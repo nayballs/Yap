@@ -25,6 +25,21 @@
         "skipTaskbar": true,
         "shadow": false,
         "center": false
+      },
+      {
+        "label": "settings",
+        "title": "Blip Settings",
+        "width": 470,
+        "height": 640,
+        "minWidth": 420,
+        "minHeight": 480,
+        "resizable": true,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {

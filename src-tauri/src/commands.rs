@@ -1,27 +1,19 @@
 //! Tauri commands exposed to the pill frontend.
 
-use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, State};
 
 use crate::config::{self, BlipConfig};
 use crate::stt;
 use crate::AppState;
 
-/// Show (or create) the settings window. Shared by the `open_settings`
-/// command and the tray menu.
+/// Show the settings window (defined hidden in tauri.conf.json). Shared by the
+/// `open_settings` command and the tray menu.
 pub fn show_settings(app: &AppHandle) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("settings") {
-        let _ = w.show();
-        let _ = w.set_focus();
-        return Ok(());
-    }
-    WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
-        .title("Blip Settings")
-        .inner_size(470.0, 640.0)
-        .min_inner_size(420.0, 480.0)
-        .resizable(true)
-        .center()
-        .build()
-        .map_err(|e| e.to_string())?;
+    let w = app
+        .get_webview_window("settings")
+        .ok_or("settings window not found")?;
+    let _ = w.show();
+    let _ = w.set_focus();
     Ok(())
 }
 

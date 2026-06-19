@@ -101,6 +101,18 @@ pub fn run() {
             }
             tray.build(app)?;
 
+            // Closing the settings window hides it (so it can reopen) instead
+            // of destroying it — the pill window stays the app's lifetime.
+            if let Some(settings) = app.get_webview_window("settings") {
+                let w = settings.clone();
+                settings.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = w.hide();
+                    }
+                });
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
