@@ -6,8 +6,11 @@
   // idle | recording | processing | needs-model
   let state = $state('idle');
   let level = $state(0);
-  let lastText = $state('');
   let downloading = $state(false);
+
+  function applyScale(s) {
+    document.documentElement.style.setProperty('--s', s ?? 1);
+  }
 
   onMount(() => {
     const unlisteners = [];
@@ -18,9 +21,13 @@
     listen('blip-level', (e) => {
       level = e.payload;
     }).then((u) => unlisteners.push(u));
-    listen('blip-transcript', (e) => {
-      lastText = e.payload;
-    }).then((u) => unlisteners.push(u));
+    listen('blip-scale', (e) => applyScale(e.payload)).then((u) => unlisteners.push(u));
+
+    // Apply the saved pill size on load.
+    invoke('get_config')
+      .then((cfg) => applyScale(cfg?.pillScale))
+      .catch(() => {});
+
     return () => unlisteners.forEach((u) => u && u());
   });
 
@@ -48,7 +55,7 @@
         ? 'Transcribing…'
         : state === 'needs-model'
           ? 'Model needed'
-          : lastText || 'Blip',
+          : 'Blip',
   );
 
   const bars = $derived(
@@ -93,21 +100,22 @@
     box-sizing: border-box;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: calc(10px * var(--s, 1));
     width: 100vw;
     height: 100vh;
-    padding: 0 12px 0 14px;
-    border-radius: 38px;
+    padding: 0 calc(12px * var(--s, 1)) 0 calc(14px * var(--s, 1));
+    border-radius: 999px;
     background: rgba(18, 20, 28, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
     backdrop-filter: blur(12px);
+    font-size: calc(13px * var(--s, 1));
   }
 
   .dot {
     flex: 0 0 auto;
-    width: 18px;
-    height: 18px;
+    width: calc(18px * var(--s, 1));
+    height: calc(18px * var(--s, 1));
     border-radius: 50%;
     border: none;
     cursor: pointer;
@@ -122,7 +130,7 @@
   }
   .pill.recording .dot {
     background: #ef4444;
-    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.25);
+    box-shadow: 0 0 0 calc(4px * var(--s, 1)) rgba(239, 68, 68, 0.25);
     animation: pulse 1.2s ease-in-out infinite;
   }
   .pill.processing .dot {
@@ -152,7 +160,6 @@
     justify-content: space-between;
     min-width: 0;
     color: #e5e7eb;
-    font-size: 13px;
   }
 
   .label {
@@ -164,8 +171,8 @@
   .wave {
     display: flex;
     align-items: center;
-    gap: 2px;
-    height: 22px;
+    gap: calc(2px * var(--s, 1));
+    height: calc(22px * var(--s, 1));
     flex: 1 1 auto;
   }
   .wave span {
@@ -178,14 +185,14 @@
 
   .dl {
     flex: 0 0 auto;
-    margin-left: 8px;
-    padding: 4px 10px;
-    font-size: 12px;
+    margin-left: calc(8px * var(--s, 1));
+    padding: calc(4px * var(--s, 1)) calc(10px * var(--s, 1));
     border-radius: 6px;
     border: none;
     cursor: pointer;
     background: #3b82f6;
     color: #fff;
+    font-size: inherit;
   }
   .dl:disabled {
     opacity: 0.6;
@@ -194,13 +201,13 @@
 
   .gear {
     flex: 0 0 auto;
-    width: 22px;
-    height: 22px;
+    width: calc(22px * var(--s, 1));
+    height: calc(22px * var(--s, 1));
     border: none;
     background: transparent;
     color: #9ca3af;
     cursor: pointer;
-    font-size: 14px;
+    font-size: calc(14px * var(--s, 1));
     line-height: 1;
     padding: 0;
     border-radius: 6px;

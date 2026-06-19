@@ -46,6 +46,7 @@ pub fn run() {
             commands::open_settings,
             commands::list_audio_devices,
             commands::configure_hotkey,
+            commands::set_pill_scale,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -66,6 +67,9 @@ pub fn run() {
                 }
                 Err(e) => tracing::error!("Failed to start pipeline: {}", e),
             }
+
+            // Apply the saved pill size.
+            commands::apply_pill_scale(&handle, cfg.pill_scale);
 
             // Toggle recording when the hotkey fires. Done Rust-side so the
             // core loop doesn't depend on the pill webview being ready.

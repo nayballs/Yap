@@ -1,10 +1,29 @@
 //! Tauri commands exposed to the pill frontend.
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, State};
 
 use crate::config::{self, BlipConfig};
 use crate::stt;
 use crate::AppState;
+
+/// Pill window dimensions at scale 1.0. Actual size = base * pill_scale.
+pub const BASE_PILL_W: f64 = 210.0;
+pub const BASE_PILL_H: f64 = 60.0;
+
+/// Resize the pill window and tell its frontend to scale its content to match.
+pub fn apply_pill_scale(app: &AppHandle, scale: f64) {
+    let s = scale.clamp(0.6, 1.6);
+    if let Some(pill) = app.get_webview_window("pill") {
+        let _ = pill.set_size(LogicalSize::new(BASE_PILL_W * s, BASE_PILL_H * s));
+    }
+    let _ = app.emit("blip-scale", s);
+}
+
+/// Live pill resize (called from the settings slider).
+#[tauri::command]
+pub fn set_pill_scale(app: AppHandle, scale: f64) {
+    apply_pill_scale(&app, scale);
+}
 
 /// Show the settings window (defined hidden in tauri.conf.json). Shared by the
 /// `open_settings` command and the tray menu.

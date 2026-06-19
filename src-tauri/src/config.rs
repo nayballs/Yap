@@ -35,9 +35,16 @@ pub struct BlipConfig {
     /// Play a chime when recording starts/stops.
     #[serde(default = "default_true")]
     pub sound_enabled: bool,
+    /// Pill size multiplier (1.0 = default). Clamped 0.6..=1.6 when applied.
+    #[serde(default = "default_scale")]
+    pub pill_scale: f64,
     /// Transcription corrections.
     #[serde(default)]
     pub dictionary: Vec<DictionaryEntry>,
+}
+
+fn default_scale() -> f64 {
+    1.0
 }
 
 fn default_hotkey() -> String {
@@ -58,6 +65,7 @@ impl Default for BlipConfig {
             use_gpu: true,
             input_device: None,
             sound_enabled: true,
+            pill_scale: 1.0,
             dictionary: Vec::new(),
         }
     }

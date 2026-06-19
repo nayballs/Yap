@@ -71,6 +71,11 @@
     return named[v] || `Key ${v}`;
   }
 
+  // ---- Pill size (live preview) ----
+  function onScale() {
+    invoke('set_pill_scale', { scale: Number(cfg.pillScale) });
+  }
+
   // ---- Dictionary ----
   function addEntry() {
     cfg.dictionary = [...cfg.dictionary, { from: '', to: '' }];
@@ -83,6 +88,7 @@
     const clean = {
       ...cfg,
       inputDevice: cfg.inputDevice || null,
+      pillScale: Number(cfg.pillScale),
       dictionary: cfg.dictionary
         .map((e) => ({ from: (e.from || '').trim(), to: (e.to || '').trim() }))
         .filter((e) => e.from),
@@ -116,6 +122,20 @@
         </div>
         <input type="checkbox" bind:checked={cfg.soundEnabled} />
       </label>
+      <div class="row">
+        <div class="ldesc">
+          <span class="label">Pill size</span>
+          <span class="hint">{Math.round(cfg.pillScale * 100)}%</span>
+        </div>
+        <input
+          type="range"
+          min="0.6"
+          max="1.4"
+          step="0.05"
+          bind:value={cfg.pillScale}
+          oninput={onScale}
+        />
+      </div>
     </section>
 
     <section>
