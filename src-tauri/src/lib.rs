@@ -16,6 +16,8 @@ mod stt;
 mod text_injector;
 
 use std::sync::Mutex;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri::{Listener, Manager};
 
 /// Shared app state: the running dictation pipeline.
@@ -41,6 +43,9 @@ pub fn run() {
             commands::get_config,
             commands::save_config,
             commands::download_model,
+            commands::open_settings,
+            commands::list_audio_devices,
+            commands::configure_hotkey,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -74,6 +79,27 @@ pub fn run() {
                     }
                 }
             });
+
+            // System tray: Settings / Quit + left-click to open settings.
+            let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit Blip", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&settings_item, &quit_item])?;
+
+            let mut tray = TrayIconBuilder::with_id("blip-tray")
+                .tooltip("Blip — voice dictation")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "settings" => {
+                        let _ = commands::show_settings(app);
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            tray.build(app)?;
 
             Ok(())
         })
