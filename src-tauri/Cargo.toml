@@ -44,3 +44,8 @@ whisper-rs = { version = "0.15", optional = true }
 default = []
 whisper = ["whisper-rs"]
 cuda = ["whisper", "whisper-rs/cuda"]
+# REQUIRED for release/standalone builds: makes the app load the EMBEDDED
+# frontend via the custom protocol instead of the dev-server URL. Without it
+# a `cargo build --release` run still points at http://localhost:1430.
+# `tauri build` enables this automatically; bare `cargo build` does not.
+custom-protocol = ["tauri/custom-protocol"]
