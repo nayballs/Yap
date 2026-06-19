@@ -67,15 +67,15 @@
     aria-label="Toggle dictation"
   ></button>
 
-  <div class="body">
+  <div class="body" data-tauri-drag-region>
     {#if state === 'recording'}
-      <div class="wave">
+      <div class="wave" data-tauri-drag-region>
         {#each bars as h}
-          <span style="height:{Math.round(h * 100)}%"></span>
+          <span data-tauri-drag-region style="height:{Math.round(h * 100)}%"></span>
         {/each}
       </div>
     {:else}
-      <span class="label">{label}</span>
+      <span class="label" data-tauri-drag-region>{label}</span>
     {/if}
 
     {#if state === 'needs-model'}

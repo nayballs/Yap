@@ -1,9 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Blip default capability for the pill window",
-  "windows": ["pill"],
+  "description": "Blip default capability (pill + settings windows)",
+  "windows": ["*"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
   ]
 }
