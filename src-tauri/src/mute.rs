@@ -1,6 +1,6 @@
 //! System output mute while recording (Windows).
 //!
-//! When `mute_while_recording` is enabled, Blip mutes the default audio
+//! When `mute_while_recording` is enabled, Yap mutes the default audio
 //! render endpoint while a recording is in progress so playback (music,
 //! videos) doesn't bleed into the mic or distract the user, then restores
 //! the previous mute state when recording stops.

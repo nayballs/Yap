@@ -1,4 +1,4 @@
-//! Blip's dictation pipeline.
+//! Yap's dictation pipeline.
 //!
 //! Simpler than Voice Mirror's (no TTS, no AI routing, no modes, no VAD):
 //! one mic stream captures audio into a buffer while *recording* is on;
@@ -390,7 +390,7 @@ impl Pipeline {
         let engine = match stt::create_stt_engine(&data_dir, &cfg.model_size, cfg.use_gpu) {
             Ok(e) => Some(e),
             Err(SttError::ModelNotFound(_)) => {
-                tracing::warn!("STT model not found — Blip needs a model download");
+                tracing::warn!("STT model not found — Yap needs a model download");
                 None
             }
             Err(e) => {

@@ -336,7 +336,7 @@ fn resolve_model(id: &str) -> ResolvedModel {
         };
     }
 
-    // Legacy ids from Blip's previous (whisper-only) registry — file-based.
+    // Legacy ids from Yap's previous (whisper-only) registry — file-based.
     let legacy_filename = match id {
         "large-v3" => Some("ggml-large-v3.bin"),
         "large-v3-turbo" => Some("ggml-large-v3-turbo-q5_0.bin"),
@@ -1040,7 +1040,7 @@ pub fn create_stt_engine(
 
 // ── Accelerator setup ───────────────────────────────────────────────
 
-/// Apply Blip's fixed accelerator policy to the transcribe-rs global atomics:
+/// Apply Yap's fixed accelerator policy to the transcribe-rs global atomics:
 /// **whisper → CUDA** (Auto picks the CUDA build), **ONNX → DirectML**.
 ///
 /// Must be called once on startup, before any model loads. No-op (compiled

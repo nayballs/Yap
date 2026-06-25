@@ -1,17 +1,17 @@
-# CLAUDE.md — how Blip works
+# CLAUDE.md — how Yap works
 
-Blip is a tiny **local voice-dictation pill**: press a global hotkey, speak, press
-again — Blip transcribes **locally on the GPU**, optionally runs the text through an
+Yap is a tiny **local voice-dictation pill**: press a global hotkey, speak, press
+again — Yap transcribes **locally on the GPU**, optionally runs the text through an
 **AI cleanup pass** (filler/punctuation/grammar), and types it into whatever window
 is focused. A chime marks start/stop, a correction dictionary fixes mis-heard jargon,
 and a floating overlay shows a live waveform while you talk.
 
-This file documents how Blip actually runs today. For *where it's going* and the
+This file documents how Yap actually runs today. For *where it's going* and the
 competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 
 > Origin note: the core dictation plumbing (input hook, text injection) was ported
 > from "Voice Mirror"; the multi-engine STT, AI cleanup, settings, tray, overlay,
-> installer and the rest is Blip's own.
+> installer and the rest is Yap's own.
 
 ---
 
@@ -32,7 +32,7 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 - **Model download:** `reqwest` streaming + `sha2` verify + `flate2`/`tar` extract.
 - **Updates/install:** `tauri-plugin-updater` (GitHub Releases) + custom NSIS installer.
 - **Autostart:** `tauri-plugin-autostart`.
-- **Data dir:** `%APPDATA%/blip/` (`config.json`, `models/`, `groq_usage.json`).
+- **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`).
 
 ---
 
@@ -155,7 +155,7 @@ GPU). On CUDA machines set `CMAKE_CUDA_ARCHITECTURES=native` so nvcc targets the
 GPU (Blackwell/5070 Ti = sm_120).
 
 ### Run in dev (what we use)
-Use **`scripts/dev.bat`** ("blip.dev") — it sets `CMAKE_CUDA_ARCHITECTURES=native` and
+Use **`scripts/dev.bat`** ("yap.dev") — it sets `CMAKE_CUDA_ARCHITECTURES=native` and
 runs `npm run tauri dev -- --features cuda` (the **real** GPU pipeline). A commented
 line in the script switches to the fast no-GPU stub for pure UI work. Dev hot-reloads
 the frontend on every edit (Vite on **:1430**).
@@ -184,11 +184,11 @@ updater (`tauri-plugin-updater`) checks that endpoint. **Currently unsigned**
 
 ## Config & data
 
-- Config: `%APPDATA%/blip/config.json` (auto-created; old files load — every field is
+- Config: `%APPDATA%/yap/config.json` (auto-created; old files load — every field is
   `#[serde(default)]`). Portable mode → `<exe>/Data/`.
-- Models: `%APPDATA%/blip/models/` — Whisper `.bin` files and extracted ONNX dirs,
+- Models: `%APPDATA%/yap/models/` — Whisper `.bin` files and extracted ONNX dirs,
   downloaded from `https://blob.handy.computer/` (SHA-256 verified).
-- Groq usage: `%APPDATA%/blip/groq_usage.json`.
+- Groq usage: `%APPDATA%/yap/groq_usage.json`.
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
   recording mode `toggle`, **pill hidden**, overlay shown, AI cleanup **off**.
@@ -212,14 +212,14 @@ presets, Authenticode signing, real WASAPI mute, non-Windows polish. See
 
 ## Competitive context (why the roadmap looks the way it does)
 
-Blip is in the **local-STT, hotkey, type-anywhere** category. Handy (~25k★, same
+Yap is in the **local-STT, hotkey, type-anywhere** category. Handy (~25k★, same
 Rust+Tauri stack) is the OSS leader but **outputs raw, unpolished text** — it has no
 AI cleanup. Paid tools (Wispr Flow, superwhisper, Aqua) win on exactly that cleanup
 layer; Wispr Flow's own stack is **Whisper + a fine-tuned Llama** — the same two
-stages Blip now runs, except Blip keeps transcription **local/free** and uses a cheap/
+stages Yap now runs, except Yap keeps transcription **local/free** and uses a cheap/
 fast cleanup model (Groq `llama-3.1-8b-instant`) or a fully-local one.
 
-**Blip's wedge (now real):** local + private + free transcription **plus** instant AI
+**Yap's wedge (now real):** local + private + free transcription **plus** instant AI
 cleanup, Windows-first. Monetisation stays fair — core free/local forever; any future
 paid tier is *convenience* (a hosted cleanup option) or a one-time Pro, never the basic
 dictation.

@@ -1,4 +1,4 @@
-// Blip's model catalog — ported from Handy's registry (src-tauri model.rs).
+// Yap's model catalog — ported from Handy's registry (src-tauri model.rs).
 // `id` values MUST match the Rust registry in src-tauri/src/stt.rs.
 // Whisper models run on whisper.cpp (CUDA); the rest run on ONNX Runtime
 // (DirectML) via transcribe-rs. Scores are 0..1 (bar fill). Recommended-first.

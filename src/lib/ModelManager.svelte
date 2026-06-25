@@ -3,37 +3,28 @@
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import { MODELS } from './models.js';
+  import { modelStore, refreshModels, setActiveModel } from './modelStore.svelte.js';
   import ModelCard from './ModelCard.svelte';
 
-  let installed = $state([]); // model ids already on disk
-  let active = $state(null); // currently loaded / active model id
   let busyId = $state(null); // model id being downloaded / switched to
   let percent = $state(0); // download progress for busyId
   let error = $state('');
 
+  // Installed/active live in the shared store so the bottom StatusBar selector
+  // stays in sync with this manager.
   function statusOf(id) {
-    if (busyId === id) return installed.includes(id) ? 'switching' : 'downloading';
-    if (active === id) return 'active';
-    if (installed.includes(id)) return 'available';
+    if (busyId === id) return modelStore.installed.includes(id) ? 'switching' : 'downloading';
+    if (modelStore.active === id) return 'active';
+    if (modelStore.installed.includes(id)) return 'available';
     return 'downloadable';
   }
 
   // "Your models" (installed) vs "Available" grouping.
-  const yours = $derived(MODELS.filter((m) => installed.includes(m.id)));
-  const available = $derived(MODELS.filter((m) => !installed.includes(m.id)));
-
-  async function refresh() {
-    try {
-      installed = await invoke('installed_models');
-      const cfg = await invoke('get_config');
-      if (cfg) active = cfg.modelSize ?? null;
-    } catch (e) {
-      // best-effort
-    }
-  }
+  const yours = $derived(MODELS.filter((m) => modelStore.installed.includes(m.id)));
+  const available = $derived(MODELS.filter((m) => !modelStore.installed.includes(m.id)));
 
   onMount(() => {
-    refresh();
+    refreshModels();
     const un = listen('stt-download-progress', (e) => {
       if (e.payload && e.payload.modelSize === busyId) percent = e.payload.percent;
     });
@@ -44,7 +35,7 @@
   async function onCard(model) {
     if (busyId) return;
     error = '';
-    if (installed.includes(model.id)) {
+    if (modelStore.installed.includes(model.id)) {
       await switchTo(model);
     } else {
       await download(model);
@@ -56,7 +47,7 @@
     percent = 0;
     try {
       await invoke('download_model_size', { modelSize: model.id });
-      await refresh();
+      await refreshModels();
       // Newly downloaded model becomes active (it's now ready to use).
       await switchTo(model, true);
     } catch (e) {
@@ -68,12 +59,10 @@
   }
 
   async function switchTo(model, quiet = false) {
-    if (active === model.id) return;
+    if (modelStore.active === model.id) return;
     busyId = model.id;
     try {
-      await invoke('set_active_model', { modelSize: model.id });
-      active = model.id;
-      await refresh();
+      await setActiveModel(model.id);
     } catch (e) {
       if (!quiet) error = `Couldn't switch to ${model.name}: ${e}`;
     } finally {
@@ -83,7 +72,7 @@
 
   async function onDelete(model) {
     if (busyId) return;
-    if (active === model.id) {
+    if (modelStore.active === model.id) {
       error = `${model.name} is the active model — switch to another model first.`;
       return;
     }
@@ -91,7 +80,7 @@
     error = '';
     try {
       await invoke('delete_model', { modelSize: model.id });
-      await refresh();
+      await refreshModels();
     } catch (e) {
       error = `Couldn't delete ${model.name}: ${e}`;
     }

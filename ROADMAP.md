@@ -1,10 +1,10 @@
-# Blip Roadmap — becoming the best local dictation pill
+# Yap Roadmap — becoming the best local dictation pill
 
-> Goal: make Blip the best open-source "press a hotkey, speak, and it types
+> Goal: make Yap the best open-source "press a hotkey, speak, and it types
 > anywhere" dictation tool of its kind — local-first, private, polished, and
 > genuinely faster than typing.
 
-This roadmap is paired with [`CLAUDE.md`](./CLAUDE.md), which documents how Blip
+This roadmap is paired with [`CLAUDE.md`](./CLAUDE.md), which documents how Yap
 actually runs today. Read that first for the architecture; this file is the
 "where we're going and why."
 
@@ -12,10 +12,10 @@ actually runs today. Read that first for the architecture; this file is the
 
 ## 1. The landscape (mid-2026)
 
-Blip competes in the **local-Whisper, global-hotkey, type-into-any-app** category.
+Yap competes in the **local-Whisper, global-hotkey, type-into-any-app** category.
 The market is split into two camps, and **neither one fully wins**:
 
-### Free / open-source local tools (Blip's direct peers)
+### Free / open-source local tools (Yap's direct peers)
 | Tool | Stack | Stars | Notes |
 |------|-------|-------|-------|
 | **Handy** (cjpais) | Rust + Tauri, whisper-rs, Parakeet | ~25k | The one to beat. Fully offline, cross-platform, MIT. **Outputs raw text — no AI cleanup.** |
@@ -52,7 +52,7 @@ The category bifurcates cleanly:
 
 > **The wide-open whitespace: a local, private, free tool that ALSO does the AI
 > polish and feels instant.** Nobody has nailed this. Handy (the leader) explicitly
-> lacks it. That is Blip's wedge — especially on **Windows**, where most polished
+> lacks it. That is Yap's wedge — especially on **Windows**, where most polished
 > tools are Mac-first or Mac-only.
 
 ### What users actually love (build toward these)
@@ -133,7 +133,7 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 ### Phase 5 — Trust, polish & distribution
 - [x] **Installer** (custom NSIS: normal/portable + WebView2 bootstrap), **auto-update**
       (`tauri-plugin-updater` → GitHub Releases), **portable mode**, **release CI**.
-- [ ] **Authenticode sign the installer** (deferred by choice until Blip's worth it —
+- [ ] **Authenticode sign the installer** (deferred by choice until Yap's worth it —
       until then Windows SmartScreen warns on first run). Updater artifacts already
       minisign-signed.
 - [x] Crisp recording indicator (overlay + waveform), great defaults, hidden power
@@ -149,7 +149,7 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 
 ## 5. Positioning in one line
 
-> **Blip = Wispr Flow's polish, Handy's privacy and price, with no latency —
+> **Yap = Wispr Flow's polish, Handy's privacy and price, with no latency —
 > Windows-first.** Free, local, open-source, and it cleans up your speech so the
 > output is ready to send.
 

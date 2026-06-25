@@ -1,6 +1,6 @@
-//! Blip — a tiny local voice dictation pill.
+//! Yap — a tiny local voice dictation pill.
 //!
-//! Press a global hotkey, speak, press again: Blip transcribes locally with
+//! Press a global hotkey, speak, press again: Yap transcribes locally with
 //! Whisper and types the text into whatever window is focused. A chime marks
 //! recording start/stop, and a correction dictionary fixes mis-heard jargon.
 //!
@@ -227,5 +227,5 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Blip");
+        .expect("error while running Yap");
 }

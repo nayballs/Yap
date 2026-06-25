@@ -1,13 +1,13 @@
 [package]
-name = "blip"
+name = "yap"
 version = "0.1.0"
-description = "Blip — a tiny local voice dictation pill"
+description = "Yap — a tiny local voice dictation pill"
 license = "MIT"
 authors = [""]
 edition = "2021"
 
 [lib]
-name = "blip_lib"
+name = "yap_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

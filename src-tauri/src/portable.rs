@@ -1,7 +1,7 @@
-//! Portable-mode support for Blip.
+//! Portable-mode support for Yap.
 //!
 //! When a file named `portable` (containing the magic string
-//! `"Blip Portable Mode"`) sits next to the executable, all user data
+//! `"Yap Portable Mode"`) sits next to the executable, all user data
 //! (config, models, logs) is stored in a `Data/` directory alongside the
 //! executable instead of `%APPDATA%`. The NSIS installer's "Portable
 //! Installation" option writes that marker + `Data/` dir (see
@@ -9,7 +9,7 @@
 //!
 //! The decision is made **once** at startup and cached in a `OnceLock`, so
 //! the rest of the app can ask cheaply via [`data_dir`] / [`is_portable`].
-//! When not portable, callers fall back to the normal `%APPDATA%/blip` path —
+//! When not portable, callers fall back to the normal `%APPDATA%/yap` path —
 //! that path is left byte-for-byte unchanged so existing installs are
 //! unaffected.
 
@@ -20,7 +20,7 @@ use std::sync::OnceLock;
 static PORTABLE_DATA_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 /// Magic string written into the `portable` marker file by the installer.
-const PORTABLE_MARKER: &str = "Blip Portable Mode";
+const PORTABLE_MARKER: &str = "Yap Portable Mode";
 
 /// Detect portable mode by looking for a valid `portable` marker next to the
 /// exe. Must be called once at startup, before anything reads the data dir.
@@ -72,7 +72,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let marker = dir.join("portable");
         let mut f = std::fs::File::create(&marker).unwrap();
-        write!(f, "Blip Portable Mode").unwrap();
+        write!(f, "Yap Portable Mode").unwrap();
         assert!(is_valid_portable_marker(&marker));
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -110,7 +110,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let marker = dir.join("portable");
         let mut f = std::fs::File::create(&marker).unwrap();
-        write!(f, "  Blip Portable Mode\n").unwrap();
+        write!(f, "  Yap Portable Mode\n").unwrap();
         assert!(is_valid_portable_marker(&marker));
         std::fs::remove_dir_all(dir).unwrap();
     }

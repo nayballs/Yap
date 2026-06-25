@@ -1,13 +1,13 @@
-# Blip
+# Yap
 
 A tiny **local voice-dictation pill** for Windows. Press a global hotkey, speak, press
-again — Blip transcribes **on your GPU**, optionally runs the text through an **AI
+again — Yap transcribes **on your GPU**, optionally runs the text through an **AI
 cleanup pass** (filler/punctuation/grammar), and types it into whatever window is
 focused. Local-first, private, and free.
 
-> **Why Blip?** The free/open dictation tools transcribe but dump out raw, unpunctuated
+> **Why Yap?** The free/open dictation tools transcribe but dump out raw, unpunctuated
 > text. The paid tools (Wispr Flow et al.) add an AI cleanup layer and charge ~$15/mo.
-> Blip does **both** — local transcription *plus* instant AI cleanup — Windows-first.
+> Yap does **both** — local transcription *plus* instant AI cleanup — Windows-first.
 
 ---
 
@@ -74,7 +74,7 @@ next (VAD/streaming, cleanup presets, history, signing).
 
 ## Docs
 
-- [`CLAUDE.md`](./CLAUDE.md) — how Blip is built (architecture, modules, feature flags).
+- [`CLAUDE.md`](./CLAUDE.md) — how Yap is built (architecture, modules, feature flags).
 - [`ROADMAP.md`](./ROADMAP.md) — where it's going and the competitive strategy.
 
 ## License

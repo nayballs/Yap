@@ -68,7 +68,7 @@
         ? 'Transcribing…'
         : state === 'needs-model'
           ? 'Model needed'
-          : 'Blip',
+          : 'Yap',
   );
 
 </script>

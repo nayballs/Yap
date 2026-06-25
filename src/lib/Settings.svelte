@@ -11,8 +11,10 @@
   import Input from './ui/Input.svelte';
   import Textarea from './ui/Textarea.svelte';
   import ModelManager from './ModelManager.svelte';
+  import StatusBar from './StatusBar.svelte';
 
   let cfg = $state(null);
+  let loaded = $state(false); // gates auto-save until the initial config loads
   let devices = $state([]);
   let outputs = $state([]); // audio output device names (for the chime)
   let recording = $state(false); // hotkey-recorder active
@@ -158,9 +160,10 @@
   const APP_VERSION = '0.1.0';
 
   onMount(async () => {
-    const loaded = await invoke('get_config');
-    cfg = { ...FIELD_DEFAULTS, ...loaded };
+    const stored = await invoke('get_config');
+    cfg = { ...FIELD_DEFAULTS, ...stored };
     if (!Array.isArray(cfg.dictionary)) cfg.dictionary = [];
+    loaded = true;
     try {
       devices = await invoke('list_audio_devices');
     } catch {
@@ -386,7 +389,7 @@
   async function testCleanup() {
     if (ppTest.running) return;
     // Persist first so the backend tests the settings the user is looking at.
-    await save();
+    await persist();
     ppTest = { running: true, result: '', error: '' };
     try {
       const cleaned = await invoke('test_post_process', {
@@ -400,8 +403,11 @@
     refreshUsage();
   }
 
-  async function save() {
-    const clean = {
+  // Build the cleaned config payload the backend expects (trimmed dictionary,
+  // numeric fields, null device sentinels). Does NOT mutate `cfg` — so calling
+  // it from the auto-save effect can't re-trigger the effect.
+  function buildClean() {
+    return {
       ...cfg,
       inputDevice: cfg.inputDevice || null,
       outputDevice: cfg.outputDevice || null,
@@ -411,19 +417,79 @@
         .map((e) => ({ from: (e.from || '').trim(), to: (e.to || '').trim() }))
         .filter((e) => e.from),
     };
-    await invoke('save_config', { cfg: clean });
-    cfg = clean;
+  }
+
+  async function persist() {
+    await invoke('save_config', { cfg: buildClean() });
     saved = true;
-    setTimeout(() => (saved = false), 1600);
+    setTimeout(() => (saved = false), 1200);
+  }
+
+  // ---- Auto-save: debounce any cfg change, then persist ----
+  let saveTimer = null;
+  let primed = false; // skip the first run (initial load) so we don't save on open
+  $effect(() => {
+    if (!loaded || !cfg) return;
+    // Deep-read every field so the effect re-runs on any change (incl. dictionary).
+    JSON.stringify(cfg);
+    if (!primed) {
+      primed = true;
+      return;
+    }
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(persist, 400);
+  });
+
+  function onCheckUpdates() {
+    section = 'about';
+    checkForUpdate(true);
   }
 </script>
 
+{#snippet navIcon(id)}
+  {#if id === 'general'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <path d="M12 18v4" />
+    </svg>
+  {:else if id === 'models'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+      <path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" />
+    </svg>
+  {:else if id === 'cleanup'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" />
+      <path d="M18 14l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z" />
+    </svg>
+  {:else if id === 'advanced'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5" />
+      <circle cx="16" cy="6" r="2" />
+      <circle cx="8" cy="12" r="2" />
+      <circle cx="13" cy="18" r="2" />
+    </svg>
+  {:else if id === 'about'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
+    </svg>
+  {/if}
+{/snippet}
+
 <div class="shell">
   <nav class="sidebar">
-    <div class="brand">Blip</div>
+    <div class="brand">
+      <span class="branddot" aria-hidden="true"></span>
+      <span class="brandname">Yap</span>
+    </div>
+    <div class="brand-divider"></div>
     {#each SECTIONS as s (s.id)}
       <button class="navitem" class:active={section === s.id} onclick={() => (section = s.id)}>
-        {s.label}
+        <span class="navicon">{@render navIcon(s.id)}</span>
+        <span class="navlabel">{s.label}</span>
       </button>
     {/each}
   </nav>
@@ -653,7 +719,7 @@
                         <span class="usage-label">Requests today</span>
                         <span class="usage-stat">{usage.requests}</span>
                       </div>
-                      <p class="usage-caption">Counts Blip's own cleanup calls. Resets at midnight UTC.</p>
+                      <p class="usage-caption">Counts Yap's own cleanup calls. Resets at midnight UTC.</p>
                     </div>
                   {/if}
                 {/snippet}
@@ -695,7 +761,7 @@
               <Toggle bind:checked={cfg.showTrayIcon} label="Show tray icon" hint="System-tray icon for Settings / Quit" />
             </Row>
             <Row>
-              <Toggle bind:checked={cfg.autostart} label="Start on login" hint="Launch Blip when you sign in" onchange={onAutostart} />
+              <Toggle bind:checked={cfg.autostart} label="Start on login" hint="Launch Yap when you sign in" onchange={onAutostart} />
             </Row>
           </Group>
 
@@ -704,7 +770,7 @@
               {#snippet children()}
                 <div class="dict">
                   <p class="note">
-                    Fix words Blip mishears (e.g. “Power to Keep” → “Parakeet”).
+                    Fix words Yap mishears (e.g. “Power to Keep” → “Parakeet”).
                     Case-insensitive; applied to every transcription.
                   </p>
                   {#if cfg.dictionary.length > 0}
@@ -729,24 +795,24 @@
           </Group>
 
         {:else if section === 'about'}
-          <Group title="About Blip">
+          <Group title="About Yap">
             <Row>
               {#snippet children()}
                 <div class="about">
                   <div class="abrand">
                     <div class="ablogo" aria-hidden="true"></div>
                     <div>
-                      <div class="aname">Blip <span class="ver">{APP_VERSION}</span></div>
+                      <div class="aname">Yap <span class="ver">{APP_VERSION}</span></div>
                       <div class="atag">A tiny local voice-dictation pill.</div>
                     </div>
                   </div>
                   <p class="aline">
-                    Press your hotkey, speak, press again — Blip transcribes locally
+                    Press your hotkey, speak, press again — Yap transcribes locally
                     with Whisper and types the text into whatever window is focused.
                   </p>
                   <p class="aprivacy">🔒 Everything runs locally. Your voice never leaves your machine.</p>
-                  <p class="adir">Config &amp; models live in <code>%APPDATA%/blip/</code>.</p>
-                  <a class="alink" href="https://github.com/nayballs/Blip" target="_blank" rel="noreferrer">GitHub →</a>
+                  <p class="adir">Config &amp; models live in <code>%APPDATA%/yap/</code>.</p>
+                  <a class="alink" href="https://github.com/nayballs/Yap" target="_blank" rel="noreferrer">GitHub →</a>
                 </div>
               {/snippet}
             </Row>
@@ -775,7 +841,7 @@
                     {:else if update.status === 'unsupported'}
                       <span class="muted">
                         Portable installs update manually —
-                        <a class="alink" href="https://github.com/nayballs/Blip/releases/latest" target="_blank" rel="noreferrer">get the latest release</a>.
+                        <a class="alink" href="https://github.com/nayballs/Yap/releases/latest" target="_blank" rel="noreferrer">get the latest release</a>.
                       </span>
                     {:else if update.status === 'error'}
                       <span class="muted">Couldn’t check for updates right now.</span>
@@ -793,16 +859,14 @@
               <Toggle
                 bind:checked={cfg.updateChecksEnabled}
                 label="Check for updates automatically"
-                hint="Look for a newer Blip on launch"
+                hint="Look for a newer Yap on launch"
               />
             </Row>
           </Group>
         {/if}
       </div>
 
-      <div class="actions">
-        <Button onclick={save}>{saved ? 'Saved ✓' : 'Save'}</Button>
-      </div>
+      <StatusBar {saved} oncheckupdates={onCheckUpdates} />
     {:else}
       <p class="loading">Loading…</p>
     {/if}
@@ -822,40 +886,80 @@
   }
 
   .sidebar {
-    flex: 0 0 150px;
+    flex: 0 0 158px;
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 16px 12px;
-    border-right: 1px solid #2a2f3a;
+    padding: 14px 12px;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
     background: #0c0e14;
   }
   .brand {
-    font-size: 16px;
-    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 4px 8px 4px;
+  }
+  .branddot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #60a5fa, #2563eb);
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+    flex: 0 0 auto;
+  }
+  .brandname {
+    font-size: 15px;
+    font-weight: 600;
     color: #e5e7eb;
-    padding: 4px 10px 14px;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.01em;
+  }
+  .brand-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 10px 4px 8px;
   }
   .navitem {
+    display: flex;
+    align-items: center;
+    gap: 9px;
     text-align: left;
     background: none;
     border: none;
     color: #9ca3af;
+    opacity: 0.9;
     padding: 8px 10px;
-    border-radius: 7px;
+    border-radius: 8px;
     cursor: pointer;
     font: inherit;
+    font-size: 13px;
+    font-weight: 500;
     transition:
       background 0.15s ease,
-      color 0.15s ease;
+      color 0.15s ease,
+      opacity 0.15s ease;
+  }
+  .navicon {
+    display: inline-flex;
+    flex: 0 0 auto;
+  }
+  .navicon :global(svg) {
+    width: 18px;
+    height: 18px;
+  }
+  .navlabel {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .navitem:hover {
     color: #e5e7eb;
-    background: rgba(255, 255, 255, 0.04);
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.05);
   }
   .navitem.active {
     color: #fff;
+    opacity: 1;
     background: #3b82f6;
   }
 
@@ -869,7 +973,7 @@
   .content {
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: 20px 22px 8px;
+    padding: 22px 24px 10px;
   }
 
   .key {
@@ -1198,17 +1302,6 @@
     transition: width 0.15s ease;
   }
 
-  .actions {
-    flex: 0 0 auto;
-    padding: 12px 22px;
-    border-top: 1px solid #2a2f3a;
-    background: #0f1117;
-  }
-  .actions :global(.btn) {
-    width: 100%;
-    padding: 11px;
-    font-size: 14px;
-  }
   .loading {
     color: #6b7280;
     padding: 20px;

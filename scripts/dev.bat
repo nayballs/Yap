@@ -1,17 +1,17 @@
 @echo off
-REM ── Blip Dev launcher ─────────────────────────────────────────────
-REM Runs Blip from SOURCE with hot-reload (Vite on :1430 + Tauri dev).
+REM ── Yap Dev launcher ─────────────────────────────────────────────
+REM Runs Yap from SOURCE with hot-reload (Vite on :1430 + Tauri dev).
 REM This is the LIVE code, not the installed/compiled release build.
 REM Edit files in src/ or src-tauri/ and the app reloads automatically.
-REM Keep this window open while you work; close it to stop Blip.
+REM Keep this window open while you work; close it to stop Yap.
 
-title Blip Dev (live)
+title Yap Dev (live)
 cd /d "%~dp0.."
 
 echo ============================================================
-echo   Blip Dev - running the LIVE source with hot reload
+echo   Yap Dev - running the LIVE source with hot reload
 echo   Project: %cd%
-echo   (Close this window to stop Blip.)
+echo   (Close this window to stop Yap.)
 echo ============================================================
 echo.
 
@@ -29,5 +29,5 @@ REM UI work or machines without CUDA):
 REM call npm run tauri dev
 
 echo.
-echo Blip Dev stopped. Press any key to close this window.
+echo Yap Dev stopped. Press any key to close this window.
 pause >nul

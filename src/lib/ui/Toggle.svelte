@@ -1,4 +1,5 @@
 <script>
+  import Tooltip from './Tooltip.svelte';
   let { checked = $bindable(false), label = '', hint = '', disabled = false, onchange } = $props();
 
   function toggle() {
@@ -8,22 +9,24 @@
   }
 </script>
 
-<button
-  type="button"
-  class="toggle-row"
-  class:disabled
-  onclick={toggle}
-  aria-pressed={checked}
-  {disabled}
->
+<div class="toggle-row" class:disabled>
   {#if label}
     <span class="ldesc">
       <span class="label">{label}</span>
-      {#if hint}<span class="hint">{hint}</span>{/if}
+      {#if hint}<Tooltip text={hint} />{/if}
     </span>
   {/if}
-  <span class="switch" class:on={checked}><span class="knob"></span></span>
-</button>
+  <button
+    type="button"
+    class="switch-btn"
+    onclick={toggle}
+    aria-pressed={checked}
+    aria-label={label}
+    {disabled}
+  >
+    <span class="switch" class:on={checked}><span class="knob"></span></span>
+  </button>
+</div>
 
 <style>
   .toggle-row {
@@ -32,33 +35,31 @@
     justify-content: space-between;
     gap: 14px;
     width: 100%;
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    color: inherit;
-    font: inherit;
-    text-align: left;
   }
   .toggle-row.disabled {
-    cursor: default;
     opacity: 0.5;
   }
   .ldesc {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    gap: 6px;
     min-width: 0;
   }
   .label {
     color: #e5e7eb;
   }
-  .hint {
-    color: #6b7280;
-    font-size: 11px;
-    margin-top: 1px;
+  .switch-btn {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  .toggle-row.disabled .switch-btn {
+    cursor: default;
   }
   .switch {
-    flex: 0 0 auto;
+    display: block;
     position: relative;
     width: 38px;
     height: 22px;

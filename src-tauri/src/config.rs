@@ -1,4 +1,4 @@
-//! Blip configuration: stored as JSON in the app data dir.
+//! Yap configuration: stored as JSON in the app data dir.
 //!
 //! Deliberately tiny — a dictation pill only needs a hotkey, a model,
 //! GPU toggle, the sound cue, and the correction dictionary.
@@ -65,7 +65,7 @@ pub struct BlipConfig {
     /// Show the system-tray icon.
     #[serde(default = "default_true")]
     pub show_tray_icon: bool,
-    /// Launch Blip at OS login.
+    /// Launch Yap at OS login.
     #[serde(default)]
     pub autostart: bool,
     /// Chime volume (0.0–1.0).
@@ -102,7 +102,7 @@ pub struct BlipConfig {
     /// or "shiftEnter".
     #[serde(default = "default_auto_submit_key")]
     pub auto_submit_key: String,
-    /// Automatically check GitHub Releases for a newer Blip on launch.
+    /// Automatically check GitHub Releases for a newer Yap on launch.
     #[serde(default = "default_true")]
     pub update_checks_enabled: bool,
 
@@ -213,10 +213,10 @@ impl Default for BlipConfig {
     }
 }
 
-/// Blip's data directory.
+/// Yap's data directory.
 ///
 /// In **portable mode** this is `<exe_dir>/Data/` (set up by the installer and
-/// detected by [`crate::portable`]). Otherwise it's `%APPDATA%/blip/` (or the
+/// detected by [`crate::portable`]). Otherwise it's `%APPDATA%/yap/` (or the
 /// platform equivalent) — left unchanged so existing installs are unaffected.
 pub fn data_dir() -> PathBuf {
     if let Some(dir) = crate::portable::data_dir() {
@@ -224,7 +224,7 @@ pub fn data_dir() -> PathBuf {
     }
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("blip")
+        .join("yap")
 }
 
 fn config_path() -> PathBuf {

@@ -18,7 +18,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, Tray
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
 fn tooltip() -> String {
-    format!("Blip v{}", env!("CARGO_PKG_VERSION"))
+    format!("Yap v{}", env!("CARGO_PKG_VERSION"))
 }
 
 /// Build a 32×32 RGBA "status dot" icon for the given state.
@@ -67,7 +67,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     let settings = MenuItem::with_id(app, "settings", "Settings", true, settings_accel)?;
     let check_updates =
         MenuItem::with_id(app, "check_updates", "Check for updates…", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Blip", true, quit_accel)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Yap", true, quit_accel)?;
     let sep = || PredefinedMenuItem::separator(app);
 
     let recording = matches!(state, "recording" | "processing");

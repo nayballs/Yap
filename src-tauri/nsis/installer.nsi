@@ -1,9 +1,9 @@
-; Custom NSIS template for Blip with portable-mode support.
+; Custom NSIS template for Yap with portable-mode support.
 ; Adapted from Handy's template, itself based on
 ; tauri-apps/tauri@tauri-v2.9.1 crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi
-; Blip currently builds against Tauri 2.11.3 — the bundled handlebars template
-; is stable across these versions; the only Blip-specific edits are the
-; portable magic string ("Blip Portable Mode") and the comments.
+; Yap currently builds against Tauri 2.11.3 — the bundled handlebars template
+; is stable across these versions; the only Yap-specific edits are the
+; portable magic string ("Yap Portable Mode") and the comments.
 ; Portable changes are marked with "; --- PORTABLE MODE ---" comments.
 ;
 ; When upgrading Tauri, diff this file against the new upstream template and
@@ -221,7 +221,7 @@ Function PageLeaveInstallType
   ${NSD_GetState} $InstallTypeRadioPortable $0
   ${If} $0 = ${BST_CHECKED}
     StrCpy $PortableMode 1
-    ; --- PORTABLE MODE --- Switch default directory to Desktop\Blip for portable
+    ; --- PORTABLE MODE --- Switch default directory to Desktop\Yap for portable
     ${If} $INSTDIR == "${PLACEHOLDER_INSTALL_DIR}"
     ${OrIf} $INSTDIR == "$LOCALAPPDATA\${PRODUCTNAME}"
       StrCpy $INSTDIR "$DESKTOP\${PRODUCTNAME}"
@@ -599,7 +599,7 @@ Function .onInit
     FileOpen $1 "$INSTDIR\portable" r
     FileRead $1 $2
     FileClose $1
-    ${If} $2 == "Blip Portable Mode"
+    ${If} $2 == "Yap Portable Mode"
       StrCpy $PortableMode 1
     ${EndIf}
   ${EndIf}
@@ -767,7 +767,7 @@ Section Install
   ; --- PORTABLE MODE --- Create portable marker and Data directory
   ${If} $PortableMode = 1
     FileOpen $0 "$INSTDIR\portable" w
-    FileWrite $0 "Blip Portable Mode"
+    FileWrite $0 "Yap Portable Mode"
     FileClose $0
     CreateDirectory "$INSTDIR\Data"
     DetailPrint "Portable mode: created marker file and Data directory."

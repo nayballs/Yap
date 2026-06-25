@@ -11,7 +11,7 @@
 //! live while the user dictates.
 //!
 //! Notes on what Groq actually reports:
-//! - `usage.total_tokens` is per-call; we sum it. This is **Blip's own** token
+//! - `usage.total_tokens` is per-call; we sum it. This is **Yap's own** token
 //!   use only — we can't see other apps sharing the key.
 //! - `x-ratelimit-limit-requests` / `-remaining-requests` are the *daily*
 //!   request cap and the requests left today, so `requests = limit - remaining`

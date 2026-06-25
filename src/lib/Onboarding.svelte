@@ -67,7 +67,7 @@
 <main>
   <header>
     <div class="logo" aria-hidden="true"></div>
-    <h1>Welcome to Blip</h1>
+    <h1>Welcome to Yap</h1>
     <p class="sub">
       Pick a voice model to get started. Everything runs locally on your machine —
       your voice never leaves it. You can change this any time in Settings.

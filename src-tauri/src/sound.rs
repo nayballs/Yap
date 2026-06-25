@@ -1,4 +1,4 @@
-//! Tiny audio cues so you can *hear* when Blip starts/stops listening.
+//! Tiny audio cues so you can *hear* when Yap starts/stops listening.
 //!
 //! Generates short sine beeps on the fly (no asset files needed): a higher
 //! pitch when recording starts, a lower one when it stops.

@@ -350,35 +350,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "blip"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "cpal",
- "dirs 6.0.0",
- "flate2",
- "futures-util",
- "once_cell",
- "regex",
- "reqwest 0.12.28",
- "rodio",
- "serde",
- "serde_json",
- "sha2",
- "tar",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-process",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "transcribe-rs",
-]
-
-[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6432,6 +6403,35 @@ checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
 dependencies = [
  "libc",
  "rustix",
+]
+
+[[package]]
+name = "yap"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "cpal",
+ "dirs 6.0.0",
+ "flate2",
+ "futures-util",
+ "once_cell",
+ "regex",
+ "reqwest 0.12.28",
+ "rodio",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-process",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "transcribe-rs",
 ]
 
 [[package]]

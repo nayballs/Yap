@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Blip",
+  "productName": "Yap",
   "version": "0.1.0",
-  "identifier": "com.blip.dictation",
+  "identifier": "com.yap.dictation",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1430",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "pill",
-        "title": "Blip",
+        "title": "Yap",
         "width": 210,
         "height": 60,
         "minWidth": 110,
@@ -28,7 +28,7 @@
       },
       {
         "label": "settings",
-        "title": "Blip Settings",
+        "title": "Yap Settings",
         "width": 720,
         "height": 640,
         "minWidth": 640,
@@ -43,7 +43,7 @@
       },
       {
         "label": "onboarding",
-        "title": "Welcome to Blip",
+        "title": "Welcome to Yap",
         "width": 620,
         "height": 720,
         "minWidth": 520,
@@ -58,7 +58,7 @@
       },
       {
         "label": "overlay",
-        "title": "Blip",
+        "title": "Yap",
         "width": 330,
         "height": 48,
         "resizable": false,
@@ -100,7 +100,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDczNDM0OTRGRkJGOTEzMkIKUldRckUvbjdUMGxEYzU3WUVWcm53MnRYL1hyQVBLTHdpcVhxZmplbU91bFJsbkpiS09ReEE3aUQK",
       "endpoints": [
-        "https://github.com/nayballs/Blip/releases/latest/download/latest.json"
+        "https://github.com/nayballs/Yap/releases/latest/download/latest.json"
       ]
     }
   }
