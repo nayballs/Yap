@@ -5,8 +5,9 @@
 //! toggling off runs STT, applies the dictionary, and injects the text
 //! into whatever window is focused. A short chime marks start/stop.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock, Weak};
+use std::time::{Duration, SystemTime};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use tauri::{AppHandle, Emitter};
@@ -29,11 +30,99 @@ struct Shared {
     engine: Mutex<Option<SttAdapter>>,
     app: AppHandle,
     config: RwLock<BlipConfig>,
+    /// Last time the engine did real work (ms since epoch). Drives the idle
+    /// model-unload watcher (B1).
+    last_activity: AtomicU64,
+}
+
+/// Current wall-clock time in milliseconds since the Unix epoch.
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Map a `model_unload_timeout` config string to a duration. `"never"` (and any
+/// unknown value) means "don't unload" → `None`.
+fn unload_timeout_duration(s: &str) -> Option<Duration> {
+    match s {
+        "1min" => Some(Duration::from_secs(60)),
+        "5min" => Some(Duration::from_secs(5 * 60)),
+        "15min" => Some(Duration::from_secs(15 * 60)),
+        "30min" => Some(Duration::from_secs(30 * 60)),
+        _ => None,
+    }
 }
 
 impl Shared {
     fn sound_enabled(&self) -> bool {
         self.config.read().map(|c| c.sound_enabled).unwrap_or(true)
+    }
+
+    fn audio_feedback_volume(&self) -> f32 {
+        self.config
+            .read()
+            .map(|c| c.audio_feedback_volume)
+            .unwrap_or(1.0)
+    }
+
+    fn recording_mode(&self) -> String {
+        self.config
+            .read()
+            .map(|c| c.recording_mode.clone())
+            .unwrap_or_else(|_| "toggle".into())
+    }
+
+    fn mute_while_recording(&self) -> bool {
+        self.config
+            .read()
+            .map(|c| c.mute_while_recording)
+            .unwrap_or(false)
+    }
+
+    fn output_device(&self) -> Option<String> {
+        self.config.read().ok().and_then(|c| c.output_device.clone())
+    }
+
+    /// Reset the idle timer to "now".
+    fn touch_activity(&self) {
+        self.last_activity.store(now_ms(), Ordering::Relaxed);
+    }
+
+    /// Idle-unload check, called periodically by the watcher thread.
+    ///
+    /// Drops the warm engine (freeing VRAM) once it's been idle longer than the
+    /// configured timeout. Never unloads while recording; the next dictation
+    /// lazily reloads the model in `run_stt`.
+    fn maybe_unload_idle(&self) {
+        let timeout = match self
+            .config
+            .read()
+            .ok()
+            .and_then(|c| unload_timeout_duration(&c.model_unload_timeout))
+        {
+            Some(t) => t,
+            None => return, // "never"
+        };
+
+        // Keep the timer fresh while recording so we never unload mid-session.
+        if self.recording.load(Ordering::SeqCst) {
+            self.touch_activity();
+            return;
+        }
+
+        let idle_ms = now_ms().saturating_sub(self.last_activity.load(Ordering::Relaxed));
+        if idle_ms < timeout.as_millis() as u64 {
+            return;
+        }
+
+        if let Ok(mut g) = self.engine.lock() {
+            if g.is_some() {
+                *g = None;
+                tracing::info!(idle_secs = idle_ms / 1000, "Model unloaded due to inactivity");
+            }
+        }
     }
 
     fn toggle(self: &Arc<Self>) {
@@ -44,23 +133,60 @@ impl Shared {
         }
     }
 
+    /// Route a hotkey press/release through the configured recording mode.
+    ///
+    /// - `toggle` mode: act on press only (flip recording on/off). Ignore release.
+    /// - `pushToTalk` mode: press starts (if idle), release stops + transcribes
+    ///   (if recording).
+    fn on_key(self: &Arc<Self>, pressed: bool) {
+        if self.recording_mode() == "pushToTalk" {
+            if pressed {
+                if !self.recording.load(Ordering::SeqCst) {
+                    self.start_recording();
+                }
+            } else if self.recording.load(Ordering::SeqCst) {
+                self.stop_and_transcribe();
+            }
+        } else if pressed {
+            self.toggle();
+        }
+    }
+
     fn start_recording(&self) {
         if let Ok(mut buf) = self.buffer.lock() {
             buf.clear();
         }
         self.recording.store(true, Ordering::SeqCst);
+        self.touch_activity();
+        if self.mute_while_recording() {
+            crate::mute::mute_system_output();
+        }
         let _ = self.app.emit("blip-state", "recording");
         if self.sound_enabled() {
-            crate::sound::play_start();
+            crate::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref());
         }
         tracing::info!("Recording started");
     }
 
+    /// Stop recording and discard the buffered audio (no transcription).
+    fn cancel(&self) {
+        if !self.recording.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        crate::mute::unmute_system_output();
+        if let Ok(mut buf) = self.buffer.lock() {
+            buf.clear();
+        }
+        let _ = self.app.emit("blip-state", "idle");
+        tracing::info!("Recording cancelled (audio discarded)");
+    }
+
     fn stop_and_transcribe(self: &Arc<Self>) {
         self.recording.store(false, Ordering::SeqCst);
+        crate::mute::unmute_system_output();
         let _ = self.app.emit("blip-state", "processing");
         if self.sound_enabled() {
-            crate::sound::play_stop();
+            crate::sound::play_stop(self.audio_feedback_volume(), self.output_device().as_deref());
         }
         let audio = self
             .buffer
@@ -83,17 +209,54 @@ impl Shared {
 
         // Take the engine out so the mutex isn't held across the await.
         let engine = self.engine.lock().ok().and_then(|mut g| g.take());
-        let Some(engine) = engine else {
-            tracing::warn!("No STT engine (model missing) — cannot transcribe");
-            let _ = self.app.emit("blip-state", "needs-model");
-            return;
+        let engine = match engine {
+            Some(e) => e,
+            None => {
+                // No warm engine — either the idle watcher unloaded it (B1) or
+                // a model was never loaded. Try a lazy (re)build before giving up.
+                let (model_size, use_gpu) = self
+                    .config
+                    .read()
+                    .map(|c| (c.model_size.clone(), c.use_gpu))
+                    .unwrap_or_else(|_| (String::new(), true));
+                let data_dir = config::data_dir();
+                match stt::create_stt_engine(&data_dir, &model_size, use_gpu) {
+                    Ok(e) => {
+                        tracing::info!(model = %model_size, "Reloading model (was unloaded/idle)");
+                        e
+                    }
+                    Err(e) => {
+                        tracing::warn!("No STT engine (model missing) — cannot transcribe: {}", e);
+                        let _ = self.app.emit("blip-state", "needs-model");
+                        return;
+                    }
+                }
+            }
         };
 
+        // Snapshot the language/translate settings for this transcription.
+        // `"auto"` (or a model that ignores it) maps to `None`.
+        let (language, translate) = self
+            .config
+            .read()
+            .map(|c| {
+                let lang = if c.selected_language == "auto" {
+                    None
+                } else {
+                    Some(c.selected_language.clone())
+                };
+                (lang, c.translate_to_english)
+            })
+            .unwrap_or((None, false));
+
         let outcome = tokio::task::spawn_blocking(move || {
-            let result = engine.transcribe(&audio);
+            let result = engine.transcribe(&audio, language.as_deref(), translate);
             (engine, result)
         })
         .await;
+
+        // Mark activity so the idle watcher counts from end-of-transcription.
+        self.touch_activity();
 
         match outcome {
             Ok((engine, transcription)) => {
@@ -103,17 +266,42 @@ impl Shared {
                 }
                 match transcription {
                     Ok(text) => {
-                        let dict = self
-                            .config
-                            .read()
-                            .map(|c| c.dictionary.clone())
-                            .unwrap_or_default();
-                        let corrected = config::apply_dictionary(text.trim(), &dict);
+                        // Snapshot the injection-related config under one read lock.
+                        let (dict, append_space, auto_submit, auto_submit_key, restore_clipboard) =
+                            self.config
+                                .read()
+                                .map(|c| {
+                                    (
+                                        c.dictionary.clone(),
+                                        c.append_trailing_space,
+                                        c.auto_submit,
+                                        c.auto_submit_key.clone(),
+                                        c.restore_clipboard,
+                                    )
+                                })
+                                .unwrap_or_else(|_| {
+                                    (Vec::new(), false, false, "enter".to_string(), true)
+                                });
+                        let mut corrected = config::apply_dictionary(text.trim(), &dict);
                         if !corrected.is_empty() {
+                            if append_space {
+                                corrected.push(' ');
+                            }
                             tracing::info!(text = %corrected, "Transcript");
                             let _ = self.app.emit("blip-transcript", corrected.clone());
-                            if let Err(e) = crate::text_injector::inject_text(&corrected).await {
-                                tracing::warn!("Inject failed: {}", e);
+                            match crate::text_injector::inject_text(&corrected, restore_clipboard)
+                                .await
+                            {
+                                Ok(()) => {
+                                    if auto_submit {
+                                        if let Err(e) =
+                                            crate::text_injector::press_submit(&auto_submit_key).await
+                                        {
+                                            tracing::warn!("Auto-submit failed: {}", e);
+                                        }
+                                    }
+                                }
+                                Err(e) => tracing::warn!("Inject failed: {}", e),
                             }
                         }
                     }
@@ -140,15 +328,10 @@ impl Pipeline {
     /// works) and emits `blip-state: needs-model` until a model is downloaded.
     pub fn start(app: AppHandle, cfg: BlipConfig) -> Result<Self, String> {
         let data_dir = config::data_dir();
-        let engine = match stt::create_stt_engine(
-            "whisper-local",
-            &data_dir,
-            Some(&cfg.model_size),
-            cfg.use_gpu,
-        ) {
+        let engine = match stt::create_stt_engine(&data_dir, &cfg.model_size, cfg.use_gpu) {
             Ok(e) => Some(e),
             Err(SttError::ModelNotFound(_)) => {
-                tracing::warn!("Whisper model not found — Blip needs a model download");
+                tracing::warn!("STT model not found — Blip needs a model download");
                 None
             }
             Err(e) => {
@@ -165,7 +348,10 @@ impl Pipeline {
             engine: Mutex::new(engine),
             app: app.clone(),
             config: RwLock::new(cfg.clone()),
+            last_activity: AtomicU64::new(now_ms()),
         });
+
+        spawn_idle_watcher(&shared);
 
         let stream = build_input_stream(&shared, cfg.input_device.as_deref())?;
 
@@ -177,9 +363,20 @@ impl Pipeline {
         })
     }
 
-    /// Toggle recording (called from the global hotkey).
+    /// Toggle recording (called from the pill button's `toggle_recording`).
     pub fn toggle(&self) {
         self.shared.toggle();
+    }
+
+    /// Route a hotkey press/release event through the configured recording mode.
+    /// Called from the input-hook listeners for both press and release.
+    pub fn on_key(&self, pressed: bool) {
+        self.shared.on_key(pressed);
+    }
+
+    /// Stop recording and discard the audio (no transcription).
+    pub fn cancel(&self) {
+        self.shared.cancel();
     }
 
     /// Install a freshly-created STT engine (e.g. after a model download).
@@ -196,6 +393,22 @@ impl Pipeline {
             *c = cfg;
         }
     }
+}
+
+/// Spawn the idle model-unload watcher (B1).
+///
+/// Ticks every 10s and unloads the warm engine once it's been idle longer than
+/// the configured `model_unload_timeout` (freeing VRAM). Holds only a `Weak`
+/// reference, so it exits on its own once the pipeline is dropped.
+fn spawn_idle_watcher(shared: &Arc<Shared>) {
+    let weak: Weak<Shared> = Arc::downgrade(shared);
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(10));
+        match weak.upgrade() {
+            Some(shared) => shared.maybe_unload_idle(),
+            None => break, // pipeline dropped
+        }
+    });
 }
 
 /// Build and start the mic input stream.
@@ -229,7 +442,13 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
     let needs_downmix = channels > 1;
 
     let cb_shared = Arc::clone(shared);
-    let mut level_counter: usize = 0;
+    // Time-domain amplitude meter for the scrolling waveform (Claude Code
+    // style): every ~30 ms emit one peak level (raw 0..1) that the pill/overlay
+    // push onto a scrolling history. ~1280 samples at 16 kHz ≈ 80 ms per bar
+    // for a calm, readable scroll.
+    const AMP_WINDOW: usize = 1280;
+    let mut amp_peak: f32 = 0.0;
+    let mut amp_count: usize = 0;
 
     let stream = device
         .build_input_stream(
@@ -254,14 +473,20 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
                 if let Ok(mut buf) = cb_shared.buffer.lock() {
                     buf.extend_from_slice(&resampled);
                 }
-                // Emit a normalized level for the pill's waveform (throttled).
-                level_counter = level_counter.wrapping_add(1);
-                if level_counter % 3 == 0 && !resampled.is_empty() {
-                    let rms = (resampled.iter().map(|s| s * s).sum::<f32>()
-                        / resampled.len() as f32)
-                        .sqrt();
-                    let level = (rms * 10.0).min(1.0);
-                    let _ = cb_shared.app.emit("blip-level", level);
+                // Accumulate the peak over ~30 ms, then emit it as the next
+                // scrolling-waveform bar. The frontend shapes (gain/curve) and
+                // scrolls it.
+                for &s in &resampled {
+                    let a = s.abs();
+                    if a > amp_peak {
+                        amp_peak = a;
+                    }
+                }
+                amp_count += resampled.len();
+                if amp_count >= AMP_WINDOW {
+                    let _ = cb_shared.app.emit("blip-amp", amp_peak);
+                    amp_peak = 0.0;
+                    amp_count = 0;
                 }
             },
             move |err| tracing::error!("Audio input stream error: {}", err),

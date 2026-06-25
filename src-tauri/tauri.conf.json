@@ -29,9 +29,9 @@
       {
         "label": "settings",
         "title": "Blip Settings",
-        "width": 470,
+        "width": 720,
         "height": 640,
-        "minWidth": 420,
+        "minWidth": 640,
         "minHeight": 480,
         "resizable": true,
         "decorations": true,
@@ -40,6 +40,36 @@
         "skipTaskbar": false,
         "visible": false,
         "center": true
+      },
+      {
+        "label": "onboarding",
+        "title": "Welcome to Blip",
+        "width": 620,
+        "height": 720,
+        "minWidth": 520,
+        "minHeight": 560,
+        "resizable": true,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "visible": false,
+        "center": true
+      },
+      {
+        "label": "overlay",
+        "title": "Blip",
+        "width": 330,
+        "height": 48,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "focus": false,
+        "visible": false,
+        "center": false
       }
     ],
     "security": {

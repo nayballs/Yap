@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
@@ -32,18 +33,27 @@ rodio = "0.19"
 # Clipboard for text injection
 arboard = "3"
 
-# Model download (used by stt.rs)
+# Model download + directory-model extract/verify (used by stt.rs)
 reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
 
-# STT: whisper-rs (C++ FFI to whisper.cpp) — optional so `cargo check` is fast.
-whisper-rs = { version = "0.15", optional = true }
+# Multi-engine STT (whisper.cpp + ONNX) via transcribe-rs. Optional so the
+# default build ships the STUB and `cargo check` stays fast.
+transcribe-rs = { version = "0.3", optional = true, default-features = false }
 
 [features]
-# Default has NO whisper so plain `cargo check` compiles the stub (fast).
+# Default has NO transcribe-rs so plain `cargo check` compiles the stub (fast).
 default = []
-whisper = ["whisper-rs"]
-cuda = ["whisper", "whisper-rs/cuda"]
+# Real multi-engine STT: whisper.cpp (CPU) + ONNX Runtime (DirectML on Windows).
+# Use this on machines without CUDA.
+engines = ["dep:transcribe-rs", "transcribe-rs/onnx", "transcribe-rs/whisper-cpp", "transcribe-rs/ort-directml"]
+# Adds CUDA acceleration for whisper (ONNX still runs on DirectML).
+cuda = ["engines", "transcribe-rs/whisper-cuda"]
+# Back-compat alias: `whisper` == real engines without CUDA.
+whisper = ["engines"]
 # REQUIRED for release/standalone builds: makes the app load the EMBEDDED
 # frontend via the custom protocol instead of the dev-server URL. Without it
 # a `cargo build --release` run still points at http://localhost:1430.

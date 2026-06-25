@@ -23,7 +23,8 @@ pub struct BlipConfig {
     /// Default kb:120 = F9.
     #[serde(default = "default_hotkey")]
     pub hotkey: String,
-    /// Whisper model size (e.g. "large-v3", "base").
+    /// Active model id from the STT registry (e.g. "parakeet-tdt-0.6b-v3",
+    /// "small"). Field name kept as `model_size` for config back-compat.
     #[serde(default = "default_model_size")]
     pub model_size: String,
     /// Use CUDA GPU acceleration.
@@ -41,6 +42,66 @@ pub struct BlipConfig {
     /// Transcription corrections.
     #[serde(default)]
     pub dictionary: Vec<DictionaryEntry>,
+
+    /// Recording mode: "toggle" (press to start, press again to stop) or
+    /// "pushToTalk" (hold to record, release to stop).
+    #[serde(default = "default_recording_mode")]
+    pub recording_mode: String,
+    /// Mute system output audio while recording (Windows).
+    #[serde(default)]
+    pub mute_while_recording: bool,
+    /// Append a single space after each injected transcription.
+    #[serde(default)]
+    pub append_trailing_space: bool,
+    /// After injecting text, simulate pressing Enter (auto-submit).
+    #[serde(default)]
+    pub auto_submit: bool,
+    /// Restore the user's previous clipboard contents after pasting.
+    #[serde(default = "default_true")]
+    pub restore_clipboard: bool,
+    /// Don't show any window on launch (the pill still appears).
+    #[serde(default)]
+    pub start_hidden: bool,
+    /// Show the system-tray icon.
+    #[serde(default = "default_true")]
+    pub show_tray_icon: bool,
+    /// Launch Blip at OS login.
+    #[serde(default)]
+    pub autostart: bool,
+    /// Chime volume (0.0–1.0).
+    #[serde(default = "default_audio_feedback_volume")]
+    pub audio_feedback_volume: f32,
+    /// Show the always-on-top pill window. **Hidden by default** — the
+    /// bottom-center overlay provides on-speak feedback; the pill is opt-in.
+    /// Dictation works regardless via the hotkey.
+    #[serde(default)]
+    pub show_pill: bool,
+    /// Show the floating bottom-center "transcribing" overlay while dictating.
+    #[serde(default = "default_true")]
+    pub show_overlay: bool,
+
+    /// Transcription language. `"auto"` = auto-detect; otherwise a language code
+    /// (e.g. "en", "fr"). Only applied by models that support language selection.
+    #[serde(default = "default_selected_language")]
+    pub selected_language: String,
+    /// Translate the transcription to English (Whisper / Canary only).
+    #[serde(default)]
+    pub translate_to_english: bool,
+    /// Unload the STT model after this much idle time to free VRAM, lazily
+    /// reloading on the next dictation. One of "never", "1min", "5min",
+    /// "15min", "30min".
+    #[serde(default = "default_model_unload_timeout")]
+    pub model_unload_timeout: String,
+    /// Preferred output device for the start/stop chimes (None = system default).
+    #[serde(default)]
+    pub output_device: Option<String>,
+    /// Where the transcribing overlay appears: "bottom" or "top".
+    #[serde(default = "default_overlay_position")]
+    pub overlay_position: String,
+    /// Which key auto-submit presses after pasting: "enter", "ctrlEnter",
+    /// or "shiftEnter".
+    #[serde(default = "default_auto_submit_key")]
+    pub auto_submit_key: String,
 }
 
 fn default_scale() -> f64 {
@@ -51,10 +112,28 @@ fn default_hotkey() -> String {
     "kb:120".into()
 }
 fn default_model_size() -> String {
-    "large-v3".into()
+    "parakeet-tdt-0.6b-v3".into()
 }
 fn default_true() -> bool {
     true
+}
+fn default_recording_mode() -> String {
+    "toggle".into()
+}
+fn default_audio_feedback_volume() -> f32 {
+    1.0
+}
+fn default_selected_language() -> String {
+    "auto".into()
+}
+fn default_model_unload_timeout() -> String {
+    "never".into()
+}
+fn default_overlay_position() -> String {
+    "bottom".into()
+}
+fn default_auto_submit_key() -> String {
+    "enter".into()
 }
 
 impl Default for BlipConfig {
@@ -67,6 +146,23 @@ impl Default for BlipConfig {
             sound_enabled: true,
             pill_scale: 1.0,
             dictionary: Vec::new(),
+            recording_mode: default_recording_mode(),
+            mute_while_recording: false,
+            append_trailing_space: false,
+            auto_submit: false,
+            restore_clipboard: true,
+            start_hidden: false,
+            show_tray_icon: true,
+            autostart: false,
+            audio_feedback_volume: default_audio_feedback_volume(),
+            show_pill: false,
+            show_overlay: true,
+            selected_language: default_selected_language(),
+            translate_to_english: false,
+            model_unload_timeout: default_model_unload_timeout(),
+            output_device: None,
+            overlay_position: default_overlay_position(),
+            auto_submit_key: default_auto_submit_key(),
         }
     }
 }
