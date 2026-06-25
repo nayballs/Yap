@@ -91,6 +91,6 @@ jobs:
           # entry later.
           args: "--features engines"
           tagName: app-v__VERSION__
-          releaseName: "Blip v__VERSION__"
+          releaseName: "Yap v__VERSION__"
           releaseDraft: true
           prerelease: false

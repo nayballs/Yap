@@ -1,7 +1,7 @@
 {
-  "name": "blip",
+  "name": "yap",
   "version": "0.1.0",
-  "description": "Blip — a tiny local voice dictation pill",
+  "description": "Yap — a tiny local voice dictation pill",
   "type": "module",
   "scripts": {
     "dev": "vite",
