@@ -1,5 +1,6 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy } from 'svelte';
   import Group from './ui/Group.svelte';
   import Row from './ui/Row.svelte';
@@ -17,6 +18,13 @@
   let section = $state('general'); // general | models | advanced | about
   // Language/translate capability of the active model (drives Models section).
   let langInfo = $state({ supportsLanguage: false, supportsTranslate: false, languages: [] });
+
+  // Auto-update state. status: idle | checking | available | uptodate |
+  // installing | error | unsupported (portable). The updater JS plugin only
+  // works in packaged builds, so every call is wrapped in try/catch and the UI
+  // degrades quietly in dev.
+  let update = $state({ status: 'idle', version: '', progress: 0 });
+  let unlistenUpdateEvent = null;
 
   const SECTIONS = [
     { id: 'general', label: 'General' },
@@ -82,7 +90,10 @@
     outputDevice: null,
     overlayPosition: 'bottom',
     autoSubmitKey: 'enter',
+    updateChecksEnabled: true,
   };
+
+  const APP_VERSION = '0.1.0';
 
   onMount(async () => {
     const loaded = await invoke('get_config');
@@ -98,9 +109,97 @@
     } catch {
       outputs = [];
     }
+
+    // Auto-check for updates on launch (the settings webview loads at startup,
+    // even while hidden). No-op / quiet failure in dev where the updater plugin
+    // isn't available.
+    if (cfg.updateChecksEnabled) checkForUpdate(false);
+
+    // A "Check for updates" tray item emits this; run a manual check.
+    try {
+      unlistenUpdateEvent = await listen('check-for-updates', () => {
+        section = 'about';
+        checkForUpdate(true);
+      });
+    } catch {
+      unlistenUpdateEvent = null;
+    }
   });
 
-  onDestroy(stopRecord);
+  onDestroy(() => {
+    stopRecord();
+    if (unlistenUpdateEvent) unlistenUpdateEvent();
+  });
+
+  // ---- Auto-update ----
+  async function checkForUpdate(manual = false) {
+    if (update.status === 'checking' || update.status === 'installing') return;
+    update = { ...update, status: 'checking' };
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater');
+      const result = await check();
+      if (result) {
+        update = { ...update, status: 'available', version: result.version || '' };
+      } else if (manual) {
+        update = { ...update, status: 'uptodate' };
+        setTimeout(() => {
+          if (update.status === 'uptodate') update = { ...update, status: 'idle' };
+        }, 3000);
+      } else {
+        update = { ...update, status: 'idle' };
+      }
+    } catch (e) {
+      // Updater is unavailable in dev / unpackaged builds — fail silently for
+      // the automatic check, surface a brief note for a manual one.
+      console.warn('Update check failed:', e);
+      if (manual) {
+        update = { ...update, status: 'error' };
+        setTimeout(() => {
+          if (update.status === 'error') update = { ...update, status: 'idle' };
+        }, 4000);
+      } else {
+        update = { ...update, status: 'idle' };
+      }
+    }
+  }
+
+  async function installUpdate() {
+    if (update.status !== 'available') return;
+    // Portable installs can't be replaced in place — point the user at GitHub.
+    const portable = await invoke('is_portable').catch(() => false);
+    if (portable) {
+      update = { ...update, status: 'unsupported' };
+      return;
+    }
+    update = { ...update, status: 'installing', progress: 0 };
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater');
+      const { relaunch } = await import('@tauri-apps/plugin-process');
+      const result = await check();
+      if (!result) {
+        update = { ...update, status: 'idle' };
+        return;
+      }
+      let downloaded = 0;
+      let total = 0;
+      await result.downloadAndInstall((event) => {
+        if (event.event === 'Started') {
+          total = event.data?.contentLength ?? 0;
+          downloaded = 0;
+        } else if (event.event === 'Progress') {
+          downloaded += event.data.chunkLength;
+          update = {
+            ...update,
+            progress: total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0,
+          };
+        }
+      });
+      await relaunch();
+    } catch (e) {
+      console.error('Update install failed:', e);
+      update = { ...update, status: 'error' };
+    }
+  }
 
   const micOptions = $derived([
     { value: null, label: 'System default' },
@@ -409,7 +508,7 @@
                   <div class="abrand">
                     <div class="ablogo" aria-hidden="true"></div>
                     <div>
-                      <div class="aname">Blip <span class="ver">0.1.0</span></div>
+                      <div class="aname">Blip <span class="ver">{APP_VERSION}</span></div>
                       <div class="atag">A tiny local voice-dictation pill.</div>
                     </div>
                   </div>
@@ -419,9 +518,55 @@
                   </p>
                   <p class="aprivacy">🔒 Everything runs locally. Your voice never leaves your machine.</p>
                   <p class="adir">Config &amp; models live in <code>%APPDATA%/blip/</code>.</p>
-                  <a class="alink" href="https://github.com" target="_blank" rel="noreferrer">GitHub →</a>
+                  <a class="alink" href="https://github.com/nayballs/Blip" target="_blank" rel="noreferrer">GitHub →</a>
                 </div>
               {/snippet}
+            </Row>
+          </Group>
+
+          <Group title="Updates">
+            <Row>
+              {#snippet children()}
+                <div class="upd">
+                  <div class="upd-status">
+                    {#if update.status === 'checking'}
+                      <span class="muted">Checking for updates…</span>
+                    {:else if update.status === 'available'}
+                      <span class="upd-avail">Update available{update.version ? ` — v${update.version}` : ''}</span>
+                      <button class="upd-btn" onclick={installUpdate}>Download &amp; install</button>
+                    {:else if update.status === 'installing'}
+                      <span class="muted">
+                        {update.progress > 0 && update.progress < 100
+                          ? `Downloading… ${update.progress}%`
+                          : update.progress === 100
+                            ? 'Installing…'
+                            : 'Preparing…'}
+                      </span>
+                    {:else if update.status === 'uptodate'}
+                      <span class="muted">You’re up to date ✓</span>
+                    {:else if update.status === 'unsupported'}
+                      <span class="muted">
+                        Portable installs update manually —
+                        <a class="alink" href="https://github.com/nayballs/Blip/releases/latest" target="_blank" rel="noreferrer">get the latest release</a>.
+                      </span>
+                    {:else if update.status === 'error'}
+                      <span class="muted">Couldn’t check for updates right now.</span>
+                    {:else}
+                      <button class="upd-btn ghost" onclick={() => checkForUpdate(true)}>Check for updates</button>
+                    {/if}
+                  </div>
+                  {#if update.status === 'installing' && update.progress > 0 && update.progress < 100}
+                    <div class="upd-bar"><div class="upd-fill" style={`width:${update.progress}%`}></div></div>
+                  {/if}
+                </div>
+              {/snippet}
+            </Row>
+            <Row>
+              <Toggle
+                bind:checked={cfg.updateChecksEnabled}
+                label="Check for updates automatically"
+                hint="Look for a newer Blip on launch"
+              />
             </Row>
           </Group>
         {/if}
@@ -655,6 +800,58 @@
   }
   .alink:hover {
     text-decoration: underline;
+  }
+
+  /* updates */
+  .upd {
+    width: 100%;
+  }
+  .upd-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 12.5px;
+  }
+  .upd .muted {
+    color: #9ca3af;
+  }
+  .upd-avail {
+    color: #93c5fd;
+    font-weight: 600;
+  }
+  .upd-btn {
+    background: #3b82f6;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 12.5px;
+  }
+  .upd-btn:hover {
+    background: #2563eb;
+  }
+  .upd-btn.ghost {
+    background: #181b22;
+    color: #e5e7eb;
+    border: 1px solid #2a2f3a;
+  }
+  .upd-btn.ghost:hover {
+    background: #1f2330;
+    border-color: #3b82f6;
+  }
+  .upd-bar {
+    margin-top: 10px;
+    height: 6px;
+    border-radius: 3px;
+    background: #2a2f3a;
+    overflow: hidden;
+  }
+  .upd-fill {
+    height: 100%;
+    background: #3b82f6;
+    transition: width 0.15s ease;
   }
 
   .actions {

@@ -281,6 +281,14 @@ pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether Blip is running as a portable install (data lives next to the exe).
+/// The update UI uses this to steer portable users to a manual download, since
+/// the in-place updater can't safely replace a portable folder.
+#[tauri::command]
+pub fn is_portable() -> bool {
+    crate::portable::is_portable()
+}
+
 /// Shared: ensure the model is on disk, build the engine, install it.
 async fn download_and_activate(
     app: &AppHandle,

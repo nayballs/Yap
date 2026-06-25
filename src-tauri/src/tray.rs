@@ -15,7 +15,7 @@ use crate::AppState;
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, Wry};
+use tauri::{AppHandle, Emitter, Manager, Wry};
 
 fn tooltip() -> String {
     format!("Blip v{}", env!("CARGO_PKG_VERSION"))
@@ -65,6 +65,8 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
 
     let version = MenuItem::with_id(app, "version", tooltip(), false, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, settings_accel)?;
+    let check_updates =
+        MenuItem::with_id(app, "check_updates", "Check for updates…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Blip", true, quit_accel)?;
     let sep = || PredefinedMenuItem::separator(app);
 
@@ -92,7 +94,16 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
         let download = MenuItem::with_id(app, "open_models", "Download a model…", true, None::<&str>)?;
         return Menu::with_items(
             app,
-            &[&version, &sep()?, &download, &sep()?, &settings, &sep()?, &quit],
+            &[
+                &version,
+                &sep()?,
+                &download,
+                &sep()?,
+                &settings,
+                &check_updates,
+                &sep()?,
+                &quit,
+            ],
         );
     }
 
@@ -116,7 +127,16 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
 
     Menu::with_items(
         app,
-        &[&version, &sep()?, &submenu, &sep()?, &settings, &sep()?, &quit],
+        &[
+            &version,
+            &sep()?,
+            &submenu,
+            &sep()?,
+            &settings,
+            &check_updates,
+            &sep()?,
+            &quit,
+        ],
     )
 }
 
@@ -156,6 +176,11 @@ fn on_menu_event(app: &AppHandle, id: &str) {
     match id {
         "settings" => {
             let _ = crate::commands::show_settings(app);
+        }
+        "check_updates" => {
+            // Open Settings (the update UI lives in About) and ask it to check.
+            let _ = crate::commands::show_settings(app);
+            let _ = app.emit("check-for-updates", ());
         }
         "open_models" => {
             let _ = crate::commands::show_onboarding(app);

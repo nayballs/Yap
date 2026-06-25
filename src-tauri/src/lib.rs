@@ -13,6 +13,7 @@ mod input_hook;
 mod mute;
 mod overlay;
 mod pipeline;
+mod portable;
 mod sound;
 mod stt;
 mod text_injector;
@@ -47,12 +48,19 @@ pub fn run() {
         )
         .try_init();
 
+    // Decide portable-vs-installed once, before anything reads the data dir.
+    portable::init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        // Auto-update from GitHub Releases (driven from the frontend JS plugin)
+        // + process for relaunch after install. Desktop-only.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(AppState {
             pipeline: Mutex::new(None),
         })
@@ -76,6 +84,7 @@ pub fn run() {
             commands::cancel_recording,
             commands::set_autostart,
             commands::set_pill_visible,
+            commands::is_portable,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

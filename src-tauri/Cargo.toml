@@ -44,6 +44,12 @@ tar = "0.4"
 # default build ships the STUB and `cargo check` stays fast.
 transcribe-rs = { version = "0.3", optional = true, default-features = false }
 
+# Auto-update via GitHub Releases (+ process for relaunch after install).
+# Desktop-only crates, so they live under a non-mobile target block.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+
 [features]
 # Default has NO transcribe-rs so plain `cargo check` compiles the stub (fast).
 default = []

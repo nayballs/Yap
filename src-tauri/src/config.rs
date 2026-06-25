@@ -102,6 +102,9 @@ pub struct BlipConfig {
     /// or "shiftEnter".
     #[serde(default = "default_auto_submit_key")]
     pub auto_submit_key: String,
+    /// Automatically check GitHub Releases for a newer Blip on launch.
+    #[serde(default = "default_true")]
+    pub update_checks_enabled: bool,
 }
 
 fn default_scale() -> f64 {
@@ -163,12 +166,20 @@ impl Default for BlipConfig {
             output_device: None,
             overlay_position: default_overlay_position(),
             auto_submit_key: default_auto_submit_key(),
+            update_checks_enabled: true,
         }
     }
 }
 
-/// Blip's data directory: `%APPDATA%/blip/` (or platform equivalent).
+/// Blip's data directory.
+///
+/// In **portable mode** this is `<exe_dir>/Data/` (set up by the installer and
+/// detected by [`crate::portable`]). Otherwise it's `%APPDATA%/blip/` (or the
+/// platform equivalent) — left unchanged so existing installs are unaffected.
 pub fn data_dir() -> PathBuf {
+    if let Some(dir) = crate::portable::data_dir() {
+        return dir.clone();
+    }
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("blip")
