@@ -266,23 +266,82 @@ impl Shared {
                 }
                 match transcription {
                     Ok(text) => {
-                        // Snapshot the injection-related config under one read lock.
-                        let (dict, append_space, auto_submit, auto_submit_key, restore_clipboard) =
-                            self.config
-                                .read()
-                                .map(|c| {
-                                    (
-                                        c.dictionary.clone(),
-                                        c.append_trailing_space,
-                                        c.auto_submit,
-                                        c.auto_submit_key.clone(),
-                                        c.restore_clipboard,
-                                    )
-                                })
-                                .unwrap_or_else(|_| {
-                                    (Vec::new(), false, false, "enter".to_string(), true)
-                                });
-                        let mut corrected = config::apply_dictionary(text.trim(), &dict);
+                        // Snapshot the injection- and cleanup-related config under
+                        // one read lock.
+                        let (
+                            dict,
+                            append_space,
+                            auto_submit,
+                            auto_submit_key,
+                            restore_clipboard,
+                            pp_enabled,
+                            pp_base_url,
+                            pp_api_key,
+                            pp_model,
+                            pp_prompt,
+                        ) = self
+                            .config
+                            .read()
+                            .map(|c| {
+                                (
+                                    c.dictionary.clone(),
+                                    c.append_trailing_space,
+                                    c.auto_submit,
+                                    c.auto_submit_key.clone(),
+                                    c.restore_clipboard,
+                                    c.post_process_enabled,
+                                    c.pp_base_url.clone(),
+                                    c.pp_api_key.clone(),
+                                    c.pp_model.clone(),
+                                    c.pp_prompt.clone(),
+                                )
+                            })
+                            .unwrap_or_else(|_| {
+                                (
+                                    Vec::new(),
+                                    false,
+                                    false,
+                                    "enter".to_string(),
+                                    true,
+                                    false,
+                                    String::new(),
+                                    String::new(),
+                                    String::new(),
+                                    String::new(),
+                                )
+                            });
+
+                        // Optional AI cleanup pass (best-effort). Runs before the
+                        // dictionary so the user's corrections always have the
+                        // final say. Any error/timeout falls back to the raw
+                        // transcript — dictation is never blocked. The state stays
+                        // `processing` for the extra latency.
+                        let raw = text.trim().to_string();
+                        let cleaned = if pp_enabled
+                            && !pp_base_url.is_empty()
+                            && !raw.is_empty()
+                        {
+                            match crate::llm::cleanup(
+                                &raw,
+                                &pp_base_url,
+                                &pp_api_key,
+                                &pp_model,
+                                &pp_prompt,
+                            )
+                            .await
+                            {
+                                Ok(c) if !c.trim().is_empty() => c,
+                                Ok(_) => raw,
+                                Err(e) => {
+                                    tracing::warn!("AI cleanup failed, using raw: {}", e);
+                                    raw
+                                }
+                            }
+                        } else {
+                            raw
+                        };
+
+                        let mut corrected = config::apply_dictionary(cleaned.trim(), &dict);
                         if !corrected.is_empty() {
                             if append_space {
                                 corrected.push(' ');

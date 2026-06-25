@@ -281,6 +281,23 @@ pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Test the AI cleanup settings: run a sample sentence through the saved
+/// post-processing config and return the cleaned text (or the error). Lets the
+/// user verify their base URL / key / model / prompt from the Settings UI.
+/// Never logs the API key.
+#[tauri::command]
+pub async fn test_post_process(text: String) -> Result<String, String> {
+    let cfg = config::load();
+    crate::llm::cleanup(
+        &text,
+        &cfg.pp_base_url,
+        &cfg.pp_api_key,
+        &cfg.pp_model,
+        &cfg.pp_prompt,
+    )
+    .await
+}
+
 /// Whether Blip is running as a portable install (data lives next to the exe).
 /// The update UI uses this to steer portable users to a manual download, since
 /// the in-place updater can't safely replace a portable folder.

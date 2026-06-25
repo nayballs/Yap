@@ -10,6 +10,7 @@
 mod commands;
 mod config;
 mod input_hook;
+mod llm;
 mod mute;
 mod overlay;
 mod pipeline;
@@ -85,6 +86,7 @@ pub fn run() {
             commands::set_autostart,
             commands::set_pill_visible,
             commands::is_portable,
+            commands::test_post_process,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
