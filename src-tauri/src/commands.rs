@@ -298,6 +298,16 @@ pub async fn test_post_process(text: String) -> Result<String, String> {
     .await
 }
 
+/// Today's Groq AI-cleanup usage snapshot for the Settings meter.
+/// Shape: `{ day, tokens, tokenCap, requests, requestCap }`. Tokens are Blip's
+/// own accumulated `usage.total_tokens`; the token cap is the free-tier estimate
+/// (constant), while requests use Groq's exact daily header math. Resets at
+/// midnight UTC.
+#[tauri::command]
+pub fn get_groq_usage() -> serde_json::Value {
+    crate::usage::snapshot()
+}
+
 /// Whether Blip is running as a portable install (data lives next to the exe).
 /// The update UI uses this to steer portable users to a manual download, since
 /// the in-place updater can't safely replace a portable folder.

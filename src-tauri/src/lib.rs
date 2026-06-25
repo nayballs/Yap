@@ -19,6 +19,7 @@ mod sound;
 mod stt;
 mod text_injector;
 mod tray;
+mod usage;
 
 use std::sync::Mutex;
 use tauri::{AppHandle, Listener, Manager};
@@ -87,10 +88,15 @@ pub fn run() {
             commands::set_pill_visible,
             commands::is_portable,
             commands::test_post_process,
+            commands::get_groq_usage,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
             let cfg = config::load();
+
+            // Register the app handle so the usage tracker can emit live
+            // `groq-usage` updates after each AI-cleanup call.
+            usage::set_app_handle(handle.clone());
 
             // Global input hook + dictation hotkey.
             input_hook::start_input_hook(handle.clone());

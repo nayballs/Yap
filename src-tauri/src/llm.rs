@@ -80,10 +80,26 @@ and resolve self-corrections. Keep the original meaning, wording and language.";
         return Err(format!("HTTP {}: {}", status.as_u16(), detail));
     }
 
+    // Capture Groq's daily request headers BEFORE consuming the body. These are
+    // absent on non-Groq endpoints (local servers, OpenAI), which is fine — the
+    // usage tracker falls back to counting calls.
+    let header_u64 = |name: &str| -> Option<u64> {
+        resp.headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.trim().parse::<u64>().ok())
+    };
+    let limit_req = header_u64("x-ratelimit-limit-requests");
+    let remaining_req = header_u64("x-ratelimit-remaining-requests");
+
     let value: Value = resp
         .json()
         .await
         .map_err(|e| format!("failed to parse response: {}", e))?;
+
+    // Best-effort daily-usage accounting (never fails the cleanup).
+    let total_tokens = value["usage"]["total_tokens"].as_u64().unwrap_or(0);
+    crate::usage::record(total_tokens, remaining_req, limit_req);
 
     let content = value["choices"][0]["message"]["content"]
         .as_str()

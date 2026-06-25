@@ -58,6 +58,36 @@
   // AI cleanup Test button state.
   let ppTest = $state({ running: false, result: '', error: '' });
 
+  // Daily Groq usage meter (camelCase from get_groq_usage / groq-usage event).
+  let usage = $state({ day: 0, tokens: 0, tokenCap: 500000, requests: 0, requestCap: 14400 });
+  let unlistenUsage = null;
+
+  // Compact token formatter: <1000 → as-is, else "84.2k".
+  function fmtK(n) {
+    const v = Number(n) || 0;
+    return v < 1000 ? String(v) : `${(v / 1000).toFixed(1)}k`;
+  }
+  // 0–100 percentage of a value against a cap (guards a zero/absent cap).
+  function pctOf(value, cap) {
+    const c = Number(cap) || 0;
+    if (c <= 0) return 0;
+    return Math.min(100, Math.round((Number(value) || 0) / c * 100));
+  }
+  // Pulse-style colour ramp: green < 70%, amber 70–90%, red ≥ 90%.
+  function usageColor(pct) {
+    if (pct >= 90) return '#ef4444';
+    if (pct >= 70) return '#f59e0b';
+    return '#22c55e';
+  }
+
+  async function refreshUsage() {
+    try {
+      usage = await invoke('get_groq_usage');
+    } catch {
+      /* backend not ready / stub — leave defaults */
+    }
+  }
+
   const RECORDING_MODES = [
     { value: 'toggle', label: 'Toggle (press to start/stop)' },
     { value: 'pushToTalk', label: 'Push-to-talk (hold to record)' },
@@ -156,11 +186,22 @@
     } catch {
       unlistenUpdateEvent = null;
     }
+
+    // Daily Groq usage: fetch once, then update live as dictations come in.
+    refreshUsage();
+    try {
+      unlistenUsage = await listen('groq-usage', (e) => {
+        if (e?.payload) usage = e.payload;
+      });
+    } catch {
+      unlistenUsage = null;
+    }
   });
 
   onDestroy(() => {
     stopRecord();
     if (unlistenUpdateEvent) unlistenUpdateEvent();
+    if (unlistenUsage) unlistenUsage();
   });
 
   // ---- Auto-update ----
@@ -355,6 +396,8 @@
     } catch (e) {
       ppTest = { running: false, result: '', error: String(e) };
     }
+    // The Test call goes through cleanup(), so usage moved — refresh the meter.
+    refreshUsage();
   }
 
   async function save() {
@@ -564,6 +607,60 @@
               {/snippet}
             </Row>
           </Group>
+
+          {#if cfg.postProcessEnabled}
+            <Group title="Usage today">
+              <Row>
+                {#snippet children()}
+                  {#if cfg.ppProvider === 'local'}
+                    <p class="usage-note">Running locally — no usage limits.</p>
+                  {:else if cfg.ppProvider === 'groq'}
+                    {@const tPct = pctOf(usage.tokens, usage.tokenCap)}
+                    {@const rPct = pctOf(usage.requests, usage.requestCap)}
+                    <div class="usage">
+                      <div class="usage-bar">
+                        <div class="usage-row">
+                          <span class="usage-label">Tokens today</span>
+                          <span class="usage-stat" style="color:{usageColor(tPct)}">
+                            {tPct}%&nbsp;·&nbsp;{fmtK(usage.tokens)} / {fmtK(usage.tokenCap)}
+                          </span>
+                        </div>
+                        <div class="track">
+                          <div class="value" style="width:{tPct}%;background:{usageColor(tPct)}"></div>
+                        </div>
+                      </div>
+                      <div class="usage-bar">
+                        <div class="usage-row">
+                          <span class="usage-label">Requests today</span>
+                          <span class="usage-stat" style="color:{usageColor(rPct)}">
+                            {rPct}%&nbsp;·&nbsp;{usage.requests} / {usage.requestCap}
+                          </span>
+                        </div>
+                        <div class="track">
+                          <div class="value" style="width:{rPct}%;background:{usageColor(rPct)}"></div>
+                        </div>
+                      </div>
+                      <p class="usage-caption">Resets at midnight UTC.</p>
+                      <p class="usage-fine">Token cap is the free-tier estimate; request count is exact from Groq.</p>
+                    </div>
+                  {:else}
+                    <div class="usage">
+                      <div class="usage-raw">
+                        <span class="usage-label">Tokens today</span>
+                        <span class="usage-stat">{fmtK(usage.tokens)}</span>
+                      </div>
+                      <div class="usage-raw">
+                        <span class="usage-label">Requests today</span>
+                        <span class="usage-stat">{usage.requests}</span>
+                      </div>
+                      <p class="usage-caption">Counts Blip's own cleanup calls. Resets at midnight UTC.</p>
+                    </div>
+                  {/if}
+                {/snippet}
+              </Row>
+            </Group>
+          {/if}
+
           <Group title="Privacy">
             <Row>
               {#snippet children()}
@@ -917,6 +1014,70 @@
     color: #9ca3af;
     font-size: 12.5px;
     line-height: 1.6;
+  }
+
+  /* Usage meter (Pulse-style daily bars) */
+  .usage {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .usage-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .usage-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .usage-label {
+    color: #e5e7eb;
+    font-size: 12.5px;
+  }
+  .usage-stat {
+    color: #9ca3af;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .usage .track {
+    width: 100%;
+    height: 6px;
+    background: #181b22;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .usage .value {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.4s ease, background 0.4s ease;
+  }
+  .usage-raw {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .usage-caption {
+    margin: 2px 0 0;
+    color: #6b7280;
+    font-size: 11px;
+  }
+  .usage-fine {
+    margin: 0;
+    color: #6b7280;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  .usage-note {
+    width: 100%;
+    margin: 0;
+    color: #9ca3af;
+    font-size: 12.5px;
   }
 
   /* about */
