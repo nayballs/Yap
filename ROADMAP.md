@@ -75,62 +75,75 @@ The category bifurcates cleanly:
 
 ## 3. Honest status check
 
-**Blip's transcription is currently a stub.** The default Cargo build ships
-`WhisperStt` in stub mode (no real inference) — see `src-tauri/src/stt.rs` and the
-`whisper` feature flag in `Cargo.toml`. The whole audio pipeline, hotkey, text
-injection, model download, settings, and pill UI are real and working; **only the
-actual Whisper inference needs to be turned on and validated.** Everything below
-assumes Phase 0 lands first.
+**Transcription is real and GPU-accelerated** (`cuda`/`engines` builds; the default
+no-feature build is still a fast stub for quick `cargo check`). Shipped and working:
+
+- **Multi-engine STT** via `transcribe-rs` — Whisper on **CUDA**, plus ONNX models
+  (Parakeet, Moonshine, SenseVoice, GigaAM, Canary, Cohere) on **DirectML**.
+- **16-model registry** + manager (download → SHA-256 → extract; switch/delete;
+  per-model language + translate). Default model **Parakeet V3**.
+- **AI cleanup layer** (Phase 2) — OpenAI-compatible (Groq / OpenAI / local Ollama),
+  off by default, raw-fallback on error; + a live Groq usage meter.
+- Sidebar **settings**, **tray** (state icon + model submenu), bottom **overlay**
+  with a Claude-Code-style scrolling waveform, pill show/hide, recording modes
+  (toggle / push-to-talk), and polish toggles.
+- **Installer + auto-update + portable mode + release CI** (unsigned for now).
+
+What's left: the latency *feel* (VAD pre-roll + streaming), accuracy extras, cleanup
+presets, signing, history, and reach — see the phases below (✅ = done).
 
 ---
 
 ## 4. The build plan (prioritized)
 
-### Phase 0 — Make it actually transcribe (foundation)
-- [ ] Build/run with the `whisper` feature and verify real `whisper-rs` inference.
-- [ ] Document the GPU path (`cuda` feature) and CPU fallback; pick sane defaults.
-- [ ] Validate end-to-end accuracy with `large-v3-turbo` as the default model
-      (good speed/accuracy balance) and confirm model download UX works.
+### Phase 0 — Make it actually transcribe (foundation) — ✅ DONE
+- [x] Real inference via **`transcribe-rs`** (whisper.cpp + ONNX), not the stub.
+- [x] GPU path documented + wired: **Whisper→CUDA**, **ONNX→DirectML**; CPU fallback
+      via the `engines` feature. `CMAKE_CUDA_ARCHITECTURES=native` for the build.
+- [x] End-to-end validated; default model **`parakeet-tdt-0.6b-v3`** (fast + accurate,
+      GPU via DirectML); model download/extract/verify UX works.
 
-### Phase 1 — Beat the latency complaints (this is felt immediately)
-- [ ] **Pre-warm** the mic stream + model so there is **no first-word clipping**
-      (a top, concrete Handy complaint). Keep the engine warm between dictations
-      (already done — engine is put back after each transcription).
-- [ ] **Streaming partial results** — `SttEngine::transcribe_streaming` is already
-      stubbed in the trait. Show text appearing live in the pill for perceived speed.
-- [ ] Target sub-second insertion after speech ends.
+### Phase 1 — Beat the latency complaints (felt immediately)
+- [x] Engine kept **warm** between dictations (+ lazy reload after idle-unload).
+- [x] Sub-second insertion after speech on a GPU (confirmed on a 5070 Ti).
+- [ ] **VAD pre-roll** to kill first-word clipping — matters most for push-to-talk /
+      auto-start; toggle mode already avoids clipping (you press, then speak).
+- [ ] **Streaming partial results** — show words live in the overlay as you talk.
 
-### Phase 2 — The differentiator: local AI cleanup layer
-- [ ] Optional post-processing pass that removes filler, fixes grammar, applies
-      punctuation/formatting, and resolves self-corrections.
-- [ ] **Local-first**: small local LLM (llama.cpp / Ollama) so privacy is preserved;
-      **optional** BYO cloud key (Groq is cheap & fast) for users who want max quality.
-- [ ] Off by default → "raw" mode for the privacy purists; one toggle for "polish".
-- [ ] This is the single feature that converts "raw dictation" into "magic."
+### Phase 2 — The differentiator: AI cleanup layer — ✅ DONE (v1)
+- [x] Optional post-processing pass (filler/grammar/punctuation/self-corrections),
+      hardened so small models clean rather than answer.
+- [x] **Local OR cloud** via one OpenAI-compatible client (Groq / OpenAI / OpenRouter /
+      local Ollama·LM Studio). Off by default; raw-fallback on any error.
+- [x] Live **Groq usage meter** (daily tokens/requests) in settings.
+- [ ] **Cleanup presets** (Email / Notes / Slack / Code tone modes) — next up.
+- [ ] Future: a small **fine-tuned/local** cleanup model (Wispr Flow's real moat).
 
 ### Phase 3 — Accuracy on the hard cases
-- [ ] Custom dictionary already exists (`config::apply_dictionary`) — expose a great
-      UI and seed sensible defaults.
-- [ ] Offer **Parakeet** as a fast/accurate alternative model (praised ~10× faster
-      than Whisper on CPU); keep `large-v3` for accents/multilingual.
-- [ ] A code/jargon-aware path for the developer audience (Whisper is weak here).
+- [x] Custom **dictionary** (exact, case-insensitive) with a UI.
+- [x] **Parakeet** shipped as the fast/accurate default; Whisper large-v3 + others for
+      accents/multilingual; **language selection + translate** per model.
+- [ ] **Fuzzy** custom-words (catch near-misses) + a code/jargon-aware path.
 
 ### Phase 4 — App-aware formatting + light command mode
-- [ ] Detect the focused app and adjust tone/format (casual in Slack, formatted in
-      docs, code in editors) — the superwhisper "Modes" idea, but with great defaults.
-- [ ] A few **natural-language edits** ("make this a list", "more concise") without
-      forcing a memorized command grammar (the Aqua approach users love).
+- [ ] Per-app tone/format auto-switching (superwhisper "Modes") — builds on cleanup
+      presets (pick the preset from the focused app).
+- [ ] A few **natural-language edits** ("make this a list", "more concise").
 
 ### Phase 5 — Trust, polish & distribution
-- [ ] **Sign the installer** so Windows Defender doesn't flag the global-input hook
-      as a keylogger (a real distribution/trust problem for this category).
-- [ ] Low idle CPU/RAM; no battery drain; reliable injection into every field.
-- [ ] Crisp recording indicator (done — the glowing pill), per-app hotkeys, no conflicts.
-- [ ] Ship great defaults; hide power features. Avoid the onboarding cliff.
+- [x] **Installer** (custom NSIS: normal/portable + WebView2 bootstrap), **auto-update**
+      (`tauri-plugin-updater` → GitHub Releases), **portable mode**, **release CI**.
+- [ ] **Authenticode sign the installer** (deferred by choice until Blip's worth it —
+      until then Windows SmartScreen warns on first run). Updater artifacts already
+      minisign-signed.
+- [x] Crisp recording indicator (overlay + waveform), great defaults, hidden power
+      features, first-run onboarding.
+- [ ] Verify low idle CPU/RAM; reliable injection into every field.
 
 ### Phase 6 — Reach
-- [ ] **Linux / Wayland** support — a real, underserved wedge for an OSS tool.
-- [ ] Keep the cross-platform Tauri codebase honest (macOS parity).
+- [ ] **Transcription history** (list + audio playback + retention).
+- [ ] **Linux / Wayland** + macOS parity (the engine choices were made Windows-first:
+      CUDA/DirectML; Vulkan/Metal/CoreML are available in `transcribe-rs` for later).
 
 ---
 
