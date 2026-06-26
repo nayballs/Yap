@@ -21,39 +21,77 @@ fn tooltip() -> String {
     format!("Yap v{}", env!("CARGO_PKG_VERSION"))
 }
 
-/// Build a 32×32 RGBA "status dot" icon for the given state.
+/// Build the Yap "pac" tray icon (open-mouth circle + sound waves on a
+/// transparent background) for the given state. The body colour signals state:
+/// yellow idle, red recording, amber processing, grey needs-model. Drawn at
+/// 128px so Windows can scale it down crisply.
 fn state_icon(state: &str) -> Image<'static> {
-    let (r, g, b) = match state {
-        "recording" => (239u8, 68u8, 68u8),    // red
-        "processing" => (245u8, 158u8, 11u8),  // amber
-        "needs-model" => (156u8, 163u8, 175u8), // grey
-        _ => (96u8, 165u8, 250u8),             // blue (idle)
+    let (br, bg, bb) = match state {
+        "recording" => (239.0f32, 68.0, 68.0),     // red
+        "processing" => (245.0f32, 158.0, 11.0),   // amber
+        "needs-model" => (156.0f32, 163.0, 175.0), // grey
+        _ => (251.0f32, 191.0, 36.0),              // yellow (idle)
     };
-    let size: u32 = 32;
+    let size: i32 = 128;
     let mut rgba = vec![0u8; (size * size * 4) as usize];
-    let center = (size as f32 - 1.0) / 2.0;
-    let radius = size as f32 * 0.42;
+
+    let (cx, cy, r) = (52.0f32, 64.0f32, 44.0f32);
+    let mouth = 0.62f32; // half-angle of the mouth opening (radians), facing +x
+    let (eye_x, eye_y, eye_r) = (50.0f32, 42.0f32, 7.0f32);
+    let waves = [54.0f32, 66.0f32];
+    let wave_hw = 4.0f32;
+    let wave_ang = mouth * 0.8;
+    let clamp01 = |v: f32| v.max(0.0).min(1.0);
+
     for y in 0..size {
         for x in 0..size {
-            let dx = x as f32 - center;
-            let dy = y as f32 - center;
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let dx = px - cx;
+            let dy = py - cy;
             let dist = (dx * dx + dy * dy).sqrt();
-            // 1.5px soft edge for a less jagged dot.
-            let alpha = if dist <= radius {
-                255.0
-            } else if dist <= radius + 1.5 {
-                255.0 * (1.0 - (dist - radius) / 1.5)
+            let ang = dy.atan2(dx).abs();
+
+            let (mut cr, mut cg, mut cb, mut ca) = (0.0f32, 0.0, 0.0, 0.0);
+            if dist <= r + 1.0 {
+                // Pac body = circle minus the mouth wedge.
+                let circ = clamp01(r - dist + 0.5);
+                let mouth_mask = clamp01((ang - mouth) / 0.10 + 0.5);
+                ca = circ * mouth_mask;
+                cr = br;
+                cg = bg;
+                cb = bb;
+                // Eye, composited over the body only.
+                let ed = ((px - eye_x).powi(2) + (py - eye_y).powi(2)).sqrt();
+                let eye_a = clamp01(eye_r - ed + 0.5) * ca;
+                cr = cr * (1.0 - eye_a) + 30.0 * eye_a;
+                cg = cg * (1.0 - eye_a) + 58.0 * eye_a;
+                cb = cb * (1.0 - eye_a) + 138.0 * eye_a;
             } else {
-                0.0
-            };
+                // Sound-wave arcs radiating from the mouth.
+                let mut wa = 0.0f32;
+                for &wr in waves.iter() {
+                    let d = (dist - wr).abs();
+                    let radial = clamp01(wave_hw - d + 0.5);
+                    let angular = clamp01((wave_ang - ang) / 0.12 + 0.5);
+                    wa = wa.max(radial * angular);
+                }
+                if wa > 0.0 {
+                    cr = 255.0;
+                    cg = 255.0;
+                    cb = 255.0;
+                    ca = wa;
+                }
+            }
+
             let i = ((y * size + x) * 4) as usize;
-            rgba[i] = r;
-            rgba[i + 1] = g;
-            rgba[i + 2] = b;
-            rgba[i + 3] = alpha as u8;
+            rgba[i] = cr as u8;
+            rgba[i + 1] = cg as u8;
+            rgba[i + 2] = cb as u8;
+            rgba[i + 3] = (ca * 255.0) as u8;
         }
     }
-    Image::new_owned(rgba, size, size)
+    Image::new_owned(rgba, size as u32, size as u32)
 }
 
 /// Build the context menu for the given state.
