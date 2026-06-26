@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
+  import yapIcon from '../assets/yap-icon.png';
   import { MODELS } from './models.js';
   import ModelCard from './ModelCard.svelte';
 
@@ -66,7 +67,7 @@
 
 <main>
   <header>
-    <div class="logo" aria-hidden="true"></div>
+    <img class="logo" src={yapIcon} alt="" aria-hidden="true" />
     <h1>Welcome to Yap</h1>
     <p class="sub">
       Pick a voice model to get started. Everything runs locally on your machine —
@@ -110,12 +111,11 @@
     margin-bottom: 22px;
   }
   .logo {
-    width: 44px;
-    height: 44px;
+    width: 64px;
+    height: 64px;
     margin: 0 auto 12px;
-    border-radius: 50%;
-    background: radial-gradient(circle at 35% 30%, #60a5fa, #2563eb);
-    box-shadow: 0 0 18px rgba(59, 130, 246, 0.5);
+    border-radius: 14px;
+    object-fit: contain;
   }
   h1 {
     font-size: 22px;
