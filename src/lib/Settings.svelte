@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy } from 'svelte';
+  import yapIcon from '../assets/yap-icon.png';
   import Group from './ui/Group.svelte';
   import Row from './ui/Row.svelte';
   import Toggle from './ui/Toggle.svelte';
@@ -483,7 +484,7 @@
 <div class="shell">
   <nav class="sidebar">
     <div class="brand">
-      <span class="branddot" aria-hidden="true"></span>
+      <img class="brandlogo" src={yapIcon} alt="" aria-hidden="true" />
       <span class="brandname">Yap</span>
     </div>
     <div class="brand-divider"></div>
@@ -801,7 +802,7 @@
               {#snippet children()}
                 <div class="about">
                   <div class="abrand">
-                    <div class="ablogo" aria-hidden="true"></div>
+                    <img class="ablogo" src={yapIcon} alt="" aria-hidden="true" />
                     <div>
                       <div class="aname">Yap <span class="ver">{APP_VERSION}</span></div>
                       <div class="atag">A tiny local voice-dictation pill.</div>
@@ -901,12 +902,11 @@
     gap: 9px;
     padding: 4px 8px 4px;
   }
-  .branddot {
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: radial-gradient(circle at 35% 30%, #60a5fa, #2563eb);
-    box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+  .brandlogo {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    object-fit: contain;
     flex: 0 0 auto;
   }
   .brandname {
@@ -1195,11 +1195,10 @@
     gap: 12px;
   }
   .ablogo {
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
-    background: radial-gradient(circle at 35% 30%, #60a5fa, #2563eb);
-    box-shadow: 0 0 16px rgba(59, 130, 246, 0.5);
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    object-fit: contain;
     flex: 0 0 auto;
   }
   .aname {
