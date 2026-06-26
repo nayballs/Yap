@@ -176,9 +176,10 @@
     }
 
     // Auto-check for updates on launch (the settings webview loads at startup,
-    // even while hidden). No-op / quiet failure in dev where the updater plugin
-    // isn't available.
-    if (cfg.updateChecksEnabled) checkForUpdate(false);
+    // even while hidden). Skip in dev: there's no published release, so the
+    // updater plugin would just log a 404 error every launch. Released builds
+    // (import.meta.env.DEV === false) check normally.
+    if (cfg.updateChecksEnabled && !import.meta.env.DEV) checkForUpdate(false);
 
     // A "Check for updates" tray item emits this; run a manual check.
     try {

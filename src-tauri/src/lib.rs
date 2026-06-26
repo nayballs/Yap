@@ -196,8 +196,14 @@ pub fn run() {
             }
 
             // Reconcile OS autostart state with the saved config.
-            if let Err(e) = set_autostart_enabled(&handle, cfg.autostart) {
-                tracing::warn!("Could not reconcile autostart: {}", e);
+            // Only touch OS autostart when the desired state differs from the
+            // current one. Avoids a spurious "disable" call that errors in dev
+            // (the dev exe was never registered) and spams the log on launch.
+            let autostart_now = app.autolaunch().is_enabled().unwrap_or(false);
+            if autostart_now != cfg.autostart {
+                if let Err(e) = set_autostart_enabled(&handle, cfg.autostart) {
+                    tracing::debug!("autostart reconcile skipped: {}", e);
+                }
             }
 
             // Closing the settings / onboarding windows hides them (so they can
