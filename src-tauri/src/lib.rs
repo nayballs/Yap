@@ -208,7 +208,7 @@ pub fn run() {
                 for label in ["overlay", "pill"] {
                     if let Some(w) = topmost_handle.get_webview_window(label) {
                         if w.is_visible().unwrap_or(false) {
-                            let _ = w.set_always_on_top(true);
+                            overlay::force_topmost(&w);
                         }
                     }
                 }
