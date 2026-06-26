@@ -21,9 +21,16 @@ mod text_injector;
 mod tray;
 mod usage;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Listener, Manager};
 use tauri_plugin_autostart::ManagerExt;
+
+/// Whether a recording/processing overlay is meant to be on screen. A background
+/// thread re-asserts "always on top" while this is true, so the overlay (and the
+/// pill, if shown) can't get buried behind another topmost/fullscreen window
+/// mid-recording — which would leave the user unaware a recording is live.
+static OVERLAY_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// Shared app state: the running dictation pipeline.
 pub struct AppState {
@@ -175,15 +182,36 @@ pub fn run() {
             let overlay_handle = handle.clone();
             handle.listen("blip-state", move |event| {
                 let state = event.payload().trim_matches('"'); // payload is a JSON string
-                if matches!(state, "recording" | "processing") {
+                let active = matches!(state, "recording" | "processing");
+                if active {
                     if config::load().show_overlay {
                         overlay::show_overlay(&overlay_handle);
                     }
                 } else {
                     overlay::hide_overlay(&overlay_handle);
                 }
+                OVERLAY_ACTIVE.store(active, Ordering::Relaxed);
                 // Keep the tray icon + menu in sync with the recording state.
                 tray::update_tray(&overlay_handle, state);
+            });
+
+            // While recording/processing, keep the overlay (and the pill, if
+            // shown) genuinely on top: re-assert "always on top" a few times a
+            // second so another app's topmost or fullscreen window can't bury it
+            // and leave the user unaware a recording is live.
+            let topmost_handle = handle.clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_millis(350));
+                if !OVERLAY_ACTIVE.load(Ordering::Relaxed) {
+                    continue;
+                }
+                for label in ["overlay", "pill"] {
+                    if let Some(w) = topmost_handle.get_webview_window(label) {
+                        if w.is_visible().unwrap_or(false) {
+                            let _ = w.set_always_on_top(true);
+                        }
+                    }
+                }
             });
 
             // System tray (Handy-style: state-aware icon + model submenu).
