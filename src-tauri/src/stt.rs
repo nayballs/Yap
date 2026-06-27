@@ -65,6 +65,9 @@ pub enum EngineType {
     Whisper,
     Parakeet,
     Moonshine,
+    /// Kept for future live-streaming support, but no model currently uses it:
+    /// the streaming Moonshine ONNX graph crashes DirectML's Slice op one-shot.
+    #[allow(dead_code)]
     MoonshineStreaming,
     SenseVoice,
     GigaAM,
@@ -159,30 +162,11 @@ const MODELS: &[ModelDescriptor] = &[
         is_directory: true,
         engine_type: EngineType::Moonshine,
     },
-    ModelDescriptor {
-        id: "moonshine-tiny-streaming-en",
-        filename: "moonshine-tiny-streaming-en",
-        url: "moonshine-tiny-streaming-en.tar.gz",
-        sha256: "465addcfca9e86117415677dfdc98b21edc53537210333a3ecdb58509a80abaf",
-        is_directory: true,
-        engine_type: EngineType::MoonshineStreaming,
-    },
-    ModelDescriptor {
-        id: "moonshine-small-streaming-en",
-        filename: "moonshine-small-streaming-en",
-        url: "moonshine-small-streaming-en.tar.gz",
-        sha256: "dbb3e1c1832bd88a4ac712f7449a136cc2c9a18c5fe33a12ed1b7cb1cfe9cdd5",
-        is_directory: true,
-        engine_type: EngineType::MoonshineStreaming,
-    },
-    ModelDescriptor {
-        id: "moonshine-medium-streaming-en",
-        filename: "moonshine-medium-streaming-en",
-        url: "moonshine-medium-streaming-en.tar.gz",
-        sha256: "07a66f3bff1c77e75a2f637e5a263928a08baae3c29c4c053fc968a9a9373d13",
-        is_directory: true,
-        engine_type: EngineType::MoonshineStreaming,
-    },
+    // NOTE: the Moonshine V2 *streaming* models (tiny/small/medium) are
+    // intentionally omitted — their streaming ONNX graph crashes DirectML's
+    // Slice op ("parameter is incorrect") when run one-shot, so they can't
+    // transcribe in our current (non-streaming) pipeline. Revisit if/when we
+    // implement live streaming partials. Non-streaming Moonshine Base works.
     ModelDescriptor {
         id: "sense-voice-int8",
         filename: "sense-voice-int8",
@@ -243,9 +227,6 @@ pub fn model_name(id: &str) -> String {
         "parakeet-tdt-0.6b-v2" => "Parakeet V2",
         "parakeet-tdt-0.6b-v3" => "Parakeet V3",
         "moonshine-base" => "Moonshine Base",
-        "moonshine-tiny-streaming-en" => "Moonshine V2 Tiny",
-        "moonshine-small-streaming-en" => "Moonshine V2 Small",
-        "moonshine-medium-streaming-en" => "Moonshine V2 Medium",
         "sense-voice-int8" => "SenseVoice",
         "gigaam-v3-e2e-ctc" => "GigaAM v3",
         "canary-180m-flash" => "Canary 180M Flash",
