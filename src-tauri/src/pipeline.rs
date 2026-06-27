@@ -207,6 +207,10 @@ impl Shared {
             return;
         }
 
+        // Set on any failure below so we can tell the user instead of silently
+        // returning to idle (kept short so it fits the overlay capsule).
+        let mut error_msg: Option<&'static str> = None;
+
         // Take the engine out so the mutex isn't held across the await.
         let engine = self.engine.lock().ok().and_then(|mut g| g.take());
         let engine = match engine {
@@ -364,13 +368,29 @@ impl Shared {
                             }
                         }
                     }
-                    Err(e) => tracing::error!("Transcription failed: {}", e),
+                    Err(e) => {
+                        tracing::error!("Transcription failed: {}", e);
+                        error_msg = Some("Transcription failed — check your model");
+                    }
                 }
             }
-            Err(e) => tracing::error!("STT task panicked: {}", e),
+            Err(e) => {
+                tracing::error!("STT task panicked: {}", e);
+                error_msg = Some("Transcription crashed — try another model");
+            }
         }
 
-        let _ = self.app.emit("blip-state", "idle");
+        // Never fail silently: surface a brief error to the UI, otherwise drop
+        // back to idle.
+        match error_msg {
+            Some(msg) => {
+                let _ = self.app.emit("blip-error", msg);
+                let _ = self.app.emit("blip-state", "error");
+            }
+            None => {
+                let _ = self.app.emit("blip-state", "idle");
+            }
+        }
     }
 }
 

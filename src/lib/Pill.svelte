@@ -68,7 +68,9 @@
         ? 'Transcribing…'
         : state === 'needs-model'
           ? 'Model needed'
-          : 'Yap',
+          : state === 'error'
+            ? 'Transcription failed'
+            : 'Yap',
   );
 
 </script>

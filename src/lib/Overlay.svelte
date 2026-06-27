@@ -2,18 +2,22 @@
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
 
-  // idle | recording | processing | needs-model
+  // idle | recording | processing | needs-model | error
   let state = $state('idle');
   // Scrolling amplitude waveform (Claude Code style): newest bar on the right.
   const MAX_BARS = 80;
   const AMP_GAIN = 3.5;
   let history = $state([]);
+  let errorMsg = $state('Transcription failed');
 
   onMount(() => {
     const unlisteners = [];
     listen('blip-state', (e) => {
       state = e.payload;
       if (state !== 'recording') history = [];
+    }).then((u) => unlisteners.push(u));
+    listen('blip-error', (e) => {
+      if (e.payload) errorMsg = e.payload;
     }).then((u) => unlisteners.push(u));
     listen('blip-amp', (e) => {
       const v = Math.min(1, Math.pow(Math.max(0, e.payload ?? 0) * AMP_GAIN, 0.7));
@@ -26,9 +30,9 @@
   });
 </script>
 
-{#if state === 'recording' || state === 'processing'}
+{#if state === 'recording' || state === 'processing' || state === 'error'}
   <div class="overlay">
-    <div class="capsule">
+    <div class="capsule" class:err={state === 'error'}>
       {#if state === 'recording'}
         <span class="dot rec"></span>
         <div class="wave">
@@ -36,9 +40,12 @@
             <span style="height:{Math.max(7, Math.round(v * 100))}%"></span>
           {/each}
         </div>
-      {:else}
+      {:else if state === 'processing'}
         <span class="dot proc"></span>
         <span class="txt">Transcribing…</span>
+      {:else}
+        <span class="dot errdot"></span>
+        <span class="txt">{errorMsg}</span>
       {/if}
     </div>
   </div>
@@ -85,6 +92,13 @@
     background: radial-gradient(circle at 35% 30%, #fbbf24, #d97706);
     box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
     animation: pulse 0.8s ease-in-out infinite;
+  }
+  .dot.errdot {
+    background: radial-gradient(circle at 35% 30%, #f87171, #dc2626);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.55);
+  }
+  .capsule.err {
+    border-color: rgba(239, 68, 68, 0.45);
   }
 
   .wave {

@@ -21,9 +21,9 @@ mod text_injector;
 mod tray;
 mod usage;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Listener, Manager};
+use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
 /// Whether a recording/processing overlay is meant to be on screen. A background
@@ -31,6 +31,10 @@ use tauri_plugin_autostart::ManagerExt;
 /// pill, if shown) can't get buried behind another topmost/fullscreen window
 /// mid-recording — which would leave the user unaware a recording is live.
 static OVERLAY_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Bumped on every `blip-state` change so a scheduled auto-clear of the
+/// transient "error" state is cancelled if a newer state arrives first.
+static STATE_GEN: AtomicU64 = AtomicU64::new(0);
 
 /// Shared app state: the running dictation pipeline.
 pub struct AppState {
@@ -182,17 +186,31 @@ pub fn run() {
             let overlay_handle = handle.clone();
             handle.listen("blip-state", move |event| {
                 let state = event.payload().trim_matches('"'); // payload is a JSON string
-                let active = matches!(state, "recording" | "processing");
-                if active {
+                let generation = STATE_GEN.fetch_add(1, Ordering::Relaxed) + 1;
+                // Show the overlay while recording/processing, and briefly on error.
+                let show = matches!(state, "recording" | "processing" | "error");
+                if show {
                     if config::load().show_overlay {
                         overlay::show_overlay(&overlay_handle);
                     }
                 } else {
                     overlay::hide_overlay(&overlay_handle);
                 }
-                OVERLAY_ACTIVE.store(active, Ordering::Relaxed);
+                OVERLAY_ACTIVE.store(show, Ordering::Relaxed);
                 // Keep the tray icon + menu in sync with the recording state.
                 tray::update_tray(&overlay_handle, state);
+
+                // The "error" state is transient: auto-clear it back to idle a
+                // few seconds later, unless a newer state has arrived since.
+                if state == "error" {
+                    let h = overlay_handle.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(4));
+                        if STATE_GEN.load(Ordering::Relaxed) == generation {
+                            let _ = h.emit("blip-state", "idle");
+                        }
+                    });
+                }
             });
 
             // While recording/processing, keep the overlay (and the pill, if
