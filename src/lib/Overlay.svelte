@@ -9,15 +9,24 @@
   const AMP_GAIN = 3.5;
   let history = $state([]);
   let errorMsg = $state('Transcription failed');
+  // Live partial transcript (opt-in streaming). Empty until the first partial.
+  let partial = $state('');
 
   onMount(() => {
     const unlisteners = [];
     listen('yap-state', (e) => {
       state = e.payload;
       if (state !== 'recording') history = [];
+      // Keep the partial visible through the brief "processing" state, then drop
+      // it once we're idle/needs-model/error so it never lingers.
+      if (state === 'idle' || state === 'needs-model' || state === 'error') partial = '';
+      if (state === 'recording') partial = '';
     }).then((u) => unlisteners.push(u));
     listen('yap-error', (e) => {
       if (e.payload) errorMsg = e.payload;
+    }).then((u) => unlisteners.push(u));
+    listen('yap-partial', (e) => {
+      if (typeof e.payload === 'string') partial = e.payload;
     }).then((u) => unlisteners.push(u));
     listen('yap-amp', (e) => {
       const v = Math.min(1, Math.pow(Math.max(0, e.payload ?? 0) * AMP_GAIN, 0.7));
@@ -35,14 +44,22 @@
     <div class="capsule" class:err={state === 'error'}>
       {#if state === 'recording'}
         <span class="dot rec"></span>
-        <div class="wave">
-          {#each history as v}
-            <span style="height:{Math.max(7, Math.round(v * 100))}%"></span>
-          {/each}
-        </div>
+        {#if partial}
+          <div class="partial">{partial}</div>
+        {:else}
+          <div class="wave">
+            {#each history as v}
+              <span style="height:{Math.max(7, Math.round(v * 100))}%"></span>
+            {/each}
+          </div>
+        {/if}
       {:else if state === 'processing'}
         <span class="dot proc"></span>
-        <span class="txt">Transcribing…</span>
+        {#if partial}
+          <div class="partial">{partial}</div>
+        {:else}
+          <span class="txt">Transcribing…</span>
+        {/if}
       {:else}
         <span class="dot errdot"></span>
         <span class="txt">{errorMsg}</span>
@@ -123,6 +140,19 @@
     font-weight: 600;
     letter-spacing: 0.02em;
     color: #f1f3f7;
+  }
+
+  /* Live partial transcript: keep the newest words visible (right-aligned,
+     single line, clipped on the left) so it reads like live captions. */
+  .partial {
+    max-width: 245px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: rtl;
+    text-align: left;
+    font-size: 12px;
+    color: #e5e7eb;
   }
 
   @keyframes pulse {

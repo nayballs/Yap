@@ -69,12 +69,17 @@ back to the raw transcript, so dictation never blocks.
   builds the tray (when `show_tray_icon` *or* the pill is hidden), and reconciles
   autostart. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
 - **`pipeline.rs`** — the heart. Owns the mic stream + shared state (`recording`,
-  audio `buffer`, warm STT `engine`, live `config`, `last_activity`). Audio callback
-  buffers while recording, downmixes→mono, resamples→16 kHz, and emits a throttled
-  **peak amplitude** (`yap-amp`) for the scrolling waveform. `recording_mode` selects
-  toggle vs push-to-talk. `run_stt` (async) does cleanup → dictionary → inject. An
-  **idle watcher** unloads the model after `model_unload_timeout` to free VRAM; the
-  next dictation lazily reloads it.
+  audio `buffer`, idle `preroll` ring, warm STT `engine`, live `config`,
+  `last_activity`, `target_hwnd`). Audio callback buffers while recording,
+  downmixes→mono, resamples→16 kHz, and emits a throttled **peak amplitude**
+  (`yap-amp`) for the scrolling waveform; while idle it keeps a rolling ~300 ms
+  **pre-roll** ring that `start_recording` prepends (anti first-word-clipping).
+  `recording_mode` selects toggle vs push-to-talk. `run_stt` (async) does cleanup →
+  dictionary → inject (into the captured `target_hwnd`). With `streaming_partials`
+  on, `stream_partials` (a per-session worker) re-transcribes the growing buffer
+  every ~500 ms and emits de-flickered (`smart_diff`) `yap-partial` text. An **idle
+  watcher** unloads the model after `model_unload_timeout`; the next dictation lazily
+  reloads it.
 - **`stt.rs`** — `SttEngine` trait + a real `transcribe-rs` engine (`#[cfg(feature =
   "engines")]`) and a stub (default build). Holds the **16-model registry**
   (`ModelDescriptor`: id/filename/url/sha256/is_directory/engine_type), resolves

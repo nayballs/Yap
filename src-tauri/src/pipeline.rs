@@ -5,6 +5,7 @@
 //! toggling off runs STT, applies the dictionary, and injects the text
 //! into whatever window is focused. A short chime marks start/stop.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, SystemTime};
@@ -17,6 +18,11 @@ use crate::stt::{self, SttAdapter, SttError};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 
+/// How much audio (16 kHz mono samples) to keep in the rolling pre-roll ring so
+/// the first word isn't clipped: speech that started a moment *before* the user
+/// pressed the key is prepended to the recording. 300 ms × 16 kHz.
+const PREROLL_SAMPLES: usize = (0.3 * TARGET_SAMPLE_RATE as f64) as usize;
+
 /// cpal's `Stream` is `!Send` on some platforms; we only hold it alive.
 struct SendStream(#[allow(dead_code)] cpal::Stream);
 // SAFETY: the stream is only kept alive and dropped; cpal manages its own
@@ -27,6 +33,10 @@ unsafe impl Send for SendStream {}
 struct Shared {
     recording: AtomicBool,
     buffer: Mutex<Vec<f32>>,
+    /// Rolling ring of the most recent ~300 ms of mic audio, maintained while
+    /// *idle* so `start_recording` can seed the buffer with the moment before the
+    /// keypress (anti first-word-clipping). Capped at `PREROLL_SAMPLES`.
+    preroll: Mutex<VecDeque<f32>>,
     engine: Mutex<Option<SttAdapter>>,
     app: AppHandle,
     config: RwLock<YapConfig>,
@@ -156,9 +166,17 @@ impl Shared {
         }
     }
 
-    fn start_recording(&self) {
+    fn start_recording(self: &Arc<Self>) {
+        // Seed the buffer with the pre-roll ring (the ~300 ms before the keypress)
+        // so a word already in flight isn't clipped.
+        let pre: Vec<f32> = self
+            .preroll
+            .lock()
+            .map(|p| p.iter().copied().collect())
+            .unwrap_or_default();
         if let Ok(mut buf) = self.buffer.lock() {
             buf.clear();
+            buf.extend_from_slice(&pre);
         }
         // Capture the window the user is dictating into, before the overlay/pill
         // (or anything else) can steal focus. Restored at paste time.
@@ -173,7 +191,42 @@ impl Shared {
         if self.sound_enabled() {
             crate::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref());
         }
+        // Opt-in live partials: spawn a worker that re-transcribes the growing
+        // buffer while recording. Off by default (extra GPU load).
+        self.maybe_start_streaming();
         tracing::info!("Recording started");
+    }
+
+    /// Snapshot the language/translate settings for a transcription.
+    /// `"auto"` (or a model that ignores it) maps to `None`.
+    fn language_settings(&self) -> (Option<String>, bool) {
+        self.config
+            .read()
+            .map(|c| {
+                let lang = if c.selected_language == "auto" {
+                    None
+                } else {
+                    Some(c.selected_language.clone())
+                };
+                (lang, c.translate_to_english)
+            })
+            .unwrap_or((None, false))
+    }
+
+    /// If streaming partials are enabled, spawn the worker thread for this
+    /// recording session (it exits on its own when `recording` flips false).
+    fn maybe_start_streaming(self: &Arc<Self>) {
+        let enabled = self
+            .config
+            .read()
+            .map(|c| c.streaming_partials)
+            .unwrap_or(false);
+        if !enabled {
+            return;
+        }
+        let (language, translate) = self.language_settings();
+        let shared = Arc::clone(self);
+        std::thread::spawn(move || stream_partials(shared, language, translate));
     }
 
     /// Stop recording and discard the buffered audio (no transcription).
@@ -247,19 +300,7 @@ impl Shared {
         };
 
         // Snapshot the language/translate settings for this transcription.
-        // `"auto"` (or a model that ignores it) maps to `None`.
-        let (language, translate) = self
-            .config
-            .read()
-            .map(|c| {
-                let lang = if c.selected_language == "auto" {
-                    None
-                } else {
-                    Some(c.selected_language.clone())
-                };
-                (lang, c.translate_to_english)
-            })
-            .unwrap_or((None, false));
+        let (language, translate) = self.language_settings();
 
         let outcome = tokio::task::spawn_blocking(move || {
             let result = engine.transcribe(&audio, language.as_deref(), translate);
@@ -440,6 +481,7 @@ impl Pipeline {
         let shared = Arc::new(Shared {
             recording: AtomicBool::new(false),
             buffer: Mutex::new(Vec::new()),
+            preroll: Mutex::new(VecDeque::with_capacity(PREROLL_SAMPLES + 1)),
             engine: Mutex::new(engine),
             app: app.clone(),
             config: RwLock::new(cfg.clone()),
@@ -488,6 +530,97 @@ impl Pipeline {
         if let Ok(mut c) = self.shared.config.write() {
             *c = cfg;
         }
+    }
+}
+
+/// Streaming-partials worker (opt-in). Runs on its own thread for one recording
+/// session and exits when `recording` flips false.
+///
+/// Every `INTERVAL`, it re-transcribes the *whole* growing buffer on the warm
+/// engine and emits a de-flickered partial (`yap-partial`). It never blocks the
+/// authoritative final pass: it grabs the engine with `try_lock` and skips the
+/// tick if the engine is busy or has been taken for the final transcription.
+fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: bool) {
+    const INTERVAL: Duration = Duration::from_millis(500);
+    // Don't bother until there's at least ~0.5 s of audio (avoids hallucinated
+    // output on tiny snippets — mirrors the engine's own MIN_SAMPLES guard).
+    const STREAM_MIN_SAMPLES: usize = 8_000;
+
+    let mut last = String::new();
+    loop {
+        std::thread::sleep(INTERVAL);
+        if !shared.recording.load(Ordering::SeqCst) {
+            break;
+        }
+        let buf = match shared.buffer.lock() {
+            Ok(b) => b.clone(),
+            Err(_) => break,
+        };
+        if buf.len() < STREAM_MIN_SAMPLES {
+            continue;
+        }
+
+        // Re-entrancy/contention guard: only transcribe if the engine is free.
+        let text = {
+            let guard = match shared.engine.try_lock() {
+                Ok(g) => g,
+                Err(_) => continue, // a transcription is already running — skip
+            };
+            match guard.as_ref() {
+                Some(engine) => {
+                    if !shared.recording.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    match engine.transcribe(&buf, language.as_deref(), translate) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            tracing::debug!("partial transcribe skipped: {}", e);
+                            continue;
+                        }
+                    }
+                }
+                None => continue, // engine taken for the final pass — wind down
+            }
+        };
+
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let stable = smart_diff(&last, trimmed);
+        if stable != last {
+            last = stable.clone();
+            let _ = shared.app.emit("yap-partial", stable);
+        }
+    }
+}
+
+/// De-flicker successive full-transcript partials (FluidVoice `smartDiffUpdate`).
+///
+/// Keeps the stable longest-common **word** prefix of the previous emit and
+/// appends the new tail, so the displayed text grows smoothly instead of
+/// re-rendering wholesale. If the new transcript diverges from the previous one
+/// by more than half its words, it's replaced outright (the decode changed its
+/// mind). Word comparison ignores case and surrounding punctuation.
+fn smart_diff(prev: &str, next: &str) -> String {
+    let norm = |w: &str| {
+        w.trim_matches(|c: char| !c.is_alphanumeric())
+            .to_ascii_lowercase()
+    };
+    let pw: Vec<&str> = prev.split_whitespace().collect();
+    let nw: Vec<&str> = next.split_whitespace().collect();
+
+    let mut common = 0;
+    while common < pw.len() && common < nw.len() && norm(pw[common]) == norm(nw[common]) {
+        common += 1;
+    }
+
+    if !pw.is_empty() && (common as f32 / pw.len() as f32) >= 0.5 {
+        let mut out: Vec<&str> = pw[..common].to_vec();
+        out.extend_from_slice(&nw[common..]);
+        out.join(" ")
+    } else {
+        next.to_string()
     }
 }
 
@@ -550,9 +683,6 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
         .build_input_stream(
             &stream_config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                if !cb_shared.recording.load(Ordering::Relaxed) {
-                    return;
-                }
                 let mono = if needs_downmix {
                     let ch = channels as usize;
                     data.chunks_exact(ch)
@@ -566,6 +696,17 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
                 } else {
                     mono
                 };
+                // While idle, keep a short rolling pre-roll ring (no buffering, no
+                // amp emit) so the next recording starts a moment before the key.
+                if !cb_shared.recording.load(Ordering::Relaxed) {
+                    if let Ok(mut pr) = cb_shared.preroll.lock() {
+                        pr.extend(resampled.iter().copied());
+                        while pr.len() > PREROLL_SAMPLES {
+                            pr.pop_front();
+                        }
+                    }
+                    return;
+                }
                 if let Ok(mut buf) = cb_shared.buffer.lock() {
                     buf.extend_from_slice(&resampled);
                 }
@@ -595,6 +736,35 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
         .map_err(|e| format!("Failed to start input stream: {}", e))?;
     tracing::info!("Audio capture started");
     Ok(stream)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::smart_diff;
+
+    #[test]
+    fn growing_transcript_keeps_prefix_and_appends() {
+        let out = smart_diff("the meeting is", "the meeting is at three");
+        assert_eq!(out, "the meeting is at three");
+    }
+
+    #[test]
+    fn from_empty_takes_next() {
+        assert_eq!(smart_diff("", "hello world"), "hello world");
+    }
+
+    #[test]
+    fn case_and_punctuation_insensitive_prefix() {
+        // Prev tail lacked punctuation; new decode added it — prefix still stable.
+        let out = smart_diff("lets go to the", "Let's go to the bank.");
+        assert!(out.ends_with("bank."));
+    }
+
+    #[test]
+    fn large_divergence_replaces_wholesale() {
+        let out = smart_diff("alpha beta gamma delta", "totally different words here");
+        assert_eq!(out, "totally different words here");
+    }
 }
 
 /// Simple linear resampler from one rate to another.

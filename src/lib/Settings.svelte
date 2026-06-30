@@ -178,6 +178,7 @@
     pillScale: 1.0,
     showPill: false,
     showOverlay: true,
+    streamingPartials: false,
     inputDevice: null,
     dictionary: [],
     selectedLanguage: 'auto',
@@ -605,6 +606,13 @@
             </Row>
             <Row label="Overlay position" hint="Where the transcribing overlay appears">
               <Select bind:value={cfg.overlayPosition} options={OVERLAY_POSITIONS} disabled={!cfg.showOverlay} />
+            </Row>
+            <Row>
+              <Toggle
+                bind:checked={cfg.streamingPartials}
+                label="Live partial transcript (experimental)"
+                hint="Show words in the overlay as you speak. Re-transcribes on a timer, so it adds GPU load. The final result on stop is always authoritative."
+              />
             </Row>
             <Row>
               <Slider

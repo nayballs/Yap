@@ -137,6 +137,12 @@ pub struct YapConfig {
     /// the selection; the backend always uses `pp_prompt` as the body.
     #[serde(default = "default_pp_preset")]
     pub pp_preset: String,
+
+    /// Show live partial transcripts in the overlay while you speak. Opt-in
+    /// (off by default): re-transcribes the growing buffer on a timer, which adds
+    /// GPU load. The final transcript on stop is always authoritative.
+    #[serde(default)]
+    pub streaming_partials: bool,
 }
 
 fn default_scale() -> f64 {
@@ -223,6 +229,7 @@ impl Default for YapConfig {
             pp_model: default_pp_model(),
             pp_prompt: default_pp_prompt(),
             pp_preset: default_pp_preset(),
+            streaming_partials: false,
         }
     }
 }

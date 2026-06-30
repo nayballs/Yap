@@ -106,19 +106,20 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 ### Phase 1 — Beat the latency complaints (felt immediately)
 - [x] Engine kept **warm** between dictations (+ lazy reload after idle-unload).
 - [x] Sub-second insertion after speech on a GPU (confirmed on a 5070 Ti).
-- [ ] **VAD pre-roll** to kill first-word clipping — matters most for push-to-talk /
-      auto-start; toggle mode already avoids clipping (you press, then speak).
-      `transcribe-rs` ships `vad::SileroVad` / `EnergyVad` / `SmoothedVad`
-      (with a `frame_buffer()` ring) — keep a rolling pre-roll buffer so the
-      audio handed to STT always starts a few hundred ms *before* speech onset.
-- [ ] **Streaming partial results** — show words live in the overlay as you talk.
-      Note: only Moonshine exposes true token streaming in `transcribe-rs`
-      (and we pulled it as broken). So do it FluidVoice-style: a timer
-      (~400–600 ms) re-transcribes the growing buffer on the warm engine, and a
-      **`smart_diff` de-flicker** keeps the stable longest-common word-prefix and
-      only appends new words (replace wholesale only if <50% overlaps). Re-entrancy
-      guard: skip the next tick if a transcription overruns the interval, so slow
-      machines degrade instead of queueing. Final pass on stop stays authoritative.
+- [x] **Audio pre-roll** to kill first-word clipping — a rolling ~300 ms ring of
+      mic audio is kept while idle and prepended to the buffer at record-start, so a
+      word already in flight when you press the key isn't lost. (Simpler than a VAD
+      onset detector and helps toggle *and* push-to-talk. `transcribe-rs` also ships
+      `vad::SileroVad`/`EnergyVad` if we later want true VAD-triggered auto-start.)
+- [x] **Streaming partial results** (opt-in, off by default) — `streaming_partials`
+      spawns a worker that every ~500 ms re-transcribes the growing buffer on the
+      warm engine and emits `yap-partial`, shown live in the overlay. A `smart_diff`
+      de-flicker keeps the stable longest-common word-prefix and appends the new
+      tail (replace wholesale if <50% overlaps). A `try_lock` re-entrancy guard
+      skips a tick if a transcription is already running and never blocks the
+      authoritative final pass. (Only Moonshine offers true token streaming in
+      `transcribe-rs`, and we pulled it as broken, hence the re-transcribe approach.)
+      ⚠ Needs validation on the CUDA dev build before enabling by default.
 
 ### Phase 2 — The differentiator: AI cleanup layer — ✅ DONE (v1)
 - [x] Optional post-processing pass (filler/grammar/punctuation/self-corrections),

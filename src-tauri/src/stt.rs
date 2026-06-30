@@ -1079,8 +1079,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_16_models() {
-        assert_eq!(MODELS.len(), 16);
+    fn registry_has_expected_models() {
+        // 13 after the broken streaming Moonshine models were removed (c7f2351).
+        assert_eq!(MODELS.len(), 13);
+        // The default model must always be present and resolvable.
+        assert!(MODELS.iter().any(|m| m.id == "parakeet-tdt-0.6b-v3"));
     }
 
     /// End-to-end ONNX path check: downloads the smallest ONNX model
