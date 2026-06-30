@@ -5,7 +5,7 @@
 //! toggling off runs STT, applies the dictionary, and injects the text
 //! into whatever window is focused. A short chime marks start/stop.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, SystemTime};
 
@@ -33,6 +33,10 @@ struct Shared {
     /// Last time the engine did real work (ms since epoch). Drives the idle
     /// model-unload watcher (B1).
     last_activity: AtomicU64,
+    /// Foreground window handle captured at record-start (0 = none / our own
+    /// window). The transcript is pasted back into this window so focus changes
+    /// during transcription don't misfire.
+    target_hwnd: AtomicIsize,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -156,6 +160,10 @@ impl Shared {
         if let Ok(mut buf) = self.buffer.lock() {
             buf.clear();
         }
+        // Capture the window the user is dictating into, before the overlay/pill
+        // (or anything else) can steal focus. Restored at paste time.
+        let hwnd = crate::text_injector::current_foreground().unwrap_or(0);
+        self.target_hwnd.store(hwnd, Ordering::Relaxed);
         self.recording.store(true, Ordering::SeqCst);
         self.touch_activity();
         if self.mute_while_recording() {
@@ -352,8 +360,16 @@ impl Shared {
                             }
                             tracing::info!(text = %corrected, "Transcript");
                             let _ = self.app.emit("yap-transcript", corrected.clone());
-                            match crate::text_injector::inject_text(&corrected, restore_clipboard)
-                                .await
+                            let target = match self.target_hwnd.load(Ordering::Relaxed) {
+                                0 => None,
+                                h => Some(h),
+                            };
+                            match crate::text_injector::inject_text(
+                                &corrected,
+                                restore_clipboard,
+                                target,
+                            )
+                            .await
                             {
                                 Ok(()) => {
                                     if auto_submit {
@@ -428,6 +444,7 @@ impl Pipeline {
             app: app.clone(),
             config: RwLock::new(cfg.clone()),
             last_activity: AtomicU64::new(now_ms()),
+            target_hwnd: AtomicIsize::new(0),
         });
 
         spawn_idle_watcher(&shared);

@@ -164,12 +164,14 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 - [x] Crisp recording indicator (overlay + waveform), great defaults, hidden power
       features, first-run onboarding.
 - [ ] Verify low idle CPU/RAM; reliable injection into every field.
-- [ ] **Harden text injection** (FluidVoice `TypingService` lessons): capture the
-      **target window (HWND) at record-start** so focus changes during transcription
-      don't misfire; after paste, **verify** the text landed (UI Automation
-      `ValuePattern` / focused-element check) and fall back to per-char SendInput;
-      clipboard snapshot+restore already exists. Fixes the two most common
-      "it typed into the wrong window / nothing happened" bugs.
+- [~] **Harden text injection** (FluidVoice `TypingService` lessons):
+      - [x] Capture the **target window (HWND) at record-start** (skipping Yap's own
+            windows) and **re-focus** it before pasting — fixes "typed into the wrong
+            window" when focus shifts mid-transcription.
+      - [x] **Unicode `SendInput` fallback** when the clipboard is unavailable.
+      - [x] Clipboard snapshot+restore (already existed).
+      - [ ] **Verify-after-paste** via UI Automation `ValuePattern` (read the focused
+            element's value before/after) — deferred; needs a COM/UIA integration.
 
 ### Phase 6 — Reach
 - [ ] **Transcription history** (list + audio playback + retention) — a simple local

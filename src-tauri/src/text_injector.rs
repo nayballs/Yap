@@ -53,13 +53,120 @@ mod platform {
 
     const INPUT_KEYBOARD: u32 = 1;
     const KEYEVENTF_KEYUP: u32 = 0x0002;
+    const KEYEVENTF_UNICODE: u32 = 0x0004;
     const VK_SHIFT: u16 = 0x10;
     const VK_CONTROL: u16 = 0x11;
     const VK_V: u16 = 0x56;
     const VK_RETURN: u16 = 0x0D;
 
+    type HWND = *mut core::ffi::c_void;
+
     extern "system" {
         fn SendInput(c_inputs: u32, p_inputs: *const INPUT, cb_size: i32) -> u32;
+        fn GetForegroundWindow() -> HWND;
+        fn SetForegroundWindow(hwnd: HWND) -> i32;
+        fn GetWindowThreadProcessId(hwnd: HWND, lpdw_process_id: *mut u32) -> u32;
+        fn AttachThreadInput(id_attach: u32, id_attach_to: u32, f_attach: i32) -> i32;
+        fn GetCurrentThreadId() -> u32;
+        fn GetCurrentProcessId() -> u32;
+        fn IsWindow(hwnd: HWND) -> i32;
+        fn BringWindowToTop(hwnd: HWND) -> i32;
+    }
+
+    /// Handle of the current foreground window as an `isize` (0 = none).
+    ///
+    /// Captured at record-start so we can paste back into the window the user was
+    /// dictating into, even if focus shifts during transcription. Returns 0 when
+    /// the foreground belongs to *our own* process (e.g. the user started
+    /// dictation by clicking Yap's pill) — we never want to re-focus ourselves.
+    pub fn foreground_window() -> isize {
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if hwnd.is_null() {
+                return 0;
+            }
+            let mut pid: u32 = 0;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid == GetCurrentProcessId() {
+                return 0;
+            }
+            hwnd as isize
+        }
+    }
+
+    /// Best-effort: bring `hwnd` back to the foreground before pasting.
+    ///
+    /// Windows restricts `SetForegroundWindow` from background threads, so we
+    /// briefly attach our thread's input to the target window's thread (the
+    /// standard workaround) to make the focus change stick. No-op if the handle
+    /// is null/stale or already foreground.
+    pub fn focus_window(hwnd_isize: isize) -> bool {
+        let hwnd = hwnd_isize as HWND;
+        if hwnd.is_null() {
+            return false;
+        }
+        unsafe {
+            if IsWindow(hwnd) == 0 {
+                return false;
+            }
+            if GetForegroundWindow() == hwnd {
+                return true;
+            }
+            let cur = GetCurrentThreadId();
+            let target = GetWindowThreadProcessId(hwnd, std::ptr::null_mut());
+            let attached = AttachThreadInput(cur, target, 1) != 0;
+            let ok = SetForegroundWindow(hwnd) != 0;
+            BringWindowToTop(hwnd);
+            if attached {
+                AttachThreadInput(cur, target, 0);
+            }
+            // Let the focus change settle before keystrokes land.
+            thread::sleep(Duration::from_millis(20));
+            ok
+        }
+    }
+
+    fn make_unicode(unit: u16, up: bool) -> INPUT {
+        INPUT {
+            type_: INPUT_KEYBOARD,
+            union: INPUT_UNION {
+                ki: KEYBDINPUT {
+                    w_vk: 0,
+                    w_scan: unit,
+                    dw_flags: KEYEVENTF_UNICODE | if up { KEYEVENTF_KEYUP } else { 0 },
+                    time: 0,
+                    dw_extra_info: 0,
+                },
+            },
+        }
+    }
+
+    /// Type `text` directly as Unicode keystrokes via `SendInput` (no clipboard).
+    ///
+    /// Fallback for when the clipboard/paste path is unavailable. Sends each
+    /// UTF-16 code unit as a key down/up pair (surrogate pairs go through as
+    /// consecutive units, which Windows recombines).
+    pub fn type_unicode(text: &str) {
+        let mut inputs: Vec<INPUT> = Vec::with_capacity(text.len() * 2);
+        for unit in text.encode_utf16() {
+            inputs.push(make_unicode(unit, false));
+            inputs.push(make_unicode(unit, true));
+        }
+        if inputs.is_empty() {
+            return;
+        }
+        // Send in chunks so a very long transcript doesn't overflow the input
+        // queue in a single call.
+        for chunk in inputs.chunks(512) {
+            unsafe {
+                SendInput(
+                    chunk.len() as u32,
+                    chunk.as_ptr(),
+                    mem::size_of::<INPUT>() as i32,
+                );
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
     }
 
     fn make_key(vk: u16, up: bool) -> INPUT {
@@ -154,28 +261,81 @@ pub async fn press_submit(key: &str) -> Result<(), String> {
     .map_err(|e| format!("press_submit task panicked: {}", e))
 }
 
-/// Inject text into the currently focused field via clipboard + Ctrl+V.
+/// Handle of the current foreground window (as an `isize`, `None` if none).
 ///
-/// Runs on a blocking thread to avoid blocking the tokio runtime.
-/// Adds a small initial delay to let any UI focus changes settle.
-pub async fn inject_text(text: &str, restore_clipboard: bool) -> Result<(), String> {
+/// Call this at record-start and pass the result to [`inject_text`] so the paste
+/// targets the window the user was dictating into — not whatever happens to be
+/// focused when transcription finishes. Returns `None` off Windows.
+pub fn current_foreground() -> Option<isize> {
+    #[cfg(target_os = "windows")]
+    {
+        match platform::foreground_window() {
+            0 => None,
+            h => Some(h),
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+/// Inject text into the target field via clipboard + Ctrl+V.
+///
+/// `target_hwnd` (from [`current_foreground`] at record-start) is re-focused
+/// before pasting so focus changes during transcription don't misfire. Runs on a
+/// blocking thread to avoid blocking the tokio runtime.
+pub async fn inject_text(
+    text: &str,
+    restore_clipboard: bool,
+    target_hwnd: Option<isize>,
+) -> Result<(), String> {
     let text = text.to_string();
 
-    tokio::task::spawn_blocking(move || inject_text_sync(&text, restore_clipboard))
+    tokio::task::spawn_blocking(move || inject_text_sync(&text, restore_clipboard, target_hwnd))
         .await
         .map_err(|e| format!("Inject task panicked: {}", e))?
 }
 
-fn inject_text_sync(text: &str, restore_clipboard: bool) -> Result<(), String> {
+fn inject_text_sync(
+    text: &str,
+    restore_clipboard: bool,
+    target_hwnd: Option<isize>,
+) -> Result<(), String> {
     use arboard::Clipboard;
 
     info!(len = text.len(), "Injecting text via clipboard paste");
 
-    // Small delay to let focus settle after voice recording stops
+    // Small delay to let focus settle after voice recording stops.
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    let mut clipboard =
-        Clipboard::new().map_err(|e| format!("Failed to open clipboard: {}", e))?;
+    // Re-focus the window the user was dictating into (best-effort).
+    #[cfg(target_os = "windows")]
+    if let Some(hwnd) = target_hwnd {
+        if !platform::focus_window(hwnd) {
+            warn!("Could not re-focus the dictation target window; pasting into current focus");
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = target_hwnd;
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        warn!("Text injection is only supported on Windows");
+        return Err("Text injection is only supported on Windows".into());
+    }
+
+    // Clipboard path. If the clipboard can't be opened or set, fall back to
+    // typing the text directly as Unicode keystrokes (no clipboard needed).
+    let mut clipboard = match Clipboard::new() {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("Clipboard unavailable ({e}); falling back to direct typing");
+            #[cfg(target_os = "windows")]
+            platform::type_unicode(text);
+            return Ok(());
+        }
+    };
 
     // Save current clipboard text (best-effort), only if we're going to restore it.
     let previous = if restore_clipboard {
@@ -184,25 +344,21 @@ fn inject_text_sync(text: &str, restore_clipboard: bool) -> Result<(), String> {
         None
     };
 
-    // Set our text
-    clipboard
-        .set_text(text)
-        .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
+    if let Err(e) = clipboard.set_text(text) {
+        warn!("Failed to set clipboard ({e}); falling back to direct typing");
+        #[cfg(target_os = "windows")]
+        platform::type_unicode(text);
+        return Ok(());
+    }
 
-    // Small delay to ensure clipboard is ready
+    // Small delay to ensure clipboard is ready.
     std::thread::sleep(std::time::Duration::from_millis(30));
 
-    // Simulate Ctrl+V
+    // Simulate Ctrl+V.
     #[cfg(target_os = "windows")]
     platform::simulate_paste();
 
-    #[cfg(not(target_os = "windows"))]
-    {
-        warn!("Text injection is only supported on Windows");
-        return Err("Text injection is only supported on Windows".into());
-    }
-
-    // Restore previous clipboard (delayed to ensure paste completes)
+    // Restore previous clipboard (delayed to ensure paste completes).
     if let Some(prev) = previous {
         std::thread::sleep(std::time::Duration::from_millis(200));
         if let Err(e) = clipboard.set_text(&prev) {

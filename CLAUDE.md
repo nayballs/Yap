@@ -104,7 +104,12 @@ back to the raw transcript, so dictation never blocks.
 - **`input_hook.rs`** — low-level Windows keyboard + mouse hooks; spec `kb:VKEY` /
   `mouse:ID`; emits press AND release.
 - **`text_injector.rs`** — clipboard paste (+ optional clipboard restore) and
-  `press_submit` (Enter / Ctrl+Enter / Shift+Enter) via `SendInput`.
+  `press_submit` (Enter / Ctrl+Enter / Shift+Enter) via `SendInput`. Captures the
+  dictation **target window** at record-start (`current_foreground`, skipping Yap's
+  own windows) and **re-focuses** it before pasting (`focus_window`, via the
+  `AttachThreadInput` workaround) so focus changes mid-transcription don't misfire.
+  Falls back to direct Unicode typing (`type_unicode`) if the clipboard is
+  unavailable. (UI-Automation content verification is a deferred follow-up.)
 - **`sound.rs`** — start/stop chimes (volume + output-device aware).
 - **`mute.rs`** — mute-while-recording (currently a logged stub; WASAPI TODO).
 - **`portable.rs`** — portable-mode detection (a `portable` marker next to the exe
