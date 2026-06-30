@@ -7,7 +7,7 @@
 //!   while recording/processing it offers **Cancel**. Always: Settings + Quit.
 //! - **Left-click** opens Settings (handy when the pill is hidden).
 //!
-//! The tray is rebuilt on every `blip-state` change via [`update_tray`].
+//! The tray is rebuilt on every `yap-state` change via [`update_tray`].
 
 use crate::config;
 use crate::stt;
@@ -245,7 +245,7 @@ fn on_menu_event(app: &AppHandle, id: &str) {
 /// Build the tray icon and install it. Call once at startup.
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app, "idle")?;
-    let tray = TrayIconBuilder::with_id("blip-tray")
+    let tray = TrayIconBuilder::with_id("yap-tray")
         .icon(state_icon("idle"))
         .tooltip(tooltip())
         .menu(&menu)

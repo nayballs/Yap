@@ -2,7 +2,7 @@
 //! bottom-center of the primary monitor while Yap is recording or processing,
 //! and hides when it returns to idle.
 //!
-//! Driven entirely by the `blip-state` listener in `lib.rs` (decoupled from the
+//! Driven entirely by the `yap-state` listener in `lib.rs` (decoupled from the
 //! pipeline); this module just shows/hides + positions the `overlay` window.
 
 use tauri::{AppHandle, LogicalPosition, Manager, Position};

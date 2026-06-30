@@ -1,6 +1,6 @@
 @echo off
 REM ── Yap Dev launcher ─────────────────────────────────────────────
-REM Runs Yap from SOURCE with hot-reload (Vite on :1430 + Tauri dev).
+REM Runs Yap from SOURCE with hot-reload (Vite on :51437 + Tauri dev).
 REM This is the LIVE code, not the installed/compiled release build.
 REM Edit files in src/ or src-tauri/ and the app reloads automatically.
 REM Keep this window open while you work; close it to stop Yap.

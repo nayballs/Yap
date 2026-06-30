@@ -4,3 +4,7 @@
 /src-tauri/gen
 *.log
 .DS_Store
+
+# Machine-specific local tooling config (absolute paths, pipe names, secrets)
+/.claude/
+/.mcp.json

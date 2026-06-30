@@ -1190,7 +1190,7 @@ mod tests {
     #[cfg(feature = "engines")]
     #[test]
     fn missing_model_errors() {
-        let data_dir = std::env::temp_dir().join("blip-stt-test-missing");
+        let data_dir = std::env::temp_dir().join("yap-stt-test-missing");
         let result = create_stt_engine(&data_dir, "parakeet-tdt-0.6b-v3", false);
         assert!(result.is_err());
     }

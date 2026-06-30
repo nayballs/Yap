@@ -12,14 +12,14 @@
 
   onMount(() => {
     const unlisteners = [];
-    listen('blip-state', (e) => {
+    listen('yap-state', (e) => {
       state = e.payload;
       if (state !== 'recording') history = [];
     }).then((u) => unlisteners.push(u));
-    listen('blip-error', (e) => {
+    listen('yap-error', (e) => {
       if (e.payload) errorMsg = e.payload;
     }).then((u) => unlisteners.push(u));
-    listen('blip-amp', (e) => {
+    listen('yap-amp', (e) => {
       const v = Math.min(1, Math.pow(Math.max(0, e.payload ?? 0) * AMP_GAIN, 0.7));
       const next = history.length >= MAX_BARS ? history.slice(1) : history.slice();
       next.push(v);

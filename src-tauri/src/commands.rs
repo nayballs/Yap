@@ -2,7 +2,7 @@
 
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, State};
 
-use crate::config::{self, BlipConfig};
+use crate::config::{self, YapConfig};
 use crate::stt;
 use crate::AppState;
 
@@ -16,7 +16,7 @@ pub fn apply_pill_scale(app: &AppHandle, scale: f64) {
     if let Some(pill) = app.get_webview_window("pill") {
         let _ = pill.set_size(LogicalSize::new(BASE_PILL_W * s, BASE_PILL_H * s));
     }
-    let _ = app.emit("blip-scale", s);
+    let _ = app.emit("yap-scale", s);
 }
 
 /// Live pill resize (called from the settings slider).
@@ -156,13 +156,13 @@ pub fn toggle_recording(state: State<'_, AppState>) {
 
 /// Read the current config.
 #[tauri::command]
-pub fn get_config() -> BlipConfig {
+pub fn get_config() -> YapConfig {
     config::load()
 }
 
 /// Save config, re-apply the hotkey, and push it into the running pipeline.
 #[tauri::command]
-pub fn save_config(state: State<'_, AppState>, cfg: BlipConfig) -> Result<(), String> {
+pub fn save_config(state: State<'_, AppState>, cfg: YapConfig) -> Result<(), String> {
     config::save(&cfg)?;
     if let Err(e) = crate::input_hook::configure_dictation(&cfg.hotkey) {
         tracing::warn!("Failed to apply hotkey: {}", e);

@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn valid_magic_string_enables_portable() {
-        let dir = std::env::temp_dir().join("blip_test_valid");
+        let dir = std::env::temp_dir().join("yap_test_valid");
         std::fs::create_dir_all(&dir).unwrap();
         let marker = dir.join("portable");
         let mut f = std::fs::File::create(&marker).unwrap();
@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn empty_file_does_not_enable_portable() {
-        let dir = std::env::temp_dir().join("blip_test_empty");
+        let dir = std::env::temp_dir().join("yap_test_empty");
         std::fs::create_dir_all(&dir).unwrap();
         let marker = dir.join("portable");
         std::fs::File::create(&marker).unwrap();
@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn wrong_content_does_not_enable_portable() {
-        let dir = std::env::temp_dir().join("blip_test_wrong");
+        let dir = std::env::temp_dir().join("yap_test_wrong");
         std::fs::create_dir_all(&dir).unwrap();
         let marker = dir.join("portable");
         let mut f = std::fs::File::create(&marker).unwrap();
@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn magic_string_with_whitespace_enables_portable() {
-        let dir = std::env::temp_dir().join("blip_test_ws");
+        let dir = std::env::temp_dir().join("yap_test_ws");
         std::fs::create_dir_all(&dir).unwrap();
         let marker = dir.join("portable");
         let mut f = std::fs::File::create(&marker).unwrap();

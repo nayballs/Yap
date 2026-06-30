@@ -49,12 +49,12 @@ global hotkey ─▶ input_hook ─▶ "dictation-key-pressed" / "-released"
         cpal mic stream → 16kHz mono f32      take audio ─▶ STT engine (blocking task)
         buffer (downmix + resample in              │  (transcribe-rs, warm engine)
         the audio callback); emits           AI cleanup pass (llm.rs, if enabled)
-        "blip-amp" peak for the                    │
+        "yap-amp" peak for the                    │
         scrolling waveform                   apply_dictionary()
                     │                              │
-            "blip-state" drives the        text_injector (clipboard paste [+ Enter])
+            "yap-state" drives the        text_injector (clipboard paste [+ Enter])
             overlay + tray                        │
-                                            emits "blip-transcript"
+                                            emits "yap-transcript"
 ```
 
 Pipeline order after transcription: **AI cleanup → dictionary → append-space →
@@ -65,13 +65,13 @@ back to the raw transcript, so dictation never blocks.
 - **`lib.rs`** — app entry / Tauri `setup`. Runs `portable::init()`, registers the
   updater/process/autostart/single-instance plugins, starts the input hook + pipeline,
   routes `dictation-key-pressed`/`-released` → `Pipeline.on_key()` (so recording works
-  before the webview is ready), drives the **overlay** and **tray** off `blip-state`,
+  before the webview is ready), drives the **overlay** and **tray** off `yap-state`,
   builds the tray (when `show_tray_icon` *or* the pill is hidden), and reconciles
   autostart. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
 - **`pipeline.rs`** — the heart. Owns the mic stream + shared state (`recording`,
   audio `buffer`, warm STT `engine`, live `config`, `last_activity`). Audio callback
   buffers while recording, downmixes→mono, resamples→16 kHz, and emits a throttled
-  **peak amplitude** (`blip-amp`) for the scrolling waveform. `recording_mode` selects
+  **peak amplitude** (`yap-amp`) for the scrolling waveform. `recording_mode` selects
   toggle vs push-to-talk. `run_stt` (async) does cleanup → dictionary → inject. An
   **idle watcher** unloads the model after `model_unload_timeout` to free VRAM; the
   next dictation lazily reloads it.
@@ -86,7 +86,7 @@ back to the raw transcript, so dictation never blocks.
 - **`usage.rs`** — daily Groq usage tracker (tokens summed locally + requests from
   `x-ratelimit-*` headers), persisted to `groq_usage.json`, auto-resets at midnight
   UTC; powers the `get_groq_usage` command + `groq-usage` event.
-- **`config.rs`** — `BlipConfig` (hotkey, model_size, use_gpu, input_device, sound +
+- **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
   volume, output_device, mute_while_recording, recording_mode, pill_scale, show_pill,
   show_overlay, overlay_position, dictionary, append_trailing_space, auto_submit(+key),
   restore_clipboard, show_tray_icon, autostart, model_unload_timeout, selected_language,
@@ -96,7 +96,7 @@ back to the raw transcript, so dictation never blocks.
   menu (model submenu w/ checkmark, Cancel while recording, Settings/Quit, Check for
   updates); left-click opens Settings.
 - **`overlay.rs`** — shows/positions the bottom (or top) center "transcribing" overlay
-  window on `blip-state`.
+  window on `yap-state`.
 - **`input_hook.rs`** — low-level Windows keyboard + mouse hooks; spec `kb:VKEY` /
   `mouse:ID`; emits press AND release.
 - **`text_injector.rs`** — clipboard paste (+ optional clipboard restore) and
@@ -114,8 +114,8 @@ back to the raw transcript, so dictation never blocks.
   `get_groq_usage`.
 
 ### Frontend (`src/`)
-- **`lib/Pill.svelte`** — always-on-top pill. `blip-state` dot, scrolling amplitude
-  waveform (`blip-amp`), cancel ✕ while recording, model-download button, gear.
+- **`lib/Pill.svelte`** — always-on-top pill. `yap-state` dot, scrolling amplitude
+  waveform (`yap-amp`), cancel ✕ while recording, model-download button, gear.
 - **`lib/Overlay.svelte`** — the click-through bottom/top overlay; same scrolling
   waveform + "Transcribing…".
 - **`lib/Settings.svelte`** — sidebar sections: **General** (hotkey, recording mode,

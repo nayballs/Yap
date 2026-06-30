@@ -18,11 +18,11 @@
 
   onMount(() => {
     const unlisteners = [];
-    listen('blip-state', (e) => {
+    listen('yap-state', (e) => {
       state = e.payload;
       if (state !== 'recording') history = []; // start empty next time
     }).then((u) => unlisteners.push(u));
-    listen('blip-amp', (e) => {
+    listen('yap-amp', (e) => {
       // Shape the raw peak (gain + perceptual curve) and append as a new bar,
       // scrolling older bars off the left once full.
       const v = Math.min(1, Math.pow(Math.max(0, e.payload ?? 0) * AMP_GAIN, 0.7));
@@ -30,7 +30,7 @@
       next.push(v);
       history = next;
     }).then((u) => unlisteners.push(u));
-    listen('blip-scale', (e) => applyScale(e.payload)).then((u) => unlisteners.push(u));
+    listen('yap-scale', (e) => applyScale(e.payload)).then((u) => unlisteners.push(u));
 
     // Apply the saved pill size on load.
     invoke('get_config')

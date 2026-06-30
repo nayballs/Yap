@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use tauri::{AppHandle, Emitter};
 
-use crate::config::{self, BlipConfig};
+use crate::config::{self, YapConfig};
 use crate::stt::{self, SttAdapter, SttError};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
@@ -29,7 +29,7 @@ struct Shared {
     buffer: Mutex<Vec<f32>>,
     engine: Mutex<Option<SttAdapter>>,
     app: AppHandle,
-    config: RwLock<BlipConfig>,
+    config: RwLock<YapConfig>,
     /// Last time the engine did real work (ms since epoch). Drives the idle
     /// model-unload watcher (B1).
     last_activity: AtomicU64,
@@ -161,7 +161,7 @@ impl Shared {
         if self.mute_while_recording() {
             crate::mute::mute_system_output();
         }
-        let _ = self.app.emit("blip-state", "recording");
+        let _ = self.app.emit("yap-state", "recording");
         if self.sound_enabled() {
             crate::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref());
         }
@@ -177,14 +177,14 @@ impl Shared {
         if let Ok(mut buf) = self.buffer.lock() {
             buf.clear();
         }
-        let _ = self.app.emit("blip-state", "idle");
+        let _ = self.app.emit("yap-state", "idle");
         tracing::info!("Recording cancelled (audio discarded)");
     }
 
     fn stop_and_transcribe(self: &Arc<Self>) {
         self.recording.store(false, Ordering::SeqCst);
         crate::mute::unmute_system_output();
-        let _ = self.app.emit("blip-state", "processing");
+        let _ = self.app.emit("yap-state", "processing");
         if self.sound_enabled() {
             crate::sound::play_stop(self.audio_feedback_volume(), self.output_device().as_deref());
         }
@@ -203,7 +203,7 @@ impl Shared {
 
     async fn run_stt(self: Arc<Self>, audio: Vec<f32>) {
         if audio.is_empty() {
-            let _ = self.app.emit("blip-state", "idle");
+            let _ = self.app.emit("yap-state", "idle");
             return;
         }
 
@@ -231,7 +231,7 @@ impl Shared {
                     }
                     Err(e) => {
                         tracing::warn!("No STT engine (model missing) — cannot transcribe: {}", e);
-                        let _ = self.app.emit("blip-state", "needs-model");
+                        let _ = self.app.emit("yap-state", "needs-model");
                         return;
                     }
                 }
@@ -351,7 +351,7 @@ impl Shared {
                                 corrected.push(' ');
                             }
                             tracing::info!(text = %corrected, "Transcript");
-                            let _ = self.app.emit("blip-transcript", corrected.clone());
+                            let _ = self.app.emit("yap-transcript", corrected.clone());
                             match crate::text_injector::inject_text(&corrected, restore_clipboard)
                                 .await
                             {
@@ -384,11 +384,11 @@ impl Shared {
         // back to idle.
         match error_msg {
             Some(msg) => {
-                let _ = self.app.emit("blip-error", msg);
-                let _ = self.app.emit("blip-state", "error");
+                let _ = self.app.emit("yap-error", msg);
+                let _ = self.app.emit("yap-state", "error");
             }
             None => {
-                let _ = self.app.emit("blip-state", "idle");
+                let _ = self.app.emit("yap-state", "idle");
             }
         }
     }
@@ -404,8 +404,8 @@ impl Pipeline {
     /// Start audio capture and (best-effort) load the STT engine.
     ///
     /// A missing model is tolerated: the pipeline still runs (so the hotkey
-    /// works) and emits `blip-state: needs-model` until a model is downloaded.
-    pub fn start(app: AppHandle, cfg: BlipConfig) -> Result<Self, String> {
+    /// works) and emits `yap-state: needs-model` until a model is downloaded.
+    pub fn start(app: AppHandle, cfg: YapConfig) -> Result<Self, String> {
         let data_dir = config::data_dir();
         let engine = match stt::create_stt_engine(&data_dir, &cfg.model_size, cfg.use_gpu) {
             Ok(e) => Some(e),
@@ -434,7 +434,7 @@ impl Pipeline {
 
         let stream = build_input_stream(&shared, cfg.input_device.as_deref())?;
 
-        let _ = app.emit("blip-state", if has_engine { "idle" } else { "needs-model" });
+        let _ = app.emit("yap-state", if has_engine { "idle" } else { "needs-model" });
 
         Ok(Self {
             shared,
@@ -463,11 +463,11 @@ impl Pipeline {
         if let Ok(mut g) = self.shared.engine.lock() {
             *g = Some(engine);
         }
-        let _ = self.shared.app.emit("blip-state", "idle");
+        let _ = self.shared.app.emit("yap-state", "idle");
     }
 
     /// Replace the live config (e.g. after the user saves settings).
-    pub fn update_config(&self, cfg: BlipConfig) {
+    pub fn update_config(&self, cfg: YapConfig) {
         if let Ok(mut c) = self.shared.config.write() {
             *c = cfg;
         }
@@ -563,7 +563,7 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
                 }
                 amp_count += resampled.len();
                 if amp_count >= AMP_WINDOW {
-                    let _ = cb_shared.app.emit("blip-amp", amp_peak);
+                    let _ = cb_shared.app.emit("yap-amp", amp_peak);
                     amp_peak = 0.0;
                     amp_count = 0;
                 }

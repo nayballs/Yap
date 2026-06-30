@@ -32,7 +32,7 @@ use tauri_plugin_autostart::ManagerExt;
 /// mid-recording — which would leave the user unaware a recording is live.
 static OVERLAY_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-/// Bumped on every `blip-state` change so a scheduled auto-clear of the
+/// Bumped on every `yap-state` change so a scheduled auto-clear of the
 /// transient "error" state is cancelled if a newer state arrives first.
 static STATE_GEN: AtomicU64 = AtomicU64::new(0);
 
@@ -178,13 +178,13 @@ pub fn run() {
                 }
             });
 
-            // Drive the bottom-center overlay from the pipeline's `blip-state`
+            // Drive the bottom-center overlay from the pipeline's `yap-state`
             // event (decoupled from the pipeline itself). Show it while
             // recording/processing if the user has the overlay enabled; hide it
             // otherwise. State changes are infrequent, so re-reading the saved
             // config here is fine.
             let overlay_handle = handle.clone();
-            handle.listen("blip-state", move |event| {
+            handle.listen("yap-state", move |event| {
                 let state = event.payload().trim_matches('"'); // payload is a JSON string
                 let generation = STATE_GEN.fetch_add(1, Ordering::Relaxed) + 1;
                 // Show the overlay while recording/processing, and briefly on error.
@@ -207,7 +207,7 @@ pub fn run() {
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_secs(4));
                         if STATE_GEN.load(Ordering::Relaxed) == generation {
-                            let _ = h.emit("blip-state", "idle");
+                            let _ = h.emit("yap-state", "idle");
                         }
                     });
                 }
