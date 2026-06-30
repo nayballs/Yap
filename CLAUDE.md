@@ -82,7 +82,10 @@ back to the raw transcript, so dictation never blocks.
   `apply_accelerator_settings` sets whisper→CUDA(Auto) / ONNX→DirectML.
 - **`llm.rs`** — the AI cleanup client (OpenAI-compatible). Frames the transcript as
   data (delimiters + one-shot) so small models *clean* it instead of *answering* it.
-  Records token/request usage (best-effort).
+  The system prompt is split FluidVoice-style: an immutable `BASE_PROMPT` (guardrails:
+  output-only, never answer the transcript) that's always prepended via
+  `build_system_prompt()` to the user's editable **body** (tone/format = a preset or
+  custom text). Records token/request usage (best-effort).
 - **`usage.rs`** — daily Groq usage tracker (tokens summed locally + requests from
   `x-ratelimit-*` headers), persisted to `groq_usage.json`, auto-resets at midnight
   UTC; powers the `get_groq_usage` command + `groq-usage` event.
@@ -90,7 +93,8 @@ back to the raw transcript, so dictation never blocks.
   volume, output_device, mute_while_recording, recording_mode, pill_scale, show_pill,
   show_overlay, overlay_position, dictionary, append_trailing_space, auto_submit(+key),
   restore_clipboard, show_tray_icon, autostart, model_unload_timeout, selected_language,
-  translate_to_english, the `pp*` AI-cleanup fields, update_checks_enabled). JSON
+  translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
+  Notes/Slack/Code/Custom) + the editable `pp_prompt` body, update_checks_enabled). JSON
   load/save + `apply_dictionary`. `data_dir()` is portable-aware.
 - **`tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
   menu (model submenu w/ checkmark, Cancel while recording, Settings/Quit, Check for
@@ -121,7 +125,8 @@ back to the raw transcript, so dictation never blocks.
 - **`lib/Settings.svelte`** — sidebar sections: **General** (hotkey, recording mode,
   mic, sound+volume, mute, pill size, show pill/overlay, overlay position), **Models**
   (`ModelManager` + GPU + language/translate), **AI Cleanup** (provider/key/model/
-  prompt + Test + usage meter), **Advanced** (output toggles, system, dictionary),
+  preset + editable instructions + Test + usage meter), **Advanced** (output toggles,
+  system, dictionary),
   **About** (version, updates).
 - **`lib/ModelManager.svelte` / `ModelCard.svelte` / `models.js`** — the 16-model
   browser (download/switch/delete/progress, "Your models" vs "Available").

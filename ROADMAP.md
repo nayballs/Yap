@@ -108,7 +108,17 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 - [x] Sub-second insertion after speech on a GPU (confirmed on a 5070 Ti).
 - [ ] **VAD pre-roll** to kill first-word clipping — matters most for push-to-talk /
       auto-start; toggle mode already avoids clipping (you press, then speak).
+      `transcribe-rs` ships `vad::SileroVad` / `EnergyVad` / `SmoothedVad`
+      (with a `frame_buffer()` ring) — keep a rolling pre-roll buffer so the
+      audio handed to STT always starts a few hundred ms *before* speech onset.
 - [ ] **Streaming partial results** — show words live in the overlay as you talk.
+      Note: only Moonshine exposes true token streaming in `transcribe-rs`
+      (and we pulled it as broken). So do it FluidVoice-style: a timer
+      (~400–600 ms) re-transcribes the growing buffer on the warm engine, and a
+      **`smart_diff` de-flicker** keeps the stable longest-common word-prefix and
+      only appends new words (replace wholesale only if <50% overlaps). Re-entrancy
+      guard: skip the next tick if a transcription overruns the interval, so slow
+      machines degrade instead of queueing. Final pass on stop stays authoritative.
 
 ### Phase 2 — The differentiator: AI cleanup layer — ✅ DONE (v1)
 - [x] Optional post-processing pass (filler/grammar/punctuation/self-corrections),
@@ -116,8 +126,19 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 - [x] **Local OR cloud** via one OpenAI-compatible client (Groq / OpenAI / OpenRouter /
       local Ollama·LM Studio). Off by default; raw-fallback on any error.
 - [x] Live **Groq usage meter** (daily tokens/requests) in settings.
-- [ ] **Cleanup presets** (Email / Notes / Slack / Code tone modes) — next up.
+- [ ] **Split prompt = immutable base + editable body** (FluidVoice pattern). The
+      anti-"don't answer the question" guardrails + output-only rules live in a
+      hidden base the user can't delete; the editable body holds tone/format. Stops
+      users from accidentally breaking refusal behaviour when they customise.
+- [ ] **Richer cleanup rules** in the base: self-corrections ("buy milk no wait
+      buy water" → "Buy water."), spoken→digit numbers, spoken punctuation/emoji,
+      preserve meaning/language. (Several already partly in `llm.rs`.)
+- [ ] **Cleanup presets** (Default / Email / Notes / Slack / Code tone modes) —
+      each a named body + temperature; pick from a dropdown. Foundation for
+      per-app auto-switching (Phase 4).
 - [ ] Future: a small **fine-tuned/local** cleanup model (Wispr Flow's real moat).
+      If/when local: keep the static prompt-prefix **KV cache** warm so each
+      utterance only processes the new transcript tokens (FluidVoice's latency trick).
 
 ### Phase 3 — Accuracy on the hard cases
 - [x] Custom **dictionary** (exact, case-insensitive) with a UI.
@@ -126,9 +147,13 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 - [ ] **Fuzzy** custom-words (catch near-misses) + a code/jargon-aware path.
 
 ### Phase 4 — App-aware formatting + light command mode
-- [ ] Per-app tone/format auto-switching (superwhisper "Modes") — builds on cleanup
-      presets (pick the preset from the focused app).
-- [ ] A few **natural-language edits** ("make this a list", "more concise").
+- [ ] Per-app tone/format auto-switching (superwhisper "Modes" / FluidVoice
+      per-app prompt profiles) — read the **foreground process** at record-start and
+      pick the matching cleanup preset (e.g. terse for Slack, formal for Outlook,
+      code-aware for an IDE). Resolution order: app-bound profile → default preset.
+- [ ] A few **natural-language edits** ("make this a list", "more concise") —
+      FluidVoice's Write/Edit mode: if text is selected, feed it as context and treat
+      the utterance as an instruction to rewrite it in place.
 
 ### Phase 5 — Trust, polish & distribution
 - [x] **Installer** (custom NSIS: normal/portable + WebView2 bootstrap), **auto-update**
@@ -139,9 +164,22 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 - [x] Crisp recording indicator (overlay + waveform), great defaults, hidden power
       features, first-run onboarding.
 - [ ] Verify low idle CPU/RAM; reliable injection into every field.
+- [ ] **Harden text injection** (FluidVoice `TypingService` lessons): capture the
+      **target window (HWND) at record-start** so focus changes during transcription
+      don't misfire; after paste, **verify** the text landed (UI Automation
+      `ValuePattern` / focused-element check) and fall back to per-char SendInput;
+      clipboard snapshot+restore already exists. Fixes the two most common
+      "it typed into the wrong window / nothing happened" bugs.
 
 ### Phase 6 — Reach
-- [ ] **Transcription history** (list + audio playback + retention).
+- [ ] **Transcription history** (list + audio playback + retention) — a simple local
+      table (timestamp, raw + cleaned text, model, focused app). Powers:
+- [ ] **Stats / streak dashboard** (FluidVoice `StatsView`) — computed purely from
+      history: words dictated, transcription count, **time-saved** (words/typing-WPM
+      − words/speak-WPM), daily streak, 7/30-day chart. Cheap, strong retention hook.
+- [ ] **Audio-history export** (opt-in): save each dictation's WAV + a JSONL manifest
+      pairing `raw_transcript` ↔ `final_transcript` — a ready-made eval/fine-tune
+      dataset for improving cleanup, with a GB budget + orphan GC.
 - [ ] **Linux / Wayland** + macOS parity (the engine choices were made Windows-first:
       CUDA/DirectML; Vulkan/Metal/CoreML are available in `transcribe-rs` for later).
 
