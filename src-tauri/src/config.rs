@@ -143,6 +143,11 @@ pub struct YapConfig {
     /// GPU load. The final transcript on stop is always authoritative.
     #[serde(default)]
     pub streaming_partials: bool,
+
+    /// Keep a local transcription history (powers the stats dashboard). Stored
+    /// only on this machine; can be cleared from Settings. On by default.
+    #[serde(default = "default_true")]
+    pub history_enabled: bool,
 }
 
 fn default_scale() -> f64 {
@@ -230,6 +235,7 @@ impl Default for YapConfig {
             pp_prompt: default_pp_prompt(),
             pp_preset: default_pp_preset(),
             streaming_partials: false,
+            history_enabled: true,
         }
     }
 }

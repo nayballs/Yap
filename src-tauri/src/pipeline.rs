@@ -384,14 +384,14 @@ impl Shared {
                             .await
                             {
                                 Ok(c) if !c.trim().is_empty() => c,
-                                Ok(_) => raw,
+                                Ok(_) => raw.clone(),
                                 Err(e) => {
                                     tracing::warn!("AI cleanup failed, using raw: {}", e);
-                                    raw
+                                    raw.clone()
                                 }
                             }
                         } else {
-                            raw
+                            raw.clone()
                         };
 
                         let mut corrected = config::apply_dictionary(cleaned.trim(), &dict);
@@ -422,6 +422,24 @@ impl Shared {
                                     }
                                 }
                                 Err(e) => tracing::warn!("Inject failed: {}", e),
+                            }
+
+                            // Local-only history for the stats dashboard
+                            // (best-effort, gated by `history_enabled`).
+                            let (history_enabled, model) = self
+                                .config
+                                .read()
+                                .map(|c| (c.history_enabled, c.model_size.clone()))
+                                .unwrap_or((false, String::new()));
+                            if history_enabled {
+                                let app_name =
+                                    crate::text_injector::app_name_for(target).unwrap_or_default();
+                                crate::history::record(
+                                    &raw,
+                                    corrected.trim(),
+                                    &model,
+                                    &app_name,
+                                );
                             }
                         }
                     }

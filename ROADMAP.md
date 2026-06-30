@@ -175,14 +175,16 @@ presets, signing, history, and reach — see the phases below (✅ = done).
             element's value before/after) — deferred; needs a COM/UIA integration.
 
 ### Phase 6 — Reach
-- [ ] **Transcription history** (list + audio playback + retention) — a simple local
-      table (timestamp, raw + cleaned text, model, focused app). Powers:
-- [ ] **Stats / streak dashboard** (FluidVoice `StatsView`) — computed purely from
-      history: words dictated, transcription count, **time-saved** (words/typing-WPM
-      − words/speak-WPM), daily streak, 7/30-day chart. Cheap, strong retention hook.
+- [x] **Transcription history** (`history.rs` → `history.json`) — local-only table
+      (timestamp, raw + final text, model, focused app), capped, gated by
+      `history_enabled`, clearable from Settings → History. (Audio *playback* TBD.)
+- [x] **Stats / streak dashboard** (FluidVoice `StatsView`) — computed from history:
+      words today/all-time, **time-saved** (words/40 − words/150 WPM), day streak,
+      30-day activity bars, dictation count. In Settings → History.
 - [ ] **Audio-history export** (opt-in): save each dictation's WAV + a JSONL manifest
       pairing `raw_transcript` ↔ `final_transcript` — a ready-made eval/fine-tune
-      dataset for improving cleanup, with a GB budget + orphan GC.
+      dataset for improving cleanup, with a GB budget + orphan GC. (Deferred — the
+      text history + stats landed first; audio capture/retention is the next step.)
 - [ ] **Linux / Wayland** + macOS parity (the engine choices were made Windows-first:
       CUDA/DirectML; Vulkan/Metal/CoreML are available in `transcribe-rs` for later).
 

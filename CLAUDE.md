@@ -32,7 +32,8 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 - **Model download:** `reqwest` streaming + `sha2` verify + `flate2`/`tar` extract.
 - **Updates/install:** `tauri-plugin-updater` (GitHub Releases) + custom NSIS installer.
 - **Autostart:** `tauri-plugin-autostart`.
-- **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`).
+- **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`,
+  `history.json`).
 
 ---
 
@@ -91,6 +92,11 @@ back to the raw transcript, so dictation never blocks.
   output-only, never answer the transcript) that's always prepended via
   `build_system_prompt()` to the user's editable **body** (tone/format = a preset or
   custom text). Records token/request usage (best-effort).
+- **`history.rs`** — local-only transcription history (`history.json`): each
+  dictation's timestamp, raw + final text, model, and focused app. Best-effort,
+  gated by `history_enabled`. Derives the stats dashboard (words, time-saved vs
+  typing, day streak, 30-day activity) without a date crate (UTC day-numbers like
+  `usage.rs`). Powers `get_history`/`clear_history`/`get_stats`.
 - **`usage.rs`** — daily Groq usage tracker (tokens summed locally + requests from
   `x-ratelimit-*` headers), persisted to `groq_usage.json`, auto-resets at midnight
   UTC; powers the `get_groq_usage` command + `groq-usage` event.
@@ -99,7 +105,8 @@ back to the raw transcript, so dictation never blocks.
   show_overlay, overlay_position, dictionary, append_trailing_space, auto_submit(+key),
   restore_clipboard, show_tray_icon, autostart, model_unload_timeout, selected_language,
   translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
-  Notes/Slack/Code/Custom) + the editable `pp_prompt` body, update_checks_enabled). JSON
+  Notes/Slack/Code/Custom) + the editable `pp_prompt` body, streaming_partials,
+  history_enabled, update_checks_enabled). JSON
   load/save + `apply_dictionary`. `data_dir()` is portable-aware.
 - **`tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
   menu (model submenu w/ checkmark, Cancel while recording, Settings/Quit, Check for
@@ -125,7 +132,7 @@ back to the raw transcript, so dictation never blocks.
   devices (`list_audio_devices`, `list_output_devices`), windows (`open_settings`,
   `open_onboarding`, `close_onboarding`, `set_pill_visible`, `set_pill_scale`),
   `configure_hotkey`, `set_autostart`, `is_portable`, `test_post_process`,
-  `get_groq_usage`.
+  `get_groq_usage`, history (`get_history`, `clear_history`, `get_stats`).
 
 ### Frontend (`src/`)
 - **`lib/Pill.svelte`** — always-on-top pill. `yap-state` dot, scrolling amplitude
@@ -135,8 +142,8 @@ back to the raw transcript, so dictation never blocks.
 - **`lib/Settings.svelte`** — sidebar sections: **General** (hotkey, recording mode,
   mic, sound+volume, mute, pill size, show pill/overlay, overlay position), **Models**
   (`ModelManager` + GPU + language/translate), **AI Cleanup** (provider/key/model/
-  preset + editable instructions + Test + usage meter), **Advanced** (output toggles,
-  system, dictionary),
+  preset + editable instructions + Test + usage meter), **History** (stats dashboard
+  + recent list + enable/clear), **Advanced** (output toggles, system, dictionary),
   **About** (version, updates).
 - **`lib/ModelManager.svelte` / `ModelCard.svelte` / `models.js`** — the 16-model
   browser (download/switch/delete/progress, "Your models" vs "Available").
@@ -204,6 +211,7 @@ updater (`tauri-plugin-updater`) checks that endpoint. **Currently unsigned**
 - Models: `%APPDATA%/yap/models/` — Whisper `.bin` files and extracted ONNX dirs,
   downloaded from `https://blob.handy.computer/` (SHA-256 verified).
 - Groq usage: `%APPDATA%/yap/groq_usage.json`.
+- History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → History).
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
   recording mode `toggle`, **pill hidden**, overlay shown, AI cleanup **off**.

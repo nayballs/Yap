@@ -71,6 +71,47 @@ mod platform {
         fn GetCurrentProcessId() -> u32;
         fn IsWindow(hwnd: HWND) -> i32;
         fn BringWindowToTop(hwnd: HWND) -> i32;
+        fn OpenProcess(desired_access: u32, inherit: i32, pid: u32) -> HANDLE;
+        fn QueryFullProcessImageNameW(
+            process: HANDLE,
+            flags: u32,
+            buffer: *mut u16,
+            size: *mut u32,
+        ) -> i32;
+        fn CloseHandle(h: HANDLE) -> i32;
+    }
+
+    type HANDLE = *mut core::ffi::c_void;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+
+    /// Process base name (e.g. "chrome.exe") of the window `hwnd_isize`, or `None`.
+    /// Best-effort; used to tag history entries with the focused app.
+    pub fn window_app_name(hwnd_isize: isize) -> Option<String> {
+        let hwnd = hwnd_isize as HWND;
+        if hwnd.is_null() {
+            return None;
+        }
+        unsafe {
+            let mut pid: u32 = 0;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid == 0 {
+                return None;
+            }
+            let proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if proc.is_null() {
+                return None;
+            }
+            let mut buf = [0u16; 260];
+            let mut size = buf.len() as u32;
+            let ok = QueryFullProcessImageNameW(proc, 0, buf.as_mut_ptr(), &mut size);
+            CloseHandle(proc);
+            if ok == 0 || size == 0 {
+                return None;
+            }
+            let full = String::from_utf16_lossy(&buf[..size as usize]);
+            // Base name only — strip the directory.
+            full.rsplit(['\\', '/']).next().map(|s| s.to_string())
+        }
     }
 
     /// Handle of the current foreground window as an `isize` (0 = none).
@@ -276,6 +317,20 @@ pub fn current_foreground() -> Option<isize> {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        None
+    }
+}
+
+/// Process base name (e.g. "chrome.exe") of the given window handle, or `None`.
+/// Used to tag history entries with the focused app. `None` off Windows.
+pub fn app_name_for(hwnd: Option<isize>) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        hwnd.and_then(platform::window_app_name)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = hwnd;
         None
     }
 }

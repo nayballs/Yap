@@ -9,6 +9,7 @@
 
 mod commands;
 mod config;
+mod history;
 mod input_hook;
 mod llm;
 mod mute;
@@ -100,6 +101,9 @@ pub fn run() {
             commands::is_portable,
             commands::test_post_process,
             commands::get_groq_usage,
+            commands::get_history,
+            commands::clear_history,
+            commands::get_stats,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

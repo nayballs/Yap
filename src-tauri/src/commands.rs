@@ -298,6 +298,26 @@ pub async fn test_post_process(text: String) -> Result<String, String> {
     .await
 }
 
+/// Recent local transcription history, newest first (capped at `limit`).
+/// Each item: `{ ts, raw, text, model, app, words }`.
+#[tauri::command]
+pub fn get_history(limit: Option<usize>) -> serde_json::Value {
+    crate::history::list(limit.unwrap_or(100))
+}
+
+/// Delete all local transcription history.
+#[tauri::command]
+pub fn clear_history() {
+    crate::history::clear();
+}
+
+/// Derived stats for the dashboard: totals, today, time saved, streak, and a
+/// 30-day activity series. See `history::stats`.
+#[tauri::command]
+pub fn get_stats() -> serde_json::Value {
+    crate::history::stats()
+}
+
 /// Today's Groq AI-cleanup usage snapshot for the Settings meter.
 /// Shape: `{ day, tokens, tokenCap, requests, requestCap }`. Tokens are Yap's
 /// own accumulated `usage.total_tokens`; the token cap is the free-tier estimate

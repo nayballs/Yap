@@ -35,6 +35,7 @@
     { id: 'general', label: 'General' },
     { id: 'models', label: 'Models' },
     { id: 'cleanup', label: 'AI Cleanup' },
+    { id: 'history', label: 'History' },
     { id: 'advanced', label: 'Advanced' },
     { id: 'about', label: 'About' },
   ];
@@ -98,6 +99,46 @@
 
   // AI cleanup Test button state.
   let ppTest = $state({ running: false, result: '', error: '' });
+
+  // History / stats dashboard state.
+  let stats = $state(null);
+  let historyItems = $state([]);
+
+  async function loadHistory() {
+    try {
+      [stats, historyItems] = await Promise.all([
+        invoke('get_stats'),
+        invoke('get_history', { limit: 50 }),
+      ]);
+    } catch (e) {
+      stats = null;
+      historyItems = [];
+    }
+  }
+
+  async function clearHistory() {
+    await invoke('clear_history');
+    await loadHistory();
+  }
+
+  // Refresh the dashboard whenever the History tab is opened.
+  $effect(() => {
+    if (section === 'history') loadHistory();
+  });
+
+  function fmtMinutes(min) {
+    const m = Math.round(min || 0);
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60);
+    return `${h} h ${m % 60} min`;
+  }
+  function fmtWhen(ts) {
+    try {
+      return new Date((ts || 0) * 1000).toLocaleString();
+    } catch {
+      return '';
+    }
+  }
 
   // Daily Groq usage meter (camelCase from get_groq_usage / groq-usage event).
   let usage = $state({ day: 0, tokens: 0, tokenCap: 500000, requests: 0, requestCap: 14400 });
@@ -179,6 +220,7 @@
     showPill: false,
     showOverlay: true,
     streamingPartials: false,
+    historyEnabled: true,
     inputDevice: null,
     dictionary: [],
     selectedLanguage: 'auto',
@@ -814,6 +856,82 @@
             </Row>
           </Group>
 
+        {:else if section === 'history'}
+          <Group title="Stats">
+            {#snippet children()}
+              {#if stats}
+                <div class="stats-grid">
+                  <div class="stat-card">
+                    <div class="stat-num">{stats.today?.words ?? 0}</div>
+                    <div class="stat-lbl">Words today</div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="stat-num">{stats.totalWords ?? 0}</div>
+                    <div class="stat-lbl">Words all-time</div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="stat-num">{fmtMinutes(stats.timeSavedMinutes)}</div>
+                    <div class="stat-lbl">Time saved vs typing</div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="stat-num">{stats.streakDays ?? 0}🔥</div>
+                    <div class="stat-lbl">Day streak</div>
+                  </div>
+                </div>
+                {#if stats.activity?.length}
+                  {@const maxW = Math.max(1, ...stats.activity.map((d) => d.words))}
+                  <div class="activity" title="Words per day, last 30 days">
+                    {#each stats.activity as d}
+                      <span
+                        class="abar"
+                        class:empty={!d.words}
+                        style="height:{Math.max(4, Math.round((d.words / maxW) * 100))}%"
+                      ></span>
+                    {/each}
+                  </div>
+                  <div class="activity-cap">Last 30 days · {stats.totalTranscriptions ?? 0} dictations total</div>
+                {/if}
+              {:else}
+                <p class="hist-empty">No stats yet — dictate something to get started.</p>
+              {/if}
+            {/snippet}
+          </Group>
+
+          <Group title="History">
+            <Row>
+              <Toggle
+                bind:checked={cfg.historyEnabled}
+                label="Keep local history"
+                hint="Stored only on this machine. Powers the stats above."
+              />
+            </Row>
+            <Row>
+              {#snippet children()}
+                <div class="hist-list">
+                  {#if historyItems.length}
+                    {#each historyItems as item}
+                      <div class="hist-row">
+                        <div class="hist-text">{item.text}</div>
+                        <div class="hist-meta">
+                          {fmtWhen(item.ts)}{item.app ? ` · ${item.app}` : ''}{item.words
+                            ? ` · ${item.words}w`
+                            : ''}
+                        </div>
+                      </div>
+                    {/each}
+                  {:else}
+                    <p class="hist-empty">Nothing recorded yet.</p>
+                  {/if}
+                </div>
+              {/snippet}
+            </Row>
+            <Row>
+              {#snippet children()}
+                <Button variant="secondary" size="sm" onclick={clearHistory}>Clear history</Button>
+              {/snippet}
+            </Row>
+          </Group>
+
         {:else if section === 'advanced'}
           <Group title="Output">
             <Row>
@@ -1193,6 +1311,83 @@
     color: #9ca3af;
     font-size: 12.5px;
     line-height: 1.6;
+  }
+
+  /* History / stats dashboard */
+  .stats-grid {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .stat-card {
+    background: #181b22;
+    border: 1px solid #2a2f3a;
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .stat-num {
+    font-size: 20px;
+    font-weight: 700;
+    color: #f1f3f7;
+  }
+  .stat-lbl {
+    margin-top: 2px;
+    font-size: 12px;
+    color: #9ca3af;
+  }
+  .activity {
+    width: 100%;
+    margin-top: 14px;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 56px;
+  }
+  .activity .abar {
+    flex: 1 1 0;
+    min-height: 4px;
+    background: #3b82f6;
+    border-radius: 2px;
+  }
+  .activity .abar.empty {
+    background: #2a2f3a;
+  }
+  .activity-cap {
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: #9ca3af;
+  }
+  .hist-list {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .hist-row {
+    background: #181b22;
+    border: 1px solid #2a2f3a;
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+  .hist-text {
+    color: #e5e7eb;
+    font-size: 13px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .hist-meta {
+    margin-top: 3px;
+    font-size: 11px;
+    color: #6b7280;
+  }
+  .hist-empty {
+    margin: 0;
+    color: #9ca3af;
+    font-size: 12.5px;
   }
 
   /* Usage meter (Pulse-style daily bars) */
