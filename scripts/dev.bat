@@ -8,6 +8,12 @@ REM Keep this window open while you work; close it to stop Yap.
 title Yap Dev (live)
 cd /d "%~dp0.."
 
+REM whisper-rs-sys' cmake build nests paths past Windows MAX_PATH (260) and
+REM MSBuild's FileTracker fails with FTK1011 regardless of the LongPathsEnabled
+REM registry opt-in — same workaround as CI (nightly.yml): build into a SHORT
+REM target dir on this drive instead of src-tauri\target.
+set CARGO_TARGET_DIR=%~d0\t
+
 echo ============================================================
 echo   Yap Dev - running the LIVE source with hot reload
 echo   Project: %cd%
