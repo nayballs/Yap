@@ -39,7 +39,7 @@
   });
 </script>
 
-{#if state === 'recording' || state === 'processing' || state === 'error'}
+{#if state === 'recording' || state === 'processing' || state === 'processing-slow' || state === 'error'}
   <div class="overlay">
     <div class="capsule" class:err={state === 'error'}>
       {#if state === 'recording'}
@@ -53,12 +53,12 @@
             {/each}
           </div>
         {/if}
-      {:else if state === 'processing'}
+      {:else if state === 'processing' || state === 'processing-slow'}
         <span class="dot proc"></span>
         {#if partial}
           <div class="partial">{partial}</div>
         {:else}
-          <span class="txt">Transcribing…</span>
+          <span class="txt">{state === 'processing-slow' ? 'Transcribing (CPU — slow)…' : 'Transcribing…'}</span>
         {/if}
       {:else}
         <span class="dot errdot"></span>

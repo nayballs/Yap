@@ -55,16 +55,52 @@ pub fn set_autostart_enabled(app: &AppHandle, enabled: bool) -> Result<(), Strin
     res.map_err(|e| format!("Failed to set autostart: {}", e))
 }
 
-pub fn run() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
-        )
-        .try_init();
+/// Initialise tracing to BOTH stdout (for `tauri dev`) and a rolling file in the
+/// data dir. Installed builds are windowed with no console, so stdout logs are
+/// invisible — the file log is the only way to diagnose a shipped build (e.g.
+/// the "stuck on transcribing" report was a CPU-only whisper build with no
+/// visible logs). Must run AFTER `portable::init()` so the data dir resolves.
+fn init_logging() {
+    use tracing_subscriber::prelude::*;
 
-    // Decide portable-vs-installed once, before anything reads the data dir.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "info".into());
+
+    let log_dir = config::data_dir().join("logs");
+    let file_layer = match std::fs::create_dir_all(&log_dir) {
+        Ok(_) => {
+            let appender = tracing_appender::rolling::daily(&log_dir, "yap.log");
+            let (nb, guard) = tracing_appender::non_blocking(appender);
+            // The writer's flush guard must outlive the app; the process owns it
+            // for its whole lifetime, so leaking it is intentional.
+            std::mem::forget(guard);
+            Some(
+                tracing_subscriber::fmt::layer()
+                    .with_ansi(false)
+                    .with_writer(nb),
+            )
+        }
+        Err(_) => None, // no data dir writable — fall back to stdout only
+    };
+
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer()) // stdout (dev)
+        .with(file_layer)
+        .try_init();
+}
+
+pub fn run() {
+    // Decide portable-vs-installed once, before anything reads the data dir
+    // (the file log lives under it).
     portable::init();
+    init_logging();
+    tracing::info!(
+        cuda = cfg!(feature = "cuda"),
+        engines = cfg!(feature = "engines"),
+        version = env!("CARGO_PKG_VERSION"),
+        "Yap starting — build capabilities (whisper is CPU-only unless `cuda`; ONNX runs on DirectML)"
+    );
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))

@@ -393,11 +393,42 @@ impl Shared {
         // Snapshot the language/translate settings for this transcription.
         let (language, translate) = self.language_settings();
 
+        // Slow-transcription watchdog: whisper (esp. large-v3) on a build without
+        // CUDA runs on CPU and can take minutes, leaving the UI stuck on
+        // "processing" with no feedback. We can't cancel the blocking call
+        // without losing the result, so instead we surface a distinct
+        // "processing-slow" state + an actionable log line if we cross a
+        // threshold. Cancelled the instant transcription finishes.
+        const SLOW_TRANSCRIBE_SECS: u64 = 8;
+        let done = Arc::new(AtomicBool::new(false));
+        let watch_app = self.app.clone();
+        let watch_done = Arc::clone(&done);
+        let watch_model = self
+            .config
+            .read()
+            .map(|c| c.model_size.clone())
+            .unwrap_or_default();
+        let watchdog = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(SLOW_TRANSCRIBE_SECS)).await;
+            if !watch_done.load(Ordering::SeqCst) {
+                tracing::warn!(
+                    model = %watch_model,
+                    cuda = cfg!(feature = "cuda"),
+                    "Transcription still running after {}s — a whisper model on a build without CUDA runs on CPU and is very slow; switch to an ONNX model (e.g. Parakeet V3, GPU-accelerated via DirectML)",
+                    SLOW_TRANSCRIBE_SECS
+                );
+                let _ = watch_app.emit("yap-state", "processing-slow");
+            }
+        });
+
         let outcome = tokio::task::spawn_blocking(move || {
             let result = engine.transcribe(&audio, language.as_deref(), translate);
             (engine, result)
         })
         .await;
+
+        done.store(true, Ordering::SeqCst);
+        watchdog.abort();
 
         // Mark activity so the idle watcher counts from end-of-transcription.
         self.touch_activity();

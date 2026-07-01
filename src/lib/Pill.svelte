@@ -66,7 +66,9 @@
       ? 'Listening…'
       : state === 'processing'
         ? 'Transcribing…'
-        : state === 'needs-model'
+        : state === 'processing-slow'
+          ? 'Transcribing (CPU)…'
+          : state === 'needs-model'
           ? 'Model needed'
           : state === 'error'
             ? 'Transcription failed'
@@ -171,7 +173,8 @@
       0 0 calc(12px * var(--s, 1)) rgba(239, 68, 68, 0.5);
     animation: pulse 1.2s ease-in-out infinite;
   }
-  .pill.processing .dot {
+  .pill.processing .dot,
+  .pill.processing-slow .dot {
     background: radial-gradient(circle at 35% 30%, #fbbf24, #d97706);
     box-shadow: 0 0 calc(12px * var(--s, 1)) rgba(245, 158, 11, 0.45);
     animation: pulse 0.8s ease-in-out infinite;
