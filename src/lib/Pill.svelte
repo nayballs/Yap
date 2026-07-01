@@ -136,12 +136,12 @@
     border-radius: 999px;
     background: linear-gradient(180deg, rgba(30, 33, 44, 0.94), rgba(15, 17, 24, 0.94));
     border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow:
-      0 8px 28px rgba(0, 0, 0, 0.5),
-      inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    /* NO backdrop-filter here: on a transparent WebView2 window it forces an
-       opaque compositor backdrop — the grey box behind the pill. There's nothing
-       in-page to blur anyway (CSS can't sample the desktop). */
+    /* Inset highlight only. NO outer drop shadow and NO backdrop-filter: the
+       pill fills the whole window, so a drop shadow paints into the square
+       corners and clips hard at the window rect ("box edges"), and
+       backdrop-filter forces an opaque compositor backdrop on transparent
+       WebView2 windows (grey box). */
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
     font-size: calc(13px * var(--s, 1));
   }
 

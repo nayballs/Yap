@@ -88,9 +88,8 @@
     border-radius: 999px;
     background: rgba(15, 17, 24, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
-    /* NO backdrop-filter: opaque-grey-box bug on transparent WebView2 windows
-       (see Pill.svelte). */
+    /* NO outer drop shadow and NO backdrop-filter — both render as a boxy
+       artifact on tightly-fitted transparent WebView2 windows (see Pill.svelte). */
     color: #e5e7eb;
     font-size: 12px;
   }
