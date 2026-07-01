@@ -150,7 +150,15 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 - [x] Custom **dictionary** (exact, case-insensitive) with a UI.
 - [x] **Parakeet** shipped as the fast/accurate default; Whisper large-v3 + others for
       accents/multilingual; **language selection + translate** per model.
-- [ ] **Fuzzy** custom-words (catch near-misses) + a code/jargon-aware path.
+- [ ] **Better custom-word correction** (catch near-misses) — see
+      [`docs/fuzzy-dictionary.md`](./docs/fuzzy-dictionary.md). Key finding: FluidVoice
+      has **no** fuzzy string matching (its dictionary is exact-replace like ours; its
+      "fuzziness" is acoustic ASR boosting in a non-portable Apple-Silicon lib). Plan:
+      (1) word-boundary + multi-trigger polish on the exact path; (2) feed dictionary
+      terms into the AI-cleanup prompt as bias context (beats FluidVoice's dictionary);
+      (3) optional per-entry true fuzzy (Levenshtein/phonetic) with strict length/
+      threshold guards; (4) ASR `initial_prompt`/hotword biasing if `transcribe-rs`
+      exposes a hook.
 
 ### Phase 4 — App-aware formatting + light command mode
 - [x] **Per-app tone/format auto-switching** ("smart routing" — superwhisper
