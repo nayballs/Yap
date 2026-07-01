@@ -16,6 +16,26 @@ pub struct DictionaryEntry {
     pub to: String,
 }
 
+/// A per-app cleanup routing rule ("smart routing", ported in spirit from
+/// FluidVoice's app-prompt bindings). When the foreground app at record-start
+/// matches `app` (process base name, e.g. "slack.exe"), the cleanup pass uses
+/// this rule's `prompt` body instead of the global `pp_prompt`. FluidVoice keys
+/// its bindings on macOS bundle identifiers; on Windows we key on the process
+/// exe name (what `text_injector::app_name_for` already returns for history).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppRoute {
+    /// Process base name to match, e.g. "slack.exe". Matched case-insensitively.
+    pub app: String,
+    /// Friendly display label for the Settings list (defaults to `app`).
+    #[serde(default)]
+    pub label: String,
+    /// The cleanup body (tone/format instructions) to use for this app. The
+    /// immutable `llm::BASE_PROMPT` guardrails are still prepended, exactly as
+    /// for the global body.
+    pub prompt: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct YapConfig {
@@ -23,6 +43,12 @@ pub struct YapConfig {
     /// Default kb:120 = F9.
     #[serde(default = "default_hotkey")]
     pub hotkey: String,
+    /// Optional second hotkey for **edit/rewrite mode**: capture the selected
+    /// text, then treat your spoken words as an instruction to rewrite it (or, if
+    /// nothing is selected, to write new text). Empty = unbound (opt-in). Same
+    /// "kb:VKEY"/"mouse:ID" format as `hotkey`.
+    #[serde(default)]
+    pub edit_hotkey: String,
     /// Active model id from the STT registry (e.g. "parakeet-tdt-0.6b-v3",
     /// "small"). Field name kept as `model_size` for config back-compat.
     #[serde(default = "default_model_size")]
@@ -137,6 +163,17 @@ pub struct YapConfig {
     /// the selection; the backend always uses `pp_prompt` as the body.
     #[serde(default = "default_pp_preset")]
     pub pp_preset: String,
+    /// Smart-routing scope (FluidVoice's `PromptRoutingScope`):
+    /// - "all_apps" (default): the global `pp_prompt` cleans everywhere, and
+    ///   `app_routes` override it for matching apps.
+    /// - "selected_apps_only": cleanup runs ONLY for apps with a matching rule;
+    ///   dictation into any other app is injected raw.
+    #[serde(default = "default_routing_scope")]
+    pub routing_scope: String,
+    /// Per-app cleanup routing rules. Resolved at dictation time against the
+    /// foreground app captured at record-start. See [`YapConfig::resolve_cleanup_body`].
+    #[serde(default)]
+    pub app_routes: Vec<AppRoute>,
 
     /// Show live partial transcripts in the overlay while you speak. Opt-in
     /// (off by default): re-transcribes the growing buffer on a timer, which adds
@@ -198,11 +235,15 @@ fn default_pp_prompt() -> String {
 fn default_pp_preset() -> String {
     "default".into()
 }
+fn default_routing_scope() -> String {
+    "all_apps".into()
+}
 
 impl Default for YapConfig {
     fn default() -> Self {
         Self {
             hotkey: default_hotkey(),
+            edit_hotkey: String::new(),
             model_size: default_model_size(),
             use_gpu: true,
             input_device: None,
@@ -234,6 +275,8 @@ impl Default for YapConfig {
             pp_model: default_pp_model(),
             pp_prompt: default_pp_prompt(),
             pp_preset: default_pp_preset(),
+            routing_scope: default_routing_scope(),
+            app_routes: Vec::new(),
             streaming_partials: false,
             history_enabled: true,
         }
@@ -271,6 +314,37 @@ pub fn save(cfg: &YapConfig) -> Result<(), String> {
     std::fs::create_dir_all(data_dir()).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
     std::fs::write(config_path(), json).map_err(|e| e.to_string())
+}
+
+impl YapConfig {
+    /// Decide which cleanup body to use for a dictation whose target app is
+    /// `process` (process base name, e.g. "slack.exe"), applying the smart-routing
+    /// rules. This mirrors FluidVoice's `promptResolution` precedence, minus the
+    /// macOS-only pieces (modes, bundle ids):
+    ///
+    /// 1. An `app_routes` rule matching `process` → that rule's body.
+    /// 2. Otherwise, if scope is "selected_apps_only" → `None` (skip cleanup).
+    /// 3. Otherwise ("all_apps") → the global `pp_prompt` body.
+    ///
+    /// `None` means "inject the raw transcript"; the caller still checks
+    /// `post_process_enabled`/base-URL before running any cleanup at all.
+    pub fn resolve_cleanup_body(&self, process: Option<&str>) -> Option<String> {
+        if let Some(proc) = process {
+            let proc = proc.trim();
+            if let Some(route) = self
+                .app_routes
+                .iter()
+                .find(|r| !r.app.trim().is_empty() && r.app.trim().eq_ignore_ascii_case(proc))
+            {
+                return Some(route.prompt.clone());
+            }
+        }
+        if self.routing_scope == "selected_apps_only" {
+            None
+        } else {
+            Some(self.pp_prompt.clone())
+        }
+    }
 }
 
 /// Apply dictionary corrections to a transcription.

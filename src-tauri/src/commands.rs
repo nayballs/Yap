@@ -144,6 +144,13 @@ pub fn configure_hotkey(spec: String) {
     let _ = crate::input_hook::configure_dictation(&spec);
 }
 
+/// Live-apply the edit/rewrite-mode hotkey (used by the Settings recorder to
+/// pause the binding while choosing a key, then re-apply it).
+#[tauri::command]
+pub fn configure_edit_hotkey(spec: String) {
+    let _ = crate::input_hook::configure_edit(&spec);
+}
+
 /// Toggle recording on/off (same action as the global hotkey).
 #[tauri::command]
 pub fn toggle_recording(state: State<'_, AppState>) {
@@ -166,6 +173,9 @@ pub fn save_config(state: State<'_, AppState>, cfg: YapConfig) -> Result<(), Str
     config::save(&cfg)?;
     if let Err(e) = crate::input_hook::configure_dictation(&cfg.hotkey) {
         tracing::warn!("Failed to apply hotkey: {}", e);
+    }
+    if let Err(e) = crate::input_hook::configure_edit(&cfg.edit_hotkey) {
+        tracing::warn!("Failed to apply edit hotkey: {}", e);
     }
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
@@ -297,7 +307,6 @@ pub async fn test_post_process(text: String) -> Result<String, String> {
     )
     .await
 }
-
 /// Recent local transcription history, newest first (capped at `limit`).
 /// Each item: `{ ts, raw, text, model, app, words }`.
 #[tauri::command]

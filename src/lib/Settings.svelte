@@ -126,6 +126,11 @@
     if (section === 'history') loadHistory();
   });
 
+  // Populate the per-app routing picker (from history) when AI Cleanup opens.
+  $effect(() => {
+    if (section === 'cleanup' && loaded) loadRecentApps();
+  });
+
   function fmtMinutes(min) {
     const m = Math.round(min || 0);
     if (m < 60) return `${m} min`;
@@ -238,6 +243,9 @@
     ppPreset: 'default',
     ppPrompt:
       'Remove filler words (um, uh, er, like, you know). Fix capitalization, punctuation, and obvious grammar. Resolve spoken self-corrections (e.g. "go to the store, no wait, the bank" → "go to the bank"). Keep the result faithful and natural — don\'t over-format.',
+    routingScope: 'all_apps',
+    appRoutes: [],
+    editHotkey: '',
   };
 
   const APP_VERSION = '0.1.0';
@@ -246,6 +254,7 @@
     const stored = await invoke('get_config');
     cfg = { ...FIELD_DEFAULTS, ...stored };
     if (!Array.isArray(cfg.dictionary)) cfg.dictionary = [];
+    if (!Array.isArray(cfg.appRoutes)) cfg.appRoutes = [];
     loaded = true;
     try {
       devices = await invoke('list_audio_devices');
@@ -389,10 +398,16 @@
   });
 
   // ---- Hotkey recorder ----
-  function startRecord() {
+  // `recordTarget` is which config field the recorder writes to ('hotkey' for
+  // dictation, 'editHotkey' for edit/rewrite mode) and which live-binding command
+  // to pause/re-apply.
+  let recordTarget = $state('hotkey');
+  const HOTKEY_CMD = { hotkey: 'configure_hotkey', editHotkey: 'configure_edit_hotkey' };
+  function startRecord(target = 'hotkey') {
     if (!cfg) return;
+    recordTarget = target;
     recording = true;
-    invoke('configure_hotkey', { spec: '' }); // pause live binding while choosing
+    invoke(HOTKEY_CMD[target], { spec: '' }); // pause live binding while choosing
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('mousedown', onMouse, true);
   }
@@ -401,14 +416,19 @@
     recording = false;
     window.removeEventListener('keydown', onKey, true);
     window.removeEventListener('mousedown', onMouse, true);
-    if (cfg) invoke('configure_hotkey', { spec: cfg.hotkey }); // apply live
+    if (cfg) invoke(HOTKEY_CMD[recordTarget], { spec: cfg[recordTarget] }); // apply live
   }
   function onKey(e) {
     e.preventDefault();
     e.stopPropagation();
     if (e.key === 'Escape') return stopRecord();
+    // Backspace clears the (optional) edit hotkey.
+    if (e.key === 'Backspace' && recordTarget === 'editHotkey') {
+      cfg.editHotkey = '';
+      return stopRecord();
+    }
     if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
-    cfg.hotkey = `kb:${e.keyCode}`;
+    cfg[recordTarget] = `kb:${e.keyCode}`;
     stopRecord();
   }
   function onMouse(e) {
@@ -417,7 +437,7 @@
     e.stopPropagation();
     const map = { 1: 3, 3: 4, 4: 5 }; // browser button -> our id
     const id = map[e.button] ?? e.button + 1;
-    cfg.hotkey = `mouse:${id}`;
+    cfg[recordTarget] = `mouse:${id}`;
     stopRecord();
   }
 
@@ -481,6 +501,48 @@
     if (cfg.ppPreset !== 'custom') cfg.ppPreset = 'custom';
   }
 
+  // ---- Smart routing (per-app cleanup rules) ----
+  // Apps the user has actually dictated into, pulled from local history so the
+  // "Add rule" picker suggests real targets instead of asking them to type
+  // "slack.exe". Populated lazily when the routing UI first renders.
+  let recentApps = $state([]);
+  let newRouteApp = $state('');
+  async function loadRecentApps() {
+    try {
+      const entries = await invoke('get_history', { limit: 200 });
+      const bound = new Set((cfg.appRoutes || []).map((r) => (r.app || '').toLowerCase()));
+      const seen = new Map();
+      for (const e of entries || []) {
+        const app = (e.app || '').trim();
+        if (!app || bound.has(app.toLowerCase())) continue;
+        if (!seen.has(app.toLowerCase())) seen.set(app.toLowerCase(), app);
+      }
+      recentApps = [...seen.values()].sort((a, b) => a.localeCompare(b));
+    } catch {
+      recentApps = [];
+    }
+  }
+  // Strip the ".exe" for a friendlier default label (e.g. "slack.exe" → "Slack").
+  function prettyAppLabel(app) {
+    const base = (app || '').replace(/\.exe$/i, '');
+    return base ? base.charAt(0).toUpperCase() + base.slice(1) : app;
+  }
+  function addRoute(app) {
+    const name = (app || newRouteApp || '').trim();
+    if (!name) return;
+    if ((cfg.appRoutes || []).some((r) => (r.app || '').toLowerCase() === name.toLowerCase())) return;
+    cfg.appRoutes = [
+      ...(cfg.appRoutes || []),
+      { app: name, label: prettyAppLabel(name), prompt: cfg.ppPrompt || '' },
+    ];
+    newRouteApp = '';
+    recentApps = recentApps.filter((a) => a.toLowerCase() !== name.toLowerCase());
+  }
+  function removeRoute(i) {
+    cfg.appRoutes = cfg.appRoutes.filter((_, j) => j !== i);
+    loadRecentApps();
+  }
+
   async function testCleanup() {
     if (ppTest.running) return;
     // Persist first so the backend tests the settings the user is looking at.
@@ -511,6 +573,13 @@
       dictionary: cfg.dictionary
         .map((e) => ({ from: (e.from || '').trim(), to: (e.to || '').trim() }))
         .filter((e) => e.from),
+      appRoutes: (cfg.appRoutes || [])
+        .map((r) => ({
+          app: (r.app || '').trim(),
+          label: (r.label || '').trim() || (r.app || '').trim(),
+          prompt: r.prompt || '',
+        }))
+        .filter((r) => r.app),
     };
   }
 
@@ -558,6 +627,12 @@
       <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" />
       <path d="M18 14l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z" />
     </svg>
+  {:else if id === 'history'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M12 8v4l3 2" />
+    </svg>
   {:else if id === 'advanced'}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5" />
@@ -595,12 +670,30 @@
         {#if section === 'general'}
           <Group title="Activation">
             <Row label="Hotkey" hint="Trigger dictation from any app">
-              <button class="key" class:recording onclick={startRecord}>
-                {recording ? 'Press a key…' : formatHotkey(cfg.hotkey)}
+              <button
+                class="key"
+                class:recording={recording && recordTarget === 'hotkey'}
+                onclick={() => startRecord('hotkey')}
+              >
+                {recording && recordTarget === 'hotkey' ? 'Press a key…' : formatHotkey(cfg.hotkey)}
               </button>
             </Row>
             <Row label="Recording mode" hint="How the hotkey controls recording">
               <Select bind:value={cfg.recordingMode} options={RECORDING_MODES} />
+            </Row>
+            <Row
+              label="Edit / rewrite hotkey"
+              hint="Select text, hold this key, and speak an instruction (e.g. “make this a bulleted list”) to rewrite it in place. Needs AI cleanup configured. Backspace clears."
+            >
+              <button
+                class="key"
+                class:recording={recording && recordTarget === 'editHotkey'}
+                onclick={() => startRecord('editHotkey')}
+              >
+                {recording && recordTarget === 'editHotkey'
+                  ? 'Press a key…'
+                  : formatHotkey(cfg.editHotkey)}
+              </button>
             </Row>
           </Group>
 
@@ -793,6 +886,59 @@
           </Group>
 
           {#if cfg.postProcessEnabled}
+            <Group title="Smart routing">
+              <Row
+                label="Only clean up in apps with a rule"
+                hint="When on, dictation is injected raw everywhere except the apps you list below. When off, the cleanup above applies everywhere and rules just override it per app."
+              >
+                <Toggle
+                  checked={cfg.routingScope === 'selected_apps_only'}
+                  onchange={(v) => (cfg.routingScope = v ? 'selected_apps_only' : 'all_apps')}
+                />
+              </Row>
+              <Row>
+                {#snippet children()}
+                  <div class="routes">
+                    <p class="note">
+                      Give specific apps their own cleanup instructions — e.g. terse for
+                      Slack, formal for Outlook, code-aware in your editor. Yap matches the
+                      app you were focused on when you started dictating.
+                    </p>
+                    {#if cfg.appRoutes.length > 0}
+                      {#each cfg.appRoutes as route, i (i)}
+                        <div class="route">
+                          <div class="route-head">
+                            <input class="route-label" placeholder="App name" bind:value={route.label} />
+                            <span class="route-proc">{route.app}</span>
+                            <button class="rm" title="Remove rule" aria-label="Remove rule" onclick={() => removeRoute(i)}>×</button>
+                          </div>
+                          <Textarea bind:value={route.prompt} rows={3} />
+                        </div>
+                      {/each}
+                    {:else}
+                      <div class="empty">No per-app rules yet.</div>
+                    {/if}
+                    <div class="route-add">
+                      {#if recentApps.length > 0}
+                        <select class="route-pick" bind:value={newRouteApp}>
+                          <option value="">Recent apps…</option>
+                          {#each recentApps as app}
+                            <option value={app}>{app}</option>
+                          {/each}
+                        </select>
+                      {/if}
+                      <input
+                        class="route-input"
+                        placeholder="or type an app, e.g. slack.exe"
+                        bind:value={newRouteApp}
+                      />
+                      <button class="add" disabled={!newRouteApp.trim()} onclick={() => addRoute()}>+ Add rule</button>
+                    </div>
+                  </div>
+                {/snippet}
+              </Row>
+            </Group>
+
             <Group title="Usage today">
               <Row>
                 {#snippet children()}
@@ -1258,6 +1404,79 @@
   }
   .add:hover {
     color: #e5e7eb;
+    border-color: #3b82f6;
+  }
+  .add:disabled {
+    opacity: 0.5;
+    cursor: default;
+    border-color: #2a2f3a;
+    color: #6b7280;
+  }
+
+  /* Smart routing (per-app cleanup rules) */
+  .routes {
+    width: 100%;
+  }
+  .route {
+    border: 1px solid #2a2f3a;
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+    background: #15181e;
+  }
+  .route-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .route-label {
+    flex: 0 0 auto;
+    width: 140px;
+    background: #181b22;
+    border: 1px solid #2a2f3a;
+    border-radius: 6px;
+    color: #e5e7eb;
+    padding: 5px 8px;
+    font: inherit;
+    font-size: 13px;
+  }
+  .route-label:focus {
+    outline: none;
+    border-color: #3b82f6;
+  }
+  .route-proc {
+    flex: 1 1 auto;
+    color: #6b7280;
+    font-size: 12px;
+    font-family: ui-monospace, monospace;
+  }
+  .route-add {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .route-add .add {
+    margin-top: 0;
+  }
+  .route-pick,
+  .route-input {
+    background: #181b22;
+    border: 1px solid #2a2f3a;
+    border-radius: 6px;
+    color: #e5e7eb;
+    padding: 6px 8px;
+    font: inherit;
+    font-size: 13px;
+  }
+  .route-input {
+    flex: 1 1 160px;
+    min-width: 140px;
+  }
+  .route-pick:focus,
+  .route-input:focus {
+    outline: none;
     border-color: #3b82f6;
   }
 

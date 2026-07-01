@@ -47,6 +47,13 @@ struct Shared {
     /// window). The transcript is pasted back into this window so focus changes
     /// during transcription don't misfire.
     target_hwnd: AtomicIsize,
+    /// Whether the current recording session is **edit/rewrite mode** (the spoken
+    /// words are an instruction to rewrite `selection`) rather than dictation.
+    /// Set at record-start, read in `run_stt`.
+    edit_mode: AtomicBool,
+    /// Text selected in the target app, captured at edit-mode record-start. Empty
+    /// (`None`) → "write mode" (generate new text from the instruction alone).
+    selection: Mutex<Option<String>>,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -139,11 +146,11 @@ impl Shared {
         }
     }
 
-    fn toggle(self: &Arc<Self>) {
+    fn toggle(self: &Arc<Self>, edit: bool) {
         if self.recording.load(Ordering::SeqCst) {
             self.stop_and_transcribe();
         } else {
-            self.start_recording();
+            self.start_recording(edit);
         }
     }
 
@@ -152,21 +159,24 @@ impl Shared {
     /// - `toggle` mode: act on press only (flip recording on/off). Ignore release.
     /// - `pushToTalk` mode: press starts (if idle), release stops + transcribes
     ///   (if recording).
-    fn on_key(self: &Arc<Self>, pressed: bool) {
+    ///
+    /// `edit` selects edit/rewrite mode (the dictation hotkey passes `false`, the
+    /// edit hotkey passes `true`).
+    fn on_key(self: &Arc<Self>, pressed: bool, edit: bool) {
         if self.recording_mode() == "pushToTalk" {
             if pressed {
                 if !self.recording.load(Ordering::SeqCst) {
-                    self.start_recording();
+                    self.start_recording(edit);
                 }
             } else if self.recording.load(Ordering::SeqCst) {
                 self.stop_and_transcribe();
             }
         } else if pressed {
-            self.toggle();
+            self.toggle(edit);
         }
     }
 
-    fn start_recording(self: &Arc<Self>) {
+    fn start_recording(self: &Arc<Self>, edit: bool) {
         // Seed the buffer with the pre-roll ring (the ~300 ms before the keypress)
         // so a word already in flight isn't clipped.
         let pre: Vec<f32> = self
@@ -182,6 +192,19 @@ impl Shared {
         // (or anything else) can steal focus. Restored at paste time.
         let hwnd = crate::text_injector::current_foreground().unwrap_or(0);
         self.target_hwnd.store(hwnd, Ordering::Relaxed);
+
+        // Edit/rewrite mode: grab the current selection NOW, while the target app
+        // still has focus (before recording), so the spoken instruction can be
+        // applied to it. Empty selection → write mode.
+        self.edit_mode.store(edit, Ordering::SeqCst);
+        if edit {
+            let target = if hwnd == 0 { None } else { Some(hwnd) };
+            let sel = crate::selection::capture_selection(target);
+            if let Ok(mut g) = self.selection.lock() {
+                *g = sel;
+            }
+        }
+
         self.recording.store(true, Ordering::SeqCst);
         self.touch_activity();
         if self.mute_while_recording() {
@@ -262,6 +285,74 @@ impl Shared {
         });
     }
 
+    /// Edit/rewrite-mode finish: apply the spoken `instruction` to the selection
+    /// captured at record-start (via the AI-cleanup LLM) and paste the result
+    /// back into the target window. Shares the AI-cleanup provider settings, so it
+    /// needs `pp_base_url` configured. Emits the final `yap-state` itself.
+    async fn run_rewrite(self: &Arc<Self>, instruction: String) {
+        // Take the selection captured when the edit hotkey was pressed.
+        let selection = self
+            .selection
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
+            .unwrap_or_default();
+
+        let (base_url, api_key, model, restore_clipboard) = self
+            .config
+            .read()
+            .map(|c| {
+                (
+                    c.pp_base_url.clone(),
+                    c.pp_api_key.clone(),
+                    c.pp_model.clone(),
+                    c.restore_clipboard,
+                )
+            })
+            .unwrap_or_default();
+
+        if base_url.is_empty() {
+            tracing::warn!("Edit mode needs an AI cleanup endpoint (none configured)");
+            let _ = self
+                .app
+                .emit("yap-error", "Set up AI cleanup to use edit mode");
+            let _ = self.app.emit("yap-state", "error");
+            return;
+        }
+
+        let target = match self.target_hwnd.load(Ordering::Relaxed) {
+            0 => None,
+            h => Some(h),
+        };
+
+        match crate::llm::rewrite(&instruction, &selection, &base_url, &api_key, &model).await {
+            Ok(result) => {
+                let out = result.trim().to_string();
+                if out.is_empty() {
+                    let _ = self.app.emit("yap-state", "idle");
+                    return;
+                }
+                tracing::info!(text = %out, "Rewrite");
+                let _ = self.app.emit("yap-transcript", out.clone());
+                if let Err(e) =
+                    crate::text_injector::inject_text(&out, restore_clipboard, target).await
+                {
+                    tracing::warn!("Rewrite inject failed: {}", e);
+                }
+                let _ = self.app.emit("yap-state", "idle");
+            }
+            Err(e) => {
+                // Don't fall back to typing the raw instruction — that would paste
+                // "make this a list" into the doc. Surface an error instead.
+                tracing::warn!("Rewrite failed: {}", e);
+                let _ = self
+                    .app
+                    .emit("yap-error", "Rewrite failed — check AI cleanup settings");
+                let _ = self.app.emit("yap-state", "error");
+            }
+        }
+    }
+
     async fn run_stt(self: Arc<Self>, audio: Vec<f32>) {
         if audio.is_empty() {
             let _ = self.app.emit("yap-state", "idle");
@@ -318,9 +409,28 @@ impl Shared {
                     *g = Some(engine);
                 }
                 match transcription {
+                    Ok(text) if self.edit_mode.load(Ordering::SeqCst) => {
+                        // Edit/rewrite mode: the transcript is an INSTRUCTION, not
+                        // dictation. Apply it to the captured selection and paste
+                        // the result back. Emits its own final state.
+                        self.run_rewrite(text.trim().to_string()).await;
+                        return;
+                    }
                     Ok(text) => {
+                        // Smart routing: which app were we dictating into? The
+                        // foreground window was captured at record-start; resolve
+                        // it to a process name (e.g. "slack.exe") so per-app
+                        // cleanup rules can pick a matching body.
+                        let target_hwnd = match self.target_hwnd.load(Ordering::Relaxed) {
+                            0 => None,
+                            h => Some(h),
+                        };
+                        let target_app = crate::text_injector::app_name_for(target_hwnd);
+
                         // Snapshot the injection- and cleanup-related config under
-                        // one read lock.
+                        // one read lock. `pp_body` is the routed cleanup body:
+                        // `Some(body)` to clean with, `None` to skip cleanup
+                        // (selected-apps-only scope + no matching rule).
                         let (
                             dict,
                             append_space,
@@ -331,7 +441,7 @@ impl Shared {
                             pp_base_url,
                             pp_api_key,
                             pp_model,
-                            pp_prompt,
+                            pp_body,
                         ) = self
                             .config
                             .read()
@@ -346,7 +456,7 @@ impl Shared {
                                     c.pp_base_url.clone(),
                                     c.pp_api_key.clone(),
                                     c.pp_model.clone(),
-                                    c.pp_prompt.clone(),
+                                    c.resolve_cleanup_body(target_app.as_deref()),
                                 )
                             })
                             .unwrap_or_else(|_| {
@@ -360,7 +470,7 @@ impl Shared {
                                     String::new(),
                                     String::new(),
                                     String::new(),
-                                    String::new(),
+                                    None,
                                 )
                             });
 
@@ -370,28 +480,29 @@ impl Shared {
                         // transcript — dictation is never blocked. The state stays
                         // `processing` for the extra latency.
                         let raw = text.trim().to_string();
-                        let cleaned = if pp_enabled
-                            && !pp_base_url.is_empty()
-                            && !raw.is_empty()
+                        // `pp_body` is `None` when smart routing says "skip cleanup
+                        // for this app" (selected-apps-only scope, unbound app).
+                        let cleaned = match (&pp_body, pp_enabled && !pp_base_url.is_empty() && !raw.is_empty())
                         {
-                            match crate::llm::cleanup(
-                                &raw,
-                                &pp_base_url,
-                                &pp_api_key,
-                                &pp_model,
-                                &pp_prompt,
-                            )
-                            .await
-                            {
-                                Ok(c) if !c.trim().is_empty() => c,
-                                Ok(_) => raw.clone(),
-                                Err(e) => {
-                                    tracing::warn!("AI cleanup failed, using raw: {}", e);
-                                    raw.clone()
+                            (Some(body), true) => {
+                                match crate::llm::cleanup(
+                                    &raw,
+                                    &pp_base_url,
+                                    &pp_api_key,
+                                    &pp_model,
+                                    body,
+                                )
+                                .await
+                                {
+                                    Ok(c) if !c.trim().is_empty() => c,
+                                    Ok(_) => raw.clone(),
+                                    Err(e) => {
+                                        tracing::warn!("AI cleanup failed, using raw: {}", e);
+                                        raw.clone()
+                                    }
                                 }
                             }
-                        } else {
-                            raw.clone()
+                            _ => raw.clone(),
                         };
 
                         let mut corrected = config::apply_dictionary(cleaned.trim(), &dict);
@@ -505,6 +616,8 @@ impl Pipeline {
             config: RwLock::new(cfg.clone()),
             last_activity: AtomicU64::new(now_ms()),
             target_hwnd: AtomicIsize::new(0),
+            edit_mode: AtomicBool::new(false),
+            selection: Mutex::new(None),
         });
 
         spawn_idle_watcher(&shared);
@@ -521,13 +634,19 @@ impl Pipeline {
 
     /// Toggle recording (called from the pill button's `toggle_recording`).
     pub fn toggle(&self) {
-        self.shared.toggle();
+        self.shared.toggle(false);
     }
 
-    /// Route a hotkey press/release event through the configured recording mode.
+    /// Route a **dictation** hotkey press/release through the recording mode.
     /// Called from the input-hook listeners for both press and release.
     pub fn on_key(&self, pressed: bool) {
-        self.shared.on_key(pressed);
+        self.shared.on_key(pressed, false);
+    }
+
+    /// Route an **edit/rewrite** hotkey press/release. Same as `on_key` but the
+    /// session captures the selection and rewrites it from the spoken instruction.
+    pub fn on_edit_key(&self, pressed: bool) {
+        self.shared.on_key(pressed, true);
     }
 
     /// Stop recording and discard the audio (no transcription).

@@ -6432,6 +6432,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "transcribe-rs",
+ "windows 0.61.3",
 ]
 
 [[package]]

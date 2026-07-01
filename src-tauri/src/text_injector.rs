@@ -56,6 +56,7 @@ mod platform {
     const KEYEVENTF_UNICODE: u32 = 0x0004;
     const VK_SHIFT: u16 = 0x10;
     const VK_CONTROL: u16 = 0x11;
+    const VK_C: u16 = 0x43;
     const VK_V: u16 = 0x56;
     const VK_RETURN: u16 = 0x0D;
 
@@ -253,6 +254,25 @@ mod platform {
         thread::sleep(Duration::from_millis(80));
     }
 
+    /// Simulate Ctrl+C keystroke via SendInput (used by the edit-mode selection
+    /// capture fallback to copy the current selection into the clipboard).
+    pub fn simulate_copy() {
+        let inputs = [
+            make_key(VK_CONTROL, false),
+            make_key(VK_C, false),
+            make_key(VK_C, true),
+            make_key(VK_CONTROL, true),
+        ];
+        let sent = unsafe {
+            SendInput(
+                inputs.len() as u32,
+                inputs.as_ptr(),
+                mem::size_of::<INPUT>() as i32,
+            )
+        };
+        tracing::debug!(sent, expected = inputs.len(), "SendInput Ctrl+C");
+    }
+
     /// Simulate a submit keystroke via SendInput (used by auto-submit):
     /// plain Enter, Ctrl+Enter, or Shift+Enter depending on `key`.
     pub fn press_submit(key: &str) {
@@ -331,6 +351,54 @@ pub fn app_name_for(hwnd: Option<isize>) -> Option<String> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = hwnd;
+        None
+    }
+}
+
+/// Capture the current text selection via the **clipboard Ctrl+C trick** — the
+/// fallback for edit/rewrite mode when UI Automation can't read the selection
+/// (common in Electron/Chromium/terminal apps).
+///
+/// Snapshots the clipboard, clears it (so we can tell whether Ctrl+C actually
+/// copied anything), sends Ctrl+C to `target_hwnd`, reads the result, then
+/// restores the original clipboard. Returns `None` if nothing was selected
+/// (clipboard stayed empty) or off Windows.
+pub fn selection_via_copy(target_hwnd: Option<isize>) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        use arboard::Clipboard;
+
+        // Make sure the target window has focus so Ctrl+C hits the right field.
+        if let Some(hwnd) = target_hwnd {
+            platform::focus_window(hwnd);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let mut clipboard = Clipboard::new().ok()?;
+        let previous = clipboard.get_text().ok();
+        // Clear first: if Ctrl+C copies nothing (no selection), the clipboard
+        // stays empty and we correctly return None instead of the old contents.
+        let _ = clipboard.set_text(String::new());
+        std::thread::sleep(std::time::Duration::from_millis(30));
+
+        platform::simulate_copy();
+        std::thread::sleep(std::time::Duration::from_millis(120));
+
+        let copied = clipboard.get_text().ok();
+
+        // Restore the user's clipboard (best-effort; text-only).
+        if let Some(prev) = previous {
+            let _ = clipboard.set_text(prev);
+        }
+
+        match copied {
+            Some(t) if !t.trim().is_empty() => Some(t),
+            _ => None,
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = target_hwnd;
         None
     }
 }

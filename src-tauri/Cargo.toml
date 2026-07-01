@@ -50,6 +50,12 @@ transcribe-rs = { version = "0.3", optional = true, default-features = false }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
+# Windows UI Automation — read the focused control's text selection for
+# edit/rewrite mode. Version matches the `windows` crate tauri 2 already pulls
+# in (0.61.x) so there's no duplicate copy of the crate.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation"] }
+
 [features]
 # Default has NO transcribe-rs so plain `cargo check` compiles the stub (fast).
 default = []

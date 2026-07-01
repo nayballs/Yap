@@ -127,16 +127,19 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 - [x] **Local OR cloud** via one OpenAI-compatible client (Groq / OpenAI / OpenRouter /
       local Ollama·LM Studio). Off by default; raw-fallback on any error.
 - [x] Live **Groq usage meter** (daily tokens/requests) in settings.
-- [ ] **Split prompt = immutable base + editable body** (FluidVoice pattern). The
+- [x] **Split prompt = immutable base + editable body** (FluidVoice pattern). The
       anti-"don't answer the question" guardrails + output-only rules live in a
       hidden base the user can't delete; the editable body holds tone/format. Stops
       users from accidentally breaking refusal behaviour when they customise.
-- [ ] **Richer cleanup rules** in the base: self-corrections ("buy milk no wait
+      (`llm::BASE_PROMPT` + `build_system_prompt()`; body = `config.pp_prompt`.)
+- [~] **Richer cleanup rules** in the base: self-corrections ("buy milk no wait
       buy water" → "Buy water."), spoken→digit numbers, spoken punctuation/emoji,
-      preserve meaning/language. (Several already partly in `llm.rs`.)
-- [ ] **Cleanup presets** (Default / Email / Notes / Slack / Code tone modes) —
-      each a named body + temperature; pick from a dropdown. Foundation for
-      per-app auto-switching (Phase 4).
+      preserve meaning/language. (Self-corrections + preserve-meaning/language are
+      in `BASE_PROMPT`; spoken→digits and spoken punctuation/emoji still TODO.)
+- [x] **Cleanup presets** (Default / Email / Notes / Slack / Code tone modes) —
+      each a named body; pick from a dropdown (`config.pp_preset` + editable
+      `pp_prompt`). Foundation for per-app auto-switching (Phase 4).
+      (Per-preset temperature still TODO — cleanup runs at a fixed 0.2.)
 - [ ] Future: a small **fine-tuned/local** cleanup model (Wispr Flow's real moat).
       If/when local: keep the static prompt-prefix **KV cache** warm so each
       utterance only processes the new transcript tokens (FluidVoice's latency trick).
@@ -148,13 +151,46 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 - [ ] **Fuzzy** custom-words (catch near-misses) + a code/jargon-aware path.
 
 ### Phase 4 — App-aware formatting + light command mode
-- [ ] Per-app tone/format auto-switching (superwhisper "Modes" / FluidVoice
-      per-app prompt profiles) — read the **foreground process** at record-start and
-      pick the matching cleanup preset (e.g. terse for Slack, formal for Outlook,
-      code-aware for an IDE). Resolution order: app-bound profile → default preset.
-- [ ] A few **natural-language edits** ("make this a list", "more concise") —
-      FluidVoice's Write/Edit mode: if text is selected, feed it as context and treat
-      the utterance as an instruction to rewrite it in place.
+- [x] **Per-app tone/format auto-switching** ("smart routing" — superwhisper
+      "Modes" / FluidVoice per-app prompt bindings) — read the **foreground process**
+      at record-start (`text_injector::app_name_for`, keyed on the exe name since
+      Windows has no macOS bundle id) and pick the matching cleanup body. Resolution
+      order ports FluidVoice's `promptResolution`: **app-bound rule → scope guard →
+      global default** (`config::YapConfig::resolve_cleanup_body`). Includes the
+      `allApps` vs `selectedAppsOnly` **routing scope** and a Settings UI (per-app
+      rules with their own instructions; app picker seeded from dictation history).
+      Simplification vs FluidVoice: rules store a **custom body inline** per app
+      rather than binding to a reusable named profile.
+- [x] **Edit / Rewrite mode** ("make this a list", "more concise", "fix grammar") —
+      FluidVoice's Write/Edit mode. **v1 = rewrite + write, implemented** (pending
+      end-to-end runtime test). Shipped: `edit_hotkey` (2nd hotkey via `EDIT_BINDING`
+      in `input_hook`), `selection.rs` (UIA `TextPattern` → Ctrl+C-clipboard fallback,
+      `windows` crate 0.61), `llm::rewrite()` (+ shared `post_chat`), pipeline
+      `edit_mode`/`run_rewrite` (paste result over selection), and the Settings
+      recorder + row. Command/terminal mode still deferred (agentic zsh+osascript
+      loop with no clean Windows analog). Mode is chosen by **which hotkey fired**,
+      not by parsing speech; the selection is captured **at hotkey-press, before
+      recording**, while the target window still has focus.
+
+      Implementation detail (as built):
+      - **Second global hotkey** `edit_hotkey` (`config.rs` field) → `input_hook.rs`
+        registers a 2nd binding → new `Pipeline.on_edit_key()`. (Yap's hook handles one
+        hotkey today — this is the main hook change.)
+      - **Selection capture** — new `selection.rs`, called before recording against the
+        already-captured foreground HWND. **UIA `TextPattern` first**
+        (`IUIAutomation::GetFocusedElement` → `TextPattern` → `GetSelection().GetText()`),
+        **Ctrl+C-clipboard trick as fallback** (snapshot → send Ctrl+C → read → restore,
+        reusing existing clipboard snapshot/restore) for apps where UIA text is patchy
+        (Electron/Chromium/terminals). Empty selection ⇒ **write mode**.
+      - **Prompt** — new `llm::rewrite()`: system = edit base-prompt + `"Use the
+        following selected context:\n{selection}"`; user = `"User's instruction:
+        {transcript}\n\nApply it to the selected context. Output ONLY the rewritten
+        text."` (write mode omits the context line). Reuses the existing HTTP client.
+      - **Apply** — reuse `text_injector` paste-over-selection (Ctrl+V overwrites the
+        still-live selection) after re-focusing the captured HWND.
+      Ports cleanly (no macOS deps): everything above uses Yap's existing SendInput /
+      clipboard / HWND-focus layer. MacOS pieces dropped: `AXSelectedText`, `NSApp.hide`
+      focus dance, `osascript`.
 
 ### Phase 5 — Trust, polish & distribution
 - [x] **Installer** (custom NSIS: normal/portable + WebView2 bootstrap), **auto-update**

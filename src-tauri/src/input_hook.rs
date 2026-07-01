@@ -72,6 +72,7 @@ impl KeyBinding {
 
 static PTT_BINDING: KeyBinding = KeyBinding::new();
 static DICTATION_BINDING: KeyBinding = KeyBinding::new();
+static EDIT_BINDING: KeyBinding = KeyBinding::new();
 
 #[cfg(target_os = "windows")]
 static HOOK_APP_HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
@@ -98,6 +99,16 @@ pub fn configure_dictation(key_spec: &str) -> Result<String, String> {
     DICTATION_BINDING.configure(key_type, key_code);
     let desc = format_binding(key_type, key_code);
     info!("Dictation key configured: {} (spec: {:?})", desc, key_spec);
+    Ok(desc)
+}
+
+/// Parse a key spec string and configure the edit/rewrite-mode binding. An empty
+/// spec unbinds it (edit mode is opt-in).
+pub fn configure_edit(key_spec: &str) -> Result<String, String> {
+    let (key_type, key_code) = parse_key_spec(key_spec)?;
+    EDIT_BINDING.configure(key_type, key_code);
+    let desc = format_binding(key_type, key_code);
+    info!("Edit key configured: {} (spec: {:?})", desc, key_spec);
     Ok(desc)
 }
 
@@ -310,6 +321,17 @@ unsafe extern "system" fn low_level_keyboard_proc(
                 );
                 return 1; // Suppress
             }
+
+            // Check edit/rewrite binding
+            if EDIT_BINDING.matches_keyboard(vkey) {
+                handle_binding_event(
+                    &EDIT_BINDING,
+                    "edit-key-pressed",
+                    "edit-key-released",
+                    is_keydown,
+                );
+                return 1; // Suppress
+            }
         }
     }
 
@@ -361,6 +383,17 @@ unsafe extern "system" fn low_level_mouse_proc(
                     &DICTATION_BINDING,
                     "dictation-key-pressed",
                     "dictation-key-released",
+                    is_press,
+                );
+                return 1;
+            }
+
+            // Check edit/rewrite binding — suppress the mouse button at OS level
+            if EDIT_BINDING.matches_mouse(id) {
+                handle_binding_event(
+                    &EDIT_BINDING,
+                    "edit-key-pressed",
+                    "edit-key-released",
                     is_press,
                 );
                 return 1;

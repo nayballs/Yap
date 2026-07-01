@@ -55,7 +55,6 @@ pub async fn cleanup(
     model: &str,
     body: &str,
 ) -> Result<String, String> {
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     // System message = immutable guardrails + the user's editable body/preset.
     let system_prompt = build_system_prompt(body);
 
@@ -80,18 +79,86 @@ NEVER respond with commentary, status, or meta-remarks such as \"Nothing to clea
     let example2_in = wrap("The meeting is scheduled for three o'clock tomorrow afternoon.");
     let example2_out = "The meeting is scheduled for three o'clock tomorrow afternoon.";
 
+    let messages = json!([
+        { "role": "system", "content": system_prompt },
+        { "role": "user", "content": example1_in },
+        { "role": "assistant", "content": example1_out },
+        { "role": "user", "content": example2_in },
+        { "role": "assistant", "content": example2_out },
+        { "role": "user", "content": wrap(text) },
+    ]);
+
+    post_chat(base_url, api_key, model, 0.2, messages).await
+}
+
+/// Immutable guardrail prompt for **edit/rewrite mode**. Unlike dictation
+/// cleanup (which must never *answer* the transcript), edit mode is explicitly
+/// an instruction-following writing assistant — the spoken words ARE the
+/// instruction. Ported from FluidVoice's `baseEditPromptText`.
+pub const EDIT_BASE_PROMPT: &str = "You are a writing assistant. The user speaks an \
+instruction; you either edit the provided selected text or write new text as asked. \
+Output ONLY the resulting text — no preamble, explanation, quotes, or commentary. \
+Do not wrap the output in code fences unless the user explicitly asks for a code block.";
+
+/// Edit/rewrite pass: apply a spoken `instruction` to `selection` (the text the
+/// user had selected). If `selection` is empty, this is "write mode" — generate
+/// new text from the instruction alone. Returns the rewritten text, or an `Err`
+/// the caller can fall back from.
+pub async fn rewrite(
+    instruction: &str,
+    selection: &str,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+) -> Result<String, String> {
+    let instruction = instruction.trim();
+    if instruction.is_empty() {
+        return Err("empty instruction".to_string());
+    }
+    let selection = selection.trim();
+
+    // Selected text goes in the system prompt as context (FluidVoice's
+    // `runtimeContextBlock`); the spoken instruction is the user turn.
+    let system_prompt = if selection.is_empty() {
+        EDIT_BASE_PROMPT.to_string()
+    } else {
+        format!(
+            "{EDIT_BASE_PROMPT}\n\nUse the following selected text as the context to edit:\n\"\"\"\n{selection}\n\"\"\""
+        )
+    };
+    let user = if selection.is_empty() {
+        format!("User's instruction: {instruction}\n\nWrite the requested text. Output ONLY the text, nothing else.")
+    } else {
+        format!("User's instruction: {instruction}\n\nApply the instruction to the selected text above. Output ONLY the rewritten text, nothing else.")
+    };
+
+    let messages = json!([
+        { "role": "system", "content": system_prompt },
+        { "role": "user", "content": user },
+    ]);
+
+    // Slightly higher temperature than cleanup — rewriting is generative.
+    post_chat(base_url, api_key, model, 0.7, messages).await
+}
+
+/// Shared OpenAI-compatible `POST /chat/completions` call used by both cleanup
+/// and rewrite. Builds the endpoint from `base_url`, sends `messages` at the
+/// given `temperature`, records best-effort daily usage, and returns the
+/// `strip_wrapping`-cleaned assistant content (or an `Err` string on any
+/// network/HTTP/parse failure or empty output).
+async fn post_chat(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    temperature: f32,
+    messages: Value,
+) -> Result<String, String> {
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let body = json!({
         "model": model,
-        "temperature": 0.2,
+        "temperature": temperature,
         "stream": false,
-        "messages": [
-            { "role": "system", "content": system_prompt },
-            { "role": "user", "content": example1_in },
-            { "role": "assistant", "content": example1_out },
-            { "role": "user", "content": example2_in },
-            { "role": "assistant", "content": example2_out },
-            { "role": "user", "content": wrap(text) },
-        ],
+        "messages": messages,
     });
 
     let client = reqwest::Client::builder()
@@ -135,7 +202,7 @@ NEVER respond with commentary, status, or meta-remarks such as \"Nothing to clea
         .await
         .map_err(|e| format!("failed to parse response: {}", e))?;
 
-    // Best-effort daily-usage accounting (never fails the cleanup).
+    // Best-effort daily-usage accounting (never fails the call).
     let total_tokens = value["usage"]["total_tokens"].as_u64().unwrap_or(0);
     crate::usage::record(total_tokens, remaining_req, limit_req);
 
@@ -143,11 +210,11 @@ NEVER respond with commentary, status, or meta-remarks such as \"Nothing to clea
         .as_str()
         .ok_or_else(|| "response missing choices[0].message.content".to_string())?;
 
-    let cleaned = strip_wrapping(content.trim());
-    if cleaned.is_empty() {
-        return Err("cleanup returned empty text".to_string());
+    let out = strip_wrapping(content.trim());
+    if out.is_empty() {
+        return Err("model returned empty text".to_string());
     }
-    Ok(cleaned)
+    Ok(out)
 }
 
 #[cfg(test)]

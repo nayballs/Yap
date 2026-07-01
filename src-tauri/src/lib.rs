@@ -16,6 +16,7 @@ mod mute;
 mod overlay;
 mod pipeline;
 mod portable;
+mod selection;
 mod sound;
 mod stt;
 mod text_injector;
@@ -92,6 +93,7 @@ pub fn run() {
             commands::list_output_devices,
             commands::model_language_info,
             commands::configure_hotkey,
+            commands::configure_edit_hotkey,
             commands::set_pill_scale,
             commands::set_active_model,
             commands::delete_model,
@@ -117,6 +119,10 @@ pub fn run() {
             input_hook::start_input_hook(handle.clone());
             if let Err(e) = input_hook::configure_dictation(&cfg.hotkey) {
                 tracing::warn!("Failed to configure hotkey: {}", e);
+            }
+            // Optional edit/rewrite-mode hotkey (empty = unbound / opt-in).
+            if let Err(e) = input_hook::configure_edit(&cfg.edit_hotkey) {
+                tracing::warn!("Failed to configure edit hotkey: {}", e);
             }
 
             // Clear ort's 0-byte DirectML.dll stub so ONNX uses the real system
@@ -178,6 +184,28 @@ pub fn run() {
                 if let Ok(guard) = pipeline {
                     if let Some(p) = guard.as_ref() {
                         p.on_key(false);
+                    }
+                }
+            });
+
+            // Route the edit/rewrite hotkey the same way (its own event pair).
+            let edit_press_handle = handle.clone();
+            handle.listen("edit-key-pressed", move |_event| {
+                let state = edit_press_handle.state::<AppState>();
+                let pipeline = state.pipeline.lock();
+                if let Ok(guard) = pipeline {
+                    if let Some(p) = guard.as_ref() {
+                        p.on_edit_key(true);
+                    }
+                }
+            });
+            let edit_release_handle = handle.clone();
+            handle.listen("edit-key-released", move |_event| {
+                let state = edit_release_handle.state::<AppState>();
+                let pipeline = state.pipeline.lock();
+                if let Ok(guard) = pipeline {
+                    if let Some(p) = guard.as_ref() {
+                        p.on_edit_key(false);
                     }
                 }
             });
