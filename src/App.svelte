@@ -14,7 +14,11 @@
 
   // The pill window needs a transparent body (app.css). The settings and
   // onboarding windows are opaque, so override that here or they show OS white.
+  // They also opt into `color-scheme: dark` (for native scrollbars/controls) —
+  // which is deliberately NOT global, because on the transparent pill/overlay
+  // windows it makes the WebView paint an opaque dark backdrop (grey box bug).
   if (isSettings || isOnboarding) {
+    document.documentElement.style.colorScheme = 'dark';
     document.documentElement.style.background = '#0f1117';
     document.body.style.background = '#0f1117';
   }

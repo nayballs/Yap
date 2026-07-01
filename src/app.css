@@ -1,5 +1,8 @@
 :root {
-  color-scheme: dark;
+  /* NOTE: `color-scheme: dark` is intentionally NOT set here. On a transparent
+     window (the pill + overlay) it makes the WebView paint an opaque dark UA
+     backdrop, which shows as a grey square behind the rounded pill. The opaque
+     windows (settings/onboarding) opt into dark scheme in App.svelte instead. */
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
