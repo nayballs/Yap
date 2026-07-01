@@ -1,11 +1,13 @@
-//! Unified input hook for PTT and other key bindings.
+//! Unified input hook for the dictation + edit key bindings.
 //!
 //! Installs both WH_KEYBOARD_LL and WH_MOUSE_LL hooks to capture:
 //! - Keyboard keys (including those sent by mouse side buttons via driver software)
 //! - Mouse extra buttons (XBUTTON1/2, middle)
 //!
 //! Configured keys are **suppressed** at the OS level (keyboard hooks only),
-//! preventing "44444" in text fields when holding a mouse side button for PTT.
+//! preventing "44444" in text fields when holding a bound key. Push-to-talk is
+//! NOT a separate binding: the dictation key emits both press and release, and
+//! the pipeline's `recording_mode` decides toggle vs hold.
 
 // FFI type names match Win32 API conventions (HHOOK, POINT, MSG, etc.)
 #![allow(clippy::upper_case_acronyms)]
@@ -24,7 +26,7 @@ const KEY_TYPE_NONE: u8 = 0;
 const KEY_TYPE_KEYBOARD: u8 = 1;
 const KEY_TYPE_MOUSE: u8 = 2;
 
-/// A configurable key binding (PTT key, dictation key, etc.)
+/// A configurable key binding (dictation key, edit key).
 struct KeyBinding {
     /// 0=none, 1=keyboard vkey, 2=mouse button
     key_type: AtomicU8,
@@ -34,7 +36,6 @@ struct KeyBinding {
     active: AtomicBool,
 }
 
-#[allow(dead_code)]
 impl KeyBinding {
     const fn new() -> Self {
         Self {
@@ -70,7 +71,6 @@ impl KeyBinding {
 
 // ---- Shared state ----
 
-static PTT_BINDING: KeyBinding = KeyBinding::new();
 static DICTATION_BINDING: KeyBinding = KeyBinding::new();
 static EDIT_BINDING: KeyBinding = KeyBinding::new();
 
@@ -79,21 +79,12 @@ static HOOK_APP_HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::ne
 
 // ---- Public API ----
 
-/// Parse a key spec string and configure the PTT binding.
+/// Parse a key spec string and configure the dictation binding.
 ///
 /// Formats:
 /// - `"kb:52"` — keyboard virtual key code 52 (the "4" key)
 /// - `"mouse:4"` — mouse button 4 (XBUTTON1 / back)
 /// - `"MouseButton4"` — legacy format, equivalent to `"mouse:4"`
-pub fn configure_ptt(key_spec: &str) -> Result<String, String> {
-    let (key_type, key_code) = parse_key_spec(key_spec)?;
-    PTT_BINDING.configure(key_type, key_code);
-    let desc = format_binding(key_type, key_code);
-    info!("PTT key configured: {} (spec: {:?})", desc, key_spec);
-    Ok(desc)
-}
-
-/// Parse a key spec string and configure the dictation binding.
 pub fn configure_dictation(key_spec: &str) -> Result<String, String> {
     let (key_type, key_code) = parse_key_spec(key_spec)?;
     DICTATION_BINDING.configure(key_type, key_code);
@@ -300,18 +291,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
 
         // Only match single keys — pass through modifier combos (Ctrl+4, Alt+Tab, etc.)
         if !modifiers_held() {
-            // Check PTT binding
-            if PTT_BINDING.matches_keyboard(vkey) {
-                handle_binding_event(
-                    &PTT_BINDING,
-                    "ptt-key-pressed",
-                    "ptt-key-released",
-                    is_keydown,
-                );
-                return 1; // Suppress the key (prevent "4444" in text fields)
-            }
-
-            // Check dictation binding
+            // Check dictation binding — suppress the key (prevent "4444" in text fields)
             if DICTATION_BINDING.matches_keyboard(vkey) {
                 handle_binding_event(
                     &DICTATION_BINDING,
@@ -366,17 +346,6 @@ unsafe extern "system" fn low_level_mouse_proc(
         };
 
         if let Some(id) = button_id {
-            // Check PTT binding — suppress the mouse button at OS level
-            if PTT_BINDING.matches_mouse(id) {
-                handle_binding_event(
-                    &PTT_BINDING,
-                    "ptt-key-pressed",
-                    "ptt-key-released",
-                    is_press,
-                );
-                return 1;
-            }
-
             // Check dictation binding — suppress the mouse button at OS level
             if DICTATION_BINDING.matches_mouse(id) {
                 handle_binding_event(
@@ -409,7 +378,7 @@ unsafe extern "system" fn low_level_mouse_proc(
 /// Start the unified input hook on a background thread.
 ///
 /// Installs both WH_KEYBOARD_LL and WH_MOUSE_LL hooks. The hooks check
-/// configured key bindings (set via `configure_ptt`/`configure_dictation`)
+/// configured key bindings (set via `configure_dictation`/`configure_edit`)
 /// and emit Tauri events when matched. Keyboard keys are suppressed at the
 /// OS level to prevent them from reaching other applications.
 #[cfg(target_os = "windows")]
@@ -454,7 +423,7 @@ pub fn start_input_hook(app_handle: AppHandle) {
                 // Heartbeat timer (60 seconds)
                 win32::SetTimer(0, 1, 60_000, None);
 
-                info!("Input hooks ready — configure bindings via configure_ptt/configure_dictation");
+                info!("Input hooks ready — configure bindings via configure_dictation/configure_edit");
 
                 // Message loop — REQUIRED for low-level hooks to fire
                 let mut msg: win32::MSG = std::mem::zeroed();
@@ -467,11 +436,11 @@ pub fn start_input_hook(app_handle: AppHandle) {
 
                     // Log heartbeats
                     if msg.message == win32::WM_TIMER {
-                        let (ptt_t, ptt_c) = PTT_BINDING.type_and_code();
                         let (dict_t, dict_c) = DICTATION_BINDING.type_and_code();
+                        let (edit_t, edit_c) = EDIT_BINDING.type_and_code();
                         trace!(
-                            "Input hook heartbeat: ptt=({},{}) dict=({},{})",
-                            ptt_t, ptt_c, dict_t, dict_c
+                            "Input hook heartbeat: dict=({},{}) edit=({},{})",
+                            dict_t, dict_c, edit_t, edit_c
                         );
                     }
 
