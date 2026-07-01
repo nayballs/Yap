@@ -136,7 +136,9 @@
   });
 
   function fmtMinutes(min) {
-    const m = Math.round(min || 0);
+    const v = Number(min) || 0;
+    const m = Math.round(v);
+    if (m < 1) return v > 0 ? '<1 min' : '0 min';
     if (m < 60) return `${m} min`;
     const h = Math.floor(m / 60);
     return `${h} h ${m % 60} min`;
@@ -157,6 +159,24 @@
   function fmtK(n) {
     const v = Number(n) || 0;
     return v < 1000 ? String(v) : `${(v / 1000).toFixed(1)}k`;
+  }
+  // Activity heatmap: bucket a day's words into 5 intensity levels (0 = none),
+  // relative to the busiest day in the window. Intensity (not bar height) is
+  // what keeps sparse data readable — one active day reads as one bright cell,
+  // not a lone full-height tower.
+  function activityLevel(words, max) {
+    if (!words) return 0;
+    const t = words / Math.max(1, max);
+    return t > 0.75 ? 4 : t > 0.5 ? 3 : t > 0.25 ? 2 : 1;
+  }
+  // Day-numbers are UTC (unix secs / 86400, same trick as the backend).
+  function activityDayLabel(day) {
+    return new Date((day || 0) * 86400000).toLocaleDateString(undefined, {
+      timeZone: 'UTC',
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
   }
   // 0–100 percentage of a value against a cap (guards a zero/absent cap).
   function pctOf(value, cap) {
@@ -1298,18 +1318,24 @@
           <Group title="Stats">
             {#snippet children()}
               {#if stats}
+                <!-- Single padded wrapper: Group cards have no padding of their
+                     own (Rows normally provide it), so bare children get their
+                     edges clipped by the card's rounded overflow:hidden. -->
+                <div class="stats-wrap">
+                <div class="stat-hero">
+                  <div class="hero-num">{fmtMinutes(stats.timeSavedMinutes)}</div>
+                  <div class="hero-lbl">
+                    saved vs typing — you speak ~150 wpm, most people type ~40
+                  </div>
+                </div>
                 <div class="stats-grid">
                   <div class="stat-card">
                     <div class="stat-num">{stats.today?.words ?? 0}</div>
                     <div class="stat-lbl">Words today</div>
                   </div>
                   <div class="stat-card">
-                    <div class="stat-num">{stats.totalWords ?? 0}</div>
+                    <div class="stat-num">{(stats.totalWords ?? 0).toLocaleString()}</div>
                     <div class="stat-lbl">Words all-time</div>
-                  </div>
-                  <div class="stat-card">
-                    <div class="stat-num">{fmtMinutes(stats.timeSavedMinutes)}</div>
-                    <div class="stat-lbl">Time saved vs typing</div>
                   </div>
                   <div class="stat-card">
                     <div class="stat-num">{stats.streakDays ?? 0}🔥</div>
@@ -1318,17 +1344,31 @@
                 </div>
                 {#if stats.activity?.length}
                   {@const maxW = Math.max(1, ...stats.activity.map((d) => d.words))}
-                  <div class="activity" title="Words per day, last 30 days">
+                  {@const todayDay = stats.activity[stats.activity.length - 1]?.day}
+                  <div class="activity">
                     {#each stats.activity as d}
                       <span
-                        class="abar"
-                        class:empty={!d.words}
-                        style="height:{Math.max(4, Math.round((d.words / maxW) * 100))}%"
+                        class="acell"
+                        class:today={d.day === todayDay}
+                        data-level={activityLevel(d.words, maxW)}
+                        title="{activityDayLabel(d.day)} · {d.words} {d.words === 1 ? 'word' : 'words'}"
                       ></span>
                     {/each}
                   </div>
-                  <div class="activity-cap">Last 30 days · {stats.totalTranscriptions ?? 0} dictations total</div>
+                  <div class="activity-legend">
+                    <span>Last 30 days · {stats.totalTranscriptions ?? 0} dictations</span>
+                    <span class="legend-scale">
+                      Less
+                      <span class="acell" data-level="0"></span>
+                      <span class="acell" data-level="1"></span>
+                      <span class="acell" data-level="2"></span>
+                      <span class="acell" data-level="3"></span>
+                      <span class="acell" data-level="4"></span>
+                      More
+                    </span>
+                  </div>
                 {/if}
+                </div>
               {:else}
                 <p class="hist-empty">No stats yet — dictate something to get started.</p>
               {/if}
@@ -1918,10 +1958,33 @@
   }
 
   /* History / stats dashboard */
+  .stats-wrap {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 14px;
+  }
+  .stat-hero {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.16), rgba(59, 130, 246, 0.04));
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  .hero-num {
+    font-size: 30px;
+    font-weight: 800;
+    line-height: 1.1;
+    color: #f1f3f7;
+  }
+  .hero-lbl {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #9ca3af;
+  }
   .stats-grid {
     width: 100%;
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 10px;
   }
   .stat-card {
@@ -1940,27 +2003,52 @@
     font-size: 12px;
     color: #9ca3af;
   }
+  /* 30-day activity heatmap: uniform cells, colour intensity = words. */
   .activity {
     width: 100%;
     margin-top: 14px;
     display: flex;
-    align-items: flex-end;
-    gap: 2px;
-    height: 56px;
+    gap: 4px;
   }
-  .activity .abar {
+  .acell {
     flex: 1 1 0;
-    min-height: 4px;
+    max-width: 14px;
+    aspect-ratio: 1 / 1;
+    border-radius: 3px;
+    background: #232833;
+  }
+  .acell[data-level='1'] {
+    background: #1e3a6f;
+  }
+  .acell[data-level='2'] {
+    background: #1d4ed8;
+  }
+  .acell[data-level='3'] {
     background: #3b82f6;
-    border-radius: 2px;
   }
-  .activity .abar.empty {
-    background: #2a2f3a;
+  .acell[data-level='4'] {
+    background: #93c5fd;
   }
-  .activity-cap {
-    margin-top: 6px;
+  .acell.today {
+    box-shadow: 0 0 0 1.5px rgba(147, 197, 253, 0.65);
+  }
+  .activity-legend {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     font-size: 11.5px;
     color: #9ca3af;
+  }
+  .legend-scale {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .legend-scale .acell {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
   }
   .hist-list {
     width: 100%;
