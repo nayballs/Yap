@@ -141,6 +141,7 @@ pub fn run() {
             commands::local_llm_status,
             commands::local_llm_start,
             commands::local_llm_stop,
+            commands::local_llm_install,
             commands::get_groq_usage,
             commands::get_history,
             commands::clear_history,

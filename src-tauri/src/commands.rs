@@ -326,6 +326,13 @@ pub async fn local_llm_start() -> Result<(), String> {
 pub fn local_llm_stop() {
     crate::local_llm::stop();
 }
+
+/// Download the on-device cleanup runtime + model (each SHA-verified) on demand.
+/// Emits `local-llm-download-progress` per stage. No-op for files already present.
+#[tauri::command]
+pub async fn local_llm_install(app: AppHandle) -> Result<(), String> {
+    crate::local_llm::install(Some(&app)).await
+}
 /// Recent local transcription history, newest first (capped at `limit`).
 /// Each item: `{ ts, raw, text, model, app, words }`.
 #[tauri::command]

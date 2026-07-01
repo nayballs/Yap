@@ -43,6 +43,7 @@
   // AI cleanup provider presets. Selecting one fills in the base URL; "custom"
   // leaves it editable. The backend only ever uses ppBaseUrl.
   const PP_PROVIDERS = [
+    { value: 'ondevice', label: 'On-device (private · no cloud)', baseUrl: null },
     { value: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1' },
     { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
     { value: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1' },
@@ -266,6 +267,11 @@
     if (!Array.isArray(cfg.dictionary)) cfg.dictionary = [];
     if (!Array.isArray(cfg.appRoutes)) cfg.appRoutes = [];
     if (!Array.isArray(cfg.cleanupProfiles)) cfg.cleanupProfiles = [];
+    // On-device cleanup status + live download progress.
+    refreshLocalLlm();
+    listen('local-llm-download-progress', (e) => {
+      if (e.payload) localProgress = e.payload;
+    });
     const migrated = migrateRoutesToProfiles();
     loaded = true;
     // Persist the migration immediately so it isn't redone (and duplicated) on
@@ -503,6 +509,38 @@
   function onProviderChange(value) {
     const preset = PP_PROVIDERS.find((p) => p.value === value);
     if (preset && preset.baseUrl) cfg.ppBaseUrl = preset.baseUrl;
+    if (value === 'ondevice') refreshLocalLlm();
+  }
+
+  // ---- On-device cleanup sidecar (llamafile) ----
+  let localLlm = $state({ installed: false, running: false });
+  let localInstalling = $state(false);
+  let localProgress = $state({ stage: '', percent: 0 });
+  let localError = $state('');
+
+  async function refreshLocalLlm() {
+    try {
+      localLlm = await invoke('local_llm_status');
+    } catch {
+      /* not in Tauri */
+    }
+  }
+
+  // Download the runtime + model (~1.3 GB), then start the local server.
+  async function installLocalLlm() {
+    if (localInstalling) return;
+    localError = '';
+    localInstalling = true;
+    localProgress = { stage: '', percent: 0 };
+    try {
+      await invoke('local_llm_install');
+      await invoke('local_llm_start');
+      await refreshLocalLlm();
+    } catch (e) {
+      localError = `${e}`;
+    } finally {
+      localInstalling = false;
+    }
   }
 
   // Picking a cleanup preset overwrites the editable body with its text. "Custom"
@@ -893,27 +931,51 @@
                 disabled={!cfg.postProcessEnabled}
               />
             </Row>
-            <Row label="Base URL" hint="OpenAI-compatible endpoint">
-              {#snippet children()}
-                <div class="pp-field">
-                  <Input bind:value={cfg.ppBaseUrl} disabled={!cfg.postProcessEnabled} placeholder="https://api.groq.com/openai/v1" />
-                </div>
-              {/snippet}
-            </Row>
-            <Row label="API key" hint="Stored locally; not needed for Local providers">
-              {#snippet children()}
-                <div class="pp-field">
-                  <Input type="password" bind:value={cfg.ppApiKey} disabled={!cfg.postProcessEnabled} placeholder="sk-…" />
-                </div>
-              {/snippet}
-            </Row>
-            <Row label="Model" hint={PP_MODEL_HINTS[cfg.ppProvider] || ''}>
-              {#snippet children()}
-                <div class="pp-field">
-                  <Input bind:value={cfg.ppModel} disabled={!cfg.postProcessEnabled} placeholder="llama-3.1-8b-instant" />
-                </div>
-              {/snippet}
-            </Row>
+            {#if cfg.ppProvider !== 'ondevice'}
+              <Row label="Base URL" hint="OpenAI-compatible endpoint">
+                {#snippet children()}
+                  <div class="pp-field">
+                    <Input bind:value={cfg.ppBaseUrl} disabled={!cfg.postProcessEnabled} placeholder="https://api.groq.com/openai/v1" />
+                  </div>
+                {/snippet}
+              </Row>
+              <Row label="API key" hint="Stored locally; not needed for Local providers">
+                {#snippet children()}
+                  <div class="pp-field">
+                    <Input type="password" bind:value={cfg.ppApiKey} disabled={!cfg.postProcessEnabled} placeholder="sk-…" />
+                  </div>
+                {/snippet}
+              </Row>
+              <Row label="Model" hint={PP_MODEL_HINTS[cfg.ppProvider] || ''}>
+                {#snippet children()}
+                  <div class="pp-field">
+                    <Input bind:value={cfg.ppModel} disabled={!cfg.postProcessEnabled} placeholder="llama-3.1-8b-instant" />
+                  </div>
+                {/snippet}
+              </Row>
+            {:else}
+              <Row label="On-device model" hint="Qwen2.5 1.5B · runs on your PC · nothing leaves your machine">
+                {#snippet children()}
+                  <div class="pp-field ondevice">
+                    {#if localLlm.running}
+                      <span class="ondevice-ok">● Ready — running locally</span>
+                    {:else if localLlm.installed}
+                      <span class="ondevice-ok">✓ Installed — starts on next launch</span>
+                    {:else if localInstalling}
+                      <div class="ondevice-dl">
+                        Downloading {localProgress.stage || 'files'}… {localProgress.percent}%
+                        <div class="ondevice-bar"><span style="width:{localProgress.percent}%"></span></div>
+                      </div>
+                    {:else}
+                      <button class="ondevice-btn" onclick={installLocalLlm} disabled={!cfg.postProcessEnabled}>
+                        Download &amp; enable (~1.3 GB)
+                      </button>
+                    {/if}
+                    {#if localError}<span class="ondevice-err">{localError}</span>{/if}
+                  </div>
+                {/snippet}
+              </Row>
+            {/if}
             <Row label="Preset" hint="Tone & formatting for the cleanup">
               <Select
                 bind:value={cfg.ppPreset}
@@ -1617,6 +1679,50 @@
   .pp-field {
     width: 260px;
     max-width: 260px;
+  }
+  .pp-field.ondevice {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .ondevice-ok {
+    color: #34d399;
+    font-weight: 500;
+  }
+  .ondevice-btn {
+    padding: 7px 12px;
+    border: 1px solid var(--accent, #3b82f6);
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--accent, #3b82f6) 15%, transparent);
+    color: var(--accent, #3b82f6);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .ondevice-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .ondevice-dl {
+    color: var(--muted, #9ca3af);
+  }
+  .ondevice-bar {
+    margin-top: 4px;
+    height: 5px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+  }
+  .ondevice-bar span {
+    display: block;
+    height: 100%;
+    background: var(--accent, #3b82f6);
+    transition: width 0.2s ease;
+  }
+  .ondevice-err {
+    color: #fca5a5;
+    font-size: 12px;
   }
   .pp-prompt {
     width: 100%;

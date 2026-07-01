@@ -11,11 +11,13 @@
 //! This module owns the process lifecycle: spawn (hidden), wait for `/health`,
 //! expose the base URL, and kill on stop/exit.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
+
+use tauri::{AppHandle, Emitter};
 
 /// Provider id (in `YapConfig::pp_provider`) that selects the managed sidecar.
 pub const PROVIDER_ONDEVICE: &str = "ondevice";
@@ -25,8 +27,21 @@ pub const PROVIDER_ONDEVICE: &str = "ondevice";
 pub const LOCAL_MODEL: &str = "qwen2.5-1.5b-instruct";
 
 /// The GGUF the sidecar loads (downloaded on demand). Qwen2.5-1.5B-Instruct
-/// Q4_K_M — Apache-2.0, ~1.1 GB, strong instruction-following for its size.
+/// Q4_K_M — Apache-2.0, ~1.04 GB, strong instruction-following for its size.
 pub const MODEL_FILENAME: &str = "qwen2.5-1.5b-instruct-q4_k_m.gguf";
+
+/// Download source + pinned SHA-256 for the GGUF cleanup model (HuggingFace).
+const MODEL_URL: &str =
+    "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf";
+const MODEL_SHA256: &str = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e";
+
+/// Download source + pinned SHA-256 for the llamafile runtime (v0.10.3, full
+/// build — bundles the GPU backends so it works on a clean machine with no dev
+/// tools; CPU fallback guaranteed). It's an Actually-Portable-Executable that
+/// runs on Windows when saved with a `.exe` name.
+const RUNTIME_URL: &str =
+    "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.10.3/llamafile-0.10.3";
+const RUNTIME_SHA256: &str = "e6d4041a82ca37cee15aab62e6826d7a61c6a3ea83bca68387958970df250883";
 
 /// The llamafile runtime executable name on disk.
 #[cfg(windows)]
@@ -213,5 +228,135 @@ pub async fn autostart_if_configured(cfg: &crate::config::YapConfig) {
             tracing::warn!("On-device cleanup sidecar failed to start: {}", e);
         }
     }
+}
+
+/// Progress event payload for the on-device install (`local-llm-download-progress`).
+#[derive(serde::Serialize, Clone)]
+struct DownloadProgress {
+    /// "runtime" (the llamafile engine) or "model" (the GGUF).
+    stage: &'static str,
+    percent: u8,
+    downloaded_mb: f64,
+    total_mb: f64,
+}
+
+/// Download the runtime + model (whichever are missing), each SHA-verified, into
+/// `<data_dir>/llm/`. Idempotent — already-present files are skipped. Emits
+/// `local-llm-download-progress` so the UI can show a bar per stage.
+pub async fn install(app: Option<&AppHandle>) -> Result<(), String> {
+    tokio::fs::create_dir_all(llm_dir())
+        .await
+        .map_err(|e| format!("failed to create llm dir: {}", e))?;
+
+    if !runtime_path().is_file() {
+        download_verified(RUNTIME_URL, &runtime_path(), RUNTIME_SHA256, "runtime", app).await?;
+        // On Unix the runtime needs the executable bit (Windows infers from .exe).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(runtime_path()) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o755);
+                let _ = std::fs::set_permissions(runtime_path(), perms);
+            }
+        }
+    }
+    if !model_path().is_file() {
+        download_verified(MODEL_URL, &model_path(), MODEL_SHA256, "model", app).await?;
+    }
+    Ok(())
+}
+
+/// Stream `url` → `dest.partial`, emit progress, verify SHA-256, then rename into
+/// place. A verification failure deletes the partial and errors (safe: a corrupt
+/// download can never be used).
+async fn download_verified(
+    url: &str,
+    dest: &Path,
+    expected_sha: &str,
+    stage: &'static str,
+    app: Option<&AppHandle>,
+) -> Result<(), String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let partial = dest.with_extension("partial");
+    tracing::info!(url, dest = %dest.display(), stage, "Downloading on-device cleanup asset");
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {} from {}", resp.status(), url));
+    }
+    let total = resp.content_length();
+
+    let mut file = tokio::fs::File::create(&partial)
+        .await
+        .map_err(|e| format!("create temp file: {}", e))?;
+    let mut downloaded: u64 = 0;
+    let mut last_pct: u8 = 0;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("download stream error: {}", e))?;
+        file.write_all(&chunk).await.map_err(|e| format!("write: {}", e))?;
+        downloaded += chunk.len() as u64;
+        if let (Some(total), Some(app)) = (total, app) {
+            let pct = ((downloaded as f64 / total as f64) * 100.0) as u8;
+            if pct >= last_pct + 2 {
+                last_pct = pct;
+                let _ = app.emit(
+                    "local-llm-download-progress",
+                    DownloadProgress {
+                        stage,
+                        percent: pct,
+                        downloaded_mb: downloaded as f64 / 1_048_576.0,
+                        total_mb: total as f64 / 1_048_576.0,
+                    },
+                );
+            }
+        }
+    }
+    file.flush().await.map_err(|e| format!("flush: {}", e))?;
+    drop(file);
+
+    // Verify SHA-256 on a blocking thread (files are hundreds of MB to ~1 GB).
+    let verify_path = partial.clone();
+    let expected = expected_sha.to_string();
+    let ok = tokio::task::spawn_blocking(move || match compute_sha256(&verify_path) {
+        Ok(actual) => actual == expected,
+        Err(_) => false,
+    })
+    .await
+    .map_err(|e| format!("sha task panicked: {}", e))?;
+    if !ok {
+        let _ = tokio::fs::remove_file(&partial).await;
+        return Err(format!("{} verification failed (corrupt download) — retry", stage));
+    }
+
+    tokio::fs::rename(&partial, dest)
+        .await
+        .map_err(|e| format!("rename: {}", e))?;
+    Ok(())
+}
+
+/// SHA-256 of a file, streamed so large models don't load into memory.
+fn compute_sha256(path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
