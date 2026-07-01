@@ -147,9 +147,19 @@ pub async fn start() -> Result<String, String> {
 
     let port = find_free_port().ok_or_else(|| "no free localhost port".to_string())?;
 
+    // Capture the server's output to a log so startup failures are diagnosable
+    // (an invalid `--nobrowser` flag silently killing it is exactly how we'd
+    // otherwise be blind). Best-effort — falls back to null if the file won't open.
+    let log = std::fs::File::create(llm_dir().join("llamafile.log")).ok();
+    let to_stdio = |f: Option<std::fs::File>| {
+        f.map(std::process::Stdio::from)
+            .unwrap_or_else(std::process::Stdio::null)
+    };
+
     let mut cmd = std::process::Command::new(&exe);
+    // `--server` = OpenAI-compatible HTTP API only (no browser UI, no --nobrowser
+    // flag needed — and that flag is invalid in llamafile 0.10.3).
     cmd.arg("--server")
-        .arg("--nobrowser")
         .arg("--host")
         .arg("127.0.0.1")
         .arg("--port")
@@ -157,12 +167,12 @@ pub async fn start() -> Result<String, String> {
         .arg("-m")
         .arg(&model)
         .arg("-ngl")
-        .arg("999") // offload all layers to GPU; llamafile falls back to CPU
+        .arg("999") // offload all layers to GPU; auto-falls back to CPU
         .arg("-c")
         .arg("2048") // small context — cleanup inputs are short
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+        .stdout(to_stdio(log.as_ref().and_then(|f| f.try_clone().ok())))
+        .stderr(to_stdio(log.and_then(|f| f.try_clone().ok())));
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
