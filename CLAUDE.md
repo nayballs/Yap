@@ -228,6 +228,27 @@ two channels don't cross. Both channels sign with the **same** minisign key
 (`TAURI_SIGNING_PRIVATE_KEY`) — the pubkey in `tauri.conf.json` must match it or
 installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 
+#### How to run / cut a nightly (it's all CI — no local build needed)
+- **Trigger a nightly now:** `gh workflow run nightly.yml --repo nayballs/Yap`
+  (otherwise it fires on the 05:00-UTC cron). Then find the run:
+  `gh run list --workflow=nightly.yml --repo nayballs/Yap --limit 1`
+- **Watch it to completion:** `gh run watch <run-id> --repo nayballs/Yap --exit-status`
+  (build ≈ 15 min — installs the Vulkan SDK, compiles whisper.cpp + Vulkan).
+- **Verify it published:**
+  `curl -sL https://github.com/nayballs/Yap/releases/download/nightly/latest.json`
+  → the `version` field should be the new `0.1.0-nightly.<N>`.
+- **Get it on this machine:** in the app, **Settings → Check for updates** (an installed
+  nightly auto-follows the nightly channel — no reinstall). First-time install:
+  grab `Yap-nightly-setup.exe` from https://github.com/nayballs/Yap/releases/tag/nightly.
+- **If a nightly build fails:** `gh run view <run-id> --repo nayballs/Yap --log-failed`.
+- **Run from SOURCE instead (live dev, no release):** from the project folder run
+  **`scripts\dev.bat`** (= `npm run tauri dev -- --features engines`). Hot-reloads the
+  frontend on every edit. Needs the **Vulkan SDK** installed locally
+  (https://vulkan.lunarg.com) so the `whisper-vulkan` backend compiles; the commented
+  line in `dev.bat` switches to the fast no-GPU stub if you don't have it.
+- **Requires** the `TAURI_SIGNING_PRIVATE_KEY` GitHub secret (already set). If that key
+  ever has a password, also add `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+
 ---
 
 ## Config & data
