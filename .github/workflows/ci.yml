@@ -1,0 +1,49 @@
+# Fast sanity checks on EVERY push/PR so a broken commit can never reach a
+# nightly. This intentionally builds the STUB (no `--features engines`): no
+# Vulkan SDK, no whisper/ONNX compile — it verifies all of Yap's own Rust and
+# the frontend in a few minutes. The real GPU pipeline is exercised by the
+# nightly + release builds (which is where its failures are meaningful).
+name: "CI"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push supersedes an in-flight run of the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Also produces dist/, which tauri's generate_context! requires to exist
+      # before the Rust side can compile — keep this BEFORE cargo check.
+      - name: Build frontend
+        run: npm run build
+
+      - name: Cargo check (stub build)
+        working-directory: src-tauri
+        run: cargo check --locked

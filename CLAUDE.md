@@ -203,6 +203,23 @@ npm run tauri dev
 > and restarting that `.exe` changes nothing. For live frontend changes use dev
 > (Vite on :1430). If :1430 isn't listening, you're looking at a release build.
 
+### CI on every push
+`.github/workflows/ci.yml` runs on every push/PR to `main`: `npm run build` (frontend,
+also produces the `dist/` that `generate_context!` needs) + `cargo check --locked` on
+the fast **stub** build (no `engines`, no Vulkan SDK) — a few minutes on a Windows
+runner, so a broken commit can never reach a nightly. The real GPU pipeline is only
+exercised by nightly/release builds.
+
+### The dev → nightly → stable workflow
+1. **Iterate in dev** (`scripts\dev.bat`): Vite hot-reloads `src/` edits instantly;
+   Rust edits need a restart/recompile. Verify UI/behaviour changes HERE — never
+   burn a 15-min nightly to check something dev shows in seconds.
+2. **Push to main** — CI (above) sanity-checks every push.
+3. **Nightly** — cut on demand (or let the 05:00 UTC cron) once a batch of changes
+   is worth dogfooding on the real installed app; nightlies catch installer/updater/
+   release-build issues, not CSS tweaks.
+4. **Stable** — tag `v*` deliberately for curated milestones.
+
 ### Release / installer
 Tagging `v*` (or running the **release** GitHub Action) builds via `tauri-action`
 with `--features engines`, producing a custom **NSIS installer** (normal/portable,
