@@ -132,10 +132,12 @@ presets, signing, history, and reach — see the phases below (✅ = done).
       hidden base the user can't delete; the editable body holds tone/format. Stops
       users from accidentally breaking refusal behaviour when they customise.
       (`llm::BASE_PROMPT` + `build_system_prompt()`; body = `config.pp_prompt`.)
-- [~] **Richer cleanup rules** in the base: self-corrections ("buy milk no wait
-      buy water" → "Buy water."), spoken→digit numbers, spoken punctuation/emoji,
-      preserve meaning/language. (Self-corrections + preserve-meaning/language are
-      in `BASE_PROMPT`; spoken→digits and spoken punctuation/emoji still TODO.)
+- [x] **Richer cleanup rules** in the base: self-corrections ("buy milk no wait
+      buy water" → "Buy water."), **spoken→digit numbers/dates/times**, **spoken
+      punctuation/layout** ("period"/"comma"/"new line" → symbols, only when clearly
+      dictated as commands), preserve meaning/language. In `llm::cleanup`'s always-
+      applied instruction + a one-shot example (leaves "period" as a noun alone).
+      (Spoken emoji not added — noisy; can revisit.)
 - [x] **Cleanup presets** (Default / Email / Notes / Slack / Code tone modes) —
       each a named body; pick from a dropdown (`config.pp_preset` + editable
       `pp_prompt`). Foundation for per-app auto-switching (Phase 4).
