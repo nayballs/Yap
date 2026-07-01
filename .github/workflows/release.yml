@@ -9,10 +9,11 @@ name: "Release"
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  password for that key (empty string if none)
 #   GITHUB_TOKEN                        provided automatically by Actions
 #
-# NOT configured yet (the installer ships UNSIGNED for now): Authenticode /
-# Azure Trusted Signing. When the user has an Azure cert, add
-#   bundle.windows.signCommand in tauri.conf.json + the AZURE_* secrets, and
-#   uncomment them in the env block below.
+# NOT configured yet (the installer ships UNSIGNED for now): Authenticode.
+# Planned via **SignPath Foundation** (free for OSS) — see docs/SIGNING.md for
+# the full setup, incl. the auto-updater signing-order handling. When the
+# SignPath account is approved, add the SIGNPATH_API_TOKEN secret and the
+# sign-then-updater steps from that doc.
 
 on:
   workflow_dispatch:
@@ -70,11 +71,11 @@ jobs:
           # the in-app updater accepts the artifact.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Authenticode (Azure Trusted Signing) — add later. Uncomment + set the
-          # AZURE_* secrets and bundle.windows.signCommand in tauri.conf.json.
-          # AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          # AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          # AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          # Authenticode (SignPath Foundation, free OSS) — added once the account
+          # is approved. Per docs/SIGNING.md the installer is signed AFTER build
+          # and the updater signature is regenerated over the signed installer,
+          # so this becomes a separate post-build step (not an env var here).
+          # Secret required: SIGNPATH_API_TOKEN.
           # Disable -march=native / SIMD above SSE4.2 for the broadest CPU
           # compatibility — whisper.cpp CPU inference otherwise SIGILLs on old
           # CPUs lacking AVX/FMA. The default model (Parakeet V3) runs on ONNX +

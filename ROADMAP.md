@@ -199,18 +199,14 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 ### Phase 5 — Trust, polish & distribution
 - [x] **Installer** (custom NSIS: normal/portable + WebView2 bootstrap), **auto-update**
       (`tauri-plugin-updater` → GitHub Releases), **portable mode**, **release CI**.
-- [ ] **Authenticode sign the installer** (until then Windows SmartScreen warns on
-      first run). Updater artifacts already minisign-signed. Plan:
-      - **Needs a code-signing certificate** (user action): either an **OV cert**
-        (cheap, but SmartScreen reputation builds over time/downloads) or an **EV
-        cert** (instant SmartScreen trust, pricier, usually HSM/USB-token). Store as
-        GitHub secrets: `WINDOWS_CERT` (base64 .pfx) + `WINDOWS_CERT_PASSWORD`, or a
-        cloud-KMS/Azure-Trusted-Signing setup for EV.
-      - **Wire `signCommand`** in `tauri.conf.json` (the slot is already reserved) to
-        `signtool sign /fd sha256 /tr <timestamp-url> /td sha256 …` so `tauri build`
-        signs the NSIS installer + the exe.
-      - **CI**: decode the secret in the release workflow before `tauri-action`; keep
-        it gated so unsigned dev builds still work without the secret.
+- [~] **Authenticode sign the installer** via **SignPath Foundation** (free for OSS)
+      — until then Windows SmartScreen warns on first run. Updater artifacts already
+      minisign-signed. Full setup + CI plan in [`docs/SIGNING.md`](./docs/SIGNING.md).
+      Status: guide + release-workflow notes landed; **blocked on the SignPath account
+      application/approval (user action)**, then we wire + test the sign→updater steps
+      on a tag. Key subtlety documented: Authenticode must be applied **before** the
+      minisign updater signature is computed, or auto-update breaks. (Paid fallbacks:
+      Certum OSS ~£10–30/yr inline `signCommand`; Azure Trusted Signing ~$10/mo.)
 - [x] Crisp recording indicator (overlay + waveform), great defaults, hidden power
       features, first-run onboarding.
 - [ ] Verify low idle CPU/RAM; reliable injection into every field.
