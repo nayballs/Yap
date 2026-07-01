@@ -169,7 +169,11 @@ pub fn get_config() -> YapConfig {
 
 /// Save config, re-apply the hotkey, and push it into the running pipeline.
 #[tauri::command]
-pub fn save_config(state: State<'_, AppState>, cfg: YapConfig) -> Result<(), String> {
+pub fn save_config(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    cfg: YapConfig,
+) -> Result<(), String> {
     config::save(&cfg)?;
     if let Err(e) = crate::input_hook::configure_dictation(&cfg.hotkey) {
         tracing::warn!("Failed to apply hotkey: {}", e);
@@ -177,6 +181,9 @@ pub fn save_config(state: State<'_, AppState>, cfg: YapConfig) -> Result<(), Str
     if let Err(e) = crate::input_hook::configure_edit(&cfg.edit_hotkey) {
         tracing::warn!("Failed to apply edit hotkey: {}", e);
     }
+    // Tray visibility can change with this save (show_tray_icon / show_pill) —
+    // reconcile it live instead of waiting for the next app restart.
+    crate::tray::ensure_tray(&app, &cfg);
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.update_config(cfg);

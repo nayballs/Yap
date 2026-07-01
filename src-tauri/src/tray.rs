@@ -9,13 +9,36 @@
 //!
 //! The tray is rebuilt on every `yap-state` change via [`update_tray`].
 
+use std::sync::Mutex;
+
 use crate::config;
 use crate::stt;
 use crate::AppState;
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Wry};
+
+/// Stable tray id — the app-registry key used by `tray_by_id`/`remove_tray_by_id`.
+const TRAY_ID: &str = "yap-tray";
+
+/// Long-lived tray menus, swapped on state change instead of rebuilt.
+/// Rebuilding native menus on EVERY `yap-state` event (the old behaviour)
+/// churned thousands of Win32 menu/icon handles over a long session, which is
+/// exactly what makes the Windows notification area glitch or drop the icon.
+struct MenuCache {
+    /// Idle menu (model submenu). Rebuilt only when `idle_key` changes.
+    idle: Menu<Wry>,
+    /// Recording/processing menu (Cancel).
+    recording: Menu<Wry>,
+    /// What the idle menu was built from: active model + installed set.
+    idle_key: String,
+    /// Which of the two menus is currently installed on the tray.
+    showing_recording: bool,
+}
+
+static MENUS: Mutex<Option<MenuCache>> = Mutex::new(None);
+static LAST_ICON_STATE: Mutex<String> = Mutex::new(String::new());
 
 fn tooltip() -> String {
     format!("Yap v{}", env!("CARGO_PKG_VERSION"))
@@ -27,10 +50,10 @@ fn tooltip() -> String {
 /// 128px so Windows can scale it down crisply.
 fn state_icon(state: &str) -> Image<'static> {
     let (br, bg, bb) = match state {
-        "recording" => (239.0f32, 68.0, 68.0),     // red
-        "processing" => (245.0f32, 158.0, 11.0),   // amber
+        "recording" => (239.0f32, 68.0, 68.0), // red
+        "processing" | "processing-slow" => (245.0f32, 158.0, 11.0), // amber
         "needs-model" => (156.0f32, 163.0, 175.0), // grey
-        _ => (251.0f32, 191.0, 36.0),              // yellow (idle)
+        _ => (251.0f32, 191.0, 36.0),           // yellow (idle)
     };
     let size: i32 = 128;
     let mut rgba = vec![0u8; (size * size * 4) as usize];
@@ -108,7 +131,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     let quit = MenuItem::with_id(app, "quit", "Quit Yap", true, quit_accel)?;
     let sep = || PredefinedMenuItem::separator(app);
 
-    let recording = matches!(state, "recording" | "processing");
+    let recording = matches!(state, "recording" | "processing" | "processing-slow");
 
     if recording {
         let cancel = MenuItem::with_id(app, "cancel", "Cancel", true, None::<&str>)?;
@@ -242,10 +265,23 @@ fn on_menu_event(app: &AppHandle, id: &str) {
     }
 }
 
-/// Build the tray icon and install it. Call once at startup.
+/// The active model + installed set the idle menu depends on. When this
+/// changes (model switched/downloaded/deleted) the idle menu is stale.
+fn idle_menu_key() -> String {
+    let data_dir = config::data_dir();
+    let installed: Vec<&str> = stt::all_model_ids()
+        .into_iter()
+        .filter(|id| stt::is_model_installed(&data_dir, id))
+        .collect();
+    format!("{}|{}", config::load().model_size, installed.join(","))
+}
+
+/// Build the tray icon and install it. The app keeps the tray in its registry
+/// (`tray_by_id(TRAY_ID)`); we deliberately do NOT also stash it in managed
+/// state, so `ensure_tray` can remove and rebuild it at runtime.
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app, "idle")?;
-    let tray = TrayIconBuilder::with_id("yap-tray")
+    TrayIconBuilder::with_id(TRAY_ID)
         .icon(state_icon("idle"))
         .tooltip(tooltip())
         .menu(&menu)
@@ -263,19 +299,89 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             }
         })
         .build(app)?;
-    app.manage(tray);
     Ok(())
 }
 
-/// Update the tray icon + menu for a new state. No-op if the tray wasn't built.
+/// Reconcile the tray with the current config: build it when it should exist
+/// (tray enabled, OR pill hidden — else Settings would be unreachable), remove
+/// it when it shouldn't. Called at startup AND from save_config — before that,
+/// the tray only ever reflected the config at LAUNCH, so toggling "show tray
+/// icon" (or hiding the pill) mid-session left the icon missing (or lingering)
+/// until the next restart.
+pub fn ensure_tray(app: &AppHandle, cfg: &config::YapConfig) {
+    let desired = cfg.show_tray_icon || !cfg.show_pill;
+    let exists = app.tray_by_id(TRAY_ID).is_some();
+    if desired && !exists {
+        // Fresh tray → the cached menus/icon-state belong to the old one.
+        *MENUS.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        LAST_ICON_STATE
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clear();
+        if let Err(e) = build_tray(app) {
+            tracing::warn!("Failed to build tray: {}", e);
+        }
+    } else if !desired && exists {
+        app.remove_tray_by_id(TRAY_ID);
+    }
+}
+
+/// Update the tray icon + menu for a new state. No-op if the tray isn't built.
+/// Cheap by design: the icon is only re-rendered when the state actually
+/// changed, and the two menus are cached and swapped — a full native-menu
+/// rebuild happens only when the model list/selection changes.
 pub fn update_tray(app: &AppHandle, state: &str) {
-    if app.try_state::<TrayIcon>().is_none() {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
+    };
+
+    // Icon: `yap-state` repeats states; only touch the tray when it changed.
+    {
+        let mut last = LAST_ICON_STATE.lock().unwrap_or_else(|p| p.into_inner());
+        if *last != state {
+            let _ = tray.set_icon(Some(state_icon(state)));
+            *last = state.to_string();
+        }
     }
-    let tray = app.state::<TrayIcon>();
-    let _ = tray.set_icon(Some(state_icon(state)));
-    if let Ok(menu) = build_menu(app, state) {
+
+    let recording = matches!(state, "recording" | "processing" | "processing-slow");
+    let mut guard = MENUS.lock().unwrap_or_else(|p| p.into_inner());
+
+    if guard.is_none() {
+        match (build_menu(app, "idle"), build_menu(app, "recording")) {
+            (Ok(idle), Ok(rec)) => {
+                *guard = Some(MenuCache {
+                    idle,
+                    recording: rec,
+                    idle_key: idle_menu_key(),
+                    // Force the install below by claiming the opposite menu.
+                    showing_recording: !recording,
+                });
+            }
+            _ => return,
+        }
+    }
+    let cache = guard.as_mut().expect("just initialised");
+
+    // Stale idle menu (model switched/downloaded/deleted) → rebuild it once.
+    if !recording {
+        let key = idle_menu_key();
+        if cache.idle_key != key {
+            if let Ok(menu) = build_menu(app, "idle") {
+                cache.idle = menu;
+                cache.idle_key = key;
+                cache.showing_recording = true; // force reinstall below
+            }
+        }
+    }
+
+    if cache.showing_recording != recording {
+        let menu = if recording {
+            cache.recording.clone()
+        } else {
+            cache.idle.clone()
+        };
         let _ = tray.set_menu(Some(menu));
+        cache.showing_recording = recording;
     }
-    let _ = tray.set_tooltip(Some(tooltip()));
 }

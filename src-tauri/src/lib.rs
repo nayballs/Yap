@@ -320,11 +320,7 @@ pub fn run() {
             // System tray (Handy-style: state-aware icon + model submenu).
             // Built when the user wants it, OR whenever the pill is hidden —
             // otherwise there'd be no way to reach Settings (no pill gear).
-            if cfg.show_tray_icon || !cfg.show_pill {
-                if let Err(e) = tray::build_tray(app.handle()) {
-                    tracing::warn!("Failed to build tray: {}", e);
-                }
-            }
+            tray::ensure_tray(app.handle(), &cfg);
 
             // Reconcile OS autostart state with the saved config.
             // Only touch OS autostart when the desired state differs from the
