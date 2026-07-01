@@ -42,12 +42,15 @@
 
   // AI cleanup provider presets. Selecting one fills in the base URL; "custom"
   // leaves it editable. The backend only ever uses ppBaseUrl.
+  // NOTE: `value` ids are persisted in config.json and matched by the backend
+  // ("ondevice" = local_llm::PROVIDER_ONDEVICE) — never change them. Labels are
+  // display-only and safe to reword.
   const PP_PROVIDERS = [
-    { value: 'ondevice', label: 'On-device (private · no cloud)', baseUrl: null },
+    { value: 'ondevice', label: 'Built-in local AI (private · no cloud)', baseUrl: null },
     { value: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1' },
     { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
     { value: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1' },
-    { value: 'local', label: 'Local (Ollama · LM Studio)', baseUrl: 'http://localhost:11434/v1' },
+    { value: 'local', label: 'My own server (Ollama · LM Studio)', baseUrl: 'http://localhost:11434/v1' },
     { value: 'custom', label: 'Custom', baseUrl: null },
   ];
 
@@ -1008,7 +1011,7 @@
                 {/snippet}
               </Row>
             {:else}
-              <Row label="On-device model" hint={`${localLlm.model} · runs on your PC via ${localLlm.engine} · nothing leaves your machine`}>
+              <Row label="Built-in model" hint={`${localLlm.model} · runs on your PC via ${localLlm.engine} · nothing leaves your machine`}>
                 {#snippet children()}
                   <div class="pp-field ondevice">
                     {#if localSwitching}
@@ -1194,7 +1197,21 @@
             <Group title="Usage today">
               <Row>
                 {#snippet children()}
-                  {#if cfg.ppProvider === 'local'}
+                  {#if cfg.ppProvider === 'ondevice'}
+                    <div class="usage">
+                      <div class="usage-raw">
+                        <span class="usage-label">Tokens today</span>
+                        <span class="usage-stat">{fmtK(usage.tokens)}</span>
+                      </div>
+                      <div class="usage-raw">
+                        <span class="usage-label">Cleanups today</span>
+                        <span class="usage-stat">{usage.requests}</span>
+                      </div>
+                      <p class="usage-caption">
+                        Processed entirely on this PC — free, no limits, nothing leaves your machine.
+                      </p>
+                    </div>
+                  {:else if cfg.ppProvider === 'local'}
                     <p class="usage-note">Running locally — no usage limits.</p>
                   {:else if cfg.ppProvider === 'groq'}
                     {@const tPct = pctOf(usage.tokens, usage.tokenCap)}
@@ -1247,8 +1264,16 @@
             <Row>
               {#snippet children()}
                 <p class="pp-privacy">
-                  Cleanup sends your transcript to the chosen endpoint. Use a Local
-                  provider (Ollama / LM Studio) to keep everything on-device.
+                  {#if cfg.ppProvider === 'ondevice'}
+                    Cleanup runs entirely on this PC (built-in local AI) — your
+                    transcript never leaves your machine.
+                  {:else if cfg.ppProvider === 'local'}
+                    Cleanup goes to your own local server (Ollama / LM Studio) —
+                    it stays on your machine.
+                  {:else}
+                    Cleanup sends your transcript to the chosen cloud endpoint.
+                    Choose "Built-in local AI" to keep everything on your machine.
+                  {/if}
                 </p>
               {/snippet}
             </Row>
