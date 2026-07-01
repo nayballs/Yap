@@ -249,9 +249,18 @@
     editHotkey: '',
   };
 
-  const APP_VERSION = '0.1.0';
+  // Real running version — read from Tauri, not hardcoded (was stuck at '0.1.0').
+  let APP_VERSION = $state('');
 
   onMount(async () => {
+    try {
+      if ('__TAURI_INTERNALS__' in window) {
+        const { getVersion } = await import('@tauri-apps/api/app');
+        APP_VERSION = await getVersion();
+      }
+    } catch {
+      /* not in Tauri — leave blank */
+    }
     const stored = await invoke('get_config');
     cfg = { ...FIELD_DEFAULTS, ...stored };
     if (!Array.isArray(cfg.dictionary)) cfg.dictionary = [];
@@ -860,7 +869,7 @@
           </Group>
           <Group title="Performance">
             <Row>
-              <Toggle bind:checked={cfg.useGpu} label="GPU acceleration" hint="Faster transcription on any GPU (whisper→Vulkan, ONNX→DirectML) — applies after restart" />
+              <Toggle bind:checked={cfg.useGpu} label="GPU acceleration (Whisper)" hint="Runs Whisper models on your GPU via Vulkan. ONNX models (Parakeet etc.) always use the GPU via DirectML. Applies after restart." />
             </Row>
             <Row label="Unload model when idle" hint="Free memory when not dictating; reloads on next use">
               <Select bind:value={cfg.modelUnloadTimeout} options={UNLOAD_TIMEOUTS} />

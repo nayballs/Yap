@@ -6,7 +6,7 @@
 //! DirectML-accelerated on Windows).
 //!
 //! Three layers live here:
-//! - A static **model registry** (`MODELS`) of the 16 supported models, ported
+//! - A static **model registry** (`MODELS`) of the 14 supported models, ported
 //!   from Handy. Each entry knows its on-disk filename (a `.bin` file or an
 //!   extracted directory), download URL, SHA-256, engine type, and UI metadata.
 //! - **Download / verify / extract** (`ensure_model_exists`): streams the model
@@ -93,7 +93,7 @@ struct ModelDescriptor {
 /// All model artifacts are served from this host (ported from Handy).
 const BASE_URL: &str = "https://blob.handy.computer/";
 
-/// The 16 supported models. The `id` values mirror `src/lib/models.js` on the
+/// The 14 supported models. The `id` values mirror `src/lib/models.js` on the
 /// frontend — they're what the UI passes as `model_size`/`modelSize`.
 const MODELS: &[ModelDescriptor] = &[
     // ── File-based Whisper models (.bin) ──
@@ -396,8 +396,10 @@ pub struct SttDownloadProgress {
 /// into place (file-based) or extracts the `.tar.gz` into `models/<name>/`
 /// (directory-based). Returns the final artifact path.
 ///
-/// Resume (HTTP Range) is intentionally not implemented yet — a fresh download
-/// runs each time the artifact is missing.
+/// Interrupted downloads RESUME from the leftover `.partial` via an HTTP Range
+/// request; if the server ignores/rejects it, we cleanly restart. The final
+/// SHA-256 check guarantees a bad resume can never produce a usable-but-wrong
+/// model (it just fails verification and re-downloads).
 pub async fn ensure_model_exists(
     data_dir: &Path,
     model_id: &str,
@@ -433,11 +435,36 @@ pub async fn ensure_model_exists(
     tracing::info!(url = %url, dest = %partial_path.display(), model = %model_id, "Downloading model");
 
     let client = reqwest::Client::new();
-    let resp = client
-        .get(&url)
-        .send()
+
+    // Resume: continue from any leftover ".partial" via an HTTP Range request.
+    let mut resume_from = tokio::fs::metadata(&partial_path)
         .await
-        .map_err(|e| SttError::DownloadError(format!("HTTP request failed: {}", e)))?;
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    let mut resp = {
+        let mut req = client.get(&url);
+        if resume_from > 0 {
+            req = req.header(reqwest::header::RANGE, format!("bytes={}-", resume_from));
+            tracing::info!(resume_from, model = %model_id, "Resuming interrupted download");
+        }
+        req.send()
+            .await
+            .map_err(|e| SttError::DownloadError(format!("HTTP request failed: {}", e)))?
+    };
+
+    // If the server rejected the Range (e.g. 416, or the partial is stale),
+    // throw the partial away and restart from scratch.
+    if resume_from > 0 && !resp.status().is_success() {
+        tracing::warn!(status = %resp.status(), "Resume rejected — restarting download");
+        let _ = tokio::fs::remove_file(&partial_path).await;
+        resume_from = 0;
+        resp = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| SttError::DownloadError(format!("HTTP request failed: {}", e)))?;
+    }
 
     if !resp.status().is_success() {
         return Err(SttError::DownloadError(format!(
@@ -447,17 +474,34 @@ pub async fn ensure_model_exists(
         )));
     }
 
-    let total_size = resp.content_length();
+    // 206 = server honoured the Range (append). Anything else (incl. a 200 that
+    // ignored the Range) → start fresh so we don't duplicate bytes.
+    let resuming = resume_from > 0 && resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+    let total_size = resp
+        .content_length()
+        .map(|len| if resuming { resume_from + len } else { len });
 
-    let mut file = tokio::fs::File::create(&partial_path)
-        .await
-        .map_err(|e| SttError::DownloadError(format!("Failed to create temp file: {}", e)))?;
+    let mut file = if resuming {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&partial_path)
+            .await
+            .map_err(|e| SttError::DownloadError(format!("Failed to open temp file: {}", e)))?
+    } else {
+        // File::create truncates any stale partial → clean full download.
+        tokio::fs::File::create(&partial_path)
+            .await
+            .map_err(|e| SttError::DownloadError(format!("Failed to create temp file: {}", e)))?
+    };
 
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
 
-    let mut downloaded: u64 = 0;
-    let mut last_progress: u8 = 0;
+    let mut downloaded: u64 = if resuming { resume_from } else { 0 };
+    let mut last_progress: u8 = match total_size {
+        Some(total) if total > 0 => ((downloaded as f64 / total as f64) * 100.0) as u8,
+        _ => 0,
+    };
     let mut stream = resp.bytes_stream();
 
     while let Some(chunk) = stream.next().await {

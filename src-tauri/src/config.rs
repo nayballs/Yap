@@ -387,16 +387,22 @@ impl YapConfig {
 
 /// Apply dictionary corrections to a transcription.
 ///
-/// Case-insensitive literal replacement. Uses a replacement closure so
-/// `$` in the target text is never treated as a regex backreference.
+/// Case-insensitive, WHOLE-WORD replacement. Word boundaries (`\b`) are added
+/// only where the term starts/ends with a word character, so `ai`→`AI` fires on
+/// "ai" but NOT inside "rain", while terms with punctuation (e.g. `.md`) still
+/// match. Uses a replacement closure so `$` in the target is never treated as a
+/// regex backreference.
 pub fn apply_dictionary(text: &str, dict: &[DictionaryEntry]) -> String {
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
     let mut out = text.to_string();
     for entry in dict {
         let from = entry.from.trim();
         if from.is_empty() {
             continue;
         }
-        let pattern = format!("(?i){}", regex::escape(from));
+        let lead = if from.chars().next().is_some_and(is_word) { "\\b" } else { "" };
+        let trail = if from.chars().last().is_some_and(is_word) { "\\b" } else { "" };
+        let pattern = format!("(?i){}{}{}", lead, regex::escape(from), trail);
         if let Ok(re) = regex::Regex::new(&pattern) {
             let to = entry.to.clone();
             out = re
@@ -405,4 +411,41 @@ pub fn apply_dictionary(text: &str, dict: &[DictionaryEntry]) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(from: &str, to: &str) -> DictionaryEntry {
+        DictionaryEntry {
+            from: from.to_string(),
+            to: to.to_string(),
+        }
+    }
+
+    #[test]
+    fn dictionary_matches_whole_words_only() {
+        let dict = vec![entry("ai", "AI")];
+        assert_eq!(apply_dictionary("ai is cool", &dict), "AI is cool");
+        assert_eq!(apply_dictionary("AI is cool", &dict), "AI is cool");
+        // The bug this fixes: must NOT rewrite inside another word.
+        assert_eq!(apply_dictionary("rain again", &dict), "rain again");
+    }
+
+    #[test]
+    fn dictionary_handles_terms_with_punctuation() {
+        let dict = vec![entry("cloud.md", "Claude.md")];
+        assert_eq!(
+            apply_dictionary("open cloud.md now", &dict),
+            "open Claude.md now"
+        );
+    }
+
+    #[test]
+    fn dictionary_target_dollar_is_literal() {
+        // `$` in the replacement must not be treated as a regex backreference.
+        let dict = vec![entry("price", "$5")];
+        assert_eq!(apply_dictionary("the price", &dict), "the $5");
+    }
 }

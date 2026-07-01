@@ -16,7 +16,7 @@ focused. Local-first, private, and free.
 - **Local multi-engine STT** via [`transcribe-rs`](https://crates.io/crates/transcribe-rs):
   Whisper on **Vulkan**, plus ONNX models (Parakeet, Moonshine, SenseVoice, GigaAM,
   Canary, Cohere) on **DirectML** — GPU-accelerated on any Windows GPU, no CUDA.
-- **16-model library** with in-app download (SHA-256 verified), switch, and delete.
+- **14-model library** with in-app download (SHA-256 verified), switch, and delete.
   Default model **Parakeet V3** (fast + accurate). Per-model language + translate.
 - **Optional AI cleanup** — an OpenAI-compatible pass (Groq / OpenAI / OpenRouter, or
   a **local** Ollama/LM Studio model) that fixes filler, punctuation, grammar, and

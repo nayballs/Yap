@@ -78,9 +78,9 @@ The category bifurcates cleanly:
 **Transcription is real and GPU-accelerated** (`cuda`/`engines` builds; the default
 no-feature build is still a fast stub for quick `cargo check`). Shipped and working:
 
-- **Multi-engine STT** via `transcribe-rs` — Whisper on **CUDA**, plus ONNX models
-  (Parakeet, Moonshine, SenseVoice, GigaAM, Canary, Cohere) on **DirectML**.
-- **16-model registry** + manager (download → SHA-256 → extract; switch/delete;
+- **Multi-engine STT** via `transcribe-rs` — Whisper on **Vulkan** (any GPU), plus
+  ONNX models (Parakeet, Moonshine, SenseVoice, GigaAM, Canary, Cohere) on **DirectML**.
+- **14-model registry** + manager (download → SHA-256 → extract; switch/delete;
   per-model language + translate). Default model **Parakeet V3**.
 - **AI cleanup layer** (Phase 2) — OpenAI-compatible (Groq / OpenAI / local Ollama),
   off by default, raw-fallback on error; + a live Groq usage meter.
@@ -98,8 +98,8 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 
 ### Phase 0 — Make it actually transcribe (foundation) — ✅ DONE
 - [x] Real inference via **`transcribe-rs`** (whisper.cpp + ONNX), not the stub.
-- [x] GPU path documented + wired: **Whisper→CUDA**, **ONNX→DirectML**; CPU fallback
-      via the `engines` feature. `CMAKE_CUDA_ARCHITECTURES=native` for the build.
+- [x] GPU path documented + wired: **Whisper→Vulkan** (any GPU), **ONNX→DirectML**;
+      CPU fallback via the `engines` feature. Vulkan SDK required at build time.
 - [x] End-to-end validated; default model **`parakeet-tdt-0.6b-v3`** (fast + accurate,
       GPU via DirectML); model download/extract/verify UX works.
 
@@ -119,7 +119,7 @@ presets, signing, history, and reach — see the phases below (✅ = done).
       skips a tick if a transcription is already running and never blocks the
       authoritative final pass. (Only Moonshine offers true token streaming in
       `transcribe-rs`, and we pulled it as broken, hence the re-transcribe approach.)
-      ⚠ Needs validation on the CUDA dev build before enabling by default.
+      ⚠ Needs validation on the GPU (Vulkan) build before enabling by default.
 
 ### Phase 2 — The differentiator: AI cleanup layer — ✅ DONE (v1)
 - [x] Optional post-processing pass (filler/grammar/punctuation/self-corrections),
