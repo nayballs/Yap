@@ -60,6 +60,18 @@ export const MODELS = [
     speed: 0.3,
   },
   {
+    id: 'distil-large-v3.5',
+    name: 'Distil Whisper v3.5',
+    engine: 'Whisper',
+    desc: 'Distilled Whisper Large v3 — near-large accuracy, much faster. English.',
+    sizeMb: 1449,
+    langLabel: 'English',
+    multilang: false,
+    translate: false,
+    accuracy: 0.8,
+    speed: 0.55,
+  },
+  {
     id: 'medium',
     name: 'Whisper Medium',
     engine: 'Whisper',

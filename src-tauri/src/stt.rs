@@ -137,6 +137,16 @@ const MODELS: &[ModelDescriptor] = &[
         is_directory: false,
         engine_type: EngineType::Whisper,
     },
+    // Fetched from HuggingFace (not blob.handy.computer) — the absolute URL is
+    // handled by resolve_model. distil-whisper GGML loads directly in whisper.cpp.
+    ModelDescriptor {
+        id: "distil-large-v3.5",
+        filename: "ggml-distil-large-v3.5.bin",
+        url: "https://huggingface.co/distil-whisper/distil-large-v3.5-ggml/resolve/main/ggml-model.bin",
+        sha256: "ec2498919b498c5f6b00041adb45650124b3cd9f26f545fffa8f5d11c28dcf26",
+        is_directory: false,
+        engine_type: EngineType::Whisper,
+    },
     // ── Directory-based ONNX models (.tar.gz → extracted dir) ──
     ModelDescriptor {
         id: "parakeet-tdt-0.6b-v2",
@@ -308,9 +318,16 @@ fn find_model(id: &str) -> Option<&'static ModelDescriptor> {
 /// filenames, anything else falls back to `<id>.bin`.
 fn resolve_model(id: &str) -> ResolvedModel {
     if let Some(d) = find_model(id) {
+        // Most artifacts live on BASE_URL, but a few (e.g. distil-whisper GGML)
+        // are fetched straight from their HuggingFace repo — allow absolute URLs.
+        let url = if d.url.starts_with("http://") || d.url.starts_with("https://") {
+            d.url.to_string()
+        } else {
+            format!("{}{}", BASE_URL, d.url)
+        };
         return ResolvedModel {
             filename: d.filename.to_string(),
-            url: Some(format!("{}{}", BASE_URL, d.url)),
+            url: Some(url),
             sha256: Some(d.sha256.to_string()),
             is_directory: d.is_directory,
             engine_type: d.engine_type,
@@ -1080,8 +1097,8 @@ mod tests {
 
     #[test]
     fn registry_has_expected_models() {
-        // 13 after the broken streaming Moonshine models were removed (c7f2351).
-        assert_eq!(MODELS.len(), 13);
+        // 14: 13 base + distil-large-v3.5 (fetched from HuggingFace).
+        assert_eq!(MODELS.len(), 14);
         // The default model must always be present and resolvable.
         assert!(MODELS.iter().any(|m| m.id == "parakeet-tdt-0.6b-v3"));
     }
