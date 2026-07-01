@@ -1197,22 +1197,35 @@
             <Group title="Usage today">
               <Row>
                 {#snippet children()}
+                  {@const prov = usage.providers?.[cfg.ppProvider] ?? { tokens: 0, requests: 0 }}
                   {#if cfg.ppProvider === 'ondevice'}
                     <div class="usage">
                       <div class="usage-raw">
                         <span class="usage-label">Tokens today</span>
-                        <span class="usage-stat">{fmtK(usage.tokens)}</span>
+                        <span class="usage-stat">{fmtK(prov.tokens)}</span>
                       </div>
                       <div class="usage-raw">
                         <span class="usage-label">Cleanups today</span>
-                        <span class="usage-stat">{usage.requests}</span>
+                        <span class="usage-stat">{prov.requests}</span>
                       </div>
                       <p class="usage-caption">
-                        Processed entirely on this PC — free, no limits, nothing leaves your machine.
+                        The built-in local AI only — processed entirely on this PC, free, no limits.
                       </p>
                     </div>
                   {:else if cfg.ppProvider === 'local'}
-                    <p class="usage-note">Running locally — no usage limits.</p>
+                    <div class="usage">
+                      <div class="usage-raw">
+                        <span class="usage-label">Tokens today</span>
+                        <span class="usage-stat">{fmtK(prov.tokens)}</span>
+                      </div>
+                      <div class="usage-raw">
+                        <span class="usage-label">Cleanups today</span>
+                        <span class="usage-stat">{prov.requests}</span>
+                      </div>
+                      <p class="usage-caption">
+                        Your own local server only — no usage limits.
+                      </p>
+                    </div>
                   {:else if cfg.ppProvider === 'groq'}
                     {@const tPct = pctOf(usage.tokens, usage.tokenCap)}
                     {@const rPct = pctOf(usage.requests, usage.requestCap)}
@@ -1246,13 +1259,15 @@
                     <div class="usage">
                       <div class="usage-raw">
                         <span class="usage-label">Tokens today</span>
-                        <span class="usage-stat">{fmtK(usage.tokens)}</span>
+                        <span class="usage-stat">{fmtK(prov.tokens)}</span>
                       </div>
                       <div class="usage-raw">
                         <span class="usage-label">Requests today</span>
-                        <span class="usage-stat">{usage.requests}</span>
+                        <span class="usage-stat">{prov.requests}</span>
                       </div>
-                      <p class="usage-caption">Counts Yap's own cleanup calls. Resets at midnight UTC.</p>
+                      <p class="usage-caption">
+                        This provider only — counts Yap's own cleanup calls. Resets at midnight UTC.
+                      </p>
                     </div>
                   {/if}
                 {/snippet}

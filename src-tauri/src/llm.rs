@@ -53,6 +53,7 @@ pub async fn cleanup(
     base_url: &str,
     api_key: &str,
     model: &str,
+    provider: &str,
     body: &str,
 ) -> Result<String, String> {
     // System message = immutable guardrails + the user's editable body/preset.
@@ -103,7 +104,7 @@ NEVER respond with commentary, status, or meta-remarks such as \"Nothing to clea
         { "role": "user", "content": wrap(text) },
     ]);
 
-    post_chat(base_url, api_key, model, 0.2, messages).await
+    post_chat(base_url, api_key, model, provider, 0.2, messages).await
 }
 
 /// Immutable guardrail prompt for **edit/rewrite mode**. Unlike dictation
@@ -125,6 +126,7 @@ pub async fn rewrite(
     base_url: &str,
     api_key: &str,
     model: &str,
+    provider: &str,
 ) -> Result<String, String> {
     let instruction = instruction.trim();
     if instruction.is_empty() {
@@ -153,7 +155,7 @@ pub async fn rewrite(
     ]);
 
     // Slightly higher temperature than cleanup — rewriting is generative.
-    post_chat(base_url, api_key, model, 0.7, messages).await
+    post_chat(base_url, api_key, model, provider, 0.7, messages).await
 }
 
 /// Shared OpenAI-compatible `POST /chat/completions` call used by both cleanup
@@ -165,6 +167,7 @@ async fn post_chat(
     base_url: &str,
     api_key: &str,
     model: &str,
+    provider: &str,
     temperature: f32,
     messages: Value,
 ) -> Result<String, String> {
@@ -219,7 +222,7 @@ async fn post_chat(
 
     // Best-effort daily-usage accounting (never fails the call).
     let total_tokens = value["usage"]["total_tokens"].as_u64().unwrap_or(0);
-    crate::usage::record(total_tokens, remaining_req, limit_req);
+    crate::usage::record(provider, total_tokens, remaining_req, limit_req);
 
     let content = value["choices"][0]["message"]["content"]
         .as_str()

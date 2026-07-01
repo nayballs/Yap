@@ -299,8 +299,8 @@ pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
 pub async fn test_post_process(text: String) -> Result<String, String> {
     let cfg = config::load();
     // Route through the on-device sidecar when it's the selected provider + up.
-    let (base_url, api_key, model) = crate::local_llm::effective_endpoint(&cfg);
-    crate::llm::cleanup(&text, &base_url, &api_key, &model, &cfg.pp_prompt).await
+    let (base_url, api_key, model, provider) = crate::local_llm::effective_endpoint(&cfg);
+    crate::llm::cleanup(&text, &base_url, &api_key, &model, &provider, &cfg.pp_prompt).await
 }
 
 /// Status of the on-device cleanup sidecar: whether the runtime + model are

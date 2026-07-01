@@ -141,20 +141,28 @@ pub fn is_running() -> bool {
     base_url().is_some()
 }
 
-/// The `(base_url, api_key, model)` the cleanup client should use: the managed
-/// on-device sidecar when the provider is "ondevice" AND it's up, else the user's
-/// configured cloud/local endpoint. Falling back keeps cleanup working even if the
-/// sidecar failed to start (worst case: raw transcript, never a hang).
-pub fn effective_endpoint(cfg: &crate::config::YapConfig) -> (String, String, String) {
+/// The `(base_url, api_key, model, provider)` the cleanup client should use:
+/// the managed on-device sidecar when the provider is "ondevice" AND it's up,
+/// else the user's configured cloud/local endpoint. Falling back keeps cleanup
+/// working even if the sidecar failed to start (worst case: raw transcript,
+/// never a hang). `provider` is the id the call is attributed to for the
+/// per-provider usage meter.
+pub fn effective_endpoint(cfg: &crate::config::YapConfig) -> (String, String, String, String) {
     if cfg.pp_provider == PROVIDER_ONDEVICE {
         if let Some(url) = base_url() {
-            return (url, String::new(), LOCAL_MODEL.to_string());
+            return (
+                url,
+                String::new(),
+                LOCAL_MODEL.to_string(),
+                PROVIDER_ONDEVICE.to_string(),
+            );
         }
     }
     (
         cfg.pp_base_url.clone(),
         cfg.pp_api_key.clone(),
         cfg.pp_model.clone(),
+        cfg.pp_provider.clone(),
     )
 }
 

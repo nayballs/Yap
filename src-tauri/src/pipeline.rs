@@ -298,13 +298,13 @@ impl Shared {
             .and_then(|mut g| g.take())
             .unwrap_or_default();
 
-        let (base_url, api_key, model, restore_clipboard) = self
+        let (base_url, api_key, model, provider, restore_clipboard) = self
             .config
             .read()
             .map(|c| {
                 // On-device sidecar overrides the endpoint when selected + running.
-                let (base_url, api_key, model) = crate::local_llm::effective_endpoint(&c);
-                (base_url, api_key, model, c.restore_clipboard)
+                let (base_url, api_key, model, provider) = crate::local_llm::effective_endpoint(&c);
+                (base_url, api_key, model, provider, c.restore_clipboard)
             })
             .unwrap_or_default();
 
@@ -322,7 +322,9 @@ impl Shared {
             h => Some(h),
         };
 
-        match crate::llm::rewrite(&instruction, &selection, &base_url, &api_key, &model).await {
+        match crate::llm::rewrite(&instruction, &selection, &base_url, &api_key, &model, &provider)
+            .await
+        {
             Ok(result) => {
                 let out = result.trim().to_string();
                 if out.is_empty() {
@@ -468,6 +470,7 @@ impl Shared {
                             pp_base_url,
                             pp_api_key,
                             pp_model,
+                            pp_provider,
                             pp_body,
                         ) = self
                             .config
@@ -475,7 +478,7 @@ impl Shared {
                             .map(|c| {
                                 // On-device sidecar overrides the endpoint when
                                 // selected + running; else the configured provider.
-                                let (pp_base_url, pp_api_key, pp_model) =
+                                let (pp_base_url, pp_api_key, pp_model, pp_provider) =
                                     crate::local_llm::effective_endpoint(&c);
                                 (
                                     c.dictionary.clone(),
@@ -487,6 +490,7 @@ impl Shared {
                                     pp_base_url,
                                     pp_api_key,
                                     pp_model,
+                                    pp_provider,
                                     c.resolve_cleanup_body(target_app.as_deref()),
                                 )
                             })
@@ -498,6 +502,7 @@ impl Shared {
                                     "enter".to_string(),
                                     true,
                                     false,
+                                    String::new(),
                                     String::new(),
                                     String::new(),
                                     String::new(),
@@ -521,6 +526,7 @@ impl Shared {
                                     &pp_base_url,
                                     &pp_api_key,
                                     &pp_model,
+                                    &pp_provider,
                                     body,
                                 )
                                 .await

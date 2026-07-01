@@ -35,8 +35,21 @@ pub const GROQ_FREE_TOKEN_CAP: u64 = 500_000;
 /// Fallback daily request cap used until Groq's header reports the real one.
 const DEFAULT_REQUEST_CAP: u64 = 14_400;
 
+/// Per-provider daily counts (tokens summed from responses, calls counted
+/// locally). Keyed by the provider id ("ondevice", "groq", "openai", …) so the
+/// Settings panel can show what THIS provider did, not a global mash-up.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct Bucket {
+    tokens: u64,
+    requests: u64,
+}
+
 /// Persisted daily usage. `day` is a UTC day-number (unix secs / 86400) so the
 /// totals reset when the day rolls over — no date crate needed.
+/// The top-level `tokens`/`requests` are **Groq-only** (they feed the capped
+/// free-tier meter); `providers` holds per-provider buckets for everyone.
+/// Old files without `providers` load fine — their totals stay attributed to
+/// Groq, which is where they historically came from.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct GroqUsage {
     day: u64,
@@ -45,6 +58,8 @@ struct GroqUsage {
     /// Daily request cap reported by Groq's `x-ratelimit-limit-requests`
     /// header (0 until a cloud call has been recorded).
     request_cap: u64,
+    #[serde(default)]
+    providers: std::collections::BTreeMap<String, Bucket>,
 }
 
 /// In-memory cache of the on-disk usage (loaded lazily on first access).
@@ -98,6 +113,7 @@ fn roll_over(u: &mut GroqUsage) {
         u.day = today;
         u.tokens = 0;
         u.requests = 0;
+        u.providers.clear();
         // Keep the last-known request cap across the reset so the bar has a
         // denominator before the first call of the new day comes back.
     }
@@ -106,12 +122,18 @@ fn roll_over(u: &mut GroqUsage) {
 /// JSON snapshot for the command/event: camelCase, with the constant token cap
 /// and a sensible request-cap fallback baked in.
 fn to_json(u: &GroqUsage) -> Value {
+    let providers: serde_json::Map<String, Value> = u
+        .providers
+        .iter()
+        .map(|(k, b)| (k.clone(), json!({ "tokens": b.tokens, "requests": b.requests })))
+        .collect();
     json!({
         "day": u.day,
         "tokens": u.tokens,
         "tokenCap": GROQ_FREE_TOKEN_CAP,
         "requests": u.requests,
         "requestCap": if u.request_cap > 0 { u.request_cap } else { DEFAULT_REQUEST_CAP },
+        "providers": providers,
     })
 }
 
@@ -126,10 +148,16 @@ pub fn snapshot() -> Value {
     to_json(usage)
 }
 
-/// Record one AI-cleanup call's usage. Best-effort: errors are logged, never
-/// propagated. `remaining_requests` / `limit_requests` are Groq's exact daily
-/// request headers when present.
-pub fn record(total_tokens: u64, remaining_requests: Option<u64>, limit_requests: Option<u64>) {
+/// Record one AI-cleanup call's usage against `provider` (the id actually used
+/// for the call, e.g. "ondevice" or "groq"). Best-effort: errors are logged,
+/// never propagated. `remaining_requests` / `limit_requests` are Groq's exact
+/// daily request headers when present.
+pub fn record(
+    provider: &str,
+    total_tokens: u64,
+    remaining_requests: Option<u64>,
+    limit_requests: Option<u64>,
+) {
     let snap = {
         let mut guard = match STATE.lock() {
             Ok(g) => g,
@@ -138,17 +166,26 @@ pub fn record(total_tokens: u64, remaining_requests: Option<u64>, limit_requests
         let usage = guard.get_or_insert_with(load_from_disk);
         roll_over(usage);
 
-        usage.tokens = usage.tokens.saturating_add(total_tokens);
+        // Per-provider bucket: what THIS provider did today.
+        let bucket = usage.providers.entry(provider.to_string()).or_default();
+        bucket.tokens = bucket.tokens.saturating_add(total_tokens);
+        bucket.requests = bucket.requests.saturating_add(1);
 
-        // Prefer Groq's exact daily request math (limit - remaining) when both
-        // headers are present; otherwise just count this call.
-        match (limit_requests, remaining_requests) {
-            (Some(limit), Some(remaining)) => {
-                usage.request_cap = limit;
-                usage.requests = limit.saturating_sub(remaining);
-            }
-            _ => {
-                usage.requests = usage.requests.saturating_add(1);
+        // The top-level (capped-meter) totals are Groq's alone. Gating on the
+        // provider also stops other endpoints' x-ratelimit headers (OpenAI
+        // sends them too) from overwriting Groq's request math.
+        if provider == "groq" {
+            usage.tokens = usage.tokens.saturating_add(total_tokens);
+            // Prefer Groq's exact daily request math (limit - remaining) when
+            // both headers are present; otherwise just count this call.
+            match (limit_requests, remaining_requests) {
+                (Some(limit), Some(remaining)) => {
+                    usage.request_cap = limit;
+                    usage.requests = limit.saturating_sub(remaining);
+                }
+                _ => {
+                    usage.requests = usage.requests.saturating_add(1);
+                }
             }
         }
 
