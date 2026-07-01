@@ -531,6 +531,39 @@
     model: 'Qwen2.5 1.5B model',
   };
 
+  // Model picker: the bundled default plus any GGUF the user dropped into the
+  // llm folder. Value '' = bundled default (matches the config semantics).
+  const localModelOptions = $derived([
+    { value: '', label: 'Qwen2.5 1.5B Instruct (default)' },
+    ...(localLlm.models || [])
+      .filter((f) => f !== localLlm.modelFile)
+      .map((f) => ({ value: f, label: f.replace(/\.gguf$/i, '') })),
+  ]);
+
+  // Switching models restarts the sidecar with the newly selected GGUF. The
+  // sidecar reads the selection from config.json, so save first.
+  let localSwitching = $state(false);
+  async function onLocalModelChange() {
+    localError = '';
+    localSwitching = true;
+    try {
+      await persist();
+      if (localLlm.running) {
+        await invoke('local_llm_stop');
+        await invoke('local_llm_start');
+      }
+    } catch (e) {
+      localError = `${e}`;
+    } finally {
+      localSwitching = false;
+      refreshLocalLlm();
+    }
+  }
+
+  function openLlmFolder() {
+    invoke('open_llm_folder').catch(() => {});
+  }
+
   async function refreshLocalLlm() {
     try {
       localLlm = await invoke('local_llm_status');
@@ -978,7 +1011,9 @@
               <Row label="On-device model" hint={`${localLlm.model} · runs on your PC via ${localLlm.engine} · nothing leaves your machine`}>
                 {#snippet children()}
                   <div class="pp-field ondevice">
-                    {#if localLlm.running}
+                    {#if localSwitching}
+                      <span class="ondevice-dl">Switching model — restarting the local server…</span>
+                    {:else if localLlm.running}
                       <span class="ondevice-ok">● {localLlm.model} — running locally via llamafile</span>
                     {:else if localLlm.installed}
                       <span class="ondevice-ok">✓ {localLlm.model} installed — starts with Yap</span>
@@ -996,6 +1031,24 @@
                       <button class="ondevice-btn" onclick={installLocalLlm} disabled={!cfg.postProcessEnabled}>
                         Download {localLlm.model} + llamafile engine (~1.3 GB)
                       </button>
+                      <span class="ondevice-sub">
+                        Qwen2.5 1.5B Instruct — a small, fast text-cleanup model (Apache-2.0),
+                        served on your PC by Mozilla's llamafile. One download, then fully offline.
+                      </span>
+                    {/if}
+                    {#if localLlm.installed && !localInstalling}
+                      <div class="ondevice-models">
+                        <Select
+                          bind:value={cfg.ppLocalModel}
+                          options={localModelOptions}
+                          onchange={onLocalModelChange}
+                          disabled={!cfg.postProcessEnabled || localSwitching}
+                        />
+                        <button class="ondevice-link" onclick={openLlmFolder}>Open models folder</button>
+                      </div>
+                      <span class="ondevice-sub">
+                        Bring your own model: drop any .gguf file into the folder, then pick it here.
+                      </span>
                     {/if}
                     {#if localError}<span class="ondevice-err">{localError}</span>{/if}
                   </div>
@@ -1738,6 +1791,30 @@
     font-size: 11px;
     color: #6b7280;
     font-variant-numeric: tabular-nums;
+  }
+  .ondevice-models {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .ondevice-link {
+    flex: 0 0 auto;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--accent, #3b82f6);
+    font-size: 12px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .ondevice-sub {
+    display: block;
+    margin-top: 5px;
+    font-size: 11px;
+    color: #6b7280;
+    line-height: 1.45;
   }
   .ondevice-bar {
     margin-top: 4px;

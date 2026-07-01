@@ -307,13 +307,35 @@ pub async fn test_post_process(text: String) -> Result<String, String> {
 /// installed on disk, and whether the server is currently running.
 #[tauri::command]
 pub fn local_llm_status() -> serde_json::Value {
+    let cfg = config::load();
     serde_json::json!({
-        "installed": crate::local_llm::is_installed(),
+        "installed": crate::local_llm::is_installed(&cfg),
         "running": crate::local_llm::is_running(),
         "modelFile": crate::local_llm::MODEL_FILENAME,
-        "model": crate::local_llm::MODEL_DISPLAY,
+        "model": crate::local_llm::active_model_display(&cfg),
         "engine": crate::local_llm::ENGINE_DISPLAY,
+        "activeModel": cfg.pp_local_model,
+        "models": crate::local_llm::list_models(),
     })
+}
+
+/// Open the on-device models folder (`<data>/llm/`) in the file manager so the
+/// user can drop in their own GGUF models.
+#[tauri::command]
+pub fn open_llm_folder() -> Result<(), String> {
+    let dir = crate::local_llm::llm_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    let opener = "explorer";
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let opener = "xdg-open";
+    std::process::Command::new(opener)
+        .arg(&dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// Start the on-device cleanup sidecar (runtime + model must be installed).

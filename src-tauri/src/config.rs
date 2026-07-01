@@ -182,6 +182,11 @@ pub struct YapConfig {
     /// the selection; the backend always uses `pp_prompt` as the body.
     #[serde(default = "default_pp_preset")]
     pub pp_preset: String,
+    /// GGUF filename (inside `<data>/llm/`) the on-device sidecar should load
+    /// instead of the bundled default. Empty = the bundled Qwen model. Users can
+    /// drop any GGUF into the folder and pick it in Settings.
+    #[serde(default)]
+    pub pp_local_model: String,
     /// Smart-routing scope (FluidVoice's `PromptRoutingScope`):
     /// - "all_apps" (default): the global `pp_prompt` cleans everywhere, and
     ///   `app_routes` override it for matching apps.
@@ -297,6 +302,7 @@ impl Default for YapConfig {
             pp_model: default_pp_model(),
             pp_prompt: default_pp_prompt(),
             pp_preset: default_pp_preset(),
+            pp_local_model: String::new(),
             routing_scope: default_routing_scope(),
             app_routes: Vec::new(),
             cleanup_profiles: Vec::new(),

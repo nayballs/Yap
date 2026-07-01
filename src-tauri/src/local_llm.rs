@@ -61,8 +61,9 @@ static CHILD: Mutex<Option<Child>> = Mutex::new(None);
 static PORT: AtomicU16 = AtomicU16::new(0);
 static READY: AtomicBool = AtomicBool::new(false);
 
-/// Where the sidecar's files live: `<data_dir>/llm/`.
-fn llm_dir() -> PathBuf {
+/// Where the sidecar's files live: `<data_dir>/llm/`. Users can drop their own
+/// GGUF models in here and pick one in Settings.
+pub fn llm_dir() -> PathBuf {
     crate::config::data_dir().join("llm")
 }
 
@@ -76,9 +77,51 @@ pub fn model_path() -> PathBuf {
     llm_dir().join(MODEL_FILENAME)
 }
 
-/// Both the runtime and the model are present on disk.
-pub fn is_installed() -> bool {
-    runtime_path().is_file() && model_path().is_file()
+/// Both the runtime and the active model are present on disk.
+pub fn is_installed(cfg: &crate::config::YapConfig) -> bool {
+    runtime_path().is_file() && active_model_path(cfg).is_file()
+}
+
+/// The model the sidecar should load: the user's custom GGUF (`pp_local_model`,
+/// a filename inside `llm/`) when set and present, else the bundled default.
+/// A stale selection (file deleted) falls back to the default rather than
+/// breaking the sidecar.
+pub fn active_model_path(cfg: &crate::config::YapConfig) -> PathBuf {
+    if !cfg.pp_local_model.is_empty() {
+        let p = llm_dir().join(&cfg.pp_local_model);
+        if p.is_file() {
+            return p;
+        }
+    }
+    model_path()
+}
+
+/// Human-readable name of the active model: the friendly name for the bundled
+/// default, else the custom GGUF's filename without extension.
+pub fn active_model_display(cfg: &crate::config::YapConfig) -> String {
+    let path = active_model_path(cfg);
+    if path == model_path() {
+        return MODEL_DISPLAY.to_string();
+    }
+    path.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| MODEL_DISPLAY.to_string())
+}
+
+/// All GGUF filenames in `llm/`, sorted, bundled default first. Powers the
+/// model picker in Settings.
+pub fn list_models() -> Vec<String> {
+    let mut models: Vec<String> = std::fs::read_dir(llm_dir())
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| e.path().is_file())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| n.to_ascii_lowercase().ends_with(".gguf"))
+                .collect()
+        })
+        .unwrap_or_default();
+    models.sort_by_key(|n| (n != MODEL_FILENAME, n.to_ascii_lowercase()));
+    models
 }
 
 /// The base URL of the running sidecar (`http://127.0.0.1:<port>/v1`), or `None`
@@ -142,7 +185,9 @@ pub async fn start() -> Result<String, String> {
         return Ok(url);
     }
     let exe = runtime_path();
-    let model = model_path();
+    // Load whichever GGUF the user picked (custom models live in the same dir);
+    // falls back to the bundled default if the selection is gone.
+    let model = active_model_path(&crate::config::load());
     if !exe.is_file() {
         return Err(format!("llamafile runtime not installed: {}", exe.display()));
     }
@@ -253,7 +298,7 @@ pub fn stop() {
 pub async fn autostart_if_configured(cfg: &crate::config::YapConfig) {
     if cfg.post_process_enabled
         && cfg.pp_provider == PROVIDER_ONDEVICE
-        && is_installed()
+        && is_installed(cfg)
         && !is_running()
     {
         if let Err(e) = start().await {
