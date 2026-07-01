@@ -67,6 +67,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
           echo "CARGO_TARGET_DIR=$targetDir" >> $env:GITHUB_ENV
 
+      # tauri-action does NOT install node deps for us — without this the
+      # `tauri` CLI isn't on PATH and `npm run tauri build` fails with
+      # "'tauri' is not recognized". Mirrors release.yml.
+      - name: Install frontend dependencies
+        run: npm ci
+
       # Derive a monotonic prerelease version = <baseVersion>-nightly.<run_number>
       # (run_number is monotonic across dispatch + schedule, so the updater always
       # sees a newer semver than the previous nightly). Patch it into package.json,
