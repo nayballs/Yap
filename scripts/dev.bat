@@ -19,13 +19,19 @@ REM Runs the REAL multi-engine pipeline: Whisper on VULKAN (any GPU) + ONNX
 REM models on DirectML. Needs the Vulkan SDK installed (https://vulkan.lunarg.com)
 REM so the whisper-vulkan backend can build. The FIRST build is slow (compiles
 REM whisper.cpp + downloads ONNX Runtime); later builds are fast.
-call npm run tauri dev -- --features engines
-
-REM ── Fast / no-GPU alternative ─────────────────────────────────────
-REM Comment the line above and uncomment the line below to build the STUB
-REM instead (no real transcription, fastest compile — handy for pure UI work
-REM or when the Vulkan SDK isn't installed):
-REM call npm run tauri dev
+REM Without the SDK the engines build panics ("Please install Vulkan SDK"), so
+REM fall back to the STUB automatically: UI + hot reload all work, transcription
+REM returns placeholder text.
+if defined VULKAN_SDK (
+  call npm run tauri dev -- --features engines
+) else (
+  echo   NOTE: Vulkan SDK not found ^(VULKAN_SDK is not set^) - running the
+  echo   STUB build instead: full UI + hot reload, but NO real transcription.
+  echo   For the real GPU pipeline install the SDK: winget install LunarG.VulkanSDK
+  echo   ^(then reopen this window so the new environment is picked up^).
+  echo.
+  call npm run tauri dev
+)
 
 echo.
 echo Yap Dev stopped. Press any key to close this window.
