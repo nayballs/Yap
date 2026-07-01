@@ -72,7 +72,7 @@ pub struct YapConfig {
     /// "small"). Field name kept as `model_size` for config back-compat.
     #[serde(default = "default_model_size")]
     pub model_size: String,
-    /// Use CUDA GPU acceleration.
+    /// Use GPU acceleration (whisper → Vulkan, ONNX → DirectML; any GPU).
     #[serde(default = "default_true")]
     pub use_gpu: bool,
     /// Preferred input device name (None = system default).

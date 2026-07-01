@@ -62,12 +62,21 @@ windows = { version = "0.61", features = ["Win32_UI_Accessibility", "Win32_Syste
 [features]
 # Default has NO transcribe-rs so plain `cargo check` compiles the stub (fast).
 default = []
-# Real multi-engine STT: whisper.cpp (CPU) + ONNX Runtime (DirectML on Windows).
-# Use this on machines without CUDA.
-engines = ["dep:transcribe-rs", "transcribe-rs/onnx", "transcribe-rs/whisper-cpp", "transcribe-rs/ort-directml"]
-# Adds CUDA acceleration for whisper (ONNX still runs on DirectML).
-cuda = ["engines", "transcribe-rs/whisper-cuda"]
-# Back-compat alias: `whisper` == real engines without CUDA.
+# Real multi-engine STT with UNIVERSAL GPU acceleration (any Windows GPU, no CUDA):
+#   - whisper.cpp on the VULKAN backend (NVIDIA/AMD/Intel; vulkan-1.dll ships with
+#     the GPU driver, and it falls back to CPU when no Vulkan device is present)
+#   - ONNX Runtime on DirectML (Parakeet/Moonshine/etc.)
+# Mirrors Handy's Windows target. Requires the Vulkan SDK at BUILD time (glslc +
+# headers + loader); CI installs it via humbletim/install-vulkan-sdk. This is what
+# release/nightly builds use — one small installer, GPU on every GPU.
+engines = [
+    "dep:transcribe-rs",
+    "transcribe-rs/onnx",
+    "transcribe-rs/whisper-cpp",
+    "transcribe-rs/whisper-vulkan",
+    "transcribe-rs/ort-directml",
+]
+# Back-compat alias.
 whisper = ["engines"]
 # REQUIRED for release/standalone builds: makes the app load the EMBEDDED
 # frontend via the custom protocol instead of the dev-server URL. Without it

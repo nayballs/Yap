@@ -15,17 +15,16 @@ echo   (Close this window to stop Yap.)
 echo ============================================================
 echo.
 
-REM Runs the REAL multi-engine pipeline: Whisper on CUDA + ONNX models on
-REM DirectML. CMAKE_CUDA_ARCHITECTURES=native lets nvcc target this machine's
-REM GPU. The FIRST build is slow (compiles whisper.cpp + downloads ONNX
-REM Runtime); later builds are fast.
-set CMAKE_CUDA_ARCHITECTURES=native
-call npm run tauri dev -- --features cuda
+REM Runs the REAL multi-engine pipeline: Whisper on VULKAN (any GPU) + ONNX
+REM models on DirectML. Needs the Vulkan SDK installed (https://vulkan.lunarg.com)
+REM so the whisper-vulkan backend can build. The FIRST build is slow (compiles
+REM whisper.cpp + downloads ONNX Runtime); later builds are fast.
+call npm run tauri dev -- --features engines
 
 REM ── Fast / no-GPU alternative ─────────────────────────────────────
-REM Comment the two lines above and uncomment the line below to build the
-REM STUB instead (no real transcription, fastest compile — handy for pure
-REM UI work or machines without CUDA):
+REM Comment the line above and uncomment the line below to build the STUB
+REM instead (no real transcription, fastest compile — handy for pure UI work
+REM or when the Vulkan SDK isn't installed):
 REM call npm run tauri dev
 
 echo.

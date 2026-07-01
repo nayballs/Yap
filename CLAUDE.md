@@ -23,9 +23,9 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 - **Backend:** Rust (`src-tauri/src/`).
 - **Audio:** `cpal` (capture) + `rodio` (start/stop chime).
 - **STT:** [`transcribe-rs`](https://crates.io/crates/transcribe-rs) — one crate that
-  wraps **whisper.cpp** (CUDA) *and* a family of **ONNX** models (Parakeet, Moonshine,
+  wraps **whisper.cpp** (Vulkan) *and* a family of **ONNX** models (Parakeet, Moonshine,
   SenseVoice, GigaAM, Canary, Cohere) via `ort`/ONNX Runtime (DirectML). Behind the
-  `engines`/`cuda` feature flags (see below).
+  `engines` feature flag (see below).
 - **AI cleanup:** `reqwest` → any **OpenAI-compatible** chat endpoint (Groq/OpenAI/
   OpenRouter, or local Ollama/LM Studio). `src/llm.rs`.
 - **Text injection:** `arboard` (clipboard) + Win32 `SendInput` (paste / Enter).
@@ -167,24 +167,25 @@ Cargo features in `src-tauri/Cargo.toml`:
 | Feature | Effect |
 |---------|--------|
 | *(default)* | **STUB** — no `transcribe-rs`. `cargo check` stays fast. The app runs but returns placeholder text. |
-| `engines` | Real multi-engine STT: `transcribe-rs` with whisper-cpp + ONNX + **ort-directml**. Whisper runs on CPU. Broadly compatible (no CUDA). **This is what release builds use.** |
-| `cuda` | `engines` + `whisper-cuda` → Whisper on the GPU (NVIDIA). **This is what we dev with.** |
+| `engines` | Real multi-engine STT: `transcribe-rs` with **whisper-vulkan** + ONNX + **ort-directml**. Whisper runs on the GPU via **Vulkan** (any GPU), ONNX via DirectML; CPU fallback with no GPU. **This is what release + nightly builds use.** |
 | `whisper` | Back-compat alias for `engines`. |
 | `custom-protocol` | Required for release/standalone builds — embeds the frontend. `tauri build` sets it automatically. |
 
-GPU policy: **Whisper → CUDA** (the `cuda` feature), **ONNX → DirectML** (works on any
-GPU). On CUDA machines set `CMAKE_CUDA_ARCHITECTURES=native` so nvcc targets the local
-GPU (Blackwell/5070 Ti = sm_120).
+GPU policy: **UNIVERSAL, no CUDA.** Whisper → **Vulkan** (NVIDIA/AMD/Intel; `vulkan-1.dll`
+ships with the GPU driver), ONNX → **DirectML** (any DX12 GPU). Same approach as **Handy**
+(`references/Handy`, whose Windows target is `["whisper-vulkan","ort-directml"]`). Building
+`whisper-vulkan` needs the **Vulkan SDK** at build time (glslc + headers + loader) — install
+from https://vulkan.lunarg.com locally; CI uses `humbletim/install-vulkan-sdk`. No nvcc /
+CUDA arch list. One small installer, GPU on every GPU.
 
 ### Run in dev (what we use)
-Use **`scripts/dev.bat`** ("yap.dev") — it sets `CMAKE_CUDA_ARCHITECTURES=native` and
-runs `npm run tauri dev -- --features cuda` (the **real** GPU pipeline). A commented
-line in the script switches to the fast no-GPU stub for pure UI work. Dev hot-reloads
-the frontend on every edit (Vite on **:1430**).
+Use **`scripts/dev.bat`** ("yap.dev") — it runs `npm run tauri dev -- --features engines`
+(the **real** GPU pipeline; needs the Vulkan SDK installed). A commented line switches to the
+fast no-GPU stub for pure UI work. Dev hot-reloads the frontend on every edit (Vite on **:1430**).
 
 ```bash
-# real GPU pipeline (default in dev.bat)
-CMAKE_CUDA_ARCHITECTURES=native npm run tauri dev -- --features cuda
+# real GPU pipeline (default in dev.bat) — requires the Vulkan SDK
+npm run tauri dev -- --features engines
 # stub (fast, no transcription)
 npm run tauri dev
 ```

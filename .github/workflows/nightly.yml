@@ -59,6 +59,16 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
 
+      # GPU whisper uses the VULKAN backend (universal — NVIDIA/AMD/Intel), which
+      # needs the Vulkan SDK (glslc + headers + loader) to COMPILE ggml-vulkan.
+      # Same recipe Handy uses on its Windows x64 build. The shipped exe then only
+      # needs vulkan-1.dll at runtime, which ships with every GPU driver.
+      - name: Install Vulkan SDK (Windows x64)
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.309.0
+          cache: true
+
       - name: Shorten build path (Windows)
         shell: pwsh
         run: |

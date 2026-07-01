@@ -14,8 +14,8 @@ focused. Local-first, private, and free.
 ## Features
 
 - **Local multi-engine STT** via [`transcribe-rs`](https://crates.io/crates/transcribe-rs):
-  Whisper on **CUDA**, plus ONNX models (Parakeet, Moonshine, SenseVoice, GigaAM,
-  Canary, Cohere) on **DirectML** — runs on any Windows GPU.
+  Whisper on **Vulkan**, plus ONNX models (Parakeet, Moonshine, SenseVoice, GigaAM,
+  Canary, Cohere) on **DirectML** — GPU-accelerated on any Windows GPU, no CUDA.
 - **16-model library** with in-app download (SHA-256 verified), switch, and delete.
   Default model **Parakeet V3** (fast + accurate). Per-model language + translate.
 - **Optional AI cleanup** — an OpenAI-compatible pass (Groq / OpenAI / OpenRouter, or
@@ -42,8 +42,9 @@ you can point it at a **local** model to keep everything offline.
 ## Requirements
 
 - **Windows.**
-- A GPU helps: **NVIDIA + CUDA** for GPU Whisper; **DirectML** (any modern GPU) runs
-  the ONNX models like Parakeet. CPU works but is slower for Whisper.
+- A GPU helps but **any** GPU works — Whisper runs on **Vulkan** and the ONNX models
+  (Parakeet etc.) on **DirectML**, both universal (NVIDIA/AMD/Intel). No CUDA required.
+  CPU works too, just slower for Whisper.
 - For AI cleanup (optional): a free [Groq](https://console.groq.com) API key, **or**
   a local [Ollama](https://ollama.com)/LM Studio model.
 
@@ -52,18 +53,19 @@ you can point it at a **local** model to keep everything offline.
 Real GPU pipeline (what we develop with) — use **`scripts/dev.bat`**, or:
 
 ```bash
-CMAKE_CUDA_ARCHITECTURES=native npm run tauri dev -- --features cuda
+npm run tauri dev -- --features engines
 ```
 
+(Building the Whisper Vulkan backend needs the [Vulkan SDK](https://vulkan.lunarg.com).)
 Fast UI-only build with the STT stub (no real transcription):
 
 ```bash
 npm run tauri dev
 ```
 
-Feature flags: `default` = stub · `engines` = real STT (whisper CPU + ONNX/DirectML) ·
-`cuda` = `engines` + GPU Whisper. Release installers build with `--features engines`
-(no CUDA needed on end-user machines).
+Feature flags: `default` = stub · `engines` = real STT (Whisper→Vulkan + ONNX→DirectML,
+universal GPU). Release installers build with `--features engines` — one installer,
+GPU-accelerated on any GPU, no CUDA needed on end-user machines.
 
 ## Status
 

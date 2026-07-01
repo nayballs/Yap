@@ -393,12 +393,12 @@ impl Shared {
         // Snapshot the language/translate settings for this transcription.
         let (language, translate) = self.language_settings();
 
-        // Slow-transcription watchdog: whisper (esp. large-v3) on a build without
-        // CUDA runs on CPU and can take minutes, leaving the UI stuck on
-        // "processing" with no feedback. We can't cancel the blocking call
-        // without losing the result, so instead we surface a distinct
-        // "processing-slow" state + an actionable log line if we cross a
-        // threshold. Cancelled the instant transcription finishes.
+        // Slow-transcription watchdog: if no usable GPU is present, whisper (esp.
+        // large-v3) runs on CPU and can take minutes, leaving the UI stuck on
+        // "processing" with no feedback. We can't cancel the blocking call without
+        // losing the result, so instead we surface a distinct "processing-slow"
+        // state + an actionable log line if we cross a threshold. Cancelled the
+        // instant transcription finishes.
         const SLOW_TRANSCRIBE_SECS: u64 = 8;
         let done = Arc::new(AtomicBool::new(false));
         let watch_app = self.app.clone();
@@ -413,8 +413,7 @@ impl Shared {
             if !watch_done.load(Ordering::SeqCst) {
                 tracing::warn!(
                     model = %watch_model,
-                    cuda = cfg!(feature = "cuda"),
-                    "Transcription still running after {}s — a whisper model on a build without CUDA runs on CPU and is very slow; switch to an ONNX model (e.g. Parakeet V3, GPU-accelerated via DirectML)",
+                    "Transcription still running after {}s — whisper is running on CPU (no usable Vulkan GPU found), which is very slow; Parakeet V3 (ONNX/DirectML) is the fast universal default",
                     SLOW_TRANSCRIBE_SECS
                 );
                 let _ = watch_app.emit("yap-state", "processing-slow");

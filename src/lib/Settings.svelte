@@ -860,7 +860,7 @@
           </Group>
           <Group title="Performance">
             <Row>
-              <Toggle bind:checked={cfg.useGpu} label="GPU acceleration (CUDA)" hint="Faster transcription on NVIDIA GPUs — applies after restart" />
+              <Toggle bind:checked={cfg.useGpu} label="GPU acceleration" hint="Faster transcription on any GPU (whisper→Vulkan, ONNX→DirectML) — applies after restart" />
             </Row>
             <Row label="Unload model when idle" hint="Free memory when not dictating; reloads on next use">
               <Select bind:value={cfg.modelUnloadTimeout} options={UNLOAD_TIMEOUTS} />

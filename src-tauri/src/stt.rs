@@ -1,7 +1,7 @@
 //! Speech-to-Text (STT) engine.
 //!
 //! Provides a multi-engine STT abstraction built on [`transcribe-rs`], which
-//! wraps both whisper.cpp (Whisper GGML models, CUDA-accelerated) and ONNX
+//! wraps both whisper.cpp (Whisper GGML models, Vulkan-accelerated) and ONNX
 //! Runtime (Parakeet / Moonshine / SenseVoice / GigaAM / Canary / Cohere,
 //! DirectML-accelerated on Windows).
 //!
@@ -13,7 +13,7 @@
 //!   from `blob.handy.computer`, verifies its SHA-256, and for directory-based
 //!   models unpacks the `.tar.gz` into `models/<name>/`.
 //! - The **engine layer**: a real `transcribe-rs` implementation behind the
-//!   `engines` feature (and `cuda` for GPU whisper), plus a stub fallback for
+//!   `engines` feature (GPU whisper via Vulkan), plus a stub fallback for
 //!   the default build so `cargo check` stays fast and the pipeline is testable
 //!   without compiling whisper.cpp / ONNX Runtime.
 
@@ -59,7 +59,7 @@ impl std::error::Error for SttError {}
 // ── Model Registry ──────────────────────────────────────────────────
 
 /// Which transcribe-rs engine a model runs on. Whisper models run on
-/// whisper.cpp (CUDA); the rest run on ONNX Runtime (DirectML).
+/// whisper.cpp (Vulkan); the rest run on ONNX Runtime (DirectML).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum EngineType {
     Whisper,
@@ -1022,7 +1022,7 @@ pub fn create_stt_engine(
 // ── Accelerator setup ───────────────────────────────────────────────
 
 /// Apply Yap's fixed accelerator policy to the transcribe-rs global atomics:
-/// **whisper → CUDA** (Auto picks the CUDA build), **ONNX → DirectML**.
+/// **whisper → Vulkan** (Auto picks the Vulkan GPU backend, any GPU), **ONNX → DirectML**.
 ///
 /// Must be called once on startup, before any model loads. No-op (compiled
 /// away) in the stub build.
@@ -1090,7 +1090,7 @@ mod tests {
     /// (Moonshine V2 Tiny, ~31MB), loads it via ort/DirectML, and runs
     /// inference on 1s of silence. Proves the ONNX Runtime is actually
     /// linked + the DirectML provider resolves. Network + heavy → ignored.
-    /// Run: cargo test --features cuda --lib onnx_moonshine -- --ignored --nocapture
+    /// Run: cargo test --features engines --lib onnx_moonshine -- --ignored --nocapture
     #[cfg(feature = "engines")]
     #[test]
     #[ignore = "downloads ~55MB and initializes ONNX Runtime; run manually"]

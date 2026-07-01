@@ -96,10 +96,9 @@ pub fn run() {
     portable::init();
     init_logging();
     tracing::info!(
-        cuda = cfg!(feature = "cuda"),
         engines = cfg!(feature = "engines"),
         version = env!("CARGO_PKG_VERSION"),
-        "Yap starting — build capabilities (whisper is CPU-only unless `cuda`; ONNX runs on DirectML)"
+        "Yap starting — build capabilities (GPU whisper via Vulkan, ONNX via DirectML; falls back to CPU with no GPU)"
     );
 
     tauri::Builder::default()
