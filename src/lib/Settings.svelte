@@ -1044,10 +1044,11 @@
                           onchange={onLocalModelChange}
                           disabled={!cfg.postProcessEnabled || localSwitching}
                         />
-                        <button class="ondevice-link" onclick={openLlmFolder}>Open models folder</button>
                       </div>
                       <span class="ondevice-sub">
-                        Bring your own model: drop any .gguf file into the folder, then pick it here.
+                        Bring your own model: drop any .gguf file into the
+                        <button class="ondevice-link" onclick={openLlmFolder}>models folder</button>,
+                        then pick it here.
                       </span>
                     {/if}
                     {#if localError}<span class="ondevice-err">{localError}</span>{/if}
@@ -1793,18 +1794,14 @@
     font-variant-numeric: tabular-nums;
   }
   .ondevice-models {
-    display: flex;
-    align-items: center;
-    gap: 8px;
     margin-top: 8px;
   }
   .ondevice-link {
-    flex: 0 0 auto;
     padding: 0;
     border: none;
     background: none;
     color: var(--accent, #3b82f6);
-    font-size: 12px;
+    font-size: inherit;
     cursor: pointer;
     text-decoration: underline;
     text-underline-offset: 2px;
