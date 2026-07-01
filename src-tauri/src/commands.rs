@@ -298,14 +298,33 @@ pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
 #[tauri::command]
 pub async fn test_post_process(text: String) -> Result<String, String> {
     let cfg = config::load();
-    crate::llm::cleanup(
-        &text,
-        &cfg.pp_base_url,
-        &cfg.pp_api_key,
-        &cfg.pp_model,
-        &cfg.pp_prompt,
-    )
-    .await
+    // Route through the on-device sidecar when it's the selected provider + up.
+    let (base_url, api_key, model) = crate::local_llm::effective_endpoint(&cfg);
+    crate::llm::cleanup(&text, &base_url, &api_key, &model, &cfg.pp_prompt).await
+}
+
+/// Status of the on-device cleanup sidecar: whether the runtime + model are
+/// installed on disk, and whether the server is currently running.
+#[tauri::command]
+pub fn local_llm_status() -> serde_json::Value {
+    serde_json::json!({
+        "installed": crate::local_llm::is_installed(),
+        "running": crate::local_llm::is_running(),
+        "modelFile": crate::local_llm::MODEL_FILENAME,
+    })
+}
+
+/// Start the on-device cleanup sidecar (runtime + model must be installed).
+/// Resolves once the server's /health endpoint is ready.
+#[tauri::command]
+pub async fn local_llm_start() -> Result<(), String> {
+    crate::local_llm::start().await.map(|_| ())
+}
+
+/// Stop the on-device cleanup sidecar.
+#[tauri::command]
+pub fn local_llm_stop() {
+    crate::local_llm::stop();
 }
 /// Recent local transcription history, newest first (capped at `limit`).
 /// Each item: `{ ts, raw, text, model, app, words }`.

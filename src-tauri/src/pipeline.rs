@@ -302,12 +302,9 @@ impl Shared {
             .config
             .read()
             .map(|c| {
-                (
-                    c.pp_base_url.clone(),
-                    c.pp_api_key.clone(),
-                    c.pp_model.clone(),
-                    c.restore_clipboard,
-                )
+                // On-device sidecar overrides the endpoint when selected + running.
+                let (base_url, api_key, model) = crate::local_llm::effective_endpoint(&c);
+                (base_url, api_key, model, c.restore_clipboard)
             })
             .unwrap_or_default();
 
@@ -476,6 +473,10 @@ impl Shared {
                             .config
                             .read()
                             .map(|c| {
+                                // On-device sidecar overrides the endpoint when
+                                // selected + running; else the configured provider.
+                                let (pp_base_url, pp_api_key, pp_model) =
+                                    crate::local_llm::effective_endpoint(&c);
                                 (
                                     c.dictionary.clone(),
                                     c.append_trailing_space,
@@ -483,9 +484,9 @@ impl Shared {
                                     c.auto_submit_key.clone(),
                                     c.restore_clipboard,
                                     c.post_process_enabled,
-                                    c.pp_base_url.clone(),
-                                    c.pp_api_key.clone(),
-                                    c.pp_model.clone(),
+                                    pp_base_url,
+                                    pp_api_key,
+                                    pp_model,
                                     c.resolve_cleanup_body(target_app.as_deref()),
                                 )
                             })

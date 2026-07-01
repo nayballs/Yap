@@ -12,6 +12,7 @@ mod config;
 mod history;
 mod input_hook;
 mod llm;
+mod local_llm;
 mod mute;
 mod overlay;
 mod pipeline;
@@ -137,6 +138,9 @@ pub fn run() {
             commands::set_pill_visible,
             commands::is_portable,
             commands::test_post_process,
+            commands::local_llm_status,
+            commands::local_llm_start,
+            commands::local_llm_stop,
             commands::get_groq_usage,
             commands::get_history,
             commands::clear_history,
@@ -174,6 +178,16 @@ pub fn run() {
                     }
                 }
                 Err(e) => tracing::error!("Failed to start pipeline: {}", e),
+            }
+
+            // If on-device AI cleanup is selected + installed, warm up the
+            // llamafile sidecar now (off-thread, best-effort) so the first
+            // dictation cleanup doesn't pay the cold model-load.
+            {
+                let cfg2 = cfg.clone();
+                tauri::async_runtime::spawn(async move {
+                    local_llm::autostart_if_configured(&cfg2).await;
+                });
             }
 
             // Apply the saved pill size.
@@ -345,6 +359,13 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Yap");
+        .build(tauri::generate_context!())
+        .expect("error while building Yap")
+        .run(|_app_handle, event| {
+            // Kill the on-device cleanup sidecar when the app exits so no
+            // orphaned llamafile server is left running.
+            if let tauri::RunEvent::Exit = event {
+                local_llm::stop();
+            }
+        });
 }
