@@ -139,7 +139,9 @@
     box-shadow:
       0 8px 28px rgba(0, 0, 0, 0.5),
       inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    backdrop-filter: blur(14px);
+    /* NO backdrop-filter here: on a transparent WebView2 window it forces an
+       opaque compositor backdrop — the grey box behind the pill. There's nothing
+       in-page to blur anyway (CSS can't sample the desktop). */
     font-size: calc(13px * var(--s, 1));
   }
 
