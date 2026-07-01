@@ -16,10 +16,25 @@ pub struct DictionaryEntry {
     pub to: String,
 }
 
+/// A reusable, named cleanup profile (FluidVoice's `DictationPromptProfile`): a
+/// library entry that per-app routing rules bind to, so one body can serve many
+/// apps and is edited in one place. The immutable `llm::BASE_PROMPT` guardrails
+/// are always prepended, exactly as for the global body.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupProfile {
+    /// Stable id referenced by `AppRoute.profile_id`.
+    pub id: String,
+    /// Display name shown in the profile picker.
+    pub name: String,
+    /// The cleanup body (tone/format instructions).
+    pub prompt: String,
+}
+
 /// A per-app cleanup routing rule ("smart routing", ported in spirit from
 /// FluidVoice's app-prompt bindings). When the foreground app at record-start
 /// matches `app` (process base name, e.g. "slack.exe"), the cleanup pass uses
-/// this rule's `prompt` body instead of the global `pp_prompt`. FluidVoice keys
+/// the bound profile's body instead of the global `pp_prompt`. FluidVoice keys
 /// its bindings on macOS bundle identifiers; on Windows we key on the process
 /// exe name (what `text_injector::app_name_for` already returns for history).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,9 +45,13 @@ pub struct AppRoute {
     /// Friendly display label for the Settings list (defaults to `app`).
     #[serde(default)]
     pub label: String,
-    /// The cleanup body (tone/format instructions) to use for this app. The
-    /// immutable `llm::BASE_PROMPT` guardrails are still prepended, exactly as
-    /// for the global body.
+    /// Id of the bound `CleanupProfile`. Empty → fall back to `prompt` (legacy)
+    /// or the global default.
+    #[serde(default)]
+    pub profile_id: String,
+    /// Legacy inline body from before named profiles existed. Kept for
+    /// back-compat; the frontend migrates these into profiles on load.
+    #[serde(default)]
     pub prompt: String,
 }
 
@@ -174,6 +193,9 @@ pub struct YapConfig {
     /// foreground app captured at record-start. See [`YapConfig::resolve_cleanup_body`].
     #[serde(default)]
     pub app_routes: Vec<AppRoute>,
+    /// Reusable named cleanup profiles that `app_routes` bind to.
+    #[serde(default)]
+    pub cleanup_profiles: Vec<CleanupProfile>,
 
     /// Show live partial transcripts in the overlay while you speak. Opt-in
     /// (off by default): re-transcribes the growing buffer on a timer, which adds
@@ -277,6 +299,7 @@ impl Default for YapConfig {
             pp_preset: default_pp_preset(),
             routing_scope: default_routing_scope(),
             app_routes: Vec::new(),
+            cleanup_profiles: Vec::new(),
             streaming_partials: false,
             history_enabled: true,
         }
@@ -336,7 +359,22 @@ impl YapConfig {
                 .iter()
                 .find(|r| !r.app.trim().is_empty() && r.app.trim().eq_ignore_ascii_case(proc))
             {
-                return Some(route.prompt.clone());
+                // Bound app: prefer its profile, then any legacy inline body, then
+                // the global default (a bound app is always cleaned — mirrors
+                // FluidVoice's promptID==nil → "force default").
+                if !route.profile_id.is_empty() {
+                    if let Some(p) = self
+                        .cleanup_profiles
+                        .iter()
+                        .find(|p| p.id == route.profile_id)
+                    {
+                        return Some(p.prompt.clone());
+                    }
+                }
+                if !route.prompt.trim().is_empty() {
+                    return Some(route.prompt.clone());
+                }
+                return Some(self.pp_prompt.clone());
             }
         }
         if self.routing_scope == "selected_apps_only" {

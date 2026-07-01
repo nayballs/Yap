@@ -158,9 +158,13 @@ presets, signing, history, and reach — see the phases below (✅ = done).
       order ports FluidVoice's `promptResolution`: **app-bound rule → scope guard →
       global default** (`config::YapConfig::resolve_cleanup_body`). Includes the
       `allApps` vs `selectedAppsOnly` **routing scope** and a Settings UI (per-app
-      rules with their own instructions; app picker seeded from dictation history).
-      Simplification vs FluidVoice: rules store a **custom body inline** per app
-      rather than binding to a reusable named profile.
+      rules; app picker seeded from dictation history).
+- [x] **Reusable named cleanup profiles** (FluidVoice `DictationPromptProfile`) — a
+      library of named profiles (`config.cleanup_profiles`: `{id,name,prompt}`); each
+      per-app rule **binds to a profile** (`AppRoute.profile_id`) instead of carrying
+      an inline body, so one profile can serve many apps and is edited in one place.
+      Legacy inline-body rules auto-migrate to a generated profile on first load.
+      Profiles can be seeded from the built-in presets.
 - [x] **Edit / Rewrite mode** ("make this a list", "more concise", "fix grammar") —
       FluidVoice's Write/Edit mode. **v1 = rewrite + write, implemented** (pending
       end-to-end runtime test). Shipped: `edit_hotkey` (2nd hotkey via `EDIT_BINDING`
@@ -195,9 +199,18 @@ presets, signing, history, and reach — see the phases below (✅ = done).
 ### Phase 5 — Trust, polish & distribution
 - [x] **Installer** (custom NSIS: normal/portable + WebView2 bootstrap), **auto-update**
       (`tauri-plugin-updater` → GitHub Releases), **portable mode**, **release CI**.
-- [ ] **Authenticode sign the installer** (deferred by choice until Yap's worth it —
-      until then Windows SmartScreen warns on first run). Updater artifacts already
-      minisign-signed.
+- [ ] **Authenticode sign the installer** (until then Windows SmartScreen warns on
+      first run). Updater artifacts already minisign-signed. Plan:
+      - **Needs a code-signing certificate** (user action): either an **OV cert**
+        (cheap, but SmartScreen reputation builds over time/downloads) or an **EV
+        cert** (instant SmartScreen trust, pricier, usually HSM/USB-token). Store as
+        GitHub secrets: `WINDOWS_CERT` (base64 .pfx) + `WINDOWS_CERT_PASSWORD`, or a
+        cloud-KMS/Azure-Trusted-Signing setup for EV.
+      - **Wire `signCommand`** in `tauri.conf.json` (the slot is already reserved) to
+        `signtool sign /fd sha256 /tr <timestamp-url> /td sha256 …` so `tauri build`
+        signs the NSIS installer + the exe.
+      - **CI**: decode the secret in the release workflow before `tauri-action`; keep
+        it gated so unsigned dev builds still work without the secret.
 - [x] Crisp recording indicator (overlay + waveform), great defaults, hidden power
       features, first-run onboarding.
 - [ ] Verify low idle CPU/RAM; reliable injection into every field.

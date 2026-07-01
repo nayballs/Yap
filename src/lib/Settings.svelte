@@ -245,6 +245,7 @@
       'Remove filler words (um, uh, er, like, you know). Fix capitalization, punctuation, and obvious grammar. Resolve spoken self-corrections (e.g. "go to the store, no wait, the bank" → "go to the bank"). Keep the result faithful and natural — don\'t over-format.',
     routingScope: 'all_apps',
     appRoutes: [],
+    cleanupProfiles: [],
     editHotkey: '',
   };
 
@@ -255,7 +256,12 @@
     cfg = { ...FIELD_DEFAULTS, ...stored };
     if (!Array.isArray(cfg.dictionary)) cfg.dictionary = [];
     if (!Array.isArray(cfg.appRoutes)) cfg.appRoutes = [];
+    if (!Array.isArray(cfg.cleanupProfiles)) cfg.cleanupProfiles = [];
+    const migrated = migrateRoutesToProfiles();
     loaded = true;
+    // Persist the migration immediately so it isn't redone (and duplicated) on
+    // the next load. The auto-save effect skips its first (priming) run.
+    if (migrated) persist();
     try {
       devices = await invoke('list_audio_devices');
     } catch {
@@ -501,7 +507,7 @@
     if (cfg.ppPreset !== 'custom') cfg.ppPreset = 'custom';
   }
 
-  // ---- Smart routing (per-app cleanup rules) ----
+  // ---- Smart routing (reusable profiles + per-app rules) ----
   // Apps the user has actually dictated into, pulled from local history so the
   // "Add rule" picker suggests real targets instead of asking them to type
   // "slack.exe". Populated lazily when the routing UI first renders.
@@ -527,13 +533,63 @@
     const base = (app || '').replace(/\.exe$/i, '');
     return base ? base.charAt(0).toUpperCase() + base.slice(1) : app;
   }
+
+  let idSeq = 1;
+  function newId() {
+    return globalThis.crypto?.randomUUID?.() ?? `p_${Date.now()}_${idSeq++}`;
+  }
+
+  // Migrate any legacy inline-body rules (pre-profiles) into named profiles so
+  // the whole app now speaks "profiles". Runs once on load. Returns whether it
+  // changed anything (so the caller can persist — otherwise it'd re-migrate and
+  // duplicate profiles on every load until the next save).
+  function migrateRoutesToProfiles() {
+    if (!Array.isArray(cfg.cleanupProfiles)) cfg.cleanupProfiles = [];
+    let migrated = false;
+    for (const r of cfg.appRoutes || []) {
+      if (!r.profileId && (r.prompt || '').trim()) {
+        const id = newId();
+        cfg.cleanupProfiles = [
+          ...cfg.cleanupProfiles,
+          { id, name: r.label || prettyAppLabel(r.app), prompt: r.prompt },
+        ];
+        r.profileId = id;
+        r.prompt = '';
+        migrated = true;
+      }
+    }
+    return migrated;
+  }
+
+  // ---- Profiles library ----
+  function addProfile(seedBody = '', name = '') {
+    const id = newId();
+    const n = name || `Profile ${cfg.cleanupProfiles.length + 1}`;
+    cfg.cleanupProfiles = [...cfg.cleanupProfiles, { id, name: n, prompt: seedBody }];
+    return id;
+  }
+  function addProfileFromPreset(value) {
+    const preset = PP_PRESETS.find((p) => p.value === value);
+    if (!preset || preset.value === 'custom') return addProfile('', '');
+    addProfile(preset.body ?? '', preset.label);
+  }
+  function removeProfile(id) {
+    cfg.cleanupProfiles = cfg.cleanupProfiles.filter((p) => p.id !== id);
+    // Unbind any rules that pointed at it (they fall back to the global default).
+    for (const r of cfg.appRoutes) if (r.profileId === id) r.profileId = '';
+  }
+
+  // ---- App rules ----
   function addRoute(app) {
     const name = (app || newRouteApp || '').trim();
     if (!name) return;
     if ((cfg.appRoutes || []).some((r) => (r.app || '').toLowerCase() === name.toLowerCase())) return;
+    // Ensure at least one profile exists to bind to (seed from the global body).
+    let profileId = cfg.cleanupProfiles[0]?.id;
+    if (!profileId) profileId = addProfile(cfg.ppPrompt || '', 'Default');
     cfg.appRoutes = [
       ...(cfg.appRoutes || []),
-      { app: name, label: prettyAppLabel(name), prompt: cfg.ppPrompt || '' },
+      { app: name, label: prettyAppLabel(name), profileId, prompt: '' },
     ];
     newRouteApp = '';
     recentApps = recentApps.filter((a) => a.toLowerCase() !== name.toLowerCase());
@@ -577,9 +633,17 @@
         .map((r) => ({
           app: (r.app || '').trim(),
           label: (r.label || '').trim() || (r.app || '').trim(),
+          profileId: r.profileId || '',
           prompt: r.prompt || '',
         }))
         .filter((r) => r.app),
+      cleanupProfiles: (cfg.cleanupProfiles || [])
+        .map((p) => ({
+          id: p.id,
+          name: (p.name || '').trim() || 'Untitled',
+          prompt: p.prompt || '',
+        }))
+        .filter((p) => p.id),
     };
   }
 
@@ -899,20 +963,57 @@
               <Row>
                 {#snippet children()}
                   <div class="routes">
+                    <div class="routes-sub">Profiles</div>
                     <p class="note">
-                      Give specific apps their own cleanup instructions — e.g. terse for
-                      Slack, formal for Outlook, code-aware in your editor. Yap matches the
-                      app you were focused on when you started dictating.
+                      Reusable cleanup styles — e.g. terse for chat, formal for email,
+                      code-aware for your editor. Edit one and every app using it updates.
+                    </p>
+                    {#if cfg.cleanupProfiles.length > 0}
+                      {#each cfg.cleanupProfiles as prof (prof.id)}
+                        <div class="route">
+                          <div class="route-head">
+                            <input class="route-label" placeholder="Profile name" bind:value={prof.name} />
+                            <span class="route-proc"></span>
+                            <button class="rm" title="Delete profile" aria-label="Delete profile" onclick={() => removeProfile(prof.id)}>×</button>
+                          </div>
+                          <Textarea bind:value={prof.prompt} rows={3} />
+                        </div>
+                      {/each}
+                    {:else}
+                      <div class="empty">No profiles yet — add one, then assign it to an app below.</div>
+                    {/if}
+                    <div class="route-add">
+                      <select class="route-pick" onchange={(e) => { addProfileFromPreset(e.currentTarget.value); e.currentTarget.value = ''; }}>
+                        <option value="">New from preset…</option>
+                        {#each PP_PRESETS.filter((p) => p.value !== 'custom') as p}
+                          <option value={p.value}>{p.label}</option>
+                        {/each}
+                      </select>
+                      <button class="add" onclick={() => addProfile()}>+ Blank profile</button>
+                    </div>
+                  </div>
+                {/snippet}
+              </Row>
+              <Row>
+                {#snippet children()}
+                  <div class="routes">
+                    <div class="routes-sub">App rules</div>
+                    <p class="note">
+                      Assign a profile to each app. Yap matches the app you were focused
+                      on when you started dictating.
                     </p>
                     {#if cfg.appRoutes.length > 0}
                       {#each cfg.appRoutes as route, i (i)}
-                        <div class="route">
-                          <div class="route-head">
-                            <input class="route-label" placeholder="App name" bind:value={route.label} />
-                            <span class="route-proc">{route.app}</span>
-                            <button class="rm" title="Remove rule" aria-label="Remove rule" onclick={() => removeRoute(i)}>×</button>
-                          </div>
-                          <Textarea bind:value={route.prompt} rows={3} />
+                        <div class="route-rule">
+                          <input class="route-label" placeholder="App name" bind:value={route.label} />
+                          <span class="route-proc">{route.app}</span>
+                          <select class="route-pick grow" bind:value={route.profileId}>
+                            <option value="">Default cleanup</option>
+                            {#each cfg.cleanupProfiles as p (p.id)}
+                              <option value={p.id}>{p.name}</option>
+                            {/each}
+                          </select>
+                          <button class="rm" title="Remove rule" aria-label="Remove rule" onclick={() => removeRoute(i)}>×</button>
                         </div>
                       {/each}
                     {:else}
@@ -1413,9 +1514,32 @@
     color: #6b7280;
   }
 
-  /* Smart routing (per-app cleanup rules) */
+  /* Smart routing (profiles + per-app rules) */
   .routes {
     width: 100%;
+  }
+  .routes-sub {
+    color: #e5e7eb;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .route-rule {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .route-rule .route-proc {
+    flex: 0 1 auto;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .route-pick.grow {
+    flex: 1 1 auto;
+    min-width: 0;
   }
   .route {
     border: 1px solid #2a2f3a;
