@@ -92,6 +92,15 @@ back to the raw transcript, so dictation never blocks.
   output-only, never answer the transcript) that's always prepended via
   `build_system_prompt()` to the user's editable **body** (tone/format = a preset or
   custom text). Records token/request usage (best-effort).
+- **`local_llm.rs`** — the on-device AI cleanup sidecar: runs **Mozilla llamafile**
+  (llama.cpp, single-file OpenAI-compatible server) as a hidden child process on a
+  free localhost port, serving **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) by default
+  — or **any user GGUF** dropped into `<data>/llm/` and picked via `pp_local_model`
+  (Settings shows a model picker + "Open models folder"; switching restarts the
+  sidecar). Owns install (runtime + model download, SHA-256 verified, per-stage
+  progress events), process lifecycle (spawn/health-wait/kill + orphan cleanup at
+  startup), and `effective_endpoint()` which routes `llm.rs` to the sidecar when
+  provider = "ondevice" (falls back to the configured endpoint if it's down).
 - **`history.rs`** — local-only transcription history (`history.json`): each
   dictation's timestamp, raw + final text, model, and focused app. Best-effort,
   gated by `history_enabled`. Derives the stats dashboard (words, time-saved vs
