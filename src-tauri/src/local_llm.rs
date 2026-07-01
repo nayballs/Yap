@@ -30,6 +30,11 @@ pub const LOCAL_MODEL: &str = "qwen2.5-1.5b-instruct";
 /// Q4_K_M — Apache-2.0, ~1.04 GB, strong instruction-following for its size.
 pub const MODEL_FILENAME: &str = "qwen2.5-1.5b-instruct-q4_k_m.gguf";
 
+/// Human-readable names surfaced in the Settings UI (via `local_llm_status`) so
+/// the user is told exactly what gets downloaded and what runs on their machine.
+pub const MODEL_DISPLAY: &str = "Qwen2.5 1.5B Instruct";
+pub const ENGINE_DISPLAY: &str = "Mozilla llamafile (llama.cpp)";
+
 /// Download source + pinned SHA-256 for the GGUF cleanup model (HuggingFace).
 const MODEL_URL: &str =
     "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf";

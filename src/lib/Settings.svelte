@@ -513,10 +513,23 @@
   }
 
   // ---- On-device cleanup sidecar (llamafile) ----
-  let localLlm = $state({ installed: false, running: false });
+  // model/engine display names come from the backend (single source of truth);
+  // the literals here are just a fallback until local_llm_status resolves.
+  let localLlm = $state({
+    installed: false,
+    running: false,
+    model: 'Qwen2.5 1.5B Instruct',
+    engine: 'Mozilla llamafile (llama.cpp)',
+  });
   let localInstalling = $state(false);
-  let localProgress = $state({ stage: '', percent: 0 });
+  let localProgress = $state({ stage: '', percent: 0, downloaded_mb: 0, total_mb: 0 });
   let localError = $state('');
+
+  // What each install stage actually downloads, so the progress bar names it.
+  const LOCAL_STAGE_LABELS = {
+    runtime: 'llamafile engine (local AI server)',
+    model: 'Qwen2.5 1.5B model',
+  };
 
   async function refreshLocalLlm() {
     try {
@@ -962,21 +975,26 @@
                 {/snippet}
               </Row>
             {:else}
-              <Row label="On-device model" hint="Qwen2.5 1.5B · runs on your PC · nothing leaves your machine">
+              <Row label="On-device model" hint={`${localLlm.model} · runs on your PC via ${localLlm.engine} · nothing leaves your machine`}>
                 {#snippet children()}
                   <div class="pp-field ondevice">
                     {#if localLlm.running}
-                      <span class="ondevice-ok">● Ready — running locally</span>
+                      <span class="ondevice-ok">● {localLlm.model} — running locally via llamafile</span>
                     {:else if localLlm.installed}
-                      <span class="ondevice-ok">✓ Installed — starts on next launch</span>
+                      <span class="ondevice-ok">✓ {localLlm.model} installed — starts with Yap</span>
                     {:else if localInstalling}
                       <div class="ondevice-dl">
-                        Downloading {localProgress.stage || 'files'}… {localProgress.percent}%
+                        Downloading {LOCAL_STAGE_LABELS[localProgress.stage] || 'files'}… {localProgress.percent}%
+                        {#if localProgress.total_mb}
+                          <span class="ondevice-mb">
+                            {Math.round(localProgress.downloaded_mb)} / {Math.round(localProgress.total_mb)} MB
+                          </span>
+                        {/if}
                         <div class="ondevice-bar"><span style="width:{localProgress.percent}%"></span></div>
                       </div>
                     {:else}
                       <button class="ondevice-btn" onclick={installLocalLlm} disabled={!cfg.postProcessEnabled}>
-                        Download &amp; enable (~1.3 GB)
+                        Download {localLlm.model} + llamafile engine (~1.3 GB)
                       </button>
                     {/if}
                     {#if localError}<span class="ondevice-err">{localError}</span>{/if}
@@ -1714,6 +1732,12 @@
   }
   .ondevice-dl {
     color: var(--muted, #9ca3af);
+  }
+  .ondevice-mb {
+    margin-left: 6px;
+    font-size: 11px;
+    color: #6b7280;
+    font-variant-numeric: tabular-nums;
   }
   .ondevice-bar {
     margin-top: 4px;

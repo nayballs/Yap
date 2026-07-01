@@ -311,6 +311,8 @@ pub fn local_llm_status() -> serde_json::Value {
         "installed": crate::local_llm::is_installed(),
         "running": crate::local_llm::is_running(),
         "modelFile": crate::local_llm::MODEL_FILENAME,
+        "model": crate::local_llm::MODEL_DISPLAY,
+        "engine": crate::local_llm::ENGINE_DISPLAY,
     })
 }
 
