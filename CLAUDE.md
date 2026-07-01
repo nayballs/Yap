@@ -202,6 +202,31 @@ updater (`tauri-plugin-updater`) checks that endpoint. **Currently unsigned**
 `signCommand` slot is ready. Updater artifacts are minisign-signed
 (`TAURI_SIGNING_PRIVATE_KEY` GitHub secret).
 
+### Release channels (stable + nightly)
+Yap ships **two auto-update channels** (Chrome Stable/Canary style), both CI-built
+on GitHub Actions (Yap builds cleanly there — ONNX + DirectML, no CUDA):
+
+- **Stable** — tag `v*` → `.github/workflows/release.yml` → a normal (non-prerelease)
+  GitHub Release. Installed stable copies check
+  `…/releases/latest/download/latest.json` (the `endpoints` in `tauri.conf.json`).
+  Cut deliberately for curated versions (`0.1.0`, `0.2.0`, …).
+- **Nightly** — `.github/workflows/nightly.yml` (daily `schedule` cron at 05:00 UTC,
+  plus manual `workflow_dispatch`) → a **single rolling `nightly` pre-release** whose
+  assets are overwritten in place (`gh release upload --clobber`). Version is
+  `<baseVersion>-nightly.<run_number>` (e.g. `0.1.0-nightly.42`) — a semver prerelease,
+  monotonic via the run number so the updater always sees "newer". The installer + sig
+  are renamed to the **constant** names `Yap-nightly-setup.exe(.sig)` so the download
+  URL never changes across nightlies.
+
+**Channel separation:** a nightly install follows the nightly endpoint because it is
+built with `-c src-tauri/tauri.nightly.conf.json`, which overrides only the updater
+`endpoints` to `…/releases/download/nightly/latest.json` (same identifier/productName
+as stable — it's the same app on a different endpoint). Because a GitHub *pre-release*
+never resolves as `/releases/latest/`, stable users never see nightly builds, and the
+two channels don't cross. Both channels sign with the **same** minisign key
+(`TAURI_SIGNING_PRIVATE_KEY`) — the pubkey in `tauri.conf.json` must match it or
+installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
+
 ---
 
 ## Config & data

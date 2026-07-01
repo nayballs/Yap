@@ -1,0 +1,201 @@
+name: "Nightly"
+
+# Build + sign a NIGHTLY Yap and publish it to a SINGLE rolling `nightly`
+# GitHub pre-release, with CONSTANT asset names so the updater URL never changes
+# across nightlies. This is the dogfood channel — separate from stable.
+#
+#   Stable  : tag `v*`  -> release.yml -> /releases/latest/ (non-prerelease)
+#   Nightly : this file -> rolling `nightly` PRE-release, assets clobbered in place
+#
+# A pre-release never resolves as /releases/latest/, so stable users never see
+# nightly builds. A nightly install follows the nightly endpoint because it is
+# built with `-c src-tauri/tauri.nightly.conf.json` (overrides the updater URL).
+#
+# Required GitHub secrets (same key as stable — the updater pubkey in
+# tauri.conf.json must match this private key or installed copies reject updates):
+#   TAURI_SIGNING_PRIVATE_KEY           minisign private key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  password for that key (empty string if none)
+#   GITHUB_TOKEN                        provided automatically by Actions
+#
+# NOTE: TAURI_SIGNING_PRIVATE_KEY_PASSWORD is NOT set on this repo yet (only
+# TAURI_SIGNING_PRIVATE_KEY exists). If Yap's key HAS a password, add that secret
+# or the build's signing step will fail. If the key has NO password, set the
+# secret to an empty string (or the env line tolerates it being unset).
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 05:00 UTC daily. GitHub cron is ALWAYS UTC (no repo-timezone support).
+    - cron: "0 5 * * *"
+
+jobs:
+  nightly:
+    permissions:
+      contents: write
+    runs-on: windows-latest
+    steps:
+      # whisper-rs-sys' cmake build produces paths that exceed Windows MAX_PATH
+      # (260 chars). Enable long paths + use a short target dir to stay under it.
+      - name: Enable long paths (Windows)
+        shell: pwsh
+        run: |
+          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+            -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+          git config --system core.longpaths true
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Shorten build path (Windows)
+        shell: pwsh
+        run: |
+          $drive = Split-Path -Qualifier $env:GITHUB_WORKSPACE
+          $targetDir = "$drive\t"
+          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+          echo "CARGO_TARGET_DIR=$targetDir" >> $env:GITHUB_ENV
+
+      # Derive a monotonic prerelease version = <baseVersion>-nightly.<run_number>
+      # (run_number is monotonic across dispatch + schedule, so the updater always
+      # sees a newer semver than the previous nightly). Patch it into package.json,
+      # tauri.conf.json and Cargo.toml BEFORE the build, and export it to
+      # $GITHUB_ENV as NIGHTLY_VERSION for later steps.
+      - name: Compute + patch nightly version
+        shell: bash
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          cat > patch-nightly-version.cjs <<'EOF'
+          const fs = require('fs');
+          const tauriConfPath = 'src-tauri/tauri.conf.json';
+          const conf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf8'));
+          const base = conf.version; // e.g. "0.1.0"
+          const runNumber = process.env.RUN_NUMBER;
+          const version = `${base}-nightly.${runNumber}`;
+
+          // package.json
+          const pkgPath = 'package.json';
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          pkg.version = version;
+          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+
+          // tauri.conf.json
+          conf.version = version;
+          fs.writeFileSync(tauriConfPath, JSON.stringify(conf, null, 2) + '\n');
+
+          // Cargo.toml — replace ONLY the version line inside [package], leaving
+          // dependency versions untouched.
+          const cargoPath = 'src-tauri/Cargo.toml';
+          const lines = fs.readFileSync(cargoPath, 'utf8').split(/\r?\n/);
+          let section = '';
+          let patched = false;
+          for (let i = 0; i < lines.length; i++) {
+            const t = lines[i].trim();
+            const m = t.match(/^\[([^\]]+)\]$/);
+            if (m) { section = m[1]; continue; }
+            if (section === 'package' && /^version\s*=/.test(t) && !patched) {
+              lines[i] = lines[i].replace(/version\s*=\s*"[^"]*"/, `version = "${version}"`);
+              patched = true;
+            }
+          }
+          if (!patched) { console.error('Could not find [package] version in Cargo.toml'); process.exit(1); }
+          fs.writeFileSync(cargoPath, lines.join('\n'));
+
+          fs.appendFileSync(process.env.GITHUB_ENV, `NIGHTLY_VERSION=${version}\n`);
+          console.log('Nightly version:', version);
+          EOF
+          node patch-nightly-version.cjs
+
+      # Build-only mode: NOT setting tagName/releaseName means tauri-action just
+      # builds (and minisign-signs) the artifacts and does NOT create its own
+      # release. We publish the rolling `nightly` release ourselves below.
+      - name: Build + sign (Tauri, nightly config)
+        uses: tauri-apps/tauri-action@v0
+        id: tauri
+        env:
+          # Updater (minisign) signing — required so latest.json's signature is
+          # valid and the in-app updater accepts the artifact.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Disable -march=native / SIMD above SSE4.2 for the broadest CPU
+          # compatibility — whisper.cpp CPU inference otherwise SIGILLs on old
+          # CPUs lacking AVX/FMA. The default model (Parakeet V3) runs on ONNX +
+          # DirectML and is unaffected.
+          GGML_NATIVE: "OFF"
+          GGML_AVX: "OFF"
+          GGML_AVX2: "OFF"
+          GGML_FMA: "OFF"
+          GGML_F16C: "OFF"
+        with:
+          # Same broad-compat build as stable (ONNX/DirectML + whisper CPU, no
+          # CUDA), PLUS the nightly config merge that points the updater endpoint
+          # at the nightly channel's latest.json.
+          args: "--features engines -c src-tauri/tauri.nightly.conf.json"
+
+      # Rename the built installer + its .sig to CONSTANT names so the download
+      # URL is stable across every nightly, then build latest.json from the .sig.
+      - name: Stage nightly artifacts
+        shell: bash
+        run: |
+          cat > stage-nightly.cjs <<'EOF'
+          const fs = require('fs');
+          const path = require('path');
+          const version = process.env.NIGHTLY_VERSION;
+          const nsisDir = path.join(process.env.CARGO_TARGET_DIR, 'release', 'bundle', 'nsis');
+          const files = fs.readdirSync(nsisDir);
+          const exe = files.find((f) => f.endsWith('-setup.exe'));
+          const sig = files.find((f) => f.endsWith('-setup.exe.sig'));
+          if (!exe || !sig) {
+            console.error('Missing NSIS installer or .sig in', nsisDir, '->', files);
+            process.exit(1);
+          }
+          const CONST_EXE = 'Yap-nightly-setup.exe';
+          fs.copyFileSync(path.join(nsisDir, exe), CONST_EXE);
+          fs.copyFileSync(path.join(nsisDir, sig), CONST_EXE + '.sig');
+          const signature = fs.readFileSync(path.join(nsisDir, sig), 'utf8').trim();
+          const manifest = {
+            version,
+            notes: 'Rolling nightly build for dogfooding — the latest fixes from main.',
+            pub_date: new Date().toISOString(),
+            platforms: {
+              'windows-x86_64': {
+                signature,
+                url: `https://github.com/nayballs/Yap/releases/download/nightly/${CONST_EXE}`,
+              },
+            },
+          };
+          fs.writeFileSync('latest.json', JSON.stringify(manifest, null, 2));
+          console.log('Staged nightly', version, 'from', exe);
+          EOF
+          node stage-nightly.cjs
+
+      # Publish IN PLACE to the single rolling `nightly` pre-release. --clobber
+      # overwrites the constant-named assets so the Releases page keeps ONE
+      # nightly row and the updater URL never breaks.
+      - name: Publish rolling nightly release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create nightly \
+            --prerelease \
+            --title "Yap Nightly" \
+            --notes "Rolling nightly build — always the latest from main. For dogfooding; may be unstable." \
+            || true
+          gh release upload nightly \
+            Yap-nightly-setup.exe \
+            Yap-nightly-setup.exe.sig \
+            latest.json \
+            --clobber
