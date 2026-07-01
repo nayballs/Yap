@@ -12,6 +12,10 @@
   let percent = $state(0); // download progress for busyId
   let error = $state('');
 
+  // The recommended default (Parakeet V3) — powers the one-click quick-start so a
+  // brand-new user can go from install → dictating without hunting through the list.
+  const recommended = MODELS.find((m) => m.recommended) || MODELS[0];
+
   function statusOf(id) {
     if (busyId === id) return installed.includes(id) ? 'switching' : 'downloading';
     if (active === id) return 'active';
@@ -60,6 +64,18 @@
     }
   }
 
+  // One-click path: download + activate the recommended model, then finish. If a
+  // model is already active (user picked one from the list), just finish.
+  async function quickStart() {
+    if (busyId) return;
+    if (active) {
+      getStarted();
+      return;
+    }
+    await choose(recommended);
+    if (active === recommended.id) getStarted();
+  }
+
   function getStarted() {
     invoke('close_onboarding');
   }
@@ -70,8 +86,9 @@
     <img class="logo" src={yapIcon} alt="" aria-hidden="true" />
     <h1>Welcome to Yap</h1>
     <p class="sub">
-      Pick a voice model to get started. Everything runs locally on your machine —
-      your voice never leaves it. You can change this any time in Settings.
+      Just hit <strong>Download {recommended.name} &amp; start</strong> below — or pick a
+      different model from the list. Everything runs locally on your machine; your voice
+      never leaves it. You can change this any time in Settings.
     </p>
   </header>
 
@@ -87,8 +104,16 @@
 
   <footer>
     <button class="skip" onclick={getStarted}>I'll choose later</button>
-    <button class="start" onclick={getStarted} disabled={!active}>
-      {active ? 'Get started →' : 'Pick a model to continue'}
+    <button class="start" onclick={quickStart} disabled={!!busyId}>
+      {#if busyId === recommended.id}
+        Downloading {recommended.name}… {percent}%
+      {:else if busyId}
+        Setting up… {percent}%
+      {:else if active}
+        Get started →
+      {:else}
+        Download {recommended.name} & start
+      {/if}
     </button>
   </footer>
 </main>
