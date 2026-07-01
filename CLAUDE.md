@@ -190,7 +190,9 @@ CUDA arch list. One small installer, GPU on every GPU.
 ### Run in dev (what we use)
 Use **`scripts/dev.bat`** ("yap.dev") — it runs `npm run tauri dev -- --features engines`
 (the **real** GPU pipeline; needs the Vulkan SDK installed). A commented line switches to the
-fast no-GPU stub for pure UI work. Dev hot-reloads the frontend on every edit (Vite on **:1430**).
+fast no-GPU stub for pure UI work. Dev hot-reloads the frontend on every edit (Vite on **:51437**).
+A **"Yap - Dev"** desktop shortcut launches it; the plain **"Yap"** desktop shortcut is the
+*installed* app (`D:\Hobby Project\Yap`, follows the nightly channel).
 
 ```bash
 # real GPU pipeline (default in dev.bat) — requires the Vulkan SDK
@@ -201,7 +203,7 @@ npm run tauri dev
 
 > ⚠️ A *compiled release build* bakes the frontend into the binary — editing `src/`
 > and restarting that `.exe` changes nothing. For live frontend changes use dev
-> (Vite on :1430). If :1430 isn't listening, you're looking at a release build.
+> (Vite on :51437). If :51437 isn't listening, you're looking at a release build.
 
 ### CI on every push
 `.github/workflows/ci.yml` runs on every push/PR to `main`: `npm run build` (frontend,
