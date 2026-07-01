@@ -64,7 +64,7 @@ fn state_icon(state: &str) -> Image<'static> {
     let waves = [54.0f32, 66.0f32];
     let wave_hw = 4.0f32;
     let wave_ang = mouth * 0.8;
-    let clamp01 = |v: f32| v.max(0.0).min(1.0);
+    let clamp01 = |v: f32| v.clamp(0.0, 1.0);
 
     for y in 0..size {
         for x in 0..size {
@@ -168,7 +168,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
         );
     }
 
-    let label = if installed.iter().any(|id| *id == current) {
+    let label = if installed.contains(&current) {
         stt::model_name(&current)
     } else {
         "Model".to_string()

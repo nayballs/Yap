@@ -49,7 +49,7 @@ pub fn force_topmost(window: &tauri::WebviewWindow) {
             let topmost = -1isize as *mut std::ffi::c_void;
             unsafe {
                 win::SetWindowPos(
-                    hwnd.0 as *mut std::ffi::c_void,
+                    hwnd.0,
                     topmost,
                     0,
                     0,

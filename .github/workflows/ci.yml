@@ -44,6 +44,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Cargo check (stub build)
+      # Clippy subsumes cargo check. -D warnings is the ratchet: the codebase
+      # is at zero warnings (2026-07-02), so any new warning — dead code,
+      # unused imports, clippy lints — fails the push instead of accumulating.
+      - name: Cargo clippy (stub build, deny warnings)
         working-directory: src-tauri
-        run: cargo check --locked
+        run: cargo clippy --locked -- -D warnings
