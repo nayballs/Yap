@@ -213,6 +213,23 @@ pub async fn start() -> Result<String, String> {
     Err("llamafile did not become ready in time".to_string())
 }
 
+/// Kill any orphaned llamafile processes left over from a previous session.
+/// The Tauri updater (and crashes / task-kill) can force-exit Yap WITHOUT running
+/// the `RunEvent::Exit` handler, so `stop()` never fires and the sidecar survives.
+/// Called at startup before we spawn a fresh one, so at most one ever runs.
+#[cfg(windows)]
+pub fn kill_orphans() {
+    use std::os::windows::process::CommandExt;
+    // taskkill by image name — llamafile is Yap-specific in practice, and this
+    // only runs at our startup (any running instance is a leftover we own).
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/IM", RUNTIME_FILENAME])
+        .creation_flags(0x0800_0000)
+        .output();
+}
+#[cfg(not(windows))]
+pub fn kill_orphans() {}
+
 /// Stop the sidecar (kill + reap the child). Safe to call when not running.
 pub fn stop() {
     READY.store(false, Ordering::SeqCst);

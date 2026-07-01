@@ -181,9 +181,11 @@ pub fn run() {
                 Err(e) => tracing::error!("Failed to start pipeline: {}", e),
             }
 
-            // If on-device AI cleanup is selected + installed, warm up the
-            // llamafile sidecar now (off-thread, best-effort) so the first
-            // dictation cleanup doesn't pay the cold model-load.
+            // Clear any orphaned cleanup sidecar from a previous session (the
+            // updater force-exits without running the Exit handler), then — if
+            // on-device cleanup is selected + installed — warm up a fresh one
+            // off-thread so the first dictation cleanup skips the cold load.
+            local_llm::kill_orphans();
             {
                 let cfg2 = cfg.clone();
                 tauri::async_runtime::spawn(async move {

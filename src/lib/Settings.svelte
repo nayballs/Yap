@@ -543,6 +543,14 @@
     }
   }
 
+  // While on-device is selected but not yet running (e.g. the sidecar is warming
+  // up after launch), poll status so the panel flips to "Ready" on its own.
+  $effect(() => {
+    if (cfg?.ppProvider !== 'ondevice' || localLlm.running) return;
+    const id = setInterval(refreshLocalLlm, 3000);
+    return () => clearInterval(id);
+  });
+
   // Picking a cleanup preset overwrites the editable body with its text. "Custom"
   // leaves whatever's there. Editing the body by hand flips the preset to Custom.
   function onPresetChange(value) {
