@@ -40,6 +40,12 @@ your voice to the cloud. Yap refuses the choice:
              → typed into the focused app
 ```
 
+<div align="center">
+<img src="docs/screenshot-pill.png" alt="The Yap pill — a minimal floating capsule" width="240" />
+<br/>
+<img src="docs/screenshot-settings.png" alt="Yap settings — hotkey, microphone, recording mode" width="620" />
+</div>
+
 ## Features
 
 - 🎙️ **Dictate into anything** — one global hotkey (default `F9`), toggle or
