@@ -17,6 +17,8 @@ app you're in.
 
 **[⬇ Download for Windows](https://github.com/nayballs/Yap/releases/download/nightly/Yap-nightly-setup.exe)** · [all releases](https://github.com/nayballs/Yap/releases)
 
+<img src="docs/demo.gif" alt="Yap demo — dictating into Notepad, AI cleanup stripping the filler words" width="680" />
+
 </div>
 
 ---
