@@ -13,7 +13,7 @@
 param(
     [int]$Fps = 12,
     [int]$Width = 960,
-    [string]$Region = "",   # "x,y,w,h" — empty = primary monitor
+    [string]$Region = "",   # "x,y,w,h" - empty = primary monitor
     [string]$Out = "docs\demo.gif"
 )
 
@@ -47,7 +47,7 @@ $psi.UseShellExecute = $false
 $psi.RedirectStandardInput = $true
 $proc = [System.Diagnostics.Process]::Start($psi)
 
-Write-Host "  ● RECORDING — do the take! (hotkey, talk, hotkey)" -ForegroundColor Red
+Write-Host "  * RECORDING - do the take! (hotkey, talk, hotkey)" -ForegroundColor Red
 Read-Host  "  Press ENTER to STOP"
 
 $proc.StandardInput.Write("q")   # graceful stop
@@ -66,5 +66,5 @@ $size = [math]::Round((Get-Item $Out).Length / 1MB, 2)
 Write-Host ""
 Write-Host "  Saved $Out ($size MB)" -ForegroundColor Green
 if ($size -gt 10) {
-    Write-Host "  (>10 MB is heavy for a README — do a shorter take or crop with -Region)" -ForegroundColor Yellow
+    Write-Host "  (over 10 MB is heavy for a README - do a shorter take or crop with -Region)" -ForegroundColor Yellow
 }
