@@ -102,8 +102,24 @@ pub fn run() {
         "Yap starting — build capabilities (GPU whisper via Vulkan, ONNX via DirectML; falls back to CPU with no GPU)"
     );
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+    let builder = tauri::Builder::default();
+
+    // Single-instance: RELEASE builds only. Dev builds must coexist with an
+    // installed Yap — with the plugin on, a `tauri dev` instance pings the
+    // running installed app and silently exits within seconds, which broke
+    // every "run the dev build" workflow (incl. Voice Mirror's App Preview).
+    // On a duplicate release launch, surface the app instead of doing nothing.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        use tauri::Manager;
+        if let Some(settings) = app.get_webview_window("settings") {
+            let _ = settings.show();
+            let _ = settings.unminimize();
+            let _ = settings.set_focus();
+        }
+    }));
+
+    builder
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
