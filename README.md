@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="src/assets/128x128@2x.png" width="96" alt="Yap icon" />
+<img src="src-tauri/icons/128x128@2x.png" width="96" alt="Yap icon" />
 
 # Yap
 
