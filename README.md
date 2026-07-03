@@ -52,7 +52,7 @@ your voice to the cloud. Yap refuses the choice:
 
 - 🎙️ **Dictate into anything** — one global hotkey (default `F9`), toggle or
   push-to-talk. The text lands in whatever window has focus: Slack, email, your IDE.
-- ⚡ **Local GPU transcription** — 16 models to choose from (Parakeet, Whisper,
+- ⚡ **Local GPU transcription** — 14 models to choose from (Parakeet, Whisper,
   Moonshine, SenseVoice, Canary…), downloaded in-app and SHA-256 verified. Runs on
   **any** GPU — NVIDIA, AMD, or Intel — via Vulkan + DirectML. No CUDA. CPU fallback included.
 - 🧠 **AI cleanup, private by default** — one click downloads a small local model
