@@ -159,6 +159,61 @@ switchable via hotkey, menu, or `superwhisper://mode?key=…` deep links.
 
 ---
 
+## Hands-on: superwhisper Windows app (installed + screenshotted, July 2026)
+
+First-party observations from installing the Windows build (screenshots in
+`E:\Pictures\2026-07-04_22-3*.png`). What their UX actually does, and what Yap
+should take from it.
+
+### Onboarding (a 6-step guided flow, progress bar on top)
+1. **Permissions** — mic access with a live "✓ Allowed" state + a privacy link.
+2. **"Using Superwhisper"** — a picture of the Windows system tray with an arrow
+   pointing at their icon; buttons "Got it!" / "I can't find it". Solves tray-app
+   discoverability head-on.
+3. **Mic test** — "Speak and see if the waves react", live waveform, inline input-device
+   picker. Catches wrong-mic problems *before* first dictation.
+4. **Pro upsell** (skippable "Maybe later").
+5. **Cloud vs Local model** — two equal cards; honest copy ("recordings go to the cloud
+   to process but are never stored there").
+6. **"Try the shortcut"** — press Ctrl+Space and dictate *into a text box inside the
+   onboarding itself*; "Change shortcut" link right there. The user proves the core loop
+   works before onboarding closes.
+
+### Main app (sidebar: Home / Modes / Vocabulary / Configuration / Sound / Models library / History)
+- **Home** = stats strip (avg WPM · words this week · apps used · minutes saved) + a
+  **"Get started" checklist** (start recording / customize shortcuts / create a mode /
+  add vocabulary) + a **"What's new?" changelog feed**. Feature discovery, not just config.
+- **Vocabulary** — one combined entry bar: type a word → "Add word ↵" *or* "Replace
+  with… ⇧↵". Two features (recognition hint vs replacement) in one compact affordance.
+- **Sound** — auto mic-volume boost, **silence removal**, dynamic normalization,
+  **"Playback when recording: [Pause ▾]"** (the pause-media feature), sound-effects
+  toggle + volume.
+- **Models library** — a single searchable list mixing **LLMs and STT models** (Anthropic
+  Sonnet 4.5/4.6/5, GPT-5.x family, Gemini 3.x, Grok, Deepgram Nova, NVIDIA Parakeet
+  1.1 GB, their own S1/Fast/Nano/Pro/Standard/Ultra locals 75 MB–3 GB), with columns for
+  **type icon, Speed/Accuracy bars, Cloud/Offline, size + download button**, star
+  favourites, a provider filter, and a BYOK key button.
+- **Recording pill** — compact floating capsule (mode ✦ · logo · expand ⤢) with a hover
+  tooltip "Start recording Ctrl+Space".
+
+### Takeaways for Yap (ranked)
+1. **Onboarding v2** — Yap's onboarding is a model picker only. Adopt: mic-test step
+   (Yap already has the live waveform component), a **"press F9, try it here"** step with
+   an inline textbox, and — critically — an **AI-cleanup step offering the built-in local
+   model one-click**. Yap's #1 differentiator (zero-config local cleanup) is currently
+   buried in Settings, off by default, invisible to a new user. superwhisper puts model
+   choice *in onboarding*; Yap should put its cleanup wedge there.
+2. **Tray-discovery step** — Yap is tray-first with all windows hidden; a "here's where
+   Yap lives" pointer step is nearly free and prevents "the app vanished" confusion.
+3. **Pause media while recording** — they ship it as a Playback dropdown (Pause). Already
+   on Yap's small-polish list; screenshot confirms the UX shape.
+4. **Speed/Accuracy bars in the model browser** — a cheap visual upgrade to Yap's
+   ModelCard (the registry already knows each model's traits).
+5. **Get-started checklist on first run** — Yap's power features (edit mode, per-app
+   profiles, per-profile models) are exactly the kind that need discovery nudges.
+6. **Skip**: the unified LLM+STT model list (Yap's STT-models vs cleanup-provider split is
+   clearer), Home-page WPM strip (Yap's stats already live in History).
+
 ## Sources
 
 **superwhisper** — [docs repo](https://github.com/superultrainc/superwhisper-docs)
