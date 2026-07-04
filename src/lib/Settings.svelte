@@ -1539,7 +1539,12 @@
                   </p>
                   <p class="aprivacy">🔒 Everything runs locally. Your voice never leaves your machine.</p>
                   <p class="adir">Config &amp; models live in <code>%APPDATA%/yap/</code>.</p>
-                  <a class="alink" href="https://github.com/nayballs/Yap" target="_blank" rel="noreferrer">GitHub →</a>
+                  <div class="arow">
+                    <a class="alink" href="https://github.com/nayballs/Yap" target="_blank" rel="noreferrer">GitHub →</a>
+                    <button class="alink abtn" onclick={() => invoke('open_onboarding')}>
+                      Show setup guide again →
+                    </button>
+                  </div>
                 </div>
               {/snippet}
             </Row>
@@ -2278,6 +2283,20 @@
     color: #60a5fa;
     text-decoration: none;
     font-size: 12.5px;
+  }
+  .arow {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  /* A button that reads like .alink (for actions, e.g. re-run onboarding). */
+  .abtn {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
   }
   .alink:hover {
     text-decoration: underline;
