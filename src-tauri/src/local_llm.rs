@@ -148,8 +148,26 @@ pub fn is_running() -> bool {
 /// never a hang). `provider` is the id the call is attributed to for the
 /// per-provider usage meter.
 pub fn effective_endpoint(cfg: &crate::config::YapConfig) -> (String, String, String, String) {
-    if cfg.pp_provider == PROVIDER_ONDEVICE {
-        if let Some(url) = base_url() {
+    effective_endpoint_for(
+        &cfg.pp_provider,
+        &cfg.pp_base_url,
+        &cfg.pp_api_key,
+        &cfg.pp_model,
+    )
+}
+
+/// Same as [`effective_endpoint`] but for explicit values — used by per-profile
+/// LLM overrides, where the provider comes from the matched `CleanupProfile`
+/// instead of the global config. "ondevice" routes through the sidecar when
+/// it's up, exactly like the global path.
+pub fn effective_endpoint_for(
+    provider: &str,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+) -> (String, String, String, String) {
+    if provider == PROVIDER_ONDEVICE {
+        if let Some(url) = self::base_url() {
             return (
                 url,
                 String::new(),
@@ -159,10 +177,10 @@ pub fn effective_endpoint(cfg: &crate::config::YapConfig) -> (String, String, St
         }
     }
     (
-        cfg.pp_base_url.clone(),
-        cfg.pp_api_key.clone(),
-        cfg.pp_model.clone(),
-        cfg.pp_provider.clone(),
+        base_url.to_string(),
+        api_key.to_string(),
+        model.to_string(),
+        provider.to_string(),
     )
 }
 
@@ -301,14 +319,21 @@ pub fn stop() {
     }
 }
 
-/// If the user has selected on-device cleanup and the files are installed, start
-/// the sidecar (best-effort — logs and moves on if it can't). Called at startup.
+/// Whether any config path can route cleanup to the on-device sidecar: the
+/// global provider, or a per-profile LLM override.
+fn ondevice_selected(cfg: &crate::config::YapConfig) -> bool {
+    cfg.pp_provider == PROVIDER_ONDEVICE
+        || cfg
+            .cleanup_profiles
+            .iter()
+            .any(|p| p.provider == PROVIDER_ONDEVICE)
+}
+
+/// If on-device cleanup is selected anywhere (globally or by a profile
+/// override) and the files are installed, start the sidecar (best-effort —
+/// logs and moves on if it can't). Called at startup and after config saves.
 pub async fn autostart_if_configured(cfg: &crate::config::YapConfig) {
-    if cfg.post_process_enabled
-        && cfg.pp_provider == PROVIDER_ONDEVICE
-        && is_installed(cfg)
-        && !is_running()
-    {
+    if cfg.post_process_enabled && ondevice_selected(cfg) && is_installed(cfg) && !is_running() {
         if let Err(e) = start().await {
             tracing::warn!("On-device cleanup sidecar failed to start: {}", e);
         }

@@ -61,7 +61,9 @@ your voice to the cloud. Yap refuses the choice:
   Prefer your own stack? Point it at Ollama/LM Studio, or bring a Groq/OpenAI key.
   Even bring your own GGUF.
 - 🎯 **Per-app cleanup profiles** — terse for Slack, formal for email, code-aware for
-  your editor. Yap detects the app you're dictating into and applies the right style.
+  your editor. Yap detects the app you're dictating into and applies the right style —
+  and each profile can even run its **own AI model** (e.g. email on a strong cloud
+  model, chat on the fast local one).
 - ✏️ **Voice edit/rewrite mode** — bind a second hotkey, select some text, and *say* the
   change: "make this a bullet list", "more concise", "fix the grammar", "translate to
   French". Yap rewrites the selection in place. With nothing selected it writes new text

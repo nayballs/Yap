@@ -116,9 +116,12 @@ back to the raw transcript, so dictation never blocks.
   show_overlay, overlay_position, dictionary, append_trailing_space, auto_submit(+key),
   restore_clipboard, show_tray_icon, autostart, model_unload_timeout, selected_language,
   translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
-  Notes/Slack/Code/Custom) + the editable `pp_prompt` body, streaming_partials,
+  Notes/Slack/Code/Custom) + the editable `pp_prompt` body, `cleanup_profiles` (each
+  with an optional per-profile LLM override: provider/base_url/model/api_key — empty
+  provider = inherit global) + `app_routes` smart routing, streaming_partials,
   history_enabled, update_checks_enabled). JSON
-  load/save + `apply_dictionary`. `data_dir()` is portable-aware.
+  load/save + `apply_dictionary` + `resolve_cleanup` (per-app plan: body + endpoint).
+  `data_dir()` is portable-aware.
 - **`tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
   menu (model submenu w/ checkmark, Cancel while recording, Settings/Quit, Check for
   updates); left-click opens Settings.
@@ -158,7 +161,8 @@ back to the raw transcript, so dictation never blocks.
 - **`lib/Settings.svelte`** — sidebar sections: **General** (hotkey, recording mode,
   mic, sound+volume, mute, pill size, show pill/overlay, overlay position), **Models**
   (`ModelManager` + GPU + language/translate), **AI Cleanup** (provider/key/model/
-  preset + editable instructions + Test + usage meter), **History** (stats dashboard
+  preset + editable instructions + Test + usage meter + profiles w/ per-profile model
+  override + per-app rules), **History** (stats dashboard
   + recent list + enable/clear), **Advanced** (output toggles, system, dictionary),
   **About** (version, updates).
 - **`lib/ModelManager.svelte` / `ModelCard.svelte` / `models.js`** — the 14-model

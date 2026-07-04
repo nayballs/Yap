@@ -675,7 +675,15 @@
         const id = newId();
         cfg.cleanupProfiles = [
           ...cfg.cleanupProfiles,
-          { id, name: r.label || prettyAppLabel(r.app), prompt: r.prompt },
+          {
+            id,
+            name: r.label || prettyAppLabel(r.app),
+            prompt: r.prompt,
+            provider: '',
+            baseUrl: '',
+            model: '',
+            apiKey: '',
+          },
         ];
         r.profileId = id;
         r.prompt = '';
@@ -689,8 +697,27 @@
   function addProfile(seedBody = '', name = '') {
     const id = newId();
     const n = name || `Profile ${cfg.cleanupProfiles.length + 1}`;
-    cfg.cleanupProfiles = [...cfg.cleanupProfiles, { id, name: n, prompt: seedBody }];
+    // provider '' = inherit the global AI-cleanup model (the default).
+    cfg.cleanupProfiles = [
+      ...cfg.cleanupProfiles,
+      { id, name: n, prompt: seedBody, provider: '', baseUrl: '', model: '', apiKey: '' },
+    ];
     return id;
+  }
+
+  // Picking a per-profile provider fills its base-URL default (mirrors the
+  // global onProviderChange); clearing back to "global" wipes the override so
+  // stale URLs/keys can't linger invisibly.
+  function onProfileProviderChange(prof) {
+    if (!prof.provider) {
+      prof.baseUrl = '';
+      prof.model = '';
+      prof.apiKey = '';
+      return;
+    }
+    const preset = PP_PROVIDERS.find((p) => p.value === prof.provider);
+    if (preset && preset.baseUrl) prof.baseUrl = preset.baseUrl;
+    if (prof.provider === 'ondevice') refreshLocalLlm();
   }
   function addProfileFromPreset(value) {
     const preset = PP_PRESETS.find((p) => p.value === value);
@@ -766,6 +793,10 @@
           id: p.id,
           name: (p.name || '').trim() || 'Untitled',
           prompt: p.prompt || '',
+          provider: p.provider || '',
+          baseUrl: (p.baseUrl || '').trim(),
+          model: (p.model || '').trim(),
+          apiKey: p.apiKey || '',
         }))
         .filter((p) => p.id),
     };
@@ -1151,6 +1182,26 @@
                             <button class="rm" title="Delete profile" aria-label="Delete profile" onclick={() => removeProfile(prof.id)}>×</button>
                           </div>
                           <Textarea bind:value={prof.prompt} rows={3} />
+                          <div class="prof-model">
+                            <select
+                              class="route-pick"
+                              bind:value={prof.provider}
+                              onchange={() => onProfileProviderChange(prof)}
+                              title="Which AI model runs this profile"
+                            >
+                              <option value="">Model: global setting</option>
+                              {#each PP_PROVIDERS as p (p.value)}
+                                <option value={p.value}>Model: {p.label}</option>
+                              {/each}
+                            </select>
+                            {#if prof.provider && prof.provider !== 'ondevice'}
+                              <input class="route-input prof-inp" placeholder="Base URL (https://…/v1)" bind:value={prof.baseUrl} />
+                              <input class="route-input prof-inp" placeholder="Model (e.g. llama-3.1-8b-instant)" bind:value={prof.model} />
+                              <input class="route-input prof-inp" type="password" placeholder="API key" bind:value={prof.apiKey} />
+                            {:else if prof.provider === 'ondevice'}
+                              <span class="prof-note">Runs on the built-in local model — private, no key needed.</span>
+                            {/if}
+                          </div>
                         </div>
                       {/each}
                     {:else}
@@ -1805,6 +1856,23 @@
     color: #6b7280;
     font-size: 12px;
     font-family: ui-monospace, monospace;
+  }
+  /* Per-profile model override (provider select + endpoint fields) */
+  .prof-model {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .prof-inp {
+    flex: 1 1 130px;
+    min-width: 0;
+    font-size: 12px;
+  }
+  .prof-note {
+    color: #6b7280;
+    font-size: 12px;
   }
   .route-add {
     display: flex;

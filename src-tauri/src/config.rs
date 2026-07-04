@@ -29,6 +29,31 @@ pub struct CleanupProfile {
     pub name: String,
     /// The cleanup body (tone/format instructions).
     pub prompt: String,
+    /// Optional per-profile **LLM override** (superwhisper-style per-mode model
+    /// choice): run this profile on its own provider/model instead of the global
+    /// AI-cleanup settings — e.g. "Email" on a strong cloud model while "Slack"
+    /// uses the fast local sidecar. Empty `provider` = inherit the global
+    /// settings (the other three fields are then ignored). Same provider ids as
+    /// `pp_provider` ("ondevice" routes through the sidecar).
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub api_key: String,
+}
+
+/// A resolved cleanup plan for one dictation: the prompt body to use, plus the
+/// profile's LLM override when the matched profile carries one (`None` =
+/// use the global AI-cleanup endpoint). Produced by
+/// [`YapConfig::resolve_cleanup`].
+pub struct CleanupPlan {
+    /// The cleanup body (tone/format instructions).
+    pub body: String,
+    /// `(provider, base_url, api_key, model)` override from the profile.
+    pub endpoint: Option<(String, String, String, String)>,
 }
 
 /// A per-app cleanup routing rule ("smart routing", ported in spirit from
@@ -195,7 +220,7 @@ pub struct YapConfig {
     #[serde(default = "default_routing_scope")]
     pub routing_scope: String,
     /// Per-app cleanup routing rules. Resolved at dictation time against the
-    /// foreground app captured at record-start. See [`YapConfig::resolve_cleanup_body`].
+    /// foreground app captured at record-start. See [`YapConfig::resolve_cleanup`].
     #[serde(default)]
     pub app_routes: Vec<AppRoute>,
     /// Reusable named cleanup profiles that `app_routes` bind to.
@@ -346,18 +371,20 @@ pub fn save(cfg: &YapConfig) -> Result<(), String> {
 }
 
 impl YapConfig {
-    /// Decide which cleanup body to use for a dictation whose target app is
-    /// `process` (process base name, e.g. "slack.exe"), applying the smart-routing
-    /// rules. This mirrors FluidVoice's `promptResolution` precedence, minus the
-    /// macOS-only pieces (modes, bundle ids):
+    /// Decide the cleanup **plan** (body + optional per-profile LLM override) for
+    /// a dictation whose target app is `process` (process base name, e.g.
+    /// "slack.exe"), applying the smart-routing rules. This mirrors FluidVoice's
+    /// `promptResolution` precedence, minus the macOS-only pieces (modes, bundle
+    /// ids):
     ///
-    /// 1. An `app_routes` rule matching `process` → that rule's body.
+    /// 1. An `app_routes` rule matching `process` → that rule's profile (body +
+    ///    its LLM override, if the profile names a provider) or legacy body.
     /// 2. Otherwise, if scope is "selected_apps_only" → `None` (skip cleanup).
-    /// 3. Otherwise ("all_apps") → the global `pp_prompt` body.
+    /// 3. Otherwise ("all_apps") → the global `pp_prompt` body, global endpoint.
     ///
     /// `None` means "inject the raw transcript"; the caller still checks
     /// `post_process_enabled`/base-URL before running any cleanup at all.
-    pub fn resolve_cleanup_body(&self, process: Option<&str>) -> Option<String> {
+    pub fn resolve_cleanup(&self, process: Option<&str>) -> Option<CleanupPlan> {
         if let Some(proc) = process {
             let proc = proc.trim();
             if let Some(route) = self
@@ -374,19 +401,43 @@ impl YapConfig {
                         .iter()
                         .find(|p| p.id == route.profile_id)
                     {
-                        return Some(p.prompt.clone());
+                        // Per-profile LLM override: active iff the profile names
+                        // a provider; otherwise inherit the global endpoint.
+                        let endpoint = if p.provider.trim().is_empty() {
+                            None
+                        } else {
+                            Some((
+                                p.provider.clone(),
+                                p.base_url.clone(),
+                                p.api_key.clone(),
+                                p.model.clone(),
+                            ))
+                        };
+                        return Some(CleanupPlan {
+                            body: p.prompt.clone(),
+                            endpoint,
+                        });
                     }
                 }
                 if !route.prompt.trim().is_empty() {
-                    return Some(route.prompt.clone());
+                    return Some(CleanupPlan {
+                        body: route.prompt.clone(),
+                        endpoint: None,
+                    });
                 }
-                return Some(self.pp_prompt.clone());
+                return Some(CleanupPlan {
+                    body: self.pp_prompt.clone(),
+                    endpoint: None,
+                });
             }
         }
         if self.routing_scope == "selected_apps_only" {
             None
         } else {
-            Some(self.pp_prompt.clone())
+            Some(CleanupPlan {
+                body: self.pp_prompt.clone(),
+                endpoint: None,
+            })
         }
     }
 }

@@ -204,13 +204,17 @@ below (✅ = done).
       an inline body, so one profile can serve many apps and is edited in one place.
       Legacy inline-body rules auto-migrate to a generated profile on first load.
       Profiles can be seeded from the built-in presets.
-- [ ] **Per-profile model choice** (match superwhisper "Modes") — let each cleanup
-      profile pick its **own LLM** (provider/model/endpoint), not just a prompt, so an
-      "Email" profile can run a stronger cloud model while "Slack" runs the fast local
-      sidecar. Cheap, high-impact: Yap's cleanup client is already OpenAI-compatible —
-      add optional `{provider, base_url, model, api_key_ref}` to `cleanup_profiles`,
-      falling back to the global AI-cleanup config when unset. Closes the clearest gap
-      vs superwhisper's per-mode model picker. See
+- [x] **Per-profile model choice** (match superwhisper "Modes") — each cleanup profile
+      can pick its **own LLM** (provider/base URL/model/API key), not just a prompt, so
+      an "Email" profile runs a stronger cloud model while "Slack" runs the fast local
+      sidecar. Empty provider = inherit the global AI-cleanup settings. Implemented:
+      optional `{provider, base_url, model, api_key}` on `CleanupProfile`;
+      `resolve_cleanup` returns a `CleanupPlan` (body + endpoint override);
+      `local_llm::effective_endpoint_for` routes "ondevice" through the sidecar for
+      profile overrides too (and the sidecar now autostarts if *any* profile selects
+      it, re-checked on config save); per-profile picker + endpoint fields in
+      Settings → AI Cleanup → Profiles. Closes the clearest gap vs superwhisper's
+      per-mode model picker — see
       [`docs/competitive-analysis.md`](./docs/competitive-analysis.md).
 - [x] **Edit / Rewrite mode** ("make this a list", "more concise", "fix grammar") —
       FluidVoice's Write/Edit mode. **v1 = rewrite + write, implemented** (pending

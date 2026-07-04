@@ -184,6 +184,12 @@ pub fn save_config(
     // Tray visibility can change with this save (show_tray_icon / show_pill) —
     // reconcile it live instead of waiting for the next app restart.
     crate::tray::ensure_tray(&app, &cfg);
+    // This save may have newly selected on-device cleanup (globally or via a
+    // per-profile override) — start the sidecar now rather than on next launch.
+    let cfg_for_sidecar = cfg.clone();
+    tauri::async_runtime::spawn(async move {
+        crate::local_llm::autostart_if_configured(&cfg_for_sidecar).await;
+    });
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.update_config(cfg);

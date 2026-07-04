@@ -494,7 +494,10 @@ impl Shared {
                         // Snapshot the injection- and cleanup-related config under
                         // one read lock. `pp_body` is the routed cleanup body:
                         // `Some(body)` to clean with, `None` to skip cleanup
-                        // (selected-apps-only scope + no matching rule).
+                        // (selected-apps-only scope + no matching rule). The
+                        // endpoint comes from the matched profile's LLM override
+                        // when it has one, else the global settings — either way
+                        // "ondevice" routes through the sidecar when it's up.
                         let (
                             dict,
                             append_space,
@@ -511,10 +514,16 @@ impl Shared {
                             .config
                             .read()
                             .map(|c| {
-                                // On-device sidecar overrides the endpoint when
-                                // selected + running; else the configured provider.
+                                let plan = c.resolve_cleanup(target_app.as_deref());
                                 let (pp_base_url, pp_api_key, pp_model, pp_provider) =
-                                    crate::local_llm::effective_endpoint(&c);
+                                    match plan.as_ref().and_then(|p| p.endpoint.as_ref()) {
+                                        Some((provider, base_url, api_key, model)) => {
+                                            crate::local_llm::effective_endpoint_for(
+                                                provider, base_url, api_key, model,
+                                            )
+                                        }
+                                        None => crate::local_llm::effective_endpoint(&c),
+                                    };
                                 (
                                     c.dictionary.clone(),
                                     c.append_trailing_space,
@@ -526,7 +535,7 @@ impl Shared {
                                     pp_api_key,
                                     pp_model,
                                     pp_provider,
-                                    c.resolve_cleanup_body(target_app.as_deref()),
+                                    plan.map(|p| p.body),
                                 )
                             })
                             .unwrap_or_else(|_| {

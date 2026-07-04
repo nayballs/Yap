@@ -96,7 +96,7 @@ switchable via hotkey, menu, or `superwhisper://mode?key=…` deep links.
 | AI cleanup (filler/grammar/punct) | ✅ | ✅ always-on | ✅ | — | Parity |
 | **Bundled zero-config local cleanup** | ◐ (Mac-only local LLM) | ✗ | ✅ llamafile+Qwen | — | 🏆 **Yap wins** |
 | Per-app modes / auto-switching | ✅ Modes | ✅ Personalized Style | ✅ cleanup routing | — | Parity |
-| **Per-profile/mode model choice** | ✅ per-mode | ◐ tone-only | ✗ global model | **Low** — add `{provider,model,endpoint}` to profiles | **MATCH — do first** |
+| **Per-profile/mode model choice** | ✅ per-mode | ◐ tone-only | ✅ per-profile override | — | **Matched (July 2026)** |
 | Voice edit/rewrite of selection | ◐ format-only | ✅ Command Mode (Pro) | ✅ edit mode | — | Parity (Yap free, no mode-limit) |
 | Voice *generation* on command ("summarize") | ✗ (blocked) | ✅ | ◐ write-mode | Low — broaden edit-mode prompt | Small polish |
 | **Context-aware cleanup** (read focused text/selection/clipboard as LLM context) | ✅ Super Mode | ✅ | ◐ app-name only | **Med** — inject selection/field/clipboard into cleanup prompt | **MATCH — high value** |
@@ -134,8 +134,8 @@ switchable via hotkey, menu, or `superwhisper://mode?key=…` deep links.
 
 ## What to match (prioritized — see ROADMAP for detail)
 
-1. **Per-profile model choice** *(Low effort)* — each cleanup profile picks its own LLM.
-   Closes the clearest superwhisper "Modes" gap; Yap's client is already OpenAI-compatible.
+1. ~~**Per-profile model choice**~~ — **done (July 2026):** each cleanup profile can pick
+   its own LLM (provider/URL/model/key), inheriting the global settings when unset.
 2. **Context-aware cleanup** *(Med)* — feed the captured selection / focused-field text /
    recent clipboard into the cleanup prompt (Yap already captures the target HWND + does
    selection capture for edit mode; extend it to the dictation cleanup path).
