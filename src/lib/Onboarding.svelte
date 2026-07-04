@@ -235,8 +235,17 @@
 
   // ---- Step 4: try it ----
   let tryState = $state('idle'); // mirrors yap-state while on the try step
+  let tryText = $state(''); // filled from the yap-transcript EVENT (see below)
   let gotTranscript = $state(false);
   let recordingKey = $state(false); // mini hotkey recorder active
+
+  // Reset the demo box each time the user lands on the try step.
+  $effect(() => {
+    if (step === STEPS.length - 1) {
+      tryText = '';
+      gotTranscript = false;
+    }
+  });
 
   function formatHotkey(spec) {
     if (!spec) return 'None';
@@ -346,8 +355,16 @@
       listen('yap-state', (e) => {
         tryState = e.payload || 'idle';
       }),
-      listen('yap-transcript', () => {
-        if (step === STEPS.length - 1) gotTranscript = true;
+      // The try-box fills from this EVENT, not from the OS-level paste: pasting
+      // into our own webview races the clipboard restore (WebView2 handles
+      // Ctrl+V asynchronously), so the injected text can vanish. The event is
+      // authoritative and timing-proof; the textarea is readonly so the paste
+      // (when it does win the race) can't double-write.
+      listen('yap-transcript', (e) => {
+        if (step === STEPS.length - 1) {
+          tryText = (e.payload || '').trim();
+          gotTranscript = !!tryText;
+        }
       }),
     ];
     return () => {
@@ -560,9 +577,9 @@
     <header>
       <h1>Try it</h1>
       <p class="sub">
-        Click the box, press <strong class="key">{formatHotkey(cfg?.hotkey)}</strong>,
-        say something, then press
-        <strong class="key">{formatHotkey(cfg?.hotkey)}</strong> again.
+        Press <strong class="key">{formatHotkey(cfg?.hotkey)}</strong>, say something,
+        then press <strong class="key">{formatHotkey(cfg?.hotkey)}</strong> again —
+        your words appear below.
       </p>
     </header>
 
@@ -571,6 +588,8 @@
         class="try-area"
         placeholder="Your words will appear here…"
         rows="5"
+        readonly
+        bind:value={tryText}
       ></textarea>
       <p class="try-status">
         {#if gotTranscript}

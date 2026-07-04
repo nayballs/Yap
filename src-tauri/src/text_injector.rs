@@ -556,9 +556,13 @@ fn inject_text_sync(
     #[cfg(target_os = "windows")]
     platform::simulate_paste();
 
-    // Restore previous clipboard (delayed to ensure paste completes).
+    // Restore previous clipboard (delayed to ensure paste completes). Webview/
+    // Electron apps process Ctrl+V asynchronously (browser→renderer IPC) and can
+    // take well over 200 ms to actually read the clipboard — restoring too early
+    // makes the paste land empty or with the OLD contents. 500 ms is still
+    // imperceptible (it runs after the text has visually appeared in fast apps).
     if let Some(prev) = previous {
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        std::thread::sleep(std::time::Duration::from_millis(500));
         restore_clipboard_snapshot(&mut clipboard, prev);
     }
 
