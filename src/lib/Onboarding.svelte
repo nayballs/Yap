@@ -106,16 +106,52 @@
   });
 
   // ---- Step 2: AI cleanup (Yap's differentiator, offered up front) ----
-  let llm = $state({ installed: false, running: false, model: 'Qwen2.5 1.5B Instruct' });
+  let llm = $state({ installed: false, running: false, model: 'Qwen2.5 1.5B Instruct', curated: [] });
   let llmInstalling = $state(false);
   let llmProgress = $state({ stage: '', percent: 0 });
   let llmError = $state('');
   let cleanupEnabled = $state(false); // reflects what we set up this session
+  let enabledSummary = $state('');
+
+  // Private vs cloud, superwhisper-style two-card choice.
+  let cleanupMode = $state('local'); // 'local' | 'cloud'
+  let localPick = $state('qwen2.5-1.5b'); // curated id (the recommended default)
+
+  // Cloud (bring-your-own-key) fields. Base URLs/default models mirror the
+  // Settings provider presets.
+  const CLOUD_PROVIDERS = [
+    { value: 'groq', label: 'Groq (free tier)', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant' },
+    { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+    { value: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.1-8b-instruct' },
+    { value: 'local', label: 'My own server (Ollama · LM Studio)', baseUrl: 'http://localhost:11434/v1', model: 'llama3.1' },
+    { value: 'custom', label: 'Custom endpoint', baseUrl: '', model: '' },
+  ];
+  let cloudProvider = $state('groq');
+  let cloudBaseUrl = $state(CLOUD_PROVIDERS[0].baseUrl);
+  let cloudKey = $state('');
+  let cloudModel = $state(CLOUD_PROVIDERS[0].model);
+
+  function onCloudProviderChange() {
+    const p = CLOUD_PROVIDERS.find((p) => p.value === cloudProvider);
+    if (!p) return;
+    cloudBaseUrl = p.baseUrl;
+    cloudModel = p.model;
+  }
+
+  function fmtSize(mb) {
+    return mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${mb} MB`;
+  }
 
   async function refreshLlm() {
     try {
       llm = await invoke('local_llm_status');
-      cleanupEnabled = !!(cfg?.postProcessEnabled && cfg?.ppProvider === 'ondevice');
+      cleanupEnabled = !!cfg?.postProcessEnabled;
+      if (cleanupEnabled) {
+        enabledSummary =
+          cfg.ppProvider === 'ondevice'
+            ? `${llm.model} — running privately on this machine`
+            : `cloud cleanup via ${cfg.ppProvider}`;
+      }
     } catch {
       // stub build / best-effort
     }
@@ -127,9 +163,12 @@
     llmInstalling = true;
     llmProgress = { stage: '', percent: 0 };
     try {
-      await invoke('local_llm_install'); // no-op for parts already present
+      // Downloads runtime + the picked model (skips already-present files) and
+      // returns the model's GGUF filename for pp_local_model.
+      const filename = await invoke('local_llm_install', { model: localPick });
       cfg.postProcessEnabled = true;
       cfg.ppProvider = 'ondevice';
+      cfg.ppLocalModel = filename;
       await persistCfg(); // save_config also autostarts the sidecar
       cleanupEnabled = true;
       await refreshLlm();
@@ -138,6 +177,26 @@
     } finally {
       llmInstalling = false;
     }
+  }
+
+  async function enableCloudCleanup() {
+    llmError = '';
+    if (!cloudModel.trim() || !cloudBaseUrl.trim()) {
+      llmError = 'Pick a provider and model first.';
+      return;
+    }
+    if (!cloudKey.trim() && !['local', 'custom'].includes(cloudProvider)) {
+      llmError = 'This provider needs an API key.';
+      return;
+    }
+    cfg.postProcessEnabled = true;
+    cfg.ppProvider = cloudProvider;
+    cfg.ppBaseUrl = cloudBaseUrl.trim();
+    cfg.ppApiKey = cloudKey.trim();
+    cfg.ppModel = cloudModel.trim();
+    await persistCfg();
+    cleanupEnabled = true;
+    enabledSummary = `${cloudModel.trim()} via ${cloudProvider}`;
   }
 
   // ---- Step 4: try it ----
@@ -311,9 +370,8 @@
 
     <div class="cleanup-box">
       {#if cleanupEnabled}
-        <div class="cleanup-done">
-          ✓ <strong>{llm.model}</strong> is set up — cleanup runs locally on this machine.
-        </div>
+        <div class="cleanup-done">✓ AI cleanup is on — <strong>{enabledSummary}</strong>.</div>
+        <p class="fine">Change the model or provider any time in Settings → AI Cleanup.</p>
       {:else if llmInstalling}
         <div class="cleanup-progress">
           <span>
@@ -328,11 +386,69 @@
           <div class="demo-arrow">↓</div>
           <div class="demo-clean">"I went to the shop and got milk."</div>
         </div>
-        <button class="start wide" onclick={enableLocalCleanup}>
-          Enable private AI cleanup (~1 GB download)
-        </button>
-        <p class="fine">One-time download of {llm.model}. You can switch to your own
-          provider — or turn it off — any time in Settings → AI Cleanup.</p>
+
+        <div class="mode-cards">
+          <button
+            class="mode-card"
+            class:sel={cleanupMode === 'local'}
+            onclick={() => (cleanupMode = 'local')}
+          >
+            <span class="mode-title">🔒 Private</span>
+            <span class="mode-sub">runs on your PC · no account</span>
+            <span class="mode-badge">Recommended</span>
+          </button>
+          <button
+            class="mode-card"
+            class:sel={cleanupMode === 'cloud'}
+            onclick={() => (cleanupMode = 'cloud')}
+          >
+            <span class="mode-title">☁ Cloud</span>
+            <span class="mode-sub">bring your own key</span>
+          </button>
+        </div>
+
+        {#if cleanupMode === 'local'}
+          <div class="llm-list">
+            {#each llm.curated || [] as m (m.id)}
+              <label class="llm-row" class:sel={localPick === m.id}>
+                <input type="radio" bind:group={localPick} value={m.id} name="llm" />
+                <span class="llm-main">
+                  <span class="llm-name">{m.display}</span>
+                  <span class="llm-blurb">{m.blurb}</span>
+                </span>
+                <span class="llm-size">{m.installed ? '✓ installed' : fmtSize(m.sizeMb)}</span>
+              </label>
+            {/each}
+          </div>
+          {@const pick = (llm.curated || []).find((m) => m.id === localPick)}
+          <button class="start wide" onclick={enableLocalCleanup} disabled={!pick}>
+            {#if pick && !pick.installed}
+              Download {pick.display} ({fmtSize(pick.sizeMb)}) & enable
+            {:else if pick}
+              Enable {pick.display}
+            {:else}
+              Enable private AI cleanup
+            {/if}
+          </button>
+          <p class="fine">All of these run fully offline via llamafile. Prefer your own?
+            Drop any GGUF into the models folder later (Settings → AI Cleanup).</p>
+        {:else}
+          <div class="cloud-form">
+            <select class="mic-pick" bind:value={cloudProvider} onchange={onCloudProviderChange}>
+              {#each CLOUD_PROVIDERS as p (p.value)}
+                <option value={p.value}>{p.label}</option>
+              {/each}
+            </select>
+            {#if cloudProvider === 'custom'}
+              <input class="cloud-inp" placeholder="Base URL (https://…/v1)" bind:value={cloudBaseUrl} />
+            {/if}
+            <input class="cloud-inp" type="password" placeholder="API key" bind:value={cloudKey} />
+            <input class="cloud-inp" placeholder="Model (e.g. llama-3.1-8b-instant)" bind:value={cloudModel} />
+          </div>
+          <button class="start wide" onclick={enableCloudCleanup}>Enable cloud cleanup</button>
+          <p class="fine">Your key is stored locally. Transcripts (never audio) are sent to the
+            provider you chose. Groq's free tier is plenty for dictation.</p>
+        {/if}
       {/if}
       {#if llmError}<p class="error">{llmError}</p>{/if}
     </div>
@@ -581,11 +697,127 @@
   /* Cleanup step */
   .cleanup-box {
     flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 16px;
+    justify-content: flex-start;
+    gap: 14px;
+    padding: 6px 2px;
+  }
+  .mode-cards {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    max-width: 440px;
+  }
+  .mode-card {
+    position: relative;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    background: #15181e;
+    border: 1px solid #2a2f3a;
+    border-radius: 10px;
+    padding: 14px 10px 12px;
+    color: #e5e7eb;
+    font: inherit;
+    cursor: pointer;
+    transition: border-color 0.12s ease;
+  }
+  .mode-card.sel {
+    border-color: #3b82f6;
+    background: #151d2c;
+  }
+  .mode-title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .mode-sub {
+    font-size: 11.5px;
+    color: #9ca3af;
+  }
+  .mode-badge {
+    position: absolute;
+    top: -8px;
+    right: 8px;
+    background: #1d4ed8;
+    color: #fff;
+    font-size: 10px;
+    border-radius: 5px;
+    padding: 1px 6px;
+  }
+  .llm-list {
+    width: 100%;
+    max-width: 440px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .llm-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #15181e;
+    border: 1px solid #2a2f3a;
+    border-radius: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+  }
+  .llm-row.sel {
+    border-color: #3b82f6;
+  }
+  .llm-row input {
+    accent-color: #3b82f6;
+  }
+  .llm-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .llm-name {
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .llm-blurb {
+    font-size: 11.5px;
+    color: #6b7280;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .llm-size {
+    flex: 0 0 auto;
+    font-size: 11.5px;
+    color: #9ca3af;
+    font-variant-numeric: tabular-nums;
+  }
+  .cloud-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    max-width: 380px;
+  }
+  .cloud-form .mic-pick {
+    max-width: none;
+  }
+  .cloud-inp {
+    background: #181b22;
+    border: 1px solid #2a2f3a;
+    border-radius: 7px;
+    color: #e5e7eb;
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 10px;
+  }
+  .cloud-inp:focus {
+    outline: none;
+    border-color: #3b82f6;
   }
   .cleanup-demo {
     text-align: center;

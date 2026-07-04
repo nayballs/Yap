@@ -346,6 +346,21 @@ pub async fn test_post_process(text: String) -> Result<String, String> {
 #[tauri::command]
 pub fn local_llm_status() -> serde_json::Value {
     let cfg = config::load();
+    let on_disk = crate::local_llm::list_models();
+    // The curated one-click download set, with per-model installed state.
+    let curated: Vec<serde_json::Value> = crate::local_llm::CURATED_MODELS
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "id": m.id,
+                "display": m.display,
+                "blurb": m.blurb,
+                "filename": m.filename,
+                "sizeMb": m.size_mb,
+                "installed": on_disk.iter().any(|f| f == m.filename),
+            })
+        })
+        .collect();
     serde_json::json!({
         "installed": crate::local_llm::is_installed(&cfg),
         "running": crate::local_llm::is_running(),
@@ -353,7 +368,8 @@ pub fn local_llm_status() -> serde_json::Value {
         "model": crate::local_llm::active_model_display(&cfg),
         "engine": crate::local_llm::ENGINE_DISPLAY,
         "activeModel": cfg.pp_local_model,
-        "models": crate::local_llm::list_models(),
+        "models": on_disk,
+        "curated": curated,
     })
 }
 
@@ -389,11 +405,21 @@ pub fn local_llm_stop() {
     crate::local_llm::stop();
 }
 
-/// Download the on-device cleanup runtime + model (each SHA-verified) on demand.
-/// Emits `local-llm-download-progress` per stage. No-op for files already present.
+/// Download the on-device cleanup runtime + a model (each SHA-verified) on
+/// demand. `model` = a curated id from `local_llm_status().curated` (None →
+/// the bundled default). Returns the model's GGUF filename so the caller can
+/// set `pp_local_model`. Emits `local-llm-download-progress` per stage.
+/// No-op for files already present.
 #[tauri::command]
-pub async fn local_llm_install(app: AppHandle) -> Result<(), String> {
-    crate::local_llm::install(Some(&app)).await
+pub async fn local_llm_install(app: AppHandle, model: Option<String>) -> Result<String, String> {
+    match model {
+        Some(id) => crate::local_llm::install_curated(&id, Some(&app))
+            .await
+            .map(|m| m.filename.to_string()),
+        None => crate::local_llm::install(Some(&app))
+            .await
+            .map(|_| crate::local_llm::MODEL_FILENAME.to_string()),
+    }
 }
 /// Recent local transcription history, newest first (capped at `limit`).
 /// Each item: `{ ts, raw, text, model, app, words }`.

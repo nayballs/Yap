@@ -350,10 +350,85 @@ struct DownloadProgress {
     total_mb: f64,
 }
 
-/// Download the runtime + model (whichever are missing), each SHA-verified, into
-/// `<data_dir>/llm/`. Idempotent — already-present files are skipped. Emits
-/// `local-llm-download-progress` so the UI can show a bar per stage.
-pub async fn install(app: Option<&AppHandle>) -> Result<(), String> {
+/// A curated, SHA-pinned local cleanup model offered in onboarding/Settings.
+/// (Any other GGUF dropped into `llm/` still works via `pp_local_model` — this
+/// list is just the managed, one-click download set.)
+pub struct CuratedLlm {
+    pub id: &'static str,
+    pub display: &'static str,
+    /// One-line pitch shown in the picker.
+    pub blurb: &'static str,
+    pub filename: &'static str,
+    pub url: &'static str,
+    pub sha256: &'static str,
+    pub size_mb: u32,
+}
+
+/// Ordered smallest→largest. SHA-256s are the HuggingFace `lfs.oid` values
+/// (verified July 2026); all repos are ungated.
+pub const CURATED_MODELS: &[CuratedLlm] = &[
+    CuratedLlm {
+        id: "llama-3.2-1b",
+        display: "Llama 3.2 1B Instruct",
+        blurb: "Smallest + fastest — great on modest PCs",
+        filename: "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+        sha256: "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
+        size_mb: 808,
+    },
+    CuratedLlm {
+        id: "qwen2.5-1.5b",
+        display: MODEL_DISPLAY,
+        blurb: "Fast and accurate — the recommended default",
+        filename: MODEL_FILENAME,
+        url: MODEL_URL,
+        sha256: MODEL_SHA256,
+        size_mb: 1043,
+    },
+    CuratedLlm {
+        id: "gemma-2-2b",
+        display: "Gemma 2 2B IT",
+        blurb: "Google's small model — polished, natural tone",
+        filename: "gemma-2-2b-it-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
+        sha256: "e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787",
+        size_mb: 1709,
+    },
+    CuratedLlm {
+        id: "llama-3.2-3b",
+        display: "Llama 3.2 3B Instruct",
+        blurb: "Stronger rewrites, still quick on a GPU",
+        filename: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+        sha256: "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
+        size_mb: 2019,
+    },
+    CuratedLlm {
+        id: "qwen2.5-3b",
+        display: "Qwen2.5 3B Instruct",
+        blurb: "The default's bigger sibling — noticeably smarter",
+        filename: "qwen2.5-3b-instruct-q4_k_m.gguf",
+        url: "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+        sha256: "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
+        size_mb: 2105,
+    },
+    CuratedLlm {
+        id: "phi-3.5-mini",
+        display: "Phi-3.5 Mini Instruct",
+        blurb: "Microsoft's 3.8B — strongest quality, heaviest",
+        filename: "Phi-3.5-mini-instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
+        sha256: "e4165e3a71af97f1b4820da61079826d8752a2088e313af0c7d346796c38eff5",
+        size_mb: 2393,
+    },
+];
+
+pub fn curated_by_id(id: &str) -> Option<&'static CuratedLlm> {
+    CURATED_MODELS.iter().find(|m| m.id == id)
+}
+
+/// Ensure the llamafile runtime is on disk (SHA-verified download if missing).
+async fn ensure_runtime(app: Option<&AppHandle>) -> Result<(), String> {
     tokio::fs::create_dir_all(llm_dir())
         .await
         .map_err(|e| format!("failed to create llm dir: {}", e))?;
@@ -371,10 +446,33 @@ pub async fn install(app: Option<&AppHandle>) -> Result<(), String> {
             }
         }
     }
+    Ok(())
+}
+
+/// Download the runtime + the default model (whichever are missing), each
+/// SHA-verified, into `<data_dir>/llm/`. Idempotent — already-present files are
+/// skipped. Emits `local-llm-download-progress` so the UI can show a bar per stage.
+pub async fn install(app: Option<&AppHandle>) -> Result<(), String> {
+    ensure_runtime(app).await?;
     if !model_path().is_file() {
         download_verified(MODEL_URL, &model_path(), MODEL_SHA256, "model", app).await?;
     }
     Ok(())
+}
+
+/// Download the runtime + a specific **curated** model by id. Returns the
+/// curated entry so the caller can point `pp_local_model` at its filename.
+pub async fn install_curated(
+    id: &str,
+    app: Option<&AppHandle>,
+) -> Result<&'static CuratedLlm, String> {
+    let m = curated_by_id(id).ok_or_else(|| format!("unknown cleanup model id: {}", id))?;
+    ensure_runtime(app).await?;
+    let dest = llm_dir().join(m.filename);
+    if !dest.is_file() {
+        download_verified(m.url, &dest, m.sha256, "model", app).await?;
+    }
+    Ok(m)
 }
 
 /// Stream `url` → `dest.partial`, emit progress, verify SHA-256, then rename into
