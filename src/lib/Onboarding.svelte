@@ -1,6 +1,5 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import yapIcon from '../assets/yap-icon.png';
   import { MODELS } from './models.js';
@@ -341,6 +340,72 @@
     invoke('close_onboarding');
   }
 
+  // Tauri event subscription — via the RAW internals bridge, not the bundled
+  // @tauri-apps/api `listen`. Empirically (CDP debugging, 2026-07-05): on this
+  // window, listeners registered through the bundled module never fire, while
+  // an identical registration through window.__TAURI_INTERNALS__ on the same
+  // page receives every event. Root cause unresolved (suspected duplicate api
+  // module instance under the Vite dev server); this shape is the one PROVEN
+  // to work.
+  function rawListen(event, cb) {
+    const I = window.__TAURI_INTERNALS__;
+    if (!I) return Promise.resolve(() => {});
+    return I.invoke('plugin:event|listen', {
+      event,
+      target: { kind: 'Any' },
+      handler: I.transformCallback((e) => cb(e)),
+    }).then(
+      (eventId) => () =>
+        I.invoke('plugin:event|unlisten', { event, eventId }).catch(() => {}),
+      () => () => {}
+    );
+  }
+
+  // Registered at mount AND re-registered whenever the window is re-shown:
+  // this window has been observed to go deaf across its hide/re-show
+  // lifecycle, so we tear down and re-listen on every show.
+  let unsubs = [];
+  async function registerListeners() {
+    const old = unsubs;
+    unsubs = [];
+    for (const p of old) {
+      try {
+        const u = await p;
+        if (u) u();
+      } catch {
+        // best-effort teardown
+      }
+    }
+    unsubs = [
+      rawListen('stt-download-progress', (e) => {
+        if (e.payload && e.payload.modelSize === busyId) percent = e.payload.percent;
+      }),
+      rawListen('yap-amp', (e) => {
+        const amp = Math.min(1, (e.payload || 0) * 4); // same gain feel as the pill
+        bars = [...bars.slice(1), amp];
+        if (amp > 0.06) micHeard = true;
+      }),
+      rawListen('local-llm-download-progress', (e) => {
+        if (e.payload) llmProgress = e.payload;
+      }),
+      rawListen('yap-state', (e) => {
+        tryState = e.payload || 'idle';
+      }),
+      // The try-box fills from this EVENT, not from the OS-level paste: pasting
+      // into our own webview races the clipboard restore (WebView2 handles
+      // Ctrl+V asynchronously), so the injected text can vanish. The event is
+      // authoritative and timing-proof; the textarea is readonly so the paste
+      // (when it does win the race) can't double-write. (Plus the history poll
+      // above as belt-and-braces.)
+      rawListen('yap-transcript', (e) => {
+        if (step === STEPS.length - 1) {
+          tryText = (e.payload || '').trim();
+          gotTranscript = !!tryText;
+        }
+      }),
+    ];
+  }
+
   onMount(() => {
     refresh().then(refreshLlm);
     invoke('list_audio_devices')
@@ -349,8 +414,10 @@
     const onVis = () => {
       pageVisible = !document.hidden;
       // Re-shown after a hide ("Show setup guide again"): re-sync from disk so
-      // this long-lived window doesn't present (or later save) stale state.
+      // this long-lived window doesn't present (or later save) stale state —
+      // and re-register the event subscriptions (see registerListeners).
       if (pageVisible) {
+        registerListeners();
         invoke('get_config')
           .then((fresh) => {
             cfg = { ...fresh, ...cfgPatch };
@@ -361,33 +428,7 @@
       }
     };
     document.addEventListener('visibilitychange', onVis);
-    const unsubs = [
-      listen('stt-download-progress', (e) => {
-        if (e.payload && e.payload.modelSize === busyId) percent = e.payload.percent;
-      }),
-      listen('yap-amp', (e) => {
-        const amp = Math.min(1, (e.payload || 0) * 4); // same gain feel as the pill
-        bars = [...bars.slice(1), amp];
-        if (amp > 0.06) micHeard = true;
-      }),
-      listen('local-llm-download-progress', (e) => {
-        if (e.payload) llmProgress = e.payload;
-      }),
-      listen('yap-state', (e) => {
-        tryState = e.payload || 'idle';
-      }),
-      // The try-box fills from this EVENT, not from the OS-level paste: pasting
-      // into our own webview races the clipboard restore (WebView2 handles
-      // Ctrl+V asynchronously), so the injected text can vanish. The event is
-      // authoritative and timing-proof; the textarea is readonly so the paste
-      // (when it does win the race) can't double-write.
-      listen('yap-transcript', (e) => {
-        if (step === STEPS.length - 1) {
-          tryText = (e.payload || '').trim();
-          gotTranscript = !!tryText;
-        }
-      }),
-    ];
+    registerListeners();
     return () => {
       unsubs.forEach((p) => p.then((u) => u && u()));
       window.removeEventListener('keydown', onRecordKey, true);
