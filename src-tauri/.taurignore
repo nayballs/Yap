@@ -1,0 +1,10 @@
+# Paths the `tauri dev` file-watcher must IGNORE (gitignore syntax).
+#
+# target/ is written by any manual `cargo check`/`cargo build` run with the
+# default target dir. dev.bat builds into CARGO_TARGET_DIR=<drive>:\t, so the
+# watcher doesn't ignore src-tauri/target automatically — and every manual
+# cargo run then reads as thousands of "source changes", making tauri dev
+# kill + rebuild + relaunch the app in a loop (seen 2026-07-04: an evening of
+# phantom "crashes" and dead hotkeys that were really watcher churn).
+target
+logs

@@ -48,6 +48,8 @@
   const PP_PROVIDERS = [
     { value: 'ondevice', label: 'Built-in local AI (private · no cloud)', baseUrl: null },
     { value: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1' },
+    // Anthropic's OpenAI-compatible /v1/chat/completions layer.
+    { value: 'anthropic', label: 'Anthropic (Claude)', baseUrl: 'https://api.anthropic.com/v1' },
     { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
     { value: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1' },
     { value: 'local', label: 'My own server (Ollama · LM Studio)', baseUrl: 'http://localhost:11434/v1' },
@@ -95,6 +97,7 @@
   // Example model ids per provider, shown as the Model field hint.
   const PP_MODEL_HINTS = {
     groq: 'e.g. llama-3.1-8b-instant',
+    anthropic: 'e.g. claude-haiku-4-5',
     openai: 'e.g. gpt-4o-mini',
     openrouter: 'e.g. meta-llama/llama-3.1-8b-instruct',
     local: 'your Ollama / LM Studio model name (e.g. llama3.1)',

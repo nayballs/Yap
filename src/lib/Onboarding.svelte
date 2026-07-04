@@ -5,6 +5,36 @@
   import yapIcon from '../assets/yap-icon.png';
   import { MODELS } from './models.js';
   import ModelCard from './ModelCard.svelte';
+  import brandAnthropic from '../assets/brands/anthropic.svg';
+  import brandOpenai from '../assets/brands/openai.svg';
+  import brandMeta from '../assets/brands/meta.svg';
+  import brandGoogle from '../assets/brands/google.svg';
+  import brandQwen from '../assets/brands/qwen.svg';
+  import brandOllama from '../assets/brands/ollama.svg';
+  import brandOpenrouter from '../assets/brands/openrouter.svg';
+
+  // Brand badges (superwhisper-style coloured squares). `icon` = white SVG
+  // (simple-icons, CC0); brands without one fall back to a letter badge.
+  const BRANDS = {
+    anthropic: { icon: brandAnthropic, color: '#D97757' },
+    openai: { icon: brandOpenai, color: '#10A37F' },
+    meta: { icon: brandMeta, color: '#0866FF' },
+    google: { icon: brandGoogle, color: '#4285F4' },
+    qwen: { icon: brandQwen, color: '#615CED' },
+    ollama: { icon: brandOllama, color: '#374151' },
+    openrouter: { icon: brandOpenrouter, color: '#6467F2' },
+    microsoft: { letter: 'P', color: '#0078D4' }, // Phi
+    groq: { letter: 'G', color: '#F55036' },
+    custom: { letter: '⚙', color: '#4b5563' },
+  };
+  // Which brand a curated local model belongs to, by id prefix.
+  function brandForModel(id) {
+    if (id.startsWith('llama')) return BRANDS.meta;
+    if (id.startsWith('qwen')) return BRANDS.qwen;
+    if (id.startsWith('gemma')) return BRANDS.google;
+    if (id.startsWith('phi')) return BRANDS.microsoft;
+    return BRANDS.custom;
+  }
 
   // ---- Stepped flow (superwhisper-style guided onboarding) ----
   // 0 model → 1 mic check → 2 AI cleanup (the wedge) → 3 tray → 4 try it
@@ -120,12 +150,15 @@
 
   // Cloud (bring-your-own-key) fields. Base URLs/default models mirror the
   // Settings provider presets.
+  // Anthropic works through its OpenAI-compatible /v1/chat/completions layer,
+  // so it plugs into Yap's existing cleanup client like any other provider.
   const CLOUD_PROVIDERS = [
-    { value: 'groq', label: 'Groq (free tier)', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant' },
-    { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-    { value: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.1-8b-instruct' },
-    { value: 'local', label: 'My own server (Ollama · LM Studio)', baseUrl: 'http://localhost:11434/v1', model: 'llama3.1' },
-    { value: 'custom', label: 'Custom endpoint', baseUrl: '', model: '' },
+    { value: 'groq', label: 'Groq (free tier)', brand: BRANDS.groq, baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant' },
+    { value: 'anthropic', label: 'Anthropic (Claude)', brand: BRANDS.anthropic, baseUrl: 'https://api.anthropic.com/v1', model: 'claude-haiku-4-5' },
+    { value: 'openai', label: 'OpenAI', brand: BRANDS.openai, baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+    { value: 'openrouter', label: 'OpenRouter', brand: BRANDS.openrouter, baseUrl: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.1-8b-instruct' },
+    { value: 'local', label: 'My own server (Ollama · LM Studio)', brand: BRANDS.ollama, baseUrl: 'http://localhost:11434/v1', model: 'llama3.1' },
+    { value: 'custom', label: 'Custom endpoint', brand: BRANDS.custom, baseUrl: '', model: '' },
   ];
   let cloudProvider = $state('groq');
   let cloudBaseUrl = $state(CLOUD_PROVIDERS[0].baseUrl);
@@ -440,8 +473,12 @@
         {#if cleanupMode === 'local'}
           <div class="llm-list">
             {#each llm.curated || [] as m (m.id)}
+              {@const b = brandForModel(m.id)}
               <label class="llm-row" class:sel={localPick === m.id}>
                 <input type="radio" bind:group={localPick} value={m.id} name="llm" />
+                <span class="brand" style="background:{b.color}">
+                  {#if b.icon}<img src={b.icon} alt="" />{:else}{b.letter}{/if}
+                </span>
                 <span class="llm-main">
                   <span class="llm-name">{m.display}</span>
                   <span class="llm-blurb">{m.blurb}</span>
@@ -464,11 +501,23 @@
             Drop any GGUF into the models folder later (Settings → AI Cleanup).</p>
         {:else}
           <div class="cloud-form">
-            <select class="mic-pick" bind:value={cloudProvider} onchange={onCloudProviderChange}>
+            <div class="prov-grid">
               {#each CLOUD_PROVIDERS as p (p.value)}
-                <option value={p.value}>{p.label}</option>
+                <button
+                  class="prov-chip"
+                  class:sel={cloudProvider === p.value}
+                  onclick={() => {
+                    cloudProvider = p.value;
+                    onCloudProviderChange();
+                  }}
+                >
+                  <span class="brand" style="background:{p.brand.color}">
+                    {#if p.brand.icon}<img src={p.brand.icon} alt="" />{:else}{p.brand.letter}{/if}
+                  </span>
+                  <span class="prov-label">{p.label}</span>
+                </button>
               {/each}
-            </select>
+            </div>
             {#if cloudProvider === 'custom'}
               <input class="cloud-inp" placeholder="Base URL (https://…/v1)" bind:value={cloudBaseUrl} />
             {/if}
@@ -826,12 +875,60 @@
     color: #9ca3af;
     font-variant-numeric: tabular-nums;
   }
+  /* Brand badge — coloured rounded square w/ white glyph (or letter). */
+  .brand {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .brand img {
+    width: 13px;
+    height: 13px;
+    display: block;
+  }
   .cloud-form {
     display: flex;
     flex-direction: column;
     gap: 8px;
     width: 100%;
-    max-width: 380px;
+    max-width: 440px;
+  }
+  .prov-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .prov-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #15181e;
+    border: 1px solid #2a2f3a;
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: #e5e7eb;
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.12s ease;
+  }
+  .prov-chip.sel {
+    border-color: #3b82f6;
+    background: #151d2c;
+  }
+  .prov-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .cloud-form .mic-pick {
     max-width: none;
