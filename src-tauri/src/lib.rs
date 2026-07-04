@@ -220,6 +220,15 @@ pub fn run() {
                 let _ = w.set_always_on_top(true);
             }
 
+            // Dev builds: show Settings on launch. Every Yap window is hidden
+            // at startup by design (tray-first UX), which leaves dev runs — and
+            // anything trying to preview/capture the app, like Voice Mirror's
+            // App Preview — with literally nothing on screen.
+            #[cfg(debug_assertions)]
+            if let Some(settings) = app.get_webview_window("settings") {
+                let _ = settings.show();
+            }
+
             // Honour the saved pill visibility (dictation still works hidden).
             // The pill is hidden by default — the bottom overlay gives on-speak
             // feedback and the tray opens Settings.
