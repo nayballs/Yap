@@ -197,7 +197,7 @@ impl Shared {
         // spawn an overlapping `run_stt` (which would rebuild a duplicate model).
         // Processing is normally sub-second on a GPU, so this rarely bites.
         if self.processing.load(Ordering::SeqCst) {
-            tracing::debug!("Ignoring start — a transcription is still processing");
+            tracing::info!("Ignoring start — a transcription is still processing");
             return;
         }
         // Seed the buffer with the pre-roll ring (the ~300 ms before the keypress)

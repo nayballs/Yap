@@ -349,7 +349,7 @@
       <div class="tray-arrow">⬇</div>
       <div class="tray-bar">
         <span class="tray-caret">^</span>
-        <span class="tray-icon yap"><span class="tray-dot"></span></span>
+        <span class="tray-icon yap"><img class="tray-yap-img" src={yapIcon} alt="" /></span>
         <span class="tray-icon">☁</span>
         <span class="tray-lang">ENG</span>
         <span class="tray-icon">🔊</span>
@@ -677,11 +677,11 @@
     background: #10131a;
     outline: 2px solid #f59e0b;
   }
-  .tray-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: #3b82f6;
+  .tray-yap-img {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    object-fit: contain;
   }
   .tray-clock {
     font-variant-numeric: tabular-nums;

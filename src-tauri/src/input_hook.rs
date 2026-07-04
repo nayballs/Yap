@@ -74,8 +74,14 @@ impl KeyBinding {
 static DICTATION_BINDING: KeyBinding = KeyBinding::new();
 static EDIT_BINDING: KeyBinding = KeyBinding::new();
 
+/// Channel from the hook callback to the emit-forwarder thread. The callback
+/// must NEVER do slow work (like `app.emit`, which can block on a busy webview):
+/// Windows silently REMOVES a low-level hook whose callback exceeds the
+/// LowLevelHooksTimeout (~300 ms) — the hotkey then goes dead with no error.
+/// So the callback only does atomics + a non-blocking channel send.
 #[cfg(target_os = "windows")]
-static HOOK_APP_HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
+static EVENT_TX: std::sync::OnceLock<std::sync::mpsc::Sender<&'static str>> =
+    std::sync::OnceLock::new();
 
 // ---- Public API ----
 
@@ -257,27 +263,23 @@ fn modifiers_held() -> bool {
 #[cfg(target_os = "windows")]
 fn handle_binding_event(
     binding: &KeyBinding,
-    event_pressed: &str,
-    event_released: &str,
+    event_pressed: &'static str,
+    event_released: &'static str,
     is_press: bool,
 ) -> bool {
     if is_press {
-        if let Some(app) = HOOK_APP_HANDLE.get() {
+        if let Some(tx) = EVENT_TX.get() {
             // Only emit on first press (not repeats)
             if !binding.active.swap(true, Ordering::Relaxed) {
-                info!("Input hook: emitting {}", event_pressed);
-                if let Err(e) = app.emit(event_pressed, ()) {
-                    warn!("Input hook: failed to emit {}: {}", event_pressed, e);
-                }
+                info!("Input hook: queueing {}", event_pressed);
+                let _ = tx.send(event_pressed);
             }
         }
         true
     } else if binding.active.swap(false, Ordering::Relaxed) {
-        if let Some(app) = HOOK_APP_HANDLE.get() {
-            info!("Input hook: emitting {}", event_released);
-            if let Err(e) = app.emit(event_released, ()) {
-                warn!("Input hook: failed to emit {}: {}", event_released, e);
-            }
+        if let Some(tx) = EVENT_TX.get() {
+            info!("Input hook: queueing {}", event_released);
+            let _ = tx.send(event_released);
         }
         true
     } else {
@@ -400,9 +402,22 @@ unsafe extern "system" fn low_level_mouse_proc(
 /// OS level to prevent them from reaching other applications.
 #[cfg(target_os = "windows")]
 pub fn start_input_hook(app_handle: AppHandle) {
-    HOOK_APP_HANDLE
-        .set(app_handle)
-        .expect("Input hook AppHandle already set");
+    // Emit-forwarder: the hook callback queues event names here and this thread
+    // does the (potentially slow) `app.emit`, keeping the callback fast enough
+    // that Windows never times it out (see EVENT_TX).
+    let (tx, rx) = std::sync::mpsc::channel::<&'static str>();
+    EVENT_TX.set(tx).expect("Input hook event channel already set");
+    std::thread::Builder::new()
+        .name("input-hook-emit".into())
+        .spawn(move || {
+            while let Ok(event) = rx.recv() {
+                info!("Input hook: emitting {}", event);
+                if let Err(e) = app_handle.emit(event, ()) {
+                    warn!("Input hook: failed to emit {}: {}", event, e);
+                }
+            }
+        })
+        .expect("Failed to spawn input hook emit thread");
 
     std::thread::Builder::new()
         .name("input-hook".into())
@@ -411,25 +426,19 @@ pub fn start_input_hook(app_handle: AppHandle) {
 
             unsafe {
                 let hmod = win32::GetModuleHandleW(std::ptr::null());
+                type HookProc = unsafe extern "system" fn(std::ffi::c_int, usize, isize) -> isize;
+                let install = |id: std::ffi::c_int, proc_: HookProc| {
+                    win32::SetWindowsHookExW(id, proc_, hmod, 0)
+                };
 
-                let kb_hook = win32::SetWindowsHookExW(
-                    win32::WH_KEYBOARD_LL,
-                    low_level_keyboard_proc,
-                    hmod,
-                    0,
-                );
+                let mut kb_hook = install(win32::WH_KEYBOARD_LL, low_level_keyboard_proc);
                 if kb_hook == 0 {
                     error!("Failed to install WH_KEYBOARD_LL hook");
                     return;
                 }
                 info!("WH_KEYBOARD_LL installed (handle: {})", kb_hook);
 
-                let mouse_hook = win32::SetWindowsHookExW(
-                    win32::WH_MOUSE_LL,
-                    low_level_mouse_proc,
-                    hmod,
-                    0,
-                );
+                let mut mouse_hook = install(win32::WH_MOUSE_LL, low_level_mouse_proc);
                 if mouse_hook == 0 {
                     error!("Failed to install WH_MOUSE_LL hook");
                     win32::UnhookWindowsHookEx(kb_hook);
@@ -437,8 +446,8 @@ pub fn start_input_hook(app_handle: AppHandle) {
                 }
                 info!("WH_MOUSE_LL installed (handle: {})", mouse_hook);
 
-                // Heartbeat timer (60 seconds)
-                win32::SetTimer(0, 1, 60_000, None);
+                // Heartbeat timer: logs, and re-installs the hooks (below).
+                win32::SetTimer(0, 1, 30_000, None);
 
                 info!("Input hooks ready — configure bindings via configure_dictation/configure_edit");
 
@@ -451,12 +460,27 @@ pub fn start_input_hook(app_handle: AppHandle) {
                         break;
                     }
 
-                    // Log heartbeats
                     if msg.message == win32::WM_TIMER {
+                        // Self-heal: Windows silently REMOVES a low-level hook
+                        // whose callback ever exceeds LowLevelHooksTimeout —
+                        // the hotkey would stay dead forever with no error. Cheap
+                        // insurance: re-install both hooks every heartbeat, so a
+                        // silently-removed hook revives within 30 s. (Same trick
+                        // AutoHotkey uses.)
+                        win32::UnhookWindowsHookEx(kb_hook);
+                        win32::UnhookWindowsHookEx(mouse_hook);
+                        kb_hook = install(win32::WH_KEYBOARD_LL, low_level_keyboard_proc);
+                        mouse_hook = install(win32::WH_MOUSE_LL, low_level_mouse_proc);
+                        if kb_hook == 0 || mouse_hook == 0 {
+                            error!(
+                                "Input hook re-install failed (kb={}, mouse={}) — retrying next heartbeat",
+                                kb_hook, mouse_hook
+                            );
+                        }
                         let (dict_t, dict_c) = DICTATION_BINDING.type_and_code();
                         let (edit_t, edit_c) = EDIT_BINDING.type_and_code();
                         trace!(
-                            "Input hook heartbeat: dict=({},{}) edit=({},{})",
+                            "Input hook heartbeat (re-hooked): dict=({},{}) edit=({},{})",
                             dict_t, dict_c, edit_t, edit_c
                         );
                     }
