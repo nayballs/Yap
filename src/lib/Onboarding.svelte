@@ -67,7 +67,8 @@
       installed = await invoke('installed_models');
       const c = await invoke('get_config');
       if (c) {
-        cfg = c;
+        // Keep this window's intentional changes on top of the fresh config.
+        cfg = { ...c, ...cfgPatch };
         if (installed.includes(c.modelSize)) active = c.modelSize;
       }
     } catch (e) {
@@ -239,12 +240,32 @@
   let gotTranscript = $state(false);
   let recordingKey = $state(false); // mini hotkey recorder active
 
-  // Reset the demo box each time the user lands on the try step.
+  // Reset the demo box each time the user lands on the try step — and, while
+  // on it, ALSO poll history for the newest dictation. The box normally fills
+  // from the yap-transcript event, but this webview has been observed to go
+  // deaf to events after a hide/re-show cycle (root cause under
+  // investigation); history is backend truth and always works.
   $effect(() => {
-    if (step === STEPS.length - 1) {
-      tryText = '';
-      gotTranscript = false;
-    }
+    if (step !== STEPS.length - 1) return;
+    tryText = '';
+    gotTranscript = false;
+    const enteredAt = Math.floor(Date.now() / 1000) - 2; // small clock slack
+    const timer = setInterval(async () => {
+      try {
+        const h = await invoke('get_history', { limit: 1 });
+        const e = Array.isArray(h) ? h[0] : null;
+        if (e && e.ts >= enteredAt && (e.text || '').trim()) {
+          const t = e.text.trim();
+          if (t !== tryText) {
+            tryText = t;
+            gotTranscript = true;
+          }
+        }
+      } catch {
+        // history disabled or command unavailable — events remain the path
+      }
+    }, 700);
+    return () => clearInterval(timer);
   });
 
   function formatHotkey(spec) {

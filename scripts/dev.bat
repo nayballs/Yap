@@ -14,6 +14,11 @@ REM registry opt-in — same workaround as CI (nightly.yml): build into a SHORT
 REM target dir on this drive instead of src-tauri\target.
 set CARGO_TARGET_DIR=%~d0\t
 
+REM Dev-only: expose the webviews on the Chrome DevTools Protocol (CDP) so
+REM tooling can inspect them (console errors, event delivery) while diagnosing
+REM UI issues. Not set for installed/release builds.
+set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9653
+
 echo ============================================================
 echo   Yap Dev - running the LIVE source with hot reload
 echo   Project: %cd%
