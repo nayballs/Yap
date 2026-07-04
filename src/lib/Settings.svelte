@@ -917,8 +917,12 @@
           </Group>
 
           <Group title="Audio">
-            <Row label="Microphone" hint="Applies after restart">
-              <Select bind:value={cfg.inputDevice} options={micOptions} />
+            <Row label="Microphone" hint="Applies instantly">
+              <Select
+                bind:value={cfg.inputDevice}
+                options={micOptions}
+                onchange={() => invoke('set_input_device', { device: cfg.inputDevice || null }).catch(() => {})}
+              />
             </Row>
             <Row label="Output device" hint="Where the start/stop chime plays">
               <Select bind:value={cfg.outputDevice} options={outputOptions} disabled={!cfg.soundEnabled} />

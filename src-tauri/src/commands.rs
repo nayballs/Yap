@@ -102,6 +102,31 @@ pub fn list_audio_devices() -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Toggle mic-test mode: while on, `yap-amp` levels are emitted even when idle
+/// so onboarding's mic check can show a live meter without recording.
+#[tauri::command]
+pub fn set_mic_test(state: State<'_, AppState>, on: bool) {
+    if let Ok(guard) = state.pipeline.lock() {
+        if let Some(p) = guard.as_ref() {
+            p.set_mic_test(on);
+        }
+    }
+}
+
+/// Switch the capture stream to a different input device live (no restart).
+/// `device` = a name from `list_audio_devices`, or null for the system default.
+#[tauri::command]
+pub fn set_input_device(state: State<'_, AppState>, device: Option<String>) -> Result<(), String> {
+    let mut guard = state
+        .pipeline
+        .lock()
+        .map_err(|_| "pipeline lock poisoned".to_string())?;
+    match guard.as_mut() {
+        Some(p) => p.set_input_device(device.as_deref()),
+        None => Err("pipeline not running".into()),
+    }
+}
+
 /// List available audio output device names (for the chime).
 #[tauri::command]
 pub fn list_output_devices() -> Vec<String> {

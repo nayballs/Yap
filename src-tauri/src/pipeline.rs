@@ -66,6 +66,10 @@ struct Shared {
     /// otherwise spawn a second `run_stt` that finds the engine taken and rebuilds
     /// a *duplicate* model into VRAM.
     processing: AtomicBool,
+    /// Mic-test mode (onboarding "speak and see the waves react"): when set, the
+    /// audio callback emits `yap-amp` while *idle* too, so a level meter works
+    /// without recording. Normally amp is only emitted during a recording.
+    mic_test: AtomicBool,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -700,6 +704,7 @@ impl Pipeline {
             edit_mode: AtomicBool::new(false),
             selection: Mutex::new(None),
             processing: AtomicBool::new(false),
+            mic_test: AtomicBool::new(false),
         });
 
         spawn_idle_watcher(&shared);
@@ -749,6 +754,22 @@ impl Pipeline {
         if let Ok(mut c) = self.shared.config.write() {
             *c = cfg;
         }
+    }
+
+    /// Enable/disable mic-test mode: while on, the audio callback emits
+    /// `yap-amp` levels even when idle (onboarding's "see the waves react").
+    pub fn set_mic_test(&self, on: bool) {
+        self.shared.mic_test.store(on, Ordering::Relaxed);
+    }
+
+    /// Swap the capture stream to a different input device **live** (no app
+    /// restart). Builds the new stream first, so on failure the old stream keeps
+    /// running and an error is returned.
+    pub fn set_input_device(&mut self, device: Option<&str>) -> Result<(), String> {
+        let stream = build_input_stream(&self.shared, device)?;
+        self._stream = SendStream(stream); // dropping the old stream stops it
+        tracing::info!(device = device.unwrap_or("default"), "Input device switched");
+        Ok(())
     }
 }
 
@@ -920,8 +941,9 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
                 } else {
                     mono
                 };
-                // While idle, keep a short rolling pre-roll ring (no buffering, no
-                // amp emit) so the next recording starts a moment before the key.
+                // While idle, keep a short rolling pre-roll ring (no buffering) so
+                // the next recording starts a moment before the key. Amp is only
+                // emitted while idle if a mic test (onboarding) asked for levels.
                 if !cb_shared.recording.load(Ordering::Relaxed) {
                     if let Ok(mut pr) = cb_shared.preroll.lock() {
                         pr.extend(resampled.iter().copied());
@@ -929,9 +951,10 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
                             pr.pop_front();
                         }
                     }
-                    return;
-                }
-                if let Ok(mut buf) = cb_shared.buffer.lock() {
+                    if !cb_shared.mic_test.load(Ordering::Relaxed) {
+                        return;
+                    }
+                } else if let Ok(mut buf) = cb_shared.buffer.lock() {
                     // Bound the buffer so a stuck key can't grow it without limit
                     // (OOM). Past the cap we drop further audio and warn once.
                     if buf.len() < MAX_RECORDING_SAMPLES {
@@ -945,8 +968,8 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
                     }
                 }
                 // Accumulate the peak over ~30 ms, then emit it as the next
-                // scrolling-waveform bar. The frontend shapes (gain/curve) and
-                // scrolls it.
+                // scrolling-waveform bar (recording, or an active mic test). The
+                // frontend shapes (gain/curve) and scrolls it.
                 for &s in &resampled {
                     let a = s.abs();
                     if a > amp_peak {

@@ -143,6 +143,8 @@ pub fn run() {
             commands::close_onboarding,
             commands::list_audio_devices,
             commands::list_output_devices,
+            commands::set_mic_test,
+            commands::set_input_device,
             commands::model_language_info,
             commands::configure_hotkey,
             commands::configure_edit_hotkey,

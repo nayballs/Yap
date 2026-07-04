@@ -269,18 +269,19 @@ below (✅ = done).
       Certum OSS ~£10–30/yr inline `signCommand`; Azure Trusted Signing ~$10/mo.)
 - [x] Crisp recording indicator (overlay + waveform), great defaults, hidden power
       features, first-run onboarding.
-- [ ] **Onboarding v2 — guided flow** (from the July-2026 superwhisper Windows
+- [x] **Onboarding v2 — guided flow** (from the July-2026 superwhisper Windows
       hands-on; see the hands-on section of
-      [`docs/competitive-analysis.md`](./docs/competitive-analysis.md)). Yap's
-      onboarding is a model picker only; upgrade to a stepped flow: **mic test**
-      (live waveform — component already exists) → model pick (existing) → **AI
-      cleanup step offering the built-in local model one-click** (Yap's #1
-      differentiator is currently buried in Settings, off by default, invisible to
-      new users) → **tray-discovery pointer** ("Yap lives here" — all windows are
-      hidden by design, so this prevents "the app vanished") → **"press F9, try it
-      here"** live test with an inline textbox + a change-shortcut link. Optional:
-      a small get-started checklist (edit mode, per-app profiles, per-profile
-      models) for feature discovery after onboarding.
+      [`docs/competitive-analysis.md`](./docs/competitive-analysis.md)) —
+      **implemented (pending an end-to-end runtime pass)**. Five steps: model pick
+      (the old picker, now step 1) → **mic check** (live level meter + device
+      picker; backed by a new `mic_test` mode that emits `yap-amp` while idle, and
+      a new `set_input_device` command that swaps the capture stream **live** — no
+      more "applies after restart", in Settings too) → **AI cleanup** (one-click
+      "enable private AI cleanup" installing the built-in local model, with a
+      raw→clean demo — the wedge, now impossible to miss) → **tray pointer** (CSS
+      mock of the tray with tips) → **"try it here"** (inline textbox + live
+      state/✓ feedback + change-shortcut recorder). Progress dots, back nav,
+      skippable at every step.
 - [ ] Verify low idle CPU/RAM; reliable injection into every field.
 - [~] **Harden text injection** (FluidVoice `TypingService` lessons):
       - [x] Capture the **target window (HWND) at record-start** (skipping Yap's own

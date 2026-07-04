@@ -6,6 +6,15 @@
   import { MODELS } from './models.js';
   import ModelCard from './ModelCard.svelte';
 
+  // ---- Stepped flow (superwhisper-style guided onboarding) ----
+  // 0 model → 1 mic check → 2 AI cleanup (the wedge) → 3 tray → 4 try it
+  const STEPS = ['Model', 'Microphone', 'AI cleanup', 'Tray', 'Try it'];
+  let step = $state(0);
+
+  // Full config (loaded once; mutated by steps; persisted via save_config).
+  let cfg = $state(null);
+
+  // ---- Step 0: model picker (unchanged mechanics) ----
   let installed = $state([]); // model ids already on disk
   let active = $state(null); // currently active model id
   let busyId = $state(null); // model id being downloaded / switched to
@@ -26,20 +35,15 @@
   async function refresh() {
     try {
       installed = await invoke('installed_models');
-      const cfg = await invoke('get_config');
-      if (cfg && installed.includes(cfg.modelSize)) active = cfg.modelSize;
+      const c = await invoke('get_config');
+      if (c) {
+        cfg = c;
+        if (installed.includes(c.modelSize)) active = c.modelSize;
+      }
     } catch (e) {
       // best-effort
     }
   }
-
-  onMount(() => {
-    refresh();
-    const un = listen('stt-download-progress', (e) => {
-      if (e.payload && e.payload.modelSize === busyId) percent = e.payload.percent;
-    });
-    return () => un.then((u) => u && u());
-  });
 
   // Pick a model: download if needed, then make it the active model.
   async function choose(model) {
@@ -64,57 +68,368 @@
     }
   }
 
-  // One-click path: download + activate the recommended model, then finish. If a
-  // model is already active (user picked one from the list), just finish.
+  // One-click path: download + activate the recommended model, then advance.
   async function quickStart() {
     if (busyId) return;
     if (active) {
-      getStarted();
+      next();
       return;
     }
     await choose(recommended);
-    if (active === recommended.id) getStarted();
+    if (active === recommended.id) next();
   }
 
-  function getStarted() {
+  // ---- Step 1: mic check ----
+  let devices = $state([]);
+  let bars = $state(Array(36).fill(0)); // scrolling level meter
+  let micHeard = $state(false); // any signal above the floor yet?
+
+  async function applyMic() {
+    if (!cfg) return;
+    try {
+      await invoke('set_input_device', { device: cfg.inputDevice || null });
+      await persistCfg();
+      bars = Array(36).fill(0);
+      micHeard = false;
+    } catch (e) {
+      error = `Couldn't switch microphone: ${e}`;
+    }
+  }
+
+  // Mic-test mode follows the step: levels stream (yap-amp) only on step 1.
+  // The window hides (not closes) on X, so also gate on page visibility —
+  // otherwise a hidden onboarding parked on the mic step would keep the
+  // level meter streaming forever.
+  let pageVisible = $state(!document.hidden);
+  $effect(() => {
+    invoke('set_mic_test', { on: step === 1 && pageVisible }).catch(() => {});
+  });
+
+  // ---- Step 2: AI cleanup (Yap's differentiator, offered up front) ----
+  let llm = $state({ installed: false, running: false, model: 'Qwen2.5 1.5B Instruct' });
+  let llmInstalling = $state(false);
+  let llmProgress = $state({ stage: '', percent: 0 });
+  let llmError = $state('');
+  let cleanupEnabled = $state(false); // reflects what we set up this session
+
+  async function refreshLlm() {
+    try {
+      llm = await invoke('local_llm_status');
+      cleanupEnabled = !!(cfg?.postProcessEnabled && cfg?.ppProvider === 'ondevice');
+    } catch {
+      // stub build / best-effort
+    }
+  }
+
+  async function enableLocalCleanup() {
+    if (llmInstalling) return;
+    llmError = '';
+    llmInstalling = true;
+    llmProgress = { stage: '', percent: 0 };
+    try {
+      await invoke('local_llm_install'); // no-op for parts already present
+      cfg.postProcessEnabled = true;
+      cfg.ppProvider = 'ondevice';
+      await persistCfg(); // save_config also autostarts the sidecar
+      cleanupEnabled = true;
+      await refreshLlm();
+    } catch (e) {
+      llmError = `${e}`;
+    } finally {
+      llmInstalling = false;
+    }
+  }
+
+  // ---- Step 4: try it ----
+  let tryState = $state('idle'); // mirrors yap-state while on the try step
+  let gotTranscript = $state(false);
+  let recordingKey = $state(false); // mini hotkey recorder active
+
+  function formatHotkey(spec) {
+    if (!spec) return 'None';
+    if (spec.startsWith('mouse:')) return `Mouse ${spec.slice(6)}`;
+    const m = spec.match(/^kb:(\d+)$/);
+    return m ? vkeyName(+m[1]) : spec;
+  }
+  function vkeyName(v) {
+    if (v >= 112 && v <= 123) return `F${v - 111}`;
+    if ((v >= 48 && v <= 57) || (v >= 65 && v <= 90)) return String.fromCharCode(v);
+    const named = { 32: 'Space', 13: 'Enter', 9: 'Tab', 8: 'Backspace', 192: '`' };
+    return named[v] || `Key ${v}`;
+  }
+
+  // Mini hotkey recorder (same mechanics as Settings): pause the live binding,
+  // capture one keypress, re-apply + persist.
+  function startKeyRecord() {
+    if (recordingKey) return;
+    recordingKey = true;
+    invoke('configure_hotkey', { spec: '' }).catch(() => {});
+    window.addEventListener('keydown', onRecordKey, true);
+  }
+  function stopKeyRecord() {
+    recordingKey = false;
+    window.removeEventListener('keydown', onRecordKey, true);
+    if (cfg) {
+      invoke('configure_hotkey', { spec: cfg.hotkey }).catch(() => {});
+      persistCfg();
+    }
+  }
+  function onRecordKey(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Escape') return stopKeyRecord();
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+    cfg.hotkey = `kb:${e.keyCode}`;
+    stopKeyRecord();
+  }
+
+  // ---- Shared plumbing ----
+  async function persistCfg() {
+    if (!cfg) return;
+    try {
+      await invoke('save_config', { cfg });
+    } catch (e) {
+      error = `Couldn't save settings: ${e}`;
+    }
+  }
+
+  function next() {
+    if (!cfg) return; // config still loading — steps 1+ bind into it
+    if (step < STEPS.length - 1) step += 1;
+  }
+  function back() {
+    if (step > 0) step -= 1;
+  }
+  function finish() {
+    invoke('set_mic_test', { on: false }).catch(() => {});
     invoke('close_onboarding');
   }
+
+  onMount(() => {
+    refresh().then(refreshLlm);
+    invoke('list_audio_devices')
+      .then((d) => (devices = d || []))
+      .catch(() => {});
+    const onVis = () => (pageVisible = !document.hidden);
+    document.addEventListener('visibilitychange', onVis);
+    const unsubs = [
+      listen('stt-download-progress', (e) => {
+        if (e.payload && e.payload.modelSize === busyId) percent = e.payload.percent;
+      }),
+      listen('yap-amp', (e) => {
+        const amp = Math.min(1, (e.payload || 0) * 4); // same gain feel as the pill
+        bars = [...bars.slice(1), amp];
+        if (amp > 0.06) micHeard = true;
+      }),
+      listen('local-llm-download-progress', (e) => {
+        if (e.payload) llmProgress = e.payload;
+      }),
+      listen('yap-state', (e) => {
+        tryState = e.payload || 'idle';
+      }),
+      listen('yap-transcript', () => {
+        if (step === STEPS.length - 1) gotTranscript = true;
+      }),
+    ];
+    return () => {
+      unsubs.forEach((p) => p.then((u) => u && u()));
+      window.removeEventListener('keydown', onRecordKey, true);
+      document.removeEventListener('visibilitychange', onVis);
+      invoke('set_mic_test', { on: false }).catch(() => {});
+    };
+  });
 </script>
 
 <main>
-  <header>
-    <img class="logo" src={yapIcon} alt="" aria-hidden="true" />
-    <h1>Welcome to Yap</h1>
-    <p class="sub">
-      Just hit <strong>Download {recommended.name} &amp; start</strong> below — or pick a
-      different model from the list. Everything runs locally on your machine; your voice
-      never leaves it. You can change this any time in Settings.
-    </p>
-  </header>
-
-  <div class="cards">
-    {#each MODELS as m (m.id)}
-      <ModelCard model={m} status={statusOf(m.id)} {percent} onclick={choose} />
+  <!-- Progress dots -->
+  <nav class="dots" aria-label="Setup progress">
+    {#each STEPS as s, i}
+      <button
+        class="dot"
+        class:done={i < step}
+        class:current={i === step}
+        title={s}
+        onclick={() => (i < step ? (step = i) : null)}
+        aria-label={`Step ${i + 1}: ${s}`}
+      ></button>
     {/each}
-  </div>
+  </nav>
+
+  {#if step === 0}
+    <header>
+      <img class="logo" src={yapIcon} alt="" aria-hidden="true" />
+      <h1>Welcome to Yap</h1>
+      <p class="sub">
+        Pick the speech model that turns your voice into text. It runs
+        <strong>locally on your GPU</strong> — your voice never leaves this machine.
+        <strong>{recommended.name}</strong> is the fast, accurate default.
+      </p>
+    </header>
+
+    <div class="cards">
+      {#each MODELS as m (m.id)}
+        <ModelCard model={m} status={statusOf(m.id)} {percent} onclick={choose} />
+      {/each}
+    </div>
+  {:else if step === 1}
+    <header>
+      <h1>Let's check your microphone</h1>
+      <p class="sub">Say something — the bars should react. Silence? Pick a different device.</p>
+    </header>
+
+    <div class="mic-box">
+      <select
+        class="mic-pick"
+        bind:value={cfg.inputDevice}
+        onchange={applyMic}
+        aria-label="Microphone"
+      >
+        <option value={null}>System default</option>
+        {#each devices as d}
+          <option value={d}>{d}</option>
+        {/each}
+      </select>
+
+      <div class="meter" class:live={micHeard} aria-hidden="true">
+        {#each bars as b}
+          <span style="height:{Math.max(6, b * 100)}%"></span>
+        {/each}
+      </div>
+      <p class="mic-status">
+        {#if micHeard}✓ Hearing you loud and clear{:else}Waiting for sound…{/if}
+      </p>
+    </div>
+  {:else if step === 2}
+    <header>
+      <h1>Make it sound polished</h1>
+      <p class="sub">
+        Raw dictation is full of "um"s and false starts. Yap's <strong>AI cleanup</strong>
+        strips filler, fixes punctuation, and resolves "no wait, I meant…" —
+        <strong>entirely on your PC</strong>. No account, no API key, no cloud.
+      </p>
+    </header>
+
+    <div class="cleanup-box">
+      {#if cleanupEnabled}
+        <div class="cleanup-done">
+          ✓ <strong>{llm.model}</strong> is set up — cleanup runs locally on this machine.
+        </div>
+      {:else if llmInstalling}
+        <div class="cleanup-progress">
+          <span>
+            Downloading the {llmProgress.stage === 'runtime' ? 'engine' : 'model'}…
+            {llmProgress.percent || 0}%
+          </span>
+          <div class="bar"><span style="width:{llmProgress.percent || 0}%"></span></div>
+        </div>
+      {:else}
+        <div class="cleanup-demo" aria-hidden="true">
+          <div class="demo-raw">"so um, I went to the shop and uh, no wait — I mean I got milk"</div>
+          <div class="demo-arrow">↓</div>
+          <div class="demo-clean">"I went to the shop and got milk."</div>
+        </div>
+        <button class="start wide" onclick={enableLocalCleanup}>
+          Enable private AI cleanup (~1 GB download)
+        </button>
+        <p class="fine">One-time download of {llm.model}. You can switch to your own
+          provider — or turn it off — any time in Settings → AI Cleanup.</p>
+      {/if}
+      {#if llmError}<p class="error">{llmError}</p>{/if}
+    </div>
+  {:else if step === 3}
+    <header>
+      <h1>Yap lives in your tray</h1>
+      <p class="sub">
+        There's no main window to keep open — Yap waits in the corner of your taskbar.
+        A floating overlay appears whenever you're dictating.
+      </p>
+    </header>
+
+    <div class="tray-mock" aria-hidden="true">
+      <div class="tray-arrow">⬇</div>
+      <div class="tray-bar">
+        <span class="tray-caret">^</span>
+        <span class="tray-icon yap"><span class="tray-dot"></span></span>
+        <span class="tray-icon">☁</span>
+        <span class="tray-lang">ENG</span>
+        <span class="tray-icon">🔊</span>
+        <span class="tray-clock">10:42</span>
+      </div>
+    </div>
+    <ul class="tray-tips">
+      <li><strong>Left-click</strong> the icon → open Settings.</li>
+      <li><strong>Right-click</strong> → switch model, cancel a recording, check for updates.</li>
+      <li>The dot changes colour while recording &amp; transcribing.</li>
+    </ul>
+  {:else}
+    <header>
+      <h1>Try it</h1>
+      <p class="sub">
+        Click the box, press <strong class="key">{formatHotkey(cfg?.hotkey)}</strong>,
+        say something, then press
+        <strong class="key">{formatHotkey(cfg?.hotkey)}</strong> again.
+      </p>
+    </header>
+
+    <div class="try-box">
+      <textarea
+        class="try-area"
+        placeholder="Your words will appear here…"
+        rows="5"
+      ></textarea>
+      <p class="try-status">
+        {#if gotTranscript}
+          ✓ It works! You can dictate into any app exactly like this.
+        {:else if tryState === 'recording'}
+          ● Listening…
+        {:else if tryState === 'processing' || tryState === 'processing-slow'}
+          … Transcribing
+        {:else if tryState === 'needs-model'}
+          ⚠ No model installed — go back to step 1.
+        {:else}
+          Waiting for {formatHotkey(cfg?.hotkey)}…
+        {/if}
+      </p>
+      <button class="skip" onclick={startKeyRecord} disabled={recordingKey}>
+        {#if recordingKey}Press the key you want… (Esc to cancel){:else}Change shortcut{/if}
+      </button>
+    </div>
+  {/if}
 
   {#if error}
     <p class="error">{error}</p>
   {/if}
 
   <footer>
-    <button class="skip" onclick={getStarted}>I'll choose later</button>
-    <button class="start" onclick={quickStart} disabled={!!busyId}>
-      {#if busyId === recommended.id}
-        Downloading {recommended.name}… {percent}%
-      {:else if busyId}
-        Setting up… {percent}%
-      {:else if active}
-        Get started →
-      {:else}
-        Download {recommended.name} & start
-      {/if}
-    </button>
+    {#if step > 0}
+      <button class="skip" onclick={back}>← Back</button>
+    {:else}
+      <button class="skip" onclick={next}>I'll choose later</button>
+    {/if}
+
+    {#if step === 0}
+      <button class="start" onclick={quickStart} disabled={!!busyId}>
+        {#if busyId === recommended.id}
+          Downloading {recommended.name}… {percent}%
+        {:else if busyId}
+          Setting up… {percent}%
+        {:else if active}
+          Continue →
+        {:else}
+          Download {recommended.name} & continue
+        {/if}
+      </button>
+    {:else if step === 2 && !cleanupEnabled}
+      <button class="start ghost" onclick={next} disabled={llmInstalling}>
+        {llmInstalling ? 'Downloading…' : 'Maybe later'}
+      </button>
+    {:else if step === STEPS.length - 1}
+      <button class="start" onclick={finish}>
+        {gotTranscript ? 'Finish 🎉' : 'Finish'}
+      </button>
+    {:else}
+      <button class="start" onclick={next}>Continue →</button>
+    {/if}
   </footer>
 </main>
 
@@ -125,25 +440,51 @@
   main {
     box-sizing: border-box;
     min-height: 100vh;
+    display: flex;
+    flex-direction: column;
     background: #0f1117;
     color: #e5e7eb;
-    padding: 26px 28px 22px;
+    padding: 20px 28px 22px;
     font-family: system-ui, -apple-system, sans-serif;
+  }
+
+  /* Progress dots */
+  .dots {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 18px;
+  }
+  .dot {
+    width: 26px;
+    height: 5px;
+    border: none;
+    border-radius: 3px;
+    background: #232936;
+    padding: 0;
+    cursor: default;
+  }
+  .dot.done {
+    background: #2b4a7a;
+    cursor: pointer;
+  }
+  .dot.current {
+    background: #3b82f6;
   }
 
   header {
     text-align: center;
-    margin-bottom: 22px;
+    margin-bottom: 18px;
   }
   .logo {
-    width: 64px;
-    height: 64px;
-    margin: 0 auto 12px;
-    border-radius: 14px;
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 10px;
+    border-radius: 12px;
     object-fit: contain;
   }
   h1 {
-    font-size: 22px;
+    font-size: 21px;
     margin: 0 0 8px;
     letter-spacing: 0.01em;
   }
@@ -151,14 +492,220 @@
     color: #9ca3af;
     font-size: 13px;
     line-height: 1.6;
-    max-width: 440px;
+    max-width: 460px;
     margin: 0 auto;
+  }
+  .key {
+    background: #1f2733;
+    border: 1px solid #2a2f3a;
+    border-radius: 5px;
+    padding: 1px 7px;
+    color: #e5e7eb;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
   }
 
   .cards {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* Mic step */
+  .mic-box {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+  }
+  .mic-pick {
+    background: #181b22;
+    border: 1px solid #2a2f3a;
+    border-radius: 7px;
+    color: #e5e7eb;
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 10px;
+    max-width: 320px;
+  }
+  .meter {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 90px;
+    width: 100%;
+    max-width: 420px;
+  }
+  .meter span {
+    flex: 1;
+    background: #2a2f3a;
+    border-radius: 2px;
+    transition: height 60ms linear;
+  }
+  .meter.live span {
+    background: #3b82f6;
+  }
+  .mic-status {
+    color: #9ca3af;
+    font-size: 13px;
+    margin: 0;
+  }
+  .meter.live + .mic-status {
+    color: #34d399;
+  }
+
+  /* Cleanup step */
+  .cleanup-box {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+  .cleanup-demo {
+    text-align: center;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .demo-raw {
+    color: #6b7280;
+    font-style: italic;
+  }
+  .demo-arrow {
+    color: #3b82f6;
+    font-size: 15px;
+  }
+  .demo-clean {
+    color: #e5e7eb;
+    font-weight: 500;
+  }
+  .cleanup-done {
+    color: #34d399;
+    font-size: 14px;
+    text-align: center;
+    line-height: 1.6;
+  }
+  .cleanup-progress {
+    width: 100%;
+    max-width: 380px;
+    font-size: 13px;
+    color: #9ca3af;
+    text-align: center;
+  }
+  .bar {
+    margin-top: 8px;
+    height: 6px;
+    border-radius: 3px;
+    background: #1f2733;
+    overflow: hidden;
+  }
+  .bar span {
+    display: block;
+    height: 100%;
+    background: #3b82f6;
+    transition: width 0.2s ease;
+  }
+  .fine {
+    color: #6b7280;
+    font-size: 11.5px;
+    text-align: center;
+    max-width: 380px;
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  /* Tray step */
+  .tray-mock {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 26px 0 18px;
+  }
+  .tray-arrow {
+    color: #f59e0b;
+    font-size: 20px;
+    margin-bottom: 4px;
+    margin-left: -132px;
+  }
+  .tray-bar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: #1c2028;
+    border: 1px solid #2a2f3a;
+    border-radius: 10px;
+    padding: 10px 18px;
+    font-size: 13px;
+    color: #9ca3af;
+  }
+  .tray-caret {
+    font-weight: 700;
+  }
+  .tray-icon.yap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    background: #10131a;
+    outline: 2px solid #f59e0b;
+  }
+  .tray-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #3b82f6;
+  }
+  .tray-clock {
+    font-variant-numeric: tabular-nums;
+  }
+  .tray-tips {
+    color: #9ca3af;
+    font-size: 13px;
+    line-height: 1.9;
+    max-width: 400px;
+    margin: 0 auto;
+    padding-left: 18px;
+  }
+
+  /* Try step */
+  .try-box {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .try-area {
+    width: 100%;
+    max-width: 460px;
+    background: #181b22;
+    border: 1px solid #2a2f3a;
+    border-radius: 10px;
+    color: #e5e7eb;
+    font: inherit;
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 12px 14px;
+    resize: none;
+  }
+  .try-area:focus {
+    outline: none;
+    border-color: #3b82f6;
+  }
+  .try-status {
+    color: #9ca3af;
+    font-size: 13px;
+    min-height: 18px;
+    margin: 0;
   }
 
   .error {
@@ -173,7 +720,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-top: 20px;
+    margin-top: 18px;
   }
   .skip {
     background: none;
@@ -183,7 +730,7 @@
     cursor: pointer;
     padding: 8px 4px;
   }
-  .skip:hover {
+  .skip:hover:not(:disabled) {
     color: #9ca3af;
   }
   .start {
@@ -204,5 +751,16 @@
     background: #1f2733;
     color: #6b7280;
     cursor: default;
+  }
+  .start.ghost {
+    background: #1f2733;
+    color: #9ca3af;
+  }
+  .start.ghost:hover:not(:disabled) {
+    background: #262f3d;
+  }
+  .start.wide {
+    width: 100%;
+    max-width: 380px;
   }
 </style>

@@ -148,7 +148,8 @@ back to the raw transcript, so dictation never blocks.
 - **`commands.rs`** — Tauri commands: recording (`toggle_recording`, `cancel_recording`),
   config (`get_config`/`save_config`), models (`installed_models`, `download_model`,
   `download_model_size`, `set_active_model`, `delete_model`, `model_language_info`),
-  devices (`list_audio_devices`, `list_output_devices`), windows (`open_settings`,
+  devices (`list_audio_devices`, `list_output_devices`, `set_input_device` — live
+  stream swap, `set_mic_test` — idle level meter), windows (`open_settings`,
   `open_onboarding`, `close_onboarding`, `set_pill_visible`, `set_pill_scale`),
   `configure_hotkey`, `set_autostart`, `is_portable`, `test_post_process`,
   `get_groq_usage`, history (`get_history`, `clear_history`, `get_stats`).
@@ -167,7 +168,10 @@ back to the raw transcript, so dictation never blocks.
   **About** (version, updates).
 - **`lib/ModelManager.svelte` / `ModelCard.svelte` / `models.js`** — the 14-model
   browser (download/switch/delete/progress, "Your models" vs "Available").
-- **`lib/Onboarding.svelte`** — first-run model picker.
+- **`lib/Onboarding.svelte`** — first-run **guided setup** (5 steps): model picker →
+  mic check (live level meter via `set_mic_test` idle-amp mode + live device switch)
+  → one-click **local AI cleanup** install → tray pointer → "try it here" live
+  dictation test with a change-shortcut recorder.
 - **`lib/ui/`** — primitives: Toggle, Select, Slider, Group, Row, Button, Input, Textarea.
 
 ### Window config (`src-tauri/tauri.conf.json`)
