@@ -408,7 +408,7 @@
     {/if}
 
     {#if step === 0}
-      <button class="start" onclick={quickStart} disabled={!!busyId}>
+      <button class="start" onclick={quickStart} disabled={!!busyId || !cfg}>
         {#if busyId === recommended.id}
           Downloading {recommended.name}… {percent}%
         {:else if busyId}
@@ -428,7 +428,7 @@
         {gotTranscript ? 'Finish 🎉' : 'Finish'}
       </button>
     {:else}
-      <button class="start" onclick={next}>Continue →</button>
+      <button class="start" onclick={next} disabled={!cfg}>Continue →</button>
     {/if}
   </footer>
 </main>
@@ -439,7 +439,11 @@
   }
   main {
     box-sizing: border-box;
-    min-height: 100vh;
+    /* Hard viewport bound (NOT min-height): the page itself must never grow
+       past the window, or the footer nav ends up below the fold and the model
+       list silently stops being a scroll container. `.cards` scrolls instead. */
+    height: 100vh;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     background: #0f1117;
@@ -512,6 +516,21 @@
     overflow-y: auto;
     flex: 1 1 auto;
     min-height: 0;
+    padding-right: 6px; /* breathing room so the scrollbar doesn't hug the cards */
+  }
+  /* Visible (but subtle) scrollbar so it's obvious the list scrolls. */
+  .cards::-webkit-scrollbar {
+    width: 8px;
+  }
+  .cards::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .cards::-webkit-scrollbar-thumb {
+    background: #2a2f3a;
+    border-radius: 4px;
+  }
+  .cards::-webkit-scrollbar-thumb:hover {
+    background: #3a4150;
   }
 
   /* Mic step */
