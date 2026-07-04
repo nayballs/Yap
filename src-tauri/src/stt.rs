@@ -342,9 +342,13 @@ fn resolve_model(id: &str) -> ResolvedModel {
         "tiny" => Some("ggml-tiny.en.bin"),
         _ => None,
     };
-    let filename = legacy_filename
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("{}.bin", id));
+    // Sanitize an unknown/custom id before it becomes a filename: strip path
+    // separators and drive colons so a crafted id (e.g. `..\..\x`) from config
+    // can't escape the models/ directory when joined.
+    let filename = legacy_filename.map(str::to_string).unwrap_or_else(|| {
+        let safe_id: String = id.chars().filter(|c| !matches!(c, '/' | '\\' | ':')).collect();
+        format!("{}.bin", safe_id)
+    });
 
     ResolvedModel {
         filename,

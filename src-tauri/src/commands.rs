@@ -402,12 +402,42 @@ pub fn is_portable() -> bool {
     crate::portable::is_portable()
 }
 
+/// Model ids whose download is currently in flight, so two concurrent downloads
+/// of the same model can't interleave writes into the same `<name>.partial` file.
+fn downloads_in_flight() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// Removes its id from the in-flight set on drop (covers every early return).
+struct DownloadGuard(String);
+impl Drop for DownloadGuard {
+    fn drop(&mut self) {
+        if let Ok(mut s) = downloads_in_flight().lock() {
+            s.remove(&self.0);
+        }
+    }
+}
+
 /// Shared: ensure the model is on disk, build the engine, install it.
 async fn download_and_activate(
     app: &AppHandle,
     state: &State<'_, AppState>,
     model_size: &str,
 ) -> Result<(), String> {
+    // Reject a second concurrent download of the same model (double-click, or the
+    // two download commands racing) — they'd corrupt a shared `.partial`.
+    let _guard = {
+        let mut inflight = downloads_in_flight()
+            .lock()
+            .map_err(|_| "download registry lock poisoned".to_string())?;
+        if !inflight.insert(model_size.to_string()) {
+            return Err(format!("{} is already downloading", model_size));
+        }
+        DownloadGuard(model_size.to_string())
+    };
+
     let data_dir = config::data_dir();
     let use_gpu = config::load().use_gpu;
 

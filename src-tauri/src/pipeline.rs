@@ -23,6 +23,13 @@ const TARGET_SAMPLE_RATE: u32 = 16_000;
 /// pressed the key is prepended to the recording. 300 ms × 16 kHz.
 const PREROLL_SAMPLES: usize = (0.3 * TARGET_SAMPLE_RATE as f64) as usize;
 
+/// Hard cap on a single recording's captured audio (16 kHz mono f32 ≈ 64 KB/s).
+/// A stuck hotkey or a forgotten toggle-mode session would otherwise grow the
+/// buffer without bound (~3.8 MB/min) until the process runs out of memory. At
+/// 15 minutes that's ~57 MB — far longer than any real dictation — after which
+/// the callback stops appending (and logs once) rather than risk an OOM.
+const MAX_RECORDING_SAMPLES: usize = 15 * 60 * TARGET_SAMPLE_RATE as usize;
+
 /// cpal's `Stream` is `!Send` on some platforms; we only hold it alive.
 struct SendStream(#[allow(dead_code)] cpal::Stream);
 // SAFETY: the stream is only kept alive and dropped; cpal manages its own
@@ -54,6 +61,11 @@ struct Shared {
     /// Text selected in the target app, captured at edit-mode record-start. Empty
     /// (`None`) → "write mode" (generate new text from the instruction alone).
     selection: Mutex<Option<String>>,
+    /// True from `stop_and_transcribe` until `run_stt` finishes. Blocks starting a
+    /// new recording while one is still transcribing — a rapid re-toggle would
+    /// otherwise spawn a second `run_stt` that finds the engine taken and rebuilds
+    /// a *duplicate* model into VRAM.
+    processing: AtomicBool,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -177,6 +189,13 @@ impl Shared {
     }
 
     fn start_recording(self: &Arc<Self>, edit: bool) {
+        // A previous transcription is still running — ignore the start so we don't
+        // spawn an overlapping `run_stt` (which would rebuild a duplicate model).
+        // Processing is normally sub-second on a GPU, so this rarely bites.
+        if self.processing.load(Ordering::SeqCst) {
+            tracing::debug!("Ignoring start — a transcription is still processing");
+            return;
+        }
         // Seed the buffer with the pre-roll ring (the ~300 ms before the keypress)
         // so a word already in flight isn't clipped.
         let pre: Vec<f32> = self
@@ -261,6 +280,11 @@ impl Shared {
         if let Ok(mut buf) = self.buffer.lock() {
             buf.clear();
         }
+        // Drop any edit-mode selection/state so it can't leak into a later session.
+        if let Ok(mut g) = self.selection.lock() {
+            *g = None;
+        }
+        self.edit_mode.store(false, Ordering::SeqCst);
         let _ = self.app.emit("yap-state", "idle");
         tracing::info!("Recording cancelled (audio discarded)");
     }
@@ -279,9 +303,15 @@ impl Shared {
             .unwrap_or_default();
         tracing::info!(samples = audio.len(), "Recording stopped, transcribing");
 
+        // Mark "processing" so a rapid re-toggle can't start an overlapping
+        // transcription. Cleared once `run_stt` returns (all paths), below.
+        self.processing.store(true, Ordering::SeqCst);
         let shared = Arc::clone(self);
         tauri::async_runtime::spawn(async move {
+            // `run_stt` consumes its Arc; keep a second handle to clear the flag.
+            let flag = Arc::clone(&shared);
             shared.run_stt(audio).await;
+            flag.processing.store(false, Ordering::SeqCst);
         });
     }
 
@@ -433,9 +463,14 @@ impl Shared {
 
         match outcome {
             Ok((engine, transcription)) => {
-                // Put the (warm) engine back for next time.
+                // Put the (warm) engine back for next time — but only if the
+                // slot is still empty. If a model switch (`set_engine`) installed
+                // a *newer* engine while we were transcribing, keep theirs and
+                // drop ours, so the switch isn't silently reverted.
                 if let Ok(mut g) = self.engine.lock() {
-                    *g = Some(engine);
+                    if g.is_none() {
+                        *g = Some(engine);
+                    }
                 }
                 match transcription {
                     Ok(text) if self.edit_mode.load(Ordering::SeqCst) => {
@@ -655,6 +690,7 @@ impl Pipeline {
             target_hwnd: AtomicIsize::new(0),
             edit_mode: AtomicBool::new(false),
             selection: Mutex::new(None),
+            processing: AtomicBool::new(false),
         });
 
         spawn_idle_watcher(&shared);
@@ -764,6 +800,11 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
         let stable = smart_diff(&last, trimmed);
         if stable != last {
             last = stable.clone();
+            // Recording may have stopped while we were transcribing — don't emit a
+            // stale partial over the authoritative final transcript.
+            if !shared.recording.load(Ordering::SeqCst) {
+                break;
+            }
             let _ = shared.app.emit("yap-partial", stable);
         }
     }
@@ -882,7 +923,17 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
                     return;
                 }
                 if let Ok(mut buf) = cb_shared.buffer.lock() {
-                    buf.extend_from_slice(&resampled);
+                    // Bound the buffer so a stuck key can't grow it without limit
+                    // (OOM). Past the cap we drop further audio and warn once.
+                    if buf.len() < MAX_RECORDING_SAMPLES {
+                        buf.extend_from_slice(&resampled);
+                        if buf.len() >= MAX_RECORDING_SAMPLES {
+                            tracing::warn!(
+                                "Recording hit the {}-minute cap — further audio dropped; stop the recording",
+                                MAX_RECORDING_SAMPLES / (60 * TARGET_SAMPLE_RATE as usize)
+                            );
+                        }
+                    }
                 }
                 // Accumulate the peak over ~30 ms, then emit it as the next
                 // scrolling-waveform bar. The frontend shapes (gain/curve) and

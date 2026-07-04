@@ -355,6 +355,42 @@ pub fn app_name_for(hwnd: Option<isize>) -> Option<String> {
     }
 }
 
+/// A best-effort snapshot of the clipboard so we can restore it after borrowing
+/// it for a paste / Ctrl+C. Covers the two common payloads (text and image) —
+/// restoring text *only* (the previous behaviour) silently destroyed any image
+/// or files the user had copied.
+#[cfg(target_os = "windows")]
+enum ClipSnapshot {
+    Text(String),
+    Image(arboard::ImageData<'static>),
+    Empty,
+}
+
+#[cfg(target_os = "windows")]
+fn snapshot_clipboard(cb: &mut arboard::Clipboard) -> ClipSnapshot {
+    if let Ok(t) = cb.get_text() {
+        return ClipSnapshot::Text(t);
+    }
+    if let Ok(img) = cb.get_image() {
+        return ClipSnapshot::Image(img);
+    }
+    ClipSnapshot::Empty
+}
+
+#[cfg(target_os = "windows")]
+fn restore_clipboard_snapshot(cb: &mut arboard::Clipboard, snap: ClipSnapshot) {
+    match snap {
+        ClipSnapshot::Text(t) => {
+            let _ = cb.set_text(t);
+        }
+        ClipSnapshot::Image(img) => {
+            let _ = cb.set_image(img);
+        }
+        // Nothing (or an unsupported format) was there — leave it as-is.
+        ClipSnapshot::Empty => {}
+    }
+}
+
 /// Capture the current text selection via the **clipboard Ctrl+C trick** — the
 /// fallback for edit/rewrite mode when UI Automation can't read the selection
 /// (common in Electron/Chromium/terminal apps).
@@ -375,21 +411,30 @@ pub fn selection_via_copy(target_hwnd: Option<isize>) -> Option<String> {
         }
 
         let mut clipboard = Clipboard::new().ok()?;
-        let previous = clipboard.get_text().ok();
+        // Snapshot text *or* image so restoring doesn't wipe a copied image/files.
+        let previous = snapshot_clipboard(&mut clipboard);
         // Clear first: if Ctrl+C copies nothing (no selection), the clipboard
         // stays empty and we correctly return None instead of the old contents.
         let _ = clipboard.set_text(String::new());
         std::thread::sleep(std::time::Duration::from_millis(30));
 
         platform::simulate_copy();
-        std::thread::sleep(std::time::Duration::from_millis(120));
-
-        let copied = clipboard.get_text().ok();
-
-        // Restore the user's clipboard (best-effort; text-only).
-        if let Some(prev) = previous {
-            let _ = clipboard.set_text(prev);
+        // Poll for the copy to land (up to ~200 ms) rather than a fixed sleep —
+        // returns as soon as text appears (fast common case) but tolerates a slow
+        // Ctrl+C in RDP/Electron/busy apps.
+        let mut copied = None;
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            if let Ok(t) = clipboard.get_text() {
+                if !t.trim().is_empty() {
+                    copied = Some(t);
+                    break;
+                }
+            }
         }
+
+        // Restore the user's clipboard (best-effort; text or image).
+        restore_clipboard_snapshot(&mut clipboard, previous);
 
         match copied {
             Some(t) if !t.trim().is_empty() => Some(t),
@@ -460,9 +505,9 @@ fn inject_text_sync(
         }
     };
 
-    // Save current clipboard text (best-effort), only if we're going to restore it.
+    // Snapshot the current clipboard (text or image), only if we'll restore it.
     let previous = if restore_clipboard {
-        clipboard.get_text().ok()
+        Some(snapshot_clipboard(&mut clipboard))
     } else {
         None
     };
@@ -484,9 +529,7 @@ fn inject_text_sync(
     // Restore previous clipboard (delayed to ensure paste completes).
     if let Some(prev) = previous {
         std::thread::sleep(std::time::Duration::from_millis(200));
-        if let Err(e) = clipboard.set_text(&prev) {
-            warn!("Failed to restore clipboard: {}", e);
-        }
+        restore_clipboard_snapshot(&mut clipboard, prev);
     }
 
     Ok(())

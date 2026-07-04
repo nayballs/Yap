@@ -249,15 +249,20 @@ fn modifiers_held() -> bool {
 
 /// Handle a press/release for a key binding. Emits Tauri events and
 /// suppresses key repeats (only emits on first press, not held repeats).
+///
+/// Returns whether this binding is "ours" for suppression purposes: a press is
+/// always ours (we swallow the raw key so it doesn't land in the field); a
+/// release is only ours if the binding was actually `active` (so the keyup of a
+/// pass-through combo isn't swallowed).
 #[cfg(target_os = "windows")]
 fn handle_binding_event(
     binding: &KeyBinding,
     event_pressed: &str,
     event_released: &str,
     is_press: bool,
-) {
-    if let Some(app) = HOOK_APP_HANDLE.get() {
-        if is_press {
+) -> bool {
+    if is_press {
+        if let Some(app) = HOOK_APP_HANDLE.get() {
             // Only emit on first press (not repeats)
             if !binding.active.swap(true, Ordering::Relaxed) {
                 info!("Input hook: emitting {}", event_pressed);
@@ -265,12 +270,18 @@ fn handle_binding_event(
                     warn!("Input hook: failed to emit {}: {}", event_pressed, e);
                 }
             }
-        } else if binding.active.swap(false, Ordering::Relaxed) {
+        }
+        true
+    } else if binding.active.swap(false, Ordering::Relaxed) {
+        if let Some(app) = HOOK_APP_HANDLE.get() {
             info!("Input hook: emitting {}", event_released);
             if let Err(e) = app.emit(event_released, ()) {
                 warn!("Input hook: failed to emit {}: {}", event_released, e);
             }
         }
+        true
+    } else {
+        false
     }
 }
 
@@ -289,28 +300,34 @@ unsafe extern "system" fn low_level_keyboard_proc(
 
         let is_keydown = msg == win32::WM_KEYDOWN || msg == win32::WM_SYSKEYDOWN;
 
-        // Only match single keys — pass through modifier combos (Ctrl+4, Alt+Tab, etc.)
-        if !modifiers_held() {
-            // Check dictation binding — suppress the key (prevent "4444" in text fields)
-            if DICTATION_BINDING.matches_keyboard(vkey) {
-                handle_binding_event(
-                    &DICTATION_BINDING,
-                    "dictation-key-pressed",
-                    "dictation-key-released",
-                    is_keydown,
-                );
-                return 1; // Suppress
+        // A bound key is handled on BOTH press and release. The press only
+        // *starts* a binding when no modifier is held, so combos (Ctrl+F9,
+        // Alt+Tab, …) pass through as normal shortcuts. The release is honoured
+        // **regardless** of modifier state — otherwise pressing a modifier after
+        // the hotkey is down (very common while dictating) would swallow the
+        // keyup, stranding the binding `active` forever (dead hotkey / PTT that
+        // never stops).
+        for (binding, pressed, released) in [
+            (
+                &DICTATION_BINDING,
+                "dictation-key-pressed",
+                "dictation-key-released",
+            ),
+            (&EDIT_BINDING, "edit-key-pressed", "edit-key-released"),
+        ] {
+            if !binding.matches_keyboard(vkey) {
+                continue;
             }
-
-            // Check edit/rewrite binding
-            if EDIT_BINDING.matches_keyboard(vkey) {
-                handle_binding_event(
-                    &EDIT_BINDING,
-                    "edit-key-pressed",
-                    "edit-key-released",
-                    is_keydown,
-                );
-                return 1; // Suppress
+            if is_keydown {
+                if modifiers_held() {
+                    break; // modifier combo — let it through as a shortcut
+                }
+                handle_binding_event(binding, pressed, released, true);
+                return 1; // suppress so the raw key doesn't land in the field
+            } else if handle_binding_event(binding, pressed, released, false) {
+                return 1; // we were tracking this key — swallow its keyup too
+            } else {
+                break; // not our key (never started) — let the keyup pass
             }
         }
     }
