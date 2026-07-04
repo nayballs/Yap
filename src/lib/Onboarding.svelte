@@ -250,9 +250,12 @@
     gotTranscript = false;
     const enteredAt = Math.floor(Date.now() / 1000) - 2; // small clock slack
     const timer = setInterval(async () => {
+      // Debug beacons (read via CDP while diagnosing the deaf-window issue).
+      window.__pollTick = Date.now();
       try {
         const h = await invoke('get_history', { limit: 1 });
         const e = Array.isArray(h) ? h[0] : null;
+        window.__pollLast = JSON.stringify({ e, enteredAt });
         if (e && e.ts >= enteredAt && (e.text || '').trim()) {
           const t = e.text.trim();
           if (t !== tryText) {

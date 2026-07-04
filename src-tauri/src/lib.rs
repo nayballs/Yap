@@ -393,6 +393,27 @@ pub fn run() {
                 }
             }
 
+            // WebView2 subsystems initialized against a HIDDEN window can come
+            // up permanently broken — most relevantly the Rust→JS event/eval
+            // delivery channel (same created-hidden bug family as
+            // tauri-apps/tauri#3654 and wry#1639; drag-drop got fixed in
+            // wry#1638, the rest of the surface was never audited). One-shot
+            // show+hide, parked off-screen so nothing flashes, forces those
+            // windows to finish initialization while VISIBLE.
+            for label in ["onboarding", "settings"] {
+                if let Some(w) = app.get_webview_window(label) {
+                    let orig = w.outer_position().ok();
+                    let _ = w.set_position(tauri::PhysicalPosition::new(-32000, -32000));
+                    let _ = w.show();
+                    let _ = w.hide();
+                    if let Some(p) = orig {
+                        let _ = w.set_position(p);
+                    } else {
+                        let _ = w.center();
+                    }
+                }
+            }
+
             // First run: if no model is downloaded yet, greet the user with the
             // onboarding model picker instead of a silent "needs-model" pill.
             // Suppressed when launched hidden (e.g. autostart at login).
