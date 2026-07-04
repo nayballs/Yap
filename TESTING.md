@@ -6,14 +6,14 @@ result; anything that fails, note the exact behaviour so it's easy to fix.
 
 > ⚠️ **You must be on the real engine build**, not the stub. If dictation types
 > `[STT stub: received 1.6s of audio, engine=whisper]`, you're on the stub —
-> relaunch with `scripts/dev.bat` (it adds `--features cuda`). Edit/rewrite mode
-> can't be tested on the stub.
+> relaunch with `scripts/dev.bat` (it adds `--features engines`; needs the Vulkan
+> SDK). Edit/rewrite mode can't be tested on the stub.
 
 ---
 
 ## 0. Prerequisites
 
-- [ ] Yap is running from `scripts/dev.bat` (real CUDA engine).
+- [ ] Yap is running from `scripts/dev.bat` (real engine — Vulkan + DirectML).
 - [ ] **Dictation sanity check** — focus a text box, press the dictation hotkey
       (default **F9**), say *"this is a test"*, press again. Real words appear
       (not the stub string). If this fails, stop — nothing else will work.

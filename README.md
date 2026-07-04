@@ -62,6 +62,10 @@ your voice to the cloud. Yap refuses the choice:
   Even bring your own GGUF.
 - 🎯 **Per-app cleanup profiles** — terse for Slack, formal for email, code-aware for
   your editor. Yap detects the app you're dictating into and applies the right style.
+- ✏️ **Voice edit/rewrite mode** — bind a second hotkey, select some text, and *say* the
+  change: "make this a bullet list", "more concise", "fix the grammar", "translate to
+  French". Yap rewrites the selection in place. With nothing selected it writes new text
+  from your instruction.
 - 📊 **History & stats** — a local-only log of your dictations plus a dashboard:
   time saved vs typing, day streak, 30-day activity heatmap.
 - 📖 **Correction dictionary** — teach it your jargon once ("Power to Keep" → "Parakeet"),

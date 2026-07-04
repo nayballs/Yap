@@ -76,16 +76,18 @@ back to the raw transcript, so dictation never blocks.
   (`yap-amp`) for the scrolling waveform; while idle it keeps a rolling ~300 ms
   **pre-roll** ring that `start_recording` prepends (anti first-word-clipping).
   `recording_mode` selects toggle vs push-to-talk. `run_stt` (async) does cleanup →
-  dictionary → inject (into the captured `target_hwnd`). With `streaming_partials`
-  on, `stream_partials` (a per-session worker) re-transcribes the growing buffer
-  every ~500 ms and emits de-flickered (`smart_diff`) `yap-partial` text. An **idle
-  watcher** unloads the model after `model_unload_timeout`; the next dictation lazily
-  reloads it.
+  dictionary → inject (into the captured `target_hwnd`). A `processing` guard blocks
+  starting a new recording while one is still transcribing (no overlapping `run_stt`
+  / duplicate model load), and the buffer is capped at 15 min so a stuck key can't
+  OOM. With `streaming_partials` on, `stream_partials` (a per-session worker)
+  re-transcribes the growing buffer every ~500 ms and emits de-flickered
+  (`smart_diff`) `yap-partial` text. An **idle watcher** unloads the model after
+  `model_unload_timeout`; the next dictation lazily reloads it.
 - **`stt.rs`** — `SttEngine` trait + a real `transcribe-rs` engine (`#[cfg(feature =
-  "engines")]`) and a stub (default build). Holds the **16-model registry**
+  "engines")]`) and a stub (default build). Holds the **14-model registry**
   (`ModelDescriptor`: id/filename/url/sha256/is_directory/engine_type), resolves
   legacy/custom ids, and does download → SHA-256 verify → (tar.gz) extract.
-  `apply_accelerator_settings` sets whisper→CUDA(Auto) / ONNX→DirectML.
+  `apply_accelerator_settings` sets whisper→Vulkan(Auto) / ONNX→DirectML.
 - **`llm.rs`** — the AI cleanup client (OpenAI-compatible). Frames the transcript as
   data (delimiters + one-shot) so small models *clean* it instead of *answering* it.
   The system prompt is split FluidVoice-style: an immutable `BASE_PROMPT` (guardrails:
@@ -129,10 +131,15 @@ back to the raw transcript, so dictation never blocks.
   dictation **target window** at record-start (`current_foreground`, skipping Yap's
   own windows) and **re-focuses** it before pasting (`focus_window`, via the
   `AttachThreadInput` workaround) so focus changes mid-transcription don't misfire.
-  Falls back to direct Unicode typing (`type_unicode`) if the clipboard is
-  unavailable. (UI-Automation content verification is a deferred follow-up.)
+  The clipboard snapshot/restore preserves **text or image** so a paste doesn't wipe
+  a copied image; `selection_via_copy` (edit-mode fallback) polls for the Ctrl+C
+  result instead of a fixed sleep. Falls back to direct Unicode typing
+  (`type_unicode`) if the clipboard is unavailable. (UI-Automation content
+  verification is a deferred follow-up.)
 - **`sound.rs`** — start/stop chimes (volume + output-device aware).
-- **`mute.rs`** — mute-while-recording (currently a logged stub; WASAPI TODO).
+- **`mute.rs`** — mute-while-recording: mutes the default render endpoint via
+  WASAPI/COM (`IMMDeviceEnumerator` → `IAudioEndpointVolume`) while recording and
+  restores it after — only unmuting what Yap itself muted.
 - **`portable.rs`** — portable-mode detection (a `portable` marker next to the exe
   redirects data to `<exe>/Data`).
 - **`commands.rs`** — Tauri commands: recording (`toggle_recording`, `cancel_recording`),
@@ -154,7 +161,7 @@ back to the raw transcript, so dictation never blocks.
   preset + editable instructions + Test + usage meter), **History** (stats dashboard
   + recent list + enable/clear), **Advanced** (output toggles, system, dictionary),
   **About** (version, updates).
-- **`lib/ModelManager.svelte` / `ModelCard.svelte` / `models.js`** — the 16-model
+- **`lib/ModelManager.svelte` / `ModelCard.svelte` / `models.js`** — the 14-model
   browser (download/switch/delete/progress, "Your models" vs "Available").
 - **`lib/Onboarding.svelte`** — first-run model picker.
 - **`lib/ui/`** — primitives: Toggle, Select, Slider, Group, Row, Button, Input, Textarea.
@@ -295,15 +302,20 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 
 ## Current status
 
-**Transcription is REAL and GPU-accelerated** (no longer a stub in `cuda`/`engines`
-builds). Working end-to-end: multi-engine STT (Whisper/CUDA + ONNX/DirectML), the
-16-model registry + manager, settings, tray, overlay, scrolling waveform, recording
-modes, language/translate, **AI cleanup** (BYO key or local), the Groq usage meter,
-and the installer + auto-updater + portable mode + release CI. The default (no-feature)
-build still ships the stub for fast `cargo check`.
+**Transcription is REAL and GPU-accelerated** (no longer a stub in `engines`
+builds). Working end-to-end: multi-engine STT (Whisper/Vulkan + ONNX/DirectML), the
+14-model registry + manager, settings, tray, overlay, scrolling waveform, recording
+modes, language/translate, **AI cleanup** (BYO key or local sidecar), per-app cleanup
+routing + named profiles, **edit/rewrite mode**, the audio pre-roll (anti first-word
+clipping), streaming partials (opt-in), transcription history + stats, cleanup presets,
+real WASAPI mute, the Groq usage meter, and the installer + auto-updater + portable
+mode + release CI. The default (no-feature) build still ships the stub for fast
+`cargo check`.
 
-Not yet done: VAD pre-roll + streaming partials, transcription history, cleanup
-presets, Authenticode signing, real WASAPI mute, non-Windows polish. See
+Not yet done: validate + default-on streaming partials on the Vulkan build (and a true
+streaming model for the partial pass — see [`ROADMAP.md`](./ROADMAP.md) Phase 1), fuzzy/
+near-miss dictionary, verify-after-paste (UIA `ValuePattern`), Authenticode signing
+(blocked on SignPath approval), audio-history export, and non-Windows polish. See
 [`ROADMAP.md`](./ROADMAP.md).
 
 ---

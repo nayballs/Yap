@@ -18,12 +18,26 @@ The market is split into two camps, and **neither one fully wins**:
 ### Free / open-source local tools (Yap's direct peers)
 | Tool | Stack | Stars | Notes |
 |------|-------|-------|-------|
-| **Handy** (cjpais) | Rust + Tauri, whisper-rs, Parakeet | ~25k | The one to beat. Fully offline, cross-platform, MIT. **Outputs raw text — no AI cleanup.** |
-| **Whispering** (Epicenter) | Tauri, whisper.cpp + BYO cloud key | ~4.6k | Privacy-first, LLM transform pipelines, but BYO-API-key setup friction. |
-| **OpenWhispr** | Electron, Whisper/Parakeet | ~1k | Local or BYOK, hotkey-to-cursor. |
+| **Handy** (cjpais) | Rust + Tauri, whisper-rs, Parakeet | ~20k | The one to beat. Fully offline, cross-platform, MIT. **Maintainer has *publicly committed to never* adding AI cleanup** (tone/filler/rewrite/per-app are explicit "won't do"). Added Cohere Transcribe + a dictionary + a Raycast extension. **Leaves Yap's exact gap wide open on purpose.** |
+| **Whispering** (Epicenter, YC) | Tauri, whisper.cpp + BYO cloud key | ~4.6k | Privacy-first, chainable LLM transforms, now custom OpenAI-compatible endpoints — but **BYO-API-key / BYO-server**, no bundled local model. |
+| **OpenWhispr** | Electron, Whisper/Parakeet | ~3.7k | Local + AI cleanup, but the cloud/AI path is **BYOK** and free tier caps cloud at 2k words/wk. |
 | **VoiceInk** (Beingpax) | Swift, whisper.cpp + Parakeet | ~5.3k | Feature-rich (Power Mode, context awareness) but **macOS only**. |
 | **whisper-writer** (savbell) | Python, faster-whisper | ~1.1k | Most configurable, but CUDA/Python install pain. |
+| **Quobi / Whisper Local (drajb)** | local Parakeet / Whisper + local cleanup | small | The *closest* pitch-matches (no API key, cleanup off by default via local Ollama) — but obscure/unpolished. |
 | **nerd-dictation / Numen / BlahST** | Linux-only (VOSK / whisper.cpp) | — | Define the Linux/accessibility end. |
+
+> **Landscape recheck (July 2026).** Since late 2025 several tools moved into the
+> "free + local + cleanup" box, so the *literal* claim is no longer unique — **but no
+> popular, polished, Windows-first tool ships zero-config local cleanup.** The matches
+> are Mac-first (superwhisper, VoiceInk, Aqua), BYO-key/BYO-Ollama (Whispering,
+> OpenWhispr), cloud-tiered (Wispr Flow — still no offline mode at any tier), or obscure
+> (Quobi). **Yap's moat is now execution, not category:** bundled llamafile+Qwen (no
+> Ollama, no API key), Windows-first, universal GPU (Vulkan/DirectML vs CUDA/Apple lock-in).
+> Rising 2026 differentiators — per-app formatting, voice edit/rewrite, sub-second
+> streaming — Yap has **already built** (Phase 4 + streaming partials); the gap is
+> validation + marketing, not code. Also new: on-device cleanup LLMs going mainstream
+> (Google **Eloquent** = offline Gemma + Gemini cleanup; Voicebox local Qwen3), which
+> *validates* Yap's local-small-model bet.
 
 ### Paid / commercial leaders (the UX bar)
 | Tool | Model | Price | What they do best |
@@ -75,7 +89,7 @@ The category bifurcates cleanly:
 
 ## 3. Honest status check
 
-**Transcription is real and GPU-accelerated** (`cuda`/`engines` builds; the default
+**Transcription is real and GPU-accelerated** (the `engines` build; the default
 no-feature build is still a fast stub for quick `cargo check`). Shipped and working:
 
 - **Multi-engine STT** via `transcribe-rs` — Whisper on **Vulkan** (any GPU), plus
@@ -89,8 +103,10 @@ no-feature build is still a fast stub for quick `cargo check`). Shipped and work
   (toggle / push-to-talk), and polish toggles.
 - **Installer + auto-update + portable mode + release CI** (unsigned for now).
 
-What's left: the latency *feel* (VAD pre-roll + streaming), accuracy extras, cleanup
-presets, signing, history, and reach — see the phases below (✅ = done).
+What's left: validating streaming partials on the Vulkan build (+ a true streaming
+model for the partial pass), accuracy extras (fuzzy dictionary, verify-after-paste),
+Authenticode signing, audio-history export, and reach (Linux/macOS) — see the phases
+below (✅ = done).
 
 ---
 
@@ -120,6 +136,16 @@ presets, signing, history, and reach — see the phases below (✅ = done).
       authoritative final pass. (Only Moonshine offers true token streaming in
       `transcribe-rs`, and we pulled it as broken, hence the re-transcribe approach.)
       ⚠ Needs validation on the GPU (Vulkan) build before enabling by default.
+- [ ] **Add a true streaming model for the partial pass** (July-2026 research). The
+      re-transcribe-the-growing-buffer approach runs Parakeet in exactly the mode where
+      it degrades ~2× (batch ~6% → streaming ~12.8% WER), and cost grows O(n) with
+      recording length. Purpose-built streaming models now run on Yap's *same* DirectML
+      runtime and would give better, lower-latency partials: **Moonshine v2 streaming**
+      (245 MB, 6.65% WER, ONNX/.ort — Yap already lists an older Moonshine) or **NVIDIA
+      Nemotron on-device streaming** (0.67 GB int4, 0.56 s latency, ONNX via MS Foundry
+      Local, only ~0.2% batch→stream loss). Pair with a sliding-window buffer for the
+      partial pass to kill the O(n) re-transcribe cost. Keep Parakeet TDT 0.6B v3 as the
+      authoritative final-pass default — nothing dethroned it for a lightweight local pill.
 
 ### Phase 2 — The differentiator: AI cleanup layer — ✅ DONE (v1)
 - [x] Optional post-processing pass (filler/grammar/punctuation/self-corrections),
@@ -241,7 +267,7 @@ presets, signing, history, and reach — see the phases below (✅ = done).
       dataset for improving cleanup, with a GB budget + orphan GC. (Deferred — the
       text history + stats landed first; audio capture/retention is the next step.)
 - [ ] **Linux / Wayland** + macOS parity (the engine choices were made Windows-first:
-      CUDA/DirectML; Vulkan/Metal/CoreML are available in `transcribe-rs` for later).
+      Vulkan/DirectML; Metal/CoreML are available in `transcribe-rs` for later).
 
 ---
 
