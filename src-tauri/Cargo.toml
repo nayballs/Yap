@@ -57,7 +57,7 @@ tauri-plugin-process = "2"
 # edit/rewrite mode. Version matches the `windows` crate tauri 2 already pulls
 # in (0.61.x) so there's no duplicate copy of the crate.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation"] }
+windows = { version = "0.61", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints"] }
 
 [features]
 # Default has NO transcribe-rs so plain `cargo check` compiles the stub (fast).
