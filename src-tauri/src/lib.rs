@@ -89,6 +89,24 @@ fn init_logging() {
         .with(tracing_subscriber::fmt::layer()) // stdout (dev)
         .with(file_layer)
         .try_init();
+
+    // Route panics into the log file too — a panicking thread otherwise dies
+    // silently in a windowed build (and even in dev the console scrolls away).
+    // A native access violation can't be caught here, but every Rust-level
+    // panic now leaves a trace with its location.
+    std::panic::set_hook(Box::new(|info| {
+        let msg = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic payload>".into());
+        let loc = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown>".into());
+        tracing::error!(location = %loc, "PANIC: {}", msg);
+    }));
 }
 
 pub fn run() {

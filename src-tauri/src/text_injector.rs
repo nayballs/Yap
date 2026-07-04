@@ -3,7 +3,7 @@
 //! Used by the dictation feature to inject transcribed text into
 //! whatever application/field is currently focused.
 
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 #[cfg(target_os = "windows")]
 #[allow(clippy::upper_case_acronyms)] // Win32 FFI names match the Windows API
@@ -366,15 +366,39 @@ enum ClipSnapshot {
     Empty,
 }
 
+/// Cap for image snapshot/restore: a 4K BGRA screenshot is ~33 MB; anything
+/// much larger isn't worth the memory or the risk in native conversion code.
+#[cfg(target_os = "windows")]
+const MAX_SNAPSHOT_IMAGE_BYTES: usize = 64 * 1024 * 1024;
+
 #[cfg(target_os = "windows")]
 fn snapshot_clipboard(cb: &mut arboard::Clipboard) -> ClipSnapshot {
     if let Ok(t) = cb.get_text() {
         return ClipSnapshot::Text(t);
     }
-    if let Ok(img) = cb.get_image() {
-        return ClipSnapshot::Image(img);
+    // Image handling goes through native DIB conversion (arboard + `image`),
+    // which is the riskiest code on this path — guard against Rust panics and
+    // log entry/exit so a native crash here is identifiable in the log.
+    trace!("clipboard snapshot: no text, trying image");
+    let img = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cb.get_image()));
+    match img {
+        Ok(Ok(img)) if img.bytes.len() <= MAX_SNAPSHOT_IMAGE_BYTES => {
+            trace!(w = img.width, h = img.height, "clipboard snapshot: image captured");
+            ClipSnapshot::Image(img)
+        }
+        Ok(Ok(img)) => {
+            warn!(
+                bytes = img.bytes.len(),
+                "clipboard image too large to snapshot — it won't be restored after paste"
+            );
+            ClipSnapshot::Empty
+        }
+        Ok(Err(_)) => ClipSnapshot::Empty,
+        Err(_) => {
+            warn!("clipboard image snapshot panicked — skipping image restore");
+            ClipSnapshot::Empty
+        }
     }
-    ClipSnapshot::Empty
 }
 
 #[cfg(target_os = "windows")]
@@ -384,7 +408,13 @@ fn restore_clipboard_snapshot(cb: &mut arboard::Clipboard, snap: ClipSnapshot) {
             let _ = cb.set_text(t);
         }
         ClipSnapshot::Image(img) => {
-            let _ = cb.set_image(img);
+            trace!(w = img.width, h = img.height, "restoring image clipboard");
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                let _ = cb.set_image(img);
+            }));
+            if res.is_err() {
+                warn!("clipboard image restore panicked — original image lost");
+            }
         }
         // Nothing (or an unsupported format) was there — leave it as-is.
         ClipSnapshot::Empty => {}

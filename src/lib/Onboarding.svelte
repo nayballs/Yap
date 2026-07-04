@@ -87,6 +87,7 @@
   async function applyMic() {
     if (!cfg) return;
     try {
+      cfgPatch.inputDevice = cfg.inputDevice || null; // set via bind:value
       await invoke('set_input_device', { device: cfg.inputDevice || null });
       await persistCfg();
       bars = Array(36).fill(0);
@@ -166,9 +167,7 @@
       // Downloads runtime + the picked model (skips already-present files) and
       // returns the model's GGUF filename for pp_local_model.
       const filename = await invoke('local_llm_install', { model: localPick });
-      cfg.postProcessEnabled = true;
-      cfg.ppProvider = 'ondevice';
-      cfg.ppLocalModel = filename;
+      patchCfg({ postProcessEnabled: true, ppProvider: 'ondevice', ppLocalModel: filename });
       await persistCfg(); // save_config also autostarts the sidecar
       cleanupEnabled = true;
       await refreshLlm();
@@ -189,11 +188,13 @@
       llmError = 'This provider needs an API key.';
       return;
     }
-    cfg.postProcessEnabled = true;
-    cfg.ppProvider = cloudProvider;
-    cfg.ppBaseUrl = cloudBaseUrl.trim();
-    cfg.ppApiKey = cloudKey.trim();
-    cfg.ppModel = cloudModel.trim();
+    patchCfg({
+      postProcessEnabled: true,
+      ppProvider: cloudProvider,
+      ppBaseUrl: cloudBaseUrl.trim(),
+      ppApiKey: cloudKey.trim(),
+      ppModel: cloudModel.trim(),
+    });
     await persistCfg();
     cleanupEnabled = true;
     enabledSummary = `${cloudModel.trim()} via ${cloudProvider}`;
@@ -229,6 +230,7 @@
     recordingKey = false;
     window.removeEventListener('keydown', onRecordKey, true);
     if (cfg) {
+      cfgPatch.hotkey = cfg.hotkey; // set directly by onRecordKey
       invoke('configure_hotkey', { spec: cfg.hotkey }).catch(() => {});
       persistCfg();
     }
@@ -243,9 +245,21 @@
   }
 
   // ---- Shared plumbing ----
+  // Only the fields onboarding has INTENTIONALLY changed. persistCfg merges
+  // these onto a freshly-loaded config, so this window's (possibly stale)
+  // snapshot can never clobber changes made meanwhile in Settings — this
+  // window survives hide/re-show for the app's whole lifetime.
+  let cfgPatch = {};
+  function patchCfg(fields) {
+    Object.assign(cfgPatch, fields);
+    Object.assign(cfg, fields);
+  }
+
   async function persistCfg() {
     if (!cfg) return;
     try {
+      const fresh = await invoke('get_config');
+      cfg = { ...fresh, ...cfgPatch };
       await invoke('save_config', { cfg });
     } catch (e) {
       error = `Couldn't save settings: ${e}`;
@@ -269,7 +283,20 @@
     invoke('list_audio_devices')
       .then((d) => (devices = d || []))
       .catch(() => {});
-    const onVis = () => (pageVisible = !document.hidden);
+    const onVis = () => {
+      pageVisible = !document.hidden;
+      // Re-shown after a hide ("Show setup guide again"): re-sync from disk so
+      // this long-lived window doesn't present (or later save) stale state.
+      if (pageVisible) {
+        invoke('get_config')
+          .then((fresh) => {
+            cfg = { ...fresh, ...cfgPatch };
+            refreshLlm();
+            refresh();
+          })
+          .catch(() => {});
+      }
+    };
     document.addEventListener('visibilitychange', onVis);
     const unsubs = [
       listen('stt-download-progress', (e) => {
@@ -371,7 +398,10 @@
     <div class="cleanup-box">
       {#if cleanupEnabled}
         <div class="cleanup-done">✓ AI cleanup is on — <strong>{enabledSummary}</strong>.</div>
-        <p class="fine">Change the model or provider any time in Settings → AI Cleanup.</p>
+        <button class="skip" onclick={() => (cleanupEnabled = false)}>
+          Choose a different model or provider →
+        </button>
+        <p class="fine">Or change it any time in Settings → AI Cleanup.</p>
       {:else if llmInstalling}
         <div class="cleanup-progress">
           <span>
