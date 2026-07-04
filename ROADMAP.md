@@ -48,6 +48,9 @@ The market is split into two camps, and **neither one fully wins**:
 
 **Tools to benchmark against:** Wispr Flow (UX bar), Handy (OSS bar), superwhisper
 (local power), VoiceInk (feature richness), Whispering (philosophy), Aqua (editing frontier).
+For a feature-by-feature breakdown of **superwhisper** and **Wispr Flow** vs Yap — what
+to match, what to skip, and effort estimates — see
+[`docs/competitive-analysis.md`](./docs/competitive-analysis.md).
 
 ---
 
@@ -201,6 +204,14 @@ below (✅ = done).
       an inline body, so one profile can serve many apps and is edited in one place.
       Legacy inline-body rules auto-migrate to a generated profile on first load.
       Profiles can be seeded from the built-in presets.
+- [ ] **Per-profile model choice** (match superwhisper "Modes") — let each cleanup
+      profile pick its **own LLM** (provider/model/endpoint), not just a prompt, so an
+      "Email" profile can run a stronger cloud model while "Slack" runs the fast local
+      sidecar. Cheap, high-impact: Yap's cleanup client is already OpenAI-compatible —
+      add optional `{provider, base_url, model, api_key_ref}` to `cleanup_profiles`,
+      falling back to the global AI-cleanup config when unset. Closes the clearest gap
+      vs superwhisper's per-mode model picker. See
+      [`docs/competitive-analysis.md`](./docs/competitive-analysis.md).
 - [x] **Edit / Rewrite mode** ("make this a list", "more concise", "fix grammar") —
       FluidVoice's Write/Edit mode. **v1 = rewrite + write, implemented** (pending
       end-to-end runtime test). Shipped: `edit_hotkey` (2nd hotkey via `EDIT_BINDING`
@@ -231,8 +242,17 @@ below (✅ = done).
       Ports cleanly (no macOS deps): everything above uses Yap's existing SendInput /
       clipboard / HWND-focus layer. MacOS pieces dropped: `AXSelectedText`, `NSApp.hide`
       focus dance, `osascript`.
-
-### Phase 5 — Trust, polish & distribution
+- [ ] **Agentic voice-command mode (frontier)** — speech → *actions*, not just text.
+      superwhisper/Wispr Flow market "agentic" but in practice it's mostly *dictating
+      into* agent tools (Cursor, Claude Code) — which Yap already does by typing into any
+      window. The genuinely-open space is voice → a *structured action* ("summarize this
+      and send it to #eng", "rename these variables", "commit with message X"). Yap has a
+      head start: **edit/rewrite mode already turns speech into a transformation** rather
+      than literal dictation. A v1 could route a spoken command to a small **tool-calling**
+      LLM turn over the captured selection/context, then apply the result via the existing
+      inject layer. Substantial + different risk profile than the polish items — parked as
+      a deliberate exploration, not a near-term commitment. See
+      [`docs/competitive-analysis.md`](./docs/competitive-analysis.md).
 - [x] **Installer** (custom NSIS: normal/portable + WebView2 bootstrap), **auto-update**
       (`tauri-plugin-updater` → GitHub Releases), **portable mode**, **release CI**.
 - [~] **Authenticode sign the installer** via **SignPath Foundation** (free for OSS)
@@ -266,8 +286,29 @@ below (✅ = done).
       pairing `raw_transcript` ↔ `final_transcript` — a ready-made eval/fine-tune
       dataset for improving cleanup, with a GB budget + orphan GC. (Deferred — the
       text history + stats landed first; audio capture/retention is the next step.)
-- [ ] **Linux / Wayland** + macOS parity (the engine choices were made Windows-first:
-      Vulkan/DirectML; Metal/CoreML are available in `transcribe-rs` for later).
+- [ ] **Meeting recording / long-form transcription** (match superwhisper) — capture
+      **system audio** (WASAPI **loopback**) mixed with the mic, record long sessions,
+      transcribe in chunks on the warm engine, and save a transcript (+ optional speaker
+      diarization, + file/import transcription). Reuses Yap's whole STT stack; the new
+      pieces are loopback capture, long-audio chunking, and a recordings UI. Windows-first
+      (loopback is per-platform). A distinct surface from push-to-type dictation.
+- [ ] **Cross-platform desktop — Linux + macOS.** Tauri + Rust + `transcribe-rs` are
+      already portable (Vulkan/ONNX on Linux, Metal/CoreML on macOS); the work is porting
+      the **four Windows-specific layers** that make a dictation app work, each already
+      `cfg`-gated: **global input hooks** (`input_hook`: Win32 LL hooks → evdev/`libei`
+      on Linux, `CGEventTap` on macOS), **text injection** (`text_injector`: SendInput/
+      clipboard → XTest/`ydotool`/Wayland-portal, macOS `CGEvent`/Accessibility),
+      **selection capture** (`selection`: UIA → AT-SPI / macOS AX API), and **audio +
+      mute** (cpal is cross-platform; WASAPI mute → PulseAudio/PipeWire, CoreAudio).
+      **Wayland input injection is the hard part** (its security model deliberately
+      restricts synthetic input — needs `libei`/portals). **Linux first** (same Rust, no
+      Apple hardware needed, and it's the OSS audience that overlaps with Handy); macOS
+      after (needs a Mac to build/test).
+- [ ] **iOS — a separate product, not a port.** No global hotkey, and sandboxing forbids
+      "type into any app"; dictation there goes through a **custom keyboard extension** or
+      share sheet, in Swift. None of Yap's Win32/Tauri desktop layer applies. Tracked here
+      only so it's a conscious *future separate project*, never mistaken for a Yap platform
+      milestone.
 
 ---
 
