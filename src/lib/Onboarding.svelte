@@ -288,11 +288,9 @@
         }
         if (e && e.ts >= enteredAt && e.ts > shownTs && (e.text || '').trim()) {
           const t = e.text.trim();
-          if (t !== tryText) {
-            flog(`poll: filling box with "${t.slice(0, 40)}"`);
-            shownTs = e.ts;
-            showTranscript(t);
-          }
+          flog(`poll: filling box with "${t.slice(0, 40)}"`);
+          shownTs = e.ts;
+          showTranscript(t);
         }
       } catch (err) {
         flog('poll: get_history FAILED: ' + err);
@@ -437,7 +435,9 @@
         flog(`event yap-transcript (step=${step}): "${String(e && e.payload).slice(0, 40)}"`);
         if (step === STEPS.length - 1) {
           const t = (e.payload || '').trim();
-          if (t && t !== tryText) {
+          if (t) {
+            // Always re-show + flash: dictating the SAME phrase twice must
+            // still visibly react, or it reads as "nothing happened".
             shownTs = Math.floor(Date.now() / 1000);
             showTranscript(t);
           }
