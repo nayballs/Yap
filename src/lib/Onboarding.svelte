@@ -446,8 +446,39 @@
     ];
   }
 
+  // In-window hotkey fallback. When a WebView2 window of OUR OWN app has
+  // focus, the global low-level keyboard hook never sees the hotkey (log-
+  // proven 2026-07-05: focused presses leave zero hook events — WebView2
+  // appears to front-run the hook chain). The key DOES reach this page as a
+  // normal keydown though, so catch it here and drive the pipeline directly.
+  function hotkeyVkey() {
+    const m = (cfg?.hotkey || '').match(/^kb:(\d+)$/);
+    return m ? +m[1] : null;
+  }
+  function onFallbackKeyDown(e) {
+    if (recordingKey || e.repeat) return; // shortcut recorder open / key repeat
+    if (e.keyCode !== hotkeyVkey()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    flog('in-window hotkey fallback: keydown -> toggle_recording');
+    invoke('toggle_recording').catch(() => {});
+  }
+  function onFallbackKeyUp(e) {
+    if (recordingKey) return;
+    if (e.keyCode !== hotkeyVkey()) return;
+    // Push-to-talk: the release stops the recording (toggle mode ignores it —
+    // in toggle mode recording only flips on keydown).
+    if (cfg?.recordingMode === 'pushToTalk') {
+      e.preventDefault();
+      flog('in-window hotkey fallback: keyup -> toggle_recording (PTT)');
+      invoke('toggle_recording').catch(() => {});
+    }
+  }
+
   onMount(() => {
     flog('mounted; visibilityState=' + document.visibilityState);
+    window.addEventListener('keydown', onFallbackKeyDown, true);
+    window.addEventListener('keyup', onFallbackKeyUp, true);
     refresh().then(refreshLlm);
     invoke('list_audio_devices')
       .then((d) => (devices = d || []))
@@ -473,6 +504,8 @@
     registerListeners();
     return () => {
       unsubs.forEach((p) => p.then((u) => u && u()));
+      window.removeEventListener('keydown', onFallbackKeyDown, true);
+      window.removeEventListener('keyup', onFallbackKeyUp, true);
       window.removeEventListener('keydown', onRecordKey, true);
       document.removeEventListener('visibilitychange', onVis);
       invoke('set_mic_test', { on: false }).catch(() => {});

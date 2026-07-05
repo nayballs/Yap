@@ -488,6 +488,38 @@
     stopRecord();
   }
 
+  // In-window hotkey fallback: when OUR OWN window has focus, the global
+  // low-level hook never sees the hotkey (WebView2 front-runs the hook chain;
+  // log-proven 2026-07-05). The page gets the keydown normally, so drive the
+  // pipeline directly. Guarded while the shortcut recorder is capturing.
+  function fallbackVkey() {
+    const m = (cfg?.hotkey || '').match(/^kb:(\d+)$/);
+    return m ? +m[1] : null;
+  }
+  function onFallbackKeyDown(e) {
+    if (recording || e.repeat) return;
+    if (e.keyCode !== fallbackVkey()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    invoke('toggle_recording').catch(() => {});
+  }
+  function onFallbackKeyUp(e) {
+    if (recording) return;
+    if (e.keyCode !== fallbackVkey()) return;
+    if (cfg?.recordingMode === 'pushToTalk') {
+      e.preventDefault();
+      invoke('toggle_recording').catch(() => {});
+    }
+  }
+  $effect(() => {
+    window.addEventListener('keydown', onFallbackKeyDown, true);
+    window.addEventListener('keyup', onFallbackKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', onFallbackKeyDown, true);
+      window.removeEventListener('keyup', onFallbackKeyUp, true);
+    };
+  });
+
   function formatHotkey(spec) {
     if (!spec) return 'None';
     if (spec.startsWith('mouse:')) return `Mouse button ${spec.slice(6)}`;
