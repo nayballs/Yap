@@ -20,7 +20,7 @@ The market is split into two camps, and **neither one fully wins**:
 |------|-------|-------|-------|
 | **Handy** (cjpais) | Rust + Tauri, whisper-rs, Parakeet | ~20k | The one to beat. Fully offline, cross-platform, MIT. **Maintainer has *publicly committed to never* adding AI cleanup** (tone/filler/rewrite/per-app are explicit "won't do"). Added Cohere Transcribe + a dictionary + a Raycast extension. **Leaves Yap's exact gap wide open on purpose.** |
 | **Whispering** (Epicenter, YC) | Tauri, whisper.cpp + BYO cloud key | ~4.6k | Privacy-first, chainable LLM transforms, now custom OpenAI-compatible endpoints — but **BYO-API-key / BYO-server**, no bundled local model. |
-| **OpenWhispr** | Electron, Whisper/Parakeet | ~3.7k | Local + AI cleanup, but the cloud/AI path is **BYOK** and free tier caps cloud at 2k words/wk. |
+| **OpenWhispr** | Electron, Whisper/Parakeet | ~4.3k | Local + AI cleanup, but the cloud/AI path is **BYOK** and free tier caps cloud at 2k words/wk. Has grown into a full **notes + meetings + AI-chat** app around the dictation core — its settings UX, AI Notepad, AI Chat and Audio Upload are torn down source-level for Yap in [`docs/openwhispr-teardown.md`](./docs/openwhispr-teardown.md). |
 | **VoiceInk** (Beingpax) | Swift, whisper.cpp + Parakeet | ~5.3k | Feature-rich (Power Mode, context awareness) but **macOS only**. |
 | **whisper-writer** (savbell) | Python, faster-whisper | ~1.1k | Most configurable, but CUDA/Python install pain. |
 | **Quobi / Whisper Local (drajb)** | local Parakeet / Whisper + local cleanup | small | The *closest* pitch-matches (no API key, cleanup off by default via local Ollama) — but obscure/unpolished. |
@@ -50,7 +50,9 @@ The market is split into two camps, and **neither one fully wins**:
 (local power), VoiceInk (feature richness), Whispering (philosophy), Aqua (editing frontier).
 For a feature-by-feature breakdown of **superwhisper** and **Wispr Flow** vs Yap — what
 to match, what to skip, and effort estimates — see
-[`docs/competitive-analysis.md`](./docs/competitive-analysis.md).
+[`docs/competitive-analysis.md`](./docs/competitive-analysis.md). For a source-level
+teardown of **OpenWhispr's** settings UX + AI Notepad + AI Chat + Audio Upload — the
+features that inspired Phase 7 below — see [`docs/openwhispr-teardown.md`](./docs/openwhispr-teardown.md).
 
 ---
 
@@ -269,6 +271,18 @@ below (✅ = done).
       Certum OSS ~£10–30/yr inline `signCommand`; Azure Trusted Signing ~$10/mo.)
 - [x] Crisp recording indicator (overlay + waveform), great defaults, hidden power
       features, first-run onboarding.
+- [ ] **Settings UX overhaul (OpenWhispr-inspired)** — port the three patterns that make
+      OpenWhispr's settings read as noticeably more polished than Yap's single-file
+      `Settings.svelte`: a **scope-driven AI config editor** (one component drives every AI
+      use-case via a `scope` prop + a declarative scope→config-field map with fallback chains —
+      pays off the moment Yap has a 2nd AI use-case beyond cleanup), a **radio-list mode
+      selector** (icon tile + label + "Active" pill + description; huge polish-per-line), and a
+      **hotkey-capture input** (live modifier chips, hold-to-capture modifier-only combos,
+      inline conflict validation — Yap already validates conflicts, this is the missing UI).
+      Plus native CSS `@container` responsive rows (drop OpenWhispr's Electron-era
+      ResizeObserver). Pure front-end + config, **no new surface**; effort **S–M** total.
+      Pattern-by-pattern port guide (with `file:line` refs) in
+      [`docs/openwhispr-teardown.md`](./docs/openwhispr-teardown.md) §1.
 - [x] **Onboarding v2 — guided flow** (from the July-2026 superwhisper Windows
       hands-on; see the hands-on section of
       [`docs/competitive-analysis.md`](./docs/competitive-analysis.md)) —
@@ -303,6 +317,16 @@ below (✅ = done).
       pairing `raw_transcript` ↔ `final_transcript` — a ready-made eval/fine-tune
       dataset for improving cleanup, with a GB budget + orphan GC. (Deferred — the
       text history + stats landed first; audio capture/retention is the next step.)
+- [ ] **Audio Upload / file transcription** ("transcribe any audio file locally" — OpenWhispr,
+      superwhisper) — drag a file (or pick one) → local transcription → transcript lands as a
+      note / into the editor. The one real cost is a **decoder**: Yap only ever sees raw mic f32
+      today, and whisper.cpp itself can't decode compressed audio, so add a pure-Rust
+      **Symphonia** decode → mono → 16 kHz front-end to the warm `transcribe-rs` engine, then
+      chunk **in-memory** (~30–120 s windows, small overlap) with real per-chunk progress events
+      — no FFmpeg, no re-encode, no disk I/O. Tauri drag-drop already hands over filesystem
+      paths (simpler than Electron). **This `decode.rs` + in-memory chunker is the foundation the
+      meeting recorder below reuses — build it first.** Effort **M** (dominated by the decoder).
+      See [`docs/openwhispr-teardown.md`](./docs/openwhispr-teardown.md) §4.
 - [ ] **Meeting recording / long-form transcription** (match superwhisper) — capture
       **system audio** (WASAPI **loopback**) mixed with the mic, record long sessions,
       transcribe in chunks on the warm engine, and save a transcript (+ optional speaker
@@ -326,6 +350,60 @@ below (✅ = done).
       share sheet, in Swift. None of Yap's Win32/Tauri desktop layer applies. Tracked here
       only so it's a conscious *future separate project*, never mistaken for a Yap platform
       milestone.
+
+### Phase 7 — From pill to notes surface (OpenWhispr-inspired)
+
+> ⚠ **A scope decision, not just polish.** These items expand Yap from a *dictation pill* into
+> a *pill + notes/meetings/chat surface* — the direction OpenWhispr took (AI Notepad, AI Chat,
+> Audio Upload built around its dictation core). Grouped here as a deliberate, opt-in
+> exploration and **sequenced so each small piece ships value before the next depends on it**.
+> Full source-level teardown of how OpenWhispr builds each — with what-to-match / what-to-skip /
+> effort (S/M/L) for Yap's Tauri + Rust + Svelte stack, and `file:line` refs into the cloned
+> repo — is in [`docs/openwhispr-teardown.md`](./docs/openwhispr-teardown.md). (Audio Upload,
+> the shared foundation, lives in Phase 6 above.)
+
+- [ ] **AI "Actions" engine** — the crown jewel, and the *smallest* new infrastructure. An
+      Action = a user-editable **prompt fragment** (`{name, description, prompt, icon}`) that the
+      app wraps in an **app-owned system prompt** carrying the hard format rules the user can't
+      break (FluidVoice-style, same split Yap's cleanup already uses). One `llm.rs` call at
+      temp 0.3 → structured markdown written to a separate `enhanced_content` field (raw text
+      never overwritten; a cheap `len+first50` content hash marks the enhancement stale when the
+      source changes). Ships a built-in **"Generate Notes"** action + a custom-actions manager.
+      Runs over typed text (or the last dictation) **before a full notes UI exists**, and reuses
+      Yap's existing cleanup-model config + llamafile sidecar wholesale. Effort **S–M**.
+      Teardown §2.
+- [ ] **AI Notepad** — a markdown notepad (folders, raw ↔ **Enhanced** dual-view, staleness dot)
+      that the Actions engine enhances. New plumbing: a notes store (`notes.rs` over
+      `tauri-plugin-sql` for FTS + relations, or JSON-per-note) and a Svelte markdown editor with
+      **task-list checkboxes** (Milkdown / CodeMirror 6 / framework-agnostic Tiptap — TipTap-React
+      doesn't port). Store markdown strings end-to-end (OpenWhispr does, which is why it ports
+      cleanly). Effort **M**. Teardown §2.
+- [ ] **Meeting notes** — capture mic + WASAPI loopback (**shared with Phase 6's recorder**),
+      chunk on the warm `transcribe-rs` engine, fold `You:`/`Them:` `TranscriptSegment`s into
+      `notes.transcript`, then run the Actions engine with a **meeting** system prompt →
+      `## Decisions / ## Action Items / ## Follow-ups` with attributed `- [ ]` checkboxes. v1 tags
+      mic = "You", loopback = "Them"; real **speaker diarization** (voice-print profiles) is a
+      later **L** item, skipped for now. Effort **L**, but the recorder half is Phase 6 work and
+      the enhancement half is free once the Actions engine exists. Teardown §2.
+- [ ] **AI Chat over your notes** ("chat that knows your meetings") — escalating scope so the
+      cheap, high-value slice ships first:
+      1. **Eager keyword-RAG** *(S — do first)*: search notes **before** calling the LLM and
+         inline the top-5 snippets into the system prompt. Model-agnostic, works even on the
+         bundled tiny local model, and delivers "knows your notes" with **no agent loop at all**.
+      2. **Tool-calling agent loop** *(M–L)*: port OpenWhispr's client-side loop into Rust over
+         `llm.rs` (`/chat/completions` + `tools`, stream, execute `search_notes`, re-loop ≤20),
+         **gated on model capability** (≥~4B — the bundled Qwen2.5-1.5B can't reliably tool-call,
+         so fall back to plain chat + eager RAG for it).
+      3. **Semantic vectors** *(L, optional)*: only if keyword recall proves insufficient — use
+         `fastembed-rs` (in-process MiniLM, **no** ONNX utility-process) + `sqlite-vec`/`usearch`
+         (**no** Qdrant sidecar) + the RRF merge (K=60, 0.3 cosine threshold, ~15 lines).
+      Persist conversations as JSON first (SQLite only if you want chat FTS later). A **voice-first
+      chat overlay** here is the natural home for the parked *agentic voice-command mode* (Phase 4).
+      Teardown §3.
+
+> **Recommended build order across Phases 4/6/7** (small → foundational → dependent): settings-UX
+> patterns → Actions engine → Audio Upload (`decode.rs` + chunker) → notes + editor → meeting
+> recording → meeting-notes Action → AI Chat (keyword-RAG → agent → vectors). Teardown §5.
 
 ---
 
