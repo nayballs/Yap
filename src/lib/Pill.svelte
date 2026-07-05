@@ -11,6 +11,9 @@
   const AMP_GAIN = 3.5;
   let history = $state([]);
   let downloading = $state(false);
+  // For the in-window hotkey fallback (see onMount).
+  let hotkeyVk = null;
+  let pttMode = false;
 
   function applyScale(s) {
     document.documentElement.style.setProperty('--s', s ?? 1);
@@ -32,12 +35,39 @@
     }).then((u) => unlisteners.push(u));
     listen('yap-scale', (e) => applyScale(e.payload)).then((u) => unlisteners.push(u));
 
-    // Apply the saved pill size on load.
+    // Apply the saved pill size on load — and remember the hotkey for the
+    // in-window fallback below.
     invoke('get_config')
-      .then((cfg) => applyScale(cfg?.pillScale))
+      .then((cfg) => {
+        applyScale(cfg?.pillScale);
+        const m = (cfg?.hotkey || '').match(/^kb:(\d+)$/);
+        hotkeyVk = m ? +m[1] : null;
+        pttMode = cfg?.recordingMode === 'pushToTalk';
+      })
       .catch(() => {});
 
-    return () => unlisteners.forEach((u) => u && u());
+    // In-window hotkey fallback: when one of Yap's OWN WebView2 windows has
+    // focus, the global LL keyboard hook never receives the hotkey (WebView2
+    // front-runs the hook chain — see input_hook.rs notes). The page gets the
+    // keydown normally, so drive the pipeline directly.
+    const onKeyDown = (e) => {
+      if (e.repeat || e.keyCode !== hotkeyVk) return;
+      e.preventDefault();
+      invoke('toggle_recording').catch(() => {});
+    };
+    const onKeyUp = (e) => {
+      if (e.keyCode !== hotkeyVk || !pttMode) return;
+      e.preventDefault();
+      invoke('toggle_recording').catch(() => {});
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+
+    return () => {
+      unlisteners.forEach((u) => u && u());
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+    };
   });
 
   function toggle() {

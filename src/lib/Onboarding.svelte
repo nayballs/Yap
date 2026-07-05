@@ -272,20 +272,10 @@
     const enteredAt = Math.floor(Date.now() / 1000) - 2; // small clock slack
     flog(`try-step entered, enteredAt=${enteredAt}`);
     shownTs = 0;
-    let lastSeenTs = 0;
     const timer = setInterval(async () => {
-      window.__pollTick = Date.now();
       try {
         const h = await invoke('get_history', { limit: 1 });
         const e = Array.isArray(h) ? h[0] : null;
-        window.__pollLast = JSON.stringify({ e, enteredAt });
-        if (e && e.ts !== lastSeenTs) {
-          lastSeenTs = e.ts;
-          flog(
-            `poll: newest ts=${e.ts} enteredAt=${enteredAt} fresh=${e.ts >= enteredAt} ` +
-            `text="${(e.text || '').slice(0, 40)}"`
-          );
-        }
         if (e && e.ts >= enteredAt && e.ts > shownTs && (e.text || '').trim()) {
           const t = e.text.trim();
           flog(`poll: filling box with "${t.slice(0, 40)}"`);
@@ -422,7 +412,6 @@
         if (e.payload) llmProgress = e.payload;
       }),
       rawListen('yap-state', (e) => {
-        flog('event yap-state: ' + (e && e.payload));
         tryState = e.payload || 'idle';
       }),
       // The try-box fills from this EVENT, not from the OS-level paste: pasting
