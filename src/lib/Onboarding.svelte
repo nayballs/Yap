@@ -244,6 +244,10 @@
   let tryFlash = $state(false); // green flash when the box (re)fills
   let recordingKey = $state(false); // mini hotkey recorder active
   let flashTimer = null;
+  // Timestamp (epoch s) of the content currently shown — an in-flight poll
+  // response must never overwrite a FRESHER event fill (seen in the log:
+  // a stale poll replaced a just-arrived transcript for ~800ms).
+  let shownTs = 0;
 
   // Show a transcript in the box — with an unmissable flash. A silent 0.7s
   // delayed text replacement reads as "nothing happened" (field-tested).
@@ -267,6 +271,7 @@
     gotTranscript = false;
     const enteredAt = Math.floor(Date.now() / 1000) - 2; // small clock slack
     flog(`try-step entered, enteredAt=${enteredAt}`);
+    shownTs = 0;
     let lastSeenTs = 0;
     const timer = setInterval(async () => {
       window.__pollTick = Date.now();
@@ -281,10 +286,11 @@
             `text="${(e.text || '').slice(0, 40)}"`
           );
         }
-        if (e && e.ts >= enteredAt && (e.text || '').trim()) {
+        if (e && e.ts >= enteredAt && e.ts > shownTs && (e.text || '').trim()) {
           const t = e.text.trim();
           if (t !== tryText) {
             flog(`poll: filling box with "${t.slice(0, 40)}"`);
+            shownTs = e.ts;
             showTranscript(t);
           }
         }
@@ -431,7 +437,10 @@
         flog(`event yap-transcript (step=${step}): "${String(e && e.payload).slice(0, 40)}"`);
         if (step === STEPS.length - 1) {
           const t = (e.payload || '').trim();
-          if (t && t !== tryText) showTranscript(t);
+          if (t && t !== tryText) {
+            shownTs = Math.floor(Date.now() / 1000);
+            showTranscript(t);
+          }
         }
       }),
     ];
