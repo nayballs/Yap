@@ -163,6 +163,7 @@ pub fn run() {
             commands::list_output_devices,
             commands::set_mic_test,
             commands::set_input_device,
+            commands::frontend_log,
             commands::model_language_info,
             commands::configure_hotkey,
             commands::configure_edit_hotkey,

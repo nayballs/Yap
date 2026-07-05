@@ -1,6 +1,10 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
+
+  // Diagnostics -> the backend's rolling yap.log (webview consoles are
+  // invisible in normal runs; this made the event-delivery bug debuggable).
+  const flog = (m) => invoke('frontend_log', { msg: '[onboarding] ' + m }).catch(() => {});
   import yapIcon from '../assets/yap-icon.png';
   import { MODELS } from './models.js';
   import ModelCard from './ModelCard.svelte';
@@ -262,19 +266,30 @@
     tryText = '';
     gotTranscript = false;
     const enteredAt = Math.floor(Date.now() / 1000) - 2; // small clock slack
+    flog(`try-step entered, enteredAt=${enteredAt}`);
+    let lastSeenTs = 0;
     const timer = setInterval(async () => {
-      // Debug beacons (read via CDP while diagnosing the deaf-window issue).
       window.__pollTick = Date.now();
       try {
         const h = await invoke('get_history', { limit: 1 });
         const e = Array.isArray(h) ? h[0] : null;
         window.__pollLast = JSON.stringify({ e, enteredAt });
+        if (e && e.ts !== lastSeenTs) {
+          lastSeenTs = e.ts;
+          flog(
+            `poll: newest ts=${e.ts} enteredAt=${enteredAt} fresh=${e.ts >= enteredAt} ` +
+            `text="${(e.text || '').slice(0, 40)}"`
+          );
+        }
         if (e && e.ts >= enteredAt && (e.text || '').trim()) {
           const t = e.text.trim();
-          if (t !== tryText) showTranscript(t);
+          if (t !== tryText) {
+            flog(`poll: filling box with "${t.slice(0, 40)}"`);
+            showTranscript(t);
+          }
         }
-      } catch {
-        // history disabled or command unavailable — events remain the path
+      } catch (err) {
+        flog('poll: get_history FAILED: ' + err);
       }
     }, 400);
     return () => clearInterval(timer);
@@ -389,6 +404,7 @@
         // best-effort teardown
       }
     }
+    flog('registerListeners: registering 5 raw listeners');
     unsubs = [
       rawListen('stt-download-progress', (e) => {
         if (e.payload && e.payload.modelSize === busyId) percent = e.payload.percent;
@@ -402,6 +418,7 @@
         if (e.payload) llmProgress = e.payload;
       }),
       rawListen('yap-state', (e) => {
+        flog('event yap-state: ' + (e && e.payload));
         tryState = e.payload || 'idle';
       }),
       // The try-box fills from this EVENT, not from the OS-level paste: pasting
@@ -411,6 +428,7 @@
       // (when it does win the race) can't double-write. (Plus the history poll
       // above as belt-and-braces.)
       rawListen('yap-transcript', (e) => {
+        flog(`event yap-transcript (step=${step}): "${String(e && e.payload).slice(0, 40)}"`);
         if (step === STEPS.length - 1) {
           const t = (e.payload || '').trim();
           if (t && t !== tryText) showTranscript(t);
@@ -420,12 +438,14 @@
   }
 
   onMount(() => {
+    flog('mounted; visibilityState=' + document.visibilityState);
     refresh().then(refreshLlm);
     invoke('list_audio_devices')
       .then((d) => (devices = d || []))
       .catch(() => {});
     const onVis = () => {
       pageVisible = !document.hidden;
+      flog('visibilitychange: hidden=' + document.hidden);
       // Re-shown after a hide ("Show setup guide again"): re-sync from disk so
       // this long-lived window doesn't present (or later save) stale state —
       // and re-register the event subscriptions (see registerListeners).

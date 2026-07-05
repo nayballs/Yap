@@ -458,6 +458,15 @@ pub fn get_groq_usage() -> serde_json::Value {
     crate::usage::snapshot()
 }
 
+/// Frontend → log-file bridge: webviews call this to land diagnostics in the
+/// same rolling `yap.log` as the backend (webview consoles are invisible in
+/// normal runs, which made the onboarding event-delivery bug nearly
+/// undebuggable — see 2026-07-05).
+#[tauri::command]
+pub fn frontend_log(msg: String) {
+    tracing::info!("[web] {}", msg);
+}
+
 /// Whether Yap is running as a portable install (data lives next to the exe).
 /// The update UI uses this to steer portable users to a manual download, since
 /// the in-place updater can't safely replace a portable folder.
