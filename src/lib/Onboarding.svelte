@@ -237,7 +237,20 @@
   let tryState = $state('idle'); // mirrors yap-state while on the try step
   let tryText = $state(''); // filled from the yap-transcript EVENT (see below)
   let gotTranscript = $state(false);
+  let tryFlash = $state(false); // green flash when the box (re)fills
   let recordingKey = $state(false); // mini hotkey recorder active
+  let flashTimer = null;
+
+  // Show a transcript in the box — with an unmissable flash. A silent 0.7s
+  // delayed text replacement reads as "nothing happened" (field-tested).
+  function showTranscript(t) {
+    tryText = t;
+    gotTranscript = !!t;
+    tryFlash = false;
+    clearTimeout(flashTimer);
+    requestAnimationFrame(() => (tryFlash = true));
+    flashTimer = setTimeout(() => (tryFlash = false), 1200);
+  }
 
   // Reset the demo box each time the user lands on the try step — and, while
   // on it, ALSO poll history for the newest dictation. The box normally fills
@@ -258,15 +271,12 @@
         window.__pollLast = JSON.stringify({ e, enteredAt });
         if (e && e.ts >= enteredAt && (e.text || '').trim()) {
           const t = e.text.trim();
-          if (t !== tryText) {
-            tryText = t;
-            gotTranscript = true;
-          }
+          if (t !== tryText) showTranscript(t);
         }
       } catch {
         // history disabled or command unavailable — events remain the path
       }
-    }, 700);
+    }, 400);
     return () => clearInterval(timer);
   });
 
@@ -402,8 +412,8 @@
       // above as belt-and-braces.)
       rawListen('yap-transcript', (e) => {
         if (step === STEPS.length - 1) {
-          tryText = (e.payload || '').trim();
-          gotTranscript = !!tryText;
+          const t = (e.payload || '').trim();
+          if (t && t !== tryText) showTranscript(t);
         }
       }),
     ];
@@ -651,6 +661,7 @@
     <div class="try-box">
       <textarea
         class="try-area"
+        class:flash={tryFlash}
         placeholder="Your words will appear here…"
         rows="5"
         readonly
@@ -1162,6 +1173,14 @@
   .try-area:focus {
     outline: none;
     border-color: #3b82f6;
+  }
+  .try-area.flash {
+    border-color: #34d399;
+    background: #10241c;
+    transition: none;
+  }
+  .try-area {
+    transition: border-color 0.9s ease, background 0.9s ease;
   }
   .try-status {
     color: #9ca3af;
