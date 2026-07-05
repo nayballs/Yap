@@ -53,14 +53,14 @@
     padding: 0;
     background: none;
     border: none;
-    color: #6b7280;
+    color: var(--yap-fg-45);
     cursor: help;
     border-radius: 50%;
-    transition: color 0.15s ease;
+    transition: color var(--yap-dur) ease;
   }
   .tip:hover,
   .tip:focus-visible {
-    color: #3b82f6;
+    color: var(--yap-primary);
     outline: none;
   }
   .bubble {
@@ -69,11 +69,11 @@
     z-index: 9999;
     max-width: 240px;
     padding: 8px 10px;
-    background: #1f2430;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
-    color: #e5e7eb;
+    background: var(--yap-s3);
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r-lg);
+    box-shadow: 0 12px 28px -8px rgba(0, 0, 0, 0.55);
+    color: var(--yap-fg);
     font-size: 12px;
     line-height: 1.45;
     text-align: center;

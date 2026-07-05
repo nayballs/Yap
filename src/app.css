@@ -20,3 +20,57 @@ body {
   width: 100vw;
   height: 100vh;
 }
+
+/* ------------------------------------------------------------------ *
+ * Yap design tokens (dark). Used by the opaque windows (settings /
+ * onboarding) and their `ui/` primitives. These are just custom
+ * properties — they don't paint anything, so the transparent pill /
+ * overlay windows are unaffected. Palette: an OpenWhispr-style charcoal
+ * elevation ladder (depth from lightness, not borders) with a single
+ * superwhisper-style violet accent used sparingly at low alpha.
+ * ------------------------------------------------------------------ */
+:root {
+  /* surfaces — each step ~+3% lightness */
+  --yap-bg: #191a1e;          /* window / sidebar */
+  --yap-s1: #1e1f23;          /* content pane, inputs */
+  --yap-s2: #232429;          /* panels / cards */
+  --yap-s3: #2a2b31;          /* menus, hover surfaces */
+  --yap-raised: #313239;      /* toggle-off track, icon chips */
+  --yap-raised-soft: #26272d; /* active nav row */
+
+  /* text — one off-white, stepped by opacity */
+  --yap-fg: #e9e9ea;
+  --yap-fg-80: rgba(233, 233, 234, 0.8);
+  --yap-fg-62: rgba(233, 233, 234, 0.62);
+  --yap-fg-45: rgba(233, 233, 234, 0.45);
+  --yap-muted: #9a9aa0;
+  --yap-muted-70: rgba(154, 154, 160, 0.72);
+  --yap-muted-55: rgba(154, 154, 160, 0.55);
+
+  /* accent — superwhisper violet */
+  --yap-primary: #6d5cf5;
+  --yap-primary-fg: #ffffff;
+  --yap-primary-hover: #7d6ef7;
+  --yap-primary-wash: rgba(109, 92, 245, 0.15);
+  --yap-primary-tint: rgba(109, 92, 245, 0.22);
+  --yap-primary-line: rgba(109, 92, 245, 0.42);
+
+  /* borders — faint; depth comes from surfaces, not lines */
+  --yap-border: #34353c;
+  --yap-border-subtle: #2c2d33;
+  --yap-border-hover: #41434b;
+
+  /* semantic (kept separate from the accent) */
+  --yap-success: #3dbb74;
+  --yap-warning: #dca03c;
+  --yap-danger: #e0564f;
+
+  /* radii — tight, native-feeling */
+  --yap-r-sm: 4px;
+  --yap-r: 6px;
+  --yap-r-lg: 8px;
+  --yap-r-xl: 11px;
+  --yap-r-full: 9999px;
+
+  --yap-dur: 150ms;
+}

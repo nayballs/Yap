@@ -64,16 +64,18 @@
     min-width: 0;
   }
   .label {
-    color: #e5e7eb;
+    color: var(--yap-fg);
+    font-size: 12.5px;
+    font-weight: 500;
   }
   .readout {
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-size: 11.5px;
     font-variant-numeric: tabular-nums;
   }
   input[type='range'] {
     width: 100%;
-    accent-color: #3b82f6;
+    accent-color: var(--yap-primary);
     cursor: pointer;
   }
   input[type='range']:disabled {

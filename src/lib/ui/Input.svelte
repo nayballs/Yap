@@ -21,17 +21,25 @@
   .input {
     width: 100%;
     box-sizing: border-box;
-    background: #181b22;
-    border: 1px solid #2a2f3a;
-    border-radius: 6px;
-    color: #e5e7eb;
-    padding: 7px 9px;
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    color: var(--yap-fg);
+    padding: 8px 12px;
     font: inherit;
-    font-size: 13px;
+    font-size: 12.5px;
+    transition: border-color var(--yap-dur) ease, box-shadow var(--yap-dur) ease;
+  }
+  .input:hover:not(:disabled) {
+    border-color: var(--yap-border-hover);
   }
   .input:focus {
     outline: none;
-    border-color: #3b82f6;
+    border-color: var(--yap-primary);
+    box-shadow: 0 0 0 3px var(--yap-primary-wash);
+  }
+  .input::placeholder {
+    color: var(--yap-fg-45);
   }
   .input:disabled {
     opacity: 0.5;

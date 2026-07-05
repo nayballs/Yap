@@ -45,7 +45,9 @@
     min-width: 0;
   }
   .label {
-    color: #e5e7eb;
+    color: var(--yap-fg);
+    font-size: 12.5px;
+    font-weight: 500;
   }
   .select-wrap {
     position: relative;
@@ -56,21 +58,24 @@
     appearance: none;
     -webkit-appearance: none;
     width: 100%;
-    height: 34px;
-    background: #181b22;
-    border: 1px solid #2a2f3a;
-    border-radius: 8px;
-    color: #e5e7eb;
-    padding: 0 30px 0 10px;
+    height: 32px;
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    color: var(--yap-fg);
+    padding: 0 32px 0 12px;
     font: inherit;
-    font-size: 13px;
+    font-size: 12.5px;
     cursor: pointer;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: border-color var(--yap-dur) ease, box-shadow var(--yap-dur) ease;
+  }
+  select:hover:not(:disabled) {
+    border-color: var(--yap-border-hover);
   }
   select:focus {
     outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+    border-color: var(--yap-primary);
+    box-shadow: 0 0 0 3px var(--yap-primary-wash);
   }
   select:disabled {
     opacity: 0.5;
@@ -78,10 +83,10 @@
   }
   .chev {
     position: absolute;
-    right: 9px;
+    right: 10px;
     top: 50%;
     transform: translateY(-50%);
-    color: #9ca3af;
+    color: var(--yap-muted);
     pointer-events: none;
   }
   .select-wrap.disabled .chev {

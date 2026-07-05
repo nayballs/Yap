@@ -4,14 +4,19 @@
   // (e.g. a Toggle/Slider that draws its own label). The `hint` shows as a ⓘ
   // tooltip next to the label rather than always-on text underneath.
   import Tooltip from './Tooltip.svelte';
-  let { label = '', hint = '', children } = $props();
+  // `desc` renders as a muted line under the label (nicer than a tooltip for
+  // short explanations); `hint` keeps the ⓘ tooltip for longer help text.
+  let { label = '', hint = '', desc = '', children } = $props();
 </script>
 
 <div class="row" class:bare={!label}>
   {#if label}
-    <span class="ldesc">
-      <span class="label">{label}</span>
-      {#if hint}<Tooltip text={hint} />{/if}
+    <span class="lhs">
+      <span class="ldesc">
+        <span class="label">{label}</span>
+        {#if hint}<Tooltip text={hint} />{/if}
+      </span>
+      {#if desc}<span class="desc">{desc}</span>{/if}
     </span>
     <span class="control">{@render children?.()}</span>
   {:else}
@@ -24,11 +29,17 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 14px;
-    padding: 10px 14px;
+    gap: 16px;
+    padding: 12px 16px;
   }
   .row.bare {
     display: block;
+  }
+  .lhs {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
   }
   .ldesc {
     display: flex;
@@ -37,7 +48,14 @@
     min-width: 0;
   }
   .label {
-    color: #e5e7eb;
+    color: var(--yap-fg);
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .desc {
+    color: var(--yap-muted-70);
+    font-size: 11.5px;
+    line-height: 1.5;
   }
   .control {
     flex: 0 0 auto;

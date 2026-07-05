@@ -11,6 +11,8 @@
   import Button from './ui/Button.svelte';
   import Input from './ui/Input.svelte';
   import Textarea from './ui/Textarea.svelte';
+  import ModeSelector from './ui/ModeSelector.svelte';
+  import Segmented from './ui/Segmented.svelte';
   import ModelManager from './ModelManager.svelte';
   import StatusBar from './StatusBar.svelte';
 
@@ -55,6 +57,21 @@
     { value: 'local', label: 'My own server (Ollama · LM Studio)', baseUrl: 'http://localhost:11434/v1' },
     { value: 'custom', label: 'Custom', baseUrl: null },
   ];
+
+  // Provider rows for the AI-cleanup mode selector: same `value`s as
+  // PP_PROVIDERS (the backend contract), with a friendly label + one-line
+  // description. `kind` picks the chip icon.
+  const PP_MODE_OPTIONS = [
+    { value: 'ondevice', label: 'Built-in local AI', desc: 'Private · runs on your PC · no key, nothing leaves the machine', kind: 'local' },
+    { value: 'groq', label: 'Groq', desc: 'Fast hosted inference — bring your own key', kind: 'cloud' },
+    { value: 'anthropic', label: 'Anthropic (Claude)', desc: 'Claude via its OpenAI-compatible API', kind: 'cloud' },
+    { value: 'openai', label: 'OpenAI', desc: 'GPT models — bring your own key', kind: 'cloud' },
+    { value: 'openrouter', label: 'OpenRouter', desc: 'One key, many models', kind: 'cloud' },
+    { value: 'local', label: 'My own server', desc: 'Ollama or LM Studio on your network', kind: 'server' },
+    { value: 'custom', label: 'Custom', desc: 'Any OpenAI-compatible endpoint', kind: 'server' },
+  ];
+  // exe/name → icon kind lookup for the snippet below
+  const PP_ICON_KIND = Object.fromEntries(PP_MODE_OPTIONS.map((o) => [o.value, o.kind]));
 
   // Cleanup presets: each fills the editable "body" (tone/format). The immutable
   // guardrails live in the backend (llm::BASE_PROMPT) and are always applied, so
@@ -903,6 +920,25 @@
   {/if}
 {/snippet}
 
+{#snippet provIcon(v)}
+  {@const kind = PP_ICON_KIND[v] || 'cloud'}
+  {#if kind === 'local'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="5" y="5" width="14" height="14" rx="2" /><rect x="9" y="9" width="6" height="6" />
+      <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
+    </svg>
+  {:else if kind === 'server'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="7" rx="2" /><rect x="3" y="13" width="18" height="7" rx="2" />
+      <path d="M7 8h.01M7 17h.01" />
+    </svg>
+  {:else}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M17.5 19a4.5 4.5 0 0 0 .5-8.98 6 6 0 0 0-11.6-1.02A4 4 0 0 0 6 19z" />
+    </svg>
+  {/if}
+{/snippet}
+
 <div class="shell">
   <nav class="sidebar">
     <div class="brand">
@@ -916,6 +952,20 @@
         <span class="navlabel">{s.label}</span>
       </button>
     {/each}
+
+    <div class="side-spacer"></div>
+    <div class="acct-rule"></div>
+    <button class="acct" class:active={section === 'account'} onclick={() => (section = 'account')}>
+      <span class="acct-avatar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="8" r="3.2" /><path d="M5 20a7 7 0 0 1 14 0" />
+        </svg>
+      </span>
+      <span class="acct-who">
+        <span class="l1">Sign in</span>
+        <span class="l2">Optional · works offline</span>
+      </span>
+    </button>
   </nav>
 
   <main>
@@ -933,7 +983,13 @@
               </button>
             </Row>
             <Row label="Recording mode" hint="How the hotkey controls recording">
-              <Select bind:value={cfg.recordingMode} options={RECORDING_MODES} />
+              <Segmented
+                bind:value={cfg.recordingMode}
+                options={[
+                  { value: 'toggle', label: 'Toggle' },
+                  { value: 'pushToTalk', label: 'Push-to-talk' },
+                ]}
+              />
             </Row>
             <Row
               label="Edit / rewrite hotkey"
@@ -1070,14 +1126,13 @@
                 hint="Clean up filler, punctuation & grammar before pasting. Off = raw transcript."
               />
             </Row>
-            <Row label="Provider" hint="Where the cleanup runs">
-              <Select
-                bind:value={cfg.ppProvider}
-                options={PP_PROVIDERS}
-                onchange={onProviderChange}
-                disabled={!cfg.postProcessEnabled}
-              />
-            </Row>
+            <ModeSelector
+              bind:value={cfg.ppProvider}
+              options={PP_MODE_OPTIONS}
+              icon={provIcon}
+              onchange={onProviderChange}
+              disabled={!cfg.postProcessEnabled}
+            />
             {#if cfg.ppProvider !== 'ondevice'}
               <Row label="Base URL" hint="OpenAI-compatible endpoint">
                 {#snippet children()}
@@ -1630,6 +1685,55 @@
               />
             </Row>
           </Group>
+
+        {:else if section === 'account'}
+          <div class="page-h">
+            <h1>Account</h1>
+            <p>Yap is 100% local and needs no account. Sign in only if you want the optional hosted extras.</p>
+          </div>
+
+          <div class="acct-hero">
+            <span class="acct-badge">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="8" r="3.4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+              </svg>
+            </span>
+            <div class="acct-hero-body">
+              <h3>Sign in to Yap</h3>
+              <p>
+                Unlocks optional hosted AI cleanup (a stronger cloud model) and settings sync across
+                machines. Everything else — transcription, local cleanup, history — stays on your
+                machine, signed in or not.
+              </p>
+              <div class="acct-cta">
+                <button class="google-btn" type="button" disabled aria-disabled="true">
+                  <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z" />
+                  </svg>
+                  Continue with Google
+                </button>
+                <span class="soon">Coming soon</span>
+              </div>
+              <div class="acct-privacy">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7z" /><path d="M9 12l2 2 4-4" />
+                </svg>
+                Your voice and transcripts never leave your PC. Sign-in is only for the hosted extras.
+              </div>
+            </div>
+          </div>
+
+          <Group title="What sign-in would add">
+            <Row label="Hosted Pro cleanup" desc="A stronger cloud cleanup model when you want it — local stays the default">
+              {#snippet children()}<span class="soon-tag">Planned</span>{/snippet}
+            </Row>
+            <Row label="Settings sync" desc="Carry your config & dictionary across your machines">
+              {#snippet children()}<span class="soon-tag">Planned</span>{/snippet}
+            </Row>
+          </Group>
         {/if}
       </div>
 
@@ -1642,76 +1746,82 @@
 
 <style>
   :global(body) {
-    background: #0f1117;
+    background: var(--yap-s1);
   }
   .shell {
     display: flex;
     min-height: 100vh;
-    background: #0f1117;
-    color: #e5e7eb;
+    background: var(--yap-s1);
+    color: var(--yap-fg);
     font-size: 13px;
   }
 
   .sidebar {
-    flex: 0 0 158px;
+    flex: 0 0 202px;
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 14px 12px;
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
-    background: #0c0e14;
+    padding: 14px 10px 10px;
+    border-right: 1px solid var(--yap-border-subtle);
+    background: var(--yap-bg);
   }
   .brand {
     display: flex;
     align-items: center;
     gap: 9px;
-    padding: 4px 8px 4px;
+    padding: 4px 8px 0;
   }
   .brandlogo {
     width: 22px;
     height: 22px;
-    border-radius: 6px;
+    border-radius: 7px;
     object-fit: contain;
     flex: 0 0 auto;
   }
   .brandname {
-    font-size: 15px;
-    font-weight: 600;
-    color: #e5e7eb;
-    letter-spacing: 0.01em;
+    font-size: 14px;
+    font-weight: 650;
+    color: var(--yap-fg);
+    letter-spacing: -0.01em;
   }
   .brand-divider {
     height: 1px;
-    background: rgba(255, 255, 255, 0.08);
-    margin: 10px 4px 8px;
+    background: var(--yap-border-subtle);
+    margin: 12px 4px 10px;
   }
   .navitem {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: 10px;
     text-align: left;
     background: none;
     border: none;
-    color: #9ca3af;
-    opacity: 0.9;
-    padding: 8px 10px;
-    border-radius: 8px;
+    color: var(--yap-fg-62);
+    padding: 0 8px;
+    height: 33px;
+    border-radius: var(--yap-r);
     cursor: pointer;
     font: inherit;
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 12.5px;
     transition:
-      background 0.15s ease,
-      color 0.15s ease,
-      opacity 0.15s ease;
+      background var(--yap-dur) ease,
+      color var(--yap-dur) ease;
   }
   .navicon {
-    display: inline-flex;
-    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+    border-radius: var(--yap-r-sm);
+    display: grid;
+    place-items: center;
+    color: var(--yap-fg-45);
+    transition:
+      background var(--yap-dur) ease,
+      color var(--yap-dur) ease;
   }
   .navicon :global(svg) {
-    width: 18px;
-    height: 18px;
+    width: 15px;
+    height: 15px;
   }
   .navlabel {
     overflow: hidden;
@@ -1719,14 +1829,83 @@
     white-space: nowrap;
   }
   .navitem:hover {
-    color: #e5e7eb;
-    opacity: 1;
-    background: rgba(255, 255, 255, 0.05);
+    color: var(--yap-fg-80);
+    background: rgba(255, 255, 255, 0.04);
   }
   .navitem.active {
-    color: #fff;
-    opacity: 1;
-    background: #3b82f6;
+    color: var(--yap-fg);
+    font-weight: 500;
+    background: var(--yap-raised-soft);
+  }
+  .navitem.active .navicon {
+    background: var(--yap-primary-tint);
+    color: var(--yap-primary);
+  }
+
+  .side-spacer {
+    flex: 1 1 auto;
+  }
+  .acct-rule {
+    height: 1px;
+    background: var(--yap-border-subtle);
+    margin: 8px 4px;
+  }
+  .acct {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-radius: var(--yap-r-lg);
+    cursor: pointer;
+    border: 1px dashed var(--yap-border);
+    background: transparent;
+    width: 100%;
+    font: inherit;
+    text-align: left;
+    transition:
+      background var(--yap-dur) ease,
+      border-color var(--yap-dur) ease;
+  }
+  .acct:hover {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: var(--yap-border-hover);
+  }
+  .acct.active {
+    border-style: solid;
+    background: var(--yap-raised-soft);
+  }
+  .acct-avatar {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-raised);
+    display: grid;
+    place-items: center;
+    color: var(--yap-fg-45);
+  }
+  .acct-avatar :global(svg) {
+    width: 17px;
+    height: 17px;
+  }
+  .acct-who {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .acct-who .l1 {
+    font-size: 12.5px;
+    color: var(--yap-fg-80);
+    font-weight: 500;
+    line-height: 1.25;
+  }
+  .acct-who .l2 {
+    font-size: 11.5px;
+    color: var(--yap-muted-55);
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   main {
@@ -1739,22 +1918,51 @@
   .content {
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: 22px 24px 10px;
+    padding: 26px 30px 40px;
+  }
+  .page-h {
+    margin: 0 0 22px;
+  }
+  .page-h h1 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    color: var(--yap-fg);
+  }
+  .page-h p {
+    margin: 4px 0 0;
+    font-size: 12.5px;
+    color: var(--yap-muted-70);
+    line-height: 1.5;
   }
 
   .key {
-    min-width: 130px;
-    padding: 6px 12px;
-    border-radius: 6px;
-    border: 1px solid #2a2f3a;
-    background: #181b22;
-    color: #e5e7eb;
+    min-width: 92px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: var(--yap-r);
+    border: 1px solid var(--yap-border);
+    border-bottom-width: 2px;
+    background: var(--yap-s1);
+    color: var(--yap-fg);
     cursor: pointer;
-    font-size: 13px;
+    font-family: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', Consolas, monospace;
+    font-size: 12.5px;
+    font-weight: 600;
+    transition:
+      border-color var(--yap-dur) ease,
+      background var(--yap-dur) ease,
+      box-shadow var(--yap-dur) ease;
+  }
+  .key:hover {
+    border-color: var(--yap-border-hover);
+    background: #24262b;
   }
   .key.recording {
-    border-color: #3b82f6;
-    color: #93c5fd;
+    border-color: var(--yap-primary);
+    color: var(--yap-primary);
+    box-shadow: 0 0 0 3px var(--yap-primary-wash);
   }
 
   .mm-wrap {
@@ -1766,7 +1974,7 @@
     width: 100%;
   }
   .note {
-    color: #6b7280;
+    color: var(--yap-muted-55);
     font-size: 11px;
     margin: 0 0 10px;
     line-height: 1.5;
@@ -1783,13 +1991,13 @@
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.4px;
-    color: #6b7280;
+    color: var(--yap-muted-55);
   }
   .dict-row input {
-    background: #181b22;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border);
     border-radius: 5px;
-    color: #e5e7eb;
+    color: var(--yap-fg);
     padding: 6px 8px;
     font-size: 13px;
     width: 100%;
@@ -1797,16 +2005,16 @@
   }
   .dict-row input:focus {
     outline: none;
-    border-color: #3b82f6;
+    border-color: var(--yap-primary);
   }
   .arrow {
-    color: #6b7280;
+    color: var(--yap-muted-55);
     text-align: center;
   }
   .rm {
     background: none;
     border: none;
-    color: #6b7280;
+    color: var(--yap-muted-55);
     cursor: pointer;
     font-size: 17px;
     line-height: 1;
@@ -1815,29 +2023,29 @@
     color: #ef4444;
   }
   .empty {
-    color: #6b7280;
+    color: var(--yap-muted-55);
     font-size: 12px;
     padding: 4px 0 8px;
   }
   .add {
     margin-top: 8px;
     background: none;
-    border: 1px dashed #2a2f3a;
-    color: #9ca3af;
+    border: 1px dashed var(--yap-border);
+    color: var(--yap-muted);
     border-radius: 6px;
     padding: 6px 10px;
     cursor: pointer;
     font-size: 12px;
   }
   .add:hover {
-    color: #e5e7eb;
-    border-color: #3b82f6;
+    color: var(--yap-fg);
+    border-color: var(--yap-primary);
   }
   .add:disabled {
     opacity: 0.5;
     cursor: default;
-    border-color: #2a2f3a;
-    color: #6b7280;
+    border-color: var(--yap-border);
+    color: var(--yap-muted-55);
   }
 
   /* Smart routing (profiles + per-app rules) */
@@ -1845,7 +2053,7 @@
     width: 100%;
   }
   .routes-sub {
-    color: #e5e7eb;
+    color: var(--yap-fg);
     font-size: 13px;
     font-weight: 600;
     margin-bottom: 4px;
@@ -1868,11 +2076,11 @@
     min-width: 0;
   }
   .route {
-    border: 1px solid #2a2f3a;
+    border: 1px solid var(--yap-border);
     border-radius: 8px;
     padding: 10px;
     margin-bottom: 10px;
-    background: #15181e;
+    background: var(--yap-s2);
   }
   .route-head {
     display: flex;
@@ -1883,21 +2091,21 @@
   .route-label {
     flex: 0 0 auto;
     width: 140px;
-    background: #181b22;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border);
     border-radius: 6px;
-    color: #e5e7eb;
+    color: var(--yap-fg);
     padding: 5px 8px;
     font: inherit;
     font-size: 13px;
   }
   .route-label:focus {
     outline: none;
-    border-color: #3b82f6;
+    border-color: var(--yap-primary);
   }
   .route-proc {
     flex: 1 1 auto;
-    color: #6b7280;
+    color: var(--yap-muted-55);
     font-size: 12px;
     font-family: ui-monospace, monospace;
   }
@@ -1915,7 +2123,7 @@
     font-size: 12px;
   }
   .prof-note {
-    color: #6b7280;
+    color: var(--yap-muted-55);
     font-size: 12px;
   }
   .route-add {
@@ -1929,10 +2137,10 @@
   }
   .route-pick,
   .route-input {
-    background: #181b22;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border);
     border-radius: 6px;
-    color: #e5e7eb;
+    color: var(--yap-fg);
     padding: 6px 8px;
     font: inherit;
     font-size: 13px;
@@ -1944,7 +2152,7 @@
   .route-pick:focus,
   .route-input:focus {
     outline: none;
-    border-color: #3b82f6;
+    border-color: var(--yap-primary);
   }
 
   /* AI cleanup */
@@ -1959,15 +2167,15 @@
     font-size: 13px;
   }
   .ondevice-ok {
-    color: #34d399;
+    color: var(--yap-success);
     font-weight: 500;
   }
   .ondevice-btn {
     padding: 7px 12px;
-    border: 1px solid var(--accent, #3b82f6);
+    border: 1px solid var(--accent, var(--yap-primary));
     border-radius: 7px;
-    background: color-mix(in srgb, var(--accent, #3b82f6) 15%, transparent);
-    color: var(--accent, #3b82f6);
+    background: color-mix(in srgb, var(--accent, var(--yap-primary)) 15%, transparent);
+    color: var(--accent, var(--yap-primary));
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
@@ -1977,12 +2185,12 @@
     cursor: default;
   }
   .ondevice-dl {
-    color: var(--muted, #9ca3af);
+    color: var(--muted, var(--yap-muted));
   }
   .ondevice-mb {
     margin-left: 6px;
     font-size: 11px;
-    color: #6b7280;
+    color: var(--yap-muted-55);
     font-variant-numeric: tabular-nums;
   }
   .ondevice-models {
@@ -1992,7 +2200,7 @@
     padding: 0;
     border: none;
     background: none;
-    color: var(--accent, #3b82f6);
+    color: var(--accent, var(--yap-primary));
     font-size: inherit;
     cursor: pointer;
     text-decoration: underline;
@@ -2002,7 +2210,7 @@
     display: block;
     margin-top: 5px;
     font-size: 11px;
-    color: #6b7280;
+    color: var(--yap-muted-55);
     line-height: 1.45;
   }
   .ondevice-bar {
@@ -2015,7 +2223,7 @@
   .ondevice-bar span {
     display: block;
     height: 100%;
-    background: var(--accent, #3b82f6);
+    background: var(--accent, var(--yap-primary));
     transition: width 0.2s ease;
   }
   .ondevice-err {
@@ -2026,10 +2234,10 @@
     width: 100%;
   }
   .pp-label {
-    color: #e5e7eb;
+    color: var(--yap-fg);
   }
   .pp-sub {
-    color: #6b7280;
+    color: var(--yap-muted-55);
     font-size: 11px;
     margin: 1px 0 8px;
   }
@@ -2043,16 +2251,16 @@
     flex-wrap: wrap;
   }
   .pp-test-note {
-    color: #6b7280;
+    color: var(--yap-muted-55);
     font-size: 11px;
   }
   .pp-result {
     margin-top: 10px;
-    background: #181b22;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border);
     border-radius: 6px;
     padding: 8px 10px;
-    color: #e5e7eb;
+    color: var(--yap-fg);
     font-size: 12.5px;
     line-height: 1.5;
     white-space: pre-wrap;
@@ -2064,7 +2272,7 @@
   .pp-privacy {
     width: 100%;
     margin: 0;
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-size: 12.5px;
     line-height: 1.6;
   }
@@ -2091,7 +2299,7 @@
   .hero-lbl {
     margin-top: 4px;
     font-size: 12px;
-    color: #9ca3af;
+    color: var(--yap-muted);
   }
   .stats-grid {
     width: 100%;
@@ -2100,8 +2308,8 @@
     gap: 10px;
   }
   .stat-card {
-    background: #181b22;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border);
     border-radius: 8px;
     padding: 12px 14px;
   }
@@ -2113,7 +2321,7 @@
   .stat-lbl {
     margin-top: 2px;
     font-size: 12px;
-    color: #9ca3af;
+    color: var(--yap-muted);
   }
   /* 30-day activity heatmap: uniform cells, colour intensity = words. */
   .activity {
@@ -2136,10 +2344,10 @@
     background: #1d4ed8;
   }
   .acell[data-level='3'] {
-    background: #3b82f6;
+    background: var(--yap-primary);
   }
   .acell[data-level='4'] {
-    background: #93c5fd;
+    background: var(--yap-primary);
   }
   .acell.today {
     box-shadow: 0 0 0 1.5px rgba(147, 197, 253, 0.65);
@@ -2150,7 +2358,7 @@
     align-items: center;
     justify-content: space-between;
     font-size: 11.5px;
-    color: #9ca3af;
+    color: var(--yap-muted);
   }
   .legend-scale {
     display: inline-flex;
@@ -2171,13 +2379,13 @@
     overflow-y: auto;
   }
   .hist-row {
-    background: #181b22;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border);
     border-radius: 6px;
     padding: 8px 10px;
   }
   .hist-text {
-    color: #e5e7eb;
+    color: var(--yap-fg);
     font-size: 13px;
     line-height: 1.45;
     white-space: pre-wrap;
@@ -2186,11 +2394,11 @@
   .hist-meta {
     margin-top: 3px;
     font-size: 11px;
-    color: #6b7280;
+    color: var(--yap-muted-55);
   }
   .hist-empty {
     margin: 0;
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-size: 12.5px;
   }
 
@@ -2213,11 +2421,11 @@
     gap: 10px;
   }
   .usage-label {
-    color: #e5e7eb;
+    color: var(--yap-fg);
     font-size: 12.5px;
   }
   .usage-stat {
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-size: 11.5px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -2225,7 +2433,7 @@
   .usage .track {
     width: 100%;
     height: 6px;
-    background: #181b22;
+    background: var(--yap-s1);
     border-radius: 999px;
     overflow: hidden;
   }
@@ -2242,19 +2450,19 @@
   }
   .usage-caption {
     margin: 2px 0 0;
-    color: #6b7280;
+    color: var(--yap-muted-55);
     font-size: 11px;
   }
   .usage-fine {
     margin: 0;
-    color: #6b7280;
+    color: var(--yap-muted-55);
     font-size: 11px;
     line-height: 1.5;
   }
   .usage-note {
     width: 100%;
     margin: 0;
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-size: 12.5px;
   }
 
@@ -2279,36 +2487,36 @@
     font-weight: 600;
   }
   .ver {
-    color: #6b7280;
+    color: var(--yap-muted-55);
     font-weight: 400;
     font-size: 12px;
     margin-left: 4px;
   }
   .atag {
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-size: 12px;
     margin-top: 2px;
   }
   .aline {
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-size: 12.5px;
     line-height: 1.6;
     margin: 14px 0 0;
   }
   .aprivacy {
-    color: #93c5fd;
+    color: var(--yap-primary);
     font-size: 12.5px;
     margin: 12px 0 0;
   }
   .adir {
-    color: #6b7280;
+    color: var(--yap-muted-55);
     font-size: 12px;
     margin: 10px 0 0;
   }
   .adir code {
-    color: #9ca3af;
-    background: #181b22;
-    border: 1px solid #2a2f3a;
+    color: var(--yap-muted);
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border);
     border-radius: 4px;
     padding: 1px 5px;
   }
@@ -2349,14 +2557,14 @@
     font-size: 12.5px;
   }
   .upd .muted {
-    color: #9ca3af;
+    color: var(--yap-muted);
   }
   .upd-avail {
-    color: #93c5fd;
+    color: var(--yap-primary);
     font-weight: 600;
   }
   .upd-btn {
-    background: #3b82f6;
+    background: var(--yap-primary);
     color: #fff;
     border: none;
     border-radius: 6px;
@@ -2368,29 +2576,119 @@
     background: #2563eb;
   }
   .upd-btn.ghost {
-    background: #181b22;
-    color: #e5e7eb;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s1);
+    color: var(--yap-fg);
+    border: 1px solid var(--yap-border);
   }
   .upd-btn.ghost:hover {
     background: #1f2330;
-    border-color: #3b82f6;
+    border-color: var(--yap-primary);
   }
   .upd-bar {
     margin-top: 10px;
     height: 6px;
     border-radius: 3px;
-    background: #2a2f3a;
+    background: var(--yap-border);
     overflow: hidden;
   }
   .upd-fill {
     height: 100%;
-    background: #3b82f6;
+    background: var(--yap-primary);
     transition: width 0.15s ease;
   }
 
   .loading {
-    color: #6b7280;
+    color: var(--yap-muted-55);
     padding: 20px;
+  }
+
+  /* ---- Account section (UI only) ---- */
+  .acct-hero {
+    display: flex;
+    gap: 18px;
+    align-items: flex-start;
+    padding: 22px;
+    margin-bottom: 22px;
+    border: 1px solid var(--yap-primary-line);
+    border-radius: var(--yap-r-lg);
+    background: linear-gradient(180deg, #24222f, var(--yap-s2));
+  }
+  .acct-badge {
+    width: 46px;
+    height: 46px;
+    flex: 0 0 46px;
+    border-radius: 12px;
+    background: var(--yap-primary-tint);
+    color: var(--yap-primary);
+    display: grid;
+    place-items: center;
+  }
+  .acct-badge :global(svg) {
+    width: 24px;
+    height: 24px;
+  }
+  .acct-hero-body h3 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--yap-fg);
+  }
+  .acct-hero-body p {
+    margin: 0 0 14px;
+    font-size: 12.5px;
+    color: var(--yap-muted-70);
+    line-height: 1.55;
+    max-width: 52ch;
+  }
+  .acct-cta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .google-btn {
+    height: 38px;
+    padding: 0 16px;
+    border-radius: var(--yap-r);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    background: #fff;
+    color: #202124;
+    border: 0;
+    cursor: default;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    opacity: 0.92;
+  }
+  .soon {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--yap-muted);
+    background: var(--yap-raised);
+    padding: 3px 9px;
+    border-radius: var(--yap-r-full);
+  }
+  .acct-privacy {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    font-size: 11.5px;
+    color: var(--yap-muted-55);
+  }
+  .acct-privacy :global(svg) {
+    width: 13px;
+    height: 13px;
+    color: var(--yap-success);
+    flex: 0 0 13px;
+  }
+  .soon-tag {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--yap-muted);
+    background: var(--yap-raised);
+    padding: 2px 9px;
+    border-radius: var(--yap-r-sm);
   }
 </style>

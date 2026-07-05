@@ -46,7 +46,9 @@
     min-width: 0;
   }
   .label {
-    color: #e5e7eb;
+    color: var(--yap-fg);
+    font-size: 12.5px;
+    font-weight: 500;
   }
   .switch-btn {
     flex: 0 0 auto;
@@ -61,26 +63,28 @@
   .switch {
     display: block;
     position: relative;
-    width: 38px;
-    height: 22px;
-    border-radius: 999px;
-    background: #2a2f3a;
-    transition: background 0.18s ease;
+    width: 42px;
+    height: 24px;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-raised);
+    transition: background var(--yap-dur) ease;
   }
   .switch.on {
-    background: #3b82f6;
+    background: var(--yap-primary);
   }
   .knob {
     position: absolute;
     top: 3px;
     left: 3px;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
-    background: #e5e7eb;
-    transition: transform 0.18s ease;
+    background: #d9dade;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    transition: transform var(--yap-dur) ease;
   }
   .switch.on .knob {
-    transform: translateX(16px);
+    transform: translateX(18px);
+    background: #fff;
   }
 </style>

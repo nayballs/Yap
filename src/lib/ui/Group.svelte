@@ -11,24 +11,25 @@
 
 <style>
   .group {
-    margin-bottom: 26px;
+    margin-bottom: 22px;
   }
   h2 {
     font-size: 11px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #6b7280;
-    margin: 0 0 10px;
+    letter-spacing: 0.09em;
+    color: var(--yap-muted-55);
+    margin: 0 0 9px;
     padding-left: 2px;
   }
   .card {
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    background: #161922;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s2);
     overflow: hidden;
   }
-  /* Divided rows: each direct child gets a top border except the first. */
+  /* Divided rows: each direct child gets a hairline top border except the first. */
   .card > :global(* + *) {
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid var(--yap-border-subtle);
   }
 </style>

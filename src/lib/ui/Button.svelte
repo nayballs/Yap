@@ -19,63 +19,72 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 7px;
     border: 1px solid transparent;
-    border-radius: 7px;
+    border-radius: var(--yap-r);
     cursor: pointer;
     font: inherit;
-    font-weight: 500;
+    font-weight: 600;
     line-height: 1;
     transition:
-      background 0.15s ease,
-      border-color 0.15s ease,
-      color 0.15s ease;
+      background var(--yap-dur) ease,
+      border-color var(--yap-dur) ease,
+      color var(--yap-dur) ease,
+      transform var(--yap-dur) ease;
+  }
+  .btn:active:not(:disabled) {
+    transform: scale(0.985);
   }
   .btn:disabled {
     opacity: 0.5;
     cursor: default;
   }
   .md {
-    padding: 9px 16px;
-    font-size: 13px;
+    padding: 0 16px;
+    height: 34px;
+    font-size: 12.5px;
   }
   .sm {
-    padding: 6px 11px;
+    padding: 0 12px;
+    height: 30px;
     font-size: 12px;
   }
 
   .primary {
-    background: #3b82f6;
-    color: #fff;
+    background: var(--yap-primary);
+    color: var(--yap-primary-fg);
+    border-color: var(--yap-primary-line);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   }
   .primary:hover:not(:disabled) {
-    background: #2563eb;
+    background: var(--yap-primary-hover);
   }
 
   .secondary {
-    background: #181b22;
-    border-color: #2a2f3a;
-    color: #e5e7eb;
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: var(--yap-fg-80);
   }
   .secondary:hover:not(:disabled) {
-    border-color: #3b82f6;
+    background: rgba(255, 255, 255, 0.09);
   }
 
   .danger {
     background: transparent;
-    border-color: rgba(239, 68, 68, 0.4);
-    color: #ef4444;
+    border-color: rgba(224, 86, 79, 0.4);
+    color: var(--yap-danger);
   }
   .danger:hover:not(:disabled) {
-    background: rgba(239, 68, 68, 0.12);
-    border-color: #ef4444;
+    background: rgba(224, 86, 79, 0.12);
+    border-color: var(--yap-danger);
   }
 
   .ghost {
     background: transparent;
-    color: #9ca3af;
+    color: var(--yap-muted);
   }
   .ghost:hover:not(:disabled) {
-    color: #e5e7eb;
+    color: var(--yap-fg);
+    background: rgba(255, 255, 255, 0.05);
   }
 </style>
