@@ -128,7 +128,13 @@ back to the raw transcript, so dictation never blocks.
 - **`overlay.rs`** — shows/positions the bottom (or top) center "transcribing" overlay
   window on `yap-state`.
 - **`input_hook.rs`** — low-level Windows keyboard + mouse hooks; spec `kb:VKEY` /
-  `mouse:ID`; emits press AND release.
+  `mouse:ID`; emits press AND release (via an emit-forwarder thread — the hook
+  callback never blocks — plus a 30 s re-hook self-heal). ⚠ **Known Windows
+  gotcha:** when one of Yap's OWN WebView2 windows has focus, the LL hook never
+  receives the hotkey (WebView2/Chromium front-runs the hook chain on focus) —
+  so the Settings + onboarding pages catch the hotkey **in-page** (keydown
+  fallback → `toggle_recording`). Any new Yap window with focusable UI needs the
+  same fallback.
 - **`text_injector.rs`** — clipboard paste (+ optional clipboard restore) and
   `press_submit` (Enter / Ctrl+Enter / Shift+Enter) via `SendInput`. Captures the
   dictation **target window** at record-start (`current_foreground`, skipping Yap's
