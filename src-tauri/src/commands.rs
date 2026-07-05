@@ -62,15 +62,19 @@ pub fn show_onboarding(app: &AppHandle) -> Result<(), String> {
     let w = app
         .get_webview_window("onboarding")
         .ok_or("onboarding window not found")?;
-    // Reload the page on every open. The long-lived hidden webview has been
-    // observed (2026-07-05, CDP debugging) to lose its Tauri event
-    // subscriptions across hide/show + dev-HMR cycles — the UI goes deaf while
-    // fresh listeners on the same page receive fine. A reload gives fresh
-    // listeners and a fresh wizard (starting over is the right UX for a setup
-    // guide anyway).
-    let _ = w.eval("window.location.reload()");
+    // Show FIRST, then reload. Reloading while hidden left the webview with a
+    // frozen visual surface when focused (JS state advanced — log-proven —
+    // but pixels only updated after the window LOST focus). The reload itself
+    // stays: it gives fresh event listeners and a fresh wizard every open.
     let _ = w.show();
     let _ = w.set_focus();
+    let _ = w.eval("window.location.reload()");
+    // Compositor nudge: a 1px resize round-trip forces DWM to recomposite the
+    // webview surface, un-sticking any stale frame.
+    if let Ok(size) = w.inner_size() {
+        let _ = w.set_size(tauri::PhysicalSize::new(size.width + 1, size.height));
+        let _ = w.set_size(size);
+    }
     Ok(())
 }
 
