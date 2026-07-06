@@ -72,6 +72,14 @@ your voice to the cloud. Yap refuses the choice:
   time saved vs typing, day streak, 30-day activity heatmap.
 - 📖 **Correction dictionary** — teach it your jargon once ("Power to Keep" → "Parakeet"),
   never fix it again.
+- 🗒️ **AI Notepad** — folders, an Actions engine (Generate Notes, Action Items…),
+  attendees, and one-click markdown export.
+- 🗓️ **Meeting recorder** — captures mic + system audio as a live You/Them
+  transcript and auto-writes meeting minutes when you stop.
+- 📤 **Upload & transcribe** — drop in an existing audio file for fully local
+  transcription, no cloud round-trip.
+- 💬 **AI chat over your notes** — ask questions grounded in your notes, backed by
+  a local tool-calling loop that can search, create, and update notes for you.
 - 🌍 **Multilingual** — per-model language selection and translate-to-English.
 - 🍰 **Polished, minimal UI** — a floating waveform overlay while you speak, an optional
   always-on-top pill, a state-aware tray icon, live streaming partials (opt-in).

@@ -5,11 +5,11 @@
 > 1:1?" is a document lookup, not a screenshot hunt. Regenerate by re-running the
 > `openwhispr-parity-matrix` audit workflow when either side changes.
 
-Reference repo: `E:/Projects/references/openwhispr`. Last audit: 2026-07-05.
+Reference repo: `E:/Projects/references/openwhispr`. Last audit: 2026-07-06.
 
 **Legend** — ✅ Done (equivalent exists) · 🟡 Partial (present but less complete) · ❌ Gap (missing, not a deliberate choice) · ⚪ Intentional (deliberate divergence, documented in `ROADMAP.md`).
 
-**Status:** 26/55 ✅ done · 6 🟡 partial · 16 ❌ gap · 7 ⚪ intentional *(at audit time)*.
+**Status:** 35/57 ✅ done · 6 🟡 partial · 10 ❌ gap · 6 ⚪ intentional *(as of 2026-07-06, recounted from the table below)*.
 
 > **Update — 2026-07-05, post-audit.** Built the **Local-mode model browser** (former headline
 > gap #1). The 6 SHA-pinned curated models are now surfaced as downloadable **cards** — name, size,

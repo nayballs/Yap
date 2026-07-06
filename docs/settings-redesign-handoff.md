@@ -1,5 +1,9 @@
 # Yap settings redesign — handoff / context
 
+> **Historical.** This handoff predates the 2026-07-05/06 parity pushes; the work it
+> describes has shipped (see [`ROADMAP.md`](../ROADMAP.md) and
+> [`docs/openwhispr-parity.md`](./openwhispr-parity.md)).
+
 > A cold-start briefing for another AI assistant (or a future me). It explains **what we're
 > doing, why, what's done, the decisions that are locked, and what's next.** Paired with
 > [`CLAUDE.md`](../CLAUDE.md) (how Yap works), [`ROADMAP.md`](../ROADMAP.md) (where it's going),

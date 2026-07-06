@@ -53,7 +53,10 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 - **External links:** `tauri-plugin-opener` (opens URLs in the default browser).
 - **Dialogs:** `tauri-plugin-dialog` (file open/save dialogs for note export and upload).
 - **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`,
-  `history.json`).
+  `history.json`, `notes.json` — the AI Notepad store, `chats.json` — AI Chat
+  conversations). Every JSON store writes atomically and quarantines a corrupt
+  file on load instead of crashing (`config::atomic_write`/`quarantine_corrupt`,
+  used by all five stores).
 
 ---
 
@@ -117,7 +120,13 @@ back to the raw transcript, so dictation never blocks.
   The system prompt is split FluidVoice-style: an immutable `BASE_PROMPT` (guardrails:
   output-only, never answer the transcript) that's always prepended via
   `build_system_prompt()` to the user's editable **body** (tone/format = a preset or
-  custom text). Records token/request usage (best-effort).
+  custom text). Records token/request usage (best-effort). Also carries
+  `EDIT_BASE_PROMPT` (edit/rewrite mode's guardrails), `NOTE_BASE_PROMPT` +
+  `MEETING_NOTE_BASE_PROMPT` + `NOTE_DEFAULT_FRAGMENT` (note enhancement's
+  guardrails/action fragment), `enhance_note` (the Actions-engine call),
+  `note_chat` (embedded per-note chat + Chat-surface turns), and
+  `post_chat_message` (the tool-loop variant that returns the whole assistant
+  message, incl. `tool_calls`, instead of just the text).
 - **`local_llm.rs`** — the on-device AI cleanup sidecar: runs **Mozilla llamafile**
   (llama.cpp, single-file OpenAI-compatible server) as a hidden child process on a
   free localhost port, serving **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) by default
@@ -162,6 +171,19 @@ back to the raw transcript, so dictation never blocks.
   quietest sample of each window's last 5 s). Consumed by
   `pipeline::run_file_transcription` (progress events, cancel flag, `processing`
   guard, history record) via the `transcribe_file` command.
+- **`chats.rs`** — the AI Chat surface's conversation store (`chats.json`): a
+  `Conversation` (title, messages, timestamps) with `list`/`get`/`create`/
+  `append`/`delete`; `chat_send` (commands.rs) creates a conversation on the
+  first message using a first-50-chars title rule.
+- **`tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
+  near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
+  `get_note`, `create_note`, `update_note`, `list_folders`,
+  `copy_to_clipboard` — executed locally over `notes.rs`/`arboard`), plus their
+  `TOOL_INSTRUCTIONS` system-prompt lines. `run_tool_loop` drives the OpenAI
+  tool-call protocol via `llm::post_chat_message` for up to `MAX_TOOL_STEPS`
+  (20) turns. Gated by `supports_tools` — cloud providers always qualify,
+  local models need ≥4B params (`LOCAL_TOOL_MIN_PARAMS_B`) — so smaller local
+  models fall back to plain keyword-RAG chat instead.
 - **`history.rs`** — local-only transcription history (`history.json`): each
   dictation's timestamp, raw + final text, model, and focused app. Best-effort,
   gated by `history_enabled`. Derives the stats dashboard (words, time-saved vs
@@ -234,7 +256,11 @@ back to the raw transcript, so dictation never blocks.
   stream swap, `set_mic_test` — idle level meter), windows (`open_settings`,
   `open_onboarding`, `close_onboarding`, `set_pill_visible`, `set_pill_scale`),
   `configure_hotkey`, `set_autostart`, `is_portable`, `test_post_process`,
-  `get_groq_usage`, history (`get_history`, `clear_history`, `get_stats`).
+  `get_groq_usage`, history (`get_history`, `clear_history`, `get_stats`),
+  plus the notes/actions/folders CRUD + `note_enhance`/`note_ask`/`note_export`,
+  chats CRUD + `chat_send` (RAG + tool loop), `meeting_start`/`meeting_stop`/
+  `meeting_state`, `transcribe_file`/`cancel_file_transcription`/
+  `audio_file_info`, `log_info`/`open_logs_folder`, `delete_history_entry`.
 
 ### Frontend (`src/`)
 - **`lib/ControlPanel.svelte`** — the **main window** (window label is still
@@ -437,6 +463,11 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   downloaded from `https://blob.handy.computer/` (SHA-256 verified).
 - Groq usage: `%APPDATA%/yap/groq_usage.json`.
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → History).
+- Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
+  participants, meeting transcripts).
+- Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chats.rs`).
+- All of the above (plus config) write atomically and quarantine a corrupt file
+  on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`).
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
   recording mode `toggle`, **pill hidden**, overlay shown, AI cleanup **off**.
@@ -446,20 +477,37 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 ## Current status
 
 **Transcription is REAL and GPU-accelerated** (no longer a stub in `engines`
-builds). Working end-to-end: multi-engine STT (Whisper/Vulkan + ONNX/DirectML), the
-14-model registry + manager, settings, tray, overlay, scrolling waveform, recording
-modes, language/translate, **AI cleanup** (BYO key or local sidecar), per-app cleanup
-routing + named profiles, **edit/rewrite mode**, the audio pre-roll (anti first-word
-clipping), streaming partials (opt-in), transcription history + stats, cleanup presets,
-real WASAPI mute, the Groq usage meter, and the installer + auto-updater + portable
-mode + release CI. The default (no-feature) build still ships the stub for fast
-`cargo check`.
+builds), and the dictation pipeline around it is complete: multi-engine STT
+(Whisper/Vulkan + ONNX/DirectML), the 14-model registry + manager, recording modes,
+language/translate, **AI cleanup** (BYO key or local sidecar) with per-app routing +
+named profiles + per-profile model choice, **edit/rewrite mode** + the **Voice Agent
+wake word**, combo hotkeys, the audio pre-roll (anti first-word clipping), streaming
+partials (opt-in), transcription history + stats, cleanup presets, real WASAPI mute,
+the Groq usage meter, and the installer + auto-updater + portable mode + release CI.
+On top of that, the main window is now a full **ControlPanel** (Home dictation feed
+w/ Ctrl+K search, Chat, Notes, Upload, Dictionary, Settings as an always-mounted
+modal, app-wide toasts): local audio-**file** transcription (Upload — `media.rs`
+Symphonia decode + chunking), an **AI Notepad** (`notes.rs` — folders/actions/
+participants/transcripts, an Actions engine, ActionPicker/ActionManager, attendee +
+folder management, markdown export, an embedded per-note chat), a **meeting
+recorder** (`meeting.rs` — mic + WASAPI loopback → You/Them transcript → an
+auto-generated Meeting Notes action), and an **AI Chat** surface (`chats.rs` + eager
+keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six tools,
+≤20-step loop, gated to cloud or ≥4B local models). Every JSON store now writes
+atomically with corrupt-file quarantine. The default (no-feature) build still ships
+the stub for fast `cargo check`.
 
-Not yet done: validate + default-on streaming partials on the Vulkan build (and a true
-streaming model for the partial pass — see [`ROADMAP.md`](./ROADMAP.md) Phase 1), fuzzy/
-near-miss dictionary, verify-after-paste (UIA `ValuePattern`), Authenticode signing
-(blocked on SignPath approval), audio-history export, and non-Windows polish. See
-[`ROADMAP.md`](./ROADMAP.md).
+Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
+search (keyword-RAG only), and no `web_search`/calendar tools or conversation
+search/archive/rename; the AI Notepad has no rich markdown editor (plain textarea)
+or folder "add existing note" picker; the meeting recorder's full pipeline is
+verified (incl. WASAPI loopback delivering audio) but real transcript TEXT still
+needs one pass on the `engines` build (Upload IS live-verified — a real mp3
+transcribed end-to-end); validating + defaulting-on streaming partials on the Vulkan build (and a true
+streaming model for the partial pass — see [`ROADMAP.md`](./ROADMAP.md) Phase 1);
+fuzzy/near-miss dictionary matching; verify-after-paste (UIA `ValuePattern`);
+Authenticode signing (blocked on SignPath approval); audio-history export; and
+non-Windows (Linux/macOS) polish. See [`ROADMAP.md`](./ROADMAP.md).
 
 ---
 
