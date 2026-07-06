@@ -7,6 +7,7 @@
 //! The dictation engine (input hook, STT, text injection) is ported verbatim
 //! from Voice Mirror; everything else here is the slim glue.
 
+mod agent_detect;
 mod commands;
 mod config;
 mod history;
@@ -146,6 +147,9 @@ pub fn run() {
         // + process for relaunch after install. Desktop-only.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // External links ("Get your API key", GitHub, Learn more) open in the
+        // default browser — target=_blank does nothing in a Tauri webview.
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             pipeline: Mutex::new(None),
         })
@@ -175,10 +179,13 @@ pub fn run() {
             commands::set_pill_visible,
             commands::is_portable,
             commands::test_post_process,
+            commands::get_base_prompt,
+            commands::get_edit_base_prompt,
             commands::local_llm_status,
             commands::local_llm_start,
             commands::local_llm_stop,
             commands::local_llm_install,
+            commands::local_llm_delete,
             commands::open_llm_folder,
             commands::get_groq_usage,
             commands::get_history,

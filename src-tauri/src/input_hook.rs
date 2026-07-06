@@ -25,13 +25,26 @@ use tracing::{error, warn};
 const KEY_TYPE_NONE: u8 = 0;
 const KEY_TYPE_KEYBOARD: u8 = 1;
 const KEY_TYPE_MOUSE: u8 = 2;
+/// Modifier-only chord (e.g. hold Ctrl+Alt) — no main key. Ported from
+/// OpenWhispr's `windows-key-listener.c` `g_useModifiersOnly` mode.
+const KEY_TYPE_MODS: u8 = 3;
+
+// Modifier bitmask (matches the required-modifier flags in OpenWhispr's C
+// listener: Ctrl / Alt / Shift / Win).
+const MOD_CTRL: u8 = 1;
+const MOD_ALT: u8 = 2;
+const MOD_SHIFT: u8 = 4;
+const MOD_WIN: u8 = 8;
 
 /// A configurable key binding (dictation key, edit key).
 struct KeyBinding {
-    /// 0=none, 1=keyboard vkey, 2=mouse button
+    /// 0=none, 1=keyboard vkey, 2=mouse button, 3=modifier-only chord
     key_type: AtomicU8,
-    /// Virtual key code (for keyboard) or button ID (for mouse)
+    /// Virtual key code (for keyboard) or button ID (for mouse); 0 for chords
     key_code: AtomicU32,
+    /// Required modifiers (MOD_* bitmask). "At least these held" — extra
+    /// modifiers are tolerated, same as OpenWhispr's listener.
+    mods: AtomicU8,
     /// Whether the key is currently pressed (for repeat suppression)
     active: AtomicBool,
 }
@@ -41,24 +54,29 @@ impl KeyBinding {
         Self {
             key_type: AtomicU8::new(KEY_TYPE_NONE),
             key_code: AtomicU32::new(0),
+            mods: AtomicU8::new(0),
             active: AtomicBool::new(false),
         }
     }
 
-    fn configure(&self, key_type: u8, key_code: u32) {
+    fn configure(&self, key_type: u8, key_code: u32, mods: u8) {
         self.active.store(false, Ordering::Relaxed);
         self.key_type.store(key_type, Ordering::Release);
         self.key_code.store(key_code, Ordering::Release);
-    }
-
-    fn matches_keyboard(&self, vkey: u32) -> bool {
-        self.key_type.load(Ordering::Acquire) == KEY_TYPE_KEYBOARD
-            && self.key_code.load(Ordering::Acquire) == vkey
+        self.mods.store(mods, Ordering::Release);
     }
 
     fn matches_mouse(&self, button_id: u32) -> bool {
         self.key_type.load(Ordering::Acquire) == KEY_TYPE_MOUSE
             && self.key_code.load(Ordering::Acquire) == button_id
+    }
+
+    fn kind_code_mods(&self) -> (u8, u32, u8) {
+        (
+            self.key_type.load(Ordering::Acquire),
+            self.key_code.load(Ordering::Acquire),
+            self.mods.load(Ordering::Acquire),
+        )
     }
 
     fn type_and_code(&self) -> (u8, u32) {
@@ -89,12 +107,15 @@ static EVENT_TX: std::sync::OnceLock<std::sync::mpsc::Sender<&'static str>> =
 ///
 /// Formats:
 /// - `"kb:52"` — keyboard virtual key code 52 (the "4" key)
+/// - `"kb:ctrl+shift+32"` — modifier combo: Ctrl+Shift+Space
+/// - `"kb:165"` — a single right-side modifier (VK_RMENU = RightAlt)
+/// - `"mods:ctrl+alt"` — modifier-only chord (2+ modifiers, no main key)
 /// - `"mouse:4"` — mouse button 4 (XBUTTON1 / back)
 /// - `"MouseButton4"` — legacy format, equivalent to `"mouse:4"`
 pub fn configure_dictation(key_spec: &str) -> Result<String, String> {
-    let (key_type, key_code) = parse_key_spec(key_spec)?;
-    DICTATION_BINDING.configure(key_type, key_code);
-    let desc = format_binding(key_type, key_code);
+    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
+    DICTATION_BINDING.configure(key_type, key_code, mods);
+    let desc = format_binding(key_type, key_code, mods);
     info!("Dictation key configured: {} (spec: {:?})", desc, key_spec);
     Ok(desc)
 }
@@ -102,47 +123,100 @@ pub fn configure_dictation(key_spec: &str) -> Result<String, String> {
 /// Parse a key spec string and configure the edit/rewrite-mode binding. An empty
 /// spec unbinds it (edit mode is opt-in).
 pub fn configure_edit(key_spec: &str) -> Result<String, String> {
-    let (key_type, key_code) = parse_key_spec(key_spec)?;
-    EDIT_BINDING.configure(key_type, key_code);
-    let desc = format_binding(key_type, key_code);
+    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
+    EDIT_BINDING.configure(key_type, key_code, mods);
+    let desc = format_binding(key_type, key_code, mods);
     info!("Edit key configured: {} (spec: {:?})", desc, key_spec);
     Ok(desc)
 }
 
-fn parse_key_spec(spec: &str) -> Result<(u8, u32), String> {
-    if spec.is_empty() {
-        return Ok((KEY_TYPE_NONE, 0));
+/// Parse one modifier token ("ctrl", "alt", …) to its MOD_* bit.
+fn parse_mod_token(token: &str) -> Option<u8> {
+    match token.to_ascii_lowercase().as_str() {
+        "ctrl" | "control" => Some(MOD_CTRL),
+        "alt" | "option" => Some(MOD_ALT),
+        "shift" => Some(MOD_SHIFT),
+        "win" | "super" | "meta" | "cmd" | "command" => Some(MOD_WIN),
+        _ => None,
     }
-    // New format: "kb:52" or "mouse:4"
-    if let Some(vkey) = spec.strip_prefix("kb:") {
-        let code = vkey
+}
+
+fn parse_key_spec(spec: &str) -> Result<(u8, u32, u8), String> {
+    if spec.is_empty() {
+        return Ok((KEY_TYPE_NONE, 0, 0));
+    }
+    // "kb:52" or "kb:ctrl+shift+52" — modifier tokens then the main vkey.
+    if let Some(rest) = spec.strip_prefix("kb:") {
+        let mut mods: u8 = 0;
+        let tokens: Vec<&str> = rest.split('+').collect();
+        let (mod_tokens, key_token) = tokens.split_at(tokens.len() - 1);
+        for t in mod_tokens {
+            mods |= parse_mod_token(t).ok_or_else(|| format!("Unknown modifier: '{}'", t))?;
+        }
+        let code = key_token[0]
             .parse::<u32>()
-            .map_err(|_| format!("Invalid vkey: {}", vkey))?;
-        return Ok((KEY_TYPE_KEYBOARD, code));
+            .map_err(|_| format!("Invalid vkey: {}", key_token[0]))?;
+        return Ok((KEY_TYPE_KEYBOARD, code, mods));
+    }
+    // "mods:ctrl+alt" — modifier-only chord. Require 2+ so a lone "mods:ctrl"
+    // can't hijack every Ctrl press (single right-side modifiers are plain
+    // "kb:<vk>" bindings instead — VK_RCONTROL etc.).
+    if let Some(rest) = spec.strip_prefix("mods:") {
+        let mut mods: u8 = 0;
+        let mut count = 0usize;
+        for t in rest.split('+') {
+            mods |= parse_mod_token(t).ok_or_else(|| format!("Unknown modifier: '{}'", t))?;
+            count += 1;
+        }
+        if count < 2 || mods.count_ones() < 2 {
+            return Err("A modifier-only chord needs at least 2 distinct modifiers".into());
+        }
+        return Ok((KEY_TYPE_MODS, 0, mods));
     }
     if let Some(btn) = spec.strip_prefix("mouse:") {
         let code = btn
             .parse::<u32>()
             .map_err(|_| format!("Invalid button: {}", btn))?;
-        return Ok((KEY_TYPE_MOUSE, code));
+        return Ok((KEY_TYPE_MOUSE, code, 0));
     }
     // Legacy format: "MouseButton4" → mouse button 4
     if let Some(rest) = spec.strip_prefix("MouseButton") {
         let id = rest
             .parse::<u32>()
             .map_err(|_| format!("Invalid MouseButton: {}", rest))?;
-        return Ok((KEY_TYPE_MOUSE, id));
+        return Ok((KEY_TYPE_MOUSE, id, 0));
     }
     Err(format!(
-        "Unknown key spec: '{}'. Use 'kb:CODE' or 'mouse:ID'.",
+        "Unknown key spec: '{}'. Use 'kb:CODE', 'kb:MODS+CODE', 'mods:MODS' or 'mouse:ID'.",
         spec
     ))
 }
 
-fn format_binding(key_type: u8, key_code: u32) -> String {
+fn format_mods(mods: u8) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if mods & MOD_CTRL != 0 {
+        parts.push("ctrl");
+    }
+    if mods & MOD_ALT != 0 {
+        parts.push("alt");
+    }
+    if mods & MOD_SHIFT != 0 {
+        parts.push("shift");
+    }
+    if mods & MOD_WIN != 0 {
+        parts.push("win");
+    }
+    parts.join("+")
+}
+
+fn format_binding(key_type: u8, key_code: u32, mods: u8) -> String {
     match key_type {
+        KEY_TYPE_KEYBOARD if mods != 0 => {
+            format!("keyboard {}+vkey {}", format_mods(mods), key_code)
+        }
         KEY_TYPE_KEYBOARD => format!("keyboard vkey {}", key_code),
         KEY_TYPE_MOUSE => format!("mouse button {}", key_code),
+        KEY_TYPE_MODS => format!("modifier chord {}", format_mods(mods)),
         _ => "none".into(),
     }
 }
@@ -167,11 +241,14 @@ mod win32 {
     pub const WM_XBUTTONUP: u32 = 0x020C;
     pub const WM_TIMER: u32 = 0x0113;
 
-    pub const VK_CONTROL: i32 = 0x11;
-    pub const VK_MENU: i32 = 0x12;
-    pub const VK_SHIFT: i32 = 0x10;
     pub const VK_LWIN: i32 = 0x5B;
     pub const VK_RWIN: i32 = 0x5C;
+    pub const VK_LSHIFT: i32 = 0xA0;
+    pub const VK_RSHIFT: i32 = 0xA1;
+    pub const VK_LCONTROL: i32 = 0xA2;
+    pub const VK_RCONTROL: i32 = 0xA3;
+    pub const VK_LMENU: i32 = 0xA4;
+    pub const VK_RMENU: i32 = 0xA5;
 
     #[repr(C)]
     pub struct POINT {
@@ -240,17 +317,56 @@ mod win32 {
     }
 }
 
-/// Check if any modifier key is currently held.
-/// Used to avoid suppressing keys when part of a modifier combo (Ctrl+4, etc.)
+/// Which modifier family (MOD_* bit) a virtual key belongs to; 0 for
+/// non-modifier keys. The LL hook reports side-specific codes (VK_LCONTROL…),
+/// but the generic codes are included for injected input.
 #[cfg(target_os = "windows")]
-fn modifiers_held() -> bool {
-    unsafe {
-        win32::GetAsyncKeyState(win32::VK_CONTROL) < 0
-            || win32::GetAsyncKeyState(win32::VK_MENU) < 0
-            || win32::GetAsyncKeyState(win32::VK_SHIFT) < 0
-            || win32::GetAsyncKeyState(win32::VK_LWIN) < 0
-            || win32::GetAsyncKeyState(win32::VK_RWIN) < 0
+fn modifier_family(vk: u32) -> u8 {
+    match vk {
+        0x11 | 0xA2 | 0xA3 => MOD_CTRL,  // VK_CONTROL / L / R
+        0x12 | 0xA4 | 0xA5 => MOD_ALT,   // VK_MENU / L / R
+        0x10 | 0xA0 | 0xA1 => MOD_SHIFT, // VK_SHIFT / L / R
+        0x5B | 0x5C => MOD_WIN,          // VK_LWIN / VK_RWIN
+        _ => 0,
     }
+}
+
+/// Is any key of `family` down, ignoring `exclude_vk`? `GetAsyncKeyState` is
+/// unreliable for the key that triggered the *current* hook callback (the state
+/// isn't updated yet), so callers exclude it and supply its event state — the
+/// same trick as OpenWhispr's `SyncModifierState`.
+#[cfg(target_os = "windows")]
+fn family_down_excluding(family: u8, exclude_vk: u32) -> bool {
+    let vks: &[i32] = match family {
+        MOD_CTRL => &[win32::VK_LCONTROL, win32::VK_RCONTROL],
+        MOD_ALT => &[win32::VK_LMENU, win32::VK_RMENU],
+        MOD_SHIFT => &[win32::VK_LSHIFT, win32::VK_RSHIFT],
+        MOD_WIN => &[win32::VK_LWIN, win32::VK_RWIN],
+        _ => &[],
+    };
+    vks.iter()
+        .any(|&vk| vk as u32 != exclude_vk && unsafe { win32::GetAsyncKeyState(vk) } < 0)
+}
+
+/// Current modifier state as a MOD_* bitmask. When the in-flight hook event is
+/// itself a modifier, its own family is decided by the event (`is_down`) OR'd
+/// with the *other* side's async state (releasing LCtrl while RCtrl is held
+/// keeps Ctrl "down").
+#[cfg(target_os = "windows")]
+fn mods_now(current_vk: u32, is_down: bool) -> u8 {
+    let current_family = modifier_family(current_vk);
+    let mut mods = 0u8;
+    for family in [MOD_CTRL, MOD_ALT, MOD_SHIFT, MOD_WIN] {
+        let held = if family == current_family {
+            is_down || family_down_excluding(family, current_vk)
+        } else {
+            family_down_excluding(family, 0)
+        };
+        if held {
+            mods |= family;
+        }
+    }
+    mods
 }
 
 /// Handle a press/release for a key binding. Emits Tauri events and
@@ -289,6 +405,94 @@ fn handle_binding_event(
 
 // ---- Keyboard hook callback ----
 
+/// Process one keyboard event against one binding. Returns whether the event
+/// should be **suppressed** (swallowed before it reaches the focused app).
+///
+/// Semantics (ported from OpenWhispr's `windows-key-listener.c`, keeping Yap's
+/// original bare-key behaviour):
+/// - **Bare key** (`kb:120`): press only starts when NO modifier is held, so
+///   Ctrl+F9 etc. pass through as normal shortcuts (Yap's original rule). The
+///   release is honoured regardless of modifier state. Suppressed both ways.
+/// - **Combo** (`kb:ctrl+shift+32`): press fires when the main key goes down
+///   with at least the required modifiers held (extras tolerated); the main
+///   key is suppressed, the modifiers are not. Releasing the main key OR any
+///   required modifier ends the press (so push-to-talk can't get stuck).
+/// - **Right-side single modifier** (`kb:165` = RightAlt): a plain vkey
+///   binding whose key IS a modifier — never suppressed (RightAlt is AltGr on
+///   international layouts) and exempt from the bare-key "no modifiers held"
+///   guard (its own family is held by definition).
+/// - **Modifier-only chord** (`mods:ctrl+alt`): press fires the instant the
+///   chord completes; release when any chord modifier lifts. Never suppressed.
+/// - Self-heal: while active, any other key event verifies the main key is
+///   still physically down (`GetAsyncKeyState` is reliable for keys other than
+///   the in-flight one) — a keyup eaten by Win+L etc. can't strand the binding.
+#[cfg(target_os = "windows")]
+fn process_keyboard_event(
+    binding: &KeyBinding,
+    pressed: &'static str,
+    released: &'static str,
+    vkey: u32,
+    is_keydown: bool,
+) -> bool {
+    let (kind, code, required) = binding.kind_code_mods();
+    match kind {
+        KEY_TYPE_KEYBOARD => {
+            let bound_is_modifier = modifier_family(code) != 0;
+            if vkey == code {
+                if is_keydown {
+                    let held = mods_now(vkey, true);
+                    if required == 0 {
+                        // Bare key: keep Yap's guard — modifier combos like
+                        // Ctrl+F9 pass through — unless the bound key is
+                        // itself a modifier (RightAlt holds Alt by nature).
+                        if !bound_is_modifier && held != 0 {
+                            return false;
+                        }
+                    } else if held & required != required {
+                        return false; // required modifiers absent → passthrough
+                    }
+                    handle_binding_event(binding, pressed, released, true);
+                    return !bound_is_modifier; // never suppress modifier keys
+                }
+                let ours = handle_binding_event(binding, pressed, released, false);
+                return ours && !bound_is_modifier;
+            }
+            // Another key's event while our press is active: two safety rules.
+            if binding.active.load(Ordering::Relaxed) {
+                let family = modifier_family(vkey);
+                if required != 0 && !is_keydown && family != 0 && required & family != 0 {
+                    // 1. A required modifier was released → end the press.
+                    if mods_now(vkey, false) & required != required {
+                        handle_binding_event(binding, pressed, released, false);
+                    }
+                } else if bound_is_modifier
+                    && unsafe { win32::GetAsyncKeyState(code as i32) } >= 0
+                {
+                    // 2. Self-heal a missed main-key keyup — ONLY for
+                    // unsuppressed (modifier) bindings: a suppressed key never
+                    // registers in GetAsyncKeyState (the hook eats the event
+                    // before the key-state table updates), so an async check
+                    // on it would "heal" a perfectly live press.
+                    handle_binding_event(binding, pressed, released, false);
+                }
+            }
+            false
+        }
+        KEY_TYPE_MODS => {
+            let held = mods_now(vkey, is_keydown);
+            if is_keydown {
+                if held & required == required {
+                    handle_binding_event(binding, pressed, released, true);
+                }
+            } else if binding.active.load(Ordering::Relaxed) && held & required != required {
+                handle_binding_event(binding, pressed, released, false);
+            }
+            false // chords are made of modifiers — never suppressed
+        }
+        _ => false,
+    }
+}
+
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn low_level_keyboard_proc(
     code: i32,
@@ -302,13 +506,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
 
         let is_keydown = msg == win32::WM_KEYDOWN || msg == win32::WM_SYSKEYDOWN;
 
-        // A bound key is handled on BOTH press and release. The press only
-        // *starts* a binding when no modifier is held, so combos (Ctrl+F9,
-        // Alt+Tab, …) pass through as normal shortcuts. The release is honoured
-        // **regardless** of modifier state — otherwise pressing a modifier after
-        // the hotkey is down (very common while dictating) would swallow the
-        // keyup, stranding the binding `active` forever (dead hotkey / PTT that
-        // never stops).
+        let mut suppress = false;
         for (binding, pressed, released) in [
             (
                 &DICTATION_BINDING,
@@ -317,20 +515,10 @@ unsafe extern "system" fn low_level_keyboard_proc(
             ),
             (&EDIT_BINDING, "edit-key-pressed", "edit-key-released"),
         ] {
-            if !binding.matches_keyboard(vkey) {
-                continue;
-            }
-            if is_keydown {
-                if modifiers_held() {
-                    break; // modifier combo — let it through as a shortcut
-                }
-                handle_binding_event(binding, pressed, released, true);
-                return 1; // suppress so the raw key doesn't land in the field
-            } else if handle_binding_event(binding, pressed, released, false) {
-                return 1; // we were tracking this key — swallow its keyup too
-            } else {
-                break; // not our key (never started) — let the keyup pass
-            }
+            suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
+        }
+        if suppress {
+            return 1;
         }
     }
 
@@ -509,36 +697,92 @@ mod tests {
 
     #[test]
     fn parse_keyboard_spec() {
-        assert_eq!(parse_key_spec("kb:52").unwrap(), (KEY_TYPE_KEYBOARD, 52));
-        assert_eq!(parse_key_spec("kb:100").unwrap(), (KEY_TYPE_KEYBOARD, 100));
+        assert_eq!(parse_key_spec("kb:52").unwrap(), (KEY_TYPE_KEYBOARD, 52, 0));
+        assert_eq!(
+            parse_key_spec("kb:100").unwrap(),
+            (KEY_TYPE_KEYBOARD, 100, 0)
+        );
+    }
+
+    #[test]
+    fn parse_combo_spec() {
+        assert_eq!(
+            parse_key_spec("kb:ctrl+shift+32").unwrap(),
+            (KEY_TYPE_KEYBOARD, 32, MOD_CTRL | MOD_SHIFT)
+        );
+        assert_eq!(
+            parse_key_spec("kb:alt+120").unwrap(),
+            (KEY_TYPE_KEYBOARD, 120, MOD_ALT)
+        );
+        // modifier names are case-insensitive; win/super/meta are aliases
+        assert_eq!(
+            parse_key_spec("kb:Ctrl+Win+65").unwrap(),
+            (KEY_TYPE_KEYBOARD, 65, MOD_CTRL | MOD_WIN)
+        );
+        // a right-side modifier as the main key is a plain vkey binding
+        assert_eq!(
+            parse_key_spec("kb:165").unwrap(),
+            (KEY_TYPE_KEYBOARD, 165, 0)
+        );
+        assert!(parse_key_spec("kb:bogus+32").is_err());
+    }
+
+    #[test]
+    fn parse_mods_only_spec() {
+        assert_eq!(
+            parse_key_spec("mods:ctrl+alt").unwrap(),
+            (KEY_TYPE_MODS, 0, MOD_CTRL | MOD_ALT)
+        );
+        assert_eq!(
+            parse_key_spec("mods:ctrl+alt+shift").unwrap(),
+            (KEY_TYPE_MODS, 0, MOD_CTRL | MOD_ALT | MOD_SHIFT)
+        );
+        // a single modifier (or the same one twice) can't be a chord — it
+        // would hijack every plain Ctrl press
+        assert!(parse_key_spec("mods:ctrl").is_err());
+        assert!(parse_key_spec("mods:ctrl+ctrl").is_err());
+        assert!(parse_key_spec("mods:ctrl+bogus").is_err());
     }
 
     #[test]
     fn parse_mouse_spec() {
-        assert_eq!(parse_key_spec("mouse:4").unwrap(), (KEY_TYPE_MOUSE, 4));
-        assert_eq!(parse_key_spec("mouse:5").unwrap(), (KEY_TYPE_MOUSE, 5));
+        assert_eq!(parse_key_spec("mouse:4").unwrap(), (KEY_TYPE_MOUSE, 4, 0));
+        assert_eq!(parse_key_spec("mouse:5").unwrap(), (KEY_TYPE_MOUSE, 5, 0));
     }
 
     #[test]
     fn parse_legacy_spec() {
         assert_eq!(
             parse_key_spec("MouseButton4").unwrap(),
-            (KEY_TYPE_MOUSE, 4)
+            (KEY_TYPE_MOUSE, 4, 0)
         );
         assert_eq!(
             parse_key_spec("MouseButton3").unwrap(),
-            (KEY_TYPE_MOUSE, 3)
+            (KEY_TYPE_MOUSE, 3, 0)
         );
     }
 
     #[test]
     fn parse_empty_spec() {
-        assert_eq!(parse_key_spec("").unwrap(), (KEY_TYPE_NONE, 0));
+        assert_eq!(parse_key_spec("").unwrap(), (KEY_TYPE_NONE, 0, 0));
     }
 
     #[test]
     fn parse_invalid_spec() {
         assert!(parse_key_spec("garbage").is_err());
         assert!(parse_key_spec("kb:notanumber").is_err());
+    }
+
+    #[test]
+    fn format_binding_describes_combos() {
+        assert_eq!(
+            format_binding(KEY_TYPE_KEYBOARD, 32, MOD_CTRL | MOD_SHIFT),
+            "keyboard ctrl+shift+vkey 32"
+        );
+        assert_eq!(
+            format_binding(KEY_TYPE_MODS, 0, MOD_CTRL | MOD_ALT),
+            "modifier chord ctrl+alt"
+        );
+        assert_eq!(format_binding(KEY_TYPE_KEYBOARD, 120, 0), "keyboard vkey 120");
     }
 }

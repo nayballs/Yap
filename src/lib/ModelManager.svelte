@@ -4,7 +4,9 @@
   import { onMount } from 'svelte';
   import { MODELS } from './models.js';
   import { modelStore, refreshModels, setActiveModel } from './modelStore.svelte.js';
-  import ModelCard from './ModelCard.svelte';
+  import ModelRow from './ModelRow.svelte';
+  import PillTabs from './ui/PillTabs.svelte';
+  import { ENGINE_PROVIDER, PROVIDER_ICONS } from './providerIcons.js';
 
   let busyId = $state(null); // model id being downloaded / switched to
   let percent = $state(0); // download progress for busyId
@@ -19,9 +21,17 @@
     return 'downloadable';
   }
 
-  // "Your models" (installed) vs "Available" grouping.
-  const yours = $derived(MODELS.filter((m) => modelStore.installed.includes(m.id)));
-  const available = $derived(MODELS.filter((m) => !modelStore.installed.includes(m.id)));
+  // Vendor pill tabs (OpenWhispr-style): brand tabs + a catch-all. A model's
+  // tab comes from its engine family (Parakeet/Canary → NVIDIA, Whisper → OpenAI).
+  const vendorOf = (m) => ENGINE_PROVIDER[m.engine] ?? 'community';
+  const TABS = [
+    { value: 'all', label: 'All' },
+    { value: 'nvidia', label: 'NVIDIA', icon: PROVIDER_ICONS.nvidia },
+    { value: 'openai', label: 'OpenAI', icon: PROVIDER_ICONS.openai, mono: true },
+    { value: 'community', label: 'Community' },
+  ];
+  let tab = $state('all');
+  const shown = $derived(tab === 'all' ? MODELS : MODELS.filter((m) => vendorOf(m) === tab));
 
   onMount(() => {
     refreshModels();
@@ -88,31 +98,15 @@
 </script>
 
 <div class="manager">
-  {#if yours.length > 0}
-    <h3 class="grouptitle">Your models</h3>
-    <div class="cards">
-      {#each yours as m (m.id)}
-        <ModelCard
-          model={m}
-          status={statusOf(m.id)}
-          {percent}
-          onclick={onCard}
-          ondelete={onDelete}
-        />
-      {/each}
-    </div>
-  {/if}
+  <PillTabs bind:value={tab} options={TABS} />
 
-  <h3 class="grouptitle">{yours.length > 0 ? 'Available to download' : 'Available models'}</h3>
-  {#if available.length > 0}
-    <div class="cards">
-      {#each available as m (m.id)}
-        <ModelCard model={m} status={statusOf(m.id)} {percent} onclick={onCard} />
-      {/each}
-    </div>
-  {:else}
-    <p class="empty">All models downloaded.</p>
-  {/if}
+  <div class="rows">
+    {#each shown as m (m.id)}
+      <ModelRow model={m} status={statusOf(m.id)} {percent} onclick={onCard} ondelete={onDelete} />
+    {:else}
+      <p class="empty">No models in this group.</p>
+    {/each}
+  </div>
 
   {#if error}
     <p class="error">{error}</p>
@@ -123,29 +117,20 @@
   .manager {
     display: flex;
     flex-direction: column;
-  }
-  .grouptitle {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #9ca3af;
-    margin: 4px 0 8px;
-  }
-  .grouptitle:not(:first-child) {
-    margin-top: 18px;
-  }
-  .cards {
-    display: flex;
-    flex-direction: column;
     gap: 10px;
   }
+  .rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
   .empty {
-    color: #6b7280;
+    color: var(--yap-muted-70);
     font-size: 12px;
     margin: 2px 0 0;
   }
   .error {
-    color: #fca5a5;
+    color: var(--yap-danger);
     font-size: 12px;
     margin: 12px 0 0;
   }

@@ -21,10 +21,10 @@
   .textarea {
     width: 100%;
     box-sizing: border-box;
-    background: #181b22;
-    border: 1px solid #2a2f3a;
-    border-radius: 6px;
-    color: #e5e7eb;
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    color: var(--yap-fg);
     padding: 8px 9px;
     font: inherit;
     font-size: 13px;
@@ -33,7 +33,7 @@
   }
   .textarea:focus {
     outline: none;
-    border-color: #3b82f6;
+    border-color: var(--yap-primary);
   }
   .textarea:disabled {
     opacity: 0.5;

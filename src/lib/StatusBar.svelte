@@ -169,8 +169,8 @@
     max-height: 280px;
     overflow-y: auto;
     padding: 4px;
-    background: #161922;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: var(--yap-s3);
+    border: 1px solid var(--yap-border);
     border-radius: 10px;
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
     z-index: 50;
@@ -237,7 +237,7 @@
     transition: color 0.15s ease;
   }
   .link:hover {
-    color: #3b82f6;
+    color: var(--yap-primary-hover);
   }
   .sep {
     color: #4b5563;

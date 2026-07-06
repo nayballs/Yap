@@ -340,6 +340,22 @@ pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// The immutable cleanup guardrail prompt, exposed so the Settings Prompt
+/// Studio can display the full effective system prompt (guardrails + the
+/// editable body) in its View tab.
+#[tauri::command]
+pub fn get_base_prompt() -> String {
+    crate::llm::BASE_PROMPT.to_string()
+}
+
+/// The immutable **edit/rewrite (Voice Agent)** guardrail prompt, exposed so the
+/// Voice Agent tab's Prompt Studio can show the full effective prompt (guardrails
+/// + the editable agent body) in its View tab. See `llm::EDIT_BASE_PROMPT`.
+#[tauri::command]
+pub fn get_edit_base_prompt() -> String {
+    crate::llm::EDIT_BASE_PROMPT.to_string()
+}
+
 /// Test the AI cleanup settings: run a sample sentence through the saved
 /// post-processing config and return the cleaned text (or the error). Lets the
 /// user verify their base URL / key / model / prompt from the Settings UI.
@@ -349,7 +365,7 @@ pub async fn test_post_process(text: String) -> Result<String, String> {
     let cfg = config::load();
     // Route through the on-device sidecar when it's the selected provider + up.
     let (base_url, api_key, model, provider) = crate::local_llm::effective_endpoint(&cfg);
-    crate::llm::cleanup(&text, &base_url, &api_key, &model, &provider, &cfg.pp_prompt).await
+    crate::llm::cleanup(&text, &base_url, &api_key, &model, &provider, &cfg.pp_prompt, &cfg.dictionary, cfg.pp_disable_thinking).await
 }
 
 /// Status of the on-device cleanup sidecar: whether the runtime + model are
@@ -368,6 +384,9 @@ pub fn local_llm_status() -> serde_json::Value {
                 "blurb": m.blurb,
                 "filename": m.filename,
                 "sizeMb": m.size_mb,
+                "url": m.url,
+                "recommended": m.recommended,
+                "family": m.family,
                 "installed": on_disk.iter().any(|f| f == m.filename),
             })
         })
@@ -431,6 +450,29 @@ pub async fn local_llm_install(app: AppHandle, model: Option<String>) -> Result<
             .await
             .map(|_| crate::local_llm::MODEL_FILENAME.to_string()),
     }
+}
+
+/// Delete a downloaded local-cleanup model GGUF from `<data>/llm/`. `filename`
+/// is a bare name from `local_llm_status().models`/`curated`. Refuses path
+/// traversal and non-`.gguf` names, and stops the sidecar first if it's serving
+/// the file being removed (Windows locks an open file).
+#[tauri::command]
+pub fn local_llm_delete(filename: String) -> Result<(), String> {
+    let name = std::path::Path::new(&filename)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "invalid filename".to_string())?;
+    if !name.to_ascii_lowercase().ends_with(".gguf") {
+        return Err("not a .gguf model".into());
+    }
+    let path = crate::local_llm::llm_dir().join(name);
+    if !path.is_file() {
+        return Ok(());
+    }
+    if crate::local_llm::active_model_path(&config::load()) == path {
+        crate::local_llm::stop();
+    }
+    std::fs::remove_file(&path).map_err(|e| e.to_string())
 }
 /// Recent local transcription history, newest first (capped at `limit`).
 /// Each item: `{ ts, raw, text, model, app, words }`.

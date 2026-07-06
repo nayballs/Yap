@@ -2,6 +2,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
+  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
 
   // idle | recording | processing | needs-model
   let state = $state('idle');
@@ -12,7 +13,7 @@
   let history = $state([]);
   let downloading = $state(false);
   // For the in-window hotkey fallback (see onMount).
-  let hotkeyVk = null;
+  let hotkeySpec = '';
   let pttMode = false;
 
   function applyScale(s) {
@@ -40,8 +41,7 @@
     invoke('get_config')
       .then((cfg) => {
         applyScale(cfg?.pillScale);
-        const m = (cfg?.hotkey || '').match(/^kb:(\d+)$/);
-        hotkeyVk = m ? +m[1] : null;
+        hotkeySpec = cfg?.hotkey || '';
         pttMode = cfg?.recordingMode === 'pushToTalk';
       })
       .catch(() => {});
@@ -49,14 +49,15 @@
     // In-window hotkey fallback: when one of Yap's OWN WebView2 windows has
     // focus, the global LL keyboard hook never receives the hotkey (WebView2
     // front-runs the hook chain — see input_hook.rs notes). The page gets the
-    // keydown normally, so drive the pipeline directly.
+    // keydown normally, so drive the pipeline directly (combo-aware via
+    // lib/hotkeys.js).
     const onKeyDown = (e) => {
-      if (e.repeat || e.keyCode !== hotkeyVk) return;
+      if (e.repeat || !hotkeyMatchesKeydown(e, hotkeySpec)) return;
       e.preventDefault();
       invoke('toggle_recording').catch(() => {});
     };
     const onKeyUp = (e) => {
-      if (e.keyCode !== hotkeyVk || !pttMode) return;
+      if (!pttMode || !hotkeyMatchesKeyup(e, hotkeySpec)) return;
       e.preventDefault();
       invoke('toggle_recording').catch(() => {});
     };

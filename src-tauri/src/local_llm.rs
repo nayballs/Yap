@@ -245,7 +245,8 @@ pub async fn start() -> Result<String, String> {
         .arg("-ngl")
         .arg("999") // offload all layers to GPU; auto-falls back to CPU
         .arg("-c")
-        .arg("2048") // small context — cleanup inputs are short
+        .arg("8192") // room for the structured system prompt + one-shots (~2.1k
+        // tokens) plus a long dictation and its cleaned output
         .stdin(std::process::Stdio::null())
         .stdout(to_stdio(log.as_ref().and_then(|f| f.try_clone().ok())))
         .stderr(to_stdio(log.and_then(|f| f.try_clone().ok())));
@@ -327,6 +328,11 @@ fn ondevice_selected(cfg: &crate::config::YapConfig) -> bool {
             .cleanup_profiles
             .iter()
             .any(|p| p.provider == PROVIDER_ONDEVICE)
+        // A Language-Models scope (Voice Agent, etc.) pointed at the local model.
+        || cfg
+            .llm_scopes
+            .values()
+            .any(|s| s.enabled && s.provider == PROVIDER_ONDEVICE)
 }
 
 /// If on-device cleanup is selected anywhere (globally or by a profile
@@ -362,19 +368,28 @@ pub struct CuratedLlm {
     pub url: &'static str,
     pub sha256: &'static str,
     pub size_mb: u32,
+    /// Marked as the suggested default in the Settings model browser.
+    pub recommended: bool,
+    /// Model family for the browser's provider tabs + brand icon
+    /// ("qwen"|"llama"|"gemma"|"mistral"|"phi").
+    pub family: &'static str,
 }
 
-/// Ordered smallest→largest. SHA-256s are the HuggingFace `lfs.oid` values
-/// (verified July 2026); all repos are ungated.
+/// Grouped by family, smallest→largest within a family. SHA-256s are the
+/// HuggingFace `lfs.oid` values (verified July 2026 from each repo's LFS
+/// pointer); all are real, ungated Q4_K_M GGUFs.
 pub const CURATED_MODELS: &[CuratedLlm] = &[
+    // ── Qwen ─────────────────────────────────────────────────────────────
     CuratedLlm {
-        id: "llama-3.2-1b",
-        display: "Llama 3.2 1B Instruct",
-        blurb: "Smallest + fastest — great on modest PCs",
-        filename: "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-        sha256: "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
-        size_mb: 808,
+        id: "qwen2.5-0.5b",
+        display: "Qwen2.5 0.5B Instruct",
+        blurb: "Tiny — instant even on a laptop",
+        filename: "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+        sha256: "6eb923e7d26e9cea28811e1a8e852009b21242fb157b26149d3b188f3a8c8653",
+        size_mb: 398,
+        recommended: false,
+        family: "qwen",
     },
     CuratedLlm {
         id: "qwen2.5-1.5b",
@@ -384,24 +399,8 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         url: MODEL_URL,
         sha256: MODEL_SHA256,
         size_mb: 1043,
-    },
-    CuratedLlm {
-        id: "gemma-2-2b",
-        display: "Gemma 2 2B IT",
-        blurb: "Google's small model — polished, natural tone",
-        filename: "gemma-2-2b-it-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
-        sha256: "e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787",
-        size_mb: 1709,
-    },
-    CuratedLlm {
-        id: "llama-3.2-3b",
-        display: "Llama 3.2 3B Instruct",
-        blurb: "Stronger rewrites, still quick on a GPU",
-        filename: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        sha256: "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
-        size_mb: 2019,
+        recommended: true,
+        family: "qwen",
     },
     CuratedLlm {
         id: "qwen2.5-3b",
@@ -411,15 +410,100 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         url: "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
         sha256: "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
         size_mb: 2105,
+        recommended: false,
+        family: "qwen",
     },
+    CuratedLlm {
+        id: "qwen2.5-7b",
+        display: "Qwen2.5 7B Instruct",
+        blurb: "Big Qwen — best local cleanup quality",
+        filename: "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+        sha256: "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
+        size_mb: 4683,
+        recommended: false,
+        family: "qwen",
+    },
+    // ── Meta Llama ───────────────────────────────────────────────────────
+    CuratedLlm {
+        id: "llama-3.2-1b",
+        display: "Llama 3.2 1B Instruct",
+        blurb: "Smallest + fastest — great on modest PCs",
+        filename: "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+        sha256: "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
+        size_mb: 808,
+        recommended: false,
+        family: "llama",
+    },
+    CuratedLlm {
+        id: "llama-3.2-3b",
+        display: "Llama 3.2 3B Instruct",
+        blurb: "Stronger rewrites, still quick on a GPU",
+        filename: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+        sha256: "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
+        size_mb: 2019,
+        recommended: false,
+        family: "llama",
+    },
+    CuratedLlm {
+        id: "llama-3.1-8b",
+        display: "Llama 3.1 8B Instruct",
+        blurb: "Meta's 8B — strong and well-rounded",
+        filename: "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+        sha256: "7b064f5842bf9532c91456deda288a1b672397a54fa729aa665952863033557c",
+        size_mb: 4921,
+        recommended: false,
+        family: "llama",
+    },
+    // ── Gemma (Google) ───────────────────────────────────────────────────
+    CuratedLlm {
+        id: "gemma-2-2b",
+        display: "Gemma 2 2B IT",
+        blurb: "Google's small model — polished, natural tone",
+        filename: "gemma-2-2b-it-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
+        sha256: "e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787",
+        size_mb: 1709,
+        recommended: false,
+        family: "gemma",
+    },
+    CuratedLlm {
+        id: "gemma-2-9b",
+        display: "Gemma 2 9B IT",
+        blurb: "Google's 9B — polished, high quality",
+        filename: "gemma-2-9b-it-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q4_K_M.gguf",
+        sha256: "13b2a7b4115bbd0900162edcebe476da1ba1fc24e718e8b40d32f6e300f56dfe",
+        size_mb: 5761,
+        recommended: false,
+        family: "gemma",
+    },
+    // ── Mistral ──────────────────────────────────────────────────────────
+    CuratedLlm {
+        id: "mistral-7b-v0.3",
+        display: "Mistral 7B Instruct v0.3",
+        blurb: "Mistral's classic 7B — a solid all-rounder",
+        filename: "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
+        sha256: "1270d22c0fbb3d092fb725d4d96c457b7b687a5f5a715abe1e818da303e562b6",
+        size_mb: 4373,
+        recommended: false,
+        family: "mistral",
+    },
+    // ── Phi (Microsoft) ──────────────────────────────────────────────────
     CuratedLlm {
         id: "phi-3.5-mini",
         display: "Phi-3.5 Mini Instruct",
-        blurb: "Microsoft's 3.8B — strongest quality, heaviest",
+        blurb: "Microsoft's 3.8B — strong quality for its size",
         filename: "Phi-3.5-mini-instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
         sha256: "e4165e3a71af97f1b4820da61079826d8752a2088e313af0c7d346796c38eff5",
         size_mb: 2393,
+        recommended: false,
+        family: "phi",
     },
 ];
 

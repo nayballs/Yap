@@ -319,10 +319,37 @@ impl Shared {
         });
     }
 
+    /// Should this dictation wake the Voice Agent? Port of OpenWhispr's
+    /// `resolveDictationAgentReachability` + `detectAgentName` gate: the
+    /// Voice-Agent scope must be enabled with a provider (BYOK/custom providers
+    /// also need a model; ondevice/self-hosted have defaults), and the
+    /// transcript must address the agent by name — fuzzy-matched, so STT
+    /// mis-hearings still wake it. Default name "Yap" (the tab's copy).
+    fn wake_word_hit(&self, transcript: &str) -> bool {
+        let Ok(c) = self.config.read() else {
+            return false;
+        };
+        let Some(s) = c.llm_scopes.get("voiceAgent") else {
+            return false;
+        };
+        if !s.enabled || s.provider.is_empty() {
+            return false;
+        }
+        if !(s.provider == "ondevice" || s.provider == "local") && s.model.trim().is_empty() {
+            return false;
+        }
+        let name = match c.agent_name.trim() {
+            "" => "Yap",
+            n => n,
+        };
+        crate::agent_detect::detect_agent_name(transcript, name)
+    }
+
     /// Edit/rewrite-mode finish: apply the spoken `instruction` to the selection
-    /// captured at record-start (via the AI-cleanup LLM) and paste the result
-    /// back into the target window. Shares the AI-cleanup provider settings, so it
-    /// needs `pp_base_url` configured. Emits the final `yap-state` itself.
+    /// captured at record-start and paste the result back into the target window.
+    /// Uses the **Voice Agent** scope's own provider/model/prompt when that scope is
+    /// enabled + configured, otherwise the global AI-cleanup endpoint; either way it
+    /// needs a base URL configured. Emits the final `yap-state` itself.
     async fn run_rewrite(self: &Arc<Self>, instruction: String) {
         // Take the selection captured when the edit hotkey was pressed.
         let selection = self
@@ -331,14 +358,52 @@ impl Shared {
             .ok()
             .and_then(|mut g| g.take())
             .unwrap_or_default();
+        self.run_agent(instruction, selection).await
+    }
 
-        let (base_url, api_key, model, provider, restore_clipboard) = self
+    /// Shared agent runner: apply `instruction` via the Voice-Agent scope (or
+    /// the global cleanup endpoint) and paste the result. `selection` empty =
+    /// write mode. Two callers: the edit hotkey (`run_rewrite`, selection
+    /// captured at key-press) and the **wake-word path** (no selection — the
+    /// whole transcript is the instruction, OpenWhispr-style).
+    async fn run_agent(self: &Arc<Self>, instruction: String, selection: String) {
+        let (base_url, api_key, model, provider, body, disable_thinking, restore_clipboard) = self
             .config
             .read()
             .map(|c| {
-                // On-device sidecar overrides the endpoint when selected + running.
-                let (base_url, api_key, model, provider) = crate::local_llm::effective_endpoint(&c);
-                (base_url, api_key, model, provider, c.restore_clipboard)
+                // Voice Agent scope (OpenWhispr "Language Models" bubble, step 3):
+                // when it's enabled and configured, run edit/rewrite on THAT scope's own
+                // provider/model/prompt. Otherwise fall back to the global AI-cleanup
+                // endpoint (the original edit-mode behaviour). "ondevice" routes
+                // through the sidecar in both paths via effective_endpoint_for.
+                let (base_url, api_key, model, provider, body, disable_thinking) =
+                    match c.llm_scopes.get("voiceAgent") {
+                        Some(s) if s.enabled && !s.provider.is_empty() => {
+                            // Standard-provider keys are global (shared with the
+                            // Cleanup tab); an empty scope key falls back to them.
+                            let key = c.provider_api_key(&s.provider, &s.api_key);
+                            let (b, k, m, p) = crate::local_llm::effective_endpoint_for(
+                                &s.provider,
+                                &s.base_url,
+                                &key,
+                                &s.model,
+                            );
+                            // The agent prompt is templated on the wake word
+                            // (OpenWhispr's `{{agentName}}`); "Yap" is the
+                            // unnamed default, matching the tab's copy.
+                            let name = match c.agent_name.trim() {
+                                "" => "Yap",
+                                n => n,
+                            };
+                            let body = s.prompt.replace("{{agentName}}", name);
+                            (b, k, m, p, body, s.disable_thinking)
+                        }
+                        _ => {
+                            let (b, k, m, p) = crate::local_llm::effective_endpoint(&c);
+                            (b, k, m, p, String::new(), c.pp_disable_thinking)
+                        }
+                    };
+                (base_url, api_key, model, provider, body, disable_thinking, c.restore_clipboard)
             })
             .unwrap_or_default();
 
@@ -351,13 +416,37 @@ impl Shared {
             return;
         }
 
+        // Cloud providers reject keyless requests with a confusing 401 (e.g.
+        // "Invalid Anthropic API Key" while the user is looking at the Groq
+        // cleanup tab) — fail fast with a message that names the provider.
+        const KEYED_PROVIDERS: [&str; 5] =
+            ["groq", "anthropic", "openai", "gemini", "openrouter"];
+        if api_key.is_empty() && KEYED_PROVIDERS.contains(&provider.as_str()) {
+            tracing::warn!(provider = %provider, "Rewrite skipped: no API key for provider");
+            let _ = self.app.emit(
+                "yap-error",
+                format!("Voice Agent: no {provider} API key — add one in Language Models"),
+            );
+            let _ = self.app.emit("yap-state", "error");
+            return;
+        }
+
         let target = match self.target_hwnd.load(Ordering::Relaxed) {
             0 => None,
             h => Some(h),
         };
 
-        match crate::llm::rewrite(&instruction, &selection, &base_url, &api_key, &model, &provider)
-            .await
+        match crate::llm::rewrite(
+            &instruction,
+            &selection,
+            &base_url,
+            &api_key,
+            &model,
+            &provider,
+            &body,
+            disable_thinking,
+        )
+        .await
         {
             Ok(result) => {
                 let out = result.trim().to_string();
@@ -378,9 +467,10 @@ impl Shared {
                 // Don't fall back to typing the raw instruction — that would paste
                 // "make this a list" into the doc. Surface an error instead.
                 tracing::warn!("Rewrite failed: {}", e);
-                let _ = self
-                    .app
-                    .emit("yap-error", "Rewrite failed — check AI cleanup settings");
+                let _ = self.app.emit(
+                    "yap-error",
+                    format!("Rewrite failed via {provider} — check its key in Language Models"),
+                );
                 let _ = self.app.emit("yap-state", "error");
             }
         }
@@ -484,6 +574,17 @@ impl Shared {
                         self.run_rewrite(text.trim().to_string()).await;
                         return;
                     }
+                    // Wake-word Voice Agent (port of OpenWhispr's detectAgentName
+                    // + dictation routing): a normal dictation that addresses the
+                    // agent by name ("Hey {name}, …") routes the WHOLE transcript
+                    // through the Voice-Agent scope in write mode instead of
+                    // cleanup — the agent prompt strips the name + command from
+                    // the output. Agent unreachable / no match → normal cleanup.
+                    Ok(text) if self.wake_word_hit(text.trim()) => {
+                        tracing::info!("Wake word detected — routing dictation to the Voice Agent");
+                        self.run_agent(text.trim().to_string(), String::new()).await;
+                        return;
+                    }
                     Ok(text) => {
                         // Smart routing: which app were we dictating into? The
                         // foreground window was captured at record-start; resolve
@@ -514,6 +615,7 @@ impl Shared {
                             pp_model,
                             pp_provider,
                             pp_body,
+                            pp_disable_thinking,
                         ) = self
                             .config
                             .read()
@@ -522,8 +624,11 @@ impl Shared {
                                 let (pp_base_url, pp_api_key, pp_model, pp_provider) =
                                     match plan.as_ref().and_then(|p| p.endpoint.as_ref()) {
                                         Some((provider, base_url, api_key, model)) => {
+                                            // Profile keys fall back to the global
+                                            // per-provider store, like scopes do.
+                                            let key = c.provider_api_key(provider, api_key);
                                             crate::local_llm::effective_endpoint_for(
-                                                provider, base_url, api_key, model,
+                                                provider, base_url, &key, model,
                                             )
                                         }
                                         None => crate::local_llm::effective_endpoint(&c),
@@ -540,6 +645,7 @@ impl Shared {
                                     pp_model,
                                     pp_provider,
                                     plan.map(|p| p.body),
+                                    c.pp_disable_thinking,
                                 )
                             })
                             .unwrap_or_else(|_| {
@@ -555,6 +661,7 @@ impl Shared {
                                     String::new(),
                                     String::new(),
                                     None,
+                                    false,
                                 )
                             });
 
@@ -576,11 +683,15 @@ impl Shared {
                                     &pp_model,
                                     &pp_provider,
                                     body,
+                                    &dict,
+                                    pp_disable_thinking,
                                 )
                                 .await
                                 {
-                                    Ok(c) if !c.trim().is_empty() => c,
-                                    Ok(_) => raw.clone(),
+                                    // Ok(empty) is a DELIBERATE empty result (filler-only
+                                    // input) — keep it empty so nothing is injected. Only a
+                                    // real request error falls back to the raw transcript.
+                                    Ok(c) => c,
                                     Err(e) => {
                                         tracing::warn!("AI cleanup failed, using raw: {}", e);
                                         raw.clone()

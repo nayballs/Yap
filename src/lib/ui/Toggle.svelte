@@ -1,6 +1,8 @@
 <script>
   import Tooltip from './Tooltip.svelte';
-  let { checked = $bindable(false), label = '', hint = '', disabled = false, onchange } = $props();
+  // `desc` renders as a muted line under the label (preferred, OpenWhispr-style);
+  // `hint` keeps the ⓘ tooltip for longer help text.
+  let { checked = $bindable(false), label = '', hint = '', desc = '', disabled = false, onchange } = $props();
 
   function toggle() {
     if (disabled) return;
@@ -11,9 +13,12 @@
 
 <div class="toggle-row" class:disabled>
   {#if label}
-    <span class="ldesc">
-      <span class="label">{label}</span>
-      {#if hint}<Tooltip text={hint} />{/if}
+    <span class="lhs">
+      <span class="ldesc">
+        <span class="label">{label}</span>
+        {#if hint}<Tooltip text={hint} />{/if}
+      </span>
+      {#if desc}<span class="desc">{desc}</span>{/if}
     </span>
   {/if}
   <button
@@ -39,6 +44,12 @@
   .toggle-row.disabled {
     opacity: 0.5;
   }
+  .lhs {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
   .ldesc {
     display: flex;
     align-items: center;
@@ -49,6 +60,11 @@
     color: var(--yap-fg);
     font-size: 12.5px;
     font-weight: 500;
+  }
+  .desc {
+    color: var(--yap-muted-70);
+    font-size: 11.5px;
+    line-height: 1.5;
   }
   .switch-btn {
     flex: 0 0 auto;

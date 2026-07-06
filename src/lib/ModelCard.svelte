@@ -94,22 +94,22 @@
   .card {
     display: flex;
     align-items: stretch;
-    background: #161922;
-    border: 2px solid rgba(255, 255, 255, 0.06);
-    border-radius: 12px;
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-xl);
     transition:
       border-color 0.18s ease,
       background 0.18s ease,
       box-shadow 0.18s ease;
   }
   .card:hover {
-    border-color: rgba(59, 130, 246, 0.5);
-    background: rgba(59, 130, 246, 0.06);
+    border-color: var(--yap-border-hover);
+    background: var(--yap-s2);
     box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
   }
   .card.active {
-    border-color: rgba(59, 130, 246, 0.6);
-    background: rgba(59, 130, 246, 0.1);
+    border-color: var(--yap-primary-line);
+    background: var(--yap-primary-wash);
   }
 
   .hit {
@@ -155,7 +155,7 @@
     margin: 0;
   }
   .desc {
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-size: 12.5px;
     line-height: 1.45;
     margin: 3px 0 0;
@@ -164,15 +164,15 @@
   .badge {
     font-size: 10.5px;
     font-weight: 600;
-    color: #bfdbfe;
-    background: rgba(59, 130, 246, 0.18);
-    border: 1px solid rgba(59, 130, 246, 0.35);
-    border-radius: 999px;
+    color: var(--yap-fg);
+    background: var(--yap-primary-tint);
+    border: 1px solid var(--yap-primary-line);
+    border-radius: var(--yap-r-full);
     padding: 2px 8px;
     white-space: nowrap;
   }
   .badge.ghost {
-    color: #9ca3af;
+    color: var(--yap-muted);
     background: rgba(255, 255, 255, 0.06);
     border-color: rgba(255, 255, 255, 0.12);
   }
@@ -191,7 +191,7 @@
   }
   .score span {
     font-size: 11px;
-    color: #9ca3af;
+    color: var(--yap-muted);
     width: 56px;
     text-align: right;
   }
@@ -199,19 +199,19 @@
     width: 70px;
     height: 6px;
     background: rgba(255, 255, 255, 0.1);
-    border-radius: 999px;
+    border-radius: var(--yap-r-full);
     overflow: hidden;
   }
   .fill {
     height: 100%;
-    background: linear-gradient(90deg, #3b82f6, #60a5fa);
-    border-radius: 999px;
+    background: linear-gradient(90deg, var(--yap-primary), var(--yap-primary-hover));
+    border-radius: var(--yap-r-full);
   }
 
   hr {
     width: 100%;
     border: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    border-top: 1px solid var(--yap-border-subtle);
     margin: 0;
   }
 
@@ -220,13 +220,13 @@
     align-items: center;
     gap: 14px;
     font-size: 11.5px;
-    color: #8b93a1;
+    color: var(--yap-muted-70);
   }
   .tag.engine {
-    color: #c4b5fd;
-    background: rgba(139, 92, 246, 0.16);
-    border: 1px solid rgba(139, 92, 246, 0.32);
-    border-radius: 999px;
+    color: var(--yap-fg-80);
+    background: var(--yap-primary-wash);
+    border: 1px solid var(--yap-primary-line);
+    border-radius: var(--yap-r-full);
     padding: 1px 8px;
     font-size: 10.5px;
     font-weight: 600;
@@ -245,19 +245,19 @@
     width: 100%;
     height: 6px;
     background: rgba(255, 255, 255, 0.1);
-    border-radius: 999px;
+    border-radius: var(--yap-r-full);
     overflow: hidden;
   }
   .value {
     height: 100%;
-    background: linear-gradient(90deg, #3b82f6, #60a5fa);
-    border-radius: 999px;
+    background: linear-gradient(90deg, var(--yap-primary), var(--yap-primary-hover));
+    border-radius: var(--yap-r-full);
     transition: width 0.25s ease;
   }
   .pct {
     display: block;
     font-size: 11px;
-    color: #9ca3af;
+    color: var(--yap-muted);
     margin-top: 4px;
   }
 
@@ -265,10 +265,10 @@
     flex: 0 0 auto;
     width: 42px;
     border: none;
-    border-left: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 0 10px 10px 0;
+    border-left: 1px solid var(--yap-border-subtle);
+    border-radius: 0 var(--yap-r-lg) var(--yap-r-lg) 0;
     background: transparent;
-    color: #6b7280;
+    color: var(--yap-fg-45);
     cursor: pointer;
     font-size: 14px;
     line-height: 1;
@@ -277,7 +277,7 @@
       background 0.15s ease;
   }
   .del:hover {
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.12);
+    color: var(--yap-danger);
+    background: rgba(224, 86, 79, 0.12);
   }
 </style>

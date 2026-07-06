@@ -65,6 +65,56 @@ All in `E:\Projects\Yap`. `npm run build` passes; the app runs.
   a proper **keycap** for hotkeys, roomier content padding, page-header styles. Added a new
   **Account** section (nav footer "Sign in" + a page with the UI-only Google CTA and "Planned"
   extras). Bulk-replaced the old hardcoded palette with tokens.
+- **2026-07-05 follow-up (handoff items 1–3 + model picker):**
+  - **Page headers** (`.page-h` h1 + subtitle) on every section — General/Models/AI Cleanup/
+    History/Advanced/About now open like the Account page.
+  - **Inline row descriptions** — the important rows moved from ⓘ-tooltip to the `desc` prop
+    (Row **and** Toggle now both support `desc`); long help text stays as `hint` tooltips.
+  - **Grouped sidebar nav** — OpenWhispr-style caps labels (`.navcap`): App / AI models /
+    Data / System.
+  - **Models page ported to OpenWhispr's picker exactly**: `ui/PillTabs.svelte` (vendor tabs
+    All/NVIDIA/OpenAI/Community with brand icons) + `ModelRow.svelte` (compact rows: status
+    dot with glow states, brand icon, name, size, language, Recommended/Active chips, violet
+    Download button, hover-reveal delete). Brand SVGs copied from OpenWhispr (MIT) into
+    `src/assets/providers/` with a `providerIcons.js` registry (monochrome logos get
+    `invert(1)`). The old big `ModelCard.svelte` now only serves Onboarding.
+  - **Last blue-accent stragglers migrated to tokens**: ModelCard/ModelManager, StatusBar
+    (menu bg + link hover), Textarea (focus ring + full token refactor), stats hero, About link.
+  - **Nav renamed to OpenWhispr's AI-models split**: "Models" → **Speech-to-Text** (mic icon),
+    "AI Cleanup" → **Language Models** (brain icon); General got a preferences-sliders icon.
+  - **Language Models page rebuilt to OpenWhispr's exact layout+wiring**
+    (ReasoningModelSelector): enable toggle → 3-option mode selector (Cloud Providers /
+    Local / Self-Hosted) → provider pill tabs with brand icons → "API Key" heading with
+    right-aligned "Get your API key →" console link → masked key display (`gsk…okrN` + edit)
+    → "Select Model" radio-row list from a per-provider registry (`src/lib/ppModels.js`,
+    ported from OW's modelRegistryData.json; first model = auto-selected default on provider
+    switch). Custom tab + Self-Hosted mode collapse to Base URL/key/model inputs; Local mode
+    is the existing built-in llamafile panel. New primitive: `src/lib/ui/SelectList.svelte`.
+    Persisted contract unchanged (`ppProvider`/`ppBaseUrl`/`ppApiKey`/`ppModel`) — `ppMode` +
+    `cloudProvider` are UI-only.
+  - **Per-provider API keys** (matches OW): new `pp_api_keys: HashMap<String,String>` in
+    `config.rs`; Settings stashes/restores the active `ppApiKey` from the map on every
+    provider/mode switch (+ live on key input), and reconciles on load (active key wins for
+    the active provider; a lone pre-migration key is credited to the derived cloud provider —
+    guard added after that path once wiped a key). The backend still reads only the active
+    `pp_api_key`.
+  - **Live transcription preview** moved from General → Speech-to-Text (below the model
+    browser), matching OW's placement.
+  - **Prompt Studio** (`src/lib/PromptStudio.svelte`, ported from OW's `ui/PromptStudio.tsx`
+    with its wording): replaces the old "Cleanup style" group. One card, three tabs —
+    **View** (DEFAULT/CUSTOM PROMPT caps label + Modified chip + Copy; shows the FULL
+    effective prompt via the new `get_base_prompt` command composing `llm::BASE_PROMPT` +
+    the editable body), **Customize** (caution line, preset select — Yap extra — 12-row
+    mono textarea, explicit Save/Reset like OW replacing the old live-save), **Test**
+    (MODEL | PROVIDER caps row, Input + CLEANUP chip, full-width Run Test, Output + copy;
+    temporarily applies the edited prompt during the run, OW semantics). Adapted wording
+    where OW's agent features don't exist in Yap (no {{agentName}}, no instruction
+    detection).
+  - **OW STT-page features Yap does NOT have yet** (backend work, roadmap candidates):
+    purpose tabs (Dictation / Note Recording / Audio Upload — ROADMAP Phase 7), cloud/
+    self-hosted STT engines (Yap is deliberately local-only for now), Silero **VAD**
+    (toggles + threshold/duration tuning grid — would pair well with the existing pre-roll),
+    and the contextual "Enable GPU" banner (Yap defaults GPU on instead).
 
 ## 5. The design tokens (reference)
 
@@ -90,15 +140,14 @@ Defined in `src/app.css` (`:root`). Dark-committed.
 ## 6. What's NEXT (candidate work, not yet done)
 
 Sequenced roughly by value:
-1. **Page headers per section** — add the `h1` + subtitle block (styles already exist as `.page-h`)
-   to General/Models/AI Cleanup/History/Advanced so every page opens like the Account one does.
-2. **Inline row descriptions** — `Row` now takes a `desc` prop; convert the most important rows from
-   ⓘ-tooltip to an inline muted description (matches the mockup; it's a copy pass, not new code).
-3. **Reuse the new components elsewhere** — the per-profile provider dropdowns + overlay-position /
-   output-device selects in AI Cleanup could adopt `ModeSelector`/refined `Select`; Models engine
-   choice could use `Segmented`/`ModeSelector`.
-4. **Onboarding.svelte** — it has its own hardcoded styles; adopt the `--yap-*` tokens for a
-   consistent look across the first-run flow.
+1. ~~**Page headers per section**~~ — DONE (2026-07-05).
+2. ~~**Inline row descriptions**~~ — DONE (2026-07-05); a few long explanations remain as ⓘ hints
+   on purpose.
+3. **Reuse the new components elsewhere** — `PillTabs` could replace the AI-Cleanup per-profile
+   provider `<select>`s; the cloud model field could become an OpenWhispr-style "Select Model"
+   row list (`ModelRow` minus download affordances) fed by a per-provider model registry.
+4. **Onboarding.svelte** — it has its own hardcoded styles (incl. old blue); adopt the `--yap-*`
+   tokens + `ModelRow` for a consistent look across the first-run flow.
 5. Optional: a subtle window titlebar treatment like the mockup.
 
 The approved visual target is the mockup (an OpenWhispr-charcoal + violet settings window). If you

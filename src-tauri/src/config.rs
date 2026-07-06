@@ -45,6 +45,54 @@ pub struct CleanupProfile {
     pub api_key: String,
 }
 
+/// A per-mode LLM configuration for one of Yap's AI **scopes** — the OpenWhispr-
+/// style "Language Models" bubbles: Dictation Cleanup, Voice Agent, Note
+/// Formatting, Chat. Each scope carries its own provider/model/key/prompt so a
+/// heavy cloud model can drive Voice Agent while cleanup runs on the fast local
+/// sidecar, etc. (OpenWhispr's `INFERENCE_SCOPES`, one config per bubble.)
+///
+/// **Back-compat:** the Dictation Cleanup scope is NOT stored here — it stays in
+/// the top-level `pp_*` fields, which the whole cleanup pipeline already reads.
+/// This map (`YapConfig::llm_scopes`) holds only the three newer scopes, keyed
+/// `"voiceAgent"|"noteFormatting"|"chat"`. A missing key = the scope's feature is
+/// off / unconfigured; an empty `provider` inherits the global cleanup endpoint;
+/// Note Formatting falls back to the Cleanup scope (OpenWhispr `fallbackScope`).
+/// The runtime for Voice Agent (edit mode) / Note Formatting / Chat is wired in
+/// later steps — this struct is the storage those hang off. See `ROADMAP.md`
+/// Phase 4 "Multi-mode Language Models".
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmScope {
+    /// Whether this scope's feature is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Provider id ("groq"|"anthropic"|"openai"|"openrouter"|"ondevice"|"local"|
+    /// "custom"). Empty = inherit the global cleanup provider/endpoint.
+    #[serde(default)]
+    pub provider: String,
+    /// OpenAI-compatible base URL; `/chat/completions` is appended.
+    #[serde(default)]
+    pub base_url: String,
+    /// Model id passed to the endpoint.
+    #[serde(default)]
+    pub model: String,
+    /// Active API key for this scope (empty for local servers). Never logged.
+    #[serde(default)]
+    pub api_key: String,
+    /// Per-provider key memory (like `pp_api_keys`): the UI swaps `api_key` from
+    /// here when the provider changes so each provider remembers its own key.
+    #[serde(default)]
+    pub api_keys: std::collections::HashMap<String, String>,
+    /// Editable prompt body for this scope. The immutable guardrails
+    /// (`llm::BASE_PROMPT` and friends) are still applied by the backend.
+    #[serde(default)]
+    pub prompt: String,
+    /// Strip the model's `<think>…</think>` reasoning blocks from the output
+    /// (only meaningful for reasoning models). See `pp_disable_thinking`.
+    #[serde(default)]
+    pub disable_thinking: bool,
+}
+
 /// A resolved cleanup plan for one dictation: the prompt body to use, plus the
 /// profile's LLM override when the matched profile carries one (`None` =
 /// use the global AI-cleanup endpoint). Produced by
@@ -193,6 +241,12 @@ pub struct YapConfig {
     /// local config.json; REDACTED in any logs — never logged.
     #[serde(default)]
     pub pp_api_key: String,
+    /// Per-provider API keys (provider id → key), OpenWhispr-style: the Settings
+    /// UI stashes/restores `pp_api_key` from this map when the provider changes,
+    /// so each provider remembers its own key. The backend only ever reads the
+    /// active `pp_api_key`. Same secrecy rules: never logged.
+    #[serde(default)]
+    pub pp_api_keys: std::collections::HashMap<String, String>,
     /// Model id passed to the cleanup endpoint.
     #[serde(default = "default_pp_model")]
     pub pp_model: String,
@@ -207,6 +261,11 @@ pub struct YapConfig {
     /// the selection; the backend always uses `pp_prompt` as the body.
     #[serde(default = "default_pp_preset")]
     pub pp_preset: String,
+    /// Strip the cleanup model's `<think>…</think>` reasoning blocks from its
+    /// output (OpenWhispr's "Disable thinking output"). Only shown/relevant for
+    /// reasoning models; harmless for others (they emit no think blocks).
+    #[serde(default)]
+    pub pp_disable_thinking: bool,
     /// GGUF filename (inside `<data>/llm/`) the on-device sidecar should load
     /// instead of the bundled default. Empty = the bundled Qwen model. Users can
     /// drop any GGUF into the folder and pick it in Settings.
@@ -226,6 +285,22 @@ pub struct YapConfig {
     /// Reusable named cleanup profiles that `app_routes` bind to.
     #[serde(default)]
     pub cleanup_profiles: Vec<CleanupProfile>,
+
+    /// Per-mode LLM config for the AI **scopes** beyond cleanup (OpenWhispr's
+    /// Language-Model bubbles), keyed `"voiceAgent"|"noteFormatting"|"chat"`.
+    /// (Step-1 storage for the multi-mode Language Models feature.) The
+    /// Dictation Cleanup scope stays in the `pp_*` fields above for back-compat.
+    /// See [`LlmScope`] and `ROADMAP.md` Phase 4 "Multi-mode Language Models".
+    #[serde(default)]
+    pub llm_scopes: std::collections::HashMap<String, LlmScope>,
+    /// The **Voice Agent** wake word (OpenWhispr "Agent Name"): speak this name
+    /// during dictation to address the agent — it executes your spoken command
+    /// instead of transcribing it verbatim. Empty = no wake word set (the agent
+    /// then only runs via the edit/rewrite hotkey). Also added to the dictionary
+    /// so the STT spells it right. See the Voice Agent bubble in Settings.
+    /// (Persisted by the Voice Agent tab's Agent Name field.)
+    #[serde(default)]
+    pub agent_name: String,
 
     /// Show live partial transcripts in the overlay while you speak. Opt-in
     /// (off by default): re-transcribes the growing buffer on a timer, which adds
@@ -280,9 +355,14 @@ fn default_pp_model() -> String {
     "llama-3.1-8b-instant".into()
 }
 fn default_pp_prompt() -> String {
-    // The "Default" preset body. Behaviour/tone only — the guardrails live in
-    // `llm::BASE_PROMPT`. Keep in sync with PP_PRESETS.default in Settings.svelte.
-    "Remove filler words (um, uh, er, like, you know). Fix capitalization, punctuation, and obvious grammar. Resolve spoken self-corrections (e.g. \"go to the store, no wait, the bank\" → \"go to the bank\"). Keep the result faithful and natural — don't over-format.".into()
+    // The "Default" preset body, shown (with `llm::BASE_PROMPT` on top) in the
+    // Prompt Studio View. Structured OpenWhispr-style so the rules are VISIBLE.
+    // The same rules are ALSO enforced at runtime via `llm::cleanup`'s framing +
+    // one-shot examples (kept for small-model reliability), so editing/deleting
+    // this body can't break cleanup — it degrades gracefully to the guardrails.
+    // MUST stay byte-identical to PP_PRESETS.default.body + the FIELD_DEFAULTS
+    // fallback in Settings.svelte (the "Default vs Modified" check compares them).
+    "Clean up the transcript using these rules.\n\nRULES:\n- Remove filler words (um, uh, er, like, you know, basically) unless meaningful.\n- Fix grammar, spelling, punctuation, and capitalization; break up run-on sentences.\n- Remove false starts, stutters, and accidental repetitions.\n- Correct obvious speech-to-text transcription errors from context.\n- Preserve the speaker's voice, tone, vocabulary, and intent.\n- Preserve technical terms, proper nouns, names, and jargon exactly as spoken — never \"correct\" them.\n\nSelf-corrections (\"wait no\", \"I meant\", \"scratch that\"): keep only the corrected version. \"Actually\" used for emphasis is NOT a correction.\nSpoken punctuation (\"period\", \"comma\", \"new line\"): convert to symbols. Use context to distinguish commands from literal mentions.\nNumbers & dates: standard written forms (January 15, 2026 / $300 / 5:30 PM). Small conversational numbers can stay as words.\nBroken phrases: reconstruct the speaker's likely intent from context. Never output a polished sentence that says nothing coherent.\nFormatting: bullets, numbered lists, or paragraph breaks only when they genuinely improve readability. Don't over-format.\n\nOUTPUT:\n- Output ONLY the cleaned text. Nothing else.\n- No commentary, labels, explanations, or preamble.\n- No questions. No suggestions. No added content.\n- Empty or filler-only input = empty output.".into()
 }
 fn default_pp_preset() -> String {
     "default".into()
@@ -324,13 +404,17 @@ impl Default for YapConfig {
             pp_provider: default_pp_provider(),
             pp_base_url: default_pp_base_url(),
             pp_api_key: String::new(),
+            pp_api_keys: std::collections::HashMap::new(),
             pp_model: default_pp_model(),
             pp_prompt: default_pp_prompt(),
             pp_preset: default_pp_preset(),
+            pp_disable_thinking: false,
             pp_local_model: String::new(),
             routing_scope: default_routing_scope(),
             app_routes: Vec::new(),
             cleanup_profiles: Vec::new(),
+            llm_scopes: std::collections::HashMap::new(),
+            agent_name: String::new(),
             streaming_partials: false,
             history_enabled: true,
         }
@@ -357,10 +441,17 @@ fn config_path() -> PathBuf {
 
 /// Load config from disk, falling back to defaults.
 pub fn load() -> YapConfig {
-    match std::fs::read_to_string(config_path()) {
+    let mut cfg = match std::fs::read_to_string(config_path()) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
         Err(_) => YapConfig::default(),
+    };
+    // Migration: users still on the "default" cleanup preset get the current
+    // default body (so prompt improvements land without a "Modified" badge). A
+    // hand-customised body carries `pp_preset != "default"`, so it's preserved.
+    if cfg.pp_preset == "default" {
+        cfg.pp_prompt = default_pp_prompt();
     }
+    cfg
 }
 
 /// Persist config to disk.
@@ -371,6 +462,27 @@ pub fn save(cfg: &YapConfig) -> Result<(), String> {
 }
 
 impl YapConfig {
+    /// Resolve the API key for `provider` given a scope-local key. Standard
+    /// cloud-provider keys are GLOBAL — one key per provider shared by every
+    /// scope, exactly like OpenWhispr's `openai_api_key` etc. — so an empty
+    /// scope key falls back to the per-provider store (`pp_api_keys`) and then
+    /// to the active cleanup key when it's the same provider. Fixes rewrites
+    /// firing with an empty key while the Cleanup tab held one for that provider.
+    pub fn provider_api_key(&self, provider: &str, scope_key: &str) -> String {
+        if !scope_key.is_empty() {
+            return scope_key.to_string();
+        }
+        if let Some(k) = self.pp_api_keys.get(provider) {
+            if !k.is_empty() {
+                return k.clone();
+            }
+        }
+        if self.pp_provider == provider && !self.pp_api_key.is_empty() {
+            return self.pp_api_key.clone();
+        }
+        String::new()
+    }
+
     /// Decide the cleanup **plan** (body + optional per-profile LLM override) for
     /// a dictation whose target app is `process` (process base name, e.g.
     /// "slack.exe"), applying the smart-routing rules. This mirrors FluidVoice's
@@ -504,5 +616,24 @@ mod tests {
         // `$` in the replacement must not be treated as a regex backreference.
         let dict = vec![entry("price", "$5")];
         assert_eq!(apply_dictionary("the price", &dict), "the $5");
+    }
+
+    #[test]
+    fn provider_api_key_falls_back_to_the_global_store() {
+        let mut cfg = YapConfig::default();
+        cfg.pp_provider = "groq".into();
+        cfg.pp_api_key = "gsk_active".into();
+        cfg.pp_api_keys
+            .insert("anthropic".into(), "sk-ant-stored".into());
+
+        // scope key wins when set
+        assert_eq!(cfg.provider_api_key("anthropic", "sk-scope"), "sk-scope");
+        // empty scope key → per-provider store
+        assert_eq!(cfg.provider_api_key("anthropic", ""), "sk-ant-stored");
+        // empty scope key + empty store slot, but the provider is the active
+        // cleanup provider → the active cleanup key (the user's Groq-tab key)
+        assert_eq!(cfg.provider_api_key("groq", ""), "gsk_active");
+        // nothing anywhere → empty (caller fails fast with a named error)
+        assert_eq!(cfg.provider_api_key("openai", ""), "");
     }
 }

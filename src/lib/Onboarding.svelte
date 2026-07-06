@@ -1,6 +1,7 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
+  import { formatHotkeySpec, hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
 
   // Diagnostics -> the backend's rolling yap.log (webview consoles are
   // invisible in normal runs; this made the event-delivery bug debuggable).
@@ -289,18 +290,8 @@
     return () => clearInterval(timer);
   });
 
-  function formatHotkey(spec) {
-    if (!spec) return 'None';
-    if (spec.startsWith('mouse:')) return `Mouse ${spec.slice(6)}`;
-    const m = spec.match(/^kb:(\d+)$/);
-    return m ? vkeyName(+m[1]) : spec;
-  }
-  function vkeyName(v) {
-    if (v >= 112 && v <= 123) return `F${v - 111}`;
-    if ((v >= 48 && v <= 57) || (v >= 65 && v <= 90)) return String.fromCharCode(v);
-    const named = { 32: 'Space', 13: 'Enter', 9: 'Tab', 8: 'Backspace', 192: '`' };
-    return named[v] || `Key ${v}`;
-  }
+  // Combo-aware display + matchers shared with Settings (lib/hotkeys.js).
+  const formatHotkey = formatHotkeySpec;
 
   // Mini hotkey recorder (same mechanics as Settings): pause the live binding,
   // capture one keypress, re-apply + persist.
@@ -440,13 +431,9 @@
   // proven 2026-07-05: focused presses leave zero hook events — WebView2
   // appears to front-run the hook chain). The key DOES reach this page as a
   // normal keydown though, so catch it here and drive the pipeline directly.
-  function hotkeyVkey() {
-    const m = (cfg?.hotkey || '').match(/^kb:(\d+)$/);
-    return m ? +m[1] : null;
-  }
   function onFallbackKeyDown(e) {
     if (recordingKey || e.repeat) return; // shortcut recorder open / key repeat
-    if (e.keyCode !== hotkeyVkey()) return;
+    if (!hotkeyMatchesKeydown(e, cfg?.hotkey)) return;
     e.preventDefault();
     e.stopPropagation();
     flog('in-window hotkey fallback: keydown -> toggle_recording');
@@ -454,7 +441,7 @@
   }
   function onFallbackKeyUp(e) {
     if (recordingKey) return;
-    if (e.keyCode !== hotkeyVkey()) return;
+    if (!hotkeyMatchesKeyup(e, cfg?.hotkey)) return;
     // Push-to-talk: the release stops the recording (toggle mode ignores it —
     // in toggle mode recording only flips on keydown).
     if (cfg?.recordingMode === 'pushToTalk') {

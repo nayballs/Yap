@@ -13,6 +13,21 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 > from "Voice Mirror"; the multi-engine STT, AI cleanup, settings, tray, overlay,
 > installer and the rest is Yap's own.
 
+> **Mission — the best-of-everything blend.** Yap's strategy is to take the best of
+> every top-tier dictation app — **superwhisper**, **OpenWhispr**, **Wispr Flow**,
+> **Handy**, **Aqua**, **FluidVoice** — and combine them into one Windows-first,
+> local-first app. We port proven patterns **from source**, not from screenshots:
+> **OpenWhispr is cloned at `E:\Projects\references\openwhispr`** (Handy at
+> `references/Handy`) — when working on a feature one of these apps does well, read
+> its actual implementation first. See ROADMAP.md "North star" +
+> `docs/openwhispr-teardown.md` + `docs/openwhispr-parity.md`.
+
+> Active work note: the Settings / Language-Models / Prompt-Studio surface is being
+> reshaped to track **OpenWhispr** (`E:\Projects\references\openwhispr`) as the design
+> reference — porting its UX patterns and wording while keeping Yap's own backend
+> contract (split immutable-guardrails + editable body). Treat that repo as the
+> source of truth for this redesign pass.
+
 ---
 
 ## Stack
@@ -76,7 +91,11 @@ back to the raw transcript, so dictation never blocks.
   (`yap-amp`) for the scrolling waveform; while idle it keeps a rolling ~300 ms
   **pre-roll** ring that `start_recording` prepends (anti first-word-clipping).
   `recording_mode` selects toggle vs push-to-talk. `run_stt` (async) does cleanup →
-  dictionary → inject (into the captured `target_hwnd`). A `processing` guard blocks
+  dictionary → inject (into the captured `target_hwnd`). **Voice Agent wake word**
+  (`agent_detect.rs`, OpenWhispr `detectAgentName` port): a dictation addressing the
+  agent by name (`agent_name`, default "Yap"; fuzzy-matched) routes the whole
+  transcript through the Voice-Agent scope in write mode (`run_agent`, shared with
+  the edit hotkey) instead of cleanup — the agent prompt strips the name+command. A `processing` guard blocks
   starting a new recording while one is still transcribing (no overlapping `run_stt`
   / duplicate model load), and the buffer is capped at 15 min so a stuck key can't
   OOM. With `streaming_partials` on, `stream_partials` (a per-session worker)
@@ -116,7 +135,8 @@ back to the raw transcript, so dictation never blocks.
   show_overlay, overlay_position, dictionary, append_trailing_space, auto_submit(+key),
   restore_clipboard, show_tray_icon, autostart, model_unload_timeout, selected_language,
   translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
-  Notes/Slack/Code/Custom) + the editable `pp_prompt` body, `cleanup_profiles` (each
+  Notes/Slack/Code/Custom), the editable `pp_prompt` body, `pp_api_keys` (per-provider
+  key store — the UI swaps the active `pp_api_key` from it on provider switch), `cleanup_profiles` (each
   with an optional per-profile LLM override: provider/base_url/model/api_key — empty
   provider = inherit global) + `app_routes` smart routing, streaming_partials,
   history_enabled, update_checks_enabled). JSON
@@ -127,9 +147,17 @@ back to the raw transcript, so dictation never blocks.
   updates); left-click opens Settings.
 - **`overlay.rs`** — shows/positions the bottom (or top) center "transcribing" overlay
   window on `yap-state`.
-- **`input_hook.rs`** — low-level Windows keyboard + mouse hooks; spec `kb:VKEY` /
-  `mouse:ID`; emits press AND release (via an emit-forwarder thread — the hook
-  callback never blocks — plus a 30 s re-hook self-heal). ⚠ **Known Windows
+- **`input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
+  `kb:ctrl+shift+VKEY` (modifier combo), `kb:165` (single right-side modifier, e.g.
+  RightAlt — never suppressed, it's AltGr), `mods:ctrl+alt` (modifier-only chord) /
+  `mouse:ID` — combo semantics ported from OpenWhispr's `windows-key-listener.c`
+  (press = key down w/ required modifiers held, release = key up OR required
+  modifier up; chords fire on completion; suppressed keys are excluded from the
+  GetAsyncKeyState self-heal — the hook eats them before the key-state table
+  updates). Emits press AND release (via an emit-forwarder thread — the hook
+  callback never blocks — plus a 30 s re-hook self-heal). The capture UI is
+  `ui/HotkeyInput.svelte` + shared `lib/hotkeys.js` (parse/format/match — also
+  drives the in-window fallbacks). ⚠ **Known Windows
   gotcha:** when one of Yap's OWN WebView2 windows has focus, the LL hook never
   receives the hotkey (WebView2/Chromium front-runs the hook chain on focus) —
   so the Settings + onboarding pages catch the hotkey **in-page** (keydown
@@ -165,15 +193,26 @@ back to the raw transcript, so dictation never blocks.
   waveform (`yap-amp`), cancel ✕ while recording, model-download button, gear.
 - **`lib/Overlay.svelte`** — the click-through bottom/top overlay; same scrolling
   waveform + "Transcribing…".
-- **`lib/Settings.svelte`** — sidebar sections: **General** (hotkey, recording mode,
-  mic, sound+volume, mute, pill size, show pill/overlay, overlay position), **Models**
-  (`ModelManager` + GPU + language/translate), **AI Cleanup** (provider/key/model/
-  preset + editable instructions + Test + usage meter + profiles w/ per-profile model
-  override + per-app rules), **History** (stats dashboard
-  + recent list + enable/clear), **Advanced** (output toggles, system, dictionary),
-  **About** (version, updates).
-- **`lib/ModelManager.svelte` / `ModelCard.svelte` / `models.js`** — the 14-model
-  browser (download/switch/delete/progress, "Your models" vs "Available").
+- **`lib/Settings.svelte`** — grouped sidebar (App / AI models / Data / System):
+  **General** (hotkey, recording mode, mic, sound+volume, mute, pill size, show
+  pill/overlay, overlay position), **Speech-to-Text** (`ModelManager` + GPU +
+  language/translate), **Language Models** (OpenWhispr-style: enable toggle → mode
+  selector Cloud Providers/Local/Self-Hosted → provider pill tabs (Groq/Anthropic/
+  OpenAI/OpenRouter/Custom, brand icons) → API Key (masked + "Get your API key"
+  link) → Select Model registry rows (`ppModels.js` + `ui/SelectList.svelte`);
+  UI-only `ppMode`/`cloudProvider` state resolves to the unchanged `ppProvider`
+  contract. Below it, **Prompt Studio** (`PromptStudio.svelte`, OpenWhispr port):
+  View (full effective prompt via `get_base_prompt`) / Customize (preset +
+  body + Save/Reset) / Test tabs. Plus usage meter + profiles w/ per-profile
+  model override + per-app rules), **History** (stats
+  dashboard + recent list + enable/clear), **Advanced** (output toggles, system,
+  dictionary), **About** (version, updates).
+- **`lib/ModelManager.svelte` / `ModelRow.svelte` / `models.js`** — the 14-model
+  browser, OpenWhispr-style: vendor pill tabs (All/NVIDIA/OpenAI/Community via
+  `ui/PillTabs.svelte`) + compact one-line rows (status dot, brand icon from
+  `providerIcons.js` + `assets/providers/*.svg` (MIT, from OpenWhispr), name,
+  size, Download/Active/delete). `ModelCard.svelte` (big cards) remains only in
+  Onboarding.
 - **`lib/Onboarding.svelte`** — first-run **guided setup** (5 steps): model picker →
   mic check (live level meter via `set_mic_test` idle-amp mode + live device switch)
   → one-click **local AI cleanup** install → tray pointer → "try it here" live
