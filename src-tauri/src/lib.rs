@@ -14,6 +14,7 @@ mod config;
 mod media;
 mod meeting;
 mod notes;
+mod tools;
 mod history;
 mod input_hook;
 mod llm;

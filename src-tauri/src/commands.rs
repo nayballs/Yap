@@ -631,52 +631,15 @@ pub fn open_logs_folder() -> Result<(), String> {
 // ---- AI Chat (the Chat surface; OpenWhispr chat/ChatView port) ----
 
 /// Eager keyword-RAG (OpenWhispr `buildRAGContext`, keyword edition per the
-/// ROADMAP's escalating plan): score every note by query-word hits (title
-/// weighted 3×), take the top 5, and format them exactly like theirs —
+/// ROADMAP's escalating plan): top-5 notes by the shared keyword scorer
+/// (`tools::search_notes`), formatted exactly like theirs —
 /// `<note id="N" title="T">\n{first 500 chars}\n</note>` joined by blank lines.
 fn rag_context(query: &str) -> String {
     const RAG_NOTE_LIMIT: usize = 5;
     const RAG_NOTE_SNIPPET_LENGTH: usize = 500;
 
-    let words: Vec<String> = query
-        .to_lowercase()
-        .split_whitespace()
-        .map(|w| {
-            w.trim_matches(|c: char| !c.is_alphanumeric())
-                .to_string()
-        })
-        .filter(|w| w.chars().count() > 2)
-        .collect();
-    if words.is_empty() {
-        return String::new();
-    }
-
-    let mut scored: Vec<(usize, crate::notes::Note)> = crate::notes::all()
+    crate::tools::search_notes(query, RAG_NOTE_LIMIT)
         .into_iter()
-        .filter_map(|n| {
-            let title = n.title.to_lowercase();
-            let body = format!(
-                "{}\n{}\n{}",
-                n.content.to_lowercase(),
-                n.enhanced_content.to_lowercase(),
-                n.transcript
-                    .iter()
-                    .map(|s| s.text.to_lowercase())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            );
-            let score: usize = words
-                .iter()
-                .map(|w| title.matches(w.as_str()).count() * 3 + body.matches(w.as_str()).count())
-                .sum();
-            (score > 0).then_some((score, n))
-        })
-        .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
-
-    scored
-        .into_iter()
-        .take(RAG_NOTE_LIMIT)
         .map(|(_, n)| {
             // Snippet from raw content (their choice); fall back to enhanced /
             // transcript for notes that are transcript-only.
@@ -759,31 +722,55 @@ pub async fn chat_send(
         .collect();
     crate::chats::append(conv.id, "user", &text)?;
 
-    // System prompt: persona + RAG notes under their exact framing.
+    // System prompt: persona (+ tool instructions when the model can
+    // tool-call) + eager-RAG notes under their exact framing. OpenWhispr runs
+    // BOTH: the model gets relevant notes up front AND can search for more.
+    let tools_supported = crate::tools::supports_tools(&provider, &model);
+    let mut system = persona.trim().to_string();
+    if tools_supported {
+        system.push_str("\n\nYou have access to tools. ");
+        system.push_str(&crate::tools::TOOL_INSTRUCTIONS.join(" "));
+    }
     let rag = rag_context(&text);
-    let system = if rag.is_empty() {
-        persona.trim().to_string()
-    } else {
-        format!(
-            "{}\n\nBelow are notes from the user's library that may be relevant. Reference them naturally if they help answer the question.\n\n{}",
-            persona.trim(),
-            rag
-        )
-    };
+    if !rag.is_empty() {
+        system.push_str(&format!(
+            "\n\nBelow are notes from the user's library that may be relevant. Reference them naturally if they help answer the question.\n\n{rag}"
+        ));
+    }
 
-    let reply = crate::llm::note_chat(
-        &system,
-        &history,
-        &text,
-        &base_url,
-        &api_key,
-        &model,
-        &provider,
-        disable_thinking,
-    )
-    .await?;
+    let (reply, tools_used) = if tools_supported {
+        crate::tools::run_tool_loop(
+            &system,
+            &history,
+            &text,
+            &base_url,
+            &api_key,
+            &model,
+            &provider,
+            disable_thinking,
+        )
+        .await?
+    } else {
+        // Small/local models: plain chat + eager RAG (their fallback).
+        let reply = crate::llm::note_chat(
+            &system,
+            &history,
+            &text,
+            &base_url,
+            &api_key,
+            &model,
+            &provider,
+            disable_thinking,
+        )
+        .await?;
+        (reply, Vec::new())
+    };
     crate::chats::append(conv.id, "assistant", &reply)?;
-    Ok(serde_json::json!({ "conversationId": conv.id, "reply": reply }))
+    Ok(serde_json::json!({
+        "conversationId": conv.id,
+        "reply": reply,
+        "toolsUsed": tools_used,
+    }))
 }
 
 /// Name + size of an audio file the user picked/dropped (Upload file card).

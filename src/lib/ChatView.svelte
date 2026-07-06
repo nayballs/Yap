@@ -76,7 +76,7 @@
     try {
       const res = await invoke('chat_send', { conversationId: activeId, text });
       activeId = res.conversationId;
-      messages = [...messages, { role: 'assistant', text: res.reply }];
+      messages = [...messages, { role: 'assistant', text: res.reply, tools: res.toolsUsed || [] }];
       refreshList();
       scrollThread();
     } catch (e) {
@@ -184,6 +184,17 @@
     {:else}
       <div class="msgs" bind:this={threadEl}>
         {#each messages as m, i (i)}
+          {#if m.role === 'assistant' && m.tools?.length}
+            <!-- Tool-activity chips (OpenWhispr shows tool calls above the answer) -->
+            <div class="toolchips">
+              {#each m.tools as t, j (j)}
+                <span class="toolchip">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4.5 4.5 0 0 0 5.8 5.8L17 15.6a4.5 4.5 0 0 1-5.8-5.8z" transform="rotate(90 12 12)" /><path d="m3 21 6.5-6.5" /><path d="M14.7 6.3 21 3l-3.3 6.3" /></svg>
+                  {t}
+                </span>
+              {/each}
+            </div>
+          {/if}
           <div class="cbubble {m.role}">
             {#if m.role === 'assistant'}
               <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown escapes all input -->
@@ -391,6 +402,30 @@
   .cbody.thinking {
     color: var(--yap-muted-55);
     font-style: italic;
+  }
+  .toolchips {
+    align-self: flex-start;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 78%;
+  }
+  .toolchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+    font-size: 10.5px;
+    color: var(--yap-muted);
+  }
+  .toolchip svg {
+    width: 10px;
+    height: 10px;
+    flex: 0 0 auto;
+    color: var(--yap-primary);
   }
   .cbubble.assistant :global(p) {
     margin: 4px 0;

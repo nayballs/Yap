@@ -340,13 +340,40 @@ async fn post_chat(
     temperature: f32,
     messages: Value,
 ) -> Result<String, String> {
+    let message =
+        post_chat_message(base_url, api_key, model, provider, temperature, messages, None).await?;
+    let content = message["content"]
+        .as_str()
+        .ok_or_else(|| "response missing choices[0].message.content".to_string())?;
+    // An empty response is a DELIBERATE result (the prompt tells the model to
+    // return nothing for empty/filler-only input), NOT an error — return Ok("")
+    // so the caller can inject nothing. Only network/HTTP/parse failures stay
+    // `Err` and trigger the raw-transcript fallback.
+    Ok(strip_wrapping(content.trim()))
+}
+
+/// Lower-level variant returning the WHOLE assistant message object (so the
+/// chat tool loop can inspect `tool_calls`). `tools` is an optional OpenAI
+/// `tools` array attached to the request.
+pub(crate) async fn post_chat_message(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    provider: &str,
+    temperature: f32,
+    messages: Value,
+    tools: Option<&Value>,
+) -> Result<Value, String> {
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let body = json!({
+    let mut body = json!({
         "model": model,
         "temperature": temperature,
         "stream": false,
         "messages": messages,
     });
+    if let Some(t) = tools {
+        body["tools"] = t.clone();
+    }
 
     let client = reqwest::Client::builder()
         .timeout(CLEANUP_TIMEOUT)
@@ -393,15 +420,11 @@ async fn post_chat(
     let total_tokens = value["usage"]["total_tokens"].as_u64().unwrap_or(0);
     crate::usage::record(provider, total_tokens, remaining_req, limit_req);
 
-    let content = value["choices"][0]["message"]["content"]
-        .as_str()
-        .ok_or_else(|| "response missing choices[0].message.content".to_string())?;
-
-    // An empty response is a DELIBERATE result (the prompt tells the model to
-    // return nothing for empty/filler-only input), NOT an error — return Ok("")
-    // so the caller can inject nothing. Only network/HTTP/parse failures above
-    // stay `Err` and trigger the raw-transcript fallback.
-    Ok(strip_wrapping(content.trim()))
+    let message = value["choices"][0]["message"].clone();
+    if message.is_null() {
+        return Err("response missing choices[0].message".to_string());
+    }
+    Ok(message)
 }
 
 #[cfg(test)]
@@ -469,7 +492,7 @@ mod tests {
 /// a paired block, a dangling opener with no closer (truncated generations), and a
 /// closer with no opener (some servers strip the opener), all case-insensitively.
 /// Non-reasoning models emit none of these, so this is a no-op for them.
-fn strip_thinking(s: &str) -> String {
+pub(crate) fn strip_thinking(s: &str) -> String {
     let mut result = s.to_string();
     for (open, close) in [("<think>", "</think>"), ("<thinking>", "</thinking>")] {
         loop {

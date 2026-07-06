@@ -268,8 +268,12 @@ back to the raw transcript, so dictation never blocks.
   (Today/Yesterday/Previous 7 Days/Older grouping, Ctrl+N, hover-delete) +
   thread; `chat_send` answers via the Chat scope with **eager keyword-RAG**
   over the notes library (top-5 `<note>` snippets; `chats.rs` persists
-  conversations to `chats.json`; no streaming/tool-loop yet — ROADMAP steps
-  2–3).
+  conversations to `chats.json`) **plus the tool-calling agent loop**
+  (`tools.rs`: search_notes/get_note/create_note/update_note/list_folders/
+  copy_to_clipboard executed locally, ≤20-step loop over the OpenAI tool
+  protocol, gated to cloud or ≥4B local models — smaller models fall back to
+  plain RAG chat; tool-activity chips render in the thread). No streaming or
+  semantic vectors yet (ROADMAP step 3).
 - **`lib/Pill.svelte`** — always-on-top pill. `yap-state` dot, scrolling amplitude
   waveform (`yap-amp`), cancel ✕ while recording, model-download button, gear.
 - **`lib/Overlay.svelte`** — the click-through bottom/top overlay; same scrolling

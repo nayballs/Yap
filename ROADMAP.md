@@ -724,10 +724,21 @@ below (✅ = done).
          their exact framing line, + last-20-turn history. Model-agnostic — works on the
          bundled tiny local model. *v1 divergences:* no streaming ("Thinking…" placeholder),
          no conversation search/archive/rename.
-      2. [ ] **Tool-calling agent loop** *(M–L)*: port OpenWhispr's client-side loop into Rust
-         over `llm.rs` (`/chat/completions` + `tools`, stream, execute `search_notes`, re-loop
-         ≤20), **gated on model capability** (≥~4B — the bundled Qwen2.5-1.5B can't reliably
-         tool-call, so fall back to plain chat + eager RAG for it).
+      2. [x] **Tool-calling agent loop — SHIPPED** (2026-07-06; self-tested live). `tools.rs`
+         ports their `services/tools/*` registry: the six always-on tools (`search_notes`,
+         `get_note`, `create_note`, `update_note`, `list_folders`, `copy_to_clipboard`) with
+         their schemas/descriptions near-verbatim (search reworded to "by keywords" — honest
+         until step 3) + their `TOOL_INSTRUCTIONS` system-prompt lines verbatim. Rust loop
+         over the OpenAI tool protocol via `llm::post_chat_message` (execute locally, feed
+         `{success,data,displayText}` back as `role:"tool"`, re-invoke, ≤20 steps, final
+         no-tools call if exhausted). **Gated on their exact rule** (`-([\d.]+)[bB]` ≥ 4;
+         cloud always; the bundled 1.5B falls back to plain chat + eager RAG) — unit-tested.
+         ChatView shows tool-activity chips. **Live-verified chains:** "create a note … in a
+         folder that fits" → `list_folders` → `create_note` (invented a "Camping" folder when
+         nothing fit — the reuse-or-create judgment working); "find my packing list and copy
+         it" → `search_notes` → `get_note` → `copy_to_clipboard` with the REAL clipboard
+         verified. Skipped (need their cloud/integrations): `web_search`,
+         `get_calendar_events`. Streaming still pending.
       3. [ ] **Semantic vectors** *(L, optional)*: only if keyword recall proves insufficient —
          `fastembed-rs` (in-process MiniLM, **no** ONNX utility-process) + `sqlite-vec`/`usearch`
          (**no** Qdrant sidecar) + the RRF merge (K=60, 0.3 cosine threshold, ~15 lines).
