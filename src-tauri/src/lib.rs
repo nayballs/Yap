@@ -8,6 +8,7 @@
 //! from Voice Mirror; everything else here is the slim glue.
 
 mod agent_detect;
+mod chats;
 mod commands;
 mod config;
 mod media;
@@ -276,6 +277,10 @@ pub fn run() {
             commands::meeting_state,
             commands::note_export,
             commands::note_ask,
+            commands::chats_list,
+            commands::chat_get,
+            commands::chat_delete,
+            commands::chat_send,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

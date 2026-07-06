@@ -135,7 +135,7 @@ Reference repo: `E:/Projects/references/openwhispr`. Last audit: 2026-07-05.
 | Feature | Status | Notes |
 |---|---|---|
 | System Prompt editor | ✅ Done | ChatConfig.svelte uses the full PromptStudio (View/Customize/Test) instead of OpenWhispr's plain 4-row textarea — a superset. |
-| Chat runtime (answers questions over notes) | 🟡 Partial | The **embedded per-note chat** is live (NotesView "Ask anything…" bar → note_ask: Chat scope endpoint + persona, note/transcript/attendees injected as grounding, in-memory thread, mic = dictate-into-box). The full Chat *surface* (cross-note RAG, persistence, streaming, tool loop) remains Phase 7. |
+| Chat runtime (answers questions over notes) | 🟡 Partial | TWO live runtimes: the **embedded per-note chat** (NotesView "Ask anything…" bar → note_ask, note-grounded) and the full **Chat surface** (ChatView.svelte ← chat/ChatView.tsx: conversation sidebar w/ their date grouping, persisted conversations (chats.json), **eager keyword-RAG** top-5 `<note>` snippets under their exact framing, last-20-turn history, Ctrl+N). Remaining vs theirs: streaming, tool-calling loop, semantic vectors, conversation search/archive/rename. |
 
 ### Area 11 — Prompt Studio
 

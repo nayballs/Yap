@@ -189,17 +189,25 @@ fn notes_path() -> PathBuf {
 }
 
 fn load_from_disk() -> Store {
-    let mut store = match std::fs::read_to_string(notes_path()) {
-        // Current shape first; fall back to the v1 bare-array format.
-        Ok(s) => serde_json::from_str::<Store>(&s)
-            .or_else(|_| {
-                serde_json::from_str::<Vec<Note>>(&s).map(|notes| Store {
-                    folders: default_folders(),
-                    actions: default_actions(),
-                    notes,
-                })
+    let path = notes_path();
+    let mut store = match std::fs::read_to_string(&path) {
+        // Current shape first; fall back to the v1 bare-array format. A file
+        // that exists but parses as NEITHER is quarantined (renamed aside),
+        // never overwritten — see config::quarantine_corrupt.
+        Ok(s) => match serde_json::from_str::<Store>(&s).or_else(|_| {
+            serde_json::from_str::<Vec<Note>>(&s).map(|notes| Store {
+                folders: default_folders(),
+                actions: default_actions(),
+                notes,
             })
-            .unwrap_or_default(),
+        }) {
+            Ok(store) => store,
+            Err(e) => {
+                tracing::error!("notes.json failed to parse: {}", e);
+                crate::config::quarantine_corrupt(&path);
+                Store::default()
+            }
+        },
         Err(_) => Store::default(),
     };
     if seed_missing_builtins(&mut store) {
@@ -212,7 +220,7 @@ fn save_to_disk(store: &Store) {
     match serde_json::to_string(store) {
         Ok(json) => {
             let _ = std::fs::create_dir_all(crate::config::data_dir());
-            if let Err(e) = std::fs::write(notes_path(), json) {
+            if let Err(e) = crate::config::atomic_write(&notes_path(), &json) {
                 tracing::warn!("Failed to persist notes: {}", e);
             }
         }
@@ -358,6 +366,11 @@ pub fn list() -> Value {
 
 pub fn get(id: u64) -> Option<Note> {
     with_notes(|notes| notes.iter().find(|n| n.id == id).cloned())
+}
+
+/// All notes (cloned) — used by the AI Chat's keyword-RAG scorer.
+pub fn all() -> Vec<Note> {
+    with_notes(|notes| notes.clone())
 }
 
 pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {

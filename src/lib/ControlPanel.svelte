@@ -19,7 +19,7 @@
   import DictionaryView from './DictionaryView.svelte';
   import UploadView from './UploadView.svelte';
   import NotesView from './NotesView.svelte';
-  import ComingSoonView from './ComingSoonView.svelte';
+  import ChatView from './ChatView.svelte';
 
   let activeView = $state('home');
   let settingsOpen = $state(false);
@@ -125,13 +125,7 @@
     {:else if activeView === 'dictionary'}
       <DictionaryView />
     {:else if activeView === 'chat'}
-      <ComingSoonView
-        kind="chat"
-        title="Chat"
-        body="A voice assistant you can ask questions — coming with Yap's AI Chat surface. Its model and prompt are already configurable, so it works the moment it ships."
-        linkText="Configure its model in Settings → Language Models → Chat"
-        onlink={() => openSettings('llm')}
-      />
+      <ChatView />
     {:else if activeView === 'notes'}
       <NotesView />
     {:else if activeView === 'upload'}

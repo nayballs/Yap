@@ -487,20 +487,12 @@ pub fn get_note_base_prompt() -> String {
     crate::llm::NOTE_BASE_PROMPT.to_string()
 }
 
-/// One turn of the embedded note chat (the "Ask anything…" bar, OpenWhispr
-/// `useEmbeddedChat`): the **Chat** scope's endpoint + prompt with the note's
-/// content and transcript injected as context — falling back to the global
-/// cleanup endpoint when the scope is off. `history` is the prior turns as
-/// `[role, text]` pairs (the UI sends the last few).
-#[tauri::command]
-pub async fn note_ask(
-    id: u64,
-    question: String,
-    history: Option<Vec<(String, String)>>,
-) -> Result<String, String> {
-    let note = crate::notes::get(id).ok_or("Note not found")?;
-    let cfg = config::load();
-
+/// Resolve the **Chat** scope's endpoint + persona (falling back to the global
+/// cleanup endpoint when the scope is off) and fail fast on keyless cloud
+/// providers. Shared by the embedded note chat and the AI Chat surface.
+fn resolve_chat_endpoint(
+    cfg: &YapConfig,
+) -> Result<(String, String, String, String, String, bool), String> {
     let (base_url, api_key, model, provider, persona, disable_thinking) =
         match cfg.llm_scopes.get("chat") {
             Some(s) if s.enabled && !s.provider.is_empty() => {
@@ -514,7 +506,7 @@ pub async fn note_ask(
                 (b, k, m, p, s.prompt.clone(), s.disable_thinking)
             }
             scope => {
-                let (b, k, m, p) = crate::local_llm::effective_endpoint(&cfg);
+                let (b, k, m, p) = crate::local_llm::effective_endpoint(cfg);
                 let persona = scope
                     .map(|s| s.prompt.clone())
                     .filter(|p| !p.trim().is_empty())
@@ -535,6 +527,24 @@ pub async fn note_ask(
             "No {provider} API key — add one in Settings → Language Models"
         ));
     }
+    Ok((base_url, api_key, model, provider, persona, disable_thinking))
+}
+
+/// One turn of the embedded note chat (the "Ask anything…" bar, OpenWhispr
+/// `useEmbeddedChat`): the **Chat** scope's endpoint + prompt with the note's
+/// content and transcript injected as context — falling back to the global
+/// cleanup endpoint when the scope is off. `history` is the prior turns as
+/// `[role, text]` pairs (the UI sends the last few).
+#[tauri::command]
+pub async fn note_ask(
+    id: u64,
+    question: String,
+    history: Option<Vec<(String, String)>>,
+) -> Result<String, String> {
+    let note = crate::notes::get(id).ok_or("Note not found")?;
+    let cfg = config::load();
+    let (base_url, api_key, model, provider, persona, disable_thinking) =
+        resolve_chat_endpoint(&cfg)?;
 
     // Inject the note as grounding context (content + transcript + attendees).
     let mut context = String::new();
@@ -616,6 +626,164 @@ pub fn open_logs_folder() -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+// ---- AI Chat (the Chat surface; OpenWhispr chat/ChatView port) ----
+
+/// Eager keyword-RAG (OpenWhispr `buildRAGContext`, keyword edition per the
+/// ROADMAP's escalating plan): score every note by query-word hits (title
+/// weighted 3×), take the top 5, and format them exactly like theirs —
+/// `<note id="N" title="T">\n{first 500 chars}\n</note>` joined by blank lines.
+fn rag_context(query: &str) -> String {
+    const RAG_NOTE_LIMIT: usize = 5;
+    const RAG_NOTE_SNIPPET_LENGTH: usize = 500;
+
+    let words: Vec<String> = query
+        .to_lowercase()
+        .split_whitespace()
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_string()
+        })
+        .filter(|w| w.chars().count() > 2)
+        .collect();
+    if words.is_empty() {
+        return String::new();
+    }
+
+    let mut scored: Vec<(usize, crate::notes::Note)> = crate::notes::all()
+        .into_iter()
+        .filter_map(|n| {
+            let title = n.title.to_lowercase();
+            let body = format!(
+                "{}\n{}\n{}",
+                n.content.to_lowercase(),
+                n.enhanced_content.to_lowercase(),
+                n.transcript
+                    .iter()
+                    .map(|s| s.text.to_lowercase())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+            let score: usize = words
+                .iter()
+                .map(|w| title.matches(w.as_str()).count() * 3 + body.matches(w.as_str()).count())
+                .sum();
+            (score > 0).then_some((score, n))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+
+    scored
+        .into_iter()
+        .take(RAG_NOTE_LIMIT)
+        .map(|(_, n)| {
+            // Snippet from raw content (their choice); fall back to enhanced /
+            // transcript for notes that are transcript-only.
+            let source = if !n.content.trim().is_empty() {
+                n.content.clone()
+            } else if !n.enhanced_content.trim().is_empty() {
+                n.enhanced_content.clone()
+            } else {
+                n.transcript
+                    .iter()
+                    .map(|s| s.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            let snippet: String = source.chars().take(RAG_NOTE_SNIPPET_LENGTH).collect();
+            let title = if n.title.trim().is_empty() {
+                "Untitled".to_string()
+            } else {
+                n.title.clone()
+            };
+            format!("<note id=\"{}\" title=\"{}\">\n{}\n</note>", n.id, title, snippet)
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Conversation summaries for the chat sidebar.
+#[tauri::command]
+pub fn chats_list() -> serde_json::Value {
+    crate::chats::list()
+}
+
+/// One conversation with its messages.
+#[tauri::command]
+pub fn chat_get(id: u64) -> Result<crate::chats::Conversation, String> {
+    crate::chats::get(id).ok_or_else(|| "Conversation not found".to_string())
+}
+
+#[tauri::command]
+pub fn chat_delete(id: u64) {
+    crate::chats::delete(id);
+}
+
+/// Send one chat turn. Creates the conversation on first message (title =
+/// first 50 chars, OpenWhispr's rule), persists both sides, and answers via
+/// the Chat scope with eager keyword-RAG over the notes library injected under
+/// their exact framing line. Returns `{ conversationId, reply }`.
+#[tauri::command]
+pub async fn chat_send(
+    conversation_id: Option<u64>,
+    text: String,
+) -> Result<serde_json::Value, String> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err("Type a message first".to_string());
+    }
+    let cfg = config::load();
+    let (base_url, api_key, model, provider, persona, disable_thinking) =
+        resolve_chat_endpoint(&cfg)?;
+
+    // Conversation bookkeeping (create on first message, OpenWhispr-style).
+    let conv = match conversation_id.and_then(crate::chats::get) {
+        Some(c) => c,
+        None => {
+            let title: String = if text.chars().count() > 50 {
+                format!("{}...", text.chars().take(50).collect::<String>())
+            } else {
+                text.clone()
+            };
+            crate::chats::create(&title)
+        }
+    };
+    let history: Vec<(String, String)> = conv
+        .messages
+        .iter()
+        .rev()
+        .take(19) // + the new user turn ≈ their slice(-20)
+        .rev()
+        .map(|m| (m.role.clone(), m.text.clone()))
+        .collect();
+    crate::chats::append(conv.id, "user", &text)?;
+
+    // System prompt: persona + RAG notes under their exact framing.
+    let rag = rag_context(&text);
+    let system = if rag.is_empty() {
+        persona.trim().to_string()
+    } else {
+        format!(
+            "{}\n\nBelow are notes from the user's library that may be relevant. Reference them naturally if they help answer the question.\n\n{}",
+            persona.trim(),
+            rag
+        )
+    };
+
+    let reply = crate::llm::note_chat(
+        &system,
+        &history,
+        &text,
+        &base_url,
+        &api_key,
+        &model,
+        &provider,
+        disable_thinking,
+    )
+    .await?;
+    crate::chats::append(conv.id, "assistant", &reply)?;
+    Ok(serde_json::json!({ "conversationId": conv.id, "reply": reply }))
 }
 
 /// Name + size of an audio file the user picked/dropped (Upload file card).

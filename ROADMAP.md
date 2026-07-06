@@ -709,21 +709,30 @@ below (✅ = done).
       mic = "You", loopback = "Them"; real **speaker diarization** (voice-print profiles) is a
       later **L** item, skipped for now. Effort **L**, but the recorder half is Phase 6 work and
       the enhancement half is free once the Actions engine exists. Teardown §2.
-- [ ] **AI Chat over your notes** ("chat that knows your meetings") — escalating scope so the
-      cheap, high-value slice ships first:
-      1. **Eager keyword-RAG** *(S — do first)*: search notes **before** calling the LLM and
-         inline the top-5 snippets into the system prompt. Model-agnostic, works even on the
-         bundled tiny local model, and delivers "knows your notes" with **no agent loop at all**.
-      2. **Tool-calling agent loop** *(M–L)*: port OpenWhispr's client-side loop into Rust over
-         `llm.rs` (`/chat/completions` + `tools`, stream, execute `search_notes`, re-loop ≤20),
-         **gated on model capability** (≥~4B — the bundled Qwen2.5-1.5B can't reliably tool-call,
-         so fall back to plain chat + eager RAG for it).
-      3. **Semantic vectors** *(L, optional)*: only if keyword recall proves insufficient — use
+- [~] **AI Chat over your notes** ("chat that knows your meetings") — **step 1 SHIPPED**
+      (2026-07-06; ⚠ awaiting live runtime test), steps 2–3 remain:
+      1. [x] **Eager keyword-RAG + the Chat surface** — the ControlPanel's **Chat** view is
+         live (`ChatView.svelte` ← OpenWhispr `chat/ChatView.tsx` + `ConversationList`):
+         two panes — conversation sidebar with their **Today / Yesterday / Previous 7 Days /
+         Older** grouping, New chat (Ctrl+N), hover-delete — and the thread (markdown
+         assistant bubbles, "Type a message..." bar with mic = dictate-into-box + send).
+         Conversations persist as JSON (`chats.rs`, created on first message with their
+         first-50-chars title rule). `chat_send` = Chat scope endpoint (cleanup fallback,
+         shared `resolve_chat_endpoint` with the embedded note chat) + **keyword-RAG**:
+         every note scored by query-word hits (title 3×, content + enhanced + transcript),
+         top 5 injected as their exact `<note id="" title="">` snippets (500 chars) under
+         their exact framing line, + last-20-turn history. Model-agnostic — works on the
+         bundled tiny local model. *v1 divergences:* no streaming ("Thinking…" placeholder),
+         no conversation search/archive/rename.
+      2. [ ] **Tool-calling agent loop** *(M–L)*: port OpenWhispr's client-side loop into Rust
+         over `llm.rs` (`/chat/completions` + `tools`, stream, execute `search_notes`, re-loop
+         ≤20), **gated on model capability** (≥~4B — the bundled Qwen2.5-1.5B can't reliably
+         tool-call, so fall back to plain chat + eager RAG for it).
+      3. [ ] **Semantic vectors** *(L, optional)*: only if keyword recall proves insufficient —
          `fastembed-rs` (in-process MiniLM, **no** ONNX utility-process) + `sqlite-vec`/`usearch`
          (**no** Qdrant sidecar) + the RRF merge (K=60, 0.3 cosine threshold, ~15 lines).
-      Persist conversations as JSON first (SQLite only if you want chat FTS later). A **voice-first
-      chat overlay** here is the natural home for the parked *agentic voice-command mode* (Phase 4).
-      Teardown §3.
+      A **voice-first chat overlay** here is the natural home for the parked *agentic
+      voice-command mode* (Phase 4). Teardown §3.
 
 > **Recommended build order across Phases 4/6/7** (small → foundational → dependent): settings-UX
 > patterns → Actions engine → Audio Upload (`decode.rs` + chunker) → notes + editor → meeting

@@ -460,11 +460,40 @@ pub fn load() -> YapConfig {
     cfg
 }
 
-/// Persist config to disk.
+/// Atomic file write: write to `<path>.tmp`, then rename over the target
+/// (`std::fs::rename` replaces on Windows). A `tauri dev` rebuild or crash
+/// mid-write can otherwise leave a torn JSON file — which the stores would
+/// fail to parse and (before this fix) silently replace with an empty
+/// default, destroying user data.
+pub(crate) fn atomic_write(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, contents)?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Move an unparseable store file aside (`<name>.corrupt-<unix-secs>`) so it
+/// is NEVER overwritten by a fresh default — the data stays recoverable.
+pub(crate) fn quarantine_corrupt(path: &std::path::Path) {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let backup = path.with_extension(format!("corrupt-{ts}"));
+    match std::fs::rename(path, &backup) {
+        Ok(_) => tracing::error!(
+            "Unparseable store {:?} quarantined to {:?} — starting fresh, data preserved",
+            path,
+            backup
+        ),
+        Err(e) => tracing::error!("Failed to quarantine corrupt store {:?}: {}", path, e),
+    }
+}
+
+/// Persist config to disk (atomically).
 pub fn save(cfg: &YapConfig) -> Result<(), String> {
     std::fs::create_dir_all(data_dir()).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    std::fs::write(config_path(), json).map_err(|e| e.to_string())
+    atomic_write(&config_path(), &json).map_err(|e| e.to_string())
 }
 
 impl YapConfig {

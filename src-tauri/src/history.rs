@@ -61,8 +61,16 @@ fn history_path() -> PathBuf {
 }
 
 fn load_from_disk() -> Vec<HistoryEntry> {
-    match std::fs::read_to_string(history_path()) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+    let path = history_path();
+    match std::fs::read_to_string(&path) {
+        Ok(s) => match serde_json::from_str(&s) {
+            Ok(entries) => entries,
+            Err(e) => {
+                tracing::error!("history.json failed to parse: {}", e);
+                crate::config::quarantine_corrupt(&path);
+                Vec::new()
+            }
+        },
         Err(_) => Vec::new(),
     }
 }
@@ -71,7 +79,7 @@ fn save_to_disk(entries: &[HistoryEntry]) {
     match serde_json::to_string(entries) {
         Ok(json) => {
             let _ = std::fs::create_dir_all(crate::config::data_dir());
-            if let Err(e) = std::fs::write(history_path(), json) {
+            if let Err(e) = crate::config::atomic_write(&history_path(), &json) {
                 tracing::warn!("Failed to persist history: {}", e);
             }
         }

@@ -263,8 +263,13 @@ back to the raw transcript, so dictation never blocks.
   staleness dot** (safe renderer in `lib/markdown.js`); embedded per-note
   **"Ask anything…" bar** = Chat scope grounded in the note, with mic button
   for in-box dictation; live **You/Them meeting transcript bubbles** during
-  recording); the Home feed has **Ctrl+K search**. Chat is a `ComingSoonView`
-  panel awaiting Phase 7.
+  recording); the Home feed has **Ctrl+K search**. **`ChatView.svelte`** = the
+  AI Chat surface (OpenWhispr `chat/ChatView.tsx` port): conversation sidebar
+  (Today/Yesterday/Previous 7 Days/Older grouping, Ctrl+N, hover-delete) +
+  thread; `chat_send` answers via the Chat scope with **eager keyword-RAG**
+  over the notes library (top-5 `<note>` snippets; `chats.rs` persists
+  conversations to `chats.json`; no streaming/tool-loop yet — ROADMAP steps
+  2–3).
 - **`lib/Pill.svelte`** — always-on-top pill. `yap-state` dot, scrolling amplitude
   waveform (`yap-amp`), cancel ✕ while recording, model-download button, gear.
 - **`lib/Overlay.svelte`** — the click-through bottom/top overlay; same scrolling

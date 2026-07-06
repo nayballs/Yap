@@ -98,7 +98,7 @@ fn save_to_disk(u: &GroqUsage) {
     match serde_json::to_string_pretty(u) {
         Ok(json) => {
             let _ = std::fs::create_dir_all(crate::config::data_dir());
-            if let Err(e) = std::fs::write(usage_path(), json) {
+            if let Err(e) = crate::config::atomic_write(&usage_path(), &json) {
                 tracing::warn!("Failed to persist Groq usage: {}", e);
             }
         }
