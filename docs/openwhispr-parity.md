@@ -135,7 +135,7 @@ Reference repo: `E:/Projects/references/openwhispr`. Last audit: 2026-07-05.
 | Feature | Status | Notes |
 |---|---|---|
 | System Prompt editor | ✅ Done | ChatConfig.svelte uses the full PromptStudio (View/Customize/Test) instead of OpenWhispr's plain 4-row textarea — a superset. |
-| Chat runtime (answers questions over notes) | ⚪ Intentional | Coming-soon; AI Chat surface deferred to ROADMAP Phase 7 (eager keyword-RAG → tool-loop → vectors). |
+| Chat runtime (answers questions over notes) | 🟡 Partial | The **embedded per-note chat** is live (NotesView "Ask anything…" bar → note_ask: Chat scope endpoint + persona, note/transcript/attendees injected as grounding, in-memory thread, mic = dictate-into-box). The full Chat *surface* (cross-note RAG, persistence, streaming, tool loop) remains Phase 7. |
 
 ### Area 11 — Prompt Studio
 
@@ -153,6 +153,6 @@ Reference repo: `E:/Projects/references/openwhispr`. Last audit: 2026-07-05.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Mode-transition success toasts | ❌ Gap | Yap changes mode silently (onModeChange) with no toast — cosmetic. |
+| Toast notification system (ui/Toast.tsx) | ✅ Done | Full port: ui/toast.svelte.js + ToastHost.svelte (variant accent bars, hover-pause, destructive mono error box w/ copy, progress hairline, slide in/out; 3.5 s / 6 s durations). Mounted in ControlPanel; wired to action runs, meeting start/stop, upload done/error, copies, Debug-mode toggle (their exact toast copy), and backend `yap-error` events. Mode-transition toasts in the LLM config remain unwired (cosmetic). |
 | Local model downloader infrastructure (reusable) | ✅ Done | The Local-mode LLM browser (family tabs + cards + download/delete) shipped in Settings, reusing the ModelManager patterns; backend = 11 curated SHA-pinned GGUFs. |
 | Local mode shared across all 4 scope tabs | 🟡 Partial | Non-cleanup scopes' Local mode just points users to install under Dictation Cleanup and shares that one sidecar (ScopeProviderConfig.svelte:186) rather than each tab having its own downloader — reasonable for Yap's single-sidecar model. |

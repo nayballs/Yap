@@ -557,12 +557,24 @@ below (✅ = done).
       Also shipped: **Home feed search** (Ctrl+K, OpenWhispr's command-search slot —
       client-side filter over text/app/model). Retry-on-failure deferred: Yap's history
       only records successes; failure entries would come with audio-history export.
-- [ ] **Meeting recording / long-form transcription — ⭐ NEXT UP** (chosen 2026-07-06; the
-      openwhispr.com hero: "The notepad that cleans up after your meetings"). Capture the
-      **mic** ("You") + **system audio** via WASAPI **loopback** ("Them" — what the call
-      plays through the speakers), record long sessions, chunk-transcribe both streams on
-      the warm engine, fold time-ordered You/Them segments into `notes.transcript`, and on
-      stop run the Actions engine with the meeting prompt → minutes in `enhanced_content`.
+- [~] **Meeting recording / long-form transcription — v1 IMPLEMENTED** (2026-07-06; ⚠ **NOT
+      yet runtime-tested** — needs a live pass with real call audio; loopback capture is the
+      risky part). The openwhispr.com hero: "The notepad that cleans up after your
+      meetings". As built: `meeting.rs` captures the **mic** ("You") + **system audio** via
+      WASAPI **loopback** ("Them" — cpal input stream on the default *output* device), both
+      downmixed/resampled to 16 kHz on their own capture thread (cpal streams are !Send). A
+      worker drains each source every **~15 s** (2 s minimum, silence-gated at peak<0.008 to
+      avoid hallucinated chunks), transcribes on the **shared warm engine**
+      (`pipeline::EngineSlot` — engine taken per chunk and returned, so hotkey dictation
+      still works between chunks), appends `TranscriptSegment {source you|them, text, ts}`
+      to `notes.transcript` (persisted every drain — a crash loses ≤1 chunk) and emits
+      `yap-meeting-segment` for the live UI. NotesView: **Record** button + elapsed timer
+      in the note editor, You/Them **chat-bubble transcript** (OpenWhispr
+      MeetingTranscriptChat style), headphones hint (echo caveat: speakers leak "Them" into
+      the mic), and on stop the **"Meeting Notes" action auto-runs** with
+      `MEETING_NOTE_BASE_PROMPT` over typed notes + the `You:`/`Them:` transcript (their
+      exact input assembly) → minutes in the Enhanced tab. Fully offline — no realtime
+      cloud path; "live" means ~15 s behind. 4 h buffer cap per source.
       **Where the code is:**
       - *OpenWhispr reference (port source):* `src/stores/meetingRecordingStore.ts` (the
         session state machine: record → PCM chunks → partial/final segment folding →
@@ -663,12 +675,33 @@ below (✅ = done).
       button** (`ActionPicker.tsx` port: left half re-runs the last-used action —
       persisted in localStorage — chevron opens the action menu + "Manage actions").
       `note_enhance(action_id)` runs the picked action's prompt as the fragment.
-      *Deferred from v1:* "Add existing" (move note between folders — the backend
-      `note_update(folder)` exists, no UI), rich editor (Milkdown/CodeMirror — the
-      markdown-strings-end-to-end contract makes the swap clean), auto-generated note
-      titles (first-6-words fallback only), background-action state surviving view switches
-      (the LLM call completes + saves; only the spinner is lost), dictation-into-note.
-      Teardown §2.
+      *Editor-header + notifications pass (same day):* the note editor matches OpenWhispr's
+      NoteEditor header — **meta chip row** (created-date chip, **Add attendees** →
+      `participants` on the note, fed to the enhancement prompt as an `Attendees:` line so
+      the no-guessing-names base rule has real names; **folder chip** with a move-to-folder
+      menu), an **export-to-markdown** button (`note_export` + native save dialog),
+      **document-style borderless editor** ("Start writing…"), richer list rows (relative
+      "now"/"5m" times, meeting/enhanced tags) and **folder counts**. Plus the app-wide
+      **toast notification system** (ui/Toast.tsx ported → `ui/toast.svelte.js` +
+      `ToastHost.svelte`: variant accent bars, hover-pause, copyable error boxes, progress
+      hairline) wired to actions, meetings, uploads, copies, Debug-mode (their toast copy)
+      and backend `yap-error` events.
+      *Editor-exact pass (same day):* the note editor now mirrors OpenWhispr's layout
+      one-to-one — the **"Ask anything…" bottom bar** ([🎙 dictate-into-box] [input]
+      [Generate Notes split button]) with a REAL **embedded per-note chat**
+      (`note_ask` → the **Chat scope's** endpoint/persona with the note + transcript +
+      attendees injected as grounding context, cleanup-endpoint fallback — the Chat
+      scope's first live runtime, ahead of the full Chat surface); **Record** became a
+      chip in the meta row; **attendees** open a **popover** card (input + hint, stays
+      open for multiple adds) instead of inlining in place; the **folder chip menu** got
+      folder icons, a ✓ on the current folder, and an in-menu **"+ New folder"**;
+      sidebar +/section icons made properly visible.
+      *Deferred from v1:* note-folder "Add existing" picker, rich editor
+      (Milkdown/CodeMirror — the markdown-strings-end-to-end contract makes the swap
+      clean), auto-generated note titles (first-6-words fallback only), background-action
+      state surviving view switches (the LLM call completes + saves; only the spinner is
+      lost), dictation-into-note (the ask-bar mic covers the chat box), chat thread
+      persistence + streaming (thread is in-memory per note). Teardown §2.
 - [ ] **Meeting notes** — capture mic + WASAPI loopback (**shared with Phase 6's recorder**),
       chunk on the warm `transcribe-rs` engine, fold `You:`/`Them:` `TranscriptSegment`s into
       `notes.transcript`, then run the Actions engine with a **meeting** system prompt →

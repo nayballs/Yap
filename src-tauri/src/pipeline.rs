@@ -16,7 +16,13 @@ use tauri::{AppHandle, Emitter};
 use crate::config::{self, YapConfig};
 use crate::stt::{self, SttAdapter, SttError};
 
-const TARGET_SAMPLE_RATE: u32 = 16_000;
+pub(crate) const TARGET_SAMPLE_RATE: u32 = 16_000;
+
+/// The shared warm-engine slot. The pipeline owns it; the meeting recorder
+/// (`meeting.rs`) clones the Arc and takes/returns the engine per chunk, so
+/// dictation and meeting transcription interleave instead of double-loading
+/// the model.
+pub(crate) type EngineSlot = std::sync::Arc<Mutex<Option<SttAdapter>>>;
 
 /// How much audio (16 kHz mono samples) to keep in the rolling pre-roll ring so
 /// the first word isn't clipped: speech that started a moment *before* the user
@@ -44,7 +50,7 @@ struct Shared {
     /// *idle* so `start_recording` can seed the buffer with the moment before the
     /// keypress (anti first-word-clipping). Capped at `PREROLL_SAMPLES`.
     preroll: Mutex<VecDeque<f32>>,
-    engine: Mutex<Option<SttAdapter>>,
+    engine: EngineSlot,
     app: AppHandle,
     config: RwLock<YapConfig>,
     /// Last time the engine did real work (ms since epoch). Drives the idle
@@ -948,7 +954,7 @@ impl Pipeline {
             recording: AtomicBool::new(false),
             buffer: Mutex::new(Vec::new()),
             preroll: Mutex::new(VecDeque::with_capacity(PREROLL_SAMPLES + 1)),
-            engine: Mutex::new(engine),
+            engine: std::sync::Arc::new(Mutex::new(engine)),
             app: app.clone(),
             config: RwLock::new(cfg.clone()),
             last_activity: AtomicU64::new(now_ms()),
@@ -1000,6 +1006,12 @@ impl Pipeline {
             *g = Some(engine);
         }
         let _ = self.shared.app.emit("yap-state", "idle");
+    }
+
+    /// Clone of the shared warm-engine slot for the meeting recorder (see
+    /// `EngineSlot`).
+    pub(crate) fn engine_slot(&self) -> EngineSlot {
+        std::sync::Arc::clone(&self.shared.engine)
     }
 
     /// Start an Upload file transcription (async — progress + result arrive via

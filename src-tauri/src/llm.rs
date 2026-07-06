@@ -177,10 +177,8 @@ Do not wrap the output in code fences unless the user explicitly asks for a code
 /// after "Instructions: ", so the app-owned format rules always win.
 pub const NOTE_BASE_PROMPT: &str = "You are a note enhancement assistant. The user will provide raw notes — possibly voice-transcribed, rough, or unstructured. Your job is to clean them up according to the instructions below while preserving all original meaning and information. Output clean markdown.\n\nFORMAT RULES (strict):\n- Do NOT include any preamble: no title, no date/time/location, no attendee list, no topic header. Start directly with the content.\n- Do NOT use tables, horizontal rules, or block quotes.\n- Do NOT list or guess participant names/roles.\n- Keep the tone professional and concise. Bias toward brevity.\n\nInstructions: ";
 
-/// The meeting variant (OpenWhispr `MEETING_SYSTEM_PROMPT`, verbatim) — unused
-/// until the Phase-6 meeting recorder lands; kept so the pair stays together
-/// and the port is complete.
-#[allow(dead_code)]
+/// The meeting variant (OpenWhispr `MEETING_SYSTEM_PROMPT`, verbatim) — used
+/// when enhancing a meeting note (typed notes + You:/Them: transcript).
 pub const MEETING_NOTE_BASE_PROMPT: &str = "You are a professional meeting notes assistant. You will receive a dual-speaker transcript where \"You:\" marks the user's speech and \"Them:\" marks the other participant(s), along with any manual notes the user took.\n\nYour job is to produce clean, actionable meeting notes in markdown. Follow these rules:\n\nFORMAT RULES (strict):\n- Do NOT include any preamble: no title, no \"# Meeting Notes\", no date/time/location, no attendee list, no topic header. Start directly with the summary.\n- Do NOT use tables, horizontal rules, or block quotes.\n- Do NOT list or guess participant names/roles.\n- Start with a concise 1\u{2013}2 sentence summary of what the meeting was about.\n- Use clear section headings: ## Key Discussion Points, ## Decisions Made, ## Action Items, ## Follow-ups (omit any section that has no content).\n- Under Action Items, use checkboxes (`- [ ]`) and attribute each item to \"You\" or \"Them\" where clear.\n\nCONTENT RULES:\n- Preserve important quotes or specific commitments verbatim when they carry meaning.\n- Remove filler, small talk, false starts, and repeated/redundant content.\n- Where speakers refer to the same topic across multiple turns, consolidate into a coherent point rather than listing every utterance.\n- If the user included manual notes alongside the transcript, integrate them — they represent the user's emphasis on what matters most.\n- Keep the tone professional and concise. Bias toward brevity.\n\nInstructions: ";
 
 /// The built-in "Generate Notes" action fragment (OpenWhispr `database.js`
@@ -196,6 +194,7 @@ pub const NOTE_DEFAULT_FRAGMENT: &str = "Transform the provided content into cle
 pub async fn enhance_note(
     content: &str,
     fragment: &str,
+    meeting: bool,
     base_url: &str,
     api_key: &str,
     model: &str,
@@ -206,7 +205,14 @@ pub async fn enhance_note(
     if content.is_empty() {
         return Err("Note is empty — nothing to enhance".to_string());
     }
-    let system = format!("{NOTE_BASE_PROMPT}{}", fragment.trim());
+    // Base prompt selected by note kind, exactly like OpenWhispr's
+    // `runBackgroundAction` (`isMeetingNote`).
+    let base = if meeting {
+        MEETING_NOTE_BASE_PROMPT
+    } else {
+        NOTE_BASE_PROMPT
+    };
+    let system = format!("{base}{}", fragment.trim());
     let messages = json!([
         { "role": "system", "content": system },
         { "role": "user", "content": content },
@@ -219,6 +225,49 @@ pub async fn enhance_note(
     };
     if out.trim().is_empty() {
         return Err("The model returned an empty enhancement".to_string());
+    }
+    Ok(out.trim().to_string())
+}
+
+/// One embedded note-chat turn (OpenWhispr `useEmbeddedChat`): system = the
+/// Chat scope's prompt + the note injected as context, then a short history
+/// and the user's question. Returns the assistant's answer.
+pub async fn note_chat(
+    system: &str,
+    history: &[(String, String)],
+    question: &str,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    provider: &str,
+    disable_thinking: bool,
+) -> Result<String, String> {
+    let question = question.trim();
+    if question.is_empty() {
+        return Err("Ask something first".to_string());
+    }
+    let mut messages = vec![json!({ "role": "system", "content": system })];
+    for (role, text) in history {
+        let role = if role == "assistant" { "assistant" } else { "user" };
+        messages.push(json!({ "role": role, "content": text }));
+    }
+    messages.push(json!({ "role": "user", "content": question }));
+    let out = post_chat(
+        base_url,
+        api_key,
+        model,
+        provider,
+        0.5,
+        serde_json::Value::Array(messages),
+    )
+    .await?;
+    let out = if disable_thinking {
+        strip_thinking(&out)
+    } else {
+        out
+    };
+    if out.trim().is_empty() {
+        return Err("The model returned an empty answer".to_string());
     }
     Ok(out.trim().to_string())
 }

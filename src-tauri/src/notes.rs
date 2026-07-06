@@ -17,7 +17,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-/// One note. `note_type` is "personal" today; "meeting" arrives with Phase 6.
+/// One You/Them transcript segment from the meeting recorder (OpenWhispr
+/// `TranscriptSegment`, trimmed to what Yap uses: source "you"|"them", text,
+/// unix-seconds timestamp).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptSegment {
+    pub source: String,
+    pub text: String,
+    pub ts: u64,
+}
+
+/// One note. `note_type`: "personal" | "meeting" (set when a recording starts).
 /// camelCase on the wire + on disk, like `YapConfig`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +50,14 @@ pub struct Note {
     /// Folder name (OpenWhispr seeds Personal + Meetings; user-creatable).
     #[serde(default = "default_folder")]
     pub folder: String,
+    /// Meeting-recorder segments (You/Them), time-ordered. Empty for
+    /// personal notes.
+    #[serde(default)]
+    pub transcript: Vec<TranscriptSegment>,
+    /// Attendee names (OpenWhispr `participants`) — shown as chips and fed to
+    /// the enhancement prompt so the model can attribute correctly.
+    #[serde(default)]
+    pub participants: Vec<String>,
     /// Where the note came from ("manual" | "upload" | later "meeting").
     #[serde(default)]
     pub source: String,
@@ -329,6 +348,7 @@ pub fn list() -> Value {
                         && n.enhanced_at_hash != content_hash(&n.content),
                     "folder": n.folder,
                     "source": n.source,
+                    "noteType": n.note_type,
                 })
             })
             .collect();
@@ -357,6 +377,8 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
             enhanced_at_hash: String::new(),
             note_type: default_note_type(),
             folder,
+            transcript: Vec::new(),
+            participants: Vec::new(),
             source: source.to_string(),
             created_ts: now,
             updated_ts: now,
@@ -374,6 +396,7 @@ pub fn update(
     title: Option<String>,
     content: Option<String>,
     folder: Option<String>,
+    participants: Option<Vec<String>>,
 ) -> Result<(), String> {
     with_store(|store| {
         let note = store
@@ -392,6 +415,34 @@ pub fn update(
                 note.folder = f.trim().to_string();
             }
         }
+        if let Some(p) = participants {
+            note.participants = p
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+        note.updated_ts = now_secs();
+        save_to_disk(store);
+        Ok(())
+    })
+}
+
+/// Append meeting-recorder segments to a note's transcript and mark it a
+/// meeting note (the recorder persists every drain, so a crash loses at most
+/// one chunk).
+pub fn append_transcript(id: u64, segments: &[TranscriptSegment]) -> Result<(), String> {
+    if segments.is_empty() {
+        return Ok(());
+    }
+    with_store(|store| {
+        let note = store
+            .notes
+            .iter_mut()
+            .find(|n| n.id == id)
+            .ok_or("Note not found")?;
+        note.transcript.extend_from_slice(segments);
+        note.note_type = "meeting".to_string();
         note.updated_ts = now_secs();
         save_to_disk(store);
         Ok(())

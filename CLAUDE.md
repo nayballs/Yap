@@ -130,6 +130,15 @@ back to the raw transcript, so dictation never blocks.
   cleanup endpoint), `llm::enhance_note` at temp 0.3 under the immutable
   `llm::NOTE_BASE_PROMPT` (OpenWhispr's BASE_SYSTEM_PROMPT verbatim;
   MEETING_NOTE_BASE_PROMPT staged for Phase 6).
+- **`meeting.rs`** — the meeting recorder (OpenWhispr `meetingRecordingStore`
+  port, fully offline): mic ("You") + **WASAPI loopback** ("Them" — cpal input
+  stream on the default output device) on a dedicated capture thread; a worker
+  drains each source every ~15 s (silence-gated), transcribes on the shared
+  warm engine (`pipeline::EngineSlot`, taken per chunk so dictation still
+  works), persists `TranscriptSegment`s to `notes.transcript` and emits
+  `yap-meeting-segment`/`-state`. On stop the UI auto-runs the "Meeting Notes"
+  action with `llm::MEETING_NOTE_BASE_PROMPT` over notes + You:/Them: lines.
+  Commands: `meeting_start`/`meeting_stop`/`meeting_state`.
 - **`media.rs`** — audio-file decode front-end for Upload: pure-Rust **Symphonia**
   (mp3/wav/m4a/aac/flac/ogg-vorbis; no opus yet) → downmix mono → 16 kHz
   (`pipeline::resample_linear`), plus `chunk_ranges` (~60 s windows cut at the

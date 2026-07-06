@@ -24,6 +24,7 @@
   import { PP_CLOUD_MODELS, modelThinks } from './ppModels.js';
   import { PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
   import { createExternalLinkHandler } from './externalLinks.js';
+  import { toast } from './ui/toast.svelte.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
   import HotkeyInput from './ui/HotkeyInput.svelte';
 
@@ -704,8 +705,9 @@
       await navigator.clipboard.writeText(logInfo.file);
       logCopied = true;
       setTimeout(() => (logCopied = false), 1500);
+      toast({ title: 'Copied', description: 'Log file path copied to clipboard' });
     } catch {
-      /* clipboard unavailable */
+      toast({ title: "Couldn't copy", description: 'Something went wrong copying to clipboard.', variant: 'destructive' });
     }
   }
   function logFileName(p) {
@@ -2071,6 +2073,19 @@
                     desc={cfg.debugLogging
                       ? 'Logging audio processing, AI requests, and system operations'
                       : 'Enable to capture detailed diagnostic information'}
+                    onchange={(on) =>
+                      toast(
+                        on
+                          ? {
+                              title: 'Debug Logging Enabled',
+                              description: 'Detailed logs are now being written to disk',
+                              variant: 'success',
+                            }
+                          : {
+                              title: 'Debug Logging Disabled',
+                              description: 'Debug logging has been turned off',
+                            }
+                      )}
                   />
 
                   <div class="dbg-row">

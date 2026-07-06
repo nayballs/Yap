@@ -5,6 +5,7 @@
   // Name / Description / Prompt editor with Save/Update. Built-ins can be
   // edited but not deleted.
   import { invoke } from '@tauri-apps/api/core';
+  import { toast } from './ui/toast.svelte.js';
 
   let { open = $bindable(false), onchanged = null } = $props();
 
@@ -78,6 +79,7 @@
         });
         await refresh();
         selectAction(actions.find((x) => x.id === a.id) || a);
+        toast({ title: 'Action created', description: a.name, variant: 'success' });
       } else if (selected) {
         await invoke('action_update', {
           id: selected.id,
@@ -88,6 +90,7 @@
         await refresh();
         const again = actions.find((x) => x.id === selectedId);
         if (again) selectAction(again);
+        toast({ title: 'Action updated', variant: 'success' });
       }
       onchanged?.();
     } catch (e) {

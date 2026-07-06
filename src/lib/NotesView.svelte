@@ -12,8 +12,10 @@
   // (Milkdown/CodeMirror) and folders come later; meeting notes arrive with
   // the Phase-6 recorder.
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import { renderMarkdown } from './markdown.js';
+  import { toast } from './ui/toast.svelte.js';
   import ActionManager from './ActionManager.svelte';
 
   let notes = $state([]); // list summaries (all folders)
@@ -48,6 +50,97 @@
       actions = (await invoke('notes_actions')) || [];
     } catch {
       actions = [];
+    }
+  }
+
+  // ---- Meeting recorder (OpenWhispr meetingRecordingStore port) ----
+  // meeting = { recording, noteId, elapsedSecs } from the backend; segments
+  // stream in live via yap-meeting-segment and land on note.transcript.
+  let meeting = $state({ recording: false });
+  let elapsed = $state(0);
+  let elapsedTimer = null;
+  const recordingThisNote = $derived(meeting.recording && meeting.noteId === selected?.id);
+
+  function startElapsed(from = 0) {
+    elapsed = from;
+    clearInterval(elapsedTimer);
+    elapsedTimer = setInterval(() => (elapsed += 1), 1000);
+  }
+  function stopElapsed() {
+    clearInterval(elapsedTimer);
+    elapsedTimer = null;
+  }
+  function fmtElapsed(s) {
+    const m = Math.floor(s / 60);
+    const sec = String(s % 60).padStart(2, '0');
+    return m >= 60
+      ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}:${sec}`
+      : `${m}:${sec}`;
+  }
+
+  async function startMeeting() {
+    if (!selected || meeting.recording) return;
+    flushSave();
+    error = null;
+    try {
+      await invoke('meeting_start', { noteId: selected.id });
+      // state event updates `meeting`; start the local timer optimistically
+      startElapsed(0);
+      toast({
+        title: 'Recording meeting',
+        description: 'Mic is "You", call audio is "Them" — use headphones for clean separation',
+        variant: 'success',
+      });
+    } catch (e) {
+      error = String(e);
+      toast({ title: "Couldn't start recording", description: String(e), variant: 'destructive' });
+    }
+  }
+  async function stopMeeting() {
+    try {
+      await invoke('meeting_stop');
+      // the worker's final yap-meeting-state triggers the auto-enhance below
+      toast({ title: 'Recording stopped', description: 'Transcribing the last chunk…' });
+    } catch (e) {
+      error = String(e);
+      toast({ title: "Couldn't stop recording", description: String(e), variant: 'destructive' });
+    }
+  }
+
+  function onMeetingState(s) {
+    const wasRecording = meeting.recording;
+    const noteId = meeting.noteId;
+    meeting = s || { recording: false };
+    if (meeting.recording) {
+      startElapsed(meeting.elapsedSecs || 0);
+    } else {
+      stopElapsed();
+      // Recording just finished → reload the note (transcript persisted) and
+      // auto-run the Meeting Notes action (OpenWhispr: enhancement after stop).
+      if (wasRecording && noteId) {
+        (async () => {
+          if (selected?.id === noteId) {
+            try {
+              selected = await invoke('note_get', { id: noteId });
+            } catch {
+              /* keep current */
+            }
+          }
+          refreshList();
+          const meetingAction =
+            actions.find((a) => a.name === 'Meeting Notes') ?? activeAction;
+          if (meetingAction && selected?.id === noteId) runAction(meetingAction);
+        })();
+      }
+    }
+  }
+
+  function onMeetingSegment(seg) {
+    if (!seg) return;
+    // Live-append to the open note's transcript view.
+    if (selected && meeting.recording && meeting.noteId === selected.id) {
+      selected.transcript = [...(selected.transcript || []), seg];
+      selected.noteType = 'meeting';
     }
   }
 
@@ -104,6 +197,8 @@
       selected = await invoke('note_get', { id });
       tab = 'raw';
       error = null;
+      chatThread = []; // the embedded chat is pinned to one note
+      chatInput = '';
     } catch (e) {
       error = String(e);
     }
@@ -170,8 +265,10 @@
         tab = 'enhanced'; // OpenWhispr auto-switches to the Enhanced tab
       }
       refreshList();
+      toast({ title: `${action.name} complete`, variant: 'success' });
     } catch (e) {
       if (selected?.id === id) error = String(e);
+      toast({ title: `${action.name} failed`, description: String(e), variant: 'destructive' });
     } finally {
       const next = new Set(enhancing);
       next.delete(id);
@@ -186,9 +283,135 @@
       await navigator.clipboard.writeText(text);
       copied = true;
       setTimeout(() => (copied = false), 1500);
+      toast({ title: 'Copied to clipboard' });
     } catch {
       /* clipboard unavailable */
     }
+  }
+
+  // ---- Editor meta chips (OpenWhispr NoteEditor header) ----
+  let addingAttendee = $state(false);
+  let attendeeInput = $state('');
+  let attendeeEl = $state(null);
+  let folderMenuOpen = $state(false);
+  let addingFolderInMenu = $state(false);
+
+  async function createFolderAndMove() {
+    const name = newFolderName.trim();
+    addingFolderInMenu = false;
+    newFolderName = '';
+    if (!name) return;
+    try {
+      folders = await invoke('notes_folder_create', { name });
+      await moveToFolder(name);
+    } catch (e) {
+      toast({ title: "Couldn't create folder", description: String(e), variant: 'destructive' });
+    }
+  }
+
+  function persistParticipants() {
+    if (!selected) return;
+    invoke('note_update', { id: selected.id, participants: selected.participants || [] }).catch(
+      () => {}
+    );
+  }
+  function addAttendee() {
+    const name = attendeeInput.trim();
+    attendeeInput = '';
+    if (!name || !selected) return;
+    // Popover stays open so several attendees can be added in a row.
+    selected.participants = [...(selected.participants || []), name];
+    persistParticipants();
+  }
+  function removeAttendee(i) {
+    if (!selected) return;
+    selected.participants = (selected.participants || []).filter((_, j) => j !== i);
+    persistParticipants();
+  }
+  async function moveToFolder(f) {
+    folderMenuOpen = false;
+    if (!selected || selected.folder === f) return;
+    selected.folder = f;
+    try {
+      await invoke('note_update', { id: selected.id, folder: f });
+      refreshList();
+      toast({ title: `Moved to ${f}` });
+    } catch (e) {
+      toast({ title: "Couldn't move note", description: String(e), variant: 'destructive' });
+    }
+  }
+  async function exportNote() {
+    if (!selected) return;
+    flushSave();
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const suggested = (displayTitle(selected) || 'note').replace(/[\\/:*?"<>|]/g, '-');
+      const path = await save({
+        defaultPath: `${suggested}.md`,
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+      });
+      if (!path) return;
+      await invoke('note_export', { id: selected.id, path });
+      toast({ title: 'Note exported', description: path, variant: 'success' });
+    } catch (e) {
+      toast({ title: 'Export failed', description: String(e), variant: 'destructive' });
+    }
+  }
+
+  function chipDate(ts) {
+    return new Date((ts || 0) * 1000).toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+    });
+  }
+  // Relative time for list rows (OpenWhispr's "now" badge style).
+  function relTime(ts) {
+    const diff = Math.floor(Date.now() / 1000) - ts;
+    if (diff < 60) return 'now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+    const d = new Date(ts * 1000);
+    if (d.toDateString() === new Date().toDateString()) {
+      return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    }
+    return chipDate(ts);
+  }
+  const folderCounts = $derived.by(() => {
+    const counts = {};
+    for (const n of notes) counts[n.folder || 'Personal'] = (counts[n.folder || 'Personal'] || 0) + 1;
+    return counts;
+  });
+
+  // ---- Embedded note chat (the "Ask anything…" bar, useEmbeddedChat port) ----
+  let chatThread = $state([]); // { role: 'user'|'assistant', text }
+  let chatInput = $state('');
+  let asking = $state(false);
+
+  async function askNote() {
+    const q = chatInput.trim();
+    if (!q || !selected || asking) return;
+    chatInput = '';
+    flushSave();
+    const history = chatThread.slice(-6).map((t) => [t.role, t.text]);
+    chatThread = [...chatThread, { role: 'user', text: q }];
+    asking = true;
+    try {
+      const answer = await invoke('note_ask', { id: selected.id, question: q, history });
+      chatThread = [...chatThread, { role: 'assistant', text: answer }];
+    } catch (e) {
+      chatThread = chatThread.slice(0, -1);
+      chatInput = q; // give the question back
+      toast({ title: "Couldn't answer", description: String(e), variant: 'destructive' });
+    } finally {
+      asking = false;
+    }
+  }
+
+  // The bar's mic: focus the input and start dictation — Yap types wherever
+  // the caret is, so the answer box IS the dictation target.
+  let askEl = $state(null);
+  function micAsk() {
+    askEl?.focus();
+    invoke('toggle_recording').catch(() => {});
   }
 
   // Title fallback = first 6 words of content (OpenWhispr's fallback).
@@ -211,11 +434,35 @@
   onMount(() => {
     refreshList();
     refreshActions();
-    return () => flushSave();
+    const unlisteners = [];
+    invoke('meeting_state')
+      .then((s) => {
+        meeting = s || { recording: false };
+        if (meeting.recording) startElapsed(meeting.elapsedSecs || 0);
+      })
+      .catch(() => {});
+    listen('yap-meeting-state', (e) => onMeetingState(e.payload)).then((u) =>
+      unlisteners.push(u)
+    );
+    listen('yap-meeting-segment', (e) => onMeetingSegment(e.payload)).then((u) =>
+      unlisteners.push(u)
+    );
+    return () => {
+      flushSave();
+      stopElapsed();
+      unlisteners.forEach((u) => u && u());
+    };
   });
 </script>
 
-<svelte:window onclick={() => (pickerOpen = false)} />
+<svelte:window
+  onclick={() => {
+    pickerOpen = false;
+    folderMenuOpen = false;
+    addingAttendee = false;
+    addingFolderInMenu = false;
+  }}
+/>
 
 <ActionManager bind:open={actionsOpen} onchanged={refreshActions} />
 
@@ -257,7 +504,8 @@
       {#each folders as f (f)}
         <button class="folder" class:active={activeFolder === f} onclick={() => (activeFolder = f)}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.2 3.9A2 2 0 0 0 7.5 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z" /></svg>
-          {f}
+          <span class="fname">{f}</span>
+          {#if folderCounts[f]}<span class="fcount">{folderCounts[f]}</span>{/if}
         </button>
       {/each}
       {#if addingFolder}
@@ -278,7 +526,12 @@
     </div>
 
     <!-- NOTES -->
-    <div class="seccap"><span>Notes</span></div>
+    <div class="seccap">
+      <span>Notes</span>
+      <button class="secadd" title="New note" aria-label="New note" onclick={newNote}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
+    </div>
     {#if shownNotes.length === 0}
       <div class="listempty">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h4" /></svg>
@@ -300,14 +553,13 @@
           >
             <div class="itembody">
               <p class="ititle">
-                {displayTitle(n)}
+                <span class="ittext">{displayTitle(n)}</span>
                 {#if n.stale}<span class="staledot" title="Note changed since enhancement"></span>{/if}
+                <span class="reltime">{relTime(n.updatedTs)}</span>
               </p>
               <p class="imeta">
-                {dateOf(n.updatedTs)}
-                {#if n.hasEnhanced}
-                  · <span class="enhtag">enhanced</span>
-                {/if}
+                {#if n.noteType === 'meeting'}<span class="enhtag">meeting</span> · {/if}
+                {#if n.hasEnhanced}<span class="enhtag">enhanced</span>{:else}{dateOf(n.updatedTs)}{/if}
               </p>
             </div>
             <button
@@ -340,65 +592,128 @@
       <div class="edhead">
         <input
           class="title"
-          placeholder="Untitled note"
+          placeholder="Untitled Note"
           bind:value={selected.title}
           oninput={queueSave}
         />
-        <div class="edactions">
-          <!-- ActionPicker split button (OpenWhispr ActionPicker.tsx): left half
-               runs the last-used action, the chevron opens the action menu. -->
-          <div class="picker">
-            <button
-              class="enhance runhalf"
-              onclick={() => runAction(activeAction)}
-              disabled={!activeAction || enhancing.has(selected.id) || !selected.content?.trim()}
-              title={activeAction ? `Run "${activeAction.name}"` : 'No actions'}
-            >
-              {#if enhancing.has(selected.id)}
-                <span class="spin"></span> Running…
-              {:else}
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /></svg>
-                {activeAction?.name ?? 'Enhance'}
-              {/if}
-            </button>
-            <button
-              class="enhance chevron"
-              aria-label="Select action"
-              disabled={enhancing.has(selected.id)}
-              onclick={(e) => {
-                e.stopPropagation();
-                pickerOpen = !pickerOpen;
-              }}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-            </button>
-            {#if pickerOpen}
-              <div class="menu" role="menu">
-                {#each actions as a (a.id)}
-                  <button class="mitem" class:current={a.id === activeAction?.id} role="menuitem" onclick={() => runAction(a)}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /></svg>
-                    <span class="mtext">
-                      <span class="mname">{a.name}</span>
-                      {#if a.description}<span class="mdesc">{a.description}</span>{/if}
-                    </span>
-                  </button>
-                {/each}
-                <div class="msep"></div>
-                <button
-                  class="mitem manage"
-                  role="menuitem"
-                  onclick={() => {
-                    pickerOpen = false;
-                    actionsOpen = true;
-                  }}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7h-9M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" /></svg>
-                  Manage actions
+      </div>
+
+      <!-- Meta chip row (OpenWhispr NoteEditor header): date · attendees ·
+           folder, with export at the right. -->
+      <div class="metarow">
+        <span class="chip static">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
+          {chipDate(selected.createdTs)}
+        </span>
+        {#each selected.participants || [] as p, i (p + i)}
+          <span class="chip person">
+            {p}
+            <button class="chipx" aria-label={`Remove ${p}`} onclick={() => removeAttendee(i)}>×</button>
+          </span>
+        {/each}
+        <span class="chipmenuwrap">
+          <button
+            class="chip"
+            onclick={(e) => {
+              e.stopPropagation();
+              addingAttendee = !addingAttendee;
+              folderMenuOpen = false;
+              if (addingAttendee) setTimeout(() => attendeeEl?.focus(), 0);
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M19 8v6M16 11h6" /></svg>
+            Add attendees
+          </button>
+          {#if addingAttendee}
+            <!-- Popover, not an inline morph (OpenWhispr's attendees card) -->
+            <div class="chipmenu pop" role="presentation" onclick={(e) => e.stopPropagation()}>
+              <input
+                class="popinput"
+                bind:this={attendeeEl}
+                placeholder="Add attendees…"
+                bind:value={attendeeInput}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter') addAttendee();
+                  if (e.key === 'Escape') {
+                    addingAttendee = false;
+                    attendeeInput = '';
+                  }
+                }}
+              />
+              <p class="pophint">Type a name and press Enter to add…</p>
+            </div>
+          {/if}
+        </span>
+        <span class="chipmenuwrap">
+          <button
+            class="chip"
+            onclick={(e) => {
+              e.stopPropagation();
+              folderMenuOpen = !folderMenuOpen;
+              addingAttendee = false;
+              addingFolderInMenu = false;
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.2 3.9A2 2 0 0 0 7.5 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z" /></svg>
+            {selected.folder || 'Personal'}
+          </button>
+          {#if folderMenuOpen}
+            <div class="chipmenu" role="presentation" onclick={(e) => e.stopPropagation()}>
+              {#each folders as f (f)}
+                <button class="chipmenuitem" class:current={f === selected.folder} role="menuitem" onclick={() => moveToFolder(f)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.2 3.9A2 2 0 0 0 7.5 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z" /></svg>
+                  <span class="cmname">{f}</span>
+                  {#if f === selected.folder}
+                    <svg class="cmcheck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6" /></svg>
+                  {/if}
                 </button>
-              </div>
-            {/if}
-          </div>
-        </div>
+              {/each}
+              <div class="msep"></div>
+              {#if addingFolderInMenu}
+                <input
+                  class="popinput"
+                  placeholder="Folder name…"
+                  bind:value={newFolderName}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') createFolderAndMove();
+                    if (e.key === 'Escape') {
+                      addingFolderInMenu = false;
+                      newFolderName = '';
+                    }
+                  }}
+                />
+              {:else}
+                <button class="chipmenuitem newf" onclick={() => (addingFolderInMenu = true)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                  <span class="cmname">New folder</span>
+                </button>
+              {/if}
+            </div>
+          {/if}
+        </span>
+        <span class="metaspacer"></span>
+        <!-- Meeting recorder: mic ("You") + system audio ("Them"). -->
+        {#if recordingThisNote}
+          <button class="chip reclive" onclick={stopMeeting} title="Stop recording">
+            <span class="recdot"></span>
+            {fmtElapsed(elapsed)} · Stop
+          </button>
+        {:else}
+          <button
+            class="chip"
+            onclick={startMeeting}
+            disabled={meeting.recording}
+            title={meeting.recording
+              ? 'Already recording another note'
+              : 'Record this meeting — your mic is "You", the call audio is "Them"'}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
+            Record
+          </button>
+        {/if}
+        <button class="iconbtn" title="Export as Markdown" aria-label="Export as Markdown" onclick={exportNote}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
+        </button>
       </div>
 
       {#if selected.enhancedContent}
@@ -424,11 +739,132 @@
       {:else}
         <textarea
           class="raw"
-          placeholder="Write or dictate rough notes here — markdown welcome…"
+          placeholder={recordingThisNote
+            ? 'Take rough notes while Yap listens — they get woven into the minutes…'
+            : 'Start writing…'}
           bind:value={selected.content}
           oninput={queueSave}
         ></textarea>
       {/if}
+
+      <!-- Meeting transcript (You/Them chat bubbles, OpenWhispr
+           MeetingTranscriptChat style). Live while recording; kept afterwards. -->
+      {#if recordingThisNote || selected.transcript?.length}
+        <div class="transcript">
+          <div class="thead">
+            <span class="tcap">Meeting transcript</span>
+            {#if recordingThisNote}
+              <span class="tlive"><span class="recdot"></span> listening — transcribes every ~15 s</span>
+            {/if}
+          </div>
+          {#if recordingThisNote && !selected.transcript?.length}
+            <p class="thint">
+              Your mic is <strong>You</strong>, the call audio is <strong>Them</strong>. Use
+              headphones so your mic doesn't also hear the call.
+            </p>
+          {/if}
+          <div class="tscroll">
+            {#each selected.transcript || [] as seg, i (i)}
+              <div class="bubble {seg.source === 'you' ? 'you' : 'them'}">
+                <span class="who">{seg.source === 'you' ? 'You' : 'Them'}</span>
+                <p>{seg.text}</p>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      <!-- Embedded note chat thread (answers grounded in this note). -->
+      {#if chatThread.length > 0}
+        <div class="chatthread">
+          {#each chatThread as turn, i (i)}
+            <div class="cbubble {turn.role}">
+              {#if turn.role === 'assistant'}
+                <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown escapes all input -->
+                <div class="cbody">{@html renderMarkdown(turn.text)}</div>
+              {:else}
+                <p class="cbody">{turn.text}</p>
+              {/if}
+            </div>
+          {/each}
+          {#if asking}
+            <div class="cbubble assistant"><p class="cbody thinking">Thinking…</p></div>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Bottom bar (OpenWhispr NoteEditor): mic · Ask anything… · Generate Notes -->
+      <div class="askbar">
+        <button
+          class="micbtn"
+          title="Dictate your question (starts recording into the box)"
+          aria-label="Dictate your question"
+          onclick={micAsk}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
+        </button>
+        <input
+          class="askinput"
+          bind:this={askEl}
+          bind:value={chatInput}
+          placeholder="Ask anything…"
+          disabled={asking}
+          onkeydown={(e) => e.key === 'Enter' && askNote()}
+        />
+        <!-- ActionPicker split button (OpenWhispr ActionPicker.tsx): left half
+             runs the last-used action, the chevron opens the action menu. -->
+        <div class="picker">
+          <button
+            class="enhance runhalf"
+            onclick={() => runAction(activeAction)}
+            disabled={!activeAction || enhancing.has(selected.id) || !selected.content?.trim()}
+            title={activeAction ? `Run "${activeAction.name}"` : 'No actions'}
+          >
+            {#if enhancing.has(selected.id)}
+              <span class="spin"></span> Running…
+            {:else}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /></svg>
+              {activeAction?.name ?? 'Enhance'}
+            {/if}
+          </button>
+          <button
+            class="enhance chevron"
+            aria-label="Select action"
+            disabled={enhancing.has(selected.id)}
+            onclick={(e) => {
+              e.stopPropagation();
+              pickerOpen = !pickerOpen;
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+          {#if pickerOpen}
+            <div class="menu up" role="menu">
+              {#each actions as a (a.id)}
+                <button class="mitem" class:current={a.id === activeAction?.id} role="menuitem" onclick={() => runAction(a)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /></svg>
+                  <span class="mtext">
+                    <span class="mname">{a.name}</span>
+                    {#if a.description}<span class="mdesc">{a.description}</span>{/if}
+                  </span>
+                </button>
+              {/each}
+              <div class="msep"></div>
+              <button
+                class="mitem manage"
+                role="menuitem"
+                onclick={() => {
+                  pickerOpen = false;
+                  actionsOpen = true;
+                }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7h-9M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" /></svg>
+                Manage actions
+              </button>
+            </div>
+          {/if}
+        </div>
+      </div>
     {/if}
   </section>
 </div>
@@ -508,14 +944,14 @@
   }
   .secadd {
     display: inline-flex;
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
     align-items: center;
     justify-content: center;
     border: none;
     border-radius: var(--yap-r-sm);
     background: none;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
     cursor: pointer;
   }
   .secadd:hover {
@@ -523,8 +959,8 @@
     color: var(--yap-fg);
   }
   .secadd svg {
-    width: 11px;
-    height: 11px;
+    width: 13px;
+    height: 13px;
   }
   .folderlist {
     display: flex;
@@ -633,9 +1069,31 @@
     margin: 0;
     font-size: 12.5px;
     font-weight: 600;
+  }
+  .ittext {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .reltime {
+    flex: 0 0 auto;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--yap-muted-55);
+  }
+  .fname {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fcount {
+    flex: 0 0 auto;
+    font-size: 10px;
+    color: var(--yap-muted-55);
   }
   .imeta {
     margin: 2px 0 0;
@@ -701,8 +1159,112 @@
   .title::placeholder {
     color: var(--yap-muted-55);
   }
-  .edactions {
+  .chip.reclive {
+    border-color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  button.chip:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .recdot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ef4444;
+    animation: recpulse 1.2s ease-in-out infinite;
+  }
+  @keyframes recpulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+
+  /* meeting transcript */
+  .transcript {
     flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s2);
+    padding: 10px 12px;
+    max-height: 240px;
+  }
+  .thead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .tcap {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--yap-muted-55);
+  }
+  .tlive {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #ef4444;
+  }
+  .thint {
+    margin: 0;
+    font-size: 11.5px;
+    color: var(--yap-muted);
+    line-height: 1.5;
+  }
+  .tscroll {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .bubble {
+    max-width: 82%;
+    border-radius: 10px;
+    padding: 6px 10px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .bubble p {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  .bubble .who {
+    display: block;
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 1px;
+    color: var(--yap-muted-55);
+  }
+  .bubble.you {
+    align-self: flex-end;
+    background: var(--yap-primary-wash);
+  }
+  .bubble.you .who {
+    color: var(--yap-primary);
+  }
+  .bubble.them {
+    align-self: flex-start;
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border-subtle);
   }
   .picker {
     position: relative;
@@ -745,6 +1307,101 @@
     width: 11px;
     height: 11px;
   }
+  /* embedded note chat */
+  .chatthread {
+    flex: 0 0 auto;
+    max-height: 220px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 10px;
+    padding: 2px;
+  }
+  .cbubble {
+    max-width: 85%;
+    border-radius: 10px;
+    padding: 7px 11px;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .cbubble.user {
+    align-self: flex-end;
+    background: var(--yap-primary-wash);
+  }
+  .cbubble.assistant {
+    align-self: flex-start;
+    background: var(--yap-s2);
+    border: 1px solid var(--yap-border-subtle);
+  }
+  .cbody {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  .cbody.thinking {
+    color: var(--yap-muted-55);
+    font-style: italic;
+  }
+  .cbubble.assistant :global(p) {
+    margin: 4px 0;
+  }
+  .cbubble.assistant :global(ul),
+  .cbubble.assistant :global(ol) {
+    margin: 4px 0;
+    padding-left: 18px;
+  }
+
+  /* the bottom "Ask anything…" bar */
+  .askbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 8px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s2);
+  }
+  .micbtn {
+    display: inline-flex;
+    width: 30px;
+    height: 30px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s1);
+    color: var(--yap-muted);
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+  .micbtn:hover {
+    color: var(--yap-fg);
+    border-color: var(--yap-border-hover);
+  }
+  .micbtn svg {
+    width: 13px;
+    height: 13px;
+  }
+  .askinput {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 30px;
+    padding: 0 10px;
+    border: none;
+    background: transparent;
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 12.5px;
+  }
+  .askinput:focus {
+    outline: none;
+  }
+  .askinput::placeholder {
+    color: var(--yap-muted-55);
+  }
+
   .menu {
     position: absolute;
     top: calc(100% + 6px);
@@ -756,6 +1413,10 @@
     border-radius: var(--yap-r-lg);
     background: var(--yap-s1);
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  }
+  .menu.up {
+    top: auto;
+    bottom: calc(100% + 6px);
   }
   .mitem {
     display: flex;
@@ -828,6 +1489,172 @@
     }
   }
 
+  /* meta chip row (date · attendees · folder · export) */
+  .metarow {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 2px 0 12px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 9px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    transition:
+      border-color var(--yap-dur) ease,
+      color var(--yap-dur) ease;
+  }
+  button.chip:hover {
+    border-color: var(--yap-border-hover);
+    color: var(--yap-fg);
+  }
+  .chip.static {
+    cursor: default;
+  }
+  .chip svg {
+    width: 11px;
+    height: 11px;
+    flex: 0 0 auto;
+  }
+  .chip.person {
+    color: var(--yap-fg);
+    background: var(--yap-primary-wash);
+    border-color: transparent;
+    cursor: default;
+  }
+  .chipx {
+    border: none;
+    background: none;
+    color: var(--yap-muted-55);
+    font: inherit;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+  }
+  .chipx:hover {
+    color: #ef4444;
+  }
+  .chipmenuwrap {
+    position: relative;
+    display: inline-flex;
+  }
+  .chipmenu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 20;
+    min-width: 150px;
+    padding: 4px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s1);
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+  }
+  /* attendees popover card (OpenWhispr style: input + hint) */
+  .chipmenu.pop {
+    min-width: 240px;
+    padding: 9px;
+  }
+  .popinput {
+    width: 100%;
+    height: 28px;
+    padding: 0 9px;
+    border: 1px solid var(--yap-primary);
+    border-radius: var(--yap-r-sm);
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 11.5px;
+    box-sizing: border-box;
+  }
+  .popinput:focus {
+    outline: none;
+  }
+  .pophint {
+    margin: 8px 0 2px;
+    text-align: center;
+    font-size: 10.5px;
+    color: var(--yap-muted-55);
+  }
+  .chipmenuitem {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 9px;
+    border: none;
+    border-radius: var(--yap-r-sm);
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 11.5px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .chipmenuitem:hover {
+    background: var(--yap-s2);
+  }
+  .chipmenuitem.current {
+    background: var(--yap-primary-wash);
+    font-weight: 600;
+  }
+  .chipmenuitem svg {
+    width: 11px;
+    height: 11px;
+    flex: 0 0 auto;
+    color: var(--yap-muted-55);
+  }
+  .chipmenuitem.current svg {
+    color: var(--yap-primary);
+  }
+  .cmname {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cmcheck {
+    color: var(--yap-primary) !important;
+  }
+  .chipmenuitem.newf {
+    color: var(--yap-muted);
+  }
+  .metaspacer {
+    flex: 1;
+  }
+  .iconbtn {
+    display: inline-flex;
+    width: 26px;
+    height: 26px;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: var(--yap-r-sm);
+    background: none;
+    color: var(--yap-muted-55);
+    cursor: pointer;
+  }
+  .iconbtn:hover {
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+  }
+  .iconbtn svg {
+    width: 14px;
+    height: 14px;
+  }
+
   .tabs {
     display: flex;
     align-items: center;
@@ -878,22 +1705,22 @@
     flex: 0 0 auto;
   }
 
+  /* Document-style editor (OpenWhispr NoteEditor: borderless page, not a
+     boxed textarea). */
   .raw {
     flex: 1 1 auto;
     min-height: 0;
     resize: none;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-lg);
-    background: var(--yap-s2);
+    border: none;
+    background: transparent;
     color: var(--yap-fg);
     font: inherit;
     font-size: 13px;
-    line-height: 1.65;
-    padding: 14px 16px;
+    line-height: 1.7;
+    padding: 4px 2px;
   }
   .raw:focus {
     outline: none;
-    border-color: var(--yap-primary);
   }
   .raw::placeholder {
     color: var(--yap-muted-55);
@@ -903,12 +1730,11 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-lg);
-    background: var(--yap-s2);
-    padding: 14px 18px;
+    border: none;
+    background: transparent;
+    padding: 4px 2px;
     font-size: 13px;
-    line-height: 1.65;
+    line-height: 1.7;
   }
   .rendered :global(h2),
   .rendered :global(h3),

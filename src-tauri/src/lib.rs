@@ -11,6 +11,7 @@ mod agent_detect;
 mod commands;
 mod config;
 mod media;
+mod meeting;
 mod notes;
 mod history;
 mod input_hook;
@@ -255,6 +256,11 @@ pub fn run() {
             commands::action_delete,
             commands::log_info,
             commands::open_logs_folder,
+            commands::meeting_start,
+            commands::meeting_stop,
+            commands::meeting_state,
+            commands::note_export,
+            commands::note_ask,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

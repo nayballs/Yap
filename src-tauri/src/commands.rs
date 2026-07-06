@@ -247,16 +247,52 @@ pub fn note_create(
     )
 }
 
-/// Update a note's title / raw content / folder (enhancement fields untouched —
-/// an edit just marks the Enhanced tab stale).
+/// Update a note's title / raw content / folder / attendees (enhancement
+/// fields untouched — an edit just marks the Enhanced tab stale).
 #[tauri::command]
 pub fn note_update(
     id: u64,
     title: Option<String>,
     content: Option<String>,
     folder: Option<String>,
+    participants: Option<Vec<String>>,
 ) -> Result<(), String> {
-    crate::notes::update(id, title, content, folder)
+    crate::notes::update(id, title, content, folder, participants)
+}
+
+/// Export a note as a markdown file at `path` (the editor's download button):
+/// title heading + enhanced content (or raw) + the You/Them transcript.
+#[tauri::command]
+pub fn note_export(id: u64, path: String) -> Result<(), String> {
+    let note = crate::notes::get(id).ok_or("Note not found")?;
+    let mut out = String::new();
+    let title = if note.title.trim().is_empty() {
+        "Untitled note"
+    } else {
+        note.title.trim()
+    };
+    out.push_str(&format!("# {title}\n\n"));
+    if !note.participants.is_empty() {
+        out.push_str(&format!("Attendees: {}\n\n", note.participants.join(", ")));
+    }
+    if !note.enhanced_content.trim().is_empty() {
+        out.push_str(note.enhanced_content.trim());
+        out.push('\n');
+        if !note.content.trim().is_empty() {
+            out.push_str(&format!("\n---\n\n## Raw notes\n\n{}\n", note.content.trim()));
+        }
+    } else if !note.content.trim().is_empty() {
+        out.push_str(note.content.trim());
+        out.push('\n');
+    }
+    if !note.transcript.is_empty() {
+        out.push_str("\n## Meeting Transcript\n\n");
+        for seg in &note.transcript {
+            let who = if seg.source == "you" { "You" } else { "Them" };
+            out.push_str(&format!("**{who}:** {}\n\n", seg.text));
+        }
+    }
+    std::fs::write(&path, out).map_err(|e| format!("Couldn't write file: {e}"))
 }
 
 /// Folder names (seeded with Personal + Meetings, OpenWhispr-style).
@@ -368,9 +404,38 @@ pub async fn note_enhance(id: u64, action_id: Option<u64>) -> Result<String, Str
         ));
     }
 
+    // Meeting notes: assemble typed content + the You:/Them: transcript
+    // (OpenWhispr PersonalNotesView "assemble input") and use the meeting base
+    // prompt. Attendee names are prepended so the model can attribute without
+    // guessing (the base prompt forbids guessing names).
+    let is_meeting = note.note_type == "meeting" && !note.transcript.is_empty();
+    let attendees = if note.participants.is_empty() {
+        String::new()
+    } else {
+        format!("Attendees: {}\n\n", note.participants.join(", "))
+    };
+    let content = if is_meeting {
+        let mut lines = String::new();
+        for seg in &note.transcript {
+            let who = if seg.source == "you" { "You" } else { "Them" };
+            lines.push_str(&format!("{who}: {}\n", seg.text));
+        }
+        if note.content.trim().is_empty() {
+            format!("{attendees}## Meeting Transcript\n{lines}")
+        } else {
+            format!(
+                "{attendees}{}\n\n## Meeting Transcript\n{lines}",
+                note.content.trim()
+            )
+        }
+    } else {
+        format!("{attendees}{}", note.content)
+    };
+
     let enhanced = crate::llm::enhance_note(
-        &note.content,
+        &content,
         &fragment,
+        is_meeting,
         &base_url,
         &api_key,
         &model,
@@ -382,11 +447,131 @@ pub async fn note_enhance(id: u64, action_id: Option<u64>) -> Result<String, Str
     Ok(enhanced)
 }
 
+// ---- Meeting recorder ----
+
+/// Start recording a meeting into `note_id` (mic = "You" + system-audio
+/// loopback = "Them"). Segments arrive via `yap-meeting-segment`; state via
+/// `yap-meeting-state`.
+#[tauri::command]
+pub fn meeting_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    note_id: u64,
+) -> Result<(), String> {
+    crate::notes::get(note_id).ok_or("Note not found")?;
+    let engine_slot = {
+        let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
+        let p = guard.as_ref().ok_or("pipeline not started")?;
+        p.engine_slot()
+    };
+    crate::meeting::start(app, engine_slot, note_id)
+}
+
+/// Stop the active meeting recording (final chunk is transcribed + persisted,
+/// then the closing `yap-meeting-state` fires).
+#[tauri::command]
+pub fn meeting_stop() -> Result<(), String> {
+    crate::meeting::stop()
+}
+
+/// `{ recording, noteId?, elapsedSecs? }` for the Notes UI.
+#[tauri::command]
+pub fn meeting_state() -> serde_json::Value {
+    crate::meeting::state()
+}
+
 /// The immutable note-enhancement guardrails, for the Note Formatting Prompt
 /// Studio's View tab (same pattern as `get_base_prompt`/`get_edit_base_prompt`).
 #[tauri::command]
 pub fn get_note_base_prompt() -> String {
     crate::llm::NOTE_BASE_PROMPT.to_string()
+}
+
+/// One turn of the embedded note chat (the "Ask anything…" bar, OpenWhispr
+/// `useEmbeddedChat`): the **Chat** scope's endpoint + prompt with the note's
+/// content and transcript injected as context — falling back to the global
+/// cleanup endpoint when the scope is off. `history` is the prior turns as
+/// `[role, text]` pairs (the UI sends the last few).
+#[tauri::command]
+pub async fn note_ask(
+    id: u64,
+    question: String,
+    history: Option<Vec<(String, String)>>,
+) -> Result<String, String> {
+    let note = crate::notes::get(id).ok_or("Note not found")?;
+    let cfg = config::load();
+
+    let (base_url, api_key, model, provider, persona, disable_thinking) =
+        match cfg.llm_scopes.get("chat") {
+            Some(s) if s.enabled && !s.provider.is_empty() => {
+                let key = cfg.provider_api_key(&s.provider, &s.api_key);
+                let (b, k, m, p) = crate::local_llm::effective_endpoint_for(
+                    &s.provider,
+                    &s.base_url,
+                    &key,
+                    &s.model,
+                );
+                (b, k, m, p, s.prompt.clone(), s.disable_thinking)
+            }
+            scope => {
+                let (b, k, m, p) = crate::local_llm::effective_endpoint(&cfg);
+                let persona = scope
+                    .map(|s| s.prompt.clone())
+                    .filter(|p| !p.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        "You are a helpful assistant. Answer concisely.".to_string()
+                    });
+                (b, k, m, p, persona, cfg.pp_disable_thinking)
+            }
+        };
+    if base_url.is_empty() {
+        return Err(
+            "No AI model configured — set one in Settings → Language Models → Chat".to_string(),
+        );
+    }
+    const KEYED_PROVIDERS: [&str; 5] = ["groq", "anthropic", "openai", "gemini", "openrouter"];
+    if api_key.is_empty() && KEYED_PROVIDERS.contains(&provider.as_str()) {
+        return Err(format!(
+            "No {provider} API key — add one in Settings → Language Models"
+        ));
+    }
+
+    // Inject the note as grounding context (content + transcript + attendees).
+    let mut context = String::new();
+    if !note.participants.is_empty() {
+        context.push_str(&format!("Attendees: {}\n", note.participants.join(", ")));
+    }
+    if !note.content.trim().is_empty() {
+        context.push_str(note.content.trim());
+        context.push('\n');
+    }
+    if !note.transcript.is_empty() {
+        context.push_str("\nMeeting transcript:\n");
+        for seg in &note.transcript {
+            let who = if seg.source == "you" { "You" } else { "Them" };
+            context.push_str(&format!("{who}: {}\n", seg.text));
+        }
+    }
+    if !note.enhanced_content.trim().is_empty() {
+        context.push_str(&format!("\nEnhanced notes:\n{}\n", note.enhanced_content.trim()));
+    }
+    let system = format!(
+        "{}\n\nThe user is asking about the following note. Ground your answers in it; if the answer isn't in the note, say so briefly.\n\n<note>\n{}\n</note>",
+        persona.trim(),
+        context.trim()
+    );
+
+    crate::llm::note_chat(
+        &system,
+        &history.unwrap_or_default(),
+        &question,
+        &base_url,
+        &api_key,
+        &model,
+        &provider,
+        disable_thinking,
+    )
+    .await
 }
 
 // ---- Debug logging (Settings → Advanced, OpenWhispr Developer section) ----

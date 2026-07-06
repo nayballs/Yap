@@ -9,7 +9,11 @@
   // window-level listeners (in-window hotkey fallback — the WebView2-focus
   // gotcha), auto-save effect, and update checker must run for the lifetime of
   // the window, not only while the modal is open.
+  import { listen } from '@tauri-apps/api/event';
+  import { onMount } from 'svelte';
   import yapIcon from '../assets/yap-icon.png';
+  import ToastHost from './ui/ToastHost.svelte';
+  import { toast } from './ui/toast.svelte.js';
   import Settings from './Settings.svelte';
   import HomeView from './HomeView.svelte';
   import DictionaryView from './DictionaryView.svelte';
@@ -42,6 +46,17 @@
       e.stopPropagation();
     }
   }
+
+  // Backend error events (rewrite failures, missing keys, …) surface as
+  // destructive toasts in the main window (OpenWhispr-style notifications).
+  onMount(() => {
+    let un;
+    listen('yap-error', (e) => {
+      const msg = String(e.payload || 'Something went wrong');
+      toast({ title: 'Yap ran into a problem', description: msg, variant: 'destructive' });
+    }).then((u) => (un = u));
+    return () => un && un();
+  });
 </script>
 
 {#snippet navIcon(id)}
@@ -124,6 +139,8 @@
     {/if}
   </main>
 </div>
+
+<ToastHost />
 
 <!-- Settings modal overlay. <Settings> is always mounted (see header comment);
      the backdrop just hides it. -->

@@ -9,6 +9,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { onMount } from 'svelte';
+  import { toast } from './ui/toast.svelte.js';
 
   // Matches media.rs (Symphonia features): no opus/webm yet.
   const SUPPORTED_EXTENSIONS = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'oga'];
@@ -114,11 +115,13 @@
       progress = 100;
       result = e.payload?.text || '';
       state = 'complete';
+      toast({ title: 'Transcription complete', description: e.payload?.file || '', variant: 'success' });
     }).then((u) => unlisteners.push(u));
     listen('yap-upload-error', (e) => {
       error = String(e.payload || 'Transcription failed');
       progress = 0;
       state = file ? 'error' : 'idle';
+      toast({ title: 'Transcription failed', description: error, variant: 'destructive' });
     }).then((u) => unlisteners.push(u));
     listen('yap-upload-cancelled', () => {
       progress = 0;
