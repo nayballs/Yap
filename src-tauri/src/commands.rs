@@ -487,6 +487,13 @@ pub fn clear_history() {
     crate::history::clear();
 }
 
+/// Delete one history entry (matched by timestamp + final text) — the per-item
+/// trash button in the Home feed.
+#[tauri::command]
+pub fn delete_history_entry(ts: u64, text: String) {
+    crate::history::delete(ts, &text);
+}
+
 /// Derived stats for the dashboard: totals, today, time saved, streak, and a
 /// 30-day activity series. See `history::stats`.
 #[tauri::command]

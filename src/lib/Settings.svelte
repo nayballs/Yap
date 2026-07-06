@@ -27,6 +27,13 @@
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
   import HotkeyInput from './ui/HotkeyInput.svelte';
 
+  // Embedded mode: rendered inside the ControlPanel's Settings modal
+  // (OpenWhispr SettingsModal-style) instead of filling the window. The parent
+  // keeps this component ALWAYS MOUNTED — the in-window hotkey fallback and
+  // auto-save below must live for the whole window, not just while the modal
+  // is open. `onclose` closes the modal (the ✕ button).
+  let { embedded = false, onclose = null } = $props();
+
   let cfg = $state(null);
   let loaded = $state(false); // gates auto-save until the initial config loads
   let devices = $state([]);
@@ -669,6 +676,38 @@
     };
   });
 
+  // ---- ControlPanel integration ----
+  // Deep-links from the shell (e.g. "Sign in" → account section) and dictionary
+  // sync with the DictionaryView surface: both edit the same config field from
+  // separate components, so events keep the two copies converged instead of the
+  // last-saved-wins clobbering each other.
+  let lastReceivedDictJson = null;
+  function onSettingsGoto(e) {
+    if (typeof e.detail === 'string') section = e.detail;
+  }
+  function onDictChanged(e) {
+    if (!cfg || !Array.isArray(e.detail)) return;
+    lastReceivedDictJson = JSON.stringify(e.detail);
+    cfg.dictionary = e.detail.map((x) => ({ ...x }));
+  }
+  $effect(() => {
+    window.addEventListener('yap-settings-goto', onSettingsGoto);
+    window.addEventListener('yap-dictionary-changed', onDictChanged);
+    return () => {
+      window.removeEventListener('yap-settings-goto', onSettingsGoto);
+      window.removeEventListener('yap-dictionary-changed', onDictChanged);
+    };
+  });
+  // Broadcast Settings-side dictionary edits (e.g. the Voice Agent name save)
+  // to DictionaryView — skipping echoes of updates we just received from it.
+  $effect(() => {
+    const json = JSON.stringify(cfg?.dictionary ?? null);
+    if (!loaded || json === null || json === lastReceivedDictJson) return;
+    window.dispatchEvent(
+      new CustomEvent('yap-dictionary-external', { detail: JSON.parse(json) })
+    );
+  });
+
   // ---- Pill size (live preview) ----
   function onScale() {
     invoke('set_pill_scale', { scale: Number(cfg.pillScale) });
@@ -687,14 +726,6 @@
       // revert the toggle if the OS rejected it
       cfg.autostart = !enabled;
     }
-  }
-
-  // ---- Dictionary ----
-  function addEntry() {
-    cfg.dictionary = [...cfg.dictionary, { from: '', to: '' }];
-  }
-  function removeEntry(i) {
-    cfg.dictionary = cfg.dictionary.filter((_, j) => j !== i);
   }
 
   // ---- AI cleanup ----
@@ -1205,11 +1236,16 @@
   {/if}
 {/snippet}
 
-<div class="shell">
+<div class="shell" class:embedded>
+  {#if embedded}
+    <button class="modal-x" title="Close settings" aria-label="Close settings" onclick={() => onclose?.()}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+    </button>
+  {/if}
   <nav class="sidebar">
     <div class="brand">
       <img class="brandlogo" src={yapIcon} alt="" aria-hidden="true" />
-      <span class="brandname">Yap</span>
+      <span class="brandname">{embedded ? 'Settings' : 'Yap'}</span>
     </div>
     <div class="brand-divider"></div>
     {#each NAV_GROUPS as g (g.label)}
@@ -1979,30 +2015,12 @@
           </Group>
 
           <Group title="Dictation dictionary">
-            <Row>
+            <Row
+              label="Dictionary"
+              desc="Moved to the main sidebar — corrections now live on their own page"
+            >
               {#snippet children()}
-                <div class="dict">
-                  <p class="note">
-                    Fix words Yap mishears (e.g. “Power to Keep” → “Parakeet”).
-                    Case-insensitive; applied to every transcription.
-                  </p>
-                  {#if cfg.dictionary.length > 0}
-                    <div class="dict-head">
-                      <span>Heard</span><span></span><span>Replace with</span><span></span>
-                    </div>
-                    {#each cfg.dictionary as entry, i (i)}
-                      <div class="dict-row">
-                        <input placeholder="Power to Keep" bind:value={entry.from} />
-                        <span class="arrow">→</span>
-                        <input placeholder="Parakeet" bind:value={entry.to} />
-                        <button class="rm" title="Remove" aria-label="Remove" onclick={() => removeEntry(i)}>×</button>
-                      </div>
-                    {/each}
-                  {:else}
-                    <div class="empty">No corrections yet.</div>
-                  {/if}
-                  <button class="add" onclick={addEntry}>+ Add correction</button>
-                </div>
+                <span class="dict-moved">Close settings and pick <strong>Dictionary</strong></span>
               {/snippet}
             </Row>
           </Group>
@@ -2154,6 +2172,44 @@
     background: var(--yap-s1);
     color: var(--yap-fg);
     font-size: 13px;
+  }
+  /* Embedded (ControlPanel settings modal): fill the modal card, not the
+     viewport, and scroll internally. */
+  .shell.embedded {
+    position: relative;
+    min-height: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  .shell.embedded main {
+    max-height: 100%;
+  }
+  .modal-x {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: var(--yap-r-sm);
+    background: none;
+    color: var(--yap-muted-55);
+    cursor: pointer;
+    transition:
+      color var(--yap-dur) ease,
+      background var(--yap-dur) ease;
+  }
+  .modal-x:hover {
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+  }
+  .modal-x svg {
+    width: 14px;
+    height: 14px;
   }
 
   .sidebar {
@@ -2444,47 +2500,17 @@
     width: 100%;
   }
 
-  /* dictionary */
-  .dict {
-    width: 100%;
+  /* dictionary moved to the ControlPanel sidebar (styles live in
+     DictionaryView.svelte); .note/.rm/.empty stay — profiles + rules use them */
+  .dict-moved {
+    font-size: 12px;
+    color: var(--yap-muted);
   }
   .note {
     color: var(--yap-muted-55);
     font-size: 11px;
     margin: 0 0 10px;
     line-height: 1.5;
-  }
-  .dict-head,
-  .dict-row {
-    display: grid;
-    grid-template-columns: 1fr 14px 1fr 22px;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 0;
-  }
-  .dict-head {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    color: var(--yap-muted-55);
-  }
-  .dict-row input {
-    background: var(--yap-s1);
-    border: 1px solid var(--yap-border);
-    border-radius: 5px;
-    color: var(--yap-fg);
-    padding: 6px 8px;
-    font-size: 13px;
-    width: 100%;
-    box-sizing: border-box;
-  }
-  .dict-row input:focus {
-    outline: none;
-    border-color: var(--yap-primary);
-  }
-  .arrow {
-    color: var(--yap-muted-55);
-    text-align: center;
   }
   .rm {
     background: none;

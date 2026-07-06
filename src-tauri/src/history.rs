@@ -134,6 +134,20 @@ pub fn list(limit: usize) -> Value {
     json!(items)
 }
 
+/// Delete one entry, matched by timestamp + final text (the pair is unique
+/// enough for a per-item delete from the Home feed; first match wins).
+pub fn delete(ts: u64, text: &str) {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    if let Some(pos) = entries.iter().position(|e| e.ts == ts && e.text == text) {
+        entries.remove(pos);
+        save_to_disk(entries);
+    }
+}
+
 /// Delete all history (and the on-disk file).
 pub fn clear() {
     let mut guard = match STATE.lock() {

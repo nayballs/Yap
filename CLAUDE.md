@@ -189,11 +189,23 @@ back to the raw transcript, so dictation never blocks.
   `get_groq_usage`, history (`get_history`, `clear_history`, `get_stats`).
 
 ### Frontend (`src/`)
+- **`lib/ControlPanel.svelte`** — the **main window** (window label is still
+  `settings`, historic): an OpenWhispr-style control panel — slim sidebar
+  (**Home / Chat / Notes / Upload / Dictionary**) + **Settings as a modal
+  overlay** (cogwheel). `Settings.svelte` renders `embedded` inside the modal
+  and stays **always mounted** so its in-window hotkey fallback + auto-save run
+  for the window's lifetime. **`HomeView.svelte`** = the dictation feed
+  (day-grouped history, per-item copy/delete via `delete_history_entry`, stats
+  strip, live refresh on `yap-transcript`). **`DictionaryView.svelte`** = the
+  correction dictionary (promoted out of Settings → Advanced; syncs with
+  Settings' cfg copy via `yap-dictionary-changed`/`-external` events).
+  Chat/Notes/Upload are `ComingSoonView` panels awaiting Phase 6/7.
 - **`lib/Pill.svelte`** — always-on-top pill. `yap-state` dot, scrolling amplitude
   waveform (`yap-amp`), cancel ✕ while recording, model-download button, gear.
 - **`lib/Overlay.svelte`** — the click-through bottom/top overlay; same scrolling
   waveform + "Transcribing…".
-- **`lib/Settings.svelte`** — grouped sidebar (App / AI models / Data / System):
+- **`lib/Settings.svelte`** — the settings surface, now rendered **inside the
+  ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / System):
   **General** (hotkey, recording mode, mic, sound+volume, mute, pill size, show
   pill/overlay, overlay position), **Speech-to-Text** (`ModelManager` + GPU +
   language/translate), **Language Models** (OpenWhispr-style: enable toggle → mode
@@ -222,7 +234,8 @@ back to the raw transcript, so dictation never blocks.
 ### Window config (`src-tauri/tauri.conf.json`)
 - **pill**: 210×60, transparent, decorations off, always-on-top, skip-taskbar. Hidden
   by default (`show_pill = false`) — the overlay + tray are the default surface.
-- **settings**: 720×640, normal, hidden, hide-on-close.
+- **settings**: 980×700, titled "Yap" (it hosts the ControlPanel — see above),
+  normal, hidden, hide-on-close.
 - **onboarding**: 620×720, hidden, hide-on-close.
 - **overlay**: 330×48, transparent, click-through, always-on-top, not focused, hidden
   until recording/processing.

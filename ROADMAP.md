@@ -570,6 +570,20 @@ below (✅ = done).
 > repo — is in [`docs/openwhispr-teardown.md`](./docs/openwhispr-teardown.md). (Audio Upload,
 > the shared foundation, lives in Phase 6 above.)
 
+- [x] **Control-panel shell — the main window** (2026-07-06, ported from OpenWhispr's
+      `ControlPanel.tsx` / `ControlPanelSidebar.tsx` / `SettingsModal.tsx`). Yap's main
+      window is no longer a settings dialog: `ControlPanel.svelte` gives it a slim
+      sidebar (**Home / Chat / Notes / Upload / Dictionary**) with **Settings as a modal
+      overlay** opened from the cogwheel (the entire existing `Settings.svelte` renders
+      `embedded` inside it — always mounted, so the in-window hotkey fallback + auto-save
+      keep running while the modal is closed). **Home** = the dictation feed
+      (`HomeView.svelte`): day-grouped history with per-item copy/delete (new
+      `delete_history_entry` command), a stats strip, live refresh on `yap-transcript`,
+      and an empty state showing the current hotkey. **Dictionary** promoted from
+      Settings → Advanced to its own surface (`DictionaryView.svelte`, event-synced with
+      Settings' config copy). Chat / Notes / Upload are coming-soon panels wired to their
+      Language-Models scopes — the shell each Phase 6/7 feature drops into. Window is now
+      titled "Yap" at 980×700; tray menu says "Open Yap".
 - [ ] **AI "Actions" engine** — the crown jewel, and the *smallest* new infrastructure. An
       Action = a user-editable **prompt fragment** (`{name, description, prompt, icon}`) that the
       app wraps in an **app-owned system prompt** carrying the hard format rules the user can't

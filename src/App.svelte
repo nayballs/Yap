@@ -1,7 +1,7 @@
 <script>
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import Pill from './lib/Pill.svelte';
-  import Settings from './lib/Settings.svelte';
+  import ControlPanel from './lib/ControlPanel.svelte';
   import Onboarding from './lib/Onboarding.svelte';
   import Overlay from './lib/Overlay.svelte';
 
@@ -25,7 +25,9 @@
 </script>
 
 {#if isSettings}
-  <Settings />
+  <!-- The "settings" window label is historic — it now hosts the main
+       control panel (Home feed + surfaces), with Settings as a modal. -->
+  <ControlPanel />
 {:else if isOnboarding}
   <Onboarding />
 {:else if isOverlay}

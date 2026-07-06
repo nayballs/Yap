@@ -190,6 +190,7 @@ pub fn run() {
             commands::get_groq_usage,
             commands::get_history,
             commands::clear_history,
+            commands::delete_history_entry,
             commands::get_stats,
         ])
         .setup(|app| {

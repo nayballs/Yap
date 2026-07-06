@@ -125,7 +125,9 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     let (settings_accel, quit_accel) = (Some("Ctrl+,"), Some("Ctrl+Q"));
 
     let version = MenuItem::with_id(app, "version", tooltip(), false, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "Settings", true, settings_accel)?;
+    // Opens the main window (the control panel — Home feed + surfaces; the
+    // Settings modal lives inside it).
+    let settings = MenuItem::with_id(app, "settings", "Open Yap", true, settings_accel)?;
     let check_updates =
         MenuItem::with_id(app, "check_updates", "Check for updates…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Yap", true, quit_accel)?;
