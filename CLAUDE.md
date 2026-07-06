@@ -47,6 +47,11 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 - **Model download:** `reqwest` streaming + `sha2` verify + `flate2`/`tar` extract.
 - **Updates/install:** `tauri-plugin-updater` (GitHub Releases) + custom NSIS installer.
 - **Autostart:** `tauri-plugin-autostart`.
+- **Window state:** `tauri-plugin-window-state` persists the main window's size, position, and
+  maximized state across launches (pill, overlay, onboarding denylisted; VISIBLE flag excluded
+  so the window never un-hides on start-hidden launches).
+- **External links:** `tauri-plugin-opener` (opens URLs in the default browser).
+- **Dialogs:** `tauri-plugin-dialog` (file open/save dialogs for note export and upload).
 - **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`,
   `history.json`).
 
@@ -122,14 +127,26 @@ back to the raw transcript, so dictation never blocks.
   progress events), process lifecycle (spawn/health-wait/kill + orphan cleanup at
   startup), and `effective_endpoint()` which routes `llm.rs` to the sidecar when
   provider = "ondevice" (falls back to the configured endpoint if it's down).
-- **`notes.rs`** — the AI Notepad's data layer (`notes.json`, camelCase):
+- **`notes.rs`** — the AI Notepad's data layer (`notes.json`, camelCase). Stores:
   `content` (raw markdown, never overwritten by AI), `enhanced_content` (the
   Enhanced tab), `enhanced_at_hash` (OpenWhispr's `len+first-50` staleness
-  marker). `note_enhance` (commands.rs) = the ported **Actions engine**: the
-  Note Formatting scope's endpoint + editable fragment (fallback → global
-  cleanup endpoint), `llm::enhance_note` at temp 0.3 under the immutable
-  `llm::NOTE_BASE_PROMPT` (OpenWhispr's BASE_SYSTEM_PROMPT verbatim;
-  MEETING_NOTE_BASE_PROMPT staged for Phase 6).
+  marker), `folder` (string, seeded with Personal + Meetings), `participants`
+  (attendee names, shown as chips and fed to prompts for attribution),
+  `transcript` (meeting-recorder You/Them segments, time-ordered), `note_type`
+  ("personal" | "meeting"), and `source` ("manual" | "upload" | "meeting").
+  **Folders** are user-creatable (backend `notes_folder_create` command) with
+  counts shown in the sidebar; notes filter by active folder. **Actions** (named
+  prompt fragments) are built-in protected set (seeded "Generate Notes",
+  "Meeting Notes", "Action Items") + user-created; `note_enhance` (commands.rs)
+  invokes the **Actions engine**: picks an action by id, runs the Note Formatting
+  scope's endpoint + the action's editable prompt (fallback → global cleanup
+  endpoint), at temp 0.3 under the immutable `llm::NOTE_BASE_PROMPT`
+  (OpenWhispr's BASE_SYSTEM_PROMPT verbatim). Built-ins seed via additive
+  by-name migration, so user edits to their prompts are never clobbered. For
+  **meeting notes** (`note_type == "meeting"` with a transcript), `note_enhance`
+  switches to `llm::MEETING_NOTE_BASE_PROMPT` and assembles attendees + typed
+  notes + `You:`/`Them:` transcript lines; NotesView auto-runs the "Meeting
+  Notes" action when a recording finishes (on the closing `yap-meeting-state`).
 - **`meeting.rs`** — the meeting recorder (OpenWhispr `meetingRecordingStore`
   port, fully offline): mic ("You") + **WASAPI loopback** ("Them" — cpal input
   stream on the default output device) on a dedicated capture thread; a worker
@@ -225,17 +242,29 @@ back to the raw transcript, so dictation never blocks.
   (**Home / Chat / Notes / Upload / Dictionary**) + **Settings as a modal
   overlay** (cogwheel). `Settings.svelte` renders `embedded` inside the modal
   and stays **always mounted** so its in-window hotkey fallback + auto-save run
-  for the window's lifetime. **`HomeView.svelte`** = the dictation feed
-  (day-grouped history, per-item copy/delete via `delete_history_entry`, stats
-  strip, live refresh on `yap-transcript`). **`DictionaryView.svelte`** = the
-  correction dictionary (promoted out of Settings → Advanced; syncs with
+  for the window's lifetime. App-wide **toast notification system**
+  (`ui/toast.svelte.js` + `ui/ToastHost.svelte`, OpenWhispr port): variant
+  accent bars, hover-pause, copyable mono error boxes, progress hairlines,
+  slide in/out (3.5 s / 6 s durations); mounted in ControlPanel and wired to
+  action runs, meeting start/stop, uploads, clipboard copies, debug-mode
+  toggles, and backend `yap-error` events. **`HomeView.svelte`** = the dictation
+  feed (day-grouped history, per-item copy/delete via `delete_history_entry`,
+  stats strip, live refresh on `yap-transcript`). **`DictionaryView.svelte`** =
+  the correction dictionary (promoted out of Settings → Advanced; syncs with
   Settings' cfg copy via `yap-dictionary-changed`/`-external` events).
   **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
   Symphonia decode → chunked transcription on the warm engine with progress +
-  cancel — see `media.rs`); **`NotesView.svelte`** = the AI Notepad (list +
-  markdown editor, Enhance via the Note Formatting scope, Raw ↔ Enhanced
-  dual-view + staleness dot; safe renderer in `lib/markdown.js`); the Home
-  feed has **Ctrl+K search**. Chat is a `ComingSoonView` panel awaiting Phase 7.
+  cancel — see `media.rs`); **`NotesView.svelte`** = the AI Notepad (OpenWhispr
+  sidebar port: **New note / Search notes / Actions** rows; **FOLDERS with
+  counts + NOTES list**; meta chip row shows date + attendees popover
+  → add/remove participants, folder-move menu w/ New folder option, meeting
+  Record chip, export-to-markdown; ActionPicker split button + ActionManager
+  dialog for custom actions + protected built-ins; **Raw ↔ Enhanced dual-view +
+  staleness dot** (safe renderer in `lib/markdown.js`); embedded per-note
+  **"Ask anything…" bar** = Chat scope grounded in the note, with mic button
+  for in-box dictation; live **You/Them meeting transcript bubbles** during
+  recording); the Home feed has **Ctrl+K search**. Chat is a `ComingSoonView`
+  panel awaiting Phase 7.
 - **`lib/Pill.svelte`** — always-on-top pill. `yap-state` dot, scrolling amplitude
   waveform (`yap-amp`), cancel ✕ while recording, model-download button, gear.
 - **`lib/Overlay.svelte`** — the click-through bottom/top overlay; same scrolling
@@ -270,9 +299,12 @@ back to the raw transcript, so dictation never blocks.
 ### Window config (`src-tauri/tauri.conf.json`)
 - **pill**: 210×60, transparent, decorations off, always-on-top, skip-taskbar. Hidden
   by default (`show_pill = false`) — the overlay + tray are the default surface.
-- **settings**: 980×700, titled "Yap" (it hosts the ControlPanel — see above),
-  normal, hidden, hide-on-close.
-- **onboarding**: 620×720, hidden, hide-on-close.
+- **settings**: 1200×800 (min 860×600), titled "Yap" (it hosts the ControlPanel — see above),
+  normal, hidden, hide-on-close. Size/position/maximized persisted by `tauri-plugin-window-state`
+  across launches; pill, overlay, onboarding are excluded from persistence; the VISIBLE flag
+  is excluded so the window never un-hides on start-hidden launches (see lib.rs window-state
+  plugin setup).
+- **onboarding**: 620×720 (min 520×560), hidden, hide-on-close.
 - **overlay**: 330×48, transparent, click-through, always-on-top, not focused, hidden
   until recording/processing.
 
