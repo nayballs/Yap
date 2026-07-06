@@ -223,6 +223,11 @@ pub struct YapConfig {
     /// Automatically check GitHub Releases for a newer Yap on launch.
     #[serde(default = "default_true")]
     pub update_checks_enabled: bool,
+    /// Debug mode (Settings → Advanced → Debug Logging, OpenWhispr-style):
+    /// raises Yap's file/console log level to `debug` for troubleshooting.
+    /// A RUST_LOG env var overrides it. Applied live on save.
+    #[serde(default)]
+    pub debug_logging: bool,
 
     // ---- AI cleanup (post-processing) ----
     /// Run the transcript through an LLM cleanup pass before injecting it.
@@ -400,6 +405,7 @@ impl Default for YapConfig {
             overlay_position: default_overlay_position(),
             auto_submit_key: default_auto_submit_key(),
             update_checks_enabled: true,
+            debug_logging: false,
             post_process_enabled: false,
             pp_provider: default_pp_provider(),
             pp_base_url: default_pp_base_url(),

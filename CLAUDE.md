@@ -193,6 +193,14 @@ back to the raw transcript, so dictation never blocks.
   restores it after — only unmuting what Yap itself muted.
 - **`portable.rs`** — portable-mode detection (a `portable` marker next to the exe
   redirects data to `<exe>/Data`).
+- **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
+  `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
+  **Debug mode** (Settings → Advanced → Debug Logging, OpenWhispr Developer-
+  section port): `config.debug_logging` raises `yap_lib` to `debug` live via a
+  `reload::Layer` handle (`set_debug_logging`, applied on config save; RUST_LOG
+  env always wins). `log_info`/`open_logs_folder` commands back the UI (current
+  log file + copy path + open folder). ⚠ transcripts DO appear in logs at
+  `info` — the UI warns users to skim before sharing.
 - **`commands.rs`** — Tauri commands: recording (`toggle_recording`, `cancel_recording`),
   config (`get_config`/`save_config`), models (`installed_models`, `download_model`,
   `download_model_size`, `set_active_model`, `delete_model`, `model_language_info`),

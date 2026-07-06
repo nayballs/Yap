@@ -389,6 +389,50 @@ pub fn get_note_base_prompt() -> String {
     crate::llm::NOTE_BASE_PROMPT.to_string()
 }
 
+// ---- Debug logging (Settings → Advanced, OpenWhispr Developer section) ----
+
+/// Where logs live + the most recent log file (the one to attach to a bug
+/// report). Yap always writes a daily-rolling file at `info`; Debug mode
+/// raises Yap's own crate to `debug`.
+#[tauri::command]
+pub fn log_info() -> serde_json::Value {
+    let dir = config::data_dir().join("logs");
+    let newest = std::fs::read_dir(&dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_file())
+        .max_by_key(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        })
+        .map(|e| e.path().to_string_lossy().to_string());
+    serde_json::json!({
+        "dir": dir.to_string_lossy(),
+        "file": newest,
+    })
+}
+
+/// Open the logs folder in the system file manager.
+#[tauri::command]
+pub fn open_logs_folder() -> Result<(), String> {
+    let dir = config::data_dir().join("logs");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    let opener = "explorer";
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let opener = "xdg-open";
+    std::process::Command::new(opener)
+        .arg(&dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// Name + size of an audio file the user picked/dropped (Upload file card).
 #[tauri::command]
 pub fn audio_file_info(path: String) -> Result<serde_json::Value, String> {
@@ -413,7 +457,13 @@ pub fn save_config(
     state: State<'_, AppState>,
     cfg: YapConfig,
 ) -> Result<(), String> {
+    // Live-apply a Debug-mode change (only on change, so an explicit RUST_LOG
+    // env override isn't clobbered by unrelated saves).
+    let prev_debug = config::load().debug_logging;
     config::save(&cfg)?;
+    if cfg.debug_logging != prev_debug {
+        crate::set_debug_logging(cfg.debug_logging);
+    }
     if let Err(e) = crate::input_hook::configure_dictation(&cfg.hotkey) {
         tracing::warn!("Failed to apply hotkey: {}", e);
     }

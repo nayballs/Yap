@@ -516,6 +516,17 @@ below (✅ = done).
       - [ ] **Verify-after-paste** via UI Automation `ValuePattern` (read the focused
             element's value before/after) — deferred; needs a COM/UIA integration.
 
+- [x] **Debug Logging (OpenWhispr Developer-section port)** (2026-07-06) — Yap already had
+      the hard part (daily-rolling `<data>/logs/yap.log.*` at `info` + panic hook, since the
+      "stuck on transcribing" incident); this adds the OpenWhispr UX on top
+      (`src/helpers/debugLogger.js` + the `developerSection` settings strings are the
+      reference): a **Debug mode** toggle in Settings → Advanced (persisted
+      `config.debug_logging`, applied LIVE via a `tracing_subscriber::reload` handle — no
+      restart; raises `yap_lib` to `debug` while keeping deps at `info`; RUST_LOG overrides),
+      **Current log file** row (newest file, click to copy the path), **Open Logs Folder**,
+      a "what gets logged" list, support-sharing steps, and an honest privacy footer (unlike
+      OpenWhispr's claim, Yap's logs DO carry transcript text at `info` — the UI says so).
+
 ### Phase 6 — Reach
 - [x] **Transcription history** (`history.rs` → `history.json`) — local-only table
       (timestamp, raw + final text, model, focused app), capped, gated by
@@ -546,12 +557,31 @@ below (✅ = done).
       Also shipped: **Home feed search** (Ctrl+K, OpenWhispr's command-search slot —
       client-side filter over text/app/model). Retry-on-failure deferred: Yap's history
       only records successes; failure entries would come with audio-history export.
-- [ ] **Meeting recording / long-form transcription** (match superwhisper) — capture
-      **system audio** (WASAPI **loopback**) mixed with the mic, record long sessions,
-      transcribe in chunks on the warm engine, and save a transcript (+ optional speaker
-      diarization, + file/import transcription). Reuses Yap's whole STT stack; the new
-      pieces are loopback capture, long-audio chunking, and a recordings UI. Windows-first
-      (loopback is per-platform). A distinct surface from push-to-type dictation.
+- [ ] **Meeting recording / long-form transcription — ⭐ NEXT UP** (chosen 2026-07-06; the
+      openwhispr.com hero: "The notepad that cleans up after your meetings"). Capture the
+      **mic** ("You") + **system audio** via WASAPI **loopback** ("Them" — what the call
+      plays through the speakers), record long sessions, chunk-transcribe both streams on
+      the warm engine, fold time-ordered You/Them segments into `notes.transcript`, and on
+      stop run the Actions engine with the meeting prompt → minutes in `enhanced_content`.
+      **Where the code is:**
+      - *OpenWhispr reference (port source):* `src/stores/meetingRecordingStore.ts` (the
+        session state machine: record → PCM chunks → partial/final segment folding →
+        persist transcript every 30 s + on stop → auto-enhance),
+        `src/components/notes/MeetingTranscriptChat.tsx` (You/Them chat-bubble transcript
+        UI), `src/utils/transcriptSpeakerState.ts` (`TranscriptSegment` shape),
+        `src/helpers/database.js` (`notes.transcript`/`participants` columns). Teardown
+        §2 "Meeting-notes flow".
+      - *Yap pieces already staged:* `llm::MEETING_NOTE_BASE_PROMPT` (their
+        MEETING_SYSTEM_PROMPT, ported verbatim, unused so far), `media.rs::chunk_ranges`
+        (the chunker built for Upload), `notes.rs` (store; needs a `transcript` field),
+        the "Meeting Notes"/"Action Items" built-in actions, and the warm-engine chunked
+        transcription pattern in `pipeline::run_file_transcription`.
+      - *New build:* loopback capture — `cpal` on Windows supports WASAPI loopback by
+        opening an **input** stream on an **output** device (same crate as the mic path);
+        a recording-session module buffering/tagging both streams; the meeting-note
+        record UI (Record button + timer + transcript view on a note).
+      Reuses Yap's whole STT stack. Windows-first (loopback is per-platform). Speaker
+      diarization stays a later L item (mic="You", loopback="Them" for v1).
 - [ ] **Cross-platform desktop — Linux + macOS.** Tauri + Rust + `transcribe-rs` are
       already portable (Vulkan/ONNX on Linux, Metal/CoreML on macOS); the work is porting
       the **four Windows-specific layers** that make a dictation app work, each already

@@ -59,16 +59,57 @@ pub fn set_autostart_enabled(app: &AppHandle, enabled: bool) -> Result<(), Strin
     res.map_err(|e| format!("Failed to set autostart: {}", e))
 }
 
+/// Reload handle for the global log filter — lets the Settings "Debug mode"
+/// toggle (OpenWhispr's Debug Logging section) bump verbosity at runtime
+/// without a restart. See `set_debug_logging`.
+static LOG_RELOAD: std::sync::OnceLock<
+    tracing_subscriber::reload::Handle<
+        tracing_subscriber::EnvFilter,
+        tracing_subscriber::Registry,
+    >,
+> = std::sync::OnceLock::new();
+
+/// The filter directives for normal vs debug mode. Debug raises YAP's own
+/// crate to `debug` while keeping dependencies at `info` (whisper/ort/reqwest
+/// at debug would drown the file).
+fn log_directives(debug: bool) -> &'static str {
+    if debug {
+        "info,yap_lib=debug"
+    } else {
+        "info"
+    }
+}
+
+/// Live-switch the log verbosity (the Settings → Advanced → Debug Logging
+/// toggle; persisted as `config.debug_logging` and re-applied on save/startup).
+/// An explicit RUST_LOG env var always wins (it was applied at init and this
+/// is only called from config paths when the value CHANGES).
+pub(crate) fn set_debug_logging(enabled: bool) {
+    if let Some(handle) = LOG_RELOAD.get() {
+        let _ = handle.reload(tracing_subscriber::EnvFilter::new(log_directives(enabled)));
+        // NB: the identifier `debug` must not appear inside tracing macros —
+        // it resolves to the macro's own level shorthand and breaks the build.
+        let state = if enabled { "enabled" } else { "disabled" };
+        tracing::info!(debug_mode = enabled, "Debug logging {state}");
+    }
+}
+
 /// Initialise tracing to BOTH stdout (for `tauri dev`) and a rolling file in the
 /// data dir. Installed builds are windowed with no console, so stdout logs are
 /// invisible — the file log is the only way to diagnose a shipped build (e.g.
 /// the "stuck on transcribing" report was a CPU-only whisper build with no
 /// visible logs). Must run AFTER `portable::init()` so the data dir resolves.
+/// The filter sits behind a reload layer so "Debug mode" can raise it live.
 fn init_logging() {
     use tracing_subscriber::prelude::*;
 
+    // Startup level: RUST_LOG wins, else the persisted Debug-mode setting.
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "info".into());
+        .unwrap_or_else(|_| {
+            tracing_subscriber::EnvFilter::new(log_directives(config::load().debug_logging))
+        });
+    let (filter, reload_handle) = tracing_subscriber::reload::Layer::new(filter);
+    let _ = LOG_RELOAD.set(reload_handle);
 
     let log_dir = config::data_dir().join("logs");
     let file_layer = match std::fs::create_dir_all(&log_dir) {
@@ -212,6 +253,8 @@ pub fn run() {
             commands::action_create,
             commands::action_update,
             commands::action_delete,
+            commands::log_info,
+            commands::open_logs_folder,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

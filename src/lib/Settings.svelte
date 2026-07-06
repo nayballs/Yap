@@ -427,6 +427,7 @@
     overlayPosition: 'bottom',
     autoSubmitKey: 'enter',
     updateChecksEnabled: true,
+    debugLogging: false,
     postProcessEnabled: false,
     ppProvider: 'groq',
     ppBaseUrl: 'https://api.groq.com/openai/v1',
@@ -488,6 +489,7 @@
     if (!Array.isArray(cfg.appRoutes)) cfg.appRoutes = [];
     if (!Array.isArray(cfg.cleanupProfiles)) cfg.cleanupProfiles = [];
     ensureScopes();
+    refreshLogInfo();
     // On-device cleanup status + live download progress.
     refreshLocalLlm();
     listen('local-llm-download-progress', (e) => {
@@ -687,6 +689,28 @@
       window.removeEventListener('keyup', onFallbackKeyUp, true);
     };
   });
+
+  // ---- Debug logging (Advanced → Debug Logging, OpenWhispr Developer port) ----
+  let logInfo = $state(null); // { dir, file } from log_info
+  let logCopied = $state(false);
+  function refreshLogInfo() {
+    invoke('log_info')
+      .then((i) => (logInfo = i))
+      .catch(() => {});
+  }
+  async function copyLogPath() {
+    if (!logInfo?.file) return;
+    try {
+      await navigator.clipboard.writeText(logInfo.file);
+      logCopied = true;
+      setTimeout(() => (logCopied = false), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+  function logFileName(p) {
+    return (p || '').split(/[/\\]/).pop() || p;
+  }
 
   // ---- ControlPanel integration ----
   // Deep-links from the shell (e.g. "Sign in" → account section) and dictionary
@@ -2037,6 +2061,59 @@
             </Row>
           </Group>
 
+          <Group title="Debug Logging">
+            <Row>
+              {#snippet children()}
+                <div class="dbg">
+                  <Toggle
+                    bind:checked={cfg.debugLogging}
+                    label="Debug mode"
+                    desc={cfg.debugLogging
+                      ? 'Logging audio processing, AI requests, and system operations'
+                      : 'Enable to capture detailed diagnostic information'}
+                  />
+
+                  <div class="dbg-row">
+                    <span class="dbg-label">Current log file</span>
+                    {#if logInfo?.file}
+                      <button class="dbg-file" title={logInfo.file} onclick={copyLogPath}>
+                        <span class="mono">{logFileName(logInfo.file)}</span>
+                        <span class="copyhint">{logCopied ? 'Copied!' : 'copy path'}</span>
+                      </button>
+                    {:else}
+                      <span class="dbg-none">No log file yet</span>
+                    {/if}
+                  </div>
+
+                  <div class="dbg-actions">
+                    <Button onclick={() => invoke('open_logs_folder').catch(() => {})}>
+                      Open Logs Folder
+                    </Button>
+                  </div>
+
+                  <div class="dbg-note">
+                    <p class="dbg-cap">What gets logged</p>
+                    <p class="dbg-items">
+                      Audio pipeline · Transcription pipeline · AI cleanup requests · Hotkey &amp;
+                      injection events · Error details · System diagnostics
+                    </p>
+                    <p class="dbg-cap">Sharing logs for support</p>
+                    <p class="dbg-items">
+                      1. Reproduce the issue while Debug mode is enabled &nbsp;2. Open the logs
+                      folder &nbsp;3. Attach the most recent log file to your bug report
+                    </p>
+                    <p class="dbg-foot">
+                      Logs never contain API keys. Transcribed text can appear in them (stored
+                      only on this PC) — skim a log before attaching it to a public report.
+                      Debug mode writes more detail to disk; disable it when you're not
+                      troubleshooting.
+                    </p>
+                  </div>
+                </div>
+              {/snippet}
+            </Row>
+          </Group>
+
         {:else if section === 'about'}
           <div class="page-h">
             <h1>About</h1>
@@ -2517,6 +2594,88 @@
   .dict-moved {
     font-size: 12px;
     color: var(--yap-muted);
+  }
+
+  /* Debug Logging (Advanced) */
+  .dbg {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+  }
+  .dbg-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .dbg-label {
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .dbg-file {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    max-width: 340px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-sm);
+    background: var(--yap-s1);
+    padding: 4px 9px;
+    color: var(--yap-muted);
+    font: inherit;
+    cursor: pointer;
+  }
+  .dbg-file:hover {
+    border-color: var(--yap-border-hover);
+  }
+  .dbg-file .mono {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .copyhint {
+    flex: 0 0 auto;
+    font-size: 10.5px;
+    color: var(--yap-primary);
+  }
+  .dbg-none {
+    font-size: 11.5px;
+    color: var(--yap-muted-55);
+  }
+  .dbg-actions {
+    display: flex;
+  }
+  .dbg-note {
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s1);
+    padding: 10px 13px;
+  }
+  .dbg-cap {
+    margin: 6px 0 2px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--yap-muted-55);
+  }
+  .dbg-cap:first-child {
+    margin-top: 0;
+  }
+  .dbg-items {
+    margin: 0;
+    font-size: 11.5px;
+    color: var(--yap-muted);
+    line-height: 1.55;
+  }
+  .dbg-foot {
+    margin: 8px 0 0;
+    font-size: 10.5px;
+    color: var(--yap-muted-55);
+    line-height: 1.55;
   }
   .note {
     color: var(--yap-muted-55);

@@ -27,6 +27,8 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 dirs = "6"
 tracing = "0.1"
+# env-filter for RUST_LOG; the reload module (Debug-mode live toggle) comes
+# with the default "registry"/"std" features — no extra flag.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Rolling FILE log so installed (windowed) builds are debuggable — stdout is
 # invisible without a console attached.
