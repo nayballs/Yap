@@ -19,6 +19,9 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+# Remembers the main window's size/position across launches (OpenWhispr opens
+# fixed 1200x800 every time — we match their size and go one better).
+tauri-plugin-window-state = "2"
 # Audio-file decode for Upload (media.rs): pure-Rust, no ffmpeg. Defaults give
 # wav/flac/ogg-vorbis/pcm; mp3 + aac + isomp4 add mp3/m4a/aac.
 symphonia = { version = "0.5", features = ["mp3", "aac", "isomp4"] }

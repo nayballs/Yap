@@ -196,6 +196,21 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         // Native file-open dialog for the Upload surface's Browse button.
         .plugin(tauri_plugin_dialog::init())
+        // Remember the MAIN window's size/position across launches. Only the
+        // "settings" window is managed: the pill/overlay are positioned
+        // programmatically, and onboarding is one-shot — restoring stale
+        // bounds would misplace them. Flags exclude VISIBLE so the window
+        // never un-hides itself on a start-hidden launch.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .with_denylist(&["pill", "overlay", "onboarding"])
+                .build(),
+        )
         .manage(AppState {
             pipeline: Mutex::new(None),
         })
