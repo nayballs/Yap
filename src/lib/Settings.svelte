@@ -152,8 +152,11 @@
       enableDesc: 'Turn dictation into clean, structured notes',
       promptLabel: 'Formatting prompt',
       promptHint: 'How dictated text should be shaped into notes',
+      // OpenWhispr's built-in "Generate Notes" action prompt (database.js seed),
+      // verbatim. MUST stay byte-identical to llm::NOTE_DEFAULT_FRAGMENT — the
+      // immutable guardrails (llm::NOTE_BASE_PROMPT) are prepended at runtime.
       prompt:
-        "Format the dictated text as clean, well-structured notes: use short headings, bullet points, and tidy paragraphs where they help readability. Preserve all information and the speaker's meaning; do not add new content.",
+        'Transform the provided content into clean, well-structured notes in markdown. Preserve the user\'s intent and all substantive information. Remove filler, small talk, false starts, and redundant content. For personal notes, improve grammar and structure for readability. For meeting transcripts, extract key discussion points, decisions, action items, and follow-ups.',
     },
     chat: {
       enableLabel: 'Enable Chat',
@@ -195,6 +198,15 @@
           'You are a voice command assistant inside a dictation app. The user speaks an instruction; carry it out and output ONLY the resulting text — no preamble or explanation. If text is selected, apply the instruction to it.'
       ) {
         s.prompt = SCOPE_DEFAULTS.voiceAgent.prompt;
+      }
+      // migrate a Note-Formatting prompt still on the pre-notepad default to
+      // OpenWhispr's Generate-Notes fragment (edited prompts left alone)
+      if (
+        key === 'noteFormatting' &&
+        s.prompt ===
+          "Format the dictated text as clean, well-structured notes: use short headings, bullet points, and tidy paragraphs where they help readability. Preserve all information and the speaker's meaning; do not add new content."
+      ) {
+        s.prompt = SCOPE_DEFAULTS.noteFormatting.prompt;
       }
       // migrate non-empty per-scope keys up (never clobber an existing global)
       for (const [p, k] of Object.entries(s.apiKeys || {})) {

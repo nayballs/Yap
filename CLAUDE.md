@@ -122,6 +122,20 @@ back to the raw transcript, so dictation never blocks.
   progress events), process lifecycle (spawn/health-wait/kill + orphan cleanup at
   startup), and `effective_endpoint()` which routes `llm.rs` to the sidecar when
   provider = "ondevice" (falls back to the configured endpoint if it's down).
+- **`notes.rs`** — the AI Notepad's data layer (`notes.json`, camelCase):
+  `content` (raw markdown, never overwritten by AI), `enhanced_content` (the
+  Enhanced tab), `enhanced_at_hash` (OpenWhispr's `len+first-50` staleness
+  marker). `note_enhance` (commands.rs) = the ported **Actions engine**: the
+  Note Formatting scope's endpoint + editable fragment (fallback → global
+  cleanup endpoint), `llm::enhance_note` at temp 0.3 under the immutable
+  `llm::NOTE_BASE_PROMPT` (OpenWhispr's BASE_SYSTEM_PROMPT verbatim;
+  MEETING_NOTE_BASE_PROMPT staged for Phase 6).
+- **`media.rs`** — audio-file decode front-end for Upload: pure-Rust **Symphonia**
+  (mp3/wav/m4a/aac/flac/ogg-vorbis; no opus yet) → downmix mono → 16 kHz
+  (`pipeline::resample_linear`), plus `chunk_ranges` (~60 s windows cut at the
+  quietest sample of each window's last 5 s). Consumed by
+  `pipeline::run_file_transcription` (progress events, cancel flag, `processing`
+  guard, history record) via the `transcribe_file` command.
 - **`history.rs`** — local-only transcription history (`history.json`): each
   dictation's timestamp, raw + final text, model, and focused app. Best-effort,
   gated by `history_enabled`. Derives the stats dashboard (words, time-saved vs
@@ -199,7 +213,12 @@ back to the raw transcript, so dictation never blocks.
   strip, live refresh on `yap-transcript`). **`DictionaryView.svelte`** = the
   correction dictionary (promoted out of Settings → Advanced; syncs with
   Settings' cfg copy via `yap-dictionary-changed`/`-external` events).
-  Chat/Notes/Upload are `ComingSoonView` panels awaiting Phase 6/7.
+  **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
+  Symphonia decode → chunked transcription on the warm engine with progress +
+  cancel — see `media.rs`); **`NotesView.svelte`** = the AI Notepad (list +
+  markdown editor, Enhance via the Note Formatting scope, Raw ↔ Enhanced
+  dual-view + staleness dot; safe renderer in `lib/markdown.js`); the Home
+  feed has **Ctrl+K search**. Chat is a `ComingSoonView` panel awaiting Phase 7.
 - **`lib/Pill.svelte`** — always-on-top pill. `yap-state` dot, scrolling amplitude
   waveform (`yap-amp`), cancel ✕ while recording, model-download button, gear.
 - **`lib/Overlay.svelte`** — the click-through bottom/top overlay; same scrolling

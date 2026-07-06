@@ -485,8 +485,10 @@ below (✅ = done).
             substituted at request time; old default migrates) — it instructs the model to
             strip the name+command and apply the instruction to surrounding content, which
             is why no code-level stripping is needed (same as OpenWhispr).
-      - [ ] **Note Formatting** scope → bubble + config now; **runtime deferred to Phase 7**
-            (Actions engine / AI Notepad — no notes surface exists yet).
+      - [x] **Note Formatting** scope → **runtime live** (2026-07-06): powers the Notes
+            surface's Enhance button (see Phase 7 "AI Notepad v1"); its editable prompt is
+            the action fragment under the immutable `NOTE_BASE_PROMPT` guardrails, with
+            endpoint fallback to the cleanup scope (OpenWhispr `fallbackScope`).
       - [ ] **Chat** scope → bubble + config now; **runtime deferred to Phase 7** (AI Chat over
             notes — no chat surface exists yet).
       Makes the "scope-driven AI config editor" bullet above concrete with the four real scopes.
@@ -525,16 +527,25 @@ below (✅ = done).
       pairing `raw_transcript` ↔ `final_transcript` — a ready-made eval/fine-tune
       dataset for improving cleanup, with a GB budget + orphan GC. (Deferred — the
       text history + stats landed first; audio capture/retention is the next step.)
-- [ ] **Audio Upload / file transcription** ("transcribe any audio file locally" — OpenWhispr,
-      superwhisper) — drag a file (or pick one) → local transcription → transcript lands as a
-      note / into the editor. The one real cost is a **decoder**: Yap only ever sees raw mic f32
-      today, and whisper.cpp itself can't decode compressed audio, so add a pure-Rust
-      **Symphonia** decode → mono → 16 kHz front-end to the warm `transcribe-rs` engine, then
-      chunk **in-memory** (~30–120 s windows, small overlap) with real per-chunk progress events
-      — no FFmpeg, no re-encode, no disk I/O. Tauri drag-drop already hands over filesystem
-      paths (simpler than Electron). **This `decode.rs` + in-memory chunker is the foundation the
-      meeting recorder below reuses — build it first.** Effort **M** (dominated by the decoder).
-      See [`docs/openwhispr-teardown.md`](./docs/openwhispr-teardown.md) §4.
+- [~] **Audio Upload / file transcription** (2026-07-06, ported from OpenWhispr's
+      `UploadAudioView.tsx` flow) — **implemented, compiles + unit-tested; ⚠ NOT yet
+      runtime-tested on the GPU build** (pending a live pass: drop/browse → progress →
+      transcript → Home feed entry → cancel → busy-guard vs dictation). The ControlPanel's
+      **Upload** surface: drop an
+      audio file (Tauri webview drag-drop hands over real paths) or browse (native dialog
+      via `tauri-plugin-dialog`) → **fully local transcription** on the same warm engine
+      dictation uses. As planned: pure-Rust **Symphonia** decode → downmix mono → 16 kHz
+      (`media.rs`; mp3/wav/m4a/aac/flac/ogg-vorbis — opus deferred, no Symphonia decoder),
+      in-memory **~60 s chunks cut at the quietest point** of each window's last 5 s (no
+      FFmpeg, no re-encode, no disk I/O), per-chunk `yap-upload-progress` events, **cancel**
+      between chunks, and the `processing` guard held so a hotkey dictation can't fight
+      over the engine (`pipeline::run_file_transcription`). Result shows in the Upload view
+      (copy button) and lands in the Home feed via history (file name in the app slot). No
+      file-size limits (OpenWhispr's caps are cloud-plan artifacts). **The decode + chunker
+      is the foundation the meeting recorder below reuses.**
+      Also shipped: **Home feed search** (Ctrl+K, OpenWhispr's command-search slot —
+      client-side filter over text/app/model). Retry-on-failure deferred: Yap's history
+      only records successes; failure entries would come with audio-history export.
 - [ ] **Meeting recording / long-form transcription** (match superwhisper) — capture
       **system audio** (WASAPI **loopback**) mixed with the mic, record long sessions,
       transcribe in chunks on the warm engine, and save a transcript (+ optional speaker
@@ -584,22 +595,50 @@ below (✅ = done).
       Settings' config copy). Chat / Notes / Upload are coming-soon panels wired to their
       Language-Models scopes — the shell each Phase 6/7 feature drops into. Window is now
       titled "Yap" at 980×700; tray menu says "Open Yap".
-- [ ] **AI "Actions" engine** — the crown jewel, and the *smallest* new infrastructure. An
-      Action = a user-editable **prompt fragment** (`{name, description, prompt, icon}`) that the
-      app wraps in an **app-owned system prompt** carrying the hard format rules the user can't
-      break (FluidVoice-style, same split Yap's cleanup already uses). One `llm.rs` call at
-      temp 0.3 → structured markdown written to a separate `enhanced_content` field (raw text
-      never overwritten; a cheap `len+first50` content hash marks the enhancement stale when the
-      source changes). Ships a built-in **"Generate Notes"** action + a custom-actions manager.
-      Runs over typed text (or the last dictation) **before a full notes UI exists**, and reuses
-      Yap's existing cleanup-model config + llamafile sidecar wholesale. Effort **S–M**.
+- [x] **AI "Actions" engine** (2026-07-06; ⚠ awaiting live runtime test) — shipped exactly
+      as designed, inside the AI Notepad below: Action = a user-editable **prompt fragment**
+      (`{name, description, prompt, builtin}`) wrapped in the app-owned `NOTE_BASE_PROMPT`
+      (the hard format rules the user can't break), one `llm.rs` call at temp 0.3 →
+      `enhanced_content` (raw never overwritten; `len+first50` staleness hash). Built-in
+      **"Generate Notes"** seeded + a full custom-actions manager + the ActionPicker split
+      button. Reuses Yap's cleanup-model config + llamafile sidecar wholesale via the
+      noteFormatting scope (fallback → cleanup endpoint).
+- [~] **AI Notepad — v1 SHIPPED** (2026-07-06; ⚠ **not yet runtime-tested** — needs a live
+      pass with a configured Note Formatting model). The ControlPanel's **Notes** surface
+      (`NotesView.svelte`): notes list + markdown editor (plain textarea v1) with debounced
+      autosave, **Enhance** button running the ported Actions engine, **Raw ↔ Enhanced
+      dual-view** with OpenWhispr's `len+first-50` **staleness dot**, per-item delete,
+      copy. Backend: `notes.rs` (JSON store, history.rs-style; camelCase like YapConfig) +
+      `llm::enhance_note` (temp 0.3) under **`NOTE_BASE_PROMPT`** — OpenWhispr's
+      `BASE_SYSTEM_PROMPT` ported **verbatim** (+ `MEETING_NOTE_BASE_PROMPT` staged for
+      Phase 6) — with the **Note Formatting scope's editable prompt as the action
+      fragment** (default = OpenWhispr's built-in "Generate Notes" prompt verbatim,
+      byte-identical Rust/JS, old default migrates). Endpoint resolves from the
+      noteFormatting scope with **fallback to the global cleanup endpoint** (OpenWhispr's
+      `fallbackScope`), shared per-provider keys, keyless-cloud fail-fast. The Enhanced tab
+      renders via a tiny escape-first markdown renderer (`lib/markdown.js` — safe: input is
+      HTML-escaped before transforms; the base prompt forbids tables/HR/quotes so the
+      space is headings/lists/checkboxes/bold/code). **Raw content is never overwritten.**
+      *Layout-match pass (same day):* the notes pane now mirrors OpenWhispr's sidebar —
+      **New note / Search notes** action rows, a **FOLDERS** section (Personal + Meetings
+      seeded, user-creatable via +, notes carry a `folder`; store migrated from the v1
+      bare-array format), a **NOTES** section, and their exact empty-state copy ("No notes
+      in this folder" / "No notes here yet — Create your first note to start writing").
+      *Actions pass (same day):* the full **custom-actions manager** shipped — `Action
+      {name, description, prompt, builtin}` rows in the notes store (seeded with the
+      built-in **"Generate Notes"**, editable but not deletable), the sidebar **Actions**
+      row opening a two-pane manager dialog (`ActionManager.svelte` ←
+      `ActionManagerDialog.tsx`: list w/ Built-in badge + hover-trash, Name/Description/
+      Prompt editor), and the editor's Enhance button is now the **ActionPicker split
+      button** (`ActionPicker.tsx` port: left half re-runs the last-used action —
+      persisted in localStorage — chevron opens the action menu + "Manage actions").
+      `note_enhance(action_id)` runs the picked action's prompt as the fragment.
+      *Deferred from v1:* "Add existing" (move note between folders — the backend
+      `note_update(folder)` exists, no UI), rich editor (Milkdown/CodeMirror — the
+      markdown-strings-end-to-end contract makes the swap clean), auto-generated note
+      titles (first-6-words fallback only), background-action state surviving view switches
+      (the LLM call completes + saves; only the spinner is lost), dictation-into-note.
       Teardown §2.
-- [ ] **AI Notepad** — a markdown notepad (folders, raw ↔ **Enhanced** dual-view, staleness dot)
-      that the Actions engine enhances. New plumbing: a notes store (`notes.rs` over
-      `tauri-plugin-sql` for FTS + relations, or JSON-per-note) and a Svelte markdown editor with
-      **task-list checkboxes** (Milkdown / CodeMirror 6 / framework-agnostic Tiptap — TipTap-React
-      doesn't port). Store markdown strings end-to-end (OpenWhispr does, which is why it ports
-      cleanly). Effort **M**. Teardown §2.
 - [ ] **Meeting notes** — capture mic + WASAPI loopback (**shared with Phase 6's recorder**),
       chunk on the warm `transcribe-rs` engine, fold `You:`/`Them:` `TranscriptSegment`s into
       `notes.transcript`, then run the Actions engine with a **meeting** system prompt →

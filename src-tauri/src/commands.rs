@@ -197,6 +197,209 @@ pub fn toggle_recording(state: State<'_, AppState>) {
     }
 }
 
+/// Start transcribing an audio FILE (the Upload surface). Async: progress and
+/// the result arrive via `yap-upload-progress` / `-done` / `-error` /
+/// `-cancelled` events; this only validates + kicks the run off.
+#[tauri::command]
+pub fn transcribe_file(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
+    let p = guard.as_ref().ok_or("pipeline not started")?;
+    p.transcribe_file(path)
+}
+
+/// Cancel an in-flight Upload transcription (takes effect between chunks).
+#[tauri::command]
+pub fn cancel_file_transcription(state: State<'_, AppState>) {
+    if let Ok(guard) = state.pipeline.lock() {
+        if let Some(p) = guard.as_ref() {
+            p.cancel_file_transcription();
+        }
+    }
+}
+
+// ---- Notes (the AI Notepad surface) ----
+
+/// Note summaries for the list pane, newest-updated first.
+#[tauri::command]
+pub fn notes_list() -> serde_json::Value {
+    crate::notes::list()
+}
+
+/// One full note (raw + enhanced content).
+#[tauri::command]
+pub fn note_get(id: u64) -> Result<crate::notes::Note, String> {
+    crate::notes::get(id).ok_or_else(|| "Note not found".to_string())
+}
+
+/// Create a note; returns it (the UI selects it immediately).
+#[tauri::command]
+pub fn note_create(
+    title: Option<String>,
+    content: Option<String>,
+    source: Option<String>,
+    folder: Option<String>,
+) -> crate::notes::Note {
+    crate::notes::create(
+        title.as_deref().unwrap_or(""),
+        content.as_deref().unwrap_or(""),
+        source.as_deref().unwrap_or("manual"),
+        folder.as_deref().unwrap_or(""),
+    )
+}
+
+/// Update a note's title / raw content / folder (enhancement fields untouched —
+/// an edit just marks the Enhanced tab stale).
+#[tauri::command]
+pub fn note_update(
+    id: u64,
+    title: Option<String>,
+    content: Option<String>,
+    folder: Option<String>,
+) -> Result<(), String> {
+    crate::notes::update(id, title, content, folder)
+}
+
+/// Folder names (seeded with Personal + Meetings, OpenWhispr-style).
+#[tauri::command]
+pub fn notes_folders() -> Vec<String> {
+    crate::notes::folders()
+}
+
+/// Note Actions — named prompt fragments (seeded with "Generate Notes").
+#[tauri::command]
+pub fn notes_actions() -> Vec<crate::notes::Action> {
+    crate::notes::actions()
+}
+
+#[tauri::command]
+pub fn action_create(
+    name: String,
+    description: Option<String>,
+    prompt: String,
+) -> Result<crate::notes::Action, String> {
+    crate::notes::action_create(&name, description.as_deref().unwrap_or(""), &prompt)
+}
+
+#[tauri::command]
+pub fn action_update(
+    id: u64,
+    name: String,
+    description: Option<String>,
+    prompt: String,
+) -> Result<(), String> {
+    crate::notes::action_update(id, &name, description.as_deref().unwrap_or(""), &prompt)
+}
+
+#[tauri::command]
+pub fn action_delete(id: u64) -> Result<(), String> {
+    crate::notes::action_delete(id)
+}
+
+/// Create a folder; returns the updated folder list.
+#[tauri::command]
+pub fn notes_folder_create(name: String) -> Vec<String> {
+    crate::notes::folder_create(&name)
+}
+
+#[tauri::command]
+pub fn note_delete(id: u64) {
+    crate::notes::delete(id);
+}
+
+/// Run the note-formatting "action" on a note (OpenWhispr's Actions engine,
+/// `runBackgroundAction`): resolve the **Note Formatting** scope's endpoint +
+/// editable fragment — falling back to the global cleanup endpoint when the
+/// scope is disabled (OpenWhispr `fallbackScope: dictationCleanup`) — call the
+/// LLM at temp 0.3 under the immutable NOTE_BASE_PROMPT guardrails, and store
+/// the result in `enhanced_content` (raw content never touched). Returns the
+/// enhanced markdown; the staleness hash is captured before the call so edits
+/// made while the model runs correctly show as stale.
+#[tauri::command]
+pub async fn note_enhance(id: u64, action_id: Option<u64>) -> Result<String, String> {
+    let note = crate::notes::get(id).ok_or("Note not found")?;
+    let hash = crate::notes::content_hash(&note.content);
+    let cfg = config::load();
+
+    // The fragment: the picked Action's prompt (OpenWhispr's Actions engine);
+    // without one (older callers), fall back to the Note Formatting scope's
+    // editable prompt, then the built-in default.
+    let action_fragment = action_id
+        .and_then(crate::notes::action_get)
+        .map(|a| a.prompt);
+
+    let (base_url, api_key, model, provider, scope_fragment, disable_thinking) =
+        match cfg.llm_scopes.get("noteFormatting") {
+            Some(s) if s.enabled && !s.provider.is_empty() => {
+                let key = cfg.provider_api_key(&s.provider, &s.api_key);
+                let (b, k, m, p) = crate::local_llm::effective_endpoint_for(
+                    &s.provider,
+                    &s.base_url,
+                    &key,
+                    &s.model,
+                );
+                let frag = if s.prompt.trim().is_empty() {
+                    crate::llm::NOTE_DEFAULT_FRAGMENT.to_string()
+                } else {
+                    s.prompt.clone()
+                };
+                (b, k, m, p, frag, s.disable_thinking)
+            }
+            scope => {
+                let (b, k, m, p) = crate::local_llm::effective_endpoint(&cfg);
+                let frag = scope
+                    .map(|s| s.prompt.clone())
+                    .filter(|p| !p.trim().is_empty())
+                    .unwrap_or_else(|| crate::llm::NOTE_DEFAULT_FRAGMENT.to_string());
+                (b, k, m, p, frag, cfg.pp_disable_thinking)
+            }
+        };
+    let fragment = action_fragment.unwrap_or(scope_fragment);
+
+    if base_url.is_empty() {
+        return Err(
+            "No AI model configured — set one in Settings → Language Models → Note Formatting"
+                .to_string(),
+        );
+    }
+    const KEYED_PROVIDERS: [&str; 5] = ["groq", "anthropic", "openai", "gemini", "openrouter"];
+    if api_key.is_empty() && KEYED_PROVIDERS.contains(&provider.as_str()) {
+        return Err(format!(
+            "No {provider} API key — add one in Settings → Language Models"
+        ));
+    }
+
+    let enhanced = crate::llm::enhance_note(
+        &note.content,
+        &fragment,
+        &base_url,
+        &api_key,
+        &model,
+        &provider,
+        disable_thinking,
+    )
+    .await?;
+    crate::notes::set_enhanced(id, &enhanced, &hash)?;
+    Ok(enhanced)
+}
+
+/// The immutable note-enhancement guardrails, for the Note Formatting Prompt
+/// Studio's View tab (same pattern as `get_base_prompt`/`get_edit_base_prompt`).
+#[tauri::command]
+pub fn get_note_base_prompt() -> String {
+    crate::llm::NOTE_BASE_PROMPT.to_string()
+}
+
+/// Name + size of an audio file the user picked/dropped (Upload file card).
+#[tauri::command]
+pub fn audio_file_info(path: String) -> Result<serde_json::Value, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| format!("Can't read file: {e}"))?;
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    Ok(serde_json::json!({ "name": name, "size": meta.len() }))
+}
+
 /// Read the current config.
 #[tauri::command]
 pub fn get_config() -> YapConfig {

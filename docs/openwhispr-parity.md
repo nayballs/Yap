@@ -127,7 +127,8 @@ Reference repo: `E:/Projects/references/openwhispr`. Last audit: 2026-07-05.
 | Feature | Status | Notes |
 |---|---|---|
 | 5-mode inference editor (scope=noteFormatting) | ✅ Done | NoteFormattingConfig.svelte mounts ScopeProviderConfig over cfg.llmScopes.noteFormatting (3 modes; managed/enterprise intentionally absent). |
-| Note-formatting runtime (actually formats notes) | ⚪ Intentional | Endpoint config saved now but no formatting pass runs — deferred to Phase 7 (no notes surface yet), shown as a coming-soon panel (NoteFormattingConfig.svelte:44). |
+| Note-formatting runtime (actually formats notes) | ✅ Done | The Notes surface's Enhance button (NotesView.svelte → note_enhance): OpenWhispr's Actions engine ported — BASE_SYSTEM_PROMPT verbatim (llm::NOTE_BASE_PROMPT) + the scope's editable fragment (default = the built-in "Generate Notes" prompt verbatim), temp 0.3, enhanced_content + len+first-50 staleness hash, endpoint fallback to cleanup (fallbackScope). ⚠ Awaiting live runtime test. |
+| "Auto-generate note titles" toggle | ⚪ Intentional | Still skipped: Yap derives titles from the first 6 words (OpenWhispr's own fallback); AI title generation can come with the Actions expansion. |
 
 ### Area 10 — Chat tab extras
 

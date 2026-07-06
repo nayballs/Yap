@@ -14,6 +14,19 @@
   let historyEnabled = $state(true);
   let hotkeyLabel = $state('the hotkey');
   let copiedTs = $state(null);
+  // Feed search (OpenWhispr Ctrl+K): plain client-side text filter.
+  let query = $state('');
+  let searchEl = $state(null);
+
+  function onSearchKey(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      searchEl?.focus();
+    } else if (e.key === 'Escape' && document.activeElement === searchEl) {
+      query = '';
+      searchEl?.blur();
+    }
+  }
 
   async function refresh() {
     try {
@@ -42,12 +55,22 @@
     return () => un && un();
   });
 
-  // Group entries (newest first) into local-day buckets with friendly labels.
+  // Group entries (newest first) into local-day buckets with friendly labels,
+  // after applying the search filter (text, app, or model).
   const groups = $derived.by(() => {
+    const q = query.trim().toLowerCase();
+    const shown = !q
+      ? entries
+      : entries.filter(
+          (e) =>
+            (e.text || '').toLowerCase().includes(q) ||
+            (e.app || '').toLowerCase().includes(q) ||
+            (e.model || '').toLowerCase().includes(q)
+        );
     const out = [];
     let currentKey = null;
     let bucket = null;
-    for (const e of entries) {
+    for (const e of shown) {
       const d = new Date(e.ts * 1000);
       const key = d.toDateString();
       if (key !== currentKey) {
@@ -105,8 +128,18 @@
   }
 </script>
 
+<svelte:window onkeydown={onSearchKey} />
+
 <div class="home">
   <div class="feed">
+    {#if entries.length > 0}
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+        <input bind:this={searchEl} bind:value={query} placeholder="Search transcriptions…" />
+        <kbd>Ctrl K</kbd>
+      </div>
+    {/if}
+
     {#if stats && (stats.totalTranscriptions ?? 0) > 0}
       <div class="statsrow">
         <div class="stat">
@@ -135,7 +168,12 @@
       </div>
     {/if}
 
-    {#if groups.length === 0}
+    {#if groups.length === 0 && query.trim()}
+      <div class="empty">
+        <h2>No matches</h2>
+        <p>Nothing in your history matches “{query.trim()}”.</p>
+      </div>
+    {:else if groups.length === 0}
       <div class="empty">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="9" y="2" width="6" height="12" rx="3" />
@@ -187,6 +225,48 @@
     max-width: 780px;
     margin: 0 auto;
     padding: 26px 30px 40px;
+  }
+
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 11px;
+    margin-bottom: 14px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+  }
+  .search svg {
+    width: 13px;
+    height: 13px;
+    color: var(--yap-muted-55);
+    flex: 0 0 auto;
+  }
+  .search input {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: none;
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 12.5px;
+  }
+  .search input:focus {
+    outline: none;
+  }
+  .search input::placeholder {
+    color: var(--yap-muted-55);
+  }
+  .search kbd {
+    flex: 0 0 auto;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 10px;
+    color: var(--yap-muted-55);
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: 4px;
+    padding: 1px 5px;
+    background: var(--yap-s1);
   }
 
   .statsrow {

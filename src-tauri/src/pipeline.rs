@@ -66,6 +66,9 @@ struct Shared {
     /// otherwise spawn a second `run_stt` that finds the engine taken and rebuilds
     /// a *duplicate* model into VRAM.
     processing: AtomicBool,
+    /// Cancel flag for an in-flight Upload file transcription (checked between
+    /// chunks — a running chunk finishes, then the run stops).
+    upload_cancel: AtomicBool,
     /// Mic-test mode (onboarding "speak and see the waves react"): when set, the
     /// audio callback emits `yap-amp` while *idle* too, so a level meter works
     /// without recording. Normally amp is only emitted during a recording.
@@ -476,6 +479,144 @@ impl Shared {
         }
     }
 
+    /// Upload / file transcription: decode → chunk → transcribe on the warm
+    /// engine, with per-chunk `yap-upload-progress` events and a cancel flag.
+    /// Runs with the `processing` guard held (set by `Pipeline::transcribe_file`)
+    /// so a live dictation can't grab the engine mid-run. Result arrives via
+    /// `yap-upload-done` / `-error` / `-cancelled` events.
+    async fn run_file_transcription(self: Arc<Self>, path: String) {
+        let emit_err = |msg: String| {
+            tracing::warn!("Upload transcription failed: {}", msg);
+            let _ = self.app.emit("yap-upload-error", msg);
+        };
+
+        let file_name = std::path::Path::new(&path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+
+        let _ = self.app.emit(
+            "yap-upload-progress",
+            serde_json::json!({ "stage": "decoding", "percent": 0, "chunksTotal": 0, "chunksCompleted": 0 }),
+        );
+
+        // 1. Decode off the async runtime (long files take seconds).
+        let decode_path = std::path::PathBuf::from(&path);
+        let decoded =
+            tokio::task::spawn_blocking(move || crate::media::decode_to_16k_mono(&decode_path))
+                .await;
+        let samples = match decoded {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => return emit_err(e),
+            Err(e) => return emit_err(format!("Decode task failed: {e}")),
+        };
+        let duration_secs = samples.len() as f32 / 16_000.0;
+
+        // 2. Warm engine, or lazy-reload (same pattern as run_stt).
+        let engine = self.engine.lock().ok().and_then(|mut g| g.take());
+        let mut engine = match engine {
+            Some(e) => e,
+            None => {
+                let (model_size, use_gpu) = self
+                    .config
+                    .read()
+                    .map(|c| (c.model_size.clone(), c.use_gpu))
+                    .unwrap_or_else(|_| (String::new(), true));
+                match stt::create_stt_engine(&config::data_dir(), &model_size, use_gpu) {
+                    Ok(e) => {
+                        tracing::info!(model = %model_size, "Reloading model for file transcription");
+                        e
+                    }
+                    Err(e) => return emit_err(format!("No STT model available: {e}")),
+                }
+            }
+        };
+
+        let (language, translate) = self.language_settings();
+
+        // 3. ~60 s chunks, each cut at the quietest point of its last 5 s so a
+        //    boundary doesn't slice through a word (media::chunk_ranges).
+        let ranges = crate::media::chunk_ranges(samples.len(), 16_000, 60, 5, &samples);
+        let total = ranges.len();
+        let mut pieces: Vec<String> = Vec::with_capacity(total);
+
+        for (i, (a, b)) in ranges.into_iter().enumerate() {
+            if self.upload_cancel.load(Ordering::SeqCst) {
+                if let Ok(mut g) = self.engine.lock() {
+                    if g.is_none() {
+                        *g = Some(engine);
+                    }
+                }
+                tracing::info!("Upload transcription cancelled");
+                let _ = self.app.emit("yap-upload-cancelled", ());
+                return;
+            }
+            let chunk: Vec<f32> = samples[a..b].to_vec();
+            let lang = language.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                let result = engine.transcribe(&chunk, lang.as_deref(), translate);
+                (engine, result)
+            })
+            .await;
+            match outcome {
+                Ok((e, Ok(text))) => {
+                    engine = e;
+                    let t = text.trim().to_string();
+                    if !t.is_empty() {
+                        pieces.push(t);
+                    }
+                }
+                Ok((e, Err(err))) => {
+                    if let Ok(mut g) = self.engine.lock() {
+                        if g.is_none() {
+                            *g = Some(e);
+                        }
+                    }
+                    return emit_err(format!("Transcription failed: {err}"));
+                }
+                Err(e) => return emit_err(format!("Transcription task failed: {e}")),
+            }
+            self.touch_activity();
+            let _ = self.app.emit(
+                "yap-upload-progress",
+                serde_json::json!({
+                    "stage": "transcribing",
+                    "percent": ((i + 1) as f64 / total as f64 * 100.0).round(),
+                    "chunksTotal": total,
+                    "chunksCompleted": i + 1,
+                }),
+            );
+        }
+
+        // Put the warm engine back (unless a model switch installed a newer one).
+        if let Ok(mut g) = self.engine.lock() {
+            if g.is_none() {
+                *g = Some(engine);
+            }
+        }
+
+        let text = pieces.join(" ").trim().to_string();
+        if text.is_empty() {
+            return emit_err("No speech detected in this file".to_string());
+        }
+
+        // Local history (best-effort, gated like dictations) — the Home feed
+        // shows the upload with the file name in the app slot.
+        let (history_enabled, model) = self
+            .config
+            .read()
+            .map(|c| (c.history_enabled, c.model_size.clone()))
+            .unwrap_or((false, String::new()));
+        if history_enabled {
+            crate::history::record(&text, &text, &model, &file_name);
+        }
+        let _ = self.app.emit("yap-transcript", text.clone());
+        let _ = self.app.emit(
+            "yap-upload-done",
+            serde_json::json!({ "text": text, "durationSecs": duration_secs, "file": file_name }),
+        );
+    }
+
     async fn run_stt(self: Arc<Self>, audio: Vec<f32>) {
         if audio.is_empty() {
             let _ = self.app.emit("yap-state", "idle");
@@ -815,6 +956,7 @@ impl Pipeline {
             edit_mode: AtomicBool::new(false),
             selection: Mutex::new(None),
             processing: AtomicBool::new(false),
+            upload_cancel: AtomicBool::new(false),
             mic_test: AtomicBool::new(false),
         });
 
@@ -858,6 +1000,32 @@ impl Pipeline {
             *g = Some(engine);
         }
         let _ = self.shared.app.emit("yap-state", "idle");
+    }
+
+    /// Start an Upload file transcription (async — progress + result arrive via
+    /// `yap-upload-*` events). Refuses while a dictation is recording, and holds
+    /// the `processing` guard for the whole run so the hotkey can't start a
+    /// dictation that would fight over the engine.
+    pub fn transcribe_file(&self, path: String) -> Result<(), String> {
+        let shared = Arc::clone(&self.shared);
+        if shared.recording.load(Ordering::SeqCst) {
+            return Err("Recording in progress — stop dictating first".into());
+        }
+        if shared.processing.swap(true, Ordering::SeqCst) {
+            return Err("Yap is busy transcribing — try again in a moment".into());
+        }
+        shared.upload_cancel.store(false, Ordering::SeqCst);
+        tauri::async_runtime::spawn(async move {
+            let flag = Arc::clone(&shared);
+            shared.run_file_transcription(path).await;
+            flag.processing.store(false, Ordering::SeqCst);
+        });
+        Ok(())
+    }
+
+    /// Cancel an in-flight Upload transcription (takes effect between chunks).
+    pub fn cancel_file_transcription(&self) {
+        self.shared.upload_cancel.store(true, Ordering::SeqCst);
     }
 
     /// Replace the live config (e.g. after the user saves settings).
@@ -1135,8 +1303,9 @@ mod tests {
     }
 }
 
-/// Simple linear resampler from one rate to another.
-fn resample_linear(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+/// Simple linear resampler from one rate to another. Shared with `media.rs`
+/// (audio-file decode front-end).
+pub(crate) fn resample_linear(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     if input.is_empty() || from_rate == to_rate {
         return input.to_vec();
     }

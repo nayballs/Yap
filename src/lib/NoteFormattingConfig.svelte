@@ -17,8 +17,21 @@
   import PromptStudio from './PromptStudio.svelte';
   import Toggle from './ui/Toggle.svelte';
   import Row from './ui/Row.svelte';
+  import { invoke } from '@tauri-apps/api/core';
+  import { onMount } from 'svelte';
 
   let { scope, cfg = null, defaultPrompt = '' } = $props();
+
+  // The immutable note-enhancement guardrails (llm::NOTE_BASE_PROMPT) shown in
+  // the Prompt Studio View tab — always prepended to the editable fragment.
+  let noteBase = $state('');
+  onMount(async () => {
+    try {
+      noteBase = await invoke('get_note_base_prompt');
+    } catch {
+      /* older backend — View shows the fragment alone */
+    }
+  });
 
   const enabled = $derived(scope.enabled);
   const PROVIDER_NAMES = {
@@ -39,16 +52,14 @@
   </Row>
 
   {#if enabled}
-    <!-- Coming-soon note: the endpoint config below is real and saved now, but the
-         formatting pass only runs once Yap's Notepad surface exists. -->
+    <!-- Live: this scope powers the Notes surface's Enhance button. -->
     <div class="soon">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+        <path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4z" />
       </svg>
       <p>
-        <strong>Coming soon.</strong> Note Formatting runs once Yap's Notepad surface
-        lands. Your provider, model and prompt below are saved now and will apply
-        automatically when it ships.
+        This model runs when you hit <strong>Enhance</strong> on a note (main sidebar →
+        <strong>Notes</strong>) — it turns raw notes into clean, structured markdown.
       </p>
     </div>
 
@@ -58,9 +69,9 @@
 
     <div class="sectionhead">
       <h4>Formatting prompt</h4>
-      <p>How dictated text is shaped into notes.</p>
+      <p>How notes are shaped when enhanced. Guardrails (View tab) are always applied.</p>
     </div>
-    <PromptStudio bind:prompt={scope.prompt} defaultBody={defaultPrompt} {providerLabel} {modelLabel} />
+    <PromptStudio bind:prompt={scope.prompt} basePrompt={noteBase} defaultBody={defaultPrompt} {providerLabel} {modelLabel} />
   {/if}
 </div>
 

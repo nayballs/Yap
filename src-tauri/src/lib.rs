@@ -10,6 +10,8 @@
 mod agent_detect;
 mod commands;
 mod config;
+mod media;
+mod notes;
 mod history;
 mod input_hook;
 mod llm;
@@ -150,6 +152,8 @@ pub fn run() {
         // External links ("Get your API key", GitHub, Learn more) open in the
         // default browser — target=_blank does nothing in a Tauri webview.
         .plugin(tauri_plugin_opener::init())
+        // Native file-open dialog for the Upload surface's Browse button.
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             pipeline: Mutex::new(None),
         })
@@ -192,6 +196,22 @@ pub fn run() {
             commands::clear_history,
             commands::delete_history_entry,
             commands::get_stats,
+            commands::transcribe_file,
+            commands::cancel_file_transcription,
+            commands::audio_file_info,
+            commands::notes_list,
+            commands::note_get,
+            commands::note_create,
+            commands::note_update,
+            commands::note_delete,
+            commands::note_enhance,
+            commands::get_note_base_prompt,
+            commands::notes_folders,
+            commands::notes_folder_create,
+            commands::notes_actions,
+            commands::action_create,
+            commands::action_update,
+            commands::action_delete,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

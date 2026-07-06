@@ -13,6 +13,8 @@
   import Settings from './Settings.svelte';
   import HomeView from './HomeView.svelte';
   import DictionaryView from './DictionaryView.svelte';
+  import UploadView from './UploadView.svelte';
+  import NotesView from './NotesView.svelte';
   import ComingSoonView from './ComingSoonView.svelte';
 
   let activeView = $state('home');
@@ -116,19 +118,9 @@
         onlink={() => openSettings('llm')}
       />
     {:else if activeView === 'notes'}
-      <ComingSoonView
-        kind="notes"
-        title="Notes"
-        body="Dictation-first notes with AI formatting — coming with Yap's Notepad surface. The Note Formatting model you pick now will apply automatically."
-        linkText="Configure formatting in Settings → Language Models → Note Formatting"
-        onlink={() => openSettings('llm')}
-      />
+      <NotesView />
     {:else if activeView === 'upload'}
-      <ComingSoonView
-        kind="upload"
-        title="Upload"
-        body="Drop an audio file and transcribe it locally — meetings, voice memos, recordings. On the roadmap as the next mid-size feature."
-      />
+      <UploadView />
     {/if}
   </main>
 </div>
