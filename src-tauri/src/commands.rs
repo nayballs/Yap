@@ -819,12 +819,22 @@ pub fn save_config(
     tauri::async_runtime::spawn(async move {
         crate::local_llm::autostart_if_configured(&cfg_for_sidecar).await;
     });
+    // The Integrations toggle may have flipped — start/stop the local API
+    // bridge to match (idempotent when unchanged).
+    crate::bridge::sync(&app, cfg.bridge_enabled);
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.update_config(cfg);
         }
     }
     Ok(())
+}
+
+/// Local API bridge status for the Integrations view:
+/// `{ running, port, bridgeFile }`.
+#[tauri::command]
+pub fn bridge_status() -> serde_json::Value {
+    crate::bridge::status()
 }
 
 /// Download the configured Whisper model, then load it into the pipeline.

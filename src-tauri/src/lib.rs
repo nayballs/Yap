@@ -8,6 +8,7 @@
 //! from Voice Mirror; everything else here is the slim glue.
 
 mod agent_detect;
+mod bridge;
 mod chats;
 mod commands;
 mod config;
@@ -282,6 +283,7 @@ pub fn run() {
             commands::chat_get,
             commands::chat_delete,
             commands::chat_send,
+            commands::bridge_status,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -328,6 +330,9 @@ pub fn run() {
                     local_llm::autostart_if_configured(&cfg2).await;
                 });
             }
+
+            // Local API bridge (Integrations): loopback server for CLIs/agents.
+            bridge::sync(&handle, cfg.bridge_enabled);
 
             // Apply the saved pill size.
             commands::apply_pill_scale(&handle, cfg.pill_scale);
@@ -528,9 +533,11 @@ pub fn run() {
         .expect("error while building Yap")
         .run(|_app_handle, event| {
             // Kill the on-device cleanup sidecar when the app exits so no
-            // orphaned llamafile server is left running.
+            // orphaned llamafile server is left running, and stop the local API
+            // bridge so a stale cli-bridge.json never points at a dead port.
             if let tauri::RunEvent::Exit = event {
                 local_llm::stop();
+                bridge::stop();
             }
         });
 }

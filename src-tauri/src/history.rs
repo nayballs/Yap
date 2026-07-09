@@ -142,6 +142,34 @@ pub fn list(limit: usize) -> Value {
     json!(items)
 }
 
+/// One entry by timestamp (the local-API bridge's transcription id; first
+/// match wins on the rare same-second collision).
+pub fn get_by_ts(ts: u64) -> Option<HistoryEntry> {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    entries.iter().find(|e| e.ts == ts).cloned()
+}
+
+/// Delete one entry by timestamp alone (bridge delete route). Returns whether
+/// anything was removed.
+pub fn delete_by_ts(ts: u64) -> bool {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    if let Some(pos) = entries.iter().position(|e| e.ts == ts) {
+        entries.remove(pos);
+        save_to_disk(entries);
+        true
+    } else {
+        false
+    }
+}
+
 /// Delete one entry, matched by timestamp + final text (the pair is unique
 /// enough for a per-item delete from the Home feed; first match wins).
 pub fn delete(ts: u64, text: &str) {

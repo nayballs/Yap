@@ -317,6 +317,13 @@ pub struct YapConfig {
     /// only on this machine; can be cleared from Settings. On by default.
     #[serde(default = "default_true")]
     pub history_enabled: bool,
+
+    /// Run the local API bridge (Integrations): a token-authenticated loopback
+    /// HTTP server exposing notes/folders/history to CLIs and coding agents
+    /// (`bridge.rs`, OpenWhispr cliBridge port). On by default, like OpenWhispr;
+    /// loopback-only + bearer token, so nothing is reachable off-machine.
+    #[serde(default = "default_true")]
+    pub bridge_enabled: bool,
 }
 
 fn default_scale() -> f64 {
@@ -423,6 +430,7 @@ impl Default for YapConfig {
             agent_name: String::new(),
             streaming_partials: false,
             history_enabled: true,
+            bridge_enabled: true,
         }
     }
 }

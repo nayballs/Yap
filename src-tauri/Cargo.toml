@@ -46,6 +46,11 @@ rodio = "0.19"
 # Clipboard for text injection
 arboard = "3"
 
+# Local API bridge (Integrations): a tiny loopback HTTP server (bridge.rs,
+# OpenWhispr cliBridge port) + CSPRNG for its bearer token.
+tiny_http = "0.12"
+getrandom = "0.3"
+
 # Model download + directory-model extract/verify (used by stt.rs)
 reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"
