@@ -12,7 +12,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { onMount } from 'svelte';
-  import yapIcon from '../assets/yap-icon.png';
+  import yapIcon from '../assets/yap-logo.svg';
   import ToastHost from './ui/ToastHost.svelte';
   import { toast } from './ui/toast.svelte.js';
   import Settings from './Settings.svelte';
@@ -27,6 +27,7 @@
 
   let activeView = $state('home');
   let settingsOpen = $state(false);
+  let bellOpen = $state(false);
 
   // Sidebar nav (Wispr order: Home, Insights, then the work surfaces).
   const NAV = [
@@ -61,10 +62,20 @@
   }
 
   function onOverlayKeydown(e) {
+    if (e.key === 'Escape' && bellOpen) {
+      bellOpen = false;
+      e.stopPropagation();
+      return;
+    }
     if (e.key === 'Escape' && settingsOpen) {
       settingsOpen = false;
       e.stopPropagation();
     }
+  }
+
+  // Close the notifications dropdown on any click outside its wrapper.
+  function onWindowClick(e) {
+    if (bellOpen && !e.target.closest?.('.bellwrap')) bellOpen = false;
   }
 
   // Backend error events (rewrite failures, missing keys, …) surface as
@@ -99,7 +110,7 @@
   {/if}
 {/snippet}
 
-<svelte:window onkeydown={onOverlayKeydown} />
+<svelte:window onkeydown={onOverlayKeydown} onclick={onWindowClick} />
 
 <div class="panel">
   <div class="titlebar" data-tauri-drag-region>
@@ -108,18 +119,53 @@
       <span class="brandname" data-tauri-drag-region>Yap</span>
     </div>
     <div class="winbtns">
+      <div class="bellwrap">
+        <button
+          class="winbtn bell"
+          class:open={bellOpen}
+          aria-label="Notifications"
+          data-tip="Notifications"
+          onclick={() => (bellOpen = !bellOpen)}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.26 9a5.74 5.74 0 0 1 11.48 0c0 3.5.9 5.2 1.62 6.1a1 1 0 0 1-.78 1.63H5.42a1 1 0 0 1-.78-1.63c.72-.9 1.62-2.6 1.62-6.1" /><path d="M10 20.3a2.1 2.1 0 0 0 4 0" /></svg>
+          {#if attention.items.length > 0}
+            <span class="belldot">{attention.items.length}</span>
+          {/if}
+        </button>
+        {#if bellOpen}
+          <div class="bellmenu">
+            <div class="bellhead">Notifications</div>
+            {#if attention.items.length === 0}
+              <div class="bellempty">You're all caught up.</div>
+            {:else}
+              {#each attention.items as item (item.section + item.label)}
+                <button
+                  class="bellitem"
+                  onclick={() => {
+                    bellOpen = false;
+                    openSettings(item.section);
+                  }}
+                >
+                  <span>{item.label}</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                </button>
+              {/each}
+            {/if}
+          </div>
+        {/if}
+      </div>
       <button class="winbtn" title="Minimize" aria-label="Minimize" onclick={() => appWindow.minimize()}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12h16" /></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M4 12h16" /></svg>
       </button>
       <button class="winbtn" title={maximized ? 'Restore' : 'Maximize'} aria-label={maximized ? 'Restore' : 'Maximize'} onclick={() => appWindow.toggleMaximize()}>
         {#if maximized}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3" /><rect x="4" y="8" width="12" height="12" rx="1" /></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3" /><rect x="4" y="8" width="12" height="12" rx="1" /></svg>
         {:else}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="1.5" /></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="1.5" /></svg>
         {/if}
       </button>
       <button class="winbtn close" title="Close" aria-label="Close" onclick={() => appWindow.close()}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
       </button>
     </div>
   </div>
@@ -242,22 +288,24 @@
     display: flex;
     align-self: stretch;
   }
+  /* Wispr-weight caption buttons: near-ink glyphs, thicker strokes. */
   .winbtn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 44px;
+    height: 100%;
     border: none;
     background: none;
-    color: var(--yap-fg-62);
+    color: var(--yap-fg);
     cursor: default;
     transition:
       background var(--yap-dur) ease,
       color var(--yap-dur) ease;
   }
   .winbtn svg {
-    width: 14px;
-    height: 14px;
+    width: 18px;
+    height: 18px;
   }
   .winbtn:hover {
     background: var(--yap-raised);
@@ -266,6 +314,110 @@
   .winbtn.close:hover {
     background: #c42b1c;
     color: #fff;
+  }
+
+  /* Notification bell (Wispr's title-bar bell + dark tooltip). */
+  .bellwrap {
+    position: relative;
+    display: flex;
+    align-self: stretch;
+  }
+  .winbtn.bell {
+    position: relative;
+    cursor: pointer;
+  }
+  .winbtn.bell.open {
+    background: var(--yap-raised);
+    color: var(--yap-fg);
+  }
+  .winbtn.bell::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 2px);
+    right: 4px;
+    padding: 4px 9px;
+    border-radius: 7px;
+    background: #1c1a16;
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+    z-index: 60;
+  }
+  .winbtn.bell:hover:not(.open)::after {
+    opacity: 1;
+  }
+  .belldot {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--yap-r-full);
+    background: #e5484d;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .bellmenu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    width: 264px;
+    padding: 6px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: 12px;
+    background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-menu);
+    z-index: 90;
+  }
+  .bellhead {
+    padding: 6px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--yap-muted);
+  }
+  .bellempty {
+    padding: 4px 8px 10px;
+    font-size: 12.5px;
+    color: var(--yap-muted);
+  }
+  .bellitem {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 550;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--yap-dur) ease;
+  }
+  .bellitem:hover {
+    background: var(--yap-raised-soft);
+  }
+  .bellitem svg {
+    flex: 0 0 auto;
+    width: 12px;
+    height: 12px;
+    color: var(--yap-muted);
   }
 
   .cols {
@@ -288,21 +440,21 @@
     flex-direction: column;
     gap: 2px;
   }
-  /* Wispr-weight nav: labels read in near-ink medium even when inactive. */
+  /* Wispr-weight nav: full-ink semibold labels even when inactive. */
   .navitem {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 11px;
     width: 100%;
-    height: 36px;
+    height: 38px;
     padding: 0 11px;
     border: none;
     border-radius: var(--yap-r);
     background: none;
-    color: var(--yap-fg-80);
+    color: var(--yap-fg);
     font: inherit;
-    font-size: 13.5px;
-    font-weight: 550;
+    font-size: 14px;
+    font-weight: 600;
     text-align: left;
     cursor: pointer;
     transition:
@@ -318,15 +470,11 @@
     background: var(--yap-s2);
     box-shadow: var(--yap-shadow-sm);
     color: var(--yap-fg);
-    font-weight: 650;
-  }
-  .navitem.active .navicon {
-    color: var(--yap-primary);
   }
   .navicon {
     display: inline-flex;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     flex: 0 0 auto;
   }
   .navicon :global(svg) {
@@ -399,7 +547,7 @@
     min-width: 0;
   }
   .acct-who .l1 {
-    font-size: 12.5px;
+    font-size: 13.5px;
     font-weight: 600;
   }
   .acct-who .l2 {

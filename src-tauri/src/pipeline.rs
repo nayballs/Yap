@@ -8,7 +8,7 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use tauri::{AppHandle, Emitter};
@@ -220,7 +220,7 @@ impl Shared {
             buf.clear();
             buf.extend_from_slice(&pre);
         }
-        // Capture the window the user is dictating into, before the overlay/pill
+        // Capture the window the user is dictating into, before the overlay
         // (or anything else) can steal focus. Restored at paste time.
         let hwnd = crate::text_injector::current_foreground().unwrap_or(0);
         self.target_hwnd.store(hwnd, Ordering::Relaxed);
@@ -246,8 +246,9 @@ impl Shared {
         if self.sound_enabled() {
             crate::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref());
         }
-        // Opt-in live partials: spawn a worker that re-transcribes the growing
-        // buffer while recording. Off by default (extra GPU load).
+        // Live partials: spawn a worker that re-transcribes a bounded sliding
+        // window of the buffer while recording (cost independent of recording
+        // length — see `partials::PartialSession`).
         self.maybe_start_streaming();
         tracing::info!("Recording started");
     }
@@ -978,7 +979,7 @@ impl Pipeline {
         })
     }
 
-    /// Toggle recording (called from the pill button's `toggle_recording`).
+    /// Toggle recording (the `toggle_recording` command).
     pub fn toggle(&self) {
         self.shared.toggle(false);
     }
@@ -1064,35 +1065,68 @@ impl Pipeline {
     }
 }
 
-/// Streaming-partials worker (opt-in). Runs on its own thread for one recording
-/// session and exits when `recording` flips false.
+/// Streaming-partials worker. Runs on its own thread for one recording session
+/// and exits when `recording` flips false.
 ///
-/// Every `INTERVAL`, it re-transcribes the *whole* growing buffer on the warm
-/// engine and emits a de-flickered partial (`yap-partial`). It never blocks the
-/// authoritative final pass: it grabs the engine with `try_lock` and skips the
-/// tick if the engine is busy or has been taken for the final transcription.
+/// Each tick it transcribes only a bounded **sliding window** of the buffer
+/// (`partials::PartialSession`): audio older than the window is frozen as
+/// committed text, so per-tick cost is independent of recording length. It
+/// never blocks the authoritative final pass: it grabs the engine with
+/// `try_lock` and skips the tick if the engine is busy or absent (taken by a
+/// meeting chunk; the final pass only takes it after `recording` flips false).
 fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: bool) {
-    const INTERVAL: Duration = Duration::from_millis(500);
-    // Don't bother until there's at least ~0.5 s of audio (avoids hallucinated
-    // output on tiny snippets — mirrors the engine's own MIN_SAMPLES guard).
+    const BASE_INTERVAL: Duration = Duration::from_millis(500);
+    const MAX_INTERVAL: Duration = Duration::from_secs(3);
+    // Don't bother until the window has at least ~0.5 s of audio (avoids
+    // hallucinated output on tiny snippets — mirrors the engine's own guard).
     const STREAM_MIN_SAMPLES: usize = 8_000;
 
-    let mut last = String::new();
+    // If the idle watcher unloaded the model, warm-load it now — otherwise a
+    // session started after an idle unload silently produces no partials at
+    // all (only the final pass lazily reloads).
+    ensure_partial_engine(&shared);
+
+    // Transcription outcome of one tick (built while holding the engine).
+    enum Out {
+        Normal(String),
+        Advance { commit: String, tail: String, cut: usize },
+    }
+
+    let mut session = crate::partials::PartialSession::default();
+    let mut last_emitted = String::new();
+    let mut interval = BASE_INTERVAL;
     loop {
-        std::thread::sleep(INTERVAL);
+        std::thread::sleep(interval);
         if !shared.recording.load(Ordering::SeqCst) {
             break;
         }
-        let buf = match shared.buffer.lock() {
-            Ok(b) => b.clone(),
-            Err(_) => break,
+
+        // Snapshot this tick's window under the buffer lock — only the bounded
+        // window is cloned, never the whole recording.
+        let (win, rel_cut, abs_cut) = {
+            let buf = match shared.buffer.lock() {
+                Ok(b) => b,
+                Err(_) => break,
+            };
+            let len = buf.len();
+            if len.saturating_sub(session.window_start) < STREAM_MIN_SAMPLES {
+                continue;
+            }
+            match session.plan(len, &buf) {
+                crate::partials::TickPlan::Normal => {
+                    (buf[session.window_start..len].to_vec(), None, 0usize)
+                }
+                crate::partials::TickPlan::Advance { cut } => (
+                    buf[session.window_start..len].to_vec(),
+                    Some(cut - session.window_start),
+                    cut,
+                ),
+            }
         };
-        if buf.len() < STREAM_MIN_SAMPLES {
-            continue;
-        }
 
         // Re-entrancy/contention guard: only transcribe if the engine is free.
-        let text = {
+        let started = Instant::now();
+        let out = {
             let guard = match shared.engine.try_lock() {
                 Ok(g) => g,
                 Err(_) => continue, // a transcription is already running — skip
@@ -1102,61 +1136,99 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
                     if !shared.recording.load(Ordering::SeqCst) {
                         break;
                     }
-                    match engine.transcribe(&buf, language.as_deref(), translate) {
-                        Ok(t) => t,
+                    // On an advance, both halves are transcribed under one
+                    // engine hold and emitted once, so the display never
+                    // shrinks at the seam.
+                    let res = match rel_cut {
+                        None => engine
+                            .transcribe(&win, language.as_deref(), translate)
+                            .map(Out::Normal),
+                        Some(c) => {
+                            engine
+                                .transcribe(&win[..c], language.as_deref(), translate)
+                                .and_then(|commit| {
+                                    engine
+                                        .transcribe(&win[c..], language.as_deref(), translate)
+                                        .map(|tail| Out::Advance {
+                                            commit,
+                                            tail,
+                                            cut: abs_cut,
+                                        })
+                                })
+                        }
+                    };
+                    match res {
+                        Ok(o) => o,
                         Err(e) => {
                             tracing::debug!("partial transcribe skipped: {}", e);
                             continue;
                         }
                     }
                 }
-                None => continue, // engine taken for the final pass — wind down
+                // Engine absent: a meeting chunk has it (it comes back — keep
+                // polling). If the final pass took it, `recording` is already
+                // false and the loop-top check exits next tick.
+                None => continue,
             }
         };
 
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            continue;
+        match out {
+            Out::Normal(text) => session.apply_normal(&text),
+            Out::Advance { commit, tail, cut } => session.apply_advance(&commit, &tail, cut),
         }
-        let stable = smart_diff(&last, trimmed);
-        if stable != last {
-            last = stable.clone();
-            // Recording may have stopped while we were transcribing — don't emit a
-            // stale partial over the authoritative final transcript.
+        shared.touch_activity();
+
+        // Self-throttle when transcription is slow (e.g. CPU fallback): back
+        // off the tick so the preview never saturates the machine.
+        let elapsed = started.elapsed();
+        interval = if elapsed > Duration::from_secs(1) {
+            (elapsed * 2).min(MAX_INTERVAL)
+        } else {
+            BASE_INTERVAL
+        };
+
+        let display = session.display();
+        if !display.is_empty() && display != last_emitted {
+            // Recording may have stopped while we were transcribing — don't emit
+            // a stale partial over the authoritative final transcript.
             if !shared.recording.load(Ordering::SeqCst) {
                 break;
             }
-            let _ = shared.app.emit("yap-partial", stable);
+            last_emitted = display.clone();
+            let _ = shared.app.emit("yap-partial", display);
         }
     }
 }
 
-/// De-flicker successive full-transcript partials (FluidVoice `smartDiffUpdate`).
-///
-/// Keeps the stable longest-common **word** prefix of the previous emit and
-/// appends the new tail, so the displayed text grows smoothly instead of
-/// re-rendering wholesale. If the new transcript diverges from the previous one
-/// by more than half its words, it's replaced outright (the decode changed its
-/// mind). Word comparison ignores case and surrounding punctuation.
-fn smart_diff(prev: &str, next: &str) -> String {
-    let norm = |w: &str| {
-        w.trim_matches(|c: char| !c.is_alphanumeric())
-            .to_ascii_lowercase()
-    };
-    let pw: Vec<&str> = prev.split_whitespace().collect();
-    let nw: Vec<&str> = next.split_whitespace().collect();
-
-    let mut common = 0;
-    while common < pw.len() && common < nw.len() && norm(pw[common]) == norm(nw[common]) {
-        common += 1;
+/// Warm-load the shared engine for the partials worker if the slot is empty
+/// (e.g. after an idle unload). Best-effort: on failure the worker simply runs
+/// partial-less and the final pass surfaces `needs-model` as before.
+fn ensure_partial_engine(shared: &Arc<Shared>) {
+    let empty = shared
+        .engine
+        .try_lock()
+        .map(|g| g.is_none())
+        .unwrap_or(false);
+    if !empty {
+        return;
     }
-
-    if !pw.is_empty() && (common as f32 / pw.len() as f32) >= 0.5 {
-        let mut out: Vec<&str> = pw[..common].to_vec();
-        out.extend_from_slice(&nw[common..]);
-        out.join(" ")
-    } else {
-        next.to_string()
+    let (model_size, use_gpu) = shared
+        .config
+        .read()
+        .map(|c| (c.model_size.clone(), c.use_gpu))
+        .unwrap_or_else(|_| (String::new(), true));
+    match stt::create_stt_engine(&config::data_dir(), &model_size, use_gpu) {
+        Ok(e) => {
+            // Place back only if still empty — a model switch or lazy reload
+            // that landed meanwhile wins (same pattern as run_stt's put-back).
+            if let Ok(mut g) = shared.engine.lock() {
+                if g.is_none() {
+                    tracing::info!(model = %model_size, "Warm-loaded model for the live preview");
+                    *g = Some(e);
+                }
+            }
+        }
+        Err(e) => tracing::debug!("partials warm-load skipped: {}", e),
     }
 }
 
@@ -1208,7 +1280,7 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
 
     let cb_shared = Arc::clone(shared);
     // Time-domain amplitude meter for the scrolling waveform (Claude Code
-    // style): every ~30 ms emit one peak level (raw 0..1) that the pill/overlay
+    // style): every ~30 ms emit one peak level (raw 0..1) that the overlay
     // push onto a scrolling history. ~1280 samples at 16 kHz ≈ 80 ms per bar
     // for a calm, readable scroll.
     const AMP_WINDOW: usize = 1280;
@@ -1284,35 +1356,6 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
         .map_err(|e| format!("Failed to start input stream: {}", e))?;
     tracing::info!("Audio capture started");
     Ok(stream)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::smart_diff;
-
-    #[test]
-    fn growing_transcript_keeps_prefix_and_appends() {
-        let out = smart_diff("the meeting is", "the meeting is at three");
-        assert_eq!(out, "the meeting is at three");
-    }
-
-    #[test]
-    fn from_empty_takes_next() {
-        assert_eq!(smart_diff("", "hello world"), "hello world");
-    }
-
-    #[test]
-    fn case_and_punctuation_insensitive_prefix() {
-        // Prev tail lacked punctuation; new decode added it — prefix still stable.
-        let out = smart_diff("lets go to the", "Let's go to the bank.");
-        assert!(out.ends_with("bank."));
-    }
-
-    #[test]
-    fn large_divergence_replaces_wholesale() {
-        let out = smart_diff("alpha beta gamma delta", "totally different words here");
-        assert_eq!(out, "totally different words here");
-    }
 }
 
 /// Simple linear resampler from one rate to another. Shared with `media.rs`

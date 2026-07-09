@@ -159,16 +159,26 @@ below (✅ = done).
       authoritative final pass. (Only Moonshine offers true token streaming in
       `transcribe-rs`, and we pulled it as broken, hence the re-transcribe approach.)
       ⚠ Needs validation on the GPU (Vulkan) build before enabling by default.
-- [ ] **Add a true streaming model for the partial pass** (July-2026 research). The
-      re-transcribe-the-growing-buffer approach runs Parakeet in exactly the mode where
-      it degrades ~2× (batch ~6% → streaming ~12.8% WER), and cost grows O(n) with
-      recording length. Purpose-built streaming models now run on Yap's *same* DirectML
-      runtime and would give better, lower-latency partials: **Moonshine v2 streaming**
-      (245 MB, 6.65% WER, ONNX/.ort — Yap already lists an older Moonshine) or **NVIDIA
-      Nemotron on-device streaming** (0.67 GB int4, 0.56 s latency, ONNX via MS Foundry
-      Local, only ~0.2% batch→stream loss). Pair with a sliding-window buffer for the
-      partial pass to kill the O(n) re-transcribe cost. Keep Parakeet TDT 0.6B v3 as the
-      authoritative final-pass default — nothing dethroned it for a lightweight local pill.
+- [~] **Sliding-window partial pass — IMPLEMENTED** (2026-07-09; ⚠ awaiting live GPU
+      validation, then the default flips on). Killed the O(n) re-transcribe cost:
+      `partials.rs` (`PartialSession`) freezes text older than a bounded window as
+      committed text and advances the window at quiet points (`media::quietest_index`,
+      12 s advance / 8 s keep / 20 s hard cap), so per-tick cost is independent of
+      recording length; adaptive backoff self-throttles CPU-fallback machines, and the
+      worker warm-loads the engine after an idle unload (was: silent no-partials).
+      Unit-tested (plan/stitch/seam cases). Validation checklist + default-flip plan in
+      the 2026-07-09 plan file; Settings copy already de-scarified.
+- [ ] **True streaming model for the partial pass — spike-gated Stage 2** (researched
+      2026-07-09). transcribe-rs 0.3.11 (latest) has NO public incremental API — the
+      Moonshine `StreamingModel`'s streaming internals are private (public API = batch),
+      and its models were pulled for a DirectML Slice crash (`c7f2351`). **Spike A:**
+      restore `moonshine-tiny-streaming-en` (31 MB, engine wiring still in stt.rs) and
+      test on **CPU EP** over the Stage-1 sliding window — go if no crash + EP scopable
+      per-load without perturbing the DirectML main engine. **Spike B (if A fails):**
+      sherpa-onnx streaming zipformer (true streaming `OnlineRecognizer`, int8 ~70 MB,
+      Rust crate) — gate: its static onnxruntime must coexist with transcribe-rs's `ort`
+      in one binary. Either way: second engine slot, English-only gate (non-English falls
+      back to Stage 1). Keep Parakeet TDT 0.6B v3 as the authoritative final pass.
 
 ### Phase 2 — The differentiator: AI cleanup layer — ✅ DONE (v1)
 - [x] Optional post-processing pass (filler/grammar/punctuation/self-corrections),

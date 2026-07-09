@@ -351,7 +351,7 @@
               <span class="l">day streak</span>
             </div>
             <div class="statrule"></div>
-            <p class="statfoot">{fmtNum(stats.totalTranscriptions)} dictations, all local.</p>
+            <p class="statfoot">{fmtNum(stats.totalTranscriptions)} dictations, stored on this PC.</p>
           </div>
         </aside>
       {/if}
@@ -735,9 +735,11 @@
     color: var(--yap-fg);
     font-variant-numeric: oldstyle-nums;
   }
+  /* Wispr-weight labels: full ink at medium, not washed-out grey. */
   .stat .l {
-    font-size: 12.5px;
-    color: var(--yap-muted);
+    font-size: 14px;
+    font-weight: 550;
+    color: var(--yap-fg);
   }
   .statrule {
     height: 1px;
@@ -745,9 +747,9 @@
   }
   .statfoot {
     margin: 0;
-    font-size: 11.5px;
+    font-size: 12px;
     line-height: 1.5;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted-70);
   }
 
   .empty {

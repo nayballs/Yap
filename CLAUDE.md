@@ -1,6 +1,6 @@
 # CLAUDE.md — how Yap works
 
-Yap is a tiny **local voice-dictation pill**: press a global hotkey, speak, press
+Yap is a tiny **local voice-dictation tool**: press a global hotkey, speak, press
 again — Yap transcribes **locally on the GPU**, optionally runs the text through an
 **AI cleanup pass** (filler/punctuation/grammar), and types it into whatever window
 is focused. A chime marks start/stop, a correction dictionary fixes mis-heard jargon,
@@ -33,8 +33,10 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 ## Stack
 
 - **Shell:** [Tauri 2](https://tauri.app) (Rust backend + webview frontend).
-- **Frontend:** Svelte 5 + Vite 6 (`src/`). Windows: **pill**, **settings**,
-  **onboarding**, **overlay**.
+- **Frontend:** Svelte 5 + Vite 6 (`src/`). Windows: **settings** (the main
+  ControlPanel), **onboarding**, **overlay**. (The always-on pill window was
+  retired 2026-07-09 — the transcribing overlay + tray are the only floating
+  surfaces.)
 - **Backend:** Rust (`src-tauri/src/`).
 - **Audio:** `cpal` (capture) + `rodio` (start/stop chime).
 - **STT:** [`transcribe-rs`](https://crates.io/crates/transcribe-rs) — one crate that
@@ -48,7 +50,7 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 - **Updates/install:** `tauri-plugin-updater` (GitHub Releases) + custom NSIS installer.
 - **Autostart:** `tauri-plugin-autostart`.
 - **Window state:** `tauri-plugin-window-state` persists the main window's size, position, and
-  maximized state across launches (pill, overlay, onboarding denylisted; VISIBLE flag excluded
+  maximized state across launches (overlay, onboarding denylisted; VISIBLE flag excluded
   so the window never un-hides on start-hidden launches).
 - **External links:** `tauri-plugin-opener` (opens URLs in the default browser).
 - **Dialogs:** `tauri-plugin-dialog` (file open/save dialogs for note export and upload).
@@ -90,7 +92,7 @@ back to the raw transcript, so dictation never blocks.
   updater/process/autostart/single-instance plugins, starts the input hook + pipeline,
   routes `dictation-key-pressed`/`-released` → `Pipeline.on_key()` (so recording works
   before the webview is ready), drives the **overlay** and **tray** off `yap-state`,
-  builds the tray (when `show_tray_icon` *or* the pill is hidden), and reconciles
+  builds the tray (always — it's the only persistent surface), and reconciles
   autostart. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
 - **`pipeline.rs`** — the heart. Owns the mic stream + shared state (`recording`,
   audio `buffer`, idle `preroll` ring, warm STT `engine`, live `config`,
@@ -107,8 +109,12 @@ back to the raw transcript, so dictation never blocks.
   starting a new recording while one is still transcribing (no overlapping `run_stt`
   / duplicate model load), and the buffer is capped at 15 min so a stuck key can't
   OOM. With `streaming_partials` on, `stream_partials` (a per-session worker)
-  re-transcribes the growing buffer every ~500 ms and emits de-flickered
-  (`smart_diff`) `yap-partial` text. An **idle watcher** unloads the model after
+  transcribes a bounded **sliding window** of the buffer every ~500 ms
+  (`partials.rs`: text older than the window freezes as committed text, the
+  window advances at quiet points via `media::quietest_index`, 20 s hard cap —
+  per-tick cost independent of recording length; de-flickered by `smart_diff`,
+  adaptive backoff on slow machines, warm-loads the engine if it was
+  idle-unloaded) and emits `yap-partial` text. An **idle watcher** unloads the model after
   `model_unload_timeout`; the next dictation lazily reloads it.
 - **`stt.rs`** — `SttEngine` trait + a real `transcribe-rs` engine (`#[cfg(feature =
   "engines")]`) and a stub (default build). Holds the **14-model registry**
@@ -202,7 +208,7 @@ back to the raw transcript, so dictation never blocks.
   `x-ratelimit-*` headers), persisted to `groq_usage.json`, auto-resets at midnight
   UTC; powers the `get_groq_usage` command + `groq-usage` event.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
-  volume, output_device, mute_while_recording, recording_mode, pill_scale, show_pill,
+  volume, output_device, mute_while_recording, recording_mode,
   show_overlay, overlay_position, dictionary, append_trailing_space, auto_submit(+key),
   restore_clipboard, show_tray_icon, autostart, model_unload_timeout, selected_language,
   translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
@@ -263,7 +269,7 @@ back to the raw transcript, so dictation never blocks.
   `download_model_size`, `set_active_model`, `delete_model`, `model_language_info`),
   devices (`list_audio_devices`, `list_output_devices`, `set_input_device` — live
   stream swap, `set_mic_test` — idle level meter), windows (`open_settings`,
-  `open_onboarding`, `close_onboarding`, `set_pill_visible`, `set_pill_scale`),
+  `open_onboarding`, `close_onboarding`),
   `configure_hotkey`, `set_autostart`, `is_portable`, `test_post_process`,
   `get_groq_usage`, history (`get_history`, `clear_history`, `get_stats`),
   plus the notes/actions/folders CRUD + `note_enhance`/`note_ask`/`note_export`,
@@ -285,11 +291,15 @@ back to the raw transcript, so dictation never blocks.
   Settings computes real needs-action items (update available / no STT model /
   cleanup on a cloud provider with no key) into a shared runes store; the
   ControlPanel cog + the matching Settings nav rows show a red count chip
-  (Wispr's Settings "1" pattern). The **pill + overlay stay dark**
-  (they float over other apps) and **Onboarding keeps the old dark palette** via
-  scoped `:root[data-yap-theme='dark']` token overrides (attribute set in
-  App.svelte, which also sets per-window `color-scheme`). Monochrome brand SVGs
-  are only `invert(1)`-ed under that dark scope.
+  (Wispr's Settings "1" pattern). **Onboarding is warm-light too** (2026-07-09
+  redesign: same tokens as the main window, serif display headlines, ink CTA,
+  brand icons on the model cards via `providerIcons.js`); the
+  `:root[data-yap-theme='dark']` token block in app.css is currently unset
+  everywhere — kept only as the seed of a future dark mode. App.svelte sets
+  per-window `color-scheme`. **Brand mark** (2026-07-09):
+  `src/assets/yap-logo.svg` — warm-ink rounded badge, amber yapping mouth,
+  cream soundwaves (replaced the old blue `yap-icon.png` in the title bar +
+  onboarding; `src-tauri/icons/*` regenerated from it via `npx tauri icon`).
 - **Custom window chrome (2026-07-09)** — the settings window is **undecorated**
   (`decorations: false` in tauri.conf.json): ControlPanel draws a 40px
   `data-tauri-drag-region` title bar (brand left; min / max-restore / close
@@ -305,11 +315,15 @@ back to the raw transcript, so dictation never blocks.
   overlay** (cogwheel). `Settings.svelte` renders `embedded` inside the modal
   and stays **always mounted** so its in-window hotkey fallback + auto-save run
   for the window's lifetime. App-wide **toast notification system**
-  (`ui/toast.svelte.js` + `ui/ToastHost.svelte`, OpenWhispr port): variant
-  accent bars, hover-pause, copyable mono error boxes, progress hairlines,
-  slide in/out (3.5 s / 6 s durations); mounted in ControlPanel and wired to
-  action runs, meeting start/stop, uploads, clipboard copies, debug-mode
-  toggles, and backend `yap-error` events. **`HomeView.svelte`** = the Wispr-style
+  (`ui/toast.svelte.js` + `ui/ToastHost.svelte`, OpenWhispr timer logic in
+  **Wispr-Flow card styling** since 2026-07-09): dark rounded card with a
+  per-variant category chip (Tip/Done/Error, override via `chip`), always-
+  visible circular ✕, optional light **action button** bottom-right
+  (`action: { label, onClick }` — Wispr's "Open Settings"), hover-pause,
+  copyable mono error boxes, progress hairlines (3.5 s / 6 s durations);
+  mounted in ControlPanel and wired to action runs, meeting start/stop,
+  uploads, clipboard copies, debug-mode toggles, and backend `yap-error`
+  events. **`HomeView.svelte`** = the Wispr-style
   Home: time-of-day greeting with the hotkey as **amber keycaps**, a dark
   **rotating hero card** (4 tips — voice edit / AI cleanup / meeting notes /
   per-app profiles — picked by day, dot nav, CTAs open the right Settings
@@ -350,14 +364,18 @@ back to the raw transcript, so dictation never blocks.
   "Copy API guide" button copies a paste-into-your-agent endpoint cheat-sheet,
   and an endpoint reference table. (OpenWhispr's Google-Calendar OAuth /
   cloud API-keys / hosted-MCP cards need their paid cloud and are not ported.)
-- **`lib/Pill.svelte`** — always-on-top pill. `yap-state` dot, scrolling amplitude
-  waveform (`yap-amp`), cancel ✕ while recording, model-download button, gear.
-- **`lib/Overlay.svelte`** — the click-through bottom/top overlay; same scrolling
-  waveform + "Transcribing…".
+- **`lib/Overlay.svelte`** — the click-through bottom/top overlay, Yap's only
+  floating dictation surface (the pill was retired 2026-07-09): a **light**
+  capsule matching the app's identity (white `--yap-s2` surface + warm border +
+  ink text; a little Yap card floating on screen), with a **burnt-orange**
+  (`--yap-primary`) scrolling amplitude waveform while recording, "Transcribing…"
+  while processing, and an error state. Red pulsing dot + moving waveform carry
+  visibility on any background, so **no drop shadow** (dodges the boxy-shadow
+  artifact on the tightly-fitted transparent WebView2 window).
 - **`lib/Settings.svelte`** — the settings surface, now rendered **inside the
   ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / System):
-  **General** (hotkey, recording mode, mic, sound+volume, mute, pill size, show
-  pill/overlay, overlay position), **Speech-to-Text** (`ModelManager` + GPU +
+  **General** (hotkey, recording mode, mic, sound+volume, mute, show overlay,
+  overlay position), **Speech-to-Text** (`ModelManager` + GPU +
   language/translate), **Language Models** (OpenWhispr-style: enable toggle → mode
   selector Cloud Providers/Local/Self-Hosted → provider pill tabs (Groq/Anthropic/
   OpenAI/OpenRouter/Custom, brand icons) → API Key (masked + "Get your API key"
@@ -382,13 +400,11 @@ back to the raw transcript, so dictation never blocks.
 - **`lib/ui/`** — primitives: Toggle, Select, Slider, Group, Row, Button, Input, Textarea.
 
 ### Window config (`src-tauri/tauri.conf.json`)
-- **pill**: 210×60, transparent, decorations off, always-on-top, skip-taskbar. Hidden
-  by default (`show_pill = false`) — the overlay + tray are the default surface.
 - **settings**: 1200×800 (min 860×600), titled "Yap" (it hosts the ControlPanel — see above),
   **undecorated** (custom in-page title bar w/ drag region + caption buttons — see the
   "Custom window chrome" bullet above), hidden, hide-on-close. Size/position/maximized
   persisted by `tauri-plugin-window-state`
-  across launches; pill, overlay, onboarding are excluded from persistence; the VISIBLE flag
+  across launches; overlay, onboarding are excluded from persistence; the VISIBLE flag
   is excluded so the window never un-hides on start-hidden launches (see lib.rs window-state
   plugin setup).
 - **onboarding**: 620×720 (min 520×560), hidden, hide-on-close.
@@ -525,7 +541,7 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   `docs/local-api.md`).
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
-  recording mode `toggle`, **pill hidden**, overlay shown, AI cleanup **off**.
+  recording mode `toggle`, overlay shown, AI cleanup **off**.
 
 ---
 

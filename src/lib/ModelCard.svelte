@@ -1,5 +1,6 @@
 <script>
   import { formatSize } from './models.js';
+  import { ENGINE_PROVIDER, PROVIDER_ICONS } from './providerIcons.js';
 
   // status: downloadable | downloading | available | active | switching
   let {
@@ -12,6 +13,12 @@
 
   const installed = $derived(status === 'available' || status === 'active');
   const busy = $derived(status === 'downloading' || status === 'switching');
+
+  // Brand icon (same mapping the Settings model list uses): NVIDIA for
+  // Parakeet/Canary, OpenAI for Whisper; engines without a truthful brand
+  // icon fall back to a generic waveform glyph.
+  const prov = $derived(ENGINE_PROVIDER[model.engine]);
+  const icon = $derived(prov ? PROVIDER_ICONS[prov] : null);
 </script>
 
 <div class="card {status}">
@@ -28,6 +35,11 @@
     <div class="top">
       <div class="info">
         <div class="titleline">
+          {#if icon}
+            <img class="micon" src={icon} alt="" aria-hidden="true" />
+          {:else}
+            <svg class="micon gen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h2l2-6 3 12 3-9 2 3h6" /></svg>
+          {/if}
           <h3>{model.name}</h3>
           {#if model.recommended && status !== 'active'}
             <span class="badge">Recommended</span>
@@ -105,7 +117,7 @@
   .card:hover {
     border-color: var(--yap-border-hover);
     background: var(--yap-s2);
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 8px 22px rgba(60, 50, 30, 0.1);
   }
   .card.active {
     border-color: var(--yap-primary-line);
@@ -173,8 +185,18 @@
   }
   .badge.ghost {
     color: var(--yap-muted);
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.12);
+    background: var(--yap-raised-soft);
+    border-color: var(--yap-border-subtle);
+  }
+
+  .micon {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    object-fit: contain;
+  }
+  .micon.gen {
+    color: var(--yap-muted);
   }
 
   .scores {
@@ -198,7 +220,7 @@
   .bar {
     width: 70px;
     height: 6px;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--yap-raised);
     border-radius: var(--yap-r-full);
     overflow: hidden;
   }
@@ -244,7 +266,7 @@
   .track {
     width: 100%;
     height: 6px;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--yap-raised);
     border-radius: var(--yap-r-full);
     overflow: hidden;
   }

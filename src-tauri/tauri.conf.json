@@ -12,21 +12,6 @@
   "app": {
     "windows": [
       {
-        "label": "pill",
-        "title": "Yap",
-        "width": 210,
-        "height": 60,
-        "minWidth": 110,
-        "minHeight": 34,
-        "resizable": false,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "shadow": false,
-        "center": false
-      },
-      {
         "label": "settings",
         "title": "Yap",
         "width": 1200,

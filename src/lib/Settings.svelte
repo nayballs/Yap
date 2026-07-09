@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy } from 'svelte';
-  import yapIcon from '../assets/yap-icon.png';
+  import yapIcon from '../assets/yap-logo.svg';
   import Group from './ui/Group.svelte';
   import Row from './ui/Row.svelte';
   import Toggle from './ui/Toggle.svelte';
@@ -411,13 +411,10 @@
     autoSubmit: false,
     restoreClipboard: true,
     startHidden: false,
-    showTrayIcon: true,
     autostart: false,
     audioFeedbackVolume: 1.0,
     soundEnabled: true,
     useGpu: true,
-    pillScale: 1.0,
-    showPill: false,
     showOverlay: true,
     streamingPartials: false,
     historyEnabled: true,
@@ -542,7 +539,6 @@
   });
 
   onDestroy(() => {
-    stopRecord();
     if (unlistenUpdateEvent) unlistenUpdateEvent();
     if (unlistenUsage) unlistenUsage();
   });
@@ -747,16 +743,6 @@
       new CustomEvent('yap-dictionary-external', { detail: JSON.parse(json) })
     );
   });
-
-  // ---- Pill size (live preview) ----
-  function onScale() {
-    invoke('set_pill_scale', { scale: Number(cfg.pillScale) });
-  }
-
-  // ---- Show/hide pill (apply immediately + persist on Save) ----
-  function onShowPill(visible) {
-    invoke('set_pill_visible', { visible });
-  }
 
   // ---- Autostart (apply immediately + persist on Save) ----
   async function onAutostart(enabled) {
@@ -1138,7 +1124,6 @@
       ...cfg,
       inputDevice: cfg.inputDevice || null,
       outputDevice: cfg.outputDevice || null,
-      pillScale: Number(cfg.pillScale),
       audioFeedbackVolume: Number(cfg.audioFeedbackVolume),
       dictionary: cfg.dictionary
         .map((e) => ({ from: (e.from || '').trim(), to: (e.to || '').trim() }))
@@ -1417,32 +1402,13 @@
           <Group title="Appearance">
             <Row>
               <Toggle
-                bind:checked={cfg.showPill}
-                label="Show pill"
-                desc="The floating dictation pill — the hotkey still works when it's hidden"
-                onchange={onShowPill}
-              />
-            </Row>
-            <Row>
-              <Toggle
                 bind:checked={cfg.showOverlay}
                 label="Show transcribing overlay"
-                desc="A floating waveform indicator while you dictate"
+                desc="The floating waveform while you dictate"
               />
             </Row>
             <Row label="Overlay position" desc="Where the transcribing overlay appears">
               <Select bind:value={cfg.overlayPosition} options={OVERLAY_POSITIONS} disabled={!cfg.showOverlay} />
-            </Row>
-            <Row>
-              <Slider
-                bind:value={cfg.pillScale}
-                min={0.6}
-                max={1.4}
-                step={0.05}
-                label="Pill size"
-                hint={`${Math.round(cfg.pillScale * 100)}%`}
-                oninput={onScale}
-              />
             </Row>
           </Group>
 
@@ -1460,9 +1426,9 @@
             <Row>
               <Toggle
                 bind:checked={cfg.streamingPartials}
-                label="Live transcription preview (experimental)"
-                desc="Show words in the overlay as you speak — adds GPU load"
-                hint="Re-transcribes on a timer. The final result on stop is always authoritative."
+                label="Live transcription preview"
+                desc="Show words in the overlay as you speak"
+                hint="Preview only — the final result on stop is always authoritative."
               />
             </Row>
           </Group>
@@ -2015,9 +1981,6 @@
 
           <Group title="System">
             <Row>
-              <Toggle bind:checked={cfg.showTrayIcon} label="Show tray icon" desc="System-tray icon for Settings and Quit" />
-            </Row>
-            <Row>
               <Toggle bind:checked={cfg.autostart} label="Start on login" desc="Launch Yap when you sign in" onchange={onAutostart} />
             </Row>
           </Group>
@@ -2112,14 +2075,18 @@
                     <img class="ablogo" src={yapIcon} alt="" aria-hidden="true" />
                     <div>
                       <div class="aname">Yap <span class="ver">{APP_VERSION}</span></div>
-                      <div class="atag">A tiny local voice-dictation pill.</div>
+                      <div class="atag">A tiny local voice-dictation app.</div>
                     </div>
                   </div>
                   <p class="aline">
                     Press your hotkey, speak, press again — Yap transcribes locally
                     with Whisper and types the text into whatever window is focused.
                   </p>
-                  <p class="aprivacy">🔒 Everything runs locally. Your voice never leaves your machine.</p>
+                  <p class="aprivacy">
+                    🔒 Transcription is 100% local — your voice never leaves this machine.
+                    If you point AI cleanup at a cloud provider, only the transcript text
+                    is sent to it; the built-in local AI keeps that on your PC too.
+                  </p>
                   <p class="adir">Config &amp; models live in <code>%APPDATA%/yap/</code>.</p>
                   <div class="arow">
                     <a class="alink" href="https://github.com/nayballs/Yap" onclick={createExternalLinkHandler('https://github.com/nayballs/Yap')} target="_blank" rel="noreferrer">GitHub →</a>
@@ -2181,7 +2148,7 @@
         {:else if section === 'account'}
           <div class="page-h">
             <h1>Account</h1>
-            <p>Yap is 100% local and needs no account. Sign in only if you want the optional hosted extras.</p>
+            <p>Yap needs no account — dictation works fully offline. Sign in only if you want the optional hosted extras.</p>
           </div>
 
           <div class="acct-hero">

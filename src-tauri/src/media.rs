@@ -142,23 +142,37 @@ pub fn chunk_ranges(
         let hard_end = start + chunk;
         // Search the last `slack` samples of the window for the quietest point.
         let search_from = hard_end.saturating_sub(slack).max(start + 1);
-        let mut best = hard_end;
-        let mut best_amp = f32::MAX;
-        let mut i = search_from;
-        while i < hard_end {
-            let amp = samples[i].abs();
-            if amp < best_amp {
-                best_amp = amp;
-                best = i;
-            }
-            // Sampling every ~10 ms is plenty for a cut point.
-            i += sample_rate / 100;
-        }
+        let (best, _) = quietest_index(samples, search_from, hard_end, sample_rate);
         ranges.push((start, best));
         start = best;
     }
     ranges.push((start, len));
     ranges
+}
+
+/// Index of the quietest sample in `samples[from..to]` (scanned at a ~10 ms
+/// stride), with its amplitude. Returns (`to`, `f32::MAX`) for an empty range.
+/// Shared by the upload chunker above and the live-preview window advance
+/// (`partials::PartialSession::plan`) — both want cuts that land in pauses.
+pub fn quietest_index(
+    samples: &[f32],
+    from: usize,
+    to: usize,
+    sample_rate: usize,
+) -> (usize, f32) {
+    let mut best = to;
+    let mut best_amp = f32::MAX;
+    let mut i = from;
+    while i < to {
+        let amp = samples[i].abs();
+        if amp < best_amp {
+            best_amp = amp;
+            best = i;
+        }
+        // Sampling every ~10 ms is plenty for a cut point.
+        i += (sample_rate / 100).max(1);
+    }
+    (best, best_amp)
 }
 
 #[cfg(test)]
@@ -189,5 +203,15 @@ mod tests {
         }
         // The first cut used the quiet dip.
         assert_eq!(r[0].1, dip);
+    }
+
+    #[test]
+    fn quietest_index_finds_dip() {
+        let mut samples = vec![0.5f32; 16_000 * 4];
+        let dip = 16_000 * 2; // stride-aligned so the 10 ms scan hits it exactly
+        samples[dip] = 0.0;
+        let (i, amp) = quietest_index(&samples, 16_000, 16_000 * 3, 16_000);
+        assert_eq!(i, dip);
+        assert!(amp < 0.01);
     }
 }

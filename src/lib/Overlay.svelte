@@ -80,17 +80,22 @@
     animation: fade-in 0.18s ease;
   }
 
+  /* Light capsule — matches the app's LIGHT identity (a little white Yap card
+     floating on screen), not the dark hero card. White surface + warm border +
+     ink text + the burnt-orange accent (the app's accent-on-light) carrying the
+     waveform (2026-07-09: pill goes light to match the settings/main window).
+     The red pulsing dot + moving waveform carry visibility on any background,
+     so no drop shadow is needed — which also dodges the boxy-shadow artifact on
+     the tightly-fitted transparent WebView2 window. */
   .capsule {
     display: flex;
     align-items: center;
     gap: 9px;
     padding: 6px 14px;
     border-radius: 999px;
-    background: rgba(15, 17, 24, 0.92);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    /* NO outer drop shadow and NO backdrop-filter — both render as a boxy
-       artifact on tightly-fitted transparent WebView2 windows (see Pill.svelte). */
-    color: #e5e7eb;
+    background: var(--yap-s2, #ffffff);
+    border: 1px solid var(--yap-border-hover, #c8c2b3);
+    color: var(--yap-fg, #23211b);
     font-size: 12px;
   }
 
@@ -101,21 +106,21 @@
     border-radius: 50%;
   }
   .dot.rec {
-    background: radial-gradient(circle at 35% 30%, #f87171, #dc2626);
-    box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+    background: radial-gradient(circle at 35% 30%, #e5645e, var(--yap-danger, #c23b32));
+    box-shadow: 0 0 7px color-mix(in srgb, var(--yap-danger, #c23b32) 45%, transparent);
     animation: pulse 1.2s ease-in-out infinite;
   }
   .dot.proc {
-    background: radial-gradient(circle at 35% 30%, #fbbf24, #d97706);
-    box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+    background: radial-gradient(circle at 35% 30%, #e39a3f, var(--yap-primary, #c2690a));
+    box-shadow: 0 0 7px color-mix(in srgb, var(--yap-primary, #c2690a) 45%, transparent);
     animation: pulse 0.8s ease-in-out infinite;
   }
   .dot.errdot {
-    background: radial-gradient(circle at 35% 30%, #f87171, #dc2626);
-    box-shadow: 0 0 8px rgba(239, 68, 68, 0.55);
+    background: radial-gradient(circle at 35% 30%, #e5645e, var(--yap-danger, #c23b32));
+    box-shadow: 0 0 7px color-mix(in srgb, var(--yap-danger, #c23b32) 45%, transparent);
   }
   .capsule.err {
-    border-color: rgba(239, 68, 68, 0.45);
+    border-color: var(--yap-danger, #c23b32);
   }
 
   .wave {
@@ -131,7 +136,7 @@
     flex: 0 0 auto;
     width: 2px;
     min-height: 2px;
-    background: #d1d5db; /* light grey, Claude-Code-style */
+    background: var(--yap-primary, #c2690a); /* burnt orange — the app's accent on light */
     border-radius: 1px;
     transition: height 0.06s linear;
   }
@@ -139,7 +144,7 @@
   .txt {
     font-weight: 600;
     letter-spacing: 0.02em;
-    color: #f1f3f7;
+    color: var(--yap-fg, #23211b);
   }
 
   /* Live partial transcript: keep the newest words visible (right-aligned,
@@ -152,7 +157,7 @@
     direction: rtl;
     text-align: left;
     font-size: 12px;
-    color: #e5e7eb;
+    color: var(--yap-fg-80, rgba(35, 33, 27, 0.82));
   }
 
   @keyframes pulse {

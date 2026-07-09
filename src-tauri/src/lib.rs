@@ -1,4 +1,4 @@
-//! Yap — a tiny local voice dictation pill.
+//! Yap — a tiny local voice dictation tool.
 //!
 //! Press a global hotkey, speak, press again: Yap transcribes locally with
 //! Whisper and types the text into whatever window is focused. A chime marks
@@ -22,6 +22,7 @@ mod llm;
 mod local_llm;
 mod mute;
 mod overlay;
+mod partials;
 mod pipeline;
 mod portable;
 mod selection;
@@ -37,9 +38,9 @@ use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
 /// Whether a recording/processing overlay is meant to be on screen. A background
-/// thread re-asserts "always on top" while this is true, so the overlay (and the
-/// pill, if shown) can't get buried behind another topmost/fullscreen window
-/// mid-recording — which would leave the user unaware a recording is live.
+/// thread re-asserts "always on top" while this is true, so the overlay can't
+/// get buried behind another topmost/fullscreen window mid-recording — which
+/// would leave the user unaware a recording is live.
 static OVERLAY_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// Bumped on every `yap-state` change so a scheduled auto-clear of the
@@ -200,7 +201,7 @@ pub fn run() {
         // Native file-open dialog for the Upload surface's Browse button.
         .plugin(tauri_plugin_dialog::init())
         // Remember the MAIN window's size/position across launches. Only the
-        // "settings" window is managed: the pill/overlay are positioned
+        // "settings" window is managed: the overlay is positioned
         // programmatically, and onboarding is one-shot — restoring stale
         // bounds would misplace them. Flags exclude VISIBLE so the window
         // never un-hides itself on a start-hidden launch.
@@ -211,7 +212,7 @@ pub fn run() {
                         | tauri_plugin_window_state::StateFlags::POSITION
                         | tauri_plugin_window_state::StateFlags::MAXIMIZED,
                 )
-                .with_denylist(&["pill", "overlay", "onboarding"])
+                .with_denylist(&["overlay", "onboarding"])
                 .build(),
         )
         .manage(AppState {
@@ -235,12 +236,10 @@ pub fn run() {
             commands::model_language_info,
             commands::configure_hotkey,
             commands::configure_edit_hotkey,
-            commands::set_pill_scale,
             commands::set_active_model,
             commands::delete_model,
             commands::cancel_recording,
             commands::set_autostart,
-            commands::set_pill_visible,
             commands::is_portable,
             commands::test_post_process,
             commands::get_base_prompt,
@@ -334,9 +333,6 @@ pub fn run() {
             // Local API bridge (Integrations): loopback server for CLIs/agents.
             bridge::sync(&handle, cfg.bridge_enabled);
 
-            // Apply the saved pill size.
-            commands::apply_pill_scale(&handle, cfg.pill_scale);
-
             // Make the overlay click-through + topmost so it floats above the
             // focused window without ever stealing the cursor.
             if let Some(w) = app.get_webview_window("overlay") {
@@ -353,20 +349,8 @@ pub fn run() {
                 let _ = settings.show();
             }
 
-            // Honour the saved pill visibility (dictation still works hidden).
-            // The pill is hidden by default — the bottom overlay gives on-speak
-            // feedback and the tray opens Settings.
-            if let Some(pill) = app.get_webview_window("pill") {
-                if cfg.show_pill {
-                    let _ = pill.show();
-                } else {
-                    let _ = pill.hide();
-                }
-                tracing::info!(show_pill = cfg.show_pill, "Applied initial pill visibility");
-            }
-
             // Route hotkey press/release into the pipeline. Done Rust-side so the
-            // core loop doesn't depend on the pill webview being ready. The
+            // core loop doesn't depend on any webview being ready. The
             // pipeline picks toggle vs push-to-talk live from its config, so
             // both events go through `on_key`.
             let press_handle = handle.clone();
@@ -447,28 +431,26 @@ pub fn run() {
                 }
             });
 
-            // While recording/processing, keep the overlay (and the pill, if
-            // shown) genuinely on top: re-assert "always on top" a few times a
-            // second so another app's topmost or fullscreen window can't bury it
-            // and leave the user unaware a recording is live.
+            // While recording/processing, keep the overlay genuinely on top:
+            // re-assert "always on top" a few times a second so another app's
+            // topmost or fullscreen window can't bury it and leave the user
+            // unaware a recording is live.
             let topmost_handle = handle.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_millis(350));
                 if !OVERLAY_ACTIVE.load(Ordering::Relaxed) {
                     continue;
                 }
-                for label in ["overlay", "pill"] {
-                    if let Some(w) = topmost_handle.get_webview_window(label) {
-                        if w.is_visible().unwrap_or(false) {
-                            overlay::force_topmost(&w);
-                        }
+                if let Some(w) = topmost_handle.get_webview_window("overlay") {
+                    if w.is_visible().unwrap_or(false) {
+                        overlay::force_topmost(&w);
                     }
                 }
             });
 
             // System tray (Handy-style: state-aware icon + model submenu).
-            // Built when the user wants it, OR whenever the pill is hidden —
-            // otherwise there'd be no way to reach Settings (no pill gear).
+            // Always built — it's the only persistent surface now that the
+            // pill is retired; without it Settings would be unreachable.
             tray::ensure_tray(app.handle(), &cfg);
 
             // Reconcile OS autostart state with the saved config.
@@ -483,8 +465,7 @@ pub fn run() {
             }
 
             // Closing the settings / onboarding windows hides them (so they can
-            // reopen) instead of destroying them — the pill window stays the
-            // app's lifetime.
+            // reopen) instead of destroying them — the app lives in the tray.
             for label in ["settings", "onboarding"] {
                 if let Some(win) = app.get_webview_window(label) {
                     let w = win.clone();

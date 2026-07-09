@@ -104,9 +104,9 @@ body {
   --yap-dur: 150ms;
 }
 
-/* Onboarding window: still the old dark palette (App.svelte sets
- * data-yap-theme="dark" there). Only token-consuming components rendered
- * inside it (ModelCard) need these; remove once onboarding goes light. */
+/* Dark token scope — currently UNSET everywhere (onboarding went warm-light
+ * 2026-07-09; App.svelte no longer applies data-yap-theme="dark"). Kept as
+ * the starting point for a future opt-in dark mode. */
 :root[data-yap-theme='dark'] {
   --yap-bg: #191a1e;
   --yap-s1: #1e1f23;
@@ -123,12 +123,13 @@ body {
   --yap-muted-70: rgba(154, 154, 160, 0.72);
   --yap-muted-55: rgba(154, 154, 160, 0.55);
 
-  --yap-primary: #6d5cf5;
-  --yap-primary-fg: #ffffff;
-  --yap-primary-hover: #7d6ef7;
-  --yap-primary-wash: rgba(109, 92, 245, 0.15);
-  --yap-primary-tint: rgba(109, 92, 245, 0.22);
-  --yap-primary-line: rgba(109, 92, 245, 0.42);
+  /* Brand amber, brightened for dark surfaces (was the old violet accent). */
+  --yap-primary: #e2982a;
+  --yap-primary-fg: #1f1c16;
+  --yap-primary-hover: #f0b04a;
+  --yap-primary-wash: rgba(226, 152, 42, 0.15);
+  --yap-primary-tint: rgba(226, 152, 42, 0.22);
+  --yap-primary-line: rgba(226, 152, 42, 0.45);
 
   --yap-ink: #e9e9ea;
   --yap-ink-hover: #ffffff;

@@ -1,6 +1,6 @@
 //! Yap configuration: stored as JSON in the app data dir.
 //!
-//! Deliberately tiny — a dictation pill only needs a hotkey, a model,
+//! Deliberately tiny — a dictation tool only needs a hotkey, a model,
 //! GPU toggle, the sound cue, and the correction dictionary.
 
 use serde::{Deserialize, Serialize};
@@ -154,9 +154,6 @@ pub struct YapConfig {
     /// Play a chime when recording starts/stops.
     #[serde(default = "default_true")]
     pub sound_enabled: bool,
-    /// Pill size multiplier (1.0 = default). Clamped 0.6..=1.6 when applied.
-    #[serde(default = "default_scale")]
-    pub pill_scale: f64,
     /// Transcription corrections.
     #[serde(default)]
     pub dictionary: Vec<DictionaryEntry>,
@@ -177,10 +174,12 @@ pub struct YapConfig {
     /// Restore the user's previous clipboard contents after pasting.
     #[serde(default = "default_true")]
     pub restore_clipboard: bool,
-    /// Don't show any window on launch (the pill still appears).
+    /// Don't show any window on launch (dictation still works via the hotkey).
     #[serde(default)]
     pub start_hidden: bool,
-    /// Show the system-tray icon.
+    /// Deprecated (2026-07-09, pill retirement): the tray is Yap's only
+    /// persistent surface now and is always built; this field is kept so old
+    /// configs load but is no longer consulted.
     #[serde(default = "default_true")]
     pub show_tray_icon: bool,
     /// Launch Yap at OS login.
@@ -189,11 +188,6 @@ pub struct YapConfig {
     /// Chime volume (0.0–1.0).
     #[serde(default = "default_audio_feedback_volume")]
     pub audio_feedback_volume: f32,
-    /// Show the always-on-top pill window. **Hidden by default** — the
-    /// bottom-center overlay provides on-speak feedback; the pill is opt-in.
-    /// Dictation works regardless via the hotkey.
-    #[serde(default)]
-    pub show_pill: bool,
     /// Show the floating bottom-center "transcribing" overlay while dictating.
     #[serde(default = "default_true")]
     pub show_overlay: bool,
@@ -326,9 +320,6 @@ pub struct YapConfig {
     pub bridge_enabled: bool,
 }
 
-fn default_scale() -> f64 {
-    1.0
-}
 
 fn default_hotkey() -> String {
     "kb:120".into()
@@ -392,7 +383,6 @@ impl Default for YapConfig {
             use_gpu: true,
             input_device: None,
             sound_enabled: true,
-            pill_scale: 1.0,
             dictionary: Vec::new(),
             recording_mode: default_recording_mode(),
             mute_while_recording: false,
@@ -403,7 +393,6 @@ impl Default for YapConfig {
             show_tray_icon: true,
             autostart: false,
             audio_feedback_volume: default_audio_feedback_volume(),
-            show_pill: false,
             show_overlay: true,
             selected_language: default_selected_language(),
             translate_to_english: false,

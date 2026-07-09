@@ -6,7 +6,7 @@
   // Diagnostics -> the backend's rolling yap.log (webview consoles are
   // invisible in normal runs; this made the event-delivery bug debuggable).
   const flog = (m) => invoke('frontend_log', { msg: '[onboarding] ' + m }).catch(() => {});
-  import yapIcon from '../assets/yap-icon.png';
+  import yapIcon from '../assets/yap-logo.svg';
   import { MODELS } from './models.js';
   import ModelCard from './ModelCard.svelte';
   import brandAnthropic from '../assets/brands/anthropic.svg';
@@ -395,7 +395,7 @@
         if (e.payload && e.payload.modelSize === busyId) percent = e.payload.percent;
       }),
       rawListen('yap-amp', (e) => {
-        const amp = Math.min(1, (e.payload || 0) * 4); // same gain feel as the pill
+        const amp = Math.min(1, (e.payload || 0) * 4); // same gain feel as the overlay
         bars = [...bars.slice(1), amp];
         if (amp > 0.06) micHeard = true;
       }),
@@ -554,7 +554,8 @@
       <p class="sub">
         Raw dictation is full of "um"s and false starts. Yap's <strong>AI cleanup</strong>
         strips filler, fixes punctuation, and resolves "no wait, I meant…" —
-        <strong>entirely on your PC</strong>. No account, no API key, no cloud.
+        <strong>privately on your PC</strong> (no account, no key, no cloud), or via
+        a faster cloud provider with your own key if you prefer.
       </p>
     </header>
 
@@ -564,7 +565,7 @@
         <button class="skip" onclick={() => (cleanupEnabled = false)}>
           Choose a different model or provider →
         </button>
-        <p class="fine">Or change it any time in Settings → AI Cleanup.</p>
+        <p class="fine">Or change it any time in Settings → Language Models.</p>
       {:else if llmInstalling}
         <div class="cleanup-progress">
           <span>
@@ -628,7 +629,7 @@
             {/if}
           </button>
           <p class="fine">All of these run fully offline via llamafile. Prefer your own?
-            Drop any GGUF into the models folder later (Settings → AI Cleanup).</p>
+            Drop any GGUF into the models folder later (Settings → Language Models).</p>
         {:else}
           <div class="cloud-form">
             <div class="prov-grid">
@@ -665,8 +666,8 @@
     <header>
       <h1>Yap lives in your tray</h1>
       <p class="sub">
-        There's no main window to keep open — Yap waits in the corner of your taskbar.
-        A floating overlay appears whenever you're dictating.
+        Close the main window any time — Yap keeps running in the corner of your
+        taskbar. A floating overlay appears whenever you're dictating.
       </p>
     </header>
 
@@ -763,7 +764,7 @@
 
 <style>
   :global(body) {
-    background: #0f1117;
+    background: var(--yap-bg);
   }
   main {
     box-sizing: border-box;
@@ -774,10 +775,9 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    background: #0f1117;
-    color: #e5e7eb;
+    background: var(--yap-bg);
+    color: var(--yap-fg);
     padding: 20px 28px 22px;
-    font-family: system-ui, -apple-system, sans-serif;
   }
 
   /* Progress dots */
@@ -792,16 +792,16 @@
     height: 5px;
     border: none;
     border-radius: 3px;
-    background: #232936;
+    background: var(--yap-raised);
     padding: 0;
     cursor: default;
   }
   .dot.done {
-    background: #2b4a7a;
+    background: var(--yap-primary-tint);
     cursor: pointer;
   }
   .dot.current {
-    background: #3b82f6;
+    background: var(--yap-primary);
   }
 
   header {
@@ -812,27 +812,32 @@
     width: 56px;
     height: 56px;
     margin: 0 auto 10px;
-    border-radius: 12px;
+    border-radius: 14px;
     object-fit: contain;
+    box-shadow: var(--yap-shadow-sm);
   }
+  /* Serif display headline, matching the Settings page titles. */
   h1 {
-    font-size: 21px;
+    font-family: var(--yap-font-display);
+    font-size: 26px;
+    font-weight: 600;
     margin: 0 0 8px;
     letter-spacing: 0.01em;
   }
   .sub {
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-size: 13px;
     line-height: 1.6;
     max-width: 460px;
     margin: 0 auto;
   }
+  /* Amber keycap chip (matches the Home greeting hotkey). */
   .key {
-    background: #1f2733;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-primary-tint);
+    border: 1px solid var(--yap-primary-line);
     border-radius: 5px;
     padding: 1px 7px;
-    color: #e5e7eb;
+    color: var(--yap-fg);
     font-family: ui-monospace, monospace;
     font-size: 12px;
   }
@@ -854,11 +859,11 @@
     background: transparent;
   }
   .cards::-webkit-scrollbar-thumb {
-    background: #2a2f3a;
+    background: var(--yap-border);
     border-radius: 4px;
   }
   .cards::-webkit-scrollbar-thumb:hover {
-    background: #3a4150;
+    background: var(--yap-border-hover);
   }
 
   /* Mic step */
@@ -871,10 +876,10 @@
     gap: 18px;
   }
   .mic-pick {
-    background: #181b22;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s2);
+    border: 1px solid var(--yap-border);
     border-radius: 7px;
-    color: #e5e7eb;
+    color: var(--yap-fg);
     font: inherit;
     font-size: 13px;
     padding: 7px 10px;
@@ -890,20 +895,20 @@
   }
   .meter span {
     flex: 1;
-    background: #2a2f3a;
+    background: var(--yap-raised);
     border-radius: 2px;
     transition: height 60ms linear;
   }
   .meter.live span {
-    background: #3b82f6;
+    background: var(--yap-primary);
   }
   .mic-status {
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-size: 13px;
     margin: 0;
   }
   .meter.live + .mic-status {
-    color: #34d399;
+    color: var(--yap-success);
   }
 
   /* Cleanup step */
@@ -931,18 +936,19 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    background: #15181e;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s2);
+    border: 1px solid var(--yap-border-subtle);
     border-radius: 10px;
     padding: 14px 10px 12px;
-    color: #e5e7eb;
+    color: var(--yap-fg);
     font: inherit;
     cursor: pointer;
+    box-shadow: var(--yap-shadow-sm);
     transition: border-color 0.12s ease;
   }
   .mode-card.sel {
-    border-color: #3b82f6;
-    background: #151d2c;
+    border-color: var(--yap-primary);
+    background: var(--yap-primary-wash);
   }
   .mode-title {
     font-size: 14px;
@@ -950,15 +956,16 @@
   }
   .mode-sub {
     font-size: 11.5px;
-    color: #9ca3af;
+    color: var(--yap-muted);
   }
   .mode-badge {
     position: absolute;
     top: -8px;
     right: 8px;
-    background: #1d4ed8;
+    background: var(--yap-primary);
     color: #fff;
     font-size: 10px;
+    font-weight: 600;
     border-radius: 5px;
     padding: 1px 6px;
   }
@@ -973,17 +980,18 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    background: #15181e;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s2);
+    border: 1px solid var(--yap-border-subtle);
     border-radius: 8px;
     padding: 8px 12px;
     cursor: pointer;
   }
   .llm-row.sel {
-    border-color: #3b82f6;
+    border-color: var(--yap-primary);
+    background: var(--yap-primary-wash);
   }
   .llm-row input {
-    accent-color: #3b82f6;
+    accent-color: var(--yap-primary);
   }
   .llm-main {
     flex: 1 1 auto;
@@ -997,7 +1005,7 @@
   }
   .llm-blurb {
     font-size: 11.5px;
-    color: #6b7280;
+    color: var(--yap-muted-70);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1005,7 +1013,7 @@
   .llm-size {
     flex: 0 0 auto;
     font-size: 11.5px;
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-variant-numeric: tabular-nums;
   }
   /* Brand badge — coloured rounded square w/ white glyph (or letter). */
@@ -1042,11 +1050,11 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    background: #15181e;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s2);
+    border: 1px solid var(--yap-border-subtle);
     border-radius: 8px;
     padding: 8px 10px;
-    color: #e5e7eb;
+    color: var(--yap-fg);
     font: inherit;
     font-size: 12.5px;
     cursor: pointer;
@@ -1054,8 +1062,8 @@
     transition: border-color 0.12s ease;
   }
   .prov-chip.sel {
-    border-color: #3b82f6;
-    background: #151d2c;
+    border-color: var(--yap-primary);
+    background: var(--yap-primary-wash);
   }
   .prov-label {
     min-width: 0;
@@ -1067,17 +1075,17 @@
     max-width: none;
   }
   .cloud-inp {
-    background: #181b22;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s2);
+    border: 1px solid var(--yap-border);
     border-radius: 7px;
-    color: #e5e7eb;
+    color: var(--yap-fg);
     font: inherit;
     font-size: 13px;
     padding: 7px 10px;
   }
   .cloud-inp:focus {
     outline: none;
-    border-color: #3b82f6;
+    border-color: var(--yap-primary);
   }
   .cleanup-demo {
     text-align: center;
@@ -1085,19 +1093,19 @@
     line-height: 1.7;
   }
   .demo-raw {
-    color: #6b7280;
+    color: var(--yap-muted);
     font-style: italic;
   }
   .demo-arrow {
-    color: #3b82f6;
+    color: var(--yap-primary);
     font-size: 15px;
   }
   .demo-clean {
-    color: #e5e7eb;
+    color: var(--yap-fg);
     font-weight: 500;
   }
   .cleanup-done {
-    color: #34d399;
+    color: var(--yap-success);
     font-size: 14px;
     text-align: center;
     line-height: 1.6;
@@ -1106,24 +1114,24 @@
     width: 100%;
     max-width: 380px;
     font-size: 13px;
-    color: #9ca3af;
+    color: var(--yap-muted);
     text-align: center;
   }
   .bar {
     margin-top: 8px;
     height: 6px;
     border-radius: 3px;
-    background: #1f2733;
+    background: var(--yap-raised);
     overflow: hidden;
   }
   .bar span {
     display: block;
     height: 100%;
-    background: #3b82f6;
+    background: var(--yap-primary);
     transition: width 0.2s ease;
   }
   .fine {
-    color: #6b7280;
+    color: var(--yap-muted-70);
     font-size: 11.5px;
     text-align: center;
     max-width: 380px;
@@ -1140,11 +1148,12 @@
     margin: 26px 0 18px;
   }
   .tray-arrow {
-    color: #f59e0b;
+    color: var(--yap-primary);
     font-size: 20px;
     margin-bottom: 4px;
     margin-left: -132px;
   }
+  /* The mock bar stays dark on purpose — it depicts the Windows taskbar. */
   .tray-bar {
     display: flex;
     align-items: center;
@@ -1155,6 +1164,7 @@
     padding: 10px 18px;
     font-size: 13px;
     color: #9ca3af;
+    box-shadow: var(--yap-shadow-menu);
   }
   .tray-caret {
     font-weight: 700;
@@ -1167,7 +1177,7 @@
     height: 22px;
     border-radius: 5px;
     background: #10131a;
-    outline: 2px solid #f59e0b;
+    outline: 2px solid var(--yap-primary);
   }
   .tray-yap-img {
     width: 16px;
@@ -1179,7 +1189,7 @@
     font-variant-numeric: tabular-nums;
   }
   .tray-tips {
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-size: 13px;
     line-height: 1.9;
     max-width: 400px;
@@ -1198,10 +1208,10 @@
   .try-area {
     width: 100%;
     max-width: 460px;
-    background: #181b22;
-    border: 1px solid #2a2f3a;
+    background: var(--yap-s2);
+    border: 1px solid var(--yap-border);
     border-radius: 10px;
-    color: #e5e7eb;
+    color: var(--yap-fg);
     font: inherit;
     font-size: 14px;
     line-height: 1.6;
@@ -1210,25 +1220,25 @@
   }
   .try-area:focus {
     outline: none;
-    border-color: #3b82f6;
+    border-color: var(--yap-primary);
   }
   .try-area.flash {
-    border-color: #34d399;
-    background: #10241c;
+    border-color: var(--yap-success);
+    background: rgba(61, 187, 116, 0.1);
     transition: none;
   }
   .try-area {
     transition: border-color 0.9s ease, background 0.9s ease;
   }
   .try-status {
-    color: #9ca3af;
+    color: var(--yap-muted);
     font-size: 13px;
     min-height: 18px;
     margin: 0;
   }
 
   .error {
-    color: #fca5a5;
+    color: var(--yap-danger);
     font-size: 12px;
     text-align: center;
     margin: 12px 0 0;
@@ -1244,39 +1254,40 @@
   .skip {
     background: none;
     border: none;
-    color: #6b7280;
+    color: var(--yap-muted-70);
     font-size: 12.5px;
     cursor: pointer;
     padding: 8px 4px;
   }
   .skip:hover:not(:disabled) {
-    color: #9ca3af;
+    color: var(--yap-fg);
   }
+  /* Primary CTA = ink filled button, matching the main window. */
   .start {
     border: none;
     border-radius: 9px;
-    background: #3b82f6;
-    color: #fff;
+    background: var(--yap-ink);
+    color: var(--yap-ink-fg);
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 600;
     padding: 11px 20px;
     cursor: pointer;
     transition: background 0.15s ease;
   }
   .start:hover:not(:disabled) {
-    background: #2563eb;
+    background: var(--yap-ink-hover);
   }
   .start:disabled {
-    background: #1f2733;
-    color: #6b7280;
+    background: var(--yap-raised);
+    color: var(--yap-muted);
     cursor: default;
   }
   .start.ghost {
-    background: #1f2733;
-    color: #9ca3af;
+    background: var(--yap-raised);
+    color: var(--yap-fg-80);
   }
   .start.ghost:hover:not(:disabled) {
-    background: #262f3d;
+    background: var(--yap-raised-soft);
   }
   .start.wide {
     width: 100%;

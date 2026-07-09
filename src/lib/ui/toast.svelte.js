@@ -1,8 +1,12 @@
-// Toast store — port of OpenWhispr's ui/useToast + ToastProvider timer logic.
-// Usage: toast({ title, description?, variant?: 'default'|'success'|'destructive',
-// duration? }). Destructive toasts linger longer (6 s vs 3.5 s) and render the
-// description as a copyable mono error box (ToastHost.svelte). Hovering a toast
-// pauses its timer; leaving resumes with the remaining time.
+// Toast store — port of OpenWhispr's ui/useToast + ToastProvider timer logic,
+// rendered Wispr-Flow-style (ToastHost.svelte). Usage: toast({ title,
+// description?, variant?: 'default'|'success'|'destructive', duration?,
+// chip?, action?: { label, onClick } }). `chip` overrides the little category
+// pill (defaults: Tip / Done / Error per variant); `action` renders a light
+// button bottom-right (Wispr's "Open Settings"). Destructive toasts linger
+// longer (6 s vs 3.5 s) and render the description as a copyable mono error
+// box. Hovering a toast pauses its timer; leaving resumes with the remaining
+// time.
 
 export const toastStore = $state({ list: [] });
 
@@ -30,7 +34,7 @@ function arm(id, ms) {
   );
 }
 
-export function toast({ title = '', description = '', variant = 'default', duration } = {}) {
+export function toast({ title = '', description = '', variant = 'default', duration, chip = '', action = null } = {}) {
   const id = ++seq;
   const dur = duration ?? (variant === 'destructive' ? 6000 : 3500);
   toastStore.list.push({
@@ -38,6 +42,8 @@ export function toast({ title = '', description = '', variant = 'default', durat
     title,
     description,
     variant,
+    chip,
+    action,
     duration: dur,
     createdAt: Date.now(),
     isExiting: false,

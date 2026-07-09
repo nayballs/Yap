@@ -1,8 +1,7 @@
 // Brand/provider logos, ported from OpenWhispr (MIT — src/assets/icons/providers).
 // Imported as URLs by Vite and rendered via <img src>. Monochrome logos (drawn in
-// black) render as-is on the light theme; only the dark-scoped onboarding window
-// ([data-yap-theme='dark']) inverts them to white — OpenWhispr's
-// `.icon-monochrome` recipe.
+// black) render as-is on the light theme; under a [data-yap-theme='dark'] scope
+// (currently unused) they invert to white — OpenWhispr's `.icon-monochrome` recipe.
 import openai from '../assets/providers/openai.svg';
 import nvidia from '../assets/providers/nvidia.svg';
 import anthropic from '../assets/providers/anthropic.svg';

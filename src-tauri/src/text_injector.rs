@@ -120,7 +120,7 @@ mod platform {
     /// Captured at record-start so we can paste back into the window the user was
     /// dictating into, even if focus shifts during transcription. Returns 0 when
     /// the foreground belongs to *our own* process (e.g. the user started
-    /// dictation by clicking Yap's pill) — we never want to re-focus ourselves.
+    /// dictation from one of Yap's own windows) — we never re-focus ourselves.
     pub fn foreground_window() -> isize {
         unsafe {
             let hwnd = GetForegroundWindow();

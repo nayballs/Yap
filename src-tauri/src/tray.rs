@@ -1,11 +1,11 @@
 //! System-tray icon + right-click menu, modelled on Handy's tray.
 //!
-//! - A **state-aware icon** (a coloured dot: blue idle, red recording, amber
+//! - A **state-aware icon** (the "pac" mark: amber idle, red recording, amber
 //!   processing, grey needs-model) generated at runtime — no image assets.
 //! - A **right-click menu** that changes with state: when idle it offers a
 //!   **model submenu** (switch the active model, checkmark on the current one);
 //!   while recording/processing it offers **Cancel**. Always: Settings + Quit.
-//! - **Left-click** opens Settings (handy when the pill is hidden).
+//! - **Left-click** opens Settings.
 //!
 //! The tray is rebuilt on every `yap-state` change via [`update_tray`].
 
@@ -46,14 +46,15 @@ fn tooltip() -> String {
 
 /// Build the Yap "pac" tray icon (open-mouth circle + sound waves on a
 /// transparent background) for the given state. The body colour signals state:
-/// yellow idle, red recording, amber processing, grey needs-model. Drawn at
-/// 128px so Windows can scale it down crisply.
+/// brand amber idle (matches `src/assets/yap-logo.svg`), red recording, bright
+/// amber processing, grey needs-model. Drawn at 128px so Windows can scale it
+/// down crisply.
 fn state_icon(state: &str) -> Image<'static> {
     let (br, bg, bb) = match state {
         "recording" => (239.0f32, 68.0, 68.0), // red
         "processing" | "processing-slow" => (245.0f32, 158.0, 11.0), // amber
         "needs-model" => (156.0f32, 163.0, 175.0), // grey
-        _ => (251.0f32, 191.0, 36.0),           // yellow (idle)
+        _ => (240.0f32, 176.0, 74.0),           // brand amber (idle, logo #f0b04a)
     };
     let size: i32 = 128;
     let mut rgba = vec![0u8; (size * size * 4) as usize];
@@ -84,12 +85,12 @@ fn state_icon(state: &str) -> Image<'static> {
                 cr = br;
                 cg = bg;
                 cb = bb;
-                // Eye, composited over the body only.
+                // Eye, composited over the body only (warm ink, logo #1f1c16).
                 let ed = ((px - eye_x).powi(2) + (py - eye_y).powi(2)).sqrt();
                 let eye_a = clamp01(eye_r - ed + 0.5) * ca;
-                cr = cr * (1.0 - eye_a) + 30.0 * eye_a;
-                cg = cg * (1.0 - eye_a) + 58.0 * eye_a;
-                cb = cb * (1.0 - eye_a) + 138.0 * eye_a;
+                cr = cr * (1.0 - eye_a) + 31.0 * eye_a;
+                cg = cg * (1.0 - eye_a) + 28.0 * eye_a;
+                cb = cb * (1.0 - eye_a) + 22.0 * eye_a;
             } else {
                 // Sound-wave arcs radiating from the mouth.
                 let mut wa = 0.0f32;
@@ -290,7 +291,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| on_menu_event(app, event.id.as_ref()))
         .on_tray_icon_event(|tray, event| {
-            // Left-click opens Settings (useful when the pill is hidden).
+            // Left-click opens Settings.
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
@@ -304,14 +305,13 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Reconcile the tray with the current config: build it when it should exist
-/// (tray enabled, OR pill hidden — else Settings would be unreachable), remove
-/// it when it shouldn't. Called at startup AND from save_config — before that,
-/// the tray only ever reflected the config at LAUNCH, so toggling "show tray
-/// icon" (or hiding the pill) mid-session left the icon missing (or lingering)
-/// until the next restart.
+/// Reconcile the tray with the current config. Since the pill was retired
+/// (2026-07-09) the tray is Yap's only persistent surface, so it is always
+/// built regardless of `show_tray_icon` — without it Settings would be
+/// unreachable. Called at startup AND from save_config.
 pub fn ensure_tray(app: &AppHandle, cfg: &config::YapConfig) {
-    let desired = cfg.show_tray_icon || !cfg.show_pill;
+    let _ = cfg; // kept for signature stability (config no longer gates the tray)
+    let desired = true;
     let exists = app.tray_by_id(TRAY_ID).is_some();
     if desired && !exists {
         // Fresh tray → the cached menus/icon-state belong to the old one.
