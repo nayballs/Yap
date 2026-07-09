@@ -159,15 +159,18 @@ below (✅ = done).
       authoritative final pass. (Only Moonshine offers true token streaming in
       `transcribe-rs`, and we pulled it as broken, hence the re-transcribe approach.)
       ⚠ Needs validation on the GPU (Vulkan) build before enabling by default.
-- [~] **Sliding-window partial pass — IMPLEMENTED** (2026-07-09; ⚠ awaiting live GPU
-      validation, then the default flips on). Killed the O(n) re-transcribe cost:
+- [x] **Sliding-window partial pass — SHIPPED + validated live, ON BY DEFAULT**
+      (2026-07-09/10, nightly.24/25 on the GPU build — a 63 s dictation transcribed
+      in 1.3 s with live partials in the overlay). Killed the O(n) re-transcribe cost:
       `partials.rs` (`PartialSession`) freezes text older than a bounded window as
       committed text and advances the window at quiet points (`media::quietest_index`,
       12 s advance / 8 s keep / 20 s hard cap), so per-tick cost is independent of
       recording length; adaptive backoff self-throttles CPU-fallback machines, and the
       worker warm-loads the engine after an idle unload (was: silent no-partials).
-      Unit-tested (plan/stitch/seam cases). Validation checklist + default-flip plan in
-      the 2026-07-09 plan file; Settings copy already de-scarified.
+      Unit-tested (plan/stitch/seam cases). The overlay paces the reveal
+      **word-by-word between ticks** (fade-in per word, animated left glide + edge
+      mask — the Wispr-feel polish, nightly.25). Default flipped to ON for new/
+      pre-feature configs (an explicitly saved `false` keeps its opt-out).
 - [ ] **True streaming model for the partial pass — spike-gated Stage 2** (researched
       2026-07-09). transcribe-rs 0.3.11 (latest) has NO public incremental API — the
       Moonshine `StreamingModel`'s streaming internals are private (public API = batch),

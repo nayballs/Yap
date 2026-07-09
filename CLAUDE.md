@@ -541,7 +541,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   `docs/local-api.md`).
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
-  recording mode `toggle`, overlay shown, AI cleanup **off**.
+  recording mode `toggle`, overlay shown, live transcription preview **on**
+  (`streaming_partials`), AI cleanup **off**.
 
 ---
 
@@ -552,8 +553,9 @@ builds), and the dictation pipeline around it is complete: multi-engine STT
 (Whisper/Vulkan + ONNX/DirectML), the 14-model registry + manager, recording modes,
 language/translate, **AI cleanup** (BYO key or local sidecar) with per-app routing +
 named profiles + per-profile model choice, **edit/rewrite mode** + the **Voice Agent
-wake word**, combo hotkeys, the audio pre-roll (anti first-word clipping), streaming
-partials (opt-in), transcription history + stats, cleanup presets, real WASAPI mute,
+wake word**, combo hotkeys, the audio pre-roll (anti first-word clipping), **live
+streaming partials** (sliding-window, on by default, word-paced overlay reveal —
+validated live 2026-07-10), transcription history + stats, cleanup presets, real WASAPI mute,
 the Groq usage meter, and the installer + auto-updater + portable mode + release CI.
 On top of that, the main window is now a full **ControlPanel** (Home dictation feed
 w/ Ctrl+K search, Chat, Notes, Upload, Dictionary, Settings as an always-mounted
@@ -574,8 +576,8 @@ search/archive/rename; the AI Notepad has no rich markdown editor (plain textare
 or folder "add existing note" picker; the meeting recorder's full pipeline is
 verified (incl. WASAPI loopback delivering audio) but real transcript TEXT still
 needs one pass on the `engines` build (Upload IS live-verified — a real mp3
-transcribed end-to-end); validating + defaulting-on streaming partials on the Vulkan build (and a true
-streaming model for the partial pass — see [`ROADMAP.md`](./ROADMAP.md) Phase 1);
+transcribed end-to-end); a true streaming model for the partial pass (spike-gated
+Stage 2 — see [`ROADMAP.md`](./ROADMAP.md) Phase 1);
 fuzzy/near-miss dictionary matching; verify-after-paste (UIA `ValuePattern`);
 Authenticode signing (blocked on SignPath approval); audio-history export; and
 non-Windows (Linux/macOS) polish. See [`ROADMAP.md`](./ROADMAP.md).

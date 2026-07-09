@@ -301,10 +301,13 @@ pub struct YapConfig {
     #[serde(default)]
     pub agent_name: String,
 
-    /// Show live partial transcripts in the overlay while you speak. Opt-in
-    /// (off by default): re-transcribes the growing buffer on a timer, which adds
-    /// GPU load. The final transcript on stop is always authoritative.
-    #[serde(default)]
+    /// Show live partial transcripts in the overlay while you speak. On by
+    /// default (2026-07-10, after live validation): the worker transcribes a
+    /// bounded sliding window on a timer (see `partials.rs`), so the cost is
+    /// independent of recording length. Preview-only — the final transcript on
+    /// stop is always authoritative. Existing configs that saved an explicit
+    /// `false` keep their opt-out (serde default applies to missing fields).
+    #[serde(default = "default_true")]
     pub streaming_partials: bool,
 
     /// Keep a local transcription history (powers the stats dashboard). Stored

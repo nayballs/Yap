@@ -416,7 +416,7 @@
     soundEnabled: true,
     useGpu: true,
     showOverlay: true,
-    streamingPartials: false,
+    streamingPartials: true,
     historyEnabled: true,
     inputDevice: null,
     dictionary: [],
