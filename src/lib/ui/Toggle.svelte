@@ -58,8 +58,8 @@
   }
   .label {
     color: var(--yap-fg);
-    font-size: 12.5px;
-    font-weight: 500;
+    font-size: 13px;
+    font-weight: 650;
   }
   .desc {
     color: var(--yap-muted-70);
@@ -95,8 +95,8 @@
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    background: #d9dade;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(60, 50, 30, 0.25);
     transition: transform var(--yap-dur) ease;
   }
   .switch.on .knob {

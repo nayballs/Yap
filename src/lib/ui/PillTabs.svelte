@@ -58,7 +58,7 @@
   }
   .pill:hover {
     color: var(--yap-fg-80);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--yap-s3);
   }
   .pill.sel {
     color: var(--yap-fg);
@@ -70,6 +70,9 @@
     height: 13px;
   }
   .picon.mono {
+    filter: none;
+  }
+  :global([data-yap-theme='dark']) .picon.mono {
     filter: invert(1);
   }
   .picon.svgicon {

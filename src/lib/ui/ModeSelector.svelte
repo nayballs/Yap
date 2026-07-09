@@ -58,7 +58,7 @@
     border-top: 1px solid var(--yap-border-subtle);
   }
   .mode:hover {
-    background: rgba(255, 255, 255, 0.025);
+    background: var(--yap-s3);
   }
   .chip {
     width: 34px;

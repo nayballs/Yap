@@ -248,8 +248,8 @@
     padding: 0 16px;
     border: none;
     border-radius: var(--yap-r);
-    background: var(--yap-primary);
-    color: var(--yap-primary-fg);
+    background: var(--yap-ink, var(--yap-primary));
+    color: var(--yap-ink-fg, var(--yap-primary-fg));
     font: inherit;
     font-size: 12px;
     font-weight: 600;
@@ -259,7 +259,7 @@
       transform var(--yap-dur) ease;
   }
   .save:hover:not(:disabled) {
-    background: var(--yap-primary-hover);
+    background: var(--yap-ink-hover, var(--yap-primary-hover));
   }
   .save:active:not(:disabled) {
     transform: scale(0.985);

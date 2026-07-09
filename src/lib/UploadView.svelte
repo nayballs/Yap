@@ -383,15 +383,15 @@
     padding: 0 18px;
     border: none;
     border-radius: var(--yap-r);
-    background: var(--yap-primary);
-    color: var(--yap-primary-fg);
+    background: var(--yap-ink, var(--yap-primary));
+    color: var(--yap-ink-fg, var(--yap-primary-fg));
     font: inherit;
     font-size: 12.5px;
     font-weight: 600;
     cursor: pointer;
   }
   .primary:hover {
-    background: var(--yap-primary-hover);
+    background: var(--yap-ink-hover, var(--yap-primary-hover));
   }
   .secondary {
     height: 32px;
@@ -443,7 +443,7 @@
     padding: 0;
   }
   .cancel:hover {
-    color: #ef4444;
+    color: var(--yap-danger);
   }
 
   .resultcard {
@@ -489,7 +489,7 @@
   .errline {
     margin: 0 0 12px;
     font-size: 12px;
-    color: #ef4444;
+    color: var(--yap-danger);
     line-height: 1.5;
   }
   .hint {

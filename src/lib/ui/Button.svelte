@@ -50,32 +50,35 @@
     font-size: 12px;
   }
 
+  /* Filled buttons are INK on the light theme — amber stays reserved for
+     keycaps/highlights (falls back to primary under the dark-token scope). */
   .primary {
-    background: var(--yap-primary);
-    color: var(--yap-primary-fg);
-    border-color: var(--yap-primary-line);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    background: var(--yap-ink, var(--yap-primary));
+    color: var(--yap-ink-fg, var(--yap-primary-fg));
+    border-color: transparent;
+    box-shadow: var(--yap-shadow-sm);
   }
   .primary:hover:not(:disabled) {
-    background: var(--yap-primary-hover);
+    background: var(--yap-ink-hover, var(--yap-primary-hover));
   }
 
   .secondary {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.08);
+    background: var(--yap-s2);
+    border-color: var(--yap-border);
     color: var(--yap-fg-80);
   }
   .secondary:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.09);
+    background: var(--yap-s3);
+    border-color: var(--yap-border-hover);
   }
 
   .danger {
     background: transparent;
-    border-color: rgba(224, 86, 79, 0.4);
+    border-color: color-mix(in srgb, var(--yap-danger) 40%, transparent);
     color: var(--yap-danger);
   }
   .danger:hover:not(:disabled) {
-    background: rgba(224, 86, 79, 0.12);
+    background: color-mix(in srgb, var(--yap-danger) 10%, transparent);
     border-color: var(--yap-danger);
   }
 
@@ -85,6 +88,6 @@
   }
   .ghost:hover:not(:disabled) {
     color: var(--yap-fg);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--yap-s3);
   }
 </style>

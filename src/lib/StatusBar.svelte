@@ -106,10 +106,10 @@
     align-items: center;
     justify-content: space-between;
     padding: 8px 14px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    background: #0c0e14;
+    border-top: 1px solid var(--yap-border-subtle);
+    background: var(--yap-bg);
     font-size: 12px;
-    color: #9ca3af;
+    color: var(--yap-muted);
   }
   .left {
     position: relative;
@@ -122,7 +122,7 @@
     max-width: 240px;
     background: none;
     border: none;
-    color: #9ca3af;
+    color: var(--yap-muted);
     font: inherit;
     font-size: 12px;
     padding: 4px 6px;
@@ -132,8 +132,8 @@
     transition: background 0.15s ease, color 0.15s ease;
   }
   .model:hover:not(.disabled) {
-    background: rgba(255, 255, 255, 0.05);
-    color: #e5e7eb;
+    background: var(--yap-raised-soft);
+    color: var(--yap-fg);
   }
   .model.disabled {
     cursor: default;
@@ -143,11 +143,11 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #4b5563;
+    background: var(--yap-raised);
   }
   .dot.ready {
-    background: #22c55e;
-    box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+    background: var(--yap-success);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--yap-success) 50%, transparent);
   }
   .name {
     overflow: hidden;
@@ -169,10 +169,10 @@
     max-height: 280px;
     overflow-y: auto;
     padding: 4px;
-    background: var(--yap-s3);
+    background: var(--yap-s2);
     border: 1px solid var(--yap-border);
     border-radius: 10px;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--yap-shadow-menu);
     z-index: 50;
   }
   .menu-item {
@@ -182,7 +182,7 @@
     width: 100%;
     background: none;
     border: none;
-    color: #cbd5e1;
+    color: var(--yap-fg-80);
     font: inherit;
     font-size: 12.5px;
     text-align: left;
@@ -191,21 +191,22 @@
     cursor: pointer;
   }
   .menu-item:hover {
-    background: rgba(255, 255, 255, 0.06);
-    color: #e5e7eb;
+    background: var(--yap-s3);
+    color: var(--yap-fg);
   }
   .menu-item.current {
-    color: #fff;
+    color: var(--yap-fg);
+    font-weight: 600;
   }
   .mi-dot {
     flex: 0 0 auto;
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: #4b5563;
+    background: var(--yap-raised);
   }
   .mi-dot.on {
-    background: #22c55e;
+    background: var(--yap-success);
   }
   .mi-name {
     overflow: hidden;
@@ -219,7 +220,7 @@
     flex: 0 0 auto;
   }
   .saved {
-    color: #22c55e;
+    color: var(--yap-success);
     opacity: 0;
     transition: opacity 0.2s ease;
   }
@@ -229,7 +230,7 @@
   .link {
     background: none;
     border: none;
-    color: #9ca3af;
+    color: var(--yap-muted);
     font: inherit;
     font-size: 12px;
     padding: 0;
@@ -237,13 +238,13 @@
     transition: color 0.15s ease;
   }
   .link:hover {
-    color: var(--yap-primary-hover);
+    color: var(--yap-primary);
   }
   .sep {
-    color: #4b5563;
+    color: var(--yap-border-hover);
   }
   .ver {
-    color: #6b7280;
+    color: var(--yap-muted-55);
     font-variant-numeric: tabular-nums;
   }
 </style>

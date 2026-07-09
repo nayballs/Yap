@@ -216,7 +216,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.55);
+    background: rgba(45, 38, 25, 0.35);
   }
   .dialog {
     position: relative;
@@ -224,10 +224,10 @@
     width: min(760px, calc(100vw - 60px));
     height: min(480px, calc(100vh - 80px));
     border: 1px solid var(--yap-border);
-    border-radius: 12px;
+    border-radius: var(--yap-r-xl);
     overflow: hidden;
     background: var(--yap-s1);
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--yap-shadow-modal);
   }
   .x {
     position: absolute;
@@ -399,15 +399,15 @@
     padding: 0 13px;
     border: none;
     border-radius: var(--yap-r);
-    background: var(--yap-primary);
-    color: var(--yap-primary-fg);
+    background: var(--yap-ink, var(--yap-primary));
+    color: var(--yap-ink-fg, var(--yap-primary-fg));
     font: inherit;
     font-size: 11.5px;
     font-weight: 600;
     cursor: pointer;
   }
   .save:hover:not(:disabled) {
-    background: var(--yap-primary-hover);
+    background: var(--yap-ink-hover, var(--yap-primary-hover));
   }
   .save:disabled {
     opacity: 0.5;

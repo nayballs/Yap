@@ -68,11 +68,11 @@
     height: 6px;
     flex: 0 0 auto;
     border-radius: var(--yap-r-full);
-    background: rgba(255, 255, 255, 0.14);
+    background: var(--yap-raised);
   }
   .srow.sel .dot {
     background: var(--yap-primary);
-    box-shadow: 0 0 6px rgba(109, 92, 245, 0.65);
+    box-shadow: 0 0 6px var(--yap-primary-tint);
     animation: pulse-glow 2s ease-in-out infinite;
   }
 
@@ -82,6 +82,9 @@
     flex: 0 0 auto;
   }
   .sicon.mono {
+    filter: none;
+  }
+  :global([data-yap-theme='dark']) .sicon.mono {
     filter: invert(1);
   }
 

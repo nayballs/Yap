@@ -46,8 +46,8 @@
   }
   .label {
     color: var(--yap-fg);
-    font-size: 12.5px;
-    font-weight: 500;
+    font-size: 13px;
+    font-weight: 650;
   }
   .select-wrap {
     position: relative;

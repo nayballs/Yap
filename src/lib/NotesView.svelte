@@ -447,6 +447,9 @@
     listen('yap-meeting-segment', (e) => onMeetingSegment(e.payload)).then((u) =>
       unlisteners.push(u)
     );
+    // The local API bridge (Integrations) can create/update/delete notes from
+    // outside the app — refresh the list so external edits show up live.
+    listen('yap-notes-changed', () => refreshList()).then((u) => unlisteners.push(u));
     return () => {
       flushSave();
       stopElapsed();
@@ -1035,8 +1038,7 @@
     cursor: pointer;
   }
   .createbtn:hover {
-    background: var(--yap-primary);
-    color: var(--yap-primary-fg);
+    background: var(--yap-primary-tint);
   }
   .items {
     flex: 1 1 auto;
@@ -1121,7 +1123,7 @@
     opacity: 1;
   }
   .idel:hover {
-    color: #ef4444;
+    color: var(--yap-danger);
   }
   .idel svg {
     width: 12px;
@@ -1160,9 +1162,9 @@
     color: var(--yap-muted-55);
   }
   .chip.reclive {
-    border-color: #ef4444;
-    background: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
+    border-color: var(--yap-danger);
+    background: color-mix(in srgb, var(--yap-danger) 8%, transparent);
+    color: var(--yap-danger);
     font-family: ui-monospace, Consolas, monospace;
   }
   button.chip:disabled {
@@ -1174,7 +1176,7 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #ef4444;
+    background: var(--yap-danger);
     animation: recpulse 1.2s ease-in-out infinite;
   }
   @keyframes recpulse {
@@ -1218,7 +1220,7 @@
     align-items: center;
     gap: 6px;
     font-size: 11px;
-    color: #ef4444;
+    color: var(--yap-danger);
   }
   .thint {
     margin: 0;
@@ -1277,8 +1279,8 @@
     height: 30px;
     padding: 0 13px;
     border: none;
-    background: var(--yap-primary);
-    color: var(--yap-primary-fg);
+    background: var(--yap-ink, var(--yap-primary));
+    color: var(--yap-ink-fg, var(--yap-primary-fg));
     font: inherit;
     font-size: 12px;
     font-weight: 600;
@@ -1289,11 +1291,11 @@
   }
   .enhance.chevron {
     border-radius: 0 var(--yap-r) var(--yap-r) 0;
-    border-left: 1px solid rgba(0, 0, 0, 0.25);
+    border-left: 1px solid rgba(255, 255, 255, 0.22);
     padding: 0 7px;
   }
   .enhance:hover:not(:disabled) {
-    background: var(--yap-primary-hover);
+    background: var(--yap-ink-hover, var(--yap-primary-hover));
   }
   .enhance:disabled {
     opacity: 0.55;
@@ -1412,7 +1414,7 @@
     border: 1px solid var(--yap-border);
     border-radius: var(--yap-r-lg);
     background: var(--yap-s1);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    box-shadow: var(--yap-shadow-menu);
   }
   .menu.up {
     top: auto;
@@ -1543,7 +1545,7 @@
     padding: 0;
   }
   .chipx:hover {
-    color: #ef4444;
+    color: var(--yap-danger);
   }
   .chipmenuwrap {
     position: relative;
@@ -1559,7 +1561,7 @@
     border: 1px solid var(--yap-border);
     border-radius: var(--yap-r-lg);
     background: var(--yap-s1);
-    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--yap-shadow-menu);
   }
   /* attendees popover card (OpenWhispr style: input + hint) */
   .chipmenu.pop {
@@ -1806,21 +1808,21 @@
     padding: 0 16px;
     border: none;
     border-radius: var(--yap-r);
-    background: var(--yap-primary);
-    color: var(--yap-primary-fg);
+    background: var(--yap-ink, var(--yap-primary));
+    color: var(--yap-ink-fg, var(--yap-primary-fg));
     font: inherit;
     font-size: 12.5px;
     font-weight: 600;
     cursor: pointer;
   }
   .primary:hover {
-    background: var(--yap-primary-hover);
+    background: var(--yap-ink-hover, var(--yap-primary-hover));
   }
 
   .errline {
     margin: 0 0 10px;
     font-size: 12px;
-    color: #ef4444;
+    color: var(--yap-danger);
     line-height: 1.5;
   }
 </style>

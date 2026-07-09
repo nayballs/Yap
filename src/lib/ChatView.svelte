@@ -505,13 +505,13 @@
     justify-content: center;
     border: none;
     border-radius: var(--yap-r);
-    background: var(--yap-primary);
-    color: var(--yap-primary-fg);
+    background: var(--yap-ink, var(--yap-primary));
+    color: var(--yap-ink-fg, var(--yap-primary-fg));
     cursor: pointer;
     flex: 0 0 auto;
   }
   .sendbtn:hover:not(:disabled) {
-    background: var(--yap-primary-hover);
+    background: var(--yap-ink-hover, var(--yap-primary-hover));
   }
   .sendbtn:disabled {
     opacity: 0.45;

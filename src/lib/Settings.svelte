@@ -27,6 +27,8 @@
   import { toast } from './ui/toast.svelte.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
   import HotkeyInput from './ui/HotkeyInput.svelte';
+  import { modelStore } from './modelStore.svelte.js';
+  import { attention, attentionCount } from './attention.svelte.js';
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
   // (OpenWhispr SettingsModal-style) instead of filling the window. The parent
@@ -355,9 +357,9 @@
   }
   // Pulse-style colour ramp: green < 70%, amber 70–90%, red ≥ 90%.
   function usageColor(pct) {
-    if (pct >= 90) return '#ef4444';
-    if (pct >= 70) return '#f59e0b';
-    return '#22c55e';
+    if (pct >= 90) return 'var(--yap-danger)';
+    if (pct >= 70) return 'var(--yap-warning)';
+    return 'var(--yap-success)';
   }
 
   async function refreshUsage() {
@@ -1188,6 +1190,30 @@
     section = 'about';
     checkForUpdate(true);
   }
+
+  // ---- Settings attention badge (Wispr-style red count) ----
+  // Real conditions only: an update waiting, no STT model installed, or AI
+  // cleanup pointed at a cloud provider with no key. Settings is always
+  // mounted, so this stays live for the ControlPanel cog badge too.
+  const KEYED_PROVIDERS = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter'];
+  $effect(() => {
+    if (!loaded || !cfg) return;
+    const items = [];
+    if (update.status === 'available') {
+      items.push({ section: 'about', label: `Update ${update.version} ready to install` });
+    }
+    if (modelStore.loaded && modelStore.installed.length === 0) {
+      items.push({ section: 'models', label: 'No speech-to-text model installed' });
+    }
+    if (
+      cfg.postProcessEnabled &&
+      KEYED_PROVIDERS.includes(cfg.ppProvider) &&
+      !(cfg.ppApiKey || '').trim()
+    ) {
+      items.push({ section: 'cleanup', label: 'AI cleanup needs an API key' });
+    }
+    attention.items = items;
+  });
 </script>
 
 {#snippet navIcon(id)}
@@ -1289,9 +1315,13 @@
     {#each NAV_GROUPS as g (g.label)}
       <div class="navcap">{g.label}</div>
       {#each g.items as s (s.id)}
+        {@const attn = attentionCount(s.id)}
         <button class="navitem" class:active={section === s.id} onclick={() => (section = s.id)}>
           <span class="navicon">{@render navIcon(s.id)}</span>
           <span class="navlabel">{s.label}</span>
+          {#if attn > 0}
+            <span class="navbadge" title={attention.items.filter((i) => i.section === s.id).map((i) => i.label).join(' · ')}>{attn}</span>
+          {/if}
         </button>
       {/each}
     {/each}
@@ -1924,68 +1954,8 @@
         {:else if section === 'history'}
           <div class="page-h">
             <h1>History</h1>
-            <p>Your dictations and stats — stored only on this PC.</p>
+            <p>Your dictations — stored only on this PC. Stats live in the Insights tab.</p>
           </div>
-          <Group title="Stats">
-            {#snippet children()}
-              {#if stats}
-                <!-- Single padded wrapper: Group cards have no padding of their
-                     own (Rows normally provide it), so bare children get their
-                     edges clipped by the card's rounded overflow:hidden. -->
-                <div class="stats-wrap">
-                <div class="stat-hero">
-                  <div class="hero-num">{fmtMinutes(stats.timeSavedMinutes)}</div>
-                  <div class="hero-lbl">
-                    saved vs typing — you speak ~150 wpm, most people type ~40
-                  </div>
-                </div>
-                <div class="stats-grid">
-                  <div class="stat-card">
-                    <div class="stat-num">{stats.today?.words ?? 0}</div>
-                    <div class="stat-lbl">Words today</div>
-                  </div>
-                  <div class="stat-card">
-                    <div class="stat-num">{(stats.totalWords ?? 0).toLocaleString()}</div>
-                    <div class="stat-lbl">Words all-time</div>
-                  </div>
-                  <div class="stat-card">
-                    <div class="stat-num">{stats.streakDays ?? 0}🔥</div>
-                    <div class="stat-lbl">Day streak</div>
-                  </div>
-                </div>
-                {#if stats.activity?.length}
-                  {@const maxW = Math.max(1, ...stats.activity.map((d) => d.words))}
-                  {@const todayDay = stats.activity[stats.activity.length - 1]?.day}
-                  <div class="activity">
-                    {#each stats.activity as d}
-                      <span
-                        class="acell"
-                        class:today={d.day === todayDay}
-                        data-level={activityLevel(d.words, maxW)}
-                        title="{activityDayLabel(d.day)} · {d.words} {d.words === 1 ? 'word' : 'words'}"
-                      ></span>
-                    {/each}
-                  </div>
-                  <div class="activity-legend">
-                    <span>Last 30 days · {stats.totalTranscriptions ?? 0} dictations</span>
-                    <span class="legend-scale">
-                      Less
-                      <span class="acell" data-level="0"></span>
-                      <span class="acell" data-level="1"></span>
-                      <span class="acell" data-level="2"></span>
-                      <span class="acell" data-level="3"></span>
-                      <span class="acell" data-level="4"></span>
-                      More
-                    </span>
-                  </div>
-                {/if}
-                </div>
-              {:else}
-                <p class="hist-empty">No stats yet — dictate something to get started.</p>
-              {/if}
-            {/snippet}
-          </Group>
-
           <Group title="History">
             <Row>
               <Toggle
@@ -2361,6 +2331,7 @@
   .navcap:first-of-type {
     margin-top: 0;
   }
+  /* Wispr-weight nav: labels read in near-ink medium even when inactive. */
   .navitem {
     display: flex;
     align-items: center;
@@ -2368,13 +2339,14 @@
     text-align: left;
     background: none;
     border: none;
-    color: var(--yap-fg-62);
+    color: var(--yap-fg-80);
     padding: 0 8px;
     height: 33px;
     border-radius: var(--yap-r);
     cursor: pointer;
     font: inherit;
-    font-size: 12.5px;
+    font-size: 13px;
+    font-weight: 550;
     transition:
       background var(--yap-dur) ease,
       color var(--yap-dur) ease;
@@ -2401,17 +2373,34 @@
     white-space: nowrap;
   }
   .navitem:hover {
-    color: var(--yap-fg-80);
-    background: rgba(255, 255, 255, 0.04);
+    color: var(--yap-fg);
+    background: var(--yap-raised-soft);
   }
   .navitem.active {
     color: var(--yap-fg);
-    font-weight: 500;
+    font-weight: 650;
     background: var(--yap-raised-soft);
   }
   .navitem.active .navicon {
     background: var(--yap-primary-tint);
     color: var(--yap-primary);
+  }
+  /* Wispr-style red attention count. */
+  .navbadge {
+    flex: 0 0 auto;
+    margin-left: auto;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--yap-r-full);
+    background: #e5484d;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
   }
 
   .side-spacer {
@@ -2439,7 +2428,7 @@
       border-color var(--yap-dur) ease;
   }
   .acct:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--yap-raised-soft);
     border-color: var(--yap-border-hover);
   }
   .acct.active {
@@ -2499,11 +2488,13 @@
   .scope-tabs {
     margin: 0 0 20px;
   }
+  /* Serif page titles (Wispr's settings pages — EB Garamond). */
   .page-h h1 {
     margin: 0;
-    font-size: 17px;
-    font-weight: 650;
-    letter-spacing: -0.02em;
+    font-family: var(--yap-font-display);
+    font-size: 25px;
+    font-weight: 550;
+    letter-spacing: -0.005em;
     color: var(--yap-fg);
   }
   .page-h p {
@@ -2997,7 +2988,7 @@
   .lb-bar {
     height: 5px;
     border-radius: 3px;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--yap-raised);
     overflow: hidden;
   }
   .lb-bar span {
@@ -3132,99 +3123,7 @@
     line-height: 1.6;
   }
 
-  /* History / stats dashboard */
-  .stats-wrap {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 14px;
-  }
-  .stat-hero {
-    background: linear-gradient(135deg, rgba(109, 92, 245, 0.16), rgba(109, 92, 245, 0.04));
-    border: 1px solid var(--yap-primary-line);
-    border-radius: 10px;
-    padding: 14px 16px;
-    margin-bottom: 10px;
-  }
-  .hero-num {
-    font-size: 30px;
-    font-weight: 800;
-    line-height: 1.1;
-    color: #f1f3f7;
-  }
-  .hero-lbl {
-    margin-top: 4px;
-    font-size: 12px;
-    color: var(--yap-muted);
-  }
-  .stats-grid {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
-  }
-  .stat-card {
-    background: var(--yap-s1);
-    border: 1px solid var(--yap-border);
-    border-radius: 8px;
-    padding: 12px 14px;
-  }
-  .stat-num {
-    font-size: 20px;
-    font-weight: 700;
-    color: #f1f3f7;
-  }
-  .stat-lbl {
-    margin-top: 2px;
-    font-size: 12px;
-    color: var(--yap-muted);
-  }
-  /* 30-day activity heatmap: uniform cells, colour intensity = words. */
-  .activity {
-    width: 100%;
-    margin-top: 14px;
-    display: flex;
-    gap: 4px;
-  }
-  .acell {
-    flex: 1 1 0;
-    max-width: 14px;
-    aspect-ratio: 1 / 1;
-    border-radius: 3px;
-    background: #232833;
-  }
-  .acell[data-level='1'] {
-    background: #1e3a6f;
-  }
-  .acell[data-level='2'] {
-    background: #1d4ed8;
-  }
-  .acell[data-level='3'] {
-    background: var(--yap-primary);
-  }
-  .acell[data-level='4'] {
-    background: var(--yap-primary);
-  }
-  .acell.today {
-    box-shadow: 0 0 0 1.5px rgba(147, 197, 253, 0.65);
-  }
-  .activity-legend {
-    margin-top: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 11.5px;
-    color: var(--yap-muted);
-  }
-  .legend-scale {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-  }
-  .legend-scale .acell {
-    flex: 0 0 auto;
-    width: 10px;
-    height: 10px;
-  }
+  /* History (the stats dashboard moved to the Insights view) */
   .hist-list {
     width: 100%;
     display: flex;
@@ -3419,8 +3318,8 @@
     font-weight: 600;
   }
   .upd-btn {
-    background: var(--yap-primary);
-    color: #fff;
+    background: var(--yap-ink, var(--yap-primary));
+    color: var(--yap-ink-fg, #fff);
     border: none;
     border-radius: 6px;
     padding: 6px 12px;
@@ -3428,16 +3327,16 @@
     font-size: 12.5px;
   }
   .upd-btn:hover {
-    background: #2563eb;
+    background: var(--yap-ink-hover, var(--yap-primary-hover));
   }
   .upd-btn.ghost {
-    background: var(--yap-s1);
+    background: var(--yap-s2);
     color: var(--yap-fg);
     border: 1px solid var(--yap-border);
   }
   .upd-btn.ghost:hover {
-    background: #1f2330;
-    border-color: var(--yap-primary);
+    background: var(--yap-s3);
+    border-color: var(--yap-border-hover);
   }
   .upd-bar {
     margin-top: 10px;
@@ -3466,7 +3365,7 @@
     margin-bottom: 22px;
     border: 1px solid var(--yap-primary-line);
     border-radius: var(--yap-r-lg);
-    background: linear-gradient(180deg, #24222f, var(--yap-s2));
+    background: linear-gradient(180deg, var(--yap-primary-wash), var(--yap-s2));
   }
   .acct-badge {
     width: 46px;
@@ -3509,7 +3408,7 @@
     font-weight: 600;
     background: #fff;
     color: #202124;
-    border: 0;
+    border: 1px solid var(--yap-border);
     cursor: default;
     display: inline-flex;
     align-items: center;

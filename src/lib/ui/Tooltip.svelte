@@ -72,7 +72,7 @@
     background: var(--yap-s3);
     border: 1px solid var(--yap-border);
     border-radius: var(--yap-r-lg);
-    box-shadow: 0 12px 28px -8px rgba(0, 0, 0, 0.55);
+    box-shadow: var(--yap-shadow-menu);
     color: var(--yap-fg);
     font-size: 12px;
     line-height: 1.45;

@@ -184,6 +184,15 @@ back to the raw transcript, so dictation never blocks.
   (20) turns. Gated by `supports_tools` — cloud providers always qualify,
   local models need ≥4B params (`LOCAL_TOOL_MIN_PARAMS_B`) — so smaller local
   models fall back to plain keyword-RAG chat instead.
+- **`bridge.rs`** — the **local API bridge** (OpenWhispr `cliBridge.js` port,
+  backs the Integrations view): a token-authenticated loopback HTTP server
+  (`tiny_http`, `127.0.0.1`, OS-assigned port) exposing `/v1` REST routes over
+  notes/folders/history so terminals + coding agents can drive Yap data.
+  Discovery = `~/.yap/cli-bridge.json` `{version, port, token}` (fixed path,
+  written on start, deleted on exit); auth = `Bearer <token>` (SHA-256
+  constant-time compare); note mutations emit `yap-notes-changed` so NotesView
+  refreshes live. Toggled by `config.bridge_enabled` (default on; `sync()`
+  runs at setup + every config save). See `docs/local-api.md`.
 - **`history.rs`** — local-only transcription history (`history.json`): each
   dictation's timestamp, raw + final text, model, and focused app. Best-effort,
   gated by `history_enabled`. Derives the stats dashboard (words, time-saved vs
@@ -263,9 +272,36 @@ back to the raw transcript, so dictation never blocks.
   `audio_file_info`, `log_info`/`open_logs_folder`, `delete_history_entry`.
 
 ### Frontend (`src/`)
+- **Theme (2026-07-09)** — the main window is **warm-light, Wispr-Flow-inspired**:
+  every token lives in `src/app.css` (`--yap-*`: paper surfaces w/ white cards,
+  warm ink text, ONE amber accent reserved for keycap chips / active states /
+  toggles, **ink** filled buttons via `--yap-ink*`, serif display numerals via
+  `--yap-font-display`, light shadow tokens). Typefaces = **the exact pair Wispr Flow
+  ships** (identified from its install at
+  `%LOCALAPPDATA%\WisprFlow\app-*\resources\assets\fonts`; both OFL/Google
+  Fonts, bundled via `@fontsource-variable/*` imports in main.js): **Figtree**
+  = UI sans (Segoe UI fallback), **EB Garamond** (+italic) =
+  `--yap-font-display` (hero headlines, stat numerals, Settings page titles). **Settings attention badge** (`lib/attention.svelte.js`):
+  Settings computes real needs-action items (update available / no STT model /
+  cleanup on a cloud provider with no key) into a shared runes store; the
+  ControlPanel cog + the matching Settings nav rows show a red count chip
+  (Wispr's Settings "1" pattern). The **pill + overlay stay dark**
+  (they float over other apps) and **Onboarding keeps the old dark palette** via
+  scoped `:root[data-yap-theme='dark']` token overrides (attribute set in
+  App.svelte, which also sets per-window `color-scheme`). Monochrome brand SVGs
+  are only `invert(1)`-ed under that dark scope.
+- **Custom window chrome (2026-07-09)** — the settings window is **undecorated**
+  (`decorations: false` in tauri.conf.json): ControlPanel draws a 40px
+  `data-tauri-drag-region` title bar (brand left; min / max-restore / close
+  right, Win11-style hover incl. red close) over the warm frame, Wispr-style.
+  Buttons use `getCurrentWindow()` (capability grants: minimize,
+  toggle-maximize, is-maximized, close in `capabilities/default.json`);
+  close still routes through hide-on-close; double-click on the drag region
+  toggles maximize (Tauri built-in). Trade-off: the native snap-layout flyout
+  on hover-over-maximize is gone (Win+arrows still snap).
 - **`lib/ControlPanel.svelte`** — the **main window** (window label is still
   `settings`, historic): an OpenWhispr-style control panel — slim sidebar
-  (**Home / Chat / Notes / Upload / Dictionary**) + **Settings as a modal
+  (**Home / Chat / Notes / Upload / Dictionary / Integrations**) + **Settings as a modal
   overlay** (cogwheel). `Settings.svelte` renders `embedded` inside the modal
   and stays **always mounted** so its in-window hotkey fallback + auto-save run
   for the window's lifetime. App-wide **toast notification system**
@@ -273,9 +309,17 @@ back to the raw transcript, so dictation never blocks.
   accent bars, hover-pause, copyable mono error boxes, progress hairlines,
   slide in/out (3.5 s / 6 s durations); mounted in ControlPanel and wired to
   action runs, meeting start/stop, uploads, clipboard copies, debug-mode
-  toggles, and backend `yap-error` events. **`HomeView.svelte`** = the dictation
-  feed (day-grouped history, per-item copy/delete via `delete_history_entry`,
-  stats strip, live refresh on `yap-transcript`). **`DictionaryView.svelte`** =
+  toggles, and backend `yap-error` events. **`HomeView.svelte`** = the Wispr-style
+  Home: time-of-day greeting with the hotkey as **amber keycaps**, a dark
+  **rotating hero card** (4 tips — voice edit / AI cleanup / meeting notes /
+  per-app profiles — picked by day, dot nav, CTAs open the right Settings
+  section or view via `onnavigate`), the dictation feed (day-grouped flat rows
+  w/ hover-revealed meta + copy/delete via `delete_history_entry`, live refresh
+  on `yap-transcript`, icon-expand search on Ctrl+K), and a right-rail stats
+  card with serif display numerals. **`InsightsView.svelte`** = the stats
+  dashboard promoted out of Settings→History (serif hero number, stat grid,
+  30-day amber heatmap, top-apps-by-words bars from `get_history`); Settings →
+  History keeps only the enable toggle + recent list + clear. **`DictionaryView.svelte`** =
   the correction dictionary (promoted out of Settings → Advanced; syncs with
   Settings' cfg copy via `yap-dictionary-changed`/`-external` events).
   **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
@@ -299,7 +343,13 @@ back to the raw transcript, so dictation never blocks.
   copy_to_clipboard executed locally, ≤20-step loop over the OpenAI tool
   protocol, gated to cloud or ≥4B local models — smaller models fall back to
   plain RAG chat; tool-activity chips render in the thread). No streaming or
-  semantic vectors yet (ROADMAP step 3).
+  semantic vectors yet (ROADMAP step 3). **`IntegrationsView.svelte`** = the
+  Integrations surface (OpenWhispr `IntegrationsView.tsx`, local-first cut):
+  Local API card (enable toggle + live status/port via `bridge_status`,
+  discovery-file path + curl example with copy), a Coding-agents card whose
+  "Copy API guide" button copies a paste-into-your-agent endpoint cheat-sheet,
+  and an endpoint reference table. (OpenWhispr's Google-Calendar OAuth /
+  cloud API-keys / hosted-MCP cards need their paid cloud and are not ported.)
 - **`lib/Pill.svelte`** — always-on-top pill. `yap-state` dot, scrolling amplitude
   waveform (`yap-amp`), cancel ✕ while recording, model-download button, gear.
 - **`lib/Overlay.svelte`** — the click-through bottom/top overlay; same scrolling
@@ -335,7 +385,9 @@ back to the raw transcript, so dictation never blocks.
 - **pill**: 210×60, transparent, decorations off, always-on-top, skip-taskbar. Hidden
   by default (`show_pill = false`) — the overlay + tray are the default surface.
 - **settings**: 1200×800 (min 860×600), titled "Yap" (it hosts the ControlPanel — see above),
-  normal, hidden, hide-on-close. Size/position/maximized persisted by `tauri-plugin-window-state`
+  **undecorated** (custom in-page title bar w/ drag region + caption buttons — see the
+  "Custom window chrome" bullet above), hidden, hide-on-close. Size/position/maximized
+  persisted by `tauri-plugin-window-state`
   across launches; pill, overlay, onboarding are excluded from persistence; the VISIBLE flag
   is excluded so the window never un-hides on start-hidden launches (see lib.rs window-state
   plugin setup).
@@ -468,6 +520,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 - Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chats.rs`).
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`).
+- Local API bridge discovery: `~/.yap/cli-bridge.json` (fixed path, NOT the
+  data dir; written while the app runs, deleted on exit — see `bridge.rs` +
+  `docs/local-api.md`).
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
   recording mode `toggle`, **pill hidden**, overlay shown, AI cleanup **off**.

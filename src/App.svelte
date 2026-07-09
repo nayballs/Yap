@@ -14,11 +14,18 @@
 
   // The pill window needs a transparent body (app.css). The settings and
   // onboarding windows are opaque, so override that here or they show OS white.
-  // They also opt into `color-scheme: dark` (for native scrollbars/controls) —
-  // which is deliberately NOT global, because on the transparent pill/overlay
-  // windows it makes the WebView paint an opaque dark backdrop (grey box bug).
-  if (isSettings || isOnboarding) {
+  // They also set an explicit `color-scheme` (for native scrollbars/controls) —
+  // deliberately NOT global, because on the transparent pill/overlay windows it
+  // makes the WebView paint an opaque backdrop (grey box bug).
+  // Settings (the ControlPanel) is warm-light; onboarding keeps its own dark
+  // styling for now (self-contained hardcoded palette, restyle deferred).
+  if (isSettings) {
+    document.documentElement.style.colorScheme = 'light';
+    document.documentElement.style.background = '#f0ede7';
+    document.body.style.background = '#f0ede7';
+  } else if (isOnboarding) {
     document.documentElement.style.colorScheme = 'dark';
+    document.documentElement.dataset.yapTheme = 'dark'; // scoped dark tokens (app.css)
     document.documentElement.style.background = '#0f1117';
     document.body.style.background = '#0f1117';
   }

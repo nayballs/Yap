@@ -280,12 +280,12 @@
   }
   .tab:hover {
     color: var(--yap-fg);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--yap-s3);
   }
   .tab.active {
     border-bottom-color: var(--yap-primary);
     color: var(--yap-fg);
-    background: rgba(109, 92, 245, 0.05);
+    background: color-mix(in srgb, var(--yap-primary) 5%, transparent);
   }
 
   .pane {
@@ -350,7 +350,7 @@
   }
   .ghost:hover {
     color: var(--yap-fg);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--yap-s3);
   }
   .ghost svg {
     width: 12px;
@@ -436,11 +436,11 @@
   .primary {
     flex: 1;
     border: none;
-    background: var(--yap-primary);
-    color: var(--yap-primary-fg);
+    background: var(--yap-ink, var(--yap-primary));
+    color: var(--yap-ink-fg, var(--yap-primary-fg));
   }
   .primary:hover:not(:disabled) {
-    background: var(--yap-primary-hover);
+    background: var(--yap-ink-hover, var(--yap-primary-hover));
   }
   .primary:disabled {
     opacity: 0.5;
@@ -473,8 +473,8 @@
     display: flex;
     align-items: flex-start;
     gap: 9px;
-    border: 1px solid rgba(220, 160, 60, 0.25);
-    background: rgba(220, 160, 60, 0.07);
+    border: 1px solid color-mix(in srgb, var(--yap-warning) 30%, transparent);
+    background: color-mix(in srgb, var(--yap-warning) 7%, transparent);
     border-radius: var(--yap-r-lg);
     padding: 11px 13px;
   }

@@ -103,16 +103,16 @@
     height: 6px;
     flex: 0 0 auto;
     border-radius: var(--yap-r-full);
-    background: rgba(255, 255, 255, 0.14);
+    background: var(--yap-raised);
   }
   .mrow.active .dot {
     background: var(--yap-primary);
-    box-shadow: 0 0 6px rgba(109, 92, 245, 0.65);
+    box-shadow: 0 0 6px var(--yap-primary-tint);
     animation: pulse-glow 2s ease-in-out infinite;
   }
   .mrow.available .dot {
     background: var(--yap-success);
-    box-shadow: 0 0 4px rgba(61, 187, 116, 0.5);
+    box-shadow: 0 0 4px color-mix(in srgb, var(--yap-success) 50%, transparent);
   }
   .mrow.downloading .dot,
   .mrow.switching .dot {
@@ -126,7 +126,12 @@
     height: 14px;
     flex: 0 0 auto;
   }
+  /* Monochrome (black) brand logos read as-is on the light theme; only the
+     dark-scoped onboarding window still needs the white inversion. */
   .micon.mono {
+    filter: none;
+  }
+  :global([data-yap-theme='dark']) .micon.mono {
     filter: invert(1);
   }
   .micon.gen {
@@ -185,8 +190,8 @@
     padding: 0 10px;
     border: none;
     border-radius: var(--yap-r-sm);
-    background: var(--yap-primary);
-    color: var(--yap-primary-fg);
+    background: var(--yap-ink, var(--yap-primary));
+    color: var(--yap-ink-fg, var(--yap-primary-fg));
     font: inherit;
     font-size: 11px;
     font-weight: 600;
@@ -195,7 +200,7 @@
     transition: background var(--yap-dur) ease;
   }
   .dl:hover {
-    background: var(--yap-primary-hover);
+    background: var(--yap-ink-hover, var(--yap-primary-hover));
   }
   .dl svg {
     width: 11px;
@@ -225,7 +230,7 @@
   }
   .trash:hover {
     color: var(--yap-danger);
-    background: rgba(224, 86, 79, 0.12);
+    background: color-mix(in srgb, var(--yap-danger) 10%, transparent);
   }
   .trash svg {
     width: 13px;

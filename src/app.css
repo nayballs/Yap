@@ -3,7 +3,10 @@
      window (the pill + overlay) it makes the WebView paint an opaque dark UA
      backdrop, which shows as a grey square behind the rounded pill. The opaque
      windows (settings/onboarding) opt into dark scheme in App.svelte instead. */
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Figtree — the SAME UI sans Wispr Flow ships (OFL, bundled via
+     @fontsource-variable/figtree in main.js); Segoe UI fallbacks if the
+     webfont ever fails to load. */
+  font-family: 'Figtree Variable', 'Segoe UI Variable Text', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
 }
 
 html,
@@ -22,23 +25,96 @@ body {
 }
 
 /* ------------------------------------------------------------------ *
- * Yap design tokens (dark). Used by the opaque windows (settings /
- * onboarding) and their `ui/` primitives. These are just custom
- * properties — they don't paint anything, so the transparent pill /
- * overlay windows are unaffected. Palette: an OpenWhispr-style charcoal
- * elevation ladder (depth from lightness, not borders) with a single
- * superwhisper-style violet accent used sparingly at low alpha.
+ * Yap design tokens (warm light — Wispr-Flow-inspired, 2026-07-08).
+ * Used by the opaque windows (settings window = the ControlPanel) and
+ * their `ui/` primitives. These are just custom properties — they don't
+ * paint anything, so the transparent pill / overlay windows (which stay
+ * DARK: they float over other apps) are unaffected. Onboarding keeps its
+ * own hardcoded dark styling for now (deferred).
+ *
+ * The system: warm paper surfaces with white cards ON gray (a light
+ * elevation ladder — depth from whiteness + soft shadow, not lines),
+ * one warm ink for text stepped by opacity, and a single amber accent
+ * spent almost entirely on the keycap motif (Yap is driven by one
+ * physical key). Filled buttons are INK, not accent — amber stays rare.
  * ------------------------------------------------------------------ */
 :root {
-  /* surfaces — each step ~+3% lightness */
-  --yap-bg: #191a1e;          /* window / sidebar */
-  --yap-s1: #1e1f23;          /* content pane, inputs */
-  --yap-s2: #232429;          /* panels / cards */
-  --yap-s3: #2a2b31;          /* menus, hover surfaces */
-  --yap-raised: #313239;      /* toggle-off track, icon chips */
-  --yap-raised-soft: #26272d; /* active nav row */
+  /* surfaces — white cards on warm paper */
+  --yap-bg: #f0ede7;          /* window frame / sidebar (warm gray) */
+  --yap-s1: #faf9f6;          /* content sheet */
+  --yap-s2: #ffffff;          /* panels / cards / inputs */
+  --yap-s3: #f2efe9;          /* menus, hover surfaces */
+  --yap-raised: #e8e4dc;      /* toggle-off track, icon chips */
+  --yap-raised-soft: #f4f1eb; /* active nav row */
 
-  /* text — one off-white, stepped by opacity */
+  /* text — one warm ink, stepped by opacity */
+  --yap-fg: #23211b;
+  --yap-fg-80: rgba(35, 33, 27, 0.82);
+  --yap-fg-62: rgba(35, 33, 27, 0.64);
+  --yap-fg-45: rgba(35, 33, 27, 0.46);
+  --yap-muted: #6e6a5f;
+  --yap-muted-70: rgba(110, 106, 95, 0.75);
+  --yap-muted-55: rgba(110, 106, 95, 0.6);
+
+  /* accent — Wispr amber; spend it sparingly (keycaps, active icons,
+     toggles-on, links). Filled buttons use the ink tokens below. */
+  --yap-primary: #c2690a;
+  --yap-primary-fg: #ffffff;
+  --yap-primary-hover: #a85a08;
+  --yap-primary-wash: rgba(226, 152, 42, 0.16);
+  --yap-primary-tint: rgba(226, 152, 42, 0.28);
+  --yap-primary-line: rgba(194, 105, 10, 0.45);
+
+  /* ink — filled buttons + dark feature surfaces (hero cards) */
+  --yap-ink: #26231c;
+  --yap-ink-hover: #3a3529;
+  --yap-ink-fg: #f7f5f0;
+
+  /* keycap chip — the signature: hotkeys render as physical keys */
+  --yap-key-bg: #f6a93c;
+  --yap-key-border: #d78a17;
+  --yap-key-fg: #3d2c07;
+
+  /* borders — warm hairlines; depth mostly from surfaces + shadows */
+  --yap-border: #dcd7cb;
+  --yap-border-subtle: #e7e3d9;
+  --yap-border-hover: #c8c2b3;
+
+  /* semantic (kept separate from the accent) */
+  --yap-success: #1e8f4d;
+  --yap-warning: #b07c10;
+  --yap-danger: #c23b32;
+
+  /* shadows — soft, warm-tinted (light themes need them; dark didn't) */
+  --yap-shadow-sm: 0 1px 2px rgba(60, 50, 30, 0.07), 0 1px 1px rgba(60, 50, 30, 0.04);
+  --yap-shadow-menu: 0 12px 32px rgba(55, 45, 25, 0.16);
+  --yap-shadow-modal: 0 24px 80px rgba(50, 40, 20, 0.28);
+
+  /* display face — EB Garamond, Wispr's exact serif (stat numerals, hero
+     headlines, settings titles; bundled in main.js) */
+  --yap-font-display: 'EB Garamond Variable', Georgia, 'Palatino Linotype', 'Times New Roman', serif;
+
+  /* radii — a touch softer than the dark theme's */
+  --yap-r-sm: 5px;
+  --yap-r: 8px;
+  --yap-r-lg: 11px;
+  --yap-r-xl: 14px;
+  --yap-r-full: 9999px;
+
+  --yap-dur: 150ms;
+}
+
+/* Onboarding window: still the old dark palette (App.svelte sets
+ * data-yap-theme="dark" there). Only token-consuming components rendered
+ * inside it (ModelCard) need these; remove once onboarding goes light. */
+:root[data-yap-theme='dark'] {
+  --yap-bg: #191a1e;
+  --yap-s1: #1e1f23;
+  --yap-s2: #232429;
+  --yap-s3: #2a2b31;
+  --yap-raised: #313239;
+  --yap-raised-soft: #26272d;
+
   --yap-fg: #e9e9ea;
   --yap-fg-80: rgba(233, 233, 234, 0.8);
   --yap-fg-62: rgba(233, 233, 234, 0.62);
@@ -47,7 +123,6 @@ body {
   --yap-muted-70: rgba(154, 154, 160, 0.72);
   --yap-muted-55: rgba(154, 154, 160, 0.55);
 
-  /* accent — superwhisper violet */
   --yap-primary: #6d5cf5;
   --yap-primary-fg: #ffffff;
   --yap-primary-hover: #7d6ef7;
@@ -55,22 +130,19 @@ body {
   --yap-primary-tint: rgba(109, 92, 245, 0.22);
   --yap-primary-line: rgba(109, 92, 245, 0.42);
 
-  /* borders — faint; depth comes from surfaces, not lines */
+  --yap-ink: #e9e9ea;
+  --yap-ink-hover: #ffffff;
+  --yap-ink-fg: #1e1f23;
+
   --yap-border: #34353c;
   --yap-border-subtle: #2c2d33;
   --yap-border-hover: #41434b;
 
-  /* semantic (kept separate from the accent) */
   --yap-success: #3dbb74;
   --yap-warning: #dca03c;
   --yap-danger: #e0564f;
 
-  /* radii — tight, native-feeling */
-  --yap-r-sm: 4px;
-  --yap-r: 6px;
-  --yap-r-lg: 8px;
-  --yap-r-xl: 11px;
-  --yap-r-full: 9999px;
-
-  --yap-dur: 150ms;
+  --yap-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --yap-shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --yap-shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.5);
 }
