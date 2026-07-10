@@ -31,7 +31,12 @@
 <style>
   .seg {
     position: relative;
-    display: inline-flex;
+    /* Equal-width columns (widest label wins) so the thumb's simple
+       percentage slide always lands exactly on the segment boundary —
+       flex:1 couldn't shrink a long nowrap label below its text width. */
+    display: inline-grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
     padding: 3px;
     background: var(--yap-s1);
     border: 1px solid var(--yap-border-subtle);
@@ -52,7 +57,6 @@
   .seg-btn {
     position: relative;
     z-index: 1;
-    flex: 1;
     border: 0;
     background: transparent;
     padding: 5px 13px;
