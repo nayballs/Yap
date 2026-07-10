@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn dictionary_suffix_formats_spellings_and_corrections() {
         use crate::config::DictionaryEntry;
-        let de = |from: &str, to: &str| DictionaryEntry { from: from.into(), to: to.into() };
+        let de = |from: &str, to: &str| DictionaryEntry { from: from.into(), to: to.into(), fuzzy: true };
         assert_eq!(dictionary_suffix(&[]), "");
         // same-word entry (e.g. an agent name) → exact-spelling bias
         let s = dictionary_suffix(&[de("Kubernetes", "Kubernetes")]);

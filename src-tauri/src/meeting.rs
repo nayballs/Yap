@@ -200,10 +200,12 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option
         Some(cfg.selected_language.clone())
     };
     let translate = cfg.translate_to_english;
+    let dict_prompt = crate::config::dictionary_prompt(&cfg.dictionary);
 
     let slot = Arc::clone(engine_slot);
     let outcome = tokio::task::spawn_blocking(move || {
-        let result = engine.transcribe(&samples, language.as_deref(), translate);
+        let result =
+            engine.transcribe(&samples, language.as_deref(), translate, dict_prompt.as_deref());
         (engine, result)
     })
     .await;

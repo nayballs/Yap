@@ -14,6 +14,12 @@ use std::path::PathBuf;
 pub struct DictionaryEntry {
     pub from: String,
     pub to: String,
+    /// Whether the fuzzy near-miss pass (fuzzy.rs) may match this entry.
+    /// Off for corrections whose near-misses are real words — `json → JSON`
+    /// would otherwise eat the name "Jason". Exact replacement and the
+    /// Whisper `initial_prompt` bias always apply regardless.
+    #[serde(default = "default_true")]
+    pub fuzzy: bool,
 }
 
 /// A reusable, named cleanup profile (FluidVoice's `DictationPromptProfile`): a
@@ -157,6 +163,12 @@ pub struct YapConfig {
     /// Transcription corrections.
     #[serde(default)]
     pub dictionary: Vec<DictionaryEntry>,
+    /// Fuzzy near-miss correction: snap words that ALMOST match a dictionary
+    /// spelling (Levenshtein + phonetic, Handy's algorithm — see fuzzy.rs).
+    /// Applies to ONNX models only; Whisper models get the dictionary as an
+    /// `initial_prompt` bias instead.
+    #[serde(default = "default_true")]
+    pub dictionary_fuzzy: bool,
 
     /// Recording mode: "toggle" (press to start, press again to stop) or
     /// "pushToTalk" (hold to record, release to stop).
@@ -387,6 +399,7 @@ impl Default for YapConfig {
             input_device: None,
             sound_enabled: true,
             dictionary: Vec::new(),
+            dictionary_fuzzy: true,
             recording_mode: default_recording_mode(),
             mute_while_recording: false,
             append_trailing_space: false,
@@ -617,6 +630,35 @@ pub fn apply_dictionary(text: &str, dict: &[DictionaryEntry]) -> String {
     out
 }
 
+/// Build the Whisper `initial_prompt` vocabulary from the dictionary: the
+/// distinct canonical (`to`) spellings joined ", " (Handy's format — the
+/// prompt biases whisper.cpp's decoder toward these spellings). Capped at
+/// ~600 chars cut at a comma boundary (Whisper only reads ~224 tokens of
+/// prompt; OpenWhispr truncates the same way). `None` when the dictionary is
+/// empty.
+pub fn dictionary_prompt(dict: &[DictionaryEntry]) -> Option<String> {
+    const MAX_PROMPT_CHARS: usize = 600;
+    let mut seen = std::collections::HashSet::new();
+    let words: Vec<&str> = dict
+        .iter()
+        .map(|e| e.to.trim())
+        .filter(|t| !t.is_empty() && seen.insert(t.to_lowercase()))
+        .collect();
+    if words.is_empty() {
+        return None;
+    }
+    let mut prompt = words.join(", ");
+    if prompt.len() > MAX_PROMPT_CHARS {
+        let boundary = (0..=MAX_PROMPT_CHARS)
+            .rev()
+            .find(|i| prompt.is_char_boundary(*i))
+            .unwrap_or(0);
+        let cut = prompt[..boundary].rfind(',').unwrap_or(boundary);
+        prompt.truncate(cut);
+    }
+    Some(prompt)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -625,6 +667,7 @@ mod tests {
         DictionaryEntry {
             from: from.to_string(),
             to: to.to_string(),
+            fuzzy: true,
         }
     }
 

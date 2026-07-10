@@ -117,3 +117,49 @@ most work to wire per-engine.
 > dictionary" (it has none). It's "exact-path polish + LLM-context correction, with
 > optional true fuzzy matching" — which lands us at parity on the exact path and
 > *ahead* on smart correction.
+
+---
+
+## 2026-07-10 update — the rest of the field, checked from source, and SHIPPED
+
+Follow-up source audit of the other top apps (OpenWhispr clone, Wispr Flow's
+extracted `app.asar`, Handy clone):
+
+| App | Dictionary model | Fuzzy text matching? | How corrections actually happen |
+|---|---|---|---|
+| **Handy** | word list + threshold setting | **YES** — `audio_toolkit/text.rs` `apply_custom_words`: 1–3 word n-grams, normalized Levenshtein + Soundex boost (×0.3), 25% length gate, threshold 0.18. ONNX models only | Whisper models get the words as `initial_prompt` instead (decoder bias) |
+| **OpenWhispr** | word list (manual + **auto-learned**) | no post-hoc fuzzy | Whisper `initial_prompt` / Mistral `contextBias` (ASR bias) + LLM prompt suffix; `correctionLearner.js` diffs the user's edits vs the pasted transcript (word-LCS + Levenshtein ≤0.65) to auto-add words; `dictionaryEchoFilter.js` guards prompt echo on silence |
+| **Wispr Flow** | word list, auto-learning (`DictionaryItemAutoAdded`, undo toast) | no client-side fuzzy (only `diff_levenshtein` inside the bundled diff-match-patch lib) | words go to their **cloud** ASR/LLM; all biasing is server-side |
+| **FluidVoice** | (above) | no | acoustic CTC boosting, Apple-Silicon-only |
+
+**Shipped in Yap (2026-07-10):** options 1+2 were already in; this pass added
+**3 and 4** — the full Handy split, ported from source:
+
+- `src-tauri/src/fuzzy.rs` — Handy's `apply_custom_words` (Levenshtein +
+  `natural`-crate Soundex replicated exactly — it's a NONSTANDARD variant: raw
+  first char, strip h/w → dedup → strip vowels — verified against the real
+  crates in a scratch build). Adapted to Yap's `{from → to}` entries (n-grams
+  match both spellings, always replace with `to`; ≥3-char terms only). One
+  deliberate fix over Handy: n-grams are chosen shortest-first and a longer
+  n-gram must **strictly reduce absolute edit distance**, because Handy's
+  longest-first greedy provably swallows an unrelated adjacent word
+  ("Charge B, che" → "ChargeBee" eating "che"; their own unit test can't pass
+  as committed). Gated by `config.dictionary_fuzzy` (default ON, toggle in the
+  Dictionary view), ONNX models only. **Per-entry opt-out** (the ≈ button on a
+  Dictionary row, `entry.fuzzy`, default on): exempts one correction from the
+  near-miss pass for entries whose near-misses are real words — live dogfooding
+  found `json → JSON` eating the name "Jason" (Soundex-identical, so no
+  threshold can separate them). Exact replacement + the Whisper prompt bias
+  still apply to exempted entries.
+- **Whisper `initial_prompt`** — `config::dictionary_prompt` (distinct `to`
+  spellings, ", "-joined, ~600-char cap at a comma) threaded through
+  `SttEngine::transcribe` at every call site (dictation, partials, upload,
+  meeting). Echo guard: `fuzzy::is_prompt_echo` (OpenWhispr's
+  `matchesDictionaryPrompt` port) drops a transcript that is just the prompt
+  hallucinated back — whisper-only, and only when the dictionary has ≥3 words
+  so a real one-word dictation of a dictionary term can't be eaten.
+
+Still open from the original list: multi-trigger entries (`triggers[] → to`)
+and OpenWhispr-style auto-learning (needs an edit-observation channel).
+(The per-entry fuzzy flag from option 3's guardrails shipped 2026-07-10,
+see above.)

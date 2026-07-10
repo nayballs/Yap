@@ -83,9 +83,19 @@ global hotkey ─▶ input_hook ─▶ "dictation-key-pressed" / "-released"
                                             emits "yap-transcript"
 ```
 
-Pipeline order after transcription: **AI cleanup → dictionary → append-space →
-auto-submit (Enter) → inject**. Cleanup is best-effort — any error/timeout falls
-back to the raw transcript, so dictation never blocks.
+Pipeline order after transcription: **AI cleanup → dictionary (exact, then a
+fuzzy near-miss pass) → append-space → auto-submit (Enter) → inject**. Cleanup is
+best-effort — any error/timeout falls back to the raw transcript, so dictation
+never blocks. The dictionary runs Handy's split (ported from its source):
+**Whisper models** get the correct spellings as the decoder's `initial_prompt`
+(ASR biasing, threaded through `SttEngine::transcribe` at every call site —
+dictation/partials/upload/meeting — plus an OpenWhispr-ported prompt-echo guard
+in `stt.rs`), **ONNX models** get **`fuzzy.rs`** — Levenshtein + Soundex 1–3-word
+n-gram correction ("jaison"→"JSON", "Chat G P T"→"ChatGPT"; threshold 0.18,
+≥3-char terms), gated by `config.dictionary_fuzzy` (default on, "Catch
+near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
+(`entry.fuzzy` — exempts corrections whose near-misses are real words, e.g.
+`json → JSON` eating the name "Jason"). See `docs/fuzzy-dictionary.md`.
 
 ### Key modules (`src-tauri/src/`)
 - **`lib.rs`** — app entry / Tauri `setup`. Runs `portable::init()`, registers the
@@ -216,9 +226,18 @@ back to the raw transcript, so dictation never blocks.
   key store — the UI swaps the active `pp_api_key` from it on provider switch), `cleanup_profiles` (each
   with an optional per-profile LLM override: provider/base_url/model/api_key — empty
   provider = inherit global) + `app_routes` smart routing, streaming_partials,
-  history_enabled, update_checks_enabled). JSON
-  load/save + `apply_dictionary` + `resolve_cleanup` (per-app plan: body + endpoint).
+  history_enabled, update_checks_enabled, dictionary_fuzzy). JSON
+  load/save + `apply_dictionary` + `dictionary_prompt` (the Whisper
+  `initial_prompt` vocabulary) + `resolve_cleanup` (per-app plan: body + endpoint).
   `data_dir()` is portable-aware.
+- **`fuzzy.rs`** — fuzzy dictionary correction (Handy `audio_toolkit/text.rs` port):
+  1–3-word n-grams vs the dictionary's `from`/`to` spellings, normalized Levenshtein
+  + Soundex phonetic boost (the `natural` crate's nonstandard variant, replicated
+  exactly), threshold 0.18, ≥3-char terms, case/punctuation preserved; shortest-first
+  n-gram choice (deliberate fix over Handy's word-swallowing longest-first greedy).
+  Runs after `apply_dictionary` for ONNX models (`dictionary_fuzzy`, default on).
+  Also `is_prompt_echo` (OpenWhispr `dictionaryEchoFilter` port) used by `stt.rs`
+  against Whisper hallucinating the dictionary prompt on silence.
 - **`tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
   menu (model submenu w/ checkmark, Cancel while recording, Settings/Quit, Check for
   updates); left-click opens Settings.

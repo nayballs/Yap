@@ -722,9 +722,13 @@
     if (typeof e.detail === 'string') section = e.detail;
   }
   function onDictChanged(e) {
-    if (!cfg || !Array.isArray(e.detail)) return;
-    lastReceivedDictJson = JSON.stringify(e.detail);
-    cfg.dictionary = e.detail.map((x) => ({ ...x }));
+    const entries = Array.isArray(e.detail) ? e.detail : e.detail?.entries;
+    if (!cfg || !Array.isArray(entries)) return;
+    lastReceivedDictJson = JSON.stringify(entries);
+    cfg.dictionary = entries.map((x) => ({ ...x }));
+    // dictionaryFuzzy is owned by DictionaryView but rides along in this cfg
+    // copy — adopt its new value or our next auto-save would revert the toggle.
+    if (typeof e.detail?.fuzzy === 'boolean') cfg.dictionaryFuzzy = e.detail.fuzzy;
   }
   $effect(() => {
     window.addEventListener('yap-settings-goto', onSettingsGoto);
@@ -1126,7 +1130,7 @@
       outputDevice: cfg.outputDevice || null,
       audioFeedbackVolume: Number(cfg.audioFeedbackVolume),
       dictionary: cfg.dictionary
-        .map((e) => ({ from: (e.from || '').trim(), to: (e.to || '').trim() }))
+        .map((e) => ({ from: (e.from || '').trim(), to: (e.to || '').trim(), fuzzy: e.fuzzy ?? true }))
         .filter((e) => e.from),
       appRoutes: (cfg.appRoutes || [])
         .map((r) => ({

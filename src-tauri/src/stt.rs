@@ -706,11 +706,17 @@ pub trait SttEngine: Send + Sync {
     /// for auto-detect. `translate` requests translation to English. Both are
     /// applied per-engine — engines without language/translate support ignore
     /// them (see [`model_supports_language`] / [`model_supports_translate`]).
+    ///
+    /// `initial_prompt` is a vocabulary bias (the dictionary's correct
+    /// spellings, comma-joined — `config::dictionary_prompt`). Only Whisper
+    /// engines consume it (whisper.cpp decoder prompt, Handy's approach);
+    /// other engines ignore it and get the fuzzy post-pass instead.
     fn transcribe(
         &self,
         audio: &[f32],
         language: Option<&str>,
         translate: bool,
+        initial_prompt: Option<&str>,
     ) -> Result<String, SttError>;
 
     /// Process a streaming audio chunk and return a partial transcript when
@@ -847,6 +853,7 @@ mod engine_real {
             audio: &[f32],
             language: Option<&str>,
             translate: bool,
+            initial_prompt: Option<&str>,
         ) -> Result<String, SttError> {
             if audio.is_empty() {
                 return Ok(String::new());
@@ -886,6 +893,7 @@ mod engine_real {
                     let params = WhisperInferenceParams {
                         language: lang,
                         translate,
+                        initial_prompt: initial_prompt.map(str::to_string),
                         ..Default::default()
                     };
                     e.transcribe_with(audio, &params).map_err(tx_err)?
@@ -943,6 +951,22 @@ mod engine_real {
             };
 
             let text = result.text.trim().to_string();
+
+            // With a dictionary `initial_prompt`, Whisper on (near-)silence
+            // tends to hallucinate the prompt back. Drop such transcripts
+            // (OpenWhispr's dictionaryEchoFilter — the guard is engine-level
+            // so every call site is covered). Whisper-only: other engines
+            // never saw the prompt. Skipped for prompts under 3 words, where
+            // a real dictation of a dictionary term would false-positive.
+            if let Some(prompt) = initial_prompt.filter(|p| {
+                self.name == "whisper" && p.split(',').count() >= 3
+            }) {
+                if crate::fuzzy::is_prompt_echo(&text, prompt) {
+                    tracing::info!("Transcript matched the dictionary prompt (echo) — dropping");
+                    return Ok(String::new());
+                }
+            }
+
             tracing::info!(text_len = text.len(), "Transcription complete");
             Ok(text)
         }
@@ -990,6 +1014,7 @@ mod engine_stub {
             audio: &[f32],
             _language: Option<&str>,
             _translate: bool,
+            _initial_prompt: Option<&str>,
         ) -> Result<String, SttError> {
             if audio.is_empty() {
                 return Ok(String::new());
@@ -1039,15 +1064,16 @@ pub struct SttAdapter {
 
 impl SttAdapter {
     /// Transcribe audio using the underlying engine. `language` (`None` =
-    /// auto-detect) and `translate` are applied per engine; see
-    /// [`SttEngine::transcribe`].
+    /// auto-detect), `translate`, and the `initial_prompt` vocabulary bias
+    /// are applied per engine; see [`SttEngine::transcribe`].
     pub fn transcribe(
         &self,
         audio: &[f32],
         language: Option<&str>,
         translate: bool,
+        initial_prompt: Option<&str>,
     ) -> Result<String, SttError> {
-        self.engine.transcribe(audio, language, translate)
+        self.engine.transcribe(audio, language, translate, initial_prompt)
     }
 
     /// Process a streaming audio chunk (returns a partial transcript or `None`).
@@ -1082,6 +1108,13 @@ pub fn create_stt_engine(
     let model_path = data_dir.join("models").join(&resolved.filename);
     let engine = ActiveEngine::load(&model_path, resolved.engine_type)?;
     Ok(SttAdapter { engine })
+}
+
+/// Whether `model_id` resolves to a whisper.cpp model. Drives the dictionary
+/// split (Handy's): Whisper models get the vocabulary as `initial_prompt`;
+/// ONNX models get the fuzzy post-correction pass instead.
+pub fn is_whisper_model(model_id: &str) -> bool {
+    resolve_model(model_id).engine_type == EngineType::Whisper
 }
 
 // ── Accelerator setup ───────────────────────────────────────────────
@@ -1181,7 +1214,7 @@ mod tests {
             .map(|i| 0.1 * (std::f32::consts::TAU * 220.0 * i as f32 / sr as f32).sin())
             .collect();
         let text = engine
-            .transcribe(&audio, None, false)
+            .transcribe(&audio, None, false, None)
             .expect("transcribe on ONNX engine should not error");
         eprintln!("ONNX smoke transcript: {:?}", text);
     }
@@ -1274,7 +1307,7 @@ mod tests {
                 .unwrap();
             let adapter = SttAdapter { engine };
             let audio = vec![0.1f32; 16_000];
-            let out = adapter.transcribe(&audio, None, false).unwrap();
+            let out = adapter.transcribe(&audio, None, false, None).unwrap();
             assert!(out.contains("STT stub"));
             assert!(adapter.is_ready());
             assert_eq!(adapter.name(), "stub");
@@ -1285,7 +1318,7 @@ mod tests {
             let engine =
                 ActiveEngine::load(Path::new("models/whatever"), EngineType::Whisper).unwrap();
             let adapter = SttAdapter { engine };
-            assert!(adapter.transcribe(&[], None, false).unwrap().is_empty());
+            assert!(adapter.transcribe(&[], None, false, None).unwrap().is_empty());
         }
 
         #[test]
@@ -1293,7 +1326,7 @@ mod tests {
             let engine =
                 ActiveEngine::load(Path::new("models/whatever"), EngineType::Whisper).unwrap();
             let adapter = SttAdapter { engine };
-            assert!(adapter.transcribe(&[0.1f32; 100], None, false).is_err());
+            assert!(adapter.transcribe(&[0.1f32; 100], None, false, None).is_err());
         }
     }
 

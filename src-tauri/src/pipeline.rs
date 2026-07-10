@@ -269,6 +269,16 @@ impl Shared {
             .unwrap_or((None, false))
     }
 
+    /// The dictionary vocabulary as a Whisper `initial_prompt` bias (None when
+    /// the dictionary is empty). Snapshotted per transcription like
+    /// `language_settings`; only Whisper engines consume it.
+    fn dictionary_prompt(&self) -> Option<String> {
+        self.config
+            .read()
+            .ok()
+            .and_then(|c| config::dictionary_prompt(&c.dictionary))
+    }
+
     /// If streaming partials are enabled, spawn the worker thread for this
     /// recording session (it exits on its own when `recording` flips false).
     fn maybe_start_streaming(self: &Arc<Self>) {
@@ -560,8 +570,9 @@ impl Shared {
             }
             let chunk: Vec<f32> = samples[a..b].to_vec();
             let lang = language.clone();
+            let prompt = self.dictionary_prompt();
             let outcome = tokio::task::spawn_blocking(move || {
-                let result = engine.transcribe(&chunk, lang.as_deref(), translate);
+                let result = engine.transcribe(&chunk, lang.as_deref(), translate, prompt.as_deref());
                 (engine, result)
             })
             .await;
@@ -691,8 +702,10 @@ impl Shared {
             }
         });
 
+        let dict_prompt = self.dictionary_prompt();
         let outcome = tokio::task::spawn_blocking(move || {
-            let result = engine.transcribe(&audio, language.as_deref(), translate);
+            let result =
+                engine.transcribe(&audio, language.as_deref(), translate, dict_prompt.as_deref());
             (engine, result)
         })
         .await;
@@ -850,6 +863,17 @@ impl Shared {
                         };
 
                         let mut corrected = config::apply_dictionary(cleaned.trim(), &dict);
+                        // Fuzzy near-miss pass (Handy's split): ONNX models
+                        // only — a Whisper model already got the vocabulary as
+                        // its `initial_prompt` bias.
+                        let fuzzy_on = self
+                            .config
+                            .read()
+                            .map(|c| c.dictionary_fuzzy && !stt::is_whisper_model(&c.model_size))
+                            .unwrap_or(false);
+                        if fuzzy_on {
+                            corrected = crate::fuzzy::apply_fuzzy(&corrected, &dict);
+                        }
                         if !corrected.is_empty() {
                             if append_space {
                                 corrected.push(' ');
@@ -1081,6 +1105,14 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
     // hallucinated output on tiny snippets — mirrors the engine's own guard).
     const STREAM_MIN_SAMPLES: usize = 8_000;
 
+    // Dictionary vocabulary bias (Whisper models only) — snapshotted once per
+    // session like `language`/`translate`.
+    let dict_prompt = shared
+        .config
+        .read()
+        .ok()
+        .and_then(|c| config::dictionary_prompt(&c.dictionary));
+
     // If the idle watcher unloaded the model, warm-load it now — otherwise a
     // session started after an idle unload silently produces no partials at
     // all (only the final pass lazily reloads).
@@ -1141,14 +1173,14 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
                     // shrinks at the seam.
                     let res = match rel_cut {
                         None => engine
-                            .transcribe(&win, language.as_deref(), translate)
+                            .transcribe(&win, language.as_deref(), translate, dict_prompt.as_deref())
                             .map(Out::Normal),
                         Some(c) => {
                             engine
-                                .transcribe(&win[..c], language.as_deref(), translate)
+                                .transcribe(&win[..c], language.as_deref(), translate, dict_prompt.as_deref())
                                 .and_then(|commit| {
                                     engine
-                                        .transcribe(&win[c..], language.as_deref(), translate)
+                                        .transcribe(&win[c..], language.as_deref(), translate, dict_prompt.as_deref())
                                         .map(|tail| Out::Advance {
                                             commit,
                                             tail,

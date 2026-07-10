@@ -6,8 +6,10 @@
   // its own cfg copy instead of clobbering ours on its next auto-save.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
+  import Toggle from './ui/Toggle.svelte';
 
   let dict = $state([]);
+  let fuzzy = $state(true);
   let loaded = $state(false);
   let saveTimer = null;
   let priming = true;
@@ -16,6 +18,7 @@
     try {
       const cfg = await invoke('get_config');
       dict = Array.isArray(cfg?.dictionary) ? cfg.dictionary : [];
+      fuzzy = cfg?.dictionaryFuzzy ?? true;
     } catch {
       dict = [];
     }
@@ -49,17 +52,27 @@
     try {
       const fresh = await invoke('get_config');
       const cleaned = dict
-        .map((e) => ({ from: (e.from || '').trim(), to: (e.to || '').trim() }))
+        .map((e) => ({ from: (e.from || '').trim(), to: (e.to || '').trim(), fuzzy: e.fuzzy ?? true }))
         .filter((e) => e.from && e.to);
-      await invoke('save_config', { cfg: { ...fresh, dictionary: cleaned } });
-      window.dispatchEvent(new CustomEvent('yap-dictionary-changed', { detail: cleaned }));
+      await invoke('save_config', { cfg: { ...fresh, dictionary: cleaned, dictionaryFuzzy: fuzzy } });
+      // The always-mounted Settings component keeps its own full-cfg copy and
+      // auto-saves it wholesale — the event must carry EVERY dictionary field
+      // we own (entries + fuzzy), or Settings' next save reverts the missing one.
+      window.dispatchEvent(
+        new CustomEvent('yap-dictionary-changed', { detail: { entries: cleaned, fuzzy } })
+      );
     } catch {
       /* best-effort */
     }
   }
 
+  function setFuzzy(on) {
+    fuzzy = on;
+    persist();
+  }
+
   function addEntry() {
-    dict = [...dict, { from: '', to: '' }];
+    dict = [...dict, { from: '', to: '', fuzzy: true }];
   }
   function removeEntry(i) {
     dict = dict.filter((_, j) => j !== i);
@@ -79,13 +92,23 @@
     <div class="dictcard">
       {#if dict.length > 0}
         <div class="dict-head">
-          <span>Heard</span><span></span><span>Replace with</span><span></span>
+          <span>Heard</span><span></span><span>Replace with</span><span></span><span></span>
         </div>
         {#each dict as entry, i (i)}
           <div class="dict-row">
             <input placeholder="Power to Keep" bind:value={entry.from} />
             <span class="arrow">→</span>
             <input placeholder="Parakeet" bind:value={entry.to} />
+            <button
+              class="fz"
+              class:on={entry.fuzzy ?? true}
+              class:dim={!fuzzy}
+              title={(entry.fuzzy ?? true)
+                ? 'Near-misses are corrected too — click for exact matches only (e.g. so “Jason” stops becoming “JSON”)'
+                : 'Exact matches only — click to also catch near-misses'}
+              aria-label="Toggle near-miss matching for this correction"
+              onclick={() => (entry.fuzzy = !(entry.fuzzy ?? true))}
+            >≈</button>
             <button class="rm" title="Remove" aria-label="Remove" onclick={() => removeEntry(i)}>×</button>
           </div>
         {/each}
@@ -93,6 +116,15 @@
         <div class="empty">No corrections yet.</div>
       {/if}
       <button class="add" onclick={addEntry}>+ Add correction</button>
+    </div>
+
+    <div class="fuzzycard">
+      <Toggle
+        label="Catch near-misses"
+        desc="Also fix words that ALMOST match a correction — “jaison” still becomes “JSON”. Uses spelling + sound-alike matching (same engine as Handy). The ≈ button on a row exempts that correction — handy when a near-miss is a real word (“Jason”). With a Whisper model the dictionary is fed straight into the recognizer instead."
+        checked={fuzzy}
+        onchange={setFuzzy}
+      />
     </div>
   </div>
 </div>
@@ -129,10 +161,17 @@
     background: var(--yap-s2);
     padding: 14px 16px;
   }
+  .fuzzycard {
+    margin-top: 14px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s2);
+    padding: 12px 16px;
+  }
   .dict-head,
   .dict-row {
     display: grid;
-    grid-template-columns: 1fr 14px 1fr 22px;
+    grid-template-columns: 1fr 14px 1fr 24px 22px;
     align-items: center;
     gap: 6px;
     padding: 3px 0;
@@ -160,6 +199,25 @@
   .arrow {
     color: var(--yap-muted-55);
     text-align: center;
+  }
+  .fz {
+    background: none;
+    border: 1px solid var(--yap-border);
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    color: var(--yap-muted-55);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .fz.on {
+    color: var(--yap-primary);
+    border-color: var(--yap-primary);
+  }
+  .fz.dim {
+    opacity: 0.35;
   }
   .rm {
     background: none;

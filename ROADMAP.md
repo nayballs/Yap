@@ -293,18 +293,32 @@ below (✅ = done).
 - [x] Custom **dictionary** (exact, case-insensitive) with a UI.
 - [x] **Parakeet** shipped as the fast/accurate default; Whisper large-v3 + others for
       accents/multilingual; **language selection + translate** per model.
-- [~] **Better custom-word correction** (catch near-misses) — see
-      [`docs/fuzzy-dictionary.md`](./docs/fuzzy-dictionary.md). Key finding: FluidVoice
-      has **no** fuzzy string matching (its dictionary is exact-replace like ours; its
-      "fuzziness" is acoustic ASR boosting in a non-portable Apple-Silicon lib). Plan:
-      (1) word-boundary + multi-trigger polish on the exact path; (2) ✅ **done** — feed
-      dictionary terms into the AI-cleanup prompt as bias context (OpenWhispr's
-      `dictionarySuffix`): `llm::dictionary_suffix` appends the user's exact spellings +
-      mis-hearing corrections to the cleanup system prompt, so the model uses the right
-      spelling up front instead of the post-pass find/replace being the only defense (the
-      mechanical `apply_dictionary` still runs after as a safety net); (3) optional per-entry
-      true fuzzy (Levenshtein/phonetic) with strict length/threshold guards; (4) ASR
-      `initial_prompt`/hotword biasing if `transcribe-rs` exposes a hook.
+- [x] **Better custom-word correction** (catch near-misses) — **shipped +
+      live-verified on the GPU build 2026-07-10** (dogfooding caught and fixed a
+      Settings-clobbers-the-toggle sync bug, and added a **per-entry ≈ opt-out**,
+      `entry.fuzzy`, for corrections whose near-misses are real words — e.g.
+      `json → JSON` eating the name "Jason"); see
+      [`docs/fuzzy-dictionary.md`](./docs/fuzzy-dictionary.md) for the full
+      competitive audit (FluidVoice: no fuzzy; OpenWhispr/Wispr Flow: ASR-bias +
+      auto-learn word lists, no post-hoc fuzzy; **Handy: both mechanisms — the
+      port source**). As built, Handy's exact split:
+      (1) ✅ word boundaries on the exact path (earlier); (2) ✅ dictionary terms
+      as AI-cleanup bias context (`llm::dictionary_suffix`); (3) ✅ **fuzzy
+      post-correction** (`fuzzy.rs` ← Handy `audio_toolkit/text.rs`): 1–3 word
+      n-grams, normalized Levenshtein + `natural`-crate Soundex boost (×0.3,
+      replicated exactly incl. its nonstandard first-char handling), 25% length
+      gate, threshold 0.18, ≥3-char terms, case/punctuation preserved; matches
+      both `from` and `to` spellings → replaces with `to`; ONNX models only;
+      `config.dictionary_fuzzy` toggle (default ON) in the Dictionary view. One
+      deliberate improvement over Handy: shortest-first n-gram choice where a
+      longer n-gram must strictly reduce absolute edit distance (their
+      longest-first greedy swallows an adjacent unrelated word — verified
+      against the real strsim/natural crates); (4) ✅ **Whisper `initial_prompt`
+      ASR biasing** (`config::dictionary_prompt` → `SttEngine::transcribe` at
+      all four call sites: dictation, partials, upload, meeting) with
+      OpenWhispr's dictionary-echo guard (`fuzzy::is_prompt_echo`, ≥3-word
+      dictionaries only). Unit-tested (18 new tests). Still open: multi-trigger
+      entries; OpenWhispr-style auto-learning from user edits.
 
 ### Phase 4 — App-aware formatting + light command mode
 - [x] **Per-app tone/format auto-switching** ("smart routing" — superwhisper

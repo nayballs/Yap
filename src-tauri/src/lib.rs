@@ -12,6 +12,7 @@ mod bridge;
 mod chats;
 mod commands;
 mod config;
+mod fuzzy;
 mod media;
 mod meeting;
 mod notes;
