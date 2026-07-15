@@ -1,6 +1,6 @@
 //! The floating "transcribing" overlay — a small capsule that appears at the
-//! bottom-center of the primary monitor while Yap is recording or processing,
-//! and hides when it returns to idle.
+//! bottom-center of the active monitor (the one holding the mouse cursor)
+//! while Yap is recording or processing, and hides when it returns to idle.
 //!
 //! Driven entirely by the `yap-state` listener in `lib.rs` (decoupled from the
 //! pipeline); this module just shows/hides + positions the `overlay` window.
@@ -22,6 +22,11 @@ mod win {
     pub const SWP_NOMOVE: u32 = 0x0002;
     pub const SWP_NOACTIVATE: u32 = 0x0010;
     pub const SWP_SHOWWINDOW: u32 = 0x0040;
+    #[repr(C)]
+    pub struct Point {
+        pub x: i32,
+        pub y: i32,
+    }
     #[link(name = "user32")]
     extern "system" {
         pub fn SetWindowPos(
@@ -33,6 +38,7 @@ mod win {
             cy: i32,
             flags: u32,
         ) -> i32;
+        pub fn GetCursorPos(point: *mut Point) -> i32;
     }
 }
 
@@ -66,11 +72,51 @@ pub fn force_topmost(window: &tauri::WebviewWindow) {
     }
 }
 
-/// Show the overlay, positioned at the bottom-center of the primary monitor.
+/// The current mouse cursor position in physical (virtual-screen) pixels.
+/// Tauri runs per-monitor DPI aware, so `GetCursorPos` returns coordinates in
+/// the same physical space as Tauri's monitor rects — directly comparable.
+#[cfg(target_os = "windows")]
+fn cursor_position() -> Option<(i32, i32)> {
+    let mut p = win::Point { x: 0, y: 0 };
+    (unsafe { win::GetCursorPos(&mut p) } != 0).then_some((p.x, p.y))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn cursor_position() -> Option<(i32, i32)> {
+    None
+}
+
+/// The monitor the user is working on: the one containing the mouse cursor
+/// (screen-aware, so the overlay follows you across monitors — same approach
+/// as Handy's `get_monitor_with_cursor` / OpenWhispr's
+/// `_repositionToCursorDisplay`). Falls back to the primary monitor.
+fn active_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
+    if let Some((cx, cy)) = cursor_position() {
+        if let Ok(monitors) = app.available_monitors() {
+            for monitor in monitors {
+                let pos = monitor.position();
+                let size = monitor.size();
+                if cx >= pos.x
+                    && cx < pos.x + size.width as i32
+                    && cy >= pos.y
+                    && cy < pos.y + size.height as i32
+                {
+                    return Some(monitor);
+                }
+            }
+        }
+    }
+    app.primary_monitor().ok().flatten()
+}
+
+/// Show the overlay, positioned at the bottom-center of the active monitor
+/// (the one holding the mouse cursor; primary monitor as fallback).
 ///
 /// Monitor position/size are physical pixels; we divide by the monitor's scale
 /// factor to get logical coordinates and set a `LogicalPosition`, which Tauri
-/// then maps correctly regardless of DPI.
+/// then maps correctly regardless of DPI (physical positions are converted
+/// with the scale of the monitor the window is *currently* on — wrong when
+/// moving cross-monitor).
 pub fn show_overlay(app: &AppHandle) {
     let Some(win) = app.get_webview_window("overlay") else {
         tracing::warn!("overlay window not found");
@@ -80,8 +126,8 @@ pub fn show_overlay(app: &AppHandle) {
     // "top" or "bottom" (default) from the saved config.
     let at_top = crate::config::load().overlay_position == "top";
 
-    match app.primary_monitor() {
-        Ok(Some(monitor)) => {
+    match active_monitor(app) {
+        Some(monitor) => {
             let scale = monitor.scale_factor();
             let mon_x = monitor.position().x as f64 / scale;
             let mon_y = monitor.position().y as f64 / scale;
@@ -97,7 +143,7 @@ pub fn show_overlay(app: &AppHandle) {
 
             let _ = win.set_position(Position::Logical(LogicalPosition { x, y }));
         }
-        _ => tracing::warn!("no primary monitor; showing overlay at its default position"),
+        None => tracing::warn!("no monitor found; showing overlay at its default position"),
     }
 
     let _ = win.show();

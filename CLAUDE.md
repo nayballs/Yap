@@ -242,7 +242,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   menu (model submenu w/ checkmark, Cancel while recording, Settings/Quit, Check for
   updates); left-click opens Settings.
 - **`overlay.rs`** — shows/positions the bottom (or top) center "transcribing" overlay
-  window on `yap-state`.
+  window on `yap-state`. **Screen-aware**: positions on the monitor holding the
+  mouse cursor (Win32 `GetCursorPos` vs Tauri monitor rects, both physical px;
+  Handy's `get_monitor_with_cursor` pattern), primary-monitor fallback.
 - **`input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
   `kb:ctrl+shift+VKEY` (modifier combo), `kb:165` (single right-side modifier, e.g.
   RightAlt — never suppressed, it's AltGr), `mods:ctrl+alt` (modifier-only chord) /
