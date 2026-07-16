@@ -200,10 +200,6 @@ pub struct YapConfig {
     /// Chime volume (0.0–1.0).
     #[serde(default = "default_audio_feedback_volume")]
     pub audio_feedback_volume: f32,
-    /// Show the floating bottom-center "transcribing" overlay while dictating.
-    #[serde(default = "default_true")]
-    pub show_overlay: bool,
-
     /// Transcription language. `"auto"` = auto-detect; otherwise a language code
     /// (e.g. "en", "fr"). Only applied by models that support language selection.
     #[serde(default = "default_selected_language")]
@@ -409,7 +405,6 @@ impl Default for YapConfig {
             show_tray_icon: true,
             autostart: false,
             audio_feedback_volume: default_audio_feedback_volume(),
-            show_overlay: true,
             selected_language: default_selected_language(),
             translate_to_english: false,
             model_unload_timeout: default_model_unload_timeout(),

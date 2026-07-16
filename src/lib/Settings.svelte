@@ -415,7 +415,6 @@
     audioFeedbackVolume: 1.0,
     soundEnabled: true,
     useGpu: true,
-    showOverlay: true,
     streamingPartials: true,
     historyEnabled: true,
     inputDevice: null,
@@ -1403,16 +1402,17 @@
             </Row>
           </Group>
 
-          <Group title="Appearance">
+          <Group title="Recording overlay">
             <Row>
               <Toggle
-                bind:checked={cfg.showOverlay}
-                label="Show transcribing overlay"
-                desc="The floating waveform while you dictate"
+                bind:checked={cfg.streamingPartials}
+                label="Live transcription preview"
+                desc="Show your words in the overlay as you speak"
+                hint="Preview only — the final result on stop is always authoritative."
               />
             </Row>
-            <Row label="Overlay position" desc="Where the transcribing overlay appears">
-              <Select bind:value={cfg.overlayPosition} options={OVERLAY_POSITIONS} disabled={!cfg.showOverlay} />
+            <Row label="Overlay position" desc="Where the overlay appears on screen">
+              <Select bind:value={cfg.overlayPosition} options={OVERLAY_POSITIONS} />
             </Row>
           </Group>
 
@@ -1426,14 +1426,6 @@
               {#snippet children()}
                 <div class="mm-wrap"><ModelManager /></div>
               {/snippet}
-            </Row>
-            <Row>
-              <Toggle
-                bind:checked={cfg.streamingPartials}
-                label="Live transcription preview"
-                desc="Show words in the overlay as you speak"
-                hint="Preview only — the final result on stop is always authoritative."
-              />
             </Row>
           </Group>
           <Group title="Language">

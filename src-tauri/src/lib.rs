@@ -399,19 +399,17 @@ pub fn run() {
 
             // Drive the bottom-center overlay from the pipeline's `yap-state`
             // event (decoupled from the pipeline itself). Show it while
-            // recording/processing if the user has the overlay enabled; hide it
-            // otherwise. State changes are infrequent, so re-reading the saved
-            // config here is fine.
+            // recording/processing and hide it otherwise. The overlay is always
+            // on — it's the hot-mic indicator; only the live-text preview
+            // inside it is user-toggleable (`streaming_partials`).
             let overlay_handle = handle.clone();
             handle.listen("yap-state", move |event| {
                 let state = event.payload().trim_matches('"'); // payload is a JSON string
                 let generation = STATE_GEN.fetch_add(1, Ordering::Relaxed) + 1;
                 // Show the overlay while recording/processing, and briefly on error.
-                let show = matches!(state, "recording" | "processing" | "error");
+                let show = matches!(state, "recording" | "processing" | "processing-slow" | "error");
                 if show {
-                    if config::load().show_overlay {
-                        overlay::show_overlay(&overlay_handle);
-                    }
+                    overlay::show_overlay(&overlay_handle);
                 } else {
                     overlay::hide_overlay(&overlay_handle);
                 }

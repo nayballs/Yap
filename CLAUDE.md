@@ -219,7 +219,7 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   UTC; powers the `get_groq_usage` command + `groq-usage` event.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
   volume, output_device, mute_while_recording, recording_mode,
-  show_overlay, overlay_position, dictionary, append_trailing_space, auto_submit(+key),
+  overlay_position, dictionary, append_trailing_space, auto_submit(+key),
   restore_clipboard, show_tray_icon, autostart, model_unload_timeout, selected_language,
   translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
   Notes/Slack/Code/Custom), the editable `pp_prompt` body, `pp_api_keys` (per-provider
@@ -395,8 +395,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   artifact on the tightly-fitted transparent WebView2 window).
 - **`lib/Settings.svelte`** — the settings surface, now rendered **inside the
   ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / System):
-  **General** (hotkey, recording mode, mic, sound+volume, mute, show overlay,
-  overlay position), **Speech-to-Text** (`ModelManager` + GPU +
+  **General** (hotkey, recording mode, mic, sound+volume, mute, recording-overlay
+  group: live-preview toggle + overlay position — the overlay itself is always on,
+  it's the hot-mic indicator), **Speech-to-Text** (`ModelManager` + GPU +
   language/translate), **Language Models** (OpenWhispr-style: enable toggle → mode
   selector Cloud Providers/Local/Self-Hosted → provider pill tabs (Groq/Anthropic/
   OpenAI/OpenRouter/Custom, brand icons) → API Key (masked + "Get your API key"
@@ -562,7 +563,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   `docs/local-api.md`).
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
-  recording mode `toggle`, overlay shown, live transcription preview **on**
+  recording mode `toggle`, overlay always shown while recording/transcribing (no
+  off switch — it's the hot-mic indicator), live transcription preview **on**
   (`streaming_partials`), AI cleanup **off**.
 
 ---
