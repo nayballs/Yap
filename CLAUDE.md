@@ -435,6 +435,12 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   is excluded so the window never un-hides on start-hidden launches (see lib.rs window-state
   plugin setup).
 - **onboarding**: 620×720 (min 520×560), hidden, hide-on-close.
+- settings + onboarding are **created unfocused** (`focus: false`): otherwise wry
+  `MoveFocus`es each new webview and the hidden windows grab the foreground at launch,
+  so typing (and a dictation's paste, which never targets Yap's own windows) can land
+  in an invisible window. A
+  side effect is that their first `show()` doesn't activate, so every open path must
+  `show()` + `set_focus()` (`commands::show_settings`/`show_onboarding` do).
 - **overlay**: 330×48, transparent, click-through, always-on-top, not focused, hidden
   until recording/processing.
 

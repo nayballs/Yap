@@ -8,6 +8,10 @@ use crate::AppState;
 
 /// Show the settings window (defined hidden in tauri.conf.json). Shared by the
 /// `open_settings` command and the tray menu.
+///
+/// The `set_focus` is load-bearing here and in `show_onboarding`: both windows
+/// are created unfocused (`"focus": false`) so launching Yap never pulls the
+/// foreground onto a hidden window, which makes their first `show()` inactive.
 pub fn show_settings(app: &AppHandle) -> Result<(), String> {
     let w = app
         .get_webview_window("settings")
