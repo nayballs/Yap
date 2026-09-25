@@ -340,7 +340,7 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
                         text,
                         ts,
                     };
-                    let _ = crate::notes::append_transcript(note_id, &[seg.clone()]);
+                    let _ = crate::notes::append_transcript(note_id, std::slice::from_ref(&seg));
                     let _ = app.emit("yap-meeting-segment", serde_json::json!(seg));
                 }
             }

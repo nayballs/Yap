@@ -93,7 +93,7 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
 pub fn list() -> Value {
     with_store(|s| {
         let mut sorted: Vec<&Conversation> = s.conversations.iter().collect();
-        sorted.sort_by(|a, b| b.updated_ts.cmp(&a.updated_ts));
+        sorted.sort_by_key(|c| std::cmp::Reverse(c.updated_ts));
         let items: Vec<Value> = sorted
             .into_iter()
             .map(|c| {

@@ -226,7 +226,7 @@ pub fn apply_fuzzy(text: &str, dict: &[DictionaryEntry]) -> String {
             }
             let ngram = build_ngram(&words[i..i + n]);
             if let Some((replacement, dist)) = find_best_match(&ngram, &candidates) {
-                if chosen.map_or(true, |(_, _, best)| dist < best) {
+                if chosen.is_none_or(|(_, _, best)| dist < best) {
                     chosen = Some((n, replacement, dist));
                 }
             }

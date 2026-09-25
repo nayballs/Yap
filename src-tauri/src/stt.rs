@@ -434,7 +434,7 @@ pub async fn ensure_model_exists(
 
     // Download to "<filename>.partial" (the partial holds the raw .bin or the
     // raw .tar.gz, depending on model kind).
-    let partial_path = models_dir.join(format!("{}.partial", &resolved.filename));
+    let partial_path = models_dir.join(format!("{}.partial", resolved.filename));
 
     tracing::info!(url = %url, dest = %partial_path.display(), model = %model_id, "Downloading model");
 

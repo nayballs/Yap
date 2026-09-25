@@ -91,6 +91,7 @@ fn dictionary_suffix(dictionary: &[crate::config::DictionaryEntry]) -> String {
 /// Returns the cleaned text on success, or an `Err` message on any failure
 /// (network, non-200, parse, empty response). The caller is expected to fall
 /// back to the raw transcript on `Err`.
+#[allow(clippy::too_many_arguments)]
 pub async fn cleanup(
     text: &str,
     base_url: &str,
@@ -191,6 +192,7 @@ pub const NOTE_DEFAULT_FRAGMENT: &str = "Transform the provided content into cle
 /// semantics): system = NOTE_BASE_PROMPT + the editable fragment, user = the
 /// raw note content, temperature 0.3. Returns enhanced markdown for
 /// `enhanced_content` — the raw note is never touched.
+#[allow(clippy::too_many_arguments)]
 pub async fn enhance_note(
     content: &str,
     fragment: &str,
@@ -232,6 +234,7 @@ pub async fn enhance_note(
 /// One embedded note-chat turn (OpenWhispr `useEmbeddedChat`): system = the
 /// Chat scope's prompt + the note injected as context, then a short history
 /// and the user's question. Returns the assistant's answer.
+#[allow(clippy::too_many_arguments)]
 pub async fn note_chat(
     system: &str,
     history: &[(String, String)],
@@ -276,6 +279,7 @@ pub async fn note_chat(
 /// user had selected). If `selection` is empty, this is "write mode" — generate
 /// new text from the instruction alone. Returns the rewritten text, or an `Err`
 /// the caller can fall back from.
+#[allow(clippy::too_many_arguments)]
 pub async fn rewrite(
     instruction: &str,
     selection: &str,

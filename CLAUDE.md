@@ -484,10 +484,14 @@ npm run tauri dev
 
 ### CI on every push
 `.github/workflows/ci.yml` runs on every push/PR to `main`: `npm run build` (frontend,
-also produces the `dist/` that `generate_context!` needs) + `cargo check --locked` on
-the fast **stub** build (no `engines`, no Vulkan SDK) — a few minutes on a Windows
-runner, so a broken commit can never reach a nightly. The real GPU pipeline is only
-exercised by nightly/release builds.
+also produces the `dist/` that `generate_context!` needs) + `cargo clippy --locked --
+-D warnings` on the fast **stub** build (no `engines`, no Vulkan SDK) — a few minutes
+on a Windows runner, so a broken commit can never reach a nightly. The real GPU
+pipeline is only exercised by nightly/release builds. ⚠ Zero-warnings ratchet: any
+warning or clippy lint fails the push, and the runner uses the **latest stable**
+toolchain, whose clippy can flag lints an older local one doesn't — keep local
+Rust current (`rustup update`) or read the CI log. (It sat red Jul 9 → Sep 25 2026
+on accumulated lints, masking real failures.)
 
 ### The dev → nightly → stable workflow
 1. **Iterate in dev** (`scripts\dev.bat`): Vite hot-reloads `src/` edits instantly;

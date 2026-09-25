@@ -1,5 +1,5 @@
 //! The chat tool-calling agent loop — OpenWhispr's `services/tools/*` registry
-//! + client-side loop, ported to Rust over the OpenAI tool-calling protocol
+//! and client-side loop, ported to Rust over the OpenAI tool-calling protocol
 //! (ROADMAP "AI Chat over your notes" step 2).
 //!
 //! Six tools (their schemas/descriptions kept near-verbatim; `search_notes`'
@@ -177,7 +177,7 @@ pub fn search_notes(query: &str, limit: usize) -> Vec<(usize, crate::notes::Note
             (score > 0).then_some((score, n))
         })
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
     scored.truncate(limit);
     scored
 }

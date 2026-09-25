@@ -341,7 +341,7 @@ pub fn content_hash(content: &str) -> String {
 pub fn list() -> Value {
     with_notes(|notes| {
         let mut sorted: Vec<&Note> = notes.iter().collect();
-        sorted.sort_by(|a, b| b.updated_ts.cmp(&a.updated_ts));
+        sorted.sort_by_key(|n| std::cmp::Reverse(n.updated_ts));
         let items: Vec<Value> = sorted
             .into_iter()
             .map(|n| {

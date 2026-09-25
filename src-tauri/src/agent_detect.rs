@@ -7,6 +7,7 @@
 //!   3. fuzzy Levenshtein match on single words AND adjacent joins, with the
 //!      edit budget scaled by name length (≤4 chars: exact only; 5–6: 1 edit;
 //!      7+: 2 edits) so short names can't false-positive.
+//!
 //! This is why saving an agent name also adds it to the correction dictionary.
 
 /// Classic two-row Levenshtein distance (same shape as the TS original).
