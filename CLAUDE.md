@@ -104,6 +104,11 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   before the webview is ready), drives the **overlay** and **tray** off `yap-state`,
   builds the tray (always — it's the only persistent surface), and reconciles
   autostart. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
+  Gives the hidden settings/onboarding webviews a one-shot **DWM-cloaked** show+hide
+  at startup (`init_hidden_webview` — WebView2 created-hidden workaround). ⚠ Never
+  swap the cloak for "park off-screen, show+hide, move back": DWM's close animation
+  follows the window back on-screen — that flashed the "Welcome to Yap" window on
+  every launch until 2026-09-25.
 - **`pipeline.rs`** — the heart. Owns the mic stream + shared state (`recording`,
   audio `buffer`, idle `preroll` ring, warm STT `engine`, live `config`,
   `last_activity`, `target_hwnd`). Audio callback buffers while recording,

@@ -159,6 +159,65 @@ fn init_logging() {
     }));
 }
 
+#[cfg(target_os = "windows")]
+mod dwm {
+    use std::ffi::c_void;
+    pub const DWMWA_TRANSITIONS_FORCEDISABLED: u32 = 3;
+    pub const DWMWA_CLOAK: u32 = 13;
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: *mut c_void,
+            attribute: u32,
+            value: *const c_void,
+            size: u32,
+        ) -> i32;
+        pub fn DwmFlush() -> i32;
+    }
+
+    /// Set a BOOL-valued DWM window attribute (best-effort).
+    pub fn set_flag(hwnd: *mut c_void, attribute: u32, on: bool) {
+        let value: i32 = on.into();
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                attribute,
+                &value as *const i32 as *const c_void,
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
+    }
+}
+
+/// One-shot show+hide of a still-hidden webview window so WebView2 finishes
+/// initializing while VISIBLE (see the call site in `setup`), without anything
+/// reaching the screen: the window is DWM-cloaked (composed, never drawn) with
+/// its open/close animations disabled for the round-trip.
+///
+/// The previous version parked the window at (-32000,-32000) and moved it back
+/// straight after, which flashed a blank "Welcome to Yap" window on every
+/// launch — `hide()` starts DWM's ~200 ms close animation, and that animation
+/// followed the window back to its real on-screen position. (Parking also
+/// leaked -32000 into the window-state plugin's saved position.)
+#[cfg(target_os = "windows")]
+fn init_hidden_webview(window: &tauri::WebviewWindow) {
+    // Already on screen (dev builds show Settings at launch): it initialized
+    // visible anyway, and a show+hide here would just hide it again.
+    if window.is_visible().unwrap_or(false) {
+        return;
+    }
+    let Ok(hwnd) = window.hwnd() else { return };
+    dwm::set_flag(hwnd.0, dwm::DWMWA_CLOAK, true);
+    dwm::set_flag(hwnd.0, dwm::DWMWA_TRANSITIONS_FORCEDISABLED, true);
+    let _ = window.show();
+    let _ = window.hide();
+    // Let DWM process the hide (one composition pass) while the window is
+    // still cloaked, then restore normal behaviour for real opens.
+    unsafe { dwm::DwmFlush() };
+    dwm::set_flag(hwnd.0, dwm::DWMWA_TRANSITIONS_FORCEDISABLED, false);
+    dwm::set_flag(hwnd.0, dwm::DWMWA_CLOAK, false);
+}
+
 pub fn run() {
     // Decide portable-vs-installed once, before anything reads the data dir
     // (the file log lives under it).
@@ -481,20 +540,13 @@ pub fn run() {
             // up permanently broken — most relevantly the Rust→JS event/eval
             // delivery channel (same created-hidden bug family as
             // tauri-apps/tauri#3654 and wry#1639; drag-drop got fixed in
-            // wry#1638, the rest of the surface was never audited). One-shot
-            // show+hide, parked off-screen so nothing flashes, forces those
-            // windows to finish initialization while VISIBLE.
+            // wry#1638, the rest of the surface was never audited). A one-shot,
+            // DWM-cloaked show+hide forces those windows to finish
+            // initialization while VISIBLE without anything flashing on screen.
+            #[cfg(target_os = "windows")]
             for label in ["onboarding", "settings"] {
                 if let Some(w) = app.get_webview_window(label) {
-                    let orig = w.outer_position().ok();
-                    let _ = w.set_position(tauri::PhysicalPosition::new(-32000, -32000));
-                    let _ = w.show();
-                    let _ = w.hide();
-                    if let Some(p) = orig {
-                        let _ = w.set_position(p);
-                    } else {
-                        let _ = w.center();
-                    }
+                    init_hidden_webview(&w);
                 }
             }
 
