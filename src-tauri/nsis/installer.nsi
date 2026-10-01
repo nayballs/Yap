@@ -3,11 +3,13 @@
 ; tauri-apps/tauri@tauri-v2.9.1 crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi
 ; Yap currently builds against Tauri 2.11.3 — the bundled handlebars template
 ; is stable across these versions; the only Yap-specific edits are the
-; portable magic string ("Yap Portable Mode") and the comments.
-; Portable changes are marked with "; --- PORTABLE MODE ---" comments.
+; portable magic string ("Yap Portable Mode"), the comments, and the
+; uninstaller's "Delete app data" removing Yap's own data dirs.
+; Portable changes are marked with "; --- PORTABLE MODE ---" comments, the
+; data-dir removal with "; --- YAP DATA ---".
 ;
 ; When upgrading Tauri, diff this file against the new upstream template and
-; merge changes while preserving the portable sections.
+; merge changes while preserving the portable and YAP DATA sections.
 
 Unicode true
 ManifestDPIAware true
@@ -982,6 +984,27 @@ Section Uninstall
     SetShellVarContext current
     RmDir /r "$APPDATA\${BUNDLEID}"
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+
+    ; --- YAP DATA --- The bundle-id dirs above only hold Tauri's window-state
+    ; file and the WebView2 cache. Yap's real data lives elsewhere (per-user,
+    ; hence the `current` context above): config.rs data_dir() = %APPDATA%\yap
+    ; (config, history, notes, chats, logs, multi-GB models\ + llm\), and
+    ; bridge.rs writes the local-API discovery file to %USERPROFILE%\.yap.
+    ; The literal subfolder names + empty checks mean neither path can ever
+    ; collapse to $APPDATA / $PROFILE itself or a drive root.
+    ; Portable installs keep data in <exe dir>\Data and get no uninstaller, but
+    ; an install written over another type's folder leaves this uninstaller
+    ; next to a `portable` marker; that folder's app runs portable, so any
+    ; %APPDATA%\yap belongs to a different (normal) install: leave it alone.
+    ; ~\.yap is shared by every install but only holds a runtime file that is
+    ; stale here (CheckIfAppIsRunning killed every running instance above).
+    ${If} $APPDATA != ""
+    ${AndIfNot} ${FileExists} "$INSTDIR\portable"
+      RmDir /r "$APPDATA\yap"
+    ${EndIf}
+    ${If} $PROFILE != ""
+      RmDir /r "$PROFILE\.yap"
+    ${EndIf}
   ${EndIf}
 
   !ifmacrodef NSIS_HOOK_POSTUNINSTALL
