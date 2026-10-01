@@ -17,6 +17,7 @@
   import { toast } from './ui/toast.svelte.js';
   import Settings from './Settings.svelte';
   import { attention } from './attention.svelte.js';
+  import { account, displayName, initAccount, initials } from './account.svelte.js';
   import HomeView from './HomeView.svelte';
   import InsightsView from './InsightsView.svelte';
   import DictionaryView from './DictionaryView.svelte';
@@ -26,6 +27,11 @@
   import IntegrationsView from './IntegrationsView.svelte';
 
   let activeView = $state('home');
+
+  // Sidebar account button: who's signed in (auth.rs via account.svelte.js).
+  initAccount();
+  let acctUser = $derived(account.status?.signedIn ? account.status.user : null);
+  let acctImgFailed = $state(false);
   let settingsOpen = $state(false);
   let bellOpen = $state(false);
 
@@ -200,13 +206,24 @@
 
       <div class="rule"></div>
 
-      <button class="acct" onclick={() => openSettings('account')}>
+      <button class="acct" class:signed={!!acctUser} onclick={() => openSettings('account')}>
         <span class="acct-avatar">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.2" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>
+          {#if acctUser?.image && !acctImgFailed}
+            <img src={acctUser.image} alt="" referrerpolicy="no-referrer" onerror={() => (acctImgFailed = true)} />
+          {:else if acctUser}
+            <span class="acct-ini">{initials(acctUser)}</span>
+          {:else}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.2" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>
+          {/if}
         </span>
         <span class="acct-who">
-          <span class="l1">Sign in</span>
-          <span class="l2">Optional · works offline</span>
+          {#if acctUser}
+            <span class="l1">{displayName(acctUser)}</span>
+            <span class="l2">{acctUser.name?.trim() ? acctUser.email : 'Yap account'}</span>
+          {:else}
+            <span class="l1">Sign in</span>
+            <span class="l2">Optional · works offline</span>
+          {/if}
         </span>
       </button>
     </div>
@@ -540,6 +557,27 @@
   .acct-avatar svg {
     width: 14px;
     height: 14px;
+  }
+  .acct.signed .acct-avatar {
+    border: none;
+    background: var(--yap-primary-tint);
+    overflow: hidden;
+  }
+  .acct-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .acct-ini {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--yap-primary-hover);
+  }
+  .acct-who .l1,
+  .acct-who .l2 {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .acct-who {
     display: flex;

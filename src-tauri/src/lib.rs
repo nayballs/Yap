@@ -8,6 +8,7 @@
 //! from Voice Mirror; everything else here is the slim glue.
 
 mod agent_detect;
+mod auth;
 mod bridge;
 mod chats;
 mod commands;
@@ -247,6 +248,9 @@ pub fn run() {
     }));
 
     builder
+        // Yap accounts: com.contextmirror.yap:// sign-in links (auth.rs). Must
+        // come after single-instance, which forwards links from a second launch.
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -343,6 +347,14 @@ pub fn run() {
             commands::chat_delete,
             commands::chat_send,
             commands::bridge_status,
+            auth::auth_status,
+            auth::auth_start,
+            auth::auth_cancel,
+            auth::auth_submit_code,
+            auth::auth_email_send,
+            auth::auth_email_verify,
+            auth::auth_sign_out,
+            auth::auth_delete_account,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -392,6 +404,9 @@ pub fn run() {
 
             // Local API bridge (Integrations): loopback server for CLIs/agents.
             bridge::sync(&handle, cfg.bridge_enabled);
+
+            // Yap accounts: sign-in deep links + restore the stored session.
+            auth::init(&handle);
 
             // Make the overlay click-through + topmost so it floats above the
             // focused window without ever stealing the cursor.

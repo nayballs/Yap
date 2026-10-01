@@ -15,7 +15,11 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-single-instance = "2"
+# `deep-link` forwards a com.contextmirror.yap:// sign-in link that launched a
+# second process into the running instance (auth.rs). Held on 2.4.x with
+# deep-link below: 2.5+ needs tauri 2.12.
+tauri-plugin-single-instance = { version = "~2.4.2", features = ["deep-link"] }
+tauri-plugin-deep-link = "~2.4.10"
 tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
@@ -51,6 +55,10 @@ arboard = "3"
 tiny_http = "0.12"
 getrandom = "0.3"
 
+# Yap accounts (auth.rs): base64/url decode the browser handoff code.
+base64 = "0.22"
+url = "2"
+
 # Model download + directory-model extract/verify (used by stt.rs)
 reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"
@@ -73,6 +81,10 @@ tauri-plugin-process = "2"
 # in (0.61.x) so there's no duplicate copy of the crate.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints"] }
+# Yap accounts: the session token lives in Windows Credential Manager. The
+# keyring crate's own docs steer apps to keyring-core + the one store they use.
+keyring-core = "1"
+windows-native-keyring-store = "1"
 
 [features]
 # Default has NO transcribe-rs so plain `cargo check` compiles the stub (fast).

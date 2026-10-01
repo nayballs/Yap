@@ -84,6 +84,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["com.contextmirror.yap"]
+      }
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDczNDM0OTRGRkJGOTEzMkIKUldRckUvbjdUMGxEYzU3WUVWcm53MnRYL1hyQVBLTHdpcVhxZmplbU91bFJsbkpiS09ReEE3aUQK",
       "endpoints": [

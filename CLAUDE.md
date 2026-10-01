@@ -54,6 +54,13 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
   so the window never un-hides on start-hidden launches).
 - **External links:** `tauri-plugin-opener` (opens URLs in the default browser).
 - **Dialogs:** `tauri-plugin-dialog` (file open/save dialogs for note export and upload).
+- **Accounts (optional):** `cloud/` is the sign-in server — [Better Auth](https://better-auth.com)
+  on a Cloudflare Worker + D1 at `auth.contextmirror.com` (see `cloud/README.md`). Yap's side
+  is `auth.rs`: system-browser OAuth (Google/Microsoft/GitHub, RFC 8252 + PKCE) handed back via
+  `tauri-plugin-deep-link` (`com.contextmirror.yap://`), a loopback listener or a pasted code,
+  plus in-app email codes; the session token lives in Windows Credential Manager
+  (`keyring-core` + `windows-native-keyring-store`). Deep-link/single-instance are held on 2.4.x
+  (2.5+ needs tauri 2.12).
 - **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`,
   `history.json`, `notes.json` — the AI Notepad store, `chats.json` — AI Chat
   conversations). Every JSON store writes atomically and quarantines a corrupt
@@ -214,6 +221,24 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   constant-time compare); note mutations emit `yap-notes-changed` so NotesView
   refreshes live. Toggled by `config.bridge_enabled` (default on; `sync()`
   runs at setup + every config save). See `docs/local-api.md`.
+- **`auth.rs`** — Yap accounts (optional; nothing in dictation depends on it).
+  Email codes: `auth_email_send`/`auth_email_verify` call the account service
+  directly. Google/Microsoft/GitHub: `auth_start` opens the system browser on
+  the server's `/api/auth/electron/init-oauth-proxy` with a PKCE challenge +
+  `state`; the account page hands back a one-time code by **deep link**
+  (installed builds — `is_registered` must point at *this* exe), a one-shot
+  **loopback** listener (dev/portable — the port rides at the end of `state`
+  as `-<port>`), or **paste** (`auth_submit_code`); `redeem` swaps it for a
+  session at `/electron/token`. The token (+ a profile copy) is stored in
+  Windows Credential Manager (`yap-account.com.yap.dictation`, **Local**
+  persistence — never config.json, logs or the webview). Startup + every 24 h
+  `refresh` re-validates via `get-session` (server says no → signed out;
+  unreachable → keep, flagged `offline`). `auth_sign_out` revokes best-effort
+  then forgets locally; `auth_delete_account` returns `"reauth"` when the
+  server wants a fresh sign-in (sessions > 1 day old). Emits
+  `yap-auth-changed` (status snapshot) and `yap-auth-error`. Debug builds talk
+  to `http://localhost:8787` (`cloud/`'s `wrangler dev`); `YAP_AUTH_URL`
+  overrides any build.
 - **`history.rs`** — local-only transcription history (`history.json`): each
   dictation's timestamp, raw + final text, model, and focused app. Best-effort,
   gated by `history_enabled`. Derives the stats dashboard (words, time-saved vs
@@ -415,7 +440,17 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   body + Save/Reset) / Test tabs. Plus usage meter + profiles w/ per-profile
   model override + per-app rules), **History** (stats
   dashboard + recent list + enable/clear), **Advanced** (output toggles, system,
-  dictionary), **About** (version, updates).
+  dictionary), **About** (version, updates), and **Account** (bottom of the
+  sidebar — `AccountSection.svelte`).
+- **`lib/AccountSection.svelte` / `account.svelte.js`** — Settings → Account:
+  Continue with Google/Microsoft/GitHub, "Email me a code" → 6-digit entry
+  (auto-submits), a waiting state with paste-the-code fallback, then the
+  profile (avatar or initials, linked providers), sign-out and delete-account
+  (with an in-place "Confirm it's you" re-sign-in when the server asks; it
+  only deletes if the same account signs back in). `account.svelte.js` is the
+  shared runes store (`auth_status` + `yap-auth-changed`) that also drives the
+  "signed in as" buttons at the bottom of both sidebars (ControlPanel +
+  Settings) and toasts background sign-in results.
 - **`lib/ModelManager.svelte` / `ModelRow.svelte` / `models.js`** — the 14-model
   browser, OpenWhispr-style: vendor pill tabs (All/NVIDIA/OpenAI/Community via
   `ui/PillTabs.svelte`) + compact one-line rows (status dot, brand icon from
@@ -445,6 +480,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   `show()` + `set_focus()` (`commands::show_settings`/`show_onboarding` do).
 - **overlay**: 330×48, transparent, click-through, always-on-top, not focused, hidden
   until recording/processing.
+- `plugins.deep-link.desktop.schemes = ["com.contextmirror.yap"]` — the NSIS
+  template registers it for normal installs (portable skips it) and
+  single-instance forwards a second launch's link to the running app.
 
 ---
 
@@ -479,6 +517,11 @@ npm run tauri dev -- --features engines
 # stub (fast, no transcription)
 npm run tauri dev
 ```
+
+Accounts: debug builds sign in against a local copy of the account server —
+`cd cloud && npm run dev` (wrangler dev on :8787; email codes print to its
+console; `npm run mock:microsoft` stands in for a social provider). See
+`cloud/README.md`.
 
 > ⚠️ A *compiled release build* bakes the frontend into the binary — editing `src/`
 > and restarting that `.exe` changes nothing. For live frontend changes use dev
@@ -578,6 +621,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 - Local API bridge discovery: `~/.yap/cli-bridge.json` (fixed path, NOT the
   data dir; written while the app runs, deleted on exit — see `bridge.rs` +
   `docs/local-api.md`).
+- Account session: a Windows Credential Manager generic credential
+  (`yap-account.com.yap.dictation`, Local persistence), not a file — see `auth.rs`.
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
   recording mode `toggle`, overlay always shown while recording/transcribing (no
@@ -608,7 +653,11 @@ auto-generated Meeting Notes action), and an **AI Chat** surface (`chats.rs` + e
 keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six tools,
 ≤20-step loop, gated to cloud or ≥4B local models). Every JSON store now writes
 atomically with corrupt-file quarantine. The default (no-feature) build still ships
-the stub for fast `cargo check`.
+the stub for fast `cargo check`. **Optional accounts** (`auth.rs` + `cloud/`): email
+codes and Google/Microsoft/GitHub sign-in, sign-out, delete-account — built and
+tested end to end locally (2026-10-01, against `wrangler dev` + a mock provider);
+the production service (Cloudflare DNS for contextmirror.com, D1, OAuth apps,
+Resend) isn't live yet, so release builds report the service as unreachable.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation

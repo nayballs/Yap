@@ -29,6 +29,8 @@
   import HotkeyInput from './ui/HotkeyInput.svelte';
   import { modelStore } from './modelStore.svelte.js';
   import { attention, attentionCount } from './attention.svelte.js';
+  import AccountSection from './AccountSection.svelte';
+  import { account, displayName, initAccount, initials } from './account.svelte.js';
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
   // (OpenWhispr SettingsModal-style) instead of filling the window. The parent
@@ -44,6 +46,10 @@
   let recording = $state(false); // hotkey-recorder active
   let saved = $state(false);
   let section = $state('general'); // general | models | advanced | about
+  // Sidebar account button (account state lives in account.svelte.js).
+  initAccount();
+  let acctUser = $derived(account.status?.signedIn ? account.status.user : null);
+  let acctImgFailed = $state(false);
   // Language/translate capability of the active model (drives Models section).
   let langInfo = $state({ supportsLanguage: false, supportsTranslate: false, languages: [] });
 
@@ -1316,15 +1322,26 @@
 
     <div class="side-spacer"></div>
     <div class="acct-rule"></div>
-    <button class="acct" class:active={section === 'account'} onclick={() => (section = 'account')}>
+    <button class="acct" class:active={section === 'account'} class:signed={!!acctUser} onclick={() => (section = 'account')}>
       <span class="acct-avatar">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="8" r="3.2" /><path d="M5 20a7 7 0 0 1 14 0" />
-        </svg>
+        {#if acctUser?.image && !acctImgFailed}
+          <img src={acctUser.image} alt="" referrerpolicy="no-referrer" onerror={() => (acctImgFailed = true)} />
+        {:else if acctUser}
+          <span class="acct-ini">{initials(acctUser)}</span>
+        {:else}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="8" r="3.2" /><path d="M5 20a7 7 0 0 1 14 0" />
+          </svg>
+        {/if}
       </span>
       <span class="acct-who">
-        <span class="l1">Sign in</span>
-        <span class="l2">Optional · works offline</span>
+        {#if acctUser}
+          <span class="l1">{displayName(acctUser)}</span>
+          <span class="l2">{acctUser.name?.trim() ? acctUser.email : 'Yap account'}</span>
+        {:else}
+          <span class="l1">Sign in</span>
+          <span class="l2">Optional · works offline</span>
+        {/if}
       </span>
     </button>
   </nav>
@@ -2144,51 +2161,9 @@
         {:else if section === 'account'}
           <div class="page-h">
             <h1>Account</h1>
-            <p>Yap needs no account — dictation works fully offline. Sign in only if you want the optional hosted extras.</p>
+            <p>Optional. Yap works fully offline without an account; sign in only for the extras that need one.</p>
           </div>
-
-          <div class="acct-hero">
-            <span class="acct-badge">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="12" cy="8" r="3.4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
-              </svg>
-            </span>
-            <div class="acct-hero-body">
-              <h3>Sign in to Yap</h3>
-              <p>
-                Unlocks optional hosted AI cleanup (a stronger cloud model) and settings sync across
-                machines. Everything else — transcription, local cleanup, history — stays on your
-                machine, signed in or not.
-              </p>
-              <div class="acct-cta">
-                <button class="google-btn" type="button" disabled aria-disabled="true">
-                  <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z" />
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z" />
-                    <path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z" />
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z" />
-                  </svg>
-                  Continue with Google
-                </button>
-                <span class="soon">Coming soon</span>
-              </div>
-              <div class="acct-privacy">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7z" /><path d="M9 12l2 2 4-4" />
-                </svg>
-                Your voice and transcripts never leave your PC. Sign-in is only for the hosted extras.
-              </div>
-            </div>
-          </div>
-
-          <Group title="What sign-in would add">
-            <Row label="Hosted Pro cleanup" desc="A stronger cloud cleanup model when you want it — local stays the default">
-              {#snippet children()}<span class="soon-tag">Planned</span>{/snippet}
-            </Row>
-            <Row label="Settings sync" desc="Carry your config & dictionary across your machines">
-              {#snippet children()}<span class="soon-tag">Planned</span>{/snippet}
-            </Row>
-          </Group>
+          <AccountSection />
         {/if}
       </div>
 
@@ -2397,6 +2372,25 @@
   .acct.active {
     border-style: solid;
     background: var(--yap-raised-soft);
+  }
+  .acct.signed {
+    border-style: solid;
+    border-color: var(--yap-border-subtle);
+  }
+  .acct-avatar img {
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    object-fit: cover;
+  }
+  .acct-ini {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--yap-primary-hover);
+  }
+  .acct.signed .acct-avatar {
+    background: var(--yap-primary-tint);
+    overflow: hidden;
   }
   .acct-avatar {
     width: 30px;
@@ -3310,95 +3304,5 @@
   .loading {
     color: var(--yap-muted-55);
     padding: 20px;
-  }
-
-  /* ---- Account section (UI only) ---- */
-  .acct-hero {
-    display: flex;
-    gap: 18px;
-    align-items: flex-start;
-    padding: 22px;
-    margin-bottom: 22px;
-    border: 1px solid var(--yap-primary-line);
-    border-radius: var(--yap-r-lg);
-    background: linear-gradient(180deg, var(--yap-primary-wash), var(--yap-s2));
-  }
-  .acct-badge {
-    width: 46px;
-    height: 46px;
-    flex: 0 0 46px;
-    border-radius: 12px;
-    background: var(--yap-primary-tint);
-    color: var(--yap-primary);
-    display: grid;
-    place-items: center;
-  }
-  .acct-badge :global(svg) {
-    width: 24px;
-    height: 24px;
-  }
-  .acct-hero-body h3 {
-    margin: 0 0 4px;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--yap-fg);
-  }
-  .acct-hero-body p {
-    margin: 0 0 14px;
-    font-size: 12.5px;
-    color: var(--yap-muted-70);
-    line-height: 1.55;
-    max-width: 52ch;
-  }
-  .acct-cta {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .google-btn {
-    height: 38px;
-    padding: 0 16px;
-    border-radius: var(--yap-r);
-    font: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    background: #fff;
-    color: #202124;
-    border: 1px solid var(--yap-border);
-    cursor: default;
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    opacity: 0.92;
-  }
-  .soon {
-    font-size: 11.5px;
-    font-weight: 600;
-    color: var(--yap-muted);
-    background: var(--yap-raised);
-    padding: 3px 9px;
-    border-radius: var(--yap-r-full);
-  }
-  .acct-privacy {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 14px;
-    font-size: 11.5px;
-    color: var(--yap-muted-55);
-  }
-  .acct-privacy :global(svg) {
-    width: 13px;
-    height: 13px;
-    color: var(--yap-success);
-    flex: 0 0 13px;
-  }
-  .soon-tag {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--yap-muted);
-    background: var(--yap-raised);
-    padding: 2px 9px;
-    border-radius: var(--yap-r-sm);
   }
 </style>
