@@ -21,18 +21,18 @@ const isLocalDev = new URL(env.BETTER_AUTH_URL).hostname === "localhost";
 const microsoftEmailVerified = (claims: Record<string, unknown>) =>
   [true, 1, "1", "true"].includes(claims.xms_edov as never);
 
-// Each provider switches on only once its keys are configured, so local dev
+// Each provider switches on only once its id and secret are both set, so local dev
 // runs with email codes alone. `select_account` lets people with several
 // accounts (personal + work) pick one instead of being signed in silently.
 const socialProviders = {
-  ...(env.GOOGLE_CLIENT_ID && {
+  ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && {
     google: {
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,
       prompt: "select_account" as const,
     },
   }),
-  ...(env.MICROSOFT_CLIENT_ID && {
+  ...(env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET && {
     microsoft: {
       clientId: env.MICROSOFT_CLIENT_ID,
       clientSecret: env.MICROSOFT_CLIENT_SECRET,
@@ -48,7 +48,7 @@ const socialProviders = {
       ...(isLocalDev && env.DEV_MICROSOFT_AUTHORITY && { authority: env.DEV_MICROSOFT_AUTHORITY }),
     },
   }),
-  ...(env.GITHUB_CLIENT_ID && {
+  ...(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET && {
     github: {
       clientId: env.GITHUB_CLIENT_ID,
       clientSecret: env.GITHUB_CLIENT_SECRET,

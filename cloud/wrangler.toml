@@ -16,6 +16,9 @@ preview_urls = false
 [vars]
 BETTER_AUTH_URL = "https://auth.contextmirror.com"
 EMAIL_FROM = "Yap <no-reply@mail.contextmirror.com>"
+# OAuth client ids are public (they appear in every sign-in URL); their
+# secrets are Worker secrets. A provider switches on when both are set.
+GITHUB_CLIENT_ID = "Ov23li7Hi7DTY8mtHKPR"   # github.com/settings/applications/3897989
 
 [[d1_databases]]
 binding = "DB"
