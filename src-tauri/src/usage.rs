@@ -28,12 +28,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-/// Free-tier daily token cap (llama-3.1-8b-instant default). Not API-reported —
-/// shown to the user as an estimate.
-pub const GROQ_FREE_TOKEN_CAP: u64 = 500_000;
+/// Free-tier daily token cap (Groq free plan for the default openai/gpt-oss-20b,
+/// same for 120b: 200K tokens/day). Not API-reported — shown to the user as an
+/// estimate.
+pub const GROQ_FREE_TOKEN_CAP: u64 = 200_000;
 
-/// Fallback daily request cap used until Groq's header reports the real one.
-const DEFAULT_REQUEST_CAP: u64 = 14_400;
+/// Fallback daily request cap used until Groq's header reports the real one
+/// (free plan: 1K requests/day for the gpt-oss models).
+const DEFAULT_REQUEST_CAP: u64 = 1_000;
 
 /// Per-provider daily counts (tokens summed from responses, calls counted
 /// locally). Keyed by the provider id ("ondevice", "groq", "openai", …) so the

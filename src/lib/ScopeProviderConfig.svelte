@@ -13,6 +13,7 @@
   import { PP_CLOUD_MODELS, modelThinks } from './ppModels.js';
   import { PROVIDER_ICONS } from './providerIcons.js';
   import { createExternalLinkHandler } from './externalLinks.js';
+  import { untrack } from 'svelte';
 
   // `cfg` is the global Settings config: standard cloud providers share ONE
   // API key per provider across every scope (OpenWhispr keeps openai_api_key
@@ -51,10 +52,15 @@
     custom: 'the model id your endpoint expects',
   };
 
+  // UI state seeded ONCE from the scope (untracked on purpose): Settings mounts
+  // one instance per scope tab inside {#key llmScope}, so `scope` is fixed for
+  // this component's lifetime and the handlers below keep the two in sync.
   let mode = $state(
-    scope.provider === 'ondevice' ? 'ondevice' : scope.provider === 'local' ? 'selfhosted' : 'cloud'
+    untrack(() =>
+      scope.provider === 'ondevice' ? 'ondevice' : scope.provider === 'local' ? 'selfhosted' : 'cloud'
+    )
   );
-  let cloudProvider = $state(CLOUD_IDS.includes(scope.provider) ? scope.provider : 'groq');
+  let cloudProvider = $state(untrack(() => (CLOUD_IDS.includes(scope.provider) ? scope.provider : 'groq')));
   let keyEditing = $state(false);
 
   // Standard cloud providers (everything but custom/local) share the global
@@ -79,10 +85,12 @@
   // Adopt the shared key on mount: a scope freshly pointed at a provider the
   // user already keyed elsewhere shouldn't sit on an empty key (the bug where
   // Voice Agent hit Anthropic/Groq with no key while Cleanup had one).
-  if (cfg && SHARED_KEY_IDS.has(scope.provider)) {
-    if (!scope.apiKey) scope.apiKey = sharedKey(scope.provider);
-    else if (!cfg.ppApiKeys?.[scope.provider]) stashApiKey();
-  }
+  untrack(() => {
+    if (cfg && SHARED_KEY_IDS.has(scope.provider)) {
+      if (!scope.apiKey) scope.apiKey = sharedKey(scope.provider);
+      else if (!cfg.ppApiKeys?.[scope.provider]) stashApiKey();
+    }
+  });
   function onModeChange(m) {
     mode = m;
     if (m === 'ondevice') {

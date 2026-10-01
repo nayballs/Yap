@@ -5,7 +5,7 @@
   // fetched via get_base_prompt) are always prepended to the editable body, so
   // View shows the full effective prompt while Customize edits only the body.
   import { invoke } from '@tauri-apps/api/core';
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import Textarea from './ui/Textarea.svelte';
   import Select from './ui/Select.svelte';
 
@@ -39,7 +39,7 @@
   let editedPreset = $state('custom');
   let savedNote = $state(false);
   let copied = $state(false);
-  let testText = $state(testSample);
+  let testText = $state(untrack(() => testSample)); // editable; seeded once from the sample
   let testResult = $state('');
   let testRunning = $state(false);
 
@@ -326,10 +326,6 @@
     background: var(--yap-primary-wash);
     padding: 1px 7px;
     border-radius: var(--yap-r-full);
-  }
-  .chip.dim {
-    color: var(--yap-muted);
-    background: var(--yap-raised);
   }
 
   .ghost {

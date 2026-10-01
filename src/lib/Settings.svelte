@@ -185,7 +185,7 @@
           enabled: false,
           provider: 'groq',
           baseUrl: 'https://api.groq.com/openai/v1',
-          model: 'llama-3.1-8b-instant',
+          model: 'openai/gpt-oss-20b',
           apiKey: '',
           apiKeys: {},
           prompt: SCOPE_DEFAULTS[key].prompt,
@@ -266,7 +266,7 @@
 
   // Example model ids per provider, shown as the Model field hint.
   const PP_MODEL_HINTS = {
-    groq: 'e.g. llama-3.1-8b-instant',
+    groq: 'e.g. openai/gpt-oss-20b',
     anthropic: 'e.g. claude-haiku-4-5',
     openai: 'e.g. gpt-5-mini',
     gemini: 'e.g. gemini-3.5-flash',
@@ -432,7 +432,7 @@
     ppBaseUrl: 'https://api.groq.com/openai/v1',
     ppApiKey: '',
     ppApiKeys: {},
-    ppModel: 'llama-3.1-8b-instant',
+    ppModel: 'openai/gpt-oss-20b',
     ppPreset: 'default',
     ppDisableThinking: false,
     // Byte-identical to config.rs default_pp_prompt() / PP_PRESETS.default.body.
@@ -1743,7 +1743,7 @@
                             </select>
                             {#if prof.provider && prof.provider !== 'ondevice'}
                               <input class="route-input prof-inp" placeholder="Base URL (https://…/v1)" bind:value={prof.baseUrl} />
-                              <input class="route-input prof-inp" placeholder="Model (e.g. llama-3.1-8b-instant)" bind:value={prof.model} />
+                              <input class="route-input prof-inp" placeholder="Model (e.g. openai/gpt-oss-20b)" bind:value={prof.model} />
                               <input class="route-input prof-inp" type="password" placeholder="API key" bind:value={prof.apiKey} />
                             {:else if prof.provider === 'ondevice'}
                               <span class="prof-note">Runs on the built-in local model — private, no key needed.</span>
@@ -2991,8 +2991,7 @@
     color: var(--yap-primary);
     background: var(--yap-primary-wash);
   }
-  .lb-dl svg,
-  .lb-use svg {
+  .lb-dl svg {
     width: 13px;
     height: 13px;
   }
@@ -3175,12 +3174,6 @@
     color: var(--yap-muted-55);
     font-size: 11px;
     line-height: 1.5;
-  }
-  .usage-note {
-    width: 100%;
-    margin: 0;
-    color: var(--yap-muted);
-    font-size: 12.5px;
   }
 
   /* about */

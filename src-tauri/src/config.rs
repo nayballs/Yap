@@ -366,7 +366,7 @@ fn default_pp_base_url() -> String {
     "https://api.groq.com/openai/v1".into()
 }
 fn default_pp_model() -> String {
-    "llama-3.1-8b-instant".into()
+    "openai/gpt-oss-20b".into()
 }
 fn default_pp_prompt() -> String {
     // The "Default" preset body, shown (with `llm::BASE_PROMPT` on top) in the
@@ -465,7 +465,44 @@ pub fn load() -> YapConfig {
     if cfg.pp_preset == "default" {
         cfg.pp_prompt = default_pp_prompt();
     }
+    migrate_retired_groq_models(&mut cfg);
     cfg
+}
+
+/// Groq models retired in 2026 (non-Enterprise keys get HTTP 404 "does not
+/// exist or you do not have access"), mapped to the replacements Groq names
+/// on https://console.groq.com/docs/deprecations.
+const RETIRED_GROQ_MODELS: [(&str, &str); 7] = [
+    ("llama-3.1-8b-instant", "openai/gpt-oss-20b"),
+    ("llama-3.3-70b-versatile", "openai/gpt-oss-120b"),
+    ("qwen/qwen3-32b", "openai/gpt-oss-120b"),
+    ("meta-llama/llama-4-scout-17b-16e-instruct", "openai/gpt-oss-120b"),
+    ("moonshotai/kimi-k2-instruct-0905", "openai/gpt-oss-120b"),
+    ("groq/compound", "openai/gpt-oss-120b"),
+    ("groq/compound-mini", "openai/gpt-oss-20b"),
+];
+
+/// Swap a retired Groq model id for its replacement; other providers and ids
+/// are left alone (a self-hosted server may legitimately use the same name).
+fn migrate_groq_model(provider: &str, model: &mut String) {
+    if provider != "groq" {
+        return;
+    }
+    if let Some((_, new)) = RETIRED_GROQ_MODELS.iter().find(|(old, _)| *old == model.as_str()) {
+        *model = (*new).to_string();
+    }
+}
+
+/// Migration: move every saved Groq selection (cleanup, LLM scopes, cleanup
+/// profiles) off retired models, so existing configs don't fail every call.
+fn migrate_retired_groq_models(cfg: &mut YapConfig) {
+    migrate_groq_model(&cfg.pp_provider, &mut cfg.pp_model);
+    for s in cfg.llm_scopes.values_mut() {
+        migrate_groq_model(&s.provider, &mut s.model);
+    }
+    for p in &mut cfg.cleanup_profiles {
+        migrate_groq_model(&p.provider, &mut p.model);
+    }
 }
 
 /// Atomic file write: write to `<path>.tmp`, then rename over the target
@@ -708,5 +745,29 @@ mod tests {
         assert_eq!(cfg.provider_api_key("groq", ""), "gsk_active");
         // nothing anywhere → empty (caller fails fast with a named error)
         assert_eq!(cfg.provider_api_key("openai", ""), "");
+    }
+
+    #[test]
+    fn retired_groq_models_migrate_only_for_groq() {
+        let scope = |provider: &str, model: &str| LlmScope {
+            provider: provider.into(),
+            model: model.into(),
+            ..Default::default()
+        };
+        let mut cfg = YapConfig::default();
+        cfg.pp_provider = "groq".into();
+        cfg.pp_model = "llama-3.1-8b-instant".into();
+        cfg.llm_scopes.insert("chat".into(), scope("groq", "qwen/qwen3-32b"));
+        cfg.llm_scopes.insert("notes".into(), scope("ondevice", "llama-3.1-8b-instant"));
+        cfg.llm_scopes.insert("agent".into(), scope("groq", "openai/gpt-oss-120b"));
+
+        migrate_retired_groq_models(&mut cfg);
+
+        assert_eq!(cfg.pp_model, "openai/gpt-oss-20b");
+        assert_eq!(cfg.llm_scopes["chat"].model, "openai/gpt-oss-120b");
+        // not Groq → untouched, even with a retired-looking id
+        assert_eq!(cfg.llm_scopes["notes"].model, "llama-3.1-8b-instant");
+        // already current → untouched
+        assert_eq!(cfg.llm_scopes["agent"].model, "openai/gpt-oss-120b");
     }
 }

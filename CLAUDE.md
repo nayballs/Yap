@@ -234,7 +234,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   history_enabled, update_checks_enabled, dictionary_fuzzy). JSON
   load/save + `apply_dictionary` + `dictionary_prompt` (the Whisper
   `initial_prompt` vocabulary) + `resolve_cleanup` (per-app plan: body + endpoint).
-  `data_dir()` is portable-aware.
+  `data_dir()` is portable-aware. `load()` also migrates saved Groq picks (cleanup,
+  LLM scopes, profiles) off models Groq retired in 2026 (`RETIRED_GROQ_MODELS` —
+  default is now `openai/gpt-oss-20b`); extend that table when Groq retires more.
 - **`fuzzy.rs`** — fuzzy dictionary correction (Handy `audio_toolkit/text.rs` port):
   1–3-word n-grams vs the dictionary's `from`/`to` spellings, normalized Levenshtein
   + Soundex phonetic boost (the `natural` crate's nonstandard variant, replicated
@@ -629,7 +631,7 @@ Rust+Tauri stack) is the OSS leader but **outputs raw, unpolished text** — it 
 AI cleanup. Paid tools (Wispr Flow, superwhisper, Aqua) win on exactly that cleanup
 layer; Wispr Flow's own stack is **Whisper + a fine-tuned Llama** — the same two
 stages Yap now runs, except Yap keeps transcription **local/free** and uses a cheap/
-fast cleanup model (Groq `llama-3.1-8b-instant`) or a fully-local one.
+fast cleanup model (Groq `openai/gpt-oss-20b`) or a fully-local one.
 
 **Yap's wedge (now real):** local + private + free transcription **plus** instant AI
 cleanup, Windows-first. Monetisation stays fair — core free/local forever; any future

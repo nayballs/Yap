@@ -14,7 +14,7 @@
   import Toggle from './ui/Toggle.svelte';
   import Input from './ui/Input.svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
 
   let { cfg, scope, defaultPrompt = '' } = $props();
 
@@ -41,8 +41,8 @@
 
   const enabled = $derived(scope.enabled);
 
-  // Local editor state for the name field, seeded from the saved name.
-  let agentInput = $state((cfg.agentName || '').trim());
+  // Local editor state for the name field, seeded once from the saved name.
+  let agentInput = $state(untrack(() => (cfg.agentName || '').trim()));
   let saved = $state(false);
 
   const examples = $derived([

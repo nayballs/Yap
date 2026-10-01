@@ -7,16 +7,11 @@
 export const PP_CLOUD_MODELS = {
   groq: {
     keyUrl: 'https://console.groq.com/keys',
+    // Groq retired its Llama/Qwen/Kimi/Compound models for non-Enterprise
+    // keys in 2026; config.rs migrates saved selections to these two.
     models: [
-      { value: 'llama-3.1-8b-instant', label: 'LLaMA 3.1 8B', desc: 'Ultra-fast 560 T/sec, 131K context' },
       { value: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B', desc: 'Fast open-source model, 1000 T/sec' },
       { value: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B', desc: "OpenAI's open-source flagship, 500 T/sec" },
-      { value: 'llama-3.3-70b-versatile', label: 'LLaMA 3.3 70B', desc: "Meta's versatile model, 280 T/sec" },
-      { value: 'qwen/qwen3-32b', label: 'Qwen3 32B', desc: 'Powerful reasoning model, 131K context' },
-      { value: 'meta-llama/llama-4-scout-17b-16e-instruct', label: 'Llama 4 Scout', desc: "Meta's efficient multimodal, 750 T/sec" },
-      { value: 'moonshotai/kimi-k2-instruct-0905', label: 'Kimi K2 0905', desc: "Moonshot AI's 1T MoE, 256K context" },
-      { value: 'groq/compound', label: 'Compound', desc: "Groq's compound system, 450 T/sec" },
-      { value: 'groq/compound-mini', label: 'Compound Mini', desc: 'Fast compound system, 3x lower latency' },
     ],
   },
   anthropic: {
@@ -72,7 +67,6 @@ export const PP_CLOUD_MODELS = {
 // output. Keyed by the exact model id used in PP_CLOUD_MODELS.
 export const PP_THINKING_MODELS = new Set([
   // Groq
-  'qwen/qwen3-32b',
   'openai/gpt-oss-20b',
   'openai/gpt-oss-120b',
   // OpenAI

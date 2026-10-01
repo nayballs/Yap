@@ -158,7 +158,7 @@
   // Anthropic works through its OpenAI-compatible /v1/chat/completions layer,
   // so it plugs into Yap's existing cleanup client like any other provider.
   const CLOUD_PROVIDERS = [
-    { value: 'groq', label: 'Groq (free tier)', brand: BRANDS.groq, baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant' },
+    { value: 'groq', label: 'Groq (free tier)', brand: BRANDS.groq, baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-20b' },
     { value: 'anthropic', label: 'Anthropic (Claude)', brand: BRANDS.anthropic, baseUrl: 'https://api.anthropic.com/v1', model: 'claude-haiku-4-5' },
     { value: 'openai', label: 'OpenAI', brand: BRANDS.openai, baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
     { value: 'openrouter', label: 'OpenRouter', brand: BRANDS.openrouter, baseUrl: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.1-8b-instruct' },
@@ -653,7 +653,7 @@
               <input class="cloud-inp" placeholder="Base URL (https://…/v1)" bind:value={cloudBaseUrl} />
             {/if}
             <input class="cloud-inp" type="password" placeholder="API key" bind:value={cloudKey} />
-            <input class="cloud-inp" placeholder="Model (e.g. llama-3.1-8b-instant)" bind:value={cloudModel} />
+            <input class="cloud-inp" placeholder="Model (e.g. openai/gpt-oss-20b)" bind:value={cloudModel} />
           </div>
           <button class="start wide" onclick={enableCloudCleanup}>Enable cloud cleanup</button>
           <p class="fine">Your key is stored locally. Transcripts (never audio) are sent to the
@@ -1070,9 +1070,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .cloud-form .mic-pick {
-    max-width: none;
   }
   .cloud-inp {
     background: var(--yap-s2);

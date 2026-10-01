@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn model_size_gating_matches_their_rule() {
         // cloud: always
-        assert!(supports_tools("groq", "llama-3.1-8b-instant"));
+        assert!(supports_tools("groq", "openai/gpt-oss-20b"));
         assert!(supports_tools("anthropic", "claude-haiku-4-5"));
         // local: gated on the -N[bB] pattern, min 4
         assert!(supports_tools("local", "llama-3.1-8b-instant"));

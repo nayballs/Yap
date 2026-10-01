@@ -387,6 +387,15 @@ impl Shared {
     /// captured at key-press) and the **wake-word path** (no selection — the
     /// whole transcript is the instruction, OpenWhispr-style).
     async fn run_agent(self: &Arc<Self>, instruction: String, selection: String) {
+        // Nothing heard (the edit key tapped without speaking): go quietly back
+        // to idle like an empty dictation does. Falling through used to surface
+        // "Rewrite failed via <provider> — check its key", blaming the API key.
+        if instruction.trim().is_empty() {
+            tracing::info!("Edit mode: no speech detected, nothing to rewrite");
+            let _ = self.app.emit("yap-state", "idle");
+            return;
+        }
+
         let (base_url, api_key, model, provider, body, disable_thinking, restore_clipboard) = self
             .config
             .read()
