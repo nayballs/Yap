@@ -11,7 +11,12 @@ export interface Mail {
 
 export async function sendMail(to: string, mail: Mail): Promise<void> {
   if (!env.RESEND_API_KEY) {
-    console.log(`[mail:dev] to=${to}\nSubject: ${mail.subject}\n${mail.text}`);
+    // The message carries a sign-in code, so only a local server prints it.
+    if (new URL(env.BETTER_AUTH_URL).hostname === "localhost") {
+      console.log(`[mail:dev] to=${to}\nSubject: ${mail.subject}\n${mail.text}`);
+    } else {
+      console.error("[mail] RESEND_API_KEY is not set; email not sent");
+    }
     return;
   }
   const res = await fetch("https://api.resend.com/emails", {

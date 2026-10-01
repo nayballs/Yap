@@ -7,6 +7,10 @@ compatibility_flags = ["nodejs_compat"]
 
 # Production domain, enabled once contextmirror.com's DNS is on Cloudflare.
 # routes = [{ pattern = "auth.contextmirror.com", custom_domain = true }]
+# The workers.dev address is for smoke tests until the domain is attached;
+# switch it off then so the service has one public origin.
+workers_dev = true
+preview_urls = false
 
 # Production values. `wrangler dev` overrides them from .dev.vars.
 [vars]
@@ -16,8 +20,8 @@ EMAIL_FROM = "Yap <no-reply@mail.contextmirror.com>"
 [[d1_databases]]
 binding = "DB"
 database_name = "yap-auth"
-# Placeholder until `wrangler d1 create yap-auth`; local dev doesn't need a real id.
-database_id = "00000000-0000-0000-0000-000000000000"
+# Production database (WEUR). Local dev uses its own copy under .wrangler/
+database_id = "fb03bf43-1271-43c9-981b-41be5dedf590"
 migrations_dir = "migrations"
 
 # Static pages (sign-in return page, privacy, terms). Requests that match a
