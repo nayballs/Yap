@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Sign-in didn't finish · Yap</title>
+  <link rel="icon" href="/yap-logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="brand" href="https://contextmirror.com/yap"><img src="/yap-logo.svg" alt="" />Yap</a>
+  <main class="card">
+    <h1>Sign-in didn't finish</h1>
+    <p class="muted" id="msg">Something went wrong while signing you in.</p>
+    <p class="muted">Go back to Yap and try again from <strong>Settings → Account</strong>.</p>
+    <p class="small muted" id="code" hidden></p>
+  </main>
+  <footer><a href="/privacy">Privacy</a><a href="/terms">Terms</a></footer>
+  <script>
+    // Better Auth redirects here with ?error=<code> (onAPIError.errorURL).
+    const MESSAGES = {
+      access_denied: 'Sign-in was cancelled.',
+      state_mismatch: 'That sign-in attempt expired. Start a new one from Yap.',
+      please_restart_the_process: 'That sign-in attempt expired. Start a new one from Yap.',
+      account_not_linked:
+        'That email already has a Yap account that uses a different sign-in method. Use that method, or sign in with an email code to prove the address is yours.',
+      email_not_found: "Your sign-in provider didn't share an email address, which Yap needs. Try another method or an email code.",
+      // Set by this Worker's sign-in entry point (src/index.ts).
+      provider_unavailable: "That sign-in option isn't available right now. Try another one, or an email code.",
+      rate_limited: 'Too many sign-in attempts. Wait a minute, then try again.',
+      invalid_request: 'That sign-in link was incomplete. Start again from Yap.',
+      // Set by Yap's own local listener (dev/portable builds), not Better Auth.
+      handoff_failed: "Yap couldn't finish signing you in. It shows the reason in the app.",
+    };
+    const error = new URLSearchParams(location.search).get('error');
+    if (error) {
+      document.getElementById('msg').textContent = MESSAGES[error.toLowerCase()] || 'Something went wrong while signing you in.';
+      const code = document.getElementById('code');
+      code.textContent = `Error code: ${error}`;
+      code.hidden = false;
+    }
+  </script>
+</body>
+</html>

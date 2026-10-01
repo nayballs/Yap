@@ -1,0 +1,26 @@
+# Yap accounts: Better Auth on Cloudflare Workers + D1 (see README.md).
+name = "yap-auth"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+# Better Auth needs AsyncLocalStorage + node:crypto.
+compatibility_flags = ["nodejs_compat"]
+
+# Production domain, enabled once contextmirror.com's DNS is on Cloudflare.
+# routes = [{ pattern = "auth.contextmirror.com", custom_domain = true }]
+
+# Production values. `wrangler dev` overrides them from .dev.vars.
+[vars]
+BETTER_AUTH_URL = "https://auth.contextmirror.com"
+EMAIL_FROM = "Yap <no-reply@mail.contextmirror.com>"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "yap-auth"
+# Placeholder until `wrangler d1 create yap-auth`; local dev doesn't need a real id.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+# Static pages (sign-in return page, privacy, terms). Requests that match a
+# file are served directly; everything else (/api/*) reaches the Worker.
+[assets]
+directory = "./public"

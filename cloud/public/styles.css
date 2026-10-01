@@ -1,0 +1,162 @@
+/* Yap accounts pages: the app's warm-light theme (tokens copied from
+   src/app.css), self-hosted Figtree + EB Garamond (no third-party font CDN). */
+@font-face {
+  font-family: 'Figtree Variable';
+  src: url('/fonts/figtree.woff2') format('woff2-variations');
+  font-weight: 300 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'EB Garamond Variable';
+  src: url('/fonts/eb-garamond.woff2') format('woff2-variations');
+  font-weight: 400 800;
+  font-display: swap;
+}
+
+:root {
+  --yap-bg: #f0ede7;
+  --yap-s1: #faf9f6;
+  --yap-s2: #ffffff;
+  --yap-s3: #f2efe9;
+  --yap-muted: #6e6a5f;
+  --yap-primary: #c2690a;
+  --yap-primary-wash: rgba(226, 152, 42, 0.16);
+  --yap-ink: #26231c;
+  --yap-ink-hover: #3a3529;
+  --yap-ink-fg: #f7f5f0;
+  --yap-border: #dcd7cb;
+  --yap-border-subtle: #e7e3d9;
+  --yap-success: #1e8f4d;
+  --yap-danger: #c23b32;
+  --yap-shadow-sm: 0 1px 2px rgba(60, 50, 30, 0.07), 0 1px 1px rgba(60, 50, 30, 0.04);
+  --yap-font: 'Figtree Variable', 'Segoe UI', system-ui, sans-serif;
+  --yap-font-display: 'EB Garamond Variable', Georgia, 'Palatino Linotype', serif;
+  --yap-mono: Consolas, 'SF Mono', Menlo, monospace;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 56px 16px 32px;
+  background: var(--yap-bg);
+  color: var(--yap-ink);
+  font: 15px/1.55 var(--yap-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 16px;
+}
+.brand img { width: 34px; height: 34px; border-radius: 9px; }
+
+.card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--yap-s2);
+  border: 1px solid var(--yap-border);
+  border-radius: 14px;
+  box-shadow: var(--yap-shadow-sm);
+  padding: 32px;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font: 500 32px/1.15 var(--yap-font-display);
+  letter-spacing: -0.01em;
+}
+p { margin: 0 0 14px; }
+.muted { color: var(--yap-muted); }
+.small { font-size: 13px; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin: 10px 0 18px;
+  padding: 12px 18px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--yap-ink);
+  color: var(--yap-ink-fg);
+  font: 600 15px var(--yap-font);
+  text-decoration: none;
+  cursor: pointer;
+}
+.btn:hover { background: var(--yap-ink-hover); }
+.btn.secondary {
+  background: var(--yap-s2);
+  color: var(--yap-ink);
+  border: 1px solid var(--yap-border);
+}
+.btn.secondary:hover { background: var(--yap-s3); }
+
+.code-row { display: flex; gap: 8px; margin: 8px 0 12px; }
+.code {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: 10px;
+  background: var(--yap-s1);
+  font: 13px var(--yap-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: all;
+}
+.copy {
+  flex: none;
+  padding: 0 14px;
+  border: 1px solid var(--yap-border);
+  border-radius: 10px;
+  background: var(--yap-s2);
+  color: var(--yap-ink);
+  font: 600 13px var(--yap-font);
+  cursor: pointer;
+}
+.copy:hover { background: var(--yap-s3); }
+
+.check {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--yap-primary-wash);
+  color: var(--yap-primary);
+  font-size: 20px;
+}
+
+footer {
+  margin-top: 20px;
+  font-size: 13px;
+  color: var(--yap-muted);
+}
+footer a { color: inherit; }
+footer a + a::before { content: '·'; margin: 0 8px; display: inline-block; }
+
+/* Long-form pages (privacy, terms) */
+.doc { max-width: 680px; }
+.doc h1 { font-size: 36px; }
+.doc h2 { margin: 28px 0 8px; font: 600 17px var(--yap-font); }
+.doc ul { margin: 0 0 14px; padding-left: 20px; }
+.doc li { margin: 4px 0; }
+.doc a { color: var(--yap-primary); }
+
+[hidden] { display: none !important; }

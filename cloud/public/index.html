@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Yap account</title>
+  <link rel="icon" href="/yap-logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="brand" href="https://contextmirror.com/yap"><img src="/yap-logo.svg" alt="" />Yap</a>
+
+  <!-- After a browser sign-in started from Yap: hand the one-time code back. -->
+  <main class="card" id="handoff" hidden>
+    <div class="check" aria-hidden="true">✓</div>
+    <h1>You're signed in</h1>
+    <p class="muted" id="who">Switching you back to Yap…</p>
+    <a class="btn" id="open">Open Yap</a>
+    <p class="small muted">Didn't switch? Copy this code and paste it into Yap:</p>
+    <div class="code-row">
+      <div class="code" id="code"></div>
+      <button class="copy" id="copy" type="button">Copy</button>
+    </div>
+    <p class="small muted">Only paste it into Yap on this computer, and never share it: anyone with the code could sign in as you. It works once and expires in 5 minutes.</p>
+  </main>
+
+  <!-- Back from Yap's local sign-in listener (dev/portable builds). -->
+  <main class="card" id="done" hidden>
+    <div class="check" aria-hidden="true">✓</div>
+    <h1>You're signed in</h1>
+    <p class="muted">Yap has your sign-in. You can close this tab and go back to the app.</p>
+  </main>
+
+  <!-- Anyone else landing here. -->
+  <main class="card" id="landing" hidden>
+    <h1>Your Yap account</h1>
+    <p class="muted">Sign in from the Yap app: open <strong>Settings → Account</strong>. Accounts are optional; dictation works fully offline without one.</p>
+    <a class="btn secondary" href="https://contextmirror.com/yap">Get Yap</a>
+  </main>
+
+  <footer><a href="/privacy">Privacy</a><a href="/terms">Terms</a></footer>
+
+  <script>
+    // Set by the server's desktop-handoff plugin after a sign-in that Yap
+    // started (client id "yap-desktop"): base64url JSON {identifier, state}.
+    const COOKIE = 'better-auth.yap-desktop';
+    const SCHEME = 'com.contextmirror.yap';
+
+    const readCookie = () => {
+      const hit = document.cookie.split('; ').find((c) => c.startsWith(COOKIE + '='));
+      return hit ? hit.slice(COOKIE.length + 1) : null;
+    };
+
+    // Builds without the registered scheme (dev, portable) listen on a local
+    // port instead and append it to `state` as "-<port>" (src-tauri/src/auth.rs).
+    function loopbackPort(code) {
+      try {
+        const json = atob(code.replace(/-/g, '+').replace(/_/g, '/'));
+        const m = /-(\d{2,5})$/.exec(JSON.parse(json).state || '');
+        const port = m && Number(m[1]);
+        return port > 0 && port < 65536 ? port : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function showHandoff(raw) {
+      // One use only: clear it so a reload or a later visit can't replay it.
+      document.cookie = `${COOKIE}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`;
+      // Plain base64url (no %-escapes or '=' padding) survives Windows' launch
+      // of the app intact; Yap decodes either form.
+      const code = decodeURIComponent(raw).replace(/=+$/, '');
+      const port = loopbackPort(code);
+      const href = port
+        ? `http://127.0.0.1:${port}/callback?token=${encodeURIComponent(code)}`
+        : `${SCHEME}://auth/callback#token=${code}`;
+      document.getElementById('open').href = href;
+      document.getElementById('code').textContent = code;
+      document.getElementById('copy').onclick = async (e) => {
+        await navigator.clipboard.writeText(code);
+        e.target.textContent = 'Copied';
+      };
+      document.getElementById('handoff').hidden = false;
+      fetch('/api/auth/get-session', { credentials: 'same-origin' })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d && d.user && d.user.email) {
+            document.getElementById('who').textContent = `Signed in as ${d.user.email}. Switching you back to Yap…`;
+          }
+        })
+        .catch(() => {});
+      // Try once automatically; browsers may ask first or need the button.
+      window.location.href = href;
+    }
+
+    // The cookie arrives with the sign-in redirect; poll briefly like the
+    // plugin's own helper in case it lands a beat after the page.
+    const started = Date.now();
+    (function wait() {
+      if (location.hash === '#done') {
+        document.getElementById('done').hidden = false;
+        return;
+      }
+      const raw = readCookie();
+      if (raw) return showHandoff(raw);
+      if (Date.now() - started < 1500) return setTimeout(wait, 100);
+      document.getElementById('landing').hidden = false;
+    })();
+  </script>
+</body>
+</html>

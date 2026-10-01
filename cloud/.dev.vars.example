@@ -1,0 +1,20 @@
+# Copy to .dev.vars for `wrangler dev` (gitignored). Production values are set
+# with `wrangler secret put <NAME>` (secrets) or wrangler.toml [vars].
+BETTER_AUTH_URL=http://localhost:8787
+# 32+ random bytes: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+BETTER_AUTH_SECRET=
+
+# Optional locally. Without RESEND_API_KEY, email codes print to the console.
+# RESEND_API_KEY=
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=
+# MICROSOFT_CLIENT_ID=
+# MICROSOFT_CLIENT_SECRET=
+# GITHUB_CLIENT_ID=
+# GITHUB_CLIENT_SECRET=
+
+# Test the browser handoff with no real provider: run `npm run mock:microsoft`
+# and uncomment these (ignored unless the Worker runs on localhost).
+# MICROSOFT_CLIENT_ID=mock
+# MICROSOFT_CLIENT_SECRET=mock
+# DEV_MICROSOFT_AUTHORITY=http://127.0.0.1:8790
