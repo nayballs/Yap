@@ -348,6 +348,7 @@ pub fn run() {
             commands::chat_send,
             commands::bridge_status,
             auth::auth_status,
+            auth::auth_check_methods,
             auth::auth_start,
             auth::auth_cancel,
             auth::auth_submit_code,

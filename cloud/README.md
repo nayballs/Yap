@@ -29,7 +29,9 @@ Yap keeps the session token in Windows Credential Manager and sends it as
 `Authorization: Bearer <token>`. Sessions last 30 days and slide while used.
 
 Endpoints Yap uses: `GET /api/auth/get-session`, `GET /api/auth/list-accounts`,
-`POST /api/auth/sign-out`, `POST /api/auth/delete-user`, `GET /api/health`.
+`POST /api/auth/sign-out`, `POST /api/auth/delete-user`, `GET /api/health`,
+and `GET /api/providers` (which buttons to show: configured providers, and
+whether email codes can be sent).
 POSTs need a JSON body (`{}` will do). Deleting needs a session under a day
 old (`SESSION_EXPIRED` otherwise: sign in again first) and emails a receipt.
 

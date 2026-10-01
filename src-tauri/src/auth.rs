@@ -116,7 +116,18 @@ pub struct Status {
     /// When the current session began (unix seconds). Changes on every fresh
     /// sign-in, which the delete-account flow uses to spot a re-sign-in.
     signed_in_at: Option<u64>,
+    /// What the service offers right now (`/api/providers`); `None` until
+    /// it has been reached, and then the UI offers everything.
+    methods: Option<Methods>,
     service_url: String,
+}
+
+/// The service's sign-in methods: configured providers, and whether email
+/// codes can be sent.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Methods {
+    providers: Vec<String>,
+    email: bool,
 }
 
 struct Pending {
@@ -140,6 +151,7 @@ struct Inner {
     session: Option<Stored>,
     providers: Vec<String>,
     offline: bool,
+    methods: Option<Methods>,
 }
 
 static STATE: Mutex<Inner> = Mutex::new(Inner {
@@ -147,6 +159,7 @@ static STATE: Mutex<Inner> = Mutex::new(Inner {
     session: None,
     providers: Vec::new(),
     offline: false,
+    methods: None,
 });
 
 fn lock() -> MutexGuard<'static, Inner> {
@@ -165,6 +178,7 @@ pub fn status() -> Status {
         pending: inner.pending.as_ref().map(|p| p.provider.clone()),
         offline: inner.offline,
         signed_in_at: inner.session.as_ref().map(|s| s.signed_in_at),
+        methods: inner.methods.clone(),
         service_url: base_url(),
     }
 }
@@ -196,10 +210,46 @@ pub fn init(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         loop {
+            refresh_methods(&app).await;
             refresh(&app).await;
             tokio::time::sleep(REFRESH_EVERY).await;
         }
     });
+}
+
+/// Re-read the service's sign-in methods (the Account page calls this when it
+/// opens, so newly configured providers show up without a restart).
+#[tauri::command]
+pub async fn auth_check_methods(app: AppHandle) {
+    refresh_methods(&app).await;
+}
+
+async fn refresh_methods(app: &AppHandle) {
+    let fetched = async {
+        let resp = CLIENT
+            .get(format!("{}/api/providers", base_url()))
+            .timeout(Duration::from_secs(8))
+            .send()
+            .await
+            .ok()?;
+        resp.status().is_success().then_some(())?;
+        resp.json::<Methods>().await.ok()
+    }
+    .await;
+    // Unreachable: keep what we last knew (or "unknown", which offers all).
+    let Some(mut methods) = fetched else {
+        return;
+    };
+    methods.providers.retain(|p| PROVIDERS.contains(&p.as_str()));
+    let changed = {
+        let mut inner = lock();
+        let changed = inner.methods.as_ref() != Some(&methods);
+        inner.methods = Some(methods);
+        changed
+    };
+    if changed {
+        emit_status(app);
+    }
 }
 
 /// Load the stored session (if any) and confirm it with the server: a session

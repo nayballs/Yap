@@ -57,6 +57,13 @@ const socialProviders = {
   }),
 };
 
+/** Sign-in methods the app may offer: the configured providers + email codes
+ *  (only once mail can actually be sent). Served at /api/providers. */
+export const signInMethods = () => ({
+  providers: Object.keys(socialProviders),
+  email: Boolean(env.RESEND_API_KEY) || isLocalDev,
+});
+
 const createAuth = () => betterAuth({
   appName: "Yap",
   // Set explicitly: Workers have no NODE_ENV, and outside "production" Better

@@ -5,11 +5,10 @@ compatibility_date = "2026-09-01"
 # Better Auth needs AsyncLocalStorage + node:crypto.
 compatibility_flags = ["nodejs_compat"]
 
-# Production domain, enabled once contextmirror.com's DNS is on Cloudflare.
-# routes = [{ pattern = "auth.contextmirror.com", custom_domain = true }]
-# The workers.dev address is for smoke tests until the domain is attached;
-# switch it off then so the service has one public origin.
-workers_dev = true
+# Production domain (Workers Custom Domain: Cloudflare manages its DNS + cert).
+routes = [{ pattern = "auth.contextmirror.com", custom_domain = true }]
+# Served only at the custom domain: one public origin for cookies and links.
+workers_dev = false
 preview_urls = false
 
 # Production values. `wrangler dev` overrides them from .dev.vars.

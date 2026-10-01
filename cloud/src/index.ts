@@ -2,7 +2,7 @@
 // layer before this runs; only API paths reach the Hono app.
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
-import { DESKTOP_CLIENT_ID, getAuth } from "./auth";
+import { DESKTOP_CLIENT_ID, getAuth, signInMethods } from "./auth";
 
 const app = new Hono();
 
@@ -44,5 +44,8 @@ app.get("/api/auth/electron/init-oauth-proxy", async (c) => {
 app.all("/api/auth/*", (c) => getAuth().handler(c.req.raw));
 
 app.get("/api/health", (c) => c.json({ ok: true }));
+
+// Which sign-in buttons Yap should show (providers come and go with config).
+app.get("/api/providers", (c) => c.json(signInMethods()));
 
 export default app;

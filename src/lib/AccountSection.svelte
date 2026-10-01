@@ -34,8 +34,14 @@
   let imgFailed = $state(false);
   let showSignIn = $derived(!!status && (!status.signedIn || deleteStep === 'reauth'));
 
+  // What the account service offers right now (null until it has answered:
+  // then offer everything, and the service explains if something's off).
+  let offered = $derived(status?.methods?.providers ?? ['google', 'microsoft', 'github']);
+  let emailOffered = $derived(status?.methods?.email ?? true);
+
   onMount(() => {
     initAccount();
+    invoke('auth_check_methods').catch(() => {});
     return () => clearInterval(resendTimer);
   });
 
@@ -238,34 +244,43 @@
       </Button>
     </div>
   {:else}
-    <div class="providers">
-      {#each ['google', 'microsoft', 'github'] as id (id)}
-        <button class="provider" type="button" disabled={!!busy} onclick={() => startProvider(id)}>
-          <span class="picon">{@render providerIcon(id)}</span>
-          Continue with {PROVIDER_LABELS[id]}
-        </button>
-      {/each}
-    </div>
-    <div class="or"><span>or</span></div>
-    <form
-      class="inline"
-      onsubmit={(e) => {
-        e.preventDefault();
-        sendCode();
-      }}
-    >
-      <input
-        class="field"
-        type="email"
-        bind:value={email}
-        placeholder="you@example.com"
-        autocomplete="email"
-        aria-label="Email address"
-      />
-      <Button type="submit" variant="secondary" disabled={!email.trim() || !!busy}>
-        {busy === 'email' ? 'Sending…' : 'Email me a code'}
-      </Button>
-    </form>
+    {#if offered.length}
+      <div class="providers">
+        {#each offered as id (id)}
+          <button class="provider" type="button" disabled={!!busy} onclick={() => startProvider(id)}>
+            <span class="picon">{@render providerIcon(id)}</span>
+            Continue with {PROVIDER_LABELS[id]}
+          </button>
+        {/each}
+      </div>
+    {/if}
+    {#if offered.length && emailOffered}
+      <div class="or"><span>or</span></div>
+    {/if}
+    {#if !offered.length && !emailOffered}
+      <p class="muted">Signing in isn't available right now. Please try again later.</p>
+    {/if}
+    {#if emailOffered}
+      <form
+        class="inline"
+        onsubmit={(e) => {
+          e.preventDefault();
+          sendCode();
+        }}
+      >
+        <input
+          class="field"
+          type="email"
+          bind:value={email}
+          placeholder="you@example.com"
+          autocomplete="email"
+          aria-label="Email address"
+        />
+        <Button type="submit" variant="secondary" disabled={!email.trim() || !!busy}>
+          {busy === 'email' ? 'Sending…' : 'Email me a code'}
+        </Button>
+      </form>
+    {/if}
     {#if !status.signedIn}
       <p class="fine">
         By continuing you agree to Yap's

@@ -236,7 +236,10 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   unreachable → keep, flagged `offline`). `auth_sign_out` revokes best-effort
   then forgets locally; `auth_delete_account` returns `"reauth"` when the
   server wants a fresh sign-in (sessions > 1 day old). Emits
-  `yap-auth-changed` (status snapshot) and `yap-auth-error`. Debug builds talk
+  `yap-auth-changed` (status snapshot) and `yap-auth-error`. The Account page
+  only offers what the service reports at `/api/providers` (configured
+  providers; email once mail can be sent) — `auth_check_methods`, plus at
+  startup and daily. Debug builds talk
   to `http://localhost:8787` (`cloud/`'s `wrangler dev`); `YAP_AUTH_URL`
   overrides any build.
 - **`history.rs`** — local-only transcription history (`history.json`): each
