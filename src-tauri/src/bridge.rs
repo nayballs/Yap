@@ -22,9 +22,10 @@
 //! Toggled by `config.bridge_enabled` (Integrations view); `sync()` is called
 //! at setup and on every config save.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -37,6 +38,7 @@ const MAX_BODY_BYTES: usize = 1024 * 1024;
 struct Running {
     server: Arc<Server>,
     port: u16,
+    token: String,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -84,6 +86,14 @@ pub fn start(app: &AppHandle) {
     if guard.is_some() {
         return;
     }
+    // Another Yap (say the installed app while a dev build runs) already
+    // serves the API: keep its discovery file rather than hijacking it.
+    if let Some((port, token)) = read_bridge_file() {
+        if bridge_answers(port, &token) {
+            tracing::debug!("bridge: another Yap already serves the local API on port {}", port);
+            return;
+        }
+    }
 
     let mut raw = [0u8; 32];
     if let Err(e) = getrandom::fill(&mut raw) {
@@ -114,11 +124,12 @@ pub fn start(app: &AppHandle) {
 
     let srv = server.clone();
     let app = app.clone();
+    let thread_token = token.clone();
     let thread = std::thread::Builder::new()
         .name("yap-bridge".into())
         .spawn(move || {
             for request in srv.incoming_requests() {
-                handle_request(request, &token, &app);
+                handle_request(request, &thread_token, &app);
             }
         })
         .ok();
@@ -126,6 +137,7 @@ pub fn start(app: &AppHandle) {
     *guard = Some(Running {
         server,
         port,
+        token,
         thread,
     });
     tracing::info!("bridge: local API listening on 127.0.0.1:{}", port);
@@ -138,7 +150,10 @@ pub fn stop() {
         if let Some(t) = running.thread.take() {
             let _ = t.join();
         }
-        remove_bridge_file();
+        // Only remove the discovery file while it's still ours.
+        if read_bridge_file().is_some_and(|(_, token)| token == running.token) {
+            remove_bridge_file();
+        }
         tracing::info!("bridge: stopped");
     }
 }
@@ -162,6 +177,35 @@ fn write_bridge_file(port: u16, token: &str) -> std::io::Result<()> {
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
     Ok(())
+}
+
+/// `(port, token)` from the discovery file, if there is a readable one.
+fn read_bridge_file() -> Option<(u16, String)> {
+    let raw = std::fs::read_to_string(bridge_file_path()).ok()?;
+    let v: Value = serde_json::from_str(&raw).ok()?;
+    let port = u16::try_from(v.get("port")?.as_u64()?).ok()?;
+    let token = v.get("token")?.as_str()?.to_string();
+    Some((port, token))
+}
+
+/// Whether a live bridge answers on `port` with this token (a stale file from
+/// a crashed instance points at a closed port).
+fn bridge_answers(port: u16, token: &str) -> bool {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    let request = format!(
+        "GET /v1/health HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
+        token
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut head = [0u8; 16];
+    let n = stream.read(&mut head).unwrap_or(0);
+    head[..n].starts_with(b"HTTP/1.1 200") || head[..n].starts_with(b"HTTP/1.0 200")
 }
 
 fn remove_bridge_file() {
@@ -519,6 +563,23 @@ mod tests {
         assert!(token_matches("Bearer abc", "Bearer abc"));
         assert!(!token_matches("Bearer abd", "Bearer abc"));
         assert!(!token_matches("", "Bearer abc"));
+    }
+
+    #[test]
+    fn bridge_probe_tells_live_from_stale() {
+        // A listener answering 200 counts as a live bridge...
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 512];
+            let _ = conn.read(&mut buf);
+            let _ = conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        });
+        assert!(bridge_answers(port, "token"));
+        server.join().unwrap();
+        // ...a closed port (a crashed instance's leftover file) doesn't.
+        assert!(!bridge_answers(port, "token"));
     }
 
     #[test]

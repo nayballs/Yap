@@ -293,16 +293,15 @@ pub async fn start() -> Result<String, String> {
 /// Kill any orphaned llamafile processes left over from a previous session.
 /// The Tauri updater (and crashes / task-kill) can force-exit Yap WITHOUT running
 /// the `RunEvent::Exit` handler, so `stop()` never fires and the sidecar survives.
-/// Called at startup before we spawn a fresh one, so at most one ever runs.
+/// Called at startup before we spawn a fresh one. Only sidecars whose parent
+/// Yap is gone count: a dev build must not kill the installed app's live one.
 #[cfg(windows)]
 pub fn kill_orphans() {
-    use std::os::windows::process::CommandExt;
-    // taskkill by image name — llamafile is Yap-specific in practice, and this
-    // only runs at our startup (any running instance is a leftover we own).
-    let _ = std::process::Command::new("taskkill")
-        .args(["/F", "/IM", RUNTIME_FILENAME])
-        .creation_flags(0x0800_0000)
-        .output();
+    for pid in crate::procs::orphaned(RUNTIME_FILENAME) {
+        if crate::procs::kill(pid) {
+            tracing::info!("Killed orphaned cleanup sidecar (pid {})", pid);
+        }
+    }
 }
 #[cfg(not(windows))]
 pub fn kill_orphans() {}

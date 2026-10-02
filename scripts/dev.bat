@@ -18,6 +18,10 @@ REM Dev-only: expose the webviews on the Chrome DevTools Protocol (CDP) so
 REM tooling can inspect them (console errors, event delivery) while diagnosing
 REM UI issues. Not set for installed/release builds.
 set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9653
+REM ...in a WebView2 profile of its own: processes sharing one profile must use
+REM the same browser arguments, so with the installed Yap running (no CDP flag)
+REM every dev webview failed to open (HRESULT 0x8007139F) and dev exited.
+set WEBVIEW2_USER_DATA_FOLDER=%LOCALAPPDATA%\com.yap.dictation\dev-webview
 
 echo ============================================================
 echo   Yap Dev - running the LIVE source with hot reload

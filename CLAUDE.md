@@ -162,7 +162,8 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   (Settings shows a model picker + "Open models folder"; switching restarts the
   sidecar). Owns install (runtime + model download, SHA-256 verified, per-stage
   progress events), process lifecycle (spawn/health-wait/kill + orphan cleanup at
-  startup), and `effective_endpoint()` which routes `llm.rs` to the sidecar when
+  startup — only sidecars whose parent Yap is gone, via `procs.rs`, so a dev build
+  never kills the installed app's), and `effective_endpoint()` which routes `llm.rs` to the sidecar when
   provider = "ondevice" (falls back to the configured endpoint if it's down).
 - **`notes.rs`** — the AI Notepad's data layer (`notes.json`, camelCase). Stores:
   `content` (raw markdown, never overwritten by AI), `enhanced_content` (the
@@ -220,7 +221,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   written on start, deleted on exit); auth = `Bearer <token>` (SHA-256
   constant-time compare); note mutations emit `yap-notes-changed` so NotesView
   refreshes live. Toggled by `config.bridge_enabled` (default on; `sync()`
-  runs at setup + every config save). See `docs/local-api.md`.
+  runs at setup + every config save). A second Yap (dev next to installed)
+  leaves a live bridge's file alone, and `stop()` only deletes the file while
+  it's still ours. See `docs/local-api.md`.
 - **`auth.rs`** — Yap accounts (optional; nothing in dictation depends on it).
   Email codes: `auth_email_send`/`auth_email_verify` call the account service
   directly. Google/Microsoft/GitHub: `auth_start` opens the system browser on
@@ -231,7 +234,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   as `-<port>`), or **paste** (`auth_submit_code`); `redeem` swaps it for a
   session at `/electron/token`. The token (+ a profile copy) is stored in
   Windows Credential Manager (`yap-account.com.yap.dictation`, **Local**
-  persistence — never config.json, logs or the webview). Startup + every 24 h
+  persistence — never config.json, logs or the webview; any non-production
+  service URL gets its own entry, `yap-account@<host>`, so a dev build can't
+  touch the real session). Startup + every 24 h
   `refresh` re-validates via `get-session` (server says no → signed out;
   unreachable → keep, flagged `offline`). `auth_sign_out` revokes best-effort
   then forgets locally; `auth_delete_account` returns `"reauth"` when the

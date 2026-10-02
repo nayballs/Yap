@@ -27,6 +27,7 @@ mod overlay;
 mod partials;
 mod pipeline;
 mod portable;
+mod procs;
 mod selection;
 mod sound;
 mod stt;

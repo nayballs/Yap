@@ -61,7 +61,23 @@ pub fn base_url() -> String {
     if cfg!(debug_assertions) {
         "http://localhost:8787".into()
     } else {
-        "https://auth.contextmirror.com".into()
+        PRODUCTION_URL.into()
+    }
+}
+
+const PRODUCTION_URL: &str = "https://auth.contextmirror.com";
+
+/// Credential Manager user name for the session kept for `base`. Production
+/// keeps the plain name; any other service (a dev build's local server) gets
+/// its own entry, so it can never read, or sign out, the installed app's
+/// real session.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn credential_user_for(base: &str) -> String {
+    if base == PRODUCTION_URL {
+        "yap-account".into()
+    } else {
+        let host = base.split_once("://").map_or(base, |(_, rest)| rest);
+        format!("yap-account@{}", host)
     }
 }
 
@@ -845,7 +861,6 @@ mod vault {
     use std::sync::Once;
 
     const SERVICE: &str = "com.yap.dictation";
-    const USER: &str = "yap-account";
     /// Credential Manager blobs top out at 2560 bytes (UTF-16, so ~1280 chars).
     const MAX_CHARS: usize = 1200;
 
@@ -855,9 +870,10 @@ mod vault {
             Ok(store) => keyring_core::set_default_store(store),
             Err(e) => tracing::error!("auth: credential store unavailable: {}", e),
         });
+        let user = super::credential_user_for(&super::base_url());
         // Local: a session token belongs to this PC. The default (Enterprise)
         // would roam it with a domain user's profile.
-        keyring_core::Entry::new_with_modifiers(SERVICE, USER, &HashMap::from([("persistence", "Local")]))
+        keyring_core::Entry::new_with_modifiers(SERVICE, &user, &HashMap::from([("persistence", "Local")]))
     }
 
     pub fn load() -> Option<Stored> {
@@ -953,6 +969,14 @@ mod tests {
         assert!(parse_handoff("not base64 at all!").is_none());
         assert!(parse_handoff(&URL_SAFE_NO_PAD.encode("{\"identifier\":\"\",\"state\":\"x\"}")).is_none());
         assert!(parse_handoff(&code_for("id with space", "s")).is_none());
+    }
+
+    #[test]
+    fn credentials_are_kept_per_service() {
+        // Production keeps the original entry, so existing sign-ins survive.
+        assert_eq!(credential_user_for("https://auth.contextmirror.com"), "yap-account");
+        assert_eq!(credential_user_for("http://localhost:8787"), "yap-account@localhost:8787");
+        assert_ne!(credential_user_for("https://staging.example.com"), "yap-account");
     }
 
     #[test]
