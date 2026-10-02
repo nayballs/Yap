@@ -31,6 +31,11 @@ the main integration work, and why it needs a test release to validate.
 
 ## 1. Apply to SignPath Foundation (you)
 
+Ready-to-paste answers, the README "Code signing policy" section SignPath
+requires, and their conditions (2FA, manual approval of every signed release,
+"SignPath Foundation" shown as publisher) are in
+[`signpath-application.md`](./signpath-application.md).
+
 1. Go to **https://signpath.org/apply** (SignPath Foundation OSS program).
 2. Submit Yap: repo `https://github.com/nayballs/Yap`, MIT licence, Windows
    desktop app, Tauri. Mention it's a released app with an installer + auto-updater.
