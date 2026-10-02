@@ -75,17 +75,39 @@ migration rather than editing an applied one.
 
 ## Deploying
 
-One-time:
+Live at `https://auth.contextmirror.com` (Cloudflare account
+"Nayballs@googlemail.com's Account"): Worker `yap-auth` on its custom domain
+only, D1 `yap-auth` (WEUR). Client ids are public and live in `wrangler.toml`
+`[vars]`; the secrets are set with `npx wrangler secret put <NAME>`:
+`BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`,
+`RESEND_API_KEY`. (Paste with right-click in Windows Terminal: Ctrl+V can send
+a stray control character into the hidden prompt.)
 
-1. `npx wrangler d1 create yap-auth` and put the id in `wrangler.toml`.
-2. Secrets: `npx wrangler secret put BETTER_AUTH_SECRET` (and `RESEND_API_KEY`,
-   plus `GOOGLE_*`, `MICROSOFT_*`, `GITHUB_*` client ids and secrets).
-3. Uncomment the `auth.contextmirror.com` route in `wrangler.toml` (the zone
-   must be on Cloudflare).
-4. OAuth redirect URIs to register with each provider:
-   `https://auth.contextmirror.com/api/auth/callback/{google|microsoft|github}`.
-   Microsoft: add the optional ID-token claims `email` and `xms_edov`
+- Google: Cloud project `yap-accounts` → Google Auth Platform (published),
+  web client "Yap account service".
+- GitHub: OAuth app "Yap" (github.com/settings/applications/3897989).
+- Resend: domain `mail.contextmirror.com` (eu-west-1, DNS via Cloudflare).
+
+Ship a change: `npm run typecheck && npm run deploy`. A schema change gets a
+new numbered migration, applied with `npm run db:migrate:remote` before the
+deploy.
+
+### Adding Microsoft sign-in
+
+Needs a Microsoft Entra ID tenant (a free Azure account comes with one).
+
+1. entra.microsoft.com → App registrations → New registration: name **Yap**;
+   supported accounts **any Entra ID tenant + personal Microsoft accounts**;
+   redirect URI (Web)
+   `https://auth.contextmirror.com/api/auth/callback/microsoft`.
+2. Token configuration → Add optional claim → ID token: `email`, `xms_edov`
    (`src/auth.ts` only trusts emails Microsoft marks verified).
-5. Resend: verify `mail.contextmirror.com` and add its DNS records.
-
-Then: `npm run db:migrate:remote && npm run deploy`.
+3. Certificates & secrets → New client secret (longest expiry; note the
+   renewal date) → copy the **Value**.
+4. Branding & properties: homepage `https://contextmirror.com/yap`, terms
+   `https://auth.contextmirror.com/terms`, privacy
+   `https://auth.contextmirror.com/privacy`, logo `docs/brand/yap-logo-512.png`.
+5. Add the Application (client) ID to `wrangler.toml` as `MICROSOFT_CLIENT_ID`,
+   run `npx wrangler secret put MICROSOFT_CLIENT_SECRET`, then `npm run deploy`.
+   `/api/providers` then lists `microsoft` and Yap shows the button, with no
+   app update.
