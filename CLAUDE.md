@@ -657,10 +657,13 @@ keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six
 ≤20-step loop, gated to cloud or ≥4B local models). Every JSON store now writes
 atomically with corrupt-file quarantine. The default (no-feature) build still ships
 the stub for fast `cargo check`. **Optional accounts** (`auth.rs` + `cloud/`): email
-codes and Google/Microsoft/GitHub sign-in, sign-out, delete-account — built and
-tested end to end locally (2026-10-01, against `wrangler dev` + a mock provider);
-the production service (Cloudflare DNS for contextmirror.com, D1, OAuth apps,
-Resend) isn't live yet, so release builds report the service as unreachable.
+codes and Google/Microsoft/GitHub sign-in, sign-out, delete-account — tested end
+to end locally (2026-10-01, `wrangler dev` + a mock provider). **Live since
+2026-10-02** at `https://auth.contextmirror.com` (contextmirror.com's DNS moved to
+Cloudflare; D1 `yap-auth`, WEUR): Google (Cloud project `yap-accounts`, published)
+and GitHub (OAuth app "Yap") verified with real sign-ins. Email codes wait on
+Resend; Microsoft isn't configured — the app hides both until `/api/providers`
+lists them.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
