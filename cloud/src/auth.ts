@@ -105,8 +105,9 @@ const createAuth = () => betterAuth({
     customRules: { "/sign-in/email-otp": { window: 60, max: 5 } },
   },
   // Only what Yap calls stays reachable (src-tauri/src/auth.rs: get-session,
-  // list-accounts, sign-out, delete-user, email codes, the desktop handoff;
-  // index.ts calls sign-in/social). Off, with a reason each:
+  // list-accounts, sign-out, delete-user, list-sessions + revoke-session +
+  // revoke-other-sessions, email codes, the desktop handoff; index.ts calls
+  // sign-in/social). Off, with a reason each:
   disabledPaths: [
     // Passwords and profile edits: Yap has neither.
     "/sign-up/email",

@@ -240,7 +240,19 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   `refresh` re-validates via `get-session` (server says no → signed out;
   unreachable → keep, flagged `offline`). `auth_sign_out` revokes best-effort
   then forgets locally; `auth_delete_account` returns `"reauth"` when the
-  server wants a fresh sign-in (sessions > 1 day old). Emits
+  server wants a fresh sign-in (sessions > 1 day old). A fresh sign-in that
+  replaces this PC's session (that re-auth) revokes the old one server-side,
+  so it can't linger as a phantom device. **Where you're signed in**:
+  `auth_list_sessions` (`list-sessions` → `{id, current, label, createdAt,
+  lastActiveAt, expiresAt}`, unix secs, this PC first; `label` parsed from
+  the session's user agent — "Yap 0.1.1 on Windows", "Chrome on macOS") —
+  tokens and IPs never reach the webview: the other sessions' tokens stay in
+  a backend id→token map (`Listed`, dropped on any sign-in/out) for
+  `auth_revoke_session(id)` (refuses this PC); `auth_revoke_other_sessions`.
+  ⚠ Better Auth lists sessions only to a session < 1 day old (`freshAge`,
+  `SESSION_NOT_FRESH` → `"reauth"`, same rule as delete); revoking works at
+  any age. A 401 from these re-checks via `get-session` and signs out only if
+  the session is really gone. Emits
   `yap-auth-changed` (status snapshot) and `yap-auth-error`. The Account page
   only offers what the service reports at `/api/providers` (configured
   providers; email once mail can be sent) — `auth_check_methods` when the page
@@ -456,9 +468,16 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
 - **`lib/AccountSection.svelte` / `account.svelte.js`** — Settings → Account:
   Continue with Google/Microsoft/GitHub, "Email me a code" → 6-digit entry
   (auto-submits), a waiting state with paste-the-code fallback, then the
-  profile (avatar or initials, linked providers), sign-out and delete-account
-  (with an in-place "Confirm it's you" re-sign-in when the server asks; it
-  only deletes if the same account signs back in). `account.svelte.js` is the
+  profile (avatar or initials, linked providers), sign-out, a **"Where you're
+  signed in"** group (one row per session: label + amber "This device" chip,
+  "Signed in <date> · last active <day>" — day granularity, the server only
+  renews a session about daily — per-row Sign out for the others, and "Sign
+  out of other devices" with a confirm step; loads whenever a session shows),
+  and delete-account. Deleting and listing devices both want a sign-in < 1
+  day old, so an older session gets the same in-place "Confirm it's you"
+  re-sign-in card (`reauthFor.purpose` = `delete` | `devices`; it only deletes
+  if the same account signs back in), while "Sign out of other devices" works
+  without it. `account.svelte.js` is the
   shared runes store (`auth_status` + `yap-auth-changed`) that also drives the
   "signed in as" buttons at the bottom of both sidebars (ControlPanel +
   Settings) and toasts background sign-in results.

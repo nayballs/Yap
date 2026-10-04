@@ -1,14 +1,17 @@
 <script>
   // Settings → Account. Sign-in is optional: Google / Microsoft / GitHub run
   // in the system browser and hand back to Yap (auth.rs), email works with a
-  // 6-digit code typed here. Signed in, it shows the profile, sign-out and
-  // account deletion (which asks for a fresh sign-in when the session is
-  // older than a day — the server's rule).
+  // 6-digit code typed here. Signed in, it shows the profile, sign-out, where
+  // the account is signed in (other devices can be signed out from here) and
+  // account deletion. Deleting and listing devices both want a sign-in from
+  // the last day (the server's rule), so an older session confirms it's you
+  // first: a fresh sign-in, which replaces this PC's session.
   import { invoke } from '@tauri-apps/api/core';
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import Button from './ui/Button.svelte';
   import Group from './ui/Group.svelte';
   import Row from './ui/Row.svelte';
+  import { toast } from './ui/toast.svelte.js';
   import { account, displayName, initAccount, initials, PROVIDER_LABELS } from './account.svelte.js';
   import { openExternalLink } from './externalLinks.js';
 
@@ -26,13 +29,28 @@
   let resendIn = $state(0);
   let resendTimer = null;
 
-  // Delete flow: null → 'confirm' → (server wants a fresh sign-in) 'reauth'.
+  // Delete flow: null → 'confirm'.
   let deleteStep = $state(null);
-  let reauthFor = $state(null); // { userId, signedInAt } when re-auth started
+  // "Confirm it's you" in progress: { purpose: 'delete' | 'devices', userId,
+  // signedInAt } — the server wants a fresh sign-in before it deletes the
+  // account or lists where it's signed in.
+  let reauthFor = $state(null);
   let notice = $state('');
 
+  // Where you're signed in: auth_list_sessions → [{ id, current, label,
+  // createdAt, lastActiveAt, expiresAt }], this PC first. `devicesState` is the
+  // last outcome: '' (loading) | 'ready' | 'reauth' | 'error'.
+  let devices = $state(null);
+  let devicesState = $state('');
+  let devicesError = $state('');
+  let deviceBusy = $state(''); // a device id, or 'others'
+  let confirmOthers = $state(false);
+  let others = $derived(devices?.filter((d) => !d.current) ?? []);
+  let loadFailed = $derived(!devices && devicesState === 'error');
+  let loadSeq = 0;
+
   let imgFailed = $state(false);
-  let showSignIn = $derived(!!status && (!status.signedIn || deleteStep === 'reauth'));
+  let showSignIn = $derived(!!status && (!status.signedIn || !!reauthFor));
 
   // What the account service offers. Yap only asks when this page opens, so
   // show no buttons until it answers; if it can't be reached, offer everything
@@ -58,19 +76,55 @@
     imgFailed = false;
   });
 
-  // Re-auth for deletion: once a NEW session for the same account appears,
-  // carry on with the delete; a different account deletes nothing.
+  // "Confirm it's you": once a NEW session appears, carry on with what it was
+  // for. Deleting needs the same account (a different one deletes nothing);
+  // the device list just reloads for whoever is signed in now.
   $effect(() => {
-    if (deleteStep !== 'reauth' || !reauthFor || !status?.signedIn) return;
+    if (!reauthFor || !status?.signedIn) return;
     if (status.signedInAt === reauthFor.signedInAt) return;
-    if (status.user?.id === reauthFor.userId) {
-      reauthFor = null;
+    const { purpose, userId } = reauthFor;
+    reauthFor = null;
+    if (status.user?.id !== userId) {
+      deleteStep = null;
+      notice =
+        purpose === 'delete'
+          ? `You signed in as ${status.user?.email}, a different account, so nothing was deleted.`
+          : `You're now signed in as ${status.user?.email}.`;
+    } else if (purpose === 'delete') {
+      // The list on screen belongs to the session this sign-in replaced, and
+      // the deletion ends every session anyway.
+      devices = null;
       deleteAccount();
-    } else {
+    }
+  });
+
+  // Signed out (here, or the server ended the session): nothing in flight
+  // carries over to the next sign-in.
+  $effect(() => {
+    if (status && !status.signedIn) {
       reauthFor = null;
       deleteStep = null;
-      notice = `You signed in as ${status.user?.email}, a different account, so nothing was deleted.`;
+      confirmOthers = false;
     }
+  });
+
+  // Load the device list whenever a session shows: on opening, after a
+  // re-auth or account switch, and once an offline start reconnects. Not
+  // while the account is being deleted (that ends every session).
+  let devicesKey = $derived(
+    status?.signedIn && !reauthFor && busy !== 'delete'
+      ? `${status.user?.id}|${status.signedInAt}|${status.offline}`
+      : ''
+  );
+  $effect(() => {
+    if (!devicesKey) return;
+    untrack(() => {
+      devices = null;
+      devicesState = '';
+      devicesError = '';
+      confirmOthers = false;
+      loadDevices();
+    });
   });
 
   async function run(name, fn) {
@@ -154,19 +208,130 @@
       } catch (e) {
         if (String(e) !== 'reauth') throw e;
         // The session is too old to delete with: sign in again first.
-        reauthFor = { userId: status.user.id, signedInAt: status.signedInAt };
-        email = status.user.email;
-        emailStep = 'enter';
-        deleteStep = 'reauth';
+        startReauth('delete');
       }
     });
   }
 
   function cancelDelete() {
     deleteStep = null;
+    error = '';
+  }
+
+  // "Confirm it's you": the sign-in card asks for a fresh sign-in as this
+  // account (the effect above carries on once it lands).
+  function startReauth(purpose) {
+    notice = '';
+    error = '';
+    reauthFor = { purpose, userId: status.user.id, signedInAt: status.signedInAt };
+    email = status.user.email;
+    emailStep = 'enter';
+    code = '';
+  }
+
+  // Back out of "Confirm it's you" (and of the deletion it was for).
+  function cancelReauth() {
+    if (reauthFor?.purpose === 'delete') deleteStep = null;
     reauthFor = null;
     error = '';
+    emailStep = 'enter';
+    code = '';
     if (status?.pending) invoke('auth_cancel');
+  }
+
+  // ---- where you're signed in ----
+
+  async function loadDevices() {
+    const seq = ++loadSeq;
+    try {
+      const list = await invoke('auth_list_sessions');
+      if (seq !== loadSeq) return;
+      devices = list;
+      devicesState = 'ready';
+    } catch (e) {
+      if (seq !== loadSeq) return;
+      if (String(e) === 'reauth') {
+        devices = null;
+        devicesState = 'reauth';
+      } else {
+        // Keep showing the last list (if any) under the error.
+        devicesState = 'error';
+        devicesError = String(e);
+      }
+    }
+  }
+
+  function retryDevices() {
+    devicesState = '';
+    devicesError = '';
+    loadDevices();
+  }
+
+  async function signOutDevice(device) {
+    deviceBusy = device.id;
+    devicesError = '';
+    try {
+      await invoke('auth_revoke_session', { id: device.id });
+      devices = devices?.filter((d) => d.id !== device.id) ?? null;
+      toast({ title: 'Signed out', description: `${device.label} has been signed out.`, variant: 'success' });
+    } catch (e) {
+      devicesError = String(e);
+    } finally {
+      deviceBusy = '';
+    }
+    loadDevices();
+  }
+
+  async function signOutOthers() {
+    const count = others.length;
+    deviceBusy = 'others';
+    devicesError = '';
+    try {
+      await invoke('auth_revoke_other_sessions');
+      confirmOthers = false;
+      devices = devices?.filter((d) => d.current) ?? null;
+      toast({
+        title: 'Signed out',
+        description:
+          count === 1
+            ? 'Your other device has been signed out.'
+            : count > 1
+              ? `Your ${count} other devices have been signed out.`
+              : 'Every other device has been signed out.',
+        variant: 'success',
+      });
+    } catch (e) {
+      devicesError = String(e);
+    } finally {
+      deviceBusy = '';
+    }
+    loadDevices();
+  }
+
+  const longDate = (secs) =>
+    new Date(secs * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  const startOfDay = (ms) => {
+    const d = new Date(ms);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  };
+
+  // Only to the day: the server renews "last active" about once a day.
+  function daysAgo(secs) {
+    const days = Math.round((startOfDay(Date.now()) - startOfDay(secs * 1000)) / 86_400_000);
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 14) return `${days} days ago`;
+    if (days < 60) return `${Math.floor(days / 7)} weeks ago`;
+    return `on ${longDate(secs)}`;
+  }
+
+  function deviceMeta(device) {
+    const parts = [];
+    if (device.createdAt) parts.push(`Signed in ${longDate(device.createdAt)}`);
+    if (device.current) parts.push('active now');
+    else if (device.lastActiveAt) parts.push(`last active ${daysAgo(device.lastActiveAt)}`);
+    const text = parts.join(' · ');
+    return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
   const openPage = (path) => openExternalLink(`${status?.serviceUrl ?? 'https://auth.contextmirror.com'}${path}`);
@@ -336,16 +501,95 @@
       <h3 class="title">{status.signedIn ? "Confirm it's you" : 'Sign in to Yap'}</h3>
       <p class="muted intro">
         {#if status.signedIn}
-          For your security, sign in again as <strong>{status.user?.email}</strong> to delete your account.
+          For your security, sign in again as <strong>{status.user?.email}</strong>
+          {reauthFor?.purpose === 'devices' ? "to see where you're signed in." : 'to delete your account.'}
         {:else}
           Optional. Your voice, transcripts and notes stay on this PC whether you sign in or not.
         {/if}
       </p>
       {@render signInBody()}
       {#if status.signedIn}
-        <div class="actions"><Button variant="ghost" size="sm" onclick={cancelDelete}>Keep my account</Button></div>
+        <div class="actions">
+          <Button variant="ghost" size="sm" onclick={cancelReauth}>
+            {reauthFor?.purpose === 'delete' ? 'Keep my account' : 'Cancel'}
+          </Button>
+        </div>
       {/if}
     </div>
+  {/if}
+
+  {#if status.signedIn && !reauthFor && (devices || busy !== 'delete')}
+    <Group title="Where you're signed in">
+      {#if devices}
+        {#each devices as device (device.id)}
+          <div class="device">
+            <div class="dinfo">
+              <p class="dname">
+                <span class="dlabel">{device.label}</span>
+                {#if device.current}<span class="here">This device</span>{/if}
+              </p>
+              <p class="dmeta">{deviceMeta(device)}</p>
+            </div>
+            {#if !device.current}
+              <Button variant="ghost" size="sm" disabled={!!deviceBusy} onclick={() => signOutDevice(device)}>
+                {deviceBusy === device.id ? 'Signing out…' : 'Sign out'}
+              </Button>
+            {/if}
+          </div>
+        {/each}
+      {:else if devicesState === 'reauth'}
+        <Row label="Your devices" desc="For your security, confirm it's you to see the other places you're signed in.">
+          {#snippet children()}
+            <Button variant="secondary" size="sm" onclick={() => startReauth('devices')}>Confirm it's you</Button>
+          {/snippet}
+        </Row>
+      {:else if loadFailed}
+        <div class="dnote">
+          <p class="error" role="alert">{devicesError}</p>
+          <Button variant="ghost" size="sm" onclick={retryDevices}>Try again</Button>
+        </div>
+      {:else}
+        <div class="dnote">
+          <span class="spinner small" aria-hidden="true"></span>
+          <p class="muted">Loading your devices…</p>
+        </div>
+      {/if}
+
+      {#if others.length || devicesState === 'reauth'}
+        {#if confirmOthers}
+          <div class="danger">
+            <p>
+              <strong>
+                {others.length > 1
+                  ? `Sign out of ${others.length} other devices?`
+                  : others.length === 1
+                    ? 'Sign out of your other device?'
+                    : 'Sign out everywhere else?'}
+              </strong>
+              They'll need to sign in again to use your account. This PC stays signed in.
+            </p>
+            <div class="actions">
+              <Button variant="danger" disabled={deviceBusy === 'others'} onclick={signOutOthers}>
+                {deviceBusy === 'others' ? 'Signing out…' : 'Sign out of other devices'}
+              </Button>
+              <Button variant="ghost" disabled={deviceBusy === 'others'} onclick={() => (confirmOthers = false)}>Cancel</Button>
+            </div>
+          </div>
+        {:else}
+          <Row label="Sign out of other devices" desc="Every other device will need to sign in again. This PC stays signed in.">
+            {#snippet children()}
+              <Button variant="secondary" size="sm" disabled={!!deviceBusy} onclick={() => ((confirmOthers = true), (devicesError = ''))}>
+                Sign out…
+              </Button>
+            {/snippet}
+          </Row>
+        {/if}
+      {/if}
+
+      {#if devicesError && !loadFailed}
+        <p class="dnote error" role="alert">{devicesError}</p>
+      {/if}
+    </Group>
   {/if}
 
   <Group title={status.signedIn ? 'Coming to your account' : 'What an account will add'}>
@@ -357,7 +601,7 @@
     </Row>
   </Group>
 
-  {#if status.signedIn && deleteStep !== 'reauth'}
+  {#if status.signedIn && !reauthFor}
     <Group title="Delete account">
       <div class="danger">
         {#if deleteStep === 'confirm'}
@@ -640,6 +884,71 @@
     font-size: 12.5px;
   }
   .danger .actions {
+    margin-top: 0;
+  }
+
+  /* Where you're signed in: one row per session, laid out like ui/Row. */
+  .device {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 16px;
+  }
+  .dinfo {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .dname {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .dlabel {
+    color: var(--yap-fg);
+    font-size: 13px;
+    font-weight: 650;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .here {
+    flex: 0 0 auto;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--yap-primary-hover);
+    background: var(--yap-primary-wash);
+    padding: 1px 7px;
+    border-radius: var(--yap-r-sm);
+    white-space: nowrap;
+  }
+  .dmeta {
+    color: var(--yap-muted-70);
+    font-size: 11.5px;
+    line-height: 1.5;
+  }
+  .dnote {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    font-size: 12.5px;
+  }
+  .dnote.error,
+  .dnote .error {
+    margin: 0;
+  }
+  .dnote .error {
+    flex: 1;
+  }
+  .spinner.small {
+    width: 12px;
+    height: 12px;
+    flex-basis: 12px;
     margin-top: 0;
   }
   .soon-tag {
