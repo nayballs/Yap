@@ -248,12 +248,21 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   `auth_device_start` gets a code from `/device/code` (client `yap-desktop`),
   checks both links stay on the service's origin, draws the QR **locally**
   (`qrcode` crate, encoder only → one SVG path; `Status.device` carries it +
-  the grouped code `WDJB-MJHT` + expiry) and polls `/device/token` at the
-  server's interval (`slow_down` adds 5 s; one attempt at a time — a newer one
-  or `auth_device_cancel` retires the poller; the device code never leaves
-  Rust). Approval answers with an ordinary session token → `get-session` →
-  `finish_sign_in`; denied/expired → `yap-auth-error`; approved after a
-  cancel → that session is revoked. Every route's token (+ a profile copy) is stored in
+  the grouped code `WDJB-MJHT` + expiry + `expired`) and polls `/device/token`
+  at the server's interval (`slow_down` adds 5 s; one attempt at a time — a
+  newer one or `auth_device_cancel` retires the poller; the device code never
+  leaves Rust). A **lapsed** code (`expired_token`, or Yap's deadline passing
+  while the service still answers) is no dead end: polling stops and the view
+  stays with `expired: true`, **no** `yap-auth-error`; the page asks for the
+  next code with `auth_device_start({renew: true})`, which does nothing once
+  the attempt was cancelled or signed in. Approval answers with an ordinary
+  session token → `get-session` → `finish_sign_in`, the attempt marked
+  approved meanwhile so no renewal can replace (and discard) it. Denied /
+  code gone / unreachable → `yap-auth-error`; approved after a cancel, or a
+  session `get-session` can't put a name to → that session is revoked.
+  `finish_sign_in` (every route) drops any other sign-in left waiting
+  (browser or phone), emits signed-in at once and fills in the linked
+  providers after. Every route's token (+ a profile copy) is stored in
   Windows Credential Manager (`yap-account.com.yap.dictation`, **Local**
   persistence — never config.json, logs or the webview; any non-production
   service URL gets its own entry, `yap-account@<host>`, so a dev build can't
@@ -261,7 +270,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   `refresh` re-validates via `get-session` (server says no → signed out;
   unreachable → keep, flagged `offline`). `auth_sign_out` revokes best-effort
   then forgets locally; `auth_delete_account` returns `"reauth"` when the
-  server wants a fresh sign-in (sessions > 1 day old). A fresh sign-in that
+  server wants a fresh sign-in (sessions > 1 day old). A phone sign-in under
+  a day old can't delete the account or sign devices out (403
+  `NEW_PHONE_SESSION` → a friendly "sign in another way" error). A fresh sign-in that
   replaces this PC's session (that re-auth) revokes the old one server-side,
   so it can't linger as a phantom device. **Where you're signed in**:
   `auth_list_sessions` (the service's own `GET /api/account/sessions` →
@@ -497,11 +508,21 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   for a session of any age), and delete-account (with an in-place "Confirm
   it's you" re-sign-in when the server wants a session < 1 day old; it only
   deletes if the same account signs back in). **Sign in with your phone**
-  (under the provider buttons) swaps the options for the QR code from
-  `status.device` (its SVG path at 5 px per module, the code in large
-  monospace, the typed-address fallback and a countdown, Cancel) until the
-  phone approves — then it flips to signed in like any sign-in — or the
-  attempt ends (toast says why). `account.svelte.js` is the
+  (under the provider buttons; not in "Confirm it's you", which a phone
+  sign-in can't satisfy) swaps the options for the QR code from
+  `status.device` (its SVG path at 5 px per module, `forced-color-adjust:
+  none`; the code in large monospace, spelled out for screen readers; the
+  "Can't scan?" typed-address fallback; an `aria-live` "Waiting for your
+  phone…" with a quiet "New code in m:ss"; Cancel). A lapsed code (clock at
+  0 or `device.expired`) is blurred under **"Show a new code"** (WhatsApp's
+  reload-QR pattern); while the panel is really in view (window visible +
+  IntersectionObserver — the Settings modal hides with `display: none` but
+  stays mounted) it renews itself at most 3 times per start by the person
+  (every poll costs the service D1 writes), then waits for the button. Focus
+  goes to the panel heading on start and back to the phone button (signed
+  in: the profile heading) when the panel closes. It stays until the phone
+  approves — then it flips to signed in like any sign-in — or the attempt
+  fails (toast says why). `account.svelte.js` is the
   shared runes store (`auth_status` + `yap-auth-changed`) that also drives the
   "signed in as" buttons at the bottom of both sidebars (ControlPanel +
   Settings) and toasts background sign-in results.
