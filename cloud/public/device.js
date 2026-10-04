@@ -7,7 +7,11 @@
 
 const $ = (id) => document.getElementById(id);
 const VIEWS = ['loading', 'enter', 'signin', 'confirm', 'done', 'problem'];
-const show = (view) => VIEWS.forEach((v) => ($(v).hidden = v !== view));
+function show(view) {
+  VIEWS.forEach((v) => ($(v).hidden = v !== view));
+  // Screen readers and keyboards carry on from the new view's heading.
+  $(view).querySelector('h1')?.focus();
+}
 
 // Codes are 8 letters (src/auth.ts phoneUserCode), shown as WDJB-MJHT. The
 // server ignores case and separators too.
@@ -79,12 +83,15 @@ function endBrowserSession() {
 
 // ---- the code ----
 
-const NEW_CODE = 'Get a new one in Yap on your PC: Settings → Account → Sign in with your phone.';
+const NEW_CODE = 'Yap shows a new code on your PC by itself; scan that one.';
 const PROBLEMS = {
   expired: ['This code has expired', `Codes last 10 minutes. ${NEW_CODE}`],
   used: ['This code was already used', `Each code works once. If Yap on your PC isn't signed in yet, start again there: Settings → Account → Sign in with your phone.`],
   unknown: ["That code isn't right", `Check it against the code Yap shows on your PC, or get a new one there: Settings → Account → Sign in with your phone.`],
-  claimed: ['This code belongs to another account', `It was opened with a different account first. ${NEW_CODE}`],
+  claimed: [
+    'Someone else opened this code',
+    "A different account opened it first, so someone else may have this code. If Yap on your PC signs in, check which account it shows (Settings → Account) and sign out if it isn't yours. Then start again there: Settings → Account → Sign in with your phone.",
+  ],
   busy: ['Too many tries', 'Wait a few minutes, then try again.'],
   offline: ["Couldn't reach Yap's account service", 'Check your connection, then try again.'],
   error: ['Something went wrong', 'Try again in a moment.'],
@@ -315,9 +322,51 @@ $('otp-resend').onclick = sendEmailCode;
 
 // ---- approve / deny ----
 
-function showConfirm(user) {
+/** Who asked for this code (src/phone.ts): the app, a rough place, and
+ *  whether this phone shares its network or country. Needs this browser's
+ *  session. Null if that can't be had: then the page doesn't say, and never
+ *  holds up approving. */
+async function lookUpOrigin() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const res = await fetch(`/api/account/device-origin?user_code=${encodeURIComponent(userCode)}`, {
+      credentials: 'same-origin',
+      signal: ctrl.signal,
+    });
+    const data = res.ok ? await res.json() : null;
+    return typeof data?.label === 'string' ? data : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function showOrigin(origin) {
+  $('origin').hidden = !origin;
+  if (!origin) return;
+  const ago = origin.minutesAgo >= 1 ? `${origin.minutesAgo} min ago` : 'just now';
+  $('origin-text').textContent = `Requested ${ago} by ${origin.label}${origin.place ? `, ${origin.place}` : ''}.`;
+  // null means unknown: only a real difference earns a warning.
+  const [kind, text] =
+    origin.sameCountry === false
+      ? ['abroad', "This request came from another country. If you're not at that PC right now, tap Deny."]
+      : origin.sameNetwork === true
+        ? ['same', '✓ Same network as this phone']
+        : origin.sameNetwork === false
+          ? ['differs', "Started from a different network: normal if your phone is on mobile data. Only approve if you're at that PC."]
+          : ['', ''];
+  $('origin-note').className = `note ${kind}`;
+  $('origin-note').textContent = text;
+  $('origin-note').hidden = !text;
+}
+
+async function showConfirm(user) {
+  const origin = await lookUpOrigin();
   $('who').textContent = user?.email || 'your account';
   $('confirm-code').textContent = pretty(userCode);
+  showOrigin(origin);
   setError('confirm-error', '');
   setBusy('confirm', false);
   show('confirm');
@@ -364,5 +413,10 @@ $('switch').onclick = async () => {
   await endBrowserSession();
   showSignIn();
 };
+
+// Leaving mid-way (tab closed, another page, a reload) ends this browser's
+// session, as finishing would: only Yap should stay signed in. Signed out
+// already, this does nothing, so a provider sign-in's redirect is safe.
+addEventListener('pagehide', () => endBrowserSession());
 
 start();

@@ -229,11 +229,19 @@ const createAuth = () => betterAuth({
     // session token (`access_token`) for Bearer use like any other. Paths
     // in use, so never in disabledPaths: Yap's device/code + device/token;
     // the page's sign-in/social, email codes, device, device/approve|deny
-    // and sign-out.
+    // and sign-out. src/index.ts wraps device/code (body check, where it
+    // came from), device/approve (email) and device/token (marks the
+    // session as a phone sign-in's).
+    //
+    // Yap polls at `interval`: every 3 s, so it signs in about a second
+    // sooner than at RFC 8628's default 5. A poll writes D1 twice (the
+    // code's lastPolledAt, the rate-limit count), so a code left showing
+    // for its full 10 minutes costs ~200 polls (~400 writes); most sign-ins
+    // take well under a minute.
     deviceAuthorization({
       verificationUri: "/device",
       expiresIn: "10m",
-      interval: "5s",
+      interval: "3s",
       generateUserCode: phoneUserCode,
       // Codes are issued to (and redeemed by) Yap alone.
       validateClient: (clientId) => clientId === DESKTOP_CLIENT_ID,

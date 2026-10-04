@@ -22,6 +22,11 @@ GITHUB_CLIENT_ID = "Ov23li7Hi7DTY8mtHKPR"   # github.com/settings/applications/3
 GOOGLE_CLIENT_ID = "575066617296-e3op5up8i4n5t9s6o6re9g4m7rcn45uu.apps.googleusercontent.com"
 DISCORD_CLIENT_ID = "1556416670472601620"   # discord.com/developers/applications/1556416670472601620 ("Yap")
 
+# Every 30 minutes: clears finished phone sign-in codes and their records,
+# and browser sessions left behind (src/phone.ts sweep).
+[triggers]
+crons = ["*/30 * * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "yap-auth"

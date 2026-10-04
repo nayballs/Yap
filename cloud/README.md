@@ -11,7 +11,7 @@ transcripts, notes and settings never leave the user's PC.
 |---|---|
 | **Email code** | Yap calls the API directly: `POST /api/auth/email-otp/send-verification-otp` → the user types the 6-digit code → `POST /api/auth/sign-in/email-otp`, which returns `{ token, user }`. |
 | **Google / GitHub / Discord** | Yap opens the system browser (RFC 8252) at `/api/auth/electron/init-oauth-proxy?provider=…&client_id=yap-desktop&code_challenge=…&state=…`. After the provider, the server drops a short-lived `better-auth.yap-desktop` cookie and lands on `/` (`public/index.html`), which hands a one-time code back to Yap. Yap redeems it with its PKCE verifier at `POST /api/auth/electron/token` → `{ token, user }`. |
-| **Phone (QR code)** | Yap gets a code at `POST /api/auth/device/code` and shows `/device?user_code=…` as a QR code. On the phone, `/device` (`public/device.html`) offers every method above, then asks to approve the code; Yap polls `POST /api/auth/device/token`, which answers `{ access_token }` (a session token) once approved. See below. |
+| **Phone (QR code)** | Yap gets a code at `POST /api/auth/device/code` and shows `/device?user_code=…` as a QR code. On the phone, `/device` (`public/device.html`) offers every method above, shows who asked for the code, then asks to approve it; Yap polls `POST /api/auth/device/token`, which answers `{ access_token }` (a session token) once approved. See below. |
 
 The handoff page returns the code by one of three channels:
 
@@ -30,41 +30,96 @@ the edge from the Workers egress IP (one rate-limit bucket for everyone).
 Better Auth's `deviceAuthorization` plugin): any sign-in method, done on the
 phone (its password manager, 2FA, mail app).
 
-1. Yap: `POST /api/auth/device/code` `{ "client_id": "yap-desktop" }` (no
-   other client gets one) → `device_code` (Yap's polling secret), `user_code`
-   (8 letters from RFC 8628's 20 consonants, shown as `WDJB-MJHT`),
-   `verification_uri` (`/device`), `verification_uri_complete`
+1. Yap: `POST /api/auth/device/code` with exactly `{ "client_id":
+   "yap-desktop" }` as JSON → `device_code` (Yap's polling secret),
+   `user_code` (8 letters from RFC 8628's 20 consonants, shown as
+   `WDJB-MJHT`), `verification_uri` (`/device`), `verification_uri_complete`
    (`/device?user_code=…`, drawn as a QR code inside Yap), `expires_in` 600
-   and `interval` 5.
+   and `interval` 3. Anything else in the body (`scope`, `user_id`, which
+   would pre-bind the code to an account, form encoding) gets 400
+   `invalid_request`; another client id gets `invalid_client`. The client id
+   is public, so it identifies the app rather than authenticating it. Each
+   new code records where it came from (`deviceOrigin`, below).
 2. Phone: `/device` (`public/device.html` + `device.js`; opened by typing
    the address, it asks for the code). It looks the code up without cookies,
    `GET /api/auth/device?user_code=…`, then offers every method
    `/api/providers` lists: providers through `POST /api/auth/sign-in/social`
    (`callbackURL` and `errorCallbackURL` both `/device?user_code=…`), email
-   through the usual two code calls. Signed in, it shows the account and the
-   code to compare with the PC's screen, says what approving does, and warns
-   off links someone else sent.
+   through the usual two code calls. Signed in, it shows the account, the
+   code to compare with the PC's screen and who asked for it
+   (`GET /api/account/device-origin`: "Requested 2 min ago by Yap 0.1.1 on
+   Windows, near Leeds, United Kingdom", then a green "same network as this
+   phone", an amber "different network" note, or a red "another country"
+   warning; RFC 8628 §5.4), and warns off links someone else sent. Approve
+   and Deny carry equal weight.
 3. Approve or Deny: a signed-in `GET /device?user_code=…` claims the code
    for that account (only the claimer may decide, so the page claims only
    then, and "Not you?" can still switch accounts), then
    `POST /api/auth/device/approve` or `/deny` `{ "userCode" }`. Either way it
    then signs the browser out, like the hand-back page: only Yap gets a
-   session.
+   session (leaving the page mid-way signs out too, on `pagehide`). An
+   approval emails the account "New sign-in to your Yap account", with the
+   PC's rough location and how to sign it out.
 4. Yap polls `POST /api/auth/device/token` `{ "grant_type":
    "urn:ietf:params:oauth:grant-type:device_code", "device_code",
-   "client_id" }`: 400 `authorization_pending` (or `slow_down`: +5 s) until
-   approved, then `{ access_token, token_type: "Bearer", expires_in }`. The
-   access token is a plain session token, made on Yap's request (the session
-   row has Yap's user agent) and used as `Authorization: Bearer` like the
-   others; Yap reads the profile from `get-session`. `access_denied`,
-   `expired_token` and `invalid_grant` (spent or unknown) end the attempt.
+   "client_id" }` every 3 s: 400 `authorization_pending` (or `slow_down`:
+   +5 s) until approved, then `{ access_token, token_type: "Bearer",
+   expires_in }`. The access token is a plain session token, made on Yap's
+   request (the session row has Yap's user agent) and used as
+   `Authorization: Bearer` like the others; Yap reads the profile from
+   `get-session`. `access_denied`, `expired_token` and `invalid_grant` (spent
+   or unknown) end the attempt.
+5. For its first 24 hours a session made this way can't delete the account
+   or sign other devices out: `POST /api/auth/delete-user`,
+   `POST /api/auth/revoke-other-sessions` and
+   `POST /api/account/sessions/revoke` answer 403
+   `{ "code": "NEW_PHONE_SESSION", "message": "For your security, a sign-in
+   made with your phone can't do this during its first day. Sign in another
+   way to carry on." }` (Telegram does the same). Someone tricked into
+   approving a stranger's code can still sign that session out from any
+   other sign-in. `/device/token`'s answer marks the session (`phoneSession`:
+   a keyed hash of the token, never the token) before Yap receives it; the
+   check resolves the caller's session through `get-session`, so a token
+   sent signed, raw or as a cookie is caught alike.
+
+`GET /api/account/device-origin?user_code=…` needs the page's signed-in
+browser session (cookie) and a code that's still pending and not claimed by
+another account, and answers
+`{ label, place, minutesAgo, sameNetwork, sameCountry }` (`Cache-Control:
+no-store`): `label` is "Yap 0.1.1 on Windows" when the asking user agent
+is Yap's own `Yap/<version> (Windows)`, else "Yap"; `place` is "near
+<city>, <country>", "in <country>" or `""`; the booleans compare the phone's
+request with the PC's (`null` when either side is unknown). 401 without a
+session, 404 when no sign-in waits for that code, 400 for a malformed code,
+429 over 20 look-ups per IP per 10 minutes.
+
+What `deviceOrigin` keeps, per code: Cloudflare's country and city for the
+asking IP, its user agent (first 200 characters), and `network`, a keyed
+hash (HMAC with `BETTER_AUTH_SECRET`) of its IPv4 /24 or IPv6 /64, so the
+phone can tell "same network" without anyone storing an IP.
 
 Per-IP limits (`rateLimit.customRules`): `/device/code` 5 a minute,
 `/device` lookups 10 per 10 minutes (the plugin's own is 5 per code
-lifetime), approve and deny 5 a minute each. The plugin deletes a code once
-Yap redeems it, or polls it after a deny or expiry; `src/index.ts` clears
-abandoned ones (expired over an hour ago) whenever a new code is issued.
-Table `deviceCode`: `migrations/0003_device_authorization.sql`.
+lifetime), approve and deny 5 a minute each; `device-origin` 20 per 10
+minutes (`src/throttle.ts`, counted in `emailCodeSend` under its own key
+prefix). The plugin deletes a code once Yap redeems it, or polls it after a
+deny or expiry. A sweep (`src/phone.ts`) runs after every new code and on a
+Cron Trigger every 30 minutes (`wrangler.toml` `[triggers]`): codes that
+expired over an hour ago, `deviceOrigin` rows after 70 minutes,
+`phoneSession` marks after 2 days, send/look-up counts after a day, and
+browser sessions left behind. Those are sessions whose user agent starts
+`Mozilla/` and that are over 30 minutes old: the only browser sessions this
+service makes are the hand-back page's and the phone page's, which sign out
+when they finish (Yap's own carry `Yap/…`), so one still there was
+abandoned mid-way. A future web page that needs to stay signed in would
+have to change this.
+
+At 3 s a poll costs about two D1 writes (the code's `lastPolledAt` and the
+rate-limit count): a sign-in that takes 30 s is ~20 writes; a code left on
+screen for its whole 10 minutes, ~400.
+
+Tables: `deviceCode` (`migrations/0003_device_authorization.sql`),
+`deviceOrigin` and `phoneSession` (`migrations/0004_device_origin.sql`).
 
 Yap keeps the session token in Windows Credential Manager and sends it as
 `Authorization: Bearer <token>`. Sessions last 30 days and slide while used.
@@ -82,6 +137,16 @@ is disabled: it answers only sessions under a day old and returns every
 session's token.
 POSTs need a JSON body (`{}` will do). Deleting needs a session under a day
 old (`SESSION_EXPIRED` otherwise: sign in again first) and emails a receipt.
+A phone sign-in's session gets 403 `NEW_PHONE_SESSION` from delete-user and
+both revoke calls for its first 24 hours (see above).
+
+Every POST under `/api/auth/` and `/api/account/` must declare a
+`Content-Length` of at most 4096 bytes (413 `PAYLOAD_TOO_LARGE` otherwise,
+chunked bodies included): every real body is a few hundred bytes, and
+Better Auth keeps some of what it's given. `init-oauth-proxy` takes a
+`state` of up to 128 characters from `A-Z a-z 0-9 . _ ~ -` and an S256
+`code_challenge` (43 base64url characters); anything else lands on
+`/error?error=invalid_request`.
 
 Email codes are limited beyond Better Auth's 3 sends a minute per IP: one
 address gets a code every 30 s at most and 10 a day, one IP 20 a day
@@ -106,10 +171,11 @@ fresh one when a request on it never finished, and answers a call stuck for
 ## Layout
 
 ```
-src/index.ts       Hono app: the desktop sign-in entry, /api/auth/* → Better Auth, /api/health
-src/auth.ts        Better Auth config (email OTP, social providers, bearer, desktop handoff)
+src/index.ts       Hono app: the desktop sign-in entry, /api/auth/* → Better Auth, /api/account/*, the cron
+src/auth.ts        Better Auth config (email OTP, social providers, bearer, desktop handoff, device codes)
+src/phone.ts       phone sign-in records: where a code came from, phone sessions, the sweep
 src/mail.ts        Resend sender + the Yap-styled emails
-src/throttle.ts    limits on emailed sign-in codes (per address, per IP)
+src/throttle.ts    limits on emailed sign-in codes (per address, per IP) and origin look-ups
 src/env.d.ts       bindings, vars and secrets
 auth.cli.ts        schema-only config for `npm run schema` (not deployed)
 migrations/        D1 schema (generated)
@@ -154,7 +220,12 @@ code from the console) and approve. Then `POST /api/auth/device/token` with
 `{"grant_type":"urn:ietf:params:oauth:grant-type:device_code","device_code":"…","client_id":"yap-desktop"}`
 returns the `access_token`; `GET /api/auth/get-session` with
 `Authorization: Bearer <access_token>` shows the account. Polls closer than
-5 s apart answer `slow_down`.
+3 s apart answer `slow_down`. The approval email prints to the console like
+the codes. Locally the phone page's origin line shows wrangler's idea of
+your location, and "same network" (both requests come from this PC).
+
+To run the cron's sweep by hand, start `wrangler dev --test-scheduled` and
+open `http://localhost:8787/__scheduled?cron=*/30+*+*+*+*`.
 
 After changing plugins or schema options in `src/auth.ts`, mirror them in
 `auth.cli.ts` and run `npm run schema`: it writes the whole schema to
@@ -182,7 +253,10 @@ a stray control character into the hidden prompt.)
 
 Ship a change: `npm run typecheck && npm run deploy`. A schema change gets a
 new numbered migration, applied with `npm run db:migrate:remote` before the
-deploy (phone sign-in needs `0003_device_authorization.sql` there first).
+deploy (phone sign-in needs `0003_device_authorization.sql` there first, and
+this version needs `0004_device_origin.sql`: without its tables, deleting an
+account and signing other devices out fail with a 500). Deploying also
+registers the Cron Trigger in `wrangler.toml`.
 
 ### Discord sign-in
 
