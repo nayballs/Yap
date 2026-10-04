@@ -5,7 +5,8 @@
   (github.com/settings/applications/3897989 → "Upload new logo").
 - `yap-logo-120.png` — 120×120, for Google's OAuth consent screen
   (Google Auth Platform → Branding → App logo; Google wants 120×120,
-  under 1 MB). Adding a logo there needs Google's brand verification.
+  under 1 MB). Changing it there means re-running Google's brand
+  verification (Branding → Verify branding, then Publish branding).
 
 The 512 is a copy of the generated app icon (`src-tauri/icons/icon.png`, from
 `npx tauri icon`) and the 120 is that icon downscaled (Lanczos); regenerate

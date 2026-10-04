@@ -84,8 +84,12 @@ only, D1 `yap-auth` (WEUR). Client ids are public and live in `wrangler.toml`
 a stray control character into the hidden prompt.)
 
 - Google: Cloud project `yap-accounts` → Google Auth Platform (published),
-  web client "Yap account service".
-- GitHub: OAuth app "Yap" (github.com/settings/applications/3897989).
+  web client "Yap account service". Branding (name + logo) is verified, so
+  the account chooser says "continue to Yap". That rests on the Search
+  Console ownership TXT at `contextmirror.com` (`google-site-verification=…`):
+  keep it, and re-verify branding after changing the logo, name or links.
+- GitHub: OAuth app "Yap" (github.com/settings/applications/3897989), logo
+  `docs/brand/yap-logo-512.png` on badge colour `#29251d`.
 - Resend: domain `mail.contextmirror.com` (eu-west-1, DNS via Cloudflare).
 
 Ship a change: `npm run typecheck && npm run deploy`. A schema change gets a

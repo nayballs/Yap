@@ -665,10 +665,11 @@ the stub for fast `cargo check`. **Optional accounts** (`auth.rs` + `cloud/`): e
 codes and Google/Microsoft/GitHub sign-in, sign-out, delete-account — tested end
 to end locally (2026-10-01, `wrangler dev` + a mock provider). **Live since
 2026-10-02** at `https://auth.contextmirror.com` (contextmirror.com's DNS moved to
-Cloudflare; D1 `yap-auth`, WEUR): Google (Cloud project `yap-accounts`, published)
-and GitHub (OAuth app "Yap") verified with real sign-ins. Email codes wait on
-Resend; Microsoft isn't configured — the app hides both until `/api/providers`
-lists them.
+Cloudflare; D1 `yap-auth`, WEUR): Google (Cloud project `yap-accounts`, published;
+branding verified 2026-10-04, so its chooser says "continue to Yap" with the logo)
+and GitHub (OAuth app "Yap") verified with real sign-ins; email codes send via
+Resend from `mail.contextmirror.com`. Microsoft isn't configured — the app hides
+it until `/api/providers` lists it.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
