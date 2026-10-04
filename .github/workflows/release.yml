@@ -115,6 +115,8 @@ jobs:
       # https://github.com/nayballs/Yap/releases/latest/download/Yap-setup.exe
       # always fetches the newest stable (the README and website link it). The
       # updater ignores it: latest.json points at the versioned installer.
+      # Re-running for the same version reuses the draft (tauri-action replaces
+      # its own files), so drop the old copy and re-pin the draft to this build.
       - name: Attach constant-name installer
         shell: pwsh
         env:
@@ -123,6 +125,11 @@ jobs:
         run: |
           $exe = Get-ChildItem "$env:CARGO_TARGET_DIR\release\bundle\nsis\*-setup.exe" | Select-Object -First 1
           if (-not $exe -or -not $env:RELEASE_ID) { throw "No NSIS installer or release id" }
+          $release = "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID"
+          gh api -X PATCH $release -f target_commitish=$env:GITHUB_SHA | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Couldn't pin the release to $env:GITHUB_SHA" }
+          $old = (gh api "$release/assets" | ConvertFrom-Json) | Where-Object name -eq 'Yap-setup.exe'
+          foreach ($a in $old) { gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($a.id)" | Out-Null }
           Copy-Item $exe.FullName Yap-setup.exe
           curl.exe --fail-with-body -sS -X POST `
             -H "Authorization: Bearer $env:GH_TOKEN" `
