@@ -74,6 +74,7 @@ jobs:
 
       - name: Build + release (Tauri)
         uses: tauri-apps/tauri-action@v0
+        id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Updater (minisign) signing — required so latest.json is signed and
@@ -109,3 +110,24 @@ jobs:
           releaseName: "Yap v__VERSION__"
           releaseDraft: true
           prerelease: false
+
+      # A constant-name copy of the installer, so
+      # https://github.com/nayballs/Yap/releases/latest/download/Yap-setup.exe
+      # always fetches the newest stable (the README and website link it). The
+      # updater ignores it: latest.json points at the versioned installer.
+      - name: Attach constant-name installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.tauri.outputs.releaseId }}
+        run: |
+          $exe = Get-ChildItem "$env:CARGO_TARGET_DIR\release\bundle\nsis\*-setup.exe" | Select-Object -First 1
+          if (-not $exe -or -not $env:RELEASE_ID) { throw "No NSIS installer or release id" }
+          Copy-Item $exe.FullName Yap-setup.exe
+          curl.exe --fail-with-body -sS -X POST `
+            -H "Authorization: Bearer $env:GH_TOKEN" `
+            -H "Content-Type: application/octet-stream" `
+            --data-binary "@Yap-setup.exe" `
+            "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?name=Yap-setup.exe" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Upload failed ($LASTEXITCODE)" }
+          Write-Host "Attached Yap-setup.exe (copy of $($exe.Name))"
