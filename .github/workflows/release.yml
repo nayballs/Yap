@@ -122,11 +122,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ steps.tauri.outputs.releaseId }}
+          APP_VERSION: ${{ steps.tauri.outputs.appVersion }}
         run: |
           $exe = Get-ChildItem "$env:CARGO_TARGET_DIR\release\bundle\nsis\*-setup.exe" | Select-Object -First 1
-          if (-not $exe -or -not $env:RELEASE_ID) { throw "No NSIS installer or release id" }
+          if (-not $exe -or -not $env:RELEASE_ID -or -not $env:APP_VERSION) { throw "No NSIS installer, release id or version" }
           $release = "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID"
-          gh api -X PATCH $release -f target_commitish=$env:GITHUB_SHA | Out-Null
+          # Restate tag_name: GitHub turns a draft's tag into "untagged-…"
+          # when an edit leaves it out.
+          gh api -X PATCH $release -f tag_name="v$env:APP_VERSION" -f target_commitish=$env:GITHUB_SHA | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Couldn't pin the release to $env:GITHUB_SHA" }
           $old = (gh api "$release/assets" | ConvertFrom-Json) | Where-Object name -eq 'Yap-setup.exe'
           foreach ($a in $old) { gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($a.id)" | Out-Null }

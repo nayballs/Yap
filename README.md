@@ -15,7 +15,7 @@ app you're in.
 ![GPU](https://img.shields.io/badge/GPU-any%20(Vulkan%20%2B%20DirectML)-8A2BE2)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-**[⬇ Download for Windows](https://github.com/nayballs/Yap/releases/download/nightly/Yap-nightly-setup.exe)** · [all releases](https://github.com/nayballs/Yap/releases)
+**[⬇ Download for Windows](https://github.com/nayballs/Yap/releases/latest/download/Yap-setup.exe)** · [release notes](https://github.com/nayballs/Yap/releases/latest) · [nightly](https://github.com/nayballs/Yap/releases/tag/nightly)
 
 <img src="docs/demo.gif" alt="Yap demo — dictating into Notepad, AI cleanup stripping the filler words" width="680" />
 
@@ -43,8 +43,6 @@ your voice to the cloud. Yap refuses the choice:
 ```
 
 <div align="center">
-<img src="docs/screenshot-pill.png" alt="The Yap pill — a minimal floating capsule" width="240" />
-<br/>
 <img src="docs/screenshot-settings.png" alt="Yap settings — hotkey, microphone, recording mode" width="620" />
 </div>
 
@@ -81,20 +79,22 @@ your voice to the cloud. Yap refuses the choice:
 - 💬 **AI chat over your notes** — ask questions grounded in your notes, backed by
   a local tool-calling loop that can search, create, and update notes for you.
 - 🌍 **Multilingual** — per-model language selection and translate-to-English.
-- 🍰 **Polished, minimal UI** — a floating waveform overlay while you speak, an optional
-  always-on-top pill, a state-aware tray icon, live streaming partials (opt-in).
+- 🍰 **Polished, minimal UI** — a floating waveform overlay while you speak, a live
+  preview of the words as you say them, and a state-aware tray icon.
+- 👤 **Optional account** — sign in with Google, GitHub or an email code. Dictation
+  never needs one.
 - 📦 **Zero-friction install** — small NSIS installer (normal or portable), in-app
   auto-updates, autostart option.
 
 ## Quick start
 
-1. **[Download the installer](https://github.com/nayballs/Yap/releases/download/nightly/Yap-nightly-setup.exe)** and run it.
+1. **[Download the installer](https://github.com/nayballs/Yap/releases/latest/download/Yap-setup.exe)** and run it.
    > Builds are not yet Authenticode-signed, so SmartScreen will warn on first run —
    > click *More info → Run anyway*. (Signing is on the [roadmap](./ROADMAP.md).)
 2. Pick a model in onboarding — the default **Parakeet V3** is fast and accurate.
 3. Press **F9**, talk, press **F9** again. That's it.
-4. *(Optional)* Settings → **AI Cleanup** → enable → **Built-in local AI** for
-   polished text with nothing ever leaving your machine.
+4. *(Optional)* Settings → **Language Models** → enable → **Local** for polished
+   text with nothing ever leaving your machine.
 
 ## Privacy
 
@@ -102,7 +102,11 @@ your voice to the cloud. Yap refuses the choice:
 - AI cleanup is **off by default**; the built-in option runs locally too. Cloud
   providers are strictly opt-in, bring-your-own-key.
 - Dictation history is stored **only on your machine** and can be disabled or cleared
-  in Settings. No telemetry, no accounts.
+  in Settings. No telemetry.
+- Yap goes online only to download models, check for updates (you can turn that
+  off), reach a cloud AI provider you set up, or for the **optional account**. A
+  signed-out Yap contacts the account service only when you open its Account page
+  ([privacy policy](https://auth.contextmirror.com/privacy)).
 
 ## Building from source
 
@@ -126,8 +130,11 @@ any GPU, nothing extra to install for end users.
 - [`ROADMAP.md`](./ROADMAP.md) — where Yap is going, and the competitive strategy.
 - [`CLAUDE.md`](./CLAUDE.md) — architecture deep-dive (modules, pipeline, feature flags).
 
-Yap is pre-1.0 and moving fast — the download above is the rolling nightly build,
-auto-updated as fixes land. A curated stable channel is imminent.
+Yap is pre-1.0 and moving fast. The download above is the **stable** channel: tagged
+releases with notes, and installed copies update themselves. For every change as it
+lands, use the [nightly](https://github.com/nayballs/Yap/releases/tag/nightly)
+([installer](https://github.com/nayballs/Yap/releases/download/nightly/Yap-nightly-setup.exe)),
+which updates daily from `main`.
 
 ## License
 
