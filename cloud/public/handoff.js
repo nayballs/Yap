@@ -49,9 +49,25 @@ function showHandoff(raw) {
         document.getElementById('who').textContent = `Signed in as ${d.user.email}. Switching you back to Yap…`;
       }
     })
-    .catch(() => {});
+    .catch(() => {})
+    .finally(signOutBrowser);
   // Try once automatically; browsers may ask first or need the button.
   window.location.href = href;
+}
+
+// The provider sign-in also left this browser signed in, but only Yap needs a
+// session (it gets its own when it redeems the code), so end the browser's:
+// nothing usable stays behind on a shared computer. keepalive lets it finish
+// even when the loopback hand-back navigates away; the "#done" page that
+// follows tries again.
+function signOutBrowser() {
+  fetch('/api/auth/sign-out', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+    keepalive: true,
+  }).catch(() => {});
 }
 
 // The cookie arrives with the sign-in redirect; poll briefly like the
@@ -60,6 +76,7 @@ const started = Date.now();
 (function wait() {
   if (location.hash === '#done') {
     document.getElementById('done').hidden = false;
+    signOutBrowser();
     return;
   }
   const raw = readCookie();

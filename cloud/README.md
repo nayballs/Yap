@@ -40,8 +40,20 @@ address gets a code every 30 s at most and 10 a day, one IP 20 a day
 (`src/throttle.ts`, table `emailCodeSend`: keyed hashes, kept a day). Over the
 limit, the send answers 429 `TOO_MANY_REQUESTS` with `Retry-After` and
 doesn't touch the code already sent. Only `type: "sign-in"` codes can be
-requested, and the email plugin's other flows (password reset, email change,
-email verification) are switched off with `disabledPaths`.
+requested.
+
+Everything Yap doesn't call is switched off (`disabledPaths` in
+`src/auth.ts`, 404): passwords, profile edits, provider tokens
+(`get-access-token`), manual account linking, `electron/transfer-user`, and
+the email plugin's other flows. After a browser sign-in, the hand-back page
+signs the *browser* out (Yap gets its own session when it redeems the code),
+so nothing usable stays behind in the browser.
+
+On Workers a cancelled request stops mid-await, which can leave a shared
+Better Auth instance hanging every later call. `handleAuth` (`src/auth.ts`)
+shares an instance only after it has served a request end to end, starts a
+fresh one when a request on it never finished, and answers a call stuck for
+8 s with a retry (GETs) or a 503. See its comment before changing it.
 
 ## Layout
 

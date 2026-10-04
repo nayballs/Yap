@@ -66,6 +66,7 @@ export const signInMethods = () => ({
 
 const createAuth = () => betterAuth({
   appName: "Yap",
+  telemetry: { enabled: false }, // off by default too; stated so it stays off
   // Set explicitly: Workers have no NODE_ENV, and outside "production" Better
   // Auth would silently fall back to a default secret and disable rate limits.
   baseURL: env.BETTER_AUTH_URL,
@@ -103,10 +104,39 @@ const createAuth = () => betterAuth({
     // sends stay at the plugin's 3 a minute.
     customRules: { "/sign-in/email-otp": { window: 60, max: 5 } },
   },
-  // Yap has no passwords and never changes an account's email, so the email
-  // plugin's other code flows stay off: each would be another way to make
-  // the service send mail. (Sign-in codes go through index.ts's limits.)
+  // Only what Yap calls stays reachable (src-tauri/src/auth.rs: get-session,
+  // list-accounts, sign-out, delete-user, email codes, the desktop handoff;
+  // index.ts calls sign-in/social). Off, with a reason each:
   disabledPaths: [
+    // Passwords and profile edits: Yap has neither.
+    "/sign-up/email",
+    "/sign-in/email",
+    "/change-password",
+    "/verify-password",
+    "/request-password-reset",
+    "/reset-password",
+    "/change-email",
+    "/send-verification-email",
+    "/verify-email",
+    "/update-user",
+    "/update-session",
+    // Provider tokens: Yap only needs identity, and these hand a session
+    // holder the user's Google/GitHub access token.
+    "/get-access-token",
+    "/refresh-token",
+    "/account-info",
+    // Linking is automatic (same verified email); by hand it would let
+    // anyone holding a session attach their own provider account.
+    "/link-social",
+    "/unlink-account",
+    // Deletion happens in Yap, never from an email link.
+    "/delete-user/callback",
+    // index.ts serves the desktop entry itself; transfer-user would let a
+    // browser session mint a new desktop sign-in code.
+    "/electron/init-oauth-proxy",
+    "/electron/transfer-user",
+    // The email plugin's other code flows: each one more way to make the
+    // service send mail. (Sign-in codes go through index.ts's limits.)
     "/email-otp/check-verification-otp",
     "/email-otp/verify-email",
     "/email-otp/request-password-reset",
@@ -119,6 +149,13 @@ const createAuth = () => betterAuth({
   advanced: {
     ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
     backgroundTasks: { handler: waitUntil },
+    // No runtime schema check. Better Auth runs it once per instance and has
+    // every concurrent request await that same promise; on Workers a promise
+    // whose request is cancelled never settles, so one cancelled first
+    // request left every later /api/auth call on that isolate hanging (seen
+    // 2026-10-04: get-session timing out on ~40% of calls). The schema comes
+    // from migrations/ anyway.
+    database: { validateSchema: false },
   },
   plugins: [
     emailOTP({
@@ -136,10 +173,62 @@ const createAuth = () => betterAuth({
   ],
 });
 
-let instance: ReturnType<typeof createAuth> | undefined;
+// One Better Auth instance per isolate keeps warm requests at a few ms of
+// CPU (building one costs 30-70 ms; the free plan allows 10 per request).
+// But on Workers a cancelled request (client gone) stops mid-await, and the
+// shared instance can be left with work that never settles: in production a
+// burst of cancelled requests left later /api/auth calls on those isolates
+// hanging, both mid-setup and after it (2026-10-04). Hence:
+//  - an instance is shared only once it has served a request end to end;
+//  - each request on it is marked running until it finishes. A cancelled one
+//    never unmarks itself, so a mark older than SUSPECT_MS means "possibly
+//    stuck": the next request builds a fresh instance instead of waiting;
+//  - backstop: a call pending after STUCK_MS answers 503 and retires it.
+interface Instance {
+  auth: ReturnType<typeof createAuth>;
+  running: Set<{ since: number }>;
+}
+let shared: Instance | undefined;
 
-/** Built on first use rather than at module scope: Better Auth checks the D1
- *  schema as it starts, and Workers forbid I/O outside a request, so a
- *  module-scope instance logs a failed check on every cold start. Building it
- *  inside the first request lets the check run; later requests reuse it. */
-export const getAuth = () => (instance ??= createAuth());
+/** Normal calls take well under a second. A slow but healthy one (a provider
+ *  callback can take 1-2 s) only costs the next request a fresh instance. */
+const SUSPECT_MS = 1500;
+/** Yap waits 20 s; answer well before that. */
+const STUCK_MS = 8000;
+
+/** Runs a request through Better Auth (see above). A stuck GET (get-session,
+ *  list-accounts) changes nothing, so it gets one more try on a fresh
+ *  instance; anything else answers 503. */
+export async function handleAuth(request: Request, retry = true): Promise<Response> {
+  const now = Date.now();
+  if (shared && [...shared.running].some((mark) => now - mark.since > SUSPECT_MS)) {
+    console.warn("[auth] a request on the shared instance never finished; starting a fresh one");
+    shared = undefined;
+  }
+  const instance: Instance = shared ?? { auth: createAuth(), running: new Set() };
+  const mark = { since: now };
+  instance.running.add(mark);
+  const again = retry && (request.method === "GET" || request.method === "HEAD") ? request.clone() : null;
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const stuck = new Promise<"stuck">((resolve) => {
+    timer = setTimeout(() => resolve("stuck"), STUCK_MS);
+  });
+  try {
+    const result = await Promise.race([instance.auth.handler(request), stuck]);
+    if (result === "stuck") {
+      if (shared === instance) shared = undefined;
+      console.error(`[auth] ${new URL(request.url).pathname} stuck for ${STUCK_MS} ms; instance retired`);
+      if (again) return await handleAuth(again, false);
+      return Response.json(
+        { code: "SERVICE_UNAVAILABLE", message: "The account service was busy. Try again." },
+        { status: 503, headers: { "Retry-After": "1" } },
+      );
+    }
+    shared ??= instance;
+    return result;
+  } finally {
+    clearTimeout(timer);
+    instance.running.delete(mark);
+  }
+}

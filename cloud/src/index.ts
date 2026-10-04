@@ -3,7 +3,7 @@
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
-import { DESKTOP_CLIENT_ID, getAuth, signInMethods } from "./auth";
+import { DESKTOP_CLIENT_ID, handleAuth, signInMethods } from "./auth";
 import { recordSend, secondsUntilNextSend, sendKeys } from "./throttle";
 
 const app = new Hono();
@@ -30,7 +30,7 @@ app.get("/api/auth/electron/init-oauth-proxy", async (c) => {
   headers.set("content-type", "application/json");
   headers.delete("content-length");
 
-  const res = await getAuth().handler(
+  const res = await handleAuth(
     new Request(target, { method: "POST", headers, body: JSON.stringify({ provider }) }),
   );
   const data = (await res.json().catch(() => null)) as { url?: string } | null;
@@ -70,7 +70,7 @@ app.post("/api/auth/email-otp/send-verification-otp", async (c, next) => {
 
 // Better Auth: sign-in (social, email code), sessions (cookie or Bearer),
 // the desktop handoff (/electron/*), sign-out and account deletion.
-app.all("/api/auth/*", (c) => getAuth().handler(c.req.raw));
+app.all("/api/auth/*", (c) => handleAuth(c.req.raw));
 
 app.get("/api/health", (c) => c.json({ ok: true }));
 
