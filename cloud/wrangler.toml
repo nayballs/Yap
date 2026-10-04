@@ -20,6 +20,7 @@ EMAIL_FROM = "Yap <no-reply@mail.contextmirror.com>"
 GITHUB_CLIENT_ID = "Ov23li7Hi7DTY8mtHKPR"   # github.com/settings/applications/3897989
 # Google Cloud project yap-accounts → Google Auth Platform → Clients → "Yap account service"
 GOOGLE_CLIENT_ID = "575066617296-e3op5up8i4n5t9s6o6re9g4m7rcn45uu.apps.googleusercontent.com"
+DISCORD_CLIENT_ID = "1556416670472601620"   # discord.com/developers/applications/1556416670472601620 ("Yap")
 
 [[d1_databases]]
 binding = "DB"
