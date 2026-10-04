@@ -74,7 +74,8 @@ Done when every box is ticked.
       fixes, the leaked-session fix, the `NEW_PHONE_SESSION` message, the phone
       option hidden in "Confirm it's you", sign-in announced before the
       provider lookup.
-- [ ] Shipped in a nightly and tried on the installed app.
+- [x] Shipped in nightly `0.1.1-nightly.108` (2026-10-05).
+- [ ] Tried on the installed app (the manual tests below).
 - [x] Migration `0004` applied to production (2026-10-05).
 - [ ] Manual tests on a real phone (iPhone Safari and/or Android Chrome):
   - [ ] Google already signed in on the phone (≈4 taps from scan).
