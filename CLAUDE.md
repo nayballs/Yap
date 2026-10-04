@@ -719,9 +719,13 @@ to end locally (2026-10-01, `wrangler dev` + a mock provider). **Live since
 Cloudflare; D1 `yap-auth`, WEUR): Google (Cloud project `yap-accounts`, published;
 branding verified 2026-10-04, so its chooser says "continue to Yap" with the logo)
 and GitHub (OAuth app "Yap") verified with real sign-ins; email codes send via
-Resend from `mail.contextmirror.com`. Discord is wired up (shown once
-`/api/providers` lists it); Microsoft was dropped 2026-10-04. New accounts need a
-verified email (`databaseHooks` in `cloud/src/auth.ts`).
+Resend from `mail.contextmirror.com`. Discord (application "Yap") is live and
+verified with a real sign-in (2026-10-04); Microsoft was dropped the same day. New
+accounts need a verified email (`databaseHooks` in `cloud/src/auth.ts`). **Sign in
+with your phone** (QR code, device flow) verified end to end in the installed
+nightly `0.1.1-nightly.107` (2026-10-04), along with the "Where you're signed in"
+device list. Known quirk: Better Auth links accounts by exact email, so
+`…@gmail.com` and `…@googlemail.com` (same Gmail inbox) are separate accounts.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
