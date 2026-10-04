@@ -56,7 +56,7 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 - **Dialogs:** `tauri-plugin-dialog` (file open/save dialogs for note export and upload).
 - **Accounts (optional):** `cloud/` is the sign-in server — [Better Auth](https://better-auth.com)
   on a Cloudflare Worker + D1 at `auth.contextmirror.com` (see `cloud/README.md`). Yap's side
-  is `auth.rs`: system-browser OAuth (Google/Microsoft/GitHub, RFC 8252 + PKCE) handed back via
+  is `auth.rs`: system-browser OAuth (Google/GitHub/Discord, RFC 8252 + PKCE) handed back via
   `tauri-plugin-deep-link` (`com.contextmirror.yap://`), a loopback listener or a pasted code,
   plus in-app email codes; the session token lives in Windows Credential Manager
   (`keyring-core` + `windows-native-keyring-store`). Deep-link/single-instance are held on 2.4.x
@@ -226,7 +226,7 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   it's still ours. See `docs/local-api.md`.
 - **`auth.rs`** — Yap accounts (optional; nothing in dictation depends on it).
   Email codes: `auth_email_send`/`auth_email_verify` call the account service
-  directly. Google/Microsoft/GitHub: `auth_start` opens the system browser on
+  directly. Google/GitHub/Discord: `auth_start` opens the system browser on
   the server's `/api/auth/electron/init-oauth-proxy` with a PKCE challenge +
   `state`; the account page hands back a one-time code by **deep link**
   (installed builds — `is_registered` must point at *this* exe), a one-shot
@@ -243,16 +243,16 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   server wants a fresh sign-in (sessions > 1 day old). A fresh sign-in that
   replaces this PC's session (that re-auth) revokes the old one server-side,
   so it can't linger as a phantom device. **Where you're signed in**:
-  `auth_list_sessions` (`list-sessions` → `{id, current, label, createdAt,
-  lastActiveAt, expiresAt}`, unix secs, this PC first; `label` parsed from
-  the session's user agent — "Yap 0.1.1 on Windows", "Chrome on macOS") —
-  tokens and IPs never reach the webview: the other sessions' tokens stay in
-  a backend id→token map (`Listed`, dropped on any sign-in/out) for
-  `auth_revoke_session(id)` (refuses this PC); `auth_revoke_other_sessions`.
-  ⚠ Better Auth lists sessions only to a session < 1 day old (`freshAge`,
-  `SESSION_NOT_FRESH` → `"reauth"`, same rule as delete); revoking works at
-  any age. A 401 from these re-checks via `get-session` and signs out only if
-  the session is really gone. Emits
+  `auth_list_sessions` (the service's own `GET /api/account/sessions` →
+  `{id, current, label, createdAt, lastActiveAt, expiresAt}`, unix secs, this
+  PC first; `label` parsed from the session's user agent — "Yap 0.1.1 on
+  Windows", "Chrome on macOS"), `auth_revoke_session(id)` (`POST
+  /api/account/sessions/revoke`, refuses this PC) and
+  `auth_revoke_other_sessions` (Better Auth's). The service's endpoints work
+  for a session of any age and send no tokens or IPs (Better Auth's own
+  `/list-sessions` wanted a sign-in < 1 day old and handed out every
+  session's token; it's disabled). A 401 from these re-checks via
+  `get-session` and signs out only if the session is really gone. Emits
   `yap-auth-changed` (status snapshot) and `yap-auth-error`. The Account page
   only offers what the service reports at `/api/providers` (configured
   providers; email once mail can be sent) — `auth_check_methods` when the page
@@ -466,7 +466,7 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   dictionary), **About** (version, updates), and **Account** (bottom of the
   sidebar — `AccountSection.svelte`).
 - **`lib/AccountSection.svelte` / `account.svelte.js`** — Settings → Account:
-  Continue with Google/Microsoft/GitHub, "Email me a code" → 6-digit entry
+  Continue with Google/GitHub/Discord, "Email me a code" → 6-digit entry
   (auto-submits), a waiting state with paste-the-code fallback, then the
   profile (avatar or initials, linked providers), sign-out, a **"Where you're
   signed in"** group (one row per session: label + amber "This device" chip,
@@ -550,7 +550,7 @@ npm run tauri dev
 
 Accounts: debug builds sign in against a local copy of the account server —
 `cd cloud && npm run dev` (wrangler dev on :8787; email codes print to its
-console; `npm run mock:microsoft` stands in for a social provider). See
+console; `npm run mock:provider` stands in for a social provider). See
 `cloud/README.md`.
 
 > ⚠️ A *compiled release build* bakes the frontend into the binary — editing `src/`
@@ -689,14 +689,15 @@ keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six
 ≤20-step loop, gated to cloud or ≥4B local models). Every JSON store now writes
 atomically with corrupt-file quarantine. The default (no-feature) build still ships
 the stub for fast `cargo check`. **Optional accounts** (`auth.rs` + `cloud/`): email
-codes and Google/Microsoft/GitHub sign-in, sign-out, delete-account — tested end
+codes and Google/GitHub/Discord sign-in, sign-out, delete-account — tested end
 to end locally (2026-10-01, `wrangler dev` + a mock provider). **Live since
 2026-10-02** at `https://auth.contextmirror.com` (contextmirror.com's DNS moved to
 Cloudflare; D1 `yap-auth`, WEUR): Google (Cloud project `yap-accounts`, published;
 branding verified 2026-10-04, so its chooser says "continue to Yap" with the logo)
 and GitHub (OAuth app "Yap") verified with real sign-ins; email codes send via
-Resend from `mail.contextmirror.com`. Microsoft isn't configured — the app hides
-it until `/api/providers` lists it.
+Resend from `mail.contextmirror.com`. Discord is wired up (shown once
+`/api/providers` lists it); Microsoft was dropped 2026-10-04. New accounts need a
+verified email (`databaseHooks` in `cloud/src/auth.ts`).
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation

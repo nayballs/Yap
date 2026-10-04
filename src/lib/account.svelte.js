@@ -10,7 +10,7 @@ import { toast } from './ui/toast.svelte.js';
 
 export const account = $state({ status: null });
 
-export const PROVIDER_LABELS = { google: 'Google', microsoft: 'Microsoft', github: 'GitHub' };
+export const PROVIDER_LABELS = { google: 'Google', github: 'GitHub', discord: 'Discord' };
 
 let started = false;
 

@@ -6,7 +6,7 @@
 //! Credential Manager (never in config.json, the logs, or the webview) and
 //! sent as `Authorization: Bearer <token>`:
 //! - **Email code**: Yap calls the API directly (send a code, verify it).
-//! - **Google / Microsoft / GitHub** (RFC 8252): the system browser does the
+//! - **Google / GitHub / Discord** (RFC 8252): the system browser does the
 //!   provider sign-in, then hands Yap a one-time code that only redeems with
 //!   the PKCE verifier Yap kept back. The code comes back by whichever channel
 //!   this build has:
@@ -23,7 +23,6 @@
 //!
 //! Server endpoints and the handoff protocol: `cloud/README.md`.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -40,7 +39,7 @@ use tiny_http::{Header, Response, Server};
 const SCHEME: &str = "com.contextmirror.yap";
 /// Matches `DESKTOP_CLIENT_ID` in cloud/src/auth.ts.
 const CLIENT_ID: &str = "yap-desktop";
-const PROVIDERS: &[&str] = &["google", "microsoft", "github"];
+const PROVIDERS: &[&str] = &["google", "github", "discord"];
 /// How long a browser sign-in may take (provider 2FA etc.) before Yap stops
 /// waiting. The server's handoff code itself lives 5 minutes.
 const PENDING_TTL: Duration = Duration::from_secs(15 * 60);
@@ -128,7 +127,7 @@ struct Stored {
 pub struct Status {
     signed_in: bool,
     user: Option<Profile>,
-    /// Linked sign-in providers ("google", "microsoft", "github"). Email codes
+    /// Linked sign-in providers ("google", "github", "discord"). Email codes
     /// work for every account, so they aren't listed.
     providers: Vec<String>,
     /// Provider of a browser sign-in in progress.
@@ -174,8 +173,6 @@ struct Inner {
     providers: Vec<String>,
     offline: bool,
     methods: Option<Methods>,
-    /// The last "where you're signed in" list; see `Listed`.
-    listed: Option<Listed>,
 }
 
 static STATE: Mutex<Inner> = Mutex::new(Inner {
@@ -184,7 +181,6 @@ static STATE: Mutex<Inner> = Mutex::new(Inner {
     providers: Vec::new(),
     offline: false,
     methods: None,
-    listed: None,
 });
 
 fn lock() -> MutexGuard<'static, Inner> {
@@ -320,7 +316,6 @@ async fn refresh(app: &AppHandle) {
                 inner.session = None;
                 inner.providers.clear();
                 inner.offline = false;
-                inner.listed = None;
                 vault::clear();
             }
         }
@@ -329,7 +324,7 @@ async fn refresh(app: &AppHandle) {
     emit_status(app);
 }
 
-// ---- browser sign-in (Google / Microsoft / GitHub) ----
+// ---- browser sign-in (Google / GitHub / Discord) ----
 
 /// Open the system browser on a provider sign-in.
 #[tauri::command]
@@ -665,7 +660,6 @@ async fn finish_sign_in(app: &AppHandle, token: String, user: Profile) {
         let old = inner.session.replace(stored);
         inner.providers = providers;
         inner.offline = false;
-        inner.listed = None;
         old.map(|s| s.token).filter(|old| *old != new_token)
     };
     // Yap keeps one session per PC. One this sign-in replaced (signing in
@@ -744,7 +738,6 @@ fn forget_session(app: &AppHandle) {
         inner.session = None;
         inner.providers.clear();
         inner.offline = false;
-        inner.listed = None;
     }
     vault::clear();
     emit_status(app);
@@ -795,7 +788,8 @@ fn session_from(body: &Value) -> Option<(String, Profile)> {
 // ---- where you're signed in ----
 
 /// One place the account is signed in, as Settings → Account lists it.
-/// Carries neither the session's token nor its IP address.
+/// Carries neither the session's token nor its IP address: the account
+/// service never sends them (cloud/src/index.ts, `/api/account/sessions`).
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceSession {
@@ -812,43 +806,32 @@ pub struct DeviceSession {
     expires_at: Option<u64>,
 }
 
-/// The other sessions' tokens from the last list, by id. Better Auth revokes
-/// a session by its token, so these stay here; the UI only ever sees ids.
-struct Listed {
-    /// The session (token) that listed them.
-    owner: String,
-    current_id: Option<String>,
-    tokens: HashMap<String, String>,
+/// The account service's own routes (outside Better Auth's /api/auth).
+fn account_api(path: &str) -> String {
+    format!("{}/api/account{}", base_url(), path)
 }
 
 /// Where this account is signed in: this PC first, then the most recently
-/// active. Errors with `"reauth"` when the server wants a recent sign-in
-/// first: Better Auth lists sessions only to one signed in within the last
-/// day (its `freshAge`), the same rule as deleting the account.
+/// active. Works with a session of any age (Better Auth's own /list-sessions
+/// wants a sign-in from the last day and hands out every session's token, so
+/// the service has its own endpoint that returns ids only).
 #[tauri::command]
 pub async fn auth_list_sessions(app: AppHandle) -> Result<Vec<DeviceSession>, String> {
     let token = current_token()?;
     let resp = CLIENT
-        .get(api("/list-sessions"))
+        .get(account_api("/sessions"))
         .bearer_auth(&token)
         .send()
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
-    let body = match read_api(resp).await {
-        Ok(body) => body,
-        Err(e) => return Err(session_call_failed(&app, e).await),
-    };
-    let (sessions, listed) = parse_sessions(&body, &token);
-    let mut inner = lock();
-    // Skip if the user signed out / switched while the request ran.
-    if inner.session.as_ref().is_some_and(|s| s.token == token) {
-        inner.listed = Some(listed);
+    match read_api(resp).await {
+        Ok(body) => Ok(parse_sessions(&body)),
+        Err(e) => Err(session_call_failed(&app, e).await),
     }
-    Ok(sessions)
 }
 
-/// Sign out everywhere but this PC. Unlike listing, this works with a
-/// session of any age.
+/// Sign out everywhere but this PC (Better Auth's revoke-other-sessions,
+/// which works with a session of any age).
 #[tauri::command]
 pub async fn auth_revoke_other_sessions(app: AppHandle) -> Result<(), String> {
     let token = current_token()?;
@@ -862,56 +845,37 @@ pub async fn auth_revoke_other_sessions(app: AppHandle) -> Result<(), String> {
     if let Err(e) = read_api(resp).await {
         return Err(session_call_failed(&app, e).await);
     }
-    if let Some(listed) = lock().listed.as_mut() {
-        listed.tokens.clear();
-    }
     tracing::info!("auth: signed out of the other sessions");
     Ok(())
 }
 
-/// Sign out one other device, by its id from the last list. This PC signs
-/// out with `auth_sign_out` instead.
+/// Sign out one other device, by its id from the list. This PC signs out
+/// with `auth_sign_out` instead (the service refuses its own session here).
 #[tauri::command]
 pub async fn auth_revoke_session(app: AppHandle, id: String) -> Result<(), String> {
-    let (token, target) = {
-        let inner = lock();
-        let token = inner.session.as_ref().map(|s| s.token.clone()).ok_or(NOT_SIGNED_IN)?;
-        let listed = inner.listed.as_ref().filter(|l| l.owner == token);
-        if listed.is_some_and(|l| l.current_id.as_deref() == Some(id.as_str())) {
-            return Err("That's this PC. Use Sign out to sign out here.".into());
-        }
-        // Not in the last list (or the list was since cleared): already gone.
-        let target = listed
-            .and_then(|l| l.tokens.get(&id).cloned())
-            .ok_or("That device is already signed out.")?;
-        (token, target)
-    };
+    let token = current_token()?;
     let resp = CLIENT
-        .post(api("/revoke-session"))
+        .post(account_api("/sessions/revoke"))
         .bearer_auth(&token)
-        .json(&json!({ "token": target }))
+        .json(&json!({ "id": id }))
         .send()
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     if let Err(e) = read_api(resp).await {
+        if e.code == "CURRENT_SESSION" {
+            return Err("That's this PC. Use Sign out to sign out here.".into());
+        }
         return Err(session_call_failed(&app, e).await);
-    }
-    if let Some(listed) = lock().listed.as_mut() {
-        listed.tokens.remove(&id);
     }
     tracing::info!("auth: signed out one other session");
     Ok(())
 }
 
 /// What a refused list/revoke call tells the UI. A 401 means the server no
-/// longer takes this PC's session, or that its session lookup hiccuped (Better
-/// Auth reports both as UNAUTHORIZED), so re-check the way startup does:
-/// get-session answers definitively, and only a session that's really gone
-/// signs Yap out.
+/// longer takes this PC's session, or that its session lookup hiccuped, so
+/// re-check the way startup does: get-session answers definitively, and only
+/// a session that's really gone signs Yap out.
 async fn session_call_failed(app: &AppHandle, e: ApiError) -> String {
-    if e.code == "SESSION_NOT_FRESH" {
-        return "reauth".into();
-    }
     if e.status == 401 {
         refresh(app).await;
         if lock().session.is_none() {
@@ -921,41 +885,36 @@ async fn session_call_failed(app: &AppHandle, e: ApiError) -> String {
     e.friendly()
 }
 
-/// Better Auth's `/list-sessions` reply → the rows the UI shows, plus the
-/// other sessions' tokens for revoking one of them.
-fn parse_sessions(body: &Value, own_token: &str) -> (Vec<DeviceSession>, Listed) {
-    let mut listed = Listed { owner: own_token.to_string(), current_id: None, tokens: HashMap::new() };
-    let mut sessions = Vec::new();
-    for row in body.as_array().into_iter().flatten() {
-        let text = |key: &str| row.get(key).and_then(Value::as_str).unwrap_or_default();
-        let time = |key: &str| row.get(key).and_then(unix_secs);
-        let (id, token) = (text("id"), text("token"));
-        if id.is_empty() || token.is_empty() {
-            continue;
-        }
-        let current = token == own_token;
-        if current {
-            listed.current_id = Some(id.to_string());
-        } else {
-            listed.tokens.insert(id.to_string(), token.to_string());
-        }
-        let created_at = time("createdAt");
-        sessions.push(DeviceSession {
-            id: id.to_string(),
-            current,
-            label: device_label(text("userAgent")),
-            created_at,
-            last_active_at: time("updatedAt").or(created_at),
-            expires_at: time("expiresAt"),
-        });
-    }
+/// The service's `{ "sessions": [{ id, current, createdAt, updatedAt,
+/// expiresAt, userAgent }] }` → the rows the UI shows, this PC first.
+fn parse_sessions(body: &Value) -> Vec<DeviceSession> {
+    let rows = body.get("sessions").and_then(Value::as_array).into_iter().flatten();
+    let mut sessions: Vec<DeviceSession> = rows
+        .filter_map(|row| {
+            let text = |key: &str| row.get(key).and_then(Value::as_str).unwrap_or_default();
+            let time = |key: &str| row.get(key).and_then(unix_secs);
+            let id = text("id");
+            if id.is_empty() {
+                return None;
+            }
+            let created_at = time("createdAt");
+            Some(DeviceSession {
+                id: id.to_string(),
+                current: row.get("current").and_then(Value::as_bool).unwrap_or(false),
+                label: device_label(text("userAgent")),
+                created_at,
+                last_active_at: time("updatedAt").or(created_at),
+                expires_at: time("expiresAt"),
+            })
+        })
+        .collect();
     sessions.sort_by(|a, b| {
         b.current
             .cmp(&a.current)
             .then(b.last_active_at.cmp(&a.last_active_at))
             .then(b.created_at.cmp(&a.created_at))
     });
-    (sessions, listed)
+    sessions
 }
 
 /// A session's user agent as people name the device: "Yap 0.1.1 on Windows"
@@ -1348,37 +1307,34 @@ mod tests {
         assert!(session_from(&json!({ "user": ok["user"] })).is_none());
     }
 
-    const OWN_TOKEN: &str = "ownTokenAAAAAAAAAAAAAAAAAAAAAAAA";
-    const LAPTOP_TOKEN: &str = "laptopTokenBBBBBBBBBBBBBBBBBBBBB";
-    const BROWSER_TOKEN: &str = "browserTokenCCCCCCCCCCCCCCCCCCCC";
+    const STRAY_TOKEN: &str = "strayTokenAAAAAAAAAAAAAAAAAAAAAA";
 
-    /// `GET /api/auth/list-sessions` as Better Auth 1.7.7 answers it (shape
-    /// from `wrangler dev`; ids, tokens and IPs made up), in server order.
+    /// `GET /api/account/sessions` (cloud/src/index.ts) in server order. The
+    /// service sends no tokens or IPs; the stray ones here prove the UI
+    /// payload drops them anyway.
     fn list_reply() -> Value {
-        json!([
+        json!({ "sessions": [
             {
-                "id": "sessLaptop", "token": LAPTOP_TOKEN, "userId": "user1",
+                "id": "sessLaptop", "current": false,
                 "expiresAt": "2026-10-12T08:00:00.000Z", "createdAt": "2026-09-12T08:00:00.000Z",
-                "updatedAt": "2026-10-02T09:30:00.000Z", "ipAddress": "203.0.113.7",
-                "userAgent": "Yap/0.1.0 (Windows)"
+                "updatedAt": "2026-10-02T09:30:00.000Z", "userAgent": "Yap/0.1.0 (Windows)"
             },
             {
-                "id": "sessThisPc", "token": OWN_TOKEN, "userId": "user1",
+                "id": "sessThisPc", "current": true,
                 "expiresAt": "2026-11-03T20:25:17.000Z", "createdAt": "2026-10-04T20:25:17.000Z",
-                "updatedAt": "2026-10-04T20:25:17.000Z", "ipAddress": "198.51.100.4",
-                "userAgent": "Yap/0.1.1 (Windows)"
+                "updatedAt": "2026-10-04T20:25:17.000Z", "userAgent": "Yap/0.1.1 (Windows)",
+                "token": STRAY_TOKEN, "ipAddress": "198.51.100.4"
             },
             {
-                "id": "sessBrowser", "token": BROWSER_TOKEN, "userId": "user1",
+                "id": "sessBrowser", "current": false,
                 "expiresAt": "2026-11-02T10:00:00.000Z", "createdAt": "2026-10-03T10:00:00.000Z",
-                "updatedAt": "2026-10-03T10:00:00.000Z", "ipAddress": "",
+                "updatedAt": "2026-10-03T10:00:00.000Z",
                 "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
             },
             // Malformed rows are skipped, not fatal.
-            { "id": "", "token": "x" },
-            { "id": "noToken" },
+            { "id": "" },
             "junk"
-        ])
+        ]})
     }
 
     #[test]
@@ -1446,7 +1402,7 @@ mod tests {
 
     #[test]
     fn parse_sessions_marks_this_pc_and_orders_by_activity() {
-        let (sessions, listed) = parse_sessions(&list_reply(), OWN_TOKEN);
+        let sessions = parse_sessions(&list_reply());
         let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
         // This PC first, then the most recently active.
         assert_eq!(ids, ["sessThisPc", "sessBrowser", "sessLaptop"]);
@@ -1466,30 +1422,17 @@ mod tests {
         assert_eq!(sessions[2].label, "Yap 0.1.0 on Windows");
         assert_eq!(sessions[2].created_at, Some(1_789_200_000));
 
-        // The backend keeps the other sessions' tokens (to revoke one by id).
-        assert_eq!(listed.owner, OWN_TOKEN);
-        assert_eq!(listed.current_id.as_deref(), Some("sessThisPc"));
-        assert_eq!(listed.tokens.len(), 2);
-        assert_eq!(listed.tokens["sessLaptop"], LAPTOP_TOKEN);
-        assert_eq!(listed.tokens["sessBrowser"], BROWSER_TOKEN);
-
-        // A token the server doesn't list: nothing is "this device".
-        let (sessions, listed) = parse_sessions(&list_reply(), "someOtherToken");
-        assert!(sessions.iter().all(|s| !s.current));
-        assert!(listed.current_id.is_none());
-        assert_eq!(listed.tokens.len(), 3);
-
-        // Anything but a list: no sessions.
-        assert!(parse_sessions(&json!({ "code": "UNAUTHORIZED" }), OWN_TOKEN).0.is_empty());
-        assert!(parse_sessions(&Value::Null, OWN_TOKEN).0.is_empty());
+        // Anything but the service's object: no sessions.
+        assert!(parse_sessions(&json!({ "code": "UNAUTHORIZED" })).is_empty());
+        assert!(parse_sessions(&json!([{ "id": "bare-array" }])).is_empty());
+        assert!(parse_sessions(&Value::Null).is_empty());
     }
 
     #[test]
     fn session_list_for_the_ui_has_no_tokens_or_ips() {
-        let (sessions, _) = parse_sessions(&list_reply(), OWN_TOKEN);
-        let ui = serde_json::to_value(&sessions).unwrap();
+        let ui = serde_json::to_value(parse_sessions(&list_reply())).unwrap();
         let text = ui.to_string();
-        for secret in [OWN_TOKEN, LAPTOP_TOKEN, BROWSER_TOKEN, "203.0.113.7", "198.51.100.4"] {
+        for secret in [STRAY_TOKEN, "198.51.100.4"] {
             assert!(!text.contains(secret), "{secret} leaked: {text}");
         }
         assert!(!text.to_lowercase().contains("token") && !text.contains("ipAddress"), "{text}");
