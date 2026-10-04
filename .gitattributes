@@ -1,0 +1,3 @@
+# Cloudflare parses this file line by line; with CRLF (core.autocrlf on
+# Windows) every header value would end in a stray \r.
+cloud/public/_headers text eol=lf
