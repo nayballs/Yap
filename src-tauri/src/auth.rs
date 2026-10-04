@@ -17,9 +17,13 @@
 //!     one-shot loopback listener on 127.0.0.1, whose port rides at the end
 //!     of `state` for the account page to redirect to;
 //!   - always: the account page shows the code to paste into Yap.
+//! - **Phone** (RFC 8628 device authorization): Yap shows a QR code for the
+//!   service's `/device` page; the person signs in on their phone, checks the
+//!   code matches and approves, while Yap polls for the session.
 //!
 //! Server endpoints and the handoff protocol: `cloud/README.md`.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -127,6 +131,8 @@ pub struct Status {
     providers: Vec<String>,
     /// Provider of a browser sign-in in progress.
     pending: Option<String>,
+    /// A phone sign-in in progress: the QR code and code to show.
+    device: Option<DeviceView>,
     /// Signed in from the stored copy, not yet confirmed with the server.
     offline: bool,
     /// When the current session began (unix seconds). Changes on every fresh
@@ -186,12 +192,15 @@ fn lock() -> MutexGuard<'static, Inner> {
 }
 
 pub fn status() -> Status {
+    // Read before taking STATE: the two locks are never held together.
+    let device = device_lock().as_ref().map(|flow| flow.view.clone());
     let inner = lock();
     Status {
         signed_in: inner.session.is_some(),
         user: inner.session.as_ref().map(|s| s.user.clone()),
         providers: inner.providers.clone(),
         pending: inner.pending.as_ref().map(|p| p.provider.clone()),
+        device,
         offline: inner.offline,
         signed_in_at: inner.session.as_ref().map(|s| s.signed_in_at),
         methods: inner.methods.clone(),
@@ -633,6 +642,529 @@ fn normalize_email(email: &str) -> Result<String, String> {
         Ok(email)
     } else {
         Err("Enter a valid email address.".into())
+    }
+}
+
+// ---- phone sign-in (OAuth 2.0 device authorization, RFC 8628) ----
+//
+// Yap asks the service for a code and shows it as a QR code for
+// `…/device?user_code=…` (cloud/public/device.html). The person signs in on
+// their phone, any way the service offers, and approves the code there,
+// while Yap polls `/device/token`; once approved, that answers with a
+// session token, kept like any other.
+
+/// RFC 8628 §3.4: the grant type Yap polls with.
+const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
+/// RFC 8628 §3.5: every `slow_down` adds this to the polling interval.
+const SLOW_DOWN_STEP: Duration = Duration::from_secs(5);
+const PHONE_EXPIRED: &str = "The code expired before it was approved on your phone. Start again when you're ready.";
+const PHONE_DENIED: &str = "The sign-in was denied on your phone.";
+const PHONE_CODE_GONE: &str = "That sign-in code is no longer valid. Start again.";
+const UNEXPECTED: &str = "The account service sent an unexpected reply.";
+
+/// What the Account page shows while Yap waits for the phone (`Status::device`).
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceView {
+    /// The code to check on the phone, grouped for reading: "WDJB-MJHT".
+    user_code: String,
+    /// Where to type the code by hand (`…/device`).
+    verification_uri: String,
+    /// What the QR code opens (`…/device?user_code=…`).
+    verification_uri_complete: String,
+    /// The code's lifetime as granted, in seconds.
+    expires_in: u64,
+    /// When the code lapses (unix seconds): what the page counts down to.
+    expires_at: u64,
+    qr: Qr,
+}
+
+/// A QR code as SVG path data, in modules: `size` square, quiet zone not
+/// included (the page adds the standard 4 modules around it).
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct Qr {
+    size: usize,
+    path: String,
+}
+
+/// `/device/code`'s answer (RFC 8628 §3.2), checked. The device code is
+/// Yap's polling secret: it never reaches the UI or the logs.
+struct DeviceGrant {
+    device_code: String,
+    interval: Duration,
+    lifetime: Duration,
+    view: DeviceView,
+}
+
+impl DeviceGrant {
+    /// `None` unless every field is sane and both links lead to the account
+    /// service itself (`base`): the QR code must never send a phone elsewhere.
+    fn parse(body: &Value, base: &str, now: u64) -> Option<Self> {
+        let text = |key: &str| body.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
+        let sane = |s: &str, max: usize| s.len() <= max && s.bytes().all(|b| b.is_ascii_graphic());
+        let device_code = text("device_code").filter(|s| sane(s, 191))?;
+        let user_code = text("user_code").filter(|s| sane(s, 32))?;
+        let verification_uri = text("verification_uri")?;
+        // Optional in RFC 8628 (Better Auth always sends it).
+        let complete = match text("verification_uri_complete") {
+            Some(link) => link.to_string(),
+            None => {
+                let mut link = url::Url::parse(verification_uri).ok()?;
+                link.query_pairs_mut().append_pair("user_code", user_code);
+                link.to_string()
+            }
+        };
+        if !same_origin(verification_uri, base) || !same_origin(&complete, base) {
+            return None;
+        }
+        let expires_in = body.get("expires_in")?.as_u64().filter(|&s| s > 0)?.min(30 * 60);
+        let interval = body.get("interval").and_then(Value::as_u64).unwrap_or(5).clamp(1, 60);
+        Some(DeviceGrant {
+            device_code: device_code.to_string(),
+            interval: Duration::from_secs(interval),
+            lifetime: Duration::from_secs(expires_in),
+            view: DeviceView {
+                user_code: group_user_code(user_code),
+                verification_uri: verification_uri.to_string(),
+                qr: qr_for(&complete)?,
+                verification_uri_complete: complete,
+                expires_in,
+                expires_at: now + expires_in,
+            },
+        })
+    }
+}
+
+/// `true` when `link` is an http(s) URL on `base`'s origin.
+fn same_origin(link: &str, base: &str) -> bool {
+    match (url::Url::parse(link), url::Url::parse(base)) {
+        (Ok(a), Ok(b)) => matches!(a.scheme(), "https" | "http") && a.origin() == b.origin(),
+        _ => false,
+    }
+}
+
+/// "WDJBMJHT" → "WDJB-MJHT" (RFC 8628 §6.1); other shapes stay as they are.
+fn group_user_code(code: &str) -> String {
+    if code.len() == 8 && code.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        format!("{}-{}", &code[..4], &code[4..])
+    } else {
+        code.to_string()
+    }
+}
+
+/// The QR code for `text` (error correction M) as one SVG path: each run of
+/// dark modules on a row is a `M{x} {y}h{n}v1h-{n}z` rectangle.
+fn qr_for(text: &str) -> Option<Qr> {
+    use qrcode::{Color, EcLevel, QrCode};
+    use std::fmt::Write;
+    let code = QrCode::with_error_correction_level(text.as_bytes(), EcLevel::M).ok()?;
+    let size = code.width();
+    let mut path = String::new();
+    for (y, row) in code.to_colors().chunks(size).enumerate() {
+        let mut x = 0;
+        while x < size {
+            if row[x] != Color::Dark {
+                x += 1;
+                continue;
+            }
+            let start = x;
+            while x < size && row[x] == Color::Dark {
+                x += 1;
+            }
+            let _ = write!(path, "M{} {}h{n}v1h-{n}z", start, y, n = x - start);
+        }
+    }
+    Some(Qr { size, path })
+}
+
+/// The phone sign-in in progress (at most one): `id` tells a stale poller
+/// that it was cancelled or replaced.
+struct DeviceFlow {
+    id: u64,
+    view: DeviceView,
+}
+
+static DEVICE: Mutex<Option<DeviceFlow>> = Mutex::new(None);
+static DEVICE_IDS: AtomicU64 = AtomicU64::new(1);
+
+fn device_lock() -> MutexGuard<'static, Option<DeviceFlow>> {
+    match DEVICE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn device_is_current(id: u64) -> bool {
+    device_lock().as_ref().is_some_and(|flow| flow.id == id)
+}
+
+/// Ends flow `id`; `false` if it had already ended (cancelled, replaced).
+fn device_end(id: u64) -> bool {
+    let mut flow = device_lock();
+    let current = flow.as_ref().is_some_and(|f| f.id == id);
+    if current {
+        *flow = None;
+    }
+    current
+}
+
+/// One answer from `/device/token`.
+#[derive(Debug, PartialEq)]
+enum PollReply {
+    /// The session token: approved on the phone.
+    Approved(String),
+    /// Not approved yet: ask again after the interval.
+    Pending,
+    /// Asked too often (RFC 8628 §3.5): poll more slowly from now on.
+    SlowDown,
+    /// Rate-limited: wait this many seconds once, then carry on.
+    Wait(u64),
+    /// A hiccup on the way (server error, no connection): ask again.
+    Retry,
+    Denied,
+    Expired,
+    /// Nothing more to wait for; the message says why.
+    Failed(String),
+}
+
+fn classify_poll(status: u16, body: &Value, retry_after: Option<u64>) -> PollReply {
+    if (200..300).contains(&status) {
+        return match body.get("access_token").and_then(Value::as_str) {
+            Some(token) if !token.is_empty() && token.bytes().all(|b| b.is_ascii_graphic()) => {
+                PollReply::Approved(token.to_string())
+            }
+            _ => PollReply::Failed(UNEXPECTED.into()),
+        };
+    }
+    match body.get("error").and_then(Value::as_str).unwrap_or_default() {
+        "authorization_pending" => PollReply::Pending,
+        "slow_down" => PollReply::SlowDown,
+        "access_denied" => PollReply::Denied,
+        "expired_token" => PollReply::Expired,
+        // Unknown or already-used code (or another client's).
+        "invalid_grant" => PollReply::Failed(PHONE_CODE_GONE.into()),
+        _ if status == 429 => PollReply::Wait(retry_after.unwrap_or(10).clamp(1, 60)),
+        // Includes the 503 the service gives a call that got stuck.
+        _ if status >= 500 => PollReply::Retry,
+        _ => PollReply::Failed(format!(
+            "Yap's account service had a problem (error {}). Try again in a moment.",
+            status
+        )),
+    }
+}
+
+async fn poll_once(device_code: &str) -> PollReply {
+    let sent = CLIENT
+        .post(api("/device/token"))
+        .json(&json!({ "grant_type": DEVICE_GRANT, "device_code": device_code, "client_id": CLIENT_ID }))
+        .send()
+        .await;
+    let Ok(resp) = sent else {
+        return PollReply::Retry;
+    };
+    let status = resp.status().as_u16();
+    let retry_after = resp
+        .headers()
+        .get("x-retry-after")
+        .or_else(|| resp.headers().get("retry-after"))
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse().ok());
+    // Not read_api: "pending" every few seconds is no warning, and the body
+    // carries the token.
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    classify_poll(status, &body, retry_after)
+}
+
+/// Sign in with your phone: get a code from the service and wait for the
+/// phone to approve it. The QR code and code show up in the status
+/// (`device`); a newer call replaces an attempt still waiting.
+#[tauri::command]
+pub async fn auth_device_start(app: AppHandle) -> Result<DeviceView, String> {
+    let resp = CLIENT
+        .post(api("/device/code"))
+        .json(&json!({ "client_id": CLIENT_ID }))
+        .send()
+        .await
+        .map_err(|_| UNREACHABLE.to_string())?;
+    let body = read_api(resp).await.map_err(|e| e.friendly())?;
+    let grant = DeviceGrant::parse(&body, &base_url(), unix_now()).ok_or(UNEXPECTED)?;
+    let id = DEVICE_IDS.fetch_add(1, Ordering::Relaxed);
+    let view = grant.view.clone();
+    *device_lock() = Some(DeviceFlow { id, view: view.clone() });
+    tracing::info!("auth: phone sign-in started");
+    emit_status(&app);
+    tauri::async_runtime::spawn(wait_for_phone(app, id, grant));
+    Ok(view)
+}
+
+/// Stop waiting for the phone. The service can't withdraw a code, so it
+/// simply lapses: approving it on the phone afterwards signs nothing in.
+#[tauri::command]
+pub fn auth_device_cancel(app: AppHandle) {
+    if device_lock().take().is_some() {
+        tracing::info!("auth: phone sign-in cancelled");
+    }
+    emit_status(&app);
+}
+
+/// Polls until the phone decides, the code lapses, or the attempt is
+/// cancelled or replaced. The service has the last word on expiry; Yap's own
+/// deadline only ends a wait it can no longer confirm (e.g. offline).
+async fn wait_for_phone(app: AppHandle, id: u64, grant: DeviceGrant) {
+    let deadline = tokio::time::Instant::now() + grant.lifetime;
+    let mut interval = grant.interval;
+    loop {
+        tokio::time::sleep(interval).await;
+        if !device_is_current(id) {
+            return;
+        }
+        let failure = match poll_once(&grant.device_code).await {
+            PollReply::Approved(token) => return finish_phone(&app, id, token).await,
+            PollReply::Denied => PHONE_DENIED.to_string(),
+            PollReply::Expired => PHONE_EXPIRED.to_string(),
+            PollReply::Failed(message) => message,
+            // Still waiting past the code's lifetime: the service should have
+            // said "expired" by now, so it can't be reached (or answer).
+            waiting if tokio::time::Instant::now() >= deadline => {
+                if waiting == PollReply::Retry { UNREACHABLE.to_string() } else { PHONE_EXPIRED.to_string() }
+            }
+            PollReply::SlowDown => {
+                interval += SLOW_DOWN_STEP;
+                continue;
+            }
+            PollReply::Wait(secs) => {
+                tokio::time::sleep(Duration::from_secs(secs)).await;
+                continue;
+            }
+            PollReply::Pending | PollReply::Retry => continue,
+        };
+        if device_end(id) {
+            tracing::info!("auth: phone sign-in ended without signing in");
+            emit_status(&app);
+            emit_error(&app, &failure);
+        }
+        return;
+    }
+}
+
+/// Approved: find out whose session it is, then sign in like the other
+/// routes. Cancelled meanwhile? Then the new session is revoked instead.
+async fn finish_phone(app: &AppHandle, id: u64, token: String) {
+    // The token answer doesn't say who signed in; get-session does.
+    let mut user = None;
+    for attempt in 0..3 {
+        match get_session(&token).await {
+            Ok(found) => {
+                user = found;
+                break;
+            }
+            Err(_) if attempt < 2 => tokio::time::sleep(Duration::from_secs(2)).await,
+            Err(_) => {}
+        }
+    }
+    if !device_is_current(id) {
+        let _ = CLIENT.post(api("/sign-out")).bearer_auth(&token).json(&json!({})).send().await;
+        tracing::info!("auth: phone approved a cancelled sign-in; session revoked");
+        return;
+    }
+    let Some(user) = user else {
+        if device_end(id) {
+            emit_status(app);
+            emit_error(app, "Couldn't finish signing in. Start again from Settings → Account.");
+        }
+        return;
+    };
+    // A browser sign-in left waiting is moot now.
+    lock().pending = None;
+    // Signed in first, then the QR code goes: the page never flashes the
+    // signed-out view in between.
+    finish_sign_in(app, token, user).await;
+    if device_end(id) {
+        emit_status(app);
+    }
+    tracing::info!("auth: signed in (phone)");
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod phone_tests {
+    use super::*;
+
+    const BASE: &str = "https://auth.contextmirror.com";
+
+    /// What the service answers at /device/code (shape checked on wrangler dev).
+    fn grant_body() -> Value {
+        json!({
+            "device_code": "WcFjcSVVttGsfrrmdAua891bzFIKHnt2QVjiuNhO",
+            "user_code": "WDJBMJHT",
+            "verification_uri": "https://auth.contextmirror.com/device",
+            "verification_uri_complete": "https://auth.contextmirror.com/device?user_code=WDJBMJHT",
+            "expires_in": 600,
+            "interval": 5
+        })
+    }
+
+    /// Redraws a QR path as a module grid (true = dark).
+    fn grid_from_path(qr: &Qr) -> Vec<bool> {
+        let mut grid = vec![false; qr.size * qr.size];
+        for rect in qr.path.split('M').filter(|s| !s.is_empty()) {
+            let (xy, rest) = rect.split_once('h').expect("h");
+            let (x, y) = xy.split_once(' ').expect("x y");
+            let (x, y): (usize, usize) = (x.parse().unwrap(), y.parse().unwrap());
+            let n: usize = rest.split_once('v').expect("v").0.parse().unwrap();
+            assert_eq!(rest, format!("{n}v1h-{n}z"), "{rect}");
+            for dx in 0..n {
+                assert!(!grid[y * qr.size + x + dx], "overlapping runs");
+                grid[y * qr.size + x + dx] = true;
+            }
+        }
+        grid
+    }
+
+    #[test]
+    fn grant_parses_into_what_the_page_shows() {
+        let g = DeviceGrant::parse(&grant_body(), BASE, 1_000).expect("valid grant");
+        assert_eq!(g.device_code, "WcFjcSVVttGsfrrmdAua891bzFIKHnt2QVjiuNhO");
+        assert_eq!((g.interval, g.lifetime), (Duration::from_secs(5), Duration::from_secs(600)));
+        assert_eq!(g.view.user_code, "WDJB-MJHT");
+        assert_eq!(g.view.verification_uri, "https://auth.contextmirror.com/device");
+        assert_eq!(g.view.verification_uri_complete, "https://auth.contextmirror.com/device?user_code=WDJBMJHT");
+        assert_eq!((g.view.expires_in, g.view.expires_at), (600, 1_600));
+        assert_eq!(g.view.qr, qr_for(&g.view.verification_uri_complete).unwrap());
+    }
+
+    #[test]
+    fn the_device_code_never_reaches_the_ui() {
+        let g = DeviceGrant::parse(&grant_body(), BASE, 0).unwrap();
+        let view = serde_json::to_value(&g.view).unwrap();
+        let keys: Vec<&str> = view.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys.len(), 6);
+        for key in ["userCode", "verificationUri", "verificationUriComplete", "expiresIn", "expiresAt", "qr"] {
+            assert!(keys.contains(&key), "{key}");
+        }
+        assert!(!view.to_string().contains(&g.device_code));
+    }
+
+    #[test]
+    fn grant_links_must_stay_on_the_account_service() {
+        let with = |key: &str, value: Value| {
+            let mut body = grant_body();
+            body[key] = value;
+            DeviceGrant::parse(&body, BASE, 0)
+        };
+        assert!(with("verification_uri_complete", json!("https://evil.example/device?user_code=WDJBMJHT")).is_none());
+        assert!(with("verification_uri", json!("https://auth.contextmirror.com.evil.example/device")).is_none());
+        assert!(with("verification_uri", json!("http://auth.contextmirror.com/device")).is_none()); // scheme
+        assert!(with("verification_uri", json!("https://auth.contextmirror.com:444/device")).is_none()); // port
+        assert!(with("verification_uri_complete", json!("javascript:alert(1)")).is_none());
+        // Missing complete link: built from the plain one.
+        let mut body = grant_body();
+        body.as_object_mut().unwrap().remove("verification_uri_complete");
+        let g = DeviceGrant::parse(&body, BASE, 0).unwrap();
+        assert_eq!(g.view.verification_uri_complete, "https://auth.contextmirror.com/device?user_code=WDJBMJHT");
+        // Dev: the local service.
+        let local = json!({
+            "device_code": "abc", "user_code": "WDJBMJHT", "expires_in": 600, "interval": 5,
+            "verification_uri": "http://localhost:8787/device",
+            "verification_uri_complete": "http://localhost:8787/device?user_code=WDJBMJHT",
+        });
+        assert!(DeviceGrant::parse(&local, "http://localhost:8787", 0).is_some());
+        assert!(DeviceGrant::parse(&local, BASE, 0).is_none());
+    }
+
+    #[test]
+    fn grant_rejects_junk_and_clamps_timing() {
+        let with = |key: &str, value: Value| {
+            let mut body = grant_body();
+            body[key] = value;
+            DeviceGrant::parse(&body, BASE, 0)
+        };
+        assert!(with("device_code", json!("")).is_none());
+        assert!(with("device_code", json!("has space")).is_none());
+        assert!(with("device_code", json!("x".repeat(192))).is_none());
+        assert!(with("user_code", json!(null)).is_none());
+        assert!(with("expires_in", json!(0)).is_none());
+        assert!(with("expires_in", json!("600")).is_none());
+        assert_eq!(with("expires_in", json!(86_400)).unwrap().lifetime, Duration::from_secs(1800));
+        assert_eq!(with("interval", json!(null)).unwrap().interval, Duration::from_secs(5));
+        assert_eq!(with("interval", json!(0)).unwrap().interval, Duration::from_secs(1));
+        assert_eq!(with("interval", json!(999)).unwrap().interval, Duration::from_secs(60));
+        assert!(DeviceGrant::parse(&json!(null), BASE, 0).is_none());
+    }
+
+    #[test]
+    fn user_codes_are_grouped_for_reading() {
+        assert_eq!(group_user_code("WDJBMJHT"), "WDJB-MJHT");
+        assert_eq!(group_user_code("ABC123"), "ABC123");
+        assert_eq!(group_user_code("WDJB-MJH"), "WDJB-MJH");
+    }
+
+    #[test]
+    fn same_origin_is_strict() {
+        assert!(same_origin("https://auth.contextmirror.com/device?user_code=X", BASE));
+        assert!(same_origin("https://AUTH.contextmirror.com/device", BASE));
+        assert!(!same_origin("https://auth.contextmirror.com.evil.example/device", BASE));
+        assert!(!same_origin("ftp://auth.contextmirror.com/device", "ftp://auth.contextmirror.com"));
+        assert!(!same_origin("not a url", BASE));
+        assert!(!same_origin("https://auth.contextmirror.com/device", "not a url"));
+    }
+
+    #[test]
+    fn qr_path_redraws_the_exact_code() {
+        let url = "https://auth.contextmirror.com/device?user_code=WDJBMJHT";
+        let qr = qr_for(url).unwrap();
+        assert_eq!(qr.size, 33); // version 4: small enough to scan off a screen easily
+        let expected: Vec<bool> = qrcode::QrCode::with_error_correction_level(url, qrcode::EcLevel::M)
+            .unwrap()
+            .to_colors()
+            .into_iter()
+            .map(|c| c == qrcode::Color::Dark)
+            .collect();
+        assert_eq!(grid_from_path(&qr), expected);
+        // Finder patterns in three corners, separators around them.
+        let dark = |x: usize, y: usize| expected[y * qr.size + x];
+        let last = qr.size - 1;
+        assert!(dark(0, 0) && dark(6, 6) && dark(last, 0) && dark(0, last));
+        assert!(!dark(7, 7) && !dark(last - 7, 7) && !dark(7, last - 7));
+    }
+
+    #[test]
+    fn poll_replies() {
+        let p = |status, body: Value, retry| classify_poll(status, &body, retry);
+        assert_eq!(p(200, json!({ "access_token": "tok", "token_type": "Bearer" }), None), PollReply::Approved("tok".into()));
+        assert_eq!(p(200, json!({ "access_token": "" }), None), PollReply::Failed(UNEXPECTED.into()));
+        assert_eq!(p(200, json!({ "access_token": "a b" }), None), PollReply::Failed(UNEXPECTED.into()));
+        assert_eq!(p(200, Value::Null, None), PollReply::Failed(UNEXPECTED.into()));
+        assert_eq!(p(400, json!({ "error": "authorization_pending" }), None), PollReply::Pending);
+        assert_eq!(p(400, json!({ "error": "slow_down" }), None), PollReply::SlowDown);
+        assert_eq!(p(400, json!({ "error": "access_denied" }), None), PollReply::Denied);
+        assert_eq!(p(400, json!({ "error": "expired_token" }), None), PollReply::Expired);
+        assert_eq!(p(400, json!({ "error": "invalid_grant" }), None), PollReply::Failed(PHONE_CODE_GONE.into()));
+        assert_eq!(p(429, json!({ "message": "Too many requests." }), Some(7)), PollReply::Wait(7));
+        assert_eq!(p(429, Value::Null, None), PollReply::Wait(10));
+        assert_eq!(p(429, Value::Null, Some(3600)), PollReply::Wait(60));
+        assert_eq!(p(503, json!({ "code": "SERVICE_UNAVAILABLE" }), Some(1)), PollReply::Retry);
+        assert_eq!(p(500, Value::Null, None), PollReply::Retry);
+        assert!(matches!(p(400, json!({ "error": "invalid_request" }), None), PollReply::Failed(m) if m.contains("error 400")));
+    }
+
+    #[test]
+    fn one_phone_sign_in_at_a_time() {
+        let g = DeviceGrant::parse(&grant_body(), BASE, 0).unwrap();
+        *device_lock() = Some(DeviceFlow { id: 41, view: g.view.clone() });
+        assert_eq!(status().device.as_ref(), Some(&g.view));
+        // A newer attempt replaces it: the old poller sees it's no longer current.
+        *device_lock() = Some(DeviceFlow { id: 42, view: g.view.clone() });
+        assert!(!device_is_current(41) && device_is_current(42));
+        assert!(!device_end(41), "a stale poller can't end the newer attempt");
+        assert!(device_end(42));
+        assert!(!device_end(42) && status().device.is_none());
     }
 }
 

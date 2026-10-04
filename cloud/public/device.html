@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="same-origin" />
+  <title>Sign in with your phone · Yap</title>
+  <link rel="icon" href="/yap-logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="phone">
+  <a class="brand" href="https://contextmirror.com/yap"><img src="/yap-logo.svg" alt="" />Yap</a>
+
+  <!-- Sign in with your phone: Yap on a PC shows a QR code for
+       /device?user_code=…; sign in here, then approve that code (device.js). -->
+
+  <main class="card" id="loading">
+    <p class="muted">One moment…</p>
+  </main>
+
+  <!-- Opened by typing the address: ask for the code Yap shows. -->
+  <main class="card" id="enter" hidden>
+    <h1>Sign in to Yap on your PC</h1>
+    <p class="muted">Enter the code Yap is showing on your PC (Settings → Account → Sign in with your phone).</p>
+    <form id="enter-form" novalidate>
+      <label class="label" for="enter-code">Code</label>
+      <input class="field caps" id="enter-code" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="12" placeholder="WDJB-MJHT" />
+      <p class="error" id="enter-error" role="alert" hidden></p>
+      <button class="btn" type="submit">Continue</button>
+    </form>
+  </main>
+
+  <!-- A good code and nobody signed in here yet: every way to sign in. -->
+  <main class="card" id="signin" hidden>
+    <h1>Sign in to Yap on your PC</h1>
+    <p class="muted">Your PC is showing this code. Sign in here, then you'll approve it.</p>
+    <div class="usercode compact" id="signin-code"></div>
+    <p class="error" id="signin-error" role="alert" hidden></p>
+
+    <div id="choose">
+      <div class="providers" id="providers">
+        <button class="provider" type="button" data-provider="google" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z" />
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z" />
+            <path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z" />
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z" />
+          </svg>
+          Continue with Google
+        </button>
+        <button class="provider" type="button" data-provider="github" hidden>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path fill="#181717" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+          </svg>
+          Continue with GitHub
+        </button>
+        <button class="provider" type="button" data-provider="discord" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="#5865F2" d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
+          </svg>
+          Continue with Discord
+        </button>
+      </div>
+      <div class="or" id="or" hidden><span>or</span></div>
+      <form id="email-form" novalidate hidden>
+        <label class="label" for="email">Email me a sign-in code</label>
+        <input class="field" id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" placeholder="you@example.com" />
+        <button class="btn secondary" type="submit">Email me a code</button>
+      </form>
+      <p class="muted" id="no-methods" hidden>Signing in isn't available right now. Try again later.</p>
+    </div>
+
+    <form id="otp-form" novalidate hidden>
+      <p>We sent a 6-digit code to <strong id="otp-email"></strong>. It expires in 10 minutes.</p>
+      <input class="field otp" id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" aria-label="6-digit code" />
+      <button class="btn" type="submit">Sign in</button>
+      <div class="links">
+        <button class="link" type="button" id="otp-back">Use a different email</button>
+        <button class="link" type="button" id="otp-resend">Resend code</button>
+      </div>
+    </form>
+
+    <p class="small muted">By continuing you agree to Yap's <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p>
+  </main>
+
+  <!-- Signed in: approve or deny. -->
+  <main class="card" id="confirm" hidden>
+    <h1>Sign in to Yap on your PC?</h1>
+    <p class="muted">You're signed in here as <strong id="who"></strong>. <button class="link" type="button" id="switch">Not you?</button></p>
+    <p class="label">Code</p>
+    <div class="usercode" id="confirm-code"></div>
+    <p>Make sure it matches the code on your PC's screen. Approving signs Yap on that Windows PC in to your account.</p>
+    <p class="warn">Only approve a sign-in you started yourself, just now. If someone sent you this link or asked you for this code, tap Deny.</p>
+    <p class="error" id="confirm-error" role="alert" hidden></p>
+    <button class="btn" type="button" id="approve">Approve</button>
+    <button class="btn secondary" type="button" id="deny">Deny</button>
+  </main>
+
+  <!-- Approved or denied. -->
+  <main class="card" id="done" hidden>
+    <div class="check" id="done-mark" aria-hidden="true">✓</div>
+    <h1 id="done-title"></h1>
+    <p class="muted" id="done-text"></p>
+  </main>
+
+  <!-- The code can't be used (expired, used, unknown) or the service balked. -->
+  <main class="card" id="problem" hidden>
+    <h1 id="problem-title"></h1>
+    <p class="muted" id="problem-text"></p>
+    <button class="btn secondary" type="button" id="problem-action"></button>
+  </main>
+
+  <footer><a href="/privacy">Privacy</a><a href="/terms">Terms</a></footer>
+
+  <script src="/device.js"></script>
+</body>
+</html>

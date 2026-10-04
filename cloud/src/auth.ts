@@ -1,16 +1,36 @@
 // Yap accounts: the Better Auth instance, one per isolate.
 import { env, waitUntil } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
-import { bearer, emailOTP } from "better-auth/plugins";
+import { bearer, deviceAuthorization, emailOTP } from "better-auth/plugins";
 import { electron } from "@better-auth/electron";
 import { accountDeletedEmail, otpEmail, sendMail } from "./mail";
 
 /** Client id Yap sends with browser sign-ins (src-tauri/src/auth.rs). The
  *  electron plugin binds the handoff code to it and names the handoff cookie
- *  `better-auth.yap-desktop` after it (public/index.html reads that cookie). */
+ *  `better-auth.yap-desktop` after it (public/index.html reads that cookie).
+ *  Phone sign-in codes are issued to it alone. */
 export const DESKTOP_CLIENT_ID = "yap-desktop";
 
 const DAY = 60 * 60 * 24;
+
+/** RFC 8628 §6.1's 20 consonants: no vowels (no words spelled by chance), no
+ *  digits (no keyboard switch on a phone), nothing to mistake for 0/O or 1/I. */
+const PHONE_CODE_LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
+
+/** The code people check between Yap and their phone, and type there if the
+ *  camera fails: 8 letters, shown as WDJB-MJHT. 20^8 ≈ 2^34.6 codes, a few
+ *  live at once for 10 minutes each, and 10 lookups per IP per 10 minutes
+ *  (rateLimit below): guessing one is hopeless. */
+function phoneUserCode(): string {
+  let code = "";
+  while (code.length < 8) {
+    for (const byte of crypto.getRandomValues(new Uint8Array(16))) {
+      // 240 = 12 × 20: dropping the rest keeps every letter equally likely.
+      if (byte < 240 && code.length < 8) code += PHONE_CODE_LETTERS[byte % 20];
+    }
+  }
+  return code;
+}
 
 const isLocalDev = new URL(env.BETTER_AUTH_URL).hostname === "localhost";
 
@@ -116,7 +136,18 @@ const createAuth = () => betterAuth({
     // Per IP. Code checks match the per-code attempt budget (allowedAttempts
     // below), so a few typos never lock someone out before the code does;
     // sends stay at the plugin's 3 a minute.
-    customRules: { "/sign-in/email-otp": { window: 60, max: 5 } },
+    customRules: {
+      "/sign-in/email-otp": { window: 60, max: 5 },
+      // Phone sign-in. Each new code is a row, so a few a minute. Looking a
+      // code up (the phone page checks it, then claims it to approve) is what
+      // a guesser would hammer: the plugin allows 5 per code lifetime; 10
+      // leaves room for a reload and a second try, or a few people behind
+      // one carrier IP, and guessing stays hopeless (see phoneUserCode).
+      "/device/code": { window: 60, max: 5 },
+      "/device": { window: 600, max: 10 },
+      "/device/approve": { window: 60, max: 5 },
+      "/device/deny": { window: 60, max: 5 },
+    },
   },
   // Only what Yap calls stays reachable (src-tauri/src/auth.rs: get-session,
   // list-accounts, sign-out, delete-user, email codes, the desktop handoff;
@@ -184,6 +215,22 @@ const createAuth = () => betterAuth({
     }),
     bearer(), // Yap sends `Authorization: Bearer <session token>`
     electron({ clientID: DESKTOP_CLIENT_ID }), // PKCE browser → app handoff
+    // Sign in with your phone (OAuth 2.0 device authorization, RFC 8628):
+    // Yap gets a code at /device/code and shows it as a QR code for
+    // /device?user_code=… (public/device.html). The person signs in there
+    // and approves; Yap polls /device/token, which then answers with a
+    // session token (`access_token`) for Bearer use like any other. Paths
+    // in use, so never in disabledPaths: Yap's device/code + device/token;
+    // the page's sign-in/social, email codes, device, device/approve|deny
+    // and sign-out.
+    deviceAuthorization({
+      verificationUri: "/device",
+      expiresIn: "10m",
+      interval: "5s",
+      generateUserCode: phoneUserCode,
+      // Codes are issued to (and redeemed by) Yap alone.
+      validateClient: (clientId) => clientId === DESKTOP_CLIENT_ID,
+    }),
   ],
 });
 

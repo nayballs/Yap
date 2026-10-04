@@ -3,7 +3,9 @@
 // session — the token lives in Windows Credential Manager and never reaches
 // the webview — so the UI only sees this status snapshot:
 //   { signedIn, user: { id, email, name, image } | null, providers: [],
-//     pending: 'google' | … | null, offline, signedInAt, serviceUrl }
+//     pending: 'google' | … | null, offline, signedInAt, serviceUrl,
+//     device: { userCode, verificationUri, verificationUriComplete,
+//               expiresIn, expiresAt, qr: { size, path } } | null  (phone sign-in) }
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from './ui/toast.svelte.js';
@@ -24,9 +26,10 @@ export function initAccount() {
   listen('yap-auth-changed', (e) => {
     const before = account.status;
     account.status = e.payload;
-    // A browser sign-in finishes in the background (deep link / loopback),
-    // possibly with the Account page closed: say so.
-    if (before?.pending && !before?.signedIn && e.payload?.signedIn) {
+    // A browser or phone sign-in finishes in the background (deep link /
+    // loopback / the phone's approval), possibly with the Account page
+    // closed: say so.
+    if ((before?.pending || before?.device) && !before?.signedIn && e.payload?.signedIn) {
       toast({ title: 'Signed in', description: `Signed in as ${e.payload.user?.email ?? 'your account'}.`, variant: 'success' });
     }
   });

@@ -1,6 +1,6 @@
 // Yap accounts Worker. Static pages in ./public are served by the assets
 // layer before this runs; only API paths reach the Hono app.
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { DESKTOP_CLIENT_ID, handleAuth, signInMethods } from "./auth";
@@ -66,6 +66,24 @@ app.post("/api/auth/email-otp/send-verification-otp", async (c, next) => {
   }
   await next();
   if (c.res.status === 200) await recordSend(keys);
+});
+
+// Phone sign-in codes (device authorization, src/auth.ts). Better Auth
+// deletes one when Yap redeems it, or polls it after a deny or expiry; one
+// nobody finished (cancelled in Yap, never scanned) would stay for good. So
+// each new code clears those that expired over an hour ago: late enough that
+// a straggling poll still hears "expired". Better Auth keeps D1 dates as ISO
+// 8601 strings, which compare in time order.
+app.post("/api/auth/device/code", async (c, next) => {
+  await next();
+  if (c.res.status !== 200) return;
+  const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  waitUntil(
+    env.DB.prepare(`DELETE FROM "deviceCode" WHERE "expiresAt" < ?1`)
+      .bind(cutoff)
+      .run()
+      .then(() => undefined, (e) => console.error("[device] couldn't clear expired codes", e)),
+  );
 });
 
 // Better Auth: sign-in (social, email code), sessions (cookie or Bearer),
