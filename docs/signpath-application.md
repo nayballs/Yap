@@ -1,78 +1,100 @@
 # SignPath Foundation application — draft answers
 
 Apply at **https://signpath.org/apply**. Everything below is ready to paste;
-the form is yours to submit (it's an application in your name). Pair with
-[`SIGNING.md`](./SIGNING.md) for the CI wiring once approved.
+the form is yours to submit (it's an application in your name, and it ends in a
+reCAPTCHA). Pair with [`SIGNING.md`](./SIGNING.md) for the CI wiring once
+approved. Conditions quoted from https://signpath.org/terms (checked 2026-10-04).
 
-## Before you submit
+## The gate: reputation
 
-SignPath's conditions (signpath.org/terms) that need something from you:
+SignPath puts *its own name* on the certificate, so it won't vouch for software
+"based on source code that nobody knows": downloadable programs need "a certain
+verifiable reputation". The form has a required **Reputation** field (media
+coverage, blog posts, download statistics, GitHub insights, community
+discussions). They decide case by case and ask applicants not to argue a
+rejection, so apply once there is something to show.
 
-- [ ] **2FA on GitHub** (and on SignPath once the account exists). Required for
-      every team member.
-- [ ] **A "Code signing policy" section** must be published (README or website).
-      Text ready below — add it to the README when you submit. It credits
-      SignPath and names who can change code and approve signing.
-- [ ] **A release to point at.** They sign projects that are already released;
-      Yap has rolling nightlies but no tagged stable release yet. Consider tagging
-      `v0.1.0` first (see ROADMAP / the stable-release plan) so the application
-      can link a real release page.
+On 2026-10-04 Yap had 1 star, 0 forks and ~14 unique visitors a fortnight —
+too early. Things that would count: a launch post (Show HN, r/LocalLLaMA,
+r/Windows, r/speechtech) and its discussion, stars, stable-release download
+counts (`gh api repos/nayballs/Yap/releases --jq '.[] | {tag_name, d: [.assets[].download_count]}'`),
+any write-ups or videos.
 
-Things to know:
+## Everything else (already met unless ticked off below)
 
-- **Publisher name.** Windows will show **"SignPath Foundation"** as the
-  publisher, not "Nathan Lawrie" or "Yap". That's how the free program works.
-- **Manual approval per release.** "Every release needs manual approval for
-  signing." Sign **stable releases** (a click in SignPath per tag); leave the
-  daily nightlies unsigned, or approve them by hand when it matters.
-- **No proprietary components.** Yap's own code is MIT. The installer can pull
-  in Microsoft's WebView2 bootstrapper (Microsoft-signed) — mention it if asked.
-  Models and the llamafile runtime are downloaded at runtime, not bundled.
+- OSI licence, no commercial dual-licensing: MIT.
+- No proprietary components: Yap's code is MIT. The installer bootstraps
+  Microsoft's WebView2 (Microsoft-signed, a system component); models and the
+  llamafile runtime are downloaded at runtime, not bundled.
+- Released in the form to be signed: the NSIS installer on GitHub Releases
+  (stable from v0.1.0).
+- Maintained; functionality documented on the download page.
+- Uninstaller: the NSIS uninstaller.
+- MFA: GitHub 2FA is on (and required for the account). Turn it on for
+  SignPath too once the account exists.
+- Privacy: nothing leaves the PC unless the user asks (model downloads, update
+  checks, a cloud cleanup provider they configured, the optional account).
+- Builds are verifiable: public GitHub Actions workflows, tagged commits.
+
+To do when you apply:
+
+- [ ] **"Code signing policy"** on the homepage *and* the download/release
+      pages, with SignPath's wording (text below): the README, the
+      contextmirror.com/yap page, and the release notes.
+- [ ] Every release then needs your manual approval in SignPath. Sign stable
+      releases; leave nightlies unsigned.
+- [ ] Windows will show **"SignPath Foundation"** as the publisher, not
+      "Nathan Lawrie" or "Yap". That's how the free program works.
 
 ## Form answers
 
-**Project name:** Yap
+**Project Name\*** (a Google search should identify it): Yap — voice dictation for Windows
 
-**Repository:** https://github.com/nayballs/Yap
+**Repository URL\***: https://github.com/nayballs/Yap
 
-**Homepage / download page:** https://contextmirror.com/yap
+**Homepage URL\***: https://contextmirror.com/yap
 
-**License:** MIT (OSI-approved, no dual licensing)
+**Download URL** (must mention SignPath Foundation code signing): https://contextmirror.com/yap
 
-**Short description:**
-Yap is a free, open-source voice dictation app for Windows. Press a hotkey,
-speak, and Yap transcribes locally on your GPU (Whisper via Vulkan, ONNX models
-via DirectML), optionally cleans the text up with a local or user-configured AI
-model, and types it into whatever app is focused. Audio and transcripts never
-leave the PC unless the user turns on a cloud cleanup provider themselves.
+**Privacy Policy URL**: https://auth.contextmirror.com/privacy
 
-**What will be signed:**
-The Windows NSIS installer (`Yap_<version>_x64-setup.exe`) and the application
-executable inside it (`yap.exe`), built by GitHub Actions
-(`.github/workflows/release.yml`, Tauri 2 + Rust + Svelte).
+**Wikipedia URL**: (none)
 
-**Build system:** GitHub Actions (windows-latest), public workflow files in
-the repository; releases are built from tagged commits on `main`.
+**Tagline\*** (one sentence, may appear on signpath.org):
+Free, open-source voice dictation for Windows that transcribes on your own GPU
+and types into any app.
 
-**Release cadence:** Stable releases tagged manually (`v*`); a nightly
-pre-release channel is built daily from `main` (we'd sign stable releases).
+**Description\*** (a short paragraph, nothing version-specific):
+Yap is a voice dictation app for Windows. Press a hotkey, speak, and Yap
+transcribes locally on the user's GPU (Whisper and ONNX speech models via
+Vulkan and DirectML), optionally tidies the text with a local or
+user-configured AI model, and types it into whatever app is focused. Audio and
+transcripts stay on the PC unless the user chooses a cloud provider. It also
+includes a correction dictionary, voice editing of selected text, notes, a
+meeting recorder and transcription of audio files.
 
-**Users / downloads:** (fill in — GitHub release download counts are on the
-Insights → Traffic page and the releases page)
+**Reputation\***: (fill in at the time — see above)
 
-**Team roles:**
-- Authors (commit without extra review): Nathan Lawrie (@nayballs)
-- Reviewers (review outside contributions): Nathan Lawrie (@nayballs)
-- Approvers (approve each signing request): Nathan Lawrie (@nayballs)
+**Maintainer Type**: Individual
 
-**Anything else:**
-The app has an auto-updater (Tauri updater, minisign-verified). Our release
-pipeline will Authenticode-sign the installer *before* computing the updater
-signature, so existing installs keep updating. An unsigned installer currently
-triggers SmartScreen's "unknown publisher" warning, which is the main reason
-we're applying.
+**Build System\***: GitHub Actions
 
-## README section to add when you submit
+**First Name\* / Last Name\***: Nathan / Lawrie
+
+**Email\***: your email (it becomes the SignPath login)
+
+**Company Name**: (leave empty)
+
+**Primary Discovery Channel\***: whatever's true (e.g. an AI assistant)
+
+Then the reCAPTCHA and the Code of Conduct checkbox.
+
+## Code signing policy text
+
+SignPath requires the heading "Code signing policy", the sentence "Free code
+signing provided by SignPath.io, certificate by SignPath Foundation", the team
+roles, and a privacy statement. For the README (and, adapted, the website and
+release notes):
 
 ```markdown
 ## Code signing policy
@@ -84,9 +106,12 @@ Team roles:
 - Committers and reviewers: [Nathan Lawrie](https://github.com/nayballs)
 - Approvers: [Nathan Lawrie](https://github.com/nayballs)
 
-Privacy policy: Yap works offline and doesn't send your audio or transcripts
-anywhere. It only contacts the network when you ask it to: downloading a
-model, checking for updates, using a cloud AI cleanup provider you configured,
-or signing in to the optional Yap account (see the
-[privacy policy](https://auth.contextmirror.com/privacy)).
+Privacy policy: This program will not transfer any information to other
+networked systems unless specifically requested by the user or the person
+installing or operating it — downloading a model, checking for updates, using
+a cloud AI cleanup provider they configured, or signing in to the optional
+Yap account (see the [privacy policy](https://auth.contextmirror.com/privacy)).
 ```
+
+Add it only once SignPath has accepted Yap (or at the moment you apply):
+before that, the sentence would claim signing that doesn't exist.

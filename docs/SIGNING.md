@@ -31,6 +31,9 @@ the main integration work, and why it needs a test release to validate.
 
 ## 1. Apply to SignPath Foundation (you)
 
+SignPath only signs downloadable programs with "a certain verifiable
+reputation" (stars, downloads, coverage), so apply once Yap has some users.
+
 Ready-to-paste answers, the README "Code signing policy" section SignPath
 requires, and their conditions (2FA, manual approval of every signed release,
 "SignPath Foundation" shown as publisher) are in
