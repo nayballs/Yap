@@ -786,7 +786,7 @@ impl ApiError {
                 "That code belongs to a different sign-in. Start again.".into()
             }
             _ if self.status == 429 => match self.retry_after {
-                Some(s) if s > 1 => format!("Too many tries. Wait {} seconds, then try again.", s),
+                Some(s) if s > 1 => format!("Too many tries. Wait {}, then try again.", wait_text(s)),
                 _ => "Too many tries. Wait a minute, then try again.".into(),
             },
             _ => format!(
@@ -794,6 +794,16 @@ impl ApiError {
                 self.status
             ),
         }
+    }
+}
+
+/// A server-sent wait as people say it: "42 seconds", "3 minutes", "2 hours".
+/// Rounded up, so waiting that long is always enough.
+fn wait_text(secs: u64) -> String {
+    match secs {
+        0..=89 => format!("{} seconds", secs),
+        90..=5399 => format!("{} minutes", secs.div_ceil(60)),
+        _ => format!("{} hours", secs.div_ceil(3600)),
     }
 }
 
@@ -996,7 +1006,11 @@ mod tests {
     fn friendly_errors() {
         let e = |status, code: &str, retry_after| ApiError { status, code: code.into(), retry_after };
         assert!(e(400, "INVALID_OTP", None).friendly().contains("isn't right"));
-        assert!(e(429, "", Some(42)).friendly().contains("42 seconds"));
+        assert!(e(429, "", Some(42)).friendly().contains("Wait 42 seconds,"));
+        assert!(e(429, "", Some(90)).friendly().contains("Wait 2 minutes,"));
+        assert!(e(429, "", Some(3540)).friendly().contains("Wait 59 minutes,"));
+        assert!(e(429, "", Some(5400)).friendly().contains("Wait 2 hours,"));
+        assert!(e(429, "", Some(86_000)).friendly().contains("Wait 24 hours,"));
         assert!(e(429, "", None).friendly().contains("a minute"));
         assert!(e(500, "", None).friendly().contains("error 500"));
         assert_eq!(ApiError::network().friendly(), UNREACHABLE);
