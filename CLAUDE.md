@@ -236,15 +236,18 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   Windows Credential Manager (`yap-account.com.yap.dictation`, **Local**
   persistence — never config.json, logs or the webview; any non-production
   service URL gets its own entry, `yap-account@<host>`, so a dev build can't
-  touch the real session). Startup + every 24 h
+  touch the real session). Signed in, startup + every 24 h
   `refresh` re-validates via `get-session` (server says no → signed out;
   unreachable → keep, flagged `offline`). `auth_sign_out` revokes best-effort
   then forgets locally; `auth_delete_account` returns `"reauth"` when the
   server wants a fresh sign-in (sessions > 1 day old). Emits
   `yap-auth-changed` (status snapshot) and `yap-auth-error`. The Account page
   only offers what the service reports at `/api/providers` (configured
-  providers; email once mail can be sent) — `auth_check_methods`, plus at
-  startup and daily. Debug builds talk
+  providers; email once mail can be sent) — `auth_check_methods` when the page
+  opens, plus daily while signed in. ⚠ A **signed-out Yap never contacts the
+  account service on its own** (the privacy promise in the README, the
+  release notes and SignPath's policy) — keep any new auth call behind a
+  sign-in or a user action. Debug builds talk
   to `http://localhost:8787` (`cloud/`'s `wrangler dev`); `YAP_AUTH_URL`
   overrides any build.
 - **`history.rs`** — local-only transcription history (`history.json`): each

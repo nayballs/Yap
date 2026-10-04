@@ -226,15 +226,20 @@ pub fn init(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         loop {
-            refresh_methods(&app).await;
             refresh(&app).await;
+            // Signed out, Yap never contacts the account service on its own:
+            // the Account page fetches the sign-in methods when it opens.
+            let signed_in = lock().session.is_some();
+            if signed_in {
+                refresh_methods(&app).await;
+            }
             tokio::time::sleep(REFRESH_EVERY).await;
         }
     });
 }
 
-/// Re-read the service's sign-in methods (the Account page calls this when it
-/// opens, so newly configured providers show up without a restart).
+/// Re-read the service's sign-in methods. The Account page calls this when it
+/// opens: the only time a signed-out Yap talks to the account service.
 #[tauri::command]
 pub async fn auth_check_methods(app: AppHandle) {
     refresh_methods(&app).await;

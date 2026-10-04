@@ -34,14 +34,21 @@
   let imgFailed = $state(false);
   let showSignIn = $derived(!!status && (!status.signedIn || deleteStep === 'reauth'));
 
-  // What the account service offers right now (null until it has answered:
-  // then offer everything, and the service explains if something's off).
-  let offered = $derived(status?.methods?.providers ?? ['google', 'microsoft', 'github']);
-  let emailOffered = $derived(status?.methods?.email ?? true);
+  // What the account service offers. Yap only asks when this page opens, so
+  // show no buttons until it answers; if it can't be reached, offer everything
+  // and let the service explain if something's off.
+  let methodsChecked = $state(false);
+  let methods = $derived(
+    status?.methods ?? (methodsChecked ? { providers: ['google', 'microsoft', 'github'], email: true } : null)
+  );
+  let offered = $derived(methods?.providers ?? []);
+  let emailOffered = $derived(methods?.email ?? false);
 
   onMount(() => {
     initAccount();
-    invoke('auth_check_methods').catch(() => {});
+    invoke('auth_check_methods')
+      .catch(() => {})
+      .finally(() => (methodsChecked = true));
     return () => clearInterval(resendTimer);
   });
 
@@ -257,7 +264,7 @@
     {#if offered.length && emailOffered}
       <div class="or"><span>or</span></div>
     {/if}
-    {#if !offered.length && !emailOffered}
+    {#if methods && !offered.length && !emailOffered}
       <p class="muted">Signing in isn't available right now. Please try again later.</p>
     {/if}
     {#if emailOffered}
