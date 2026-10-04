@@ -52,6 +52,15 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
 
+      # GPU whisper uses the VULKAN backend (universal — NVIDIA/AMD/Intel), which
+      # needs the Vulkan SDK (glslc + headers + loader) to COMPILE ggml-vulkan.
+      # Same step + version as nightly.yml — keep the two in sync.
+      - name: Install Vulkan SDK (Windows x64)
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.309.0
+          cache: true
+
       - name: Shorten build path (Windows)
         shell: pwsh
         run: |
@@ -86,12 +95,17 @@ jobs:
           GGML_FMA: "OFF"
           GGML_F16C: "OFF"
         with:
-          # BROAD COMPAT: whisper CPU + ONNX on DirectML (GPU-accelerated for the
-          # default Parakeet V3 model) — runs on any Windows GPU, no CUDA needed.
-          # A CUDA/Vulkan GPU-whisper variant could be added as a second matrix
-          # entry later.
-          args: "--features engines"
-          tagName: app-v__VERSION__
+          # Same build as nightly minus its updater-endpoint override: whisper
+          # on Vulkan, ONNX on DirectML — any Windows GPU, no CUDA. NSIS only:
+          # installs come from the custom NSIS installer (normal/portable,
+          # deep-link scheme), so latest.json must never point at an MSI.
+          args: "--features engines --bundles nsis"
+          updaterJsonPreferNsis: true
+          # The draft targets the commit that was built. Run from a pushed
+          # `v*` tag, or dispatch from main: publishing the draft creates the
+          # tag then.
+          tagName: v__VERSION__
+          releaseCommitish: ${{ github.sha }}
           releaseName: "Yap v__VERSION__"
           releaseDraft: true
           prerelease: false
