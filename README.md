@@ -81,8 +81,9 @@ your voice to the cloud. Yap refuses the choice:
 - 🌍 **Multilingual** — per-model language selection and translate-to-English.
 - 🍰 **Polished, minimal UI** — a floating waveform overlay while you speak, a live
   preview of the words as you say them, and a state-aware tray icon.
-- 👤 **Optional account** — sign in with Google, GitHub or an email code. Dictation
-  never needs one.
+- 👤 **Optional account** — sign in with Google, GitHub, Discord or an email code,
+  or scan a QR code with your phone. See and sign out the devices you're signed in
+  on. Dictation never needs an account.
 - 📦 **Zero-friction install** — small NSIS installer (normal or portable), in-app
   auto-updates, autostart option.
 
