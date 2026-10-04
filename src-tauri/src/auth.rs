@@ -18,8 +18,12 @@
 //!     of `state` for the account page to redirect to;
 //!   - always: the account page shows the code to paste into Yap.
 //!
+//! Signed in, Settings → Account also lists where the account is signed in
+//! (each Yap install, and any browser) and can sign the others out.
+//!
 //! Server endpoints and the handoff protocol: `cloud/README.md`.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -48,6 +52,8 @@ const REFRESH_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 const EXPIRED: &str = "That sign-in has expired. Start again from Settings → Account.";
 const UNREACHABLE: &str =
     "Couldn't reach Yap's account service. Check your connection and try again.";
+const NOT_SIGNED_IN: &str = "You're not signed in.";
+const SIGNED_OUT: &str = "This PC has been signed out of your Yap account. Sign in again to carry on.";
 
 /// The account service. `YAP_AUTH_URL` overrides it; debug builds default to
 /// the local `wrangler dev` server (cloud/README.md).
@@ -168,6 +174,8 @@ struct Inner {
     providers: Vec<String>,
     offline: bool,
     methods: Option<Methods>,
+    /// The last "where you're signed in" list; see `Listed`.
+    listed: Option<Listed>,
 }
 
 static STATE: Mutex<Inner> = Mutex::new(Inner {
@@ -176,6 +184,7 @@ static STATE: Mutex<Inner> = Mutex::new(Inner {
     providers: Vec::new(),
     offline: false,
     methods: None,
+    listed: None,
 });
 
 fn lock() -> MutexGuard<'static, Inner> {
@@ -311,6 +320,7 @@ async fn refresh(app: &AppHandle) {
                 inner.session = None;
                 inner.providers.clear();
                 inner.offline = false;
+                inner.listed = None;
                 vault::clear();
             }
         }
@@ -649,13 +659,45 @@ async fn finish_sign_in(app: &AppHandle, token: String, user: Profile) {
         tracing::error!("auth: couldn't store the session: {}", e);
     }
     let providers = list_providers(&stored.token).await.unwrap_or_default();
-    {
+    let replaced = {
         let mut inner = lock();
-        inner.session = Some(stored);
+        let new_token = stored.token.clone();
+        let old = inner.session.replace(stored);
         inner.providers = providers;
         inner.offline = false;
+        inner.listed = None;
+        old.map(|s| s.token).filter(|old| *old != new_token)
+    };
+    // Yap keeps one session per PC. One this sign-in replaced (signing in
+    // again to confirm it's you) would otherwise stay live on the server,
+    // unused, for up to 30 days, and show up as another device. The new
+    // session is already in place, so Yap no longer uses the old one.
+    if let Some(old) = replaced {
+        if !end_session(&old).await {
+            tracing::info!("auth: couldn't revoke the replaced session");
+        }
     }
     emit_status(app);
+}
+
+/// Revoke one of Yap's own sessions server-side. Best effort: `false` when
+/// the server couldn't be reached.
+async fn end_session(token: &str) -> bool {
+    CLIENT
+        .post(api("/sign-out"))
+        .bearer_auth(token)
+        .json(&json!({}))
+        .send()
+        .await
+        .is_ok()
+}
+
+fn current_token() -> Result<String, String> {
+    lock()
+        .session
+        .as_ref()
+        .map(|s| s.token.clone())
+        .ok_or_else(|| NOT_SIGNED_IN.to_string())
 }
 
 /// Sign out: revoke the session server-side (best effort, so it works
@@ -664,13 +706,7 @@ async fn finish_sign_in(app: &AppHandle, token: String, user: Profile) {
 pub async fn auth_sign_out(app: AppHandle) -> Result<(), String> {
     let token = lock().session.as_ref().map(|s| s.token.clone());
     if let Some(token) = token {
-        let revoked = CLIENT
-            .post(api("/sign-out"))
-            .bearer_auth(&token)
-            .json(&json!({}))
-            .send()
-            .await;
-        if revoked.is_err() {
+        if !end_session(&token).await {
             tracing::info!("auth: couldn't reach the server to revoke the session; signing out locally");
         }
     }
@@ -683,11 +719,7 @@ pub async fn auth_sign_out(app: AppHandle) -> Result<(), String> {
 /// wants a fresh sign-in first (sessions older than a day).
 #[tauri::command]
 pub async fn auth_delete_account(app: AppHandle) -> Result<(), String> {
-    let token = lock()
-        .session
-        .as_ref()
-        .map(|s| s.token.clone())
-        .ok_or("You're not signed in.")?;
+    let token = current_token()?;
     let resp = CLIENT
         .post(api("/delete-user"))
         .bearer_auth(&token)
@@ -712,6 +744,7 @@ fn forget_session(app: &AppHandle) {
         inner.session = None;
         inner.providers.clear();
         inner.offline = false;
+        inner.listed = None;
     }
     vault::clear();
     emit_status(app);
@@ -757,6 +790,297 @@ fn session_from(body: &Value) -> Option<(String, Profile)> {
     let token = body.get("token")?.as_str()?.to_string();
     let user = serde_json::from_value(body.get("user")?.clone()).ok()?;
     (!token.is_empty()).then_some((token, user))
+}
+
+// ---- where you're signed in ----
+
+/// One place the account is signed in, as Settings → Account lists it.
+/// Carries neither the session's token nor its IP address.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceSession {
+    id: String,
+    /// This PC's own session.
+    current: bool,
+    /// "Yap 0.1.1 on Windows", "Chrome on macOS", …
+    label: String,
+    /// Unix seconds, like the rest of the IPC; `None` when the server didn't say.
+    created_at: Option<u64>,
+    /// When the server last renewed the session. That happens about once a
+    /// day while the session is used, so it's only good to the day.
+    last_active_at: Option<u64>,
+    expires_at: Option<u64>,
+}
+
+/// The other sessions' tokens from the last list, by id. Better Auth revokes
+/// a session by its token, so these stay here; the UI only ever sees ids.
+struct Listed {
+    /// The session (token) that listed them.
+    owner: String,
+    current_id: Option<String>,
+    tokens: HashMap<String, String>,
+}
+
+/// Where this account is signed in: this PC first, then the most recently
+/// active. Errors with `"reauth"` when the server wants a recent sign-in
+/// first: Better Auth lists sessions only to one signed in within the last
+/// day (its `freshAge`), the same rule as deleting the account.
+#[tauri::command]
+pub async fn auth_list_sessions(app: AppHandle) -> Result<Vec<DeviceSession>, String> {
+    let token = current_token()?;
+    let resp = CLIENT
+        .get(api("/list-sessions"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|_| UNREACHABLE.to_string())?;
+    let body = match read_api(resp).await {
+        Ok(body) => body,
+        Err(e) => return Err(session_call_failed(&app, e).await),
+    };
+    let (sessions, listed) = parse_sessions(&body, &token);
+    let mut inner = lock();
+    // Skip if the user signed out / switched while the request ran.
+    if inner.session.as_ref().is_some_and(|s| s.token == token) {
+        inner.listed = Some(listed);
+    }
+    Ok(sessions)
+}
+
+/// Sign out everywhere but this PC. Unlike listing, this works with a
+/// session of any age.
+#[tauri::command]
+pub async fn auth_revoke_other_sessions(app: AppHandle) -> Result<(), String> {
+    let token = current_token()?;
+    let resp = CLIENT
+        .post(api("/revoke-other-sessions"))
+        .bearer_auth(&token)
+        .json(&json!({}))
+        .send()
+        .await
+        .map_err(|_| UNREACHABLE.to_string())?;
+    if let Err(e) = read_api(resp).await {
+        return Err(session_call_failed(&app, e).await);
+    }
+    if let Some(listed) = lock().listed.as_mut() {
+        listed.tokens.clear();
+    }
+    tracing::info!("auth: signed out of the other sessions");
+    Ok(())
+}
+
+/// Sign out one other device, by its id from the last list. This PC signs
+/// out with `auth_sign_out` instead.
+#[tauri::command]
+pub async fn auth_revoke_session(app: AppHandle, id: String) -> Result<(), String> {
+    let (token, target) = {
+        let inner = lock();
+        let token = inner.session.as_ref().map(|s| s.token.clone()).ok_or(NOT_SIGNED_IN)?;
+        let listed = inner.listed.as_ref().filter(|l| l.owner == token);
+        if listed.is_some_and(|l| l.current_id.as_deref() == Some(id.as_str())) {
+            return Err("That's this PC. Use Sign out to sign out here.".into());
+        }
+        // Not in the last list (or the list was since cleared): already gone.
+        let target = listed
+            .and_then(|l| l.tokens.get(&id).cloned())
+            .ok_or("That device is already signed out.")?;
+        (token, target)
+    };
+    let resp = CLIENT
+        .post(api("/revoke-session"))
+        .bearer_auth(&token)
+        .json(&json!({ "token": target }))
+        .send()
+        .await
+        .map_err(|_| UNREACHABLE.to_string())?;
+    if let Err(e) = read_api(resp).await {
+        return Err(session_call_failed(&app, e).await);
+    }
+    if let Some(listed) = lock().listed.as_mut() {
+        listed.tokens.remove(&id);
+    }
+    tracing::info!("auth: signed out one other session");
+    Ok(())
+}
+
+/// What a refused list/revoke call tells the UI. A 401 means the server no
+/// longer takes this PC's session, or that its session lookup hiccuped (Better
+/// Auth reports both as UNAUTHORIZED), so re-check the way startup does:
+/// get-session answers definitively, and only a session that's really gone
+/// signs Yap out.
+async fn session_call_failed(app: &AppHandle, e: ApiError) -> String {
+    if e.code == "SESSION_NOT_FRESH" {
+        return "reauth".into();
+    }
+    if e.status == 401 {
+        refresh(app).await;
+        if lock().session.is_none() {
+            return SIGNED_OUT.into();
+        }
+    }
+    e.friendly()
+}
+
+/// Better Auth's `/list-sessions` reply → the rows the UI shows, plus the
+/// other sessions' tokens for revoking one of them.
+fn parse_sessions(body: &Value, own_token: &str) -> (Vec<DeviceSession>, Listed) {
+    let mut listed = Listed { owner: own_token.to_string(), current_id: None, tokens: HashMap::new() };
+    let mut sessions = Vec::new();
+    for row in body.as_array().into_iter().flatten() {
+        let text = |key: &str| row.get(key).and_then(Value::as_str).unwrap_or_default();
+        let time = |key: &str| row.get(key).and_then(unix_secs);
+        let (id, token) = (text("id"), text("token"));
+        if id.is_empty() || token.is_empty() {
+            continue;
+        }
+        let current = token == own_token;
+        if current {
+            listed.current_id = Some(id.to_string());
+        } else {
+            listed.tokens.insert(id.to_string(), token.to_string());
+        }
+        let created_at = time("createdAt");
+        sessions.push(DeviceSession {
+            id: id.to_string(),
+            current,
+            label: device_label(text("userAgent")),
+            created_at,
+            last_active_at: time("updatedAt").or(created_at),
+            expires_at: time("expiresAt"),
+        });
+    }
+    sessions.sort_by(|a, b| {
+        b.current
+            .cmp(&a.current)
+            .then(b.last_active_at.cmp(&a.last_active_at))
+            .then(b.created_at.cmp(&a.created_at))
+    });
+    (sessions, listed)
+}
+
+/// A session's user agent as people name the device: "Yap 0.1.1 on Windows"
+/// for Yap itself (`CLIENT` sends `Yap/<version> (Windows)`), "Chrome on
+/// macOS" for a browser.
+fn device_label(user_agent: &str) -> String {
+    // First match wins, so the browsers whose user agents also claim to be
+    // Chrome (Edge, Opera, Samsung) or Safari (all of them) come first.
+    const BROWSERS: &[(&str, &str)] = &[
+        ("Edg/", "Edge"),
+        ("EdgA/", "Edge"),
+        ("EdgiOS/", "Edge"),
+        ("Edge/", "Edge"),
+        ("OPR/", "Opera"),
+        ("OPiOS/", "Opera"),
+        ("SamsungBrowser/", "Samsung Internet"),
+        ("Vivaldi/", "Vivaldi"),
+        ("Firefox/", "Firefox"),
+        ("FxiOS/", "Firefox"),
+        ("CriOS/", "Chrome"),
+        ("Chrome/", "Chrome"),
+        ("Safari/", "Safari"),
+    ];
+    // iPhone/iPad say "like Mac OS X"; Android says "Linux".
+    const SYSTEMS: &[(&str, &str)] = &[
+        ("Windows", "Windows"),
+        ("iPhone", "iPhone"),
+        ("iPad", "iPad"),
+        ("Android", "Android"),
+        ("CrOS", "ChromeOS"),
+        ("Mac OS X", "macOS"),
+        ("Macintosh", "macOS"),
+        ("Linux", "Linux"),
+    ];
+
+    let ua = user_agent.trim();
+    if ua.is_empty() {
+        return "Unknown device".into();
+    }
+    if let Some(rest) = ua.strip_prefix("Yap/") {
+        let (version, rest) = rest.split_once(' ').unwrap_or((rest, ""));
+        let os = rest.trim_start().strip_prefix('(').and_then(|r| r.split_once(')')).map(|(os, _)| os.trim());
+        // Anyone can send any user agent: only show plain, short text.
+        let plain = |s: &str, extra: &str| {
+            !s.is_empty() && s.len() <= 32 && s.chars().all(|c| c.is_ascii_alphanumeric() || extra.contains(c))
+        };
+        let app = if plain(version, ".-+") { format!("Yap {}", version) } else { "Yap".into() };
+        return match os.filter(|os| plain(os, " .")) {
+            Some(os) => format!("{} on {}", app, os),
+            None => app,
+        };
+    }
+    let find = |table: &[(&str, &'static str)]| table.iter().find(|(needle, _)| ua.contains(needle)).map(|(_, name)| *name);
+    match (find(BROWSERS), find(SYSTEMS)) {
+        (Some(browser), Some(os)) => format!("{} on {}", browser, os),
+        (Some(browser), None) => browser.into(),
+        (None, Some(os)) => format!("Web browser on {}", os),
+        (None, None) => "Web browser".into(),
+    }
+}
+
+/// A server timestamp as unix seconds. JSON carries JS dates as ISO 8601
+/// strings (`2026-10-04T20:25:17.000Z`); a bare number is epoch
+/// milliseconds, the JS convention.
+fn unix_secs(value: &Value) -> Option<u64> {
+    match value {
+        Value::String(s) => parse_rfc3339(s),
+        Value::Number(n) => n.as_f64().filter(|ms| ms.is_finite() && *ms >= 0.0).map(|ms| (ms / 1000.0) as u64),
+        _ => None,
+    }
+}
+
+/// RFC 3339 date-time → unix seconds: `2026-10-04T20:25:17Z`, with an
+/// optional fraction and a `Z` or `±hh:mm` zone (none counts as UTC).
+fn parse_rfc3339(s: &str) -> Option<u64> {
+    let b = s.trim().as_bytes();
+    let num = |at: usize, len: usize| -> Option<i64> {
+        let part = b.get(at..at + len)?;
+        part.iter()
+            .all(u8::is_ascii_digit)
+            .then(|| part.iter().fold(0, |n, d| n * 10 + i64::from(d - b'0')))
+    };
+    let sep = |at: usize, ok: &[u8]| b.get(at).is_some_and(|c| ok.contains(c));
+    if !(sep(4, b"-") && sep(7, b"-") && sep(10, b"Tt ") && sep(13, b":") && sep(16, b":")) {
+        return None;
+    }
+    let (year, month, day) = (num(0, 4)?, num(5, 2)?, num(8, 2)?);
+    let (hour, minute, second) = (num(11, 2)?, num(14, 2)?, num(17, 2)?);
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
+        return None;
+    }
+    let mut zone = &b[19..];
+    if let Some(fraction) = zone.strip_prefix(b".") {
+        let digits = fraction.iter().take_while(|c| c.is_ascii_digit()).count();
+        if digits == 0 {
+            return None;
+        }
+        zone = &fraction[digits..];
+    }
+    let offset = match zone {
+        b"" | b"Z" | b"z" => 0,
+        [sign @ (b'+' | b'-'), h1, h2, b':', m1, m2] if [h1, h2, m1, m2].iter().all(|c| c.is_ascii_digit()) => {
+            let two = |hi: u8, lo: u8| i64::from(hi - b'0') * 10 + i64::from(lo - b'0');
+            let secs = two(*h1, *h2) * 3600 + two(*m1, *m2) * 60;
+            if *sign == b'-' {
+                -secs
+            } else {
+                secs
+            }
+        }
+        _ => return None,
+    };
+    let secs = days_from_civil(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second - offset;
+    u64::try_from(secs).ok()
+}
+
+/// Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's
+/// `days_from_civil`).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year.rem_euclid(400);
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 // ---- API errors ----
@@ -1022,5 +1346,187 @@ mod tests {
         assert_eq!(session_from(&ok).unwrap().1.email, "e@x.io");
         assert!(session_from(&json!({ "token": "", "user": ok["user"] })).is_none());
         assert!(session_from(&json!({ "user": ok["user"] })).is_none());
+    }
+
+    const OWN_TOKEN: &str = "ownTokenAAAAAAAAAAAAAAAAAAAAAAAA";
+    const LAPTOP_TOKEN: &str = "laptopTokenBBBBBBBBBBBBBBBBBBBBB";
+    const BROWSER_TOKEN: &str = "browserTokenCCCCCCCCCCCCCCCCCCCC";
+
+    /// `GET /api/auth/list-sessions` as Better Auth 1.7.7 answers it (shape
+    /// from `wrangler dev`; ids, tokens and IPs made up), in server order.
+    fn list_reply() -> Value {
+        json!([
+            {
+                "id": "sessLaptop", "token": LAPTOP_TOKEN, "userId": "user1",
+                "expiresAt": "2026-10-12T08:00:00.000Z", "createdAt": "2026-09-12T08:00:00.000Z",
+                "updatedAt": "2026-10-02T09:30:00.000Z", "ipAddress": "203.0.113.7",
+                "userAgent": "Yap/0.1.0 (Windows)"
+            },
+            {
+                "id": "sessThisPc", "token": OWN_TOKEN, "userId": "user1",
+                "expiresAt": "2026-11-03T20:25:17.000Z", "createdAt": "2026-10-04T20:25:17.000Z",
+                "updatedAt": "2026-10-04T20:25:17.000Z", "ipAddress": "198.51.100.4",
+                "userAgent": "Yap/0.1.1 (Windows)"
+            },
+            {
+                "id": "sessBrowser", "token": BROWSER_TOKEN, "userId": "user1",
+                "expiresAt": "2026-11-02T10:00:00.000Z", "createdAt": "2026-10-03T10:00:00.000Z",
+                "updatedAt": "2026-10-03T10:00:00.000Z", "ipAddress": "",
+                "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+            },
+            // Malformed rows are skipped, not fatal.
+            { "id": "", "token": "x" },
+            { "id": "noToken" },
+            "junk"
+        ])
+    }
+
+    #[test]
+    fn device_labels() {
+        let cases = [
+            ("Yap/0.1.1 (Windows)", "Yap 0.1.1 on Windows"),
+            ("Yap/0.1.1-nightly.103 (Windows)", "Yap 0.1.1-nightly.103 on Windows"),
+            ("Yap/0.2.0", "Yap 0.2.0"),
+            ("Yap/<b>x</b> (Windows)", "Yap on Windows"),
+            ("Yap/0.3.0 (Windows <script>)", "Yap 0.3.0"),
+            (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+                "Chrome on Windows",
+            ),
+            (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0",
+                "Edge on Windows",
+            ),
+            (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0",
+                "Firefox on Windows",
+            ),
+            ("Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0", "Firefox on Linux"),
+            (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+                "Safari on macOS",
+            ),
+            (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+                "Chrome on macOS",
+            ),
+            (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+                "Safari on iPhone",
+            ),
+            (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/129.0.6668.69 Mobile/15E148 Safari/604.1",
+                "Chrome on iPhone",
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36",
+                "Chrome on Android",
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/26.0 Chrome/122.0.0.0 Mobile Safari/537.36",
+                "Samsung Internet on Android",
+            ),
+            (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 OPR/114.0.0.0",
+                "Opera on Windows",
+            ),
+            (
+                "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+                "Chrome on ChromeOS",
+            ),
+            ("Mozilla/5.0 (X11; Linux x86_64) SomeNewBrowser/1.0", "Web browser on Linux"),
+            ("curl/8.9.1", "Web browser"),
+            ("", "Unknown device"),
+            ("   ", "Unknown device"),
+        ];
+        for (ua, label) in cases {
+            assert_eq!(device_label(ua), label, "{ua}");
+        }
+    }
+
+    #[test]
+    fn parse_sessions_marks_this_pc_and_orders_by_activity() {
+        let (sessions, listed) = parse_sessions(&list_reply(), OWN_TOKEN);
+        let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+        // This PC first, then the most recently active.
+        assert_eq!(ids, ["sessThisPc", "sessBrowser", "sessLaptop"]);
+        assert_eq!(sessions.iter().filter(|s| s.current).count(), 1);
+        assert_eq!(
+            sessions[0],
+            DeviceSession {
+                id: "sessThisPc".into(),
+                current: true,
+                label: "Yap 0.1.1 on Windows".into(),
+                created_at: Some(1_791_145_517),
+                last_active_at: Some(1_791_145_517),
+                expires_at: Some(1_793_737_517),
+            }
+        );
+        assert_eq!(sessions[1].label, "Chrome on macOS");
+        assert_eq!(sessions[2].label, "Yap 0.1.0 on Windows");
+        assert_eq!(sessions[2].created_at, Some(1_789_200_000));
+
+        // The backend keeps the other sessions' tokens (to revoke one by id).
+        assert_eq!(listed.owner, OWN_TOKEN);
+        assert_eq!(listed.current_id.as_deref(), Some("sessThisPc"));
+        assert_eq!(listed.tokens.len(), 2);
+        assert_eq!(listed.tokens["sessLaptop"], LAPTOP_TOKEN);
+        assert_eq!(listed.tokens["sessBrowser"], BROWSER_TOKEN);
+
+        // A token the server doesn't list: nothing is "this device".
+        let (sessions, listed) = parse_sessions(&list_reply(), "someOtherToken");
+        assert!(sessions.iter().all(|s| !s.current));
+        assert!(listed.current_id.is_none());
+        assert_eq!(listed.tokens.len(), 3);
+
+        // Anything but a list: no sessions.
+        assert!(parse_sessions(&json!({ "code": "UNAUTHORIZED" }), OWN_TOKEN).0.is_empty());
+        assert!(parse_sessions(&Value::Null, OWN_TOKEN).0.is_empty());
+    }
+
+    #[test]
+    fn session_list_for_the_ui_has_no_tokens_or_ips() {
+        let (sessions, _) = parse_sessions(&list_reply(), OWN_TOKEN);
+        let ui = serde_json::to_value(&sessions).unwrap();
+        let text = ui.to_string();
+        for secret in [OWN_TOKEN, LAPTOP_TOKEN, BROWSER_TOKEN, "203.0.113.7", "198.51.100.4"] {
+            assert!(!text.contains(secret), "{secret} leaked: {text}");
+        }
+        assert!(!text.to_lowercase().contains("token") && !text.contains("ipAddress"), "{text}");
+        for row in ui.as_array().unwrap() {
+            let mut keys: Vec<&str> = row.as_object().unwrap().keys().map(String::as_str).collect();
+            keys.sort_unstable();
+            assert_eq!(keys, ["createdAt", "current", "expiresAt", "id", "label", "lastActiveAt"]);
+        }
+    }
+
+    #[test]
+    fn server_timestamps() {
+        let at = |s: &str| unix_secs(&json!(s));
+        assert_eq!(at("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(at("2026-10-04T20:25:17Z"), Some(1_791_145_517));
+        assert_eq!(at("2026-10-04T20:25:17.123Z"), Some(1_791_145_517));
+        assert_eq!(at("2026-10-04T20:25:17.123456z"), Some(1_791_145_517));
+        assert_eq!(at("2026-10-04 20:25:17"), Some(1_791_145_517));
+        assert_eq!(at("2026-10-04T21:25:17+01:00"), Some(1_791_145_517));
+        assert_eq!(at("2026-10-04T15:55:17-04:30"), Some(1_791_145_517));
+        assert_eq!(at("2000-02-29T23:59:59Z"), Some(951_868_799));
+        assert_eq!(at("2024-03-01T00:00:00.000Z"), Some(1_709_251_200));
+        assert_eq!(unix_secs(&json!(1_791_145_517_123u64)), Some(1_791_145_517));
+        for bad in [
+            "",
+            "2026-10-04",
+            "2026-13-04T20:25:17Z",
+            "2026-10-04T24:00:00Z",
+            "2026-10-04T20:25:17.Z",
+            "2026-10-04T20:25:17+0100",
+            "2026-10-04T20:25:17 junk",
+            "1969-12-31T23:59:59Z",
+            "２０２６-10-04T20:25:17Z",
+        ] {
+            assert_eq!(at(bad), None, "{bad}");
+        }
+        assert_eq!(unix_secs(&json!(-5)), None);
+        assert_eq!(unix_secs(&Value::Null), None);
     }
 }

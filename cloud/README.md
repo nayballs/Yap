@@ -30,10 +30,16 @@ Yap keeps the session token in Windows Credential Manager and sends it as
 
 Endpoints Yap uses: `GET /api/auth/get-session`, `GET /api/auth/list-accounts`,
 `POST /api/auth/sign-out`, `POST /api/auth/delete-user`, `GET /api/health`,
-and `GET /api/providers` (which buttons to show: configured providers, and
-whether email codes can be sent).
+`GET /api/providers` (which buttons to show: configured providers, and
+whether email codes can be sent), and for Settings → Account's "Where you're
+signed in": `GET /api/auth/list-sessions`, `POST /api/auth/revoke-session`
+(`{ "token": … }`, one other session) and `POST /api/auth/revoke-other-sessions`.
 POSTs need a JSON body (`{}` will do). Deleting needs a session under a day
 old (`SESSION_EXPIRED` otherwise: sign in again first) and emails a receipt.
+Listing sessions has the same rule (Better Auth's `freshAge`: 403
+`SESSION_NOT_FRESH` for an older session, so Yap asks to confirm it's you);
+it returns every session's token, which Yap keeps in the app's backend and
+never shows. The two revokes work with a session of any age.
 
 Email codes are limited beyond Better Auth's 3 sends a minute per IP: one
 address gets a code every 30 s at most and 10 a day, one IP 20 a day

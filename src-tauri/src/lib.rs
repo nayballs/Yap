@@ -357,6 +357,9 @@ pub fn run() {
             auth::auth_email_verify,
             auth::auth_sign_out,
             auth::auth_delete_account,
+            auth::auth_list_sessions,
+            auth::auth_revoke_other_sessions,
+            auth::auth_revoke_session,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
