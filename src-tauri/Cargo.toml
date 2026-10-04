@@ -58,6 +58,9 @@ getrandom = "0.3"
 # Yap accounts (auth.rs): base64/url decode the browser handoff code.
 base64 = "0.22"
 url = "2"
+# Sign in with your phone (auth.rs): the QR code, made locally. The encoder
+# alone (no image/SVG renderers, no dependencies); the Account page draws it.
+qrcode = { version = "0.14", default-features = false }
 
 # Model download + directory-model extract/verify (used by stt.rs)
 reqwest = { version = "0.12", features = ["stream", "json"] }

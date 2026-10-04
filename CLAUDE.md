@@ -69,7 +69,8 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
   on a Cloudflare Worker + D1 at `auth.contextmirror.com` (see `cloud/README.md`). Yap's side
   is `auth.rs`: system-browser OAuth (Google/GitHub/Discord, RFC 8252 + PKCE) handed back via
   `tauri-plugin-deep-link` (`com.contextmirror.yap://`), a loopback listener or a pasted code,
-  plus in-app email codes; the session token lives in Windows Credential Manager
+  plus in-app email codes and "Sign in with your phone" (a locally drawn QR code, RFC 8628
+  device authorization); the session token lives in Windows Credential Manager
   (`keyring-core` + `windows-native-keyring-store`). Deep-link/single-instance are held on 2.4.x
   (2.5+ needs tauri 2.12).
 - **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`,
@@ -243,7 +244,16 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   (installed builds — `is_registered` must point at *this* exe), a one-shot
   **loopback** listener (dev/portable — the port rides at the end of `state`
   as `-<port>`), or **paste** (`auth_submit_code`); `redeem` swaps it for a
-  session at `/electron/token`. The token (+ a profile copy) is stored in
+  session at `/electron/token`. **Phone** (RFC 8628 device authorization):
+  `auth_device_start` gets a code from `/device/code` (client `yap-desktop`),
+  checks both links stay on the service's origin, draws the QR **locally**
+  (`qrcode` crate, encoder only → one SVG path; `Status.device` carries it +
+  the grouped code `WDJB-MJHT` + expiry) and polls `/device/token` at the
+  server's interval (`slow_down` adds 5 s; one attempt at a time — a newer one
+  or `auth_device_cancel` retires the poller; the device code never leaves
+  Rust). Approval answers with an ordinary session token → `get-session` →
+  `finish_sign_in`; denied/expired → `yap-auth-error`; approved after a
+  cancel → that session is revoked. Every route's token (+ a profile copy) is stored in
   Windows Credential Manager (`yap-account.com.yap.dictation`, **Local**
   persistence — never config.json, logs or the webview; any non-production
   service URL gets its own entry, `yap-account@<host>`, so a dev build can't
@@ -483,12 +493,15 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   signed in"** group (one row per session: label + amber "This device" chip,
   "Signed in <date> · last active <day>" — day granularity, the server only
   renews a session about daily — per-row Sign out for the others, and "Sign
-  out of other devices" with a confirm step; loads whenever a session shows),
-  and delete-account. Deleting and listing devices both want a sign-in < 1
-  day old, so an older session gets the same in-place "Confirm it's you"
-  re-sign-in card (`reauthFor.purpose` = `delete` | `devices`; it only deletes
-  if the same account signs back in), while "Sign out of other devices" works
-  without it. `account.svelte.js` is the
+  out of other devices" with a confirm step; loads whenever a session shows,
+  for a session of any age), and delete-account (with an in-place "Confirm
+  it's you" re-sign-in when the server wants a session < 1 day old; it only
+  deletes if the same account signs back in). **Sign in with your phone**
+  (under the provider buttons) swaps the options for the QR code from
+  `status.device` (its SVG path at 5 px per module, the code in large
+  monospace, the typed-address fallback and a countdown, Cancel) until the
+  phone approves — then it flips to signed in like any sign-in — or the
+  attempt ends (toast says why). `account.svelte.js` is the
   shared runes store (`auth_status` + `yap-auth-changed`) that also drives the
   "signed in as" buttons at the bottom of both sidebars (ControlPanel +
   Settings) and toasts background sign-in results.

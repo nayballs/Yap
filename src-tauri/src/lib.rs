@@ -352,6 +352,8 @@ pub fn run() {
             auth::auth_check_methods,
             auth::auth_start,
             auth::auth_cancel,
+            auth::auth_device_start,
+            auth::auth_device_cancel,
             auth::auth_submit_code,
             auth::auth_email_send,
             auth::auth_email_verify,

@@ -6,6 +6,8 @@
   // account deletion. Deleting wants a sign-in from the last day (the
   // server's rule), so an older session confirms it's you first: a fresh
   // sign-in, which replaces this PC's session.
+  // "Sign in with your phone" shows a QR code: any of those methods on the
+  // phone, then approve the code there (auth_device_*, RFC 8628).
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, untrack } from 'svelte';
   import Button from './ui/Button.svelte';
@@ -144,6 +146,33 @@
     error = '';
   }
 
+  // Sign in with your phone: status.device holds the QR code and code while
+  // Yap waits. It clears once the phone approves (signed in) or the attempt
+  // ends (denied, expired: yap-auth-error says why).
+  let device = $derived(status?.device ?? null);
+  let nowSecs = $state(Math.floor(Date.now() / 1000));
+  $effect(() => {
+    if (!device) return;
+    const tick = () => (nowSecs = Math.floor(Date.now() / 1000));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  });
+  let deviceLeft = $derived(device ? Math.max(0, device.expiresAt - nowSecs) : 0);
+  // Whole pixels per module (plus the 4-module quiet zone each side).
+  let qrPx = $derived(device ? (device.qr.size + 8) * 5 : 0);
+  const clock = (secs) => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  const withoutScheme = (url) => url.replace(/^https?:\/\//, '');
+
+  function startPhone() {
+    run('phone', () => invoke('auth_device_start'));
+  }
+
+  function cancelPhone() {
+    invoke('auth_device_cancel');
+    error = '';
+  }
+
   function submitPasted() {
     if (!pasted.trim()) return;
     run('paste', () => invoke('auth_submit_code', { code: pasted }));
@@ -232,6 +261,7 @@
     emailStep = 'enter';
     code = '';
     if (status?.pending) invoke('auth_cancel');
+    if (status?.device) invoke('auth_device_cancel');
   }
 
   // ---- where you're signed in ----
@@ -352,6 +382,13 @@
   {/if}
 {/snippet}
 
+{#snippet phoneIcon()}
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+    <path d="M10.5 18.25h3" />
+  </svg>
+{/snippet}
+
 {#snippet signInBody()}
   {#if status.pending}
     <div class="waiting">
@@ -379,6 +416,39 @@
     <div class="actions">
       <Button variant="ghost" size="sm" onclick={() => startProvider(status.pending)}>Open the browser again</Button>
       <Button variant="ghost" size="sm" onclick={cancelBrowser}>Cancel</Button>
+    </div>
+  {:else if device}
+    <div class="phone">
+      <div class="qr">
+        <svg
+          width={qrPx}
+          height={qrPx}
+          viewBox="-4 -4 {device.qr.size + 8} {device.qr.size + 8}"
+          shape-rendering="crispEdges"
+          role="img"
+          aria-label="QR code that opens Yap's sign-in page on your phone"
+        >
+          <rect x="-4" y="-4" width={device.qr.size + 8} height={device.qr.size + 8} fill="#fff" />
+          <path d={device.qr.path} fill="#1f1d17" />
+        </svg>
+      </div>
+      <div class="phone-steps">
+        <p class="lead">Scan with your phone's camera</p>
+        <p class="muted">Sign in on the page that opens, check it shows this code, then approve.</p>
+        <p class="usercode">{device.userCode}</p>
+        <p class="small muted">
+          No camera? On your phone, go to <strong>{withoutScheme(device.verificationUri)}</strong> and enter the code.
+        </p>
+        <div class="waiting phone-wait">
+          <span class="spinner" aria-hidden="true"></span>
+          <p class="small muted">
+            {deviceLeft > 0 ? `Waiting for your phone. The code expires in ${clock(deviceLeft)}.` : 'The code has expired.'}
+          </p>
+        </div>
+        <div class="actions">
+          <Button variant="ghost" size="sm" onclick={cancelPhone}>Cancel</Button>
+        </div>
+      </div>
     </div>
   {:else if emailStep === 'code'}
     <p class="lead">Check your email</p>
@@ -414,6 +484,15 @@
             Continue with {PROVIDER_LABELS[id]}
           </button>
         {/each}
+      </div>
+    {/if}
+    {#if offered.length || emailOffered}
+      <!-- Any of those methods, on the phone (auth_device_*). -->
+      <div class="providers phone-option">
+        <button class="provider" type="button" disabled={!!busy} onclick={startPhone}>
+          <span class="picon">{@render phoneIcon()}</span>
+          {busy === 'phone' ? 'Getting a code…' : 'Sign in with your phone'}
+        </button>
       </div>
     {/if}
     {#if offered.length && emailOffered}
@@ -795,6 +874,48 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  /* Sign in with your phone */
+  .phone-option {
+    margin-top: 8px;
+  }
+  .phone {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 18px 24px;
+  }
+  .qr {
+    flex: none;
+    line-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r-lg);
+    background: #fff;
+    box-shadow: var(--yap-shadow-sm);
+  }
+  .qr svg {
+    display: block;
+  }
+  .phone-steps {
+    flex: 1;
+    min-width: 230px;
+  }
+  .usercode {
+    margin: 12px 0 10px;
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: var(--yap-fg);
+  }
+  .phone-wait {
+    margin-top: 14px;
+    align-items: center;
+  }
+  .phone-wait .spinner {
+    margin-top: 0;
   }
 
   .profile {
