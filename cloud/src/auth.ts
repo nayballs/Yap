@@ -103,6 +103,18 @@ const createAuth = () => betterAuth({
     // sends stay at the plugin's 3 a minute.
     customRules: { "/sign-in/email-otp": { window: 60, max: 5 } },
   },
+  // Yap has no passwords and never changes an account's email, so the email
+  // plugin's other code flows stay off: each would be another way to make
+  // the service send mail. (Sign-in codes go through index.ts's limits.)
+  disabledPaths: [
+    "/email-otp/check-verification-otp",
+    "/email-otp/verify-email",
+    "/email-otp/request-password-reset",
+    "/forget-password/email-otp",
+    "/email-otp/reset-password",
+    "/email-otp/request-email-change",
+    "/email-otp/change-email",
+  ],
   onAPIError: { errorURL: "/error" },
   advanced: {
     ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },

@@ -3,6 +3,7 @@
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { DESKTOP_CLIENT_ID, getAuth, signInMethods } from "./auth";
+import { recordSend, secondsUntilNextSend, sendKeys } from "./throttle";
 
 const app = new Hono();
 
@@ -37,6 +38,29 @@ app.get("/api/auth/electron/init-oauth-proxy", async (c) => {
   const out = new Response(null, { status: 302, headers: { location: data.url } });
   for (const cookie of res.headers.getSetCookie()) out.headers.append("set-cookie", cookie);
   return out;
+});
+
+// Emailed codes: sign-in codes only, within the limits in throttle.ts. This
+// runs before Better Auth, because every send issues a new code: a request
+// refused any later would still void the code someone is about to type.
+app.post("/api/auth/email-otp/send-verification-otp", async (c, next) => {
+  const body = (await c.req.raw.clone().json().catch(() => null)) as { email?: unknown; type?: unknown } | null;
+  if (body?.type !== "sign-in") {
+    return c.json({ code: "INVALID_OTP_TYPE", message: "Only sign-in codes can be requested." }, 400);
+  }
+  if (typeof body.email !== "string") return next(); // Better Auth explains what's wrong
+
+  const keys = await sendKeys(body.email.toLowerCase(), c.req.header("cf-connecting-ip"));
+  const wait = await secondsUntilNextSend(keys);
+  if (wait > 0) {
+    return c.json(
+      { code: "TOO_MANY_REQUESTS", message: "Too many sign-in codes requested. Try again later." },
+      429,
+      { "Retry-After": String(wait) },
+    );
+  }
+  await next();
+  if (c.res.status === 200) await recordSend(keys);
 });
 
 // Better Auth: sign-in (social, email code), sessions (cookie or Bearer),

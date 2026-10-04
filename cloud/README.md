@@ -35,12 +35,21 @@ whether email codes can be sent).
 POSTs need a JSON body (`{}` will do). Deleting needs a session under a day
 old (`SESSION_EXPIRED` otherwise: sign in again first) and emails a receipt.
 
+Email codes are limited beyond Better Auth's 3 sends a minute per IP: one
+address gets a code every 30 s at most and 10 a day, one IP 20 a day
+(`src/throttle.ts`, table `emailCodeSend`: keyed hashes, kept a day). Over the
+limit, the send answers 429 `TOO_MANY_REQUESTS` with `Retry-After` and
+doesn't touch the code already sent. Only `type: "sign-in"` codes can be
+requested, and the email plugin's other flows (password reset, email change,
+email verification) are switched off with `disabledPaths`.
+
 ## Layout
 
 ```
 src/index.ts       Hono app: the desktop sign-in entry, /api/auth/* → Better Auth, /api/health
 src/auth.ts        Better Auth config (email OTP, social providers, bearer, desktop handoff)
 src/mail.ts        Resend sender + the Yap-styled emails
+src/throttle.ts    limits on emailed sign-in codes (per address, per IP)
 src/env.d.ts       bindings, vars and secrets
 auth.cli.ts        schema-only config for `npm run schema` (not deployed)
 migrations/        D1 schema (generated)
