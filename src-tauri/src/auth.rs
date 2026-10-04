@@ -19,7 +19,8 @@
 //!   - always: the account page shows the code to paste into Yap.
 //! - **Phone** (RFC 8628 device authorization): Yap shows a QR code for the
 //!   service's `/device` page; the person signs in on their phone, checks the
-//!   code matches and approves, while Yap polls for the session.
+//!   code matches and approves, while Yap polls for the session. A code that
+//!   lapses stays on the page, dimmed, until the page asks for a new one.
 //!
 //! Signed in, Settings → Account also lists where the account is signed in
 //! (each Yap install, and any browser) and can sign the others out.
@@ -57,6 +58,8 @@ const UNREACHABLE: &str =
     "Couldn't reach Yap's account service. Check your connection and try again.";
 const NOT_SIGNED_IN: &str = "You're not signed in.";
 const SIGNED_OUT: &str = "This PC has been signed out of your Yap account. Sign in again to carry on.";
+const NEW_PHONE_SESSION: &str = "For your security, a sign-in made with your phone can't do this during its first day. \
+     Sign in another way (Google, GitHub, Discord or an email code) to carry on.";
 
 /// The account service. `YAP_AUTH_URL` overrides it; debug builds default to
 /// the local `wrangler dev` server (cloud/README.md).
@@ -136,7 +139,9 @@ pub struct Status {
     providers: Vec<String>,
     /// Provider of a browser sign-in in progress.
     pending: Option<String>,
-    /// A phone sign-in in progress: the QR code and code to show.
+    /// A phone sign-in in progress: the QR code and code to show. Its code
+    /// lapsing doesn't end it: the view stays, `expired`, for the page to
+    /// offer a new one.
     device: Option<DeviceView>,
     /// Signed in from the stored copy, not yet confirmed with the server.
     offline: bool,
@@ -517,7 +522,7 @@ async fn redeem(app: &AppHandle, code: &str) -> Result<(), String> {
             inner.pending = None;
         }
     }
-    // Success emits once, from finish_sign_in (pending → signed in in one step).
+    // On success finish_sign_in emits (pending → signed in in one step).
     let session = result
         .map_err(|e| e.friendly())
         .and_then(|body| session_from(&body).ok_or_else(|| "The account service sent an unexpected reply.".to_string()));
@@ -629,8 +634,6 @@ pub async fn auth_email_verify(app: AppHandle, email: String, code: String) -> R
         .map_err(|_| UNREACHABLE.to_string())?;
     let body = read_api(resp).await.map_err(|e| e.friendly())?;
     let (token, user) = session_from(&body).ok_or("The account service sent an unexpected reply.")?;
-    // A browser sign-in left waiting is moot now.
-    lock().pending = None;
     finish_sign_in(&app, token, user).await;
     tracing::info!("auth: signed in (email code)");
     Ok(())
@@ -662,7 +665,6 @@ fn normalize_email(email: &str) -> Result<String, String> {
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 /// RFC 8628 §3.5: every `slow_down` adds this to the polling interval.
 const SLOW_DOWN_STEP: Duration = Duration::from_secs(5);
-const PHONE_EXPIRED: &str = "The code expired before it was approved on your phone. Start again when you're ready.";
 const PHONE_DENIED: &str = "The sign-in was denied on your phone.";
 const PHONE_CODE_GONE: &str = "That sign-in code is no longer valid. Start again.";
 const UNEXPECTED: &str = "The account service sent an unexpected reply.";
@@ -681,6 +683,10 @@ pub struct DeviceView {
     expires_in: u64,
     /// When the code lapses (unix seconds): what the page counts down to.
     expires_at: u64,
+    /// The service has let the code lapse (or Yap's own deadline passed with
+    /// the service still answering). Yap has stopped polling it; the page
+    /// hides it and offers a new one (`auth_device_start` with `renew`).
+    expired: bool,
     qr: Qr,
 }
 
@@ -735,6 +741,7 @@ impl DeviceGrant {
                 verification_uri_complete: complete,
                 expires_in,
                 expires_at: now + expires_in,
+                expired: false,
             },
         })
     }
@@ -787,6 +794,15 @@ fn qr_for(text: &str) -> Option<Qr> {
 struct DeviceFlow {
     id: u64,
     view: DeviceView,
+    /// Approved on the phone: Yap is signing in with it now, so no new code
+    /// may replace it (that would throw the approval away). Cancel still can.
+    approved: bool,
+}
+
+impl DeviceFlow {
+    fn new(id: u64, view: DeviceView) -> Self {
+        DeviceFlow { id, view, approved: false }
+    }
 }
 
 static DEVICE: Mutex<Option<DeviceFlow>> = Mutex::new(None);
@@ -801,6 +817,33 @@ fn device_lock() -> MutexGuard<'static, Option<DeviceFlow>> {
 
 fn device_is_current(id: u64) -> bool {
     device_lock().as_ref().is_some_and(|flow| flow.id == id)
+}
+
+/// Makes `flow` the phone sign-in in progress. A renewal (`renew`) only
+/// replaces a code still on the page, not one cancelled meanwhile, and
+/// nothing replaces an approved one. `false` if `flow` wasn't taken: its
+/// code then simply lapses, unused.
+fn device_begin(flow: DeviceFlow, renew: bool) -> bool {
+    let mut slot = device_lock();
+    let free = match slot.as_ref() {
+        Some(current) => !current.approved,
+        None => !renew,
+    };
+    if free {
+        *slot = Some(flow);
+    }
+    free
+}
+
+/// Changes flow `id`; `false` if it had already ended (cancelled, replaced).
+fn device_update(id: u64, change: impl FnOnce(&mut DeviceFlow)) -> bool {
+    match device_lock().as_mut().filter(|flow| flow.id == id) {
+        Some(flow) => {
+            change(flow);
+            true
+        }
+        None => false,
+    }
 }
 
 /// Ends flow `id`; `false` if it had already ended (cancelled, replaced).
@@ -858,6 +901,32 @@ fn classify_poll(status: u16, body: &Value, retry_after: Option<u64>) -> PollRep
     }
 }
 
+/// How a phone sign-in that won't be approved stops.
+#[derive(Debug, PartialEq)]
+enum PhoneEnd {
+    /// The code lapsed. Not an error (codes lapse all the time): the page
+    /// dims it and offers a new one.
+    Expired,
+    /// The attempt is over, for the reason given.
+    Failed(String),
+}
+
+/// Whether `reply` stops the wait (`None`: keep polling; approvals are
+/// handled before this). Past the code's lifetime the service should already
+/// have said "expired": still answering, the code has lapsed all the same;
+/// not answering, Yap can't tell what happened on the phone.
+fn phone_end(reply: &PollReply, past_deadline: bool) -> Option<PhoneEnd> {
+    match reply {
+        PollReply::Approved(_) => None,
+        PollReply::Denied => Some(PhoneEnd::Failed(PHONE_DENIED.into())),
+        PollReply::Expired => Some(PhoneEnd::Expired),
+        PollReply::Failed(message) => Some(PhoneEnd::Failed(message.clone())),
+        PollReply::Retry if past_deadline => Some(PhoneEnd::Failed(UNREACHABLE.into())),
+        PollReply::Pending | PollReply::SlowDown | PollReply::Wait(_) if past_deadline => Some(PhoneEnd::Expired),
+        PollReply::Pending | PollReply::SlowDown | PollReply::Wait(_) | PollReply::Retry => None,
+    }
+}
+
 async fn poll_once(device_code: &str) -> PollReply {
     let sent = CLIENT
         .post(api("/device/token"))
@@ -882,9 +951,13 @@ async fn poll_once(device_code: &str) -> PollReply {
 
 /// Sign in with your phone: get a code from the service and wait for the
 /// phone to approve it. The QR code and code show up in the status
-/// (`device`); a newer call replaces an attempt still waiting.
+/// (`device`); a newer call replaces an attempt still waiting, or lapsed.
+/// `renew` asks for a new code for the attempt on the page, so it does
+/// nothing (`Ok(None)`) if that attempt ended meanwhile (cancelled, signed
+/// in) or the phone has just approved it.
 #[tauri::command]
-pub async fn auth_device_start(app: AppHandle) -> Result<DeviceView, String> {
+pub async fn auth_device_start(app: AppHandle, renew: Option<bool>) -> Result<Option<DeviceView>, String> {
+    let renew = renew.unwrap_or(false);
     let resp = CLIENT
         .post(api("/device/code"))
         .json(&json!({ "client_id": CLIENT_ID }))
@@ -895,11 +968,13 @@ pub async fn auth_device_start(app: AppHandle) -> Result<DeviceView, String> {
     let grant = DeviceGrant::parse(&body, &base_url(), unix_now()).ok_or(UNEXPECTED)?;
     let id = DEVICE_IDS.fetch_add(1, Ordering::Relaxed);
     let view = grant.view.clone();
-    *device_lock() = Some(DeviceFlow { id, view: view.clone() });
-    tracing::info!("auth: phone sign-in started");
+    if !device_begin(DeviceFlow::new(id, view.clone()), renew) {
+        return Ok(None);
+    }
+    tracing::info!("auth: phone sign-in {}", if renew { "has a new code" } else { "started" });
     emit_status(&app);
     tauri::async_runtime::spawn(wait_for_phone(app, id, grant));
-    Ok(view)
+    Ok(Some(view))
 }
 
 /// Stop waiting for the phone. The service can't withdraw a code, so it
@@ -923,70 +998,75 @@ async fn wait_for_phone(app: AppHandle, id: u64, grant: DeviceGrant) {
         if !device_is_current(id) {
             return;
         }
-        let failure = match poll_once(&grant.device_code).await {
-            PollReply::Approved(token) => return finish_phone(&app, id, token).await,
-            PollReply::Denied => PHONE_DENIED.to_string(),
-            PollReply::Expired => PHONE_EXPIRED.to_string(),
-            PollReply::Failed(message) => message,
-            // Still waiting past the code's lifetime: the service should have
-            // said "expired" by now, so it can't be reached (or answer).
-            waiting if tokio::time::Instant::now() >= deadline => {
-                if waiting == PollReply::Retry { UNREACHABLE.to_string() } else { PHONE_EXPIRED.to_string() }
-            }
-            PollReply::SlowDown => {
-                interval += SLOW_DOWN_STEP;
-                continue;
-            }
-            PollReply::Wait(secs) => {
-                tokio::time::sleep(Duration::from_secs(secs)).await;
-                continue;
-            }
-            PollReply::Pending | PollReply::Retry => continue,
-        };
-        if device_end(id) {
-            tracing::info!("auth: phone sign-in ended without signing in");
-            emit_status(&app);
-            emit_error(&app, &failure);
+        let reply = poll_once(&grant.device_code).await;
+        if let PollReply::Approved(token) = reply {
+            return finish_phone(&app, id, token).await;
         }
-        return;
+        match phone_end(&reply, tokio::time::Instant::now() >= deadline) {
+            // Kept, dimmed, for the page to renew: nothing to report.
+            Some(PhoneEnd::Expired) => {
+                if device_update(id, |flow| flow.view.expired = true) {
+                    tracing::info!("auth: phone sign-in code expired");
+                    emit_status(&app);
+                }
+                return;
+            }
+            Some(PhoneEnd::Failed(message)) => {
+                if device_end(id) {
+                    tracing::info!("auth: phone sign-in ended without signing in");
+                    emit_status(&app);
+                    emit_error(&app, &message);
+                }
+                return;
+            }
+            None => {}
+        }
+        match reply {
+            PollReply::SlowDown => interval += SLOW_DOWN_STEP,
+            PollReply::Wait(secs) => tokio::time::sleep(Duration::from_secs(secs)).await,
+            _ => {}
+        }
     }
 }
 
 /// Approved: find out whose session it is, then sign in like the other
 /// routes. Cancelled meanwhile? Then the new session is revoked instead.
 async fn finish_phone(app: &AppHandle, id: u64, token: String) {
-    // The token answer doesn't say who signed in; get-session does.
+    // From here on a new code can't replace this attempt; Cancel still can.
     let mut user = None;
-    for attempt in 0..3 {
-        match get_session(&token).await {
-            Ok(found) => {
-                user = found;
-                break;
+    if device_update(id, |flow| flow.approved = true) {
+        // The token answer doesn't say who signed in; get-session does.
+        for attempt in 0..3 {
+            match get_session(&token).await {
+                Ok(found) => {
+                    user = found;
+                    break;
+                }
+                Err(_) if attempt < 2 => tokio::time::sleep(Duration::from_secs(2)).await,
+                Err(_) => {}
             }
-            Err(_) if attempt < 2 => tokio::time::sleep(Duration::from_secs(2)).await,
-            Err(_) => {}
         }
     }
     if !device_is_current(id) {
-        let _ = CLIENT.post(api("/sign-out")).bearer_auth(&token).json(&json!({})).send().await;
+        end_session(&token).await;
         tracing::info!("auth: phone approved a cancelled sign-in; session revoked");
         return;
     }
     let Some(user) = user else {
+        // A session Yap can't put a name to is no use, and left alone it would
+        // sit in "Where you're signed in" for 30 days: revoke it (best effort).
+        if !end_session(&token).await {
+            tracing::info!("auth: couldn't revoke the unconfirmed phone session");
+        }
         if device_end(id) {
             emit_status(app);
             emit_error(app, "Couldn't finish signing in. Start again from Settings → Account.");
         }
         return;
     };
-    // A browser sign-in left waiting is moot now.
-    lock().pending = None;
-    // Signed in first, then the QR code goes: the page never flashes the
-    // signed-out view in between.
+    // Ends this attempt too, in the same update that shows the sign-in: the
+    // page never flashes the signed-out view in between.
     finish_sign_in(app, token, user).await;
-    if device_end(id) {
-        emit_status(app);
-    }
     tracing::info!("auth: signed in (phone)");
 }
 
@@ -1049,10 +1129,11 @@ mod phone_tests {
         let g = DeviceGrant::parse(&grant_body(), BASE, 0).unwrap();
         let view = serde_json::to_value(&g.view).unwrap();
         let keys: Vec<&str> = view.as_object().unwrap().keys().map(String::as_str).collect();
-        assert_eq!(keys.len(), 6);
-        for key in ["userCode", "verificationUri", "verificationUriComplete", "expiresIn", "expiresAt", "qr"] {
+        assert_eq!(keys.len(), 7);
+        for key in ["userCode", "verificationUri", "verificationUriComplete", "expiresIn", "expiresAt", "expired", "qr"] {
             assert!(keys.contains(&key), "{key}");
         }
+        assert_eq!(view["expired"], json!(false), "a new code is live");
         assert!(!view.to_string().contains(&g.device_code));
     }
 
@@ -1160,40 +1241,133 @@ mod phone_tests {
     }
 
     #[test]
+    fn how_a_wait_ends() {
+        let end = |reply: PollReply, past_deadline| phone_end(&reply, past_deadline);
+        // In time: the in-between replies keep Yap polling.
+        for reply in [PollReply::Pending, PollReply::SlowDown, PollReply::Wait(7), PollReply::Retry] {
+            assert_eq!(end(reply, false), None);
+        }
+        // The service let the code lapse: no error, the page renews it.
+        assert_eq!(end(PollReply::Expired, false), Some(PhoneEnd::Expired));
+        // Past Yap's deadline with the service still answering: lapsed too.
+        for reply in [PollReply::Pending, PollReply::SlowDown, PollReply::Wait(7)] {
+            assert_eq!(end(reply, true), Some(PhoneEnd::Expired));
+        }
+        // Past it with no answer at all: an error, not a quiet new code.
+        assert_eq!(end(PollReply::Retry, true), Some(PhoneEnd::Failed(UNREACHABLE.into())));
+        assert_eq!(end(PollReply::Denied, false), Some(PhoneEnd::Failed(PHONE_DENIED.into())));
+        assert_eq!(
+            end(PollReply::Failed(PHONE_CODE_GONE.into()), false),
+            Some(PhoneEnd::Failed(PHONE_CODE_GONE.into()))
+        );
+        // Approvals are handled before this, even a late one.
+        assert_eq!(end(PollReply::Approved("tok".into()), true), None);
+    }
+
+    /// The tests that use the one DEVICE slot take turns.
+    fn one_at_a_time() -> MutexGuard<'static, ()> {
+        static TURN: Mutex<()> = Mutex::new(());
+        TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[test]
     fn one_phone_sign_in_at_a_time() {
+        let _turn = one_at_a_time();
         let g = DeviceGrant::parse(&grant_body(), BASE, 0).unwrap();
-        *device_lock() = Some(DeviceFlow { id: 41, view: g.view.clone() });
+        *device_lock() = Some(DeviceFlow::new(41, g.view.clone()));
         assert_eq!(status().device.as_ref(), Some(&g.view));
         // A newer attempt replaces it: the old poller sees it's no longer current.
-        *device_lock() = Some(DeviceFlow { id: 42, view: g.view.clone() });
+        assert!(device_begin(DeviceFlow::new(42, g.view.clone()), false));
         assert!(!device_is_current(41) && device_is_current(42));
         assert!(!device_end(41), "a stale poller can't end the newer attempt");
         assert!(device_end(42));
         assert!(!device_end(42) && status().device.is_none());
     }
+
+    #[test]
+    fn an_expired_code_stays_on_the_page_for_a_new_one() {
+        let _turn = one_at_a_time();
+        let view = DeviceGrant::parse(&grant_body(), BASE, 0).unwrap().view;
+        *device_lock() = Some(DeviceFlow::new(51, view.clone()));
+        assert!(!device_update(50, |flow| flow.view.expired = true), "a stale poller can't mark it");
+        assert!(device_update(51, |flow| flow.view.expired = true));
+        // Still the attempt in progress, now flagged for the page.
+        assert!(device_is_current(51));
+        let shown = status().device.expect("kept");
+        let json = serde_json::to_value(&shown).unwrap();
+        assert_eq!((json["expired"].clone(), json["userCode"].clone()), (json!(true), json!("WDJB-MJHT")));
+        // A new code takes its place, live.
+        assert!(device_begin(DeviceFlow::new(52, view), true));
+        assert!(!device_is_current(51));
+        assert_eq!(status().device.map(|d| d.expired), Some(false));
+        assert!(device_end(52));
+    }
+
+    #[test]
+    fn a_new_code_never_revives_a_cancelled_attempt_or_drops_an_approved_one() {
+        let _turn = one_at_a_time();
+        let view = DeviceGrant::parse(&grant_body(), BASE, 0).unwrap().view;
+        *device_lock() = None;
+        // Cancelled while the new code was on its way: stays cancelled.
+        assert!(!device_begin(DeviceFlow::new(61, view.clone()), true));
+        assert!(status().device.is_none());
+        // Starting afresh always goes ahead.
+        assert!(device_begin(DeviceFlow::new(62, view.clone()), false));
+        // Approved on the phone: Yap is signing in with it, so nothing
+        // replaces it ...
+        assert!(device_update(62, |flow| flow.approved = true));
+        assert!(!device_begin(DeviceFlow::new(63, view.clone()), true));
+        assert!(!device_begin(DeviceFlow::new(64, view), false));
+        assert!(device_is_current(62));
+        // ... but Cancel still ends it (auth_device_cancel), and then
+        // finish_phone revokes the session.
+        assert!(device_lock().take().is_some());
+        assert!(!device_is_current(62));
+    }
 }
 
 // ---- session ----
 
+/// Where every route ends: keep the session and show it, then fill in the
+/// linked providers.
 async fn finish_sign_in(app: &AppHandle, token: String, user: Profile) {
-    let signed_in_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or_default();
-    let stored = Stored { token, user, signed_in_at };
+    let stored = Stored { token: token.clone(), user, signed_in_at: unix_now() };
     if let Err(e) = vault::save(&stored) {
         // Still signed in for this run; it just won't survive a restart.
         tracing::error!("auth: couldn't store the session: {}", e);
     }
-    let providers = list_providers(&stored.token).await.unwrap_or_default();
     let replaced = {
         let mut inner = lock();
-        let new_token = stored.token.clone();
+        // Any other sign-in left waiting is moot now.
+        inner.pending = None;
+        let same_account = inner.session.as_ref().is_some_and(|s| s.user.id == stored.user.id);
         let old = inner.session.replace(stored);
-        inner.providers = providers;
+        if !same_account {
+            inner.providers.clear();
+        }
         inner.offline = false;
-        old.map(|s| s.token).filter(|old| *old != new_token)
+        old.map(|s| s.token).filter(|old| *old != token)
     };
+    // A phone sign-in too (the two locks are never held together). Its
+    // poller, if any, stops at its next turn.
+    *device_lock() = None;
+    // Signed in: say so now, and look the providers up after. Meanwhile the
+    // page reads "Signs in with an email code", which holds for every account.
+    emit_status(app);
+    let providers = list_providers(&token).await.unwrap_or_default();
+    let changed = {
+        let mut inner = lock();
+        // Skip if the user signed out / switched while the request ran.
+        let current = inner.session.as_ref().is_some_and(|s| s.token == token);
+        let changed = current && inner.providers != providers;
+        if changed {
+            inner.providers = providers;
+        }
+        changed
+    };
+    if changed {
+        emit_status(app);
+    }
     // Yap keeps one session per PC. One this sign-in replaced (signing in
     // again to confirm it's you) would otherwise stay live on the server,
     // unused, for up to 30 days, and show up as another device. The new
@@ -1203,7 +1377,6 @@ async fn finish_sign_in(app: &AppHandle, token: String, user: Profile) {
             tracing::info!("auth: couldn't revoke the replaced session");
         }
     }
-    emit_status(app);
 }
 
 /// Revoke one of Yap's own sessions server-side. Best effort: `false` when
@@ -1600,6 +1773,9 @@ impl ApiError {
             "STATE_MISMATCH" | "INVALID_CODE_VERIFIER" => {
                 "That code belongs to a different sign-in. Start again.".into()
             }
+            // The service won't let a phone sign-in under a day old delete the
+            // account or sign devices out (403).
+            "NEW_PHONE_SESSION" => NEW_PHONE_SESSION.into(),
             _ if self.status == 429 => match self.retry_after {
                 Some(s) if s > 1 => format!("Too many tries. Wait {}, then try again.", wait_text(s)),
                 _ => "Too many tries. Wait a minute, then try again.".into(),
@@ -1829,6 +2005,12 @@ mod tests {
         assert!(e(429, "", None).friendly().contains("a minute"));
         assert!(e(500, "", None).friendly().contains("error 500"));
         assert_eq!(ApiError::network().friendly(), UNREACHABLE);
+        // A phone sign-in under a day old deleting the account / signing
+        // devices out.
+        assert_eq!(
+            e(403, "NEW_PHONE_SESSION", None).friendly(),
+            "For your security, a sign-in made with your phone can't do this during its first day. Sign in another way (Google, GitHub, Discord or an email code) to carry on."
+        );
     }
 
     #[test]

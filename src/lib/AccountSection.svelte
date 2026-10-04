@@ -7,9 +7,11 @@
   // server's rule), so an older session confirms it's you first: a fresh
   // sign-in, which replaces this PC's session.
   // "Sign in with your phone" shows a QR code: any of those methods on the
-  // phone, then approve the code there (auth_device_*, RFC 8628).
+  // phone, then approve the code there (auth_device_*, RFC 8628). A code that
+  // lapses is dimmed under "Show a new code", and renews itself a few times
+  // while the panel is in view.
   import { invoke } from '@tauri-apps/api/core';
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import Button from './ui/Button.svelte';
   import Group from './ui/Group.svelte';
   import Row from './ui/Row.svelte';
@@ -68,7 +70,12 @@
     invoke('auth_check_methods')
       .catch(() => {})
       .finally(() => (methodsChecked = true));
-    return () => clearInterval(resendTimer);
+    const onVisibility = () => (pageVisible = document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(resendTimer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   });
 
   // A new avatar URL gets a fresh chance to load.
@@ -147,25 +154,131 @@
   }
 
   // Sign in with your phone: status.device holds the QR code and code while
-  // Yap waits. It clears once the phone approves (signed in) or the attempt
-  // ends (denied, expired: yap-auth-error says why).
+  // Yap waits. A code that lapses (device.expired, or the clock got there
+  // first) is hidden under "Show a new code". While the panel is in view Yap
+  // asks for the next one itself, AUTO_RENEWALS times per start by the
+  // person; after that it waits for the button. Yap polls every code every
+  // few seconds and each poll costs the account service database writes, so
+  // a window left open mustn't renew forever. The panel goes once the phone
+  // approves (signed in) or the attempt fails (denied, unreachable:
+  // yap-auth-error says why).
+  const AUTO_RENEWALS = 3;
   let device = $derived(status?.device ?? null);
   let nowSecs = $state(Math.floor(Date.now() / 1000));
   $effect(() => {
-    if (!device) return;
-    const tick = () => (nowSecs = Math.floor(Date.now() / 1000));
-    tick();
-    const timer = setInterval(tick, 1000);
+    if (!device || device.expired) return;
+    const update = () => (nowSecs = Math.floor(Date.now() / 1000));
+    update();
+    const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
   });
   let deviceLeft = $derived(device ? Math.max(0, device.expiresAt - nowSecs) : 0);
+  let lapsed = $derived(!!device && (device.expired || deviceLeft === 0));
+  let renewBusy = $state(false); // a new code on its way
+  let renewing = $derived(lapsed && renewBusy);
+  let renewals = $state(0); // automatic new codes since the person last started
+  let phoneStatus = $derived(
+    !lapsed ? 'Waiting for your phone…' : renewing ? 'Getting a new code…' : 'This code has expired.'
+  );
   // Whole pixels per module (plus the 4-module quiet zone each side).
   let qrPx = $derived(device ? (device.qr.size + 8) * 5 : 0);
   const clock = (secs) => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
   const withoutScheme = (url) => url.replace(/^https?:\/\//, '');
+  // "WDJB-MJHT" → "W D J B, M J H T": read out letter by letter.
+  const spell = (code) =>
+    code
+      .split('-')
+      .map((part) => [...part].join(' '))
+      .join(', ');
+
+  // In view: the window is showing and the panel is on screen. (The Settings
+  // modal hides with display: none but stays mounted, and so does this page.)
+  let pageVisible = $state(document.visibilityState === 'visible');
+  let panelInView = $state(false);
+  function trackInView(node) {
+    const observer = new IntersectionObserver((entries) => {
+      panelInView = entries[entries.length - 1].isIntersecting;
+    });
+    observer.observe(node);
+    return {
+      destroy() {
+        observer.disconnect();
+        panelInView = false;
+      },
+    };
+  }
+
+  // Pre: renewBusy is set before the DOM updates, so the lapsed code goes
+  // straight to "Getting a new code…" with no flash of the button.
+  $effect.pre(() => {
+    if (lapsed && pageVisible && panelInView) untrack(autoRenew);
+  });
+
+  function autoRenew() {
+    if (renewBusy || renewals >= AUTO_RENEWALS) return;
+    renewals += 1;
+    renewCode();
+  }
+
+  // A new code for the one on the page. Not run(): if the person cancels
+  // meanwhile, the sign-in options come back free (auth.rs drops the code).
+  async function renewCode() {
+    renewBusy = true;
+    error = '';
+    try {
+      await invoke('auth_device_start', { renew: true });
+    } catch (e) {
+      if (status?.device) error = String(e);
+    } finally {
+      renewBusy = false;
+    }
+  }
+
+  // Focus. Opening the panel removes the button that had it, so the panel's
+  // heading takes it once it shows; when the panel goes (signed in,
+  // cancelled, failed) its buttons go too, so it goes back to "Sign in with
+  // your phone", or, signed in now, to the profile.
+  let phoneHeading = $state(null);
+  let phoneButton = $state(null);
+  let profileHeading = $state(null);
+  let focusPhone = false;
+  $effect(() => {
+    if (phoneHeading && focusPhone) {
+      focusPhone = false;
+      phoneHeading.focus();
+    }
+  });
+  let phoneShown = $derived(showSignIn && !status?.pending && !!device);
+  let wasShown = false;
+  $effect(() => {
+    const shown = phoneShown;
+    if (wasShown && !shown) tick().then(() => refocus(phoneButton ?? profileHeading));
+    wasShown = shown;
+  });
+
+  // Focus `el` unless focus is already somewhere (the person moved on).
+  function refocus(el) {
+    const active = document.activeElement;
+    if (el && (!active || active === document.body)) el.focus();
+  }
 
   function startPhone() {
-    run('phone', () => invoke('auth_device_start'));
+    renewals = 0;
+    focusPhone = true;
+    run('phone', () => invoke('auth_device_start')).then(() => {
+      // It didn't open (the error says why): stay on the button.
+      if (error) {
+        focusPhone = false;
+        refocus(phoneButton);
+      }
+    });
+  }
+
+  // "Show a new code": the person asked, so the automatic ones start over.
+  function renewPhone() {
+    renewals = 0;
+    phoneHeading?.focus(); // the button is about to go
+    renewCode();
   }
 
   function cancelPhone() {
@@ -389,6 +502,13 @@
   </svg>
 {/snippet}
 
+{#snippet refreshIcon()}
+  <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 12a8 8 0 1 0-2.34 5.66" />
+    <path d="M20 5v7h-7" />
+  </svg>
+{/snippet}
+
 {#snippet signInBody()}
   {#if status.pending}
     <div class="waiting">
@@ -418,32 +538,51 @@
       <Button variant="ghost" size="sm" onclick={cancelBrowser}>Cancel</Button>
     </div>
   {:else if device}
-    <div class="phone">
-      <div class="qr">
+    <div class="phone" use:trackInView>
+      <div class="qr" class:lapsed>
         <svg
           width={qrPx}
           height={qrPx}
           viewBox="-4 -4 {device.qr.size + 8} {device.qr.size + 8}"
           shape-rendering="crispEdges"
           role="img"
-          aria-label="QR code that opens Yap's sign-in page on your phone"
+          aria-label={lapsed ? 'Expired QR code' : "QR code that opens Yap's sign-in page on your phone"}
         >
           <rect x="-4" y="-4" width={device.qr.size + 8} height={device.qr.size + 8} fill="#fff" />
           <path d={device.qr.path} fill="#1f1d17" />
         </svg>
+        {#if lapsed}
+          <!-- WhatsApp's "Click to reload QR code": the old code can't be scanned. -->
+          <div class="renew">
+            {#if renewing}
+              <span class="renew-chip"><span class="spinner small" aria-hidden="true"></span>Getting a new code…</span>
+            {:else}
+              <button type="button" class="renew-btn" onclick={renewPhone}>
+                {@render refreshIcon()}
+                Show a new code
+              </button>
+            {/if}
+          </div>
+        {/if}
       </div>
       <div class="phone-steps">
-        <p class="lead">Scan with your phone's camera</p>
+        <h4 class="lead phone-h" tabindex="-1" bind:this={phoneHeading}>Scan with your phone's camera</h4>
         <p class="muted">Sign in on the page that opens, check it shows this code, then approve.</p>
-        <p class="usercode">{device.userCode}</p>
+        <p class="usercode" class:lapsed>
+          <span aria-hidden="true">{device.userCode}</span>
+          <span class="sr-only">Your code: {spell(device.userCode)}</span>
+        </p>
         <p class="small muted">
-          No camera? On your phone, go to <strong>{withoutScheme(device.verificationUri)}</strong> and enter the code.
+          Can't scan? On your phone, go to <strong>{withoutScheme(device.verificationUri)}</strong> and enter the code.
         </p>
         <div class="waiting phone-wait">
-          <span class="spinner" aria-hidden="true"></span>
-          <p class="small muted">
-            {deviceLeft > 0 ? `Waiting for your phone. The code expires in ${clock(deviceLeft)}.` : 'The code has expired.'}
-          </p>
+          <span class="spinner" class:idle={lapsed} aria-hidden="true"></span>
+          <div>
+            <p class="wait-line" role="status" aria-live="polite">{phoneStatus}</p>
+            {#if !lapsed}
+              <p class="countdown">{renewals < AUTO_RENEWALS ? 'New code in' : 'Expires in'} {clock(deviceLeft)}</p>
+            {/if}
+          </div>
         </div>
         <div class="actions">
           <Button variant="ghost" size="sm" onclick={cancelPhone}>Cancel</Button>
@@ -486,10 +625,12 @@
         {/each}
       </div>
     {/if}
-    {#if offered.length || emailOffered}
-      <!-- Any of those methods, on the phone (auth_device_*). -->
+    {#if (offered.length || emailOffered) && !reauthFor}
+      <!-- Any of those methods, on the phone (auth_device_*). Not to confirm
+           it's you: a phone sign-in can't delete the account on its first
+           day (the service answers NEW_PHONE_SESSION). -->
       <div class="providers phone-option">
-        <button class="provider" type="button" disabled={!!busy} onclick={startPhone}>
+        <button class="provider" type="button" disabled={!!busy} onclick={startPhone} bind:this={phoneButton}>
           <span class="picon">{@render phoneIcon()}</span>
           {busy === 'phone' ? 'Getting a code…' : 'Sign in with your phone'}
         </button>
@@ -548,7 +689,7 @@
         <span class="avatar initials" aria-hidden="true">{initials(status.user)}</span>
       {/if}
       <div class="who">
-        <h3>{displayName(status.user)}</h3>
+        <h3 tabindex="-1" bind:this={profileHeading}>{displayName(status.user)}</h3>
         {#if status.user?.name?.trim()}<p class="muted">{status.user.email}</p>{/if}
         <p class="small muted">
           {#if status.providers.length}
@@ -886,7 +1027,12 @@
     align-items: flex-start;
     gap: 18px 24px;
   }
+  /* AA contrast for the panel's secondary text (muted-70 is ~3.4:1). */
+  .phone .muted {
+    color: var(--yap-muted);
+  }
   .qr {
+    position: relative;
     flex: none;
     line-height: 0;
     overflow: hidden;
@@ -894,13 +1040,73 @@
     border-radius: var(--yap-r-lg);
     background: #fff;
     box-shadow: var(--yap-shadow-sm);
+    /* Dark modules on white, always: high-contrast themes must not invert it. */
+    forced-color-adjust: none;
   }
   .qr svg {
     display: block;
+    transition:
+      filter 0.2s ease,
+      opacity 0.2s ease;
+  }
+  /* A lapsed code: blurred past scanning, under "Show a new code". */
+  .qr.lapsed svg {
+    filter: blur(5px);
+    opacity: 0.35;
+  }
+  .renew {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    line-height: 1;
+    forced-color-adjust: auto;
+  }
+  .renew-btn,
+  .renew-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 16px;
+    border-radius: var(--yap-r-full);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .renew-btn {
+    border: 1px solid transparent;
+    background: var(--yap-ink);
+    color: var(--yap-ink-fg);
+    box-shadow: var(--yap-shadow-sm);
+    cursor: pointer;
+    transition: background var(--yap-dur) ease;
+  }
+  .renew-btn:hover {
+    background: var(--yap-ink-hover);
+  }
+  .renew-btn:focus-visible {
+    outline: 2px solid var(--yap-primary);
+    outline-offset: 2px;
+  }
+  .renew-chip {
+    border: 1px solid var(--yap-border);
+    background: var(--yap-s2);
+    color: var(--yap-fg-80);
+    box-shadow: var(--yap-shadow-sm);
   }
   .phone-steps {
     flex: 1;
     min-width: 230px;
+  }
+  /* Takes focus when the panel opens; not itself interactive. */
+  .phone-h {
+    margin: 0 0 2px;
+  }
+  .phone-h:focus,
+  .who h3:focus {
+    outline: none;
   }
   .usercode {
     margin: 12px 0 10px;
@@ -910,12 +1116,39 @@
     letter-spacing: 0.12em;
     color: var(--yap-fg);
   }
+  .usercode.lapsed {
+    color: var(--yap-muted-55);
+  }
   .phone-wait {
     margin-top: 14px;
-    align-items: center;
   }
-  .phone-wait .spinner {
-    margin-top: 0;
+  .spinner.idle {
+    visibility: hidden;
+  }
+  .wait-line {
+    font-size: 12.5px;
+    color: var(--yap-fg-80);
+  }
+  .countdown {
+    font-size: 11.5px;
+    color: var(--yap-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .qr svg {
+      transition: none;
+    }
   }
 
   .profile {

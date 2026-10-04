@@ -5,7 +5,9 @@
 //   { signedIn, user: { id, email, name, image } | null, providers: [],
 //     pending: 'google' | … | null, offline, signedInAt, serviceUrl,
 //     device: { userCode, verificationUri, verificationUriComplete,
-//               expiresIn, expiresAt, qr: { size, path } } | null  (phone sign-in) }
+//               expiresIn, expiresAt, expired, qr: { size, path } } | null }
+// `device` is a phone sign-in in progress; `expired` = its code has lapsed
+// and Yap stopped polling it (the Account page offers a new one).
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from './ui/toast.svelte.js';
