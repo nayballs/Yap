@@ -20,7 +20,7 @@
 
   <!-- Opened by typing the address: ask for the code Yap shows. -->
   <main class="card" id="enter" hidden>
-    <h1>Sign in to Yap on your PC</h1>
+    <h1 tabindex="-1">Sign in to Yap on your PC</h1>
     <p class="muted">Enter the code Yap is showing on your PC (Settings → Account → Sign in with your phone).</p>
     <form id="enter-form" novalidate>
       <label class="label" for="enter-code">Code</label>
@@ -32,8 +32,8 @@
 
   <!-- A good code and nobody signed in here yet: every way to sign in. -->
   <main class="card" id="signin" hidden>
-    <h1>Sign in to Yap on your PC</h1>
-    <p class="muted">Your PC is showing this code. Sign in here, then you'll approve it.</p>
+    <h1 tabindex="-1">Sign in to Yap on your PC</h1>
+    <p class="muted">Only continue if Yap on your own PC is showing this code right now.</p>
     <div class="usercode compact" id="signin-code"></div>
     <p class="error" id="signin-error" role="alert" hidden></p>
 
@@ -85,27 +85,34 @@
 
   <!-- Signed in: approve or deny. -->
   <main class="card" id="confirm" hidden>
-    <h1>Sign in to Yap on your PC?</h1>
+    <h1 tabindex="-1">Sign in to Yap on your PC?</h1>
     <p class="muted">You're signed in here as <strong id="who"></strong>. <button class="link" type="button" id="switch">Not you?</button></p>
-    <p class="label">Code</p>
     <div class="usercode" id="confirm-code"></div>
-    <p>Make sure it matches the code on your PC's screen. Approving signs Yap on that Windows PC in to your account.</p>
-    <p class="warn">Only approve a sign-in you started yourself, just now. If someone sent you this link or asked you for this code, tap Deny.</p>
+    <!-- Who asked for the code (GET /api/account/device-origin); stays
+         hidden when that's unknown. -->
+    <div class="origin" id="origin" hidden>
+      <p id="origin-text"></p>
+      <p class="note" id="origin-note" hidden></p>
+    </div>
+    <p class="warn">Approve only if this code matches your PC's screen and you started this sign-in yourself, just now. If someone sent you this link or asked for this code, tap Deny.</p>
     <p class="error" id="confirm-error" role="alert" hidden></p>
-    <button class="btn" type="button" id="approve">Approve</button>
-    <button class="btn secondary" type="button" id="deny">Deny</button>
+    <!-- Equal weight on purpose: nothing nudges towards Approve. -->
+    <div class="decide">
+      <button class="btn" type="button" id="deny">Deny</button>
+      <button class="btn" type="button" id="approve">Approve</button>
+    </div>
   </main>
 
   <!-- Approved or denied. -->
   <main class="card" id="done" hidden>
     <div class="check" id="done-mark" aria-hidden="true">✓</div>
-    <h1 id="done-title"></h1>
+    <h1 id="done-title" tabindex="-1"></h1>
     <p class="muted" id="done-text"></p>
   </main>
 
   <!-- The code can't be used (expired, used, unknown) or the service balked. -->
   <main class="card" id="problem" hidden>
-    <h1 id="problem-title"></h1>
+    <h1 id="problem-title" tabindex="-1"></h1>
     <p class="muted" id="problem-text"></p>
     <button class="btn secondary" type="button" id="problem-action"></button>
   </main>

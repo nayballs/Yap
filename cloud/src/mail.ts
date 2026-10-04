@@ -54,6 +54,42 @@ export function otpEmail(otp: string): Mail {
   };
 }
 
+const esc = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** "Sunday 4 October 2026 at 21:48 BST", in `timeZone` (an IANA name, e.g.
+ *  Cloudflare's guess for the phone) or UTC. */
+function formatWhen(at: Date, timeZone: string | undefined): string {
+  const options: Intl.DateTimeFormatOptions = {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short",
+  };
+  try {
+    return new Intl.DateTimeFormat("en-GB", { ...options, timeZone: timeZone || "UTC" }).format(at);
+  } catch {
+    return new Intl.DateTimeFormat("en-GB", { ...options, timeZone: "UTC" }).format(at); // unknown zone
+  }
+}
+
+/** Sent when a phone approves a sign-in to Yap (src/index.ts, after
+ *  /device/approve). `place` is like "near Leeds, United Kingdom", or "". */
+export function newSignInEmail(place: string, at: Date, timeZone?: string): Mail {
+  const where = !place ? "" : place.includes(",") ? ` ${place},` : ` ${place}`;
+  const what = `Yap on a Windows PC${where} was signed in to your account using your phone on ${formatWhen(at, timeZone)}.`;
+  const fix = "In Yap: Settings → Account → Where you're signed in → sign it out.";
+  return {
+    subject: "New sign-in to your Yap account",
+    text: `${what}\n\nNot you? ${fix}\n\nIf it was you, there's nothing to do.`,
+    html: shell(`<p style="margin:0 0 16px;font-size:15px;line-height:1.5">${esc(what)}</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:1.5"><strong>Not you?</strong> ${esc(fix)}</p>
+<p style="margin:0;font-size:13px;line-height:1.5;color:#6e6a5f">If it was you, there's nothing to do.</p>`),
+  };
+}
+
 /** Receipt after an account is deleted from Yap (Settings → Account). */
 export function accountDeletedEmail(): Mail {
   return {

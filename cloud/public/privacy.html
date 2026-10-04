@@ -26,12 +26,14 @@
       <li><strong>Sign-in sessions:</strong> when you signed in, plus the IP address and app or browser of that device, so sessions can be ended and abuse spotted.</li>
       <li><strong>Sign-in codes</strong> we email you, stored only in scrambled (hashed) form and deleted once used or after 10 minutes.</li>
       <li><strong>Phone sign-in requests</strong>, if you sign in with your phone: the code Yap shows and which account approved it. Each is deleted once Yap finishes signing in; unfinished ones are cleared out after they expire (codes last 10 minutes).</li>
+      <li><strong>Where a phone sign-in request came from</strong>, so your phone can show you before you approve it: the approximate city and country of the PC that asked (Cloudflare's estimate from its IP address), the Yap version it runs, and a scrambled (hashed) network identifier that only tells whether your phone is on the same network. The IP address itself isn't stored. Kept for about 70 minutes.</li>
+      <li><strong>A mark on sign-ins made with your phone</strong>: a scrambled (hashed) form of that session's key, kept for 2 days, so that in its first day such a sign-in can't delete your account or sign out your other devices.</li>
       <li><strong>Rate-limit counters</strong> tied to IP addresses for a few minutes, to block automated abuse.</li>
       <li><strong>A record of sign-in code requests:</strong> scrambled (hashed) forms of the email address and IP address that asked, kept for 24 hours, so nobody can flood an inbox with codes.</li>
     </ul>
 
     <h2>How we use it</h2>
-    <p>Only to sign you in and keep you signed in, to send you sign-in codes and essential account emails, and to protect the service from abuse. We don't sell your data, use it for advertising, or send marketing email. There are no analytics or advertising cookies.</p>
+    <p>Only to sign you in and keep you signed in, to send you sign-in codes and essential account emails, and to protect the service from abuse. When you approve a sign-in with your phone, we email you that Yap on a PC was signed in to your account, with that PC's approximate location, so a sign-in you didn't make doesn't go unnoticed. We don't sell your data, use it for advertising, or send marketing email. There are no analytics or advertising cookies.</p>
 
     <h2>Who handles it for us</h2>
     <ul>

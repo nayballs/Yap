@@ -31,7 +31,7 @@
   --yap-shadow-sm: 0 1px 2px rgba(60, 50, 30, 0.07), 0 1px 1px rgba(60, 50, 30, 0.04);
   --yap-font: 'Figtree Variable', 'Segoe UI', system-ui, sans-serif;
   --yap-font-display: 'EB Garamond Variable', Georgia, 'Palatino Linotype', serif;
-  --yap-mono: Consolas, 'SF Mono', Menlo, monospace;
+  --yap-mono: ui-monospace, Consolas, 'SF Mono', Menlo, monospace;
   color-scheme: light;
 }
 
@@ -76,7 +76,10 @@ h1 {
   margin: 0 0 8px;
   font: 500 32px/1.15 var(--yap-font-display);
   letter-spacing: -0.01em;
+  text-wrap: balance;
 }
+/* Headings take focus when a view changes (device.js), not for clicking. */
+h1[tabindex='-1']:focus { outline: none; }
 p { margin: 0 0 14px; }
 .muted { color: var(--yap-muted); }
 .small { font-size: 13px; }
@@ -212,9 +215,14 @@ footer a + a::before { content: '·'; margin: 0 8px; display: inline-block; }
 }
 .or::before,
 .or::after { content: ''; flex: 1; height: 1px; background: var(--yap-border); }
-.links { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 4px 0 14px; }
+.links { display: flex; flex-wrap: wrap; gap: 0 18px; margin: 0 0 6px; }
+/* Text buttons, tall enough to tap (44 px). Inside a line of text, negative
+   margins keep the line its usual height while the button reaches past it. */
 .link {
-  padding: 4px 0;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0;
   border: 0;
   background: none;
   color: var(--yap-ink);
@@ -223,6 +231,7 @@ footer a + a::before { content: '·'; margin: 0 8px; display: inline-block; }
   text-underline-offset: 3px;
   cursor: pointer;
 }
+p > .link { margin: -12px 0; vertical-align: baseline; }
 .link:disabled { color: var(--yap-muted); text-decoration: none; cursor: default; }
 .warn {
   padding: 12px 14px;
@@ -234,11 +243,32 @@ footer a + a::before { content: '·'; margin: 0 8px; display: inline-block; }
 .error { color: var(--yap-danger); font-size: 14px; }
 .btn:disabled, .provider:disabled { opacity: 0.55; cursor: default; }
 .phone .btn + .btn { margin-top: 0; }
+/* Who asked for the code (device.js showOrigin). */
+.origin { margin: 0 0 14px; font-size: 14px; line-height: 1.5; }
+.phone .origin p { margin: 0; }
+.phone .origin .note { margin-top: 6px; font-weight: 600; }
+.note.same { color: #17703c; }
+.note.differs { color: #8f4a05; }
+.note.abroad {
+  padding: 10px 12px;
+  border: 1px solid rgba(194, 59, 50, 0.4);
+  border-radius: 10px;
+  background: rgba(194, 59, 50, 0.08);
+  color: #a3302a;
+}
+/* Approve and Deny side by side, alike: neither is the "default". */
+.decide { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+.phone .decide .btn { min-height: 44px; margin: 0; }
 .check.no { background: rgba(194, 59, 50, 0.1); color: var(--yap-danger); }
 .phone a:not(.brand):not(.btn) { color: inherit; }
+/* Small phones: Approve and Deny fit on a 375 × 667 screen without scrolling. */
 @media (max-width: 420px) {
-  body.phone { padding-top: 28px; }
-  .phone .card { padding: 24px 20px; }
+  body.phone { padding-top: 16px; }
+  .phone .brand { margin-bottom: 12px; }
+  .phone .brand img { width: 30px; height: 30px; }
+  .phone .card { padding: 22px 20px; }
+  .phone .usercode:not(.compact) { padding: 10px; font-size: 27px; }
+  .phone .warn { padding: 10px 12px; }
 }
 
 /* Long-form pages (privacy, terms) */
