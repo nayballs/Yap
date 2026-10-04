@@ -28,6 +28,17 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 > contract (split immutable-guardrails + editable body). Treat that repo as the
 > source of truth for this redesign pass.
 
+> **Working agreement — standing permission (Nathan, 2026-10-04).** Nathan has given
+> Claude full permission to do whatever the work needs **without stopping to
+> double-check first**: commits/pushes to main, deploys of `cloud/`, releases and
+> nightlies, test emails or sign-in codes to his own inbox, email/DNS hygiene such as
+> DMARC, and configuring the project's third-party dashboards (Cloudflare, Google,
+> GitHub, Discord, Resend). Do it, verify it, then report what was done. Limits that
+> still stand regardless: never type passwords, OTPs or secrets for him (he pastes
+> secrets himself, e.g. into `npx wrangler secret put`), never create accounts or
+> move money, and if the harness blocks an action (DNS edits have been blocked
+> before) hand him the exact clicks instead of retrying.
+
 ---
 
 ## Stack
