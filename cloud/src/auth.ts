@@ -14,16 +14,10 @@ const DAY = 60 * 60 * 24;
 
 const isLocalDev = new URL(env.BETTER_AUTH_URL).hostname === "localhost";
 
-/** Microsoft passes work/school emails through unverified (the "nOAuth"
- *  problem), so trust an address only when its `xms_edov` claim (an optional
- *  claim enabled on the app registration) says the domain owner verified it;
- *  personal Microsoft accounts always carry it as true. */
-const microsoftEmailVerified = (claims: Record<string, unknown>) =>
-  [true, 1, "1", "true"].includes(claims.xms_edov as never);
-
 // Each provider switches on only once its id and secret are both set, so local dev
 // runs with email codes alone. `select_account` lets people with several
-// accounts (personal + work) pick one instead of being signed in silently.
+// accounts pick one instead of being signed in silently (Discord has no
+// account picker: it shows its authorise screen the first time).
 const socialProviders = {
   ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && {
     google: {
@@ -32,27 +26,36 @@ const socialProviders = {
       prompt: "select_account" as const,
     },
   }),
-  ...(env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET && {
-    microsoft: {
-      clientId: env.MICROSOFT_CLIENT_ID,
-      clientSecret: env.MICROSOFT_CLIENT_SECRET,
-      tenantId: "common", // personal + work/school accounts
-      prompt: "select_account" as const,
-      // Identity only: drops the default User.Read + offline_access consent.
-      disableDefaultScope: true,
-      scope: ["openid", "profile", "email"],
-      disableProfilePhoto: true,
-      mapProfileToUser: (claims: Record<string, unknown>) =>
-        microsoftEmailVerified(claims) ? { emailVerified: true } : {},
-      // Local testing only: dev/mock-microsoft.mjs stands in for Microsoft.
-      ...(isLocalDev && env.DEV_MICROSOFT_AUTHORITY && { authority: env.DEV_MICROSOFT_AUTHORITY }),
-    },
-  }),
   ...(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET && {
     github: {
       clientId: env.GITHUB_CLIENT_ID,
       clientSecret: env.GITHUB_CLIENT_SECRET,
       prompt: "select_account" as const,
+    },
+  }),
+  // Scopes identify + email (Better Auth's default): name, avatar, email and
+  // whether Discord has verified that email (see databaseHooks below).
+  ...(env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET && {
+    discord: {
+      clientId: env.DISCORD_CLIENT_ID,
+      clientSecret: env.DISCORD_CLIENT_SECRET,
+    },
+  }),
+  // Local tests only: dev/mock-provider.mjs plays a sign-in provider so the
+  // whole browser → Yap hand-back runs offline. It borrows Better Auth's
+  // Microsoft provider, the one built-in provider whose endpoints can be
+  // pointed elsewhere; Yap doesn't offer Microsoft (the app lists only
+  // google/github/discord, so this never shows as a button).
+  ...(isLocalDev && env.DEV_MOCK_PROVIDER && {
+    microsoft: {
+      clientId: "mock",
+      clientSecret: "mock",
+      tenantId: "common",
+      authority: env.DEV_MOCK_PROVIDER,
+      disableDefaultScope: true,
+      scope: ["openid", "profile", "email"],
+      disableProfilePhoto: true,
+      mapProfileToUser: (claims: Record<string, unknown>) => (claims.xms_edov === true ? { emailVerified: true } : {}),
     },
   }),
 };
@@ -76,13 +79,24 @@ const createAuth = () => betterAuth({
   // Desktop sessions: 30 days, sliding (renewed at most once a day while used).
   session: { expiresIn: 30 * DAY, updateAge: DAY },
   account: {
-    // Same verified email across Google / Microsoft / GitHub / email code = one
+    // Same verified email across Google / GitHub / Discord / email code = one
     // account. Better Auth links only when the provider vouches for the email
-    // and the existing account's email is verified too; an email-code sign-in
-    // strips any access an unverified account picked up before the proof.
+    // and the existing account's email is verified too.
     accountLinking: { enabled: true },
     // Yap only needs identity, but providers hand back tokens regardless.
     encryptOAuthTokens: true,
+  },
+  databaseHooks: {
+    user: {
+      create: {
+        // A Yap account always starts from a proven email: email codes prove
+        // it, Google and GitHub vouch for theirs, but Discord can hand over an
+        // address its user never verified. Refusing those stops anyone from
+        // claiming an address that isn't theirs (the sign-in then ends on
+        // /error?error=unable_to_create_user, which says what to do).
+        before: async (user) => (user.emailVerified ? undefined : false),
+      },
+    },
   },
   user: {
     // Deleted from inside Yap. Better Auth refuses unless the session is

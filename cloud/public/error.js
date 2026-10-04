@@ -9,6 +9,10 @@ const MESSAGES = {
   account_not_linked:
     'That email already has a Yap account that uses a different sign-in method. Use that method, or sign in with an email code to prove the address is yours.',
   email_not_found: "Your sign-in provider didn't share an email address, which Yap needs. Try another method or an email code.",
+  // Yap only creates accounts for verified emails (src/auth.ts databaseHooks);
+  // in practice that's a Discord account whose email isn't verified yet.
+  unable_to_create_user:
+    "Yap needs a verified email address to create your account. If you used Discord, verify your email there (User Settings → My Account), then try again, or sign in with an email code.",
   // Set by this Worker's sign-in entry point (src/index.ts).
   provider_unavailable: "That sign-in option isn't available right now. Try another one, or an email code.",
   rate_limited: 'Too many sign-in attempts. Wait a minute, then try again.',

@@ -10,7 +10,7 @@ transcripts, notes and settings never leave the user's PC.
 | Method | Flow |
 |---|---|
 | **Email code** | Yap calls the API directly: `POST /api/auth/email-otp/send-verification-otp` → the user types the 6-digit code → `POST /api/auth/sign-in/email-otp`, which returns `{ token, user }`. |
-| **Google / Microsoft / GitHub** | Yap opens the system browser (RFC 8252) at `/api/auth/electron/init-oauth-proxy?provider=…&client_id=yap-desktop&code_challenge=…&state=…`. After the provider, the server drops a short-lived `better-auth.yap-desktop` cookie and lands on `/` (`public/index.html`), which hands a one-time code back to Yap. Yap redeems it with its PKCE verifier at `POST /api/auth/electron/token` → `{ token, user }`. |
+| **Google / GitHub / Discord** | Yap opens the system browser (RFC 8252) at `/api/auth/electron/init-oauth-proxy?provider=…&client_id=yap-desktop&code_challenge=…&state=…`. After the provider, the server drops a short-lived `better-auth.yap-desktop` cookie and lands on `/` (`public/index.html`), which hands a one-time code back to Yap. Yap redeems it with its PKCE verifier at `POST /api/auth/electron/token` → `{ token, user }`. |
 
 The handoff page returns the code by one of three channels:
 
@@ -66,7 +66,7 @@ src/env.d.ts       bindings, vars and secrets
 auth.cli.ts        schema-only config for `npm run schema` (not deployed)
 migrations/        D1 schema (generated)
 public/            static pages: handoff (/), /error, /privacy, /terms
-dev/               mock-microsoft.mjs: a local stand-in provider for testing
+dev/               mock-provider.mjs: a local stand-in provider for testing
 ```
 
 ## Local development
@@ -83,9 +83,17 @@ Without `RESEND_API_KEY`, emails (and their codes) print to the `wrangler dev`
 console instead of sending. Social providers switch on when their client
 id/secret are set.
 
-To test the browser handoff with no real provider, run `npm run mock:microsoft`
-and enable the mock lines in `.dev.vars`; "Continue with Microsoft" then goes
-through a local sign-in form (`MOCK_AUTO_APPROVE=1` skips the form).
+To test the browser handoff with no real provider, run `npm run mock:provider`
+and set `DEV_MOCK_PROVIDER=http://127.0.0.1:8790` in `.dev.vars`, then open
+`http://localhost:8787/api/auth/electron/init-oauth-proxy?provider=microsoft&client_id=yap-desktop&code_challenge=<S256 of a verifier>&state=<anything>`
+in a browser: a local sign-in form stands in for the provider and the flow
+ends on the hand-back page (`MOCK_AUTO_APPROVE=1` skips the form,
+`MOCK_UNVERIFIED=1` signs in with an unverified email). The mock borrows
+Better Auth's Microsoft provider (the only built-in one that can point at
+another server); Yap doesn't offer Microsoft, so the app shows no button for
+it. Run `wrangler dev --local-upstream localhost:8787`, or cookie-carrying
+POSTs fail the origin check (wrangler otherwise rewrites the host to the
+production domain).
 
 Debug builds of Yap talk to `http://localhost:8787`; set `YAP_AUTH_URL` to
 point any build elsewhere.
@@ -101,7 +109,7 @@ Live at `https://auth.contextmirror.com` (Cloudflare account
 only, D1 `yap-auth` (WEUR). Client ids are public and live in `wrangler.toml`
 `[vars]`; the secrets are set with `npx wrangler secret put <NAME>`:
 `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`,
-`RESEND_API_KEY`. (Paste with right-click in Windows Terminal: Ctrl+V can send
+`DISCORD_CLIENT_SECRET`, `RESEND_API_KEY`. (Paste with right-click in Windows Terminal: Ctrl+V can send
 a stray control character into the hidden prompt.)
 
 - Google: Cloud project `yap-accounts` → Google Auth Platform (published),
@@ -117,22 +125,18 @@ Ship a change: `npm run typecheck && npm run deploy`. A schema change gets a
 new numbered migration, applied with `npm run db:migrate:remote` before the
 deploy.
 
-### Adding Microsoft sign-in
+### Discord sign-in
 
-Needs a Microsoft Entra ID tenant (a free Azure account comes with one).
+Discord application "Yap" (discord.com/developers/applications):
+OAuth2 → Redirects: `https://auth.contextmirror.com/api/auth/callback/discord`;
+General Information: icon `docs/brand/yap-logo-512.png`, terms
+`https://auth.contextmirror.com/terms`, privacy
+`https://auth.contextmirror.com/privacy`. The client id is `DISCORD_CLIENT_ID`
+in `wrangler.toml`; the secret is `DISCORD_CLIENT_SECRET` (OAuth2 → Reset
+Secret → `npx wrangler secret put DISCORD_CLIENT_SECRET`). Scopes are
+`identify email`.
 
-1. entra.microsoft.com → App registrations → New registration: name **Yap**;
-   supported accounts **any Entra ID tenant + personal Microsoft accounts**;
-   redirect URI (Web)
-   `https://auth.contextmirror.com/api/auth/callback/microsoft`.
-2. Token configuration → Add optional claim → ID token: `email`, `xms_edov`
-   (`src/auth.ts` only trusts emails Microsoft marks verified).
-3. Certificates & secrets → New client secret (longest expiry; note the
-   renewal date) → copy the **Value**.
-4. Branding & properties: homepage `https://contextmirror.com/yap`, terms
-   `https://auth.contextmirror.com/terms`, privacy
-   `https://auth.contextmirror.com/privacy`, logo `docs/brand/yap-logo-512.png`.
-5. Add the Application (client) ID to `wrangler.toml` as `MICROSOFT_CLIENT_ID`,
-   run `npx wrangler secret put MICROSOFT_CLIENT_SECRET`, then `npm run deploy`.
-   `/api/providers` then lists `microsoft` and Yap shows the button, with no
-   app update.
+Discord can hand back an email its user never verified, so new accounts are
+created only for verified emails (`databaseHooks` in `src/auth.ts`); an
+unverified Discord email ends on `/error?error=unable_to_create_user`, which
+explains how to verify it. Microsoft sign-in was dropped (2026-10-04).

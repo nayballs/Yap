@@ -1,13 +1,15 @@
-// Stand-in for Microsoft's sign-in page, so the whole browser → Yap handoff
-// can be tested locally without real OAuth credentials. Run it with
-// `npm run mock:microsoft`, and in .dev.vars set
-//   MICROSOFT_CLIENT_ID=mock
-//   MICROSOFT_CLIENT_SECRET=mock
-//   DEV_MICROSOFT_AUTHORITY=http://127.0.0.1:8790
-// (src/auth.ts ignores the authority unless the Worker runs on localhost).
+// A stand-in sign-in provider, so the whole browser → Yap hand-back can be
+// tested locally without real OAuth credentials. Run it with
+// `npm run mock:provider`, and in .dev.vars set
+//   DEV_MOCK_PROVIDER=http://127.0.0.1:8790
+// (src/auth.ts ignores it unless the Worker runs on localhost). Then start a
+// sign-in at /api/auth/electron/init-oauth-proxy?provider=microsoft&… (see
+// cloud/README.md).
 //
-// Implements the two endpoints Better Auth's Microsoft provider calls, with
-// PKCE and redirect_uri checked like the real thing. The ID token is unsigned:
+// It borrows the shape of Microsoft's endpoints because Better Auth's
+// Microsoft provider is the one built-in provider that can be pointed at
+// another server; Yap itself doesn't offer Microsoft sign-in. PKCE and
+// redirect_uri are checked like the real thing. The ID token is unsigned:
 // the provider only decodes it in the authorization-code flow.
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
@@ -49,14 +51,14 @@ function authorizePage(q) {
     .map((k) => `<input type="hidden" name="${k}" value="${esc(q.get(k) ?? "")}">`)
     .join("");
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Mock Microsoft sign-in</title></head>
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Mock sign-in</title></head>
 <body style="font-family:system-ui,sans-serif;max-width:420px;margin:48px auto;padding:0 16px;color:#1b1b1b">
-<p style="font-size:13px;color:#a4262c;font-weight:600">LOCAL TEST ONLY: not Microsoft</p>
+<p style="font-size:13px;color:#a4262c;font-weight:600">LOCAL TEST ONLY: not a real provider</p>
 <h1 style="font-size:24px;font-weight:600">Sign in</h1>
 <form method="get" action="/approve">${hidden}
 <label>Email<br><input name="email" value="mock.user@example.com" style="width:100%;padding:8px;margin:4px 0 12px"></label>
 <label>Name<br><input name="name" value="Mock User" style="width:100%;padding:8px;margin:4px 0 12px"></label>
-<label style="display:block;margin-bottom:16px"><input type="checkbox" name="verified" value="1" checked> Verified email (xms_edov)</label>
+<label style="display:block;margin-bottom:16px"><input type="checkbox" name="verified" value="1" checked> Verified email</label>
 <button name="action" value="approve" style="padding:8px 20px">Continue</button>
 <button name="action" value="cancel" style="padding:8px 20px">Cancel</button>
 </form></body></html>`;
@@ -73,13 +75,14 @@ createServer(async (req, res) => {
   const q = url.searchParams;
   try {
     // 1. Authorize: Better Auth sends the browser here. MOCK_AUTO_APPROVE=1
-    //    skips the form (hands-free tests) as MOCK_EMAIL, verified.
+    //    skips the form (hands-free tests) as MOCK_EMAIL, verified unless
+    //    MOCK_UNVERIFIED=1 (to test the verified-email rule).
     if (req.method === "GET" && url.pathname.endsWith("/oauth2/v2.0/authorize")) {
       if (!q.get("redirect_uri") || !q.get("state")) return send(res, 400, "missing redirect_uri/state");
       if (process.env.MOCK_AUTO_APPROVE === "1") {
         q.set("email", process.env.MOCK_EMAIL || "mock.user@example.com");
         q.set("name", "Mock User");
-        q.set("verified", "1");
+        q.set("verified", process.env.MOCK_UNVERIFIED === "1" ? "0" : "1");
         q.set("action", "approve");
         url.pathname = "/approve";
       } else {
@@ -160,4 +163,4 @@ createServer(async (req, res) => {
     console.error(err);
     send(res, 500, "mock error");
   }
-}).listen(PORT, "127.0.0.1", () => console.log(`Mock Microsoft sign-in on ${ORIGIN} (local testing only)`));
+}).listen(PORT, "127.0.0.1", () => console.log(`Mock sign-in provider on ${ORIGIN} (local testing only)`));

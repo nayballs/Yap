@@ -11,12 +11,12 @@ declare namespace Cloudflare {
     RESEND_API_KEY?: string;
     GOOGLE_CLIENT_ID?: string;
     GOOGLE_CLIENT_SECRET?: string;
-    MICROSOFT_CLIENT_ID?: string;
-    MICROSOFT_CLIENT_SECRET?: string;
     GITHUB_CLIENT_ID?: string;
     GITHUB_CLIENT_SECRET?: string;
+    DISCORD_CLIENT_ID?: string;
+    DISCORD_CLIENT_SECRET?: string;
 
-    /** Local testing only (.dev.vars): dev/mock-microsoft.mjs's address. */
-    DEV_MICROSOFT_AUTHORITY?: string;
+    /** Local testing only (.dev.vars): dev/mock-provider.mjs's address. */
+    DEV_MOCK_PROVIDER?: string;
   }
 }
