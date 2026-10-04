@@ -77,4 +77,53 @@ app.get("/api/health", (c) => c.json({ ok: true }));
 // Which sign-in buttons Yap should show (providers come and go with config).
 app.get("/api/providers", (c) => c.json(signInMethods()));
 
+// Settings → Account's "Where you're signed in". Better Auth's /list-sessions
+// answers only sessions signed in within a day (freshAge, so most Yap
+// sessions couldn't list) and hands back every session's token; these list
+// ids (no tokens, no IPs) for any signed-in session and sign one out by id.
+
+/** The caller's session, via Better Auth's own get-session (Bearer token). */
+async function callerSession(req: Request): Promise<{ id: string; userId: string } | null> {
+  const authorization = req.headers.get("authorization");
+  if (!authorization) return null;
+  const res = await handleAuth(
+    new Request(new URL("/api/auth/get-session", env.BETTER_AUTH_URL), { headers: { authorization } }),
+  );
+  if (!res.ok) return null;
+  const data = (await res.json().catch(() => null)) as { session?: { id?: string; userId?: string } } | null;
+  const { id, userId } = data?.session ?? {};
+  return id && userId ? { id, userId } : null;
+}
+
+const notSignedIn = { code: "UNAUTHORIZED", message: "Not signed in." };
+
+app.get("/api/account/sessions", async (c) => {
+  const me = await callerSession(c.req.raw);
+  if (!me) return c.json(notSignedIn, 401);
+  const { results } = await env.DB.prepare(
+    `SELECT id, createdAt, updatedAt, expiresAt, userAgent FROM session
+      WHERE userId = ?1 AND expiresAt > ?2 ORDER BY updatedAt DESC`,
+  )
+    .bind(me.userId, new Date().toISOString())
+    .all<{ id: string; createdAt: string; updatedAt: string; expiresAt: string; userAgent: string | null }>();
+  const sessions = results.map((s) => ({ ...s, userAgent: s.userAgent ?? "", current: s.id === me.id }));
+  c.header("Cache-Control", "no-store");
+  return c.json({ sessions });
+});
+
+app.post("/api/account/sessions/revoke", async (c) => {
+  const me = await callerSession(c.req.raw);
+  if (!me) return c.json(notSignedIn, 401);
+  const body = (await c.req.json().catch(() => null)) as { id?: unknown } | null;
+  if (typeof body?.id !== "string" || !body.id) {
+    return c.json({ code: "INVALID_REQUEST", message: "Which session?" }, 400);
+  }
+  if (body.id === me.id) {
+    return c.json({ code: "CURRENT_SESSION", message: "That's this device: sign out instead." }, 400);
+  }
+  // Only the caller's own sessions; an unknown id is already signed out.
+  const { meta } = await env.DB.prepare(`DELETE FROM session WHERE id = ?1 AND userId = ?2`).bind(body.id, me.userId).run();
+  return c.json({ success: true, removed: meta.changes > 0 });
+});
+
 export default app;

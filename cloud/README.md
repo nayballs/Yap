@@ -32,14 +32,15 @@ Endpoints Yap uses: `GET /api/auth/get-session`, `GET /api/auth/list-accounts`,
 `POST /api/auth/sign-out`, `POST /api/auth/delete-user`, `GET /api/health`,
 `GET /api/providers` (which buttons to show: configured providers, and
 whether email codes can be sent), and for Settings → Account's "Where you're
-signed in": `GET /api/auth/list-sessions`, `POST /api/auth/revoke-session`
-(`{ "token": … }`, one other session) and `POST /api/auth/revoke-other-sessions`.
+signed in": `GET /api/account/sessions` (Bearer; this service's own route:
+`{ sessions: [{ id, current, createdAt, updatedAt, expiresAt, userAgent }] }`,
+no tokens or IPs), `POST /api/account/sessions/revoke` (`{ "id": … }`, one
+other session; 400 `CURRENT_SESSION` for the caller's own) and
+`POST /api/auth/revoke-other-sessions`. Better Auth's own `/list-sessions`
+is disabled: it answers only sessions under a day old and returns every
+session's token.
 POSTs need a JSON body (`{}` will do). Deleting needs a session under a day
 old (`SESSION_EXPIRED` otherwise: sign in again first) and emails a receipt.
-Listing sessions has the same rule (Better Auth's `freshAge`: 403
-`SESSION_NOT_FRESH` for an older session, so Yap asks to confirm it's you);
-it returns every session's token, which Yap keeps in the app's backend and
-never shows. The two revokes work with a session of any age.
 
 Email codes are limited beyond Better Auth's 3 sends a minute per IP: one
 address gets a code every 30 s at most and 10 a day, one IP 20 a day
