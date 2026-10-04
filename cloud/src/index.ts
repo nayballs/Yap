@@ -2,10 +2,15 @@
 // layer before this runs; only API paths reach the Hono app.
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
+import { secureHeaders } from "hono/secure-headers";
 import { DESKTOP_CLIENT_ID, getAuth, signInMethods } from "./auth";
 import { recordSend, secondsUntilNextSend, sendKeys } from "./throttle";
 
 const app = new Hono();
+
+// API responses get the usual hardening headers (nosniff, HSTS, no framing,
+// no referrer). The static pages get theirs from public/_headers.
+app.use("*", secureHeaders({ xFrameOptions: "DENY" }));
 
 // Where Yap's browser sign-in starts (src-tauri/src/auth.rs). This replaces
 // @better-auth/electron's own /electron/init-oauth-proxy, which re-enters the
