@@ -566,7 +566,11 @@ WebView2 bootstrap) + a signed `latest.json` on a draft GitHub Release. The in-a
 updater (`tauri-plugin-updater`) checks that endpoint. **Currently unsigned**
 (Authenticode) — Windows shows a SmartScreen warning until a cert is added; the
 `signCommand` slot is ready. Updater artifacts are minisign-signed
-(`TAURI_SIGNING_PRIVATE_KEY` GitHub secret).
+(`TAURI_SIGNING_PRIVATE_KEY` GitHub secret). The uninstaller's **Delete the
+application data** checkbox (`; --- YAP DATA ---` in `src-tauri/nsis/installer.nsi`)
+removes Yap's real data (`%APPDATA%\yap`, `~\.yap`) **and the saved sign-in**
+(`CredDeleteW` on the `yap-account.com.yap.dictation` credential); never on `/UPDATE`
+runs (the updater always passes it), and unticked keeps both — a reinstall stays signed in.
 
 ### Release channels (stable + nightly)
 Yap ships **two auto-update channels** (Chrome Stable/Canary style), both CI-built
@@ -634,6 +638,7 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   `docs/local-api.md`).
 - Account session: a Windows Credential Manager generic credential
   (`yap-account.com.yap.dictation`, Local persistence), not a file — see `auth.rs`.
+  Uninstalling with "Delete the application data" removes it too (updates never do).
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
   recording mode `toggle`, overlay always shown while recording/transcribing (no

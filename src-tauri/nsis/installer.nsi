@@ -4,9 +4,10 @@
 ; Yap currently builds against Tauri 2.11.3 — the bundled handlebars template
 ; is stable across these versions; the only Yap-specific edits are the
 ; portable magic string ("Yap Portable Mode"), the comments, and the
-; uninstaller's "Delete app data" removing Yap's own data dirs.
+; uninstaller's "Delete app data" removing Yap's own data dirs and its saved
+; sign-in (Windows Credential Manager).
 ; Portable changes are marked with "; --- PORTABLE MODE ---" comments, the
-; data-dir removal with "; --- YAP DATA ---".
+; data-dir and sign-in removal with "; --- YAP DATA ---".
 ;
 ; When upgrading Tauri, diff this file against the new upstream template and
 ; merge changes while preserving the portable and YAP DATA sections.
@@ -1004,6 +1005,25 @@ Section Uninstall
     ${EndIf}
     ${If} $PROFILE != ""
       RmDir /r "$PROFILE\.yap"
+    ${EndIf}
+
+    ; --- YAP DATA --- The optional account sign-in isn't a file: auth.rs keeps
+    ; it in Windows Credential Manager (per Windows user: the one this
+    ; currentUser uninstaller runs as) as a generic credential named
+    ; <user>.<service>, "yap-account.com.yap.dictation" for the production
+    ; service (dev builds / YAP_AUTH_URL use their own yap-account@<host>
+    ; entries; left alone). It goes with %APPDATA%\yap, behind the same
+    ; portable guard: ticking "Delete app data" signs this PC out; unticked,
+    ; or on any /UPDATE run (never gets here), the sign-in stays, so a
+    ; reinstall or update is still signed in. Same call as auth.rs's local
+    ; sign-out (CredDeleteW, CRED_TYPE_GENERIC = 1) minus the server revoke:
+    ; that session just expires unused. If there's no such credential,
+    ; CredDeleteW only returns FALSE (ERROR_NOT_FOUND).
+    ${IfNot} ${FileExists} "$INSTDIR\portable"
+      System::Call 'advapi32::CredDeleteW(w "yap-account.com.yap.dictation", i 1, i 0) i .r0'
+      ${If} $0 <> 0
+        DetailPrint "Removed Yap's saved sign-in from Windows Credential Manager"
+      ${EndIf}
     ${EndIf}
   ${EndIf}
 
