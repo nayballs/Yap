@@ -212,6 +212,21 @@ production domain).
 Debug builds of Yap talk to `http://localhost:8787`; set `YAP_AUTH_URL` to
 point any build elsewhere.
 
+**End-to-end checks** (`dev/e2e-phone.mjs`, ~100 checks: size caps, every
+sign-in route, the full phone flow, "who's asking", the approval email,
+day-one limits, the cleanup cron). Start the mock on 8852 and wrangler dev on
+8851, then run `npm run test:e2e` (or `npm run test:e2e -- <section>`):
+
+```bash
+PORT=8852 MOCK_AUTO_APPROVE=1 npm run mock:provider
+npx wrangler dev --port 8851 --local-upstream localhost:8851 --test-scheduled --var BETTER_AUTH_URL:http://localhost:8851 --var DEV_MOCK_PROVIDER:http://127.0.0.1:8852
+npm run test:e2e
+```
+
+Wrangler doesn't flush the Worker's console to a redirected log promptly;
+the script reads emailed codes from its local observability API instead
+(`/cdn-cgi/local/explorer/api/local/observability/query`).
+
 To test phone sign-in without the app, play Yap with curl:
 `POST /api/auth/device/code` with `{"client_id":"yap-desktop"}`, open the
 returned `verification_uri_complete` in a browser on the PC (a phone can't

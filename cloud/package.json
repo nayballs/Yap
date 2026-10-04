@@ -9,6 +9,7 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsc",
     "mock:provider": "node dev/mock-provider.mjs",
+    "test:e2e": "node dev/e2e-phone.mjs .dev.vars",
     "schema": "auth generate --config auth.cli.ts --output .wrangler/schema.sql -y",
     "db:migrate:local": "wrangler d1 migrations apply yap-auth --local",
     "db:migrate:remote": "wrangler d1 migrations apply yap-auth --remote"
