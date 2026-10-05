@@ -105,7 +105,9 @@
     if (logEl && followLog && recordingThisNote) logEl.scrollTop = logEl.scrollHeight;
   });
   // "You" chunks that were the call coming through the speakers (meeting.rs
-  // echo check): kept, hidden unless asked for.
+  // echo check): kept, hidden unless asked for. A dictation made mid-meeting
+  // is a `dictated` marker (its words were left out of "You"): shown as a
+  // quiet "You dictated here" line.
   let showEcho = $state(false);
   const echoCount = $derived((selected?.transcript || []).filter((s) => s.echo).length);
   const shownTranscript = $derived(
@@ -199,7 +201,7 @@
     if (!selected) return;
     // A silent recording (muted mic, nobody talking) with no typed notes
     // has nothing for the model to work with.
-    if (!selected.content?.trim() && !selected.transcript?.some((s) => !s.echo)) {
+    if (!selected.content?.trim() && !selected.transcript?.some((s) => !s.echo && !s.dictated)) {
       toast({
         title: 'Nothing to summarise yet',
         description: 'No speech was transcribed in this recording.',
@@ -666,9 +668,7 @@
     );
     listen('yap-meeting-summary', (e) => onSummary(e.payload)).then((u) => unlisteners.push(u));
     listen('yap-note-changed', (e) => onNoteChanged(e.payload)).then((u) => unlisteners.push(u));
-    listen('yap-meeting-warning', (e) =>
-      toast({ title: 'Meeting recording', description: String(e.payload), chip: 'Tip' })
-    ).then((u) => unlisteners.push(u));
+    // (`yap-meeting-warning` toasts come from meetingGuard.js, in any view.)
     // The local API bridge (Integrations) can create/update/delete notes from
     // outside the app — refresh the list so external edits show up live.
     listen('yap-notes-changed', () => refreshList()).then((u) => unlisteners.push(u));
@@ -1122,12 +1122,19 @@
                 (followLog = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40)}
             >
               {#each shownTranscript as seg, i (i)}
-                <div class="bubble {seg.source === 'you' ? 'you' : 'them'}" class:echo={seg.echo}>
-                  <span class="who">
-                    {seg.source === 'you' ? 'You' : 'Them'}{seg.echo ? ' · from the speakers' : ''}
-                  </span>
-                  <p>{seg.text}</p>
-                </div>
+                {#if seg.dictated}
+                  <div class="dictated" title="Yap kept what you dictated out of the meeting's transcript and summaries">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>
+                    <span>You dictated here · left out of the notes</span>
+                  </div>
+                {:else}
+                  <div class="bubble {seg.source === 'you' ? 'you' : 'them'}" class:echo={seg.echo}>
+                    <span class="who">
+                      {seg.source === 'you' ? 'You' : 'Them'}{seg.echo ? ' · from the speakers' : ''}
+                    </span>
+                    <p>{seg.text}</p>
+                  </div>
+                {/if}
               {/each}
             </div>
             {#if echoCount}
@@ -1782,6 +1789,28 @@
   .bubble.echo {
     opacity: 0.55;
     border: 1px dashed var(--yap-border);
+  }
+  /* "You dictated here": a dictation made mid-meeting, left out of "You". */
+  .dictated {
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 1px 0;
+    font-size: 10.5px;
+    color: var(--yap-muted);
+    white-space: nowrap;
+  }
+  .dictated::before,
+  .dictated::after {
+    content: '';
+    flex: 1 1 auto;
+    border-top: 1px dashed var(--yap-border);
+  }
+  .dictated svg {
+    flex: 0 0 auto;
+    width: 11px;
+    height: 11px;
   }
   .echonote {
     align-self: flex-start;

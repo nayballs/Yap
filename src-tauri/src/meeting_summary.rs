@@ -150,19 +150,19 @@ fn speaker(seg: &TranscriptSegment) -> &'static str {
 }
 
 /// Transcript lines as the models read them ("You: …" / "Them: …"), without
-/// the echo segments.
+/// the echo segments or the "you dictated here" markers.
 pub fn transcript_lines(segs: &[TranscriptSegment]) -> String {
     segs.iter()
-        .filter(|s| !s.echo)
+        .filter(|s| s.is_talk())
         .map(|s| format!("{}: {}\n", speaker(s), s.text.trim()))
         .collect()
 }
 
 fn seg_tokens(seg: &TranscriptSegment) -> usize {
-    if seg.echo {
-        0
-    } else {
+    if seg.is_talk() {
         estimate_tokens(&seg.text) + 2
+    } else {
+        0
     }
 }
 
@@ -833,7 +833,7 @@ pub fn compose_meeting_input(note: &Note) -> MeetingInput {
         text.push_str(&header);
         text.push_str(&render_digests(&note.digests, t0, budget));
     }
-    if let Some(first) = tail.iter().find(|s| !s.echo) {
+    if let Some(first) = tail.iter().find(|s| s.is_talk()) {
         text.push_str(&format!(
             "\n## Transcript of the last part ({}\u{2013}{})\n{tail_lines}",
             clock(first.ts.saturating_sub(t0)),
@@ -1496,12 +1496,13 @@ pub const TITLE_REPLY_TOKENS: u32 = 30;
 /// (where the person last looked), with a little of what came before as
 /// context. The new part is the raw transcript when it fits
 /// [`CATCH_UP_RAW_TOKENS`], else the digests covering it plus its latest
-/// stretch. `None` when nothing was said since (echo doesn't count).
+/// stretch. `None` when nothing was said since (echo and dictation markers
+/// don't count).
 pub fn catch_up_input(note: &Note, since: usize) -> Option<String> {
     let since = since.min(note.transcript.len());
     let new = &note.transcript[since..];
-    let first = new.iter().find(|s| !s.echo)?;
-    let last = new.iter().rev().find(|s| !s.echo)?;
+    let first = new.iter().find(|s| s.is_talk())?;
+    let last = new.iter().rev().find(|s| s.is_talk())?;
     let t0 = meeting_t0(note);
 
     // Earlier in the meeting: the digests that end before `since`, then the
@@ -1712,6 +1713,7 @@ mod tests {
             text: text.to_string(),
             ts,
             echo: false,
+            dictated: false,
         }
     }
 
@@ -1804,6 +1806,36 @@ mod tests {
         let lines = transcript_lines(&t);
         assert_eq!(lines.lines().count(), 3);
         assert_eq!(seg_tokens(&t[1]), 0);
+    }
+
+    #[test]
+    fn dictation_markers_are_left_out_of_every_input() {
+        // Ten minutes of talk with a dictation marker in the middle, and one
+        // as the very last segment (the tail the final call reads raw).
+        let mut t = talk(40, 60, 15);
+        t.insert(20, TranscriptSegment::dictation_marker(1000 + 20 * 15));
+        t.push(TranscriptSegment::dictation_marker(1000 + 41 * 15));
+        assert_eq!(seg_tokens(&t[20]), 0);
+        let lines = transcript_lines(&t);
+        assert_eq!(lines.lines().count(), 40);
+        assert!(!lines.contains("You: \n"), "no empty line for a marker");
+        // Digest windows, the final input and the Ask context never show it.
+        let (from, to) = next_window(&t, 0, Plan::Live).unwrap();
+        assert!(!transcript_lines(&t[from..to]).contains("You: \n"));
+        let note = note_with(t.clone());
+        let input = compose_meeting_input(&note);
+        assert!(!input.text.contains("You: \n"));
+        assert!(!ask_context(&note, 3_000).contains("You: \n"));
+        // A recording with only a marker has no talk at all.
+        let only = note_with(vec![TranscriptSegment::dictation_marker(5)]);
+        assert!(!compose_meeting_input(&only).text.contains("You:"));
+        // The raw-tail header is dated from talk, not from a marker.
+        let mut tail_marker = talk(400, 40, 15);
+        tail_marker.push(TranscriptSegment::dictation_marker(1000 + 400 * 15 + 600));
+        let long = note_with(tail_marker);
+        assert!(!fits_single_pass(&long));
+        let text = compose_meeting_input(&long).text;
+        assert!(!text.contains("You: \n"));
     }
 
     #[test]
@@ -2135,6 +2167,11 @@ mod tests {
         assert!(catch_up_input(&note, 99).is_none());
         note.transcript[19].echo = true;
         assert!(catch_up_input(&note, 19).is_none());
+        // Nor is a dictation the person made in the meantime.
+        note.transcript.push(TranscriptSegment::dictation_marker(1000 + 20 * 15));
+        assert!(catch_up_input(&note, 19).is_none());
+        let since_18 = catch_up_input(&note, 18).unwrap();
+        assert!(!since_18.contains("You: \n"), "{since_18}");
         // From the start: no earlier context.
         let first = catch_up_input(&note_with(talk(3, 5, 15)), 0).unwrap();
         assert!(first.contains("this is the start of the meeting"));

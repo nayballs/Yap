@@ -132,7 +132,10 @@ n-gram correction ("jaison"→"JSON", "Chat G P T"→"ChatGPT"; threshold 0.18,
 ≥3-char terms), gated by `config.dictionary_fuzzy` (default on, "Catch
 near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
 (`entry.fuzzy` — exempts corrections whose near-misses are real words, e.g.
-`json → JSON` eating the name "Jason"). See `docs/fuzzy-dictionary.md`.
+`json → JSON` eating the name "Jason"). See `docs/fuzzy-dictionary.md`. The
+exact + fuzzy correction is ONE function, `pipeline::apply_corrections(text,
+&cfg)`, run the same way on a dictation, on every meeting segment (both sides,
+before `meeting::ingest`) and on an Upload's whole text.
 
 ### Key modules (`src-tauri/src/`)
 - **`lib.rs`** — app entry / Tauri `setup`. Runs `portable::init()`, registers the
@@ -158,7 +161,14 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   (`yap-amp`) for the scrolling waveform; while idle it keeps a rolling ~300 ms
   **pre-roll** ring that `start_recording` prepends (anti first-word-clipping).
   `recording_mode` selects toggle vs push-to-talk. `run_stt` (async) does cleanup →
-  dictionary → inject (into the captured `target_hwnd`). **Voice Agent wake word**
+  dictionary (`apply_corrections`, shared with meetings and Upload) → inject
+  (into the captured `target_hwnd`). **The dictation signal** for a meeting
+  recording: `start_recording` (plain dictation, the edit hotkey, the wake-word
+  path) calls `dictation_began()` and the stop/cancel `dictation_ended()`, one
+  atomic (`DICTATION`: dictations started << 1 | recording) that
+  `meeting.rs` reads lock-free in its mic callback (`dictation_state()`) to
+  keep dictations out of a meeting's "You" side. `PREROLL_SAMPLES` is shared
+  with it (the meeting blanks a dictation's pre-roll too). **Voice Agent wake word**
   (`agent_detect.rs`, OpenWhispr `detectAgentName` port): a dictation addressing the
   agent by name (`agent_name`, default "Yap"; fuzzy-matched) routes the whole
   transcript through the Voice-Agent scope in write mode (`run_agent`, shared with
@@ -215,7 +225,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   marker), `folder` (string, seeded with Personal + Meetings), `participants`
   (attendee names, shown as chips and fed to prompts for attribution),
   `transcript` (meeting-recorder You/Them segments, time-ordered; `echo` marks
-  speaker bleed), `digests` (rolling meeting digests, see `meeting_summary.rs`),
+  speaker bleed, `dictated` a "You dictated here" marker — no text, `ts` where
+  a mid-meeting dictation began; `is_talk()` = neither, what every summary
+  input reads), `digests` (rolling meeting digests, see `meeting_summary.rs`),
   `note_type` ("personal" | "meeting"), `source` ("manual" | "upload" |
   "meeting"), and `title_auto` (the title is one Yap made up — "Teams call ·
   5 Oct, 14:30" — so the AI meeting title may replace it; cleared for good by
@@ -248,18 +260,45 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   port, fully offline): mic ("You") + **WASAPI loopback** ("Them" — cpal input
   stream on the default output device) on a dedicated capture thread; a worker
   cuts each source into ~15 s chunks **at the quietest 20 ms frame of the last
-  4 s** (`media::quietest_frame`, not mid-word), transcribes them on the shared
+  4 s** (`media::quietest_frame`, not mid-word; every mid-meeting cut leaves
+  the newest 400 ms buffered), transcribes them on the shared
   warm engine (`pipeline::EngineSlot`, taken per chunk so dictation still
-  works; silence-gated), works off a backlog in ≤30 s chunks back to back,
+  works; silence-gated), runs the **correction dictionary** over each chunk's
+  text (`pipeline::apply_corrections`, both sides, so the echo check compares
+  corrected with corrected), works off a backlog in ≤30 s chunks back to back,
   caps each source's buffer at 20 min (then drops audio + `yap-meeting-warning`),
   dates each segment by its speech onset, flags **speaker echo** (a "you"
   chunk whose words repeat "them" in order AND whose 20 ms loudness envelope
   follows the call 0–600 ms later — the timing test keeps a headphone user's
   own reply; flagged segments are kept, hidden, left out of summaries), and
   `ingest`s segments: persist to `notes.transcript`, emit `yap-meeting-segment`,
-  kick the rolling digests. Commands: `meeting_start`/`meeting_stop`/
+  kick the rolling digests. Each source is a `Captured` (`AudioBuf`) on a
+  **session clock** (positions in samples); `push_audio` is the one push path
+  (device callbacks and the e2e player). **Dictation kept out of "You"**: the
+  mic's `DictationGate` reads `pipeline::dictation_state()` per callback
+  (lock-free) and, while a hotkey dictation records, appends silence instead of
+  the audio (same length, so times and the echo check stay aligned); a new
+  dictation also blanks the newest ~340 ms already buffered (its pre-roll +
+  40 ms), the callback that sees it end is blanked too, and each blanked span
+  leaves a `dictated` marker segment (dated where it began; one per span,
+  however the chunks are cut). **One clock**: `keep_in_step` (every 200 ms)
+  fills a side whose device went silent while the other moved on ≥ 0.5 s
+  (loopback with nothing playing, a device switch) with silence up to the
+  other. **Follows the default output**: the capture thread reads Windows'
+  default render endpoint id every 2 s (`IMMDeviceEnumerator`, eConsole like
+  cpal; `OutputFollower` decides) and reopens the loopback stream on a new one
+  (old stream first, a failure keeps the old one and retries; logged).
+  **Quiet sides**: `QuietWatch` (every 200 ms) — one side heard nothing above
+  the silence gate for 3 min of meeting while the other talked ≥ 10 s →
+  `yap-meeting-warning` once per quiet stretch ("Yap hasn't heard the call/
+  your Teams call for 3 minutes. If it plays through a headset, make that
+  Windows' default output device." / "…your mic…Settings → General"), plus a
+  Windows notification (`meeting_guard::notice_native`) when neither the
+  notepad is on screen nor the main window focused; a dictation counts as the
+  mic heard, not as talk. Commands: `meeting_start`/`meeting_stop`/
   `meeting_state` (signatures unchanged). Test mode opens no audio device (WAVs
-  from `YAP_E2E_MEETING_AUDIO`, or silence; `e2e::e2e_meeting_feed`).
+  from `YAP_E2E_MEETING_AUDIO`, or silence; `e2e::e2e_meeting_feed`; the
+  player also stages a dictation and an output switch, see `e2e.rs`).
 - **`meeting_summary.rs`** — meeting summaries that keep up with long meetings
   (map-reduce, the map done while recording). Every ~10 min of new talk
   (2,000 est. tokens, or 10 min with ≥ 250) a background **digest** (key
@@ -277,7 +316,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   length (raw transcript when ≤ 3,500); `postcheck_action_plan` moves invented
   owners' tasks to Unassigned, strips made-up deadlines and restores dropped
   digest tasks; `ask_context` bounds a long meeting for the Ask bar and the
-  chat `get_note` tool. The notepad's helpers live here too: `catch_up_input`
+  chat `get_note` tool. Every input reads talk only (`TranscriptSegment::
+  is_talk`: no echo, no "You dictated here" markers; markers weigh 0 tokens in
+  the digest windows). The notepad's helpers live here too: `catch_up_input`
   ("What did I miss?": what was said since segment `since`, raw when ≤ 2,400
   tokens, else the digests covering it + the latest ≤ 1,400; context ≤ ~700),
   `meeting_ask_messages` (a follow-up question, ≤ ~3.3k), `title_messages` +
@@ -525,7 +566,10 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   (`pipeline::resample_linear`), plus `chunk_ranges` (~60 s windows cut at the
   quietest sample of each window's last 5 s). Consumed by
   `pipeline::run_file_transcription` (progress events, cancel flag, `processing`
-  guard, history record) via the `transcribe_file` command.
+  guard, the correction dictionary over the whole joined text via
+  `pipeline::apply_corrections` — so a mis-hearing split across two chunks is
+  still caught — and a history record with the raw and corrected text) via the
+  `transcribe_file` command.
 - **`chats.rs`** — the AI Chat surface's conversation store (`chats.json`): a
   `Conversation` (title, messages, timestamps) with `list`/`get`/`create`/
   `append`/`delete`; `chat_send` (commands.rs) creates a conversation on the
@@ -869,9 +913,16 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   `meeting_detect_simulate` stands in), no audio device for meeting recordings
   (`spawn_meeting_audio`: `you.wav`/`them.wav` from `YAP_E2E_MEETING_AUDIO` at
   `YAP_E2E_MEETING_SPEED`× real time, or silence; a configured mic that isn't
-  plugged in still fails, found by listing devices), the debug-only
-  `e2e_meeting_feed { segments }` command (hours of transcript in seconds),
-  calendar secrets in `<data>/calendar-secrets.e2e.json` instead of
+  plugged in still fails, found by listing devices; it pushes through
+  `meeting::push_audio` + `keep_in_step` like the real capture and logs "the
+  test audio has played to the end"), the debug-only
+  `e2e_meeting_feed { segments }` command (hours of transcript in seconds,
+  corrected with the dictionary like real lines), `e2e_meeting_dictation
+  { from, to }` (the pipeline's dictation signal over that stretch of the test
+  audio — no mic involved), `e2e_meeting_output_change { at? }` (a default-
+  output switch: "Them" gets nothing for 1 s, then follows the "new device")
+  and `e2e_meeting_quiet { quietSecs?, talkSecs? }` (short quiet-side
+  timings), calendar secrets in `<data>/calendar-secrets.e2e.json` instead of
   Credential Manager and links recorded (`calendar_e2e_opened`) instead of
   opened in a browser, and it quits when its stdin closes. See
   [`docs/e2e-tests.md`](./docs/e2e-tests.md).
@@ -969,7 +1020,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   withdrawn when Rust sends `{warning: null}`), and one-off
   `yap-meeting-notice` toasts: the screen-share tip (`icon: 'screen'`,
   **Update settings** → `general#screen-sharing`), "Stopped at 2 hours", "Teams
-  call ended · Yap stopped recording…", "Taking notes"), and **"Started by
+  call ended · Yap stopped recording…", "Taking notes"; plus meeting.rs's
+  `yap-meeting-warning` strings — falling behind, a side gone quiet — as a
+  12 s toast in whichever view is open), and **"Started by
   mistake?"** (`meetingSummary.svelte.js` — the shared store of the Rust
   action-plan jobs, `summaries.byNote` / `.progress`, also used by NotesView
   and the notepad; `askStartedByMistake` = a sticky "Only a few words were
@@ -1026,7 +1079,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   ☐ tasks, plain headings); embedded per-note **"Ask anything…" bar** = Chat
   scope grounded in the note, with mic button for in-box dictation; live
   **You/Them meeting transcript bubbles** (follow the newest line; echo lines
-  hidden behind a "Show N lines…" toggle), an **AI notes so far** view of the
+  hidden behind a "Show N lines…" toggle; a `dictated` marker is a quiet dashed
+  "You dictated here · left out of the notes" divider with a mic glyph), an
+  **AI notes so far** view of the
   rolling digests ("AI notes up to 40:12"), an **Action plan** button on
   finished meetings, a "Writing your action plan… / Catching up on the meeting
   — part 3 of 12" line, and, without an AI model, a "Your meeting is saved…"
@@ -1518,7 +1573,12 @@ Symphonia decode + chunking), an **AI Notepad** (`notes.rs` — folders/actions/
 participants/transcripts, an Actions engine, ActionPicker/ActionManager, attendee +
 folder management, markdown export, an embedded per-note chat), a **meeting
 recorder** (`meeting.rs` — mic + WASAPI loopback → You/Them transcript, cut in
-pauses, speaker echo flagged; `meeting_summary.rs` — rolling ~10-minute digests
+pauses, speaker echo flagged, corrected with the dictionary like a dictation;
+hotkey dictations kept out of "You" with a "You dictated here" marker; "Them"
+follows Windows' default output device, both sides kept on one clock; a side
+quiet for 3 minutes while the other talks gets a warning — all e2e-tested in
+`meeting-audio.spec.js`, the real device switch only through a simulation
+hook so far; `meeting_summary.rs` — rolling ~10-minute digests
 while it records, then **End meeting & summarise** → an **action plan** with a
 section per person + Decisions / Open questions / Unassigned, every AI call
 within an 8k local context whatever the length; e2e-tested with a two-hour
@@ -1587,7 +1647,8 @@ or folder "add existing note" picker; meetings have no speaker diarization
 ("Them" is everyone else; tasks are attributed from attendees and names said)
 and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](./docs/meetings.md) "Limits"), and a real call (live
-WASAPI loopback + a real LLM's action plan) still wants one hands-on pass;
+WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a
+hotkey dictation mid-call) still wants one hands-on pass;
 the calendar has no one-click Outlook (Microsoft Graph) and no pre-meeting
 brief;
 a true streaming model for the partial pass (spike-gated

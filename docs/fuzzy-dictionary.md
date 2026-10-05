@@ -159,6 +159,12 @@ extracted `app.asar`, Handy clone):
   hallucinated back — whisper-only, and only when the dictionary has ≥3 words
   so a real one-word dictation of a dictionary term can't be eaten.
 
+**2026-10-05:** the exact + fuzzy passes are one function,
+`pipeline::apply_corrections(text, &cfg)`, and run on meeting segments (both
+sides, before they're saved) and on an Upload's whole text as well as on a
+dictation. Before, meetings and Upload got the dictionary only as Whisper's
+`initial_prompt`, so with the default Parakeet model they got no corrections.
+
 Still open from the original list: multi-trigger entries (`triggers[] → to`)
 and OpenWhispr-style auto-learning (needs an edit-observation channel).
 (The per-entry fuzzy flag from option 3's guardrails shipped 2026-07-10,

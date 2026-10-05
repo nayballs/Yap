@@ -19,7 +19,8 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 
 | Piece | Code |
 |---|---|
-| Recorder: capture, chunking, echo check | `src-tauri/src/meeting.rs` |
+| Recorder: capture, chunking, echo check, dictations kept out, following the output device, quiet sides | `src-tauri/src/meeting.rs` |
+| The dictation signal; the correction dictionary (`apply_corrections`) | `src-tauri/src/pipeline.rs` |
 | Guard rails: maximum length, the meeting shortcut, notices | `src-tauri/src/meeting_guard.rs` |
 | Hiding meeting windows from screen capture | `src-tauri/src/capture.rs` |
 | Rolling digests, the final input, the checks; the notepad's catch-up and title inputs | `src-tauri/src/meeting_summary.rs` |
@@ -28,7 +29,7 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 | The notepad window: docking, split screen | `src-tauri/src/notepad.rs` |
 | The calendar: meetings, the reminder card, a note's meeting | `src-tauri/src/calendar.rs` (+ `calendar/`; [`calendar.md`](./calendar.md)) |
 | Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_TITLE_PROMPT`) | `src-tauri/src/llm.rs` |
-| Storage (`Note::digests`, `TranscriptSegment::echo`, `Action::kind`, `Note::title_auto`) | `src-tauri/src/notes.rs` |
+| Storage (`Note::digests`, `TranscriptSegment::echo` / `::dictated`, `Action::kind`, `Note::title_auto`) | `src-tauri/src/notes.rs` |
 | The action run (`note_enhance` / `run_enhance`) | `src-tauri/src/commands.rs` |
 | UI | `src/lib/NotesView.svelte`, `src/lib/Notepad.svelte`, `src/lib/meetingSummary.svelte.js` |
 
@@ -41,11 +42,14 @@ note) and the bottom bar's action picker becomes **End meeting & summarise**
 [meeting notepad](#the-meeting-notepad) (a setting, on by default).
 
 - **Two streams.** The mic ("You") and WASAPI loopback ("Them": a cpal input
-  stream on the default output device), each downmixed and resampled to
-  16 kHz on its own capture thread.
+  stream on Windows' default output device), each downmixed and resampled to
+  16 kHz on its own capture thread. "Them" follows the default output: see
+  [Following the output device](#following-the-output-device).
 - **Chunks cut between words.** Once a source has 15 s buffered, the worker
   cuts it at the quietest 20 ms frame of the last 4 s, leaving the newest
-  0.3 s, where a word may still be going on (`media::quietest_frame`). It used
+  0.4 s, where a word may still be going on (`media::quietest_frame`; a
+  backlog keeps that margin too, so a dictation's pre-roll is always still
+  buffered when it starts). It used
   to cut every 15 s on the dot, splitting words. `media::quietest_index`
   (one sample every 10 ms) isn't enough here: in running speech it lands on
   zero crossings mid-word, while a whole frame only reads quiet in a real
@@ -58,11 +62,28 @@ note) and the bottom bar's action picker becomes **End meeting & summarise**
   20 minutes (~77 MB); past that, newer audio is dropped and the UI says
   "Transcription is falling behind". The transcript itself is text (~150 KB
   for two hours).
+- **The correction dictionary.** Every chunk's text, both sides, goes
+  through the dictionary exactly as a dictation does
+  (`pipeline::apply_corrections`): the exact replacements, then, for an ONNX
+  model with **Catch near-misses** on, the fuzzy pass ("send the jaisen file"
+  → "send the JSON file"; entries opted out of it stay exact-only). Until
+  2026-10 meetings only gave Whisper the words as its `initial_prompt`, so
+  with the default Parakeet model they got no corrections at all; names
+  matter twice here, as the action plan only takes owners who are attendees
+  or names said in the meeting. The echo check compares corrected text on
+  both sides. Upload runs the same function over a file's whole text.
 - **Saved as it comes.** Segments `{ source, text, ts }` are emitted live
   (`yap-meeting-segment`) and appended to the note on every chunk, so a crash
   loses at most one chunk. `ts` is when the segment's speech started (its
   first 20 ms frame of speech), which also orders a "You" and a "Them" chunk
   cut at the same moment.
+- **One clock.** A position in a side's audio is a time in the meeting, so a
+  side must never skip time: WASAPI loopback delivers nothing while nothing
+  plays on the device, and a device switch leaves a gap. A side whose device
+  has been silent while the other moved on half a second is filled with
+  silence up to it (`keep_in_step`, every 200 ms on the capture thread).
+  Without that, "Them" would run early after a gap (its segments dated too
+  soon, and the echo check holding the wrong stretches side by side).
 - **Echo.** On speakers, the mic hears the call too, so "You" repeats "Them",
   and a summary could hand "I'll do it" to the wrong person. A "You" chunk is
   flagged `echo` only when both hold: its words mostly repeat what "Them"
@@ -75,6 +96,81 @@ note) and the bottom bar's action picker becomes **End meeting & summarise**
   chunk where the user also spoke is kept whole. OpenWhispr's
   `meetingEchoLeakDetector.js` does the audio side with sample correlation and
   echo cancellation; this is the light, offline version.
+
+### Dictating mid-meeting
+
+Yap's users dictate, and mid-call they dictate a Slack reply or an email with
+the hotkey. The meeting's mic stream and the dictation's are two streams on
+the same mic, so those words used to land in "You" too, could become tasks in
+the action plan, and travelled wherever the notes went. Wispr Flow leaves them
+out and marks the gap; so does Yap now.
+
+- **The signal.** `pipeline::start_recording` (plain dictation, the edit
+  hotkey and the wake-word path all record through it) bumps one atomic,
+  `count << 1 | recording`; the stop and the cancel clear the recording bit.
+  The meeting's mic callback reads it once per callback, lock-free
+  (`pipeline::dictation_state`), and still notices a dictation that started
+  and ended between two of its callbacks (the count moved on).
+- **Silence, not a gap.** While a dictation records, the mic side gets
+  silence instead of the audio, the same length, so segment times and the echo
+  check stay aligned. A new dictation also blanks the newest ~340 ms already
+  buffered: its pre-roll (the 300 ms before the press that the dictation
+  prepends to catch a word already under way) plus 40 ms for the two streams'
+  callbacks not lining up. The callback that sees the dictation end is blanked
+  too, as it may hold its last moment. "Them" carries on untouched. A
+  dictation counts as the mic being heard (it works), not as meeting talk
+  ([Quiet sides](#quiet-sides)).
+- **The marker.** Each blanked span leaves one segment
+  `{ source: "you", text: "", ts, dictated: true }`, dated where the span
+  began (its pre-roll), whichever chunk it falls in or spans. The Notes view
+  shows it as a quiet divider with a mic glyph, "You dictated here · left out
+  of the notes" (the meeting notepad's Transcript tab draws its own divider
+  for the same flag). Digests, the action plan,
+  "What did I miss?", the AI title, the Ask bar, the chat `get_note` tool and
+  "Started by mistake?" all read talk only (`TranscriptSegment::is_talk`: no
+  echo, no markers), and the markdown export writes "_You dictated here (left
+  out of the notes)._".
+- **What isn't kept.** The dictated words aren't stored with the meeting at
+  all (a dictation goes to History as usual); the marker only says when.
+
+### Following the output device
+
+"Them" is a loopback stream on Windows' default output device. Plug in a
+headset, or pick another output in Windows, and the call moves to the new
+default while the old stream hears nothing. The capture thread reads the
+default render endpoint's id every 2 s (`IMMDeviceEnumerator`, the "console"
+role, as cpal) and when it changed reopens the loopback stream on the new
+device: the old stream stops first, so the two never interleave; if the new
+one won't open, the old one carries on and the next check tries again (said
+once in the log). The gap is silence ([one clock](#recording)). The log says
+`Meeting: Windows' default output changed; "Them" now follows it`, after the
+new stream's own line naming the device.
+
+A call app can also play on a device of its own choosing (Teams and Zoom
+have speaker settings). When that isn't Windows' default, loopback never
+hears the call, which the quiet-side warning below catches.
+
+### Quiet sides
+
+While recording, the worker watches both sides every 200 ms. When one side
+has heard nothing above the silence gate for **3 minutes** of the meeting
+while the other talked at least **10 s** in that time, Yap says so once, until
+that side is heard again:
+
+- "Them" quiet: "Yap hasn't heard your Teams call for 3 minutes. If it plays
+  through a headset, make that Windows' default output device." (naming the
+  call when call detection sees one; else "the call").
+- "You" quiet: "Yap hasn't heard your mic for 3 minutes. If you're talking,
+  check it isn't muted, and pick the right mic in Settings → General."
+
+Both sides quiet is a break, not a fault, and a cough isn't talk. The warning
+is the existing `yap-meeting-warning`: a toast in the main window, in
+whichever view is open (`meetingGuard.js`, 12 s), and in the meeting notepad.
+When neither is in view (the notepad isn't on screen and the main window
+isn't focused: the person is in their call app), it's also a Windows
+notification ("Yap can't hear the call", or "…your mic" with **Update
+settings**). The recording carries on either way. An in-person meeting (no
+call) gets the "Them" warning once too; its wording says "If".
 
 ## Summaries that keep up with long meetings
 
@@ -483,8 +579,36 @@ KeyTips) and Win the Start menu.
   tokens for a 2-hour and an 8-hour meeting, the post-check (an invented
   owner, a dropped task, a made-up deadline), digests having to continue each
   other, older note stores loading and getting the Action Plan once, and a
-  digest giving way to a dictation (`unless_busy`).
+  digest giving way to a dictation (`unless_busy`). The recorder's audio
+  (`cargo test --lib -- meeting:: pipeline:: notes::`): a dictation blanked
+  with its pre-roll and the callback that saw it end, its marker coming once
+  with the chunk it starts in when a cut lands in the middle of it, two
+  dictations in one chunk (one cancelled a callback later), one that began
+  and ended between two callbacks, back-to-back ones as one span, one still
+  recording when the meeting starts (blanked) or ended before it (ignored),
+  "Them" never blanked, every mid-meeting cut leaving the pre-roll buffered;
+  a stalled side filled up to the other and a short hiccup not; following
+  the default output (switch, a failed reopen retried and said once, no
+  device); the quiet-side watch (said once per stretch, again after the side
+  is heard, the mic side, a break, a cough, short timings) and its wording;
+  markers left out of every summary input, the catch-up and the word count;
+  the dictation signal; and `apply_corrections` (exact then fuzzy for ONNX,
+  exact only for Whisper or with near-misses off, the per-entry opt-out).
 - **e2e** (`npm run test:app`), with no audio device and no real AI:
+  - `e2e/meeting-audio.spec.js` (test WAVs at 4×): a dictation staged over
+    18–32 s of a meeting (`e2e_meeting_dictation`, the pipeline's own signal)
+    while "You" talks at 1–9 s and 21–30 s: one "You" line, a "You dictated
+    here" marker, the call carrying on after it, `{ dictated: true }` in
+    notes.json; the dictionary on transcribed lines (the stub's "STT stub" →
+    "Corrected", both sides), on lines handed over (a near-miss "jaisen" →
+    "JSON" and "chat GPT" → "ChatGPT") and on an uploaded file (History
+    keeps raw and corrected); a default-output switch 6 s in
+    (`e2e_meeting_output_change`: "Them" gets nothing for a second, then
+    follows the new device), the log saying so, the recording going on, and
+    "Them" as long as "You" afterwards (22 s each); the quiet-side warning
+    with 6 s timings (`e2e_meeting_quiet`), for the call and for the mic,
+    with the recording going on. Run against builds with the gate or the
+    filling switched off, the dictation and switch tests fail.
   - `e2e/meetings.spec.js`: the recorder plays test WAVs (4× real time);
     You/Them segments appear live; ending the meeting without AI shows the
     setup card; a mic track that's a delayed, quieter copy of the call is
@@ -525,7 +649,12 @@ KeyTips) and Win the Start menu.
     progress and error states.
     Test-mode hooks, all compiled out of release builds (`e2e.rs`):
     `YAP_E2E_MEETING_AUDIO` (a folder with `you.wav` and `them.wav`),
-    `YAP_E2E_MEETING_SPEED` and the `e2e_meeting_feed { segments }` command.
+    `YAP_E2E_MEETING_SPEED`, the `e2e_meeting_feed { segments }` command
+    (corrected with the dictionary like real lines), and for the recorder's
+    audio `e2e_meeting_dictation { from, to }`, `e2e_meeting_output_change
+    { at? }` (seconds of the test audio) and `e2e_meeting_quiet { quietSecs?,
+    talkSecs? }`. The player logs "the test audio has played to the end", so
+    a test can stop after all of it.
 - **Real speech, once** (2026-10-05): a 74 s scripted two-voice meeting
   rendered to WAV with Windows TTS (George as You, Zira as Them; to files,
   never played), through a debug `engines` build with Parakeet V3 on
@@ -564,6 +693,26 @@ KeyTips) and Win the Start menu.
   meeting chunk holds the warm engine, dictation loads a second copy (an
   older behaviour of the shared slot). Waiting briefly for the engine to come
   back would be cheaper.
+- **Dictating mid-meeting.** The blanking is at callback granularity (10 ms)
+  and assumes the two mic streams deliver within ~40 ms of each other. Meeting
+  talk in the same chunk as a dictation is one "You" line, dated at its first
+  speech, so talk after the dictation can show above the marker (as with
+  turns within a chunk). With **Mute while recording** on, the call itself is
+  muted during a dictation, so "Them" misses that stretch too. Checked with
+  the e2e player's signal; a real hotkey dictation mid-call wants a dev pass.
+- **The output device.** Yap follows Windows' default ("console") output. A
+  call app playing on another device, or on the default *communications*
+  device when that differs, isn't heard; the quiet-side warning says so but
+  can't fix it. Capturing every active output (a loopback stream per device,
+  or process loopback of everything but Yap, which would also keep Yap's own
+  chimes out of "Them") is the follow-up. A device that stops working without
+  the default changing isn't reopened. The switch itself is tested through a
+  simulation hook; a headset plugged in mid-call wants a dev pass.
+- **Quiet sides.** An in-person meeting (nothing playing) gets the "Them"
+  warning once. Sounds Yap or other apps play on the default output (a
+  dictation chime, a notification) count as the call being heard and start a
+  new quiet stretch. The level is a peak gate (0.008), so a mic that only
+  picks up loud background noise counts as heard.
 - **Guard rails.** Hiding from capture is checked through the window's
   affinity and one desktop capture, not yet in a real Teams/Zoom screen
   share. Stops Yap makes itself (the length limit, "Stop and summarise

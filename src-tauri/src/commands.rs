@@ -306,6 +306,10 @@ pub fn note_export(id: u64, path: String) -> Result<(), String> {
     if !note.transcript.is_empty() {
         out.push_str("\n## Meeting Transcript\n\n");
         for seg in &note.transcript {
+            if seg.dictated {
+                out.push_str("_You dictated here (left out of the notes)._\n\n");
+                continue;
+            }
             let who = if seg.source == "you" { "You" } else { "Them" };
             out.push_str(&format!("**{who}:** {}\n\n", seg.text));
         }
