@@ -36,6 +36,8 @@ mod text_injector;
 mod tray;
 mod updates;
 mod usage;
+#[cfg(windows)]
+mod win_toast;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
