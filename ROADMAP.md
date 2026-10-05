@@ -872,15 +872,15 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
 **Fixes the docs teardown found in Yap** (`docs/wispr-notetaker-teardown.md` §8; the
 first three are being built alongside Wave 1, since neither the notepad nor the guard
 rails touch `meeting.rs`; the consent message waits for the notepad, where it lives)
-- [ ] *(building)* **Dictation leaks into a meeting's "You" transcript.** The meeting keeps its own
+- [ ] *(merged, dev check: 81d4a35)* **Dictation leaks into a meeting's "You" transcript.** The meeting keeps its own
       mic stream open during a hotkey dictation. Blank it while dictating and leave a
       "Dictated" marker.
-- [ ] *(building)* **Meeting lines (and Upload) skip the correction dictionary** (exact and fuzzy), so
+- [ ] *(merged, dev check: 81d4a35)* **Meeting lines (and Upload) skip the correction dictionary** (exact and fuzzy), so
       with the default Parakeet model meetings get no corrections.
-- [ ] *(building)* **"Them" follows the default output device chosen at start.** A headset picked
+- [ ] *(merged, dev check: 81d4a35)* **"Them" follows the default output device chosen at start.** A headset picked
       inside Teams leaves "Them" silent with no warning. Follow device changes, and warn
       when one side goes quiet.
-- [ ] **An editable "Copy consent message"** for the meeting chat.
+- [ ] *(building)* **An editable "Copy consent message"** for the meeting chat.
 
 Skipped on purpose, because they need a hosted cloud: share-by-link, auto-share and
 org-wide admin controls. Copy-as-markdown/text and export cover sharing locally.
