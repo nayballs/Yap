@@ -428,7 +428,7 @@ impl Default for YapConfig {
             cleanup_profiles: Vec::new(),
             llm_scopes: std::collections::HashMap::new(),
             agent_name: String::new(),
-            streaming_partials: false,
+            streaming_partials: true,
             history_enabled: true,
             bridge_enabled: true,
         }
@@ -769,5 +769,17 @@ mod tests {
         assert_eq!(cfg.llm_scopes["notes"].model, "llama-3.1-8b-instant");
         // already current → untouched
         assert_eq!(cfg.llm_scopes["agent"].model, "openai/gpt-oss-120b");
+    }
+
+    #[test]
+    fn fresh_install_defaults_match_serde_defaults() {
+        // A first run (no config.json) gets `YapConfig::default()`; an older
+        // config.json that lacks a field gets that field's `#[serde(default)]`.
+        // The two must agree, or new users silently start with different
+        // settings — streaming_partials was on via serde but off in `Default`.
+        let fresh = serde_json::to_value(YapConfig::default()).unwrap();
+        let from_empty =
+            serde_json::to_value(serde_json::from_str::<YapConfig>("{}").unwrap()).unwrap();
+        assert_eq!(fresh, from_empty);
     }
 }
