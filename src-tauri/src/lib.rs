@@ -452,6 +452,12 @@ pub fn run() {
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_feed,
             #[cfg(debug_assertions)]
+            e2e::e2e_meeting_dictation,
+            #[cfg(debug_assertions)]
+            e2e::e2e_meeting_output_change,
+            #[cfg(debug_assertions)]
+            e2e::e2e_meeting_quiet,
+            #[cfg(debug_assertions)]
             meeting_guard::e2e_meeting_limit,
         ])
         // A meeting window (the notepad, the overlay) that loads while a
