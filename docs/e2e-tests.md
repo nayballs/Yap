@@ -54,11 +54,13 @@ points the suite at an exe directly), so it never competes with a running
   (`YAP_MCP_CLIENT_ROOT`): a run never adds Yap to your real Claude, Cursor…
 
 A Yap window (1200×800) shows on screen while the suite runs, plus the
-onboarding window and the overlay for a moment, and in the meeting specs the
+onboarding window for a moment, the Yap bar (the `overlay` window, a small
+pill above the taskbar of the primary monitor), and in the meeting specs the
 meeting notepad, docked to the right edge of the screen. They never take the
 focus, and Playwright's clicks and keys go to the webviews, not to your mouse
 or keyboard. (Don't click on them while the suite runs: a real click on the
-notepad's Stop, say, ends a test's meeting.)
+notepad's Stop, say, ends a test's meeting.) A test run's bar never reads
+your cursor or the window in front of you: `bar_simulate` stands in.
 
 ## Where the results go
 
@@ -105,6 +107,7 @@ then open `screenshots/` (Claude can read the PNGs directly) or
 |------|----------|-------|
 | `e2e/app.spec.js` | default | Home renders in portable mode · every sidebar view · every Settings section · a setting saved to `config.json` and read back after a reload · a new note survives a view switch · a dictionary entry is saved · Account signed out with the service unreachable · onboarding opens on its first step · a stub dictation lands in the Home feed (skipped without a microphone) |
 | `e2e/no-mic.spec.js` | configured mic missing | starts anyway and says "No microphone found" (toast + overlay) when asked to record · Upload still transcribes a file |
+| `e2e/bar.spec.js` | default | the Yap bar (`yap.overlay`), through the debug-only `bar_simulate` (a pretend cursor on a region, fake fullscreen kinds, Esc) and `bar_debug`: idle, bottom-centre on the work area, click-through and never activated — its ex-styles read inside the app and from outside it (`support/win32.js`: GetWindowLongPtr, and WindowFromPoint on the pill showing a click would go through) · the cursor on the pill opens it and makes just that clickable, then click-through again; tooltips with the shortcut · its menu: hide for an hour (Settings shows it, Show it now) and Turn off the bar (saved; Settings adopts it and turns it back on) · Settings → General → Yap bar · a call prompt as a "Meeting detected" card (its ^ menu, ✕, an app's mark), answered on the bar · fullscreen: no pill, a card over a borderless app, a card waiting out an exclusive one · ◉ starts meeting notes, the recording pill opens the notepad and ■ ends the meeting · the opt-in countdown (Esc cancels; left alone it records; the call-ended card) · dictating in the pill's place |
 | `e2e/updates.spec.js` | pointed at a local `latest.json` | a manual check finds the next patch version, downloads and verifies it, the "ready" toast and Settings → About say so, and "Restart to update" stops short of the installer (debug builds never run it) |
 | `e2e/meeting-detect.spec.js` | default | call detection through the debug-only `meeting_detect_simulate` hook: a call offers to take notes and "Not now" leaves it (and the app's next call) alone · a prompt leaves with its call · a prompt left alone fades (its `fadeMs` shortened from 30 s) and counts as "Not now" · "Record notes" creates a Meetings note and records it, the call ending offers "Stop and summarise", which ends it in the note and runs the summary step · "Keep recording" carries the notes into a rejoined huddle, whose end asks again · a Discord call isn't asked about by default · "Don't ask for Teams" confirms, Settings shows Teams off, and switching it back on asks again · "Quietly" keeps the prompt out of the window · Settings lists how Yap asks and every app's effective choice, in two columns · the Settings toggle turns it off and greys out the rest |
 | `e2e/meeting-detect-no-mic.spec.js` | configured mic missing | "Record notes" says why it can't record and leaves no empty meeting note |

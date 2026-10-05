@@ -62,8 +62,8 @@
       {
         "label": "overlay",
         "title": "Yap",
-        "width": 330,
-        "height": 48,
+        "width": 520,
+        "height": 560,
         "resizable": false,
         "decorations": false,
         "transparent": true,
@@ -71,6 +71,7 @@
         "skipTaskbar": true,
         "shadow": false,
         "focus": false,
+        "focusable": false,
         "visible": false,
         "center": false
       }
