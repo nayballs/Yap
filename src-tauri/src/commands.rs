@@ -171,6 +171,13 @@ pub fn configure_edit_hotkey(spec: String) {
     let _ = crate::input_hook::configure_edit(&spec);
 }
 
+/// Live-apply the meeting shortcut (the Settings recorder pauses it while
+/// choosing a key, as for the other two).
+#[tauri::command]
+pub fn configure_meeting_hotkey(spec: String) {
+    let _ = crate::input_hook::configure_meeting(&spec);
+}
+
 /// Toggle recording on/off (same action as the global hotkey).
 #[tauri::command]
 pub fn toggle_recording(state: State<'_, AppState>) {
@@ -232,16 +239,43 @@ pub fn note_create(
 }
 
 /// Update a note's title / raw content / folder / attendees (enhancement
-/// fields untouched — an edit just marks the Enhanced tab stale).
+/// fields untouched — an edit just marks the Enhanced tab stale). The other
+/// windows showing the note follow it: `yap-note-changed` carries the note's
+/// editable fields and `origin`, the label of the window that saved (the
+/// Notes view and the meeting notepad keep each other in sync both ways).
 #[tauri::command]
 pub fn note_update(
+    app: AppHandle,
     id: u64,
     title: Option<String>,
     content: Option<String>,
     folder: Option<String>,
     participants: Option<Vec<String>>,
+    origin: Option<String>,
 ) -> Result<(), String> {
-    crate::notes::update(id, title, content, folder, participants)
+    crate::notes::update(id, title, content, folder, participants)?;
+    note_changed(&app, id, origin.as_deref().unwrap_or(""));
+    Ok(())
+}
+
+/// Tell every window that note `id`'s editable fields changed (`origin`:
+/// who changed them, a window label or "ai"); see [`note_update`].
+pub(crate) fn note_changed(app: &AppHandle, id: u64, origin: &str) {
+    use tauri::Emitter;
+    if let Some(n) = crate::notes::get(id) {
+        let _ = app.emit(
+            "yap-note-changed",
+            serde_json::json!({
+                "id": n.id,
+                "title": n.title,
+                "titleAuto": n.title_auto,
+                "content": n.content,
+                "folder": n.folder,
+                "participants": n.participants,
+                "origin": origin,
+            }),
+        );
+    }
 }
 
 /// Export a note as a markdown file at `path` (the editor's download button):
@@ -346,6 +380,20 @@ pub async fn note_enhance(
     id: u64,
     action_id: Option<u64>,
 ) -> Result<String, String> {
+    run_enhance(&app, id, action_id, |_| {}).await
+}
+
+/// The body of [`note_enhance`], with `step` told where it is, for the
+/// notepad's "Step 2 of 3" (`meeting_end.rs` runs the action plan this way):
+/// 1 reading the meeting (catching up on its digests), 2 writing, 3 checking
+/// owners and deadlines and saving.
+pub(crate) async fn run_enhance(
+    app: &AppHandle,
+    id: u64,
+    action_id: Option<u64>,
+    step: impl Fn(u8),
+) -> Result<String, String> {
+    step(1);
     let note = crate::notes::get(id).ok_or("Note not found")?;
     let hash = crate::notes::content_hash(&note.content);
     let cfg = config::load();
@@ -366,7 +414,7 @@ pub async fn note_enhance(
     // (OpenWhispr PersonalNotesView "assemble input"), long ones digested.
     let is_meeting = note.note_type == "meeting" && !note.transcript.is_empty();
     let (content, attendees, digest_actions) = if is_meeting {
-        let note = crate::meeting_summary::prepare_final(&app, id, &ep).await?;
+        let note = crate::meeting_summary::prepare_final(app, id, &ep).await?;
         let input = crate::meeting_summary::compose_meeting_input(&note);
         (input.text, note.participants, input.digest_actions)
     } else if note.participants.is_empty() {
@@ -386,6 +434,7 @@ pub async fn note_enhance(
     } else {
         crate::llm::NOTE_BASE_PROMPT
     };
+    step(2);
     let mut enhanced = crate::llm::enhance_note(
         &content,
         base,
@@ -397,6 +446,7 @@ pub async fn note_enhance(
         &ep.final_options(),
     )
     .await?;
+    step(3);
     if action_plan {
         enhanced = crate::meeting_summary::postcheck_action_plan(
             &enhanced,
@@ -433,6 +483,7 @@ pub fn meeting_start(
 /// then the closing `yap-meeting-state` fires).
 #[tauri::command]
 pub fn meeting_stop() -> Result<(), String> {
+    tracing::info!("Meeting stop asked for (meeting_stop)");
     crate::meeting::stop()
 }
 
@@ -772,6 +823,9 @@ pub fn save_config(
     if let Err(e) = crate::input_hook::configure_edit(&cfg.edit_hotkey) {
         tracing::warn!("Failed to apply edit hotkey: {}", e);
     }
+    if let Err(e) = crate::input_hook::configure_meeting(&cfg.meeting_hotkey) {
+        tracing::warn!("Failed to apply meeting hotkey: {}", e);
+    }
     // The tray is reconciled on every save (always-on since the pill retired) —
     // reconcile it live instead of waiting for the next app restart.
     crate::tray::ensure_tray(&app, &cfg);
@@ -786,6 +840,8 @@ pub fn save_config(
     crate::bridge::sync(&app, cfg.bridge_enabled);
     // …and the "Detect calls and offer to take notes" toggle.
     crate::meeting_detect::sync(&app, cfg.meeting_detection);
+    // Hiding meeting windows from screen shares may have flipped mid-meeting.
+    crate::capture::sync(&app);
     // …and the Yap bar (on/off, fullscreen, position, the tooltips' hotkeys).
     crate::bar::sync(&app, &cfg);
     if let Ok(guard) = state.pipeline.lock() {

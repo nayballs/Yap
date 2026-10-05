@@ -1465,6 +1465,239 @@ pub async fn prepare_final(app: &AppHandle, note_id: u64, ep: &Endpoint) -> Resu
     }
 }
 
+// ---- The notepad's helpers: "What did I miss?" and the meeting title ----
+//
+// Both read a bounded slice of the meeting, like `ask_context`, so they fit
+// an 8k local model with room to spare (≤ ~3.5k in, a few hundred out), and
+// both go through [`chat_beside_dictation`], so they never slow a dictation.
+
+/// New talk up to this size goes to "What did I miss?" as it is…
+pub const CATCH_UP_RAW_TOKENS: usize = 2_400;
+/// …a longer stretch as the digests that cover it (this much)…
+const CATCH_UP_DIGEST_TOKENS: usize = 1_000;
+/// …and the raw talk after them (this much).
+const CATCH_UP_TAIL_TOKENS: usize = 1_400;
+/// Earlier talk handed over as context (on top of the digests' key points).
+const CATCH_UP_CONTEXT_TOKENS: usize = 300;
+/// Reply cap for a catch-up answer (local models only).
+pub const CATCH_UP_REPLY_TOKENS: u32 = 400;
+/// A follow-up question reads this much of the meeting (`ask_context`).
+const MEETING_ASK_TOKENS: usize = 2_600;
+/// The AI title reads this much of the start of the meeting…
+const TITLE_TRANSCRIPT_TOKENS: usize = 700;
+/// …and replies in at most this much (local models only).
+pub const TITLE_REPLY_TOKENS: u32 = 30;
+
+/// What "What did I miss?" sends: everything said since segment `since`
+/// (where the person last looked), with a little of what came before as
+/// context. The new part is the raw transcript when it fits
+/// [`CATCH_UP_RAW_TOKENS`], else the digests covering it plus its latest
+/// stretch. `None` when nothing was said since (echo doesn't count).
+pub fn catch_up_input(note: &Note, since: usize) -> Option<String> {
+    let since = since.min(note.transcript.len());
+    let new = &note.transcript[since..];
+    let first = new.iter().find(|s| !s.echo)?;
+    let last = new.iter().rev().find(|s| !s.echo)?;
+    let t0 = meeting_t0(note);
+
+    // Earlier in the meeting: the digests that end before `since`, then the
+    // raw talk between them and `since`.
+    let earlier: Vec<MeetingDigest> = note
+        .digests
+        .iter()
+        .filter(|d| d.to_seg <= since)
+        .cloned()
+        .collect();
+    let mut context = String::new();
+    if !earlier.is_empty() {
+        context.push_str(&context_so_far(&earlier, t0));
+        context.push('\n');
+    }
+    let from = earlier.last().map(|d| d.to_seg).unwrap_or(0).min(since);
+    let before = transcript_lines(&note.transcript[from..since]);
+    if !before.trim().is_empty() {
+        context.push_str(&keep_last_tokens(&before, CATCH_UP_CONTEXT_TOKENS));
+    }
+    if context.trim().is_empty() {
+        context = "(Nothing: this is the start of the meeting.)".to_string();
+    }
+
+    let raw = transcript_lines(new);
+    let body = if estimate_tokens(&raw) <= CATCH_UP_RAW_TOKENS {
+        raw
+    } else {
+        let covering: Vec<MeetingDigest> = note
+            .digests
+            .iter()
+            .filter(|d| d.to_seg > since)
+            .cloned()
+            .collect();
+        if covering.is_empty() {
+            keep_last_tokens(&raw, CATCH_UP_RAW_TOKENS)
+        } else {
+            let upto = crate::notes::digested_upto(note).clamp(since, note.transcript.len());
+            let tail = transcript_lines(&note.transcript[upto..]);
+            let mut body = format!(
+                "Notes on the first part of it:\n{}",
+                render_digests(&covering, t0, CATCH_UP_DIGEST_TOKENS)
+            );
+            if !tail.trim().is_empty() {
+                body.push_str(&format!(
+                    "\nWhat was said after that:\n{}",
+                    keep_last_tokens(&tail, CATCH_UP_TAIL_TOKENS)
+                ));
+            }
+            body
+        }
+    };
+    Some(format!(
+        "Attendees: {}\n\nEarlier in the meeting (context only):\n{}\n\nSince they last looked ({}\u{2013}{}):\n{}",
+        attendees_line(&note.participants),
+        context.trim_end(),
+        clock(first.ts.saturating_sub(t0)),
+        clock(last.ts.saturating_sub(t0)),
+        body.trim_end()
+    ))
+}
+
+/// The chat messages for "What did I miss?" over [`catch_up_input`].
+pub fn catch_up_messages(input: &str) -> Value {
+    json!([
+        { "role": "system", "content": crate::llm::CATCH_UP_PROMPT },
+        { "role": "user", "content": input },
+    ])
+}
+
+/// The chat messages for a follow-up question about the meeting: attendees,
+/// the notes the person typed and the meeting as [`ask_context`] bounds it.
+pub fn meeting_ask_messages(note: &Note, question: &str) -> Value {
+    let mut input = format!("Attendees: {}\n", attendees_line(&note.participants));
+    let typed = note.content.trim();
+    if !typed.is_empty() {
+        input.push_str(&format!(
+            "\nNotes they typed:\n{}\n",
+            truncate_to_tokens(typed, FINAL_NOTES_TOKENS)
+        ));
+    }
+    if !note.transcript.is_empty() {
+        input.push('\n');
+        input.push_str(&ask_context(note, MEETING_ASK_TOKENS));
+    }
+    json!([
+        { "role": "system", "content": crate::llm::MEETING_ASK_PROMPT },
+        { "role": "user", "content": format!("{}\n\nQuestion: {}", input.trim_end(), question.trim()) },
+    ])
+}
+
+const TITLE_EXAMPLE_IN: &str = "Attendees: (not given)\n\nTranscript (start):\nYou: Thanks for jumping on, Priya. I want to lock the launch date today.\nThem: Sure. Marketing needs a week's notice for the press release.\nYou: Then let's say March 3rd and work back from there.\n";
+const TITLE_EXAMPLE_OUT: &str = "Launch Date Planning with Priya";
+
+/// The chat messages for the AI meeting title: the start of the meeting
+/// (where people say what it's about), the attendees, and the first digests'
+/// key points when there are some. One-shot, so a small model answers with a
+/// title and nothing else.
+pub fn title_messages(note: &Note) -> Value {
+    let lines = truncate_to_tokens(&transcript_lines(&note.transcript), TITLE_TRANSCRIPT_TOKENS);
+    let points: Vec<String> = note
+        .digests
+        .iter()
+        .take(2)
+        .flat_map(|d| d.key_points.iter().take(3))
+        .map(|p| format!("- {p}"))
+        .collect();
+    let points = if points.is_empty() {
+        String::new()
+    } else {
+        format!("Main points so far:\n{}\n\n", points.join("\n"))
+    };
+    let user = format!(
+        "Attendees: {}\n\n{points}Transcript (start):\n{lines}",
+        attendees_line(&note.participants)
+    );
+    json!([
+        { "role": "system", "content": crate::llm::MEETING_TITLE_PROMPT },
+        { "role": "user", "content": TITLE_EXAMPLE_IN },
+        { "role": "assistant", "content": TITLE_EXAMPLE_OUT },
+        { "role": "user", "content": user },
+    ])
+}
+
+/// The longest title kept (cut at a word).
+const TITLE_MAX_CHARS: usize = 60;
+
+/// A title reply read back as a title: its first line without markdown,
+/// quotes, a "Title:" label or a trailing full stop, at most 60 characters.
+/// `None` when it isn't one (empty, a refusal, a sentence of chat).
+pub fn clean_title(reply: &str) -> Option<String> {
+    let line = reply.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let mut t = line.trim_start_matches(['#', '*', '-', '>', ' ']).trim().to_string();
+    // "Title: …", "Meeting title - …", "Here's a title: …"
+    if let Some((head, rest)) = t.split_once([':', '\u{2013}', '\u{2014}']) {
+        if head.to_lowercase().contains("title") && !rest.trim().is_empty() {
+            t = rest.trim().to_string();
+        }
+    }
+    const WRAPS: [char; 9] = ['"', '\'', '\u{201c}', '\u{201d}', '\u{2018}', '\u{2019}', '*', '`', '_'];
+    let t = t.trim_matches(|c: char| WRAPS.contains(&c) || c.is_whitespace());
+    let t = t.trim_end_matches(['.', ',', ';', ':']).trim();
+    let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = t.to_lowercase();
+    const NOT_A_TITLE: [&str; 7] = [
+        "i'm sorry", "i am sorry", "sorry", "i can't", "i cannot", "as an ai", "unfortunately",
+    ];
+    if t.is_empty() || NOT_A_TITLE.iter().any(|p| lower.starts_with(p)) {
+        return None;
+    }
+    if t.split_whitespace().count() > 12 {
+        return None;
+    }
+    if t.chars().count() <= TITLE_MAX_CHARS {
+        return Some(t);
+    }
+    let mut cut = String::new();
+    for word in t.split_whitespace() {
+        if cut.chars().count() + word.chars().count() + 1 > TITLE_MAX_CHARS {
+            break;
+        }
+        if !cut.is_empty() {
+            cut.push(' ');
+        }
+        cut.push_str(word);
+    }
+    (!cut.is_empty()).then_some(cut)
+}
+
+/// A local model stepping aside for a dictation this many times in a row
+/// gives up (the person is dictating nonstop; they can ask again).
+const YIELD_RETRIES: usize = 5;
+
+/// One meeting-helper call that never slows a dictation. On a local endpoint
+/// (one request at a time) it waits until no dictation is recording or
+/// transcribing (+ a short grace), and if one starts mid-call it drops the
+/// request — llama.cpp's server treats the closed connection as a cancel —
+/// then asks again once the dictation is done. Cloud endpoints just run.
+pub(crate) async fn chat_beside_dictation(
+    app: &AppHandle,
+    ep: &Endpoint,
+    messages: Value,
+    opts: &ChatOptions,
+) -> Result<String, String> {
+    let call = move |messages: Value| {
+        crate::llm::chat(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, opts)
+    };
+    if !ep.is_local() {
+        return call(messages).await;
+    }
+    for _ in 0..YIELD_RETRIES {
+        wait_idle(|| dictation_busy(app), || true).await;
+        match unless_busy(call(messages.clone()), || dictation_busy(app)).await {
+            Some(out) => return out,
+            None => tracing::info!("Meeting helper call set aside for a dictation; asking again after it"),
+        }
+    }
+    Err("Yap kept dictating, so the answer waited. Ask again in a moment.".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1870,6 +2103,111 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(2));
         // Not busy: the call finishes.
         assert_eq!(unless_busy(async { 7 }, || false).await, Some(7));
+    }
+
+    fn user_turn(messages: &Value) -> String {
+        let all = messages.as_array().unwrap();
+        all.last().unwrap()["content"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn catching_up_reads_only_what_was_said_since_you_looked() {
+        let mut note = note_with(talk(20, 10, 15));
+        let input = catch_up_input(&note, 12).unwrap();
+        let (before, since) = input.split_once("Since they last looked").unwrap();
+        // The new part: segments 12..20, and nothing older.
+        for i in 12..20 {
+            assert!(since.contains(&format!("s{i} ")), "s{i}: {since}");
+        }
+        assert!(!since.contains("s11 "));
+        // A little of what came before, as context only.
+        assert!(before.contains("Earlier in the meeting (context only)"));
+        assert!(before.contains("s11 "));
+        assert!(input.starts_with("Attendees: Alice, Bob Stone"));
+        // The range is on the meeting's clock.
+        assert!(since.starts_with(" (3:00\u{2013}4:45)"), "{since}");
+        // Nothing new (or only echo): no call at all.
+        assert!(catch_up_input(&note, 20).is_none());
+        assert!(catch_up_input(&note, 99).is_none());
+        note.transcript[19].echo = true;
+        assert!(catch_up_input(&note, 19).is_none());
+        // From the start: no earlier context.
+        let first = catch_up_input(&note_with(talk(3, 5, 15)), 0).unwrap();
+        assert!(first.contains("this is the start of the meeting"));
+    }
+
+    #[test]
+    fn a_long_absence_reads_the_digests_and_the_latest_talk() {
+        // 2.5 hours, digested in three parts; away since segment 100.
+        let mut note = note_with(talk(600, 40, 15));
+        note.digests = vec![
+            digest(0, 200, 1000, &["early"], &[("Alice", "send the budget", "Friday")]),
+            digest(200, 400, 4000, &["middle point"], &[("Bob Stone", "book the venue", "")]),
+            digest(400, 520, 7000, &["late point"], &[]),
+        ];
+        let input = catch_up_input(&note, 100).unwrap();
+        assert!(estimate_tokens(&input) <= 3_300, "{}", estimate_tokens(&input));
+        assert!(input.contains("Notes on the first part of it"));
+        assert!(input.contains("Bob Stone: book the venue"));
+        assert!(input.contains("What was said after that"));
+        assert!(input.contains("s599 ")); // the latest talk, raw
+        assert!(!input.contains("s300 ")); // digested talk isn't sent raw
+        // The whole thing fits an 8k model with the prompt and the reply.
+        let messages = catch_up_messages(&input);
+        let total: usize = messages
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| estimate_tokens(m["content"].as_str().unwrap()))
+            .sum();
+        assert!(total + CATCH_UP_REPLY_TOKENS as usize <= 4_500, "{total}");
+        // Without digests, the latest stretch of the raw talk.
+        note.digests.clear();
+        let raw = catch_up_input(&note, 100).unwrap();
+        assert!(estimate_tokens(&raw) <= 3_300);
+        assert!(raw.contains("s599 ") && !raw.contains("s150 "));
+    }
+
+    #[test]
+    fn a_question_reads_a_bounded_meeting() {
+        let mut note = note_with(talk(600, 40, 15));
+        note.content = "my own notes ".repeat(500);
+        let m = meeting_ask_messages(&note, "Who owns the budget?");
+        let user = user_turn(&m);
+        assert!(user.ends_with("Question: Who owns the budget?"));
+        assert!(user.contains("Notes they typed"));
+        assert!(estimate_tokens(&user) <= 3_500, "{}", estimate_tokens(&user));
+        assert_eq!(m[0]["content"], crate::llm::MEETING_ASK_PROMPT);
+    }
+
+    #[test]
+    fn the_title_reads_the_start_of_the_meeting() {
+        let mut note = note_with(talk(400, 40, 15));
+        note.digests = vec![digest(0, 100, 1000, &["Budget for Q3"], &[])];
+        let m = title_messages(&note);
+        assert_eq!(m.as_array().unwrap().len(), 4); // one-shot
+        let user = user_turn(&m);
+        assert!(user.contains("s0 "));
+        assert!(!user.contains("s399 "));
+        assert!(user.contains("- Budget for Q3"));
+        assert!(estimate_tokens(&user) <= 900, "{}", estimate_tokens(&user));
+    }
+
+    #[test]
+    fn title_replies_are_cleaned_up() {
+        let t = |s: &str| clean_title(s);
+        assert_eq!(t("Q3 Budget Review with Alice").as_deref(), Some("Q3 Budget Review with Alice"));
+        assert_eq!(t("\"Launch Plan Sync.\"").as_deref(), Some("Launch Plan Sync"));
+        assert_eq!(t("Title: Hiring Update\nThis meeting was about…").as_deref(), Some("Hiring Update"));
+        assert_eq!(t("## **Roadmap Planning**").as_deref(), Some("Roadmap Planning"));
+        assert_eq!(t("Here's a title: \u{201c}Venue Booking\u{201d}").as_deref(), Some("Venue Booking"));
+        assert_eq!(t("  \n\n Weekly   Standup  ").as_deref(), Some("Weekly Standup"));
+        assert_eq!(t("I'm sorry, I can't title an empty transcript."), None);
+        assert_eq!(t(""), None);
+        assert_eq!(t("This meeting covered a lot of different topics including the budget and the venue and hiring"), None);
+        // Long: cut at a word, within 60 characters.
+        let long = t("Quarterly Planning Review of Marketing Budget Allocations Overall").unwrap();
+        assert!(long.chars().count() <= 60 && !long.ends_with(' '), "{long}");
     }
 
     #[tokio::test]

@@ -11,6 +11,7 @@ mod agent_detect;
 mod auth;
 mod bar;
 mod bridge;
+mod capture;
 mod chats;
 mod commands;
 mod config;
@@ -18,8 +19,12 @@ mod e2e;
 mod fuzzy;
 mod media;
 mod meeting;
+mod meeting_assist;
 mod meeting_detect;
+mod meeting_end;
+mod meeting_guard;
 mod meeting_summary;
+mod notepad;
 mod notes;
 mod tools;
 mod history;
@@ -311,7 +316,7 @@ pub fn run() {
         builder.plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
-                .with_denylist(&["overlay", "onboarding"])
+                .with_denylist(&["overlay", "onboarding", "notepad"])
                 .build(),
         )
     };
@@ -407,6 +412,19 @@ pub fn run() {
             meeting_detect::meeting_detect_status,
             meeting_detect::meeting_detect_respond,
             meeting_detect::meeting_detect_simulate,
+            meeting_end::meeting_end,
+            meeting_end::meeting_pause,
+            meeting_end::meeting_summarise,
+            meeting_end::meeting_summary_status,
+            meeting_end::meeting_discard,
+            meeting_assist::meeting_catch_up,
+            notepad::notepad_open,
+            notepad::notepad_state,
+            meeting_guard::meeting_shortcut,
+            meeting_guard::meeting_keep_going,
+            meeting_guard::meeting_limit_status,
+            commands::configure_meeting_hotkey,
+            capture::capture_affinity,
             bar::bar_status,
             bar::bar_regions,
             bar::bar_pointer_left,
@@ -417,7 +435,18 @@ pub fn run() {
             // Test mode only (e2e.rs); not in release builds at all.
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_feed,
+            #[cfg(debug_assertions)]
+            meeting_guard::e2e_meeting_limit,
         ])
+        // A meeting window (the notepad, the overlay) that loads while a
+        // meeting records leaves screen captures too (capture.rs).
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                if let Some(window) = webview.app_handle().get_webview_window(webview.label()) {
+                    capture::sync_window(&window);
+                }
+            }
+        })
         .setup(|app| {
             let handle = app.handle().clone();
             let cfg = config::load();
@@ -437,6 +466,10 @@ pub fn run() {
             // Optional edit/rewrite-mode hotkey (empty = unbound / opt-in).
             if let Err(e) = input_hook::configure_edit(&cfg.edit_hotkey) {
                 tracing::warn!("Failed to configure edit hotkey: {}", e);
+            }
+            // The meeting shortcut (Win+Alt+M; meeting_guard.rs).
+            if let Err(e) = input_hook::configure_meeting(&cfg.meeting_hotkey) {
+                tracing::warn!("Failed to configure meeting hotkey: {}", e);
             }
 
             // Clear ort's 0-byte DirectML.dll stub so ONNX uses the real system
@@ -631,11 +664,17 @@ pub fn run() {
             // DWM-cloaked show+hide forces those windows to finish
             // initialization while VISIBLE without anything flashing on screen.
             #[cfg(target_os = "windows")]
-            for label in ["onboarding", "settings"] {
+            for label in ["onboarding", "settings", "notepad"] {
                 if let Some(w) = app.get_webview_window(label) {
                     init_hidden_webview(&w);
                 }
             }
+
+            // The meeting notepad (docked beside a call) and the end of a
+            // meeting (pause or end, "Started by mistake?", the action plan
+            // written in Rust): both follow the recorder's events.
+            notepad::init(&handle);
+            meeting_end::init(&handle);
 
             // First run: if no model is downloaded yet, greet the user with the
             // onboarding model picker instead of a silent "needs-model" pill.
@@ -654,6 +693,11 @@ pub fn run() {
             // Call detection: offer to take notes when a call starts (reads
             // Windows' per-app microphone record; local only).
             meeting_detect::init(&handle);
+
+            // Meeting guard rails: the maximum length, the meeting shortcut,
+            // and keeping meeting windows out of screen shares.
+            meeting_guard::init(&handle);
+            capture::init(&handle);
 
             // e2e test runs: announce test mode, quit when stdin closes.
             e2e::start(&handle);

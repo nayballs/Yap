@@ -15,7 +15,9 @@
 // box; `duration <= 0` = sticky. Hovering a toast pauses its timer; leaving
 // resumes with the remaining time. `onClose` runs when the person closes the
 // card with its ✕, `onExpire` when its timer runs out (a call prompt takes
-// both as "Not now"); `icon: 'call'` gives the chip a phone.
+// both as "Not now"); `icon: 'call'` gives the chip a phone, `'screen'` a
+// monitor (the screen-share tip), `'timer'` a stopwatch (a meeting's
+// length limit) and `'alert'` a warning triangle ("Started by mistake?").
 // `updateToast(id, patch)` changes a live toast in place (the update toast
 // goes ready → downloading → restarting without stacking new cards).
 

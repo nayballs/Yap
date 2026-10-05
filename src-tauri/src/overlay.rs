@@ -333,9 +333,11 @@ pub mod win {
     #[link(name = "user32")]
     extern "system" {
         fn GetCursorPos(point: *mut POINT) -> i32;
-        fn MonitorFromPoint(point: POINT, flags: u32) -> isize;
-        fn MonitorFromWindow(hwnd: HWND, flags: u32) -> isize;
-        fn GetMonitorInfoW(monitor: isize, info: *mut MONITORINFO) -> i32;
+        // Monitor handles as `*mut c_void`, as notepad.rs declares them
+        // (`clashing_extern_declarations`).
+        fn MonitorFromPoint(point: POINT, flags: u32) -> HWND;
+        fn MonitorFromWindow(hwnd: HWND, flags: u32) -> HWND;
+        fn GetMonitorInfoW(monitor: HWND, info: *mut MONITORINFO) -> i32;
         fn GetForegroundWindow() -> HWND;
         fn SetForegroundWindow(hwnd: HWND) -> i32;
         fn GetWindowRect(hwnd: HWND, rect: *mut RECT) -> i32;
@@ -358,7 +360,7 @@ pub mod win {
     }
     #[link(name = "shcore")]
     extern "system" {
-        fn GetDpiForMonitor(monitor: isize, kind: i32, dpi_x: *mut u32, dpi_y: *mut u32) -> i32;
+        fn GetDpiForMonitor(monitor: HWND, kind: u32, dpi_x: *mut u32, dpi_y: *mut u32) -> i32;
     }
     #[link(name = "shell32")]
     extern "system" {
@@ -375,7 +377,7 @@ pub mod win {
     const GWL_EXSTYLE: i32 = -20;
     const MONITOR_DEFAULTTONULL: u32 = 0;
     const MONITOR_DEFAULTTONEAREST: u32 = 2;
-    const MDT_EFFECTIVE_DPI: i32 = 0;
+    const MDT_EFFECTIVE_DPI: u32 = 0;
     const ABM_GETAUTOHIDEBAREX: u32 = 0x0000_000b;
     const ABE_TOP: u32 = 1;
     const ABE_BOTTOM: u32 = 3;
@@ -513,11 +515,12 @@ pub mod win {
             rc_work: RECT::default(),
             flags: 0,
         };
-        if id == 0 || unsafe { GetMonitorInfoW(id, &mut info) } == 0 {
+        let handle = id as HWND;
+        if id == 0 || unsafe { GetMonitorInfoW(handle, &mut info) } == 0 {
             return None;
         }
         let (mut dx, mut dy) = (96u32, 96u32);
-        let dpi = if unsafe { GetDpiForMonitor(id, MDT_EFFECTIVE_DPI, &mut dx, &mut dy) } == 0 {
+        let dpi = if unsafe { GetDpiForMonitor(handle, MDT_EFFECTIVE_DPI, &mut dx, &mut dy) } == 0 {
             dx
         } else {
             96
@@ -541,7 +544,7 @@ pub mod win {
     /// The monitor holding (or nearest to) a point.
     pub fn screen_at(point: (i32, i32), autohide: bool) -> Option<Screen> {
         let id = unsafe { MonitorFromPoint(POINT { x: point.0, y: point.1 }, MONITOR_DEFAULTTONEAREST) };
-        screen(id, autohide)
+        screen(id as isize, autohide)
     }
 
     /// The thickness of an auto-hidden taskbar on `edge` of the monitor at
@@ -582,7 +585,7 @@ pub mod win {
             class: String::from_utf16_lossy(&buf[..len]),
             zoomed: unsafe { IsZoomed(hwnd) } != 0,
             ours: ours(hwnd),
-            monitor: unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL) },
+            monitor: unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL) } as isize,
         })
     }
 

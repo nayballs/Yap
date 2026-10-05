@@ -342,6 +342,23 @@ pub struct YapConfig {
     #[serde(default = "default_true")]
     pub bridge_enabled: bool,
 
+    /// Open the meeting notepad when a meeting recording starts (Settings →
+    /// General → Meetings; `notepad.rs`): docked to the right edge of the
+    /// screen beside the call, without taking the focus. On by default, as
+    /// Wispr Flow's "Open Notepad when starting Notetaker".
+    #[serde(default = "default_true")]
+    pub meeting_open_notepad: bool,
+    /// "Split the screen when joining": when a recording starts during a
+    /// detected call, put the call's window on the left of the screen and the
+    /// notepad on the right. Off by default (it moves another app's window).
+    #[serde(default)]
+    pub meeting_split_screen: bool,
+    /// "Show live transcript": the notepad's Transcript tab shows the lines
+    /// as they're transcribed. Off, it stays quiet until the meeting stops
+    /// (transcription goes on either way). On by default, as Wispr Flow.
+    #[serde(default = "default_true")]
+    pub meeting_live_transcript: bool,
+
     /// Call detection (`meeting_detect.rs`): when Teams, Zoom, Meet, Slack,
     /// Discord, Webex… start using the mic, offer to take notes, and offer to
     /// stop and summarise when the call ends. On by default, like OpenWhispr's
@@ -365,6 +382,29 @@ pub struct YapConfig {
     /// the notification center, plus a tray menu item).
     #[serde(default = "default_meeting_detect_style")]
     pub meeting_detect_style: String,
+
+    // ---- Meeting guard rails (Settings → General → Meetings) ----
+    /// Hide Yap's meeting windows (the notepad and the recording overlay)
+    /// from screenshots and screen sharing while a meeting records
+    /// (`capture.rs`: Windows' exclude-from-capture flag). On by default, as
+    /// Wispr Flow's "Don't show Notepad and Flow Bar in screen capture"; with
+    /// it off, a meeting starting warns that the notes show in a share.
+    #[serde(default = "default_true")]
+    pub meeting_hide_from_capture: bool,
+    /// Longest one meeting recording runs, in minutes (0 = no limit): Yap
+    /// warns 5 minutes before, then stops and writes the action plan
+    /// (`meeting_guard.rs`). 2 hours by default, as Wispr Flow.
+    #[serde(default = "default_meeting_max_minutes")]
+    pub meeting_max_minutes: u32,
+    /// When a call Yap is recording ends: "ask" (the "Stop and summarise?"
+    /// prompt, the default) or "stop" (stop and summarise automatically).
+    #[serde(default = "default_meeting_call_end")]
+    pub meeting_call_end: String,
+    /// The global meeting shortcut (same spec format as `hotkey`): take notes
+    /// on the live call (or in a new meeting note), or stop and write the
+    /// action plan. Empty = unbound. Default Win+Alt+M, as Wispr Flow.
+    #[serde(default = "default_meeting_hotkey")]
+    pub meeting_hotkey: String,
 
     /// Schema version, for the one-time migrations in `migrate_once` (the
     /// kind that must never run twice, unlike `load`'s idempotent fixes). A
@@ -430,6 +470,16 @@ fn default_routing_scope() -> String {
 fn default_meeting_detect_style() -> String {
     "popup".into()
 }
+fn default_meeting_max_minutes() -> u32 {
+    120
+}
+fn default_meeting_call_end() -> String {
+    "ask".into()
+}
+fn default_meeting_hotkey() -> String {
+    // Win+Alt+M (VK 'M' = 77), Wispr Flow's Notetaker shortcut.
+    "kb:alt+win+77".into()
+}
 
 impl Default for YapConfig {
     fn default() -> Self {
@@ -479,10 +529,17 @@ impl Default for YapConfig {
             streaming_partials: true,
             history_enabled: true,
             bridge_enabled: true,
+            meeting_open_notepad: true,
+            meeting_split_screen: false,
+            meeting_live_transcript: true,
             meeting_detection: true,
             meeting_auto_start: false,
             meeting_detect_apps: std::collections::BTreeMap::new(),
             meeting_detect_style: default_meeting_detect_style(),
+            meeting_hide_from_capture: true,
+            meeting_max_minutes: default_meeting_max_minutes(),
+            meeting_call_end: default_meeting_call_end(),
+            meeting_hotkey: default_meeting_hotkey(),
             config_version: CONFIG_VERSION,
         }
     }

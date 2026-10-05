@@ -7,6 +7,8 @@
     hint = '',
     disabled = false,
     onchange,
+    // Accessible name when the visible label sits elsewhere (a Row's label).
+    ariaLabel = '',
   } = $props();
 </script>
 
@@ -18,7 +20,7 @@
     </span>
   {/if}
   <div class="select-wrap" class:disabled>
-    <select bind:value {disabled} onchange={() => onchange?.(value)}>
+    <select bind:value {disabled} aria-label={ariaLabel || label || undefined} onchange={() => onchange?.(value)}>
       {#each options as o (o.value)}
         <option value={o.value}>{o.label}</option>
       {/each}
