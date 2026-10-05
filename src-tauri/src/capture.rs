@@ -3,8 +3,9 @@
 //! While a meeting records, and Settings → General → Meetings → "Hide Yap's
 //! meeting windows from screen sharing" is on (the default), the windows that
 //! show the meeting get Windows' `WDA_EXCLUDEFROMCAPTURE` display affinity:
-//! the docked notepad (`notepad`) and the recording overlay (`overlay`, which
-//! shows the live transcript while you dictate). They stay on your monitor
+//! the docked notepad (`notepad`, and `split-preview`, the glass outline its
+//! split button shows over the call) and the recording overlay (`overlay`,
+//! which shows the live transcript while you dictate). They stay on your monitor
 //! but leave screenshots, screen recordings and screen shares (Teams, Zoom,
 //! Meet in a browser, OBS…), which show what's behind them instead. Wispr
 //! Flow does the same for its Notepad and Flow Bar ("Don't show Notepad and
@@ -32,7 +33,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Listener, Manager, WebviewWindow};
 
 /// The windows that show a meeting, by label.
-pub const MEETING_WINDOWS: [&str; 2] = ["overlay", "notepad"];
+pub const MEETING_WINDOWS: [&str; 3] = ["overlay", "notepad", "split-preview"];
 
 /// `SetWindowDisplayAffinity` values.
 const WDA_NONE: u32 = 0x00;
@@ -196,7 +197,7 @@ mod tests {
     fn affinity_values_match_windows() {
         // winuser.h: WDA_NONE 0, WDA_MONITOR 1, WDA_EXCLUDEFROMCAPTURE 0x11.
         assert_eq!((WDA_NONE, WDA_MONITOR, WDA_EXCLUDEFROMCAPTURE), (0, 1, 17));
-        assert_eq!(MEETING_WINDOWS, ["overlay", "notepad"]);
+        assert_eq!(MEETING_WINDOWS, ["overlay", "notepad", "split-preview"]);
     }
 
     #[test]

@@ -16,13 +16,14 @@
   //     and copy; speaker groups of chat bubbles with a hover copy; a paused
   //     divider where a recording stopped, `Note::breaks`; a marker where the
   //     person dictated mid-meeting, a `dictated` segment) and + Summary (the
-  //     action plan Rust writes when the meeting ends, meeting_end.rs: "Step
-  //     2 of 3", Retry);
+  //     action plan Rust writes when the meeting ends, meeting_end.rs, with
+  //     "Step 2 of 3");
   //   - the bar: Stop / Resume, and "Ask anything", which opens a bottom
   //     sheet chat grounded in the meeting (meeting_assist.rs; "What did I
   //     miss?" answers from what was said since you last looked: the
   //     transcript on screen at its newest line, or the last answer). After
-  //     the meeting, Generate summary when there's none.
+  //     the meeting, Generate summary above it when there's none, or the
+  //     summary's error with a Retry.
   // Like every Yap window you can type in, it catches the dictation key and
   // the meeting shortcut in-page (a focused WebView2 window never reaches the
   // global hook).
@@ -549,9 +550,9 @@
     if (!note || deleting) return;
     deleting = true;
     try {
+      // The notepad lets go of the note and hides (`yap-note-deleted`).
       await invoke('meeting_delete', { noteId: note.id });
       confirmOpen = false;
-      toast({ title: 'Meeting deleted', variant: 'success' });
     } catch (e) {
       toast({ title: "Couldn't delete the meeting", description: String(e), variant: 'destructive' });
     } finally {
@@ -970,16 +971,18 @@
                 {#if item.kind === 'group'}
                   <div class="group {item.source === 'you' ? 'you' : 'them'}" class:echo={item.echo}>
                     <span class="who">{item.source === 'you' ? 'You' : 'Them'}{item.echo ? ' · from the speakers' : ''}</span>
-                    {#each item.lines as line, j (line.i)}
-                      <div class="row">
-                        <div class="bubble {bubbleShape(j, item.lines.length)}">
-                          {#each highlightParts(line.text, searchQuery) as part, k (k)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}
+                    <div class="bubbles">
+                      {#each item.lines as line, j (line.i)}
+                        <div class="row">
+                          <div class="bubble {bubbleShape(j, item.lines.length)}">
+                            {#each highlightParts(line.text, searchQuery) as part, k (k)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}
+                          </div>
+                          <button class="linecopy" aria-label="Copy line" onclick={() => copyLine(line)}>
+                            {@render icon(copiedLine === line.i ? 'check' : 'copy')}
+                          </button>
                         </div>
-                        <button class="linecopy" aria-label="Copy line" onclick={() => copyLine(line)}>
-                          {@render icon(copiedLine === line.i ? 'check' : 'copy')}
-                        </button>
-                      </div>
-                    {/each}
+                      {/each}
+                    </div>
                   </div>
                 {:else if item.kind === 'pause'}
                   <div class="divider" role="separator" aria-label="Recording paused here">
@@ -1006,15 +1009,6 @@
                 <span class="stepline">{stepLine(job, progress, minutes)}</span>
                 <span class="stepcount">Step {job.step} of {job.steps}</span>
               </div>
-            {:else if job?.state === 'error'}
-              <div class="sumerr" role="alert">
-                <span class="errico">{@render icon('warn')}</span>
-                <span class="errtext">
-                  <strong>The summary didn't come through</strong>
-                  <span class="errdetail">{job.error}</span>
-                </span>
-                <button class="retry" onclick={generate}>{@render icon('retry')}Retry</button>
-              </div>
             {:else if job?.state === 'needsAi'}
               <div class="aicard">
                 <p><strong>Your meeting is saved.</strong> To turn it into an action plan, Yap needs an AI model: set one up in Language Models (an on-device model keeps everything on this PC), then press Generate summary.</p>
@@ -1027,7 +1021,7 @@
             {#if hasSummary && !writing}
               <!-- renderMarkdown escapes all input first (lib/markdown.js). -->
               <div class="rendered">{@html renderMarkdown(note.enhancedContent)}</div>
-            {:else if !writing && job?.state !== 'error' && job?.state !== 'needsAi'}
+            {:else if !writing && job?.state !== 'needsAi'}
               <p class="sumempty">
                 {@render icon('note')}
                 {recordingThis ? 'Your summary is written when you stop' : 'No summary yet'}
@@ -1051,12 +1045,21 @@
 
     <div class="bottom">
       <div class="fade" aria-hidden="true"></div>
-      {#if !recordingThis && !writing && !hasSummary && !askOpen && (note.transcript?.length || note.content?.trim())}
+      {#if !recordingThis && !askOpen && job?.state === 'error'}
+        <div class="snag" role="alert">
+          <span class="snagico">{@render icon('warn')}</span>
+          <span class="snagtext">
+            <strong>The summary didn't come through</strong>
+            <span class="snagdetail" title={job.error}>{job.error}</span>
+          </span>
+          <button class="snagretry" aria-label="Retry" title="Try again" onclick={generate}>{@render icon('retry')}</button>
+        </div>
+      {:else if !recordingThis && !writing && !hasSummary && !askOpen && (note.transcript?.length || note.content?.trim())}
         <button class="gen" onclick={generate}>{@render icon('plus')}Generate summary</button>
       {/if}
       {#if recordingThis && !askOpen}
         <p class="consent">
-          Ask before you transcribe others.
+          Let people know you're taking notes.
           <button class="learn" onclick={() => openExternalLink(CONSENT_DOCS)}>Learn more</button>
         </p>
       {/if}
@@ -1615,7 +1618,7 @@
     flex-wrap: wrap;
     align-items: center;
     column-gap: 7px;
-    margin: 24px 32px 0;
+    margin: 24px 40px 0 32px;
     padding: 10px 12px;
     border-radius: 8px;
     background: var(--yap-paper-s1);
@@ -1740,15 +1743,36 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
+    scrollbar-gutter: stable;
     display: flex;
     flex-direction: column;
     gap: 16px;
-    padding: 26px 28px 180px 36px;
+    margin-top: 14px;
+    padding: 12px 20px 164px 36px;
+  }
+  /* Thin scrollbars, as on the page they sit on (8px, a soft thumb). */
+  .lines::-webkit-scrollbar,
+  .summary::-webkit-scrollbar,
+  .thread::-webkit-scrollbar,
+  .thoughts::-webkit-scrollbar {
+    width: 8px;
+  }
+  .lines::-webkit-scrollbar-thumb,
+  .summary::-webkit-scrollbar-thumb,
+  .thread::-webkit-scrollbar-thumb,
+  .thoughts::-webkit-scrollbar-thumb {
+    border-radius: 4px;
+    background: rgb(26 26 26 / 0.14);
   }
   .group {
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+  .bubbles {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
   .who {
     font-size: 15px;
@@ -1802,17 +1826,14 @@
     justify-content: center;
     width: 24px;
     height: 24px;
-    margin-top: -12px;
     padding: 0;
     border: none;
     border-radius: 6px;
     background: none;
     color: var(--yap-paper-text-2);
     opacity: 0;
-    transform: translateY(6px);
-    transition:
-      opacity 0.12s,
-      transform 0.12s;
+    transform: translateY(-50%);
+    transition: opacity 0.12s;
   }
   .linecopy :global(svg) {
     width: 14px;
@@ -1821,7 +1842,6 @@
   .row:hover .linecopy,
   .linecopy:focus-visible {
     opacity: 1;
-    transform: none;
   }
   .linecopy:hover {
     background: var(--yap-paper-s2);
@@ -1839,7 +1859,6 @@
   .divider .rule {
     flex: 1;
     border-top: 1px dashed currentColor;
-    opacity: 0.6;
   }
   .divider :global(svg) {
     width: 12px;
@@ -1867,8 +1886,8 @@
     text-decoration: underline;
   }
   .tempty {
-    margin: 56px auto 0;
-    max-width: 340px;
+    margin: 72px auto 0;
+    max-width: 380px;
     padding: 0 20px;
     text-align: center;
   }
@@ -1885,22 +1904,24 @@
   }
 
   /* ---- Summary ---- */
+  /* Rows here line up with the transcript's timer box (x 32, padded 12). */
   .summary {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    padding: 24px 32px 180px;
+    padding: 24px 40px 180px 32px;
   }
   .steps {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 2px 0 12px;
+    gap: 12px;
+    padding: 10px 12px;
   }
   .stepdot {
     flex: 0 0 auto;
     width: 5px;
     height: 5px;
+    margin: 0 6.5px;
     border-radius: 50%;
     background: var(--yap-paper-ink);
     animation: breathe 1.2s ease-in-out infinite;
@@ -1919,60 +1940,6 @@
     color: var(--yap-paper-faint);
     font-variant-numeric: tabular-nums;
   }
-  .sumerr {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    margin-bottom: 14px;
-    padding: 10px 12px;
-    border-radius: 8px;
-    background: rgb(255 247 237);
-    color: rgb(206 112 44);
-  }
-  .errico {
-    display: inline-flex;
-    margin-top: 1px;
-  }
-  .errico :global(svg) {
-    width: 15px;
-    height: 15px;
-  }
-  .errtext {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    font-size: 13px;
-  }
-  .errtext strong {
-    font-weight: 600;
-  }
-  .errdetail {
-    font-size: 12px;
-    color: var(--yap-paper-muted);
-    overflow-wrap: anywhere;
-  }
-  .retry {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 28px;
-    padding: 0 10px;
-    border: 1px solid var(--yap-paper-s2);
-    border-radius: 9999px;
-    background: #fff;
-    color: var(--yap-paper-ink);
-    font-size: 13px;
-    font-weight: 600;
-  }
-  .retry :global(svg) {
-    width: 13px;
-    height: 13px;
-  }
-  .retry:hover {
-    border-color: var(--yap-paper-s2-strong);
-  }
   .aicard {
     margin-bottom: 14px;
     padding: 12px 14px;
@@ -1986,14 +1953,16 @@
   }
   .sumnote {
     margin: 0 0 12px;
+    padding: 0 12px;
     font-size: 13px;
     color: var(--yap-paper-muted);
   }
   .sumempty {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     margin: 0;
+    padding: 10px 12px;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.08em;
@@ -2001,10 +1970,11 @@
     color: var(--yap-paper-faint);
   }
   .sumempty :global(svg) {
-    width: 13px;
-    height: 13px;
+    width: 15px;
+    height: 15px;
   }
   .rendered {
+    padding: 0 12px;
     font-size: 15px;
     line-height: 24px;
     user-select: text;
@@ -2048,7 +2018,8 @@
     margin-left: -18px;
   }
   .sofar {
-    margin-top: 18px;
+    margin-top: 8px;
+    padding: 0 12px;
     font-size: 14px;
     line-height: 21px;
   }
@@ -2130,11 +2101,72 @@
   .gen:hover {
     background: rgb(56 56 56);
   }
+  /* The summary's error, where Generate summary would be, with a Retry. */
+  .snag {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 98px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    box-sizing: border-box;
+    padding: 0 4px 0 12px;
+    color: var(--yap-paper-snag);
+    font-size: 13px;
+    line-height: 18px;
+    pointer-events: auto;
+  }
+  .snagico {
+    display: inline-flex;
+  }
+  .snagico :global(svg) {
+    width: 15px;
+    height: 15px;
+  }
+  .snagtext {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .snagtext strong {
+    font-weight: 500;
+  }
+  .snagdetail {
+    font-size: 12px;
+    color: var(--yap-paper-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .snagretry {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--yap-paper-snag);
+    transition: background-color 0.15s;
+  }
+  .snagretry :global(svg) {
+    width: 16px;
+    height: 16px;
+  }
+  .snagretry:hover {
+    background: var(--yap-paper-s2);
+  }
   .consent {
     position: absolute;
     left: 0;
     right: 0;
-    bottom: 96px;
+    bottom: 88px;
     margin: 0;
     text-align: center;
     font-size: 12px;

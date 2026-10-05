@@ -9,7 +9,8 @@
 //! - **"Started by mistake?"** A meeting with only a handful of words (fewer
 //!   than [`MISTAKE_WORDS`]) and nothing typed gets no automatic summary:
 //!   `yap-meeting-ended` asks the window the person is looking at to offer
-//!   Keep / Discard ([`meeting_discard`] deletes the note), as Wispr Flow does.
+//!   Keep / Discard ([`meeting_discard`] deletes the note), as Wispr Flow does,
+//!   or, with no Yap window on screen, a card on the Yap bar asks.
 //! - **The action plan**, written here in Rust once the last chunk is
 //!   transcribed, so it doesn't depend on any window having the note open
 //!   (until 2026-10 the Notes view wrote it, and only for the note it showed).
@@ -49,6 +50,10 @@ static PAUSED: AtomicBool = AtomicBool::new(false);
 static ORIGIN: Mutex<Option<String>> = Mutex::new(None);
 /// The note whose recording the last `yap-meeting-state` started (0 = none).
 static RECORDING: AtomicU64 = AtomicU64::new(0);
+/// The Yap bar's "Started by mistake?" card, and the note it asks about
+/// (0 = none up).
+const MISTAKE_CARD: &str = "meeting-mistake";
+static MISTAKE_NOTE: AtomicU64 = AtomicU64::new(0);
 /// Each note's latest action-plan job (kept after it ends, so a window
 /// opened later shows its result or its error).
 static JOBS: LazyLock<Mutex<HashMap<u64, Summary>>> = LazyLock::new(Default::default);
@@ -99,8 +104,10 @@ fn on_state(app: &AppHandle, payload: &str) {
         }
         PAUSED.store(false, Ordering::SeqCst);
         *ORIGIN.lock().unwrap_or_else(|p| p.into_inner()) = None;
-        // Resuming makes an earlier summary's progress or error moot.
+        // Resuming makes an earlier summary's progress or error moot, and
+        // answers "Started by mistake?".
         jobs().remove(&note_id);
+        withdraw_mistake_card(app, note_id);
         crate::notepad::on_meeting_started(app, note_id);
         return;
     }
@@ -166,10 +173,52 @@ fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) {
         serde_json::json!({ "noteId": note_id, "mistake": mistake, "words": words, "surface": surface }),
     );
     if mistake {
+        // No Yap window on screen to ask (stopped from the bar, or
+        // automatically): the Yap bar asks.
+        if surface.is_none() {
+            ask_on_bar(app, note_id);
+        }
         return;
     }
     crate::meeting_assist::maybe_title(app, note_id, true);
     start_summary(app, note_id);
+}
+
+/// "Started by mistake?" as a card on the Yap bar: Keep (or its ✕) leaves
+/// the note, Discard deletes it. With the bar off or hidden, nobody asks and
+/// the note stays, as Keep would leave it.
+fn ask_on_bar(app: &AppHandle, note_id: u64) {
+    let card = crate::bar::Card {
+        id: MISTAKE_CARD.into(),
+        icon: "notes",
+        title: "Started by mistake?".into(),
+        body: "Only a few words were captured. Keep this meeting or discard it.".into(),
+        primary: Some(crate::bar::CardAction::new("keep", "Keep")),
+        secondary: Some(crate::bar::CardAction::new("discard", "Discard")),
+        ..Default::default()
+    };
+    let answer = move |app: &AppHandle, action: &str| {
+        MISTAKE_NOTE.store(0, Ordering::SeqCst);
+        if action == "discard" {
+            if let Err(e) = meeting_discard(app.clone(), note_id) {
+                tracing::warn!(note_id, "Meeting not discarded: {e}");
+            }
+        }
+    };
+    MISTAKE_NOTE.store(note_id, Ordering::SeqCst);
+    if crate::bar::show_card(app, card, Box::new(answer)) {
+        tracing::info!(note_id, "Started by mistake? asked on the Yap bar");
+    } else {
+        MISTAKE_NOTE.store(0, Ordering::SeqCst);
+    }
+}
+
+/// Take the bar's "Started by mistake?" down if it asks about `note_id`
+/// (resumed, or discarded elsewhere).
+fn withdraw_mistake_card(app: &AppHandle, note_id: u64) {
+    if MISTAKE_NOTE.compare_exchange(note_id, 0, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+        crate::bar::dismiss_card(app, MISTAKE_CARD);
+    }
 }
 
 /// End the meeting being recorded: stop it, and once its last chunk is in,
@@ -321,6 +370,7 @@ pub fn meeting_discard(app: AppHandle, note_id: u64) -> Result<(), String> {
     crate::notes::get(note_id).ok_or("Note not found")?;
     crate::notes::delete(note_id);
     jobs().remove(&note_id);
+    withdraw_mistake_card(&app, note_id);
     tracing::info!(note_id, "Meeting note deleted");
     let _ = app.emit("yap-notes-changed", ());
     let _ = app.emit(EVENT_DELETED, serde_json::json!({ "id": note_id }));

@@ -362,6 +362,9 @@ fn build_preview(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
     .build()
     .map_err(|e| format!("Couldn't show the split preview: {e}"))?;
     let _ = w.set_ignore_cursor_events(true);
+    // A meeting window: left out of screen shares while one records
+    // (capture::MEETING_WINDOWS), from its first show on.
+    crate::capture::sync_window(&w);
     Ok(w)
 }
 

@@ -118,6 +118,7 @@ body {
   --yap-paper-s2-strong: rgb(226 222 213); /* hovered / open icon buttons */
   --yap-paper-ring: rgb(241 235 225);      /* focus ring, 3px */
   --yap-paper-danger: rgb(238 106 106);    /* Delete */
+  --yap-paper-snag: rgb(217 119 6);        /* the summary's error line */
   --yap-live: rgb(16 185 129);             /* the recording waveform */
   --yap-live-strong: rgb(5 150 105);       /* Stop / Resume icons */
   /* Wispr's spring-like easing: 0.15 s for tabs, 0.4 s for buttons. */
