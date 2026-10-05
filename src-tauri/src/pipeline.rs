@@ -26,8 +26,57 @@ pub(crate) type EngineSlot = std::sync::Arc<Mutex<Option<SttAdapter>>>;
 
 /// How much audio (16 kHz mono samples) to keep in the rolling pre-roll ring so
 /// the first word isn't clipped: speech that started a moment *before* the user
-/// pressed the key is prepended to the recording. 300 ms × 16 kHz.
-const PREROLL_SAMPLES: usize = (0.3 * TARGET_SAMPLE_RATE as f64) as usize;
+/// pressed the key is prepended to the recording. 300 ms × 16 kHz. (The
+/// meeting recorder blanks this much before a dictation, too.)
+pub(crate) const PREROLL_SAMPLES: usize = (0.3 * TARGET_SAMPLE_RATE as f64) as usize;
+
+/// Dictations as the meeting recorder sees them: `count << 1 | recording`,
+/// where `count` goes up by one each time a dictation starts. One atomic, so
+/// `meeting.rs` reads a consistent pair from its audio callback without a
+/// lock, and still notices a dictation that started and ended between two of
+/// its callbacks. While one records, a meeting's "You" side gets silence
+/// instead of the dictated words (and its pre-roll).
+static DICTATION: AtomicU64 = AtomicU64::new(0);
+
+/// `(dictations started so far, one recording now)`.
+pub(crate) fn dictation_state() -> (u64, bool) {
+    let s = DICTATION.load(Ordering::SeqCst);
+    (s >> 1, s & 1 == 1)
+}
+
+/// A dictation started recording: `start_recording`, for plain dictation,
+/// the edit hotkey and the wake-word path alike (all record the same way).
+/// (The e2e suite's meeting player stands in for one in test mode.)
+pub(crate) fn dictation_began() {
+    let mut s = DICTATION.load(Ordering::SeqCst);
+    loop {
+        let next = (((s >> 1) + 1) << 1) | 1;
+        match DICTATION.compare_exchange_weak(s, next, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => break,
+            Err(now) => s = now,
+        }
+    }
+}
+
+/// The dictation stopped recording (transcribed or cancelled).
+pub(crate) fn dictation_ended() {
+    DICTATION.fetch_and(!1, Ordering::SeqCst);
+}
+
+/// Run the correction dictionary over a transcript, the same way for a
+/// dictation, a meeting segment and an Upload: exact replacements
+/// (`config::apply_dictionary`), then the fuzzy near-miss pass (`fuzzy.rs`)
+/// when "Catch near-misses" is on and the model isn't Whisper. (Whisper got
+/// the vocabulary as its `initial_prompt` instead: Handy's split.) Entries
+/// opted out of the fuzzy pass (`DictionaryEntry::fuzzy`) are exact-only.
+pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
+    let corrected = config::apply_dictionary(text, &cfg.dictionary);
+    if cfg.dictionary_fuzzy && !stt::is_whisper_model(&cfg.model_size) {
+        crate::fuzzy::apply_fuzzy(&corrected, &cfg.dictionary)
+    } else {
+        corrected
+    }
+}
 
 /// Hard cap on a single recording's captured audio (16 kHz mono f32 ≈ 64 KB/s).
 /// A stuck hotkey or a forgotten toggle-mode session would otherwise grow the
@@ -250,6 +299,8 @@ impl Shared {
             }
         }
 
+        // A meeting recording keeps this dictation out of its "You" side.
+        dictation_began();
         self.recording.store(true, Ordering::SeqCst);
         self.touch_activity();
         if self.mute_while_recording() {
@@ -313,6 +364,7 @@ impl Shared {
         if !self.recording.swap(false, Ordering::SeqCst) {
             return;
         }
+        dictation_ended();
         crate::mute::unmute_system_output();
         if let Ok(mut buf) = self.buffer.lock() {
             buf.clear();
@@ -328,6 +380,7 @@ impl Shared {
 
     fn stop_and_transcribe(self: &Arc<Self>) {
         self.recording.store(false, Ordering::SeqCst);
+        dictation_ended();
         crate::mute::unmute_system_output();
         let _ = self.app.emit("yap-state", "processing");
         if self.sound_enabled() {
@@ -635,7 +688,15 @@ impl Shared {
             }
         }
 
-        let text = pieces.join(" ").trim().to_string();
+        let raw = pieces.join(" ").trim().to_string();
+        // The correction dictionary, as a dictation gets it. Over the whole
+        // text, so a mis-hearing split across two chunks is still caught.
+        let text = self
+            .config
+            .read()
+            .map(|c| apply_corrections(&raw, &c))
+            .unwrap_or_else(|_| raw.clone());
+        let text = text.trim().to_string();
         if text.is_empty() {
             return emit_err("No speech detected in this file".to_string());
         }
@@ -648,7 +709,7 @@ impl Shared {
             .map(|c| (c.history_enabled, c.model_size.clone()))
             .unwrap_or((false, String::new()));
         if history_enabled {
-            crate::history::record(&text, &text, &model, &file_name);
+            crate::history::record(&raw, &text, &model, &file_name);
         }
         let _ = self.app.emit("yap-transcript", text.clone());
         let _ = self.app.emit(
@@ -884,18 +945,13 @@ impl Shared {
                             _ => raw.clone(),
                         };
 
-                        let mut corrected = config::apply_dictionary(cleaned.trim(), &dict);
-                        // Fuzzy near-miss pass (Handy's split): ONNX models
-                        // only — a Whisper model already got the vocabulary as
-                        // its `initial_prompt` bias.
-                        let fuzzy_on = self
+                        // The correction dictionary (exact, then fuzzy for
+                        // ONNX models), exactly as meetings and Upload get it.
+                        let mut corrected = self
                             .config
                             .read()
-                            .map(|c| c.dictionary_fuzzy && !stt::is_whisper_model(&c.model_size))
-                            .unwrap_or(false);
-                        if fuzzy_on {
-                            corrected = crate::fuzzy::apply_fuzzy(&corrected, &dict);
-                        }
+                            .map(|c| apply_corrections(cleaned.trim(), &c))
+                            .unwrap_or_else(|_| config::apply_dictionary(cleaned.trim(), &dict));
                         if !corrected.is_empty() {
                             if append_space {
                                 corrected.push(' ');
@@ -1481,4 +1537,78 @@ pub(crate) fn resample_linear(input: &[f32], from_rate: u32, to_rate: u32) -> Ve
         output.push(input[idx0] * (1.0 - frac) + input[idx1] * frac);
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::DictionaryEntry;
+
+    fn entry(from: &str, to: &str, fuzzy: bool) -> DictionaryEntry {
+        DictionaryEntry {
+            from: from.to_string(),
+            to: to.to_string(),
+            fuzzy,
+        }
+    }
+
+    fn cfg(model: &str, fuzzy: bool, dictionary: Vec<DictionaryEntry>) -> YapConfig {
+        YapConfig {
+            model_size: model.to_string(),
+            dictionary_fuzzy: fuzzy,
+            dictionary,
+            ..YapConfig::default()
+        }
+    }
+
+    #[test]
+    fn corrections_are_exact_then_fuzzy_for_onnx_models() {
+        let dict = vec![entry("jaison", "JSON", true), entry("chat gpt", "ChatGPT", true)];
+        let parakeet = cfg("parakeet-tdt-0.6b-v3", true, dict.clone());
+        // Exact (case-insensitive, whole words) and a near-miss ("jaisen").
+        assert_eq!(
+            apply_corrections("ask Chat GPT about the jaisen file", &parakeet),
+            "ask ChatGPT about the JSON file"
+        );
+        assert_eq!(apply_corrections("the jaison file", &parakeet), "the JSON file");
+        // Whisper had the words as its prompt: exact replacements only.
+        let whisper = cfg("turbo", true, dict.clone());
+        assert_eq!(
+            apply_corrections("the jaisen and jaison files", &whisper),
+            "the jaisen and JSON files"
+        );
+        // "Catch near-misses" off: exact only.
+        let off = cfg("parakeet-tdt-0.6b-v3", false, dict);
+        assert_eq!(apply_corrections("the jaisen file", &off), "the jaisen file");
+    }
+
+    #[test]
+    fn corrections_respect_the_per_entry_opt_out() {
+        let c = cfg("parakeet-tdt-0.6b-v3", true, vec![entry("json", "JSON", false)]);
+        assert_eq!(apply_corrections("Dear Jason, the json is attached", &c), "Dear Jason, the JSON is attached");
+    }
+
+    #[test]
+    fn no_dictionary_leaves_the_text_alone() {
+        let c = cfg("parakeet-tdt-0.6b-v3", true, Vec::new());
+        assert_eq!(apply_corrections("  two  spaces\tand a tab ", &c), "  two  spaces\tand a tab ");
+    }
+
+    #[test]
+    fn the_dictation_signal_counts_dictations_and_says_which_is_live() {
+        // One test owns the global (others don't touch it).
+        let (before, _) = dictation_state();
+        dictation_began();
+        assert_eq!(dictation_state(), (before + 1, true));
+        dictation_ended();
+        assert_eq!(dictation_state(), (before + 1, false));
+        // Ending twice (a cancel after a stop) changes nothing.
+        dictation_ended();
+        assert_eq!(dictation_state(), (before + 1, false));
+        dictation_began();
+        dictation_began(); // never happens, but stays one live dictation
+        assert_eq!(dictation_state(), (before + 3, true));
+        dictation_ended();
+        assert_eq!(dictation_state(), (before + 3, false));
+    }
 }
