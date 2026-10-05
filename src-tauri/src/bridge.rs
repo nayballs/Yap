@@ -49,6 +49,13 @@ static STATE: Mutex<Option<Running>> = Mutex::new(None);
 /// without knowing how Yap was installed. Same contract as OpenWhispr's
 /// `~/.openwhispr/cli-bridge.json`.
 pub fn bridge_file_path() -> PathBuf {
+    // Debug builds only (the e2e suite, tests): a test instance, and the
+    // `yap.exe mcp` it's driven through, use their own discovery file, so a
+    // run never touches the one the person's own Yap writes.
+    #[cfg(debug_assertions)]
+    if let Some(file) = std::env::var_os("YAP_BRIDGE_FILE").filter(|f| !f.is_empty()) {
+        return PathBuf::from(file);
+    }
     dirs::home_dir()
         .unwrap_or_else(crate::config::data_dir)
         .join(".yap")
@@ -424,8 +431,10 @@ fn route(
                         "id": n.id,
                         "title": n.title,
                         "folder": n.folder,
+                        "noteType": n.note_type,
                         "score": score,
                         "preview": preview,
+                        "createdTs": n.created_ts,
                         "updatedTs": n.updated_ts,
                     })
                 })
@@ -437,10 +446,15 @@ fn route(
             None => respond_error(request, 404, "not_found", &format!("Note {} not found", id)),
         },
         (Method::Post, ["v1", "notes", "create"]) => {
+            // Notes an AI app saves through `yap.exe mcp` say so.
+            let source = match str_field(body, "source") {
+                Some("mcp") => "mcp",
+                _ => "api",
+            };
             let note = crate::notes::create(
                 str_field(body, "title").unwrap_or("Untitled Note"),
                 str_field(body, "content").unwrap_or(""),
-                "api",
+                source,
                 str_field(body, "folder").unwrap_or(""),
             );
             let _ = app.emit("yap-notes-changed", ());
@@ -497,6 +511,32 @@ fn route(
             let folders = crate::notes::folder_create(&name);
             let _ = app.emit("yap-notes-changed", ());
             respond_json(request, 201, &json!({ "data": { "name": name, "folders": folders } }));
+        }
+
+        // ---- meetings (what `yap.exe mcp` reads; views in mcp.rs) ----
+        (Method::Get, ["v1", "meetings", "list"]) => {
+            let notes = crate::notes::all();
+            let items = crate::mcp::list_meetings(&notes, query_get(params, "folder"), limit(50));
+            respond_json(request, 200, &list_envelope(json!(items)));
+        }
+        (Method::Get, ["v1", "meetings", "search"]) => {
+            let q = query_get(params, "q").unwrap_or("");
+            if crate::mcp::query_words(q).is_empty() {
+                respond_error(
+                    request,
+                    400,
+                    "validation_error",
+                    "Search with at least one word of three or more letters",
+                );
+                return;
+            }
+            let notes = crate::notes::all();
+            let items = crate::mcp::search_meetings(&notes, q, limit(10));
+            respond_json(request, 200, &list_envelope(json!(items)));
+        }
+        (Method::Get, ["v1", "mcp", "config"]) => {
+            let allow = crate::config::load().mcp_allow_writes;
+            respond_json(request, 200, &json!({ "data": { "allowWrites": allow } }));
         }
 
         // ---- transcriptions (dictation history; id = unix-seconds ts) ----

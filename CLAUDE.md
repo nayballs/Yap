@@ -79,6 +79,10 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
   device authorization); the session token lives in Windows Credential Manager
   (`keyring-core` + `windows-native-keyring-store`). Deep-link/single-instance are held on 2.4.x
   (2.5+ needs tauri 2.12).
+- **MCP (AI apps):** [`rmcp`](https://crates.io/crates/rmcp), the official Rust MCP SDK
+  (server + stdio, no macros): `yap.exe mcp` lets Claude, ChatGPT desktop, Gemini CLI,
+  Cursor… read meetings and notes through the local API (`mcp.rs`); `toml_edit` adds Yap to
+  Codex/ChatGPT's `config.toml` (`mcp_clients.rs`).
 - **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`,
   `history.json`, `notes.json` — the AI Notepad store, `chats.json` — AI Chat
   conversations, `updates.json` — update announcements + the restart marker).
@@ -472,7 +476,41 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   refreshes live. Toggled by `config.bridge_enabled` (default on; `sync()`
   runs at setup + every config save). A second Yap (dev next to installed)
   leaves a live bridge's file alone, and `stop()` only deletes the file while
-  it's still ours. See `docs/local-api.md`.
+  it's still ours. Also serves the MCP server's meeting views
+  (`/v1/meetings/list`, `/v1/meetings/search`, `/v1/mcp/config`; built in
+  `mcp.rs`). Debug builds take `YAP_BRIDGE_FILE` to move the discovery file
+  (the e2e suite). See `docs/local-api.md`.
+- **`mcp.rs`** — **Yap's MCP server** (Wispr Flow's Notetaker MCP, local): AI apps
+  launch **`yap.exe mcp`** (main.rs sends that argument here before any of the app
+  starts: no window, tray, hook or single-instance check; release builds are
+  GUI-subsystem and inherit the client's stdio pipes fine) and speak MCP over
+  stdin/stdout via `rmcp`, which serves both eras (the 2025 `initialize` handshake
+  and 2026-07-28's per-request `_meta` + `server/discover`). The process holds no
+  data: every tool calls the **running** Yap's local API (discovery file re-read per
+  call), so notes.json keeps one writer; with Yap closed or the Local API off, tools
+  answer "Open Yap to let your AI read your notes". Tools, meetings + notes only,
+  **never dictation history**: `list_meetings`, `search_meetings` (matching
+  transcript lines + page), `get_meeting` (AI summary/action plan, typed notes,
+  digests when there's no summary, transcript in ~6k-token pages via
+  `transcript_page`), `search_notes`, `get_note`, `list_folders`, and `create_note`
+  only when `config.mcp_allow_writes` (Settings → MCP; source `"mcp"`). Markdown
+  for the model, local-time dates (chrono), "You/Them" explained.
+- **`mcp_clients.rs`** — "Add to Claude / ChatGPT / Gemini / Cursor…" (Settings →
+  MCP): edits each AI app's own config to launch `yap.exe mcp`. Claude desktop
+  (`%APPDATA%\Claude\claude_desktop_config.json` **and** the MSIX build's
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\…`), ChatGPT desktop +
+  Codex (`~/.codex/config.toml`, `[mcp_servers.yap]` via toml_edit), Gemini CLI
+  (`~/.gemini/settings.json`), Cursor (`~/.cursor/mcp.json`), Claude Code
+  (`~/.claude.json`, under Claude Code's own proper-lockfile lock), VS Code
+  (`%APPDATA%\Code\User\mcp.json`, `servers`) and Windsurf/Devin Desktop. Only the
+  `yap` entry changes (other entries kept as their original text, so key order,
+  indent, CRLF and BOM survive; remove = same bytes back), non-plain JSON is left
+  alone with the reason, `.bak` on the first edit, temp-file + rename writes.
+  Detects installed apps; status added / available / outdated (exe gone) /
+  missing. Commands `mcp_clients_status`, `mcp_client_add`, `mcp_client_remove`
+  (async, blocking IO off the main thread). Debug builds take
+  `YAP_MCP_CLIENT_ROOT` as a stand-in user profile; test mode never touches the
+  real one.
 - **`auth.rs`** — Yap accounts (optional; nothing in dictation depends on it).
   Email codes: `auth_email_send`/`auth_email_verify` call the account service
   directly. Google/GitHub/Discord: `auth_start` opens the system browser on
@@ -619,7 +657,8 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   defaults) + meeting_auto_start (the opt-in 10-second countdown, off),
   meeting guard rails: meeting_hide_from_capture (true),
   meeting_max_minutes (120; 0 = no limit), meeting_call_end ("ask"|"stop"),
-  meeting_hotkey (`kb:alt+win+77`), the Yap bar: bar_enabled (true) +
+  meeting_hotkey (`kb:alt+win+77`), bridge_enabled, mcp_allow_writes (AI apps
+  may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
   bar_hide_fullscreen (true)). JSON
   load/save + `apply_dictionary` + `dictionary_prompt` (the Whisper
   `initial_prompt` vocabulary) + `resolve_cleanup` (per-app plan: body + endpoint).
@@ -905,11 +944,15 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   plain RAG chat; tool-activity chips render in the thread). No streaming or
   semantic vectors yet (ROADMAP step 3). **`IntegrationsView.svelte`** = the
   Integrations surface (OpenWhispr `IntegrationsView.tsx`, local-first cut):
-  Local API card (enable toggle + live status/port via `bridge_status`,
-  discovery-file path + curl example with copy), a Coding-agents card whose
-  "Copy API guide" button copies a paste-into-your-agent endpoint cheat-sheet,
-  and an endpoint reference table. (OpenWhispr's Google-Calendar OAuth /
-  cloud API-keys / hosted-MCP cards need their paid cloud and are not ported.)
+  an **AI apps (MCP)** card (`McpLinkCard.svelte`, Wispr's "Go to MCP" row:
+  opens Settings → MCP via ControlPanel's `openSettings`), the Local API card
+  (enable toggle + live status/port via `bridge_status`, discovery-file path +
+  curl example with copy; the toggle tells Settings' copy via
+  `yap-config-patched` so its auto-save can't switch it back), a
+  Coding-agents card whose "Copy API guide" button copies a
+  paste-into-your-agent endpoint cheat-sheet, and an endpoint reference
+  table. (OpenWhispr's Google-Calendar OAuth / cloud API-keys / hosted-MCP
+  cards need their paid cloud and are not ported; Yap's MCP is local.)
 - **`lib/Overlay.svelte`** — the **Yap bar** page (window `overlay`, `bar.rs`):
   dark ink throughout (the toasts' palette), one stage anchored to the bottom
   (or top) edge — cards above, the pill's place below, states sharing one
@@ -954,7 +997,7 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   (`--yap-toast-bottom`). It has the **in-page hotkey fallback** (dictation,
   and the meeting shortcut when one is set), config re-read on focus.
 - **`lib/Settings.svelte`** — the settings surface, now rendered **inside the
-  ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / System):
+  ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / Connections / System):
   **General** (hotkey, recording mode, mic, sound+volume, mute; **Yap bar** group
   (`#settings-bar`, the bar menu's Settings → "general#bar"): Show the Yap bar
   (`barEnabled`; "Turn off the bar" in its menu arrives as `yap-bar-changed`
@@ -996,7 +1039,16 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   dictionary), **About** (version + an **Updates** card on the shared update
   store: "Last checked …" / Check for updates, Downloading… %, "Yap X is ready to
   install" + Restart to update, release notes + release-page link, the
-  "Check for updates automatically" toggle), and **Account** (bottom of the
+  "Check for updates automatically" toggle), **MCP** (a **Connections** group
+  between Data and System; `McpSection.svelte`, laid out like Wispr's Settings →
+  MCP: serif title, a light card each for Claude / ChatGPT / Gemini / Cursor with
+  "Allow X to access your meeting notes and transcripts" + **Add to X** (→ Added ✓
+  · Remove), the ChatGPT card's "desktop app and Codex, not the web" note, then
+  **All other apps:** with one-click rows for Claude Code / VS Code / Windsurf +
+  the command and JSON, the "Let AI apps save notes to Yap" switch
+  (`cfg.mcpAllowWrites`), a Local-API-off warning with "Turn on the Local API",
+  and the privacy line; it re-reads when it comes into view, as Settings stays
+  mounted), and **Account** (bottom of the
   sidebar — `AccountSection.svelte`). The status bar's update link follows the
   same store (Check for updates → Restart to update / Downloading… / Up to date ✓).
 - **`lib/AccountSection.svelte` / `account.svelte.js`** — Settings → Account:
@@ -1281,6 +1333,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 - Local API bridge discovery: `~/.yap/cli-bridge.json` (fixed path, NOT the
   data dir; written while the app runs, deleted on exit — see `bridge.rs` +
   `docs/local-api.md`).
+- AI apps' own config files (Settings → MCP → Add to …): Yap only adds or
+  removes its `yap` entry, keeps the original as `<file>.bak` the first time,
+  and never edits a file that isn't plain JSON (`mcp_clients.rs`).
 - Account session: a Windows Credential Manager generic credential
   (`yap-account.com.yap.dictation`, Local persistence), not a file — see `auth.rs`.
   Uninstalling with "Delete the application data" removes it too (updates never do).
@@ -1358,7 +1413,12 @@ Yap's own included, writes the action plan in Rust without bringing up the
 main window; e2e-tested in `notepad.spec.js`, split screen unit-tested only),
 and an **AI Chat** surface (`chats.rs` + eager
 keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six tools,
-≤20-step loop, gated to cloud or ≥4B local models). Every JSON store now writes
+≤20-step loop, gated to cloud or ≥4B local models). An **MCP server** (`mcp.rs`,
+`yap.exe mcp`) lets Claude, ChatGPT desktop/Codex, Gemini CLI, Cursor, Claude Code,
+VS Code and Windsurf read meetings and notes (never dictations) through the local
+API, added in one click from Settings → MCP (`mcp_clients.rs`); tested in-process,
+against the real binary and end to end (2026-10-05), not yet with a real AI app.
+Every JSON store now writes
 atomically with corrupt-file quarantine. The default (no-feature) build still ships
 the stub for fast `cargo check`. **Optional accounts** (`auth.rs` + `cloud/`): email
 codes and Google/GitHub/Discord sign-in, sign-out, delete-account — tested end

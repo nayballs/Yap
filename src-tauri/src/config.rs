@@ -341,6 +341,10 @@ pub struct YapConfig {
     /// loopback-only + bearer token, so nothing is reachable off-machine.
     #[serde(default = "default_true")]
     pub bridge_enabled: bool,
+    /// Let AI apps save notes through Yap's MCP server (its `create_note`
+    /// tool; Settings → MCP). Off by default: they can only read.
+    #[serde(default)]
+    pub mcp_allow_writes: bool,
 
     /// Open the meeting notepad when a meeting recording starts (Settings →
     /// General → Meetings; `notepad.rs`): docked to the right edge of the
@@ -529,6 +533,7 @@ impl Default for YapConfig {
             streaming_partials: true,
             history_enabled: true,
             bridge_enabled: true,
+            mcp_allow_writes: false,
             meeting_open_notepad: true,
             meeting_split_screen: false,
             meeting_live_transcript: true,
