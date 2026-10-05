@@ -47,7 +47,11 @@ points the suite at an exe directly), so it never competes with a running
   segments directly. It quits when the suite closes its stdin, including
   when the suite dies;
 - talks to an account service that isn't there (`YAP_AUTH_URL` points at a
-  closed local port), so it's signed out and never touches your saved session.
+  closed local port), so it's signed out and never touches your saved session;
+- keeps the local API's discovery file in its run folder (`YAP_BRIDGE_FILE`,
+  never `~/.yap/cli-bridge.json`) and treats `runs/<name>/ai-apps/` as the
+  user profile when Settings → MCP edits AI apps' config files
+  (`YAP_MCP_CLIENT_ROOT`): a run never adds Yap to your real Claude, Cursor…
 
 A Yap window (1200×800) shows on screen while the suite runs, plus the
 onboarding window and the overlay for a moment, and in the meeting specs the
@@ -105,6 +109,7 @@ then open `screenshots/` (Claude can read the PNGs directly) or
 | `e2e/meeting-detect.spec.js` | default | call detection through the debug-only `meeting_detect_simulate` hook: a call offers to take notes and "Not now" leaves it (and the app's next call) alone · a prompt leaves with its call · a prompt left alone fades (its `fadeMs` shortened from 30 s) and counts as "Not now" · "Record notes" creates a Meetings note and records it, the call ending offers "Stop and summarise", which ends it in the note and runs the summary step · "Keep recording" carries the notes into a rejoined huddle, whose end asks again · a Discord call isn't asked about by default · "Don't ask for Teams" confirms, Settings shows Teams off, and switching it back on asks again · "Quietly" keeps the prompt out of the window · Settings lists how Yap asks and every app's effective choice, in two columns · the Settings toggle turns it off and greys out the rest |
 | `e2e/meeting-detect-no-mic.spec.js` | configured mic missing | "Record notes" says why it can't record and leaves no empty meeting note |
 | `e2e/meetings.spec.js` | meeting audio from test WAVs | live You/Them segments, cut in pauses · ending the meeting without an AI model explains how to set one up · the call leaking from the speakers into the mic is flagged as echo, hidden, and kept |
+| `e2e/mcp.spec.js` | Local API on, seeded meetings and a dictation, a stand-in user profile with AI apps' configs | Integrations' "Go to MCP" opens Settings → MCP · Wispr's four cards in order (Claude, ChatGPT, Gemini, Cursor) with what Yap found, then All other apps · Add to Claude merges into its config (other servers kept, `.bak` made) and Remove gives back the same bytes · Cursor, ChatGPT (TOML) and Claude Code (under its lock) get their own formats · a config that isn't plain JSON is left alone, with the reason · with the Local API off the page says so and turns it on, and Settings' copy agrees · a real `yap.exe mcp` session (`support/mcp-client.js`) lists, searches and pages meetings, reads notes and folders, and never returns the dictation · "Let AI apps save notes" adds `create_note` and the note shows in Notes · with no Yap, the tools ask to open it |
 | `e2e/meeting-summary.spec.js` | Note Formatting pointed at a local fake AI | a two-hour meeting fed in ten-minute batches: 11 rolling digests, each under 4,500 tokens with a capped reply · one final call over digests + the raw tail · an action plan with a section per person, Decisions, Open questions and Unassigned · the deterministic checks (an invented owner, a dropped task, a made-up deadline) · Copy text |
 | `e2e/meeting-guards.spec.js` | default | the meeting guard rails: the overlay and the notepad excluded from screen capture while a meeting records and back after (debug-only `capture_affinity`) · with hiding off, the screen-share tip, **Update settings** at the switch, and switching it back on mid-meeting · the length warning, **Keep going**, and the stop at the limit, in seconds (debug-only `e2e_meeting_limit`) · "When a call ends: Stop and summarise automatically" on a simulated call end · the meeting shortcut (Win+Alt+M through the in-page fallback) starting a "Meeting · …" note and stopping it, and taking notes on a live call · the Settings rows and recording a new shortcut |
 | `e2e/notepad.spec.js` | Note Formatting pointed at a local fake AI | the meeting notepad (`yap.notepad`): it opens on record docked to the right edge, full height, without taking the focus, and out of screen captures · live You/Them lines, echo hidden, the dismissible tip, the empty state · closing it keeps recording and Notes reopens it · My thoughts and the title synced with Notes both ways · What did I miss? (nothing new without a model call, then only the lines since you looked, then a follow-up) · the AI title replacing call detection's made-up one, never a typed one · Started by mistake? (Keep, Generate summary, Discard) · Stop → "Step 2 of 3" → a failure with Retry → the plan · an automatic stop (the length limit) writing the plan in the notepad without bringing up the main window · the Settings rows, "Show live transcript" off · the dictation hotkey and the meeting shortcut caught in the notepad |
@@ -144,8 +149,9 @@ test('chat: the empty state offers a new chat', async ({ yap, main, shot }) => {
 - Tests in a spec share one app instance and can run in any order, so don't
   depend on another test's leftovers. A spec that needs the app started
   differently overrides `yapOptions`: `test.use({ yapOptions: { name,
-  config, env } })`, or `test.extend` when the values are computed (see
-  `updates.spec.js`).
+  config, env, data } })` (`data` seeds files in `Data/`, e.g.
+  `{ 'notes.json': {...} }`), or `test.extend` when the values are computed
+  (see `updates.spec.js`, `mcp.spec.js`).
 - Don't click anything that leaves the app: sign-in buttons and external
   links open the browser, "Download …" fetches a model, "Open logs folder"
   opens Explorer, Browse opens a native file dialog. Native surfaces (tray,

@@ -30,6 +30,8 @@ mod history;
 mod input_hook;
 mod llm;
 mod local_llm;
+mod mcp;
+mod mcp_clients;
 mod mute;
 mod overlay;
 mod partials;
@@ -102,6 +104,13 @@ pub(crate) fn shutdown_cleanup() {
     local_llm::stop();
     bridge::stop();
     mute::unmute_system_output();
+}
+
+/// `yap.exe mcp` (main.rs): serve MCP to an AI app over stdin/stdout until it
+/// hangs up, reading notes from the running Yap (see `mcp.rs`). Returns the
+/// process exit code. Nothing of the app itself starts.
+pub fn run_mcp_server() -> i32 {
+    mcp::run_stdio()
 }
 
 /// Reload handle for the global log filter — lets the Settings "Debug mode"
@@ -389,6 +398,9 @@ pub fn run() {
             commands::chat_delete,
             commands::chat_send,
             commands::bridge_status,
+            mcp_clients::mcp_clients_status,
+            mcp_clients::mcp_client_add,
+            mcp_clients::mcp_client_remove,
             auth::auth_status,
             auth::auth_check_methods,
             auth::auth_start,
