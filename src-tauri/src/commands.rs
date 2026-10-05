@@ -862,6 +862,8 @@ pub fn save_config(
     crate::capture::sync(&app);
     // …and "Notify before scheduled meetings start" applies at once.
     crate::calendar::on_config_saved();
+    // …and the Yap bar (on/off, fullscreen, position, the tooltips' hotkeys).
+    crate::bar::sync(&app, &cfg);
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.update_config(cfg);

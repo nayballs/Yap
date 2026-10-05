@@ -92,6 +92,14 @@ const POLL_TICK: Duration = Duration::from_secs(5);
 /// A start prompt left alone in the window fades after this long and counts
 /// as "Not now" (OpenWhispr hides its meeting prompt after 30 s).
 const FADE_MS: u64 = 30_000;
+/// `meeting_auto_start`: notes start this long after the prompt shows,
+/// unless it's answered first (Wispr's "Meeting detected" countdown).
+const AUTO_START_MS: u64 = 10_000;
+/// A call of an app asked about this recently (a rejoin, a reload) is asked
+/// about without the countdown, as Wispr does.
+const REDETECT_MS: u64 = 10 * 60_000;
+/// The prompt's card on the Yap bar (`crate::bar`).
+const BAR_CARD: &str = "call";
 
 /// `meeting_detect_style` for prompts that skip the banner and the window.
 const QUIET: &str = "quiet";
@@ -481,6 +489,9 @@ struct Prompt {
     /// In the window, a start prompt fades after this long (ms) and counts
     /// as "Not now". `None`: it stays (end prompts).
     fade_ms: Option<u64>,
+    /// `meeting_auto_start`: when its countdown runs out (unix ms) and notes
+    /// start by themselves, unless answered first.
+    auto_start_at: Option<u64>,
 }
 
 #[derive(Default)]
@@ -491,6 +502,10 @@ struct State {
     /// When a call Yap records ends, stop and summarise without asking
     /// (`meeting_call_end` = "stop").
     auto_stop: bool,
+    /// Start notes after a countdown (`meeting_auto_start`).
+    auto_start: bool,
+    /// App id → when Yap last asked about its call (ms), for [`REDETECT_MS`].
+    asked_at: HashMap<&'static str, u64>,
     /// App id → whether to ask about its calls (`meeting_detect_apps`; apps
     /// without an entry use their default, see [`asks`]).
     choices: BTreeMap<String, bool>,
@@ -603,6 +618,8 @@ struct PromptView {
     quiet: bool,
     /// In the window: fade after this long (ms), as "Not now".
     fade_ms: Option<u64>,
+    /// Notes start by themselves at this time (unix ms), unless answered.
+    auto_start_at: Option<u64>,
 }
 
 /// One wording for both surfaces (the in-app toast, the Windows notification).
@@ -680,6 +697,7 @@ fn status_of(s: &State) -> Status {
                 in_app: p.in_app,
                 quiet: p.quiet,
                 fade_ms: p.fade_ms,
+                auto_start_at: p.auto_start_at,
             }
         }),
     }
@@ -788,6 +806,8 @@ struct Todo {
     remove_native: bool,
     /// Post this prompt as a Windows notification.
     post_native: Option<Prompt>,
+    /// (prompt id, deadline): start notes when its countdown runs out.
+    auto_start: Option<(u64, u64)>,
     emit: bool,
     /// A call Yap recorded ended with "Stop and summarise automatically"
     /// on: stop and summarise this note.
@@ -813,12 +833,52 @@ fn run(app: &AppHandle, todo: Todo) {
     }
     #[cfg(not(windows))]
     let _ = (todo.remove_native, todo.post_native);
+    if let Some((prompt_id, at)) = todo.auto_start {
+        auto_start_later(app, prompt_id, at);
+    }
     if todo.emit {
         emit(app);
     }
     if let Some((note_id, call)) = todo.auto_stop {
         crate::meeting_guard::stop_after_call(app, note_id, &format!("{} {}", call.label, call.noun));
     }
+}
+
+/// `meeting_auto_start`: the countdown on start prompt `prompt_id` runs out
+/// at `at` → "Record notes", as if clicked — if the prompt is still up and
+/// its countdown was on screen (the in-app toast or the Yap bar's card),
+/// once any dictation in progress is over.
+fn auto_start_later(app: &AppHandle, prompt_id: u64, at: u64) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(at.saturating_sub(now_ms())));
+        while dictating(&app) {
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        let in_app = match lock().prompt.as_ref().filter(|p| p.id == prompt_id && p.auto_start_at.is_some()) {
+            Some(p) => p.in_app,
+            None => return,
+        };
+        if !in_app && !crate::bar::card_on_screen(BAR_CARD) {
+            return;
+        }
+        tracing::info!(prompt_id, "meeting detect: countdown over, recording");
+        crate::bar::update_card(&app, BAR_CARD, |card| {
+            card.status = Some("Starting notes\u{2026}".into());
+            card.dot = "";
+            card.countdown = None;
+            card.primary = None;
+            card.escape_action = None;
+        });
+        if let Err(e) = respond(&app, prompt_id, "record") {
+            #[cfg(windows)]
+            if !window_view(&app).0 && native::failed(&app, &e).is_ok() {
+                return;
+            }
+            let _ = crate::commands::show_settings(&app);
+            let _ = app.emit("yap-error", format!("Couldn't record the call. {e}"));
+        }
+    });
 }
 
 /// Retire the pending prompt (answered, moot, or its call ended).
@@ -849,11 +909,14 @@ fn drop_unasked(s: &mut State, todo: &mut Todo) {
 }
 
 /// The main window: (on screen, focused). Never call with the lock held.
+/// A test run never focuses its windows, so one the desktop activates
+/// behind the suite's back doesn't count as focused (e2e.rs).
 fn window_view(app: &AppHandle) -> (bool, bool) {
     app.get_webview_window("settings")
         .map(|w| {
             let visible = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
-            (visible, visible && w.is_focused().unwrap_or(false))
+            let focused = !crate::e2e::active() && w.is_focused().unwrap_or(false);
+            (visible, visible && focused)
         })
         .unwrap_or((false, false))
 }
@@ -890,7 +953,25 @@ fn show_prompt(
     let fade_ms = (kind == PromptKind::Start)
         .then(|| s.calls.iter().find(|c| c.id == call_id).and_then(|c| c.fade_ms).unwrap_or(FADE_MS));
     let in_app = visible && !quiet;
-    let prompt = Prompt { id: s.seq, kind, call_id, app, note_id, in_app, native: false, quiet, fade_ms };
+    // `meeting_auto_start`: a countdown, only where it's sure to be seen
+    // (the toast in a focused main window, or the Yap bar's card) and not
+    // for a call it just asked about (a rejoin or a reload).
+    let now = now_ms();
+    let redetected = s.asked_at.get(app.id).is_some_and(|at| now.saturating_sub(*at) < REDETECT_MS);
+    let counts_down = kind == PromptKind::Start
+        && s.auto_start
+        && !quiet
+        && !redetected
+        && (focused || crate::bar::cards_seen());
+    let auto_start_at = counts_down.then_some(now + AUTO_START_MS);
+    if kind == PromptKind::Start {
+        s.asked_at.insert(app.id, now);
+    }
+    let prompt =
+        Prompt { id: s.seq, kind, call_id, app, note_id, in_app, native: false, quiet, fade_ms, auto_start_at };
+    if let Some(at) = auto_start_at {
+        todo.auto_start = Some((prompt.id, at));
+    }
     if quiet || !focused {
         todo.post_native = Some(prompt.clone());
     }
@@ -1076,6 +1157,7 @@ pub fn init(app: &AppHandle) {
         s.enabled = enabled;
         s.quiet = cfg.meeting_detect_style == QUIET;
         s.auto_stop = cfg.meeting_call_end == STOP_AT_CALL_END;
+        s.auto_start = cfg.meeting_auto_start;
         s.choices = cfg.meeting_detect_apps;
     }
     let (tx, rx) = mpsc::channel();
@@ -1206,6 +1288,8 @@ pub fn sync(app: &AppHandle, enabled: bool) {
     let mut todo = Todo::default();
     {
         let mut s = lock();
+        // The countdown setting applies to the next prompt; nothing to redo.
+        s.auto_start = cfg.meeting_auto_start;
         if s.enabled == enabled && s.quiet == quiet && s.choices == cfg.meeting_detect_apps {
             // Only "When a call ends" changed (or nothing): no prompt changes.
             if s.auto_stop != auto_stop {
@@ -1784,13 +1868,70 @@ mod native {
         )
     }
 
+    /// The prompt as a card on the Yap bar (`crate::bar`), styled after
+    /// Wispr's "Meeting detected" card: the app's mark, "Teams call detected"
+    /// over "● Now", a split button "Record notes" whose ^ menu holds the
+    /// other answers, and a ✕ on its corner — the same answers as the
+    /// notification's buttons, back through [`activated`]. A start prompt
+    /// left alone fades as "Not now"; one counting down (`meeting_auto_start`)
+    /// shows the countdown, and its ✕ or Esc cancels.
+    pub fn bar_card(p: &Prompt) -> crate::bar::Card {
+        use crate::bar::{Card, CardAction, Countdown};
+        let w = wording(p.kind, p.app);
+        let (accept, decline) = match p.kind {
+            PromptKind::Start => ("record", "dismiss"),
+            PromptKind::End => ("stop", "keep"),
+        };
+        let arg = |answer: &str| format!("meeting:{answer}:{}", p.id);
+        let countdown = p.auto_start_at.map(|until| Countdown { until, label: "Notes start in".into() });
+        let counting = countdown.is_some();
+        let start = p.kind == PromptKind::Start;
+        Card {
+            id: super::BAR_CARD.into(),
+            style: "call",
+            icon: "call",
+            app: Some(p.app.id),
+            title: w.title,
+            body: w.body.into(),
+            // The call is on now; or, ended, Yap is still recording it.
+            status: Some(if start { "Now" } else { "Still recording" }.into()),
+            dot: if start { "live" } else { "recording" },
+            primary: Some(CardAction::new(arg(accept), if counting { "Start now" } else { w.accept })),
+            secondary: Some(CardAction::new(arg(decline), w.decline)),
+            link: w.never.map(|label| CardAction::new(arg("never"), label)),
+            timeout_ms: if counting { None } else { p.fade_ms },
+            expire_action: Some(arg(decline)),
+            close_action: Some(arg(decline)),
+            escape_action: counting.then(|| arg(decline)),
+            countdown,
+        }
+    }
+
+    /// On the Yap bar while it's on screen, else a Windows notification (a
+    /// quiet prompt always goes silently to the notification center).
     pub fn post_prompt(app: &AppHandle, p: &Prompt) -> Result<(), String> {
+        if !p.quiet && crate::bar::show_card(app, bar_card(p), Box::new(activated)) {
+            return Ok(());
+        }
         post(app, &prompt_xml(p, &logo_xml()), p.quiet)
     }
 
     /// "Record notes" from the notification center or the tray: say it's
     /// recording. (Feedback on a click, so with a banner in either style.)
     pub fn recording(app: &AppHandle, call: &App, note_id: u64) {
+        let card = crate::bar::Card {
+            id: super::BAR_CARD.into(),
+            icon: "notes",
+            title: format!("Taking notes on your {} {}", call.label, call.noun),
+            body: "Let people know you're taking notes. Yap offers to stop and summarise when it ends."
+                .into(),
+            primary: Some(crate::bar::CardAction::new(format!("meeting:open:{note_id}"), "Open note")),
+            timeout_ms: Some(8_000),
+            ..Default::default()
+        };
+        if crate::bar::show_card(app, card, Box::new(activated)) {
+            return;
+        }
         let xml = format!(
             "<toast launch=\"meeting:open:{note_id}\"><visual><binding template=\"ToastGeneric\">\
              <text>{}</text><text>Yap offers to stop and summarise when it ends.</text>{}\
@@ -1807,6 +1948,17 @@ mod native {
 
     /// Recording the call couldn't start: say why.
     pub fn failed(app: &AppHandle, message: &str) -> Result<(), String> {
+        let card = crate::bar::Card {
+            id: super::BAR_CARD.into(),
+            icon: "error",
+            title: "Couldn't record the call".into(),
+            body: message.into(),
+            timeout_ms: Some(8_000),
+            ..Default::default()
+        };
+        if crate::bar::show_card(app, card, Box::new(|_, _| {})) {
+            return Ok(());
+        }
         let xml = format!(
             "<toast launch=\"meeting:show\"><visual><binding template=\"ToastGeneric\">\
              <text>Couldn't record the call</text><text>{}</text>{}</binding></visual>\
@@ -1817,8 +1969,10 @@ mod native {
         post(app, &xml, false)
     }
 
-    /// Take the call notification out of the notification center.
+    /// Take the call notification out of the notification center (and its
+    /// card off the Yap bar).
     pub fn remove(app: &AppHandle) {
+        crate::bar::dismiss_card(app, super::BAR_CARD);
         if CURRENT.lock().unwrap_or_else(|p| p.into_inner()).take().is_some() {
             crate::win_toast::remove(app, TAG);
         }
@@ -2185,6 +2339,95 @@ mod tests {
         assert!(discord.asks && !discord.asks_by_default);
     }
 
+    #[test]
+    fn notes_start_after_a_countdown_only_when_switched_on_and_seen() {
+        let mut s = State { enabled: true, ..Default::default() };
+        let mut todo = Todo::default();
+        call_started(&mut s, &mut todo, "teams", 0);
+        let call = s.calls[0].id;
+        let countdown = |s: &State| s.prompt.as_ref().and_then(|p| p.auto_start_at);
+        // Off by default: just the prompt.
+        show_prompt(&mut s, &mut todo, (true, true), PromptKind::Start, call, app("teams"), None);
+        assert_eq!(countdown(&s), None);
+        assert!(todo.auto_start.is_none());
+        // Switched on: ten seconds, shown in the focused window's toast.
+        s.auto_start = true;
+        s.asked_at.clear();
+        let mut todo = Todo::default();
+        let before = now_ms();
+        show_prompt(&mut s, &mut todo, (true, true), PromptKind::Start, call, app("teams"), None);
+        let at = countdown(&s).unwrap();
+        assert!(at >= before + AUTO_START_MS && at <= now_ms() + AUTO_START_MS);
+        assert_eq!(todo.auto_start, Some((s.prompt.as_ref().unwrap().id, at)));
+        // The same app's call again soon after (a rejoin, a reload): asked
+        // about without the countdown, as Wispr does.
+        let mut todo = Todo::default();
+        show_prompt(&mut s, &mut todo, (true, true), PromptKind::Start, call, app("teams"), None);
+        assert_eq!(countdown(&s), None);
+        assert!(todo.auto_start.is_none());
+        // Nowhere sure to be seen (the window hidden, or open behind the call
+        // app, and no card on the Yap bar), or asking quietly: no countdown.
+        for view in [(false, false), (true, false)] {
+            s.asked_at.clear();
+            show_prompt(&mut s, &mut todo, view, PromptKind::Start, call, app("teams"), None);
+            assert_eq!(countdown(&s), None, "{view:?}");
+        }
+        s.asked_at.clear();
+        s.quiet = true;
+        show_prompt(&mut s, &mut todo, (true, true), PromptKind::Start, call, app("teams"), None);
+        assert_eq!(countdown(&s), None);
+        // An end prompt never starts anything.
+        s.quiet = false;
+        s.asked_at.clear();
+        show_prompt(&mut s, &mut todo, (true, true), PromptKind::End, call, app("teams"), Some(1));
+        assert_eq!(countdown(&s), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_bar_card_offers_the_same_answers() {
+        let p = Prompt {
+            id: 7,
+            kind: PromptKind::Start,
+            call_id: 3,
+            app: app("meet"),
+            note_id: None,
+            in_app: false,
+            native: false,
+            quiet: false,
+            fade_ms: Some(FADE_MS),
+            auto_start_at: None,
+        };
+        let card = native::bar_card(&p);
+        assert_eq!(card.id, BAR_CARD);
+        // Wispr's "Meeting detected" layout: the app's mark, "● Now".
+        assert_eq!((card.style, card.app), ("call", Some("meet")));
+        assert_eq!(card.title, "Google Meet call detected");
+        assert_eq!((card.status.as_deref(), card.dot), (Some("Now"), "live"));
+        let action = |a: &Option<crate::bar::CardAction>| a.as_ref().map(|a| (a.id.clone(), a.label.clone()));
+        assert_eq!(action(&card.primary), Some(("meeting:record:7".into(), "Record notes".into())));
+        assert_eq!(action(&card.secondary), Some(("meeting:dismiss:7".into(), "Not now".into())));
+        assert_eq!(action(&card.link), Some(("meeting:never:7".into(), "Don't ask for Google Meet".into())));
+        // Left alone it fades as "Not now", and its ✕ means "Not now".
+        assert_eq!(card.timeout_ms, Some(FADE_MS));
+        assert_eq!(card.expire_action.as_deref(), Some("meeting:dismiss:7"));
+        assert_eq!(card.close_action.as_deref(), Some("meeting:dismiss:7"));
+        assert!(card.escape_action.is_none() && card.countdown.is_none());
+        // Counting down: "Start now", no fade, Esc cancels.
+        let card = native::bar_card(&Prompt { auto_start_at: Some(123), ..p.clone() });
+        assert_eq!(action(&card.primary), Some(("meeting:record:7".into(), "Start now".into())));
+        assert_eq!(card.timeout_ms, None);
+        assert_eq!(card.countdown.as_ref().map(|c| c.until), Some(123));
+        assert_eq!(card.escape_action.as_deref(), Some("meeting:dismiss:7"));
+        // The call ending: Stop and summarise / Keep recording; it stays.
+        let card = native::bar_card(&Prompt { kind: PromptKind::End, note_id: Some(1), fade_ms: None, ..p });
+        assert_eq!(action(&card.primary), Some(("meeting:stop:7".into(), "Stop and summarise".into())));
+        assert_eq!(action(&card.secondary), Some(("meeting:keep:7".into(), "Keep recording".into())));
+        assert!(card.link.is_none() && card.timeout_ms.is_none());
+        assert_eq!((card.status.as_deref(), card.dot), (Some("Still recording"), "recording"));
+        assert_eq!(card.close_action.as_deref(), Some("meeting:keep:7"));
+    }
+
     #[cfg(windows)]
     #[test]
     fn notification_xml_names_the_answers() {
@@ -2198,6 +2441,7 @@ mod tests {
             native: false,
             quiet: true,
             fade_ms: Some(FADE_MS),
+            auto_start_at: None,
         };
         let xml = native::prompt_xml(&p, "");
         assert!(xml.contains("<text>Google Meet call detected</text>"));

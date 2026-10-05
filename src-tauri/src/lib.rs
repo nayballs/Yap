@@ -9,6 +9,7 @@
 
 mod agent_detect;
 mod auth;
+mod bar;
 mod bridge;
 mod calendar;
 mod capture;
@@ -447,6 +448,13 @@ pub fn run() {
             calendar::calendar_card,
             calendar::calendar_nudge,
             calendar::calendar_meeting_notes,
+            bar::bar_status,
+            bar::bar_regions,
+            bar::bar_pointer_left,
+            bar::bar_action,
+            bar::bar_card_action,
+            bar::bar_simulate,
+            bar::bar_debug,
             // Test mode only (e2e.rs); not in release builds at all.
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_feed,
@@ -524,12 +532,9 @@ pub fn run() {
             // Yap accounts: sign-in deep links + restore the stored session.
             auth::init(&handle);
 
-            // Make the overlay click-through + topmost so it floats above the
-            // focused window without ever stealing the cursor.
-            if let Some(w) = app.get_webview_window("overlay") {
-                let _ = w.set_ignore_cursor_events(true);
-                let _ = w.set_always_on_top(true);
-            }
+            // The overlay window is the Yap bar: click-through, always on
+            // top, never focused, following the cursor's monitor (bar.rs).
+            bar::init(&handle);
 
             // Dev builds: show Settings on launch. Every Yap window is hidden
             // at startup by design (tray-first UX), which leaves dev runs — and
@@ -587,22 +592,17 @@ pub fn run() {
                 }
             });
 
-            // Drive the bottom-center overlay from the pipeline's `yap-state`
-            // event (decoupled from the pipeline itself). Show it while
-            // recording/processing and hide it otherwise. The overlay is always
-            // on — it's the hot-mic indicator; only the live-text preview
+            // Drive the overlay (the Yap bar) from the pipeline's `yap-state`
+            // event (decoupled from the pipeline itself). It always shows
+            // while recording/processing, and briefly on error — it's the
+            // hot-mic indicator, bar or no bar; only the live-text preview
             // inside it is user-toggleable (`streaming_partials`).
             let overlay_handle = handle.clone();
             handle.listen("yap-state", move |event| {
                 let state = event.payload().trim_matches('"'); // payload is a JSON string
                 let generation = STATE_GEN.fetch_add(1, Ordering::Relaxed) + 1;
-                // Show the overlay while recording/processing, and briefly on error.
                 let show = matches!(state, "recording" | "processing" | "processing-slow" | "error");
-                if show {
-                    overlay::show_overlay(&overlay_handle);
-                } else {
-                    overlay::hide_overlay(&overlay_handle);
-                }
+                bar::on_pipeline_state(&overlay_handle, state);
                 OVERLAY_ACTIVE.store(show, Ordering::Relaxed);
                 // Keep the tray icon + menu in sync with the recording state.
                 tray::update_tray(&overlay_handle, state);
