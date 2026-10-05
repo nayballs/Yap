@@ -227,12 +227,16 @@
     refreshList();
   }
 
-  // Debounced autosave of title + content while typing.
+  // Debounced autosave of title + content while typing. flushSave() only
+  // sends a pending edit (an armed timer) — switching notes or leaving Notes
+  // must not re-save a note that was merely viewed, which would also clobber
+  // edits made to it meanwhile through the local API.
   function queueSave() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flushSave, 600);
   }
   function flushSave() {
+    if (saveTimer === null) return; // nothing typed since the last save
     clearTimeout(saveTimer);
     saveTimer = null;
     if (!selected) return;

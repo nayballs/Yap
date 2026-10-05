@@ -402,8 +402,9 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
     })
 }
 
-/// Update title / raw content / folder; bumps `updated_ts`. Enhancement fields
-/// are deliberately untouched — a content edit just makes the Enhanced tab stale.
+/// Update title / raw content / folder / attendees. Enhancement fields are
+/// deliberately untouched — a content edit just makes the Enhanced tab stale.
+/// Only a real change bumps `updated_ts` and hits the disk (see `apply_update`).
 pub fn update(
     id: u64,
     title: Option<String>,
@@ -412,33 +413,62 @@ pub fn update(
     participants: Option<Vec<String>>,
 ) -> Result<(), String> {
     with_store(|store| {
-        let note = store
-            .notes
-            .iter_mut()
-            .find(|n| n.id == id)
-            .ok_or("Note not found")?;
-        if let Some(t) = title {
-            note.title = t;
+        if apply_update(store, id, title, content, folder, participants)? {
+            save_to_disk(store);
         }
-        if let Some(c) = content {
-            note.content = c;
-        }
-        if let Some(f) = folder {
-            if !f.trim().is_empty() {
-                note.folder = f.trim().to_string();
-            }
-        }
-        if let Some(p) = participants {
-            note.participants = p
-                .into_iter()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-        }
-        note.updated_ts = now_secs();
-        save_to_disk(store);
         Ok(())
     })
+}
+
+/// Apply an edit to note `id`; returns whether anything actually changed.
+/// Re-sending identical values (the editor flushing a note that was only
+/// viewed, a no-op API PATCH) leaves `updated_ts` alone, so the list doesn't
+/// float a note nobody edited to the top as "now".
+fn apply_update(
+    store: &mut Store,
+    id: u64,
+    title: Option<String>,
+    content: Option<String>,
+    folder: Option<String>,
+    participants: Option<Vec<String>>,
+) -> Result<bool, String> {
+    let note = store
+        .notes
+        .iter_mut()
+        .find(|n| n.id == id)
+        .ok_or("Note not found")?;
+    let mut changed = false;
+    if let Some(t) = title {
+        changed |= set_if_changed(&mut note.title, t);
+    }
+    if let Some(c) = content {
+        changed |= set_if_changed(&mut note.content, c);
+    }
+    if let Some(f) = folder {
+        if !f.trim().is_empty() {
+            changed |= set_if_changed(&mut note.folder, f.trim().to_string());
+        }
+    }
+    if let Some(p) = participants {
+        let p: Vec<String> = p
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        changed |= set_if_changed(&mut note.participants, p);
+    }
+    if changed {
+        note.updated_ts = now_secs();
+    }
+    Ok(changed)
+}
+
+fn set_if_changed<T: PartialEq>(slot: &mut T, value: T) -> bool {
+    if *slot == value {
+        return false;
+    }
+    *slot = value;
+    true
 }
 
 /// Append meeting-recorder segments to a note's transcript and mark it a
@@ -501,5 +531,57 @@ mod tests {
         // …but a length change is always caught.
         let longer = format!("{}{}", "a".repeat(50), "tail-longer");
         assert_ne!(content_hash(&long_a), content_hash(&longer));
+    }
+
+    fn store_with_note() -> Store {
+        let note: Note = serde_json::from_value(json!({
+            "id": 1,
+            "title": "Standup",
+            "content": "Ship the fix",
+            "participants": ["Dave"],
+            "createdTs": 1,
+            "updatedTs": 1,
+        }))
+        .unwrap();
+        Store {
+            notes: vec![note],
+            ..Store::default()
+        }
+    }
+
+    #[test]
+    fn saving_unchanged_values_keeps_updated_ts() {
+        let mut store = store_with_note();
+        // What the editor sends for a note that was only viewed, with the
+        // folder/attendees spelled the way update() normalizes them anyway.
+        let changed = apply_update(
+            &mut store,
+            1,
+            Some("Standup".to_string()),
+            Some("Ship the fix".to_string()),
+            Some(" Personal ".to_string()),
+            Some(vec![" Dave ".to_string(), String::new()]),
+        )
+        .unwrap();
+        assert!(!changed);
+        assert_eq!(store.notes[0].updated_ts, 1);
+    }
+
+    #[test]
+    fn a_real_edit_bumps_updated_ts() {
+        let mut store = store_with_note();
+        let changed = apply_update(
+            &mut store,
+            1,
+            Some("Standup".to_string()),
+            Some("Ship the fix today".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(changed);
+        assert_eq!(store.notes[0].content, "Ship the fix today");
+        assert!(store.notes[0].updated_ts > 1);
+        assert!(apply_update(&mut store, 2, None, None, None, None).is_err());
     }
 }
