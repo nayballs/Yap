@@ -90,13 +90,14 @@ fn line(seg: &TranscriptSegment, t0: u64) -> String {
 }
 
 /// The transcript's pages, as ranges of segment indices, each within
-/// [`PAGE_TOKENS`] (echo segments, the call leaking into the mic, are
-/// skipped, as in summaries). Empty when nothing was said.
+/// [`PAGE_TOKENS`] (echo segments, the call leaking into the mic, and "You
+/// dictated here" markers are skipped, as in summaries). Empty when nothing
+/// was said.
 pub fn pages(segs: &[TranscriptSegment], t0: u64) -> Vec<Range<usize>> {
     let mut out = Vec::new();
     let (mut start, mut used) = (0, 0);
     for (i, seg) in segs.iter().enumerate() {
-        if seg.echo {
+        if !seg.is_talk() {
             continue;
         }
         let tokens = estimate_tokens(&line(seg, t0)) + 1;
@@ -121,7 +122,7 @@ fn page_of(pages: &[Range<usize>], seg: usize) -> usize {
 }
 
 fn spoken(n: &Note) -> impl Iterator<Item = &TranscriptSegment> {
-    n.transcript.iter().filter(|s| !s.echo)
+    n.transcript.iter().filter(|s| s.is_talk())
 }
 
 /// When the meeting started (its first words, else when the note was made).
@@ -209,7 +210,7 @@ pub fn search_meetings(notes: &[Note], query: &str, limit: usize) -> Vec<Value> 
             + hits(&n.content, &words)
             + hits(&n.enhanced_content, &words);
         let mut matched: Vec<(usize, usize)> = Vec::new(); // (distinct words, segment)
-        for (i, seg) in n.transcript.iter().enumerate().filter(|(_, s)| !s.echo) {
+        for (i, seg) in n.transcript.iter().enumerate().filter(|(_, s)| s.is_talk()) {
             let text = seg.text.to_lowercase();
             let distinct = words.iter().filter(|w| text.contains(w.as_str())).count();
             if distinct > 0 {
@@ -909,12 +910,12 @@ pub fn render_meeting(n: &Note, page: usize) -> Result<String, String> {
     };
     let lines: Vec<String> = n.transcript[range.clone()]
         .iter()
-        .filter(|s| !s.echo)
+        .filter(|s| s.is_talk())
         .map(|s| line(s, zero))
         .collect();
     if total > 1 {
-        let first = n.transcript[range.clone()].iter().find(|s| !s.echo);
-        let last = n.transcript[range.clone()].iter().rev().find(|s| !s.echo);
+        let first = n.transcript[range.clone()].iter().find(|s| s.is_talk());
+        let last = n.transcript[range.clone()].iter().rev().find(|s| s.is_talk());
         let at = |s: Option<&TranscriptSegment>| clock(s.map_or(0, |s| s.ts.saturating_sub(zero)));
         out.push_str(&format!(
             "\n## Transcript, page {page} of {total} ({}–{})\n",
@@ -1190,6 +1191,9 @@ mod tests {
         let mut echo = standup();
         echo.transcript.iter_mut().for_each(|s| s.echo = true);
         assert!(pages(&echo.transcript, 0).is_empty());
+        // Nor do "You dictated here" markers.
+        let marker = vec![TranscriptSegment::dictation_marker(5)];
+        assert!(pages(&marker, 0).is_empty());
     }
 
     #[test]
@@ -1229,6 +1233,13 @@ mod tests {
         assert!(text.contains("## Notes typed during the meeting\nremember the venue"));
         assert!(text.contains("[0:15] Them: Priya here: I will send the revised budget by Friday."));
         assert!(!text.contains("transcript_page"), "one page, no paging hint");
+        // A dictation the user made mid-meeting isn't a line of it.
+        let mut dictated = standup();
+        let at = dictated.transcript[1].ts + 5;
+        dictated.transcript.insert(2, TranscriptSegment::dictation_marker(at));
+        let with_marker = render_meeting(&dictated, 1).unwrap();
+        assert_eq!(with_marker, text);
+        assert!(render_note(&dictated).contains("a transcript of 3 lines"));
 
         let long = long_meeting();
         let first = render_meeting(&long, 1).unwrap();
