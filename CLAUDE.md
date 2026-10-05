@@ -557,7 +557,11 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   until recording/processing.
 - `plugins.deep-link.desktop.schemes = ["com.contextmirror.yap"]` — the NSIS
   template registers it for normal installs (portable skips it) and
-  single-instance forwards a second launch's link to the running app.
+  single-instance forwards a second launch's link to the running app. Routes
+  (`auth::handle_deep_link`): `auth/callback#token=…` (sign-in hand-back) and
+  `account` (shows Settings → Account via `yap-open-settings` — the "Open Yap"
+  button on `auth.contextmirror.com/security`, linked from the new-sign-in
+  email).
 
 ---
 

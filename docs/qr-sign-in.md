@@ -75,18 +75,28 @@ Done when every box is ticked.
       option hidden in "Confirm it's you", sign-in announced before the
       provider lookup.
 - [x] Shipped in nightly `0.1.1-nightly.108` (2026-10-05).
-- [ ] Tried on the installed app (the manual tests below).
+- [x] Tried on the installed app (Nathan, nightly .108, 2026-10-05).
 - [x] Migration `0004` applied to production (2026-10-05).
+- [x] Emails redesigned after that test ("looks a bit unprofessional"):
+      one Google/Apple-style layout for all three (`668a0b6`, `0b9a00c`); the
+      new-sign-in email names app + version, place, time and method and links
+      to `/security`, whose "Open Yap" button is the new
+      `com.contextmirror.yap://account` deep link (app side: next nightly).
+      Checked in Gmail: logo loads, no blue-linked address, each alert its own
+      thread.
 - [ ] Manual tests on a real phone (iPhone Safari and/or Android Chrome):
   - [ ] Google already signed in on the phone (≈4 taps from scan).
   - [ ] No sessions on the phone; email-code path; code typed at `/device`.
-  - [ ] Approval card shows app, time and place; same-network check appears.
-  - [ ] Deny; let it expire (renews by itself, then "Show a new code").
+  - [x] Approval card shows app, time and place; same-network check appears.
+  - [x] Let it expire (renews by itself, then "Show a new code").
+  - [ ] Deny.
   - [ ] Cancel on the PC, then approve on the phone (PC stays signed out).
-  - [ ] New-sign-in email arrives after Approve.
+  - [x] New-sign-in email arrives after Approve.
   - [ ] Phone-made session: "Delete account" / "Sign out other devices" refused
         with the day-one message; works from a browser/email sign-in.
-- [ ] CLAUDE.md, `cloud/README.md` and the privacy policy describe the shipped
+  - [ ] "Review your devices" in the email → `/security` → "Open Yap" opens
+        Settings → Account (needs the nightly after `668a0b6`).
+- [x] CLAUDE.md, `cloud/README.md` and the privacy policy describe the shipped
       behaviour.
 
 ## Later (deliberately not now)

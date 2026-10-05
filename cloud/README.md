@@ -58,8 +58,11 @@ phone (its password manager, 2FA, mail app).
    `POST /api/auth/device/approve` or `/deny` `{ "userCode" }`. Either way it
    then signs the browser out, like the hand-back page: only Yap gets a
    session (leaving the page mid-way signs out too, on `pagehide`). An
-   approval emails the account "New sign-in to your Yap account", with the
-   PC's rough location and how to sign it out.
+   approval emails the account "New sign-in to your Yap account": the app
+   and version, the PC's rough location, the time and how it was approved,
+   with a "Review your devices" button to `/security` (`public/security.html`:
+   how to sign a device out, plus an "Open Yap" button, the app's
+   `com.contextmirror.yap://account` deep link to Settings → Account).
 4. Yap polls `POST /api/auth/device/token` `{ "grant_type":
    "urn:ietf:params:oauth:grant-type:device_code", "device_code",
    "client_id" }` every 3 s: 400 `authorization_pending` (or `slow_down`:
@@ -174,12 +177,13 @@ fresh one when a request on it never finished, and answers a call stuck for
 src/index.ts       Hono app: the desktop sign-in entry, /api/auth/* → Better Auth, /api/account/*, the cron
 src/auth.ts        Better Auth config (email OTP, social providers, bearer, desktop handoff, device codes)
 src/phone.ts       phone sign-in records: where a code came from, phone sessions, the sweep
-src/mail.ts        Resend sender + the Yap-styled emails
+src/mail.ts        Resend sender + the emails (one layout: logo, headline, account chip, details, button)
 src/throttle.ts    limits on emailed sign-in codes (per address, per IP) and origin look-ups
 src/env.d.ts       bindings, vars and secrets
 auth.cli.ts        schema-only config for `npm run schema` (not deployed)
 migrations/        D1 schema (generated)
-public/            static pages: handoff (/), phone sign-in (/device), /error, /privacy, /terms
+public/            static pages: handoff (/), phone sign-in (/device), /security, /error, /privacy, /terms;
+                   email/yap-logo.png is the emails' logo (Gmail drops SVG)
 dev/               mock-provider.mjs: a local stand-in provider for testing
 ```
 
