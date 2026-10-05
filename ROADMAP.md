@@ -790,6 +790,9 @@ below (✅ = done).
 > screenshots. Claude reviews, merges and pushes (CI + E2E); Nathan tries it in
 > **Yap - Dev**; then a nightly per batch. Tick an item only when it's merged, green
 > and dev-checked.
+>
+> **Status markers:** *(building)* = an agent is on it; *(merged, dev check)* = on main
+> with CI + E2E green, waiting for Nathan's try in Yap - Dev.
 
 Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
 (`meeting_detect.rs`, per-app, pop-up or quiet), mic + system-audio recording
@@ -797,7 +800,7 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
 (`meeting_summary.rs`), and the meeting UI inside the Notes view.
 
 **Wave 1 — the meeting experience**
-- [ ] **Docked meeting notepad.** A slim window docked to the screen edge (Wispr: right,
+- [ ] *(building)* **Docked meeting notepad.** A slim window docked to the screen edge (Wispr: right,
       full height, about a third of the width) that opens when a recording starts, with
       a setting "Open the notepad when a meeting starts", on by default. It has:
       - tabs **My thoughts** (your own notes, the default), **Transcript** (live, You/Them
@@ -807,22 +810,22 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
         consent…") and **What did I miss?**;
       - after Stop: **Resume**, **Generate summary**, summary progress ("Step 1 of 3") and
         a retryable error state.
-- [ ] **"Split the screen when joining".** The call window on the left, the notepad on
+- [ ] *(building)* **"Split the screen when joining".** The call window on the left, the notepad on
       the right (Win32 arrange), as a setting.
-- [ ] **"What did I miss?"** An inline mini chat in the notepad that answers from the
+- [ ] *(building)* **"What did I miss?"** An inline mini chat in the notepad that answers from the
       transcript **since you last looked** (built on the rolling digests).
-- [ ] **AI meeting title.** Replaces "Teams call · 5 Oct, 14:30" once there's enough
+- [ ] *(building)* **AI meeting title.** Replaces "Teams call · 5 Oct, 14:30" once there's enough
       talk.
-- [ ] **"Started by mistake?"** After a very short recording: Keep / Discard.
-- [ ] **Hide from screen capture / sharing.** `SetWindowDisplayAffinity(
+- [ ] *(building)* **"Started by mistake?"** After a very short recording: Keep / Discard.
+- [ ] *(merged, dev check: e1bbf73)* **Hide from screen capture / sharing.** `SetWindowDisplayAffinity(
       WDA_EXCLUDEFROMCAPTURE)` on the notepad and overlay while a meeting records, so
       screen shares and screenshots never show your notes. A setting, on by default,
       plus a warning toast when it's off (as Wispr does).
-- [ ] **Maximum recording length** (Wispr: 2 h) with a warning shortly before it stops.
-- [ ] **"Stop when the call ends"** as an option alongside today's "Stop and summarise?"
+- [ ] *(merged, dev check: e1bbf73)* **Maximum recording length** (Wispr: 2 h) with a warning shortly before it stops.
+- [ ] *(merged, dev check: e1bbf73)* **"Stop when the call ends"** as an option alongside today's "Stop and summarise?"
       prompt.
-- [ ] **Global meeting shortcut** (Wispr: Win+Alt+M) to start or stop meeting notes.
-- [ ] **The Yap bar (Wispr's Flow Bar).** Traced 2026-10-05: one fixed, click-through,
+- [ ] *(merged, dev check: e1bbf73)* **Global meeting shortcut** (Wispr: Win+Alt+M) to start or stop meeting notes.
+- [ ] *(building)* **The Yap bar (Wispr's Flow Bar).** Traced 2026-10-05: one fixed, click-through,
       never-focused, always-on-top window that follows the **cursor's monitor**
       (about 300 ms after the cursor crosses), bottom-centre above the taskbar. It is:
       - a tiny pill when idle, expanding on hover into 🎤 Dictate and ◉ Meeting notes,
@@ -836,11 +839,11 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
       It evolves today's `overlay` window.
 
 **Wave 2 — your AI and your calendar**
-- [ ] **MCP server.** Claude, ChatGPT, Gemini, Cursor and any MCP client can read your
+- [ ] *(building)* **MCP server.** Claude, ChatGPT, Gemini, Cursor and any MCP client can read your
       meeting notes and transcripts (not your dictations, like Wispr), locally over Yap's
       bridge, with one-click **Add to Claude / Cursor / …** in Integrations plus a
       copyable config for everything else.
-- [ ] **Calendar connection, local-first.** **Google in one click** (installed-app OAuth
+- [ ] *(building)* **Calendar connection, local-first.** **Google in one click** (installed-app OAuth
       with PKCE straight from the PC; read-only scopes; the token kept in Credential
       Manager) plus **any calendar by private iCal link** (Outlook, iCloud and others).
       No Yap server. Synced every ~15 min; the next 7 days; Wispr's filters (invitees
@@ -848,10 +851,10 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
       (for the action plan's owners and for spelling) and join links. The Google OAuth
       client and its scope verification are the coordinator's dashboard work; Microsoft
       Graph is a follow-up.
-- [ ] **Pre-meeting card** ("Notify before scheduled meetings start"): a bottom-centre
+- [ ] *(building)* **Pre-meeting card** ("Notify before scheduled meetings start"): a bottom-centre
       card "Meeting with Tanay · In 1 min" with **Join & take notes**, which opens the
       meeting link and starts recording.
-- [ ] **Meetings hub.** A Wispr-style home for meetings: Today/Upcoming from the calendar,
+- [ ] *(building)* **Meetings hub.** A Wispr-style home for meetings: Today/Upcoming from the calendar,
       Past notes, and search across meetings.
 
 **Wave 3 — the rest of the product**
@@ -866,14 +869,15 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
       one-click rename; diarization of "Them" stays a later item.
 - [ ] Items from the docs teardown's top-10 that aren't above, added once it's merged.
 
-**Fixes the docs teardown found in Yap** (`docs/wispr-notetaker-teardown.md` §8; queued
-until the Wave 1 notepad and guard-rail work is merged, because they share `meeting.rs`)
-- [ ] **Dictation leaks into a meeting's "You" transcript.** The meeting keeps its own
+**Fixes the docs teardown found in Yap** (`docs/wispr-notetaker-teardown.md` §8; the
+first three are being built alongside Wave 1, since neither the notepad nor the guard
+rails touch `meeting.rs`; the consent message waits for the notepad, where it lives)
+- [ ] *(building)* **Dictation leaks into a meeting's "You" transcript.** The meeting keeps its own
       mic stream open during a hotkey dictation. Blank it while dictating and leave a
       "Dictated" marker.
-- [ ] **Meeting lines (and Upload) skip the correction dictionary** (exact and fuzzy), so
+- [ ] *(building)* **Meeting lines (and Upload) skip the correction dictionary** (exact and fuzzy), so
       with the default Parakeet model meetings get no corrections.
-- [ ] **"Them" follows the default output device chosen at start.** A headset picked
+- [ ] *(building)* **"Them" follows the default output device chosen at start.** A headset picked
       inside Teams leaves "Them" silent with no warning. Follow device changes, and warn
       when one side goes quiet.
 - [ ] **An editable "Copy consent message"** for the meeting chat.
