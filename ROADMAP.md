@@ -839,7 +839,7 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
       It evolves today's `overlay` window.
 
 **Wave 2 — your AI and your calendar**
-- [ ] *(building)* **MCP server.** Claude, ChatGPT, Gemini, Cursor and any MCP client can read your
+- [ ] *(merged, dev check: eb3069a)* **MCP server.** Claude, ChatGPT, Gemini, Cursor and any MCP client can read your
       meeting notes and transcripts (not your dictations, like Wispr), locally over Yap's
       bridge, with one-click **Add to Claude / Cursor / …** in Integrations plus a
       copyable config for everything else.
