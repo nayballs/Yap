@@ -314,7 +314,9 @@ pub struct YapConfig {
     /// bounded sliding window on a timer (see `partials.rs`), so the cost is
     /// independent of recording length. Preview-only — the final transcript on
     /// stop is always authoritative. Existing configs that saved an explicit
-    /// `false` keep their opt-out (serde default applies to missing fields).
+    /// `false` keep their opt-out (serde default applies to missing fields) —
+    /// except once: `Default` said off until 2026-10-05, so the v1 one-time
+    /// migration (`migrate_once`) turned pre-versioning `false`s back on.
     #[serde(default = "default_true")]
     pub streaming_partials: bool,
 
@@ -329,6 +331,13 @@ pub struct YapConfig {
     /// loopback-only + bearer token, so nothing is reachable off-machine.
     #[serde(default = "default_true")]
     pub bridge_enabled: bool,
+
+    /// Schema version, for the one-time migrations in `migrate_once` (the
+    /// kind that must never run twice, unlike `load`'s idempotent fixes). A
+    /// config saved before versioning has no field (0); `Default` and every
+    /// [`save`] use the current `CONFIG_VERSION`.
+    #[serde(default)]
+    pub config_version: u32,
 }
 
 
@@ -431,6 +440,7 @@ impl Default for YapConfig {
             streaming_partials: true,
             history_enabled: true,
             bridge_enabled: true,
+            config_version: CONFIG_VERSION,
         }
     }
 }
@@ -466,6 +476,13 @@ pub fn load() -> YapConfig {
         cfg.pp_prompt = default_pp_prompt();
     }
     migrate_retired_groq_models(&mut cfg);
+    // One-time migrations are saved straight away, so they can never run a
+    // second time and undo a choice the user makes afterwards.
+    if migrate_once(&mut cfg) {
+        if let Err(e) = save(&cfg) {
+            tracing::warn!("Failed to save migrated config: {}", e);
+        }
+    }
     cfg
 }
 
@@ -505,6 +522,27 @@ fn migrate_retired_groq_models(cfg: &mut YapConfig) {
     }
 }
 
+/// Current config schema version (see [`YapConfig::config_version`]). Bump it
+/// together with a new step in [`migrate_once`].
+const CONFIG_VERSION: u32 = 1;
+
+/// One-time migrations, keyed by `config_version`. Returns whether anything
+/// ran; [`load`] then saves the result so no step ever runs twice.
+fn migrate_once(cfg: &mut YapConfig) -> bool {
+    if cfg.config_version >= CONFIG_VERSION {
+        return false;
+    }
+    if cfg.config_version < 1 {
+        // v1 (2026-10-05): live partials became on-by-default on 2026-07-10,
+        // but `Default` still said off, so every install created since then
+        // saved `false` without the user choosing it. Turn it back on once;
+        // anyone who switches it off again keeps it off.
+        cfg.streaming_partials = true;
+    }
+    cfg.config_version = CONFIG_VERSION;
+    true
+}
+
 /// Atomic file write: write to `<path>.tmp`, then rename over the target
 /// (`std::fs::rename` replaces on Windows). A `tauri dev` rebuild or crash
 /// mid-write can otherwise leave a torn JSON file — which the stores would
@@ -537,7 +575,15 @@ pub(crate) fn quarantine_corrupt(path: &std::path::Path) {
 /// Persist config to disk (atomically).
 pub fn save(cfg: &YapConfig) -> Result<(), String> {
     std::fs::create_dir_all(data_dir()).map_err(|e| e.to_string())?;
-    let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
+    // Anything this build saves has been through `load`'s migrations already,
+    // so stamp the current version even if the caller's copy lost the field —
+    // a missing version would re-run the one-time migrations on next load.
+    // Never lower it (a newer build's file, opened after a downgrade).
+    let cfg = YapConfig {
+        config_version: cfg.config_version.max(CONFIG_VERSION),
+        ..cfg.clone()
+    };
+    let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
     atomic_write(&config_path(), &json).map_err(|e| e.to_string())
 }
 
@@ -781,9 +827,34 @@ mod tests {
         // config.json that lacks a field gets that field's `#[serde(default)]`.
         // The two must agree, or new users silently start with different
         // settings — streaming_partials was on via serde but off in `Default`.
-        let fresh = serde_json::to_value(YapConfig::default()).unwrap();
-        let from_empty =
+        // The one deliberate difference is `configVersion`: a missing field
+        // marks a pre-versioning file, so its one-time migrations still run.
+        let mut fresh = serde_json::to_value(YapConfig::default()).unwrap();
+        let mut from_empty =
             serde_json::to_value(serde_json::from_str::<YapConfig>("{}").unwrap()).unwrap();
+        assert_eq!(fresh["configVersion"], CONFIG_VERSION);
+        assert_eq!(from_empty["configVersion"], 0);
+        fresh.as_object_mut().unwrap().remove("configVersion");
+        from_empty.as_object_mut().unwrap().remove("configVersion");
         assert_eq!(fresh, from_empty);
+    }
+
+    #[test]
+    fn one_time_migration_turns_partials_back_on_once() {
+        // Saved by a pre-versioning build, whose `Default` had partials off.
+        let mut cfg: YapConfig = serde_json::from_str(r#"{"streamingPartials":false}"#).unwrap();
+        assert!(migrate_once(&mut cfg));
+        assert!(cfg.streaming_partials);
+        assert_eq!(cfg.config_version, CONFIG_VERSION);
+
+        // Switched off again afterwards (and saved): the choice sticks.
+        cfg.streaming_partials = false;
+        let saved = serde_json::to_string(&cfg).unwrap();
+        let mut reloaded: YapConfig = serde_json::from_str(&saved).unwrap();
+        assert!(!migrate_once(&mut reloaded));
+        assert!(!reloaded.streaming_partials);
+
+        // Fresh installs start current: nothing to migrate.
+        assert!(!migrate_once(&mut YapConfig::default()));
     }
 }

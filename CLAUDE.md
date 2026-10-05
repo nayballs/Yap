@@ -317,6 +317,13 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   `data_dir()` is portable-aware. `load()` also migrates saved Groq picks (cleanup,
   LLM scopes, profiles) off models Groq retired in 2026 (`RETIRED_GROQ_MODELS` —
   default is now `openai/gpt-oss-20b`); extend that table when Groq retires more.
+  Those fixes are idempotent; changes that must run only ONCE go in
+  `migrate_once`, keyed by `config_version` (`CONFIG_VERSION`; a missing field =
+  0, a pre-versioning file). `load()` saves straight after one runs, and `save()`
+  stamps the current version, so a later user choice is never undone. v1
+  (2026-10-05) turned live partials back on: `Default` said off until then, so
+  every install since July had saved `false`. A test keeps `Default` and the
+  serde defaults identical (bar `config_version`).
 - **`fuzzy.rs`** — fuzzy dictionary correction (Handy `audio_toolkit/text.rs` port):
   1–3-word n-grams vs the dictionary's `from`/`to` spellings, normalized Levenshtein
   + Soundex phonetic boost (the `natural` crate's nonstandard variant, replicated
