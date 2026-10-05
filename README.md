@@ -43,7 +43,10 @@ your voice to the cloud. Yap refuses the choice:
 ```
 
 <div align="center">
-<img src="docs/screenshot-settings.png" alt="Yap settings — hotkey, microphone, recording mode" width="620" />
+<img src="docs/screenshot-home.png" alt="Yap's Home screen: a greeting with the F9 hotkey, a tip card about AI cleanup, today's dictations, and a stats card with total words, time saved and day streak" width="760" />
+<br /><br />
+<img src="docs/screenshot-language-models.png" alt="Settings, Language Models: AI cleanup switched on, provider tabs for Groq, Anthropic, OpenAI, Gemini, OpenRouter and Custom, and the model list" width="374" />
+<img src="docs/screenshot-notes.png" alt="AI Notepad: a meeting note with attendees, AI-written minutes and action items, and the You/Them meeting transcript" width="374" />
 </div>
 
 ## Features
