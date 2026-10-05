@@ -79,6 +79,9 @@ struct Shared {
     /// audio callback emits `yap-amp` while *idle* too, so a level meter works
     /// without recording. Normally amp is only emitted during a recording.
     mic_test: AtomicBool,
+    /// A mic stream is running. False when Yap found no microphone (see
+    /// `Pipeline::start`); `start_recording` refuses until there is one.
+    has_mic: AtomicBool,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -207,6 +210,16 @@ impl Shared {
         // Processing is normally sub-second on a GPU, so this rarely bites.
         if self.processing.load(Ordering::SeqCst) {
             tracing::info!("Ignoring start — a transcription is still processing");
+            return;
+        }
+        // Nothing to record from (`Pipeline::ensure_mic` has just retried):
+        // say so instead of "recording" silence.
+        if !self.has_mic.load(Ordering::SeqCst) {
+            tracing::warn!("Can't record — no microphone");
+            let _ = self
+                .app
+                .emit("yap-error", "No microphone found — connect one and try again");
+            let _ = self.app.emit("yap-state", "error");
             return;
         }
         // Seed the buffer with the pre-roll ring (the ~300 ms before the keypress)
@@ -960,7 +973,9 @@ impl Shared {
 /// The running pipeline. Owns the mic stream (kept alive) + shared state.
 pub struct Pipeline {
     shared: Arc<Shared>,
-    _stream: SendStream,
+    /// `None` while there's no microphone to capture from. Behind a lock so a
+    /// hotkey press can retry (`ensure_mic`).
+    stream: Mutex<Option<SendStream>>,
 }
 
 impl Pipeline {
@@ -968,7 +983,11 @@ impl Pipeline {
     ///
     /// A missing model is tolerated: the pipeline still runs (so the hotkey
     /// works) and emits `yap-state: needs-model` until a model is downloaded.
-    pub fn start(app: AppHandle, cfg: YapConfig) -> Result<Self, String> {
+    /// So is a missing microphone (none plugged in, a Bluetooth headset that
+    /// connects after login, a CI runner): models, Upload and Settings work
+    /// without one, and the next hotkey press — or picking a mic in Settings —
+    /// tries again.
+    pub fn start(app: AppHandle, cfg: YapConfig) -> Self {
         let data_dir = config::data_dir();
         let engine = match stt::create_stt_engine(&data_dir, &cfg.model_size, cfg.use_gpu) {
             Ok(e) => Some(e),
@@ -998,34 +1017,70 @@ impl Pipeline {
             processing: AtomicBool::new(false),
             upload_cancel: AtomicBool::new(false),
             mic_test: AtomicBool::new(false),
+            has_mic: AtomicBool::new(false),
         });
 
         spawn_idle_watcher(&shared);
 
-        let stream = build_input_stream(&shared, cfg.input_device.as_deref())?;
+        let stream = match build_input_stream(&shared, cfg.input_device.as_deref()) {
+            Ok(s) => Some(SendStream(s)),
+            Err(e) => {
+                tracing::warn!("No audio input — running without a microphone: {}", e);
+                None
+            }
+        };
+        shared.has_mic.store(stream.is_some(), Ordering::SeqCst);
 
         let _ = app.emit("yap-state", if has_engine { "idle" } else { "needs-model" });
 
-        Ok(Self {
+        Self {
             shared,
-            _stream: SendStream(stream),
-        })
+            stream: Mutex::new(stream),
+        }
+    }
+
+    /// Without a mic stream, try to open one before a press that may start a
+    /// recording: a headset that connected after Yap started then just works.
+    /// A no-op while a stream is running.
+    fn ensure_mic(&self) {
+        if self.shared.recording.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut slot = self.stream.lock().unwrap_or_else(|p| p.into_inner());
+        if slot.is_some() {
+            return;
+        }
+        let device = self.shared.config.read().ok().and_then(|c| c.input_device.clone());
+        match build_input_stream(&self.shared, device.as_deref()) {
+            Ok(s) => {
+                *slot = Some(SendStream(s));
+                self.shared.has_mic.store(true, Ordering::SeqCst);
+            }
+            Err(e) => tracing::warn!("Still no microphone: {}", e),
+        }
     }
 
     /// Toggle recording (the `toggle_recording` command).
     pub fn toggle(&self) {
+        self.ensure_mic();
         self.shared.toggle(false);
     }
 
     /// Route a **dictation** hotkey press/release through the recording mode.
     /// Called from the input-hook listeners for both press and release.
     pub fn on_key(&self, pressed: bool) {
+        if pressed {
+            self.ensure_mic();
+        }
         self.shared.on_key(pressed, false);
     }
 
     /// Route an **edit/rewrite** hotkey press/release. Same as `on_key` but the
     /// session captures the selection and rewrites it from the spoken instruction.
     pub fn on_edit_key(&self, pressed: bool) {
+        if pressed {
+            self.ensure_mic();
+        }
         self.shared.on_key(pressed, true);
     }
 
@@ -1096,10 +1151,13 @@ impl Pipeline {
 
     /// Swap the capture stream to a different input device **live** (no app
     /// restart). Builds the new stream first, so on failure the old stream keeps
-    /// running and an error is returned.
-    pub fn set_input_device(&mut self, device: Option<&str>) -> Result<(), String> {
+    /// running and an error is returned. Also how capture starts when Yap had
+    /// no microphone.
+    pub fn set_input_device(&self, device: Option<&str>) -> Result<(), String> {
         let stream = build_input_stream(&self.shared, device)?;
-        self._stream = SendStream(stream); // dropping the old stream stops it
+        // Dropping the old stream stops it.
+        *self.stream.lock().unwrap_or_else(|p| p.into_inner()) = Some(SendStream(stream));
+        self.shared.has_mic.store(true, Ordering::SeqCst);
         tracing::info!(device = device.unwrap_or("default"), "Input device switched");
         Ok(())
     }

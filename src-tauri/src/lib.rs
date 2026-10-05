@@ -415,14 +415,11 @@ pub fn run() {
             stt::fix_directml_stub();
             stt::apply_accelerator_settings(cfg.use_gpu);
 
-            // Start the dictation pipeline (audio capture + STT engine).
-            match pipeline::Pipeline::start(handle.clone(), cfg.clone()) {
-                Ok(p) => {
-                    if let Ok(mut guard) = app.state::<AppState>().pipeline.lock() {
-                        *guard = Some(p);
-                    }
-                }
-                Err(e) => tracing::error!("Failed to start pipeline: {}", e),
+            // Start the dictation pipeline (audio capture + STT engine). It
+            // runs without a microphone too (see `Pipeline::start`).
+            let pipeline = pipeline::Pipeline::start(handle.clone(), cfg.clone());
+            if let Ok(mut guard) = app.state::<AppState>().pipeline.lock() {
+                *guard = Some(pipeline);
             }
 
             // Clear any orphaned cleanup sidecar from a previous session (a
