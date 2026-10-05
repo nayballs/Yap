@@ -23,6 +23,15 @@ use windows::UI::Notifications::{
 
 const GROUP: &str = "yap";
 
+/// Whether call prompts may go to the notification center (updates.rs keeps
+/// its own copy of this rule, with a test override). Portable Yap has no
+/// Start-menu shortcut carrying its AppUserModelID, so Windows would drop
+/// them silently; an e2e test run posts nothing to the developer's
+/// notification center.
+pub fn allowed() -> bool {
+    !crate::portable::is_portable() && !crate::e2e::active()
+}
+
 /// Release builds post as Yap: the installer's Start-menu shortcut carries
 /// the app identifier as its AppUserModelID (NSIS SetLnkAppUserModelId).
 /// A dev build has no such shortcut and borrows PowerShell's — the usual

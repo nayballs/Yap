@@ -17,6 +17,7 @@
   import { renderMarkdown } from './markdown.js';
   import { toast } from './ui/toast.svelte.js';
   import ActionManager from './ActionManager.svelte';
+  import { noteRequest } from './meetingDetect.svelte.js';
 
   let notes = $state([]); // list summaries (all folders)
   let folders = $state(['Personal', 'Meetings']);
@@ -460,6 +461,27 @@
       unlisteners.forEach((u) => u && u());
     };
   });
+
+  // Call detection (meetingDetect.svelte.js) opens a note here: the meeting
+  // note "Record notes" just started, or the one to wrap up — "Stop and
+  // summarise" stops it right here, so the Meeting Notes summary above runs
+  // as it does for any recording.
+  $effect(() => {
+    const req = noteRequest.pending;
+    if (!req) return;
+    noteRequest.pending = null;
+    openRequested(req);
+  });
+
+  async function openRequested({ id, stop }) {
+    await select(id);
+    if (selected?.id !== id) return;
+    activeFolder = selected.folder || activeFolder;
+    refreshList();
+    if (!stop) return;
+    meeting = (await invoke('meeting_state').catch(() => null)) || { recording: false };
+    if (meeting.recording && meeting.noteId === id) await stopMeeting();
+  }
 </script>
 
 <svelte:window
