@@ -25,7 +25,10 @@ export async function sendMail(to: string, mail: Mail): Promise<void> {
       Authorization: `Bearer ${env.RESEND_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ from: env.EMAIL_FROM, to: [to], ...mail }),
+    // A unique X-Entity-Ref-ID keeps Gmail from threading same-subject mail:
+    // each new-sign-in alert should stand alone, and in a thread Gmail also
+    // folds the repeated footer away.
+    body: JSON.stringify({ from: env.EMAIL_FROM, to: [to], ...mail, headers: { "X-Entity-Ref-ID": crypto.randomUUID() } }),
   });
   // Never log the message body in production: it carries the code or link.
   if (!res.ok) console.error(`[mail] Resend HTTP ${res.status}: ${await res.text()}`);
@@ -36,7 +39,9 @@ export async function sendMail(to: string, mail: Mail): Promise<void> {
 // the message (plus a details panel or the code), an optional button, and a
 // footer saying why it was sent. Tables and inline styles only (that's what
 // Gmail, Outlook and Apple Mail all render), a PNG logo (Gmail drops SVG), a
-// system font stack (no webfonts in mail), Yap's warm-light palette.
+// system font stack (no webfonts in mail), Yap's warm-light palette. The
+// address in the account chip sits in an href-less <a>, which stops Gmail
+// turning it into a blue link (Google's own mail does the same).
 const FONT = "-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 const MONO = "ui-monospace,Consolas,'SF Mono',Menlo,monospace";
 const LOGO = "https://auth.contextmirror.com/email/yap-logo.png";
@@ -71,7 +76,7 @@ function layout(l: Layout): string {
   const chip = l.account
     ? `<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:16px auto 0;border:1px solid #e4e0d6;border-radius:999px"><tr>
 <td style="padding:4px"><div style="width:24px;height:24px;border-radius:12px;background:${AMBER};color:#ffffff;font-family:${FONT};font-size:12px;font-weight:600;line-height:24px;text-align:center">${initial}</div></td>
-<td style="padding:4px 14px 4px 4px;font-family:${FONT};font-size:14px;line-height:20px;color:${BODY}">${esc(l.account)}</td>
+<td style="padding:4px 14px 4px 4px;font-family:${FONT};font-size:14px;line-height:20px;color:${BODY}"><a style="color:${BODY};text-decoration:none">${esc(l.account)}</a></td>
 </tr></table>`
     : "";
   const button = l.button
@@ -83,7 +88,8 @@ function layout(l: Layout): string {
     ? `<p style="margin:${l.button ? "20px" : "24px"} 0 0;font-family:${FONT};font-size:12px;line-height:18px;color:${MUTED};text-align:center">${l.note}</p>`
     : "";
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><title>${esc(l.title)}</title></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no"><title>${esc(l.title)}</title>
+<style>a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important;font:inherit!important}</style></head>
 <body style="margin:0;padding:0;background:#f4f2ed">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${esc(l.preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f2ed"><tr><td align="center" style="padding:40px 16px">
