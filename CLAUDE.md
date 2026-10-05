@@ -156,7 +156,12 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   per-tick cost independent of recording length; de-flickered by `smart_diff`,
   adaptive backoff on slow machines, warm-loads the engine if it was
   idle-unloaded) and emits `yap-partial` text. An **idle watcher** unloads the model after
-  `model_unload_timeout`; the next dictation lazily reloads it.
+  `model_unload_timeout`; the next dictation lazily reloads it. **No microphone** (none
+  plugged in, a headset that connects after login, a CI runner) doesn't take the
+  pipeline down: it runs without a stream (`has_mic`), a hotkey press retries
+  (`ensure_mic`), picking a mic (`set_input_device`) starts capture, and a recording
+  attempt without one says "No microphone found" (toast + overlay) — Upload, models
+  and Settings work regardless.
 - **`stt.rs`** — `SttEngine` trait + a real `transcribe-rs` engine (`#[cfg(feature =
   "engines")]`) and a stub (default build). Holds the **14-model registry**
   (`ModelDescriptor`: id/filename/url/sha256/is_directory/engine_type), resolves
@@ -423,6 +428,12 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   restores it after — only unmuting what Yap itself muted.
 - **`portable.rs`** — portable-mode detection (a `portable` marker next to the exe
   redirects data to `<exe>/Data`).
+- **`e2e.rs`** — **test mode** for the end-to-end UI suite (debug builds started
+  with `YAP_E2E=1`; compiled out of release builds): no global input hook, no
+  paste/Enter/Ctrl+C into other apps, no `set_focus` (tao's fallback presses Alt
+  in the focused app), no Windows notifications, no orphan-sidecar sweep, no
+  window-state plugin, and it quits when its stdin closes. See
+  [`docs/e2e-tests.md`](./docs/e2e-tests.md).
 - **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
   `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
   **Debug mode** (Settings → Advanced → Debug Logging, OpenWhispr Developer-
@@ -690,11 +701,33 @@ lints an older local one doesn't — keep local Rust current (`rustup update`) o
 the CI log. (It sat red Jul 9 → Sep 25 2026 on accumulated lints, masking real
 failures.)
 
+`.github/workflows/e2e.yml` runs the **end-to-end UI suite** on the same triggers
+(plus `workflow_dispatch`), separately so `ci.yml` stays quick — see below.
+
+### End-to-end UI tests (`npm run test:app`)
+Playwright drives a real **stub** debug build (frontend embedded) over WebView2's
+CDP: every window is a page, tests click through Home / every view / every
+Settings section / Notes / Dictionary / Account / onboarding / a stub dictation /
+the no-mic path / the update toast, and save **named screenshots** to
+`test-results/app/screenshots/<spec>/` (git-ignored; HTML report in
+`test-results/app/report/`, each instance's logs + data in `test-results/app/runs/`).
+Any uncaught JS error in any webview fails the test. ~20 s plus the build
+(`npm run test:app:build`, own target dir `src-tauri/target/e2e` or
+`YAP_E2E_TARGET_DIR`). Safe beside the installed app and a dev build: portable
+data dir, own WebView2 profile + CDP port, F24 hotkey, test mode (`e2e.rs`),
+unreachable account service. CI uploads `test-results/app` as the **`e2e-results`**
+artifact on every run — review it with
+`gh run download <run-id> --repo nayballs/Yap --name e2e-results --dir e2e-<run-id>`
+and read the PNGs under `screenshots/`. Full guide (incl. adding a test):
+[`docs/e2e-tests.md`](./docs/e2e-tests.md).
+
 ### The dev → nightly → stable workflow
 1. **Iterate in dev** (`scripts\dev.bat`): Vite hot-reloads `src/` edits instantly;
    Rust edits need a restart/recompile. Verify UI/behaviour changes HERE — never
-   burn a 15-min nightly to check something dev shows in seconds.
-2. **Push to main** — CI (above) sanity-checks every push.
+   burn a 15-min nightly to check something dev shows in seconds. `npm run test:app`
+   clicks through the whole app in ~20 s and leaves screenshots to look at.
+2. **Push to main** — CI (above) sanity-checks every push, and the E2E workflow
+   clicks through the app.
 3. **Nightly** — cut on demand (or let the 05:00 UTC cron) once a batch of changes
    is worth dogfooding on the real installed app; nightlies catch installer/updater/
    release-build issues, not CSS tweaks.
