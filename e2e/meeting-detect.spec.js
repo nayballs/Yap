@@ -130,13 +130,13 @@ test('"Record notes" records the call into a meeting note; the call ending offer
   expect((await status(yap)).prompt).toMatchObject({ kind: 'end', fadeMs: null });
   await shot(main, '04-prompt-call-ended');
 
-  // Stopping happens in the note, as "End meeting & summarise": the action
-  // plan step runs (and, the test recording being silent, says there's
-  // nothing to summarise yet).
+  // Stopping ends the meeting as "End meeting & summarise" does (Rust writes
+  // the action plan; meeting_end.rs) and keeps the note open here. The test
+  // recording being silent, it asks — in this window, where it was answered —
+  // whether it was started by mistake instead of writing a summary.
   await ended.getByRole('button', { name: 'Stop and summarise' }).click();
-  await expect(toast(main, 'Meeting ended')).toBeVisible();
   await expect.poll(() => yap.invoke('meeting_state').then((s) => s.recording), { timeout: 20_000 }).toBe(false);
-  await expect(toast(main, 'Nothing to summarise yet')).toBeVisible({ timeout: 20_000 });
+  await expect(toast(main, 'Started by mistake?')).toBeVisible({ timeout: 20_000 });
   await expect(title).toHaveValue(notes[0].title);
   await shot(main, '05-stopped-and-summarised');
   expect((await status(yap)).prompt).toBeNull();
@@ -164,7 +164,7 @@ test('"Keep recording" carries the notes into a rejoined huddle, which asks agai
   await simulate(yap, 'slack', false);
   await toast(main, 'Slack huddle ended').getByRole('button', { name: 'Stop and summarise' }).click();
   await expect.poll(() => yap.invoke('meeting_state').then((s) => s.recording), { timeout: 20_000 }).toBe(false);
-  await expect(toast(main, 'Nothing to summarise yet')).toBeVisible({ timeout: 20_000 });
+  await expect(toast(main, 'Started by mistake?')).toBeVisible({ timeout: 20_000 });
   await closeToasts(main);
 });
 

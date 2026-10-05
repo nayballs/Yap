@@ -77,6 +77,12 @@ pub struct Note {
     pub id: u64,
     #[serde(default)]
     pub title: String,
+    /// The title is one Yap made up ("Teams call · 5 Oct, 14:30"), so the AI
+    /// meeting title may replace it (`meeting_assist.rs`). Cleared for good
+    /// once the person edits the title or the AI names the meeting: a title
+    /// the person typed is never overwritten.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub title_auto: bool,
     /// Raw markdown, exactly as typed/dictated. Never touched by enhancement.
     #[serde(default)]
     pub content: String,
@@ -418,6 +424,76 @@ pub fn mark_meeting(id: u64) -> Result<(), String> {
     })
 }
 
+/// Note `id`'s title is one Yap made up (call detection's "Teams call · 5
+/// Oct, 14:30"): the AI meeting title may replace it.
+pub fn set_title_auto(id: u64) -> Result<(), String> {
+    with_store(|store| {
+        let note = store
+            .notes
+            .iter_mut()
+            .find(|n| n.id == id)
+            .ok_or("Note not found")?;
+        if !note.title_auto {
+            note.title_auto = true;
+            save_to_disk(store);
+        }
+        Ok(())
+    })
+}
+
+/// Whether the AI meeting title may name `note`: its title is made up by
+/// Yap, or empty. Never a title the person typed.
+pub fn title_open_to_ai(note: &Note) -> bool {
+    note.title_auto || note.title.trim().is_empty()
+}
+
+/// Name note `id` with an AI-generated title, unless the person titled it
+/// meanwhile (checked under the store lock, so a title typed while the model
+/// ran always wins). Returns whether the title was set.
+pub fn set_ai_title(id: u64, title: &str) -> Result<bool, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Ok(false);
+    }
+    with_store(|store| {
+        let note = store
+            .notes
+            .iter_mut()
+            .find(|n| n.id == id)
+            .ok_or("Note not found")?;
+        if !title_open_to_ai(note) {
+            return Ok(false);
+        }
+        note.title = title.to_string();
+        note.title_auto = false;
+        save_to_disk(store);
+        Ok(true)
+    })
+}
+
+/// Words of speech in a meeting transcript (You and Them, without the echo
+/// segments): what "Started by mistake?" and the AI title go by.
+pub fn speech_words(transcript: &[TranscriptSegment]) -> usize {
+    transcript
+        .iter()
+        .filter(|s| !s.echo)
+        .flat_map(|s| s.text.split_whitespace())
+        .filter(|w| w.chars().any(char::is_alphanumeric))
+        .count()
+}
+
+/// The few facts the meeting hooks check on every new segment, without
+/// cloning the whole transcript: (title open to the AI, words of speech,
+/// digests so far).
+pub fn meeting_brief(id: u64) -> Option<(bool, usize, usize)> {
+    with_notes(|notes| {
+        notes
+            .iter()
+            .find(|n| n.id == id)
+            .map(|n| (title_open_to_ai(n), speech_words(&n.transcript), n.digests.len()))
+    })
+}
+
 /// OpenWhispr's staleness marker: cheap, order-stable, good enough to answer
 /// "did the raw content change since we enhanced it?".
 pub fn content_hash(content: &str) -> String {
@@ -474,6 +550,7 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
         let note = Note {
             id,
             title: title.to_string(),
+            title_auto: false,
             content: content.to_string(),
             enhanced_content: String::new(),
             enhanced_at_hash: String::new(),
@@ -529,7 +606,11 @@ fn apply_update(
         .ok_or("Note not found")?;
     let mut changed = false;
     if let Some(t) = title {
-        changed |= set_if_changed(&mut note.title, t);
+        if set_if_changed(&mut note.title, t) {
+            // The person (or the local API) named it: the AI title keeps off.
+            note.title_auto = false;
+            changed = true;
+        }
     }
     if let Some(c) = content {
         changed |= set_if_changed(&mut note.content, c);
@@ -752,6 +833,49 @@ mod tests {
         assert!(push_digest(&mut note, d(4, 11)).is_err()); // past the end
         assert_eq!(push_digest(&mut note, d(4, 10)), Ok(2));
         assert_eq!(digested_upto(&note), 10);
+    }
+
+    #[test]
+    fn a_typed_title_is_never_open_to_the_ai_title() {
+        let mut store = store_with_note();
+        // A made-up title ("Teams call · 5 Oct, 14:30") is open; so is none.
+        store.notes[0].title_auto = true;
+        assert!(title_open_to_ai(&store.notes[0]));
+        // Re-sending it unchanged (a content-only save) keeps it open…
+        apply_update(&mut store, 1, Some("Standup".into()), Some("x".into()), None, None).unwrap();
+        assert!(store.notes[0].title_auto);
+        // …a title the person typed closes it for good.
+        apply_update(&mut store, 1, Some("Budget sync".into()), None, None, None).unwrap();
+        assert!(!store.notes[0].title_auto);
+        assert!(!title_open_to_ai(&store.notes[0]));
+        // An empty title is open again ("untitled").
+        store.notes[0].title = "  ".into();
+        assert!(title_open_to_ai(&store.notes[0]));
+        // Older stores have no flag: a typed title stays closed.
+        let old: Note = serde_json::from_value(json!({
+            "id": 2, "title": "Sync", "createdTs": 1, "updatedTs": 1
+        }))
+        .unwrap();
+        assert!(!old.title_auto && !title_open_to_ai(&old));
+        // The flag only reaches disk when set.
+        assert!(serde_json::to_value(&old).unwrap().get("titleAuto").is_none());
+    }
+
+    #[test]
+    fn speech_words_leave_out_echo_and_punctuation() {
+        let seg = |source: &str, text: &str, echo: bool| TranscriptSegment {
+            source: source.into(),
+            text: text.into(),
+            ts: 0,
+            echo,
+        };
+        let t = vec![
+            seg("you", "Hi, Notetaker.", false),
+            seg("them", "Hello there - how are you?", false),
+            seg("you", "Hello there how are you", true),
+        ];
+        assert_eq!(speech_words(&t), 7);
+        assert_eq!(speech_words(&[]), 0);
     }
 
     #[test]

@@ -7,7 +7,7 @@ promise rejection in any of Yap's webviews fails the test that was running.
 
 It's [Playwright](https://playwright.dev) driving the app over the Chrome
 DevTools Protocol that WebView2 exposes. Every Yap window (the main window,
-onboarding, the overlay) is a Playwright page. The build is the default
+onboarding, the meeting notepad, the overlay) is a Playwright page. The build is the default
 **stub** build (no `engines` feature: transcription returns
 `[STT stub: received 1.5s of audio, engine=parakeet]`), so it needs no GPU,
 Vulkan SDK or model. The suite takes about 20 seconds, plus the build.
@@ -54,8 +54,11 @@ points the suite at an exe directly), so it never competes with a running
   (`YAP_MCP_CLIENT_ROOT`): a run never adds Yap to your real Claude, Cursor…
 
 A Yap window (1200×800) shows on screen while the suite runs, plus the
-onboarding window and the overlay for a moment. They never take the focus, and
-Playwright's clicks and keys go to the webviews, not to your mouse or keyboard.
+onboarding window and the overlay for a moment, and in the meeting specs the
+meeting notepad, docked to the right edge of the screen. They never take the
+focus, and Playwright's clicks and keys go to the webviews, not to your mouse
+or keyboard. (Don't click on them while the suite runs: a real click on the
+notepad's Stop, say, ends a test's meeting.)
 
 ## Where the results go
 
@@ -108,7 +111,8 @@ then open `screenshots/` (Claude can read the PNGs directly) or
 | `e2e/meetings.spec.js` | meeting audio from test WAVs | live You/Them segments, cut in pauses · ending the meeting without an AI model explains how to set one up · the call leaking from the speakers into the mic is flagged as echo, hidden, and kept |
 | `e2e/mcp.spec.js` | Local API on, seeded meetings and a dictation, a stand-in user profile with AI apps' configs | Integrations' "Go to MCP" opens Settings → MCP · Wispr's four cards in order (Claude, ChatGPT, Gemini, Cursor) with what Yap found, then All other apps · Add to Claude merges into its config (other servers kept, `.bak` made) and Remove gives back the same bytes · Cursor, ChatGPT (TOML) and Claude Code (under its lock) get their own formats · a config that isn't plain JSON is left alone, with the reason · with the Local API off the page says so and turns it on, and Settings' copy agrees · a real `yap.exe mcp` session (`support/mcp-client.js`) lists, searches and pages meetings, reads notes and folders, and never returns the dictation · "Let AI apps save notes" adds `create_note` and the note shows in Notes · with no Yap, the tools ask to open it |
 | `e2e/meeting-summary.spec.js` | Note Formatting pointed at a local fake AI | a two-hour meeting fed in ten-minute batches: 11 rolling digests, each under 4,500 tokens with a capped reply · one final call over digests + the raw tail · an action plan with a section per person, Decisions, Open questions and Unassigned · the deterministic checks (an invented owner, a dropped task, a made-up deadline) · Copy text |
-| `e2e/meeting-guards.spec.js` | default | the meeting guard rails: the overlay excluded from screen capture while a meeting records and back after (debug-only `capture_affinity`) · with hiding off, the screen-share tip, **Update settings** at the switch, and switching it back on mid-meeting · the length warning, **Keep going**, and the stop at the limit, in seconds (debug-only `e2e_meeting_limit`) · "When a call ends: Stop and summarise automatically" on a simulated call end · the meeting shortcut (Win+Alt+M through the in-page fallback) starting a "Meeting · …" note and stopping it, and taking notes on a live call · the Settings rows and recording a new shortcut |
+| `e2e/meeting-guards.spec.js` | default | the meeting guard rails: the overlay and the notepad excluded from screen capture while a meeting records and back after (debug-only `capture_affinity`) · with hiding off, the screen-share tip, **Update settings** at the switch, and switching it back on mid-meeting · the length warning, **Keep going**, and the stop at the limit, in seconds (debug-only `e2e_meeting_limit`) · "When a call ends: Stop and summarise automatically" on a simulated call end · the meeting shortcut (Win+Alt+M through the in-page fallback) starting a "Meeting · …" note and stopping it, and taking notes on a live call · the Settings rows and recording a new shortcut |
+| `e2e/notepad.spec.js` | Note Formatting pointed at a local fake AI | the meeting notepad (`yap.notepad`): it opens on record docked to the right edge, full height, without taking the focus, and out of screen captures · live You/Them lines, echo hidden, the dismissible tip, the empty state · closing it keeps recording and Notes reopens it · My thoughts and the title synced with Notes both ways · What did I miss? (nothing new without a model call, then only the lines since you looked, then a follow-up) · the AI title replacing call detection's made-up one, never a typed one · Started by mistake? (Keep, Generate summary, Discard) · Stop → "Step 2 of 3" → a failure with Retry → the plan · an automatic stop (the length limit) writing the plan in the notepad without bringing up the main window · the Settings rows, "Show live transcript" off · the dictation hotkey and the meeting shortcut caught in the notepad |
 
 The update spec signs its dummy installer with a throwaway key made for the
 run (`tauri signer`) and serves `latest.json` from a local server, using the
@@ -130,8 +134,9 @@ test('chat: the empty state offers a new chat', async ({ yap, main, shot }) => {
 ```
 
 - `main` is the main window, reset before each test (toasts dismissed,
-  Settings closed, Home showing). `yap.onboarding` and `yap.overlay` are the
-  other windows; `yap.invoke(cmd, args)` calls a Tauri command;
+  Settings closed, Home showing). `yap.onboarding`, `yap.notepad` and
+  `yap.overlay` are the other windows (the notepad isn't reset: a spec that
+  uses it tidies up after itself); `yap.invoke(cmd, args)` calls a Tauri command;
   `yap.readJson('notes.json')` reads the instance's data dir, and
   `expectStore(yap, file, check)` waits for a store to change.
 - Find things the way a person does: roles, labels, placeholders and visible

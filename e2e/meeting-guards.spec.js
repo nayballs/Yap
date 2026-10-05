@@ -32,10 +32,21 @@ const meetingNotes = (yap) => (yap.readJson('notes.json')?.notes ?? []).filter((
 /** WDA_EXCLUDEFROMCAPTURE: on screen, left out of every capture. */
 const EXCLUDED = 17;
 /**
- * A silent test recording's summary step: nothing to summarise. (Once very
- * short recordings ask "Started by mistake?" instead, that toast counts too.)
+ * A silent test recording's end: so few words that Yap asks "Started by
+ * mistake?" instead of writing a summary (meeting_end.rs).
  */
 const SUMMARY_STEP = /Nothing to summarise yet|Started by mistake\?/;
+
+/**
+ * The end of a meeting Yap stopped itself: "Started by mistake?" in the
+ * meeting notepad (on screen while a meeting records), or the main window.
+ * No window is brought up for it.
+ */
+async function expectAutoStopEnded(yap, main) {
+  const asked = async () =>
+    (await toast(main, SUMMARY_STEP).count()) + (await toast(yap.notepad, SUMMARY_STEP).count());
+  await expect.poll(asked, { timeout: 20_000 }).toBeGreaterThan(0);
+}
 
 /** Win+Alt+M, the meeting shortcut, typed into the main window. */
 const pressMeetingShortcut = (main) => main.keyboard.press('Meta+Alt+KeyM');
@@ -61,10 +72,10 @@ test('the overlay leaves screen captures while a meeting records, and comes back
   await expect.poll(() => overlayAffinity(yap)).toBe(EXCLUDED);
   const during = await yap.invoke('capture_affinity');
   expect(during.hidden).toBe(true);
-  // The main window stays shareable; a notepad window, if this build has
-  // one, is hidden like the overlay.
+  // The main window stays shareable; the meeting notepad is hidden like the
+  // overlay.
   expect(during.windows.settings).toBe(0);
-  expect([null, EXCLUDED]).toContain(during.windows.notepad);
+  expect(during.windows.notepad).toBe(EXCLUDED);
   // Hiding is the default: no screen-share warning.
   await expect(toast(main, 'Your meeting notes show up in screen shares')).toHaveCount(0);
   await shot(main, '01-recording-overlay-hidden');
@@ -150,13 +161,14 @@ test('the maximum length warns, Keep going moves it, and at the limit Yap stops 
     await expect(stopped).toContainText('The meeting reached the maximum recording length.');
     await expect(warning).toHaveCount(0);
     await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
-    await expect(toast(main, SUMMARY_STEP)).toBeVisible({ timeout: 20_000 });
+    await expectAutoStopEnded(yap, main);
     await expect(main.getByPlaceholder('Untitled Note')).toHaveValue('Long meeting');
     await shot(main, '05-stopped-at-limit');
   } finally {
     await yap.invoke('e2e_meeting_limit', {});
   }
   await closeToasts(main);
+  await closeToasts(yap.notepad);
 });
 
 test('"When a call ends: Stop and summarise automatically" stops without asking', async ({
@@ -186,10 +198,11 @@ test('"When a call ends: Stop and summarise automatically" stops without asking'
   await expect(main.getByRole('button', { name: 'Stop and summarise' })).toHaveCount(0);
   expect((await yap.invoke('meeting_detect_status')).prompt).toBeNull();
   await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
-  await expect(toast(main, SUMMARY_STEP)).toBeVisible({ timeout: 20_000 });
+  await expectAutoStopEnded(yap, main);
   await expect(main.getByPlaceholder('Untitled Note')).toHaveValue(note.title);
   await shot(main, '06-call-ended-stopped-automatically');
   await closeToasts(main);
+  await closeToasts(yap.notepad);
 
   // Back to asking.
   await openSettings(main, 'General');
@@ -216,7 +229,7 @@ test('the meeting shortcut starts notes in a new meeting note, and stops them', 
   await shot(main, '07-shortcut-started');
 
   // Again: stop and write the action plan. (Presses closer than a second
-  // apart count as one.)
+  // apart count as one.) Pressed in the main window, so it asks there.
   await main.waitForTimeout(1_100);
   await pressMeetingShortcut(main);
   await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
