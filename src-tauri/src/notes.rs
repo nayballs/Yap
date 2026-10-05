@@ -329,6 +329,24 @@ pub fn folder_create(name: &str) -> Vec<String> {
     })
 }
 
+/// Mark note `id` a meeting note before any transcript arrives (call
+/// detection creates one and starts recording into it at once; see
+/// `meeting_detect.rs`). Leaves `updated_ts` alone.
+pub fn mark_meeting(id: u64) -> Result<(), String> {
+    with_store(|store| {
+        let note = store
+            .notes
+            .iter_mut()
+            .find(|n| n.id == id)
+            .ok_or("Note not found")?;
+        if note.note_type != "meeting" {
+            note.note_type = "meeting".to_string();
+            save_to_disk(store);
+        }
+        Ok(())
+    })
+}
+
 /// OpenWhispr's staleness marker: cheap, order-stable, good enough to answer
 /// "did the raw content change since we enhanced it?".
 pub fn content_hash(content: &str) -> String {

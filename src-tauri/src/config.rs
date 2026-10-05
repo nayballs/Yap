@@ -332,6 +332,14 @@ pub struct YapConfig {
     #[serde(default = "default_true")]
     pub bridge_enabled: bool,
 
+    /// Call detection (`meeting_detect.rs`): when Teams, Zoom, Meet, Slack,
+    /// Discord, Webex… start using the mic, offer to take notes, and offer to
+    /// stop and summarise when the call ends. On by default, like OpenWhispr's
+    /// `notifyMeetingDetection`: it only reads Windows' own mic-usage record,
+    /// locally, and nothing records without a click.
+    #[serde(default = "default_true")]
+    pub meeting_detection: bool,
+
     /// Schema version, for the one-time migrations in `migrate_once` (the
     /// kind that must never run twice, unlike `load`'s idempotent fixes). A
     /// config saved before versioning has no field (0); `Default` and every
@@ -440,6 +448,7 @@ impl Default for YapConfig {
             streaming_partials: true,
             history_enabled: true,
             bridge_enabled: true,
+            meeting_detection: true,
             config_version: CONFIG_VERSION,
         }
     }

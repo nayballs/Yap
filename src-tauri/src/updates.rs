@@ -1108,7 +1108,8 @@ pub fn update_ack_updated() {
 /// (the version, "Restart to update", "Later"), and a live progress bar while
 /// a download they asked for runs. Clicking the body opens Settings → About.
 /// Windows applies Do Not Disturb / Focus Assist and the per-app notification
-/// switch on its own.
+/// switch on its own. The WinRT plumbing is shared with the call prompts
+/// (`crate::win_toast`).
 #[cfg(windows)]
 mod notify {
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -1116,18 +1117,13 @@ mod notify {
     use std::time::{Duration, Instant};
 
     use tauri::{AppHandle, Emitter};
-    use windows::core::{IInspectable, Interface, HSTRING};
-    use windows::Data::Xml::Dom::XmlDocument;
-    use windows::Foundation::TypedEventHandler;
-    use windows::UI::Notifications::{
-        NotificationData, NotificationSetting, ToastActivatedEventArgs, ToastNotification,
-        ToastNotificationManager,
-    };
+    use windows::core::HSTRING;
+    use windows::UI::Notifications::{NotificationData, ToastNotification};
 
     use super::{lock, Announce, Phase};
+    use crate::win_toast::{esc, logo_xml};
 
     const TAG: &str = "update";
-    const GROUP: &str = "yap";
 
     /// The live toast, kept so its Activated handler keeps working while it
     /// sits in the notification center.
@@ -1137,83 +1133,9 @@ mod notify {
     /// Orders the download toast's data updates (Windows drops stale ones).
     static SEQUENCE: AtomicU32 = AtomicU32::new(0);
 
-    /// Release builds post as Yap: the installer's Start-menu shortcut carries
-    /// the app identifier as its AppUserModelID (NSIS SetLnkAppUserModelId).
-    /// A dev build has no such shortcut and borrows PowerShell's — the usual
-    /// stand-in for an unregistered app.
-    fn app_id(app: &AppHandle) -> String {
-        if cfg!(debug_assertions) {
-            "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe".into()
-        } else {
-            app.config().identifier.clone()
-        }
-    }
-
-    fn esc(s: &str) -> String {
-        s.replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-    }
-
-    /// Yap's logo in the toast's app-logo slot. An unpackaged app's toast only
-    /// loads local files, so the PNG baked into the binary is written next to
-    /// Yap's data once ("" — no logo — if that fails).
-    fn logo_xml() -> String {
-        static LOGO: &[u8] = include_bytes!("../icons/128x128@2x.png");
-        let dir = crate::config::data_dir();
-        let path = dir.join("notification-logo.png");
-        let current = std::fs::metadata(&path).is_ok_and(|m| m.len() == LOGO.len() as u64);
-        if !current && (std::fs::create_dir_all(&dir).is_err() || std::fs::write(&path, LOGO).is_err()) {
-            return String::new();
-        }
-        match url::Url::from_file_path(&path) {
-            Ok(src) => format!("<image placement=\"appLogoOverride\" src=\"{}\"/>", esc(src.as_str())),
-            Err(()) => String::new(),
-        }
-    }
-
     /// Post `xml` as Yap's one update toast (it replaces the previous one).
     fn post(app: &AppHandle, xml: &str, data: Option<&NotificationData>) -> Result<(), String> {
-        let err = |e: windows::core::Error| e.message();
-        let doc = XmlDocument::new().map_err(err)?;
-        doc.LoadXml(&HSTRING::from(xml)).map_err(err)?;
-        let toast = ToastNotification::CreateToastNotification(&doc).map_err(err)?;
-        toast.SetTag(&HSTRING::from(TAG)).map_err(err)?;
-        toast.SetGroup(&HSTRING::from(GROUP)).map_err(err)?;
-        let _ = toast.SetExpiresOnReboot(true);
-        if let Some(data) = data {
-            toast.SetData(data).map_err(err)?;
-        }
-
-        let handle = app.clone();
-        let on_activated = TypedEventHandler::<ToastNotification, IInspectable>::new(
-            move |_, args| {
-                let arg = args
-                    .as_ref()
-                    .and_then(|a| a.cast::<ToastActivatedEventArgs>().ok())
-                    .and_then(|a| a.Arguments().ok())
-                    .map(|h| h.to_string())
-                    .unwrap_or_default();
-                activated(&handle, &arg);
-                Ok(())
-            },
-        );
-        toast.Activated(&on_activated).map_err(err)?;
-
-        let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(
-            app_id(app),
-        ))
-        .map_err(err)?;
-        // Switched off by the user (or policy): say so, and the in-app toast
-        // takes over. `Setting` errors ("Element not found") until Windows has
-        // shown this app's first notification — that's not a "no".
-        if let Ok(setting) = notifier.Setting() {
-            if setting != NotificationSetting::Enabled {
-                return Err(format!("notifications are off for Yap ({})", setting.0));
-            }
-        }
-        notifier.Show(&toast).map_err(err)?;
+        let toast = crate::win_toast::post(app, TAG, xml, data, activated)?;
         *CURRENT.lock().unwrap_or_else(|p| p.into_inner()) = Some(toast);
         Ok(())
     }
@@ -1285,11 +1207,7 @@ mod notify {
 
     fn update_bar(app: &AppHandle, pct: u8, status: &str) {
         let Ok(data) = progress_data(pct, status) else { return };
-        if let Ok(notifier) =
-            ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id(app)))
-        {
-            let _ = notifier.UpdateWithTagAndGroup(&data, &HSTRING::from(TAG), &HSTRING::from(GROUP));
-        }
+        crate::win_toast::update(app, TAG, &data);
     }
 
     /// Move the download toast's bar — at most twice a second, and only while
@@ -1334,13 +1252,7 @@ mod notify {
         let Some(_toast) = CURRENT.lock().unwrap_or_else(|p| p.into_inner()).take() else {
             return;
         };
-        if let Ok(history) = ToastNotificationManager::History() {
-            let _ = history.RemoveGroupedTagWithId(
-                &HSTRING::from(TAG),
-                &HSTRING::from(GROUP),
-                &HSTRING::from(app_id(app)),
-            );
-        }
+        crate::win_toast::remove(app, TAG);
     }
 
     fn activated(app: &AppHandle, arg: &str) {

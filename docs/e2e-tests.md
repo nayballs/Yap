@@ -95,6 +95,8 @@ then open `screenshots/` (Claude can read the PNGs directly) or
 | `e2e/app.spec.js` | default | Home renders in portable mode · every sidebar view · every Settings section · a setting saved to `config.json` and read back after a reload · a new note survives a view switch · a dictionary entry is saved · Account signed out with the service unreachable · onboarding opens on its first step · a stub dictation lands in the Home feed (skipped without a microphone) |
 | `e2e/no-mic.spec.js` | configured mic missing | starts anyway and says "No microphone found" (toast + overlay) when asked to record · Upload still transcribes a file |
 | `e2e/updates.spec.js` | pointed at a local `latest.json` | a manual check finds the next patch version, downloads and verifies it, the "ready" toast and Settings → About say so, and "Restart to update" stops short of the installer (debug builds never run it) |
+| `e2e/meeting-detect.spec.js` | default | call detection through the debug-only `meeting_detect_simulate` hook: a call offers to take notes and "Not now" leaves it (and the app's next call) alone · a prompt leaves with its call · "Record notes" creates a Meetings note and records it, the call ending offers "Stop and summarise", which stops it in the note and runs the summary (without audio devices: says why, no note left) · "Keep recording" carries the notes into a rejoined huddle, whose end asks again (needs audio devices) · the Settings toggle turns it off |
+| `e2e/meeting-detect-no-mic.spec.js` | configured mic missing | "Record notes" says why it can't record and leaves no empty meeting note |
 
 The update spec signs its dummy installer with a throwaway key made for the
 run (`tauri signer`) and serves `latest.json` from a local server, using the

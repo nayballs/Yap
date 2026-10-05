@@ -218,6 +218,43 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   `yap-meeting-segment`/`-state`. On stop the UI auto-runs the "Meeting Notes"
   action with `llm::MEETING_NOTE_BASE_PROMPT` over notes + You:/Them: lines.
   Commands: `meeting_start`/`meeting_stop`/`meeting_state`.
+- **`meeting_detect.rs`** — **call detection** (OpenWhispr
+  `meetingDetectionEngine.js` port): notices a call starting (Teams, Zoom,
+  Google Meet, Slack huddles, Discord, Webex, GoTo, WhatsApp/Signal/Telegram…),
+  offers to take notes, and offers to stop and summarise when it ends. Signal =
+  Windows' per-app **microphone consent store** (`HKCU\…\CapabilityAccessManager\
+  ConsentStore\microphone`: packaged apps + `NonPackaged\<exe path, \ → #>`;
+  `LastUsedTimeStop == 0` = on the mic now, ignored if it predates this boot),
+  read for a known-call-app allowlist only (`APPS`); a browser counts when one
+  of its windows shows a meeting (Meet/Teams/Zoom… in the title; the call
+  sticks while you switch tabs). Yap's own mic use never counts (`yap.exe`
+  isn't a call app — it always holds the mic for the pre-roll). Event-driven:
+  a thread blocks in `RegNotifyChangeKeyValue`; the detector rescans every
+  2 s only while a call is starting/live/ending (60 s safety net; 5 s polling
+  if the watch fails). Debounce: starts after 5 s on the mic (20 s for chat
+  apps — voice notes), ends after 15 s off it (a device switch or rejoin is a
+  gap). Asks **once per call**, never while already recording: a sticky
+  in-app toast when the main window is visible, a silent Windows notification
+  (`win_toast.rs`) when it isn't focused — answering either withdraws both,
+  and focusing the window moves a pending prompt in-app
+  (`on_main_window_focused`). Prompts wait for a dictation to finish (+2.5 s);
+  "Not now" snoozes that app for 5 min (OpenWhispr's cooldown). **Record
+  notes** → `notes::create` ("Teams call · 5 Oct, 14:30", folder Meetings,
+  source "meeting") + `notes::mark_meeting` + the `meeting_start` command;
+  opens the note if the window is visible (else a "Taking notes…" Windows
+  notification); a failed start deletes the note and says why. **Call ended**
+  while recording it → "Stop and summarise?" — never an auto-stop (OpenWhispr
+  doesn't, and the mic can't tell an ended call from a rejoin, breakout room
+  or phone hand-off): opens the note and NotesView stops it there, so its
+  Meeting Notes summary runs (`yap-meeting-open-note {noteId, stop}`; Rust
+  stops it itself after 8 s if the page didn't). Snapshot
+  `meeting_detect_status` + `yap-meeting-detect`; answers
+  `meeting_detect_respond(promptId, record|dismiss|stop|keep)`; debug-only
+  `meeting_detect_simulate(appId, active)` (no debounce) for the e2e suite.
+  Gated by `config.meeting_detection` (default **on**, as OpenWhispr's
+  `notifyMeetingDetection`; `sync()` on every config save). Lock rule: never
+  touch windows/WinRT while holding its state lock (window getters wait on the
+  main thread). See [`docs/meetings.md`](./docs/meetings.md).
 - **`media.rs`** — audio-file decode front-end for Upload: pure-Rust **Symphonia**
   (mp3/wav/m4a/aac/flac/ogg-vorbis; no opus yet) → downmix mono → 16 kHz
   (`pipeline::resample_linear`), plus `chunk_ranges` (~60 s windows cut at the
@@ -363,6 +400,13 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   comes from Rust (`is_visible()`), and "the window was shown" from
   `WindowEvent::Focused(true)` on the settings window (lib.rs →
   `updates::on_main_window_focused`), never from the page.
+- **`win_toast.rs`** — the shared Windows-notification plumbing (WinRT
+  `ToastNotification`, Windows only): `app_id` (the NSIS shortcut's
+  AppUserModelID; dev builds borrow PowerShell's), `logo_xml`, `esc`, and
+  `post(tag, xml, data, on_activated)` / `update` / `remove` in the "yap"
+  group. updates.rs posts under the "update" tag, meeting_detect.rs under
+  "call"; each keeps its live toast so the buttons work from the
+  notification center. `allowed()` = not portable, not a test run.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
   volume, output_device, mute_while_recording, recording_mode,
   overlay_position, dictionary, append_trailing_space, auto_submit(+key),
@@ -439,7 +483,8 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   with `YAP_E2E=1`; compiled out of release builds): no global input hook, no
   paste/Enter/Ctrl+C into other apps, no `set_focus` (tao's fallback presses Alt
   in the focused app), no Windows notifications, no orphan-sidecar sweep, no
-  window-state plugin, and it quits when its stdin closes. See
+  window-state plugin, no call-detection registry reads (the debug-only
+  `meeting_detect_simulate` stands in), and it quits when its stdin closes. See
   [`docs/e2e-tests.md`](./docs/e2e-tests.md).
 - **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
   `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
@@ -515,7 +560,12 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   (`updates.svelte.js` — the shared update store started by ControlPanel:
   sticky "Yap X is ready" + Restart to update / Later / What's new, then
   Downloading… / Restarting Yap… in place; "Yap is up to date" after the
-  restart). **`HomeView.svelte`** = the Wispr-style
+  restart), and the **call prompts** (`meetingDetect.svelte.js` — mirrors
+  meeting_detect.rs's snapshot: sticky "Teams call detected — Record notes /
+  Not now" and "…call ended — Stop and summarise / Keep recording" toasts with
+  `icon: 'call'`, withdrawn when Rust withdraws the prompt; the card's ✕ runs
+  its `onClose` = the quiet answer; `yap-meeting-open-note` switches to Notes
+  and hands NotesView a `noteRequest` to open, and stop if asked). **`HomeView.svelte`** = the Wispr-style
   Home: time-of-day greeting with the hotkey as **amber keycaps**, a dark
   **rotating hero card** (4 tips — voice edit / AI cleanup / meeting notes /
   per-app profiles — picked by day, dot nav, CTAs open the right Settings
@@ -568,7 +618,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / System):
   **General** (hotkey, recording mode, mic, sound+volume, mute, recording-overlay
   group: live-preview toggle + overlay position — the overlay itself is always on,
-  it's the hot-mic indicator), **Speech-to-Text** (`ModelManager` + GPU +
+  it's the hot-mic indicator; **Meetings** group: "Detect calls and offer to take
+  notes" (`meetingDetection`) + an always-visible consent line, "Recording a
+  call? Let people know you're taking notes."), **Speech-to-Text** (`ModelManager` + GPU +
   language/translate), **Language Models** (OpenWhispr-style: enable toggle → mode
   selector Cloud Providers/Local/Self-Hosted → provider pill tabs (Groq/Anthropic/
   OpenAI/OpenRouter/Custom, brand icons) → API Key (masked + "Get your API key"
@@ -836,7 +888,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
   recording mode `toggle`, overlay always shown while recording/transcribing (no
   off switch — it's the hot-mic indicator), live transcription preview **on**
-  (`streaming_partials`), AI cleanup **off**.
+  (`streaming_partials`), AI cleanup **off**, call detection **on**
+  (`meeting_detection` — it only asks; nothing records without a click).
 
 ---
 
@@ -860,7 +913,10 @@ Symphonia decode + chunking), an **AI Notepad** (`notes.rs` — folders/actions/
 participants/transcripts, an Actions engine, ActionPicker/ActionManager, attendee +
 folder management, markdown export, an embedded per-note chat), a **meeting
 recorder** (`meeting.rs` — mic + WASAPI loopback → You/Them transcript → an
-auto-generated Meeting Notes action), and an **AI Chat** surface (`chats.rs` + eager
+auto-generated Meeting Notes action) with **call detection** (`meeting_detect.rs`
+— Teams/Zoom/Meet/Slack/Discord/Webex… taking the mic → "Record notes?", the
+call ending → "Stop and summarise?"; e2e-tested via a simulation hook, the
+registry signal checked read-only on Nathan's PC, no real call yet), and an **AI Chat** surface (`chats.rs` + eager
 keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six tools,
 ≤20-step loop, gated to cloud or ≥4B local models). Every JSON store now writes
 atomically with corrupt-file quarantine. The default (no-feature) build still ships
