@@ -102,6 +102,29 @@ body {
   --yap-r-full: 9999px;
 
   --yap-dur: 150ms;
+
+  /* ---- The meeting notepad (Notepad.svelte): Wispr Flow's notepad palette,
+     measured from its DOM over CDP (2026-10-05). Neutral warm paper, a pure
+     near-black ink, and an emerald for "live". ---- */
+  --yap-paper: rgb(252 252 251);           /* page */
+  --yap-paper-ink: rgb(26 26 26);          /* text, filled buttons, tooltips */
+  --yap-paper-text-2: rgb(77 74 66);       /* inactive tabs, menu icons */
+  --yap-paper-muted: rgb(113 113 110);     /* timer box, sheet buttons */
+  --yap-paper-faint: rgb(179 178 173);     /* faint icons */
+  --yap-paper-date: rgb(135 134 131);      /* date line, placeholders */
+  --yap-paper-rule: rgb(163 157 142);      /* paused divider */
+  --yap-paper-s1: rgb(245 244 240);        /* bubbles, timer box */
+  --yap-paper-s2: rgb(238 235 227);        /* hint strip, chips, buttons, hairlines */
+  --yap-paper-s2-strong: rgb(226 222 213); /* hovered / open icon buttons */
+  --yap-paper-ring: rgb(241 235 225);      /* focus ring, 3px */
+  --yap-paper-danger: rgb(238 106 106);    /* Delete */
+  --yap-live: rgb(16 185 129);             /* the recording waveform */
+  --yap-live-strong: rgb(5 150 105);       /* Stop / Resume icons */
+  /* Wispr's spring-like easing: 0.15 s for tabs, 0.4 s for buttons. */
+  --yap-ease-spring: linear(0 0%, 0.005 0.9%, 0.019 1.8%, 0.079 3.9%, 0.476 13.5%, 0.663 19.1%, 0.738 22%, 0.8 25.1%, 0.852 28.4%, 0.894 32%, 0.928 36%, 0.953 40.5%, 0.972 45.6%, 0.985 51.6%, 0.997 67.3%, 1 100%);
+  --yap-shadow-popover: 0 10px 15px -3px rgba(26, 26, 26, 0.1), 0 4px 6px -4px rgba(26, 26, 26, 0.1);
+  --yap-shadow-dialog: 0 20px 25px -5px rgba(26, 26, 26, 0.1), 0 8px 10px -6px rgba(26, 26, 26, 0.1);
+  --yap-shadow-sheet: 0 0 0 1px rgb(238 235 227), 0 4px 16px rgba(0, 0, 0, 0.1), 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 
 /* Dark token scope — currently UNSET everywhere (onboarding went warm-light

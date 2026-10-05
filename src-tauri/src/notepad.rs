@@ -14,17 +14,21 @@
 //!   meeting starts" is on (`meeting_open_notepad`, default on). It shows the
 //!   meeting being recorded; the Notes view reopens it on any meeting note
 //!   ([`notepad_open`]).
-//! - **Where**: docked to the right edge of the work area, full height, ~30%
-//!   of the width (400–600 px at 100%, [`notepad_width`]), on the monitor
-//!   with the call's window, else the one with the mouse cursor. Already on
-//!   screen, it stays where the person put it.
+//! - **Where**: docked to the right edge of the work area, full height, 30%
+//!   of the width as Wispr Flow (768 px on a 2560 px screen; 400–800 px at
+//!   100%, [`notepad_width`]), on the monitor with the call's window, else the
+//!   one with the mouse cursor. Already on screen, it stays where the person
+//!   put it.
 //! - **"Split the screen when joining"** (`meeting_split_screen`, off by
 //!   default): when a recording starts during a detected call, the call
 //!   app's main window — the largest visible top-level window of its process,
 //!   for a browser preferably the one whose title shows the meeting
 //!   ([`pick_call_window`]) — is restored if maximised and moved to the rest
-//!   of the work area, left of the notepad. Never one of Yap's own windows,
-//!   and never in a test run, which leaves other apps' windows alone.
+//!   of the work area, left of the notepad. The notepad's split button does
+//!   the same at once ([`notepad_split`]); hovering it shows where the call
+//!   will go as a glass outline (a small click-through window,
+//!   [`notepad_split_preview`]). Never one of Yap's own windows, and never in
+//!   a test run, which leaves other apps' windows alone.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -52,12 +56,12 @@ pub struct Rect {
 }
 
 /// The notepad's width on a work area `work_w` physical px wide at DPI
-/// `scale`: about a third of a typical screen (30%), between 400 and 600 px
-/// at 100%, and never more than half the work area.
+/// `scale`: 30% of it, as Wispr Flow (768 px on a 2560 px screen), between
+/// 400 and 800 px at 100%, and never more than half the work area.
 pub fn notepad_width(work_w: i32, scale: f64) -> i32 {
     let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
     let min = (400.0 * scale).round() as i32;
-    let max = (600.0 * scale).round() as i32;
+    let max = (800.0 * scale).round() as i32;
     let want = (f64::from(work_w) * 0.30).round() as i32;
     want.clamp(min, max).min(work_w / 2).max(1)
 }
@@ -92,6 +96,23 @@ pub fn outer_rect(target: Rect, (left, top, right, bottom): (i32, i32, i32, i32)
         y: target.y - top,
         w: target.w + left + right,
         h: target.h + top + bottom,
+    }
+}
+
+/// Room around the split preview's glass outline for its shadow (CSS px; the
+/// page insets the outline by the same).
+pub const PREVIEW_MARGIN: i32 = 24;
+
+/// The split preview window over `slot` (where the call's window will go,
+/// at DPI `scale`): the slot plus room for the outline's shadow all round.
+pub fn preview_rect(slot: Rect, scale: f64) -> Rect {
+    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let m = (f64::from(PREVIEW_MARGIN) * scale).round() as i32;
+    Rect {
+        x: slot.x - m,
+        y: slot.y - m,
+        w: slot.w + 2 * m,
+        h: slot.h + 2 * m,
     }
 }
 
@@ -254,7 +275,115 @@ pub fn on_note_deleted(app: &AppHandle, note_id: u64) {
     }
 }
 
+// ---- splitting the screen from the notepad ------------------------------------------------
+
+/// The split preview's label (an on-demand window, not in tauri.conf.json).
+const PREVIEW_LABEL: &str = "split-preview";
+/// Bumped by every show and hide of the preview: a show that finishes after
+/// the pointer already left stays hidden.
+static PREVIEW_GEN: AtomicU64 = AtomicU64::new(0);
+
+/// The notepad's split button: put the live call's window left of the
+/// notepad now, as "Split the screen when joining" does when a recording
+/// starts. Not in test runs, which never move other apps' windows.
+pub fn split_now(app: &AppHandle) -> Result<(), String> {
+    hide_preview(app);
+    if crate::e2e::active() {
+        return Err("Test runs never move other apps' windows.".to_string());
+    }
+    let w = window(app).ok_or("The notepad isn't there")?;
+    let call = platform::call_window().ok_or(
+        "No call to split the screen with yet. Yap splits it with a call it noticed, in Teams, Zoom, Meet and the like.",
+    )?;
+    if !platform::place_docked(&w, Some(call), true) {
+        return Err("Couldn't move the windows".to_string());
+    }
+    show(&w, false);
+    tracing::info!("notepad: split the screen with the call (button)");
+    Ok(())
+}
+
+/// Hovering the split button: a glass outline over the slot the call's
+/// window would move to (Wispr Flow's split preview), in a small
+/// borderless, click-through window that never takes the focus. Created on
+/// first use. Returns whether it shows (there's a call to split with).
+pub async fn show_preview(app: &AppHandle) -> Result<bool, String> {
+    let gen = PREVIEW_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    if crate::e2e::active() {
+        return Ok(false);
+    }
+    let Some((slot, scale)) = platform::call_slot() else {
+        return Ok(false);
+    };
+    let frame = preview_rect(slot, scale);
+    let w = match app.get_webview_window(PREVIEW_LABEL) {
+        Some(w) => w,
+        None => build_preview(app)?,
+    };
+    let current = || PREVIEW_GEN.load(Ordering::SeqCst) == gen;
+    if current() {
+        let _ = w.set_position(tauri::PhysicalPosition::new(frame.x, frame.y));
+        let _ = w.set_size(tauri::PhysicalSize::new(frame.w.max(1) as u32, frame.h.max(1) as u32));
+        let _ = w.show();
+    }
+    // The pointer left (or the split happened) while it was coming up.
+    if !current() {
+        let _ = w.hide();
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+/// Take the split preview down (the pointer left the button, or the split
+/// happened).
+pub fn hide_preview(app: &AppHandle) {
+    PREVIEW_GEN.fetch_add(1, Ordering::SeqCst);
+    if let Some(w) = app.get_webview_window(PREVIEW_LABEL) {
+        let _ = w.hide();
+    }
+}
+
+fn build_preview(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let w = tauri::WebviewWindowBuilder::new(
+        app,
+        PREVIEW_LABEL,
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("Yap")
+    .decorations(false)
+    .transparent(true)
+    .shadow(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .focused(false)
+    .focusable(false)
+    .visible(false)
+    .build()
+    .map_err(|e| format!("Couldn't show the split preview: {e}"))?;
+    let _ = w.set_ignore_cursor_events(true);
+    Ok(w)
+}
+
 // ---- commands ------------------------------------------------------------------------------
+
+/// The notepad's split button (see [`split_now`]).
+#[tauri::command]
+pub async fn notepad_split(app: AppHandle) -> Result<(), String> {
+    split_now(&app)
+}
+
+/// The split button's hover preview: `show` on pointer enter, not on leave
+/// (see [`show_preview`]). Async, as it may create a window.
+#[tauri::command]
+pub async fn notepad_split_preview(app: AppHandle, show: bool) -> Result<bool, String> {
+    if show {
+        show_preview(&app).await
+    } else {
+        hide_preview(&app);
+        Ok(false)
+    }
+}
 
 /// Show the notepad on `note_id` and focus it (the Notes view's "Notepad").
 #[tauri::command]
@@ -438,6 +567,14 @@ mod platform {
         hwnd
     }
 
+    /// Where the live call's window would go when the screen is split (its
+    /// slot left of the notepad, physical px), and that monitor's DPI scale.
+    pub fn call_slot() -> Option<(Rect, f64)> {
+        let call = call_window()?;
+        let (work, scale) = work_area(monitor_for(Some(call)))?;
+        Some((split_rects(work, notepad_width(work.w, scale)).0, scale))
+    }
+
     /// The work area and DPI scale of `monitor`.
     fn work_area(monitor: Handle) -> Option<(Rect, f64)> {
         let mut info = MonitorInfo {
@@ -553,6 +690,10 @@ mod platform {
         None
     }
 
+    pub fn call_slot() -> Option<(super::Rect, f64)> {
+        None
+    }
+
     /// Dock to the right edge of the primary monitor's work area.
     pub fn place_docked(w: &tauri::WebviewWindow, _call: Option<isize>, _split: bool) -> bool {
         let Ok(Some(m)) = w.primary_monitor() else { return false };
@@ -583,15 +724,26 @@ mod tests {
     #[test]
     fn about_a_third_of_the_screen_within_bounds() {
         assert_eq!(notepad_width(1920, 1.0), 576);
+        // Wispr Flow's, measured on a 2560 × 1440 screen.
+        assert_eq!(notepad_width(2560, 1.0), 768);
         // Small screens: the minimum, but never more than half.
         assert_eq!(notepad_width(1366, 1.0), 410);
         assert_eq!(notepad_width(1024, 1.0), 400);
         assert_eq!(notepad_width(700, 1.0), 350);
         // Wide or high-DPI screens: the maximum, scaled.
-        assert_eq!(notepad_width(3440, 1.0), 600);
-        assert_eq!(notepad_width(3840, 1.5), 900);
-        assert_eq!(notepad_width(2560, 1.25), 750);
+        assert_eq!(notepad_width(3440, 1.0), 800);
+        assert_eq!(notepad_width(3840, 1.5), 1152);
+        assert_eq!(notepad_width(5120, 1.25), 1000);
         assert_eq!(notepad_width(1920, f64::NAN), 576);
+    }
+
+    #[test]
+    fn the_preview_frames_the_calls_slot_with_room_for_its_shadow() {
+        let (call, _) = split_rects(WORK, notepad_width(WORK.w, 1.0));
+        let frame = preview_rect(call, 1.0);
+        assert_eq!(frame, Rect { x: -24, y: -24, w: 1344 + 48, h: 1032 + 48 });
+        // Scaled for the monitor's DPI.
+        assert_eq!(preview_rect(call, 1.5).x, -36);
     }
 
     #[test]

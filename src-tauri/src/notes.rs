@@ -110,6 +110,11 @@ pub struct Note {
     /// and personal notes.
     #[serde(default)]
     pub digests: Vec<MeetingDigest>,
+    /// Where recordings of this meeting stopped (a pause, or the end): the
+    /// transcript's length at each stop, in order. The meeting notepad draws
+    /// its paused divider there (`meeting_end.rs` adds them).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breaks: Vec<usize>,
     /// Where the note came from ("manual" | "upload" | later "meeting").
     #[serde(default)]
     pub source: String,
@@ -559,6 +564,7 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
             transcript: Vec::new(),
             participants: Vec::new(),
             digests: Vec::new(),
+            breaks: Vec::new(),
             source: source.to_string(),
             created_ts: now,
             updated_ts: now,
@@ -661,6 +667,34 @@ pub fn append_transcript(id: u64, segments: &[TranscriptSegment]) -> Result<(), 
         save_to_disk(store);
         Ok(())
     })
+}
+
+/// A recording of note `id` stopped (paused or ended): mark the place in its
+/// transcript (see [`Note::breaks`]). Returns the marks when one was added —
+/// not for a recording that added nothing, nor before the first line.
+pub fn add_break(id: u64) -> Result<Option<Vec<usize>>, String> {
+    with_store(|store| {
+        let note = store
+            .notes
+            .iter_mut()
+            .find(|n| n.id == id)
+            .ok_or("Note not found")?;
+        if !push_break(note) {
+            return Ok(None);
+        }
+        let breaks = note.breaks.clone();
+        save_to_disk(store);
+        Ok(Some(breaks))
+    })
+}
+
+fn push_break(note: &mut Note) -> bool {
+    let at = note.transcript.len();
+    if at == 0 || note.breaks.last() == Some(&at) {
+        return false;
+    }
+    note.breaks.push(at);
+    true
 }
 
 /// How far into a note's transcript the meeting digests reach (the first
@@ -859,6 +893,32 @@ mod tests {
         assert!(!old.title_auto && !title_open_to_ai(&old));
         // The flag only reaches disk when set.
         assert!(serde_json::to_value(&old).unwrap().get("titleAuto").is_none());
+    }
+
+    #[test]
+    fn a_stop_marks_its_place_once() {
+        let mut note = store_with_note().notes.remove(0);
+        // Nothing said yet: no divider at the top.
+        assert!(!push_break(&mut note));
+        let seg = |i: u64| TranscriptSegment {
+            source: "you".into(),
+            text: format!("line {i}"),
+            ts: i,
+            echo: false,
+        };
+        note.transcript = (0..3).map(seg).collect();
+        assert!(push_break(&mut note)); // paused after three lines
+        assert!(!push_break(&mut note)); // a resume that added nothing
+        note.transcript.push(seg(3));
+        assert!(push_break(&mut note)); // ended after the fourth
+        assert_eq!(note.breaks, vec![3, 4]);
+        // Older stores have none, and none reach disk until there are some.
+        let old: Note = serde_json::from_value(json!({
+            "id": 2, "title": "Sync", "createdTs": 1, "updatedTs": 1
+        }))
+        .unwrap();
+        assert!(old.breaks.is_empty());
+        assert!(serde_json::to_value(&old).unwrap().get("breaks").is_none());
     }
 
     #[test]

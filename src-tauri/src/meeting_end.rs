@@ -36,6 +36,9 @@ pub const EVENT_SUMMARY: &str = "yap-meeting-summary";
 pub const EVENT_ENDED: &str = "yap-meeting-ended";
 /// A meeting note was discarded: `{ id }`.
 pub const EVENT_DELETED: &str = "yap-note-deleted";
+/// A recording stopped and its place in the transcript was marked:
+/// `{ noteId, breaks }` (`Note::breaks`, the notepad's paused dividers).
+pub const EVENT_BREAKS: &str = "yap-meeting-breaks";
 
 /// The action plan is written in this many steps (see `commands::run_enhance`).
 const STEPS: u8 = 3;
@@ -141,6 +144,14 @@ fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) {
     let Some(note) = crate::notes::get(note_id) else {
         return; // deleted meanwhile
     };
+    // Where this recording stopped: the notepad's paused divider.
+    match crate::notes::add_break(note_id) {
+        Ok(Some(breaks)) => {
+            let _ = app.emit(EVENT_BREAKS, serde_json::json!({ "noteId": note_id, "breaks": breaks }));
+        }
+        Ok(None) => {}
+        Err(e) => tracing::warn!(note_id, "Meeting stop not marked: {e}"),
+    }
     if paused {
         tracing::info!(note_id, "Meeting paused");
         crate::meeting_assist::maybe_title(app, note_id, true);
@@ -310,11 +321,30 @@ pub fn meeting_discard(app: AppHandle, note_id: u64) -> Result<(), String> {
     crate::notes::get(note_id).ok_or("Note not found")?;
     crate::notes::delete(note_id);
     jobs().remove(&note_id);
-    tracing::info!(note_id, "Meeting discarded (started by mistake)");
+    tracing::info!(note_id, "Meeting note deleted");
     let _ = app.emit("yap-notes-changed", ());
     let _ = app.emit(EVENT_DELETED, serde_json::json!({ "id": note_id }));
     crate::notepad::on_note_deleted(&app, note_id);
     Ok(())
+}
+
+/// The notepad's ⋯ → Delete: delete a meeting note, stopping its recording
+/// first when it's the one going (as a pause: no action plan for a note
+/// that's going away), then as [`meeting_discard`].
+#[tauri::command]
+pub async fn meeting_delete(app: AppHandle, note_id: u64) -> Result<(), String> {
+    if crate::meeting::recording_note() == Some(note_id) {
+        pause()?;
+        // The recorder transcribes its last few seconds before it lets go.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while crate::meeting::is_recording() {
+            if std::time::Instant::now() > deadline {
+                return Err("The recording didn't stop, so the note was kept".to_string());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
+    meeting_discard(app, note_id)
 }
 
 #[cfg(test)]
