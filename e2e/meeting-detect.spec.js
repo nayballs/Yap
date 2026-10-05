@@ -266,7 +266,7 @@ test('Settings lists how Yap asks and the apps it asks about', async ({ yap, mai
   await expect(
     meetings.getByRole('tablist', { name: 'How Yap asks' }).getByRole('tab', { name: 'Pop-up' })
   ).toHaveAttribute('aria-selected', 'true');
-  await expect(meetings).toContainText('A card in Yap, or a Windows notification while Yap is in the background');
+  await expect(meetings).toContainText('A card in Yap, or on the Yap bar while you work in another app');
 
   // One switch per call app, showing what Yap does now (the person's
   // choice, else the app's default); two columns.

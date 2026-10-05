@@ -1196,6 +1196,20 @@ mod notify {
                 "Download and restart",
             )
         };
+        // A card on the Yap bar while it's on screen; "Later" just closes it.
+        let card = crate::bar::Card {
+            id: TAG.into(),
+            icon: "update",
+            title: title.clone(),
+            body: body.into(),
+            primary: Some(crate::bar::CardAction::new("update:install", button)),
+            secondary: Some(crate::bar::CardAction::new("", "Later")),
+            ..Default::default()
+        };
+        if crate::bar::show_card(app, card, Box::new(activated)) {
+            *PROGRESS.lock().unwrap_or_else(|p| p.into_inner()) = None;
+            return Ok(());
+        }
         let xml = format!(
             "<toast launch=\"update:open\"><visual><binding template=\"ToastGeneric\">\
              <text>{}</text><text>{}</text>{}</binding></visual><actions>\
@@ -1286,6 +1300,7 @@ mod notify {
     /// Take our toast out of the notification center (the update is being
     /// installed, or the main window now shows the same thing).
     pub fn remove(app: &AppHandle) {
+        crate::bar::dismiss_card(app, TAG);
         *PROGRESS.lock().unwrap_or_else(|p| p.into_inner()) = None;
         let Some(_toast) = CURRENT.lock().unwrap_or_else(|p| p.into_inner()).take() else {
             return;

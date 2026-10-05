@@ -786,6 +786,8 @@ pub fn save_config(
     crate::bridge::sync(&app, cfg.bridge_enabled);
     // …and the "Detect calls and offer to take notes" toggle.
     crate::meeting_detect::sync(&app, cfg.meeting_detection);
+    // …and the Yap bar (on/off, fullscreen, position, the tooltips' hotkeys).
+    crate::bar::sync(&app, &cfg);
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.update_config(cfg);
