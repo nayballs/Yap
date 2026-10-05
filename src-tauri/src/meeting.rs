@@ -524,20 +524,45 @@ impl Source {
         }
     }
 
-    /// The next chunk, transcribed: `(from, to, text)` with `from`/`to` in
-    /// samples on the session clock, or `None` (nothing ready, or silence).
-    async fn next(
-        &mut self,
-        engine_slot: &EngineSlot,
-        final_drain: bool,
-    ) -> Option<(u64, u64, String)> {
+    /// The next chunk, transcribed, or `None` (nothing ready, or silence).
+    async fn next(&mut self, engine_slot: &EngineSlot, final_drain: bool) -> Option<Heard> {
         let chunk = take_chunk(&self.buf, final_drain)?;
         let from = self.taken;
         self.taken += chunk.len() as u64;
         self.loudness.push(&chunk);
+        let onset = from + speech_onset(&chunk) as u64;
         let text = transcribe_chunk(engine_slot, chunk).await?;
-        Some((from, self.taken, text))
+        Some(Heard {
+            from,
+            to: self.taken,
+            onset,
+            text,
+        })
     }
+}
+
+/// A transcribed chunk; positions in samples on the session clock.
+struct Heard {
+    from: u64,
+    to: u64,
+    /// Where the speech in it starts: dates the segment, and orders "you"
+    /// and "them" chunks that were cut at the same moment.
+    onset: u64,
+    text: String,
+}
+
+/// Offset of the first 20 ms frame of speech in `samples`: the first at a
+/// fifth of the loudest frame's level (and above room noise), else 0.
+fn speech_onset(samples: &[f32]) -> usize {
+    let rms = |f: &[f32]| (f.iter().map(|s| s * s).sum::<f32>() / f.len() as f32).sqrt();
+    let (frames, _) = samples.as_chunks::<ENV_FRAME>();
+    let loudest = frames.iter().map(|f| rms(f)).fold(0.0f32, f32::max);
+    let threshold = (loudest * 0.2).max(0.004);
+    frames
+        .iter()
+        .position(|f| rms(f) >= threshold)
+        .map(|i| i * ENV_FRAME)
+        .unwrap_or(0)
 }
 
 /// Was this "you" chunk (`from..to`, saying `text`) the call coming through
@@ -555,9 +580,6 @@ fn sounds_like_echo(
     let (mic_from, mic_frames) = mic.range(a, b);
     let (call_from, call_frames) = call.range(a.saturating_sub(ECHO_MAX_LAG), b);
     let correlation = echo_correlation(&mic_frames, mic_from, &call_frames, call_from);
-    if correlation < ECHO_MIN_CORRELATION {
-        return false;
-    }
     let slack = RATE as u64;
     let said: Vec<&str> = theirs
         .iter()
@@ -566,6 +588,12 @@ fn sounds_like_echo(
         .collect();
     let share = echoed_share(text, &said.join(" "));
     let echo = is_echo(correlation, share);
+    tracing::debug!(
+        correlation,
+        share,
+        echo,
+        "Meeting: echo check on a mic chunk"
+    );
     if echo {
         tracing::info!(
             correlation,
@@ -670,35 +698,39 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
             let stopping = stop.load(Ordering::SeqCst);
 
             // "Them" first, so the echo check can hold "you" up against it.
-            let mut batch: Vec<TranscriptSegment> = Vec::new();
-            let at = |from: u64| (started_ms + from * 1000 / RATE as u64) / 1000;
-            if let Some((from, to, text)) = them.next(&engine_slot, stopping).await {
-                batch.push(TranscriptSegment {
+            // Segments are dated (and ordered) by where their speech starts.
+            let mut batch: Vec<(u64, TranscriptSegment)> = Vec::new();
+            let at = |pos: u64| (started_ms + pos * 1000 / RATE as u64) / 1000;
+            if let Some(h) = them.next(&engine_slot, stopping).await {
+                let seg = TranscriptSegment {
                     source: "them".to_string(),
-                    text: text.clone(),
-                    ts: at(from),
+                    text: h.text.clone(),
+                    ts: at(h.onset),
                     echo: false,
-                });
-                theirs.push_back((from, to, text));
+                };
+                batch.push((h.onset, seg));
+                theirs.push_back((h.from, h.to, h.text));
                 while theirs.len() > 4 {
                     theirs.pop_front();
                 }
             }
-            if let Some((from, to, text)) = you.next(&engine_slot, stopping).await {
-                let echo =
-                    sounds_like_echo(&you.loudness, &them.loudness, from, to, &text, &theirs);
-                batch.push(TranscriptSegment {
+            if let Some(h) = you.next(&engine_slot, stopping).await {
+                let (mic, call) = (&you.loudness, &them.loudness);
+                let echo = sounds_like_echo(mic, call, h.from, h.to, &h.text, &theirs);
+                let seg = TranscriptSegment {
                     source: "you".to_string(),
-                    text,
-                    ts: at(from),
+                    text: h.text,
+                    ts: at(h.onset),
                     echo,
-                });
+                };
+                batch.push((h.onset, seg));
             }
             backlog = [&you, &them].iter().any(|s| {
                 let left = buffered(&s.buf);
                 left >= CHUNK_SECS * RATE || (stopping && left > 0)
             });
-            batch.sort_by_key(|s| s.ts);
+            batch.sort_by_key(|(onset, _)| *onset);
+            let batch = batch.into_iter().map(|(_, seg)| seg).collect();
             if let Err(e) = ingest(&app, note_id, batch) {
                 tracing::warn!("Meeting segments not saved: {}", e);
             }
@@ -806,6 +838,19 @@ mod tests {
                 amp * (i as f32 * 0.21).sin()
             })
             .collect()
+    }
+
+    #[test]
+    fn speech_onset_skips_the_leading_silence() {
+        let mut s = vec![0.001f32; 2 * RATE]; // 2 s of room noise…
+        s.extend(tone(1.0)); // …then speech
+        let onset = speech_onset(&s);
+        assert!(
+            (2 * RATE - ENV_FRAME..=2 * RATE).contains(&onset),
+            "{onset}"
+        );
+        assert_eq!(speech_onset(&tone(1.0)), 0);
+        assert_eq!(speech_onset(&[0.0; 100]), 0);
     }
 
     #[test]
