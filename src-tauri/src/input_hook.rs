@@ -1,4 +1,4 @@
-//! Unified input hook for the dictation + edit key bindings.
+//! Unified input hook for the dictation, edit and meeting key bindings.
 //!
 //! Installs both WH_KEYBOARD_LL and WH_MOUSE_LL hooks to capture:
 //! - Keyboard keys (including those sent by mouse side buttons via driver software)
@@ -7,7 +7,14 @@
 //! Configured keys are **suppressed** at the OS level (keyboard hooks only),
 //! preventing "44444" in text fields when holding a bound key. Push-to-talk is
 //! NOT a separate binding: the dictation key emits both press and release, and
-//! the pipeline's `recording_mode` decides toggle vs hold.
+//! the pipeline's `recording_mode` decides toggle vs hold. The meeting
+//! shortcut (Win+Alt+M by default) only acts on its press (`meeting_guard`).
+//!
+//! A combo holding **Alt or Win** whose main key is swallowed taps an
+//! unassigned "menu mask" key while the modifiers are still down
+//! (AutoHotkey's `#MenuMaskKey`): otherwise letting go of Alt would open the
+//! focused app's menu bar (Office shows its KeyTips) and Win the Start menu,
+//! as neither saw another key in between.
 
 // FFI type names match Win32 API conventions (HHOOK, POINT, MSG, etc.)
 #![allow(clippy::upper_case_acronyms)]
@@ -91,6 +98,7 @@ impl KeyBinding {
 
 static DICTATION_BINDING: KeyBinding = KeyBinding::new();
 static EDIT_BINDING: KeyBinding = KeyBinding::new();
+static MEETING_BINDING: KeyBinding = KeyBinding::new();
 
 /// Channel from the hook callback to the emit-forwarder thread. The callback
 /// must NEVER do slow work (like `app.emit`, which can block on a busy webview):
@@ -100,6 +108,11 @@ static EDIT_BINDING: KeyBinding = KeyBinding::new();
 #[cfg(target_os = "windows")]
 static EVENT_TX: std::sync::OnceLock<std::sync::mpsc::Sender<&'static str>> =
     std::sync::OnceLock::new();
+
+/// Not an event: asks the forwarder thread to tap the menu mask key (see
+/// `send_menu_mask`) — SendInput is kept out of the hook callback too.
+#[cfg(target_os = "windows")]
+const MENU_MASK: &str = "input-hook:menu-mask";
 
 // ---- Public API ----
 
@@ -128,6 +141,23 @@ pub fn configure_edit(key_spec: &str) -> Result<String, String> {
     let desc = format_binding(key_type, key_code, mods);
     info!("Edit key configured: {} (spec: {:?})", desc, key_spec);
     Ok(desc)
+}
+
+/// Parse a key spec string and configure the meeting shortcut (start taking
+/// notes / stop and summarise — `meeting_guard`). An empty spec unbinds it.
+pub fn configure_meeting(key_spec: &str) -> Result<String, String> {
+    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
+    MEETING_BINDING.configure(key_type, key_code, mods);
+    let desc = format_binding(key_type, key_code, mods);
+    info!("Meeting key configured: {} (spec: {:?})", desc, key_spec);
+    Ok(desc)
+}
+
+/// Whether pressing a combo should tap the menu mask key: it holds Alt or
+/// Win, and its main key (swallowed by the hook) isn't itself a modifier.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn needs_menu_mask(required: u8, bound_is_modifier: bool) -> bool {
+    required & (MOD_ALT | MOD_WIN) != 0 && !bound_is_modifier
 }
 
 /// Parse one modifier token ("ctrl", "alt", …) to its MOD_* bit.
@@ -249,6 +279,47 @@ mod win32 {
     pub const VK_RCONTROL: i32 = 0xA3;
     pub const VK_LMENU: i32 = 0xA4;
     pub const VK_RMENU: i32 = 0xA5;
+    /// An unassigned virtual key: AutoHotkey's default menu mask key (vkE8).
+    pub const VK_MENU_MASK: u16 = 0xE8;
+
+    pub const INPUT_KEYBOARD: u32 = 1;
+    pub const KEYEVENTF_KEYUP: u32 = 0x0002;
+
+    // SendInput's INPUT: the union includes MOUSEINPUT (its largest member) so
+    // that sizeof(INPUT) is 40 on 64-bit, as SendInput's cbSize expects.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct MOUSEINPUT {
+        pub dx: i32,
+        pub dy: i32,
+        pub mouse_data: u32,
+        pub flags: u32,
+        pub time: u32,
+        pub extra_info: usize,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct KEYBDINPUT {
+        pub vk: u16,
+        pub scan: u16,
+        pub flags: u32,
+        pub time: u32,
+        pub extra_info: usize,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub union INPUT_UNION {
+        pub mi: MOUSEINPUT,
+        pub ki: KEYBDINPUT,
+    }
+
+    #[repr(C)]
+    pub struct INPUT {
+        pub kind: u32,
+        pub u: INPUT_UNION,
+    }
 
     #[repr(C)]
     pub struct POINT {
@@ -314,7 +385,37 @@ mod win32 {
         ) -> usize;
         pub fn GetModuleHandleW(module_name: *const u16) -> isize;
         pub fn GetAsyncKeyState(vkey: i32) -> i16;
+        pub fn SendInput(count: u32, inputs: *const INPUT, size: i32) -> u32;
     }
+}
+
+/// Tap the menu mask key (down + up) while a combo's Alt / Win is still
+/// held, so their release opens neither the focused app's menu bar nor the
+/// Start menu (see the module docs). From the forwarder thread, never the
+/// hook callback. Our own hook sees the injected key and ignores it.
+#[cfg(target_os = "windows")]
+fn send_menu_mask() {
+    let key = |flags: u32| win32::INPUT {
+        kind: win32::INPUT_KEYBOARD,
+        u: win32::INPUT_UNION {
+            ki: win32::KEYBDINPUT {
+                vk: win32::VK_MENU_MASK,
+                scan: 0,
+                flags,
+                time: 0,
+                extra_info: 0,
+            },
+        },
+    };
+    let inputs = [key(0), key(win32::KEYEVENTF_KEYUP)];
+    let sent = unsafe {
+        win32::SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<win32::INPUT>() as i32,
+        )
+    };
+    trace!(sent, "Input hook: menu mask key");
 }
 
 /// Which modifier family (MOD_* bit) a virtual key belongs to; 0 for
@@ -451,6 +552,15 @@ fn process_keyboard_event(
                     } else if held & required != required {
                         return false; // required modifiers absent → passthrough
                     }
+                    // Alt / Win held and the main key swallowed: mask their
+                    // release (first press only, not the key's repeats).
+                    if needs_menu_mask(required, bound_is_modifier)
+                        && !binding.active.load(Ordering::Relaxed)
+                    {
+                        if let Some(tx) = EVENT_TX.get() {
+                            let _ = tx.send(MENU_MASK);
+                        }
+                    }
                     handle_binding_event(binding, pressed, released, true);
                     return !bound_is_modifier; // never suppress modifier keys
                 }
@@ -514,6 +624,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
                 "dictation-key-released",
             ),
             (&EDIT_BINDING, "edit-key-pressed", "edit-key-released"),
+            (&MEETING_BINDING, "meeting-key-pressed", "meeting-key-released"),
         ] {
             suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
         }
@@ -574,6 +685,17 @@ unsafe extern "system" fn low_level_mouse_proc(
                 );
                 return 1;
             }
+
+            // …and the meeting shortcut.
+            if MEETING_BINDING.matches_mouse(id) {
+                handle_binding_event(
+                    &MEETING_BINDING,
+                    "meeting-key-pressed",
+                    "meeting-key-released",
+                    is_press,
+                );
+                return 1;
+            }
         }
     }
 
@@ -599,6 +721,10 @@ pub fn start_input_hook(app_handle: AppHandle) {
         .name("input-hook-emit".into())
         .spawn(move || {
             while let Ok(event) = rx.recv() {
+                if event == MENU_MASK {
+                    send_menu_mask();
+                    continue;
+                }
                 info!("Input hook: emitting {}", event);
                 if let Err(e) = app_handle.emit(event, ()) {
                     warn!("Input hook: failed to emit {}: {}", event, e);
@@ -725,6 +851,51 @@ mod tests {
             (KEY_TYPE_KEYBOARD, 165, 0)
         );
         assert!(parse_key_spec("kb:bogus+32").is_err());
+    }
+
+    #[test]
+    fn parse_win_combos() {
+        // The meeting shortcut's default, Win+Alt+M, as the recorder writes it
+        // (ctrl, alt, shift, win order)…
+        assert_eq!(
+            parse_key_spec("kb:alt+win+77").unwrap(),
+            (KEY_TYPE_KEYBOARD, 77, MOD_ALT | MOD_WIN)
+        );
+        // …or in any other order.
+        assert_eq!(
+            parse_key_spec("kb:win+alt+77").unwrap(),
+            (KEY_TYPE_KEYBOARD, 77, MOD_ALT | MOD_WIN)
+        );
+        assert_eq!(
+            parse_key_spec("kb:super+shift+77").unwrap(),
+            (KEY_TYPE_KEYBOARD, 77, MOD_SHIFT | MOD_WIN)
+        );
+        assert_eq!(
+            parse_key_spec(&crate::config::YapConfig::default().meeting_hotkey).unwrap(),
+            (KEY_TYPE_KEYBOARD, 77, MOD_ALT | MOD_WIN)
+        );
+        assert_eq!(
+            format_binding(KEY_TYPE_KEYBOARD, 77, MOD_ALT | MOD_WIN),
+            "keyboard alt+win+vkey 77"
+        );
+        // A chord of Win + Alt alone is fine too.
+        assert_eq!(
+            parse_key_spec("mods:win+alt").unwrap(),
+            (KEY_TYPE_MODS, 0, MOD_ALT | MOD_WIN)
+        );
+    }
+
+    #[test]
+    fn alt_and_win_combos_mask_their_release() {
+        // The main key is swallowed, so Alt / Win would be released "alone".
+        assert!(needs_menu_mask(MOD_ALT | MOD_WIN, false)); // Win+Alt+M
+        assert!(needs_menu_mask(MOD_ALT, false)); // Alt+F9
+        assert!(needs_menu_mask(MOD_CTRL | MOD_WIN, false));
+        // Ctrl/Shift combos open nothing on release, bare keys need no
+        // modifiers, and a modifier main key is never swallowed.
+        assert!(!needs_menu_mask(MOD_CTRL | MOD_SHIFT, false));
+        assert!(!needs_menu_mask(0, false));
+        assert!(!needs_menu_mask(MOD_ALT, true));
     }
 
     #[test]

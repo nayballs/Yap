@@ -108,6 +108,7 @@ then open `screenshots/` (Claude can read the PNGs directly) or
 | `e2e/meetings.spec.js` | meeting audio from test WAVs | live You/Them segments, cut in pauses · ending the meeting without an AI model explains how to set one up · the call leaking from the speakers into the mic is flagged as echo, hidden, and kept |
 | `e2e/mcp.spec.js` | Local API on, seeded meetings and a dictation, a stand-in user profile with AI apps' configs | Integrations' "Go to MCP" opens Settings → MCP · Wispr's four cards in order (Claude, ChatGPT, Gemini, Cursor) with what Yap found, then All other apps · Add to Claude merges into its config (other servers kept, `.bak` made) and Remove gives back the same bytes · Cursor, ChatGPT (TOML) and Claude Code (under its lock) get their own formats · a config that isn't plain JSON is left alone, with the reason · with the Local API off the page says so and turns it on, and Settings' copy agrees · a real `yap.exe mcp` session (`support/mcp-client.js`) lists, searches and pages meetings, reads notes and folders, and never returns the dictation · "Let AI apps save notes" adds `create_note` and the note shows in Notes · with no Yap, the tools ask to open it |
 | `e2e/meeting-summary.spec.js` | Note Formatting pointed at a local fake AI | a two-hour meeting fed in ten-minute batches: 11 rolling digests, each under 4,500 tokens with a capped reply · one final call over digests + the raw tail · an action plan with a section per person, Decisions, Open questions and Unassigned · the deterministic checks (an invented owner, a dropped task, a made-up deadline) · Copy text |
+| `e2e/meeting-guards.spec.js` | default | the meeting guard rails: the overlay excluded from screen capture while a meeting records and back after (debug-only `capture_affinity`) · with hiding off, the screen-share tip, **Update settings** at the switch, and switching it back on mid-meeting · the length warning, **Keep going**, and the stop at the limit, in seconds (debug-only `e2e_meeting_limit`) · "When a call ends: Stop and summarise automatically" on a simulated call end · the meeting shortcut (Win+Alt+M through the in-page fallback) starting a "Meeting · …" note and stopping it, and taking notes on a live call · the Settings rows and recording a new shortcut |
 
 The update spec signs its dummy installer with a throwaway key made for the
 run (`tauri signer`) and serves `latest.json` from a local server, using the
@@ -152,7 +153,8 @@ test('chat: the empty state offers a new chat', async ({ yap, main, shot }) => {
   file dialogs, Windows notifications, dragging from Explorer) can't be
   driven over CDP; `no-mic.spec.js` shows how to stand in for a file drop.
 - The hotkey reaches the app through the main window's in-page fallback:
-  `pressHotkey(main)` presses F24 (the global hook is off in test mode).
+  `pressHotkey(main)` presses F24 (the global hook is off in test mode). The
+  meeting shortcut the same way: `main.keyboard.press('Meta+Alt+KeyM')`.
 
 ## Why Playwright over CDP
 
