@@ -463,8 +463,9 @@ fn maybe_announce(app: &AppHandle) {
     {
         // Portable Yap has no Start-menu shortcut carrying its AppUserModelID,
         // so Windows would drop the notification silently — leave it to the
-        // in-app toast.
-        if portable() || lock().native_refused.as_ref() == Some(&a) {
+        // in-app toast. (So does an e2e test run, which posts nothing to the
+        // developer's notification center.)
+        if portable() || crate::e2e::active() || lock().native_refused.as_ref() == Some(&a) {
             return;
         }
         match notify::show(app, &a) {
