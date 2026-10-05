@@ -41,7 +41,6 @@ let started = false;
 let nav = { showView: () => {}, openSettings: () => {} };
 // The card on screen: { id, toastId, timer }.
 let shown = null;
-let wasRecording = false;
 
 /**
  * Load the snapshot and follow changes. Idempotent; the main window calls it
@@ -54,9 +53,6 @@ export function initCalendar(opts = {}) {
   invoke('calendar_status')
     .then(apply)
     .catch(() => {});
-  invoke('meeting_state')
-    .then((s) => (wasRecording = !!s?.recording))
-    .catch(() => {});
   listen('yap-calendar', (e) => apply(e.payload));
   listen('yap-calendar-connected', (e) => {
     const label = e.payload?.label;
@@ -65,7 +61,8 @@ export function initCalendar(opts = {}) {
   listen('yap-calendar-error', (e) => {
     toast({ title: "Couldn't connect your calendar", description: String(e.payload || ''), variant: 'destructive' });
   });
-  listen('yap-meeting-state', (e) => onMeetingState(e.payload));
+  // A meeting ended (not paused; meeting_end.rs): maybe the nudge.
+  listen('yap-meeting-ended', (e) => onMeetingEnded(e.payload));
   window.addEventListener('keydown', onKeydown);
 }
 
@@ -164,11 +161,9 @@ function onKeydown(e) {
 
 // ---- the nudge after a meeting ------------------------------------------------------------
 
-function onMeetingState(s) {
-  const recording = !!s?.recording;
-  const ended = wasRecording && !recording;
-  wasRecording = recording;
-  if (!ended || !calendar.nudge.afterMeeting) return;
+function onMeetingEnded(p) {
+  // A recording started by mistake (a few words) isn't a meeting that ended.
+  if (p?.mistake || !calendar.nudge.afterMeeting) return;
   // After the meeting's own toasts ("Meeting ended", the action plan).
   setTimeout(() => {
     if (!calendar.nudge.afterMeeting) return;

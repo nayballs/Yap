@@ -28,6 +28,7 @@ const VIEWS = [
   ['Insights', (main) => main.getByRole('heading', { level: 1, name: 'Insights' })],
   ['Chat', (main) => main.getByPlaceholder('Type a message...')],
   ['Notes', (main) => main.getByRole('button', { name: 'Search notes' })],
+  ['Meetings', (main) => main.getByRole('heading', { level: 1, name: 'Meetings' })],
   ['Upload', (main) => main.getByRole('heading', { level: 1, name: 'Upload' })],
   ['Dictionary', (main) => main.getByRole('heading', { level: 1, name: 'Dictionary' })],
   ['Integrations', (main) => main.getByRole('heading', { level: 1, name: 'Integrations' })],
@@ -41,7 +42,7 @@ test('every sidebar view renders', async ({ main, shot }) => {
   }
 });
 
-const SECTIONS = ['General', 'Speech-to-Text', 'Language Models', 'History', 'Advanced', 'About'];
+const SECTIONS = ['General', 'Speech-to-Text', 'Language Models', 'Connectors', 'History', 'Advanced', 'About'];
 
 test('every Settings section renders', async ({ main, shot }) => {
   for (const [i, section] of SECTIONS.entries()) {

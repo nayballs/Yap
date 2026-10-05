@@ -329,6 +329,14 @@ fn api_url(path: &str) -> Result<url::Url, Failure> {
     url::Url::parse(&format!("{}{path}", endpoints().api)).map_err(|_| Failure::Http(0))
 }
 
+/// `{api}/calendars/{calendar}/events`, the calendar's id (an address, or
+/// `en.uk#holiday@group…`) as one encoded segment.
+fn events_url(api: &str, calendar: &str) -> Option<url::Url> {
+    let mut url = url::Url::parse(&format!("{api}/calendars")).ok()?;
+    url.path_segments_mut().ok()?.pop_if_empty().push(calendar).push("events");
+    Some(url)
+}
+
 /// The account's address and the calendars to read: the ones you own that
 /// are shown in Google Calendar (and always the primary one).
 pub async fn calendars(access: &str, can_list: bool) -> Result<(String, Vec<String>), Failure> {
@@ -379,8 +387,7 @@ pub async fn events(access: &str, calendar: &str, from: i64, to: i64) -> Result<
     let mut out = Vec::new();
     let mut page: Option<String> = None;
     for _ in 0..MAX_PAGES {
-        let mut url = api_url("/calendars/")?;
-        url.path_segments_mut().map_err(|_| Failure::Http(0))?.push(calendar).push("events");
+        let mut url = events_url(&endpoints().api, calendar).ok_or(Failure::Http(0))?;
         url.query_pairs_mut()
             .append_pair("singleEvents", "true")
             .append_pair("orderBy", "startTime")
@@ -523,6 +530,20 @@ mod tests {
         // Just you, no link: not a meeting.
         let solo = item(json!({ "attendees": [], "hangoutLink": "" }));
         assert!(finish(draft_from_item("1", &solo).unwrap()).is_none());
+    }
+
+    #[test]
+    fn a_calendars_events_address_is_one_encoded_segment() {
+        let api = "https://www.googleapis.com/calendar/v3";
+        let url = events_url(api, "en.uk#holiday@group.v.calendar.google.com").unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://www.googleapis.com/calendar/v3/calendars/en.uk%23holiday@group.v.calendar.google.com/events"
+        );
+        assert_eq!(
+            events_url(api, "tester@example.com").unwrap().as_str(),
+            "https://www.googleapis.com/calendar/v3/calendars/tester@example.com/events"
+        );
     }
 
     #[test]
