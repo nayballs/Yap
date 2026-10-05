@@ -822,6 +822,18 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
 - [ ] **"Stop when the call ends"** as an option alongside today's "Stop and summarise?"
       prompt.
 - [ ] **Global meeting shortcut** (Wispr: Win+Alt+M) to start or stop meeting notes.
+- [ ] **The Yap bar (Wispr's Flow Bar).** Traced 2026-10-05: one fixed, click-through,
+      never-focused, always-on-top window that follows the **cursor's monitor**
+      (about 300 ms after the cursor crosses), bottom-centre above the taskbar. It is:
+      - a tiny pill when idle, expanding on hover into 🎤 Dictate and ◉ Meeting notes,
+        plus a ^ menu, with shortcut tooltips;
+      - the dictation waveform while you talk, and a compact recording pill during
+        meetings;
+      - **cards above it** as Yap's ambient notification surface (call prompts and
+        friends);
+      - hidden over fullscreen apps.
+      
+      It evolves today's `overlay` window.
 
 **Wave 2 — your AI and your calendar**
 - [ ] **MCP server.** Claude, ChatGPT, Gemini, Cursor and any MCP client can read your
