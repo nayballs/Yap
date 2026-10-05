@@ -56,7 +56,10 @@
 //! calendar "meeting ended" event isn't acted on), and the mic signal can't
 //! tell a finished call from one moved to a phone, a breakout room or a
 //! rejoin, so Yap asks instead of stopping. Stopping opens the note and stops
-//! it there, which runs the usual Meeting Notes summary.
+//! it there, which runs the usual Meeting Notes summary. With "When a call
+//! ends: Stop and summarise automatically" (`meeting_call_end`, Wispr's
+//! "Stop Notetaker when a call ends") it stops and summarises without asking
+//! (`meeting_guard::stop_after_call`).
 //!
 //! Test mode (`e2e::active`) reads no registry and posts no Windows
 //! notifications; the debug-only [`meeting_detect_simulate`] drives the flow.
@@ -94,6 +97,8 @@ const FADE_MS: u64 = 30_000;
 
 /// `meeting_detect_style` for prompts that skip the banner and the window.
 const QUIET: &str = "quiet";
+/// `meeting_call_end` for stopping without asking when a call ends.
+const STOP_AT_CALL_END: &str = "stop";
 
 /// Snapshot of calls and the pending prompt (`meeting_detect_status`).
 const EVENT: &str = "yap-meeting-detect";
@@ -485,6 +490,9 @@ struct State {
     enabled: bool,
     /// "Quietly" (`meeting_detect_style`).
     quiet: bool,
+    /// When a call Yap records ends, stop and summarise without asking
+    /// (`meeting_call_end` = "stop").
+    auto_stop: bool,
     /// App id → whether to ask about its calls (`meeting_detect_apps`; apps
     /// without an entry use their default, see [`asks`]).
     choices: BTreeMap<String, bool>,
@@ -712,6 +720,20 @@ pub fn tray_item() -> Option<(String, String)> {
     offer(&s).map(|c| (format!("meeting_record:{}", c.id), record_label(c.app)))
 }
 
+/// The latest call in progress, of any call app: (call id, "Teams call").
+/// The meeting shortcut records it (`meeting_guard::start_or_stop`) — an
+/// explicit ask, so even an app Yap doesn't ask about counts.
+pub(crate) fn latest_call() -> Option<(u64, String)> {
+    latest_of(&lock())
+}
+
+fn latest_of(s: &State) -> Option<(u64, String)> {
+    if !s.enabled {
+        return None;
+    }
+    s.calls.last().map(|c| (c.id, format!("{} {}", c.app.label, c.app.noun)))
+}
+
 /// "Record this Teams call", "Record this Slack huddle".
 fn record_label(app: &App) -> String {
     format!("Record this {} {}", app.label, app.noun)
@@ -769,6 +791,9 @@ struct Todo {
     /// Post this prompt as a Windows notification.
     post_native: Option<Prompt>,
     emit: bool,
+    /// A call Yap recorded ended with "Stop and summarise automatically"
+    /// on: stop and summarise this note.
+    auto_stop: Option<(u64, &'static App)>,
 }
 
 fn run(app: &AppHandle, todo: Todo) {
@@ -792,6 +817,9 @@ fn run(app: &AppHandle, todo: Todo) {
     let _ = (todo.remove_native, todo.post_native);
     if todo.emit {
         emit(app);
+    }
+    if let Some((note_id, call)) = todo.auto_stop {
+        crate::meeting_guard::stop_after_call(app, note_id, &format!("{} {}", call.label, call.noun));
     }
 }
 
@@ -939,12 +967,41 @@ fn call_ended(s: &mut State, todo: &mut Todo, view: (bool, bool), id: &str) {
     if s.due == Some(call.id) {
         s.due = None;
     }
-    // An app Yap doesn't ask about gets no "Stop and summarise?" either.
-    let note = recording_of(&call).filter(|_| asks(&s.choices, call.app));
-    if let Some(note) = note {
-        show_prompt(s, todo, view, PromptKind::End, call.id, call.app, Some(note));
-    } else if s.prompt.as_ref().is_some_and(|p| p.call_id == call.id) {
-        withdraw(s, todo);
+    match at_call_end(recording_of(&call), asks(&s.choices, call.app), s.auto_stop) {
+        AtCallEnd::Ask(note) => show_prompt(s, todo, view, PromptKind::End, call.id, call.app, Some(note)),
+        AtCallEnd::Stop(note) => {
+            if s.prompt.as_ref().is_some_and(|p| p.call_id == call.id) {
+                withdraw(s, todo);
+            }
+            todo.auto_stop = Some((note, call.app));
+        }
+        AtCallEnd::Nothing => {
+            if s.prompt.as_ref().is_some_and(|p| p.call_id == call.id) {
+                withdraw(s, todo);
+            }
+        }
+    }
+}
+
+/// What a call ending does to the recording of it.
+#[derive(Debug, PartialEq, Eq)]
+enum AtCallEnd {
+    Nothing,
+    /// "Teams call ended — Stop and summarise?" about this note.
+    Ask(u64),
+    /// "When a call ends: Stop and summarise automatically": stop and summarise it.
+    Stop(u64),
+}
+
+/// `note`: the meeting Yap is recording the call into, if any; `asked`:
+/// whether Yap asks about the call's app (one it doesn't gets no ending
+/// either, so a background Discord call can't stop an unrelated
+/// recording); `auto_stop`: `meeting_call_end` is "stop".
+fn at_call_end(note: Option<u64>, asked: bool, auto_stop: bool) -> AtCallEnd {
+    match note {
+        Some(note) if asked && auto_stop => AtCallEnd::Stop(note),
+        Some(note) if asked => AtCallEnd::Ask(note),
+        _ => AtCallEnd::Nothing,
     }
 }
 
@@ -1009,6 +1066,7 @@ pub fn init(app: &AppHandle) {
         let mut s = lock();
         s.enabled = enabled;
         s.quiet = cfg.meeting_detect_style == QUIET;
+        s.auto_stop = cfg.meeting_call_end == STOP_AT_CALL_END;
         s.choices = cfg.meeting_detect_apps;
     }
     let (tx, rx) = mpsc::channel();
@@ -1135,14 +1193,21 @@ fn scan(app: &AppHandle) {
 pub fn sync(app: &AppHandle, enabled: bool) {
     let cfg = crate::config::load();
     let quiet = cfg.meeting_detect_style == QUIET;
+    let auto_stop = cfg.meeting_call_end == STOP_AT_CALL_END;
     let mut todo = Todo::default();
     {
         let mut s = lock();
         if s.enabled == enabled && s.quiet == quiet && s.choices == cfg.meeting_detect_apps {
+            // Only "When a call ends" changed (or nothing): no prompt changes.
+            if s.auto_stop != auto_stop {
+                s.auto_stop = auto_stop;
+                tracing::info!(auto_stop, "meeting detect: when a call ends changed");
+            }
             return;
         }
         s.enabled = enabled;
         s.quiet = quiet;
+        s.auto_stop = auto_stop;
         s.choices = cfg.meeting_detect_apps;
         if !enabled {
             // A recording Yap started keeps going; it just won't be asked about.
@@ -1302,8 +1367,10 @@ fn record(app: &AppHandle, call_id: u64) -> Result<u64, String> {
 }
 
 /// "Stop and summarise": open the note and stop it there, so the Notes view
-/// runs its Meeting Notes summary as for any recording.
-fn stop_and_summarise(app: &AppHandle, note_id: Option<u64>) {
+/// runs its Meeting Notes summary as for any recording. (Also how
+/// `meeting_guard` stops: the length limit, "Stop and summarise
+/// automatically", the meeting shortcut.)
+pub(crate) fn stop_and_summarise(app: &AppHandle, note_id: Option<u64>) {
     let _ = crate::commands::show_settings(app);
     let _ = app.emit(EVENT_OPEN, serde_json::json!({ "noteId": note_id, "stop": true }));
     tauri::async_runtime::spawn(async move {
@@ -1344,11 +1411,22 @@ fn local_now() -> (u16, u16, u16, u16) {
 }
 
 /// "Teams call · 5 Oct, 14:30".
-fn note_title(app: &App, (day, month, hour, minute): (u16, u16, u16, u16)) -> String {
+fn note_title(app: &App, when: (u16, u16, u16, u16)) -> String {
+    format!("{} {} \u{b7} {}", app.label, app.noun, stamp(when))
+}
+
+/// "Meeting · 5 Oct, 14:30": a meeting note with no call behind it (the
+/// meeting shortcut, `meeting_guard::start_or_stop`).
+pub(crate) fn meeting_note_title() -> String {
+    format!("Meeting \u{b7} {}", stamp(local_now()))
+}
+
+/// "5 Oct, 14:30".
+fn stamp((day, month, hour, minute): (u16, u16, u16, u16)) -> String {
     const MONTHS: [&str; 12] =
         ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     let mon = MONTHS[usize::from(month.clamp(1, 12) - 1)];
-    format!("{} {} \u{b7} {day} {mon}, {hour:02}:{minute:02}", app.label, app.noun)
+    format!("{day} {mon}, {hour:02}:{minute:02}")
 }
 
 // ---- commands ------------------------------------------------------------------------------
@@ -1887,6 +1965,43 @@ mod tests {
         assert_eq!(note_title(app("teams"), (5, 10, 14, 30)), "Teams call \u{b7} 5 Oct, 14:30");
         assert_eq!(note_title(app("slack"), (31, 12, 9, 5)), "Slack huddle \u{b7} 31 Dec, 09:05");
         assert_eq!(note_title(app("meet"), (1, 1, 0, 0)), "Google Meet call \u{b7} 1 Jan, 00:00");
+    }
+
+    #[test]
+    fn a_meeting_note_without_a_call() {
+        assert_eq!(stamp((5, 10, 14, 30)), "5 Oct, 14:30");
+        let title = meeting_note_title();
+        assert!(title.starts_with("Meeting \u{b7} "), "{title}");
+    }
+
+    #[test]
+    fn a_recorded_call_ending_asks_or_stops() {
+        assert_eq!(at_call_end(Some(4), true, false), AtCallEnd::Ask(4));
+        assert_eq!(at_call_end(Some(4), true, true), AtCallEnd::Stop(4));
+        // Not recording it, or an app Yap doesn't ask about: nothing.
+        assert_eq!(at_call_end(None, true, true), AtCallEnd::Nothing);
+        assert_eq!(at_call_end(Some(4), false, true), AtCallEnd::Nothing);
+        assert_eq!(at_call_end(Some(4), false, false), AtCallEnd::Nothing);
+        // The setting: asks unless it says "stop".
+        let cfg: crate::config::YapConfig = serde_json::from_str(r#"{"meetingCallEnd":"stop"}"#).unwrap();
+        assert_eq!(cfg.meeting_call_end, STOP_AT_CALL_END);
+        assert_eq!(crate::config::YapConfig::default().meeting_call_end, "ask");
+    }
+
+    #[test]
+    fn the_shortcut_records_the_latest_call_of_any_app() {
+        let mut s = State { enabled: true, ..Default::default() };
+        let mut todo = Todo::default();
+        assert_eq!(latest_of(&s), None);
+        call_started(&mut s, &mut todo, "slack", 0);
+        call_started(&mut s, &mut todo, "discord", 0);
+        let discord = s.calls[1].id;
+        // Even an app Yap doesn't ask about: the shortcut is an explicit ask.
+        assert_eq!(latest_of(&s), Some((discord, "Discord call".to_string())));
+        call_ended(&mut s, &mut todo, (false, false), "discord");
+        assert_eq!(latest_of(&s).map(|(_, what)| what).as_deref(), Some("Slack huddle"));
+        s.enabled = false;
+        assert_eq!(latest_of(&s), None);
     }
 
     #[test]
