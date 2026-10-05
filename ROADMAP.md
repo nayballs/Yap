@@ -825,7 +825,7 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
 - [ ] *(merged, dev check: e1bbf73)* **"Stop when the call ends"** as an option alongside today's "Stop and summarise?"
       prompt.
 - [ ] *(merged, dev check: e1bbf73)* **Global meeting shortcut** (Wispr: Win+Alt+M) to start or stop meeting notes.
-- [ ] *(building)* **The Yap bar (Wispr's Flow Bar).** Traced 2026-10-05: one fixed, click-through,
+- [ ] *(merged, dev check: 9127ad7; polishing to measured values)* **The Yap bar (Wispr's Flow Bar).** Traced 2026-10-05: one fixed, click-through,
       never-focused, always-on-top window that follows the **cursor's monitor**
       (about 300 ms after the cursor crosses), bottom-centre above the taskbar. It is:
       - a tiny pill when idle, expanding on hover into 🎤 Dictate and ◉ Meeting notes,
