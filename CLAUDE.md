@@ -330,8 +330,15 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   in-app toast if the main window is visible (page acks via `update_ack`),
   else one **silent Windows notification** (WinRT `ToastNotification` under
   the app identifier = the NSIS shortcut's AppUserModelID; dev builds borrow
-  PowerShell's; Restart / Later buttons + body → Settings → About; if Windows
-  refuses it, the toast waits for the window); a newer version replacing a
+  PowerShell's; Yap's logo in the `appLogoOverride` slot — an unpackaged app's
+  toast only loads local files, so the binary writes `icons/128x128@2x.png` to
+  `<data>/notification-logo.png`; Restart / Later buttons + body → Settings →
+  About; if Windows refuses it, the toast waits for the window; a download the
+  user asked for while hidden — metered "Download and restart", the tray's
+  "Download and install" — gets a toast with a live **progress bar**, data-bound
+  and updated in place (`notify::progress`, ≤ 2/s; `sync_progress` on every
+  state change fills it on "Restarting…" or removes it on failure; background
+  downloads stay silent); a newer version replacing a
   pending one stays quiet; one reminder after 3 days. **Install**
   (`request_install`, from toast/About/tray/notification): never mid-dictation
   (deferred until the pipeline goes idle + 2.5 s, via the `yap-state` hook),

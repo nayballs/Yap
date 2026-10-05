@@ -21,8 +21,10 @@
 //!   "Restart to update" item, the tooltip and a dot on the icon), Settings →
 //!   About, the Settings badge, the status bar and, while the main window is
 //!   visible, a sticky toast. With the window hidden it is one silent Windows
-//!   notification instead (Do Not Disturb applies; if Windows won't show it,
-//!   the toast waits for the window). Each "you have an update" episode is
+//!   notification instead, with Yap's logo (Do Not Disturb applies; if Windows
+//!   won't show it, the toast waits for the window) — and a download the user
+//!   asked for while hidden gets one with a live progress bar. Each "you have
+//!   an update" episode is
 //!   announced once: a newer version replacing a pending one stays quiet, a
 //!   single reminder follows after 3 days, and the next announcement waits
 //!   until the user has actually updated.
@@ -408,10 +410,21 @@ fn snapshot() -> Status {
     snapshot_of(&lock())
 }
 
-/// Broadcast the current snapshot and bring the tray in line.
+/// Broadcast the current snapshot and bring the tray (and a download's
+/// Windows notification) in line.
 fn changed(app: &AppHandle) {
     let _ = app.emit(EVENT, snapshot());
     crate::tray::refresh(app);
+    #[cfg(windows)]
+    notify::sync_progress(app);
+}
+
+/// Whether Yap may post Windows notifications. Portable Yap has no Start-menu
+/// shortcut carrying its AppUserModelID, so Windows would drop them silently
+/// (the in-app toast covers it); an e2e test run posts nothing to the
+/// developer's notification center.
+fn native_notifications() -> bool {
+    !portable() && !crate::e2e::active()
 }
 
 fn mark_announced(a: &Announce) {
@@ -461,11 +474,7 @@ fn maybe_announce(app: &AppHandle) {
     }
     #[cfg(windows)]
     {
-        // Portable Yap has no Start-menu shortcut carrying its AppUserModelID,
-        // so Windows would drop the notification silently — leave it to the
-        // in-app toast. (So does an e2e test run, which posts nothing to the
-        // developer's notification center.)
-        if portable() || crate::e2e::active() || lock().native_refused.as_ref() == Some(&a) {
+        if !native_notifications() || lock().native_refused.as_ref() == Some(&a) {
             return;
         }
         match notify::show(app, &a) {
@@ -662,6 +671,8 @@ async fn download_update(app: AppHandle) {
                 let Some(total) = total.filter(|t| *t > 0) else { return };
                 let pct = (received.saturating_mul(100) / total).min(100) as u8;
                 lock().progress = pct;
+                #[cfg(windows)]
+                notify::progress(&app, pct);
                 // ~4 updates a second is plenty for a progress bar.
                 if last_emit.elapsed() >= Duration::from_millis(250) {
                     last_emit = Instant::now();
@@ -728,12 +739,14 @@ pub fn request_install(app: &AppHandle) -> Result<(), String> {
         Phase::Ready => {}
         Phase::Available => {
             lock().install_queued = true;
+            show_download_progress(app);
             tauri::async_runtime::spawn(download_update(app.clone()));
             changed(app);
             return Ok(());
         }
         Phase::Downloading => {
             lock().install_queued = true;
+            show_download_progress(app);
             changed(app);
             return Ok(());
         }
@@ -768,6 +781,26 @@ pub fn request_install(app: &AppHandle) -> Result<(), String> {
         changed(app);
     }
     Err(refused.into())
+}
+
+/// A download the user asked for (a metered connection's "Download and
+/// restart", the tray's "Download and install") with the main window hidden:
+/// show it as a Windows notification with a live progress bar. With the
+/// window on screen the in-app toast shows the same progress. (Background
+/// downloads stay silent; Yap speaks up once they're ready.)
+fn show_download_progress(app: &AppHandle) {
+    #[cfg(windows)]
+    if native_notifications() && !main_window_visible(app) {
+        let (version, pct) = {
+            let s = lock();
+            (s.version.clone(), s.progress)
+        };
+        if let Err(e) = notify::show_progress(app, &version, pct) {
+            tracing::info!("updates: no download notification ({})", e);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = app;
 }
 
 fn begin_install(app: &AppHandle) {
@@ -1070,24 +1103,28 @@ pub fn update_ack_updated() {
 
 // ---- Windows notification ----------------------------------------------------------------
 
-/// One silent toast in the Windows notification center for a user whose main
-/// window is hidden (PowerToys-style: the version, "Restart to update",
-/// "Later"). Clicking the body opens Settings → About. Windows applies Do Not
-/// Disturb / Focus Assist and the per-app notification switch on its own.
+/// Silent toasts in the Windows notification center for a user whose main
+/// window is hidden (PowerToys-style), with Yap's logo: the update announcement
+/// (the version, "Restart to update", "Later"), and a live progress bar while
+/// a download they asked for runs. Clicking the body opens Settings → About.
+/// Windows applies Do Not Disturb / Focus Assist and the per-app notification
+/// switch on its own.
 #[cfg(windows)]
 mod notify {
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
+    use std::time::{Duration, Instant};
 
     use tauri::{AppHandle, Emitter};
     use windows::core::{IInspectable, Interface, HSTRING};
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::Foundation::TypedEventHandler;
     use windows::UI::Notifications::{
-        NotificationSetting, ToastActivatedEventArgs, ToastNotification,
+        NotificationData, NotificationSetting, ToastActivatedEventArgs, ToastNotification,
         ToastNotificationManager,
     };
 
-    use super::{lock, Announce};
+    use super::{lock, Announce, Phase};
 
     const TAG: &str = "update";
     const GROUP: &str = "yap";
@@ -1095,6 +1132,10 @@ mod notify {
     /// The live toast, kept so its Activated handler keeps working while it
     /// sits in the notification center.
     static CURRENT: Mutex<Option<ToastNotification>> = Mutex::new(None);
+    /// While the download toast is up: when its bar last moved, and to what.
+    static PROGRESS: Mutex<Option<(Instant, u8)>> = Mutex::new(None);
+    /// Orders the download toast's data updates (Windows drops stale ones).
+    static SEQUENCE: AtomicU32 = AtomicU32::new(0);
 
     /// Release builds post as Yap: the installer's Start-menu shortcut carries
     /// the app identifier as its AppUserModelID (NSIS SetLnkAppUserModelId).
@@ -1115,35 +1156,25 @@ mod notify {
             .replace('"', "&quot;")
     }
 
-    pub fn show(app: &AppHandle, a: &Announce) -> Result<(), String> {
-        let ready = lock().phase == super::Phase::Ready;
-        let v = &a.version;
-        // Ready → restart; otherwise it's waiting on a metered connection for
-        // the user's go-ahead. (Portable builds never get here.)
-        let (title, body, button) = if ready {
-            (
-                format!("Yap {v} is ready"),
-                "Restart Yap to finish updating. It only takes a few seconds.",
-                "Restart to update",
-            )
-        } else {
-            (
-                format!("Yap {v} is available"),
-                "You're on a metered connection, so Yap hasn't downloaded it yet.",
-                "Download and restart",
-            )
-        };
-        let xml = format!(
-            "<toast launch=\"update:open\"><visual><binding template=\"ToastGeneric\">\
-             <text>{}</text><text>{}</text></binding></visual><actions>\
-             <action content=\"{}\" arguments=\"update:install\" activationType=\"foreground\"/>\
-             <action content=\"Later\" arguments=\"dismiss\" activationType=\"system\"/>\
-             </actions><audio silent=\"true\"/></toast>",
-            esc(&title),
-            esc(body),
-            esc(button),
-        );
+    /// Yap's logo in the toast's app-logo slot. An unpackaged app's toast only
+    /// loads local files, so the PNG baked into the binary is written next to
+    /// Yap's data once ("" — no logo — if that fails).
+    fn logo_xml() -> String {
+        static LOGO: &[u8] = include_bytes!("../icons/128x128@2x.png");
+        let dir = crate::config::data_dir();
+        let path = dir.join("notification-logo.png");
+        let current = std::fs::metadata(&path).is_ok_and(|m| m.len() == LOGO.len() as u64);
+        if !current && (std::fs::create_dir_all(&dir).is_err() || std::fs::write(&path, LOGO).is_err()) {
+            return String::new();
+        }
+        match url::Url::from_file_path(&path) {
+            Ok(src) => format!("<image placement=\"appLogoOverride\" src=\"{}\"/>", esc(src.as_str())),
+            Err(()) => String::new(),
+        }
+    }
 
+    /// Post `xml` as Yap's one update toast (it replaces the previous one).
+    fn post(app: &AppHandle, xml: &str, data: Option<&NotificationData>) -> Result<(), String> {
         let err = |e: windows::core::Error| e.message();
         let doc = XmlDocument::new().map_err(err)?;
         doc.LoadXml(&HSTRING::from(xml)).map_err(err)?;
@@ -1151,6 +1182,9 @@ mod notify {
         toast.SetTag(&HSTRING::from(TAG)).map_err(err)?;
         toast.SetGroup(&HSTRING::from(GROUP)).map_err(err)?;
         let _ = toast.SetExpiresOnReboot(true);
+        if let Some(data) = data {
+            toast.SetData(data).map_err(err)?;
+        }
 
         let handle = app.clone();
         let on_activated = TypedEventHandler::<ToastNotification, IInspectable>::new(
@@ -1184,9 +1218,119 @@ mod notify {
         Ok(())
     }
 
+    pub fn show(app: &AppHandle, a: &Announce) -> Result<(), String> {
+        let ready = lock().phase == Phase::Ready;
+        let v = &a.version;
+        // Ready → restart; otherwise it's waiting on a metered connection for
+        // the user's go-ahead. (Portable builds never get here.)
+        let (title, body, button) = if ready {
+            (
+                format!("Yap {v} is ready"),
+                "Restart Yap to finish updating. It only takes a few seconds.",
+                "Restart to update",
+            )
+        } else {
+            (
+                format!("Yap {v} is available"),
+                "You're on a metered connection, so Yap hasn't downloaded it yet.",
+                "Download and restart",
+            )
+        };
+        let xml = format!(
+            "<toast launch=\"update:open\"><visual><binding template=\"ToastGeneric\">\
+             <text>{}</text><text>{}</text>{}</binding></visual><actions>\
+             <action content=\"{}\" arguments=\"update:install\" activationType=\"foreground\"/>\
+             <action content=\"Later\" arguments=\"dismiss\" activationType=\"system\"/>\
+             </actions><audio silent=\"true\"/></toast>",
+            esc(&title),
+            esc(body),
+            logo_xml(),
+            esc(button),
+        );
+        post(app, &xml, None)?;
+        *PROGRESS.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        Ok(())
+    }
+
+    /// The bar's values, bound into the download toast's `<progress>`.
+    fn progress_data(pct: u8, status: &str) -> windows::core::Result<NotificationData> {
+        let data = NotificationData::new()?;
+        let values = data.Values()?;
+        let value = format!("{:.2}", f32::from(pct) / 100.0);
+        values.Insert(&HSTRING::from("progressValue"), &HSTRING::from(value))?;
+        values.Insert(&HSTRING::from("progressText"), &HSTRING::from(format!("{pct}%")))?;
+        values.Insert(&HSTRING::from("progressStatus"), &HSTRING::from(status))?;
+        data.SetSequenceNumber(SEQUENCE.fetch_add(1, Ordering::SeqCst) + 1)?;
+        Ok(data)
+    }
+
+    /// A download the user asked for while the main window is hidden: a toast
+    /// with a live progress bar, moved by [`progress`], kept in line with the
+    /// update state by [`sync_progress`], and gone once the installer starts.
+    pub fn show_progress(app: &AppHandle, version: &str, pct: u8) -> Result<(), String> {
+        let xml = format!(
+            "<toast launch=\"update:open\"><visual><binding template=\"ToastGeneric\">\
+             <text>{}</text><text>Yap restarts to finish updating as soon as it's downloaded.</text>{}\
+             <progress value=\"{{progressValue}}\" valueStringOverride=\"{{progressText}}\" status=\"{{progressStatus}}\"/>\
+             </binding></visual><audio silent=\"true\"/></toast>",
+            esc(&format!("Downloading Yap {version}")),
+            logo_xml(),
+        );
+        SEQUENCE.store(0, Ordering::SeqCst);
+        let data = progress_data(pct, "Downloading…").map_err(|e| e.message())?;
+        post(app, &xml, Some(&data))?;
+        *PROGRESS.lock().unwrap_or_else(|p| p.into_inner()) = Some((Instant::now(), pct));
+        Ok(())
+    }
+
+    fn update_bar(app: &AppHandle, pct: u8, status: &str) {
+        let Ok(data) = progress_data(pct, status) else { return };
+        if let Ok(notifier) =
+            ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id(app)))
+        {
+            let _ = notifier.UpdateWithTagAndGroup(&data, &HSTRING::from(TAG), &HSTRING::from(GROUP));
+        }
+    }
+
+    /// Move the download toast's bar — at most twice a second, and only while
+    /// that toast is up.
+    pub fn progress(app: &AppHandle, pct: u8) {
+        {
+            let mut guard = PROGRESS.lock().unwrap_or_else(|p| p.into_inner());
+            let Some((at, last)) = *guard else { return };
+            if pct == last || (pct < 100 && at.elapsed() < Duration::from_millis(500)) {
+                return;
+            }
+            *guard = Some((Instant::now(), pct));
+        }
+        update_bar(app, pct, "Downloading…");
+    }
+
+    /// Keep the download toast in line with the update state (called on every
+    /// change): full while Yap is about to restart, or waiting for a dictation
+    /// to finish first; gone if the download failed or the install was
+    /// refused.
+    pub fn sync_progress(app: &AppHandle) {
+        if PROGRESS.lock().unwrap_or_else(|p| p.into_inner()).is_none() {
+            return;
+        }
+        let (phase, queued, deferred) = {
+            let s = lock();
+            (s.phase, s.install_queued, s.deferred)
+        };
+        match phase {
+            Phase::Downloading | Phase::Installing => {}
+            Phase::Available if queued => {} // the download is about to start
+            Phase::Ready if deferred => update_bar(app, 100, "Restarting after your dictation…"),
+            Phase::Ready if queued => update_bar(app, 100, "Restarting…"),
+            _ => remove(app),
+        }
+    }
+
     /// Take our toast out of the notification center (the update is being
     /// installed, or the main window now shows the same thing).
     pub fn remove(app: &AppHandle) {
+        *PROGRESS.lock().unwrap_or_else(|p| p.into_inner()) = None;
         let Some(_toast) = CURRENT.lock().unwrap_or_else(|p| p.into_inner()).take() else {
             return;
         };

@@ -84,10 +84,11 @@ tauri-plugin-updater = "2"
 # in (0.61.x) so there's no duplicate copy of the crate.
 [target.'cfg(windows)'.dependencies]
 # ToolHelp + Threading: procs.rs (tell an orphaned sidecar from another Yap's).
-# UI_Notifications + Data_Xml_Dom: the "update ready" Windows notification;
+# UI_Notifications + Data_Xml_Dom (+ Foundation_Collections for its progress
+# bar data): the update Windows notifications;
 # Networking_Connectivity: skip background update downloads on metered
 # connections (updates.rs).
-windows = { version = "0.61", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Foundation", "UI_Notifications", "Data_Xml_Dom", "Networking_Connectivity"] }
+windows = { version = "0.61", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Foundation", "Foundation_Collections", "UI_Notifications", "Data_Xml_Dom", "Networking_Connectivity"] }
 # Yap accounts: the session token lives in Windows Credential Manager. The
 # keyring crate's own docs steer apps to keyring-core + the one store they use.
 keyring-core = "1"
