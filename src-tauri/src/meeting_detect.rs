@@ -55,8 +55,9 @@
 //! the same style. OpenWhispr never stops a meeting recording on its own (its
 //! calendar "meeting ended" event isn't acted on), and the mic signal can't
 //! tell a finished call from one moved to a phone, a breakout room or a
-//! rejoin, so Yap asks instead of stopping. Stopping opens the note and stops
-//! it there, which runs the usual Meeting Notes summary. With "When a call
+//! rejoin, so Yap asks instead of stopping. Stopping ends the meeting, so
+//! Rust writes its action plan (`meeting_end.rs`), shown in the meeting
+//! notepad or the note in the main window. With "When a call
 //! ends: Stop and summarise automatically" (`meeting_call_end`, Wispr's
 //! "Stop Notetaker when a call ends") it stops and summarises without asking
 //! (`meeting_guard::stop_after_call`).
@@ -88,9 +89,6 @@ const ACTIVE_TICK: Duration = Duration::from_secs(2);
 const IDLE_TICK: Duration = Duration::from_secs(60);
 /// …or the cadence without them (the watch couldn't start).
 const POLL_TICK: Duration = Duration::from_secs(5);
-/// A "Stop and summarise" the Notes view didn't carry out in this time is
-/// done here, so the recording stops as asked.
-const STOP_FALLBACK: Duration = Duration::from_secs(8);
 /// A start prompt left alone in the window fades after this long and counts
 /// as "Not now" (OpenWhispr hides its meeting prompt after 30 s).
 const FADE_MS: u64 = 30_000;
@@ -1340,6 +1338,8 @@ fn record(app: &AppHandle, call_id: u64) -> Result<u64, String> {
     let title = note_title(call_app, local_now());
     let note = crate::notes::create(&title, "", "meeting", "Meetings");
     crate::notes::mark_meeting(note.id)?;
+    // A made-up title: the AI meeting title may replace it (meeting_assist.rs).
+    crate::notes::set_title_auto(note.id)?;
     let started = crate::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note.id);
     if let Err(e) = started {
         crate::notes::delete(note.id);
@@ -1366,22 +1366,31 @@ fn record(app: &AppHandle, call_id: u64) -> Result<u64, String> {
     Ok(note.id)
 }
 
-/// "Stop and summarise": open the note and stop it there, so the Notes view
-/// runs its Meeting Notes summary as for any recording. (Also how
-/// `meeting_guard` stops: the length limit, "Stop and summarise
-/// automatically", the meeting shortcut.)
+/// "Stop and summarise" (the person's answer to "…call ended"): end the
+/// meeting — Rust writes the action plan once the last chunk is in
+/// (`meeting_end.rs`) — and show it where they'll look: the meeting notepad
+/// when it's on screen; the note in the main window's Notes view when that's
+/// on screen; with neither, the main window comes up on the note. (Yap's own
+/// automatic stops — the length limit, "Stop and summarise automatically",
+/// the meeting shortcut — go through `meeting_guard::stop_and_summarise`,
+/// which brings up no window.)
 pub(crate) fn stop_and_summarise(app: &AppHandle, note_id: Option<u64>) {
-    let _ = crate::commands::show_settings(app);
-    let _ = app.emit(EVENT_OPEN, serde_json::json!({ "noteId": note_id, "stop": true }));
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(STOP_FALLBACK).await;
-        let st = crate::meeting::state();
-        let same = note_id.is_none() || st["noteId"].as_u64() == note_id;
-        if st["recording"].as_bool() == Some(true) && same {
-            tracing::warn!("meeting detect: the Notes view didn't stop the recording; stopping it here");
-            let _ = crate::meeting::stop();
+    let main = window_view(app).0;
+    if note_id.is_none() || crate::meeting::recording_note() == note_id {
+        // "Started by mistake?" asks where they answered, if it's on screen.
+        if let Err(e) = crate::meeting_end::end(app, main.then_some("settings")) {
+            tracing::info!("meeting detect: nothing to stop ({e})");
         }
-    });
+    }
+    if !main && crate::notepad::shown(app) {
+        return;
+    }
+    if !main {
+        let _ = crate::commands::show_settings(app);
+    }
+    if let Some(id) = note_id {
+        let _ = app.emit(EVENT_OPEN, serde_json::json!({ "noteId": id, "stop": false }));
+    }
 }
 
 // ---- the note title ---------------------------------------------------------------------
@@ -1834,6 +1843,32 @@ mod native {
     }
 }
 
+// ---- the meeting notepad's "Split the screen when joining" (notepad.rs) ----
+
+/// The latest live call's app id and the exe names (lowercase) whose windows
+/// show it — the app's own, or the browser a meeting tab is in.
+pub fn call_window_exes() -> Option<(&'static str, Vec<String>)> {
+    call_window_exes_in(&lock())
+}
+
+fn call_window_exes_in(s: &State) -> Option<(&'static str, Vec<String>)> {
+    let call = s.calls.last()?;
+    let mut exes: Vec<String> = call.app.exes.iter().map(|e| e.to_string()).collect();
+    exes.extend(
+        s.browser_calls
+            .iter()
+            .filter(|(_, app)| app.id == call.app.id)
+            .map(|(exe, _)| exe.clone()),
+    );
+    Some((call.app.id, exes))
+}
+
+/// Whether a window titled `title` shows a call of app `app_id` (a browser
+/// tab "Meet - abc-defg-hij", "… | Microsoft Teams").
+pub fn title_shows(app_id: &str, title: &str) -> bool {
+    app_in_title(title).is_some_and(|a| a.id == app_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2193,5 +2228,21 @@ mod tests {
             .collect();
         println!("meetings showing in browser windows: {named:?}");
         assert!(everyone.iter().all(|s| !matches!(classify(s), Some(Kind::Call(_))) || calls.contains(s)));
+    }
+
+    #[test]
+    fn the_notepad_finds_the_live_calls_window() {
+        assert!(title_shows("meet", "Meet - abc-defg-hij - Google Chrome"));
+        assert!(title_shows("teams", "Weekly sync | Microsoft Teams"));
+        assert!(!title_shows("teams", "Meet - abc-defg-hij - Google Chrome"));
+        assert!(!title_shows("meet", "Inbox - Gmail"));
+        // A desktop call: the app's own exes; a browser call adds the browser.
+        let mut s = State::default();
+        assert_eq!(call_window_exes_in(&s), None);
+        s.calls.push(Call { id: 1, app: app("zoom"), since: 0, note_id: None, fade_ms: None });
+        assert_eq!(call_window_exes_in(&s), Some(("zoom", vec!["zoom.exe".to_string()])));
+        s.browser_calls.insert("chrome.exe".to_string(), app("meet"));
+        s.calls.push(Call { id: 2, app: app("meet"), since: 0, note_id: None, fade_ms: None });
+        assert_eq!(call_window_exes_in(&s), Some(("meet", vec!["chrome.exe".to_string()])));
     }
 }

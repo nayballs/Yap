@@ -201,14 +201,26 @@ pub fn notice_everywhere(app: &AppHandle, n: &Notice) {
 
 /// Stop the recording and write the action plan: the length limit, a call
 /// ending with "Stop and summarise automatically", and the meeting shortcut
-/// all come here. Today it's call detection's "Stop and summarise": the
-/// main window opens the note and the Notes view ends the meeting there, as
-/// after **End meeting & summarise** (Rust stops it after 8 s if the page
-/// didn't). Once the action plan is written in Rust on any stop that isn't a
-/// pause, a plain `crate::meeting::stop()` will do, without bringing up the
-/// window.
+/// all come here. It ends the meeting as **End meeting & summarise** does
+/// (`meeting_end::end`: Rust writes the action plan once the last chunk is
+/// in, or asks "Started by mistake?"), without bringing up any window: the
+/// meeting notepad shows the progress and the result when it's open, and
+/// the note has them either way. (`note_id`: only if that note is the one
+/// recording.)
 pub fn stop_and_summarise(app: &AppHandle, note_id: Option<u64>) {
-    crate::meeting_detect::stop_and_summarise(app, note_id);
+    stop_from(app, note_id, None);
+}
+
+/// [`stop_and_summarise`], asked for in window `origin` (the meeting
+/// shortcut caught by a window's in-page fallback): a question about the
+/// meeting ("Started by mistake?") shows there.
+fn stop_from(app: &AppHandle, note_id: Option<u64>, origin: Option<&str>) {
+    if note_id.is_some() && crate::meeting::recording_note() != note_id {
+        return;
+    }
+    if let Err(e) = crate::meeting_end::end(app, origin) {
+        tracing::info!("meeting guard: nothing to stop ({e})");
+    }
 }
 
 /// "When a call ends: Stop and summarise automatically": the call (`call`:
@@ -541,6 +553,11 @@ fn shortcut_label(spec: &str) -> Option<String> {
 /// meeting note ("Meeting · 5 Oct, 14:30", folder Meetings), recording.
 /// Blocking (the recorder takes a moment to start), so off the main thread.
 pub fn start_or_stop(app: &AppHandle) {
+    start_or_stop_from(app, None);
+}
+
+/// [`start_or_stop`], pressed in window `origin` (its in-page fallback).
+fn start_or_stop_from(app: &AppHandle, origin: Option<&str>) {
     let now = now_ms();
     if now.saturating_sub(LAST_SHORTCUT.swap(now, Ordering::SeqCst)) < SHORTCUT_DEBOUNCE_MS {
         tracing::info!("meeting shortcut: pressed again straight away; ignored");
@@ -548,7 +565,7 @@ pub fn start_or_stop(app: &AppHandle) {
     }
     if let Some(note_id) = crate::meeting::recording_note() {
         tracing::info!(note_id, "meeting shortcut: stop and summarise");
-        stop_and_summarise(app, Some(note_id));
+        stop_from(app, Some(note_id), origin);
         return;
     }
     let shortcut = shortcut_label(&crate::config::load().meeting_hotkey);
@@ -615,10 +632,11 @@ pub fn init(app: &AppHandle) {
 
 // ---- commands -----------------------------------------------------------------------------
 
-/// The meeting shortcut from a window's in-page fallback (see [`start_or_stop`]).
+/// The meeting shortcut from a window's in-page fallback (see
+/// [`start_or_stop`]); `origin` = that window's label.
 #[tauri::command]
-pub async fn meeting_shortcut(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || start_or_stop(&app))
+pub async fn meeting_shortcut(app: AppHandle, origin: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || start_or_stop_from(&app, origin.as_deref()))
         .await
         .map_err(|e| e.to_string())
 }
