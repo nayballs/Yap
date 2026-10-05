@@ -326,103 +326,81 @@ pub fn note_delete(id: u64) {
 /// `runBackgroundAction`): resolve the **Note Formatting** scope's endpoint +
 /// editable fragment — falling back to the global cleanup endpoint when the
 /// scope is disabled (OpenWhispr `fallbackScope: dictationCleanup`) — call the
-/// LLM at temp 0.3 under the immutable NOTE_BASE_PROMPT guardrails, and store
-/// the result in `enhanced_content` (raw content never touched). Returns the
-/// enhanced markdown; the staleness hash is captured before the call so edits
-/// made while the model runs correctly show as stale.
+/// LLM at temp 0.3 under the immutable guardrails (NOTE_BASE_PROMPT, the
+/// meeting variant, or ACTION_PLAN_BASE_PROMPT for the Action Plan), and
+/// store the result in `enhanced_content` (raw content never touched).
+/// Returns the enhanced markdown; the staleness hash is captured before the
+/// call so edits made while the model runs correctly show as stale.
+///
+/// Meeting notes read their transcript through `meeting_summary`: whole when
+/// it's short, else the rolling digests plus the latest stretch (finishing
+/// any digest the meeting still owes first), so a long meeting fits the
+/// model and comes back in seconds.
 #[tauri::command]
-pub async fn note_enhance(id: u64, action_id: Option<u64>) -> Result<String, String> {
+pub async fn note_enhance(
+    app: AppHandle,
+    id: u64,
+    action_id: Option<u64>,
+) -> Result<String, String> {
     let note = crate::notes::get(id).ok_or("Note not found")?;
     let hash = crate::notes::content_hash(&note.content);
     let cfg = config::load();
+    let ep = crate::meeting_summary::resolve_endpoint(&cfg)?;
 
     // The fragment: the picked Action's prompt (OpenWhispr's Actions engine);
-    // without one (older callers), fall back to the Note Formatting scope's
-    // editable prompt, then the built-in default.
-    let action_fragment = action_id
-        .and_then(crate::notes::action_get)
-        .map(|a| a.prompt);
+    // without one (older callers), the Note Formatting scope's editable
+    // prompt, then the built-in default.
+    let action = action_id.and_then(crate::notes::action_get);
+    let action_plan = action
+        .as_ref()
+        .is_some_and(|a| a.kind == crate::notes::ACTION_PLAN);
+    let fragment = action
+        .map(|a| a.prompt)
+        .unwrap_or_else(|| ep.fragment.clone());
 
-    let (base_url, api_key, model, provider, scope_fragment, disable_thinking) =
-        match cfg.llm_scopes.get("noteFormatting") {
-            Some(s) if s.enabled && !s.provider.is_empty() => {
-                let key = cfg.provider_api_key(&s.provider, &s.api_key);
-                let (b, k, m, p) = crate::local_llm::effective_endpoint_for(
-                    &s.provider,
-                    &s.base_url,
-                    &key,
-                    &s.model,
-                );
-                let frag = if s.prompt.trim().is_empty() {
-                    crate::llm::NOTE_DEFAULT_FRAGMENT.to_string()
-                } else {
-                    s.prompt.clone()
-                };
-                (b, k, m, p, frag, s.disable_thinking)
-            }
-            scope => {
-                let (b, k, m, p) = crate::local_llm::effective_endpoint(&cfg);
-                let frag = scope
-                    .map(|s| s.prompt.clone())
-                    .filter(|p| !p.trim().is_empty())
-                    .unwrap_or_else(|| crate::llm::NOTE_DEFAULT_FRAGMENT.to_string());
-                (b, k, m, p, frag, cfg.pp_disable_thinking)
-            }
-        };
-    let fragment = action_fragment.unwrap_or(scope_fragment);
-
-    if base_url.is_empty() {
-        return Err(
-            "No AI model configured — set one in Settings → Language Models → Note Formatting"
-                .to_string(),
-        );
-    }
-    const KEYED_PROVIDERS: [&str; 5] = ["groq", "anthropic", "openai", "gemini", "openrouter"];
-    if api_key.is_empty() && KEYED_PROVIDERS.contains(&provider.as_str()) {
-        return Err(format!(
-            "No {provider} API key — add one in Settings → Language Models"
-        ));
-    }
-
-    // Meeting notes: assemble typed content + the You:/Them: transcript
-    // (OpenWhispr PersonalNotesView "assemble input") and use the meeting base
-    // prompt. Attendee names are prepended so the model can attribute without
-    // guessing (the base prompt forbids guessing names).
+    // Meeting notes: attendees + typed notes + the You:/Them: transcript
+    // (OpenWhispr PersonalNotesView "assemble input"), long ones digested.
     let is_meeting = note.note_type == "meeting" && !note.transcript.is_empty();
-    let attendees = if note.participants.is_empty() {
-        String::new()
+    let (content, attendees, digest_actions) = if is_meeting {
+        let note = crate::meeting_summary::prepare_final(&app, id, &ep).await?;
+        let input = crate::meeting_summary::compose_meeting_input(&note);
+        (input.text, note.participants, input.digest_actions)
+    } else if note.participants.is_empty() {
+        (note.content.clone(), Vec::new(), Vec::new())
     } else {
-        format!("Attendees: {}\n\n", note.participants.join(", "))
-    };
-    let content = if is_meeting {
-        let mut lines = String::new();
-        for seg in &note.transcript {
-            let who = if seg.source == "you" { "You" } else { "Them" };
-            lines.push_str(&format!("{who}: {}\n", seg.text));
-        }
-        if note.content.trim().is_empty() {
-            format!("{attendees}## Meeting Transcript\n{lines}")
-        } else {
-            format!(
-                "{attendees}{}\n\n## Meeting Transcript\n{lines}",
-                note.content.trim()
-            )
-        }
-    } else {
-        format!("{attendees}{}", note.content)
+        (
+            format!("Attendees: {}\n\n{}", note.participants.join(", "), note.content),
+            note.participants.clone(),
+            Vec::new(),
+        )
     };
 
-    let enhanced = crate::llm::enhance_note(
+    let base = if action_plan {
+        crate::llm::ACTION_PLAN_BASE_PROMPT
+    } else if is_meeting {
+        crate::llm::MEETING_NOTE_BASE_PROMPT
+    } else {
+        crate::llm::NOTE_BASE_PROMPT
+    };
+    let mut enhanced = crate::llm::enhance_note(
         &content,
+        base,
         &fragment,
-        is_meeting,
-        &base_url,
-        &api_key,
-        &model,
-        &provider,
-        disable_thinking,
+        &ep.base_url,
+        &ep.api_key,
+        &ep.model,
+        &ep.provider,
+        &ep.final_options(),
     )
     .await?;
+    if action_plan {
+        enhanced = crate::meeting_summary::postcheck_action_plan(
+            &enhanced,
+            &attendees,
+            &content,
+            &digest_actions,
+        );
+    }
     crate::notes::set_enhanced(id, &enhanced, &hash)?;
     Ok(enhanced)
 }
@@ -527,6 +505,8 @@ pub async fn note_ask(
         resolve_chat_endpoint(&cfg)?;
 
     // Inject the note as grounding context (content + transcript + attendees).
+    // A long meeting's transcript comes as its digests + the latest stretch,
+    // so the context fits an 8k local model.
     let mut context = String::new();
     if !note.participants.is_empty() {
         context.push_str(&format!("Attendees: {}\n", note.participants.join(", ")));
@@ -536,11 +516,9 @@ pub async fn note_ask(
         context.push('\n');
     }
     if !note.transcript.is_empty() {
-        context.push_str("\nMeeting transcript:\n");
-        for seg in &note.transcript {
-            let who = if seg.source == "you" { "You" } else { "Them" };
-            context.push_str(&format!("{who}: {}\n", seg.text));
-        }
+        const ASK_TRANSCRIPT_TOKENS: usize = 3_000;
+        context.push('\n');
+        context.push_str(&crate::meeting_summary::ask_context(&note, ASK_TRANSCRIPT_TOKENS));
     }
     if !note.enhanced_content.trim().is_empty() {
         context.push_str(&format!("\nEnhanced notes:\n{}\n", note.enhanced_content.trim()));

@@ -9,15 +9,19 @@
   //
   // v1 scope (per ROADMAP "AI Notepad"): plain-textarea markdown editing +
   // safe rendered Enhanced view (lib/markdown.js) — a rich editor
-  // (Milkdown/CodeMirror) and folders come later; meeting notes arrive with
-  // the Phase-6 recorder.
+  // (Milkdown/CodeMirror) comes later. Meeting notes: Record / Pause /
+  // Resume in the chip row, "End meeting & summarise" in the bottom bar runs
+  // the built-in Action Plan (docs/meetings.md).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { renderMarkdown } from './markdown.js';
+  import { renderMarkdown, markdownToText } from './markdown.js';
   import { toast } from './ui/toast.svelte.js';
   import ActionManager from './ActionManager.svelte';
   import { noteRequest } from './meetingDetect.svelte.js';
+
+  // `onopensettings(section)` opens the Settings modal (ControlPanel).
+  let { onopensettings = null } = $props();
 
   let notes = $state([]); // list summaries (all folders)
   let folders = $state(['Personal', 'Meetings']);
@@ -45,6 +49,13 @@
   const activeAction = $derived(
     actions.find((a) => a.id === lastUsedActionId) ?? actions[0] ?? null
   );
+  // The built-in "End meeting & summarise" runs (found by kind: users can
+  // rename it). Older stores fall back to Meeting Notes.
+  const actionPlanAction = $derived(
+    actions.find((a) => a.kind === 'actionPlan') ??
+      actions.find((a) => a.name === 'Meeting Notes') ??
+      null
+  );
 
   async function refreshActions() {
     try {
@@ -56,11 +67,54 @@
 
   // ---- Meeting recorder (OpenWhispr meetingRecordingStore port) ----
   // meeting = { recording, noteId, elapsedSecs } from the backend; segments
-  // stream in live via yap-meeting-segment and land on note.transcript.
+  // stream in live via yap-meeting-segment and land on note.transcript, and
+  // the rolling AI digests (meeting_summary.rs) via yap-meeting-digest.
   let meeting = $state({ recording: false });
   let elapsed = $state(0);
   let elapsedTimer = null;
   const recordingThisNote = $derived(meeting.recording && meeting.noteId === selected?.id);
+  // How the recording was stopped: Pause keeps it as is; End meeting (or a
+  // stop from elsewhere) writes the action plan once the last chunk is in.
+  let pauseRequested = false;
+  // `{ noteId, done, total }` while a long meeting's last digests are written.
+  let summaryProgress = $state(null);
+  // `{ noteId, message }`: the action plan needs an AI model set up first.
+  let aiMissing = $state(null);
+  // The transcript box shows the live transcript or the AI notes so far.
+  let transcriptView = $state('live');
+  // While recording, the live transcript follows the newest lines — unless
+  // the user scrolled up to read.
+  let logEl = $state(null);
+  let followLog = true;
+  $effect(() => {
+    void shownTranscript.length;
+    if (logEl && followLog && recordingThisNote) logEl.scrollTop = logEl.scrollHeight;
+  });
+  // "You" chunks that were the call coming through the speakers (meeting.rs
+  // echo check): kept, hidden unless asked for.
+  let showEcho = $state(false);
+  const echoCount = $derived((selected?.transcript || []).filter((s) => s.echo).length);
+  const shownTranscript = $derived(
+    (selected?.transcript || []).filter((s) => showEcho || !s.echo)
+  );
+  // "AI notes up to 40:12": where the digests reach, from the meeting's start.
+  const digestedUpTo = $derived.by(() => {
+    const d = selected?.digests;
+    const t0 = selected?.transcript?.[0]?.ts;
+    if (!d?.length || t0 == null) return null;
+    return clock(d[d.length - 1].endTs - t0);
+  });
+  function clock(secs) {
+    const s = Math.max(0, Math.round(secs));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = String(s % 60).padStart(2, '0');
+    return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+  }
+  function digestRange(d) {
+    const t0 = selected?.transcript?.[0]?.ts ?? d.startTs;
+    return `${clock(d.startTs - t0)}–${clock(d.endTs - t0)}`;
+  }
 
   function startElapsed(from = 0) {
     elapsed = from;
@@ -83,12 +137,14 @@
     if (!selected || meeting.recording) return;
     flushSave();
     error = null;
+    if (aiMissing?.noteId === selected.id) aiMissing = null;
+    const resuming = !!selected.transcript?.length;
     try {
       await invoke('meeting_start', { noteId: selected.id });
       // state event updates `meeting`; start the local timer optimistically
       startElapsed(0);
       toast({
-        title: 'Recording meeting',
+        title: resuming ? 'Recording again' : 'Recording meeting',
         description: 'Mic is "You", call audio is "Them" — use headphones for clean separation',
         variant: 'success',
       });
@@ -97,15 +153,46 @@
       toast({ title: "Couldn't start recording", description: String(e), variant: 'destructive' });
     }
   }
-  async function stopMeeting() {
+  // Pause: stop recording without writing the action plan (Resume carries
+  // on in the same note).
+  async function pauseMeeting() {
+    pauseRequested = true;
     try {
       await invoke('meeting_stop');
-      // the worker's final yap-meeting-state triggers the auto-enhance below
-      toast({ title: 'Recording stopped', description: 'Transcribing the last chunk…' });
+      toast({ title: 'Recording paused', description: 'Press Resume to carry on in this note' });
+    } catch (e) {
+      pauseRequested = false;
+      error = String(e);
+      toast({ title: "Couldn't stop recording", description: String(e), variant: 'destructive' });
+    }
+  }
+  // The end-of-meeting moment: stop, let the recorder transcribe the last
+  // chunk, then write the action plan (onMeetingState below).
+  async function endMeeting() {
+    pauseRequested = false;
+    try {
+      await invoke('meeting_stop');
+      toast({ title: 'Meeting ended', description: 'Transcribing the last few seconds…' });
     } catch (e) {
       error = String(e);
       toast({ title: "Couldn't stop recording", description: String(e), variant: 'destructive' });
     }
+  }
+
+  function summariseMeeting() {
+    if (!selected) return;
+    // A silent recording (muted mic, nobody talking) with no typed notes
+    // has nothing for the model to work with.
+    if (!selected.content?.trim() && !selected.transcript?.some((s) => !s.echo)) {
+      toast({
+        title: 'Nothing to summarise yet',
+        description: 'No speech was transcribed in this recording.',
+        chip: 'Tip',
+      });
+      return;
+    }
+    const action = actionPlanAction ?? activeAction;
+    if (action) runAction(action);
   }
 
   function onMeetingState(s) {
@@ -116,9 +203,12 @@
       startElapsed(meeting.elapsedSecs || 0);
     } else {
       stopElapsed();
-      // Recording just finished → reload the note (transcript persisted) and
-      // auto-run the Meeting Notes action (OpenWhispr: enhancement after stop).
+      // Recording just finished → reload the note (transcript persisted) and,
+      // unless it was a pause, write the action plan (a stop from elsewhere,
+      // e.g. the call ending, counts as the end of the meeting).
       if (wasRecording && noteId) {
+        const paused = pauseRequested;
+        pauseRequested = false;
         (async () => {
           if (selected?.id === noteId) {
             try {
@@ -128,9 +218,7 @@
             }
           }
           refreshList();
-          const meetingAction =
-            actions.find((a) => a.name === 'Meeting Notes') ?? activeAction;
-          if (meetingAction && selected?.id === noteId) runAction(meetingAction);
+          if (!paused && selected?.id === noteId) summariseMeeting();
         })();
       }
     }
@@ -143,6 +231,17 @@
       selected.transcript = [...(selected.transcript || []), seg];
       selected.noteType = 'meeting';
     }
+  }
+
+  function onMeetingDigest(p) {
+    if (p?.digest && selected?.id === p.noteId) {
+      selected.digests = [...(selected.digests || []), p.digest];
+    }
+  }
+
+  // Errors that mean "no AI model to summarise with" rather than a failure.
+  function needsAiSetup(msg) {
+    return /No AI model configured|API key/i.test(msg);
   }
 
   async function refreshList() {
@@ -197,6 +296,8 @@
     try {
       selected = await invoke('note_get', { id });
       tab = 'raw';
+      transcriptView = 'live';
+      showEcho = false;
       error = null;
       chatThread = []; // the embedded chat is pinned to one note
       chatInput = '';
@@ -261,34 +362,55 @@
     flushSave();
     const id = selected.id;
     enhancing = new Set([...enhancing, id]);
+    runningAction = { noteId: id, name: action.name };
     error = null;
+    if (aiMissing?.noteId === id) aiMissing = null;
     try {
       const enhanced = await invoke('note_enhance', { id, actionId: action.id });
       // Only mutate the open note if the user is still on it.
       if (selected?.id === id) {
         selected.enhancedContent = enhanced;
         tab = 'enhanced'; // OpenWhispr auto-switches to the Enhanced tab
+        try {
+          selected.digests = (await invoke('note_get', { id })).digests;
+        } catch {
+          /* keep current */
+        }
       }
       refreshList();
       toast({ title: `${action.name} complete`, variant: 'success' });
     } catch (e) {
-      if (selected?.id === id) error = String(e);
-      toast({ title: `${action.name} failed`, description: String(e), variant: 'destructive' });
+      const msg = String(e);
+      if (needsAiSetup(msg)) {
+        // Not a failure: the note is saved, it just needs a model. The card
+        // in the editor says so (and links to Settings).
+        aiMissing = { noteId: id, message: msg };
+      } else {
+        if (selected?.id === id) error = msg;
+        toast({ title: `${action.name} failed`, description: msg, variant: 'destructive' });
+      }
     } finally {
       const next = new Set(enhancing);
       next.delete(id);
       enhancing = next;
+      if (runningAction?.noteId === id) runningAction = null;
+      if (summaryProgress?.noteId === id) summaryProgress = null;
     }
   }
+  // `{ noteId, name }` of the action running, for the status line.
+  let runningAction = $state(null);
 
-  async function copyEnhanced() {
-    const text = tab === 'enhanced' ? selected?.enhancedContent : selected?.content;
+  // Copy the open tab: markdown as is, or as plain text (headings and
+  // checkboxes spelled out) for chat apps and email.
+  async function copyEnhanced(asText = false) {
+    let text = tab === 'enhanced' ? selected?.enhancedContent : selected?.content;
     if (!text) return;
+    if (asText) text = markdownToText(text);
     try {
       await navigator.clipboard.writeText(text);
-      copied = true;
+      copied = asText ? 'text' : 'markdown';
       setTimeout(() => (copied = false), 1500);
-      toast({ title: 'Copied to clipboard' });
+      toast({ title: asText ? 'Copied as text' : 'Copied as markdown' });
     } catch {
       /* clipboard unavailable */
     }
@@ -452,6 +574,15 @@
     listen('yap-meeting-segment', (e) => onMeetingSegment(e.payload)).then((u) =>
       unlisteners.push(u)
     );
+    listen('yap-meeting-digest', (e) => onMeetingDigest(e.payload)).then((u) =>
+      unlisteners.push(u)
+    );
+    listen('yap-meeting-summary-progress', (e) => (summaryProgress = e.payload)).then((u) =>
+      unlisteners.push(u)
+    );
+    listen('yap-meeting-warning', (e) =>
+      toast({ title: 'Meeting recording', description: String(e.payload), chip: 'Tip' })
+    ).then((u) => unlisteners.push(u));
     // The local API bridge (Integrations) can create/update/delete notes from
     // outside the app — refresh the list so external edits show up live.
     listen('yap-notes-changed', () => refreshList()).then((u) => unlisteners.push(u));
@@ -464,8 +595,8 @@
 
   // Call detection (meetingDetect.svelte.js) opens a note here: the meeting
   // note "Record notes" just started, or the one to wrap up — "Stop and
-  // summarise" stops it right here, so the Meeting Notes summary above runs
-  // as it does for any recording.
+  // summarise" ends it right here (endMeeting), so the action plan is
+  // written as for "End meeting & summarise".
   $effect(() => {
     const req = noteRequest.pending;
     if (!req) return;
@@ -480,7 +611,7 @@
     refreshList();
     if (!stop) return;
     meeting = (await invoke('meeting_state').catch(() => null)) || { recording: false };
-    if (meeting.recording && meeting.noteId === id) await stopMeeting();
+    if (meeting.recording && meeting.noteId === id) await endMeeting();
   }
 </script>
 
@@ -721,11 +852,18 @@
           {/if}
         </span>
         <span class="metaspacer"></span>
-        <!-- Meeting recorder: mic ("You") + system audio ("Them"). -->
+        <!-- Meeting recorder: mic ("You") + system audio ("Them"). Pause
+             keeps the note as it is; "End meeting & summarise" (bottom bar)
+             writes the action plan. -->
         {#if recordingThisNote}
-          <button class="chip reclive" onclick={stopMeeting} title="Stop recording">
+          <button
+            class="chip reclive"
+            onclick={pauseMeeting}
+            aria-label="Pause recording"
+            title="Pause — Resume carries on in this note"
+          >
             <span class="recdot"></span>
-            {fmtElapsed(elapsed)} · Stop
+            {fmtElapsed(elapsed)} · Pause
           </button>
         {:else}
           <button
@@ -737,7 +875,7 @@
               : 'Record this meeting — your mic is "You", the call audio is "Them"'}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
-            Record
+            {selected.transcript?.length ? 'Resume' : 'Record'}
           </button>
         {/if}
         <button class="iconbtn" title="Export as Markdown" aria-label="Export as Markdown" onclick={exportNote}>
@@ -753,7 +891,37 @@
             {#if isStale}<span class="staledot" title="Note changed since enhancement — re-run Enhance"></span>{/if}
           </button>
           <span class="tabspacer"></span>
-          <button class="copy" onclick={copyEnhanced}>{copied ? 'Copied!' : 'Copy'}</button>
+          <button class="copy" onclick={() => copyEnhanced(false)}>
+            {copied === 'markdown' ? 'Copied!' : 'Copy markdown'}
+          </button>
+          <button class="copy" onclick={() => copyEnhanced(true)}>
+            {copied === 'text' ? 'Copied!' : 'Copy text'}
+          </button>
+        </div>
+      {/if}
+
+      {#if runningAction?.noteId === selected.id}
+        <p class="runline" aria-live="polite">
+          <span class="spin"></span>
+          {#if summaryProgress?.noteId === selected.id && summaryProgress.total > 0}
+            Catching up on the meeting — part {summaryProgress.done + 1} of {summaryProgress.total}…
+          {:else if runningAction.name === actionPlanAction?.name}
+            Writing your action plan…
+          {:else}
+            Running {runningAction.name}…
+          {/if}
+        </p>
+      {/if}
+
+      {#if aiMissing?.noteId === selected.id}
+        <div class="aicard">
+          <div class="aitext">
+            <strong>Your meeting is saved.</strong>
+            To turn it into an action plan, Yap needs an AI model: set one up in Settings → Language
+            Models (an on-device model keeps everything on this PC), then press Action plan.
+            <span class="aidetail">{aiMissing.message}</span>
+          </div>
+          <button class="aibtn" onclick={() => onopensettings?.('cleanup')}>Open Language Models</button>
         </div>
       {/if}
 
@@ -781,9 +949,41 @@
       {#if recordingThisNote || selected.transcript?.length}
         <div class="transcript">
           <div class="thead">
-            <span class="tcap">Meeting transcript</span>
+            {#if selected.digests?.length}
+              <!-- Transcript ↔ the rolling AI notes (meeting_summary.rs) -->
+              <span class="tviews">
+                <button class="tview" class:on={transcriptView === 'live'} onclick={() => (transcriptView = 'live')}>
+                  Transcript
+                </button>
+                <button class="tview" class:on={transcriptView === 'notes'} onclick={() => (transcriptView = 'notes')}>
+                  AI notes so far
+                </button>
+              </span>
+            {:else}
+              <span class="tcap">Meeting transcript</span>
+            {/if}
             {#if recordingThisNote}
               <span class="tlive"><span class="recdot"></span> listening — transcribes every ~15 s</span>
+            {/if}
+            <span class="tspacer"></span>
+            {#if digestedUpTo}
+              <span
+                class="tdigest"
+                title="Yap summarises the meeting as it goes, so the action plan is ready in seconds however long it runs"
+              >
+                AI notes up to {digestedUpTo}
+              </span>
+            {/if}
+            {#if !recordingThisNote && selected.transcript?.length}
+              <button
+                class="planbtn"
+                onclick={summariseMeeting}
+                disabled={enhancing.has(selected.id) || meeting.recording && meeting.noteId === selected.id}
+                title="Who does what by when, with decisions and open questions"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8" /><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9" /></svg>
+                Action plan
+              </button>
             {/if}
           </div>
           {#if recordingThisNote && !selected.transcript?.length}
@@ -792,14 +992,48 @@
               headphones so your mic doesn't also hear the call.
             </p>
           {/if}
-          <div class="tscroll">
-            {#each selected.transcript || [] as seg, i (i)}
-              <div class="bubble {seg.source === 'you' ? 'you' : 'them'}">
-                <span class="who">{seg.source === 'you' ? 'You' : 'Them'}</span>
-                <p>{seg.text}</p>
-              </div>
-            {/each}
-          </div>
+          {#if transcriptView === 'notes' && selected.digests?.length}
+            <div class="tscroll" role="region" aria-label="AI notes so far">
+              {#each selected.digests as d, i (i)}
+                <div class="part">
+                  <span class="partrange">{digestRange(d)}</span>
+                  <ul>
+                    {#each d.keyPoints || [] as p, j (j)}<li>{p}</li>{/each}
+                    {#each d.decisions || [] as p, j (j)}<li><strong>Decided:</strong> {p}</li>{/each}
+                    {#each d.actions || [] as a, j (j)}
+                      <li class="ptask">☐ {a.owner}: {a.task}{a.due ? ` (due ${a.due})` : ''}</li>
+                    {/each}
+                  </ul>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div
+              class="tscroll"
+              role="log"
+              aria-label="Meeting transcript"
+              bind:this={logEl}
+              onscroll={() =>
+                (followLog = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40)}
+            >
+              {#each shownTranscript as seg, i (i)}
+                <div class="bubble {seg.source === 'you' ? 'you' : 'them'}" class:echo={seg.echo}>
+                  <span class="who">
+                    {seg.source === 'you' ? 'You' : 'Them'}{seg.echo ? ' · from the speakers' : ''}
+                  </span>
+                  <p>{seg.text}</p>
+                </div>
+              {/each}
+            </div>
+            {#if echoCount}
+              <button class="echonote" onclick={() => (showEcho = !showEcho)}>
+                {showEcho ? 'Hide' : 'Show'}
+                {echoCount}
+                {echoCount === 1 ? 'line' : 'lines'} your mic picked up from the speakers (left out of
+                summaries — headphones avoid this)
+              </button>
+            {/if}
+          {/if}
         </div>
       {/if}
 
@@ -840,13 +1074,22 @@
           disabled={asking}
           onkeydown={(e) => e.key === 'Enter' && askNote()}
         />
-        <!-- ActionPicker split button (OpenWhispr ActionPicker.tsx): left half
+        <!-- While recording: the end-of-meeting moment. Otherwise the
+             ActionPicker split button (OpenWhispr ActionPicker.tsx): left half
              runs the last-used action, the chevron opens the action menu. -->
+        {#if recordingThisNote}
+          <button class="enhance endmeeting" onclick={endMeeting}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" /></svg>
+            End meeting &amp; summarise
+          </button>
+        {:else}
         <div class="picker">
           <button
             class="enhance runhalf"
             onclick={() => runAction(activeAction)}
-            disabled={!activeAction || enhancing.has(selected.id) || !selected.content?.trim()}
+            disabled={!activeAction ||
+              enhancing.has(selected.id) ||
+              (!selected.content?.trim() && !selected.transcript?.length)}
             title={activeAction ? `Run "${activeAction.name}"` : 'No actions'}
           >
             {#if enhancing.has(selected.id)}
@@ -893,6 +1136,7 @@
             </div>
           {/if}
         </div>
+        {/if}
       </div>
     {/if}
   </section>
@@ -1231,8 +1475,137 @@
   .thead {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 10px;
+    min-height: 24px;
+  }
+  .tspacer {
+    flex: 1;
+  }
+  .tviews {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: var(--yap-r);
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border-subtle);
+  }
+  .tview {
+    height: 22px;
+    padding: 0 9px;
+    border: none;
+    border-radius: var(--yap-r-sm);
+    background: none;
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .tview.on {
+    background: var(--yap-primary-wash);
+    color: var(--yap-fg);
+  }
+  .tdigest {
+    font-size: 11px;
+    color: var(--yap-muted);
+    white-space: nowrap;
+  }
+  .planbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 11px;
+    border: none;
+    border-radius: var(--yap-r);
+    background: var(--yap-ink, var(--yap-primary));
+    color: var(--yap-ink-fg, var(--yap-primary-fg));
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .planbtn:hover:not(:disabled) {
+    background: var(--yap-ink-hover, var(--yap-primary-hover));
+  }
+  .planbtn:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .planbtn svg {
+    width: 12px;
+    height: 12px;
+  }
+  .part {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .partrange {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--yap-muted-55);
+    font-variant-numeric: tabular-nums;
+  }
+  .part ul {
+    margin: 2px 0 4px;
+    padding-left: 18px;
+  }
+  .part li.ptask {
+    list-style: none;
+    margin-left: -14px;
+  }
+
+  /* "Writing your action plan…" */
+  .runline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: var(--yap-muted);
+  }
+
+  /* The summary step needs an AI model: say so, kindly. */
+  .aicard {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 0 0 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-primary-wash);
+  }
+  .aitext {
+    flex: 1 1 auto;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--yap-fg);
+  }
+  .aidetail {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--yap-muted);
+  }
+  .aibtn {
+    flex: 0 0 auto;
+    height: 30px;
+    padding: 0 13px;
+    border: none;
+    border-radius: var(--yap-r);
+    background: var(--yap-ink, var(--yap-primary));
+    color: var(--yap-ink-fg, var(--yap-primary-fg));
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .aibtn:hover {
+    background: var(--yap-ink-hover, var(--yap-primary-hover));
   }
   .tcap {
     font-size: 10.5px;
@@ -1294,6 +1667,25 @@
     background: var(--yap-s1);
     border: 1px solid var(--yap-border-subtle);
   }
+  .bubble.echo {
+    opacity: 0.55;
+    border: 1px dashed var(--yap-border);
+  }
+  .echonote {
+    align-self: flex-start;
+    border: none;
+    background: none;
+    padding: 0;
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 11px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .echonote:hover {
+    color: var(--yap-fg);
+    text-decoration: underline;
+  }
   .picker {
     position: relative;
     display: inline-flex;
@@ -1314,6 +1706,19 @@
   }
   .enhance.runhalf {
     border-radius: var(--yap-r) 0 0 var(--yap-r);
+  }
+  .enhance.endmeeting {
+    border-radius: var(--yap-r);
+    background: var(--yap-danger);
+    color: #fff;
+    padding: 0 14px;
+  }
+  .enhance.endmeeting:hover {
+    background: color-mix(in srgb, var(--yap-danger) 85%, black);
+  }
+  .enhance.endmeeting svg {
+    width: 10px;
+    height: 10px;
   }
   .enhance.chevron {
     border-radius: 0 var(--yap-r) var(--yap-r) 0;

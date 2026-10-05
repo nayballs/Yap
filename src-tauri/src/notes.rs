@@ -19,13 +19,54 @@ use serde_json::{json, Value};
 
 /// One You/Them transcript segment from the meeting recorder (OpenWhispr
 /// `TranscriptSegment`, trimmed to what Yap uses: source "you"|"them", text,
-/// unix-seconds timestamp).
+/// unix-seconds timestamp of the audio it came from).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptSegment {
     pub source: String,
     pub text: String,
     pub ts: u64,
+    /// A "you" segment that was the call audio leaking from the speakers into
+    /// the mic (`meeting::is_echo`). Kept, but left out of the summary and
+    /// hidden in the transcript view.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub echo: bool,
+}
+
+/// One action item in a meeting digest: who (a name, "You", or
+/// "Unassigned"), what, and the deadline as it was said (empty = none).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DigestAction {
+    pub owner: String,
+    pub task: String,
+    #[serde(default)]
+    pub due: String,
+}
+
+/// A rolling summary of one stretch of a meeting (`meeting_summary.rs`),
+/// written while the meeting is still going so the end-of-meeting summary
+/// merges a few of these instead of re-reading hours of transcript.
+/// Covers `transcript[from_seg..to_seg]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingDigest {
+    pub from_seg: usize,
+    pub to_seg: usize,
+    /// Unix seconds of the first and last segment covered.
+    pub start_ts: u64,
+    pub end_ts: u64,
+    #[serde(default)]
+    pub key_points: Vec<String>,
+    #[serde(default)]
+    pub decisions: Vec<String>,
+    #[serde(default)]
+    pub actions: Vec<DigestAction>,
+    #[serde(default)]
+    pub questions: Vec<String>,
+    /// The model's reply, kept only when it had none of the expected sections.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub raw: String,
 }
 
 /// One note. `note_type`: "personal" | "meeting" (set when a recording starts).
@@ -58,6 +99,11 @@ pub struct Note {
     /// the enhancement prompt so the model can attribute correctly.
     #[serde(default)]
     pub participants: Vec<String>,
+    /// Rolling meeting digests, in transcript order, each picking up where
+    /// the last one stopped (`meeting_summary.rs`). Empty for short meetings
+    /// and personal notes.
+    #[serde(default)]
+    pub digests: Vec<MeetingDigest>,
     /// Where the note came from ("manual" | "upload" | later "meeting").
     #[serde(default)]
     pub source: String,
@@ -90,27 +136,45 @@ pub struct Action {
     /// Built-ins can be edited but not deleted (OpenWhispr semantics).
     #[serde(default)]
     pub builtin: bool,
+    /// What a built-in is for, when the app has to find it whatever the user
+    /// renamed it to: [`ACTION_PLAN`] is the one "End meeting & summarise"
+    /// runs (and runs under `llm::ACTION_PLAN_BASE_PROMPT`). Empty otherwise.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
 }
 
+/// `Action::kind` of the built-in "Action Plan".
+pub const ACTION_PLAN: &str = "actionPlan";
+
 /// Built-in action seeds: OpenWhispr's "Generate Notes" (database.js seed,
-/// verbatim — the prompt is `llm::NOTE_DEFAULT_FRAGMENT`) plus two
+/// verbatim — the prompt is `llm::NOTE_DEFAULT_FRAGMENT`) plus three
 /// meeting-focused templates (Yap additions; the meeting structure mirrors
-/// OpenWhispr's MEETING_SYSTEM_PROMPT sections). `(name, description, prompt)`.
-const BUILTIN_ACTIONS: [(&str, &str, &str); 3] = [
+/// OpenWhispr's MEETING_SYSTEM_PROMPT sections). `(name, description, prompt,
+/// kind)`.
+const BUILTIN_ACTIONS: [(&str, &str, &str, &str); 4] = [
     (
         "Generate Notes",
         "Clean up, structure, and enhance your notes",
         crate::llm::NOTE_DEFAULT_FRAGMENT,
+        "",
     ),
     (
         "Meeting Notes",
         "Turn rough meeting notes into structured minutes",
         "The content is rough notes taken during a meeting (possibly including fragments of transcript). Produce clean meeting notes. Start with a concise 1\u{2013}2 sentence summary of what the meeting was about. Then use these section headings, omitting any that have no content: ## Key Discussion Points, ## Decisions Made, ## Action Items, ## Follow-ups. Under Action Items use checkboxes (- [ ]) and attribute each item to a person where clear. Consolidate repeated points into coherent ones, preserve specific commitments and dates verbatim, and bias toward brevity.",
+        "",
     ),
     (
         "Action Items",
         "Extract just the tasks, owners, and deadlines",
         "Extract ONLY the action items from the content. Output a markdown checkbox list (- [ ]) with one task per line. When the owner is clear, start the line with their name and a colon (e.g. - [ ] Dave: send the revised budget). Include deadlines in parentheses when mentioned. Do not add tasks that weren't stated or clearly implied. If there are genuinely no action items, output exactly: No action items.",
+        "",
+    ),
+    (
+        "Action Plan",
+        "Who does what by when, then decisions and open questions",
+        crate::llm::ACTION_PLAN_DEFAULT_FRAGMENT,
+        ACTION_PLAN,
     ),
 ];
 
@@ -118,26 +182,31 @@ fn default_actions() -> Vec<Action> {
     BUILTIN_ACTIONS
         .iter()
         .enumerate()
-        .map(|(i, (name, description, prompt))| Action {
+        .map(|(i, (name, description, prompt, kind))| Action {
             id: i as u64 + 1,
             name: name.to_string(),
             description: description.to_string(),
             prompt: prompt.to_string(),
             builtin: true,
+            kind: kind.to_string(),
         })
         .collect()
 }
 
-/// Additive migration: stores created before a built-in existed get it added
-/// (matched by name so user edits to a built-in's prompt are never clobbered).
+/// Additive migration: stores created before a built-in existed get it added,
+/// matched by kind for built-ins that have one, else by name, so user edits
+/// to a built-in's name or prompt are never clobbered.
 fn seed_missing_builtins(store: &mut Store) -> bool {
     let mut changed = false;
-    for (name, description, prompt) in BUILTIN_ACTIONS {
-        if !store
-            .actions
-            .iter()
-            .any(|a| a.name.eq_ignore_ascii_case(name))
-        {
+    for (name, description, prompt, kind) in BUILTIN_ACTIONS {
+        let present = store.actions.iter().any(|a| {
+            if kind.is_empty() {
+                a.name.eq_ignore_ascii_case(name)
+            } else {
+                a.kind == kind
+            }
+        });
+        if !present {
             let id = store.actions.iter().map(|a| a.id).max().unwrap_or(0) + 1;
             store.actions.push(Action {
                 id,
@@ -145,6 +214,7 @@ fn seed_missing_builtins(store: &mut Store) -> bool {
                 description: description.to_string(),
                 prompt: prompt.to_string(),
                 builtin: true,
+                kind: kind.to_string(),
             });
             changed = true;
         }
@@ -269,6 +339,7 @@ pub fn action_create(name: &str, description: &str, prompt: &str) -> Result<Acti
             description: description.trim().to_string(),
             prompt: prompt.to_string(),
             builtin: false,
+            kind: String::new(),
         };
         s.actions.push(action.clone());
         save_to_disk(s);
@@ -410,6 +481,7 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
             folder,
             transcript: Vec::new(),
             participants: Vec::new(),
+            digests: Vec::new(),
             source: source.to_string(),
             created_ts: now,
             updated_ts: now,
@@ -510,6 +582,39 @@ pub fn append_transcript(id: u64, segments: &[TranscriptSegment]) -> Result<(), 
     })
 }
 
+/// How far into a note's transcript the meeting digests reach (the first
+/// segment no digest covers yet).
+pub fn digested_upto(note: &Note) -> usize {
+    note.digests.last().map(|d| d.to_seg).unwrap_or(0)
+}
+
+/// Append a meeting digest. It must pick up exactly where the last one
+/// stopped and stay inside the transcript, so a late or repeated result can
+/// never leave a gap or cover the same stretch twice. Returns the new count.
+pub fn add_digest(id: u64, digest: MeetingDigest) -> Result<usize, String> {
+    with_store(|store| {
+        let note = store
+            .notes
+            .iter_mut()
+            .find(|n| n.id == id)
+            .ok_or("Note not found")?;
+        let count = push_digest(note, digest)?;
+        save_to_disk(store);
+        Ok(count)
+    })
+}
+
+fn push_digest(note: &mut Note, digest: MeetingDigest) -> Result<usize, String> {
+    if digest.from_seg != digested_upto(note)
+        || digest.to_seg <= digest.from_seg
+        || digest.to_seg > note.transcript.len()
+    {
+        return Err("Digest doesn't continue the note's digests".to_string());
+    }
+    note.digests.push(digest);
+    Ok(note.digests.len())
+}
+
 /// Store an enhancement result + the staleness hash of the content it was
 /// computed from (pass the hash captured BEFORE the LLM call, so edits made
 /// while the model ran correctly show as stale).
@@ -583,6 +688,70 @@ mod tests {
         .unwrap();
         assert!(!changed);
         assert_eq!(store.notes[0].updated_ts, 1);
+    }
+
+    #[test]
+    fn older_stores_load_and_get_the_action_plan() {
+        // A store from before digests, echo flags and action kinds, whose
+        // user edited the Meeting Notes prompt.
+        let old = r#"{
+            "folders": ["Personal", "Meetings"],
+            "actions": [
+                {"id": 1, "name": "Generate Notes", "prompt": "p1", "builtin": true},
+                {"id": 2, "name": "Meeting Notes", "prompt": "my own minutes", "builtin": true},
+                {"id": 3, "name": "Action Items", "prompt": "p3", "builtin": true}
+            ],
+            "notes": [{"id": 7, "title": "Sync", "noteType": "meeting",
+                       "transcript": [{"source": "you", "text": "hi", "ts": 5}],
+                       "createdTs": 1, "updatedTs": 1}]
+        }"#;
+        let mut store: Store = serde_json::from_str(old).unwrap();
+        assert!(store.notes[0].digests.is_empty());
+        assert!(!store.notes[0].transcript[0].echo);
+        assert!(seed_missing_builtins(&mut store));
+        let plan: Vec<&Action> = store.actions.iter().filter(|a| a.kind == ACTION_PLAN).collect();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].id, 4);
+        assert!(plan[0].builtin);
+        // User edits survive; a second pass adds nothing.
+        assert_eq!(store.actions[1].prompt, "my own minutes");
+        assert!(!seed_missing_builtins(&mut store));
+        // A renamed Action Plan is still found by kind (not re-added).
+        store.actions[3].name = "Who does what".to_string();
+        assert!(!seed_missing_builtins(&mut store));
+        // An echo flag only reaches disk when set.
+        let seg = serde_json::to_value(&store.notes[0].transcript[0]).unwrap();
+        assert!(seg.get("echo").is_none());
+    }
+
+    #[test]
+    fn digests_must_continue_each_other() {
+        let mut note = store_with_note().notes.remove(0);
+        note.transcript = (0..10)
+            .map(|i| TranscriptSegment {
+                source: "them".into(),
+                text: format!("line {i}"),
+                ts: i,
+                echo: false,
+            })
+            .collect();
+        let d = |from, to| MeetingDigest {
+            from_seg: from,
+            to_seg: to,
+            start_ts: from as u64,
+            end_ts: to as u64,
+            key_points: vec![],
+            decisions: vec![],
+            actions: vec![],
+            questions: vec![],
+            raw: String::new(),
+        };
+        assert_eq!(push_digest(&mut note, d(0, 4)), Ok(1));
+        assert!(push_digest(&mut note, d(0, 4)).is_err()); // the same stretch again
+        assert!(push_digest(&mut note, d(5, 8)).is_err()); // a gap
+        assert!(push_digest(&mut note, d(4, 11)).is_err()); // past the end
+        assert_eq!(push_digest(&mut note, d(4, 10)), Ok(2));
+        assert_eq!(digested_upto(&note), 10);
     }
 
     #[test]

@@ -175,8 +175,12 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   custom text). Records token/request usage (best-effort). Also carries
   `EDIT_BASE_PROMPT` (edit/rewrite mode's guardrails), `NOTE_BASE_PROMPT` +
   `MEETING_NOTE_BASE_PROMPT` + `NOTE_DEFAULT_FRAGMENT` (note enhancement's
-  guardrails/action fragment), `enhance_note` (the Actions-engine call),
-  `note_chat` (embedded per-note chat + Chat-surface turns), and
+  guardrails/action fragment), `ACTION_PLAN_BASE_PROMPT` +
+  `ACTION_PLAN_DEFAULT_FRAGMENT` (the Action Plan: never invent owners/dates)
+  and `MEETING_DIGEST_PROMPT` (one rolling meeting digest), `enhance_note`
+  (the Actions-engine call, base prompt chosen by the caller), `chat` +
+  `ChatOptions` (temperature, `max_tokens` — sent for local servers only —
+  and timeout), `note_chat` (embedded per-note chat + Chat-surface turns), and
   `post_chat_message` (the tool-loop variant that returns the whole assistant
   message, incl. `tool_calls`, instead of just the text).
 - **`local_llm.rs`** — the on-device AI cleanup sidecar: runs **Mozilla llamafile**
@@ -194,30 +198,60 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   Enhanced tab), `enhanced_at_hash` (OpenWhispr's `len+first-50` staleness
   marker), `folder` (string, seeded with Personal + Meetings), `participants`
   (attendee names, shown as chips and fed to prompts for attribution),
-  `transcript` (meeting-recorder You/Them segments, time-ordered), `note_type`
-  ("personal" | "meeting"), and `source` ("manual" | "upload" | "meeting").
+  `transcript` (meeting-recorder You/Them segments, time-ordered; `echo` marks
+  speaker bleed), `digests` (rolling meeting digests, see `meeting_summary.rs`),
+  `note_type` ("personal" | "meeting"), and `source` ("manual" | "upload" |
+  "meeting").
   **Folders** are user-creatable (backend `notes_folder_create` command) with
   counts shown in the sidebar; notes filter by active folder. **Actions** (named
   prompt fragments) are built-in protected set (seeded "Generate Notes",
-  "Meeting Notes", "Action Items") + user-created; `note_enhance` (commands.rs)
-  invokes the **Actions engine**: picks an action by id, runs the Note Formatting
-  scope's endpoint + the action's editable prompt (fallback → global cleanup
-  endpoint), at temp 0.3 under the immutable `llm::NOTE_BASE_PROMPT`
-  (OpenWhispr's BASE_SYSTEM_PROMPT verbatim). Built-ins seed via additive
-  by-name migration, so user edits to their prompts are never clobbered. For
-  **meeting notes** (`note_type == "meeting"` with a transcript), `note_enhance`
-  switches to `llm::MEETING_NOTE_BASE_PROMPT` and assembles attendees + typed
-  notes + `You:`/`Them:` transcript lines; NotesView auto-runs the "Meeting
-  Notes" action when a recording finishes (on the closing `yap-meeting-state`).
+  "Meeting Notes", "Action Items", "Action Plan") + user-created; `note_enhance`
+  (commands.rs) invokes the **Actions engine**: picks an action by id, runs the
+  Note Formatting scope's endpoint + the action's editable prompt (fallback →
+  global cleanup endpoint), at temp 0.3 under an immutable base prompt:
+  `llm::NOTE_BASE_PROMPT` (OpenWhispr's BASE_SYSTEM_PROMPT verbatim),
+  `MEETING_NOTE_BASE_PROMPT` for meeting notes, or `ACTION_PLAN_BASE_PROMPT` for
+  the Action Plan (found by `Action::kind == "actionPlan"`, so renaming is fine;
+  its reply goes through `meeting_summary::postcheck_action_plan`). Built-ins
+  seed via additive migration (by name, or by kind), so user edits to their
+  prompts are never clobbered. For **meeting notes** the input comes from
+  `meeting_summary` (the raw transcript when short, else digests + the latest
+  stretch, after digesting any backlog); NotesView runs the Action Plan when a
+  recording ends (anything but Pause, on the closing `yap-meeting-state`).
 - **`meeting.rs`** — the meeting recorder (OpenWhispr `meetingRecordingStore`
   port, fully offline): mic ("You") + **WASAPI loopback** ("Them" — cpal input
   stream on the default output device) on a dedicated capture thread; a worker
-  drains each source every ~15 s (silence-gated), transcribes on the shared
+  cuts each source into ~15 s chunks **at the quietest 20 ms frame of the last
+  4 s** (`media::quietest_frame`, not mid-word), transcribes them on the shared
   warm engine (`pipeline::EngineSlot`, taken per chunk so dictation still
-  works), persists `TranscriptSegment`s to `notes.transcript` and emits
-  `yap-meeting-segment`/`-state`. On stop the UI auto-runs the "Meeting Notes"
-  action with `llm::MEETING_NOTE_BASE_PROMPT` over notes + You:/Them: lines.
-  Commands: `meeting_start`/`meeting_stop`/`meeting_state`.
+  works; silence-gated), works off a backlog in ≤30 s chunks back to back,
+  caps each source's buffer at 20 min (then drops audio + `yap-meeting-warning`),
+  dates each segment by its speech onset, flags **speaker echo** (a "you"
+  chunk whose words repeat "them" in order AND whose 20 ms loudness envelope
+  follows the call 0–600 ms later — the timing test keeps a headphone user's
+  own reply; flagged segments are kept, hidden, left out of summaries), and
+  `ingest`s segments: persist to `notes.transcript`, emit `yap-meeting-segment`,
+  kick the rolling digests. Commands: `meeting_start`/`meeting_stop`/
+  `meeting_state` (signatures unchanged). Test mode opens no audio device (WAVs
+  from `YAP_E2E_MEETING_AUDIO`, or silence; `e2e::e2e_meeting_feed`).
+- **`meeting_summary.rs`** — meeting summaries that keep up with long meetings
+  (map-reduce, the map done while recording). Every ~10 min of new talk
+  (2,000 est. tokens, or 10 min with ≥ 250) a background **digest** (key
+  points, decisions, action items `Owner: task (due: …)`, open questions;
+  `llm::MEETING_DIGEST_PROMPT` + a one-shot; ≤ 2,600 tokens of transcript + the
+  meeting so far ≤ 400) is written with the Note Formatting endpoint and
+  stored on the note (`yap-meeting-digest`); owners must be You/Everyone/an
+  attendee/a name said in that part (else Unassigned) and deadlines must have
+  been said (`check_digest`). On a **local** endpoint digests wait for
+  dictations to finish and are dropped mid-call when one starts
+  (`unless_busy` — closing the connection cancels it in llama.cpp), and
+  replies are capped. `prepare_final` (one digest turn at a time,
+  `DIGEST_TURN`) digests any backlog with `yap-meeting-summary-progress`;
+  `compose_meeting_input` keeps the final input ≤ 4,500 tokens whatever the
+  length (raw transcript when ≤ 3,500); `postcheck_action_plan` moves invented
+  owners' tasks to Unassigned, strips made-up deadlines and restores dropped
+  digest tasks; `ask_context` bounds a long meeting for the Ask bar and the
+  chat `get_note` tool. See [`docs/meetings.md`](./docs/meetings.md).
 - **`meeting_detect.rs`** — **call detection** (OpenWhispr
   `meetingDetectionEngine.js` port): notices a call starting (Teams, Zoom,
   Google Meet, Slack huddles, Discord, Webex, GoTo, WhatsApp/Signal/Telegram…),
@@ -245,8 +279,8 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   notification); a failed start deletes the note and says why. **Call ended**
   while recording it → "Stop and summarise?" — never an auto-stop (OpenWhispr
   doesn't, and the mic can't tell an ended call from a rejoin, breakout room
-  or phone hand-off): opens the note and NotesView stops it there, so its
-  Meeting Notes summary runs (`yap-meeting-open-note {noteId, stop}`; Rust
+  or phone hand-off): opens the note and NotesView ends it there, so the
+  Action Plan runs (`yap-meeting-open-note {noteId, stop}`; Rust
   stops it itself after 8 s if the page didn't). Snapshot
   `meeting_detect_status` + `yap-meeting-detect`; answers
   `meeting_detect_respond(promptId, record|dismiss|stop|keep)`; debug-only
@@ -484,7 +518,12 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   paste/Enter/Ctrl+C into other apps, no `set_focus` (tao's fallback presses Alt
   in the focused app), no Windows notifications, no orphan-sidecar sweep, no
   window-state plugin, no call-detection registry reads (the debug-only
-  `meeting_detect_simulate` stands in), and it quits when its stdin closes. See
+  `meeting_detect_simulate` stands in), no audio device for meeting recordings
+  (`spawn_meeting_audio`: `you.wav`/`them.wav` from `YAP_E2E_MEETING_AUDIO` at
+  `YAP_E2E_MEETING_SPEED`× real time, or silence; a configured mic that isn't
+  plugged in still fails, found by listing devices), the debug-only
+  `e2e_meeting_feed { segments }` command (hours of transcript in seconds),
+  and it quits when its stdin closes. See
   [`docs/e2e-tests.md`](./docs/e2e-tests.md).
 - **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
   `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
@@ -584,12 +623,20 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   sidebar port: **New note / Search notes / Actions** rows; **FOLDERS with
   counts + NOTES list**; meta chip row shows date + attendees popover
   → add/remove participants, folder-move menu w/ New folder option, meeting
-  Record chip, export-to-markdown; ActionPicker split button + ActionManager
-  dialog for custom actions + protected built-ins; **Raw ↔ Enhanced dual-view +
-  staleness dot** (safe renderer in `lib/markdown.js`); embedded per-note
-  **"Ask anything…" bar** = Chat scope grounded in the note, with mic button
-  for in-box dictation; live **You/Them meeting transcript bubbles** during
-  recording); the Home feed has **Ctrl+K search**. **`ChatView.svelte`** = the
+  **Record / ● 12:34 · Pause / Resume** chip, export-to-markdown; ActionPicker
+  split button + ActionManager dialog for custom actions + protected
+  built-ins — while recording it becomes **End meeting & summarise** (stop →
+  the Action Plan); **Raw ↔ Enhanced dual-view + staleness dot** (safe renderer
+  in `lib/markdown.js`) with **Copy markdown / Copy text** (`markdownToText`:
+  ☐ tasks, plain headings); embedded per-note **"Ask anything…" bar** = Chat
+  scope grounded in the note, with mic button for in-box dictation; live
+  **You/Them meeting transcript bubbles** (follow the newest line; echo lines
+  hidden behind a "Show N lines…" toggle), an **AI notes so far** view of the
+  rolling digests ("AI notes up to 40:12"), an **Action plan** button on
+  finished meetings, a "Writing your action plan… / Catching up on the meeting
+  — part 3 of 12" line, and, without an AI model, a "Your meeting is saved…"
+  card linking to Settings → Language Models); the Home feed has **Ctrl+K
+  search**. **`ChatView.svelte`** = the
   AI Chat surface (OpenWhispr `chat/ChatView.tsx` port): conversation sidebar
   (Today/Yesterday/Previous 7 Days/Older grouping, Ctrl+N, hover-delete) +
   thread; `chat_send` answers via the Chat scope with **eager keyword-RAG**
@@ -912,8 +959,13 @@ modal, app-wide toasts): local audio-**file** transcription (Upload — `media.r
 Symphonia decode + chunking), an **AI Notepad** (`notes.rs` — folders/actions/
 participants/transcripts, an Actions engine, ActionPicker/ActionManager, attendee +
 folder management, markdown export, an embedded per-note chat), a **meeting
-recorder** (`meeting.rs` — mic + WASAPI loopback → You/Them transcript → an
-auto-generated Meeting Notes action) with **call detection** (`meeting_detect.rs`
+recorder** (`meeting.rs` — mic + WASAPI loopback → You/Them transcript, cut in
+pauses, speaker echo flagged; `meeting_summary.rs` — rolling ~10-minute digests
+while it records, then **End meeting & summarise** → an **action plan** with a
+section per person + Decisions / Open questions / Unassigned, every AI call
+within an 8k local context whatever the length; e2e-tested with a two-hour
+meeting against a fake AI, and once with real speech through Parakeet
+2026-10-05) with **call detection** (`meeting_detect.rs`
 — Teams/Zoom/Meet/Slack/Discord/Webex… taking the mic → "Record notes?", the
 call ending → "Stop and summarise?"; e2e-tested via a simulation hook, the
 registry signal checked read-only on Nathan's PC, no real call yet), and an **AI Chat** surface (`chats.rs` + eager
@@ -938,10 +990,12 @@ device list. Known quirk: Better Auth links accounts by exact email, so
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
 search/archive/rename; the AI Notepad has no rich markdown editor (plain textarea)
-or folder "add existing note" picker; the meeting recorder's full pipeline is
-verified (incl. WASAPI loopback delivering audio) but real transcript TEXT still
-needs one pass on the `engines` build (Upload IS live-verified — a real mp3
-transcribed end-to-end); a true streaming model for the partial pass (spike-gated
+or folder "add existing note" picker; meetings have no speaker diarization
+("Them" is everyone else; tasks are attributed from attendees and names said)
+and remove speaker echo only from chunks that are entirely the call (see
+[`docs/meetings.md`](./docs/meetings.md) "Limits"), and a real call (live
+WASAPI loopback + a real LLM's action plan) still wants one hands-on pass;
+a true streaming model for the partial pass (spike-gated
 Stage 2 — see [`ROADMAP.md`](./ROADMAP.md) Phase 1);
 fuzzy/near-miss dictionary matching; verify-after-paste (UIA `ValuePattern`);
 Authenticode signing (blocked on SignPath approval); audio-history export; and

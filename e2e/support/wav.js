@@ -1,7 +1,10 @@
-// A tiny 16-bit mono PCM WAV (a quiet 440 Hz tone) for the Upload tests.
+// A tiny 16-bit mono PCM WAV (a quiet 440 Hz tone) for the Upload and
+// meeting tests. `gaps` ([[fromSec, toSec], …]) are silent: pauses where the
+// meeting recorder cuts its chunks, and the loudness pattern its echo check
+// compares. `amplitude` is in 16-bit units.
 import fs from 'node:fs';
 
-export function writeWav(file, { seconds = 1.5, rate = 16_000 } = {}) {
+export function writeWav(file, { seconds = 1.5, rate = 16_000, gaps = [], amplitude = 3000 } = {}) {
   const samples = Math.round(seconds * rate);
   const buf = Buffer.alloc(44 + samples * 2);
   buf.write('RIFF', 0);
@@ -18,7 +21,9 @@ export function writeWav(file, { seconds = 1.5, rate = 16_000 } = {}) {
   buf.write('data', 36);
   buf.writeUInt32LE(samples * 2, 40);
   for (let i = 0; i < samples; i++) {
-    buf.writeInt16LE(Math.round(3000 * Math.sin((2 * Math.PI * 440 * i) / rate)), 44 + i * 2);
+    const silent = gaps.some(([a, b]) => i >= a * rate && i < b * rate);
+    const v = silent ? 0 : Math.round(amplitude * Math.sin((2 * Math.PI * 440 * i) / rate));
+    buf.writeInt16LE(v, 44 + i * 2);
   }
   fs.writeFileSync(file, buf);
   return file;

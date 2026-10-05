@@ -41,7 +41,11 @@ points the suite at an exe directly), so it never competes with a running
   typed or copied into other apps (a dictation still reaches history), no
   focus stealing, no Windows notifications, no killing "orphaned" sidecars,
   and the installed app's saved window position is neither read nor written.
-  It quits when the suite closes its stdin, including when the suite dies;
+  A meeting recording opens no audio device: it plays `you.wav`/`them.wav`
+  from `YAP_E2E_MEETING_AUDIO` (`YAP_E2E_MEETING_SPEED` times real time) or
+  stays silent, and the `e2e_meeting_feed` command hands it transcript
+  segments directly. It quits when the suite closes its stdin, including
+  when the suite dies;
 - talks to an account service that isn't there (`YAP_AUTH_URL` points at a
   closed local port), so it's signed out and never touches your saved session.
 
@@ -95,12 +99,17 @@ then open `screenshots/` (Claude can read the PNGs directly) or
 | `e2e/app.spec.js` | default | Home renders in portable mode · every sidebar view · every Settings section · a setting saved to `config.json` and read back after a reload · a new note survives a view switch · a dictionary entry is saved · Account signed out with the service unreachable · onboarding opens on its first step · a stub dictation lands in the Home feed (skipped without a microphone) |
 | `e2e/no-mic.spec.js` | configured mic missing | starts anyway and says "No microphone found" (toast + overlay) when asked to record · Upload still transcribes a file |
 | `e2e/updates.spec.js` | pointed at a local `latest.json` | a manual check finds the next patch version, downloads and verifies it, the "ready" toast and Settings → About say so, and "Restart to update" stops short of the installer (debug builds never run it) |
-| `e2e/meeting-detect.spec.js` | default | call detection through the debug-only `meeting_detect_simulate` hook: a call offers to take notes and "Not now" leaves it (and the app's next call) alone · a prompt leaves with its call · "Record notes" creates a Meetings note and records it, the call ending offers "Stop and summarise", which stops it in the note and runs the summary (without audio devices: says why, no note left) · "Keep recording" carries the notes into a rejoined huddle, whose end asks again (needs audio devices) · the Settings toggle turns it off |
+| `e2e/meeting-detect.spec.js` | default | call detection through the debug-only `meeting_detect_simulate` hook: a call offers to take notes and "Not now" leaves it (and the app's next call) alone · a prompt leaves with its call · "Record notes" creates a Meetings note and records it, the call ending offers "Stop and summarise", which ends it in the note and runs the summary step · "Keep recording" carries the notes into a rejoined huddle, whose end asks again · the Settings toggle turns it off |
 | `e2e/meeting-detect-no-mic.spec.js` | configured mic missing | "Record notes" says why it can't record and leaves no empty meeting note |
+| `e2e/meetings.spec.js` | meeting audio from test WAVs | live You/Them segments, cut in pauses · ending the meeting without an AI model explains how to set one up · the call leaking from the speakers into the mic is flagged as echo, hidden, and kept |
+| `e2e/meeting-summary.spec.js` | Note Formatting pointed at a local fake AI | a two-hour meeting fed in ten-minute batches: 11 rolling digests, each under 4,500 tokens with a capped reply · one final call over digests + the raw tail · an action plan with a section per person, Decisions, Open questions and Unassigned · the deterministic checks (an invented owner, a dropped task, a made-up deadline) · Copy text |
 
 The update spec signs its dummy installer with a throwaway key made for the
 run (`tauri signer`) and serves `latest.json` from a local server, using the
-debug-only `YAP_UPDATE_TEST_*` hooks in `src-tauri/src/updates.rs`.
+debug-only `YAP_UPDATE_TEST_*` hooks in `src-tauri/src/updates.rs`. The
+meeting-summary spec's AI is `support/fake-llm.js`, an OpenAI-compatible
+server with deterministic replies that records every request (see
+[meetings.md](./meetings.md#how-its-tested)).
 
 ## Adding a test
 

@@ -119,13 +119,24 @@ export async function closeSettings(main) {
   }
 }
 
+/**
+ * Close every toast. Each round re-finds whichever toasts are up at that
+ * moment and clicks the first Close with a short timeout: a toast can
+ * expire (or a new one arrive) mid-way, and a click on a toast that's gone
+ * would otherwise wait out the whole test timeout.
+ */
+export async function closeToasts(main) {
+  const toasts = main.getByRole('status');
+  await expect(async () => {
+    const close = toasts.getByRole('button', { name: 'Close', exact: true }).first();
+    if ((await close.count()) > 0) await close.click({ timeout: 1_000 });
+    await expect(toasts).toHaveCount(0, { timeout: 500 });
+  }).toPass({ timeout: 20_000 });
+}
+
 /** Back to a known state between tests: no toasts, Settings closed, Home showing. */
 export async function resetUi(main) {
-  const toasts = main.getByRole('status');
-  for (const close of await toasts.getByRole('button', { name: 'Close', exact: true }).all()) {
-    await close.click().catch(() => {}); // it may be on its way out already
-  }
-  await expect(toasts).toHaveCount(0);
+  await closeToasts(main);
   await closeSettings(main);
   await openView(main, 'Home');
 }

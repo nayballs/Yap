@@ -188,47 +188,101 @@ pub const MEETING_NOTE_BASE_PROMPT: &str = "You are a professional meeting notes
 /// Settings.svelte (same contract as the cleanup default prompt).
 pub const NOTE_DEFAULT_FRAGMENT: &str = "Transform the provided content into clean, well-structured notes in markdown. Preserve the user's intent and all substantive information. Remove filler, small talk, false starts, and redundant content. For personal notes, improve grammar and structure for readability. For meeting transcripts, extract key discussion points, decisions, action items, and follow-ups.";
 
+/// Immutable guardrails for the **Action Plan** (the built-in action "End
+/// meeting & summarise" runs, `notes::ACTION_PLAN`). Unlike
+/// MEETING_NOTE_BASE_PROMPT it asks for names, so its rules are about never
+/// inventing them; `meeting_summary::postcheck_action_plan` enforces the same
+/// rules on the reply. The action's editable prompt (the layout) follows
+/// "Instructions: ".
+pub const ACTION_PLAN_BASE_PROMPT: &str = "You are a meeting assistant. You receive one meeting: the attendees, any notes the user typed, a digest of the meeting written while it went on, and/or its transcript, where \"You:\" is the user (the person who recorded it) and \"Them:\" is everyone else on the call. Turn it into the user's notes as the instructions below say.\n\nRULES (strict):\n- Use only what is in the input. Never invent tasks, decisions, names, owners or dates.\n- An owner is someone who said they would do a task, or who was asked and agreed. Write \"You\" for the user; otherwise use the attendee's name as written, or a name said in the meeting. If no owner was stated, the task is unassigned: never guess one.\n- Give a deadline only when one was said, in the words used.\n- Keep every distinct task; merge only tasks that are clearly the same.\n- No preamble, no title, no closing remarks. No tables, horizontal rules or block quotes.\n\nInstructions: ";
+
+/// The built-in "Action Plan" action's editable prompt (the layout that
+/// `meeting_summary::postcheck_action_plan` understands; a user's own layout
+/// still works, it just gets fewer checks).
+pub const ACTION_PLAN_DEFAULT_FRAGMENT: &str = "Write an action plan. Start with a 1\u{2013}2 sentence summary of the meeting. Then \"## Action plan\" with one \"### Name\" heading per person who has tasks (\"### You\" for the user), each followed by that person's tasks as \"- [ ] task (due: deadline)\" lines, adding the deadline only when one was said. Then \"## Decisions\" and \"## Open questions\" as bullet lists, and last \"## Unassigned\" with the tasks nobody took on, as \"- [ ] task\" lines. Leave out any section that would be empty.";
+
+/// Immutable prompt for one rolling **meeting digest** (`meeting_summary.rs`):
+/// notes on one ~10-minute stretch of a meeting, in a fixed four-heading
+/// layout that `meeting_summary::parse_digest` reads back. Internal (no
+/// editable body): users shape the end result through the Action Plan action.
+pub const MEETING_DIGEST_PROMPT: &str = "You are a meeting note-taker. You receive ONE PART of a longer meeting: its transcript, where \"You:\" is the person recording and \"Them:\" is everyone else on the call, plus the attendee list and the main points of the meeting so far (context only: never repeat them).\n\nWrite notes on THIS PART ONLY, under exactly these four headings, in this order:\n### Key points\n### Decisions\n### Action items\n### Open questions\n\nUnder each heading write short \"- \" bullets, or \"- None\".\nAction items: one per line as \"- [ ] Owner: task (due: deadline)\".\n- Owner: the person who said they would do it, or who was asked and agreed: \"You\" for the person recording, a name from the attendee list, or a name said in this part. If nobody was named or nobody agreed, write \"Unassigned\". Never guess an owner.\n- Add \"(due: ...)\" only when a deadline was said, in the words used (\"by Friday\", \"end of March\").\nUse only what is said in this part. Never invent names, tasks, decisions or dates. At most 6 key points. No preamble, no closing remarks.";
+
+/// Per-call knobs for the note and meeting-summary calls.
+pub(crate) struct ChatOptions {
+    pub temperature: f32,
+    /// Cap on the reply. Sent as `max_tokens` only when set — Yap sets it for
+    /// local servers (one request at a time, so a long reply holds up the
+    /// next dictation's cleanup), never for cloud providers, where some
+    /// models want `max_completion_tokens` instead and reasoning models
+    /// spend part of the cap thinking.
+    pub max_tokens: Option<u32>,
+    pub timeout: Duration,
+    pub disable_thinking: bool,
+}
+
 /// Note enhancement (the Actions-engine call, OpenWhispr `runBackgroundAction`
-/// semantics): system = NOTE_BASE_PROMPT + the editable fragment, user = the
-/// raw note content, temperature 0.3. Returns enhanced markdown for
-/// `enhanced_content` — the raw note is never touched.
+/// semantics): system = the immutable `base` guardrails (NOTE_BASE_PROMPT,
+/// MEETING_NOTE_BASE_PROMPT or ACTION_PLAN_BASE_PROMPT) + the editable
+/// fragment, user = the note content, temperature 0.3 in OpenWhispr. Returns
+/// enhanced markdown for `enhanced_content` — the raw note is never touched.
 #[allow(clippy::too_many_arguments)]
 pub async fn enhance_note(
     content: &str,
+    base: &str,
     fragment: &str,
-    meeting: bool,
     base_url: &str,
     api_key: &str,
     model: &str,
     provider: &str,
-    disable_thinking: bool,
+    opts: &ChatOptions,
 ) -> Result<String, String> {
     let content = content.trim();
     if content.is_empty() {
         return Err("Note is empty — nothing to enhance".to_string());
     }
-    // Base prompt selected by note kind, exactly like OpenWhispr's
-    // `runBackgroundAction` (`isMeetingNote`).
-    let base = if meeting {
-        MEETING_NOTE_BASE_PROMPT
-    } else {
-        NOTE_BASE_PROMPT
-    };
     let system = format!("{base}{}", fragment.trim());
     let messages = json!([
         { "role": "system", "content": system },
         { "role": "user", "content": content },
     ]);
-    let out = post_chat(base_url, api_key, model, provider, 0.3, messages).await?;
-    let out = if disable_thinking {
-        strip_thinking(&out)
-    } else {
-        out
-    };
+    let out = chat(base_url, api_key, model, provider, messages, opts).await?;
     if out.trim().is_empty() {
         return Err("The model returned an empty enhancement".to_string());
     }
     Ok(out.trim().to_string())
+}
+
+/// One chat call with explicit options: the assistant's text, unwrapped
+/// (`strip_wrapping`) and, when asked, without reasoning blocks.
+pub(crate) async fn chat(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    provider: &str,
+    messages: Value,
+    opts: &ChatOptions,
+) -> Result<String, String> {
+    let message = post_chat_request(
+        base_url,
+        api_key,
+        model,
+        provider,
+        opts.temperature,
+        messages,
+        None,
+        opts.max_tokens,
+        opts.timeout,
+    )
+    .await?;
+    let content = message["content"]
+        .as_str()
+        .ok_or_else(|| "response missing choices[0].message.content".to_string())?;
+    let out = strip_wrapping(content.trim());
+    Ok(if opts.disable_thinking {
+        strip_thinking(&out)
+    } else {
+        out
+    })
 }
 
 /// One embedded note-chat turn (OpenWhispr `useEmbeddedChat`): system = the
@@ -368,6 +422,32 @@ pub(crate) async fn post_chat_message(
     messages: Value,
     tools: Option<&Value>,
 ) -> Result<Value, String> {
+    post_chat_request(
+        base_url,
+        api_key,
+        model,
+        provider,
+        temperature,
+        messages,
+        tools,
+        None,
+        CLEANUP_TIMEOUT,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn post_chat_request(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    provider: &str,
+    temperature: f32,
+    messages: Value,
+    tools: Option<&Value>,
+    max_tokens: Option<u32>,
+    timeout: Duration,
+) -> Result<Value, String> {
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let mut body = json!({
         "model": model,
@@ -378,9 +458,12 @@ pub(crate) async fn post_chat_message(
     if let Some(t) = tools {
         body["tools"] = t.clone();
     }
+    if let Some(n) = max_tokens {
+        body["max_tokens"] = json!(n);
+    }
 
     let client = reqwest::Client::builder()
-        .timeout(CLEANUP_TIMEOUT)
+        .timeout(timeout)
         .build()
         .map_err(|e| format!("failed to build HTTP client: {}", e))?;
 

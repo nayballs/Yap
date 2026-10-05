@@ -18,6 +18,7 @@ mod fuzzy;
 mod media;
 mod meeting;
 mod meeting_detect;
+mod meeting_summary;
 mod notes;
 mod tools;
 mod history;
@@ -405,6 +406,9 @@ pub fn run() {
             meeting_detect::meeting_detect_status,
             meeting_detect::meeting_detect_respond,
             meeting_detect::meeting_detect_simulate,
+            // Test mode only (e2e.rs); not in release builds at all.
+            #[cfg(debug_assertions)]
+            e2e::e2e_meeting_feed,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

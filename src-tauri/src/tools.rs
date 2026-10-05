@@ -232,18 +232,13 @@ pub fn execute(name: &str, args: &Value) -> Value {
                     } else {
                         n.content.clone()
                     };
-                    let transcript: String = n
-                        .transcript
-                        .iter()
-                        .map(|s| {
-                            format!(
-                                "{}: {}",
-                                if s.source == "you" { "You" } else { "Them" },
-                                s.text
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
+                    // A long meeting comes as its digests + the latest
+                    // stretch, so one tool result can't fill the context.
+                    let transcript = if n.transcript.is_empty() {
+                        String::new()
+                    } else {
+                        crate::meeting_summary::ask_context(&n, 3_000)
+                    };
                     let display = format!("Retrieved note: \"{}\"", n.title);
                     tool_result(
                         true,

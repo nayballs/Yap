@@ -2,30 +2,25 @@
 // take notes, "Record notes" creates a meeting note and records it, the call
 // ending offers to stop and summarise, and the Settings toggle turns it off.
 // Test mode reads no registry: the debug-only `meeting_detect_simulate` hook
-// stands in for an app taking or letting go of the mic (no debounce). Each
-// test uses its own call app — "Not now" quiets an app for 5 minutes, and the
-// tests share one instance.
-import { test, expect, openView, openSettings, closeSettings, expectStore } from './support/fixtures.js';
+// stands in for an app taking or letting go of the mic (no debounce), and a
+// recording opens no audio device (it's silent here; e2e.rs), so it runs the
+// same with or without a microphone. Each test uses its own call app — "Not
+// now" quiets an app for 5 minutes, and the tests share one instance.
+import {
+  test,
+  expect,
+  openView,
+  openSettings,
+  closeSettings,
+  closeToasts,
+  expectStore,
+} from './support/fixtures.js';
 
 test.use({ yapOptions: { name: 'meeting-detect' } });
 
 const toast = (main, title) => main.getByRole('status').filter({ hasText: title });
 const simulate = (yap, appId, active) => yap.invoke('meeting_detect_simulate', { appId, active });
 const meetingNotes = (yap) => (yap.readJson('notes.json')?.notes ?? []).filter((n) => n.source === 'meeting');
-
-/**
- * Close every toast, one at a time, re-finding each: the short-lived ones a
- * recording leaves behind can expire mid-way, which the shared per-test reset
- * (it clicks a list it found up front) can wait on until the test times out.
- */
-async function closeToasts(main) {
-  const toasts = main.getByRole('status');
-  await expect(async () => {
-    const close = toasts.getByRole('button', { name: 'Close', exact: true }).first();
-    if ((await close.count()) > 0) await close.click({ timeout: 1_000 });
-    await expect(toasts).toHaveCount(0, { timeout: 500 });
-  }).toPass({ timeout: 20_000 });
-}
 
 test('a call starting offers to take notes, and "Not now" leaves it alone', async ({ yap, main, shot }) => {
   await simulate(yap, 'teams', true);
@@ -68,34 +63,20 @@ test('"Record notes" records the call into a meeting note; the call ending offer
   main,
   shot,
 }) => {
-  const mics = await yap.invoke('list_audio_devices');
-  const speakers = await yap.invoke('list_output_devices');
-  const canRecord = mics.length > 0 && speakers.length > 0;
-
   await simulate(yap, 'meet', true);
   const prompt = toast(main, 'Google Meet call detected');
   await expect(prompt).toBeVisible();
   await prompt.getByRole('button', { name: 'Record notes' }).click();
 
-  if (!canRecord) {
-    // No microphone or speakers to record (a CI runner): it says so, and
-    // leaves no empty meeting note behind.
-    await expect(toast(main, "Couldn't record the call")).toBeVisible({ timeout: 15_000 });
-    expect(await yap.invoke('meeting_state')).toMatchObject({ recording: false });
-    expect(meetingNotes(yap)).toHaveLength(0);
-    await shot(main, '02-record-failed-without-devices');
-    await simulate(yap, 'meet', false);
-    return;
-  }
-
-  // The new meeting note opens in Notes, recording.
+  // The new meeting note opens in Notes, recording. (When it can't record,
+  // it says why and leaves no note: meeting-detect-no-mic.spec.js.)
   const title = main.getByPlaceholder('Untitled Note');
   await expect(title).toHaveValue(/^Google Meet call · \d{1,2} [A-Z][a-z]{2}, \d{2}:\d{2}$/, {
     timeout: 15_000,
   });
   await expect(main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Notes', exact: true }))
     .toHaveAttribute('aria-current', 'page');
-  await expect(main.getByTitle('Stop recording')).toBeVisible();
+  await expect(main.getByRole('button', { name: 'End meeting & summarise' })).toBeVisible();
   await expect(toast(main, 'Recording notes')).toBeVisible();
   const notes = meetingNotes(yap);
   expect(notes).toHaveLength(1);
@@ -111,12 +92,13 @@ test('"Record notes" records the call into a meeting note; the call ending offer
   await expect(ended.getByRole('button', { name: 'Keep recording' })).toBeVisible();
   await shot(main, '03-prompt-call-ended');
 
-  // Stopping happens in the note, so the usual Meeting Notes summary runs
-  // (it fails here: the test instance has no AI model configured).
+  // Stopping happens in the note, as "End meeting & summarise": the action
+  // plan step runs (and, the test recording being silent, says there's
+  // nothing to summarise yet).
   await ended.getByRole('button', { name: 'Stop and summarise' }).click();
-  await expect(toast(main, 'Recording stopped')).toBeVisible();
+  await expect(toast(main, 'Meeting ended')).toBeVisible();
   await expect.poll(() => yap.invoke('meeting_state').then((s) => s.recording), { timeout: 20_000 }).toBe(false);
-  await expect(toast(main, /Meeting Notes (complete|failed)/)).toBeVisible({ timeout: 20_000 });
+  await expect(toast(main, 'Nothing to summarise yet')).toBeVisible({ timeout: 20_000 });
   await expect(title).toHaveValue(notes[0].title);
   await shot(main, '04-stopped-and-summarised');
   expect((await yap.invoke('meeting_detect_status')).prompt).toBeNull();
@@ -127,10 +109,6 @@ test('"Keep recording" carries the notes into a rejoined huddle, which asks agai
   yap,
   main,
 }) => {
-  const mics = await yap.invoke('list_audio_devices');
-  const speakers = await yap.invoke('list_output_devices');
-  test.skip(mics.length === 0 || speakers.length === 0, 'needs a microphone and speakers to record');
-
   await simulate(yap, 'slack', true);
   await toast(main, 'Slack huddle detected').getByRole('button', { name: 'Record notes' }).click();
   await expect.poll(() => yap.invoke('meeting_state').then((s) => s.recording), { timeout: 15_000 }).toBe(true);
@@ -148,7 +126,7 @@ test('"Keep recording" carries the notes into a rejoined huddle, which asks agai
   await simulate(yap, 'slack', false);
   await toast(main, 'Slack huddle ended').getByRole('button', { name: 'Stop and summarise' }).click();
   await expect.poll(() => yap.invoke('meeting_state').then((s) => s.recording), { timeout: 20_000 }).toBe(false);
-  await expect(toast(main, /Meeting Notes (complete|failed)/)).toBeVisible({ timeout: 20_000 });
+  await expect(toast(main, 'Nothing to summarise yet')).toBeVisible({ timeout: 20_000 });
   await closeToasts(main);
 });
 
