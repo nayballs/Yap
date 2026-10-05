@@ -89,7 +89,13 @@
     void shownTranscript.length;
     if (logEl && followLog && recordingThisNote) logEl.scrollTop = logEl.scrollHeight;
   });
-  const shownTranscript = $derived((selected?.transcript || []).filter((s) => !s.echo));
+  // "You" chunks that were the call coming through the speakers (meeting.rs
+  // echo check): kept, hidden unless asked for.
+  let showEcho = $state(false);
+  const echoCount = $derived((selected?.transcript || []).filter((s) => s.echo).length);
+  const shownTranscript = $derived(
+    (selected?.transcript || []).filter((s) => showEcho || !s.echo)
+  );
   // "AI notes up to 40:12": where the digests reach, from the meeting's start.
   const digestedUpTo = $derived.by(() => {
     const d = selected?.digests;
@@ -279,6 +285,7 @@
       selected = await invoke('note_get', { id });
       tab = 'raw';
       transcriptView = 'live';
+      showEcho = false;
       error = null;
       chatThread = []; // the embedded chat is pinned to one note
       chatInput = '';
@@ -977,12 +984,22 @@
                 (followLog = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40)}
             >
               {#each shownTranscript as seg, i (i)}
-                <div class="bubble {seg.source === 'you' ? 'you' : 'them'}">
-                  <span class="who">{seg.source === 'you' ? 'You' : 'Them'}</span>
+                <div class="bubble {seg.source === 'you' ? 'you' : 'them'}" class:echo={seg.echo}>
+                  <span class="who">
+                    {seg.source === 'you' ? 'You' : 'Them'}{seg.echo ? ' · from the speakers' : ''}
+                  </span>
                   <p>{seg.text}</p>
                 </div>
               {/each}
             </div>
+            {#if echoCount}
+              <button class="echonote" onclick={() => (showEcho = !showEcho)}>
+                {showEcho ? 'Hide' : 'Show'}
+                {echoCount}
+                {echoCount === 1 ? 'line' : 'lines'} your mic picked up from the speakers (left out of
+                summaries — headphones avoid this)
+              </button>
+            {/if}
           {/if}
         </div>
       {/if}
@@ -1616,6 +1633,25 @@
     align-self: flex-start;
     background: var(--yap-s1);
     border: 1px solid var(--yap-border-subtle);
+  }
+  .bubble.echo {
+    opacity: 0.55;
+    border: 1px dashed var(--yap-border);
+  }
+  .echonote {
+    align-self: flex-start;
+    border: none;
+    background: none;
+    padding: 0;
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 11px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .echonote:hover {
+    color: var(--yap-fg);
+    text-decoration: underline;
   }
   .picker {
     position: relative;

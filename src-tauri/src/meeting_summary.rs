@@ -359,7 +359,13 @@ fn section_of(heading: &str) -> Section {
 /// A heading line's text: "### Key points", "**Decisions:**", "Action items:".
 fn heading_text(t: &str) -> Option<String> {
     if t.starts_with('#') {
-        return Some(t.trim_start_matches('#').trim().trim_end_matches(':').trim().to_string());
+        return Some(
+            t.trim_start_matches('#')
+                .trim()
+                .trim_end_matches(':')
+                .trim()
+                .to_string(),
+        );
     }
     for marker in ["**", "__"] {
         if let Some(inner) = t.strip_prefix(marker).and_then(|s| s.strip_suffix(marker)) {
@@ -423,7 +429,10 @@ fn parse_action(item: &str) -> Option<DigestAction> {
     let mut due = String::new();
     if let Some(c) = due_regex().captures(&text) {
         let d = c[1].trim().trim_end_matches('.').to_string();
-        if !matches!(d.to_lowercase().as_str(), "" | "none" | "n/a" | "tbd" | "not stated") {
+        if !matches!(
+            d.to_lowercase().as_str(),
+            "" | "none" | "n/a" | "tbd" | "not stated"
+        ) {
             due = d;
         }
         let start = c.get(0).map(|m| m.start()).unwrap_or(text.len());
@@ -491,11 +500,37 @@ pub fn parse_digest(reply: &str) -> ParsedDigest {
 /// Lowercase words of `s`, ordinals folded ("3rd" → "3", "third" → "3").
 fn words(s: &str) -> Vec<String> {
     const NUMBERS: [&str; 31] = [
-        "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth",
-        "tenth", "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth",
-        "seventeenth", "eighteenth", "nineteenth", "twentieth", "twenty-first", "twenty-second",
-        "twenty-third", "twenty-fourth", "twenty-fifth", "twenty-sixth", "twenty-seventh",
-        "twenty-eighth", "twenty-ninth", "thirtieth", "thirty-first",
+        "first",
+        "second",
+        "third",
+        "fourth",
+        "fifth",
+        "sixth",
+        "seventh",
+        "eighth",
+        "ninth",
+        "tenth",
+        "eleventh",
+        "twelfth",
+        "thirteenth",
+        "fourteenth",
+        "fifteenth",
+        "sixteenth",
+        "seventeenth",
+        "eighteenth",
+        "nineteenth",
+        "twentieth",
+        "twenty-first",
+        "twenty-second",
+        "twenty-third",
+        "twenty-fourth",
+        "twenty-fifth",
+        "twenty-sixth",
+        "twenty-seventh",
+        "twenty-eighth",
+        "twenty-ninth",
+        "thirtieth",
+        "thirty-first",
     ];
     const CARDINALS: [&str; 12] = [
         "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
@@ -535,11 +570,32 @@ pub fn resolve_owner(raw: &str, attendees: &[String], source: &str) -> String {
         .trim();
     let lower = owner.to_lowercase();
     const NOBODY: [&str; 15] = [
-        "", "unassigned", "none", "nobody", "no one", "someone", "somebody", "anyone", "tbd",
-        "n/a", "unknown", "them", "they", "other", "others",
+        "",
+        "unassigned",
+        "none",
+        "nobody",
+        "no one",
+        "someone",
+        "somebody",
+        "anyone",
+        "tbd",
+        "n/a",
+        "unknown",
+        "them",
+        "they",
+        "other",
+        "others",
     ];
     const YOU: [&str; 5] = ["you", "me", "i", "myself", "the user"];
-    const EVERYONE: [&str; 7] = ["everyone", "everybody", "all", "team", "the team", "all of us", "we"];
+    const EVERYONE: [&str; 7] = [
+        "everyone",
+        "everybody",
+        "all",
+        "team",
+        "the team",
+        "all of us",
+        "we",
+    ];
     if NOBODY.contains(&lower.as_str()) {
         return UNASSIGNED.to_string();
     }
@@ -642,7 +698,11 @@ fn render_with(
     let mut actions: Vec<DigestAction> = Vec::new();
     for (i, d) in digests.iter().enumerate() {
         let at = clock(d.start_ts.saturating_sub(t0));
-        let points_cap = if i % stride.max(1) == 0 { points_cap } else { 0 };
+        let points_cap = if i % stride.max(1) == 0 {
+            points_cap
+        } else {
+            0
+        };
         for p in d.key_points.iter().take(points_cap) {
             points.push_str(&format!("- ({at}) {p}\n"));
         }
@@ -678,9 +738,15 @@ fn render_with(
             }
         }
     };
-    list("Decisions", decisions.iter().map(|d| format!("- {d}")).collect());
+    list(
+        "Decisions",
+        decisions.iter().map(|d| format!("- {d}")).collect(),
+    );
     list("Action items", actions.iter().map(action_line).collect());
-    list("Open questions", questions.iter().map(|q| format!("- {q}")).collect());
+    list(
+        "Open questions",
+        questions.iter().map(|q| format!("- {q}")).collect(),
+    );
     out
 }
 
@@ -696,7 +762,9 @@ pub fn render_digests(digests: &[MeetingDigest], t0: u64, budget: usize) -> Stri
         .map(|cap| (cap, 1, usize::MAX))
         .chain((2..=12).map(|stride| (1, stride, usize::MAX)))
         .chain((1..=6).rev().map(|cap| (0, 1, cap)));
-    for (points_cap, stride, items_cap) in std::iter::once((usize::MAX, 1, usize::MAX)).chain(attempts) {
+    for (points_cap, stride, items_cap) in
+        std::iter::once((usize::MAX, 1, usize::MAX)).chain(attempts)
+    {
         let r = render_with(digests, t0, points_cap, stride, items_cap);
         if fits(&r) {
             return r;
@@ -736,7 +804,10 @@ pub fn compose_meeting_input(note: &Note) -> MeetingInput {
 
     let t0 = meeting_t0(note);
     let end = note.transcript.last().map(|s| s.ts).unwrap_or(t0);
-    text.push_str(&format!("Meeting length: {}\n", clock(end.saturating_sub(t0))));
+    text.push_str(&format!(
+        "Meeting length: {}\n",
+        clock(end.saturating_sub(t0))
+    ));
     if !typed.is_empty() {
         text.push_str(&format!(
             "\n## Notes typed during the meeting\n{}\n",
@@ -752,7 +823,8 @@ pub fn compose_meeting_input(note: &Note) -> MeetingInput {
             clock(first.start_ts.saturating_sub(t0)),
             clock(last.end_ts.saturating_sub(t0))
         );
-        let used = estimate_tokens(&text) + estimate_tokens(&header) + estimate_tokens(&tail_lines) + 30;
+        let used =
+            estimate_tokens(&text) + estimate_tokens(&header) + estimate_tokens(&tail_lines) + 30;
         let budget = FINAL_INPUT_TOKENS.saturating_sub(used);
         text.push_str(&header);
         text.push_str(&render_digests(&note.digests, t0, budget));
@@ -800,7 +872,8 @@ fn is_task(line: &str) -> bool {
 /// Content words of a task, for "is this the same task" checks.
 fn task_words(task: &str) -> HashSet<String> {
     const STOP: [&str; 14] = [
-        "the", "a", "an", "to", "and", "for", "of", "on", "by", "with", "due", "will", "our", "their",
+        "the", "a", "an", "to", "and", "for", "of", "on", "by", "with", "due", "will", "our",
+        "their",
     ];
     words(task)
         .into_iter()
@@ -963,10 +1036,17 @@ pub fn postcheck_action_plan(
         }
     }
     for a in lost.iter().filter(|a| a.owner != UNASSIGNED) {
-        let plan = doc.section(is_plan_title, "Action plan", &["decision", "question", "unassigned"]);
+        let plan = doc.section(
+            is_plan_title,
+            "Action plan",
+            &["decision", "question", "unassigned"],
+        );
         let body = &mut doc.sections[plan].1;
         let heading = format!("### {}", a.owner);
-        let at = match body.iter().position(|l| l.trim().eq_ignore_ascii_case(&heading)) {
+        let at = match body
+            .iter()
+            .position(|l| l.trim().eq_ignore_ascii_case(&heading))
+        {
             Some(h) => {
                 let next = body[h + 1..]
                     .iter()
@@ -998,7 +1078,11 @@ pub fn postcheck_action_plan(
             .map(|a| task_line(&a.task, &a.due)),
     );
     if !moved.is_empty() {
-        let un = doc.section(|t: &str| t.to_lowercase().contains("unassigned"), UNASSIGNED, &[]);
+        let un = doc.section(
+            |t: &str| t.to_lowercase().contains("unassigned"),
+            UNASSIGNED,
+            &[],
+        );
         let body = &mut doc.sections[un].1;
         while body.last().is_some_and(|l| l.trim().is_empty()) {
             body.pop();
@@ -1197,7 +1281,14 @@ async fn digest_window(
         &lines,
     );
     let opts = ep.options(DIGEST_REPLY_TOKENS, 0.2);
-    let call = crate::llm::chat(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, &opts);
+    let call = crate::llm::chat(
+        &ep.base_url,
+        &ep.api_key,
+        &ep.model,
+        &ep.provider,
+        messages,
+        &opts,
+    );
     let reply = if yield_to_dictation {
         unless_busy(call, || dictation_busy(app))
             .await
@@ -1207,7 +1298,9 @@ async fn digest_window(
     }
     .map_err(DigestError::Failed)?;
     if reply.trim().is_empty() {
-        return Err(DigestError::Failed("the model returned an empty digest".to_string()));
+        return Err(DigestError::Failed(
+            "the model returned an empty digest".to_string(),
+        ));
     }
     let parsed = check_digest(parse_digest(&reply), &note.participants, &lines);
     let raw = if parsed.recognized {
@@ -1306,9 +1399,11 @@ async fn live_digests(app: &AppHandle, note_id: u64) {
         let Some(note) = crate::notes::get(note_id) else {
             return;
         };
-        let Some((from, to)) =
-            next_window(&note.transcript, crate::notes::digested_upto(&note), Plan::Live)
-        else {
+        let Some((from, to)) = next_window(
+            &note.transcript,
+            crate::notes::digested_upto(&note),
+            Plan::Live,
+        ) else {
             return;
         };
         match digest_window(app, &note, from, to, &ep, local).await {
@@ -1322,7 +1417,10 @@ async fn live_digests(app: &AppHandle, note_id: u64) {
                 tracing::info!("Meeting digest set aside for a dictation; retrying after it");
             }
             Err(DigestError::Failed(e)) => {
-                tracing::warn!("Meeting digest failed (retrying in a couple of minutes): {}", e);
+                tracing::warn!(
+                    "Meeting digest failed (retrying in a couple of minutes): {}",
+                    e
+                );
                 COOLDOWN_UNTIL_MS.store(now_ms() + FAILURE_COOLDOWN_MS, Ordering::SeqCst);
                 return;
             }
@@ -1389,7 +1487,11 @@ mod tests {
                 for w in 1..words {
                     text.push_str(&format!(" word{}", (i + w) % 97));
                 }
-                seg(if i % 2 == 0 { "you" } else { "them" }, &text, 1000 + i as u64 * every)
+                seg(
+                    if i % 2 == 0 { "you" } else { "them" },
+                    &text,
+                    1000 + i as u64 * every,
+                )
             })
             .collect()
     }
@@ -1432,7 +1534,10 @@ mod tests {
         let (from, to) = next_window(&burst, 0, Plan::Live).unwrap();
         assert_eq!(from, 0);
         let tokens: usize = burst[from..to].iter().map(seg_tokens).sum();
-        assert!((DIGEST_TARGET_TOKENS..=DIGEST_MAX_TOKENS).contains(&tokens), "{tokens}");
+        assert!(
+            (DIGEST_TARGET_TOKENS..=DIGEST_MAX_TOKENS).contains(&tokens),
+            "{tokens}"
+        );
     }
 
     #[test]
@@ -1475,7 +1580,11 @@ mod tests {
         assert!(d.decisions.is_empty());
         assert_eq!(
             d.actions[0],
-            DigestAction { owner: "Alice".into(), task: "send the revised budget".into(), due: "Friday".into() }
+            DigestAction {
+                owner: "Alice".into(),
+                task: "send the revised budget".into(),
+                due: "Friday".into()
+            }
         );
         assert_eq!(d.actions[1].owner, "Unassigned");
         assert_eq!(d.actions[2].task, "review the contract");
@@ -1512,7 +1621,10 @@ mod tests {
 
     #[test]
     fn deadlines_must_have_been_said() {
-        let src: HashSet<String> = words("You: can you do it by the third of March? Them: sure, by Friday").into_iter().collect();
+        let src: HashSet<String> =
+            words("You: can you do it by the third of March? Them: sure, by Friday")
+                .into_iter()
+                .collect();
         assert_eq!(supported_due("Friday", &src), "Friday");
         assert_eq!(supported_due("March 3rd", &src), "March 3rd");
         assert_eq!(supported_due("by Monday", &src), "");
@@ -1530,7 +1642,13 @@ mod tests {
         assert_eq!(d.actions[1].due, "");
     }
 
-    fn digest(from: usize, to: usize, start: u64, points: &[&str], actions: &[(&str, &str, &str)]) -> MeetingDigest {
+    fn digest(
+        from: usize,
+        to: usize,
+        start: u64,
+        points: &[&str],
+        actions: &[(&str, &str, &str)],
+    ) -> MeetingDigest {
         MeetingDigest {
             from_seg: from,
             to_seg: to,
@@ -1540,7 +1658,11 @@ mod tests {
             decisions: vec![format!("decision at {start}")],
             actions: actions
                 .iter()
-                .map(|(o, t, d)| DigestAction { owner: o.to_string(), task: t.to_string(), due: d.to_string() })
+                .map(|(o, t, d)| DigestAction {
+                    owner: o.to_string(),
+                    task: t.to_string(),
+                    due: d.to_string(),
+                })
                 .collect(),
             questions: vec![],
             raw: String::new(),
@@ -1555,23 +1677,34 @@ mod tests {
             let n = (hours * 3600 / 15) as usize;
             let mut note = note_with(talk(n, words, 15));
             let mut from = 0;
-            let plans = [Plan::Live, Plan::Final { keep: FINAL_TAIL_TOKENS }];
+            let plans = [
+                Plan::Live,
+                Plan::Final {
+                    keep: FINAL_TAIL_TOKENS,
+                },
+            ];
             for plan in plans {
                 while let Some((f, to)) = next_window(&note.transcript, from, plan) {
                     let start = note.transcript[f].ts;
                     let points: Vec<String> = (0..6)
-                        .map(|i| format!("a fairly detailed key point number {i} about the discussion"))
+                        .map(|i| {
+                            format!("a fairly detailed key point number {i} about the discussion")
+                        })
                         .collect();
                     let points: Vec<&str> = points.iter().map(|s| s.as_str()).collect();
                     let task = format!("task from {f}");
-                    note.digests.push(digest(f, to, start, &points, &[("Alice", &task, "")]));
+                    note.digests
+                        .push(digest(f, to, start, &points, &[("Alice", &task, "")]));
                     from = to;
                 }
             }
             note.content = "typed notes ".repeat(400);
             let input = compose_meeting_input(&note);
             let tokens = estimate_tokens(&input.text);
-            assert!(tokens <= FINAL_INPUT_TOKENS + 50, "{hours}h: {tokens} tokens");
+            assert!(
+                tokens <= FINAL_INPUT_TOKENS + 50,
+                "{hours}h: {tokens} tokens"
+            );
             assert!(input.text.contains("## Digest of the meeting so far"));
             assert_eq!(
                 input.text.contains("## Transcript of the last part"),
@@ -1598,47 +1731,93 @@ mod tests {
         let source = "Them: Alice will send the revised budget by Friday. You: Bob, the venue?";
         let reply = "The team planned the offsite.\n\n## Action plan\n\n### Alice\n- [ ] Send the revised budget (due: Friday)\n\n### Mallory\n- [ ] Order the pizza (due: Tuesday)\n\n## Decisions\n- Offsite in May\n";
         let digest_actions = vec![
-            DigestAction { owner: "Alice".into(), task: "send the revised budget".into(), due: "Friday".into() },
-            DigestAction { owner: "Bob Stone".into(), task: "book the venue".into(), due: String::new() },
-            DigestAction { owner: UNASSIGNED.into(), task: "update the wiki".into(), due: String::new() },
+            DigestAction {
+                owner: "Alice".into(),
+                task: "send the revised budget".into(),
+                due: "Friday".into(),
+            },
+            DigestAction {
+                owner: "Bob Stone".into(),
+                task: "book the venue".into(),
+                due: String::new(),
+            },
+            DigestAction {
+                owner: UNASSIGNED.into(),
+                task: "update the wiki".into(),
+                due: String::new(),
+            },
         ];
         let out = postcheck_action_plan(reply, &attendees, source, &digest_actions);
         assert!(!out.contains("Mallory"), "{out}");
-        assert!(out.contains("### Alice\n- [ ] Send the revised budget (due: Friday)"), "{out}");
+        assert!(
+            out.contains("### Alice\n- [ ] Send the revised budget (due: Friday)"),
+            "{out}"
+        );
         assert!(out.contains("### Bob Stone\n- [ ] book the venue"), "{out}");
         // Mallory's task lost its made-up deadline and moved to Unassigned,
         // with the lost unassigned task.
         let un = out.split("## Unassigned").nth(1).expect(&out);
-        assert!(un.contains("- [ ] Order the pizza\n") || un.contains("- [ ] Order the pizza"), "{out}");
+        assert!(
+            un.contains("- [ ] Order the pizza\n") || un.contains("- [ ] Order the pizza"),
+            "{out}"
+        );
         assert!(!un.contains("Tuesday"), "{out}");
         assert!(un.contains("- [ ] update the wiki"), "{out}");
         // The action plan comes before Decisions, Unassigned last.
-        let (plan, dec, una) = (out.find("## Action plan").unwrap(), out.find("## Decisions").unwrap(), out.find("## Unassigned").unwrap());
+        let (plan, dec, una) = (
+            out.find("## Action plan").unwrap(),
+            out.find("## Decisions").unwrap(),
+            out.find("## Unassigned").unwrap(),
+        );
         assert!(plan < dec && dec < una, "{out}");
         // Nothing to fix: unchanged.
         let clean = "Summary.\n\n## Action plan\n\n### You\n- [ ] Send the deck";
-        let you = [DigestAction { owner: "You".into(), task: "send the deck".into(), due: String::new() }];
-        assert_eq!(postcheck_action_plan(clean, &attendees, "You: I'll send the deck", &you), clean);
+        let you = [DigestAction {
+            owner: "You".into(),
+            task: "send the deck".into(),
+            due: String::new(),
+        }];
+        assert_eq!(
+            postcheck_action_plan(clean, &attendees, "You: I'll send the deck", &you),
+            clean
+        );
     }
 
     #[test]
     fn context_so_far_is_bounded_and_ordered() {
         let digests: Vec<MeetingDigest> = (0..30)
-            .map(|i| digest(i, i + 1, 1000 + i as u64 * 600, &["a key point that takes up some room in the budget"], &[]))
+            .map(|i| {
+                digest(
+                    i,
+                    i + 1,
+                    1000 + i as u64 * 600,
+                    &["a key point that takes up some room in the budget"],
+                    &[],
+                )
+            })
             .collect();
         let c = context_so_far(&digests, 1000);
         assert!(estimate_tokens(&c) <= CONTEXT_TOKENS + 5);
         // The newest point is kept, and the list runs oldest → newest.
         assert!(c.trim_end().ends_with("budget"));
         assert!(c.lines().last().unwrap().contains(&clock(29 * 600)));
-        assert_eq!(context_so_far(&[], 0), "(This is the start of the meeting.)");
+        assert_eq!(
+            context_so_far(&[], 0),
+            "(This is the start of the meeting.)"
+        );
     }
 
     #[test]
     fn ask_context_is_bounded() {
         let mut note = note_with(talk(600, 40, 15));
         assert!(estimate_tokens(&ask_context(&note, 3_000)) <= 3_050);
-        note.digests.push(digest(0, 300, 1000, &["early point"], &[("Alice", "do a thing", "")]));
+        note.digests.push(digest(
+            0,
+            300,
+            1000,
+            &["early point"],
+            &[("Alice", "do a thing", "")],
+        ));
         let c = ask_context(&note, 3_000);
         assert!(c.contains("early point"));
         assert!(estimate_tokens(&c) <= 3_100);
@@ -1657,8 +1836,18 @@ mod tests {
         assert!(ep("ondevice", "http://127.0.0.1:5000/v1").is_local());
         assert!(ep("custom", "http://localhost:11434/v1").is_local());
         assert!(!ep("groq", "https://api.groq.com/openai/v1").is_local());
-        assert_eq!(ep("custom", "http://127.0.0.1:1/v1").options(700, 0.2).max_tokens, Some(700));
-        assert_eq!(ep("groq", "https://api.groq.com/openai/v1").options(700, 0.2).max_tokens, None);
+        assert_eq!(
+            ep("custom", "http://127.0.0.1:1/v1")
+                .options(700, 0.2)
+                .max_tokens,
+            Some(700)
+        );
+        assert_eq!(
+            ep("groq", "https://api.groq.com/openai/v1")
+                .options(700, 0.2)
+                .max_tokens,
+            None
+        );
     }
 
     #[tokio::test]

@@ -26,9 +26,13 @@
 //! Unlike OpenWhispr there is NO realtime-cloud path — chunks are transcribed
 //! locally, so "live" means ~15 s behind, fully offline.
 //!
-//! Echo caveat (same as their `oneOnOneAttendee` fast-path): with speakers
-//! instead of headphones, the mic hears "Them" too — the UI recommends
-//! headphones for clean separation. Speaker diarization is a later item.
+//! Echo: with speakers instead of headphones the mic hears "Them" too. A
+//! "you" chunk that only repeats the call — same words, and a loudness that
+//! follows the call audio a moment later — is flagged `echo` (kept, hidden,
+//! left out of summaries; see "Echo" below). A chunk where the user also
+//! spoke is kept whole, so the UI still recommends headphones. Telling the
+//! people on the call apart (diarization) is a later item: "Them" is
+//! everyone else.
 //!
 //! In e2e test runs (debug builds, `YAP_E2E=1`) no device is opened: the
 //! audio comes from test files, or nowhere (`e2e::spawn_meeting_audio`).
@@ -65,6 +69,150 @@ pub(crate) const MAX_BUFFER_SAMPLES: usize = 20 * 60 * RATE;
 
 /// One source's audio, shared by its capture callback and the worker.
 pub(crate) type AudioBuf = Arc<Mutex<Vec<f32>>>;
+
+// ---- Echo: the call's audio leaking from the speakers into the mic ----
+//
+// On speakers (no headphones) the mic hears "Them" too, so the "You"
+// transcript repeats what they said — and a summary could hand "I'll do it"
+// to the wrong person. A "you" chunk is flagged as echo only when BOTH hold:
+// its words mostly repeat what "them" said around then (in order), AND the
+// mic's loudness follows the call audio within a short delay (sound that
+// came out of the speakers). The second keeps a headphone user's own
+// "yes, I'll send the budget by Friday" — which repeats the question's
+// words but not its timing — from ever being taken for echo. Flagged
+// segments stay in the note (hidden, left out of summaries); a chunk where
+// the user also spoke is kept whole. (OpenWhispr's meetingEchoLeakDetector
+// does the audio side with sample correlation and AEC; this is the light,
+// offline version.)
+
+/// Envelope frame: 20 ms.
+const ENV_FRAME: usize = RATE / 50;
+/// Speaker → room → mic delay searched, in frames (600 ms).
+const ECHO_MAX_LAG: u64 = 30;
+/// Compare at least this much audio (3 s) before calling anything echo.
+const ECHO_MIN_OVERLAP: usize = 150;
+/// The mic's loudness must follow the call this closely (Pearson r)…
+const ECHO_MIN_CORRELATION: f32 = 0.6;
+/// …and this share of its words repeat theirs, in order.
+const ECHO_MIN_SHARE: f32 = 0.6;
+/// Envelope history kept per source (~2 minutes).
+const ENV_KEEP_FRAMES: usize = 6_000;
+
+/// One source's loudness, 20 ms RMS frames on the session's sample clock.
+#[derive(Default)]
+struct Envelope {
+    frames: std::collections::VecDeque<f32>,
+    /// Absolute index of `frames[0]`.
+    first: u64,
+    /// Samples short of a whole frame, waiting for the next chunk.
+    carry: Vec<f32>,
+}
+
+impl Envelope {
+    /// Append the source's next audio (chunks arrive in order, no gaps).
+    fn push(&mut self, samples: &[f32]) {
+        self.carry.extend_from_slice(samples);
+        let (frames, _) = self.carry.as_chunks::<ENV_FRAME>();
+        let whole = frames.len() * ENV_FRAME;
+        for frame in frames {
+            let ms = frame.iter().map(|s| s * s).sum::<f32>() / ENV_FRAME as f32;
+            self.frames.push_back(ms.sqrt());
+        }
+        self.carry.drain(..whole);
+        while self.frames.len() > ENV_KEEP_FRAMES {
+            self.frames.pop_front();
+            self.first += 1;
+        }
+    }
+
+    /// Frames `[from, to)` (absolute), clipped to what's kept: (start, frames).
+    fn range(&self, from: u64, to: u64) -> (u64, Vec<f32>) {
+        let end = self.first + self.frames.len() as u64;
+        let (from, to) = (from.max(self.first), to.min(end));
+        if from >= to {
+            return (from, Vec::new());
+        }
+        let frames = self
+            .frames
+            .range((from - self.first) as usize..(to - self.first) as usize)
+            .copied()
+            .collect();
+        (from, frames)
+    }
+}
+
+fn pearson(x: &[f32], y: &[f32]) -> f32 {
+    let n = x.len() as f32;
+    let (mx, my) = (x.iter().sum::<f32>() / n, y.iter().sum::<f32>() / n);
+    let (mut sxy, mut sxx, mut syy) = (0.0f32, 0.0f32, 0.0f32);
+    for (a, b) in x.iter().zip(y) {
+        sxy += (a - mx) * (b - my);
+        sxx += (a - mx) * (a - mx);
+        syy += (b - my) * (b - my);
+    }
+    if sxx <= f32::EPSILON || syy <= f32::EPSILON {
+        return 0.0;
+    }
+    sxy / (sxx.sqrt() * syy.sqrt())
+}
+
+/// How closely the mic's envelope (`mic`, from absolute frame `mic_from`)
+/// follows the call's (`call`, from `call_from`) delayed by 0..=600 ms: the
+/// best Pearson r over the lags, 0 without 3 s of overlap to compare.
+fn echo_correlation(mic: &[f32], mic_from: u64, call: &[f32], call_from: u64) -> f32 {
+    let mut best = 0.0f32;
+    for lag in 0..=ECHO_MAX_LAG {
+        // mic[i] pairs with call[i - lag], absolute frame indices.
+        let lo = mic_from.max(call_from + lag);
+        let hi = (mic_from + mic.len() as u64).min(call_from + call.len() as u64 + lag);
+        if hi <= lo || ((hi - lo) as usize) < ECHO_MIN_OVERLAP {
+            continue;
+        }
+        let m = &mic[(lo - mic_from) as usize..(hi - mic_from) as usize];
+        let c = &call[(lo - lag - call_from) as usize..(hi - lag - call_from) as usize];
+        best = best.max(pearson(m, c));
+    }
+    best
+}
+
+/// Content words (lowercase, 3+ letters, no stopwords).
+fn content_words(s: &str) -> Vec<String> {
+    const STOP: [&str; 24] = [
+        "the", "and", "you", "that", "this", "was", "for", "are", "with", "but", "not", "have",
+        "has", "had", "its", "it's", "our", "your", "they", "them", "then", "there", "what", "yes",
+    ];
+    s.split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .map(|w| w.to_lowercase())
+        .filter(|w| w.chars().count() >= 3 && !STOP.contains(&w.as_str()))
+        .collect()
+}
+
+/// Share of `you`'s content words that repeat `them`'s, in order (longest
+/// common subsequence); 0 for fewer than 4 words (too little to judge).
+fn echoed_share(you: &str, them: &str) -> f32 {
+    let (a, b) = (content_words(you), content_words(them));
+    if a.len() < 4 || b.is_empty() {
+        return 0.0;
+    }
+    let mut prev = vec![0usize; b.len() + 1];
+    for x in &a {
+        let mut cur = vec![0usize; b.len() + 1];
+        for (j, y) in b.iter().enumerate() {
+            cur[j + 1] = if x == y {
+                prev[j] + 1
+            } else {
+                prev[j + 1].max(cur[j])
+            };
+        }
+        prev = cur;
+    }
+    prev[b.len()] as f32 / a.len() as f32
+}
+
+/// The echo verdict for a "you" chunk (see above).
+fn is_echo(correlation: f32, share: f32) -> bool {
+    correlation >= ECHO_MIN_CORRELATION && share >= ECHO_MIN_SHARE
+}
 
 /// The active session — the capture thread and drain worker hold the buffers
 /// and streams; this only carries what stop/state need.
@@ -320,8 +468,12 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option
 
     let slot = Arc::clone(engine_slot);
     let outcome = tokio::task::spawn_blocking(move || {
-        let result =
-            engine.transcribe(&samples, language.as_deref(), translate, dict_prompt.as_deref());
+        let result = engine.transcribe(
+            &samples,
+            language.as_deref(),
+            translate,
+            dict_prompt.as_deref(),
+        );
         (engine, result)
     })
     .await;
@@ -353,6 +505,75 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option
             None
         }
     }
+}
+
+/// One captured source in the worker.
+struct Source {
+    buf: AudioBuf,
+    /// Samples handed to the engine so far: dates the next chunk.
+    taken: u64,
+    loudness: Envelope,
+}
+
+impl Source {
+    fn new(buf: AudioBuf) -> Self {
+        Source {
+            buf,
+            taken: 0,
+            loudness: Envelope::default(),
+        }
+    }
+
+    /// The next chunk, transcribed: `(from, to, text)` with `from`/`to` in
+    /// samples on the session clock, or `None` (nothing ready, or silence).
+    async fn next(
+        &mut self,
+        engine_slot: &EngineSlot,
+        final_drain: bool,
+    ) -> Option<(u64, u64, String)> {
+        let chunk = take_chunk(&self.buf, final_drain)?;
+        let from = self.taken;
+        self.taken += chunk.len() as u64;
+        self.loudness.push(&chunk);
+        let text = transcribe_chunk(engine_slot, chunk).await?;
+        Some((from, self.taken, text))
+    }
+}
+
+/// Was this "you" chunk (`from..to`, saying `text`) the call coming through
+/// the speakers? See the echo notes at the top.
+fn sounds_like_echo(
+    mic: &Envelope,
+    call: &Envelope,
+    from: u64,
+    to: u64,
+    text: &str,
+    theirs: &std::collections::VecDeque<(u64, u64, String)>,
+) -> bool {
+    let frame = ENV_FRAME as u64;
+    let (a, b) = (from / frame, to / frame);
+    let (mic_from, mic_frames) = mic.range(a, b);
+    let (call_from, call_frames) = call.range(a.saturating_sub(ECHO_MAX_LAG), b);
+    let correlation = echo_correlation(&mic_frames, mic_from, &call_frames, call_from);
+    if correlation < ECHO_MIN_CORRELATION {
+        return false;
+    }
+    let slack = RATE as u64;
+    let said: Vec<&str> = theirs
+        .iter()
+        .filter(|(f, t, _)| *t + slack >= from && *f <= to + slack)
+        .map(|(_, _, text)| text.as_str())
+        .collect();
+    let share = echoed_share(text, &said.join(" "));
+    let echo = is_echo(correlation, share);
+    if echo {
+        tracing::info!(
+            correlation,
+            share,
+            "Meeting: a mic chunk was the call coming through the speakers; hidden"
+        );
+    }
+    echo
 }
 
 /// New transcript segments for the meeting in `note_id`: persist them, show
@@ -426,9 +647,11 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
 
     // The chunk/transcribe worker.
     tauri::async_runtime::spawn(async move {
-        // (source, buffer, samples handed to the engine so far — which dates
-        // the next chunk)
-        let mut sources = [("you", mic_buf, 0u64), ("them", sys_buf, 0u64)];
+        let mut you = Source::new(mic_buf);
+        let mut them = Source::new(sys_buf);
+        // What "them" said lately, for the echo check: (from, to, text) in
+        // samples on the session clock.
+        let mut theirs: std::collections::VecDeque<(u64, u64, String)> = Default::default();
         let tick = drain_interval();
         let mut backlog = false;
         let mut warned = false;
@@ -445,26 +668,36 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
                 }
             }
             let stopping = stop.load(Ordering::SeqCst);
-            backlog = false;
 
+            // "Them" first, so the echo check can hold "you" up against it.
             let mut batch: Vec<TranscriptSegment> = Vec::new();
-            for (source, buf, taken) in sources.iter_mut() {
-                let Some(chunk) = take_chunk(buf, stopping) else {
-                    continue;
-                };
-                let start_ms = started_ms + *taken * 1000 / RATE as u64;
-                *taken += chunk.len() as u64;
-                if let Some(text) = transcribe_chunk(&engine_slot, chunk).await {
-                    batch.push(TranscriptSegment {
-                        source: source.to_string(),
-                        text,
-                        ts: start_ms / 1000,
-                        echo: false,
-                    });
+            let at = |from: u64| (started_ms + from * 1000 / RATE as u64) / 1000;
+            if let Some((from, to, text)) = them.next(&engine_slot, stopping).await {
+                batch.push(TranscriptSegment {
+                    source: "them".to_string(),
+                    text: text.clone(),
+                    ts: at(from),
+                    echo: false,
+                });
+                theirs.push_back((from, to, text));
+                while theirs.len() > 4 {
+                    theirs.pop_front();
                 }
-                let left = buffered(buf);
-                backlog |= left >= CHUNK_SECS * RATE || (stopping && left > 0);
             }
+            if let Some((from, to, text)) = you.next(&engine_slot, stopping).await {
+                let echo =
+                    sounds_like_echo(&you.loudness, &them.loudness, from, to, &text, &theirs);
+                batch.push(TranscriptSegment {
+                    source: "you".to_string(),
+                    text,
+                    ts: at(from),
+                    echo,
+                });
+            }
+            backlog = [&you, &them].iter().any(|s| {
+                let left = buffered(&s.buf);
+                left >= CHUNK_SECS * RATE || (stopping && left > 0)
+            });
             batch.sort_by_key(|s| s.ts);
             if let Err(e) = ingest(&app, note_id, batch) {
                 tracing::warn!("Meeting segments not saved: {}", e);
@@ -535,7 +768,10 @@ mod tests {
             *x = 0.0005;
         }
         let cut = next_cut(&s, false).unwrap();
-        assert!((13 * RATE..13 * RATE + RATE / 10).contains(&cut), "cut at {cut}");
+        assert!(
+            (13 * RATE..13 * RATE + RATE / 10).contains(&cut),
+            "cut at {cut}"
+        );
     }
 
     #[test]
@@ -554,6 +790,92 @@ mod tests {
         let first = take_chunk(&buf, false).unwrap().len();
         assert!((15 * RATE..20 * RATE).contains(&first));
         assert_eq!(first + buffered(&buf), 20 * RATE);
+    }
+
+    /// A speech-like loudness pattern: syllables on and off, `seed`-shaped.
+    fn talk_audio(secs: f32, seed: u32) -> Vec<f32> {
+        let n = (secs * RATE as f32) as usize;
+        (0..n)
+            .map(|i| {
+                let syllable = (i / 2_400) as u32; // 150 ms
+                let hash = syllable
+                    .wrapping_add(seed.wrapping_mul(1_000_003))
+                    .wrapping_mul(2_654_435_761);
+                let on = !(hash >> 16).is_multiple_of(3);
+                let amp = if on { 0.3 } else { 0.004 };
+                amp * (i as f32 * 0.21).sin()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn envelope_frames_line_up_across_chunks() {
+        let audio = talk_audio(3.0, 1);
+        let mut whole = Envelope::default();
+        whole.push(&audio);
+        let mut pieces = Envelope::default();
+        for chunk in audio.chunks(1_234) {
+            pieces.push(chunk);
+        }
+        assert_eq!(whole.frames, pieces.frames);
+        assert_eq!(whole.range(10, 20).1.len(), 10);
+        assert_eq!(whole.range(140, 999).1.len(), 10);
+        assert!(whole.range(500, 600).1.is_empty());
+    }
+
+    #[test]
+    fn speaker_bleed_follows_the_call_with_a_delay() {
+        let call = talk_audio(10.0, 7);
+        // The mic hears the call 120 ms late and quieter, plus room noise.
+        let delay = RATE * 12 / 100;
+        let mut mic: Vec<f32> = vec![0.0; delay];
+        mic.extend(call.iter().map(|s| s * 0.3));
+        mic.truncate(call.len());
+        for (i, s) in mic.iter_mut().enumerate() {
+            *s += 0.002 * (i as f32 * 1.7).sin();
+        }
+        let (mut c, mut m) = (Envelope::default(), Envelope::default());
+        c.push(&call);
+        m.push(&mic);
+        let (cf, cv) = c.range(0, 500);
+        let (mf, mv) = m.range(0, 500);
+        assert!(echo_correlation(&mv, mf, &cv, cf) > 0.9);
+        // The user talking on their own (headphones) doesn't follow it.
+        let mut own = Envelope::default();
+        own.push(&talk_audio(10.0, 3));
+        let (of, ov) = own.range(0, 500);
+        assert!(echo_correlation(&ov, of, &cv, cf) < ECHO_MIN_CORRELATION);
+        // Too little to compare: no verdict.
+        assert_eq!(echo_correlation(&mv[..100], mf, &cv, cf), 0.0);
+    }
+
+    #[test]
+    fn echoed_text_repeats_theirs_in_order() {
+        let them =
+            "Can you send the revised budget to finance by Friday? We also need the venue booked.";
+        // Bleed, transcribed a little differently.
+        assert!(
+            echoed_share(
+                "can you send the revised budget to finance by friday we also need a venue booked",
+                them
+            ) > 0.9
+        );
+        // The user's own answer repeats some words, but adds their own.
+        let reply =
+            "Sure, happy to do that, I'll get the numbers over to finance after lunch today";
+        assert!(echoed_share(reply, them) < ECHO_MIN_SHARE);
+        // Too short to judge.
+        assert_eq!(echoed_share("Friday budget", them), 0.0);
+    }
+
+    #[test]
+    fn echo_needs_both_the_words_and_the_timing() {
+        // A headphone user confirming the task: same words, own timing.
+        assert!(!is_echo(0.2, 0.83));
+        // Speakers, a chunk that's only the call: flagged.
+        assert!(is_echo(0.85, 0.9));
+        // Speakers, the user also talking: kept.
+        assert!(!is_echo(0.7, 0.45));
     }
 
     #[test]
