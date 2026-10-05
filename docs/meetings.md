@@ -198,7 +198,7 @@ block under "Ask about calls in"). Code: `src-tauri/src/meeting_guard.rs`,
 
 | Setting | Config | Default | Wispr's |
 |---|---|---|---|
-| When a call ends: **Ask me** / **Stop automatically** | `meetingCallEnd` `"ask"` / `"stop"` | Ask me | "Stop Notetaker when a call ends", on |
+| When a call ends: **Ask me** / **Stop and summarise automatically** | `meetingCallEnd` `"ask"` / `"stop"` | Ask me | "Stop Notetaker when a call ends", on |
 | **Maximum recording length**: 1, 2, 3, 4 hours / No limit | `meetingMaxMinutes` (0 = none) | 2 hours | the same, 2 hours |
 | **Hide Yap's meeting windows from screen sharing** | `meetingHideFromCapture` | on | "Don't show Notepad and Flow Bar in screen capture", on |
 | **Meeting shortcut** | `meetingHotkey` | Win+Alt+M (`kb:alt+win+77`) | Win+Alt+M |
@@ -311,10 +311,15 @@ KeyTips) and Win the Start menu.
     screen-share tip and **Update settings** landing on the switch, and
     switching it back on mid-meeting hiding at once; the length warning,
     **Keep going**, the second warning and the stop at the limit, with
-    seconds for hours (debug-only `e2e_meeting_limit`); "Stop automatically"
-    on a simulated call end; the shortcut starting a "Meeting · …" note and
-    stopping it, and taking notes on a live call; the Settings rows, and
-    recording a new shortcut.
+    seconds for hours (debug-only `e2e_meeting_limit`); "Stop and summarise
+    automatically" on a simulated call end; the shortcut starting a "Meeting
+    · …" note and stopping it, and taking notes on a live call; the Settings
+    rows, and recording a new shortcut.
+  - Capture hiding, once by hand (2026-10-05): a GDI desktop capture of just
+    the overlay's rectangle (the path screenshot tools use) while a meeting
+    recorded, with the overlay shown. Excluded: identical to the background
+    (0 % of pixels differ); hiding off: the capsule shows (27 % differ). So
+    the flag works on Tauri's transparent WebView2 overlay.
   - Unit tests (`cargo test --lib -- meeting_guard capture input_hook`): the
     length guard's steps (on time, late, raised, removed, Keep going), the
     wording, the shortcut's label, the notification XML, Win combos in hotkey
@@ -364,11 +369,12 @@ KeyTips) and Win the Start menu.
   older behaviour of the shared slot). Waiting briefly for the engine to come
   back would be cheaper.
 - **Guard rails.** Hiding from capture is checked through the window's
-  affinity, not yet in a real Teams/Zoom screen share. Stops Yap makes itself
-  (the length limit, "Stop automatically", the shortcut) bring up the main
-  window to write the action plan, until that's written in Rust. Win+Alt+M
-  is also Wispr Flow's shortcut; with both running, whichever hook is newest
-  gets it (Yap re-installs its hook every 30 s).
+  affinity and one desktop capture, not yet in a real Teams/Zoom screen
+  share. Stops Yap makes itself (the length limit, "Stop and summarise
+  automatically", the shortcut) bring up the main window to write the
+  action plan, until that's written in Rust. Win+Alt+M is also Wispr Flow's
+  shortcut; with both running, whichever hook is newest gets it (Yap
+  re-installs its hook every 30 s).
 
 ## Call detection
 
@@ -530,9 +536,9 @@ from one moved to a phone, a breakout room or a dropped connection that's
 about to rejoin. Auto-stopping on a guess would cut meetings short and
 summarise half a transcript. The person decides both ends: nothing records
 without a click, and nothing stops without one, unless they choose **When a
-call ends: Stop automatically** (Wispr Flow's "Stop Notetaker when a call
-ends"; see [Guard rails](#when-a-call-ends)), which skips the question and
-says so.
+call ends: Stop and summarise automatically** (Wispr Flow's "Stop Notetaker
+when a call ends"; see [Guard rails](#when-a-call-ends)), which skips the
+question and says so.
 
 ### Setting
 

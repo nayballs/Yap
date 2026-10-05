@@ -57,8 +57,8 @@
 //! tell a finished call from one moved to a phone, a breakout room or a
 //! rejoin, so Yap asks instead of stopping. Stopping opens the note and stops
 //! it there, which runs the usual Meeting Notes summary. With "When a call
-//! ends: Stop automatically" (`meeting_call_end`, Wispr's "Stop Notetaker
-//! when a call ends") it stops and summarises without asking
+//! ends: Stop and summarise automatically" (`meeting_call_end`, Wispr's
+//! "Stop Notetaker when a call ends") it stops and summarises without asking
 //! (`meeting_guard::stop_after_call`).
 //!
 //! Test mode (`e2e::active`) reads no registry and posts no Windows
@@ -791,8 +791,8 @@ struct Todo {
     /// Post this prompt as a Windows notification.
     post_native: Option<Prompt>,
     emit: bool,
-    /// A call Yap recorded ended with "Stop automatically" on: stop and
-    /// summarise this note.
+    /// A call Yap recorded ended with "Stop and summarise automatically"
+    /// on: stop and summarise this note.
     auto_stop: Option<(u64, &'static App)>,
 }
 
@@ -989,7 +989,7 @@ enum AtCallEnd {
     Nothing,
     /// "Teams call ended — Stop and summarise?" about this note.
     Ask(u64),
-    /// "When a call ends: Stop automatically": stop and summarise it.
+    /// "When a call ends: Stop and summarise automatically": stop and summarise it.
     Stop(u64),
 }
 
@@ -1368,8 +1368,8 @@ fn record(app: &AppHandle, call_id: u64) -> Result<u64, String> {
 
 /// "Stop and summarise": open the note and stop it there, so the Notes view
 /// runs its Meeting Notes summary as for any recording. (Also how
-/// `meeting_guard` stops: the length limit, "Stop automatically", the
-/// meeting shortcut.)
+/// `meeting_guard` stops: the length limit, "Stop and summarise
+/// automatically", the meeting shortcut.)
 pub(crate) fn stop_and_summarise(app: &AppHandle, note_id: Option<u64>) {
     let _ = crate::commands::show_settings(app);
     let _ = app.emit(EVENT_OPEN, serde_json::json!({ "noteId": note_id, "stop": true }));

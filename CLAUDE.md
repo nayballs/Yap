@@ -302,7 +302,7 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   breakout room or phone hand-off): opens the note and NotesView ends it
   there, so the Action Plan runs (`yap-meeting-open-note {noteId, stop}`;
   Rust stops it itself after 8 s if the page didn't). Opt-in **"When a call
-  ends: Stop automatically"** (`config.meeting_call_end` "ask" | "stop",
+  ends: Stop and summarise automatically"** (`config.meeting_call_end` "ask" | "stop",
   Wispr's "Stop Notetaker when a call ends"; `at_call_end`) stops and
   summarises without asking, via `meeting_guard::stop_after_call` (same rule:
   only apps Yap asks about). Snapshot
@@ -779,7 +779,7 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   the effective choice; a flip writes `meetingDetectApps[app]`; a
   `yap-meeting-detect-choice` from Rust is adopted into Settings' config copy
   so auto-save can't undo it), then the guard rails (one block):
-  "When a call ends" (Segmented Ask me / Stop automatically →
+  "When a call ends" (Select: Ask me / Stop and summarise automatically →
   `meetingCallEnd`; disabled while detection is off), "Maximum recording
   length" (Select 1–4 hours / No limit → `meetingMaxMinutes`), "Hide Yap's
   meeting windows from screen sharing" (`meetingHideFromCapture`, wrapped in
@@ -1128,7 +1128,8 @@ registry signal checked read-only on Nathan's PC, no real call yet) and
 settings: meeting windows hidden from screen capture while recording, a
 2-hour maximum length with a "Keep going" warning, an optional auto-stop
 when a recorded call ends, and the Win+Alt+M meeting shortcut;
-e2e-tested, a real screen share not yet), and an **AI Chat** surface (`chats.rs` + eager
+e2e-tested, the capture flag also checked once with a desktop capture of the
+overlay, a real screen share not yet), and an **AI Chat** surface (`chats.rs` + eager
 keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six tools,
 ≤20-step loop, gated to cloud or ≥4B local models). Every JSON store now writes
 atomically with corrupt-file quarantine. The default (no-feature) build still ships

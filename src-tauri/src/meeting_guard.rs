@@ -141,7 +141,8 @@ impl Notice {
         }
     }
 
-    /// "When a call ends: Stop automatically": `call` is "Teams call".
+    /// "When a call ends: Stop and summarise automatically" (`call`: "Teams
+    /// call").
     fn call_ended(call: &str) -> Self {
         Notice {
             kind: "stopped",
@@ -199,18 +200,19 @@ pub fn notice_everywhere(app: &AppHandle, n: &Notice) {
 // ---- stopping -------------------------------------------------------------------------
 
 /// Stop the recording and write the action plan: the length limit, a call
-/// ending with "Stop automatically", and the meeting shortcut all come here.
-/// Today it's call detection's "Stop and summarise": the main window opens
-/// the note and the Notes view ends the meeting there, as after **End
-/// meeting & summarise** (Rust stops it after 8 s if the page didn't).
-/// Once the action plan is written in Rust on any stop that isn't a pause,
-/// a plain `crate::meeting::stop()` will do, without bringing up the window.
+/// ending with "Stop and summarise automatically", and the meeting shortcut
+/// all come here. Today it's call detection's "Stop and summarise": the
+/// main window opens the note and the Notes view ends the meeting there, as
+/// after **End meeting & summarise** (Rust stops it after 8 s if the page
+/// didn't). Once the action plan is written in Rust on any stop that isn't a
+/// pause, a plain `crate::meeting::stop()` will do, without bringing up the
+/// window.
 pub fn stop_and_summarise(app: &AppHandle, note_id: Option<u64>) {
     crate::meeting_detect::stop_and_summarise(app, note_id);
 }
 
-/// "When a call ends: Stop automatically": the call (`call`: "Teams call")
-/// that Yap was recording into `note_id` ended.
+/// "When a call ends: Stop and summarise automatically": the call (`call`:
+/// "Teams call") that Yap was recording into `note_id` ended.
 pub fn stop_after_call(app: &AppHandle, note_id: u64, call: &str) {
     tracing::info!(note_id, call, "meeting guard: the call ended; stopping automatically");
     stop_and_summarise(app, Some(note_id));
@@ -393,14 +395,28 @@ fn warn(app: &AppHandle, gen: u64, note_id: u64, stop_at: u64, now: u64, t: &Tim
     let warning = LimitWarning::new(note_id, stop_at, now, t);
     tracing::info!(note_id, title = %warning.title, "meeting guard: length warning");
     emit_limit(app, Some(&warning));
+    // The recording stopped, or Keep going landed, in between: take it back
+    // rather than leave a stale warning up.
+    let still = GEN.load(Ordering::SeqCst) == gen
+        && watch_lock().as_ref().is_some_and(|w| w.warned == Some(stop_at));
+    if !still {
+        emit_limit(app, None);
+        return;
+    }
     if window_view(app).1 {
         return;
     }
     #[cfg(windows)]
     match native::limit(app, &warning) {
         Ok(()) => {
-            if let Some(w) = watch_lock().as_mut().filter(|w| w.warned == Some(stop_at)) {
-                w.native = true;
+            let posted_for = |w: &mut Watch| {
+                let current = w.warned == Some(stop_at);
+                w.native |= current;
+                current
+            };
+            // Answered or stopped while it was being posted: take it down.
+            if !watch_lock().as_mut().is_some_and(posted_for) {
+                native::remove(app, native::LIMIT);
             }
         }
         Err(e) => tracing::info!("meeting guard: no Windows notification ({e})"),

@@ -412,11 +412,11 @@
   // General → Meetings guard rails (meeting_guard.rs, capture.rs).
   const CALL_END_OPTIONS = [
     { value: 'ask', label: 'Ask me' },
-    { value: 'stop', label: 'Stop automatically' },
+    { value: 'stop', label: 'Stop and summarise automatically' },
   ];
   const CALL_END_DESC = {
-    ask: 'Yap asks whether to stop and summarise',
-    stop: 'Yap stops recording and writes your action plan',
+    ask: 'Yap asks whether to stop recording and summarise',
+    stop: 'Yap stops recording and writes your action plan, no question asked',
   };
   const MEETING_MAX_LENGTHS = [
     { value: 60, label: '1 hour' },
@@ -1485,10 +1485,10 @@
                 label="When a call ends"
                 desc={CALL_END_DESC[cfg.meetingCallEnd] ?? CALL_END_DESC.ask}
               >
-                <Segmented
+                <Select
                   bind:value={cfg.meetingCallEnd}
                   options={CALL_END_OPTIONS}
-                  label="When a call ends"
+                  ariaLabel="When a call ends"
                   disabled={!cfg.meetingDetection}
                 />
               </Row>
@@ -1496,7 +1496,11 @@
                 label="Maximum recording length"
                 desc="Yap stops at this length and writes your action plan, with a warning 5 minutes before"
               >
-                <Select bind:value={cfg.meetingMaxMinutes} options={maxLengthOptions} />
+                <Select
+                  bind:value={cfg.meetingMaxMinutes}
+                  options={maxLengthOptions}
+                  ariaLabel="Maximum recording length"
+                />
               </Row>
               <!-- The screen-share tip's "Update settings" lands here
                    (yap-settings-goto "general#screen-sharing"). -->

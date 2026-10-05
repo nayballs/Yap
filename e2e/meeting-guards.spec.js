@@ -1,8 +1,9 @@
 // Meeting guard rails (src-tauri/src/meeting_guard.rs, capture.rs): Yap's
 // meeting windows leave screen captures while a meeting records (and Yap
 // warns when that's switched off), the maximum recording length (its
-// warning, Keep going, the stop), "When a call ends → Stop automatically",
-// the meeting shortcut, and their rows in Settings → General → Meetings.
+// warning, Keep going, the stop), "When a call ends → Stop and summarise
+// automatically", the meeting shortcut, and their rows in Settings → General
+// → Meetings.
 // Test mode: a recording opens no audio device (it's silent), calls come
 // from the debug-only `meeting_detect_simulate`, the length timings from the
 // debug-only `e2e_meeting_limit`, window affinities from the debug-only
@@ -158,17 +159,17 @@ test('the maximum length warns, Keep going moves it, and at the limit Yap stops 
   await closeToasts(main);
 });
 
-test('"When a call ends: Stop automatically" stops and summarises without asking', async ({
+test('"When a call ends: Stop and summarise automatically" stops without asking', async ({
   yap,
   main,
   shot,
 }) => {
   await openSettings(main, 'General');
-  const callEnd = meetingsCard(main).getByRole('tablist', { name: 'When a call ends' });
-  await expect(callEnd.getByRole('tab', { name: 'Ask me' })).toHaveAttribute('aria-selected', 'true');
-  await callEnd.getByRole('tab', { name: 'Stop automatically' }).click();
+  const callEnd = meetingsCard(main).getByRole('combobox', { name: 'When a call ends' });
+  await expect(callEnd.locator('option:checked')).toHaveText('Ask me');
+  await callEnd.selectOption({ label: 'Stop and summarise automatically' });
   await expectStore(yap, 'config.json', (c) => c.meetingCallEnd === 'stop');
-  await expect(meetingsCard(main)).toContainText('Yap stops recording and writes your action plan');
+  await expect(meetingsCard(main)).toContainText('Yap stops recording and writes your action plan, no question asked');
   await closeSettings(main);
 
   await simulate(yap, 'zoom', true);
@@ -192,7 +193,7 @@ test('"When a call ends: Stop automatically" stops and summarises without asking
 
   // Back to asking.
   await openSettings(main, 'General');
-  await callEnd.getByRole('tab', { name: 'Ask me' }).click();
+  await callEnd.selectOption({ label: 'Ask me' });
   await expectStore(yap, 'config.json', (c) => c.meetingCallEnd === 'ask');
   await closeSettings(main);
 });
@@ -251,11 +252,11 @@ test('Settings → General → Meetings has the guard rails, and the shortcut ca
 }) => {
   await openSettings(main, 'General');
   const card = meetingsCard(main);
-  const callEnd = card.getByRole('tablist', { name: 'When a call ends' });
+  const callEnd = card.getByRole('combobox', { name: 'When a call ends' });
   await callEnd.scrollIntoViewIfNeeded();
-  await expect(callEnd.getByRole('tab', { name: 'Ask me' })).toHaveAttribute('aria-selected', 'true');
-  await expect(card).toContainText('Yap asks whether to stop and summarise');
-  const maxLength = card.getByRole('combobox');
+  await expect(callEnd.locator('option:checked')).toHaveText('Ask me');
+  await expect(card).toContainText('Yap asks whether to stop recording and summarise');
+  const maxLength = card.getByRole('combobox', { name: 'Maximum recording length' });
   await expect(maxLength.locator('option:checked')).toHaveText('2 hours');
   await expect(card.getByRole('button', { name: "Hide Yap's meeting windows from screen sharing" })).toHaveAttribute(
     'aria-pressed',
