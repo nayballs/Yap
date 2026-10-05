@@ -17,8 +17,17 @@ pub fn show_settings(app: &AppHandle) -> Result<(), String> {
         .get_webview_window("settings")
         .ok_or("settings window not found")?;
     let _ = w.show();
-    let _ = w.set_focus();
+    focus(&w);
     Ok(())
+}
+
+/// `set_focus`, except in e2e test runs: when Windows won't hand a background
+/// process the foreground, tao falls back to pressing Alt in whichever app has
+/// focus — the developer's, while the suite runs beside them.
+fn focus(w: &tauri::WebviewWindow) {
+    if !crate::e2e::active() {
+        let _ = w.set_focus();
+    }
 }
 
 /// Open the settings window.
@@ -38,7 +47,7 @@ pub fn show_onboarding(app: &AppHandle) -> Result<(), String> {
     // but pixels only updated after the window LOST focus). The reload itself
     // stays: it gives fresh event listeners and a fresh wizard every open.
     let _ = w.show();
-    let _ = w.set_focus();
+    focus(&w);
     let _ = w.eval("window.location.reload()");
     // Compositor nudge: a 1px resize round-trip forces DWM to recomposite the
     // webview surface, un-sticking any stale frame.
@@ -99,11 +108,11 @@ pub fn set_mic_test(state: State<'_, AppState>, on: bool) {
 /// `device` = a name from `list_audio_devices`, or null for the system default.
 #[tauri::command]
 pub fn set_input_device(state: State<'_, AppState>, device: Option<String>) -> Result<(), String> {
-    let mut guard = state
+    let guard = state
         .pipeline
         .lock()
         .map_err(|_| "pipeline lock poisoned".to_string())?;
-    match guard.as_mut() {
+    match guard.as_ref() {
         Some(p) => p.set_input_device(device.as_deref()),
         None => Err("pipeline not running".into()),
     }

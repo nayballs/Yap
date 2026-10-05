@@ -1208,7 +1208,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
     </button>
   {/if}
-  <nav class="sidebar">
+  <nav class="sidebar" aria-label="Settings sections">
     <div class="brand">
       <img class="brandlogo" src={yapIcon} alt="" aria-hidden="true" />
       <span class="brandname">{embedded ? 'Settings' : 'Yap'}</span>
@@ -1218,7 +1218,12 @@
       <div class="navcap">{g.label}</div>
       {#each g.items as s (s.id)}
         {@const attn = attentionCount(s.id)}
-        <button class="navitem" class:active={section === s.id} onclick={() => (section = s.id)}>
+        <button
+          class="navitem"
+          class:active={section === s.id}
+          aria-current={section === s.id ? 'page' : undefined}
+          onclick={() => (section = s.id)}
+        >
           <span class="navicon">{@render navIcon(s.id)}</span>
           <span class="navlabel">{s.label}</span>
           {#if attn > 0}

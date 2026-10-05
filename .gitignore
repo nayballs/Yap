@@ -2,6 +2,8 @@
 /dist
 /src-tauri/target
 /src-tauri/gen
+# e2e UI test output: screenshots, report, app logs (npm run test:app)
+/test-results
 *.log
 .DS_Store
 

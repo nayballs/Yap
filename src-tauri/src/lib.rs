@@ -13,6 +13,7 @@ mod bridge;
 mod chats;
 mod commands;
 mod config;
+mod e2e;
 mod fuzzy;
 mod media;
 mod meeting;
@@ -275,7 +276,7 @@ pub fn run() {
         }
     }));
 
-    builder
+    let builder = builder
         // Yap accounts: com.contextmirror.yap:// sign-in links (auth.rs). Must
         // come after single-instance, which forwards links from a second launch.
         .plugin(tauri_plugin_deep_link::init())
@@ -291,18 +292,26 @@ pub fn run() {
         // default browser — target=_blank does nothing in a Tauri webview.
         .plugin(tauri_plugin_opener::init())
         // Native file-open dialog for the Upload surface's Browse button.
-        .plugin(tauri_plugin_dialog::init())
-        // Remember the MAIN window's size/position across launches. Only the
-        // "settings" window is managed: the overlay is positioned
-        // programmatically, and onboarding is one-shot — restoring stale
-        // bounds would misplace them. Flags exclude VISIBLE so the window
-        // never un-hides itself on a start-hidden launch.
-        .plugin(
+        .plugin(tauri_plugin_dialog::init());
+
+    // Remember the MAIN window's size/position across launches. Only the
+    // "settings" window is managed: the overlay is positioned
+    // programmatically, and onboarding is one-shot — restoring stale bounds
+    // would misplace them. Flags exclude VISIBLE so the window never un-hides
+    // itself on a start-hidden launch. Not in e2e test runs: the state file
+    // sits outside the portable data dir, shared with the installed app.
+    let builder = if e2e::active() {
+        builder
+    } else {
+        builder.plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
                 .with_denylist(&["overlay", "onboarding"])
                 .build(),
         )
+    };
+
+    builder
         .manage(AppState {
             pipeline: Mutex::new(None),
         })
@@ -399,8 +408,11 @@ pub fn run() {
             // `groq-usage` updates after each AI-cleanup call.
             usage::set_app_handle(handle.clone());
 
-            // Global input hook + dictation hotkey.
-            input_hook::start_input_hook(handle.clone());
+            // Global input hook + dictation hotkey. (Not in e2e test runs: a
+            // test instance must never see, or swallow, the developer's keys.)
+            if !e2e::active() {
+                input_hook::start_input_hook(handle.clone());
+            }
             if let Err(e) = input_hook::configure_dictation(&cfg.hotkey) {
                 tracing::warn!("Failed to configure hotkey: {}", e);
             }
@@ -415,22 +427,22 @@ pub fn run() {
             stt::fix_directml_stub();
             stt::apply_accelerator_settings(cfg.use_gpu);
 
-            // Start the dictation pipeline (audio capture + STT engine).
-            match pipeline::Pipeline::start(handle.clone(), cfg.clone()) {
-                Ok(p) => {
-                    if let Ok(mut guard) = app.state::<AppState>().pipeline.lock() {
-                        *guard = Some(p);
-                    }
-                }
-                Err(e) => tracing::error!("Failed to start pipeline: {}", e),
+            // Start the dictation pipeline (audio capture + STT engine). It
+            // runs without a microphone too (see `Pipeline::start`).
+            let pipeline = pipeline::Pipeline::start(handle.clone(), cfg.clone());
+            if let Ok(mut guard) = app.state::<AppState>().pipeline.lock() {
+                *guard = Some(pipeline);
             }
 
             // Clear any orphaned cleanup sidecar from a previous session (a
             // crash or task-kill skips every exit path; installers launched by
             // older builds' updater did too), then — if on-device cleanup is
             // selected + installed — warm up a fresh one off-thread so the
-            // first dictation cleanup skips the cold load.
-            local_llm::kill_orphans();
+            // first dictation cleanup skips the cold load. (An e2e test run
+            // leaves other processes alone.)
+            if !e2e::active() {
+                local_llm::kill_orphans();
+            }
             {
                 let cfg2 = cfg.clone();
                 tauri::async_runtime::spawn(async move {
@@ -626,6 +638,9 @@ pub fn run() {
             // relaunch after "Restart to update" can reopen the main window
             // once the hidden webviews are initialized.
             updates::init(&handle);
+
+            // e2e test runs: announce test mode, quit when stdin closes.
+            e2e::start(&handle);
 
             Ok(())
         })

@@ -308,6 +308,10 @@ mod platform {
 /// Simulate the auto-submit keystroke in the focused window. `key` is one of
 /// "enter", "ctrlEnter", or "shiftEnter".
 pub async fn press_submit(key: &str) -> Result<(), String> {
+    if crate::e2e::active() {
+        info!("e2e: not pressing {} in another app", key);
+        return Ok(());
+    }
     let key = key.to_string();
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "windows")]
@@ -430,6 +434,10 @@ fn restore_clipboard_snapshot(cb: &mut arboard::Clipboard, snap: ClipSnapshot) {
 /// restores the original clipboard. Returns `None` if nothing was selected
 /// (clipboard stayed empty) or off Windows.
 pub fn selection_via_copy(target_hwnd: Option<isize>) -> Option<String> {
+    if crate::e2e::active() {
+        info!("e2e: not sending Ctrl+C to another app");
+        return None;
+    }
     #[cfg(target_os = "windows")]
     {
         use arboard::Clipboard;
@@ -488,6 +496,11 @@ pub async fn inject_text(
     restore_clipboard: bool,
     target_hwnd: Option<isize>,
 ) -> Result<(), String> {
+    // An e2e test run never pastes into another app (or touches the clipboard).
+    if crate::e2e::active() {
+        info!(len = text.len(), "e2e: not pasting the text");
+        return Ok(());
+    }
     let text = text.to_string();
 
     tokio::task::spawn_blocking(move || inject_text_sync(&text, restore_clipboard, target_hwnd))
