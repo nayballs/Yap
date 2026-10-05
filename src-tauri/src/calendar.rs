@@ -79,6 +79,11 @@ const ANSWER_KEEP: i64 = 2 * 86_400;
 /// The scheduler looks at the clock at least this often (and notices a PC
 /// that slept, when the wall clock jumps further).
 const MAX_SLEEP: u64 = 30;
+/// The calendar's card on the Yap bar (one at a time).
+const BAR_CARD: &str = "calendar";
+/// While a card is up the scheduler turns this often (seconds), so the bar
+/// card's "In 1 min" stays true and the card follows you out of the window.
+const CARD_TICK: i64 = 5;
 
 const NO_GOOGLE: &str = "This build of Yap can't connect to Google yet. Add your Google Calendar's secret iCal address under Other calendar instead.";
 const TOO_MANY: &str = "You've connected as many calendars as Yap holds. Disconnect one first.";
@@ -173,14 +178,28 @@ enum CardKind {
     Switch,
 }
 
+/// Where a card shows besides the main window's toast (which follows the
+/// snapshot, so it's there whenever the window is).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Surface {
+    /// Nowhere else: the main window was focused.
+    #[default]
+    InApp,
+    /// A card on the Yap bar (`bar::show_card`).
+    Bar,
+    /// A Windows notification: the bar is off or hidden.
+    Notification,
+}
+
 /// The card on screen.
 #[derive(Debug, Clone)]
 struct Card {
     id: u64,
     kind: CardKind,
     event: Event,
-    /// Also posted as a Windows notification.
-    native: bool,
+    surface: Surface,
+    /// The bar card's status line as last shown ("In 1 min · with Tanay").
+    bar_status: String,
 }
 
 #[derive(Default)]
@@ -466,7 +485,7 @@ fn next_wake(now: i64) -> u64 {
         next = next.min(t);
     }
     if let Some(card) = &s.card {
-        next = next.min(card.event.start + model::REMINDER_AFTER_SECS);
+        next = next.min(card.event.start + model::REMINDER_AFTER_SECS).min(now + CARD_TICK);
     }
     (next - now).clamp(1, MAX_SLEEP as i64) as u64
 }
@@ -1262,14 +1281,29 @@ pub fn on_call_started(app_id: &str) {
 
 // ---- the reminder card ------------------------------------------------------------------------
 
-/// The main window: (on screen, focused). Never with a lock held.
+/// The main window: (on screen, focused). Never with a lock held. A test
+/// run never focuses its windows, so one the desktop activates behind the
+/// suite's back doesn't count as focused (as in `meeting_detect`).
 fn window_view(app: &AppHandle) -> (bool, bool) {
     app.get_webview_window("settings")
         .map(|w| {
             let visible = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
-            (visible, visible && w.is_focused().unwrap_or(false))
+            let focused = !crate::e2e::active() && w.is_focused().unwrap_or(false);
+            (visible, visible && focused)
         })
         .unwrap_or((false, false))
+}
+
+/// What a card is waiting for, after a turn of [`tick_card`].
+enum CardChange {
+    Nothing,
+    /// Take this card down, and maybe put that one up.
+    Replace(Option<Box<Card>>, Option<Box<Card>>),
+    /// The card up stays: put it on the bar (or a notification) after all —
+    /// the main window lost the focus, or the bar went away under it.
+    Present(Box<Card>),
+    /// The card up stays: its status line on the bar reads this now.
+    Status(String, &'static str),
 }
 
 /// Decide which card should be up, and make it so.
@@ -1278,8 +1312,8 @@ fn tick_card(app: &AppHandle) {
     let lead = reminder_lead(&crate::config::load().meeting_reminder);
     let recording = crate::meeting::recording_note();
     let recording_key = recording.and_then(crate::notes::get).and_then(|n| n.event).map(|e| e.key);
-    // (the card to take down, the card to put up)
-    let (down, up): (Option<Card>, Option<Card>) = {
+    let focused = window_view(app).1;
+    let change = {
         let Some(mut s) = lock_started() else { return };
         s.snoozed.retain(|_, until| *until > now - 3600);
         let answered: HashSet<String> = s.store.answered.keys().cloned().collect();
@@ -1303,73 +1337,243 @@ fn tick_card(app: &AppHandle) {
         // One card at a time: the due one is the earliest, so a card stays
         // up until it's answered or runs out, and the next waits its turn.
         let same = |c: &Card, e: &Event| c.event.key == e.key && c.event.start == e.start && c.kind == kind_for(e);
+        let new_card = |s: &mut Runtime, event: Event| {
+            s.seq += 1;
+            let card = Card { id: s.seq, kind: kind_for(&event), event, surface: Surface::InApp, bar_status: String::new() };
+            s.card = Some(card.clone());
+            card
+        };
         match (s.card.clone(), due) {
-            (Some(card), Some(event)) if same(&card, &event) => (None, None),
-            (Some(old), Some(event)) => {
-                s.seq += 1;
-                let card = Card { id: s.seq, kind: kind_for(&event), event, native: false };
-                s.card = Some(card.clone());
-                (Some(old), Some(card))
-            }
+            (Some(card), Some(event)) if same(&card, &event) => match card.surface {
+                Surface::InApp if !focused && (crate::bar::cards_available() || native_possible()) => {
+                    CardChange::Present(Box::new(card))
+                }
+                Surface::Bar if !crate::bar::cards_available() => CardChange::Present(Box::new(card)),
+                Surface::Bar => {
+                    let (status, dot) = bar_status(&card, now);
+                    if status == card.bar_status {
+                        CardChange::Nothing
+                    } else {
+                        if let Some(c) = s.card.as_mut() {
+                            c.bar_status = status.clone();
+                        }
+                        CardChange::Status(status, dot)
+                    }
+                }
+                _ => CardChange::Nothing,
+            },
+            (Some(old), Some(event)) => CardChange::Replace(Some(Box::new(old)), Some(Box::new(new_card(&mut s, event)))),
             (Some(old), None) => {
                 s.card = None;
-                (Some(old), None)
+                CardChange::Replace(Some(Box::new(old)), None)
             }
-            (None, Some(event)) => {
-                s.seq += 1;
-                let card = Card { id: s.seq, kind: kind_for(&event), event, native: false };
-                s.card = Some(card.clone());
-                (None, Some(card))
-            }
-            (None, None) => (None, None),
+            (None, Some(event)) => CardChange::Replace(None, Some(Box::new(new_card(&mut s, event)))),
+            (None, None) => CardChange::Nothing,
         }
     };
-    if let Some(old) = down {
-        withdraw_card(app, &old);
-    }
-    if let Some(card) = up {
-        present_card(app, &card);
+    match change {
+        CardChange::Nothing => {}
+        CardChange::Replace(down, up) => {
+            if let Some(old) = down {
+                withdraw_card(app, &old);
+            }
+            if let Some(card) = up {
+                present_card(app, &card, focused);
+            }
+        }
+        CardChange::Present(card) => {
+            // Off a bar that went away (turned off, hidden for an hour).
+            crate::bar::dismiss_card(app, BAR_CARD);
+            present_card(app, &card, focused);
+        }
+        CardChange::Status(status, dot) => {
+            crate::bar::update_card(app, BAR_CARD, |c| {
+                c.status = Some(status);
+                c.dot = dot;
+            });
+        }
     }
 }
 
-/// **The one place a calendar card goes on screen.** Today: the main
-/// window's in-app toast (the snapshot's `card`, which `calendar.svelte.js`
-/// shows) plus a Windows notification while the window isn't focused (the
-/// call app is in front, or Yap is in the tray), the way
-/// `meeting_guard::notice_everywhere` shows its notices. When the Yap bar's
-/// cards land (`bar::show_card`), point this, and [`withdraw_card`], at them.
-fn present_card(app: &AppHandle, card: &Card) {
-    tracing::info!(kind = ?card.kind, "calendar: meeting card");
+/// **The one place a calendar card goes on screen.** The main window's
+/// in-app toast follows the snapshot (`calendar.svelte.js`), and while the
+/// window isn't focused (the call app is in front, Yap is in the tray) the
+/// card goes on the **Yap bar** (`bar::show_card`, a "Meeting detected"-style
+/// call card), else — the bar off or hidden for an hour — a Windows
+/// notification: as call detection's prompts do.
+fn present_card(app: &AppHandle, card: &Card, focused: bool) {
+    tracing::info!(kind = ?card.kind, focused, "calendar: meeting card");
     emit(app);
-    if window_view(app).1 {
-        return;
+    let now = now_secs();
+    let surface = if focused {
+        Surface::InApp
+    } else if crate::bar::show_card(app, bar_card(card, now), Box::new(answer_from)) {
+        Surface::Bar
+    } else {
+        native_post(app, card)
+    };
+    let mut s = lock();
+    match s.card.as_mut().filter(|c| c.id == card.id) {
+        Some(c) => {
+            c.surface = surface;
+            c.bar_status = bar_status(card, now).0;
+        }
+        // Answered while it was going up: take it down.
+        None => {
+            drop(s);
+            withdraw_card(app, &Card { surface, ..card.clone() });
+        }
     }
+}
+
+/// Whether a card could go out as a Windows notification at all (not in
+/// portable mode or a test run, Windows only). Lock-free.
+fn native_possible() -> bool {
+    #[cfg(windows)]
+    {
+        crate::win_toast::allowed()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// The card as a Windows notification (Windows only; never in portable mode
+/// or a test run): where it went.
+fn native_post(app: &AppHandle, card: &Card) -> Surface {
     #[cfg(windows)]
     match native::post(app, card) {
-        Ok(()) => {
-            let mut s = lock();
-            match s.card.as_mut().filter(|c| c.id == card.id) {
-                Some(c) => c.native = true,
-                // Answered while it was being posted: take it down.
-                None => {
-                    drop(s);
-                    native::remove(app);
-                }
-            }
-        }
+        Ok(()) => return Surface::Notification,
         Err(e) => tracing::info!("calendar: no Windows notification ({e})"),
     }
+    #[cfg(not(windows))]
+    let _ = (app, card);
+    Surface::InApp
 }
 
 /// Take `card` off screen (answered, run out, or replaced).
 fn withdraw_card(app: &AppHandle, card: &Card) {
     emit(app);
-    #[cfg(windows)]
-    if card.native {
-        native::remove(app);
+    match card.surface {
+        Surface::Bar => crate::bar::dismiss_card(app, BAR_CARD),
+        #[cfg(windows)]
+        Surface::Notification => native::remove(app),
+        _ => {}
     }
-    #[cfg(not(windows))]
-    let _ = card;
+}
+
+/// The bar card's mark: the meeting's call app, as call detection names it
+/// (others get a calendar).
+fn bar_mark(service: &str) -> Option<&'static str> {
+    Some(match service {
+        "teams" => "teams",
+        "meet" => "meet",
+        "zoom" => "zoom",
+        "webex" => "webex",
+        "slack" => "slack",
+        "goto" => "goto",
+        "whereby" => "whereby",
+        "jitsi" => "jitsi",
+        _ => return None,
+    })
+}
+
+/// "In 1 min", "Starting now", "Started 3 min ago" (the in-app toast's
+/// `whenText`).
+fn when_text(start: i64, now: i64) -> String {
+    let diff = start - now;
+    if diff >= 90 {
+        format!("In {} min", (diff + 30) / 60)
+    } else if diff >= 30 {
+        "In 1 min".into()
+    } else if diff > 0 {
+        "Starting now".into()
+    } else if -diff >= 60 {
+        format!("Started {} min ago", -diff / 60)
+    } else {
+        "Started just now".into()
+    }
+}
+
+/// The bar card's status line and its dot: "● In 1 min · with Tanay +1"
+/// (amber before the start, green once it's on), or for a switch, "● Next
+/// meeting · In 1 min".
+fn bar_status(card: &Card, now: i64) -> (String, &'static str) {
+    let when = when_text(card.event.start, now);
+    let dot = if card.event.start > now { "soon" } else { "live" };
+    let line = match card.kind {
+        CardKind::Switch => format!("Next meeting \u{b7} {when}"),
+        CardKind::Remind => {
+            let first = |name: &str| name.split_whitespace().next().unwrap_or(name).to_string();
+            match card.event.attendees.as_slice() {
+                [] => when,
+                [one] => format!("{when} \u{b7} with {}", first(&one.name)),
+                [one, rest @ ..] => format!("{when} \u{b7} with {} +{}", first(&one.name), rest.len()),
+            }
+        }
+    };
+    (line, dot)
+}
+
+/// The card on the Yap bar, as call detection's "Meeting detected" card:
+/// the call app's mark (else a calendar), the meeting over "● In 1 min ·
+/// with Tanay +1", a split button **Join & take notes** whose ^ menu holds
+/// **Start notes** and **Snooze 2 min**, and ✕ = dismiss. It stays until
+/// answered or 5 minutes after the start (Rust takes it down); Esc is left
+/// to the app in front.
+fn bar_card(card: &Card, now: i64) -> crate::bar::Card {
+    use crate::bar::CardAction;
+    let arg = |answer: &str| format!("calendar:{answer}:{}", card.id);
+    let link = card.event.join_url.is_some();
+    let (primary, secondary) = match (card.kind, link) {
+        (CardKind::Remind, true) => ("Join & take notes", Some("Start notes")),
+        (CardKind::Remind, false) => ("Start notes", None),
+        (CardKind::Switch, true) => ("Join & switch notes", Some("Switch notes")),
+        (CardKind::Switch, false) => ("Switch notes", None),
+    };
+    let (status, dot) = bar_status(card, now);
+    crate::bar::Card {
+        id: BAR_CARD.into(),
+        style: "call",
+        icon: "calendar",
+        app: card.event.service.as_deref().and_then(bar_mark),
+        title: card.event.display_title(),
+        body: match card.kind {
+            CardKind::Switch => "Switch your notes to this meeting?".into(),
+            CardKind::Remind => card.event.with_line(),
+        },
+        status: Some(status),
+        dot,
+        primary: Some(CardAction::new(arg(if link { "join" } else { "start" }), primary)),
+        secondary: secondary.map(|label| CardAction::new(arg("start"), label)),
+        link: Some(CardAction::new(arg("snooze"), "Snooze 2 min")),
+        close_action: Some(arg("dismiss")),
+        ..Default::default()
+    }
+}
+
+/// An answer from the bar card or the Windows notification:
+/// `calendar:<answer>:<card id>` (anything else brings up the main window).
+/// A start that fails says why in the main window.
+fn answer_from(app: &AppHandle, arg: &str) {
+    tracing::info!(arg, "calendar: card answered outside the window");
+    let app = app.clone();
+    let arg = arg.to_string();
+    tauri::async_runtime::spawn(async move {
+        let mut parts = arg.splitn(3, ':');
+        match (parts.next(), parts.next(), parts.next().and_then(|n| n.parse::<u64>().ok())) {
+            (Some("calendar"), Some(answer), Some(id)) => {
+                if let Err(e) = respond(&app, id, answer).await {
+                    let _ = crate::commands::show_settings(&app);
+                    let _ = app.emit("yap-error", format!("Couldn't start meeting notes. {e}"));
+                }
+            }
+            _ => {
+                let _ = crate::commands::show_settings(&app);
+            }
+        }
+    });
 }
 
 /// The person answered card `id`: "join" (join the meeting and take notes,
@@ -1591,7 +1795,7 @@ pub fn calendar_e2e_opened() -> Result<Vec<String>, String> {
 mod native {
     use std::sync::Mutex;
 
-    use tauri::{AppHandle, Emitter};
+    use tauri::AppHandle;
     use windows::UI::Notifications::ToastNotification;
 
     use super::{Card, CardKind};
@@ -1667,23 +1871,7 @@ mod native {
 
     /// A click: `calendar:<answer>:<card id>`, or the body (`calendar:show`).
     fn activated(app: &AppHandle, arg: &str) {
-        tracing::info!(arg, "calendar: Windows notification clicked");
-        let app = app.clone();
-        let arg = arg.to_string();
-        tauri::async_runtime::spawn(async move {
-            let mut parts = arg.splitn(3, ':');
-            match (parts.next(), parts.next(), parts.next().and_then(|n| n.parse::<u64>().ok())) {
-                (Some("calendar"), Some(answer), Some(id)) => {
-                    if let Err(e) = super::respond(&app, id, answer).await {
-                        let _ = crate::commands::show_settings(&app);
-                        let _ = app.emit("yap-error", format!("Couldn't start meeting notes. {e}"));
-                    }
-                }
-                _ => {
-                    let _ = crate::commands::show_settings(&app);
-                }
-            }
-        });
+        super::answer_from(app, arg);
     }
 }
 
@@ -1741,7 +1929,7 @@ mod tests {
             "joinUrl": "https://teams.microsoft.com/l/meetup-join/19%3a1", "service": "teams",
         }))
         .unwrap();
-        let card = Card { id: 7, kind: CardKind::Remind, event, native: false };
+        let card = Card { id: 7, kind: CardKind::Remind, event, surface: Surface::InApp, bar_status: String::new() };
         let xml = native::xml(&card, "");
         assert!(xml.contains("<text>Design review &amp; Q4</text>"));
         assert!(xml.contains("Teams \u{b7} with Tanay Kothari, Priya Shah"));
@@ -1761,6 +1949,47 @@ mod tests {
         assert!(xml.contains("content=\"Switch notes\" arguments=\"calendar:start:7\""));
         assert!(xml.contains("Switch your notes to this meeting?"));
         crate::win_toast::build("calendar", &xml, false).unwrap();
+    }
+
+    #[test]
+    fn the_card_on_the_yap_bar() {
+        let now = 1_791_200_000;
+        let event: Event = serde_json::from_value(json!({
+            "key": "1:design", "connection": "1", "title": "Design review",
+            "start": now + 60, "end": now + 1_860,
+            "attendees": [{ "name": "Tanay Kothari" }, { "name": "Priya Shah" }],
+            "joinUrl": "https://teams.microsoft.com/l/meetup-join/19%3a1", "service": "teams",
+        }))
+        .unwrap();
+        let card = Card { id: 7, kind: CardKind::Remind, event, surface: Surface::InApp, bar_status: String::new() };
+        let bar = bar_card(&card, now);
+        // Call detection's card: the app's mark, the meeting over "● In 1 min".
+        assert_eq!((bar.id.as_str(), bar.style, bar.app), (BAR_CARD, "call", Some("teams")));
+        assert_eq!(bar.title, "Design review");
+        assert_eq!((bar.status.as_deref(), bar.dot), (Some("In 1 min \u{b7} with Tanay +1"), "soon"));
+        let action = |a: &Option<crate::bar::CardAction>| a.as_ref().map(|a| (a.id.clone(), a.label.clone()));
+        assert_eq!(action(&bar.primary), Some(("calendar:join:7".into(), "Join & take notes".into())));
+        assert_eq!(action(&bar.secondary), Some(("calendar:start:7".into(), "Start notes".into())));
+        assert_eq!(action(&bar.link), Some(("calendar:snooze:7".into(), "Snooze 2 min".into())));
+        assert_eq!(bar.close_action.as_deref(), Some("calendar:dismiss:7"));
+        // It stays until answered (Rust takes it down 5 minutes in), and Esc
+        // belongs to the app in front.
+        assert_eq!((bar.timeout_ms, bar.escape_action.as_deref()), (None, None));
+        // The line keeps time: on, then running.
+        assert_eq!(bar_status(&card, now + 50), ("Starting now \u{b7} with Tanay +1".to_string(), "soon"));
+        assert_eq!(bar_status(&card, now + 240), ("Started 3 min ago \u{b7} with Tanay +1".to_string(), "live"));
+        // A switch without a link, on a service without a mark.
+        let mut next = card.clone();
+        next.kind = CardKind::Switch;
+        next.event.join_url = None;
+        next.event.service = Some("chime".into());
+        let bar = bar_card(&next, now - 200);
+        assert_eq!(bar.app, None);
+        assert_eq!((bar.status.as_deref(), bar.dot), (Some("Next meeting \u{b7} In 4 min"), "soon"));
+        assert_eq!(action(&bar.primary), Some(("calendar:start:7".into(), "Switch notes".into())));
+        assert_eq!(bar.secondary.as_ref().map(|a| a.id.as_str()), None);
+        assert_eq!(when_text(now + 150, now), "In 3 min");
+        assert_eq!(when_text(now - 30, now), "Started just now");
     }
 
     #[test]

@@ -155,6 +155,11 @@ const simulate = (yap, appId, active) => yap.invoke('meeting_detect_simulate', {
 const toast = (main, text) => main.getByRole('status').filter({ hasText: text });
 /** The reminder card for `title` (it always offers to snooze). */
 const cardFor = (main, title) => toast(main, title).filter({ hasText: 'Snooze 2 min' });
+/** The same card on the Yap bar (a call card: its answers in a ^ menu). */
+const barCard = (yap, title) => yap.overlay.getByRole('status').filter({ hasText: title });
+const barCards = (yap) => yap.invoke('bar_status').then((s) => s.cards.map((c) => c.id));
+/** The pretend cursor onto the bar's calendar card (the window takes clicks), or away. */
+const pointer = (yap, target) => yap.invoke('bar_simulate', { pointer: target });
 const visible = (yap, label) => yap.invoke('plugin:window|is_visible', { label });
 /** A meeting row in the Meetings view. */
 const row = (main, title) => main.getByRole('listitem').filter({ hasText: title });
@@ -193,6 +198,7 @@ test.afterEach(async ({ yap }) => {
   await pauseAll(yap);
   for (const app of ['teams', 'zoom', 'webex']) await simulate(yap, app, false);
   await setReminder(yap, 'never');
+  await pointer(yap, 'away').catch(() => {});
 });
 
 test('Settings → Connectors: what to connect, a link that was reset, and one that works', async ({ yap, main, feed, shot }) => {
@@ -319,14 +325,31 @@ test('the reminder card: Join & take notes records into a note with the meeting\
   await expect(card.getByRole('button', { name: 'Snooze 2 min' })).toBeVisible();
   await shot(main, '09-reminder-card');
 
+  // The main window never counts as focused in a test run, so the card is
+  // on the Yap bar too: call detection's card, with Teams' mark, the
+  // meeting over "● In 1 min · with Tanay +1", Join & take notes.
+  const onBar = barCard(yap, 'Design review');
+  await expect(onBar).toBeVisible();
+  await expect(onBar).toContainText(/In \d min|Starting now/);
+  await expect(onBar).toContainText('with Tanay +1');
+  await expect(onBar.locator('.dot.soon')).toBeVisible();
+  await expect(onBar.getByRole('button', { name: 'Join & take notes' })).toBeVisible();
+  await expect(onBar.getByRole('button', { name: 'Close' })).toBeVisible();
+  await yap.overlay.waitForTimeout(300); // the card's entrance
+  await shot(yap.overlay, '10-reminder-on-the-bar');
+
   // Teams starts while the card is up: no second "call detected" prompt.
   await simulate(yap, 'teams', true);
   await main.waitForTimeout(1_500);
   await expect(toast(main, 'Teams call detected')).toHaveCount(0);
+  expect(await barCards(yap)).toEqual(['calendar']);
   await expect(card).toBeVisible();
 
+  // Answered in the window, it leaves the bar too.
   await card.getByRole('button', { name: 'Join & take notes' }).click();
   await expect.poll(() => recording(yap), { timeout: 15_000 }).toBe(true);
+  await expect(onBar).toHaveCount(0);
+  await expect.poll(() => barCards(yap)).not.toContain('calendar');
   // The link opened (in a test run, only noted down)…
   expect(await opened(yap)).toContain(TEAMS_LINK);
   // …and the meeting's note records, with its name, attendees and agenda.
@@ -340,12 +363,12 @@ test('the reminder card: Join & take notes records into a note with the meeting\
   // The notepad opened on it.
   await expect.poll(() => visible(yap, 'notepad')).toBe(true);
   await expect(yap.notepad.getByRole('textbox', { name: 'Meeting title' })).toHaveValue('Design review');
-  await shot(yap.notepad, '10-notepad-from-the-card');
+  await shot(yap.notepad, '11-notepad-from-the-card');
 
   // The Meetings view shows it recording.
   await openView(main, 'Meetings');
   await expect(row(main, 'Design review')).toContainText('Recording');
-  await shot(main, '11-meetings-recording');
+  await shot(main, '12-meetings-recording');
 
   // Its call ending asks to stop and summarise, as for any recorded call.
   await simulate(yap, 'teams', false);
@@ -374,8 +397,10 @@ test('Esc dismisses a card and call detection stays quiet about that meeting; a 
 
   const pricing = cardFor(main, 'Pricing sync');
   await expect(pricing).toBeVisible();
+  await expect(barCard(yap, 'Pricing sync')).toBeVisible();
   await main.keyboard.press('Escape');
   await expect(pricing).toHaveCount(0);
+  await expect(barCard(yap, 'Pricing sync')).toHaveCount(0);
   await expectStore(yap, 'calendar.json', (c) => Object.keys(c.answered ?? {}).some((k) => k.includes('pricing@e2e')));
   // Its Zoom call starting isn't asked about: the card was the question.
   await simulate(yap, 'zoom', true);
@@ -388,19 +413,35 @@ test('Esc dismisses a card and call detection stays quiet about that meeting; a 
   await expect(roadmap).toBeVisible();
   await expect(roadmap.getByRole('button', { name: 'Join & take notes' })).toHaveCount(0);
   await expect(roadmap.getByRole('button', { name: 'Start notes' })).toBeVisible();
-  await shot(main, '12-card-without-a-link');
-  await roadmap.getByRole('button', { name: 'Snooze 2 min' }).click();
+  await shot(main, '13-card-without-a-link');
+
+  // On the bar: a calendar for a mark (no call app), Start notes, and the
+  // other answers in its ^ menu. Snoozed there, it leaves the window too.
+  const onBar = barCard(yap, 'Roadmap chat');
+  await expect(onBar).toBeVisible();
+  await expect(onBar.getByRole('button', { name: 'Start notes' })).toBeVisible();
+  await pointer(yap, 'card:calendar');
+  await expect.poll(() => yap.invoke('bar_debug').then((d) => d.interactive)).toBe(true);
+  await onBar.getByRole('button', { name: 'More answers' }).click();
+  await expect(onBar.getByRole('menuitem', { name: 'Snooze 2 min' })).toBeVisible();
+  await shot(yap.overlay, '14-bar-card-menu');
+  await onBar.getByRole('menuitem', { name: 'Snooze 2 min' }).click();
+  await expect(onBar).toHaveCount(0);
   await expect(roadmap).toHaveCount(0);
   expect((await status(yap)).card).toBeNull();
+  await pointer(yap, 'away');
 
   // A call starting during it brings the snoozed card back, instead of a
-  // second question.
+  // second question; the bar's ✕ dismisses it everywhere.
   await simulate(yap, 'webex', true);
   await expect(cardFor(main, 'Roadmap chat')).toBeVisible();
   await main.waitForTimeout(1_000);
   await expect(toast(main, 'Webex call detected')).toHaveCount(0);
-  await cardFor(main, 'Roadmap chat').getByRole('button', { name: 'Close' }).click();
+  await expect(onBar).toBeVisible();
+  await onBar.getByRole('button', { name: 'Close' }).click();
+  await expect(onBar).toHaveCount(0);
   await expect(cardFor(main, 'Roadmap chat')).toHaveCount(0);
+  await expectStore(yap, 'calendar.json', (c) => Object.keys(c.answered ?? {}).some((k) => k.includes('roadmap@e2e')));
 });
 
 test('back-to-back meetings: a call during the next one offers to switch notes', async ({ yap, main, feed, shot }) => {
@@ -427,8 +468,15 @@ test('back-to-back meetings: a call during the next one offers to switch notes',
   await expect(next).toBeVisible();
   await expect(next).toContainText('Switch your notes to it?');
   await expect(next.getByRole('button', { name: 'Join & switch notes' })).toBeVisible();
-  await shot(main, '13-switch-card');
+  await shot(main, '15-switch-card');
+  // The bar's copy says it's the next meeting.
+  const nextOnBar = barCard(yap, 'Sprint planning');
+  await expect(nextOnBar).toContainText('Next meeting');
+  await expect(nextOnBar.getByRole('button', { name: 'Join & switch notes' })).toBeVisible();
+  await yap.overlay.waitForTimeout(300);
+  await shot(yap.overlay, '16-switch-card-on-the-bar');
   await next.getByRole('button', { name: 'Switch notes', exact: true }).click();
+  await expect(nextOnBar).toHaveCount(0);
 
   // The standup ends (Rust writes its action plan) and the planning's notes record.
   await expect
@@ -442,7 +490,7 @@ test('back-to-back meetings: a call during the next one offers to switch notes',
   expect(planning.participants).toEqual(['Priya Shah']);
   expect(notes(yap).find((n) => n.id === standup.id)).toBeTruthy();
   await expect(yap.notepad.getByRole('textbox', { name: 'Meeting title' })).toHaveValue('Sprint planning');
-  await shot(yap.notepad, '14-notepad-after-the-switch');
+  await shot(yap.notepad, '17-notepad-after-the-switch');
   await closeToasts(main);
   await yap.notepad.getByRole('button', { name: 'Close notepad' }).click();
 });
@@ -460,7 +508,7 @@ test('Google Calendar in one click (a local fake of Google), read-only, then dis
   // Cancelled on Google's consent page: it says so, nothing connects.
   await card.getByRole('button', { name: 'Connect' }).click();
   await expect(card.getByText('Finish in your browser…')).toBeVisible();
-  await shot(main, '15-google-waiting');
+  await shot(main, '18-google-waiting');
   const denied = await fetch(google.deny((await opened(yap)).at(-1)));
   expect(await denied.text()).toContain('Not connected');
   await expect(toast(main, "Couldn't connect your calendar")).toContainText("You didn't let Yap see your calendar");
@@ -486,7 +534,7 @@ test('Google Calendar in one click (a local fake of Google), read-only, then dis
   expect(await back.text()).toContain('Calendar connected');
   await expect(card.getByText('tester@example.com')).toBeVisible();
   await expect(card).toContainText(/Google Calendar · Synced/);
-  await shot(main, '16-google-connected');
+  await shot(main, '19-google-connected');
 
   // Its meeting is in; Google's out-of-office, all-day, solo and declined
   // entries aren't.
@@ -501,14 +549,14 @@ test('Google Calendar in one click (a local fake of Google), read-only, then dis
   await openView(main, 'Meetings');
   await expect(row(main, 'Roadmap review')).toContainText('Google Meet');
   await expect(row(main, 'Roadmap review')).toContainText('Alex Chen');
-  await shot(main, '17-meetings-with-google');
+  await shot(main, '20-meetings-with-google');
 
   // Disconnect, from the ⋯ menu: Google's access is revoked, its meetings go.
   await ensureFeed(yap, feed);
   const settings = await openSettings(main, 'Connectors');
   const google_ = settings.getByRole('group', { name: 'Google Calendar' });
   await google_.getByRole('button', { name: 'More options for tester@example.com' }).click();
-  await shot(main, '18-connection-menu');
+  await shot(main, '21-connection-menu');
   await google_.getByRole('menuitem', { name: 'Disconnect' }).click();
   await expect(google_.getByText('tester@example.com')).toHaveCount(0);
   expect(google.revoked).toHaveLength(1);
@@ -521,7 +569,7 @@ test('Google Calendar in one click (a local fake of Google), read-only, then dis
   await expect.poll(() => status(yap).then((s) => s.connections.length)).toBe(0);
   expect((await status(yap)).events).toEqual([]);
   expect(Object.keys(yap.readJson('calendar-secrets.e2e.json'))).toEqual([]);
-  await shot(main, '19-connectors-disconnected');
+  await shot(main, '22-connectors-disconnected');
   await closeSettings(main);
   await openView(main, 'Meetings');
   await expect(main.getByText('No meetings found')).toBeVisible();

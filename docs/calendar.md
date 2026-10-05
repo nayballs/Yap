@@ -169,10 +169,18 @@ another meeting's notes record, it offers to **switch** notes instead
 notes start.
 
 Every card goes on screen through **one function**, `calendar::present_card`
-(and comes off through `withdraw_card`): today the main window's in-app
-toast, plus a Windows notification with the same buttons when the window
-isn't focused (Yap in the tray, the call app in front). When the Yap bar's
-cards land (`bar::show_card`), re-point those two.
+(and comes off through `withdraw_card`), the way call detection's prompts do:
+the main window's in-app toast, and while the window isn't focused (the call
+app in front, Yap in the tray) a card on the **Yap bar** (`bar::show_card`,
+id `calendar`), after call detection's "Meeting detected" card: the call
+app's mark (a calendar when there's none), the meeting over "● In 1 min ·
+with Tanay +1" (amber, green once it's on; kept current with `update_card`),
+a split button **Join & take notes** whose ^ menu holds **Start notes** and
+**Snooze 2 min**, and ✕ = dismiss. Esc isn't watched for it (that would be
+every Esc in every app for minutes). With the bar off or hidden for an hour,
+the card is a Windows notification with the same buttons instead. Answering
+any copy answers them all; a card shown while the window was focused moves
+onto the bar when the window loses focus, and off a bar that goes away.
 
 ### Into meeting notes
 
@@ -259,7 +267,8 @@ them at run time).
   link), finding the feed's owner (and a tie being nobody), join links (services, HTTPS only, help pages, punctuation, HTML,
   source order), invite cleanup, reminder timing (due, stays 5 minutes,
   snooze), matching a recording to the nearest meeting, placeholder titles,
-  Google's events address and items, the Windows notification's XML.
+  Google's events address and items, the card on the Yap bar (mark, status
+  line keeping time, answers) and as a Windows notification (its XML).
 - **e2e** (`npm run test:app`): `e2e/calendar.spec.js` against a local iCal
   server (`e2e/support/calendar-feed.js`: a meeting a minute away with two
   attendees and a Teams link, a weekly recurring one, an all-day event,
@@ -269,10 +278,11 @@ them at run time).
   `YAP_GOOGLE_{AUTH,TOKEN,REVOKE,API}_URL`):
   Connectors (the Outlook guide, a reset link, one that works); the Meetings
   view (today and the next 7 days, Conflict and Maybe, all-day hidden, Show
-  more, a draft note); the reminder card (**Join & take notes** records into
-  a note with the meeting's name and attendees, and its simulated call isn't
-  asked about again); Esc, and a snoozed card coming back with its call;
-  back-to-back switching; Google connect → meetings → ⋯ menu → Disconnect
+  more, a draft note); the reminder card, in the window and on the Yap bar
+  (**Join & take notes** records into a note with the meeting's name and
+  attendees, the bar's copy goes too, and its simulated call isn't asked
+  about again); Esc, the bar's ^ menu snoozing it, a snoozed card coming
+  back with its call, the bar's ✕; back-to-back switching (on the bar too); Google connect → meetings → ⋯ menu → Disconnect
   (token revoked, meetings gone). `e2e/calendar-nudge.spec.js`: no calendar
   yet (and a build without Google), the nudge once after a meeting and "Not
   now", past notes with search and the Ask bar opening Chat. Test mode keeps
@@ -289,8 +299,6 @@ them at run time).
   tenants require admin consent. Until then, the published calendar: it
   shows attendees only with "Can view all details", Outlook refreshes it on
   its own schedule (it can lag), and some organisations turn publishing off.
-- **The Yap bar**: the card goes through `present_card`/`withdraw_card`, to
-  be pointed at `bar::show_card` when the bar's cards land.
 - **A brief before the meeting** (Wispr's "Meeting prep") isn't built.
 - Google calendars you don't own (a shared team calendar) aren't read, by
   the choice of scope.

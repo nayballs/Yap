@@ -869,7 +869,10 @@ meetings and their notes meet in four places:
   meetings.
 - **The reminder card** ("Notify before scheduled meetings start": right
   before, 1 or 2 minutes, never; Settings → General → Meetings): **Join &
-  take notes**, **Start notes**, Snooze 2 min, ✕. While another meeting's
+  take notes**, **Start notes**, Snooze 2 min, ✕ — in the main window, and
+  while it isn't focused on the **Yap bar** (`bar.rs`) as a call card like
+  call detection's ("Design review · ● In 1 min · with Tanay +1"), else a
+  Windows notification. While another meeting's
   notes record, it offers to **switch** notes: the running meeting ends
   (`meeting_end::end`, so its action plan is written) and the next one's
   notes start. A call starting during the next meeting while the last one
