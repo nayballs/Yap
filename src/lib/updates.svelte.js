@@ -16,7 +16,7 @@
 // WebView2 reports `visibilityState: visible` even for a hidden window, so
 // the page can't judge that itself; with the window hidden Rust posts a
 // Windows notification instead), that toast's progress through
-// "Restarting…", and "Yap is up to date" after an update restart.
+// "Restarting…", and "Updated to X" after an update restart.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openExternalLink } from './externalLinks.js';
@@ -50,7 +50,7 @@ let toastId = null;
 // This window asked to install, so a failure belongs in that toast.
 let acting = false;
 let checkedTimer = null;
-// "Yap is up to date" shows once per launch (a snapshot sent before Rust
+// "Updated to X" shows once per launch (a snapshot sent before Rust
 // saw the ack still carries `updatedFrom`).
 let updatedShown = false;
 
@@ -94,8 +94,8 @@ function announce() {
     invoke('update_ack_updated').catch(() => {});
     const url = releaseUrlFor(updates.currentVersion);
     toast({
-      title: 'Yap is up to date',
-      description: `You're on ${updates.currentVersion} now.`,
+      title: `Updated to ${updates.currentVersion}`,
+      description: 'Yap restarted on the new version.',
       variant: 'success',
       chip: 'Updated',
       duration: 6000,
@@ -264,11 +264,10 @@ export async function checkForUpdates() {
   try {
     const r = await invoke('update_check');
     apply(r.status);
-    if (r.outcome === 'found') {
-      // Asked for it — show it now, and count it as this update's announcement.
-      showToast();
-      invoke('update_ack', { version: updates.version, reminder: false }).catch(() => {});
-    } else if (r.outcome === 'uptodate') {
+    // Found: the person is looking at the result where they asked (Settings →
+    // About, the status bar), and Rust counts it as this update's announcement
+    // (`run_check`), so no toast repeats it.
+    if (r.outcome === 'uptodate') {
       flashChecked('uptodate');
     } else if (r.outcome === 'error') {
       updates.checkError = r.error || "Couldn't check for updates right now.";

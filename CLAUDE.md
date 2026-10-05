@@ -419,7 +419,10 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   so "Restart to update" is instant. One snapshot (`update_status` /
   `yap-update` event: idle | checking | available | downloading | ready |
   installing + version/notes/progress/error/deferred/…) feeds every surface.
-  **Announcements** (`updates.json`): once per "pending update" episode — the
+  **Announcements** (`updates.json`): once per "pending update" episode. A
+  check the user starts (About, status bar, tray → About) IS the announcement
+  (`run_check` marks it): the result shows where they asked, no toast or
+  Windows notification repeats it. Otherwise the
   in-app toast if the main window is visible (page acks via `update_ack`),
   else one **silent Windows notification** (WinRT `ToastNotification` under
   the app identifier = the NSIS shortcut's AppUserModelID; dev builds borrow
@@ -440,7 +443,7 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   `shutdown_cleanup` + saves window state, because on Windows `Update::install`
   launches the installer (passive, `/R` relaunch) and `std::process::exit`s
   without the Exit handler. A restart marker lets the relaunched Yap reopen the
-  window if it was open and toast "Yap is up to date". Deliberately **no
+  window if it was open and toast "Updated to X". Deliberately **no
   install-on-quit**: the passive installer's `/R` would relaunch a Yap the
   user just quit, so a downloaded update stays one click away (and the next
   launch re-finds it). Nightly and stable announce alike (once per episode;
@@ -633,7 +636,7 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   toggles, backend `yap-error` events, and the **update toast**
   (`updates.svelte.js` — the shared update store started by ControlPanel:
   sticky "Yap X is ready" + Restart to update / Later / What's new, then
-  Downloading… / Restarting Yap… in place; "Yap is up to date" after the
+  Downloading… / Restarting Yap… in place; "Updated to X" after the
   restart), and the **call prompts** (`meetingDetect.svelte.js` — mirrors
   meeting_detect.rs's snapshot: "Teams call detected — Record notes / Not now"
   with a small **"Don't ask for Teams"** link on its own line under the

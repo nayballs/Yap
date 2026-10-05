@@ -27,7 +27,9 @@
 //!   an update" episode is
 //!   announced once: a newer version replacing a pending one stays quiet, a
 //!   single reminder follows after 3 days, and the next announcement waits
-//!   until the user has actually updated.
+//!   until the user has actually updated. A check the user starts (About, the
+//!   status bar, the tray) shows its result where they asked, and counts as
+//!   that announcement: no toast or Windows notification repeats it.
 //! - **Installing never interrupts dictation** — a restart requested while a
 //!   dictation is recording/transcribing runs right after it; a meeting
 //!   recording or a model download refuses with an explanation. On Windows
@@ -272,6 +274,7 @@ fn release_url(version: &str) -> String {
 //   YAP_UPDATE_TEST_PUBKEY=<minisign public key>  (optional: a payload signed
 //       with your own `tauri signer` test key then downloads + verifies)
 //   YAP_UPDATE_TEST_PORTABLE=0|1, YAP_UPDATE_TEST_METERED=0|1  (force a path)
+//   YAP_UPDATE_TEST_FIRST_CHECK=<secs>  (the first automatic check; default 5)
 // The installer itself never runs from a dev build (see `begin_install`).
 
 #[cfg(debug_assertions)]
@@ -283,6 +286,14 @@ fn test_endpoint() -> Option<url::Url> {
 
 #[cfg(not(debug_assertions))]
 fn test_endpoint() -> Option<url::Url> {
+    None
+}
+
+fn test_first_check() -> Option<u64> {
+    #[cfg(debug_assertions)]
+    if let Ok(v) = std::env::var("YAP_UPDATE_TEST_FIRST_CHECK") {
+        return v.trim().parse().ok();
+    }
     None
 }
 
@@ -585,6 +596,13 @@ async fn run_check(app: &AppHandle, manual: bool) -> (Outcome, String) {
     let outcome = match result {
         Ok(Some(update)) => {
             let version = update.version.clone();
+            // A check the user asked for shows its result where they asked
+            // (Settings → About, the status bar): that's this update's
+            // announcement, so neither a toast nor a Windows notification
+            // repeats it once the background download is done.
+            if manual {
+                mark_announced(&Announce { version: version.clone(), reminder: false });
+            }
             // Background download: installed builds, unless the connection is
             // metered (then it waits for the user's "Download and restart").
             let installable = !portable();
@@ -896,7 +914,7 @@ pub fn init(app: &AppHandle) {
             tracing::info!(from = %rec.restart_from, to = current_version(), "updates: updated");
             // The window was open when the user hit "Restart to update" —
             // bring it back so the update visibly finishes where it started,
-            // with a "Yap is up to date" toast. (Restarted from the tray or a
+            // with an "Updated to X" toast. (Restarted from the tray or a
             // notification with the window hidden: no toast nobody would see.)
             if rec.restart_show_window {
                 lock().updated_from = Some(rec.restart_from.clone());
@@ -914,7 +932,7 @@ pub fn init(app: &AppHandle) {
         return;
     }
     let first = if test_endpoint().is_some() {
-        5
+        test_first_check().unwrap_or(5)
     } else {
         FIRST_CHECK_DELAY + jitter(FIRST_CHECK_JITTER)
     };
