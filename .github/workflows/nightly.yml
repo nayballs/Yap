@@ -45,6 +45,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the release notes walk the commits since the last nightly
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -160,6 +162,19 @@ jobs:
           # at the nightly channel's latest.json.
           args: "--features engines -c src-tauri/tauri.nightly.conf.json"
 
+      # "What's new" for the in-app update toast (latest.json `notes`) and the
+      # release page: the app's feat/fix commits since the previous nightly,
+      # whose commit the release body records as `built-from: <sha>`.
+      - name: Write release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          prev=$(gh release view nightly --json body --jq .body 2>/dev/null | grep -oE 'built-from: [0-9a-f]{40}' | head -n1 | cut -d' ' -f2 || true)
+          echo "Previous nightly: ${prev:-unknown}"
+          node scripts/release-notes.mjs "$prev" > nightly-notes.md
+          cat nightly-notes.md
+
       # Rename the built installer + its .sig to CONSTANT names so the download
       # URL is stable across every nightly, then build latest.json from the .sig.
       - name: Stage nightly artifacts
@@ -183,7 +198,7 @@ jobs:
           const signature = fs.readFileSync(path.join(nsisDir, sig), 'utf8').trim();
           const manifest = {
             version,
-            notes: 'Rolling nightly build for dogfooding — the latest fixes from main.',
+            notes: fs.readFileSync('nightly-notes.md', 'utf8').trim(),
             pub_date: new Date().toISOString(),
             platforms: {
               'windows-x86_64': {
@@ -205,13 +220,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          {
+            echo "Rolling nightly build — always the latest from main. For dogfooding; may be unstable."
+            echo
+            echo "## What's new in ${NIGHTLY_VERSION}"
+            echo
+            cat nightly-notes.md
+            echo
+            echo "<!-- built-from: ${GITHUB_SHA} -->"
+          } > release-body.md
           gh release create nightly \
             --prerelease \
             --title "Yap Nightly" \
-            --notes "Rolling nightly build — always the latest from main. For dogfooding; may be unstable." \
+            --notes-file release-body.md \
             || true
           gh release upload nightly \
             Yap-nightly-setup.exe \
             Yap-nightly-setup.exe.sig \
             latest.json \
             --clobber
+          # After the upload, so a failed build never moves the marker.
+          gh release edit nightly --notes-file release-body.md

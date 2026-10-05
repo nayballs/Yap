@@ -38,6 +38,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the release notes walk the commits since the last tag
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -71,6 +73,22 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      # "What's new" (latest.json `notes` for the in-app update toast, and the
+      # draft's body): the app's feat/fix commits since the previous `v*` tag.
+      # Polish the draft's text before publishing; latest.json keeps this cut.
+      - name: Write release notes
+        id: notes
+        shell: bash
+        run: |
+          current="v$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          prev=$(git tag --list 'v*' --sort=-v:refname --merged HEAD | grep -vx "$current" | head -n1 || true)
+          echo "Previous release: ${prev:-none}"
+          {
+            echo 'body<<NOTES_EOF'
+            node scripts/release-notes.mjs "$prev"
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build + release (Tauri)
         uses: tauri-apps/tauri-action@v0
@@ -108,6 +126,7 @@ jobs:
           tagName: v__VERSION__
           releaseCommitish: ${{ github.sha }}
           releaseName: "Yap v__VERSION__"
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
 

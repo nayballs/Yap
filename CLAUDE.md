@@ -125,7 +125,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   routes `dictation-key-pressed`/`-released` → `Pipeline.on_key()` (so recording works
   before the webview is ready), drives the **overlay** and **tray** off `yap-state`,
   builds the tray (always — it's the only persistent surface), reconciles
-  autostart, and starts the update scheduler last (`updates::init`).
+  autostart (release builds only: a dev build shares the installed app's `Yap`
+  Run entry, so `set_autostart_enabled` leaves the OS setting alone), and
+  starts the update scheduler last (`updates::init`).
   `shutdown_cleanup()` (sidecar, bridge, WASAPI mute) runs on `RunEvent::Exit`
   AND from the updater's pre-install hook. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
   Gives the hidden settings/onboarding webviews a one-shot **DWM-cloaked** show+hide
@@ -333,7 +335,13 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   `shutdown_cleanup` + saves window state, because on Windows `Update::install`
   launches the installer (passive, `/R` relaunch) and `std::process::exit`s
   without the Exit handler. A restart marker lets the relaunched Yap reopen the
-  window if it was open and toast "Yap is up to date". Portable builds get
+  window if it was open and toast "Yap is up to date". Deliberately **no
+  install-on-quit**: the passive installer's `/R` would relaunch a Yap the
+  user just quit, so a downloaded update stays one click away (and the next
+  launch re-finds it). Nightly and stable announce alike (once per episode;
+  a daily nightly user who keeps updating hears about each build once). The
+  "What's new" notes are latest.json's `notes`, written by
+  `scripts/release-notes.mjs` in both release workflows. Portable builds get
   "Get it on GitHub". Dev builds never auto-check — debug-only
   `YAP_UPDATE_TEST_ENDPOINT` (+ `_PUBKEY`, `_PORTABLE`, `_METERED`) point them
   at a local `latest.json`; the installer itself never runs from a dev build.
@@ -577,8 +585,10 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   "Can't scan?" typed-address fallback; an `aria-live` "Waiting for your
   phone…" with a quiet "New code in m:ss"; Cancel). A lapsed code (clock at
   0 or `device.expired`) is blurred under **"Show a new code"** (WhatsApp's
-  reload-QR pattern); while the panel is really in view (window visible +
-  IntersectionObserver — the Settings modal hides with `display: none` but
+  reload-QR pattern); while the panel is really in view (window visible —
+  asked of the window on every focus change, `isVisible` && !`isMinimized`,
+  since WebView2 reports the page visible while the window is hidden — +
+  IntersectionObserver, as the Settings modal hides with `display: none` but
   stays mounted) it renews itself at most 3 times per start by the person
   (every poll costs the service D1 writes), then waits for the button. Focus
   goes to the panel heading on start and back to the phone button (signed
@@ -696,7 +706,11 @@ with `--features engines`, producing a custom **NSIS installer** (normal/portabl
 WebView2 bootstrap) + a signed `latest.json` on a draft GitHub Release. The in-app
 updater (`tauri-plugin-updater`, driven by `updates.rs`) checks that endpoint ~30 s
 after launch and every ~4 h while Yap runs, pre-downloads, and installs when the user
-clicks "Restart to update". **Currently unsigned**
+clicks "Restart to update". Its "What's new" comes from latest.json's `notes`:
+both workflows run `scripts/release-notes.mjs`, the app's feat/fix commit subjects
+since the previous release (stable: the previous `v*` tag, via tauri-action's
+`releaseBody`, so polish the draft's text by hand; nightly: since the commit the
+rolling release's body records as `<!-- built-from: <sha> -->`). **Currently unsigned**
 (Authenticode) — Windows shows a SmartScreen warning until a cert is added; the
 `signCommand` slot is ready. Updater artifacts are minisign-signed
 (`TAURI_SIGNING_PRIVATE_KEY` GitHub secret). The uninstaller's **Delete the

@@ -11,6 +11,7 @@
   // lapses is dimmed under "Show a new code", and renews itself a few times
   // while the panel is in view.
   import { invoke } from '@tauri-apps/api/core';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { onMount, tick, untrack } from 'svelte';
   import Button from './ui/Button.svelte';
   import Group from './ui/Group.svelte';
@@ -70,11 +71,15 @@
     invoke('auth_check_methods')
       .catch(() => {})
       .finally(() => (methodsChecked = true));
-    const onVisibility = () => (pageVisible = document.visibilityState === 'visible');
-    document.addEventListener('visibilitychange', onVisibility);
+    checkWindowShown();
+    let unFocus = null;
+    getCurrentWindow()
+      .onFocusChanged(() => checkWindowShown())
+      .then((u) => (unFocus = u))
+      .catch(() => {});
     return () => {
       clearInterval(resendTimer);
-      document.removeEventListener('visibilitychange', onVisibility);
+      unFocus?.();
     };
   });
 
@@ -193,7 +198,18 @@
 
   // In view: the window is showing and the panel is on screen. (The Settings
   // modal hides with display: none but stays mounted, and so does this page.)
-  let pageVisible = $state(document.visibilityState === 'visible');
+  // WebView2 keeps document.visibilityState 'visible' while the window is
+  // hidden, so ask the window itself whenever its focus changes: hiding or
+  // minimizing it takes focus away, the tray and "Open Yap" give it back.
+  let windowShown = $state(true);
+  async function checkWindowShown() {
+    try {
+      const win = getCurrentWindow();
+      windowShown = (await win.isVisible()) && !(await win.isMinimized());
+    } catch {
+      windowShown = true;
+    }
+  }
   let panelInView = $state(false);
   function trackInView(node) {
     const observer = new IntersectionObserver((entries) => {
@@ -211,7 +227,7 @@
   // Pre: renewBusy is set before the DOM updates, so the lapsed code goes
   // straight to "Getting a new code…" with no flash of the button.
   $effect.pre(() => {
-    if (lapsed && pageVisible && panelInView) untrack(autoRenew);
+    if (lapsed && windowShown && panelInView) untrack(autoRenew);
   });
 
   function autoRenew() {

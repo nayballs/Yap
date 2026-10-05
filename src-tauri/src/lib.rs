@@ -59,6 +59,13 @@ pub struct AppState {
 /// Enable or disable OS autostart via `tauri-plugin-autostart`.
 /// Kept as a free function so `commands::set_autostart` can delegate here.
 pub fn set_autostart_enabled(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    // A dev build shares the installed Yap's "Yap" Run entry: disabling would
+    // delete the installed app's launch-at-login, enabling would point it at
+    // the dev exe. Leave the OS setting to the installed app.
+    if cfg!(debug_assertions) {
+        tracing::info!(enabled, "autostart: dev build, OS setting left alone");
+        return Ok(());
+    }
     let manager = app.autolaunch();
     let res = if enabled {
         manager.enable()
