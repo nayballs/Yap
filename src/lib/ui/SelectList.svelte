@@ -110,7 +110,7 @@
   .stag {
     font-size: 10.5px;
     font-weight: 600;
-    color: #cfc9ff;
+    color: var(--yap-primary);
     background: var(--yap-primary-tint);
     padding: 1px 7px;
     border-radius: var(--yap-r-sm);

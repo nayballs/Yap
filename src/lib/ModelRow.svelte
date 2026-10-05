@@ -168,9 +168,6 @@
     white-space: nowrap;
     flex: 0 0 auto;
   }
-  .mrow.active .mtag {
-    color: #cfc9ff;
-  }
   .mpct {
     font-size: 11px;
     color: var(--yap-muted);
