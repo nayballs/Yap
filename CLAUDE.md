@@ -58,7 +58,9 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
   OpenRouter, or local Ollama/LM Studio). `src/llm.rs`.
 - **Text injection:** `arboard` (clipboard) + Win32 `SendInput` (paste / Enter).
 - **Model download:** `reqwest` streaming + `sha2` verify + `flate2`/`tar` extract.
-- **Updates/install:** `tauri-plugin-updater` (GitHub Releases) + custom NSIS installer.
+- **Updates/install:** `tauri-plugin-updater` (GitHub Releases), driven Rust-side by
+  `updates.rs` (background checks every ~4 h + background download, install on
+  request) + custom NSIS installer.
 - **Autostart:** `tauri-plugin-autostart`.
 - **Window state:** `tauri-plugin-window-state` persists the main window's size, position, and
   maximized state across launches (overlay, onboarding denylisted; VISIBLE flag excluded
@@ -75,9 +77,10 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
   (2.5+ needs tauri 2.12).
 - **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`,
   `history.json`, `notes.json` — the AI Notepad store, `chats.json` — AI Chat
-  conversations). Every JSON store writes atomically and quarantines a corrupt
-  file on load instead of crashing (`config::atomic_write`/`quarantine_corrupt`,
-  used by all five stores).
+  conversations, `updates.json` — update announcements + the restart marker).
+  Every JSON store writes atomically and quarantines a corrupt file on load
+  instead of crashing (`config::atomic_write`/`quarantine_corrupt`, used by all
+  six stores).
 
 ---
 
@@ -118,11 +121,13 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
 
 ### Key modules (`src-tauri/src/`)
 - **`lib.rs`** — app entry / Tauri `setup`. Runs `portable::init()`, registers the
-  updater/process/autostart/single-instance plugins, starts the input hook + pipeline,
+  updater/autostart/single-instance plugins, starts the input hook + pipeline,
   routes `dictation-key-pressed`/`-released` → `Pipeline.on_key()` (so recording works
   before the webview is ready), drives the **overlay** and **tray** off `yap-state`,
-  builds the tray (always — it's the only persistent surface), and reconciles
-  autostart. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
+  builds the tray (always — it's the only persistent surface), reconciles
+  autostart, and starts the update scheduler last (`updates::init`).
+  `shutdown_cleanup()` (sidecar, bridge, WASAPI mute) runs on `RunEvent::Exit`
+  AND from the updater's pre-install hook. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
   Gives the hidden settings/onboarding webviews a one-shot **DWM-cloaked** show+hide
   at startup (`init_hidden_webview` — WebView2 created-hidden workaround). ⚠ Never
   swap the cloak for "park off-screen, show+hide, move back": DWM's close animation
@@ -302,6 +307,42 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
 - **`usage.rs`** — daily Groq usage tracker (tokens summed locally + requests from
   `x-ratelimit-*` headers), persisted to `groq_usage.json`, auto-resets at midnight
   UTC; powers the `get_groq_usage` command + `groq-usage` event.
+- **`updates.rs`** — a running Yap notices updates by itself (OpenWhispr
+  `updater.js` cadence, owned by Rust because the settings webview is usually
+  hidden + timer-throttled). Scheduler: first check 30–60 s after launch, then
+  every 4 h ± 20 min, waking ≤ every 5 min and comparing the **wall clock** (a
+  slept-through check runs minutes after resume); showing the main window
+  re-checks when the last check is > 1 h old; failures retry in 30 min; gated by
+  `update_checks_enabled` (manual checks always work). Installed builds then
+  **download in the background** (skipped on a metered connection —
+  `Windows.Networking.Connectivity`), keeping the verified installer in memory,
+  so "Restart to update" is instant. One snapshot (`update_status` /
+  `yap-update` event: idle | checking | available | downloading | ready |
+  installing + version/notes/progress/error/deferred/…) feeds every surface.
+  **Announcements** (`updates.json`): once per "pending update" episode — the
+  in-app toast if the main window is visible (page acks via `update_ack`),
+  else one **silent Windows notification** (WinRT `ToastNotification` under
+  the app identifier = the NSIS shortcut's AppUserModelID; dev builds borrow
+  PowerShell's; Restart / Later buttons + body → Settings → About; if Windows
+  refuses it, the toast waits for the window); a newer version replacing a
+  pending one stays quiet; one reminder after 3 days. **Install**
+  (`request_install`, from toast/About/tray/notification): never mid-dictation
+  (deferred until the pipeline goes idle + 2.5 s, via the `yap-state` hook),
+  refused with a message during a meeting recording or model download
+  (`yap-update-blocked`); the updater's `on_before_exit` runs
+  `shutdown_cleanup` + saves window state, because on Windows `Update::install`
+  launches the installer (passive, `/R` relaunch) and `std::process::exit`s
+  without the Exit handler. A restart marker lets the relaunched Yap reopen the
+  window if it was open and toast "Yap is up to date". Portable builds get
+  "Get it on GitHub". Dev builds never auto-check — debug-only
+  `YAP_UPDATE_TEST_ENDPOINT` (+ `_PUBKEY`, `_PORTABLE`, `_METERED`) point them
+  at a local `latest.json`; the installer itself never runs from a dev build.
+  Talks to GitHub Releases only (never the account service). ⚠ WebView2 keeps
+  `document.visibilityState === 'visible'` while a Tauri window is **hidden**
+  (`hide()` doesn't touch the controller's visibility) — so window visibility
+  comes from Rust (`is_visible()`), and "the window was shown" from
+  `WindowEvent::Focused(true)` on the settings window (lib.rs →
+  `updates::on_main_window_focused`), never from the page.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
   volume, output_device, mute_while_recording, recording_mode,
   overlay_position, dictionary, append_trailing_space, auto_submit(+key),
@@ -327,7 +368,10 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   against Whisper hallucinating the dictionary prompt on silence.
 - **`tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
   menu (model submenu w/ checkmark, Cancel while recording, Settings/Quit, Check for
-  updates); left-click opens Settings.
+  updates → Settings → About + a manual check); left-click opens Settings. A ready
+  update adds **"Restart to update to X"** under the version line (replacing
+  "Check for updates…"; portable: "Get Yap X on GitHub…"), a green dot on the icon
+  and "· Update X ready" in the tooltip (`tray::refresh`, driven by updates.rs).
 - **`overlay.rs`** — shows/positions the bottom (or top) center "transcribing" overlay
   window on `yap-state`. **Screen-aware**: positions on the monitor holding the
   mouse cursor (Win32 `GetCursorPos` vs Tauri monitor rects, both physical px;
@@ -425,13 +469,20 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   for the window's lifetime. App-wide **toast notification system**
   (`ui/toast.svelte.js` + `ui/ToastHost.svelte`, OpenWhispr timer logic in
   **Wispr-Flow card styling** since 2026-07-09): dark rounded card with a
-  per-variant category chip (Tip/Done/Error, override via `chip`), always-
-  visible circular ✕, optional light **action button** bottom-right
-  (`action: { label, onClick }` — Wispr's "Open Settings"), hover-pause,
-  copyable mono error boxes, progress hairlines (3.5 s / 6 s durations);
-  mounted in ControlPanel and wired to action runs, meeting start/stop,
-  uploads, clipboard copies, debug-mode toggles, and backend `yap-error`
-  events. **`HomeView.svelte`** = the Wispr-style
+  per-variant category chip (Tip/Done/Error, override via `chip`; `icon:
+  'update'`), always-visible circular ✕, optional light **action button**
+  bottom-right (`action: { label, onClick, keepOpen? }` — Wispr's "Open
+  Settings") + a quiet `secondary` ("Later"), hover-pause, copyable mono error
+  boxes, progress hairlines (3.5 s / 6 s durations; `duration <= 0` sticky),
+  plus a determinate `progress` bar, a `busy` chip spinner and an `expand`
+  "What's new" toggle that unfolds markdown in the card; `updateToast(id,
+  patch)` changes a live toast in place; mounted in ControlPanel and wired to
+  action runs, meeting start/stop, uploads, clipboard copies, debug-mode
+  toggles, backend `yap-error` events, and the **update toast**
+  (`updates.svelte.js` — the shared update store started by ControlPanel:
+  sticky "Yap X is ready" + Restart to update / Later / What's new, then
+  Downloading… / Restarting Yap… in place; "Yap is up to date" after the
+  restart). **`HomeView.svelte`** = the Wispr-style
   Home: time-of-day greeting with the hotkey as **amber keycaps**, a dark
   **rotating hero card** (4 tips — voice edit / AI cleanup / meeting notes /
   per-app profiles — picked by day, dot nav, CTAs open the right Settings
@@ -495,8 +546,12 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   body + Save/Reset) / Test tabs. Plus usage meter + profiles w/ per-profile
   model override + per-app rules), **History** (stats
   dashboard + recent list + enable/clear), **Advanced** (output toggles, system,
-  dictionary), **About** (version, updates), and **Account** (bottom of the
-  sidebar — `AccountSection.svelte`).
+  dictionary), **About** (version + an **Updates** card on the shared update
+  store: "Last checked …" / Check for updates, Downloading… %, "Yap X is ready to
+  install" + Restart to update, release notes + release-page link, the
+  "Check for updates automatically" toggle), and **Account** (bottom of the
+  sidebar — `AccountSection.svelte`). The status bar's update link follows the
+  same store (Check for updates → Restart to update / Downloading… / Up to date ✓).
 - **`lib/AccountSection.svelte` / `account.svelte.js`** — Settings → Account:
   Continue with Google/GitHub/Discord, "Email me a code" → 6-digit entry
   (auto-submits), a waiting state with paste-the-code fallback, then the
@@ -631,7 +686,9 @@ on accumulated lints, masking real failures.)
 Tagging `v*` (or running the **release** GitHub Action) builds via `tauri-action`
 with `--features engines`, producing a custom **NSIS installer** (normal/portable,
 WebView2 bootstrap) + a signed `latest.json` on a draft GitHub Release. The in-app
-updater (`tauri-plugin-updater`) checks that endpoint. **Currently unsigned**
+updater (`tauri-plugin-updater`, driven by `updates.rs`) checks that endpoint ~30 s
+after launch and every ~4 h while Yap runs, pre-downloads, and installs when the user
+clicks "Restart to update". **Currently unsigned**
 (Authenticode) — Windows shows a SmartScreen warning until a cert is added; the
 `signCommand` slot is ready. Updater artifacts are minisign-signed
 (`TAURI_SIGNING_PRIVATE_KEY` GitHub secret). The uninstaller's **Delete the
@@ -674,9 +731,11 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 - **Verify it published:**
   `curl -sL https://github.com/nayballs/Yap/releases/download/nightly/latest.json`
   → the `version` field should be the new `0.1.0-nightly.<N>`.
-- **Get it on this machine:** in the app, **Settings → Check for updates** (an installed
-  nightly auto-follows the nightly channel — no reinstall). First-time install:
-  grab `Yap-nightly-setup.exe` from https://github.com/nayballs/Yap/releases/tag/nightly.
+- **Get it on this machine:** a running installed nightly notices it by itself within
+  ~4 h (tray "Restart to update to …", the toast or a Windows notification) — or
+  **Settings → About → Check for updates** / the tray's "Check for updates…" right away
+  (an installed nightly auto-follows the nightly channel — no reinstall). First-time
+  install: grab `Yap-nightly-setup.exe` from https://github.com/nayballs/Yap/releases/tag/nightly.
 - **If a nightly build fails:** `gh run view <run-id> --repo nayballs/Yap --log-failed`.
 - **Run from SOURCE instead (live dev, no release):** from the project folder run
   **`scripts\dev.bat`** (= `npm run tauri dev -- --features engines`). Hot-reloads the
@@ -699,6 +758,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
   participants, meeting transcripts).
 - Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chats.rs`).
+- Updates: `%APPDATA%/yap/updates.json` — which update was announced (and when),
+  the last check time, and the restart marker (`updates.rs`).
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`).
 - Local API bridge discovery: `~/.yap/cli-bridge.json` (fixed path, NOT the
@@ -725,7 +786,9 @@ named profiles + per-profile model choice, **edit/rewrite mode** + the **Voice A
 wake word**, combo hotkeys, the audio pre-roll (anti first-word clipping), **live
 streaming partials** (sliding-window, on by default, word-paced overlay reveal —
 validated live 2026-07-10), transcription history + stats, cleanup presets, real WASAPI mute,
-the Groq usage meter, and the installer + auto-updater + portable mode + release CI.
+the Groq usage meter, and the installer + auto-updater (background checks + download
+while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
+`updates.rs`, 2026-10-05) + portable mode + release CI.
 On top of that, the main window is now a full **ControlPanel** (Home dictation feed
 w/ Ctrl+K search, Chat, Notes, Upload, Dictionary, Settings as an always-mounted
 modal, app-wide toasts): local audio-**file** transcription (Upload — `media.rs`
