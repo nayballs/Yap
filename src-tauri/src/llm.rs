@@ -207,6 +207,20 @@ pub const ACTION_PLAN_DEFAULT_FRAGMENT: &str = "Write an action plan. Start with
 /// editable body): users shape the end result through the Action Plan action.
 pub const MEETING_DIGEST_PROMPT: &str = "You are a meeting note-taker. You receive ONE PART of a longer meeting: its transcript, where \"You:\" is the person recording and \"Them:\" is everyone else on the call, plus the attendee list and the main points of the meeting so far (context only: never repeat them).\n\nWrite notes on THIS PART ONLY, under exactly these four headings, in this order:\n### Key points\n### Decisions\n### Action items\n### Open questions\n\nUnder each heading write short \"- \" bullets, or \"- None\".\nAction items: one per line as \"- [ ] Owner: task (due: deadline)\".\n- Owner: the person who said they would do it, or who was asked and agreed: \"You\" for the person recording, a name from the attendee list, or a name said in this part. If nobody was named or nobody agreed, write \"Unassigned\". Never guess an owner.\n- Add \"(due: ...)\" only when a deadline was said, in the words used (\"by Friday\", \"end of March\").\nUse only what is said in this part. Never invent names, tasks, decisions or dates. At most 6 key points. No preamble, no closing remarks.";
 
+/// Immutable prompt for the notepad's **"What did I miss?"**
+/// (`meeting_assist.rs`): what was said since the person last looked at the
+/// transcript, in a few bullets. Internal, like the digest prompt.
+pub const CATCH_UP_PROMPT: &str = "You help someone catch up on a meeting they looked away from. You receive what was said SINCE THEY LAST LOOKED, where \"You:\" is the person asking and \"Them:\" is everyone else on the call, plus some earlier context (context only: never repeat it).\n\nTell them what they missed in at most 5 short \"- \" bullets: the main points, any decisions, anything asked of them (\"You\"), and tasks with their owner and deadline as said. Use only the input. Never invent names, tasks, decisions or dates. If nothing of substance was said, reply with one short line saying so. No preamble, no closing remarks.";
+
+/// Immutable prompt for a follow-up question in the notepad's catch-up chat
+/// ("Ask about this meeting…"), answered from the meeting so far.
+pub const MEETING_ASK_PROMPT: &str = "You answer questions about a meeting that may still be going on, from its notes and transcript, where \"You:\" is the person asking and \"Them:\" is everyone else on the call. Answer briefly: one or two sentences, or a few \"- \" bullets. Use only the input; if the answer isn't in it, say so in one line. Never invent names, tasks, decisions or dates.";
+
+/// Immutable prompt for the **AI meeting title** (`meeting_assist.rs`): a
+/// short title from the start of the meeting, replacing a made-up one like
+/// "Teams call · 5 Oct, 14:30". Internal (no editable body).
+pub const MEETING_TITLE_PROMPT: &str = "You name meetings. You receive the start of a meeting's transcript, where \"You:\" is the person who recorded it and \"Them:\" is everyone else on the call, sometimes with the attendees and the main points so far. Reply with ONE short title for the meeting: 3 to 7 words, in the language of the meeting, saying what it is about. Add who it is with only when a name or team is clear. Title Case. No quotes, no trailing period, no date or time, nothing else.";
+
 /// Per-call knobs for the note and meeting-summary calls.
 pub(crate) struct ChatOptions {
     pub temperature: f32,

@@ -3,13 +3,16 @@
 // spec can check what Yap sent. Point a test instance's Note Formatting
 // scope at `base` (see meetings.spec.js).
 //
-// It knows Yap's two meeting calls by their system prompts
-// (src-tauri/src/llm.rs): a rolling DIGEST of one part of a meeting, and the
-// final ACTION PLAN. Replies are built from the trigger phrases the specs
-// put in their synthetic meetings — and, to prove Yap's checks
-// (meeting_summary.rs), the digests slip in a task for someone nobody
+// It knows Yap's meeting calls by their system prompts (src-tauri/src/llm.rs):
+// a rolling DIGEST of one part of a meeting, the final ACTION PLAN, and the
+// meeting notepad's helpers: the meeting TITLE, "What did I miss?" (CATCH UP)
+// and a follow-up question (MEETING ASK). Replies are built from the trigger
+// phrases the specs put in their synthetic meetings — and, to prove Yap's
+// checks (meeting_summary.rs), the digests slip in a task for someone nobody
 // mentioned ("Zed", due "Tuesday"), and the action plan invents an owner
-// ("Mallory") and drops one real task.
+// ("Mallory") and drops one real task. A spec can make the next calls of a
+// kind fail (`failNext`) or answer slowly (`delay`), to see Yap's progress
+// and error states.
 import http from 'node:http';
 
 /** Yap's own token estimate (meeting_summary::estimate_tokens). */
@@ -25,6 +28,39 @@ export function estimateTokens(text) {
 
 const DIGEST = 'You are a meeting note-taker';
 const ACTION_PLAN = 'You are a meeting assistant';
+const TITLE = 'You name meetings';
+const CATCH_UP = 'You help someone catch up on a meeting';
+const MEETING_ASK = 'You answer questions about a meeting';
+
+const KINDS = [
+  [DIGEST, 'digest'],
+  [ACTION_PLAN, 'actionPlan'],
+  [TITLE, 'title'],
+  [CATCH_UP, 'catchUp'],
+  [MEETING_ASK, 'meetingAsk'],
+];
+
+/** The meeting's title, from what was said. */
+function titleReply(user) {
+  const said = user.split('Transcript (start):')[1] ?? user;
+  return /budget/i.test(said) ? 'Q3 Budget Review with Alice' : 'Team Sync';
+}
+
+/** "What did I miss?": from the lines said since the person last looked. */
+function catchUpReply(user) {
+  const since = user.split('Since they last looked')[1] ?? '';
+  const lines = since.split('\n').filter((l) => /^(You|Them): /.test(l));
+  const first = (lines[0] ?? '').replace(/^(You|Them): /, '').split(' ').slice(0, 5).join(' ');
+  const out = [`- ${lines.length} new ${lines.length === 1 ? 'line' : 'lines'} since you looked, opening with "${first}".`];
+  if (lines.some((l) => /send the slides/i.test(l))) out.push('- Them asked You to send the slides by Friday.');
+  return out.join('\n');
+}
+
+/** A follow-up question about the meeting. */
+function meetingAskReply(user) {
+  const q = /Question: (.*)$/m.exec(user)?.[1] ?? '';
+  return /budget/i.test(q) ? 'Alice owns the budget: she said she would send it by Friday.' : 'That isn\'t in the meeting so far.';
+}
 
 // Phrase in the transcript → the digest's action item for it.
 const TRIGGERS = [
@@ -93,14 +129,19 @@ function actionPlanReply(user) {
 
 /**
  * Start the server. `requests` collects `{ kind, model, maxTokens, tokens,
- * system, user }` per chat call (`kind`: "digest" | "actionPlan" | "other").
+ * system, user }` per chat call (`kind`: "digest" | "actionPlan" | "title" |
+ * "catchUp" | "meetingAsk" | "other"). `failNext(kind, n)` answers the next
+ * `n` calls of a kind with HTTP 500; `delay(kind, ms)` holds that kind's
+ * answers back (0 = no delay).
  */
 export async function startFakeLlm() {
   const requests = [];
+  const failures = new Map();
+  const delays = new Map();
   const server = http.createServer((req, res) => {
     let raw = '';
     req.on('data', (c) => (raw += c));
-    req.on('end', () => {
+    req.on('end', async () => {
       if (req.method !== 'POST' || !req.url.endsWith('/chat/completions')) {
         res.writeHead(404).end();
         return;
@@ -115,11 +156,7 @@ export async function startFakeLlm() {
       const messages = body.messages ?? [];
       const system = messages.find((m) => m.role === 'system')?.content ?? '';
       const user = messages.filter((m) => m.role === 'user').at(-1)?.content ?? '';
-      const kind = system.startsWith(DIGEST)
-        ? 'digest'
-        : system.startsWith(ACTION_PLAN)
-          ? 'actionPlan'
-          : 'other';
+      const kind = KINDS.find(([prefix]) => system.startsWith(prefix))?.[1] ?? 'other';
       requests.push({
         kind,
         model: body.model,
@@ -128,12 +165,26 @@ export async function startFakeLlm() {
         system,
         user,
       });
+      const wait = delays.get(kind) ?? 0;
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      const failing = failures.get(kind) ?? 0;
+      if (failing > 0) {
+        failures.set(kind, failing - 1);
+        res.writeHead(500, { 'content-type': 'text/plain' }).end('fake failure: the model is down');
+        return;
+      }
       const content =
         kind === 'digest'
           ? digestReply(user)
           : kind === 'actionPlan'
             ? actionPlanReply(user)
-            : 'OK';
+            : kind === 'title'
+              ? titleReply(user)
+              : kind === 'catchUp'
+                ? catchUpReply(user)
+                : kind === 'meetingAsk'
+                  ? meetingAskReply(user)
+                  : 'OK';
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(
         JSON.stringify({
@@ -150,6 +201,8 @@ export async function startFakeLlm() {
   return {
     base: `http://127.0.0.1:${server.address().port}/v1`,
     requests,
+    failNext: (kind, n = 1) => failures.set(kind, n),
+    delay: (kind, ms) => delays.set(kind, ms),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }

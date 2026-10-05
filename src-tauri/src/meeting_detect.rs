@@ -1275,6 +1275,8 @@ fn record(app: &AppHandle, call_id: u64) -> Result<u64, String> {
     let title = note_title(call_app, local_now());
     let note = crate::notes::create(&title, "", "meeting", "Meetings");
     crate::notes::mark_meeting(note.id)?;
+    // A made-up title: the AI meeting title may replace it (meeting_assist.rs).
+    crate::notes::set_title_auto(note.id)?;
     let started = crate::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note.id);
     if let Err(e) = started {
         crate::notes::delete(note.id);
@@ -1756,6 +1758,32 @@ mod native {
     }
 }
 
+// ---- the meeting notepad's "Split the screen when joining" (notepad.rs) ----
+
+/// The latest live call: its app id and the exe names (lowercase) whose
+/// windows show it — the app's own, or the browser a meeting tab is in.
+pub fn latest_call() -> Option<(&'static str, Vec<String>)> {
+    latest_call_in(&lock())
+}
+
+fn latest_call_in(s: &State) -> Option<(&'static str, Vec<String>)> {
+    let call = s.calls.last()?;
+    let mut exes: Vec<String> = call.app.exes.iter().map(|e| e.to_string()).collect();
+    exes.extend(
+        s.browser_calls
+            .iter()
+            .filter(|(_, app)| app.id == call.app.id)
+            .map(|(exe, _)| exe.clone()),
+    );
+    Some((call.app.id, exes))
+}
+
+/// Whether a window titled `title` shows a call of app `app_id` (a browser
+/// tab "Meet - abc-defg-hij", "… | Microsoft Teams").
+pub fn title_shows(app_id: &str, title: &str) -> bool {
+    app_in_title(title).is_some_and(|a| a.id == app_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2078,5 +2106,21 @@ mod tests {
             .collect();
         println!("meetings showing in browser windows: {named:?}");
         assert!(everyone.iter().all(|s| !matches!(classify(s), Some(Kind::Call(_))) || calls.contains(s)));
+    }
+
+    #[test]
+    fn the_notepad_finds_the_live_calls_window() {
+        assert!(title_shows("meet", "Meet - abc-defg-hij - Google Chrome"));
+        assert!(title_shows("teams", "Weekly sync | Microsoft Teams"));
+        assert!(!title_shows("teams", "Meet - abc-defg-hij - Google Chrome"));
+        assert!(!title_shows("meet", "Inbox - Gmail"));
+        // A desktop call: the app's own exes; a browser call adds the browser.
+        let mut s = State::default();
+        assert_eq!(latest_call_in(&s), None);
+        s.calls.push(Call { id: 1, app: app("zoom"), since: 0, note_id: None, fade_ms: None });
+        assert_eq!(latest_call_in(&s), Some(("zoom", vec!["zoom.exe".to_string()])));
+        s.browser_calls.insert("chrome.exe".to_string(), app("meet"));
+        s.calls.push(Call { id: 2, app: app("meet"), since: 0, note_id: None, fade_ms: None });
+        assert_eq!(latest_call_in(&s), Some(("meet", vec!["chrome.exe".to_string()])));
     }
 }

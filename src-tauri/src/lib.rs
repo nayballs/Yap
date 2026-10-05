@@ -17,8 +17,11 @@ mod e2e;
 mod fuzzy;
 mod media;
 mod meeting;
+mod meeting_assist;
 mod meeting_detect;
+mod meeting_end;
 mod meeting_summary;
+mod notepad;
 mod notes;
 mod tools;
 mod history;
@@ -310,7 +313,7 @@ pub fn run() {
         builder.plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
-                .with_denylist(&["overlay", "onboarding"])
+                .with_denylist(&["overlay", "onboarding", "notepad"])
                 .build(),
         )
     };
@@ -406,6 +409,14 @@ pub fn run() {
             meeting_detect::meeting_detect_status,
             meeting_detect::meeting_detect_respond,
             meeting_detect::meeting_detect_simulate,
+            meeting_end::meeting_end,
+            meeting_end::meeting_pause,
+            meeting_end::meeting_summarise,
+            meeting_end::meeting_summary_status,
+            meeting_end::meeting_discard,
+            meeting_assist::meeting_catch_up,
+            notepad::notepad_open,
+            notepad::notepad_state,
             // Test mode only (e2e.rs); not in release builds at all.
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_feed,
@@ -631,11 +642,17 @@ pub fn run() {
             // DWM-cloaked show+hide forces those windows to finish
             // initialization while VISIBLE without anything flashing on screen.
             #[cfg(target_os = "windows")]
-            for label in ["onboarding", "settings"] {
+            for label in ["onboarding", "settings", "notepad"] {
                 if let Some(w) = app.get_webview_window(label) {
                     init_hidden_webview(&w);
                 }
             }
+
+            // The meeting notepad (docked beside a call) and the end of a
+            // meeting (pause or end, "Started by mistake?", the action plan
+            // written in Rust): both follow the recorder's events.
+            notepad::init(&handle);
+            meeting_end::init(&handle);
 
             // First run: if no model is downloaded yet, greet the user with the
             // onboarding model picker instead of a silent "needs-model" pill.

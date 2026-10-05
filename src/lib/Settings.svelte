@@ -436,6 +436,8 @@
     meetingDetection: true,
     meetingDetectApps: {},
     meetingDetectStyle: 'popup',
+    meetingOpenNotepad: true,
+    meetingSplitScreen: false,
     inputDevice: null,
     dictionary: [],
     selectedLanguage: 'auto',
@@ -1431,6 +1433,24 @@
                     {/each}
                   </div>
                 </div>
+              </Row>
+              <!-- The meeting notepad (notepad.rs): docked beside the call. -->
+              <Row>
+                <Toggle
+                  bind:checked={cfg.meetingOpenNotepad}
+                  label="Open the notepad when a meeting starts"
+                  desc="Your notes, the live transcript and the summary, docked to the right of your screen"
+                  hint="It opens without taking the focus from your call. Closing it never stops the recording; reopen it from the meeting note."
+                />
+              </Row>
+              <Row>
+                <Toggle
+                  bind:checked={cfg.meetingSplitScreen}
+                  label="Split the screen when joining"
+                  desc="Moves the call's window left of the notepad, so you see both at once"
+                  hint="When a recording starts during a call Yap detected, it moves the call app's window to the left of the screen."
+                  disabled={!cfg.meetingOpenNotepad}
+                />
               </Row>
               <Row>
                 <p class="consent">Recording a call? Let people know you're taking notes.</p>

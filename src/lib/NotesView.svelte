@@ -10,8 +10,10 @@
   // v1 scope (per ROADMAP "AI Notepad"): plain-textarea markdown editing +
   // safe rendered Enhanced view (lib/markdown.js) — a rich editor
   // (Milkdown/CodeMirror) comes later. Meeting notes: Record / Pause /
-  // Resume in the chip row, "End meeting & summarise" in the bottom bar runs
-  // the built-in Action Plan (docs/meetings.md).
+  // Resume in the chip row, "End meeting & summarise" in the bottom bar; the
+  // built-in Action Plan is then written by Rust (meeting_end.rs), whichever
+  // window is open, and shown here as it goes (docs/meetings.md). The meeting
+  // notepad (Notepad.svelte) shows the same note: edits sync both ways.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
@@ -19,6 +21,10 @@
   import { toast } from './ui/toast.svelte.js';
   import ActionManager from './ActionManager.svelte';
   import { noteRequest } from './meetingDetect.svelte.js';
+  import { summaries, loadSummary, summarise } from './meetingSummary.svelte.js';
+
+  /** This window's label: the `origin` of its saves and stops. */
+  const LABEL = 'settings';
 
   // `onopensettings(section)` opens the Settings modal (ControlPanel).
   let { onopensettings = null } = $props();
@@ -73,13 +79,21 @@
   let elapsed = $state(0);
   let elapsedTimer = null;
   const recordingThisNote = $derived(meeting.recording && meeting.noteId === selected?.id);
-  // How the recording was stopped: Pause keeps it as is; End meeting (or a
-  // stop from elsewhere) writes the action plan once the last chunk is in.
-  let pauseRequested = false;
-  // `{ noteId, done, total }` while a long meeting's last digests are written.
-  let summaryProgress = $state(null);
-  // `{ noteId, message }`: the action plan needs an AI model set up first.
+  // The open note's action-plan job (Rust writes it when a meeting ends, or
+  // on "Action plan"), and `{ done, total }` while a long meeting's last
+  // digests are written first.
+  const job = $derived(selected ? summaries.byNote[selected.id] : null);
+  const jobRunning = $derived(job?.state === 'running');
+  const summaryProgress = $derived(selected ? summaries.progress[selected.id] : null);
+  // `{ noteId, message }`: an action needs an AI model set up first.
   let aiMissing = $state(null);
+  const needsAi = $derived(
+    aiMissing?.noteId === selected?.id
+      ? aiMissing.message
+      : job?.state === 'needsAi'
+        ? job.error
+        : null
+  );
   // The transcript box shows the live transcript or the AI notes so far.
   let transcriptView = $state('live');
   // While recording, the live transcript follows the newest lines — unless
@@ -156,22 +170,21 @@
   // Pause: stop recording without writing the action plan (Resume carries
   // on in the same note).
   async function pauseMeeting() {
-    pauseRequested = true;
     try {
-      await invoke('meeting_stop');
+      await invoke('meeting_pause');
       toast({ title: 'Recording paused', description: 'Press Resume to carry on in this note' });
     } catch (e) {
-      pauseRequested = false;
       error = String(e);
       toast({ title: "Couldn't stop recording", description: String(e), variant: 'destructive' });
     }
   }
-  // The end-of-meeting moment: stop, let the recorder transcribe the last
-  // chunk, then write the action plan (onMeetingState below).
+  // The end-of-meeting moment: stop; once the recorder has transcribed the
+  // last chunk, Rust writes the action plan (or, after only a few words,
+  // asks "Started by mistake?").
   async function endMeeting() {
-    pauseRequested = false;
+    flushSave();
     try {
-      await invoke('meeting_stop');
+      await invoke('meeting_end', { origin: LABEL });
       toast({ title: 'Meeting ended', description: 'Transcribing the last few seconds…' });
     } catch (e) {
       error = String(e);
@@ -179,7 +192,10 @@
     }
   }
 
-  function summariseMeeting() {
+  // Write the action plan (again): the "Action plan" button, and the Action
+  // Plan action on a meeting note. Rust runs it (meeting_end.rs), so the
+  // meeting notepad shows its progress too.
+  async function summariseMeeting() {
     if (!selected) return;
     // A silent recording (muted mic, nobody talking) with no typed notes
     // has nothing for the model to work with.
@@ -191,8 +207,14 @@
       });
       return;
     }
-    const action = actionPlanAction ?? activeAction;
-    if (action) runAction(action);
+    flushSave();
+    error = null;
+    if (aiMissing?.noteId === selected.id) aiMissing = null;
+    try {
+      await summarise(selected.id);
+    } catch (e) {
+      toast({ title: "Couldn't write the action plan", description: String(e), variant: 'destructive' });
+    }
   }
 
   function onMeetingState(s) {
@@ -203,25 +225,77 @@
       startElapsed(meeting.elapsedSecs || 0);
     } else {
       stopElapsed();
-      // Recording just finished → reload the note (transcript persisted) and,
-      // unless it was a pause, write the action plan (a stop from elsewhere,
-      // e.g. the call ending, counts as the end of the meeting).
+      // Recording just finished → reload the note (transcript persisted).
+      // The action plan (unless it was a pause) is Rust's: onSummary.
       if (wasRecording && noteId) {
-        const paused = pauseRequested;
-        pauseRequested = false;
         (async () => {
-          if (selected?.id === noteId) {
-            try {
-              selected = await invoke('note_get', { id: noteId });
-            } catch {
-              /* keep current */
-            }
-          }
+          if (selected?.id === noteId) await reloadSelected();
           refreshList();
-          if (!paused && selected?.id === noteId) summariseMeeting();
         })();
       }
     }
+  }
+
+  /** The open note as stored, keeping what's being typed. */
+  async function reloadSelected() {
+    if (!selected) return;
+    const id = selected.id;
+    try {
+      const n = await invoke('note_get', { id });
+      if (selected?.id !== id) return;
+      // Keep what's being typed (its save is on the way).
+      if (dirty.title) n.title = selected.title;
+      if (dirty.content) n.content = selected.content;
+      selected = n;
+    } catch {
+      /* keep current */
+    }
+  }
+
+  // The action plan Rust writes (meeting_end.rs): bring it in when done.
+  async function onSummary(s) {
+    if (!s) return;
+    if (s.state !== 'running') refreshList();
+    if (selected?.id !== s.noteId) return;
+    if (s.state === 'done') {
+      await reloadSelected();
+      if (selected?.id === s.noteId && selected.enhancedContent) {
+        tab = 'enhanced'; // OpenWhispr auto-switches to the Enhanced tab
+        toast({ title: `${actionPlanAction?.name ?? 'Action plan'} complete`, variant: 'success' });
+      }
+    } else if (s.state === 'error') {
+      toast({ title: "Couldn't write the action plan", description: s.error, variant: 'destructive' });
+    } else if (s.state === 'nothing') {
+      toast({
+        title: 'Nothing to summarise yet',
+        description: 'No speech was transcribed in this recording.',
+        chip: 'Tip',
+      });
+    }
+  }
+
+  // The meeting notepad (or the AI meeting title) changed this note.
+  function onNoteChanged(p) {
+    if (!p || p.origin === LABEL) return;
+    refreshList();
+    if (selected?.id !== p.id) return;
+    if (!dirty.title) {
+      selected.title = p.title;
+      selected.titleAuto = p.titleAuto;
+    }
+    if (!dirty.content) selected.content = p.content;
+    selected.participants = p.participants;
+    selected.folder = p.folder;
+  }
+
+  // The meeting notepad, on this note (it opens on its own when a meeting
+  // starts; this brings it back).
+  function openNotepad() {
+    if (!selected) return;
+    flushSave();
+    invoke('notepad_open', { noteId: selected.id }).catch((e) =>
+      toast({ title: "Couldn't open the notepad", description: String(e), variant: 'destructive' })
+    );
   }
 
   function onMeetingSegment(seg) {
@@ -295,6 +369,7 @@
     flushSave();
     try {
       selected = await invoke('note_get', { id });
+      loadSummary(id);
       tab = 'raw';
       transcriptView = 'live';
       showEcho = false;
@@ -332,8 +407,12 @@
   // Debounced autosave of title + content while typing. flushSave() only
   // sends a pending edit (an armed timer) — switching notes or leaving Notes
   // must not re-save a note that was merely viewed, which would also clobber
-  // edits made to it meanwhile through the local API.
-  function queueSave() {
+  // edits made to it meanwhile through the local API. And only the fields
+  // that were edited: the meeting notepad (or the AI title) may have changed
+  // the other one meanwhile.
+  let dirty = { title: false, content: false };
+  function queueSave(field = 'content') {
+    dirty[field] = true;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flushSave, 600);
   }
@@ -342,8 +421,11 @@
     clearTimeout(saveTimer);
     saveTimer = null;
     if (!selected) return;
-    const { id, title, content } = selected;
-    invoke('note_update', { id, title, content })
+    const args = { id: selected.id, origin: LABEL };
+    if (dirty.title) args.title = selected.title;
+    if (dirty.content) args.content = selected.content;
+    dirty = { title: false, content: false };
+    invoke('note_update', args)
       .then(refreshList)
       .catch(() => {});
   }
@@ -355,10 +437,16 @@
   });
 
   async function runAction(action) {
-    if (!selected || enhancing.has(selected.id) || !action) return;
+    if (!selected || enhancing.has(selected.id) || jobRunning || !action) return;
     pickerOpen = false;
     lastUsedActionId = action.id;
     localStorage.setItem('yapLastUsedActionId', String(action.id));
+    // A meeting's action plan is Rust's job (progress shows in the notepad
+    // too); any other action runs here.
+    if (action.kind === 'actionPlan' && selected.transcript?.length) {
+      summariseMeeting();
+      return;
+    }
     flushSave();
     const id = selected.id;
     enhancing = new Set([...enhancing, id]);
@@ -394,7 +482,6 @@
       next.delete(id);
       enhancing = next;
       if (runningAction?.noteId === id) runningAction = null;
-      if (summaryProgress?.noteId === id) summaryProgress = null;
     }
   }
   // `{ noteId, name }` of the action running, for the status line.
@@ -577,15 +664,19 @@
     listen('yap-meeting-digest', (e) => onMeetingDigest(e.payload)).then((u) =>
       unlisteners.push(u)
     );
-    listen('yap-meeting-summary-progress', (e) => (summaryProgress = e.payload)).then((u) =>
-      unlisteners.push(u)
-    );
+    listen('yap-meeting-summary', (e) => onSummary(e.payload)).then((u) => unlisteners.push(u));
+    listen('yap-note-changed', (e) => onNoteChanged(e.payload)).then((u) => unlisteners.push(u));
     listen('yap-meeting-warning', (e) =>
       toast({ title: 'Meeting recording', description: String(e.payload), chip: 'Tip' })
     ).then((u) => unlisteners.push(u));
     // The local API bridge (Integrations) can create/update/delete notes from
     // outside the app — refresh the list so external edits show up live.
     listen('yap-notes-changed', () => refreshList()).then((u) => unlisteners.push(u));
+    // "Started by mistake?" → Discard (here or in the notepad).
+    listen('yap-note-deleted', (e) => {
+      if (selected?.id === e.payload?.id) selected = null;
+      refreshList();
+    }).then((u) => unlisteners.push(u));
     return () => {
       flushSave();
       stopElapsed();
@@ -752,9 +843,10 @@
       <div class="edhead">
         <input
           class="title"
+          class:auto={selected.titleAuto}
           placeholder="Untitled Note"
           bind:value={selected.title}
-          oninput={queueSave}
+          oninput={() => queueSave('title')}
         />
       </div>
 
@@ -852,9 +944,20 @@
           {/if}
         </span>
         <span class="metaspacer"></span>
+        <!-- The meeting notepad (docked beside the call) on this note. -->
+        {#if selected.noteType === 'meeting' || recordingThisNote}
+          <button
+            class="chip"
+            onclick={openNotepad}
+            title="Open the meeting notepad beside your call"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M15 3v18" /><path d="M18 8h0M18 12h0" /></svg>
+            Notepad
+          </button>
+        {/if}
         <!-- Meeting recorder: mic ("You") + system audio ("Them"). Pause
              keeps the note as it is; "End meeting & summarise" (bottom bar)
-             writes the action plan. -->
+             ends it, and Rust writes the action plan. -->
         {#if recordingThisNote}
           <button
             class="chip reclive"
@@ -900,12 +1003,12 @@
         </div>
       {/if}
 
-      {#if runningAction?.noteId === selected.id}
+      {#if runningAction?.noteId === selected.id || jobRunning}
         <p class="runline" aria-live="polite">
           <span class="spin"></span>
-          {#if summaryProgress?.noteId === selected.id && summaryProgress.total > 0}
+          {#if summaryProgress?.total > 0}
             Catching up on the meeting — part {summaryProgress.done + 1} of {summaryProgress.total}…
-          {:else if runningAction.name === actionPlanAction?.name}
+          {:else if jobRunning || runningAction?.name === actionPlanAction?.name}
             Writing your action plan…
           {:else}
             Running {runningAction.name}…
@@ -913,13 +1016,13 @@
         </p>
       {/if}
 
-      {#if aiMissing?.noteId === selected.id}
+      {#if needsAi}
         <div class="aicard">
           <div class="aitext">
             <strong>Your meeting is saved.</strong>
             To turn it into an action plan, Yap needs an AI model: set one up in Settings → Language
             Models (an on-device model keeps everything on this PC), then press Action plan.
-            <span class="aidetail">{aiMissing.message}</span>
+            <span class="aidetail">{needsAi}</span>
           </div>
           <button class="aibtn" onclick={() => onopensettings?.('cleanup')}>Open Language Models</button>
         </div>
@@ -927,6 +1030,8 @@
 
       {#if error}
         <p class="errline">{error}</p>
+      {:else if job?.state === 'error'}
+        <p class="errline">{job.error}</p>
       {/if}
 
       {#if tab === 'enhanced' && selected.enhancedContent}
@@ -940,7 +1045,7 @@
             ? 'Take rough notes while Yap listens — they get woven into the minutes…'
             : 'Start writing…'}
           bind:value={selected.content}
-          oninput={queueSave}
+          oninput={() => queueSave('content')}
         ></textarea>
       {/if}
 
@@ -978,7 +1083,7 @@
               <button
                 class="planbtn"
                 onclick={summariseMeeting}
-                disabled={enhancing.has(selected.id) || meeting.recording && meeting.noteId === selected.id}
+                disabled={enhancing.has(selected.id) || jobRunning || meeting.recording && meeting.noteId === selected.id}
                 title="Who does what by when, with decisions and open questions"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8" /><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9" /></svg>
@@ -1089,10 +1194,11 @@
             onclick={() => runAction(activeAction)}
             disabled={!activeAction ||
               enhancing.has(selected.id) ||
+              jobRunning ||
               (!selected.content?.trim() && !selected.transcript?.length)}
             title={activeAction ? `Run "${activeAction.name}"` : 'No actions'}
           >
-            {#if enhancing.has(selected.id)}
+            {#if enhancing.has(selected.id) || jobRunning}
               <span class="spin"></span> Running…
             {:else}
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /></svg>
@@ -1102,7 +1208,7 @@
           <button
             class="enhance chevron"
             aria-label="Select action"
-            disabled={enhancing.has(selected.id)}
+            disabled={enhancing.has(selected.id) || jobRunning}
             onclick={(e) => {
               e.stopPropagation();
               pickerOpen = !pickerOpen;
@@ -1430,6 +1536,12 @@
   }
   .title::placeholder {
     color: var(--yap-muted-55);
+  }
+  /* A title Yap made up ("Teams call · 5 Oct, 14:30"), until the AI names
+     the meeting or the person does. */
+  .title.auto {
+    color: var(--yap-muted);
+    font-weight: 600;
   }
   .chip.reclive {
     border-color: var(--yap-danger);

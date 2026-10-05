@@ -7,22 +7,29 @@ background, and at the end turns the whole meeting into an **action plan**: a
 section per person with their tasks and deadlines, then decisions, open
 questions and unassigned tasks, back in seconds however long the meeting ran.
 It can also notice a call starting and offer to take notes
-([Call detection](#call-detection)).
+([Call detection](#call-detection)), and while a meeting records, a
+[meeting notepad](#the-meeting-notepad) docks to the edge of the screen beside
+the call.
 
 | Piece | Code |
 |---|---|
 | Recorder: capture, chunking, echo check | `src-tauri/src/meeting.rs` |
-| Rolling digests, the final input, the checks | `src-tauri/src/meeting_summary.rs` |
-| Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`) | `src-tauri/src/llm.rs` |
-| Storage (`Note::digests`, `TranscriptSegment::echo`, `Action::kind`) | `src-tauri/src/notes.rs` |
-| The action run (`note_enhance`) | `src-tauri/src/commands.rs` |
-| UI | `src/lib/NotesView.svelte` |
+| Rolling digests, the final input, the checks; the notepad's catch-up and title inputs | `src-tauri/src/meeting_summary.rs` |
+| The end of a meeting: pause or end, "Started by mistake?", the action plan job | `src-tauri/src/meeting_end.rs` |
+| "What did I miss?", the AI meeting title | `src-tauri/src/meeting_assist.rs` |
+| The notepad window: docking, split screen | `src-tauri/src/notepad.rs` |
+| Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_TITLE_PROMPT`) | `src-tauri/src/llm.rs` |
+| Storage (`Note::digests`, `TranscriptSegment::echo`, `Action::kind`, `Note::title_auto`) | `src-tauri/src/notes.rs` |
+| The action run (`note_enhance` / `run_enhance`) | `src-tauri/src/commands.rs` |
+| UI | `src/lib/NotesView.svelte`, `src/lib/Notepad.svelte`, `src/lib/meetingSummary.svelte.js` |
 
 ## Recording
 
 **Record** on a note's chip row starts it; the chip becomes **● 12:34 · Pause**
-(stop without summarising; **Resume** carries on in the same note) and the
-bottom bar's action picker becomes **End meeting & summarise**.
+(stop without summarising, `meeting_pause`; **Resume** carries on in the same
+note) and the bottom bar's action picker becomes **End meeting & summarise**
+(`meeting_end`). Any recording that starts, from anywhere, also opens the
+[meeting notepad](#the-meeting-notepad) (a setting, on by default).
 
 - **Two streams.** The mic ("You") and WASAPI loopback ("Them": a cpal input
   stream on the default output device), each downmixed and resampled to
@@ -142,11 +149,26 @@ digest); every task still reaches the action plan (see the checks below).
 
 ## The end of the meeting: the action plan
 
-**End meeting & summarise** (or a stop from elsewhere, like call detection's
-**Stop and summarise**) stops the recorder, which transcribes the last few
-seconds, then runs the built-in **Action Plan** action. **Pause** stops
-without it. On a finished meeting note, **Action plan** in the transcript
-box runs it again.
+**End meeting & summarise**, the notepad's **Stop**, or a stop from anywhere
+else (call detection's **Stop and summarise**, the Yap bar, an automatic stop)
+stops the recorder, which transcribes the last few seconds; then Rust runs the
+built-in **Action Plan** action (`meeting_end.rs`, following the recorder's
+`yap-meeting-state`). **Pause** (`meeting_pause`) stops without it. It no
+longer depends on a window: until 2026-10 the Notes view wrote the plan, and
+only for the note it was showing. Every window follows the job through
+`yap-meeting-summary` (`running` with its step — 1 reading the meeting, 2
+writing, 3 checking owners and deadlines — then `done`, `error`, `needsAi` or
+`nothing`). On a finished meeting note, **Action plan** in the transcript box
+(or the notepad's **Generate summary** / **Retry**) runs it again
+(`meeting_summarise`).
+
+**Started by mistake?** A meeting that ends with fewer than 20 words of speech
+(about ten seconds of talk) and nothing typed gets no summary. Instead the
+window the stop came from (else the notepad, else the main window, whichever
+is on screen) asks "Started by mistake? Only a few words were captured. Keep
+this meeting or discard it." **Discard** deletes the note
+(`meeting_discard`) and closes the notepad; **Keep** (or the ✕) leaves it,
+with **Generate summary** for when it's wanted after all.
 
 1. `meeting_summary::prepare_final` waits for a live digest in flight (rather
    than writing it twice), then digests whatever the final call can't take
@@ -181,9 +203,161 @@ same digest-based input; so do the note's **Ask anything** bar and AI Chat's
 
 **Without an AI model** recording and transcription work as before; the end
 step shows "Your meeting is saved. To turn it into an action plan, Yap needs
-an AI model…" with **Open Language Models**. A recording where nothing was
-transcribed and no notes were typed says "Nothing to summarise yet" instead
-of calling a model.
+an AI model…" with **Open Language Models** (in the Notes view and the
+notepad). A recording where nothing was transcribed and no notes were typed
+asks "Started by mistake?" when it ends; asking for its summary anyway says
+"Nothing to summarise yet" instead of calling a model.
+
+## The meeting notepad
+
+While a meeting records, its notes live in a slim window docked to the right
+edge of the screen, beside the call (Wispr Flow's Notetaker notepad, ported to
+Yap: `src-tauri/src/notepad.rs`, `src/lib/Notepad.svelte`).
+
+**When it opens.** Whenever a meeting recording starts, from anywhere ("Record
+notes" on a call prompt, the Notes view's Record, the tray, the Yap bar), with
+**Open the notepad when a meeting starts** on (Settings → General → Meetings,
+`meetingOpenNotepad`, default on). It never takes the focus from the call: the
+window is created unfocused, so Windows shows it without activating it.
+Closing it only hides it; the recording carries on, and **Notepad** on the
+meeting note in the Notes view brings it back (any meeting note, recording or
+not). It shows one meeting at a time: the one recording, or the one reopened.
+
+**Where.** Docked to the right edge of the work area (above the taskbar), full
+height, 30% of the width, between 400 and 600 px at 100% scaling (scaled for
+the monitor's DPI) and never more than half the screen: 576 px on a 1920 px
+screen, the third of the screen Wispr uses. It goes on the monitor with the
+call's window, else the one with the mouse cursor. Already on screen when a
+meeting starts, it stays where the person put it. The window rect reaches a
+few pixels past the edge on purpose: that's the invisible resize border, so
+the visible frame lines up with the screen edge.
+
+**Split the screen when joining** (`meetingSplitScreen`, off by default, greyed
+out while the notepad doesn't open): when a recording starts during a call
+Yap detected, the call's window moves to the rest of the work area, left of
+the notepad, so both are in full view. The window is the call app's main
+window: the largest visible top-level window of its process (Teams'
+`ms-teams.exe`, Zoom's `zoom.exe`, or the browser a meeting tab is in, where a
+window whose title shows the meeting comes first), titled, at least 200×150,
+not minimised, not a tool window, dialog or a cloaked UWP frame, and never one
+of Yap's own windows. A maximised window is restored first (it would ignore
+the new size); the move is asynchronous, so a hung app can't hang Yap, and
+it adds back the window's invisible borders so its visible edge meets the
+notepad's. Only the call app's windows have their titles read, and none are
+logged or kept. Test runs never move other apps' windows.
+
+**My thoughts** (the default tab) is the note's own text, the same as the
+Notes view's editor: typed in either window, it's saved after a short pause
+and shows up in the other (`yap-note-changed`, each window sending only the
+field it edited, so neither overwrites the other's newer text). It goes into
+the summary as "Notes typed during the meeting".
+
+**Transcript** shows the elapsed time, the You (amber) and Them (slate) lines
+as they arrive, following the newest one unless you scroll up, and a tip you
+can dismiss for good: lines arrive about every 15 seconds as Yap transcribes
+on this PC, and when you stop it fills in the last few seconds and tidies the
+transcript (each speaker's turn becomes one paragraph). Before the first line:
+"Yap is listening". Echo lines (the call through your speakers) are hidden
+behind "Show N lines your mic picked up from the speakers", as in the Notes
+view.
+
+**Summary** follows the action plan job: while it's written, "• Turning 12
+minutes of talk into an action plan… · Step 2 of 3" ("Catching up on the
+meeting: part 3 of 12…" while a long meeting's last digests are written);
+then the plan, with Copy markdown / Copy text. If it fails: "The summary
+didn't come through", the reason, and **Retry**. With no AI model: the "Your
+meeting is saved…" card. While recording it says the summary is written when
+you stop, and shows the AI notes so far (the rolling digests).
+
+**The footer.** While recording: the consent line "Always get consent when
+transcribing others.", **■ Stop** (the end of the meeting, as End meeting &
+summarise) and **What did I miss?**. After it: **Resume** (records on into the
+same note) and **Generate summary** (when there's no summary yet, or it
+failed).
+
+### What did I miss?
+
+An inline chat at the bottom of the notepad that answers from what was said
+**since you last looked** (`meeting_assist::meeting_catch_up`). The notepad
+counts a transcript line as seen while the Transcript tab is on screen (the
+window shown and not minimised, asked of the window since WebView2 reports a
+hidden window's page as visible) and scrolled to its newest line, or when an
+answer covered it. With nothing new it says "Nothing new since you last
+looked." without calling a model. Otherwise one call on the meeting's model
+(the Note Formatting scope, else the cleanup model):
+
+- the new part raw when it's ≤ 2,400 tokens; after a longer absence, the
+  digests that cover it (≤ 1,000) and the latest raw talk (≤ 1,400);
+- ≤ ~700 tokens of what came before, as context only;
+- `llm::CATCH_UP_PROMPT`: at most five short bullets (main points,
+  decisions, anything asked of you, tasks with owners and deadlines as said),
+  nothing invented, small talk said in one line; a reply cap of 400 tokens on
+  a local model.
+
+That's under 4.5k tokens with the reply, comfortable for an 8k local model. A
+question typed in the same chat ("Who owns the budget?") is answered from the
+whole meeting so far, bounded like the Ask bar (`MEETING_ASK_PROMPT`, ≤ ~3.3k
+in). Neither ever slows a dictation (`meeting_summary::chat_beside_dictation`):
+on a local endpoint the call waits until no dictation is recording or
+transcribing (+2 s), and if one starts mid-call the request is dropped (the
+closed connection cancels it in llama.cpp) and asked again after it. Without
+an AI model the chat says so and links to Language Models.
+
+### The AI meeting title
+
+A meeting with a made-up title — call detection's "Teams call · 5 Oct, 14:30"
+(`Note::title_auto`), or none — gets a short real one ("Q3 Budget Review with
+Alice") once there's enough talk: 150 words of speech or the first digest
+while it records, or 20 words when it ends. One call on the meeting's model
+(`MEETING_TITLE_PROMPT` + a one-shot, the first ~700 tokens of the transcript
+and the first digests' key points, a 30-token reply cap on a local model, the
+same dictation-safe runner), read back by `clean_title` (first line, no
+quotes, markdown, "Title:" label or full stop, at most 60 characters; a
+refusal or a sentence of chat is no title). A failed try is retried after 2
+minutes, three times at most. **A title the person typed is never
+replaced**: any edit of the title clears `title_auto` for good, and the AI
+title is set under the notes store's lock only while the title is still the
+made-up one (or empty). Until it's named, a made-up title shows muted in the
+notepad and the Notes view.
+
+### Testing the notepad
+
+- Unit tests: `cargo test --lib -- notepad meeting_end meeting_assist
+  meeting_summary notes` cover the notepad's width and docking, split-screen
+  rectangles, the invisible-border compensation, picking the call's window
+  (largest, the browser window showing the meeting, never Yap's own,
+  minimised/tool/owned/cloaked/tiny ones skipped), "Started by mistake?"'s
+  threshold, setup errors, the catch-up input (only what's new, nothing new →
+  no call, a long absence bounded through the digests, all under 4.5k with the
+  reply), follow-up and title inputs, title clean-up, and a typed title never
+  open to the AI.
+- e2e (`e2e/notepad.spec.js`, the notepad is its own page, `yap.notepad`):
+  it opens docked on record without taking the focus; live lines with
+  coloured labels and echo hidden; the tip; closing it keeps recording and
+  Notes brings it back; My thoughts and the title syncing both ways; Pause;
+  What did I miss? (nothing new without a model call, then only the new lines
+  sent, then a follow-up); the AI title replacing call detection's and never a
+  typed one; Started by mistake? (Keep then Generate summary, Discard deleting
+  the note); the summary's "Step 2 of 3", a failure with Retry, then the
+  plan; the Settings rows; and the dictation hotkey caught in the notepad.
+- Not under test mode: split screen (a test never moves another app's
+  window) and placement on a real call's monitor; both need a real call.
+
+### Limits
+
+- The notepad docks only to the right edge (Wispr's default); a left-edge
+  option would be a setting.
+- Split screen moves only the call's main window; a call app that pops its
+  meeting into a separate window after joining (Zoom, Teams) is moved only if
+  that window is up when the recording starts.
+- Speaker labels are You / Them (the mic and the call); naming the people on
+  the call is a later item (calendar attendees, diarization).
+- The transcript "tidy" after the meeting joins each speaker's turn into a
+  paragraph; it doesn't re-transcribe or relabel speakers (Wispr does both in
+  its cloud).
+- "Since you last looked" lives in the notepad page: reloading the window (or
+  restarting Yap) forgets it, and the next "What did I miss?" covers the whole
+  meeting.
 
 ## How it's tested
 
@@ -209,9 +383,14 @@ of calling a model.
     with Alice, Bob, You, Decisions, Open questions and Unassigned, rendered
     within 15 s of the click; Bob's dropped task put back, the invented
     "Mallory" gone, a made-up deadline removed; and Copy text.
+  - `e2e/notepad.spec.js`: the meeting notepad (see
+    [Testing the notepad](#testing-the-notepad)).
   - Harness: `support/fake-llm.js`, a deterministic OpenAI-compatible server
     that records every request and tests the checks by inventing an owner,
-    dropping a task and slipping in a task for someone never mentioned.
+    dropping a task and slipping in a task for someone never mentioned. It
+    also answers the notepad's title, catch-up and question calls, and can
+    fail (`failNext`) or slow down (`delay`) a kind of call, for the summary's
+    progress and error states.
     Test-mode hooks, all compiled out of release builds (`e2e.rs`):
     `YAP_E2E_MEETING_AUDIO` (a folder with `you.wav` and `them.wav`),
     `YAP_E2E_MEETING_SPEED` and the `e2e_meeting_feed { segments }` command.

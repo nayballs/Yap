@@ -20,6 +20,7 @@
   import { account, displayName, initAccount, initials } from './account.svelte.js';
   import { initUpdates } from './updates.svelte.js';
   import { initMeetingDetect } from './meetingDetect.svelte.js';
+  import { initMeetingSummary, askStartedByMistake } from './meetingSummary.svelte.js';
   import HomeView from './HomeView.svelte';
   import InsightsView from './InsightsView.svelte';
   import DictionaryView from './DictionaryView.svelte';
@@ -48,6 +49,9 @@
     },
     openSettings: (section) => openSettings(section),
   });
+  // The action plan Rust writes when a meeting ends (meeting_end.rs), for
+  // the Notes view; started here so no job's progress is missed.
+  initMeetingSummary();
   let bellOpen = $state(false);
 
   // Sidebar nav (Wispr order: Home, Insights, then the work surfaces).
@@ -110,6 +114,11 @@
     // A deep link asked for a Settings section (auth.rs: "Open Yap" on the
     // account service's /security page → "account").
     listen('yap-open-settings', (e) => openSettings(String(e.payload || '') || null)).then((u) => uns.push(u));
+    // A meeting with only a few words ended: "Started by mistake?", when Rust
+    // picked this window to ask (the meeting notepad asks when it's open).
+    listen('yap-meeting-ended', (e) => {
+      if (e.payload?.mistake && e.payload.surface === 'settings') askStartedByMistake(e.payload.noteId);
+    }).then((u) => uns.push(u));
     refreshMaximized();
     appWindow.onResized(() => refreshMaximized()).then((u) => uns.push(u));
     return () => uns.forEach((u) => u && u());
