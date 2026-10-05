@@ -291,8 +291,9 @@ pub async fn start() -> Result<String, String> {
 }
 
 /// Kill any orphaned llamafile processes left over from a previous session.
-/// The Tauri updater (and crashes / task-kill) can force-exit Yap WITHOUT running
-/// the `RunEvent::Exit` handler, so `stop()` never fires and the sidecar survives.
+/// Crashes and task-kill end Yap WITHOUT running the `RunEvent::Exit` handler
+/// (so did the Tauri updater before updates.rs ran `shutdown_cleanup` from its
+/// pre-install hook), so `stop()` never fires and the sidecar survives.
 /// Called at startup before we spawn a fresh one. Only sidecars whose parent
 /// Yap is gone count: a dev build must not kill the installed app's live one.
 #[cfg(windows)]

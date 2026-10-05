@@ -7,8 +7,8 @@
   //
   // <Settings> stays ALWAYS MOUNTED (hidden when the modal is closed): its
   // window-level listeners (in-window hotkey fallback — the WebView2-focus
-  // gotcha), auto-save effect, and update checker must run for the lifetime of
-  // the window, not only while the modal is open.
+  // gotcha), auto-save effect, and attention badge must run for the lifetime
+  // of the window, not only while the modal is open.
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { onMount } from 'svelte';
@@ -18,6 +18,7 @@
   import Settings from './Settings.svelte';
   import { attention } from './attention.svelte.js';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
+  import { initUpdates } from './updates.svelte.js';
   import HomeView from './HomeView.svelte';
   import InsightsView from './InsightsView.svelte';
   import DictionaryView from './DictionaryView.svelte';
@@ -30,6 +31,9 @@
 
   // Sidebar account button: who's signed in (auth.rs via account.svelte.js).
   initAccount();
+  // Update state + the "Yap X is ready" toast (updates.rs via
+  // updates.svelte.js). This window owns the ToastHost, so it starts it.
+  initUpdates();
   let acctUser = $derived(account.status?.signedIn ? account.status.user : null);
   let acctImgFailed = $state(false);
   let settingsOpen = $state(false);

@@ -1034,6 +1034,13 @@ impl Pipeline {
         self.shared.cancel();
     }
 
+    /// Recording, or transcribing a dictation / an Upload file — the updater
+    /// waits for this to clear before restarting Yap.
+    pub fn is_busy(&self) -> bool {
+        self.shared.recording.load(Ordering::SeqCst)
+            || self.shared.processing.load(Ordering::SeqCst)
+    }
+
     /// Install a freshly-created STT engine (e.g. after a model download).
     pub fn set_engine(&self, engine: SttAdapter) {
         if let Ok(mut g) = self.shared.engine.lock() {

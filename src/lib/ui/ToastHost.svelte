@@ -2,15 +2,25 @@
   // Toast viewport — Wispr-Flow-style cards (see docs screenshots 2026-07-09):
   // dark rounded card, small category chip top-left (their lavender "Tip"
   // pill), always-visible circular ✕ top-right, bold white title, soft grey
-  // body, optional light action button bottom-right ("Open Settings").
-  // Keeps OpenWhispr's timer behaviour: hover-pause, hairline progress bar,
-  // destructive descriptions in a copyable mono error box. Mounted once in
+  // body, optional light action button bottom-right ("Open Settings") with a
+  // quiet secondary beside it ("Later"). Keeps OpenWhispr's timer behaviour:
+  // hover-pause, hairline progress bar, destructive descriptions in a copyable
+  // mono error box. Long-running toasts (the update toast) can also carry a
+  // determinate progress bar, a busy spinner in the chip, and a "What's new"
+  // toggle that unfolds release notes in the card. Mounted once in
   // ControlPanel.
   import { toastStore, dismiss, pauseToast, resumeToast } from './toast.svelte.js';
+  import { renderMarkdown } from '../markdown.js';
 
   let copiedId = $state(null);
+  // Toasts whose `expand` notes are unfolded.
+  let expanded = $state([]);
 
   const CHIP_LABELS = { default: 'Tip', success: 'Done', destructive: 'Error' };
+
+  function toggleExpand(id) {
+    expanded = expanded.includes(id) ? expanded.filter((x) => x !== id) : [...expanded, id];
+  }
 
   async function copyError(t) {
     if (!t.description) return;
@@ -23,11 +33,12 @@
     }
   }
 
-  function runAction(t) {
+  function runAction(t, which = 'action') {
+    const a = t[which];
     try {
-      t.action?.onClick?.();
+      a?.onClick?.();
     } finally {
-      dismiss(t.id);
+      if (!a?.keepOpen) dismiss(t.id);
     }
   }
 </script>
@@ -44,7 +55,11 @@
       >
         <div class="toprow">
           <span class="chip">
-            {#if t.variant === 'success'}
+            {#if t.busy}
+              <span class="spinner" aria-hidden="true"></span>
+            {:else if t.icon === 'update'}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11" /><path d="M7 10.5l5 5 5-5" /><path d="M5 20h14" /></svg>
+            {:else if t.variant === 'success'}
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6" /></svg>
             {:else if t.variant === 'destructive'}
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
@@ -72,9 +87,40 @@
         {:else if t.description}
           <div class="desc">{t.description}</div>
         {/if}
-        {#if t.action?.label}
+        {#if typeof t.progress === 'number'}
+          <div
+            class="pbar"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow={Math.round(t.progress)}
+          >
+            <div class="pfill" style={`width:${Math.max(0, Math.min(100, t.progress))}%`}></div>
+          </div>
+        {/if}
+        {#if t.expand?.markdown && expanded.includes(t.id)}
+          <!-- renderMarkdown escapes all input first — no raw HTML gets through. -->
+          <div class="notes">{@html renderMarkdown(t.expand.markdown)}</div>
+        {/if}
+        {#if t.action?.label || t.secondary?.label || t.expand?.markdown}
           <div class="actions">
-            <button class="actionbtn" onclick={() => runAction(t)}>{t.action.label}</button>
+            {#if t.expand?.markdown}
+              <button
+                class="expandbtn"
+                aria-expanded={expanded.includes(t.id)}
+                onclick={() => toggleExpand(t.id)}
+              >
+                {t.expand.label || 'Details'}
+                <svg class:up={expanded.includes(t.id)} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+              </button>
+            {/if}
+            <span class="grow"></span>
+            {#if t.secondary?.label}
+              <button class="secondarybtn" onclick={() => runAction(t, 'secondary')}>{t.secondary.label}</button>
+            {/if}
+            {#if t.action?.label}
+              <button class="actionbtn" onclick={() => runAction(t)}>{t.action.label}</button>
+            {/if}
           </div>
         {/if}
         {#if t.duration > 0 && !t.isExiting}
@@ -236,12 +282,124 @@
     width: 11px;
     height: 11px;
   }
-  /* Light action button bottom-right — Wispr's "Open Settings". */
+  /* Busy spinner in the chip (e.g. "Restarting Yap…"). */
+  .spinner {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    animation: toast-spin 0.8s linear infinite;
+  }
+  @keyframes toast-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  /* Determinate progress (downloads) — Yap amber on a faint track. */
+  .pbar {
+    margin-top: 10px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+  }
+  .pfill {
+    height: 100%;
+    border-radius: 2px;
+    background: #f0b04a;
+    transition: width 0.2s ease;
+  }
+  /* Unfolded notes ("What's new"): compact, scrollable, rendered markdown. */
+  .notes {
+    margin-top: 10px;
+    max-height: 150px;
+    overflow-y: auto;
+    padding: 8px 11px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.72);
+    user-select: text;
+  }
+  .notes :global(:is(h2, h3, h4, h5)) {
+    margin: 6px 0 2px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.9);
+  }
+  .notes :global(p) {
+    margin: 0 0 6px;
+  }
+  .notes :global(:is(ul, ol)) {
+    margin: 0 0 6px;
+    padding-left: 18px;
+  }
+  .notes :global(code) {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11.5px;
+  }
+  .notes :global(:last-child) {
+    margin-bottom: 0;
+  }
+  /* Action row: optional "What's new" toggle left, buttons right. */
   .actions {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
     margin-top: 12px;
   }
+  .grow {
+    flex: 1;
+  }
+  .expandbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: rgba(255, 255, 255, 0.6);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 150ms ease;
+  }
+  .expandbtn:hover {
+    color: rgba(255, 255, 255, 0.9);
+  }
+  .expandbtn svg {
+    width: 12px;
+    height: 12px;
+    transition: transform 150ms ease;
+  }
+  .expandbtn svg.up {
+    transform: rotate(180deg);
+  }
+  /* Quiet secondary ("Later") beside the light primary. */
+  .secondarybtn {
+    height: 32px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 10px;
+    background: none;
+    color: rgba(255, 255, 255, 0.72);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      color 150ms ease;
+  }
+  .secondarybtn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+  }
+  /* Light action button bottom-right — Wispr's "Open Settings". */
   .actionbtn {
     height: 32px;
     padding: 0 14px;

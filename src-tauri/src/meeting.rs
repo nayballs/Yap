@@ -61,6 +61,11 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Whether a meeting is being recorded (the updater won't restart mid-meeting).
+pub fn is_recording() -> bool {
+    SESSION.lock().unwrap_or_else(|p| p.into_inner()).is_some()
+}
+
 /// Session state for the UI: `{ recording, noteId, elapsedSecs }`.
 pub fn state() -> serde_json::Value {
     let guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());

@@ -1110,6 +1110,11 @@ fn downloads_in_flight() -> &'static std::sync::Mutex<std::collections::HashSet<
     SET.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
 }
 
+/// A model download is running (the updater won't restart Yap under it).
+pub(crate) fn model_download_in_flight() -> bool {
+    downloads_in_flight().lock().is_ok_and(|s| !s.is_empty())
+}
+
 /// Removes its id from the in-flight set on drop (covers every early return).
 struct DownloadGuard(String);
 impl Drop for DownloadGuard {

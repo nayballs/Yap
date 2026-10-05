@@ -31,6 +31,8 @@
   import { attention, attentionCount } from './attention.svelte.js';
   import AccountSection from './AccountSection.svelte';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
+  import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from './updates.svelte.js';
+  import { renderMarkdown } from './markdown.js';
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
   // (OpenWhispr SettingsModal-style) instead of filling the window. The parent
@@ -53,12 +55,8 @@
   // Language/translate capability of the active model (drives Models section).
   let langInfo = $state({ supportsLanguage: false, supportsTranslate: false, languages: [] });
 
-  // Auto-update state. status: idle | checking | available | uptodate |
-  // installing | error | unsupported (portable). The updater JS plugin only
-  // works in packaged builds, so every call is wrapped in try/catch and the UI
-  // degrades quietly in dev.
-  let update = $state({ status: 'idle', version: '', progress: 0 });
-  let unlistenUpdateEvent = null;
+  // Update state lives in updates.svelte.js (Rust's updates.rs drives it);
+  // ControlPanel starts it, About + the attention badge render it.
 
   // Sidebar nav, grouped OpenWhispr-style under small caps labels. Section ids
   // are unchanged — only the presentation is grouped.
@@ -516,22 +514,6 @@
       outputs = [];
     }
 
-    // Auto-check for updates on launch (the settings webview loads at startup,
-    // even while hidden). Skip in dev: there's no published release, so the
-    // updater plugin would just log a 404 error every launch. Released builds
-    // (import.meta.env.DEV === false) check normally.
-    if (cfg.updateChecksEnabled && !import.meta.env.DEV) checkForUpdate(false);
-
-    // A "Check for updates" tray item emits this; run a manual check.
-    try {
-      unlistenUpdateEvent = await listen('check-for-updates', () => {
-        section = 'about';
-        checkForUpdate(true);
-      });
-    } catch {
-      unlistenUpdateEvent = null;
-    }
-
     // Daily Groq usage: fetch once, then update live as dictations come in.
     refreshUsage();
     try {
@@ -544,79 +526,8 @@
   });
 
   onDestroy(() => {
-    if (unlistenUpdateEvent) unlistenUpdateEvent();
     if (unlistenUsage) unlistenUsage();
   });
-
-  // ---- Auto-update ----
-  async function checkForUpdate(manual = false) {
-    if (update.status === 'checking' || update.status === 'installing') return;
-    update = { ...update, status: 'checking' };
-    try {
-      const { check } = await import('@tauri-apps/plugin-updater');
-      const result = await check();
-      if (result) {
-        update = { ...update, status: 'available', version: result.version || '' };
-      } else if (manual) {
-        update = { ...update, status: 'uptodate' };
-        setTimeout(() => {
-          if (update.status === 'uptodate') update = { ...update, status: 'idle' };
-        }, 3000);
-      } else {
-        update = { ...update, status: 'idle' };
-      }
-    } catch (e) {
-      // Updater is unavailable in dev / unpackaged builds — fail silently for
-      // the automatic check, surface a brief note for a manual one.
-      console.warn('Update check failed:', e);
-      if (manual) {
-        update = { ...update, status: 'error' };
-        setTimeout(() => {
-          if (update.status === 'error') update = { ...update, status: 'idle' };
-        }, 4000);
-      } else {
-        update = { ...update, status: 'idle' };
-      }
-    }
-  }
-
-  async function installUpdate() {
-    if (update.status !== 'available') return;
-    // Portable installs can't be replaced in place — point the user at GitHub.
-    const portable = await invoke('is_portable').catch(() => false);
-    if (portable) {
-      update = { ...update, status: 'unsupported' };
-      return;
-    }
-    update = { ...update, status: 'installing', progress: 0 };
-    try {
-      const { check } = await import('@tauri-apps/plugin-updater');
-      const { relaunch } = await import('@tauri-apps/plugin-process');
-      const result = await check();
-      if (!result) {
-        update = { ...update, status: 'idle' };
-        return;
-      }
-      let downloaded = 0;
-      let total = 0;
-      await result.downloadAndInstall((event) => {
-        if (event.event === 'Started') {
-          total = event.data?.contentLength ?? 0;
-          downloaded = 0;
-        } else if (event.event === 'Progress') {
-          downloaded += event.data.chunkLength;
-          update = {
-            ...update,
-            progress: total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0,
-          };
-        }
-      });
-      await relaunch();
-    } catch (e) {
-      console.error('Update install failed:', e);
-      update = { ...update, status: 'error' };
-    }
-  }
 
   const micOptions = $derived([
     { value: null, label: 'System default' },
@@ -1180,11 +1091,6 @@
     saveTimer = setTimeout(persist, 400);
   });
 
-  function onCheckUpdates() {
-    section = 'about';
-    checkForUpdate(true);
-  }
-
   // ---- Settings attention badge (Wispr-style red count) ----
   // Real conditions only: an update waiting, no STT model installed, or AI
   // cleanup pointed at a cloud provider with no key. Settings is always
@@ -1193,8 +1099,10 @@
   $effect(() => {
     if (!loaded || !cfg) return;
     const items = [];
-    if (update.status === 'available') {
-      items.push({ section: 'about', label: `Update ${update.version} ready to install` });
+    if (updates.status === 'ready') {
+      items.push({ section: 'about', label: `Update ${updates.version} ready to install` });
+    } else if (updates.status === 'available' && (updates.portable || updates.metered)) {
+      items.push({ section: 'about', label: `Yap ${updates.version} is available` });
     }
     if (modelStore.loaded && modelStore.installed.length === 0) {
       items.push({ section: 'models', label: 'No speech-to-text model installed' });
@@ -2116,35 +2024,74 @@
             <Row>
               {#snippet children()}
                 <div class="upd">
-                  <div class="upd-status">
-                    {#if update.status === 'checking'}
-                      <span class="muted">Checking for updates…</span>
-                    {:else if update.status === 'available'}
-                      <span class="upd-avail">Update available{update.version ? ` — v${update.version}` : ''}</span>
-                      <button class="upd-btn" onclick={installUpdate}>Download &amp; install</button>
-                    {:else if update.status === 'installing'}
-                      <span class="muted">
-                        {update.progress > 0 && update.progress < 100
-                          ? `Downloading… ${update.progress}%`
-                          : update.progress === 100
-                            ? 'Installing…'
-                            : 'Preparing…'}
-                      </span>
-                    {:else if update.status === 'uptodate'}
-                      <span class="muted">You’re up to date ✓</span>
-                    {:else if update.status === 'unsupported'}
-                      <span class="muted">
-                        Portable installs update manually —
-                        <a class="alink" href="https://github.com/nayballs/Yap/releases/latest" onclick={createExternalLinkHandler('https://github.com/nayballs/Yap/releases/latest')} target="_blank" rel="noreferrer">get the latest release</a>.
-                      </span>
-                    {:else if update.status === 'error'}
-                      <span class="muted">Couldn’t check for updates right now.</span>
-                    {:else}
-                      <button class="upd-btn ghost" onclick={() => checkForUpdate(true)}>Check for updates</button>
-                    {/if}
+                  <div class="upd-main">
+                    <div class="upd-text" aria-live="polite">
+                      {#if updates.status === 'installing'}
+                        <span class="upd-title">Restarting to update…</span>
+                        <span class="upd-sub">Installing {updates.version}. Yap will be right back.</span>
+                      {:else if updates.status === 'ready' && updates.deferred}
+                        <span class="upd-title">Restarting after this dictation</span>
+                        <span class="upd-sub">Yap installs {updates.version} as soon as you finish dictating.</span>
+                      {:else if updates.status === 'ready'}
+                        <span class="upd-title avail">Yap {updates.version} is ready to install</span>
+                        <span class="upd-sub">Downloaded in the background. Restarting takes a few seconds.</span>
+                      {:else if updates.status === 'downloading' || (updates.status === 'available' && updates.installQueued)}
+                        <span class="upd-title">Downloading Yap {updates.version}… {updates.progress}%</span>
+                        <span class="upd-sub">{updates.installQueued ? 'Yap restarts as soon as it’s done.' : 'You can keep working.'}</span>
+                      {:else if updates.status === 'available' && updates.portable}
+                        <span class="upd-title avail">Yap {updates.version} is available</span>
+                        <span class="upd-sub">Portable installs update by hand — download the new version from GitHub.</span>
+                      {:else if updates.status === 'available'}
+                        <span class="upd-title avail">Yap {updates.version} is available</span>
+                        <span class="upd-sub">
+                          {updates.error ||
+                            (updates.metered
+                              ? 'Not downloaded yet — you’re on a metered connection.'
+                              : 'Download it and restart to update.')}
+                        </span>
+                      {:else if updates.status === 'checking'}
+                        <span class="upd-title">Checking for updates…</span>
+                        <span class="upd-sub">Yap {updates.currentVersion}</span>
+                      {:else if updates.checked === 'uptodate'}
+                        <span class="upd-title ok">You’re up to date ✓</span>
+                        <span class="upd-sub">Yap {updates.currentVersion} is the latest version.</span>
+                      {:else if updates.checked === 'error'}
+                        <span class="upd-title">Couldn’t check for updates</span>
+                        <span class="upd-sub">{updates.checkError}</span>
+                      {:else}
+                        <span class="upd-title">Yap {updates.currentVersion || APP_VERSION}</span>
+                        <span class="upd-sub">
+                          {updates.lastChecked ? `Last checked ${formatAgo(updates.lastChecked)}` : 'Not checked yet'}
+                        </span>
+                      {/if}
+                    </div>
+                    <div class="upd-actions">
+                      {#if updates.status === 'ready' && !updates.deferred}
+                        <button class="upd-btn" onclick={installUpdate}>Restart to update</button>
+                      {:else if updates.status === 'available' && updates.portable}
+                        <button class="upd-btn" onclick={openRelease}>Get it on GitHub</button>
+                      {:else if updates.status === 'available' && !updates.installQueued}
+                        <button class="upd-btn" onclick={installUpdate}>Download and restart</button>
+                      {:else if updates.status === 'idle'}
+                        <button class="upd-btn ghost" onclick={checkForUpdates}>Check for updates</button>
+                      {/if}
+                    </div>
                   </div>
-                  {#if update.status === 'installing' && update.progress > 0 && update.progress < 100}
-                    <div class="upd-bar"><div class="upd-fill" style={`width:${update.progress}%`}></div></div>
+                  {#if updates.status === 'downloading'}
+                    <div class="upd-bar"><div class="upd-fill" style={`width:${updates.progress}%`}></div></div>
+                  {/if}
+                  {#if updates.error && updates.status === 'ready'}
+                    <p class="upd-err">{updates.error}</p>
+                  {/if}
+                  {#if updates.notes && ['ready', 'available', 'downloading'].includes(updates.status)}
+                    <div class="upd-notes">
+                      <div class="upd-notes-h">What’s new in {updates.version}</div>
+                      <!-- renderMarkdown escapes all input first — no raw HTML gets through. -->
+                      <div class="upd-notes-b">{@html renderMarkdown(updates.notes)}</div>
+                    </div>
+                  {/if}
+                  {#if updates.version && ['ready', 'available', 'downloading'].includes(updates.status)}
+                    <a class="alink upd-link" href={updates.releaseUrl} onclick={createExternalLinkHandler(updates.releaseUrl)} target="_blank" rel="noreferrer">Release page on GitHub →</a>
                   {/if}
                 </div>
               {/snippet}
@@ -2153,7 +2100,7 @@
               <Toggle
                 bind:checked={cfg.updateChecksEnabled}
                 label="Check for updates automatically"
-                desc="Look for a newer Yap on launch"
+                desc="Checks GitHub every few hours and downloads new versions in the background. Yap never restarts without asking."
               />
             </Row>
           </Group>
@@ -2167,7 +2114,7 @@
         {/if}
       </div>
 
-      <StatusBar {saved} oncheckupdates={onCheckUpdates} />
+      <StatusBar {saved} />
     {:else}
       <p class="loading">Loading…</p>
     {/if}
@@ -3253,19 +3200,84 @@
   .upd {
     width: 100%;
   }
-  .upd-status {
+  .upd-main {
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: space-between;
+    gap: 14px;
     flex-wrap: wrap;
-    font-size: 12.5px;
   }
-  .upd .muted {
+  .upd-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .upd-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--yap-fg);
+  }
+  .upd-title.avail {
+    color: var(--yap-primary);
+  }
+  .upd-title.ok {
+    color: var(--yap-success);
+  }
+  .upd-sub {
+    font-size: 12px;
     color: var(--yap-muted);
   }
-  .upd-avail {
-    color: var(--yap-primary);
-    font-weight: 600;
+  .upd-actions {
+    flex: 0 0 auto;
+  }
+  .upd-err {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--yap-danger);
+  }
+  .upd-notes {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: var(--yap-r);
+    background: var(--yap-s3);
+    border: 1px solid var(--yap-border-subtle);
+  }
+  .upd-notes-h {
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--yap-muted);
+    margin-bottom: 4px;
+  }
+  .upd-notes-b {
+    max-height: 180px;
+    overflow-y: auto;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--yap-fg-80);
+    user-select: text;
+  }
+  .upd-notes-b :global(:is(h2, h3, h4, h5)) {
+    margin: 6px 0 2px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--yap-fg);
+  }
+  .upd-notes-b :global(p) {
+    margin: 0 0 6px;
+  }
+  .upd-notes-b :global(:is(ul, ol)) {
+    margin: 0 0 6px;
+    padding-left: 18px;
+  }
+  .upd-notes-b :global(:last-child) {
+    margin-bottom: 0;
+  }
+  .upd-link {
+    display: inline-block;
+    margin-top: 10px;
   }
   .upd-btn {
     background: var(--yap-ink, var(--yap-primary));

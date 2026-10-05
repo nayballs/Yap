@@ -2,9 +2,11 @@
   import { onMount } from 'svelte';
   import { MODELS } from './models.js';
   import { modelStore, refreshModels, setActiveModel } from './modelStore.svelte.js';
+  import { updates, checkForUpdates, installUpdate, openRelease } from './updates.svelte.js';
 
-  // Settings owns the updater flow + the "Saved" pulse; we just trigger / show.
-  let { saved = false, oncheckupdates } = $props();
+  // Settings owns the "Saved" pulse; update state comes from the shared store
+  // (Handy's footer UpdateChecker pattern: the link becomes the status).
+  let { saved = false } = $props();
 
   let version = $state('0.1.0');
   let menuOpen = $state(false);
@@ -92,7 +94,23 @@
 
   <div class="right">
     <span class="saved" class:show={saved}>Saved ✓</span>
-    <button class="link" onclick={() => oncheckupdates?.()}>Check for updates</button>
+    {#if updates.status === 'installing' || (updates.status === 'ready' && updates.deferred)}
+      <span class="note">Restarting to update…</span>
+    {:else if updates.status === 'ready'}
+      <button class="link upd" onclick={installUpdate}>Restart to update</button>
+    {:else if updates.status === 'downloading' || (updates.status === 'available' && updates.installQueued)}
+      <span class="note">Downloading update… {updates.progress}%</span>
+    {:else if updates.status === 'available'}
+      <button class="link upd" onclick={updates.portable ? openRelease : installUpdate}>
+        {updates.portable ? `Get Yap ${updates.version}` : `Update to ${updates.version}`}
+      </button>
+    {:else if updates.status === 'checking'}
+      <span class="note">Checking for updates…</span>
+    {:else if updates.checked === 'uptodate'}
+      <span class="note ok">Up to date ✓</span>
+    {:else}
+      <button class="link" onclick={checkForUpdates}>Check for updates</button>
+    {/if}
     <span class="sep">•</span>
     <span class="ver">v{version}</span>
   </div>
@@ -239,6 +257,21 @@
   }
   .link:hover {
     color: var(--yap-primary);
+  }
+  /* An update waiting: the link turns into the accent action. */
+  .link.upd {
+    color: var(--yap-primary);
+    font-weight: 600;
+  }
+  .link.upd:hover {
+    color: var(--yap-primary-hover);
+  }
+  .note {
+    color: var(--yap-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .note.ok {
+    color: var(--yap-success);
   }
   .sep {
     color: var(--yap-border-hover);

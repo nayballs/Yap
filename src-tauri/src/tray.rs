@@ -5,9 +5,13 @@
 //! - A **right-click menu** that changes with state: when idle it offers a
 //!   **model submenu** (switch the active model, checkmark on the current one);
 //!   while recording/processing it offers **Cancel**. Always: Settings + Quit.
+//! - **Updates** (updates.rs): a ready update adds "Restart to update to X"
+//!   under the version line, a small green dot on the icon and a note in the
+//!   tooltip — Windows Update's own "restart required" idiom.
 //! - **Left-click** opens Settings.
 //!
-//! The tray is rebuilt on every `yap-state` change via [`update_tray`].
+//! The tray is rebuilt on every `yap-state` change via [`update_tray`], and on
+//! update-status changes via [`refresh`].
 
 use std::sync::Mutex;
 
@@ -15,9 +19,9 @@ use crate::config;
 use crate::stt;
 use crate::AppState;
 use tauri::image::Image;
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, Wry};
+use tauri::{AppHandle, Manager, Wry};
 
 /// Stable tray id — the app-registry key used by `tray_by_id`/`remove_tray_by_id`.
 const TRAY_ID: &str = "yap-tray";
@@ -38,18 +42,28 @@ struct MenuCache {
 }
 
 static MENUS: Mutex<Option<MenuCache>> = Mutex::new(None);
+/// What the icon was last drawn for (`state|badge`), so repeats are no-ops.
 static LAST_ICON_STATE: Mutex<String> = Mutex::new(String::new());
+/// The last pipeline state seen, so [`refresh`] can redraw for it.
+static LAST_STATE: Mutex<String> = Mutex::new(String::new());
+
+fn version_label() -> String {
+    format!("Yap v{}", env!("CARGO_PKG_VERSION"))
+}
 
 fn tooltip() -> String {
-    format!("Yap v{}", env!("CARGO_PKG_VERSION"))
+    match crate::updates::tray_note() {
+        Some(note) => format!("{} · {}", version_label(), note),
+        None => version_label(),
+    }
 }
 
 /// Build the Yap "pac" tray icon (open-mouth circle + sound waves on a
 /// transparent background) for the given state. The body colour signals state:
 /// brand amber idle (matches `src/assets/yap-logo.svg`), red recording, bright
-/// amber processing, grey needs-model. Drawn at 128px so Windows can scale it
-/// down crisply.
-fn state_icon(state: &str) -> Image<'static> {
+/// amber processing, grey needs-model. `badge` adds a green dot top-right (an
+/// update is ready). Drawn at 128px so Windows can scale it down crisply.
+fn state_icon(state: &str, badge: bool) -> Image<'static> {
     let (br, bg, bb) = match state {
         "recording" => (239.0f32, 68.0, 68.0), // red
         "processing" | "processing-slow" => (245.0f32, 158.0, 11.0), // amber
@@ -108,6 +122,23 @@ fn state_icon(state: &str) -> Image<'static> {
                 }
             }
 
+            // Update badge: a green dot in a warm-ink ring, composited on top
+            // (the ring keeps it legible on light and dark taskbars alike).
+            if badge {
+                let bd = ((px - 106.0).powi(2) + (py - 22.0).powi(2)).sqrt();
+                let ring = clamp01(21.0 - bd + 0.5);
+                let dot = clamp01(15.0 - bd + 0.5);
+                if ring > 0.0 {
+                    // Ink ring (logo #1f1c16) → green dot (#22c55e).
+                    let mix = |ink: f32, green: f32| ink * (1.0 - dot) + green * dot;
+                    let (dr, dg, db) = (mix(31.0, 34.0), mix(28.0, 197.0), mix(22.0, 94.0));
+                    cr = cr * (1.0 - ring) + dr * ring;
+                    cg = cg * (1.0 - ring) + dg * ring;
+                    cb = cb * (1.0 - ring) + db * ring;
+                    ca = ca.max(ring);
+                }
+            }
+
             let i = ((y * size + x) * 4) as usize;
             rgba[i] = cr as u8;
             rgba[i + 1] = cg as u8;
@@ -125,7 +156,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     #[cfg(not(target_os = "macos"))]
     let (settings_accel, quit_accel) = (Some("Ctrl+,"), Some("Ctrl+Q"));
 
-    let version = MenuItem::with_id(app, "version", tooltip(), false, None::<&str>)?;
+    let version = MenuItem::with_id(app, "version", version_label(), false, None::<&str>)?;
     // Opens the main window (the control panel — Home feed + surfaces; the
     // Settings modal lives inside it).
     let settings = MenuItem::with_id(app, "settings", "Open Yap", true, settings_accel)?;
@@ -153,55 +184,51 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
         .map(|s| s.to_string())
         .collect();
 
-    if installed.is_empty() {
+    let models: Box<dyn IsMenuItem<Wry>> = if installed.is_empty() {
         // No models yet — offer a way into the model picker.
-        let download = MenuItem::with_id(app, "open_models", "Download a model…", true, None::<&str>)?;
-        return Menu::with_items(
-            app,
-            &[
-                &version,
-                &sep()?,
-                &download,
-                &sep()?,
-                &settings,
-                &check_updates,
-                &sep()?,
-                &quit,
-            ],
-        );
-    }
-
-    let label = if installed.contains(&current) {
-        stt::model_name(&current)
+        Box::new(MenuItem::with_id(app, "open_models", "Download a model…", true, None::<&str>)?)
     } else {
-        "Model".to_string()
+        let label = if installed.contains(&current) {
+            stt::model_name(&current)
+        } else {
+            "Model".to_string()
+        };
+        let submenu = Submenu::with_id(app, "model_submenu", label, true)?;
+        for id in &installed {
+            let item = CheckMenuItem::with_id(
+                app,
+                format!("model:{}", id),
+                stt::model_name(id),
+                true,
+                *id == current,
+                None::<&str>,
+            )?;
+            submenu.append(&item)?;
+        }
+        Box::new(submenu)
     };
-    let submenu = Submenu::with_id(app, "model_submenu", label, true)?;
-    for id in &installed {
-        let item = CheckMenuItem::with_id(
-            app,
-            format!("model:{}", id),
-            stt::model_name(id),
-            true,
-            *id == current,
-            None::<&str>,
-        )?;
-        submenu.append(&item)?;
-    }
 
-    Menu::with_items(
-        app,
-        &[
-            &version,
-            &sep()?,
-            &submenu,
-            &sep()?,
-            &settings,
-            &check_updates,
-            &sep()?,
-            &quit,
-        ],
-    )
+    // An update the user can act on goes right under the version line
+    // ("Restart to update to 0.1.2"); "Check for updates…" steps aside then.
+    let update = crate::updates::tray_item()
+        .map(|(id, label, enabled)| MenuItem::with_id(app, id, label, enabled, None::<&str>))
+        .transpose()?;
+    let (sep_update, sep_models, sep_quit) = (sep()?, sep()?, sep()?);
+    let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&version, &sep_update];
+    if let Some(update) = &update {
+        items.push(update);
+        items.push(&sep_models);
+    }
+    items.push(models.as_ref());
+    let sep_settings = sep()?;
+    items.push(&sep_settings);
+    items.push(&settings);
+    if update.is_none() {
+        items.push(&check_updates);
+    }
+    items.push(&sep_quit);
+    items.push(&quit);
+    Menu::with_items(app, &items)
 }
 
 /// Switch the active model from the tray (installed models only). Runs the
@@ -241,10 +268,13 @@ fn on_menu_event(app: &AppHandle, id: &str) {
         "settings" => {
             let _ = crate::commands::show_settings(app);
         }
-        "check_updates" => {
-            // Open Settings (the update UI lives in About) and ask it to check.
-            let _ = crate::commands::show_settings(app);
-            let _ = app.emit("check-for-updates", ());
+        "check_updates" => crate::updates::on_tray_check(app),
+        "update_install" | "update_get" => {
+            // Off the main thread: installing takes the pipeline lock (to
+            // check for a dictation) and may open a window.
+            let app = app.clone();
+            let id = id.to_string();
+            std::thread::spawn(move || crate::updates::on_tray_menu(&app, &id));
         }
         "open_models" => {
             let _ = crate::commands::show_onboarding(app);
@@ -268,15 +298,19 @@ fn on_menu_event(app: &AppHandle, id: &str) {
     }
 }
 
-/// The active model + installed set the idle menu depends on. When this
-/// changes (model switched/downloaded/deleted) the idle menu is stale.
+/// The active model + installed set + update item the idle menu depends on.
+/// When this changes (model switched/downloaded/deleted, an update got ready)
+/// the idle menu is stale.
 fn idle_menu_key() -> String {
     let data_dir = config::data_dir();
     let installed: Vec<&str> = stt::all_model_ids()
         .into_iter()
         .filter(|id| stt::is_model_installed(&data_dir, id))
         .collect();
-    format!("{}|{}", config::load().model_size, installed.join(","))
+    let update = crate::updates::tray_item()
+        .map(|(id, label, _)| format!("{id}:{label}"))
+        .unwrap_or_default();
+    format!("{}|{}|{}", config::load().model_size, installed.join(","), update)
 }
 
 /// Build the tray icon and install it. The app keeps the tray in its registry
@@ -285,7 +319,7 @@ fn idle_menu_key() -> String {
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app, "idle")?;
     TrayIconBuilder::with_id(TRAY_ID)
-        .icon(state_icon("idle"))
+        .icon(state_icon("idle", crate::updates::tray_badge()))
         .tooltip(tooltip())
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -331,23 +365,57 @@ pub fn ensure_tray(app: &AppHandle, cfg: &config::YapConfig) {
 /// Update the tray icon + menu for a new state. No-op if the tray isn't built.
 /// Cheap by design: the icon is only re-rendered when the state actually
 /// changed, and the two menus are cached and swapped — a full native-menu
-/// rebuild happens only when the model list/selection changes.
+/// rebuild happens only when the model list/selection or update item changes.
+///
+/// All tray work is posted to the main thread and runs there in order: tray
+/// and menu calls made from other threads block until the main thread runs
+/// them, so a worker holding the menu lock while the main thread waited on
+/// that same lock (a sync command's `yap-state`, an update refresh) would
+/// deadlock.
 pub fn update_tray(app: &AppHandle, state: &str) {
+    let handle = app.clone();
+    let state = state.to_string();
+    let _ = app.run_on_main_thread(move || {
+        *LAST_STATE.lock().unwrap_or_else(|p| p.into_inner()) = state.clone();
+        let mut guard = MENUS.lock().unwrap_or_else(|p| p.into_inner());
+        apply(&handle, &mut guard, &state);
+    });
+}
+
+/// Re-apply the update item, icon dot and tooltip after an update-status
+/// change (updates.rs), for the current pipeline state. Main thread, like
+/// [`update_tray`].
+pub fn refresh(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(tray) = handle.tray_by_id(TRAY_ID) {
+            let _ = tray.set_tooltip(Some(tooltip()));
+        }
+        let state = LAST_STATE.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let mut guard = MENUS.lock().unwrap_or_else(|p| p.into_inner());
+        apply(&handle, &mut guard, if state.is_empty() { "idle" } else { &state });
+    });
+}
+
+/// The body of [`update_tray`] / [`refresh`]: main thread, under the menu lock.
+fn apply(app: &AppHandle, guard: &mut Option<MenuCache>, state: &str) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
 
     // Icon: `yap-state` repeats states; only touch the tray when it changed.
     {
+        let badge = crate::updates::tray_badge();
+        let key = format!("{state}|{badge}");
         let mut last = LAST_ICON_STATE.lock().unwrap_or_else(|p| p.into_inner());
-        if *last != state {
-            let _ = tray.set_icon(Some(state_icon(state)));
-            *last = state.to_string();
+        if *last != key {
+            let _ = tray.set_icon(Some(state_icon(state, badge)));
+            tracing::debug!(icon = %key, "tray: icon updated");
+            *last = key;
         }
     }
 
     let recording = matches!(state, "recording" | "processing" | "processing-slow");
-    let mut guard = MENUS.lock().unwrap_or_else(|p| p.into_inner());
 
     if guard.is_none() {
         match (build_menu(app, "idle"), build_menu(app, "recording")) {
@@ -365,11 +433,13 @@ pub fn update_tray(app: &AppHandle, state: &str) {
     }
     let cache = guard.as_mut().expect("just initialised");
 
-    // Stale idle menu (model switched/downloaded/deleted) → rebuild it once.
+    // Stale idle menu (model switched/downloaded/deleted, update item
+    // changed) → rebuild it once.
     if !recording {
         let key = idle_menu_key();
         if cache.idle_key != key {
             if let Ok(menu) = build_menu(app, "idle") {
+                tracing::debug!(menu = %key, "tray: idle menu rebuilt");
                 cache.idle = menu;
                 cache.idle_key = key;
                 cache.showing_recording = true; // force reinstall below

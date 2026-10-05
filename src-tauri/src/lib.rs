@@ -33,6 +33,7 @@ mod sound;
 mod stt;
 mod text_injector;
 mod tray;
+mod updates;
 mod usage;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -65,6 +66,25 @@ pub fn set_autostart_enabled(app: &AppHandle, enabled: bool) -> Result<(), Strin
         manager.disable()
     };
     res.map_err(|e| format!("Failed to set autostart: {}", e))
+}
+
+/// What the window-state plugin remembers for the main window (see `run`).
+/// Excludes VISIBLE so a start-hidden launch never un-hides itself.
+pub(crate) fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
+    use tauri_plugin_window_state::StateFlags;
+    StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED
+}
+
+/// Clean-up every way out of Yap needs: stop the on-device AI sidecar, take
+/// down the local API bridge (removing its discovery file), and give back the
+/// speakers if mute-while-recording muted them. Runs from the
+/// `RunEvent::Exit` handler AND from the updater's pre-install hook — on
+/// Windows the installer step force-exits Yap (`std::process::exit`) without
+/// ever reaching the Exit handler (see `updates::build_updater`).
+pub(crate) fn shutdown_cleanup() {
+    local_llm::stop();
+    bridge::stop();
+    mute::unmute_system_output();
 }
 
 /// Reload handle for the global log filter — lets the Settings "Debug mode"
@@ -256,10 +276,10 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        // Auto-update from GitHub Releases (driven from the frontend JS plugin)
-        // + process for relaunch after install. Desktop-only.
+        // Auto-update from GitHub Releases. Driven Rust-side by updates.rs
+        // (background checks, download, install-on-request); the plugin's JS
+        // commands aren't granted to the webviews. Desktop-only.
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         // External links ("Get your API key", GitHub, Learn more) open in the
         // default browser — target=_blank does nothing in a Tauri webview.
         .plugin(tauri_plugin_opener::init())
@@ -272,11 +292,7 @@ pub fn run() {
         // never un-hides itself on a start-hidden launch.
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::SIZE
-                        | tauri_plugin_window_state::StateFlags::POSITION
-                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
-                )
+                .with_state_flags(window_state_flags())
                 .with_denylist(&["overlay", "onboarding"])
                 .build(),
         )
@@ -362,6 +378,11 @@ pub fn run() {
             auth::auth_list_sessions,
             auth::auth_revoke_other_sessions,
             auth::auth_revoke_session,
+            updates::update_status,
+            updates::update_check,
+            updates::update_install,
+            updates::update_ack,
+            updates::update_ack_updated,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -397,10 +418,11 @@ pub fn run() {
                 Err(e) => tracing::error!("Failed to start pipeline: {}", e),
             }
 
-            // Clear any orphaned cleanup sidecar from a previous session (the
-            // updater force-exits without running the Exit handler), then — if
-            // on-device cleanup is selected + installed — warm up a fresh one
-            // off-thread so the first dictation cleanup skips the cold load.
+            // Clear any orphaned cleanup sidecar from a previous session (a
+            // crash or task-kill skips every exit path; installers launched by
+            // older builds' updater did too), then — if on-device cleanup is
+            // selected + installed — warm up a fresh one off-thread so the
+            // first dictation cleanup skips the cold load.
             local_llm::kill_orphans();
             {
                 let cfg2 = cfg.clone();
@@ -497,6 +519,9 @@ pub fn run() {
                 OVERLAY_ACTIVE.store(show, Ordering::Relaxed);
                 // Keep the tray icon + menu in sync with the recording state.
                 tray::update_tray(&overlay_handle, state);
+                // A dictation just ended → a restart-to-update requested
+                // mid-dictation (or a held-back update notice) can go ahead.
+                updates::on_pipeline_state(&overlay_handle, state);
 
                 // The "error" state is transient: auto-clear it back to idle a
                 // few seconds later, unless a newer state has arrived since.
@@ -549,11 +574,20 @@ pub fn run() {
             for label in ["settings", "onboarding"] {
                 if let Some(win) = app.get_webview_window(label) {
                     let w = win.clone();
-                    win.on_window_event(move |event| {
-                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let main = label == "settings";
+                    let focus_handle = handle.clone();
+                    win.on_window_event(move |event| match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
                             api.prevent_close();
                             let _ = w.hide();
                         }
+                        // The main window came up (tray, notification, second
+                        // launch) or was clicked: a stale update check and a
+                        // pending "update ready" toast can happen now.
+                        tauri::WindowEvent::Focused(true) if main => {
+                            updates::on_main_window_focused(&focus_handle);
+                        }
+                        _ => {}
                     });
                 }
             }
@@ -581,17 +615,20 @@ pub fn run() {
                 }
             }
 
+            // Background update checks (GitHub Releases only). Last, so a
+            // relaunch after "Restart to update" can reopen the main window
+            // once the hidden webviews are initialized.
+            updates::init(&handle);
+
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building Yap")
         .run(|_app_handle, event| {
-            // Kill the on-device cleanup sidecar when the app exits so no
-            // orphaned llamafile server is left running, and stop the local API
-            // bridge so a stale cli-bridge.json never points at a dead port.
+            // No orphaned llamafile server, no stale cli-bridge.json pointing
+            // at a dead port, no speakers left muted.
             if let tauri::RunEvent::Exit = event {
-                local_llm::stop();
-                bridge::stop();
+                shutdown_cleanup();
             }
         });
 }
