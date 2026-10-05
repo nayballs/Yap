@@ -730,9 +730,11 @@ mod tests {
 
     #[test]
     fn provider_api_key_falls_back_to_the_global_store() {
-        let mut cfg = YapConfig::default();
-        cfg.pp_provider = "groq".into();
-        cfg.pp_api_key = "gsk_active".into();
+        let mut cfg = YapConfig {
+            pp_provider: "groq".into(),
+            pp_api_key: "gsk_active".into(),
+            ..Default::default()
+        };
         cfg.pp_api_keys
             .insert("anthropic".into(), "sk-ant-stored".into());
 
@@ -754,9 +756,11 @@ mod tests {
             model: model.into(),
             ..Default::default()
         };
-        let mut cfg = YapConfig::default();
-        cfg.pp_provider = "groq".into();
-        cfg.pp_model = "llama-3.1-8b-instant".into();
+        let mut cfg = YapConfig {
+            pp_provider: "groq".into(),
+            pp_model: "llama-3.1-8b-instant".into(),
+            ..Default::default()
+        };
         cfg.llm_scopes.insert("chat".into(), scope("groq", "qwen/qwen3-32b"));
         cfg.llm_scopes.insert("notes".into(), scope("ondevice", "llama-3.1-8b-instant"));
         cfg.llm_scopes.insert("agent".into(), scope("groq", "openai/gpt-oss-120b"));

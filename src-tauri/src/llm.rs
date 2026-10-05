@@ -431,66 +431,6 @@ pub(crate) async fn post_chat_message(
     Ok(message)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn empty_body_is_base_alone() {
-        assert_eq!(build_system_prompt(""), BASE_PROMPT);
-        assert_eq!(build_system_prompt("   \n  "), BASE_PROMPT);
-    }
-
-    #[test]
-    fn body_is_appended_after_blank_line() {
-        let s = build_system_prompt("Keep it casual.");
-        assert!(s.starts_with(BASE_PROMPT));
-        assert!(s.ends_with("Keep it casual."));
-        assert!(s.contains("\n\nKeep it casual."));
-    }
-
-    #[test]
-    fn strip_thinking_removes_reasoning_blocks() {
-        assert_eq!(strip_thinking("<think>hmm, let me see</think>\nThe answer."), "The answer.");
-        assert_eq!(strip_thinking("The answer.<think>oops</think>"), "The answer.");
-        // closer with no opener (some servers strip the opener)
-        assert_eq!(strip_thinking("long reasoning here</think>Final."), "Final.");
-        // opener with no closer (truncated generation)
-        assert_eq!(strip_thinking("Final answer<think>cut off"), "Final answer");
-        // <thinking> variant, case-insensitive
-        assert_eq!(strip_thinking("<THINKING>x</THINKING>Done"), "Done");
-        // no tags → unchanged (just trimmed)
-        assert_eq!(strip_thinking("  just clean  "), "just clean");
-    }
-
-    #[test]
-    fn dictionary_suffix_formats_spellings_and_corrections() {
-        use crate::config::DictionaryEntry;
-        let de = |from: &str, to: &str| DictionaryEntry { from: from.into(), to: to.into(), fuzzy: true };
-        assert_eq!(dictionary_suffix(&[]), "");
-        // same-word entry (e.g. an agent name) → exact-spelling bias
-        let s = dictionary_suffix(&[de("Kubernetes", "Kubernetes")]);
-        assert!(s.contains("use these exact spellings: Kubernetes"), "{s}");
-        // differing entry → explicit correction
-        let s = dictionary_suffix(&[de("cuber netties", "Kubernetes")]);
-        assert!(
-            s.contains("apply these corrections: \"cuber netties\" → \"Kubernetes\""),
-            "{s}"
-        );
-        // blank entries are skipped → empty suffix
-        assert_eq!(dictionary_suffix(&[de("", "")]), "");
-    }
-
-    #[test]
-    fn body_carrying_the_guardrails_is_not_doubled() {
-        // Prompt Studio stores the full effective prompt (guardrails + body);
-        // build_system_prompt must return it verbatim, not prepend a 2nd copy.
-        let full = format!("{BASE_PROMPT}\n\nKeep it casual.");
-        assert_eq!(build_system_prompt(&full), full);
-        assert_eq!(build_system_prompt(BASE_PROMPT), BASE_PROMPT);
-    }
-}
-
 /// Remove `<think>…</think>` / `<thinking>…</thinking>` reasoning blocks that
 /// reasoning models emit inline (OpenWhispr's "Disable thinking output"). Handles
 /// a paired block, a dangling opener with no closer (truncated generations), and a
@@ -549,4 +489,64 @@ fn strip_wrapping(s: &str) -> String {
     }
 
     t.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_body_is_base_alone() {
+        assert_eq!(build_system_prompt(""), BASE_PROMPT);
+        assert_eq!(build_system_prompt("   \n  "), BASE_PROMPT);
+    }
+
+    #[test]
+    fn body_is_appended_after_blank_line() {
+        let s = build_system_prompt("Keep it casual.");
+        assert!(s.starts_with(BASE_PROMPT));
+        assert!(s.ends_with("Keep it casual."));
+        assert!(s.contains("\n\nKeep it casual."));
+    }
+
+    #[test]
+    fn strip_thinking_removes_reasoning_blocks() {
+        assert_eq!(strip_thinking("<think>hmm, let me see</think>\nThe answer."), "The answer.");
+        assert_eq!(strip_thinking("The answer.<think>oops</think>"), "The answer.");
+        // closer with no opener (some servers strip the opener)
+        assert_eq!(strip_thinking("long reasoning here</think>Final."), "Final.");
+        // opener with no closer (truncated generation)
+        assert_eq!(strip_thinking("Final answer<think>cut off"), "Final answer");
+        // <thinking> variant, case-insensitive
+        assert_eq!(strip_thinking("<THINKING>x</THINKING>Done"), "Done");
+        // no tags → unchanged (just trimmed)
+        assert_eq!(strip_thinking("  just clean  "), "just clean");
+    }
+
+    #[test]
+    fn dictionary_suffix_formats_spellings_and_corrections() {
+        use crate::config::DictionaryEntry;
+        let de = |from: &str, to: &str| DictionaryEntry { from: from.into(), to: to.into(), fuzzy: true };
+        assert_eq!(dictionary_suffix(&[]), "");
+        // same-word entry (e.g. an agent name) → exact-spelling bias
+        let s = dictionary_suffix(&[de("Kubernetes", "Kubernetes")]);
+        assert!(s.contains("use these exact spellings: Kubernetes"), "{s}");
+        // differing entry → explicit correction
+        let s = dictionary_suffix(&[de("cuber netties", "Kubernetes")]);
+        assert!(
+            s.contains("apply these corrections: \"cuber netties\" → \"Kubernetes\""),
+            "{s}"
+        );
+        // blank entries are skipped → empty suffix
+        assert_eq!(dictionary_suffix(&[de("", "")]), "");
+    }
+
+    #[test]
+    fn body_carrying_the_guardrails_is_not_doubled() {
+        // Prompt Studio stores the full effective prompt (guardrails + body);
+        // build_system_prompt must return it verbatim, not prepend a 2nd copy.
+        let full = format!("{BASE_PROMPT}\n\nKeep it casual.");
+        assert_eq!(build_system_prompt(&full), full);
+        assert_eq!(build_system_prompt(BASE_PROMPT), BASE_PROMPT);
+    }
 }

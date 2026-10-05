@@ -215,8 +215,10 @@ mod tests {
     #[test]
     fn plan_respects_window_start() {
         // 30 s buffer but the window starts at 20 s → 10 s window → Normal.
-        let mut s = PartialSession::default();
-        s.window_start = 20 * R;
+        let s = PartialSession {
+            window_start: 20 * R,
+            ..Default::default()
+        };
         let samples = loud(30);
         assert_eq!(s.plan(samples.len(), &samples), TickPlan::Normal);
     }
