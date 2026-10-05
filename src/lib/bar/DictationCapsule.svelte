@@ -55,9 +55,11 @@
     box-sizing: border-box;
     padding: 0 16px 0 14px;
     border-radius: 999px;
-    background: #1c1a16;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+    /* The bar's black with the cards' hairline; no shadow: the capsule sits
+       14 px above the window's edge, which a shadow would reach (a grey box
+       on a transparent WebView2 window). */
+    background: #000;
+    border: 1px solid rgb(48, 48, 47);
     color: rgba(255, 255, 255, 0.9);
     font-size: 12.5px;
   }

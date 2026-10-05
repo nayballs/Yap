@@ -1857,13 +1857,14 @@ mod native {
         )
     }
 
-    /// The prompt as a card on the Yap bar (`crate::bar`), styled after
-    /// Wispr's "Meeting detected" card: the app's mark, "Teams call detected"
-    /// over "● Now", a split button "Record notes" whose ^ menu holds the
-    /// other answers, and a ✕ on its corner — the same answers as the
-    /// notification's buttons, back through [`activated`]. A start prompt
-    /// left alone fades as "Not now"; one counting down (`meeting_auto_start`)
-    /// shows the countdown, and its ✕ or Esc cancels.
+    /// The prompt as a card on the Yap bar (`crate::bar`) — the same answers
+    /// as the notification's buttons, back through [`activated`]. A start
+    /// prompt is Wispr's "Meeting detected" card: the app's mark, "Teams
+    /// call" over "● Now", a split button "Record notes" whose ^ menu holds
+    /// the other answers, a ✕ on its corner; left alone it fades as "Not
+    /// now", and one counting down (`meeting_auto_start`) shows the
+    /// countdown, its ✕ or Esc cancelling. The call ending asks in a notice
+    /// card: "Teams call ended", Keep recording / Stop and summarise.
     pub fn bar_card(p: &Prompt) -> crate::bar::Card {
         use crate::bar::{Card, CardAction, Countdown};
         let w = wording(p.kind, p.app);
@@ -1874,17 +1875,10 @@ mod native {
         let arg = |answer: &str| format!("meeting:{answer}:{}", p.id);
         let countdown = p.auto_start_at.map(|until| Countdown { until, label: "Notes start in".into() });
         let counting = countdown.is_some();
-        let start = p.kind == PromptKind::Start;
-        Card {
+        let card = Card {
             id: super::BAR_CARD.into(),
-            style: "call",
             icon: "call",
             app: Some(p.app.id),
-            title: w.title,
-            body: w.body.into(),
-            // The call is on now; or, ended, Yap is still recording it.
-            status: Some(if start { "Now" } else { "Still recording" }.into()),
-            dot: if start { "live" } else { "recording" },
             primary: Some(CardAction::new(arg(accept), if counting { "Start now" } else { w.accept })),
             secondary: Some(CardAction::new(arg(decline), w.decline)),
             link: w.never.map(|label| CardAction::new(arg("never"), label)),
@@ -1893,6 +1887,18 @@ mod native {
             close_action: Some(arg(decline)),
             escape_action: counting.then(|| arg(decline)),
             countdown,
+            ..Card::default()
+        };
+        match p.kind {
+            // One row: the title short enough for it, the call being on now.
+            PromptKind::Start => Card {
+                style: "call",
+                title: format!("{} {}", p.app.label, p.app.noun),
+                status: Some("Now".into()),
+                dot: "live",
+                ..card
+            },
+            PromptKind::End => Card { title: w.title, body: w.body.into(), ..card },
         }
     }
 
@@ -2389,9 +2395,10 @@ mod tests {
         };
         let card = native::bar_card(&p);
         assert_eq!(card.id, BAR_CARD);
-        // Wispr's "Meeting detected" layout: the app's mark, "● Now".
+        // Wispr's "Meeting detected" layout: the app's mark, a title short
+        // enough for one row, "● Now".
         assert_eq!((card.style, card.app), ("call", Some("meet")));
-        assert_eq!(card.title, "Google Meet call detected");
+        assert_eq!(card.title, "Google Meet call");
         assert_eq!((card.status.as_deref(), card.dot), (Some("Now"), "live"));
         let action = |a: &Option<crate::bar::CardAction>| a.as_ref().map(|a| (a.id.clone(), a.label.clone()));
         assert_eq!(action(&card.primary), Some(("meeting:record:7".into(), "Record notes".into())));
@@ -2408,12 +2415,15 @@ mod tests {
         assert_eq!(card.timeout_ms, None);
         assert_eq!(card.countdown.as_ref().map(|c| c.until), Some(123));
         assert_eq!(card.escape_action.as_deref(), Some("meeting:dismiss:7"));
-        // The call ending: Stop and summarise / Keep recording; it stays.
+        // The call ending: a notice card, Keep recording / Stop and
+        // summarise; it stays.
         let card = native::bar_card(&Prompt { kind: PromptKind::End, note_id: Some(1), fade_ms: None, ..p });
+        assert_eq!(card.style, "");
+        assert_eq!(card.title, "Google Meet call ended");
+        assert_eq!(card.body, "Stop recording and summarise your notes?");
         assert_eq!(action(&card.primary), Some(("meeting:stop:7".into(), "Stop and summarise".into())));
         assert_eq!(action(&card.secondary), Some(("meeting:keep:7".into(), "Keep recording".into())));
         assert!(card.link.is_none() && card.timeout_ms.is_none());
-        assert_eq!((card.status.as_deref(), card.dot), (Some("Still recording"), "recording"));
         assert_eq!(card.close_action.as_deref(), Some("meeting:keep:7"));
     }
 
