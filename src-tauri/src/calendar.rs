@@ -1731,6 +1731,38 @@ mod tests {
         assert!(events_from_feed("1", b"<html>nope</html>", 0, 1).is_err());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn the_card_as_a_windows_notification() {
+        let event: Event = serde_json::from_value(json!({
+            "key": "1:design", "connection": "1", "title": "Design review & Q4",
+            "start": now_secs() + 60, "end": now_secs() + 1_860,
+            "attendees": [{ "name": "Tanay Kothari" }, { "name": "Priya Shah" }],
+            "joinUrl": "https://teams.microsoft.com/l/meetup-join/19%3a1", "service": "teams",
+        }))
+        .unwrap();
+        let card = Card { id: 7, kind: CardKind::Remind, event, native: false };
+        let xml = native::xml(&card, "");
+        assert!(xml.contains("<text>Design review &amp; Q4</text>"));
+        assert!(xml.contains("Teams \u{b7} with Tanay Kothari, Priya Shah"));
+        // Join & take notes, Start notes, Snooze.
+        assert_eq!(xml.matches("<action ").count(), 3);
+        assert!(xml.contains("content=\"Join &amp; take notes\" arguments=\"calendar:join:7\""));
+        assert!(xml.contains("content=\"Start notes\" arguments=\"calendar:start:7\""));
+        assert!(xml.contains("arguments=\"calendar:snooze:7\""));
+        // WinRT takes it as a toast (built, never shown).
+        crate::win_toast::build("calendar", &xml, false).unwrap();
+        // Without a link, and as a switch: no join, and the question.
+        let mut plain = card.clone();
+        plain.kind = CardKind::Switch;
+        plain.event.join_url = None;
+        let xml = native::xml(&plain, "");
+        assert_eq!(xml.matches("<action ").count(), 2);
+        assert!(xml.contains("content=\"Switch notes\" arguments=\"calendar:start:7\""));
+        assert!(xml.contains("Switch your notes to this meeting?"));
+        crate::win_toast::build("calendar", &xml, false).unwrap();
+    }
+
     #[test]
     fn invites_become_context() {
         let mut note: crate::notes::Note = serde_json::from_value(json!({
