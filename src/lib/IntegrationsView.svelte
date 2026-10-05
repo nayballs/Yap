@@ -10,6 +10,10 @@
   import { onMount } from 'svelte';
   import { toast } from './ui/toast.svelte.js';
   import CalendarLinkCard from './CalendarLinkCard.svelte';
+  import McpLinkCard from './McpLinkCard.svelte';
+
+  // ControlPanel's openSettings(section): "Go to MCP" opens Settings → MCP.
+  let { onopensettings } = $props();
 
   let enabled = $state(true);
   let status = $state({ running: false, port: null, bridgeFile: '' });
@@ -41,6 +45,9 @@
     try {
       const fresh = await invoke('get_config');
       await invoke('save_config', { cfg: { ...fresh, bridgeEnabled: on } });
+      // Settings (always mounted) keeps its own copy: tell it, or its next
+      // auto-save would switch the bridge back.
+      window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: { bridgeEnabled: on } }));
       await refresh();
       toast({
         title: on ? 'Local API on' : 'Local API off',
@@ -115,13 +122,16 @@ ${curlExample}
     <div class="page-h">
       <h1>Integrations</h1>
       <p>
-        Connect Yap to terminals, scripts, and coding agents. Everything below runs on this
-        machine — loopback only, token-protected, no cloud, no account.
+        Connect Yap to your AI apps, terminals, scripts, and coding agents. Everything below runs
+        on this machine — loopback only, token-protected, no cloud, no account.
       </p>
     </div>
 
     <!-- Calendar: connected in Settings → Connectors (calendar.rs) -->
     <CalendarLinkCard />
+
+    <!-- AI apps over MCP: set up in Settings → MCP (needs the Local API below) -->
+    <McpLinkCard onopen={() => onopensettings?.('mcp')} />
 
     <!-- Local API bridge -->
     <div class="card">

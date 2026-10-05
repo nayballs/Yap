@@ -30,7 +30,9 @@ tauri-plugin-window-state = "2"
 # wav/flac/ogg-vorbis/pcm; mp3 + aac + isomp4 add mp3/m4a/aac.
 symphonia = { version = "0.5", features = ["mp3", "aac", "isomp4"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# raw_value: mcp_clients.rs edits AI apps' config files keeping every other
+# entry byte for byte (their own formatting and key order).
+serde_json = { version = "1", features = ["raw_value"] }
 tokio = { version = "1", features = ["full"] }
 dirs = "6"
 tracing = "0.1"
@@ -55,6 +57,16 @@ arboard = "3"
 tiny_http = "0.12"
 getrandom = "0.3"
 
+# MCP server (`yap.exe mcp`, mcp.rs): AI apps read meeting notes through the
+# bridge. The official Rust SDK, server + stdio only (no macros): it speaks
+# both protocol eras (the 2025 `initialize` handshake and 2026-07-28's
+# per-request metadata). toml_edit adds Yap to Codex/ChatGPT's config.toml
+# without touching the rest of the file; chrono's clock shows meeting dates in
+# local time. Both were already in the dependency tree.
+rmcp = { version = "3.5", default-features = false, features = ["server", "transport-io"] }
+toml_edit = "0.25"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
 # Yap accounts (auth.rs): base64/url decode the browser handoff code.
 base64 = "0.22"
 url = "2"
@@ -65,8 +77,8 @@ qrcode = { version = "0.14", default-features = false }
 # Calendar (calendar.rs): meetings read straight from Google Calendar or a
 # private iCal link. `rrule` expands RFC 5545 recurrence rules (the crate the
 # `icalendar` crate builds on); `chrono-tz` is the IANA time-zone database,
-# for TZIDs (Windows zone names are mapped to it, see calendar/tz.rs).
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# for TZIDs (Windows zone names are mapped to it, see calendar/tz.rs). Both
+# work on the `chrono` above.
 chrono-tz = "0.10"
 rrule = "0.14"
 
