@@ -20,6 +20,7 @@
   import { account, displayName, initAccount, initials } from './account.svelte.js';
   import { initUpdates } from './updates.svelte.js';
   import { initMeetingDetect } from './meetingDetect.svelte.js';
+  import { initMeetingGuard } from './meetingGuard.js';
   import HomeView from './HomeView.svelte';
   import InsightsView from './InsightsView.svelte';
   import DictionaryView from './DictionaryView.svelte';
@@ -48,6 +49,10 @@
     },
     openSettings: (section) => openSettings(section),
   });
+  // Meeting guard rails (meeting_guard.rs, capture.rs via meetingGuard.js):
+  // "Notes stop in 5 minutes · Keep going", the screen-share tip → Settings
+  // → General → Meetings, and the stops Yap makes itself.
+  initMeetingGuard({ openSettings: (section) => openSettings(section) });
   let bellOpen = $state(false);
 
   // Sidebar nav (Wispr order: Home, Insights, then the work surfaces).

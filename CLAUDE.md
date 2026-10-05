@@ -297,11 +297,15 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   source "meeting") + `notes::mark_meeting` + the `meeting_start` command;
   opens the note if the window is visible (else a "Taking notes…" Windows
   notification); a failed start deletes the note and says why. **Call ended**
-  while recording it → "Stop and summarise?" — never an auto-stop (OpenWhispr
-  doesn't, and the mic can't tell an ended call from a rejoin, breakout room
-  or phone hand-off): opens the note and NotesView ends it there, so the
-  Action Plan runs (`yap-meeting-open-note {noteId, stop}`; Rust
-  stops it itself after 8 s if the page didn't). Snapshot
+  while recording it → "Stop and summarise?" — by default never an auto-stop
+  (OpenWhispr doesn't, and the mic can't tell an ended call from a rejoin,
+  breakout room or phone hand-off): opens the note and NotesView ends it
+  there, so the Action Plan runs (`yap-meeting-open-note {noteId, stop}`;
+  Rust stops it itself after 8 s if the page didn't). Opt-in **"When a call
+  ends: Stop and summarise automatically"** (`config.meeting_call_end` "ask" | "stop",
+  Wispr's "Stop Notetaker when a call ends"; `at_call_end`) stops and
+  summarises without asking, via `meeting_guard::stop_after_call` (same rule:
+  only apps Yap asks about). Snapshot
   `meeting_detect_status` + `yap-meeting-detect` (`{enabled, style, apps,
   calls, prompt}`); answers `meeting_detect_respond(promptId,
   record|dismiss|never|stop|keep)`; debug-only `meeting_detect_simulate(appId,
@@ -311,6 +315,47 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   the style and per-app choices too). Lock rule: never touch windows/WinRT
   while holding its state lock (window getters wait on the main thread). See
   [`docs/meetings.md`](./docs/meetings.md).
+- **`meeting_guard.rs`** — guard rails around a meeting recording (Phase 8,
+  Wispr Flow's Notetaker settings) + their notices. **Maximum recording
+  length** (`config.meeting_max_minutes`: 60/120/180/240, 0 = no limit,
+  default **120**, as Wispr): a watcher thread per recording (follows
+  `yap-meeting-state`; Settings re-read every second) warns 5 min before —
+  "Notes stop in 5 minutes" + **Keep going** (another hour;
+  `meeting_keep_going`), a sticky in-app toast (`yap-meeting-limit`,
+  `meeting_limit_status` after a reload) plus a Windows notification while
+  the main window isn't focused — then stops and writes the action plan. A
+  warning always gives the full 5 min (limit lowered mid-meeting, PC slept
+  through it); raising/removing the limit takes it back (`step`/`kept_going`,
+  pure + unit-tested). **The meeting shortcut** (`config.meeting_hotkey`,
+  default `kb:alt+win+77` = **Win+Alt+M**, as Wispr; "" = unbound):
+  `start_or_stop` — recording → stop and summarise; a live call (any app) →
+  `meeting_detect::on_tray_record`; else a new "Meeting · 5 Oct, 14:30" note
+  (Meetings) + `meeting_start`, opened if the window is visible (else a
+  "Taking notes" notification). 1 s debounce. Global hook event
+  `meeting-key-pressed`; the in-page fallback calls `meeting_shortcut`.
+  `notice` / `notice_native` / `notice_everywhere` (`yap-meeting-notice`
+  `{kind, title, body, icon, variant, settings, noteId}`) carry the
+  screen-share tip, "Stopped at 2 hours", "Teams call ended · writing your
+  action plan" and "Taking notes". **Every stop goes through
+  `stop_and_summarise`** (today `meeting_detect::stop_and_summarise`, which
+  opens the note; switch it to `meeting::stop()` once the action plan is
+  written in Rust on any non-pause stop). Debug-only `e2e_meeting_limit
+  {limitMs, warnMs, keepGoingMs}` shortens the timings for the e2e suite.
+- **`capture.rs`** — hides Yap's meeting windows from screen capture and
+  sharing: while a meeting records and `config.meeting_hide_from_capture` is
+  on (default **on**, Wispr's "Don't show Notepad and Flow Bar in screen
+  capture"), the windows labelled **`overlay`** and **`notepad`**
+  (`MEETING_WINDOWS`, looked up by label, a missing one skipped) get
+  `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` (fallback
+  `WDA_MONITOR` before Windows 10 2004): on your monitor, left out of
+  screenshots, recordings and every screen share. Lifted when the recording
+  stops. Applied on the main thread (`run_on_main_thread`, in order, no lock)
+  on every `yap-meeting-state`, on `save_config` (toggled mid-meeting), and on
+  `on_page_load` (lib.rs: a window created mid-recording; `sync_window`).
+  Off + a meeting starting → the screen-share tip once per note ("Your
+  meeting notes show up in screen shares and screenshots" + **Update
+  settings** → `general#screen-sharing`). Debug-only `capture_affinity` reads
+  each window's affinity back (`GetWindowDisplayAffinity`) for the e2e suite.
 - **`media.rs`** — audio-file decode front-end for Upload: pure-Rust **Symphonia**
   (mp3/wav/m4a/aac/flac/ogg-vorbis; no opus yet) → downmix mono → 16 kHz
   (`pipeline::resample_linear`), plus `chunk_ranges` (~60 s windows cut at the
@@ -466,9 +511,10 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   group, plus `post_quietly` (no banner — `SetSuppressPopup`, straight into
   the notification centre; the call prompts' "Quietly" style) and `build`
   (the toast, unshown — what the unit tests check). updates.rs posts under the
-  "update" tag (always with a banner), meeting_detect.rs under "call"; each
-  keeps its live toast so the buttons work from the notification center.
-  `allowed()` = not portable, not a test run.
+  "update" tag (always with a banner), meeting_detect.rs under "call",
+  meeting_guard.rs under "meeting-limit" (Keep going) and "meeting-notice"
+  (Update settings / Open note); each keeps its live toast so the buttons
+  work from the notification center. `allowed()` = not portable, not a test run.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
   volume, output_device, mute_while_recording, recording_mode,
   overlay_position, dictionary, append_trailing_space, auto_submit(+key),
@@ -481,7 +527,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   history_enabled, update_checks_enabled, dictionary_fuzzy, call detection:
   meeting_detection + meeting_detect_style ("popup"|"quiet") +
   meeting_detect_apps (app id → bool overrides of `meeting_detect::APPS`'
-  defaults)). JSON
+  defaults), meeting guard rails: meeting_hide_from_capture (true),
+  meeting_max_minutes (120; 0 = no limit), meeting_call_end ("ask"|"stop"),
+  meeting_hotkey (`kb:alt+win+77`)). JSON
   load/save + `apply_dictionary` + `dictionary_prompt` (the Whisper
   `initial_prompt` vocabulary) + `resolve_cleanup` (per-app plan: body + endpoint).
   `data_dir()` is portable-aware. `load()` also migrates saved Groq picks (cleanup,
@@ -518,20 +566,28 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   mouse cursor (Win32 `GetCursorPos` vs Tauri monitor rects, both physical px;
   Handy's `get_monitor_with_cursor` pattern), primary-monitor fallback.
 - **`input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
-  `kb:ctrl+shift+VKEY` (modifier combo), `kb:165` (single right-side modifier, e.g.
+  `kb:ctrl+shift+VKEY` (modifier combo; `win` is a modifier too, e.g. the
+  meeting shortcut `kb:alt+win+77` = Win+Alt+M), `kb:165` (single right-side modifier, e.g.
   RightAlt — never suppressed, it's AltGr), `mods:ctrl+alt` (modifier-only chord) /
   `mouse:ID` — combo semantics ported from OpenWhispr's `windows-key-listener.c`
   (press = key down w/ required modifiers held, release = key up OR required
   modifier up; chords fire on completion; suppressed keys are excluded from the
   GetAsyncKeyState self-heal — the hook eats them before the key-state table
-  updates). Emits press AND release (via an emit-forwarder thread — the hook
+  updates). Three bindings: dictation, edit (`edit-key-*`) and the meeting
+  shortcut (`meeting-key-*`, `configure_meeting`; only its press is used —
+  `meeting_guard`). A combo holding **Alt or Win** whose main key is swallowed
+  taps an unassigned **menu-mask key** (vkE8, AutoHotkey's `#MenuMaskKey`)
+  while the modifiers are still down, sent by the forwarder thread
+  (`needs_menu_mask`): otherwise releasing Alt opens the focused app's menu
+  bar (Office KeyTips) and Win the Start menu. Emits press AND release (via an emit-forwarder thread — the hook
   callback never blocks — plus a 30 s re-hook self-heal). The capture UI is
   `ui/HotkeyInput.svelte` + shared `lib/hotkeys.js` (parse/format/match — also
-  drives the in-window fallbacks). ⚠ **Known Windows
+  drives the in-window fallbacks; combos read Win first, "Win + Alt + M"). ⚠ **Known Windows
   gotcha:** when one of Yap's OWN WebView2 windows has focus, the LL hook never
   receives the hotkey (WebView2/Chromium front-runs the hook chain on focus) —
   so the Settings + onboarding pages catch the hotkey **in-page** (keydown
-  fallback → `toggle_recording`). Any new Yap window with focusable UI needs the
+  fallback → `toggle_recording`; Settings also catches the meeting shortcut →
+  `meeting_shortcut`). Any new Yap window with focusable UI needs the
   same fallback.
 - **`text_injector.rs`** — clipboard paste (+ optional clipboard restore) and
   `press_submit` (Enter / Ctrl+Enter / Shift+Enter) via `SendInput`. Captures the
@@ -647,7 +703,13 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   answer; `yap-meeting-detect-choice` with `confirm` shows "Won't ask about
   Teams calls" + Open Settings (→ `general#meetings`);
   `yap-meeting-open-note` switches to Notes and hands NotesView a
-  `noteRequest` to open, and stop if asked). **`HomeView.svelte`** = the Wispr-style
+  `noteRequest` to open, and stop if asked), and the **meeting guard rails**
+  (`meetingGuard.js` — meeting_guard.rs / capture.rs: the sticky "Notes stop
+  in 5 minutes" + **Keep going** toast (`icon: 'timer'`, counting down,
+  withdrawn when Rust sends `{warning: null}`), and one-off
+  `yap-meeting-notice` toasts: the screen-share tip (`icon: 'screen'`,
+  **Update settings** → `general#screen-sharing`), "Stopped at 2 hours", "Teams
+  call ended · Yap stopped recording…", "Taking notes"). **`HomeView.svelte`** = the Wispr-style
   Home: time-of-day greeting with the hotkey as **amber keycaps**, a dark
   **rotating hero card** (4 tips — voice edit / AI cleanup / meeting notes /
   per-app profiles — picked by day, dot nav, CTAs open the right Settings
@@ -716,7 +778,15 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   switches, one per call app from the `meetingDetect.apps` snapshot, showing
   the effective choice; a flip writes `meetingDetectApps[app]`; a
   `yap-meeting-detect-choice` from Rust is adopted into Settings' config copy
-  so auto-save can't undo it) + an always-visible consent line, "Recording a
+  so auto-save can't undo it), then the guard rails (one block):
+  "When a call ends" (Select: Ask me / Stop and summarise automatically →
+  `meetingCallEnd`; disabled while detection is off), "Maximum recording
+  length" (Select 1–4 hours / No limit → `meetingMaxMinutes`), "Hide Yap's
+  meeting windows from screen sharing" (`meetingHideFromCapture`, wrapped in
+  `#settings-screen-sharing` — the screen-share tip's "Update settings"
+  target) and "Meeting shortcut" (`ui/HotkeyInput`, clearable →
+  `meetingHotkey`; paused while capturing via `configure_meeting_hotkey`; the
+  three hotkeys can't clash) + an always-visible consent line, "Recording a
   call? Let people know you're taking notes."), **Speech-to-Text** (`ModelManager` + GPU +
   language/translate), **Language Models** (OpenWhispr-style: enable toggle → mode
   selector Cloud Providers/Local/Self-Hosted → provider pill tabs (Groq/Anthropic/
@@ -1015,7 +1085,11 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   (`streaming_partials`), AI cleanup **off**, call detection **on**
   (`meeting_detection` — it only asks; nothing records without a click) as
   **pop-ups** (`meeting_detect_style`), for work apps only (Discord, WhatsApp,
-  Signal and Telegram start switched off; `meeting_detect_apps` holds changes).
+  Signal and Telegram start switched off; `meeting_detect_apps` holds changes);
+  meeting guard rails: meeting windows **hidden from screen capture** while
+  recording (`meeting_hide_from_capture`), a **2-hour** maximum recording length
+  (`meeting_max_minutes`), **ask** when a recorded call ends
+  (`meeting_call_end`), meeting shortcut **Win+Alt+M** (`meeting_hotkey`).
 
 ---
 
@@ -1049,7 +1123,13 @@ meeting against a fake AI, and once with real speech through Parakeet
 call ending → "Stop and summarise?"; per-app choice (work apps on, Discord &
 co. off, "Don't ask for X" on the prompt), a pop-up or quiet style, a 30 s
 fade, and a tray item; e2e-tested via a simulation hook, the
-registry signal checked read-only on Nathan's PC, no real call yet), and an **AI Chat** surface (`chats.rs` + eager
+registry signal checked read-only on Nathan's PC, no real call yet) and
+**guard rails** (`meeting_guard.rs` + `capture.rs`, Wispr Flow's Notetaker
+settings: meeting windows hidden from screen capture while recording, a
+2-hour maximum length with a "Keep going" warning, an optional auto-stop
+when a recorded call ends, and the Win+Alt+M meeting shortcut;
+e2e-tested, the capture flag also checked once with a desktop capture of the
+overlay, a real screen share not yet), and an **AI Chat** surface (`chats.rs` + eager
 keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six tools,
 ≤20-step loop, gated to cloud or ≥4B local models). Every JSON store now writes
 atomically with corrupt-file quarantine. The default (no-feature) build still ships
