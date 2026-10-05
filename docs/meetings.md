@@ -256,12 +256,17 @@ of calling a model.
 
 ## Call detection
 
-When a call starts in Teams, Zoom, Google Meet, a Slack huddle, Discord, Webex
-or another call app, Yap asks once, "Teams call detected. Record notes?". It
-records only after a click, into a new meeting note. When the call ends while Yap is
-recording it, Yap asks "Stop and summarise?". Code: `src-tauri/src/meeting_detect.rs`
+When a call starts in Teams, Zoom, Google Meet, a Slack huddle, Webex or another
+work call app, Yap asks once, "Teams call detected. Record notes?". It records
+only after a click, into a new meeting note. When the call ends while Yap is
+recording it, Yap asks "Stop and summarise?". Personal chat apps (Discord,
+WhatsApp, Signal, Telegram) aren't asked about unless switched on, any app can
+be switched off from its prompt ("Don't ask for Teams"), and the prompts can
+come as a pop-up or quietly. While a call is live, the tray menu offers
+"Record this Teams call" either way. Code: `src-tauri/src/meeting_detect.rs`
 (+ `src/lib/meetingDetect.svelte.js` for the in-app prompts,
-`src-tauri/src/win_toast.rs` for the Windows notifications).
+`src-tauri/src/win_toast.rs` for the Windows notifications, `src-tauri/src/tray.rs`
+for the tray item).
 
 ### How a call is detected
 
@@ -315,20 +320,63 @@ is fully local: no network, no audio, no process list.
 | After "Not now" | that app's calls stay quiet for **5 min** | all detections quiet for 5 min |
 | While dictating | the prompt waits until the dictation finishes, then **2.5 s** | queued, flushed 2.5 s after |
 | Already recording | no start prompt | suppressed in meeting mode |
+| Prompt left alone | the in-app prompt fades after **30 s**, as "Not now" | hidden after 30 s, as a dismissal (its cooldown starts) |
+
+### Which apps it asks about
+
+Each app in `APPS` has a default (`asks_by_default`): yes for work meetings,
+no for personal chat apps, where notes on a call with friends would be an odd
+thing to offer.
+
+| Asked about by default | Not by default |
+|---|---|
+| Teams, Zoom, Google Meet, Webex, Slack, GoTo Meeting, Whereby, Jitsi Meet | Discord, WhatsApp, Signal, Telegram |
+
+The person's choices are stored as overrides, `meetingDetectApps` in
+`config.json` (app id → `true`/`false`), from Settings or from "Don't ask for
+Teams" on a prompt. An app without an entry follows its default, so an app a
+later release adds starts at its own default. A switched-off app's calls are
+still noticed (they show in `meeting_detect_status`) but get no prompt, start
+or end, and no tray item. Switching an app off withdraws a prompt about its
+call at once; switching one on mid-call adds the tray item (the call's start
+has passed, so no prompt).
 
 ### Asking
 
 - **Once per call**, and never while Yap already records a meeting.
-- Main window on screen: a sticky in-app toast ("Teams call detected", "Record
-  notes? Let people know you're taking notes.", **Record notes** / **Not
-  now**; its ✕ means Not now).
-- Main window hidden, minimized or behind the call app: a silent Windows
-  notification with Yap's logo and the same buttons. If the window is open but
-  not focused, both surfaces show; answering one withdraws the other.
-  Focusing the window moves a pending prompt into it.
-- The call ending before anyone answers withdraws the prompt.
+- **Pop-up** (the default, `meetingDetectStyle: "popup"`):
+  - Main window on screen: an in-app toast ("Teams call detected", "Record
+    notes? Let people know you're taking notes.", **Record notes** / **Not
+    now**, and a small **Don't ask for Teams** link on its own line under
+    them, so long names like Google Meet fit; its ✕ means Not now). Left
+    alone, it fades after 30 s, a countdown hairline along its bottom edge,
+    and that counts as Not now (OpenWhispr hides its meeting prompt after
+    30 s and treats it as a dismissal). It stays while the pointer is on it.
+  - Main window hidden, minimized or behind the call app: a silent Windows
+    notification with Yap's logo and the same three answers as buttons. If
+    the window is open but not focused, both surfaces show; answering one
+    withdraws the other. Focusing the window moves a pending prompt into it.
+- **Quietly** (`"quiet"`): no in-app toast. The Windows notification goes
+  straight into the notification centre without a banner
+  (`ToastNotification.SuppressPopup`), and the prompt stays out of the window
+  (clicking the notification's body brings it in). The "call ended" prompt
+  follows the same style. Portable Yap and test runs post no notifications,
+  so there a quiet prompt is just the tray item.
+- **Don't ask for Teams** saves Teams as switched off, withdraws the prompt
+  everywhere, and with the window on screen confirms it there: "Won't ask
+  about Teams calls" with **Open Settings** (General → Meetings).
+- **The tray**, in both styles: while a call of an app Yap asks about is live
+  and nothing records, the menu's top item is **Record this Teams call**
+  (same as Record notes; it also answers a prompt still up for that call). So
+  a prompt that faded, went quietly to the notification centre or got "Not
+  now" still leaves a way to record.
+- The call ending before anyone answers withdraws the prompt and its Windows
+  notification.
 - Windows notifications follow Do Not Disturb and Yap's notification switch.
-  Portable Yap and test runs post none, so their prompts show in the window.
+  Portable Yap and test runs post none, so their pop-up prompts show in the
+  window. "Taking notes on your Teams call" and "Couldn't record the call",
+  feedback on a click, keep their banner in either style. Update
+  notifications (`updates.rs`) don't follow the style.
 
 ### Record notes
 
@@ -346,7 +394,9 @@ deleted and the prompt says why.
 ### When the call ends
 
 If Yap is recording that call, it asks "Teams call ended. Stop recording and
-summarise your notes?" with **Stop and summarise** / **Keep recording**. "That
+summarise your notes?" with **Stop and summarise** / **Keep recording**, in
+the chosen style. It doesn't fade: it's about a recording that's still
+running. "That
 call" means the recording its prompt started, or one started during the call.
 **Stop and summarise** opens the note and ends it from the Notes view, so the
 action plan is written exactly as after **End meeting & summarise**. If the page
@@ -371,41 +421,67 @@ Settings → General → Meetings: **Detect calls and offer to take notes**
 (`meetingDetection`, default **on**, like OpenWhispr's
 `notifyMeetingDetection`). It only reads Windows' own record of mic use,
 locally, and only ever asks, and the prompt is how people find out notes
-exist. An always-visible line under it reminds people of consent: "Recording a call? Let
-people know you're taking notes." Switching it off withdraws any prompt
-(a recording in progress carries on) and stops all detection work.
+exist. Under it, greyed out while it's off:
+
+- **How Yap asks**: Pop-up / Quietly (`meetingDetectStyle`), with a line on
+  what the choice means.
+- **Ask about calls in**: a switch per call app in two columns, showing what
+  Yap does now (the person's choice, else the default above). Flipping one
+  saves it in `meetingDetectApps`.
+
+An always-visible line at the bottom reminds people of consent: "Recording a
+call? Let people know you're taking notes." Changes go through the usual
+config save, and the detector applies them at once (`meeting_detect::sync`).
+Switching detection off withdraws any prompt (a recording in progress carries
+on) and stops all detection work.
 
 ### Testing
 
 - Unit tests (`cargo test --lib meeting_detect`): consent-store key names → apps,
   dictation apps/games/Yap never matching, browser titles, the stale-entry rule,
-  the start/end debounce, note titles, prompt wording, and the notification XML
-  (built into a WinRT toast, never shown).
+  the start/end debounce, note titles, prompt wording, the per-app defaults and
+  the person's choice winning over them, no prompt for a switched-off app, the
+  quiet style (no in-app toast, a quiet notification), the 30 s fade (start
+  prompts only), the tray item, the Settings list's order, and the
+  notification XML (three answers on a start prompt; built into a WinRT toast,
+  never shown, with `SuppressPopup` set only when quiet).
 - Read-only check of this PC's microphone record:
   `cargo test --lib meeting_detect::tests::this_machine -- --ignored --nocapture`
   (prints exe/package names and recognised meetings only, never window titles).
 - e2e (`npm run test:app`): `e2e/meeting-detect.spec.js` and
   `e2e/meeting-detect-no-mic.spec.js` drive the flow through the debug-only
-  `meeting_detect_simulate { appId, active }` hook (no debounce; test mode reads no
-  registry). They cover the prompt, Not now, a prompt withdrawn with its call, Record
-  notes (the note and the recording, which in test mode opens no audio device;
-  with a configured microphone that isn't plugged in, the error and no note
-  left behind), Stop and summarise, and the Settings toggle.
+  `meeting_detect_simulate { appId, active, fadeMs? }` hook (no debounce;
+  `fadeMs` makes that call's prompt fade in a second or two instead of 30 s;
+  test mode reads no registry). They cover the prompt, Not now, a prompt
+  withdrawn with its call, the fade counting as Not now, Record notes (the
+  note and the recording, which in test mode opens no audio device; with a
+  configured microphone that isn't plugged in, the error and no note left
+  behind), Stop and summarise, Discord not asked about by default, "Don't ask
+  for Teams" (the confirmation, Settings showing it off, switching it back on),
+  the quiet style, the Settings list, and the master toggle. The tray item and
+  the Windows notifications can't be driven over CDP: their logic is in the
+  unit tests.
 
 ### Limits
 
 - Apps not in `APPS`/browser titles aren't detected (record manually from a note).
 - Exe names for Webex and GoTo installs vary by version. Only Teams, Discord
   and a browser have been seen in the consent store on the development PC.
+- The Windows notification's three buttons share its width, so a long label
+  like "Don't ask for Google Meet" may be cut short there (the in-app link
+  has a line of its own). Not yet seen on a real notification.
 - A meeting tab in a browser is named from the windows' titles, i.e. the
   active tab of each window, so a call started in a background tab is named
   once its tab is shown.
 - Windows only. Other platforms build but don't detect.
 
-Sources: OpenWhispr `src/helpers/meetingDetectionEngine.js`,
+Sources: OpenWhispr `src/helpers/meetingDetectionEngine.js`
+(`handleNotificationTimeout`),
 `audioActivityDetector.js`, `meetingProcessDetector.js`,
 `resources/windows-mic-listener.c`, `src/components/MeetingNotificationOverlay.tsx`,
+`src/helpers/windowManager.js` (`showMeetingNotification`: the 30 s timeout),
 `src/stores/settingsStore.ts` (`notifyMeetingDetection` default);
+Microsoft, [ToastNotification.SuppressPopup](https://learn.microsoft.com/en-us/uwp/api/windows.ui.notifications.toastnotification.suppresspopup);
 Microsoft, [RegNotifyChangeKeyValue](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regnotifychangekeyvalue);
 the same consent-store technique in
 [automattermostatus #17](https://gitlab.com/matclab/automattermostatus/-/issues/17)
