@@ -30,6 +30,7 @@
   import { modelStore } from './modelStore.svelte.js';
   import { attention, attentionCount } from './attention.svelte.js';
   import AccountSection from './AccountSection.svelte';
+  import McpSection from './McpSection.svelte';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
   import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from './updates.svelte.js';
   import { meetingDetect } from './meetingDetect.svelte.js';
@@ -71,6 +72,9 @@
       ],
     },
     { label: 'Data', items: [{ id: 'history', label: 'History' }] },
+    // Wispr's Connectors + MCP pages. MCP: AI apps read your meetings
+    // (McpSection.svelte).
+    { label: 'Connections', items: [{ id: 'mcp', label: 'MCP' }] },
     {
       label: 'System',
       items: [
@@ -676,12 +680,20 @@
     // copy — adopt its new value or our next auto-save would revert the toggle.
     if (typeof e.detail?.fuzzy === 'boolean') cfg.dictionaryFuzzy = e.detail.fuzzy;
   }
+  // A view outside Settings saved a config field (the Integrations view's
+  // Local API switch): adopt it, or this copy's next auto-save would put the
+  // old value back.
+  function onConfigPatched(e) {
+    if (cfg && e.detail && typeof e.detail === 'object') Object.assign(cfg, e.detail);
+  }
   $effect(() => {
     window.addEventListener('yap-settings-goto', onSettingsGoto);
     window.addEventListener('yap-dictionary-changed', onDictChanged);
+    window.addEventListener('yap-config-patched', onConfigPatched);
     return () => {
       window.removeEventListener('yap-settings-goto', onSettingsGoto);
       window.removeEventListener('yap-dictionary-changed', onDictChanged);
+      window.removeEventListener('yap-config-patched', onConfigPatched);
     };
   });
   // General → Meetings → "Ask about calls in": each app's effective choice
@@ -1206,6 +1218,13 @@
       <circle cx="12" cy="12" r="9" />
       <path d="M12 16v-4" />
       <path d="M12 8h.01" />
+    </svg>
+  {:else if id === 'mcp'}
+    <!-- The Model Context Protocol's knot mark, redrawn on the 24 grid. -->
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3.1 12 11.4 3.7c1.2-1.2 3.1-1.2 4.2 0s1.2 3.1 0 4.2L9.3 14.2" />
+      <path d="m9.4 14.1 6.2-6.2c1.2-1.2 3.1-1.2 4.2 0c1.2 1.2 1.2 3.1 0 4.2l-7.6 7.6c-.4.4-.4 1 0 1.4l1.6 1.6" />
+      <path d="M13.5 5.8 7.3 12c-1.2 1.2-1.2 3.1 0 4.2s3.1 1.2 4.2 0l6.2-6.2" />
     </svg>
   {/if}
 {/snippet}
@@ -2204,6 +2223,16 @@
               />
             </Row>
           </Group>
+
+        {:else if section === 'mcp'}
+          <div class="page-h">
+            <h1>MCP</h1>
+            <p>
+              Connect Yap to your favourite AI apps, so you can ask about your meeting transcripts
+              and notes. Yap's MCP can't see your dictations, and everything stays on this PC.
+            </p>
+          </div>
+          <McpSection bind:cfg />
 
         {:else if section === 'account'}
           <div class="page-h">

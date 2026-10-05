@@ -9,7 +9,10 @@
 //   hook, no paste into other apps, no focus stealing, and it quits when we
 //   close its stdin;
 // - YAP_AUTH_URL points at a closed local port: the account service is
-//   unreachable and the saved-session slot is one nobody uses.
+//   unreachable and the saved-session slot is one nobody uses;
+// - YAP_BRIDGE_FILE and YAP_MCP_CLIENT_ROOT (debug builds only) keep the
+//   local API's discovery file and the AI apps' config files ("Add to
+//   Claude"…) inside the run folder, never in ~/.yap or a real AI app.
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -32,7 +35,7 @@ export const BASE_CONFIG = {
   hotkey: 'kb:135', // F24: nobody's keyboard has one
   autostart: false,
   updateChecksEnabled: false,
-  bridgeEnabled: false, // its discovery file lives in ~/.yap, outside Data
+  bridgeEnabled: false, // off unless a spec needs it (mcp.spec.js)
   soundEnabled: false,
   startHidden: true, // no first-run onboarding pop-up (tests open it themselves)
   configVersion: 1,
@@ -70,8 +73,10 @@ function rmrf(dir) {
  * @param {string} opts.name   run folder name (test-results/app/runs/<name>)
  * @param {object} [opts.config]  extra config.json fields
  * @param {Record<string,string>} [opts.env]  extra environment for the app
+ * @param {Record<string,object>} [opts.data]  files to seed in Data/ before
+ *   launch, e.g. `{ 'notes.json': {...} }` (written as JSON)
  */
-export async function launchYap({ name, config = {}, env = {} }) {
+export async function launchYap({ name, config = {}, env = {}, data = {} }) {
   if (!fs.existsSync(EXE)) {
     throw new Error(`No test build at ${EXE} — run \`npm run test:app:build\` first.`);
   }
@@ -86,9 +91,13 @@ export async function launchYap({ name, config = {}, env = {} }) {
     path.join(dataDir, 'config.json'),
     JSON.stringify({ ...BASE_CONFIG, ...config }, null, 2)
   );
+  for (const [file, value] of Object.entries(data)) {
+    fs.writeFileSync(path.join(dataDir, file), JSON.stringify(value, null, 2));
+  }
 
   const closedPort = await freePort(); // nothing listens here
   const webview2Dir = path.join(runDir, 'webview2');
+  const bridgeFile = path.join(runDir, 'cli-bridge.json');
   const childEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !SCRUB.test(k)));
   Object.assign(childEnv, {
     YAP_E2E: '1',
@@ -99,6 +108,8 @@ export async function launchYap({ name, config = {}, env = {} }) {
     // runners are elevated, so e2e.yml sets the same flag as a machine policy.)
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=0',
     NO_COLOR: '1',
+    YAP_BRIDGE_FILE: bridgeFile,
+    YAP_MCP_CLIENT_ROOT: path.join(runDir, 'ai-apps'),
     ...env,
   });
 
@@ -116,7 +127,7 @@ export async function launchYap({ name, config = {}, env = {} }) {
   child.on('exit', (code, signal) => (exited = { code, signal }));
   child.on('error', (e) => (exited = { error: e }));
 
-  const app = new YapApp({ name, child, runDir, appDir, dataDir, logPath });
+  const app = new YapApp({ name, child, runDir, appDir, dataDir, logPath, bridgeFile: childEnv.YAP_BRIDGE_FILE });
   try {
     app.browser = await connect(webview2Dir, () => exited, logPath);
     await assertTestMode(logPath);

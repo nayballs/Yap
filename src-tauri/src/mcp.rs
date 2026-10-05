@@ -15,7 +15,7 @@
 //! **Tools.** Meetings and notes only, never the dictation history (Wispr's
 //! promise too): `list_meetings`, `search_meetings`, `get_meeting`,
 //! `search_notes`, `get_note`, `list_folders`, plus `create_note` when the
-//! person allows it (Integrations → AI apps, `config.mcp_allow_writes`).
+//! person allows it (Settings → MCP, `config.mcp_allow_writes`).
 //! Results are markdown for the model to read; a long transcript comes in
 //! pages of about [`PAGE_TOKENS`] so it fits any client's context.
 //!
@@ -478,7 +478,7 @@ impl<B: Bridge> YapMcp<B> {
             }
             "create_note" => {
                 if !self.writes_allowed().await {
-                    return Err("Saving notes from AI apps is switched off in Yap. The user can switch it on in Yap → Integrations → AI apps → \"Let AI apps save notes\".".to_string());
+                    return Err("Saving notes from AI apps is switched off in Yap. The user can switch it on in Yap: Settings → MCP → \"Let AI apps save notes to Yap\".".to_string());
                 }
                 let title = arg_str(args, "title").unwrap_or("").trim().to_string();
                 let content = arg_str(args, "content").unwrap_or("").to_string();
@@ -1204,7 +1204,7 @@ mod tests {
 
         let found = search_meetings(&notes, "budget", 5);
         assert_eq!(found.len(), 2);
-        assert_eq!(found[0]["id"], 1, "title-less but most mentions first");
+        assert_eq!(found[0]["id"], 1, "the most mentions first");
         let lines = found[0]["matches"].as_array().unwrap();
         assert_eq!(lines[0]["at"], "0:00");
         assert_eq!(lines[1]["speaker"], "Them");

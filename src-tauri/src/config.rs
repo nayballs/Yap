@@ -332,7 +332,7 @@ pub struct YapConfig {
     #[serde(default = "default_true")]
     pub bridge_enabled: bool,
     /// Let AI apps save notes through Yap's MCP server (its `create_note`
-    /// tool; Integrations → AI apps). Off by default: they can only read.
+    /// tool; Settings → MCP). Off by default: they can only read.
     #[serde(default)]
     pub mcp_allow_writes: bool,
 

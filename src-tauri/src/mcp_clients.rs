@@ -1,4 +1,4 @@
-//! "Add to Claude / ChatGPT / Gemini / Cursor…" (Integrations → AI apps):
+//! "Add to Claude / ChatGPT / Gemini / Cursor…" (Settings → MCP):
 //! one click adds Yap's MCP server (`yap.exe mcp`, see `mcp.rs`) to an AI
 //! app by editing that app's own config file, the way its docs say to add a
 //! local server; Remove takes it out again.
@@ -656,7 +656,7 @@ fn exe() -> Result<String, String> {
         .map_err(|e| format!("Couldn't find Yap's own program file: {e}"))
 }
 
-/// One app's row in Integrations → AI apps.
+/// One app's card or row in Settings → MCP.
 fn status(def: &ClientDef, b: &Bases, exe: &str) -> Value {
     let all = targets(def.id, b);
     let present: Vec<&Target> = all.iter().filter(|t| t.present).collect();
@@ -675,7 +675,11 @@ fn status(def: &ClientDef, b: &Bases, exe: &str) -> Value {
                 elsewhere |= !cmd.eq_ignore_ascii_case(exe);
             }
             Ok(None) => {}
-            Err(why) => problem = Some(format!("{} {why}", t.path.display())),
+            // The file's name is enough on the row; `paths` has the rest.
+            Err(why) => {
+                let name = t.path.file_name().unwrap_or_default().to_string_lossy();
+                problem = Some(format!("{name} {why}"));
+            }
         }
     }
     let state = if present.is_empty() {
@@ -709,7 +713,7 @@ fn snippet(exe: &str) -> String {
     emit(&[("mcpServers".to_string(), servers)], "  ", 0, "\n")
 }
 
-/// Everything the AI apps card shows.
+/// Everything Settings → MCP shows.
 pub fn overview_in(b: &Bases, exe: &str) -> Value {
     json!({
         "command": exe,
@@ -747,7 +751,7 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| e.to_string())?
 }
 
-/// The AI apps card: Yap's command, a JSON snippet, and one row per app.
+/// Settings → MCP: Yap's command, a JSON snippet, and one row per app.
 #[tauri::command]
 pub async fn mcp_clients_status() -> Result<Value, String> {
     blocking(|| Ok(overview_in(&bases()?, &exe()?))).await
