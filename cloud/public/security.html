@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="same-origin" />
+  <title>Check where you're signed in · Yap</title>
+  <link rel="icon" href="/yap-logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="brand" href="https://contextmirror.com/yap"><img src="/yap-logo.svg" alt="" />Yap</a>
+
+  <!-- Linked from the "New sign-in to your Yap account" email (src/mail.ts).
+       Static on purpose: the device list lives in the app, where the
+       account is signed in. "Open Yap" uses the app's deep link
+       (src-tauri/src/auth.rs: com.contextmirror.yap://account). -->
+  <main class="card">
+    <h1>Check where you're signed in</h1>
+    <p class="muted">Yap lists every device signed in to your account, and can sign any of them out.</p>
+    <ol class="steps">
+      <li>Open Yap on your PC.</li>
+      <li>Go to <strong>Settings → Account</strong>.</li>
+      <li>Under <strong>Where you're signed in</strong>, sign out any device you don't recognise.</li>
+    </ol>
+    <a class="btn pc-only" href="com.contextmirror.yap://account">Open Yap</a>
+    <p class="small muted">Your Yap account holds only your name, email and sign-ins. Your dictation, notes and settings stay on your PC. A sign-in approved with a phone can't delete your account or sign out your other devices during its first day, so you can always take it back.</p>
+  </main>
+
+  <footer><a href="/privacy">Privacy</a><a href="/terms">Terms</a></footer>
+</body>
+</html>

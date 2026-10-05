@@ -444,6 +444,14 @@ fn scheme_registered(app: &AppHandle) -> bool {
 }
 
 fn handle_deep_link(app: &AppHandle, url: &url::Url) {
+    // `com.contextmirror.yap://account` (the "Open Yap" button on
+    // auth.contextmirror.com/security, linked from the new-sign-in email):
+    // show Settings → Account, where the device list is.
+    if url.scheme() == SCHEME && url.host_str() == Some("account") {
+        let _ = crate::commands::show_settings(app);
+        let _ = app.emit("yap-open-settings", "account");
+        return;
+    }
     if url.scheme() != SCHEME || url.host_str() != Some("auth") || url.path() != "/callback" {
         tracing::warn!("auth: ignoring unrecognised deep link");
         return;

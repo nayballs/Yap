@@ -126,7 +126,7 @@ const createAuth = () => betterAuth({
     deleteUser: {
       enabled: true,
       afterDelete: async (user) => {
-        waitUntil(sendMail(user.email, accountDeletedEmail()));
+        waitUntil(sendMail(user.email, accountDeletedEmail(user.email)));
       },
     },
   },
@@ -217,7 +217,7 @@ const createAuth = () => betterAuth({
       storeOTP: "hashed",
       async sendVerificationOTP({ email, otp }) {
         // Not awaited: response timing must not reveal whether mail was sent.
-        waitUntil(sendMail(email, otpEmail(otp)));
+        waitUntil(sendMail(email, otpEmail(otp, email)));
       },
     }),
     bearer(), // Yap sends `Authorization: Bearer <session token>`

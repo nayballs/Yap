@@ -92,6 +92,9 @@
       const msg = String(e.payload || 'Something went wrong');
       toast({ title: 'Yap ran into a problem', description: msg, variant: 'destructive' });
     }).then((u) => uns.push(u));
+    // A deep link asked for a Settings section (auth.rs: "Open Yap" on the
+    // account service's /security page → "account").
+    listen('yap-open-settings', (e) => openSettings(String(e.payload || '') || null)).then((u) => uns.push(u));
     refreshMaximized();
     appWindow.onResized(() => refreshMaximized()).then((u) => uns.push(u));
     return () => uns.forEach((u) => u && u());

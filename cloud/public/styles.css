@@ -280,3 +280,19 @@ p > .link { margin: -12px 0; vertical-align: baseline; }
 .doc a { color: var(--yap-primary); }
 
 [hidden] { display: none !important; }
+
+/* security.html: the numbered steps. */
+.steps {
+  margin: 4px 0 20px;
+  padding-left: 22px;
+  text-align: left;
+  line-height: 1.6;
+}
+.steps li + li {
+  margin-top: 6px;
+}
+/* "Open Yap" is a deep link into the desktop app: no use on a phone, where
+   the email linking here is often read. */
+@media (hover: none) and (pointer: coarse) {
+  .pc-only { display: none; }
+}

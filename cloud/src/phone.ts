@@ -164,12 +164,13 @@ export async function describeOrigin(
   };
 }
 
-/** Where a code came from, for the new-sign-in email ("" if unknown). */
-export async function originPlace(userCode: string): Promise<string> {
-  const row = await env.DB.prepare(`SELECT "country", "city" FROM "deviceOrigin" WHERE "userCode" = ?1`)
+/** Where and from what a code was requested, for the new-sign-in email:
+ *  "near Leeds, United Kingdom" ("" if unknown) and "Yap 0.1.1 on Windows". */
+export async function originSummary(userCode: string): Promise<{ place: string; device: string }> {
+  const row = await env.DB.prepare(`SELECT "country", "city", "userAgent" FROM "deviceOrigin" WHERE "userCode" = ?1`)
     .bind(normalizeUserCode(userCode))
-    .first<{ country: string | null; city: string | null }>();
-  return row ? placeOf(row.country, row.city) : "";
+    .first<{ country: string | null; city: string | null; userAgent: string | null }>();
+  return row ? { place: placeOf(row.country, row.city), device: appLabel(row.userAgent) } : { place: "", device: "Yap" };
 }
 
 const tokenKey = (token: string) => keyedHash(`session-token:${token}`);

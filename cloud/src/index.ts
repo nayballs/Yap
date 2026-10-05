@@ -9,7 +9,7 @@ import {
   describeOrigin,
   isNewPhoneSession,
   normalizeUserCode,
-  originPlace,
+  originSummary,
   recordOrigin,
   recordPhoneSession,
   sweep,
@@ -187,9 +187,9 @@ app.post("/api/auth/device/approve", async (c, next) => {
   const timeZone = (c.req.raw.cf as IncomingRequestCfProperties | undefined)?.timezone; // the phone's
   const at = new Date();
   waitUntil(
-    originPlace(userCode)
-      .catch(() => "")
-      .then((place) => sendMail(me.email, newSignInEmail(place, at, timeZone)))
+    originSummary(userCode)
+      .catch(() => ({ place: "", device: "Yap" }))
+      .then(({ place, device }) => sendMail(me.email, newSignInEmail({ to: me.email, device, place, at, timeZone })))
       .catch((e) => console.error("[device] couldn't send the new sign-in email", e)),
   );
 });
