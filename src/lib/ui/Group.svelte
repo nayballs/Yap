@@ -1,9 +1,12 @@
 <script>
   let { title = '', children } = $props();
+  // Named after its heading, so assistive tech (and the e2e tests) can find
+  // a group by its title.
+  const id = $props.id();
 </script>
 
-<div class="group">
-  {#if title}<h2>{title}</h2>{/if}
+<div class="group" role={title ? 'group' : undefined} aria-labelledby={title ? id : undefined}>
+  {#if title}<h2 {id}>{title}</h2>{/if}
   <div class="card">
     {@render children?.()}
   </div>

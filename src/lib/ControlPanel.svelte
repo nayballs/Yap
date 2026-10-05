@@ -184,12 +184,13 @@
   </div>
 
   <div class="cols">
-  <nav class="side">
+  <nav class="side" aria-label="Main">
     <div class="nav">
       {#each NAV as item (item.id)}
         <button
           class="navitem"
           class:active={activeView === item.id}
+          aria-current={activeView === item.id ? 'page' : undefined}
           onclick={() => (activeView = item.id)}
         >
           <span class="navicon">{@render navIcon(item.id)}</span>
@@ -266,7 +267,7 @@
   onclick={(e) => e.target === e.currentTarget && (settingsOpen = false)}
   role="presentation"
 >
-  <div class="card">
+  <div class="card" role="dialog" aria-modal="true" aria-label="Settings">
     <Settings embedded onclose={() => (settingsOpen = false)} />
   </div>
 </div>

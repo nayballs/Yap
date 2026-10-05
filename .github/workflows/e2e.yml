@@ -1,0 +1,70 @@
+# End-to-end UI tests (e2e/, docs/e2e-tests.md). Builds the STUB debug app
+# with the frontend embedded, launches it isolated (portable data dir, its own
+# WebView2 profile, test mode), and drives every window with Playwright over
+# CDP. Screenshots, the HTML report and the app's logs are uploaded as the
+# `e2e-results` artifact on every run, pass or fail:
+#   gh run download <run-id> --repo nayballs/Yap --name e2e-results
+# Separate from ci.yml so that quick lint gate stays quick. The runner has no
+# audio devices, so this also proves Yap starts and works without a mic.
+name: "E2E"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push supersedes an in-flight run of the same branch.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      # A short target dir outside the checkout (Windows path limits). The
+      # rust-cache entry below points at the same folder: ../../t from
+      # src-tauri, i.e. <runner workspace>\t.
+      - name: Short target dir
+        shell: pwsh
+        run: echo "YAP_E2E_TARGET_DIR=$((Resolve-Path "$env:GITHUB_WORKSPACE\..").Path)\t" >> $env:GITHUB_ENV
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> ../../t"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build the test app (stub engine, debug, frontend embedded)
+        run: npm run test:app:build
+
+      - name: Run the e2e suite
+        run: npx playwright test -c e2e
+
+      - name: Upload screenshots, report and app logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            test-results/app
+            !test-results/app/runs/*/app/yap.exe
+            !test-results/app/runs/*/webview2
+          if-no-files-found: warn
+          retention-days: 14
