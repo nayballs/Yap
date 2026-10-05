@@ -1,7 +1,7 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import yapIcon from '../assets/yap-logo.svg';
   import Group from './ui/Group.svelte';
   import Row from './ui/Row.svelte';
@@ -32,6 +32,7 @@
   import AccountSection from './AccountSection.svelte';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
   import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from './updates.svelte.js';
+  import { meetingDetect } from './meetingDetect.svelte.js';
   import { renderMarkdown } from './markdown.js';
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
@@ -398,6 +399,17 @@
     { value: 'shiftEnter', label: 'Shift + Enter' },
   ];
 
+  // General → Meetings: how Yap asks about a call it noticed
+  // (meeting_detect.rs, `meetingDetectStyle`), one line on what each means.
+  const CALL_PROMPT_STYLES = [
+    { value: 'popup', label: 'Pop-up' },
+    { value: 'quiet', label: 'Quietly' },
+  ];
+  const CALL_PROMPT_STYLE_DESC = {
+    popup: 'A card in Yap, or a Windows notification while Yap is in the background',
+    quiet: 'No pop-up: it waits in the notification centre and the tray menu',
+  };
+
   // Display names for the language codes the backend returns.
   const LANG_NAMES = {
     en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian',
@@ -422,6 +434,8 @@
     streamingPartials: true,
     historyEnabled: true,
     meetingDetection: true,
+    meetingDetectApps: {},
+    meetingDetectStyle: 'popup',
     inputDevice: null,
     dictionary: [],
     selectedLanguage: 'auto',
@@ -645,7 +659,13 @@
   // last-saved-wins clobbering each other.
   let lastReceivedDictJson = null;
   function onSettingsGoto(e) {
-    if (typeof e.detail === 'string') section = e.detail;
+    if (typeof e.detail !== 'string') return;
+    // "general#meetings": a section, then the card in it to scroll to.
+    const [target, card] = e.detail.split('#');
+    section = target;
+    if (card) {
+      tick().then(() => document.getElementById(`settings-${card}`)?.scrollIntoView({ block: 'start' }));
+    }
   }
   function onDictChanged(e) {
     const entries = Array.isArray(e.detail) ? e.detail : e.detail?.entries;
@@ -664,6 +684,26 @@
       window.removeEventListener('yap-dictionary-changed', onDictChanged);
     };
   });
+  // General → Meetings → "Ask about calls in": each app's effective choice
+  // is the saved one (`meetingDetectApps`), else the app's default from
+  // meeting_detect.rs (work apps on, personal chat apps off). Flipping one
+  // saves it as the person's choice.
+  function callAppAsks(app) {
+    return cfg.meetingDetectApps?.[app.id] ?? app.asksByDefault;
+  }
+  function setCallAppAsks(id, asks) {
+    cfg.meetingDetectApps = { ...(cfg.meetingDetectApps || {}), [id]: asks };
+  }
+  // "Don't ask for Teams" on a call prompt saves that in Rust: adopt it into
+  // this config copy, or the next auto-save would switch Teams back on.
+  onMount(() => {
+    const un = listen('yap-meeting-detect-choice', (e) => {
+      const c = e.payload;
+      if (cfg && c?.app && typeof c.asks === 'boolean') setCallAppAsks(c.app, c.asks);
+    });
+    return () => un.then((f) => f());
+  });
+
   // Broadcast Settings-side dictionary edits (e.g. the Voice Agent name save)
   // to DictionaryView — skipping echoes of updates we just received from it.
   $effect(() => {
@@ -1356,19 +1396,47 @@
             </Row>
           </Group>
 
-          <Group title="Meetings">
-            <Row>
-              <Toggle
-                bind:checked={cfg.meetingDetection}
-                label="Detect calls and offer to take notes"
-                desc="Asks when a Teams, Zoom, Meet, Slack, Discord or Webex call starts, and offers to stop and summarise when it ends"
-                hint="Yap reads Windows' own record of which app is using your microphone, on this PC only. Nothing records until you click Record notes."
-              />
-            </Row>
-            <Row>
-              <p class="consent">Recording a call? Let people know you're taking notes.</p>
-            </Row>
-          </Group>
+          <div id="settings-meetings">
+            <Group title="Meetings">
+              <Row>
+                <Toggle
+                  bind:checked={cfg.meetingDetection}
+                  label="Detect calls and offer to take notes"
+                  desc="Asks when a Teams, Zoom, Meet, Slack or Webex call starts, and offers to stop and summarise when it ends"
+                  hint="Yap reads Windows' own record of which app is using your microphone, on this PC only. Nothing records until you click Record notes."
+                />
+              </Row>
+              <Row
+                label="How Yap asks"
+                desc={CALL_PROMPT_STYLE_DESC[cfg.meetingDetectStyle] ?? CALL_PROMPT_STYLE_DESC.popup}
+              >
+                <Segmented
+                  bind:value={cfg.meetingDetectStyle}
+                  options={CALL_PROMPT_STYLES}
+                  label="How Yap asks"
+                  disabled={!cfg.meetingDetection}
+                />
+              </Row>
+              <Row>
+                <div class="callapps" role="group" aria-label="Ask about calls in">
+                  <span class="callapps-label">Ask about calls in</span>
+                  <span class="callapps-desc">Work apps to start with. Personal ones like Discord and WhatsApp stay quiet unless you switch them on.</span>
+                  <div class="callapps-grid">
+                    {#each meetingDetect.apps as app (app.id)}
+                      <Toggle
+                        bind:checked={() => callAppAsks(app), (on) => setCallAppAsks(app.id, on)}
+                        label={app.label}
+                        disabled={!cfg.meetingDetection}
+                      />
+                    {/each}
+                  </div>
+                </div>
+              </Row>
+              <Row>
+                <p class="consent">Recording a call? Let people know you're taking notes.</p>
+              </Row>
+            </Group>
+          </div>
 
         {:else if section === 'models'}
           <div class="page-h">
@@ -2630,6 +2698,32 @@
     font-size: 12px;
     margin: 0;
     line-height: 1.5;
+  }
+  /* General → Meetings → "Ask about calls in": one switch per call app, two
+     columns when the card is wide enough (each column ≥ 190px). */
+  .callapps {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .callapps-label {
+    color: var(--yap-fg);
+    font-size: 13px;
+    font-weight: 650;
+  }
+  .callapps-desc {
+    color: var(--yap-muted-70);
+    font-size: 11.5px;
+    line-height: 1.5;
+  }
+  .callapps-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(max(190px, calc((100% - 32px) / 2)), 1fr));
+    gap: 9px 32px;
+    margin-top: 10px;
+  }
+  .callapps-grid :global(.toggle-row .label) {
+    font-weight: 500;
   }
   .rm {
     background: none;

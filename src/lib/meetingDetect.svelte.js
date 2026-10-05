@@ -2,15 +2,25 @@
 // a call (Teams, Zoom, Meet, Slack, Discord, Webex, …) and owns the decisions;
 // this mirrors its snapshot (`meeting_detect_status` + the
 // `yap-meeting-detect` event):
-//   { enabled, calls: [{ id, app, label, noun, since, noteId }],
+//   { enabled, style: 'popup' | 'quiet',
+//     apps: [{ id, label, asks, asksByDefault }],
+//     calls: [{ id, app, label, noun, since, noteId }],
 //     prompt: { id, kind: 'start' | 'end', callId, app, title, body, accept,
-//               decline, noteId, inApp } | null }
+//               decline, never, noteId, inApp, quiet, fadeMs } | null }
 // and shows the prompt as a sticky toast while `inApp` (Rust decides that:
-// WebView2 reports `visible` even for a hidden window, so the page can't).
-// "Record notes" / "Not now" answer a start prompt, "Stop and summarise" /
-// "Keep recording" an end prompt; the toast's ✕ counts as the quiet answer.
-// A prompt Rust withdraws (the call ended, the other surface answered) takes
-// its toast with it.
+// WebView2 reports `visible` even for a hidden window, so the page can't;
+// quiet prompts stay out of the window). "Record notes" / "Not now" answer a
+// start prompt, "Stop and summarise" / "Keep recording" an end prompt; the
+// toast's ✕ counts as the quiet answer. A start prompt also offers `never`
+// ("Don't ask for Teams", a small link under the buttons) and, left alone,
+// fades after `fadeMs` (30 s, OpenWhispr's auto-dismiss) as "Not now". A
+// prompt Rust withdraws (the call ended, the other surface answered) takes
+// its toast with it. `apps` feeds Settings → General → Meetings.
+//
+// `yap-meeting-detect-choice` { app, asks, confirm }: Yap switched an app
+// off itself ("Don't ask for Teams", from either surface). Settings adopts it
+// into its config copy; `confirm` (the window is on screen) is shown here as
+// a brief toast with a way to Settings → General → Meetings.
 //
 // `yap-meeting-open-note` { noteId, stop } opens a note in Notes (the new
 // meeting note, or the one to stop): the main window switches view and
@@ -20,28 +30,32 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast, dismiss, isToastLive } from './ui/toast.svelte.js';
 
-export const meetingDetect = $state({ enabled: true, calls: [], prompt: null });
+export const meetingDetect = $state({ enabled: true, style: 'popup', apps: [], calls: [], prompt: null });
 
 /** A note for NotesView to open: { id, stop } (it clears `pending`). */
 export const noteRequest = $state({ pending: null });
 
 let started = false;
 let showNotes = () => {};
+let openSettings = () => {};
 // The prompt on screen: { id, toastId }.
 let shown = null;
 
 /**
  * Load the snapshot and follow changes. Idempotent; the main window calls it
- * with `showNotes`, which switches it to the Notes view.
+ * with `showNotes`, which switches it to the Notes view, and `openSettings`
+ * (a Settings section, e.g. 'general#meetings').
  */
 export function initMeetingDetect(opts = {}) {
   if (opts.showNotes) showNotes = opts.showNotes;
+  if (opts.openSettings) openSettings = opts.openSettings;
   if (started) return;
   started = true;
   invoke('meeting_detect_status')
     .then(apply)
     .catch(() => {});
   listen('yap-meeting-detect', (e) => apply(e.payload));
+  listen('yap-meeting-detect-choice', (e) => confirmChoice(e.payload));
   listen('yap-meeting-open-note', (e) => openNote(e.payload));
 }
 
@@ -64,10 +78,12 @@ function showPrompt(p) {
     description: p.body,
     chip: p.kind === 'start' ? 'Call' : 'Call ended',
     icon: 'call',
-    duration: 0,
+    duration: p.fadeMs ?? 0,
     action: { label: p.accept, onClick: () => answer(p, yes) },
     secondary: { label: p.decline, onClick: () => answer(p, no) },
+    tertiary: p.never ? { label: p.never, onClick: () => answer(p, 'never') } : null,
     onClose: () => answer(p, no),
+    onExpire: () => answer(p, no),
   });
   shown = { id: p.id, toastId };
 }
@@ -90,6 +106,17 @@ async function answer(p, action) {
       variant: 'destructive',
     });
   }
+}
+
+/** "Won't ask about Teams calls", when Rust says the window is on screen. */
+function confirmChoice(c) {
+  if (!c?.confirm) return;
+  toast({
+    title: c.confirm,
+    variant: 'success',
+    duration: 6000,
+    action: { label: 'Open Settings', onClick: () => openSettings('general#meetings') },
+  });
 }
 
 function openNote(payload) {

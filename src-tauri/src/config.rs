@@ -339,6 +339,17 @@ pub struct YapConfig {
     /// locally, and nothing records without a click.
     #[serde(default = "default_true")]
     pub meeting_detection: bool,
+    /// Which call apps it asks about (Settings → General → Meetings, or "Don't
+    /// ask for Discord" on a prompt): app id → the person's choice. An app
+    /// without an entry uses its default in `meeting_detect::APPS` (work apps
+    /// yes, personal chat apps no), so apps added later start at their own.
+    #[serde(default)]
+    pub meeting_detect_apps: std::collections::BTreeMap<String, bool>,
+    /// How it asks: "popup" (a card in the main window, or a Windows
+    /// notification while Yap is in the background) or "quiet" (silently into
+    /// the notification center, plus a tray menu item).
+    #[serde(default = "default_meeting_detect_style")]
+    pub meeting_detect_style: String,
 
     /// Schema version, for the one-time migrations in `migrate_once` (the
     /// kind that must never run twice, unlike `load`'s idempotent fixes). A
@@ -401,6 +412,9 @@ fn default_pp_preset() -> String {
 fn default_routing_scope() -> String {
     "all_apps".into()
 }
+fn default_meeting_detect_style() -> String {
+    "popup".into()
+}
 
 impl Default for YapConfig {
     fn default() -> Self {
@@ -449,6 +463,8 @@ impl Default for YapConfig {
             history_enabled: true,
             bridge_enabled: true,
             meeting_detection: true,
+            meeting_detect_apps: std::collections::BTreeMap::new(),
+            meeting_detect_style: default_meeting_detect_style(),
             config_version: CONFIG_VERSION,
         }
     }

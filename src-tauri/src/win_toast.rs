@@ -10,7 +10,8 @@
 //! long as the toast can still be clicked. Windows applies Do Not Disturb /
 //! Focus Assist and the per-app notification switch on its own; when Yap's
 //! notifications are switched off, [`post`] says so and the caller falls back
-//! to its in-app toast.
+//! to its in-app toast. [`post_quietly`] skips the banner: the toast only
+//! lands in the notification center.
 
 use tauri::AppHandle;
 use windows::core::{IInspectable, Interface, HSTRING};
@@ -69,6 +70,26 @@ pub fn logo_xml() -> String {
     }
 }
 
+fn err(e: windows::core::Error) -> String {
+    e.message()
+}
+
+/// The toast for `xml` as Yap's `tag`, not shown yet. `quiet` sends it
+/// straight to the notification center: no banner on screen
+/// (`SuppressPopup`).
+pub fn build(tag: &str, xml: &str, quiet: bool) -> Result<ToastNotification, String> {
+    let doc = XmlDocument::new().map_err(err)?;
+    doc.LoadXml(&HSTRING::from(xml)).map_err(err)?;
+    let toast = ToastNotification::CreateToastNotification(&doc).map_err(err)?;
+    toast.SetTag(&HSTRING::from(tag)).map_err(err)?;
+    toast.SetGroup(&HSTRING::from(GROUP)).map_err(err)?;
+    let _ = toast.SetExpiresOnReboot(true);
+    if quiet {
+        toast.SetSuppressPopup(true).map_err(err)?;
+    }
+    Ok(toast)
+}
+
 /// Post `xml` as Yap's toast `tag` (replacing an earlier one with that tag).
 /// `on_activated` gets the clicked button's `arguments` — the toast's
 /// `launch` value for a click on its body. Returns the live toast.
@@ -79,17 +100,29 @@ pub fn post(
     data: Option<&NotificationData>,
     on_activated: fn(&AppHandle, &str),
 ) -> Result<ToastNotification, String> {
-    let err = |e: windows::core::Error| e.message();
-    let doc = XmlDocument::new().map_err(err)?;
-    doc.LoadXml(&HSTRING::from(xml)).map_err(err)?;
-    let toast = ToastNotification::CreateToastNotification(&doc).map_err(err)?;
-    toast.SetTag(&HSTRING::from(tag)).map_err(err)?;
-    toast.SetGroup(&HSTRING::from(GROUP)).map_err(err)?;
-    let _ = toast.SetExpiresOnReboot(true);
+    let toast = build(tag, xml, false)?;
     if let Some(data) = data {
         toast.SetData(data).map_err(err)?;
     }
+    show(app, toast, on_activated)
+}
 
+/// [`post`] without a banner: the toast goes silently into the notification
+/// center (the call prompts' "Quietly" style).
+pub fn post_quietly(
+    app: &AppHandle,
+    tag: &str,
+    xml: &str,
+    on_activated: fn(&AppHandle, &str),
+) -> Result<ToastNotification, String> {
+    show(app, build(tag, xml, true)?, on_activated)
+}
+
+fn show(
+    app: &AppHandle,
+    toast: ToastNotification,
+    on_activated: fn(&AppHandle, &str),
+) -> Result<ToastNotification, String> {
     let handle = app.clone();
     let handler = TypedEventHandler::<ToastNotification, IInspectable>::new(move |_, args| {
         let arg = args

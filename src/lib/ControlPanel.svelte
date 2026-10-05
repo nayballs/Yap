@@ -39,12 +39,14 @@
   let acctImgFailed = $state(false);
   let settingsOpen = $state(false);
   // Call detection (meeting_detect.rs via meetingDetect.svelte.js): "call
-  // detected — Record notes?" toasts, and opening the meeting note in Notes.
+  // detected — Record notes?" toasts, opening the meeting note in Notes, and
+  // "Won't ask about Teams calls" → Settings → General → Meetings.
   initMeetingDetect({
     showNotes: () => {
       settingsOpen = false;
       activeView = 'notes';
     },
+    openSettings: (section) => openSettings(section),
   });
   let bellOpen = $state(false);
 

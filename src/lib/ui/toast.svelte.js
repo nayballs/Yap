@@ -2,18 +2,20 @@
 // rendered Wispr-Flow-style (ToastHost.svelte). Usage: toast({ title,
 // description?, variant?: 'default'|'success'|'destructive', duration?,
 // chip?, icon?, action?: { label, onClick, keepOpen? }, secondary?: { label,
-// onClick }, progress?, busy?, expand?: { label, markdown } }). `chip`
-// overrides the little category pill (defaults: Tip / Done / Error per
-// variant) and `icon: 'update'` swaps its glyph; `action` renders a light
-// button bottom-right (Wispr's "Open Settings") and `secondary` a quiet one
-// beside it ("Later"); both close the toast unless `keepOpen`. `progress`
-// (0–100) draws a determinate bar, `busy` a spinner in the chip, and
-// `expand` a "What's new"-style toggle that unfolds markdown notes inside the
-// card. Destructive toasts linger longer (6 s vs 3.5 s) and render the
-// description as a copyable mono error box; `duration <= 0` = sticky. Hovering
-// a toast pauses its timer; leaving resumes with the remaining time.
-// `onClose` runs when the person closes the card with its ✕ (a call prompt
-// takes that as "Not now"); `icon: 'call'` gives the chip a phone.
+// onClick }, tertiary?: { label, onClick }, progress?, busy?, expand?:
+// { label, markdown } }). `chip` overrides the little category pill
+// (defaults: Tip / Done / Error per variant) and `icon: 'update'` swaps its
+// glyph; `action` renders a light button bottom-right (Wispr's "Open
+// Settings"), `secondary` a quiet one beside it ("Later") and `tertiary` a
+// small text link on its own line under them ("Don't ask for Teams"); all
+// close the toast unless `keepOpen`. `progress` (0–100) draws a determinate
+// bar, `busy` a spinner in the chip, and `expand` a "What's new"-style toggle
+// that unfolds markdown notes inside the card. Destructive toasts linger
+// longer (6 s vs 3.5 s) and render the description as a copyable mono error
+// box; `duration <= 0` = sticky. Hovering a toast pauses its timer; leaving
+// resumes with the remaining time. `onClose` runs when the person closes the
+// card with its ✕, `onExpire` when its timer runs out (a call prompt takes
+// both as "Not now"); `icon: 'call'` gives the chip a phone.
 // `updateToast(id, patch)` changes a live toast in place (the update toast
 // goes ready → downloading → restarting without stacking new cards).
 
@@ -38,7 +40,12 @@ function arm(id, ms) {
     id,
     setTimeout(() => {
       timers.delete(id);
-      startExit(id);
+      const t = toastStore.list.find((x) => x.id === id);
+      try {
+        if (t && !t.isExiting) t.onExpire?.();
+      } finally {
+        startExit(id);
+      }
     }, ms)
   );
 }
@@ -60,10 +67,12 @@ export function toast({
   icon = '',
   action = null,
   secondary = null,
+  tertiary = null,
   progress = null,
   busy = false,
   expand = null,
   onClose = null,
+  onExpire = null,
 } = {}) {
   const id = ++seq;
   const dur = duration ?? (variant === 'destructive' ? 6000 : 3500);
@@ -76,10 +85,12 @@ export function toast({
     icon,
     action,
     secondary,
+    tertiary,
     progress,
     busy,
     expand,
     onClose,
+    onExpire,
     duration: dur,
     createdAt: Date.now(),
     isExiting: false,

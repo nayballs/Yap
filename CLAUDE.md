@@ -267,12 +267,32 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   2 s only while a call is starting/live/ending (60 s safety net; 5 s polling
   if the watch fails). Debounce: starts after 5 s on the mic (20 s for chat
   apps — voice notes), ends after 15 s off it (a device switch or rejoin is a
-  gap). Asks **once per call**, never while already recording: a sticky
-  in-app toast when the main window is visible, a silent Windows notification
-  (`win_toast.rs`) when it isn't focused — answering either withdraws both,
-  and focusing the window moves a pending prompt in-app
-  (`on_main_window_focused`). Prompts wait for a dictation to finish (+2.5 s);
-  "Not now" snoozes that app for 5 min (OpenWhispr's cooldown). **Record
+  gap). **Per-app choice**: each `APPS` entry has `asks_by_default` (work apps
+  — Teams, Zoom, Meet, Webex, Slack, GoTo, Whereby, Jitsi — yes; Discord,
+  WhatsApp, Signal, Telegram no); the person's overrides live in
+  `config.meeting_detect_apps` (app id → bool; effective = override, else the
+  default, so apps added later start at theirs). A switched-off app's calls
+  are still tracked but get no prompt (start or end) and no tray item. Asks
+  **once per call**, never while already recording, in one of two styles
+  (`config.meeting_detect_style`): **"popup"** (default) — a sticky in-app
+  toast when the main window is visible, a silent Windows notification
+  (`win_toast.rs`) when it isn't focused; answering either withdraws both,
+  focusing the window moves a pending prompt in-app (`on_main_window_focused`),
+  and an in-app start prompt left alone **fades after 30 s as "Not now"**
+  (OpenWhispr's auto-dismiss; `fadeMs` in the prompt view, the toast's
+  `onExpire`) — or **"quiet"** — no in-app toast, the notification goes
+  silently into the notification centre (`win_toast::post_quietly` →
+  `SetSuppressPopup`) and stays out of the window unless its body is clicked.
+  Both styles: start prompts carry a third answer, **"Don't ask for Teams"**
+  (`never`: saves the override, withdraws the prompt everywhere, emits
+  `yap-meeting-detect-choice {app, asks, confirm}` so Settings adopts it and,
+  window on screen, a "Won't ask about Teams calls" toast links to Settings →
+  General → Meetings); the end prompt follows the style. Prompts wait for a
+  dictation to finish (+2.5 s); "Not now" snoozes that app for 5 min
+  (OpenWhispr's cooldown). **Tray**: while a call of an asked-about app is live
+  and nothing records, `tray_item()` puts "Record this Teams call" at the top
+  of the idle menu (`meeting_record:<call id>` → `on_tray_record`, same as
+  Record notes); `sync_tray` calls `tray::refresh` when it changes. **Record
   notes** → `notes::create` ("Teams call · 5 Oct, 14:30", folder Meetings,
   source "meeting") + `notes::mark_meeting` + the `meeting_start` command;
   opens the note if the window is visible (else a "Taking notes…" Windows
@@ -282,13 +302,15 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   or phone hand-off): opens the note and NotesView ends it there, so the
   Action Plan runs (`yap-meeting-open-note {noteId, stop}`; Rust
   stops it itself after 8 s if the page didn't). Snapshot
-  `meeting_detect_status` + `yap-meeting-detect`; answers
-  `meeting_detect_respond(promptId, record|dismiss|stop|keep)`; debug-only
-  `meeting_detect_simulate(appId, active)` (no debounce) for the e2e suite.
-  Gated by `config.meeting_detection` (default **on**, as OpenWhispr's
-  `notifyMeetingDetection`; `sync()` on every config save). Lock rule: never
-  touch windows/WinRT while holding its state lock (window getters wait on the
-  main thread). See [`docs/meetings.md`](./docs/meetings.md).
+  `meeting_detect_status` + `yap-meeting-detect` (`{enabled, style, apps,
+  calls, prompt}`); answers `meeting_detect_respond(promptId,
+  record|dismiss|never|stop|keep)`; debug-only `meeting_detect_simulate(appId,
+  active, fadeMs?)` (no debounce; `fadeMs` shortens that call's fade) for the
+  e2e suite. Gated by `config.meeting_detection` (default **on**, as
+  OpenWhispr's `notifyMeetingDetection`; `sync()` on every config save re-reads
+  the style and per-app choices too). Lock rule: never touch windows/WinRT
+  while holding its state lock (window getters wait on the main thread). See
+  [`docs/meetings.md`](./docs/meetings.md).
 - **`media.rs`** — audio-file decode front-end for Upload: pure-Rust **Symphonia**
   (mp3/wav/m4a/aac/flac/ogg-vorbis; no opus yet) → downmix mono → 16 kHz
   (`pipeline::resample_linear`), plus `chunk_ranges` (~60 s windows cut at the
@@ -438,9 +460,12 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   `ToastNotification`, Windows only): `app_id` (the NSIS shortcut's
   AppUserModelID; dev builds borrow PowerShell's), `logo_xml`, `esc`, and
   `post(tag, xml, data, on_activated)` / `update` / `remove` in the "yap"
-  group. updates.rs posts under the "update" tag, meeting_detect.rs under
-  "call"; each keeps its live toast so the buttons work from the
-  notification center. `allowed()` = not portable, not a test run.
+  group, plus `post_quietly` (no banner — `SetSuppressPopup`, straight into
+  the notification centre; the call prompts' "Quietly" style) and `build`
+  (the toast, unshown — what the unit tests check). updates.rs posts under the
+  "update" tag (always with a banner), meeting_detect.rs under "call"; each
+  keeps its live toast so the buttons work from the notification center.
+  `allowed()` = not portable, not a test run.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
   volume, output_device, mute_while_recording, recording_mode,
   overlay_position, dictionary, append_trailing_space, auto_submit(+key),
@@ -450,7 +475,10 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   key store — the UI swaps the active `pp_api_key` from it on provider switch), `cleanup_profiles` (each
   with an optional per-profile LLM override: provider/base_url/model/api_key — empty
   provider = inherit global) + `app_routes` smart routing, streaming_partials,
-  history_enabled, update_checks_enabled, dictionary_fuzzy). JSON
+  history_enabled, update_checks_enabled, dictionary_fuzzy, call detection:
+  meeting_detection + meeting_detect_style ("popup"|"quiet") +
+  meeting_detect_apps (app id → bool overrides of `meeting_detect::APPS`'
+  defaults)). JSON
   load/save + `apply_dictionary` + `dictionary_prompt` (the Whisper
   `initial_prompt` vocabulary) + `resolve_cleanup` (per-app plan: body + endpoint).
   `data_dir()` is portable-aware. `load()` also migrates saved Groq picks (cleanup,
@@ -477,6 +505,11 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   update adds **"Restart to update to X"** under the version line (replacing
   "Check for updates…"; portable: "Get Yap X on GitHub…"), a green dot on the icon
   and "· Update X ready" in the tooltip (`tray::refresh`, driven by updates.rs).
+  A live call Yap asks about, while nothing records, puts **"Record this Teams
+  call"** above it (`meeting_detect::tray_item`; the click runs
+  `on_tray_record` on a worker thread). Both items are in the idle menu's cache
+  key (`idle_menu_key`), so the menu rebuilds when they change; all tray work
+  runs on the main thread.
 - **`overlay.rs`** — shows/positions the bottom (or top) center "transcribing" overlay
   window on `yap-state`. **Screen-aware**: positions on the monitor holding the
   mouse cursor (Win32 `GetCursorPos` vs Tauri monitor rects, both physical px;
@@ -589,7 +622,9 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   per-variant category chip (Tip/Done/Error, override via `chip`; `icon:
   'update'`), always-visible circular ✕, optional light **action button**
   bottom-right (`action: { label, onClick, keepOpen? }` — Wispr's "Open
-  Settings") + a quiet `secondary` ("Later"), hover-pause, copyable mono error
+  Settings") + a quiet `secondary` ("Later") + a small `tertiary` text link on
+  its own line under them ("Don't ask for Teams"), hover-pause, `onClose` (✕) /
+  `onExpire` (timer ran out) callbacks, copyable mono error
   boxes, progress hairlines (3.5 s / 6 s durations; `duration <= 0` sticky),
   plus a determinate `progress` bar, a `busy` chip spinner and an `expand`
   "What's new" toggle that unfolds markdown in the card; `updateToast(id,
@@ -600,11 +635,16 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   sticky "Yap X is ready" + Restart to update / Later / What's new, then
   Downloading… / Restarting Yap… in place; "Yap is up to date" after the
   restart), and the **call prompts** (`meetingDetect.svelte.js` — mirrors
-  meeting_detect.rs's snapshot: sticky "Teams call detected — Record notes /
-  Not now" and "…call ended — Stop and summarise / Keep recording" toasts with
-  `icon: 'call'`, withdrawn when Rust withdraws the prompt; the card's ✕ runs
-  its `onClose` = the quiet answer; `yap-meeting-open-note` switches to Notes
-  and hands NotesView a `noteRequest` to open, and stop if asked). **`HomeView.svelte`** = the Wispr-style
+  meeting_detect.rs's snapshot: "Teams call detected — Record notes / Not now"
+  with a small **"Don't ask for Teams"** link on its own line under the
+  buttons (the toast's `tertiary`), fading after the prompt's `fadeMs` (30 s)
+  as "Not now" (the toast's `onExpire`), and a sticky "…call ended — Stop and
+  summarise / Keep recording", both with `icon: 'call'` and withdrawn when
+  Rust withdraws the prompt; the card's ✕ runs its `onClose` = the quiet
+  answer; `yap-meeting-detect-choice` with `confirm` shows "Won't ask about
+  Teams calls" + Open Settings (→ `general#meetings`);
+  `yap-meeting-open-note` switches to Notes and hands NotesView a
+  `noteRequest` to open, and stop if asked). **`HomeView.svelte`** = the Wispr-style
   Home: time-of-day greeting with the hotkey as **amber keycaps**, a dark
   **rotating hero card** (4 tips — voice edit / AI cleanup / meeting notes /
   per-app profiles — picked by day, dot nav, CTAs open the right Settings
@@ -665,8 +705,15 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / System):
   **General** (hotkey, recording mode, mic, sound+volume, mute, recording-overlay
   group: live-preview toggle + overlay position — the overlay itself is always on,
-  it's the hot-mic indicator; **Meetings** group: "Detect calls and offer to take
-  notes" (`meetingDetection`) + an always-visible consent line, "Recording a
+  it's the hot-mic indicator; **Meetings** group (`#settings-meetings`, the
+  target of `yap-settings-goto` "general#meetings"): "Detect calls and offer to
+  take notes" (`meetingDetection`), then — disabled while it's off — "How Yap
+  asks" (`ui/Segmented` Pop-up / Quietly → `meetingDetectStyle`, a one-line
+  explanation of the choice) and "Ask about calls in" (a two-column list of
+  switches, one per call app from the `meetingDetect.apps` snapshot, showing
+  the effective choice; a flip writes `meetingDetectApps[app]`; a
+  `yap-meeting-detect-choice` from Rust is adopted into Settings' config copy
+  so auto-save can't undo it) + an always-visible consent line, "Recording a
   call? Let people know you're taking notes."), **Speech-to-Text** (`ModelManager` + GPU +
   language/translate), **Language Models** (OpenWhispr-style: enable toggle → mode
   selector Cloud Providers/Local/Self-Hosted → provider pill tabs (Groq/Anthropic/
@@ -936,7 +983,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   recording mode `toggle`, overlay always shown while recording/transcribing (no
   off switch — it's the hot-mic indicator), live transcription preview **on**
   (`streaming_partials`), AI cleanup **off**, call detection **on**
-  (`meeting_detection` — it only asks; nothing records without a click).
+  (`meeting_detection` — it only asks; nothing records without a click) as
+  **pop-ups** (`meeting_detect_style`), for work apps only (Discord, WhatsApp,
+  Signal and Telegram start switched off; `meeting_detect_apps` holds changes).
 
 ---
 
@@ -967,7 +1016,9 @@ within an 8k local context whatever the length; e2e-tested with a two-hour
 meeting against a fake AI, and once with real speech through Parakeet
 2026-10-05) with **call detection** (`meeting_detect.rs`
 — Teams/Zoom/Meet/Slack/Discord/Webex… taking the mic → "Record notes?", the
-call ending → "Stop and summarise?"; e2e-tested via a simulation hook, the
+call ending → "Stop and summarise?"; per-app choice (work apps on, Discord &
+co. off, "Don't ask for X" on the prompt), a pop-up or quiet style, a 30 s
+fade, and a tray item; e2e-tested via a simulation hook, the
 registry signal checked read-only on Nathan's PC, no real call yet), and an **AI Chat** surface (`chats.rs` + eager
 keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six tools,
 ≤20-step loop, gated to cloud or ≥4B local models). Every JSON store now writes

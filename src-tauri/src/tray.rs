@@ -8,10 +8,12 @@
 //! - **Updates** (updates.rs): a ready update adds "Restart to update to X"
 //!   under the version line, a small green dot on the icon and a note in the
 //!   tooltip — Windows Update's own "restart required" idiom.
+//! - **Calls** (meeting_detect.rs): while a detected call is live and nothing
+//!   records, "Record this Teams call" sits at the top of the idle menu.
 //! - **Left-click** opens Settings.
 //!
 //! The tray is rebuilt on every `yap-state` change via [`update_tray`], and on
-//! update-status changes via [`refresh`].
+//! update-status and call-detection changes via [`refresh`].
 
 use std::sync::Mutex;
 
@@ -208,15 +210,24 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
         Box::new(submenu)
     };
 
-    // An update the user can act on goes right under the version line
-    // ("Restart to update to 0.1.2"); "Check for updates…" steps aside then.
+    // A call to record ("Record this Teams call") and an update the user can
+    // act on ("Restart to update to 0.1.2") go right under the version line;
+    // "Check for updates…" steps aside then.
+    let call = crate::meeting_detect::tray_item()
+        .map(|(id, label)| MenuItem::with_id(app, id, label, true, None::<&str>))
+        .transpose()?;
     let update = crate::updates::tray_item()
         .map(|(id, label, enabled)| MenuItem::with_id(app, id, label, enabled, None::<&str>))
         .transpose()?;
     let (sep_update, sep_models, sep_quit) = (sep()?, sep()?, sep()?);
     let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&version, &sep_update];
+    if let Some(call) = &call {
+        items.push(call);
+    }
     if let Some(update) = &update {
         items.push(update);
+    }
+    if call.is_some() || update.is_some() {
         items.push(&sep_models);
     }
     items.push(models.as_ref());
@@ -279,6 +290,14 @@ fn on_menu_event(app: &AppHandle, id: &str) {
         "open_models" => {
             let _ = crate::commands::show_onboarding(app);
         }
+        other if other.starts_with("meeting_record:") => {
+            // Off the main thread: starting the recorder blocks for a moment
+            // and looks at the main window.
+            if let Some(call_id) = other.strip_prefix("meeting_record:").and_then(|n| n.parse().ok()) {
+                let app = app.clone();
+                std::thread::spawn(move || crate::meeting_detect::on_tray_record(&app, call_id));
+            }
+        }
         "quit" => app.exit(0),
         "cancel" => {
             if let Some(st) = app.try_state::<AppState>() {
@@ -298,9 +317,9 @@ fn on_menu_event(app: &AppHandle, id: &str) {
     }
 }
 
-/// The active model + installed set + update item the idle menu depends on.
-/// When this changes (model switched/downloaded/deleted, an update got ready)
-/// the idle menu is stale.
+/// The active model + installed set + update and call items the idle menu
+/// depends on. When this changes (model switched/downloaded/deleted, an
+/// update got ready, a call to record came or went) the idle menu is stale.
 fn idle_menu_key() -> String {
     let data_dir = config::data_dir();
     let installed: Vec<&str> = stt::all_model_ids()
@@ -310,7 +329,10 @@ fn idle_menu_key() -> String {
     let update = crate::updates::tray_item()
         .map(|(id, label, _)| format!("{id}:{label}"))
         .unwrap_or_default();
-    format!("{}|{}|{}", config::load().model_size, installed.join(","), update)
+    let call = crate::meeting_detect::tray_item()
+        .map(|(id, label)| format!("{id}:{label}"))
+        .unwrap_or_default();
+    format!("{}|{}|{}|{}", config::load().model_size, installed.join(","), update, call)
 }
 
 /// Build the tray icon and install it. The app keeps the tray in its registry
@@ -382,8 +404,9 @@ pub fn update_tray(app: &AppHandle, state: &str) {
     });
 }
 
-/// Re-apply the update item, icon dot and tooltip after an update-status
-/// change (updates.rs), for the current pipeline state. Main thread, like
+/// Re-apply the update and call items, icon dot and tooltip after an
+/// update-status change (updates.rs) or a call-detection change
+/// (meeting_detect.rs), for the current pipeline state. Main thread, like
 /// [`update_tray`].
 pub fn refresh(app: &AppHandle) {
     let handle = app.clone();
