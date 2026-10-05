@@ -228,12 +228,16 @@ fn is_address(s: &str) -> bool {
 }
 
 /// Who "you" are in a feed that doesn't say: the calendar's name when it's
-/// an address (Google's secret iCal address is named after its owner), and
-/// anyone invited to (nearly) every meeting in it, as the feed's owner is.
+/// an address (Google's secret iCal address is named after its owner), else
+/// the one person invited to (nearly) every meeting in it, as the feed's
+/// owner is. Two such people (all your meetings are with Sam) is a tie, and
+/// nobody: taking Sam for you would leave your meetings with Sam without
+/// anyone else in them, and drop them.
 pub fn self_addresses(calendar: &Component) -> HashSet<String> {
     let mut out = HashSet::new();
     if let Some(name) = ics::calendar_name(calendar).filter(|n| is_address(n)) {
         out.insert(name.to_ascii_lowercase());
+        return out;
     }
     let mut counts: HashMap<String, usize> = HashMap::new();
     let mut meetings = 0;
@@ -249,7 +253,10 @@ pub fn self_addresses(calendar: &Component) -> HashSet<String> {
         }
     }
     if meetings >= 3 {
-        out.extend(counts.into_iter().filter(|(_, n)| *n * 10 >= meetings * 9).map(|(a, _)| a));
+        let regulars: Vec<String> = counts.into_iter().filter(|(_, n)| *n * 10 >= meetings * 9).map(|(a, _)| a).collect();
+        if let [owner] = regulars.as_slice() {
+            out.insert(owner.clone());
+        }
     }
     out
 }
@@ -518,6 +525,16 @@ mod tests {
         body.push_str("END:VCALENDAR\r\n");
         let found = self_addresses(&ics::parse_text(&body).unwrap());
         assert_eq!(found, HashSet::from(["owner@example.com".to_string()]));
+        // Every meeting with Sam: Sam and the owner tie, so it's nobody (Sam
+        // taken for "you" would leave these meetings with no one else in them).
+        let mut body = String::from("BEGIN:VCALENDAR\r\nX-WR-CALNAME:Calendar\r\n");
+        for i in 0..4 {
+            body.push_str(&format!(
+                "BEGIN:VEVENT\r\nUID:{i}\r\nATTENDEE:mailto:owner@example.com\r\nATTENDEE:mailto:sam@example.com\r\nEND:VEVENT\r\n"
+            ));
+        }
+        body.push_str("END:VCALENDAR\r\n");
+        assert!(self_addresses(&ics::parse_text(&body).unwrap()).is_empty());
     }
 
     #[test]

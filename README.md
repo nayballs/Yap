@@ -108,7 +108,9 @@ your voice to the cloud. Yap refuses the choice:
 - Dictation history is stored **only on your machine** and can be disabled or cleared
   in Settings. No telemetry.
 - Yap goes online only to download models, check for updates (you can turn that
-  off), reach a cloud AI provider you set up, or for the **optional account**. A
+  off), reach a cloud AI provider you set up, read a **calendar you connect**
+  (straight from Google or your calendar's link, read-only; meetings stay on
+  your PC), or for the **optional account**. A
   signed-out Yap contacts the account service only when you open its Account page
   ([privacy policy](https://auth.contextmirror.com/privacy)).
 
