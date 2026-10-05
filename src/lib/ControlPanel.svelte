@@ -247,7 +247,7 @@
     {:else if activeView === 'chat'}
       <ChatView />
     {:else if activeView === 'notes'}
-      <NotesView />
+      <NotesView onopensettings={openSettings} />
     {:else if activeView === 'upload'}
       <UploadView />
     {:else if activeView === 'integrations'}

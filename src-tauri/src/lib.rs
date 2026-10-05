@@ -17,6 +17,7 @@ mod e2e;
 mod fuzzy;
 mod media;
 mod meeting;
+mod meeting_summary;
 mod notes;
 mod tools;
 mod history;
@@ -399,6 +400,9 @@ pub fn run() {
             updates::update_install,
             updates::update_ack,
             updates::update_ack_updated,
+            // Test mode only (e2e.rs); not in release builds at all.
+            #[cfg(debug_assertions)]
+            e2e::e2e_meeting_feed,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

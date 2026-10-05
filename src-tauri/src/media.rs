@@ -175,9 +175,72 @@ pub fn quietest_index(
     (best, best_amp)
 }
 
+/// The quietest moment in `samples[from..to]`: the middle of the 20 ms frame
+/// (10 ms hop) with the least energy, and that frame's RMS. The meeting
+/// recorder cuts its chunks here. Unlike [`quietest_index`] (one sample every
+/// 10 ms, which in running speech can land on a zero crossing mid-word), a
+/// whole frame only reads quiet in a real pause.
+pub fn quietest_frame(samples: &[f32], from: usize, to: usize, sample_rate: usize) -> (usize, f32) {
+    let to = to.min(samples.len());
+    if from >= to {
+        return (to, f32::MAX);
+    }
+    let frame = (sample_rate / 50).max(1);
+    let hop = (sample_rate / 100).max(1);
+    let mean_square = |s: &[f32]| s.iter().map(|x| x * x).sum::<f32>() / s.len() as f32;
+    if to - from < frame {
+        return (from + (to - from) / 2, mean_square(&samples[from..to]).sqrt());
+    }
+    let (mut best, mut best_energy) = (from + frame / 2, f32::MAX);
+    let mut i = from;
+    while i + frame <= to {
+        let e = mean_square(&samples[i..i + frame]);
+        if e < best_energy {
+            best_energy = e;
+            best = i + frame / 2;
+        }
+        i += hop;
+    }
+    (best, best_energy.sqrt())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 200 Hz "voice" with a 60 ms pause starting at `pause`.
+    fn voice_with_pause(len: usize, pause: usize) -> Vec<f32> {
+        (0..len)
+            .map(|i| {
+                if (pause..pause + 960).contains(&i) {
+                    0.002 + 0.001 * (i % 7) as f32 / 6.0 // room noise, never 0
+                } else {
+                    0.4 * (2.0 * std::f32::consts::PI * 200.0 * i as f32 / 16_000.0).sin()
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn quietest_frame_finds_the_pause_not_a_zero_crossing() {
+        let pause = 16_000 * 3 + 123;
+        let samples = voice_with_pause(16_000 * 5, pause);
+        let (cut, rms) = quietest_frame(&samples, 16_000, 16_000 * 5, 16_000);
+        assert!((pause..pause + 960).contains(&cut), "cut at {cut}");
+        assert!(rms < 0.01);
+        // The one-sample scan can't tell a zero crossing in the voice from
+        // the pause: it settles on a near-zero sample elsewhere.
+        let (i, _) = quietest_index(&samples, 16_000, 16_000 * 5, 16_000);
+        assert!(!(pause..pause + 960).contains(&i));
+    }
+
+    #[test]
+    fn quietest_frame_handles_tiny_and_empty_ranges() {
+        let samples = vec![0.5f32; 100];
+        assert_eq!(quietest_frame(&samples, 10, 10, 16_000).0, 10);
+        assert_eq!(quietest_frame(&samples, 10, 20, 16_000).0, 15);
+        assert_eq!(quietest_frame(&samples, 0, 1_000, 16_000).0, 50);
+    }
 
     #[test]
     fn short_audio_is_one_chunk() {

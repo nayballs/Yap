@@ -24,6 +24,25 @@ function inline(s) {
     .replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=$|[\s).,;:!?])/g, '$1<em>$2</em>');
 }
 
+// The same markdown as plain text, for pasting where markdown shows raw
+// (Teams/Slack messages, email): heading marks and emphasis dropped, task
+// checkboxes as ☐ / ☑, bullets as •. Indentation and blank lines are kept.
+export function markdownToText(md) {
+  return (md || '')
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(/^(\s*)#{1,6}\s+/, '$1')
+        .replace(/^(\s*)[-*]\s+\[ \]\s+/, '$1☐ ')
+        .replace(/^(\s*)[-*]\s+\[[xX]\]\s+/, '$1☑ ')
+        .replace(/^(\s*)[-*]\s+/, '$1• ')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+    )
+    .join('\n')
+    .trim();
+}
+
 export function renderMarkdown(md) {
   const lines = escapeHtml(md || '').split(/\r?\n/);
   const out = [];
