@@ -3,7 +3,9 @@
   // dark rounded card, small category chip top-left (their lavender "Tip"
   // pill), always-visible circular ✕ top-right, bold white title, soft grey
   // body, optional light action button bottom-right ("Open Settings") with a
-  // quiet secondary beside it ("Later"). Keeps OpenWhispr's timer behaviour:
+  // quiet secondary beside it ("Later"), and a small text link on its own
+  // line under them for a rarer third answer ("Don't ask for Google Meet" —
+  // a whole line, so long app names fit). Keeps OpenWhispr's timer behaviour:
   // hover-pause, hairline progress bar, destructive descriptions in a copyable
   // mono error box. Long-running toasts (the update toast) can also carry a
   // determinate progress bar, a busy spinner in the chip, and a "What's new"
@@ -133,6 +135,11 @@
             {#if t.action?.label}
               <button class="actionbtn" onclick={() => runAction(t)}>{t.action.label}</button>
             {/if}
+          </div>
+        {/if}
+        {#if t.tertiary?.label}
+          <div class="tertiary">
+            <button class="tertiarybtn" onclick={() => runAction(t, 'tertiary')}>{t.tertiary.label}</button>
           </div>
         {/if}
         {#if t.duration > 0 && !t.isExiting}
@@ -427,6 +434,35 @@
   }
   .actionbtn:hover {
     background: #ffffff;
+  }
+  /* The rarer third answer: a small muted link on its own line, under the
+     buttons, so the card stays two buttons wide whatever the app's name. */
+  .tertiary {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+  }
+  .tertiarybtn {
+    max-width: 100%;
+    padding: 2px 4px;
+    margin-right: -4px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: rgba(255, 255, 255, 0.5);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    text-decoration: underline;
+    text-decoration-color: rgba(255, 255, 255, 0.25);
+    text-underline-offset: 3px;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+    transition: color 150ms ease;
+  }
+  .tertiarybtn:hover {
+    color: rgba(255, 255, 255, 0.85);
+    text-decoration-color: currentColor;
   }
   .progresswrap {
     position: absolute;

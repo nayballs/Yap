@@ -3,15 +3,17 @@
   // "pick one" choices (e.g. Toggle vs Push-to-talk). Segments share equal
   // width so the thumb can slide by simple percentage, no measuring.
   //
-  //   options: [{ value, label }]
-  //   icon:    optional snippet (value) => inline <svg>
-  let { value = $bindable(), options = [], icon } = $props();
+  //   options:  [{ value, label }]
+  //   icon:     optional snippet (value) => inline <svg>
+  //   disabled: greyed out, not clickable
+  //   label:    accessible name for the group
+  let { value = $bindable(), options = [], icon, disabled = false, label = undefined } = $props();
 
   const index = $derived(Math.max(0, options.findIndex((o) => o.value === value)));
   const n = $derived(options.length || 1);
 </script>
 
-<div class="seg" role="tablist" style="--n:{n}">
+<div class="seg" class:disabled role="tablist" aria-label={label} style="--n:{n}">
   <span class="thumb" style="transform: translateX({index * 100}%)"></span>
   {#each options as o (o.value)}
     <button
@@ -20,6 +22,7 @@
       aria-selected={value === o.value}
       class="seg-btn"
       class:on={value === o.value}
+      {disabled}
       onclick={() => (value = o.value)}
     >
       {@render icon?.(o.value)}
@@ -75,6 +78,12 @@
   }
   .seg-btn.on {
     color: var(--yap-fg);
+  }
+  .seg.disabled {
+    opacity: 0.5;
+  }
+  .seg.disabled .seg-btn {
+    cursor: default;
   }
   .seg-btn :global(svg) {
     width: 13px;

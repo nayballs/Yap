@@ -33,24 +33,35 @@
 //!   a dictation records or transcribes.
 //!
 //! **Asking** — once per call, only while Yap isn't recording a meeting
-//! already: an in-app toast when the main window is on screen, a Windows
-//! notification with Yap's logo otherwise. A window that is open but not
-//! focused (the call app is in front) gets both; answering one withdraws the
-//! other, and focusing the window moves a pending prompt into it. "Record
-//! notes" creates a meeting note ("Teams call · 5 Oct, 14:30", Meetings
-//! folder) and starts the meeting recorder. Nothing records without that click.
+//! already, and only for apps the person wants asked about: each app has a
+//! default (work apps yes, personal chat apps like Discord no) that the
+//! person's choice in Settings (`meeting_detect_apps`) or "Don't ask for
+//! Discord" on a prompt overrides. Two styles (`meeting_detect_style`):
+//! - "popup": an in-app toast when the main window is on screen, a Windows
+//!   notification with Yap's logo otherwise. A window that is open but not
+//!   focused (the call app is in front) gets both; answering one withdraws
+//!   the other, and focusing the window moves a pending prompt into it. A
+//!   start prompt left alone in the window fades after 30 s and counts as
+//!   "Not now" (OpenWhispr's 30 s auto-dismiss);
+//! - "quiet": the notification goes silently into the notification center,
+//!   with no banner and no in-app toast.
 //!
-//! **Ending.** When a call Yap is recording ends: "Stop and summarise?"
-//! OpenWhispr never stops a meeting recording on its own (its calendar
-//! "meeting ended" event isn't acted on), and the mic signal can't tell a
-//! finished call from one moved to a phone, a breakout room or a rejoin, so
-//! Yap asks instead of stopping. Stopping opens the note and stops it there,
-//! which runs the usual Meeting Notes summary.
+//! Either way, while a call is live and nothing records, the tray menu offers
+//! "Record this Teams call". "Record notes" creates a meeting note ("Teams
+//! call · 5 Oct, 14:30", Meetings folder) and starts the meeting recorder.
+//! Nothing records without that click.
+//!
+//! **Ending.** When a call Yap is recording ends: "Stop and summarise?", in
+//! the same style. OpenWhispr never stops a meeting recording on its own (its
+//! calendar "meeting ended" event isn't acted on), and the mic signal can't
+//! tell a finished call from one moved to a phone, a breakout room or a
+//! rejoin, so Yap asks instead of stopping. Stopping opens the note and stops
+//! it there, which runs the usual Meeting Notes summary.
 //!
 //! Test mode (`e2e::active`) reads no registry and posts no Windows
 //! notifications; the debug-only [`meeting_detect_simulate`] drives the flow.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -77,12 +88,22 @@ const POLL_TICK: Duration = Duration::from_secs(5);
 /// A "Stop and summarise" the Notes view didn't carry out in this time is
 /// done here, so the recording stops as asked.
 const STOP_FALLBACK: Duration = Duration::from_secs(8);
+/// A start prompt left alone in the window fades after this long and counts
+/// as "Not now" (OpenWhispr hides its meeting prompt after 30 s).
+const FADE_MS: u64 = 30_000;
+
+/// `meeting_detect_style` for prompts that skip the banner and the window.
+const QUIET: &str = "quiet";
 
 /// Snapshot of calls and the pending prompt (`meeting_detect_status`).
 const EVENT: &str = "yap-meeting-detect";
 /// Open a note in the main window: `{ noteId, stop }` (`stop`: stop its
 /// recording there, which runs the summary).
 const EVENT_OPEN: &str = "yap-meeting-open-note";
+/// Yap changed a per-app choice itself ("Don't ask for Discord"): `{ app,
+/// asks, confirm }`, for Settings' copy of the config, and `confirm` (the
+/// window is on screen) to show in the window.
+const EVENT_CHOICE: &str = "yap-meeting-detect-choice";
 
 // ---- call apps -------------------------------------------------------------
 
@@ -108,6 +129,10 @@ pub struct App {
     titles: &'static [Title],
     /// A chat app: its voice messages use the mic too, so wait longer.
     chat: bool,
+    /// Asked about unless the person says otherwise (`meeting_detect_apps`):
+    /// yes for work meetings, no for personal chat apps, where notes on a
+    /// call with friends would be an odd thing to offer.
+    pub asks_by_default: bool,
 }
 
 /// Order matters for browser titles: the first match names the call.
@@ -120,6 +145,7 @@ pub static APPS: &[App] = &[
         packages: &["MSTeams", "MicrosoftTeams"],
         titles: &[Has("microsoft teams")],
         chat: false,
+        asks_by_default: true,
     },
     App {
         id: "zoom",
@@ -129,6 +155,7 @@ pub static APPS: &[App] = &[
         packages: &[],
         titles: &[Has("zoom meeting"), Has("zoom webinar"), Starts("zoom")],
         chat: false,
+        asks_by_default: true,
     },
     App {
         id: "meet",
@@ -138,6 +165,7 @@ pub static APPS: &[App] = &[
         packages: &[],
         titles: &[Starts("meet - "), Starts("meet \u{2013} "), Has("google meet")],
         chat: false,
+        asks_by_default: true,
     },
     App {
         id: "webex",
@@ -147,6 +175,7 @@ pub static APPS: &[App] = &[
         packages: &[],
         titles: &[Has("webex")],
         chat: false,
+        asks_by_default: true,
     },
     App {
         id: "slack",
@@ -156,6 +185,7 @@ pub static APPS: &[App] = &[
         packages: &["91750D7E.Slack"],
         titles: &[Has("slack")],
         chat: true,
+        asks_by_default: true,
     },
     App {
         id: "discord",
@@ -165,6 +195,7 @@ pub static APPS: &[App] = &[
         packages: &[],
         titles: &[Has("discord")],
         chat: false,
+        asks_by_default: false,
     },
     App {
         id: "goto",
@@ -174,6 +205,7 @@ pub static APPS: &[App] = &[
         packages: &[],
         titles: &[Has("goto meeting"), Has("gotomeeting")],
         chat: false,
+        asks_by_default: true,
     },
     App {
         id: "whereby",
@@ -183,6 +215,7 @@ pub static APPS: &[App] = &[
         packages: &[],
         titles: &[Has("whereby")],
         chat: false,
+        asks_by_default: true,
     },
     App {
         id: "jitsi",
@@ -192,6 +225,7 @@ pub static APPS: &[App] = &[
         packages: &[],
         titles: &[Has("jitsi")],
         chat: false,
+        asks_by_default: true,
     },
     App {
         id: "whatsapp",
@@ -201,6 +235,7 @@ pub static APPS: &[App] = &[
         packages: &["5319275A.WhatsAppDesktop"],
         titles: &[Has("whatsapp")],
         chat: true,
+        asks_by_default: false,
     },
     App {
         id: "signal",
@@ -210,6 +245,7 @@ pub static APPS: &[App] = &[
         packages: &[],
         titles: &[],
         chat: true,
+        asks_by_default: false,
     },
     App {
         id: "telegram",
@@ -219,6 +255,7 @@ pub static APPS: &[App] = &[
         packages: &["TelegramMessengerLLP.TelegramDesktop"],
         titles: &[],
         chat: true,
+        asks_by_default: false,
     },
 ];
 
@@ -232,6 +269,13 @@ const BROWSER_PACKAGES: &[(&str, &str)] = &[("TheBrowserCompany.Arc", "arc.exe")
 
 fn app_by_id(id: &str) -> Option<&'static App> {
     APPS.iter().find(|a| a.id == id)
+}
+
+/// Whether Yap asks about `app`'s calls: the person's choice (`choices`,
+/// from `meeting_detect_apps`), else the app's own default, so an app added
+/// in a later release starts at its default rather than "no".
+fn asks(choices: &BTreeMap<String, bool>, app: &App) -> bool {
+    choices.get(app.id).copied().unwrap_or(app.asks_by_default)
 }
 
 /// A microphone user, as the consent store names it.
@@ -403,6 +447,9 @@ struct Call {
     since: u64,
     /// The meeting note its prompt started recording into.
     note_id: Option<u64>,
+    /// How long its start prompt stays in the window, if not [`FADE_MS`]:
+    /// set only by the debug-only simulation, so the e2e suite needn't wait.
+    fade_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -426,10 +473,21 @@ struct Prompt {
     in_app: bool,
     /// Posted as a Windows notification.
     native: bool,
+    /// "Quietly": a notification without a banner, kept out of the window.
+    quiet: bool,
+    /// In the window, a start prompt fades after this long (ms) and counts
+    /// as "Not now". `None`: it stays (end prompts).
+    fade_ms: Option<u64>,
 }
 
+#[derive(Default)]
 struct State {
     enabled: bool,
+    /// "Quietly" (`meeting_detect_style`).
+    quiet: bool,
+    /// App id → whether to ask about its calls (`meeting_detect_apps`; apps
+    /// without an entry use their default, see [`asks`]).
+    choices: BTreeMap<String, bool>,
     tracker: Tracker,
     /// Browser exe on the mic → the meeting one of its windows showed.
     browser_calls: HashMap<String, &'static App>,
@@ -451,24 +509,12 @@ struct State {
     seq: u64,
 }
 
-static STATE: LazyLock<Mutex<State>> = LazyLock::new(|| {
-    Mutex::new(State {
-        enabled: false,
-        tracker: Tracker::default(),
-        browser_calls: HashMap::new(),
-        simulated: HashSet::new(),
-        calls: Vec::new(),
-        prompt: None,
-        answered: Vec::new(),
-        our_note: None,
-        due: None,
-        snoozed: HashMap::new(),
-        last_dictation: 0,
-        seq: 0,
-    })
-});
+static STATE: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new(State::default()));
 /// Wakes the detector thread (the registry watch, settings, the simulation).
 static WAKE: Mutex<Option<mpsc::Sender<()>>> = Mutex::new(None);
+/// The tray item last handed to `tray.rs` ([`tray_item`]); a change rebuilds
+/// the tray menu.
+static TRAY_ITEM: Mutex<Option<(String, String)>> = Mutex::new(None);
 /// The registry watch is running (else the detector polls).
 static WATCHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static STARTED: OnceLock<()> = OnceLock::new();
@@ -500,8 +546,23 @@ fn wake() {
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     enabled: bool,
+    /// "popup" | "quiet" (`meeting_detect_style`).
+    style: &'static str,
+    /// Every call app and whether Yap asks about it (Settings → General →
+    /// Meetings): the ones asked about by default first, each in table order.
+    apps: Vec<AppView>,
     calls: Vec<CallView>,
     prompt: Option<PromptView>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppView {
+    id: &'static str,
+    label: &'static str,
+    /// The effective choice: the person's, else the default.
+    asks: bool,
+    asks_by_default: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -527,9 +588,15 @@ struct PromptView {
     body: &'static str,
     accept: &'static str,
     decline: &'static str,
+    /// The quieter third answer, "Don't ask for Teams" (start prompts).
+    never: Option<String>,
     note_id: Option<u64>,
     /// Show it as the in-app toast.
     in_app: bool,
+    /// "Quietly": only in the notification center (and the tray).
+    quiet: bool,
+    /// In the window: fade after this long (ms), as "Not now".
+    fade_ms: Option<u64>,
 }
 
 /// One wording for both surfaces (the in-app toast, the Windows notification).
@@ -538,6 +605,7 @@ struct Wording {
     body: &'static str,
     accept: &'static str,
     decline: &'static str,
+    never: Option<String>,
 }
 
 fn wording(kind: PromptKind, app: &App) -> Wording {
@@ -547,19 +615,37 @@ fn wording(kind: PromptKind, app: &App) -> Wording {
             body: "Record notes? Let people know you're taking notes.",
             accept: "Record notes",
             decline: "Not now",
+            never: Some(format!("Don't ask for {}", app.label)),
         },
         PromptKind::End => Wording {
             title: format!("{} {} ended", app.label, app.noun),
             body: "Stop recording and summarise your notes?",
             accept: "Stop and summarise",
             decline: "Keep recording",
+            never: None,
         },
     }
 }
 
+/// The in-app confirmation of "Don't ask for Discord".
+fn wont_ask(app: &App) -> String {
+    format!("Won't ask about {} {}s", app.label, app.noun)
+}
+
 fn status_of(s: &State) -> Status {
+    let by_default = APPS.iter().filter(|a| a.asks_by_default);
     Status {
         enabled: s.enabled,
+        style: if s.quiet { QUIET } else { "popup" },
+        apps: by_default
+            .chain(APPS.iter().filter(|a| !a.asks_by_default))
+            .map(|a| AppView {
+                id: a.id,
+                label: a.label,
+                asks: asks(&s.choices, a),
+                asks_by_default: a.asks_by_default,
+            })
+            .collect(),
         calls: s
             .calls
             .iter()
@@ -583,8 +669,11 @@ fn status_of(s: &State) -> Status {
                 body: w.body,
                 accept: w.accept,
                 decline: w.decline,
+                never: w.never,
                 note_id: p.note_id,
                 in_app: p.in_app,
+                quiet: p.quiet,
+                fade_ms: p.fade_ms,
             }
         }),
     }
@@ -596,6 +685,78 @@ pub fn status() -> Status {
 
 fn emit(app: &AppHandle) {
     let _ = app.emit(EVENT, status());
+    sync_tray(app);
+}
+
+// ---- the tray item ---------------------------------------------------------------------------
+
+/// The call the tray offers to record: the latest live call of an app Yap
+/// asks about. (The caller checks that no meeting is recording.)
+fn offer(s: &State) -> Option<&Call> {
+    if !s.enabled {
+        return None;
+    }
+    s.calls.iter().rev().find(|c| asks(&s.choices, c.app))
+}
+
+/// The tray menu's "Record this Teams call" (`tray.rs` puts it near the top
+/// of the idle menu): (menu id, label), while a call is live, nothing
+/// records and Yap asks about its app. In either style, so a prompt that
+/// faded, went quietly to the notification center or got "Not now" still
+/// leaves a way to record.
+pub fn tray_item() -> Option<(String, String)> {
+    if crate::meeting::is_recording() {
+        return None;
+    }
+    let s = lock();
+    offer(&s).map(|c| (format!("meeting_record:{}", c.id), record_label(c.app)))
+}
+
+/// "Record this Teams call", "Record this Slack huddle".
+fn record_label(app: &App) -> String {
+    format!("Record this {} {}", app.label, app.noun)
+}
+
+/// Rebuild the tray menu when its item changed (a call started or ended, a
+/// recording started or stopped, an app was switched off…).
+fn sync_tray(app: &AppHandle) {
+    let item = tray_item();
+    let mut last = TRAY_ITEM.lock().unwrap_or_else(|p| p.into_inner());
+    if *last != item {
+        *last = item;
+        drop(last);
+        crate::tray::refresh(app);
+    }
+}
+
+/// The tray's "Record this Teams call": "Record notes" for that call, which
+/// also answers its start prompt if one is still up. Blocking (like
+/// [`respond`]), so off the main thread.
+pub fn on_tray_record(app: &AppHandle, call_id: u64) {
+    let mut todo = Todo::default();
+    {
+        let mut s = lock();
+        let pending = s.prompt.as_ref().filter(|p| p.call_id == call_id && p.kind == PromptKind::Start);
+        if let Some(id) = pending.map(|p| p.id) {
+            mark_answered(&mut s, id);
+            withdraw(&mut s, &mut todo);
+        }
+        if s.due == Some(call_id) {
+            s.due = None;
+        }
+    }
+    run(app, todo);
+    tracing::info!(call_id, "meeting detect: record from the tray");
+    if let Err(e) = record(app, call_id) {
+        // Say why in a Windows notification, or in the window when it's on
+        // screen (or no notification can be posted).
+        #[cfg(windows)]
+        if !window_view(app).0 && native::failed(app, &e).is_ok() {
+            return;
+        }
+        let _ = crate::commands::show_settings(app);
+        let _ = app.emit("yap-error", format!("Couldn't record the call. {e}"));
+    }
 }
 
 // ---- side effects (run after the lock is released) ----------------------------------------
@@ -642,6 +803,25 @@ fn withdraw(s: &mut State, todo: &mut Todo) {
     }
 }
 
+/// Prompt `id` got its answer (it can arrive from both surfaces).
+fn mark_answered(s: &mut State, id: u64) {
+    s.answered.push(id);
+    if s.answered.len() > 16 {
+        s.answered.remove(0);
+    }
+}
+
+/// After apps were switched off: nothing up or due about their calls.
+fn drop_unasked(s: &mut State, todo: &mut Todo) {
+    if s.prompt.as_ref().is_some_and(|p| !asks(&s.choices, p.app)) {
+        withdraw(s, todo);
+    }
+    let due = s.due.and_then(|id| s.calls.iter().find(|c| c.id == id));
+    if due.is_some_and(|c| !asks(&s.choices, c.app)) {
+        s.due = None;
+    }
+}
+
 /// The main window: (on screen, focused). Never call with the lock held.
 fn window_view(app: &AppHandle) -> (bool, bool) {
     app.get_webview_window("settings")
@@ -664,8 +844,10 @@ fn dictating(app: &AppHandle) -> bool {
     guard.as_ref().is_some_and(|p| p.is_busy())
 }
 
-/// Put up a prompt (replacing whatever was up): the in-app toast when the
-/// main window is on screen, a Windows notification unless it's focused.
+/// Put up a prompt (replacing whatever was up). Pop-up style: the in-app
+/// toast when the main window is on screen, a Windows notification unless
+/// it's focused. Quietly: a notification without a banner, whatever the
+/// window does.
 fn show_prompt(
     s: &mut State,
     todo: &mut Todo,
@@ -678,11 +860,15 @@ fn show_prompt(
     withdraw(s, todo);
     s.seq += 1;
     let (visible, focused) = view;
-    let prompt = Prompt { id: s.seq, kind, call_id, app, note_id, in_app: visible, native: false };
-    if !focused {
+    let quiet = s.quiet;
+    let fade_ms = (kind == PromptKind::Start)
+        .then(|| s.calls.iter().find(|c| c.id == call_id).and_then(|c| c.fade_ms).unwrap_or(FADE_MS));
+    let in_app = visible && !quiet;
+    let prompt = Prompt { id: s.seq, kind, call_id, app, note_id, in_app, native: false, quiet, fade_ms };
+    if quiet || !focused {
         todo.post_native = Some(prompt.clone());
     }
-    tracing::info!(app = app.id, ?kind, in_app = visible, "meeting detect: prompt");
+    tracing::info!(app = app.id, ?kind, in_app, quiet, "meeting detect: prompt");
     s.prompt = Some(prompt);
     todo.emit = true;
 }
@@ -735,11 +921,12 @@ fn call_started(s: &mut State, todo: &mut Todo, id: &'static str, since: u64) {
     if carried.is_some() && rejoin {
         withdraw(s, todo);
     }
-    s.calls.push(Call { id: call_id, app, since, note_id: carried });
+    s.calls.push(Call { id: call_id, app, since, note_id: carried, fade_ms: None });
     todo.emit = true;
-    tracing::info!(app = id, carried = carried.is_some(), "meeting detect: call started");
+    let asked = asks(&s.choices, app);
+    tracing::info!(app = id, carried = carried.is_some(), asked, "meeting detect: call started");
     let snoozed = s.snoozed.get(id).is_some_and(|until| now_ms() < *until);
-    if recording_note.is_none() && !snoozed {
+    if recording_note.is_none() && !snoozed && asked {
         s.due = Some(call_id);
     }
 }
@@ -752,7 +939,9 @@ fn call_ended(s: &mut State, todo: &mut Todo, view: (bool, bool), id: &str) {
     if s.due == Some(call.id) {
         s.due = None;
     }
-    if let Some(note) = recording_of(&call) {
+    // An app Yap doesn't ask about gets no "Stop and summarise?" either.
+    let note = recording_of(&call).filter(|_| asks(&s.choices, call.app));
+    if let Some(note) = note {
         show_prompt(s, todo, view, PromptKind::End, call.id, call.app, Some(note));
     } else if s.prompt.as_ref().is_some_and(|p| p.call_id == call.id) {
         withdraw(s, todo);
@@ -791,16 +980,19 @@ fn tick(app: &AppHandle) {
             s.due = None;
         }
         if let Some(call_id) = s.due {
-            let quiet = now.saturating_sub(s.last_dictation) >= AFTER_DICTATION_MS;
-            if wants_view && s.prompt.is_none() && quiet {
+            let settled = now.saturating_sub(s.last_dictation) >= AFTER_DICTATION_MS;
+            if wants_view && s.prompt.is_none() && settled {
                 s.due = None;
-                if let Some(app) = s.calls.iter().find(|c| c.id == call_id).map(|c| c.app) {
+                let call = s.calls.iter().find(|c| c.id == call_id && asks(&s.choices, c.app));
+                if let Some(app) = call.map(|c| c.app) {
                     show_prompt(&mut s, &mut todo, view, PromptKind::Start, call_id, app, None);
                 }
             }
         }
     }
     run(app, todo);
+    // A meeting recording started or stopped by hand changes the tray item.
+    sync_tray(app);
 }
 
 // ---- the detector thread ------------------------------------------------------------
@@ -811,8 +1003,14 @@ pub fn init(app: &AppHandle) {
     if STARTED.set(()).is_err() {
         return;
     }
-    let enabled = crate::config::load().meeting_detection;
-    lock().enabled = enabled;
+    let cfg = crate::config::load();
+    let enabled = cfg.meeting_detection;
+    {
+        let mut s = lock();
+        s.enabled = enabled;
+        s.quiet = cfg.meeting_detect_style == QUIET;
+        s.choices = cfg.meeting_detect_apps;
+    }
     let (tx, rx) = mpsc::channel();
     let _ = tx.send(()); // a first scan: a call may be under way already
     *WAKE.lock().unwrap_or_else(|p| p.into_inner()) = Some(tx.clone());
@@ -930,15 +1128,22 @@ fn scan(app: &AppHandle) {
     on_edges(app, edges);
 }
 
-/// The Settings toggle ("Detect calls and offer to take notes") changed.
+/// Settings were saved (`save_config`): the "Detect calls and offer to take
+/// notes" toggle is `enabled`; how Yap asks and which apps it asks about are
+/// read back from the config just saved. Applies at once: switching an app
+/// off withdraws a prompt about its call.
 pub fn sync(app: &AppHandle, enabled: bool) {
+    let cfg = crate::config::load();
+    let quiet = cfg.meeting_detect_style == QUIET;
     let mut todo = Todo::default();
     {
         let mut s = lock();
-        if s.enabled == enabled {
+        if s.enabled == enabled && s.quiet == quiet && s.choices == cfg.meeting_detect_apps {
             return;
         }
         s.enabled = enabled;
+        s.quiet = quiet;
+        s.choices = cfg.meeting_detect_apps;
         if !enabled {
             // A recording Yap started keeps going; it just won't be asked about.
             withdraw(&mut s, &mut todo);
@@ -947,40 +1152,48 @@ pub fn sync(app: &AppHandle, enabled: bool) {
             s.simulated.clear();
             s.calls.clear();
             s.due = None;
+        } else {
+            drop_unasked(&mut s, &mut todo);
         }
         todo.emit = true;
+        tracing::info!(enabled, quiet, choices = ?s.choices, "meeting detect: settings changed");
     }
-    tracing::info!(enabled, "meeting detect: setting changed");
     run(app, todo);
     wake();
 }
 
 /// The main window came up or was clicked: a pending prompt moves into it
-/// (its Windows notification is withdrawn). A window event, not a page one:
-/// WebView2 reports `visible` even while the window is hidden.
+/// (its Windows notification is withdrawn), unless it's a quiet one. A
+/// window event, not a page one: WebView2 reports `visible` even while the
+/// window is hidden.
 pub fn on_main_window_focused(app: &AppHandle) {
     let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let mut todo = Todo::default();
-        {
-            let mut s = lock();
-            if let Some(p) = s.prompt.as_mut() {
-                if p.native || !p.in_app {
-                    todo.remove_native = p.native;
-                    p.native = false;
-                    p.in_app = true;
-                    todo.emit = true;
-                }
+    tauri::async_runtime::spawn(async move { move_into_window(&app, false) });
+}
+
+/// Show the pending prompt as the in-app toast instead of a notification.
+/// A quiet prompt only moves when `quiet_too` (its notification was clicked).
+fn move_into_window(app: &AppHandle, quiet_too: bool) {
+    let mut todo = Todo::default();
+    {
+        let mut s = lock();
+        if let Some(p) = s.prompt.as_mut().filter(|p| quiet_too || !p.quiet) {
+            if p.native || !p.in_app {
+                todo.remove_native = p.native;
+                p.native = false;
+                p.in_app = true;
+                todo.emit = true;
             }
         }
-        run(&app, todo);
-    });
+    }
+    run(app, todo);
 }
 
 // ---- answers -------------------------------------------------------------------------
 
 /// The person answered prompt `prompt_id` (the in-app toast or the Windows
-/// notification): "record" | "dismiss" (start prompts), "stop" | "keep" (end
+/// notification): "record" | "dismiss" | "never" (start prompts; a prompt
+/// that faded in the window counts as "dismiss"), "stop" | "keep" (end
 /// prompts). "record" returns the new note's id. Blocking (the recorder takes
 /// up to a few seconds to start): run it off the main thread.
 pub fn respond(app: &AppHandle, prompt_id: u64, action: &str) -> Result<Option<u64>, String> {
@@ -993,10 +1206,7 @@ pub fn respond(app: &AppHandle, prompt_id: u64, action: &str) -> Result<Option<u
         }
         let current = s.prompt.as_ref().is_some_and(|p| p.id == prompt_id);
         if current {
-            s.answered.push(prompt_id);
-            if s.answered.len() > 16 {
-                s.answered.remove(0);
-            }
+            mark_answered(&mut s, prompt_id);
         }
         let prompt = if current { s.prompt.clone() } else { None };
         if current {
@@ -1016,9 +1226,38 @@ pub fn respond(app: &AppHandle, prompt_id: u64, action: &str) -> Result<Option<u
             stop_and_summarise(app, p.note_id);
             Ok(None)
         }
-        ("dismiss" | "keep" | "stop", _) => Ok(None),
+        ("never", Some(p)) if p.kind == PromptKind::Start => {
+            stop_asking(app, p.app);
+            Ok(None)
+        }
+        ("dismiss" | "keep" | "stop" | "never", _) => Ok(None),
         (other, _) => Err(format!("Unknown answer: {other}")),
     }
+}
+
+/// "Don't ask for Discord": saved as the person's choice (so Settings shows
+/// it switched off), and no prompt stays up or comes back for its calls.
+/// With the window on screen, a brief confirmation there points to Settings.
+fn stop_asking(app: &AppHandle, call_app: &'static App) {
+    let mut cfg = crate::config::load();
+    cfg.meeting_detect_apps.insert(call_app.id.to_string(), false);
+    if let Err(e) = crate::config::save(&cfg) {
+        tracing::warn!("meeting detect: couldn't save the choice ({e})");
+    }
+    let mut todo = Todo::default();
+    {
+        let mut s = lock();
+        s.choices.insert(call_app.id.to_string(), false);
+        drop_unasked(&mut s, &mut todo);
+        todo.emit = true;
+    }
+    run(app, todo);
+    let confirm = window_view(app).0.then(|| wont_ask(call_app));
+    let _ = app.emit(
+        EVENT_CHOICE,
+        serde_json::json!({ "app": call_app.id, "asks": false, "confirm": confirm }),
+    );
+    tracing::info!(app = call_app.id, "meeting detect: won't ask about this app");
 }
 
 /// "Record notes": a meeting note for the call, recording into it at once.
@@ -1134,9 +1373,15 @@ pub async fn meeting_detect_respond(
 
 /// Debug builds only: pretend call app `app_id` ("teams", "zoom", …) took
 /// (`active`) or let go of the mic, skipping the debounce — the e2e suite's
-/// stand-in for a real call.
+/// stand-in for a real call. `fade_ms` makes that call's start prompt fade
+/// from the window that soon instead of after 30 s.
 #[tauri::command]
-pub async fn meeting_detect_simulate(app: AppHandle, app_id: String, active: bool) -> Result<(), String> {
+pub async fn meeting_detect_simulate(
+    app: AppHandle,
+    app_id: String,
+    active: bool,
+    fade_ms: Option<u64>,
+) -> Result<(), String> {
     if !cfg!(debug_assertions) {
         return Err("Call simulation is only in debug builds".to_string());
     }
@@ -1155,6 +1400,11 @@ pub async fn meeting_detect_simulate(app: AppHandle, app_id: String, active: boo
     };
     tracing::info!(app = call_app.id, active, "meeting detect: simulated");
     on_edges(&app, edge.into_iter().collect());
+    if let Some(ms) = fade_ms {
+        if let Some(call) = lock().calls.iter_mut().rev().find(|c| c.app.id == call_app.id) {
+            call.fade_ms = Some(ms);
+        }
+    }
     tick(&app);
     Ok(())
 }
@@ -1375,7 +1625,8 @@ mod windows_titles {
 }
 
 /// The prompts as Windows notifications (silent, with Yap's logo; see
-/// `crate::win_toast`), for when the main window isn't in front.
+/// `crate::win_toast`), for when the main window isn't in front, or for every
+/// prompt in the quiet style (no banner: notification center only).
 #[cfg(windows)]
 mod native {
     use std::sync::Mutex;
@@ -1392,27 +1643,41 @@ mod native {
     /// notification center.
     static CURRENT: Mutex<Option<ToastNotification>> = Mutex::new(None);
 
-    fn post(app: &AppHandle, xml: &str) -> Result<(), String> {
+    /// Post `xml` as the call notification; `quiet`: without a banner.
+    fn post(app: &AppHandle, xml: &str, quiet: bool) -> Result<(), String> {
         if !crate::win_toast::allowed() {
             return Err("off in portable mode and test runs".to_string());
         }
-        let toast = crate::win_toast::post(app, TAG, xml, None, activated)?;
+        let toast = if quiet {
+            crate::win_toast::post_quietly(app, TAG, xml, activated)?
+        } else {
+            crate::win_toast::post(app, TAG, xml, None, activated)?
+        };
         *CURRENT.lock().unwrap_or_else(|p| p.into_inner()) = Some(toast);
         Ok(())
     }
 
+    /// The prompt's notification: its answers as buttons, plus "Don't ask
+    /// for Teams" on a start prompt.
     pub fn prompt_xml(p: &Prompt, logo: &str) -> String {
         let w = wording(p.kind, p.app);
         let (accept, decline) = match p.kind {
             PromptKind::Start => ("record", "dismiss"),
             PromptKind::End => ("stop", "keep"),
         };
+        let never = w.never.as_deref().map_or(String::new(), |label| {
+            format!(
+                "<action content=\"{}\" arguments=\"meeting:never:{}\" activationType=\"foreground\"/>",
+                esc(label),
+                p.id,
+            )
+        });
         format!(
             "<toast launch=\"meeting:show\"><visual><binding template=\"ToastGeneric\">\
              <text>{}</text><text>{}</text>{logo}</binding></visual><actions>\
              <action content=\"{}\" arguments=\"meeting:{accept}:{id}\" activationType=\"foreground\"/>\
              <action content=\"{}\" arguments=\"meeting:{decline}:{id}\" activationType=\"foreground\"/>\
-             </actions><audio silent=\"true\"/></toast>",
+             {never}</actions><audio silent=\"true\"/></toast>",
             esc(&w.title),
             esc(w.body),
             esc(w.accept),
@@ -1422,10 +1687,11 @@ mod native {
     }
 
     pub fn post_prompt(app: &AppHandle, p: &Prompt) -> Result<(), String> {
-        post(app, &prompt_xml(p, &logo_xml()))
+        post(app, &prompt_xml(p, &logo_xml()), p.quiet)
     }
 
-    /// "Record notes" from the notification center: say it's recording.
+    /// "Record notes" from the notification center or the tray: say it's
+    /// recording. (Feedback on a click, so with a banner in either style.)
     pub fn recording(app: &AppHandle, call: &App, note_id: u64) {
         let xml = format!(
             "<toast launch=\"meeting:open:{note_id}\"><visual><binding template=\"ToastGeneric\">\
@@ -1436,12 +1702,13 @@ mod native {
             esc(&format!("Taking notes on your {} {}", call.label, call.noun)),
             logo_xml(),
         );
-        if let Err(e) = post(app, &xml) {
+        if let Err(e) = post(app, &xml, false) {
             tracing::info!("meeting detect: no Windows notification ({e})");
         }
     }
 
-    fn failed(app: &AppHandle, message: &str) {
+    /// Recording the call couldn't start: say why.
+    pub fn failed(app: &AppHandle, message: &str) -> Result<(), String> {
         let xml = format!(
             "<toast launch=\"meeting:show\"><visual><binding template=\"ToastGeneric\">\
              <text>Couldn't record the call</text><text>{}</text>{}</binding></visual>\
@@ -1449,7 +1716,7 @@ mod native {
             esc(message),
             logo_xml(),
         );
-        let _ = post(app, &xml);
+        post(app, &xml, false)
     }
 
     /// Take the call notification out of the notification center.
@@ -1475,12 +1742,14 @@ mod native {
                 }
                 (Some("meeting"), Some(answer), Some(prompt_id)) => {
                     if let Err(e) = super::respond(&app, prompt_id, answer) {
-                        failed(&app, &e);
+                        let _ = failed(&app, &e);
                     }
                 }
-                // The body: open Yap; a pending prompt moves into the window.
+                // The body: open Yap, and a pending prompt moves into the
+                // window (even a quiet one: this click asked for it).
                 _ => {
                     let _ = crate::commands::show_settings(&app);
+                    super::move_into_window(&app, true);
                 }
             }
         });
@@ -1625,10 +1894,134 @@ mod tests {
         let start = wording(PromptKind::Start, app("teams"));
         assert_eq!(start.title, "Teams call detected");
         assert_eq!((start.accept, start.decline), ("Record notes", "Not now"));
+        assert_eq!(start.never.as_deref(), Some("Don't ask for Teams"));
         assert!(start.body.contains("Let people know you're taking notes"));
         let end = wording(PromptKind::End, app("slack"));
         assert_eq!(end.title, "Slack huddle ended");
         assert_eq!((end.accept, end.decline), ("Stop and summarise", "Keep recording"));
+        assert_eq!(end.never, None);
+        assert_eq!(wont_ask(app("discord")), "Won't ask about Discord calls");
+        assert_eq!(wont_ask(app("slack")), "Won't ask about Slack huddles");
+        assert_eq!(record_label(app("meet")), "Record this Google Meet call");
+    }
+
+    #[test]
+    fn work_apps_are_asked_about_by_default_personal_ones_are_not() {
+        let ids = |by_default: bool| -> Vec<&str> {
+            APPS.iter().filter(|a| a.asks_by_default == by_default).map(|a| a.id).collect()
+        };
+        assert_eq!(ids(true), ["teams", "zoom", "meet", "webex", "slack", "goto", "whereby", "jitsi"]);
+        assert_eq!(ids(false), ["discord", "whatsapp", "signal", "telegram"]);
+    }
+
+    #[test]
+    fn the_persons_choice_wins_over_the_app_default() {
+        let none = BTreeMap::new();
+        assert!(asks(&none, app("teams")));
+        assert!(!asks(&none, app("discord")));
+        // As saved by Settings / "Don't ask for Teams" (camelCase on the wire).
+        let cfg: crate::config::YapConfig =
+            serde_json::from_str(r#"{"meetingDetectApps":{"teams":false,"discord":true,"gone":true}}"#).unwrap();
+        let choices = cfg.meeting_detect_apps;
+        assert!(!asks(&choices, app("teams")));
+        assert!(asks(&choices, app("discord")));
+        // No choice saved: the app's default (so do apps added later).
+        assert!(asks(&choices, app("zoom")));
+        assert!(!asks(&choices, app("signal")));
+        assert_eq!(cfg.meeting_detect_style, "popup");
+        assert!(crate::config::YapConfig::default().meeting_detect_apps.is_empty());
+    }
+
+    #[test]
+    fn only_calls_of_apps_yap_asks_about_get_a_prompt() {
+        let mut s = State { enabled: true, ..Default::default() };
+        let mut todo = Todo::default();
+        call_started(&mut s, &mut todo, "discord", 0);
+        assert_eq!(s.due, None, "Discord isn't asked about by default");
+        call_started(&mut s, &mut todo, "teams", 0);
+        let teams = s.calls.iter().find(|c| c.app.id == "teams").unwrap().id;
+        assert_eq!(s.due, Some(teams));
+        // Switched off (Settings, or "Don't ask for Teams"): nothing stays due…
+        s.choices.insert("teams".into(), false);
+        drop_unasked(&mut s, &mut todo);
+        assert_eq!(s.due, None);
+        // …or up.
+        s.choices.insert("teams".into(), true);
+        show_prompt(&mut s, &mut todo, (true, true), PromptKind::Start, teams, app("teams"), None);
+        s.choices.insert("teams".into(), false);
+        drop_unasked(&mut s, &mut todo);
+        assert!(s.prompt.is_none());
+        // Switched on: a WhatsApp call is asked about.
+        s.choices.insert("whatsapp".into(), true);
+        call_started(&mut s, &mut todo, "whatsapp", 0);
+        assert_eq!(s.due, s.calls.last().map(|c| c.id));
+    }
+
+    #[test]
+    fn quiet_prompts_go_to_the_notification_center_only() {
+        let mut s = State { enabled: true, quiet: true, ..Default::default() };
+        let mut todo = Todo::default();
+        call_started(&mut s, &mut todo, "zoom", 0);
+        let call = s.calls[0].id;
+        // Even with the window on screen and focused: no toast in it, a
+        // notification without a banner.
+        show_prompt(&mut s, &mut todo, (true, true), PromptKind::Start, call, app("zoom"), None);
+        let p = s.prompt.clone().unwrap();
+        assert!(p.quiet && !p.in_app);
+        assert!(todo.post_native.as_ref().is_some_and(|n| n.quiet));
+        // Pop-up: the toast in a focused window, and no notification…
+        s.quiet = false;
+        let mut todo = Todo::default();
+        show_prompt(&mut s, &mut todo, (true, true), PromptKind::Start, call, app("zoom"), None);
+        assert!(s.prompt.as_ref().is_some_and(|p| p.in_app && !p.quiet));
+        assert!(todo.post_native.is_none());
+        // …or a notification with a banner while the window is hidden.
+        let mut todo = Todo::default();
+        show_prompt(&mut s, &mut todo, (false, false), PromptKind::Start, call, app("zoom"), None);
+        assert!(s.prompt.as_ref().is_some_and(|p| !p.in_app));
+        assert!(todo.post_native.as_ref().is_some_and(|n| !n.quiet));
+    }
+
+    #[test]
+    fn a_start_prompt_fades_from_the_window_an_end_prompt_stays() {
+        let mut s = State { enabled: true, ..Default::default() };
+        let mut todo = Todo::default();
+        call_started(&mut s, &mut todo, "webex", 0);
+        let call = s.calls[0].id;
+        show_prompt(&mut s, &mut todo, (true, true), PromptKind::Start, call, app("webex"), None);
+        assert_eq!(s.prompt.as_ref().unwrap().fade_ms, Some(30_000));
+        // The debug-only simulation can make it quicker.
+        s.calls[0].fade_ms = Some(1_500);
+        show_prompt(&mut s, &mut todo, (true, true), PromptKind::Start, call, app("webex"), None);
+        assert_eq!(s.prompt.as_ref().unwrap().fade_ms, Some(1_500));
+        show_prompt(&mut s, &mut todo, (true, true), PromptKind::End, call, app("webex"), Some(1));
+        assert_eq!(s.prompt.as_ref().unwrap().fade_ms, None);
+    }
+
+    #[test]
+    fn the_tray_offers_the_latest_call_yap_asks_about() {
+        let mut s = State { enabled: true, ..Default::default() };
+        let mut todo = Todo::default();
+        assert!(offer(&s).is_none());
+        call_started(&mut s, &mut todo, "teams", 0);
+        call_started(&mut s, &mut todo, "discord", 0);
+        assert_eq!(offer(&s).map(|c| c.app.id), Some("teams"), "not Discord: it isn't asked about");
+        s.choices.insert("discord".into(), true);
+        assert_eq!(offer(&s).map(|c| c.app.id), Some("discord"));
+        s.enabled = false;
+        assert!(offer(&s).is_none());
+    }
+
+    #[test]
+    fn settings_list_the_apps_asked_about_first() {
+        let s = State { choices: [("discord".to_string(), true)].into(), ..Default::default() };
+        let status = status_of(&s);
+        assert_eq!(status.style, "popup");
+        let ids: Vec<&str> = status.apps.iter().map(|a| a.id).collect();
+        assert_eq!(ids[..8], ["teams", "zoom", "meet", "webex", "slack", "goto", "whereby", "jitsi"]);
+        assert_eq!(ids[8..], ["discord", "whatsapp", "signal", "telegram"]);
+        let discord = status.apps.iter().find(|a| a.id == "discord").unwrap();
+        assert!(discord.asks && !discord.asks_by_default);
     }
 
     #[cfg(windows)]
@@ -1638,23 +2031,30 @@ mod tests {
             id: 7,
             kind: PromptKind::Start,
             call_id: 3,
-            app: app("teams"),
+            app: app("meet"),
             note_id: None,
             in_app: false,
             native: false,
+            quiet: true,
+            fade_ms: Some(FADE_MS),
         };
         let xml = native::prompt_xml(&p, "");
-        assert!(xml.contains("<text>Teams call detected</text>"));
-        assert!(xml.contains("arguments=\"meeting:record:7\""));
-        assert!(xml.contains("arguments=\"meeting:dismiss:7\""));
+        assert!(xml.contains("<text>Google Meet call detected</text>"));
+        // Three answers: Record notes, Not now, Don't ask for Google Meet.
+        assert_eq!(xml.matches("<action ").count(), 3);
+        assert!(xml.contains("content=\"Record notes\" arguments=\"meeting:record:7\""));
+        assert!(xml.contains("content=\"Not now\" arguments=\"meeting:dismiss:7\""));
+        assert!(xml.contains("content=\"Don't ask for Google Meet\" arguments=\"meeting:never:7\""));
         assert!(xml.contains("<audio silent=\"true\"/>"));
-        // WinRT takes it as a toast (built, never shown).
-        let doc = windows::Data::Xml::Dom::XmlDocument::new().unwrap();
-        doc.LoadXml(&windows::core::HSTRING::from(xml)).unwrap();
-        windows::UI::Notifications::ToastNotification::CreateToastNotification(&doc).unwrap();
-        let end = Prompt { kind: PromptKind::End, note_id: Some(1), ..p };
+        // WinRT takes it as a toast (built, never shown): quietly, without a
+        // banner; the pop-up style keeps it.
+        assert!(crate::win_toast::build("call", &xml, true).unwrap().SuppressPopup().unwrap());
+        assert!(!crate::win_toast::build("call", &xml, false).unwrap().SuppressPopup().unwrap());
+        let end = Prompt { kind: PromptKind::End, note_id: Some(1), fade_ms: None, ..p };
         let xml = native::prompt_xml(&end, "");
+        assert_eq!(xml.matches("<action ").count(), 2);
         assert!(xml.contains("arguments=\"meeting:stop:7\"") && xml.contains("arguments=\"meeting:keep:7\""));
+        crate::win_toast::build("call", &xml, false).unwrap();
     }
 
     /// Read-only look at this machine's microphone record:
