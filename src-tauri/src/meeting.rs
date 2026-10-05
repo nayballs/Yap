@@ -432,6 +432,21 @@ fn peak(samples: &[f32]) -> f32 {
     samples.iter().fold(0.0f32, |m, s| m.max(s.abs()))
 }
 
+/// The meeting's attendees (from its calendar invite, or typed in) ahead of
+/// the dictionary's spellings, for the Whisper prompt: names come out spelled
+/// as the invite has them.
+fn with_attendees(dictionary: &[crate::config::DictionaryEntry]) -> Vec<crate::config::DictionaryEntry> {
+    let names = recording_note()
+        .and_then(crate::notes::get)
+        .map(|n| n.participants)
+        .unwrap_or_default();
+    names
+        .into_iter()
+        .map(|to| crate::config::DictionaryEntry { from: String::new(), to, fuzzy: false })
+        .chain(dictionary.iter().cloned())
+        .collect()
+}
+
 /// Transcribe one chunk on the shared warm engine (take → transcribe →
 /// put back; lazily reloads the model if the idle watcher dropped it).
 async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option<String> {
@@ -464,7 +479,7 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option
         Some(cfg.selected_language.clone())
     };
     let translate = cfg.translate_to_english;
-    let dict_prompt = crate::config::dictionary_prompt(&cfg.dictionary);
+    let dict_prompt = crate::config::dictionary_prompt(&with_attendees(&cfg.dictionary));
 
     let slot = Arc::clone(engine_slot);
     let outcome = tokio::task::spawn_blocking(move || {

@@ -73,7 +73,8 @@ pub fn parse_bytes(bytes: &[u8]) -> Option<Component> {
     build(text.trim_start_matches('\u{feff}').lines())
 }
 
-/// [`parse_bytes`] for a string (tests, and lines already decoded).
+/// [`parse_bytes`] for a string.
+#[cfg(test)]
 pub fn parse_text(text: &str) -> Option<Component> {
     parse_bytes(text.as_bytes())
 }

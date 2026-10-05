@@ -433,7 +433,11 @@ pub fn meeting_start(
         let p = guard.as_ref().ok_or("pipeline not started")?;
         p.engine_slot()
     };
-    crate::meeting::start(app, engine_slot, note_id)
+    crate::meeting::start(app.clone(), engine_slot, note_id)?;
+    // During a meeting on the calendar, the note becomes that meeting's
+    // (title, attendees, invite), whichever way the recording started.
+    crate::calendar::on_meeting_started(&app, note_id);
+    Ok(())
 }
 
 /// Stop the active meeting recording (final chunk is transcribed + persisted,
@@ -521,6 +525,9 @@ pub async fn note_ask(
     let mut context = String::new();
     if !note.participants.is_empty() {
         context.push_str(&format!("Attendees: {}\n", note.participants.join(", ")));
+    }
+    if let Some(invite) = crate::calendar::invite_context(&note) {
+        context.push_str(&invite);
     }
     if !note.content.trim().is_empty() {
         context.push_str(note.content.trim());
@@ -660,6 +667,7 @@ pub fn chat_delete(id: u64) {
 pub async fn chat_send(
     conversation_id: Option<u64>,
     text: String,
+    scope: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let text = text.trim().to_string();
     if text.is_empty() {
@@ -700,7 +708,17 @@ pub async fn chat_send(
         system.push_str("\n\nYou have access to tools. ");
         system.push_str(&crate::tools::TOOL_INSTRUCTIONS.join(" "));
     }
-    let rag = rag_context(&text);
+    // Asked from the Meetings view: grounded in the latest meetings and the
+    // meeting notes that match (calendar.rs).
+    if scope.as_deref() == Some("meetings") {
+        let meetings = crate::calendar::meetings_context(&text);
+        if !meetings.is_empty() {
+            system.push_str(&format!(
+                "\n\nThe user is asking about their meetings. Below are their most recent meetings (newest first) and the meeting notes that match the question. Answer from them, say which meeting an answer comes from, and say so when they don't cover the question.\n\n{meetings}"
+            ));
+        }
+    }
+    let rag = if scope.as_deref() == Some("meetings") { String::new() } else { rag_context(&text) };
     if !rag.is_empty() {
         system.push_str(&format!(
             "\n\nBelow are notes from the user's library that may be relevant. Reference them naturally if they help answer the question.\n\n{rag}"
@@ -798,6 +816,8 @@ pub fn save_config(
     crate::meeting_detect::sync(&app, cfg.meeting_detection);
     // Hiding meeting windows from screen shares may have flipped mid-meeting.
     crate::capture::sync(&app);
+    // …and "Notify before scheduled meetings start" applies at once.
+    crate::calendar::on_config_saved();
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.update_config(cfg);

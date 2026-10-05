@@ -9,6 +9,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { toast } from './ui/toast.svelte.js';
+  import CalendarLinkCard from './CalendarLinkCard.svelte';
 
   let enabled = $state(true);
   let status = $state({ running: false, port: null, bridgeFile: '' });
@@ -118,6 +119,9 @@ ${curlExample}
         machine — loopback only, token-protected, no cloud, no account.
       </p>
     </div>
+
+    <!-- Calendar: connected in Settings → Connectors (calendar.rs) -->
+    <CalendarLinkCard />
 
     <!-- Local API bridge -->
     <div class="card">

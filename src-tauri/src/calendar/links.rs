@@ -155,8 +155,7 @@ pub fn links_in(text: &str) -> Vec<String> {
             .unwrap_or(rest.len());
         let mut link = rest[..end].replace("&amp;", "&");
         // A sentence's full stop, a closing bracket the link didn't open…
-        loop {
-            let Some(last) = link.chars().last() else { break };
+        while let Some(last) = link.chars().last() {
             let unbalanced = |open: char, close: char| {
                 last == close && link.matches(open).count() < link.matches(close).count()
             };

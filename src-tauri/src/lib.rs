@@ -414,11 +414,23 @@ pub fn run() {
             meeting_guard::meeting_limit_status,
             commands::configure_meeting_hotkey,
             capture::capture_affinity,
+            calendar::calendar_status,
+            calendar::calendar_sync,
+            calendar::calendar_connect_google,
+            calendar::calendar_cancel_google,
+            calendar::calendar_add_link,
+            calendar::calendar_disconnect,
+            calendar::calendar_event,
+            calendar::calendar_card,
+            calendar::calendar_nudge,
+            calendar::calendar_meeting_notes,
             // Test mode only (e2e.rs); not in release builds at all.
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_feed,
             #[cfg(debug_assertions)]
             meeting_guard::e2e_meeting_limit,
+            #[cfg(debug_assertions)]
+            calendar::calendar_e2e_opened,
         ])
         // A meeting window (the notepad, the overlay) that loads while a
         // meeting records leaves screen captures too (capture.rs).
@@ -682,6 +694,11 @@ pub fn run() {
             // and keeping meeting windows out of screen shares.
             meeting_guard::init(&handle);
             capture::init(&handle);
+
+            // Calendar: the connected calendars' meetings, reminders before
+            // them, and their titles and attendees for meeting notes (talks
+            // to Google or the person's iCal link only; calendar.rs).
+            calendar::init(&handle);
 
             // e2e test runs: announce test mode, quit when stdin closes.
             e2e::start(&handle);

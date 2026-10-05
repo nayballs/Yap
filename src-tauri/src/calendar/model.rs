@@ -377,14 +377,16 @@ pub fn next_reminder_at(events: &[Event], now: i64, lead: i64, snoozed: &HashMap
 }
 
 /// A title that's only a placeholder, which a calendar title may replace:
-/// empty, or what call detection names a note ("Teams call · 5 Oct, 14:30").
+/// empty, or what Yap names a meeting note it starts by itself ("Teams call
+/// · 5 Oct, 14:30" from call detection, "Meeting · 5 Oct, 14:30" from the
+/// meeting shortcut).
 pub fn is_placeholder_title(title: &str) -> bool {
     let t = title.trim();
     if t.is_empty() || t.eq_ignore_ascii_case("untitled note") || t.eq_ignore_ascii_case("untitled") {
         return true;
     }
     let Some((what, when)) = t.split_once(" \u{b7} ") else { return false };
-    let what_ok = what.ends_with(" call") || what.ends_with(" huddle");
+    let what_ok = what == "Meeting" || what.ends_with(" call") || what.ends_with(" huddle");
     let mut parts = when.splitn(2, ", ");
     let (Some(day_month), Some(time)) = (parts.next(), parts.next()) else { return false };
     let day_month_ok = day_month
@@ -565,7 +567,14 @@ mod tests {
 
     #[test]
     fn placeholder_titles_are_recognised() {
-        for t in ["", "  ", "Untitled note", "Teams call \u{b7} 5 Oct, 14:30", "Slack huddle \u{b7} 12 Jan, 09:05"] {
+        for t in [
+            "",
+            "  ",
+            "Untitled note",
+            "Teams call \u{b7} 5 Oct, 14:30",
+            "Slack huddle \u{b7} 12 Jan, 09:05",
+            "Meeting \u{b7} 5 Oct, 14:30",
+        ] {
             assert!(is_placeholder_title(t), "{t:?}");
         }
         for t in ["Design review", "Teams call notes", "Call \u{b7} with Sam", "Zoom call \u{b7} 5 October, 14:30"] {
