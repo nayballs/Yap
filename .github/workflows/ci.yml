@@ -47,6 +47,7 @@ jobs:
       # Clippy subsumes cargo check. -D warnings is the ratchet: the codebase
       # is at zero warnings (2026-07-02), so any new warning — dead code,
       # unused imports, clippy lints — fails the push instead of accumulating.
+      # --all-targets lints the unit tests too (clean since 2026-10-05).
       - name: Cargo clippy (stub build, deny warnings)
         working-directory: src-tauri
-        run: cargo clippy --locked -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
