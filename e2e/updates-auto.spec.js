@@ -49,6 +49,10 @@ const test = base.extend({
 const toast = (main, title) => main.getByRole('status').filter({ hasText: title });
 
 test('a background check announces the update with a toast', async ({ yap, main, updateFeed, shot }) => {
+  // The harness keeps Yap's window hidden (an announcement then goes to a
+  // Windows notification, which test mode never posts). Open it the way the
+  // tray does; the update itself is still found without anyone asking.
+  await yap.invoke('open_settings');
   // Nobody clicks anything: the scheduler finds it, downloads it, announces it.
   const ready = toast(main, `Yap ${VERSION} is ready`);
   await expect(ready).toBeVisible({ timeout: 30_000 });

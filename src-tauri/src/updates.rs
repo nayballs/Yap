@@ -181,6 +181,9 @@ struct Inner {
     /// An announcement Windows refused to show — not retried every tick; the
     /// in-app toast picks it up when the window next shows.
     native_refused: Option<Announce>,
+    /// The person asked for a check while an automatic one was running: its
+    /// result counts as theirs (shown in About, no toast).
+    manual_joined: bool,
 }
 
 impl Inner {
@@ -202,6 +205,7 @@ impl Inner {
             updated_from: None,
             offered: None,
             native_refused: None,
+            manual_joined: false,
         }
     }
 }
@@ -576,10 +580,25 @@ async fn run_check(app: &AppHandle, manual: bool) -> (Outcome, String) {
     let previous = {
         let mut s = lock();
         if matches!(s.phase, Phase::Checking | Phase::Downloading | Phase::Installing) {
+            // The person asked while something was already under way (e.g. the
+            // window-shown check the tray's "Check for updates…" also sets
+            // off): what it finds is their answer, shown in About, so it
+            // mustn't also be announced with a toast.
+            if manual {
+                let phase = s.phase;
+                if phase == Phase::Checking {
+                    s.manual_joined = true;
+                } else if phase == Phase::Downloading {
+                    let version = s.version.clone();
+                    drop(s);
+                    mark_announced(&Announce { version, reminder: false });
+                }
+            }
             return (Outcome::Busy, String::new());
         }
         let previous = s.phase;
         s.phase = Phase::Checking;
+        s.manual_joined = false;
         previous
     };
     changed(app);
@@ -600,7 +619,8 @@ async fn run_check(app: &AppHandle, manual: bool) -> (Outcome, String) {
             // (Settings → About, the status bar): that's this update's
             // announcement, so neither a toast nor a Windows notification
             // repeats it once the background download is done.
-            if manual {
+            let joined = std::mem::take(&mut lock().manual_joined);
+            if manual || joined {
                 mark_announced(&Announce { version: version.clone(), reminder: false });
             }
             // Background download: installed builds, unless the connection is

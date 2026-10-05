@@ -18,6 +18,10 @@ pub fn show_settings(app: &AppHandle) -> Result<(), String> {
         .ok_or("settings window not found")?;
     let _ = w.show();
     focus(&w);
+    // The window is on screen now: a pending update announcement moves into
+    // it. Not left to the Focused event alone: Windows can refuse a
+    // background app the foreground, and e2e test runs never take it.
+    crate::updates::on_main_window_focused(app);
     Ok(())
 }
 
