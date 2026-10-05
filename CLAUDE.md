@@ -879,17 +879,44 @@ artifact on every run — review it with
 and read the PNGs under `screenshots/`. Full guide (incl. adding a test):
 [`docs/e2e-tests.md`](./docs/e2e-tests.md).
 
-### The dev → nightly → stable workflow
-1. **Iterate in dev** (`scripts\dev.bat`): Vite hot-reloads `src/` edits instantly;
-   Rust edits need a restart/recompile. Verify UI/behaviour changes HERE — never
-   burn a 15-min nightly to check something dev shows in seconds. `npm run test:app`
-   clicks through the whole app in ~20 s and leaves screenshots to look at.
-2. **Push to main** — CI (above) sanity-checks every push, and the E2E workflow
-   clicks through the app.
-3. **Nightly** — cut on demand (or let the 05:00 UTC cron) once a batch of changes
-   is worth dogfooding on the real installed app; nightlies catch installer/updater/
-   release-build issues, not CSS tweaks.
-4. **Stable** — tag `v*` deliberately for curated milestones.
+### The dev → nightly → stable workflow (agreed with Nathan, 2026-10-05)
+**Dev first, nightly for batches.** Every change goes through these steps in order:
+1. **Claude builds it and tests it.** `npm run build` + `cargo clippy --all-targets
+   --locked -- -D warnings` + `cargo test`, then the e2e robot suite (`npm run
+   test:app`: drives the real app in ~20 s and leaves screenshots to look at; add or
+   extend a spec for anything new). Push to main: CI and the E2E workflow re-check
+   every push.
+2. **Nathan tries it in the dev build** ("Yap - Dev" desktop shortcut =
+   `scripts\dev.bat`, the real GPU pipeline from this checkout). Anything visual or
+   about how it feels gets checked HERE: Vite hot-reloads `src/` edits in seconds;
+   Rust edits need the dev build restarted (a minute or two to recompile). Something
+   off → Claude fixes it → he sees it straight away. Never burn a 15-min nightly to
+   check something dev shows in seconds.
+3. **Nightly, once a batch feels right.** Claude dispatches it (or the 05:00 UTC
+   cron picks up main) and Nathan uses it day to day on the installed app.
+   Nightlies catch what only the installed release build can show: the updater
+   flow, the installer, Windows notifications under Yap's own name (dev builds
+   borrow PowerShell's), `com.contextmirror.yap://` deep links, start on login.
+   Those go straight to a nightly check; everything else goes through dev first.
+4. **Stable** — tag `v*` deliberately for curated milestones, when Nathan's happy.
+
+**Guiding Nathan through step 2.** When work is ready for him, don't just say "try
+it in dev": give him the exact steps, every time:
+- **Quit the installed Yap first** (tray icon → Quit). The dev build skips the
+  single-instance lock and shares `%APPDATA%\yap` (config, hotkey, notes) with
+  the installed app, so with both running one hotkey press starts two dictations.
+- **Double-click "Yap - Dev"** on the desktop. It opens a console window: leave it
+  open, closing it closes the dev Yap. The first start after Rust changes compiles
+  for a few minutes; it's ready when the Yap window appears (and Vite listens on
+  :51437).
+- Then a short numbered checklist of what to try, what should happen (✅ lines),
+  and what to send back (screenshots of anything off).
+- Say which fixes appear on their own (frontend, hot reload) and which need the dev
+  build closed and reopened (Rust).
+- **When he's done:** close the dev console window, then start the installed
+  **Yap** again (desktop shortcut or Start menu).
+- He works day shifts and follows along on his phone while at work. Queue
+  hands-on dev testing for when he's home, and keep at-work messages short.
 
 ### Release / installer
 Tagging `v*` (or running the **release** GitHub Action) builds via `tauri-action`
