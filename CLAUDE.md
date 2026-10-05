@@ -83,12 +83,19 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
   (server + stdio, no macros): `yap.exe mcp` lets Claude, ChatGPT desktop, Gemini CLI,
   Cursor… read meetings and notes through the local API (`mcp.rs`); `toml_edit` adds Yap to
   Codex/ChatGPT's `config.toml` (`mcp_clients.rs`).
+- **Calendar:** Google Calendar (installed-app OAuth in the system browser, PKCE, a
+  loopback listener, two read-only scopes) or any private iCal link, read straight from
+  the PC (`calendar.rs` + `calendar/`); [`rrule`](https://crates.io/crates/rrule) expands
+  RFC 5545 recurrence and [`chrono-tz`](https://crates.io/crates/chrono-tz) is the IANA
+  zone database (Windows zone names mapped in `calendar/tz.rs`); tokens and links in
+  Windows Credential Manager, like the account session.
 - **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`,
   `history.json`, `notes.json` — the AI Notepad store, `chats.json` — AI Chat
-  conversations, `updates.json` — update announcements + the restart marker).
+  conversations, `updates.json` — update announcements + the restart marker,
+  `calendar.json` — connected calendars + the next week of meetings).
   Every JSON store writes atomically and quarantines a corrupt file on load
   instead of crashing (`config::atomic_write`/`quarantine_corrupt`, used by all
-  six stores).
+  seven stores).
 
 ---
 
@@ -228,7 +235,10 @@ before `meeting::ingest`) and on an Upload's whole text.
   under the store lock). `note_update` takes an `origin` (the saving window's
   label) and emits `yap-note-changed` with the editable fields, which keeps the
   Notes view and the meeting notepad in sync both ways (each sends only the
-  fields it edited).
+  fields it edited). `event` (optional) = the calendar meeting the note
+  belongs to (`NoteEvent`: key, title, start/end, the invite's description,
+  service), set by `link_event` (also the meeting's title as a real title,
+  attendees merged, `note_type` meeting) and found by `find_by_event`.
   **Folders** are user-creatable (backend `notes_folder_create` command) with
   counts shown in the sidebar; notes filter by active folder. **Actions** (named
   prompt fragments) are built-in protected set (seeded "Generate Notes",
@@ -436,7 +446,12 @@ before `meeting::ingest`) and on an Upload's whole text.
   summarises without asking, via `meeting_guard::stop_after_call` (same rule:
   only apps Yap asks about; no window comes up). For the notepad's split
   screen: `call_window_exes()` (the live call's exes) and `title_shows`.
-  Snapshot
+  **Calendar**: before asking, `calendar::claims_call(app)` (under this
+  module's lock; it takes only the calendar's) — a call during a meeting
+  whose reminder card is up or was answered isn't asked about, a snoozed
+  card comes back instead; each call start also goes to
+  `calendar::on_call_started` (outside the lock: the switch card for
+  back-to-back meetings). Snapshot
   `meeting_detect_status` + `yap-meeting-detect` (`{enabled, style, apps,
   calls, prompt}`); answers `meeting_detect_respond(promptId,
   record|dismiss|never|stop|keep)`; debug-only `meeting_detect_simulate(appId,
@@ -488,6 +503,64 @@ before `meeting::ingest`) and on an Upload's whole text.
   meeting notes show up in screen shares and screenshots" + **Update
   settings** → `general#screen-sharing`). Debug-only `capture_affinity` reads
   each window's affinity back (`GetWindowDisplayAffinity`) for the e2e suite.
+- **`calendar.rs`** (+ `calendar/`) — **the calendar** (Wispr Flow's,
+  local-first: no Yap server; see [`docs/calendar.md`](./docs/calendar.md)).
+  **Connections** (Settings → Connectors, ≤ 8): Google Calendar in one click
+  (`calendar/google.rs`: OAuth for installed apps in the system browser, PKCE
+  S256 + `state` via `auth.rs`'s helpers, a one-shot `tiny_http` listener on
+  `127.0.0.1`, `access_type=offline`; scopes `calendar.calendarlist.readonly`
+  + `calendar.events.owned.readonly` only; the client id/secret baked in from
+  `YAP_GOOGLE_CALENDAR_CLIENT_ID`/`_SECRET` by `option_env!` — none = no
+  Google, the page says so; the token is revoked on Disconnect) or any private iCal link
+  ("Outlook Calendar" = a guided publish-your-calendar ICS flow; "Other
+  calendar"; HTTPS only, `webcal://` → https). Secrets (refresh token, link)
+  in Credential Manager (`calendar/vault.rs`: `yap-calendar-<n>.com.yap.dictation`,
+  Local persistence; test mode: `calendar-secrets.e2e.json`); `calendar.json`
+  keeps connections' names, meetings from 12 h back to 7 days ahead, reminder
+  answers (2 days) and the nudge. **Sync** (a tokio scheduler waking ≤ 30 s;
+  a wall-clock jump = the PC slept → sync now): every 12 min, on wake, on
+  Sync, after a connect; a failure keeps the old meetings and shows why;
+  `invalid_grant` → "Connect again". **Parsing** (`calendar/ics.rs`, Yap's own,
+  lenient: byte-wise unfolding, RFC 6868, bad lines skipped) + recurrence via
+  `rrule` on wall-clock time then the event's zone (EXDATE/RDATE/
+  RECURRENCE-ID overrides); **zones** (`calendar/tz.rs`): IANA (`chrono-tz`) →
+  Windows names (CLDR table) → the feed's VTIMEZONE → "(UTC±hh:mm)" → floating;
+  RFC 5545 gap/overlap rules. **Filters** (`calendar/model.rs`, Wispr's): a
+  meeting has another invitee (not a room, not declined) or a join link; no
+  all-day, nothing > 6 h, nothing cancelled or declined; Maybe = tentative,
+  overlaps = Conflict. **Join links** (`calendar/links.rs`): HTTPS links of
+  known services (Teams/Meet/Zoom/Webex/Slack/GoTo/Whereby/Jitsi/…) from
+  conference data, location or description. **The reminder card**
+  (`meeting_reminder`: "15s" default | "1min" | "2min" | "never"): "Design
+  review · In 1 min", Join & take notes / Start notes / Snooze 2 min / ✕,
+  until 5 min after the start, one at a time; while another meeting records,
+  a **switch** card (ends it via `meeting_end::end`, then starts the next).
+  It goes on screen through **`present_card`/`withdraw_card` only**: the
+  in-app toast via the snapshot's `card`, and while the main window isn't
+  focused the **Yap bar** (`bar::show_card`, id "calendar": a call-style card
+  — the call app's mark or a calendar, the meeting over "● In 1 min · with
+  Tanay +1" in amber, green once it's on, kept current with `update_card`
+  every 5 s; Join & take notes | ^ Start notes, Snooze 2 min; ✕ = dismiss; no
+  Esc watch), else — the bar off or hidden — a Windows notification under
+  the "calendar" tag; a card follows you onto the bar when the window loses
+  focus, and off a bar that goes away. **Into notes**:
+  `on_meeting_started` (from `commands::meeting_start`, every route) ties the
+  note to the meeting on now (service of the live call first, nearest start;
+  from 10 min before) — title over a placeholder (`is_placeholder_title` /
+  `title_open_to_ai`; then a real title), attendees, the cleaned invite
+  (`invite_context` → action plan + Ask) — and `note_changed`s every window;
+  `claims_call` / `on_call_started` for call detection (above);
+  `meeting::with_attendees` puts a meeting note's participants into Whisper's
+  prompt. Commands `calendar_status`/`_sync`/`_connect_google`/
+  `_cancel_google`/`_add_link`/`_disconnect`/`_event(key, open|join|start|
+  joinStart|switch|joinSwitch)`/`_card(id, join|start|snooze|dismiss)`/
+  `_nudge`/`_meeting_notes(query)`; events `yap-calendar` (snapshot),
+  `yap-calendar-connected`, `yap-calendar-error`; `meetings_context` backs the
+  Meetings view's Ask bar (`chat_send` scope "meetings"). Debug-only:
+  `YAP_GOOGLE_{AUTH,TOKEN,REVOKE,API}_URL` (+ the client at run time) and
+  `calendar_e2e_opened` (test mode records links instead of opening them).
+  Lock rule: never hold its state lock while touching windows, the network,
+  notes or call detection.
 - **`media.rs`** — audio-file decode front-end for Upload: pure-Rust **Symphonia**
   (mp3/wav/m4a/aac/flac/ogg-vorbis; no opus yet) → downmix mono → 16 kHz
   (`pipeline::resample_linear`), plus `chunk_ranges` (~60 s windows cut at the
@@ -682,7 +755,8 @@ before `meeting::ingest`) and on an Upload's whole text.
   (the toast, unshown — what the unit tests check). updates.rs posts under the
   "update" tag (always with a banner), meeting_detect.rs under "call",
   meeting_guard.rs under "meeting-limit" (Keep going) and "meeting-notice"
-  (Update settings / Open note); each keeps its live toast so the buttons
+  (Update settings / Open note), calendar.rs under "calendar" (the reminder
+  card's buttons); each keeps its live toast so the buttons
   work from the notification center. `allowed()` = not portable, not a test run.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
   volume, output_device, mute_while_recording, recording_mode,
@@ -701,7 +775,8 @@ before `meeting::ingest`) and on an Upload's whole text.
   defaults) + meeting_auto_start (the opt-in 10-second countdown, off),
   meeting guard rails: meeting_hide_from_capture (true),
   meeting_max_minutes (120; 0 = no limit), meeting_call_end ("ask"|"stop"),
-  meeting_hotkey (`kb:alt+win+77`), bridge_enabled, mcp_allow_writes (AI apps
+  meeting_hotkey (`kb:alt+win+77`), meeting_reminder (the calendar's card:
+  "15s" | "1min" | "2min" | "never"), bridge_enabled, mcp_allow_writes (AI apps
   may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
   bar_hide_fullscreen (true)). JSON
   load/save + `apply_dictionary` + `dictionary_prompt` (the Whisper
@@ -775,7 +850,8 @@ before `meeting::ingest`) and on an Upload's whole text.
   for an hour, and the caller posts the notification as before. Users:
   `meeting_detect` (call prompts as Wispr's "Meeting detected" card, "Taking
   notes…", failures), `meeting_guard` (length warning with Keep going,
-  notices), `updates` ("Yap X is ready"). An Esc watch (a low-level keyboard
+  notices), `updates` ("Yap X is ready"), `calendar` (the reminder before a
+  meeting, as a call card). An Esc watch (a low-level keyboard
   hook that only looks) runs only while an on-screen card offers Esc (the
   auto-start countdown). Debug-only `bar_simulate` (pretend cursor on a
   region, fake fullscreen kinds, Esc, demo cards) and `bar_debug` (the real
@@ -846,7 +922,9 @@ before `meeting::ingest`) and on an Upload's whole text.
   audio — no mic involved), `e2e_meeting_output_change { at? }` (a default-
   output switch: "Them" gets nothing for 1 s, then follows the "new device")
   and `e2e_meeting_quiet { quietSecs?, talkSecs? }` (short quiet-side
-  timings), and it quits when its stdin closes. See
+  timings), calendar secrets in `<data>/calendar-secrets.e2e.json` instead of
+  Credential Manager and links recorded (`calendar_e2e_opened`) instead of
+  opened in a browser, and it quits when its stdin closes. See
   [`docs/e2e-tests.md`](./docs/e2e-tests.md).
 - **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
   `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
@@ -865,7 +943,9 @@ before `meeting::ingest`) and on an Upload's whole text.
   `configure_hotkey`, `set_autostart`, `is_portable`, `test_post_process`,
   `get_groq_usage`, history (`get_history`, `clear_history`, `get_stats`),
   plus the notes/actions/folders CRUD + `note_enhance`/`note_ask`/`note_export`,
-  chats CRUD + `chat_send` (RAG + tool loop), `meeting_start`/`meeting_stop`/
+  chats CRUD + `chat_send` (RAG + tool loop; `scope: "meetings"` = the
+  Meetings view's Ask bar, grounded in `calendar::meetings_context`),
+  `meeting_start` (then `calendar::on_meeting_started`)/`meeting_stop`/
   `meeting_state`, `transcribe_file`/`cancel_file_transcription`/
   `audio_file_info`, `log_info`/`open_logs_folder`, `delete_history_entry`.
 
@@ -903,7 +983,7 @@ before `meeting::ingest`) and on an Upload's whole text.
   on hover-over-maximize is gone (Win+arrows still snap).
 - **`lib/ControlPanel.svelte`** — the **main window** (window label is still
   `settings`, historic): an OpenWhispr-style control panel — slim sidebar
-  (**Home / Chat / Notes / Upload / Dictionary / Integrations**) + **Settings as a modal
+  (**Home / Insights / Chat / Notes / Meetings / Upload / Dictionary / Integrations**) + **Settings as a modal
   overlay** (cogwheel). `Settings.svelte` renders `embedded` inside the modal
   and stays **always mounted** so its in-window hotkey fallback + auto-save run
   for the window's lifetime. App-wide **toast notification system**
@@ -947,7 +1027,26 @@ before `meeting::ingest`) and on an Upload's whole text.
   action-plan jobs, `summaries.byNote` / `.progress`, also used by NotesView
   and the notepad; `askStartedByMistake` = a sticky "Only a few words were
   captured. Keep this meeting or discard it." with Discard / Keep, `icon:
-  'alert'`, shown by the window `yap-meeting-ended`'s `surface` names). **`HomeView.svelte`** = the Wispr-style
+  'alert'`, shown by the window `yap-meeting-ended`'s `surface` names), and the
+  **calendar** (`calendar.svelte.js` — the shared store of calendar.rs's
+  snapshot, started by ControlPanel: the reminder card as a sticky toast,
+  chip Meeting / Next meeting, `icon: 'calendar'`, "In 1 min" counting,
+  Join & take notes / Start notes / Snooze 2 min, ✕ or Esc = dismiss,
+  withdrawn when Rust withdraws it; "Calendar connected", sign-in errors;
+  the one-time "Connect your calendar" nudge after a real meeting ends
+  (`yap-meeting-ended`, not a mistake) with Connect calendar / Not now).
+  **`MeetingsView.svelte`** = the Meetings view (Wispr's): serif title, Sync
+  calendar / settings / New note; **Today** and **Upcoming · Next 7 days**
+  (by day, 3 at a time + Show more; time, name, Conflict / Maybe tags,
+  service, attendees, "In 1 min", Note ready; from 10 min before: Join
+  meeting / Start / Join + Start, or Switch notes while another records, or
+  ● Recording · Open note; opening a meeting makes or opens its note via
+  `calendar_event`); the connect-your-calendar empty state and nudge;
+  **Past meeting notes** with search (`calendar_meeting_notes`); a bottom
+  **Ask bar** cycling example questions ("What questions were left
+  unanswered in my last meeting?") that opens Chat with the question (scope
+  `meetings`, through `chatRequest.svelte.js`), plus a **Past chats ↗** chip
+  (opens Chat). **`HomeView.svelte`** = the Wispr-style
   Home: time-of-day greeting with the hotkey as **amber keycaps**, a dark
   **rotating hero card** (4 tips — voice edit / AI cleanup / meeting notes /
   per-app profiles — picked by day, dot nav, CTAs open the right Settings
@@ -996,9 +1095,12 @@ before `meeting::ingest`) and on an Upload's whole text.
   (`tools.rs`: search_notes/get_note/create_note/update_note/list_folders/
   copy_to_clipboard executed locally, ≤20-step loop over the OpenAI tool
   protocol, gated to cloud or ≥4B local models — smaller models fall back to
-  plain RAG chat; tool-activity chips render in the thread). No streaming or
+  plain RAG chat; tool-activity chips render in the thread; a question from
+  the Meetings view's Ask bar arrives through `chatRequest` and is sent with
+  `scope: 'meetings'`). No streaming or
   semantic vectors yet (ROADMAP step 3). **`IntegrationsView.svelte`** = the
   Integrations surface (OpenWhispr `IntegrationsView.tsx`, local-first cut):
+  a **Calendar** card (`CalendarLinkCard.svelte` → Settings → Connectors),
   an **AI apps (MCP)** card (`McpLinkCard.svelte`, Wispr's "Go to MCP" row:
   opens Settings → MCP via ControlPanel's `openSettings`), the Local API card
   (enable toggle + live status/port via `bridge_status`, discovery-file path +
@@ -1021,7 +1123,9 @@ before `meeting::ingest`) and on an Upload's whole text.
   detected" card: the app's mark from `bar/callApps.js` — Simple Icons CC0
   glyphs, monograms for Teams/Slack/Webex/Whereby, a phone otherwise — "●
   Now", a light split button [Yap] Record notes with the other answers in its
-  ^ menu, a corner ✕, a 30 s fade hairline, the countdown ring); shared fade
+  ^ menu, a corner ✕, a 30 s fade hairline, the countdown ring; also the
+  calendar's reminder: a calendar glyph when there's no call app, an amber
+  "soon" dot, a long status line ending in "…"); shared fade
   and countdown timers in `bar/cardTimers.svelte.js`. Every `data-region`
   element is reported to Rust on layout changes. ⚠ The window is transparent:
   **no `backdrop-filter`** and shadows kept well inside it (one reaching a
@@ -1078,6 +1182,9 @@ before `meeting::ingest`) and on an Upload's whole text.
   (`meetingSplitScreen`, greyed out while the first is off); "Meeting
   shortcut" (`ui/HotkeyInput`, clearable → `meetingHotkey`; paused while
   capturing via `configure_meeting_hotkey`; the three hotkeys can't clash);
+  "Notify before scheduled meetings start" (Select: Right before / 1 minute /
+  2 minutes / Never → `meetingReminder`) with a "Calendar" row under it
+  (Connected: <account> + Manage, or Connect calendar → Connectors);
   "Show live transcript" (`meetingLiveTranscript`, the notepad's live lines)
   + an always-visible consent line, "Recording a
   call? Let people know you're taking notes."), **Speech-to-Text** (`ModelManager` + GPU +
@@ -1094,8 +1201,19 @@ before `meeting::ingest`) and on an Upload's whole text.
   dictionary), **About** (version + an **Updates** card on the shared update
   store: "Last checked …" / Check for updates, Downloading… %, "Yap X is ready to
   install" + Restart to update, release notes + release-page link, the
-  "Check for updates automatically" toggle), **MCP** (a **Connections** group
-  between Data and System; `McpSection.svelte`, laid out like Wispr's Settings →
+  "Check for updates automatically" toggle), **Connectors** (first in the
+  **Connections** group; `ConnectorsSection.svelte`, laid out like Wispr's
+  Settings → Connectors: serif title + one line on what a calendar gives you,
+  a rounded light card per connector — **Google Calendar** ("Reminders for
+  Google meetings before they begin", Connect → the browser, "Finish in your
+  browser…" + Cancel; a build without the client says so), **Outlook
+  Calendar** (Connect → the guided publish-your-calendar ICS form), **Other
+  calendar** (an iCal link, help for Google/iCloud/Fastmail) — each
+  connection a row with its account or link host, "Synced …" or the error,
+  "Connect again" when Google needs it, and a ⋯ menu Sync now / Disconnect;
+  then a plain row with the AI apps' logos, "Give your AI access to your
+  meeting transcripts and notes" + **Go to MCP**), **MCP** (in the same
+  **Connections** group, between Data and System; `McpSection.svelte`, laid out like Wispr's Settings →
   MCP: serif title, a light card each for Claude / ChatGPT / Gemini / Cursor with
   "Allow X to access your meeting notes and transcripts" + **Add to X** (→ Added ✓
   · Remove), the ChatGPT card's "desktop app and Codex, not the web" note, then
@@ -1317,8 +1435,13 @@ rolling release's body records as `<!-- built-from: <sha> -->`). **Currently uns
 (`TAURI_SIGNING_PRIVATE_KEY` GitHub secret). The uninstaller's **Delete the
 application data** checkbox (`; --- YAP DATA ---` in `src-tauri/nsis/installer.nsi`)
 removes Yap's real data (`%APPDATA%\yap`, `~\.yap`) **and the saved sign-in**
-(`CredDeleteW` on the `yap-account.com.yap.dictation` credential); never on `/UPDATE`
+(`CredDeleteW` on the `yap-account.com.yap.dictation` credential) **and the
+calendars' tokens/links** (`yap-calendar-1…8.com.yap.dictation`); never on `/UPDATE`
 runs (the updater always passes it), and unticked keeps both — a reinstall stays signed in.
+Google Calendar needs the build to carry an OAuth client: the optional
+`YAP_GOOGLE_CALENDAR_CLIENT_ID` / `_SECRET` repository secrets, passed to the
+build by both workflows (unset = the Connectors page says this build can't
+connect to Google; iCal links still work). Setup: [`docs/calendar.md`](./docs/calendar.md).
 
 ### Release channels (stable + nightly)
 Yap ships **two auto-update channels** (Chrome Stable/Canary style), both CI-built
@@ -1383,6 +1506,12 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 - Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chats.rs`).
 - Updates: `%APPDATA%/yap/updates.json` — which update was announced (and when),
   the last check time, and the restart marker (`updates.rs`).
+- Calendar: `%APPDATA%/yap/calendar.json` — connected calendars (name, kind,
+  last sync, error), meetings from 12 h ago to 7 days ahead, answered reminders,
+  the nudge (`calendar.rs`). Never a token or a link: those are Credential
+  Manager generic credentials `yap-calendar-<1-8>.com.yap.dictation` (Local
+  persistence; portable adds a data-dir hash), deleted on Disconnect and, for
+  an installed copy, by the uninstaller's "Delete the application data".
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`).
 - Local API bridge discovery: `~/.yap/cli-bridge.json` (fixed path, NOT the
@@ -1411,7 +1540,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   (`meeting_call_end`), meeting shortcut **Win+Alt+M** (`meeting_hotkey`); the
   meeting notepad opening when a meeting starts (`meeting_open_notepad`) with
   its live transcript (`meeting_live_transcript`), but **not** splitting the
-  screen (`meeting_split_screen` off: it moves another app's window).
+  screen (`meeting_split_screen` off: it moves another app's window); with a
+  calendar connected, the reminder card **right before** a meeting (15 s,
+  `meeting_reminder`).
 
 ---
 
@@ -1478,6 +1609,20 @@ keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six
 VS Code and Windsurf read meetings and notes (never dictations) through the local
 API, added in one click from Settings → MCP (`mcp_clients.rs`); tested in-process,
 against the real binary and end to end (2026-10-05), not yet with a real AI app.
+The **calendar** (`calendar.rs` + `calendar/`, Wispr Flow's, local-first,
+2026-10-05): Google Calendar in one click (read-only, PKCE, loopback) or any
+private iCal link (Outlook's published calendar, Google's secret address,
+iCloud…) under Settings → **Connectors**; a **Meetings** view (today, the next
+7 days, Conflict/Maybe, Join + Start, past meeting notes with search, an Ask
+bar into Chat); a reminder card before each meeting, on the Yap bar while the
+main window isn't focused (**Join & take notes**, switch notes for
+back-to-back meetings); every recording during a meeting
+takes its name, attendees and invite, and call detection doesn't ask twice.
+Recurrence and time zones (incl. Windows zone names) unit-tested; e2e-tested
+against a local iCal server and a local fake of Google. Google needs the
+OAuth client set up in Google Cloud + the two repository secrets
+([`docs/calendar.md`](./docs/calendar.md)); not yet tried against a real
+calendar.
 Every JSON store now writes
 atomically with corrupt-file quarantine. The default (no-feature) build still ships
 the stub for fast `cargo check`. **Optional accounts** (`auth.rs` + `cloud/`): email
@@ -1504,6 +1649,8 @@ and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](./docs/meetings.md) "Limits"), and a real call (live
 WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a
 hotkey dictation mid-call) still wants one hands-on pass;
+the calendar has no one-click Outlook (Microsoft Graph) and no pre-meeting
+brief;
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see [`ROADMAP.md`](./ROADMAP.md) Phase 1);
 fuzzy/near-miss dictionary matching; verify-after-paste (UIA `ValuePattern`);

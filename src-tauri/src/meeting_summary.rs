@@ -786,6 +786,10 @@ pub struct MeetingInput {
 /// first so the tail is already short; a tail that isn't keeps its end).
 pub fn compose_meeting_input(note: &Note) -> MeetingInput {
     let mut text = format!("Attendees: {}\n", attendees_line(&note.participants));
+    // The calendar invite's agenda (calendar.rs), when the meeting had one.
+    if let Some(invite) = crate::calendar::invite_context(note) {
+        text.push_str(&invite);
+    }
     let typed = note.content.trim();
     let digest_actions = digest_actions(&note.digests);
     if fits_single_pass(note) {

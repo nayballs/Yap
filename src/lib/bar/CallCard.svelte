@@ -9,7 +9,10 @@
   // With "Start notes automatically" a ring drains around the logo and the
   // line under the title counts down; Esc cancels (Rust watches the key).
   // A call that ended while Yap records it: "● Still recording" (red),
-  // Stop and summarise | ^ Keep recording.
+  // Stop and summarise | ^ Keep recording. The calendar's reminder
+  // (calendar.rs `bar_card`) is one too: the meeting over "● In 1 min · with
+  // Tanay +1" (amber, then green once it's on), Join & take notes | ^ Start
+  // notes, Snooze 2 min; a calendar glyph when the meeting has no call app.
   import yapLogo from '../../assets/yap-logo.svg';
   import { callAppIcon } from './callApps.js';
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
@@ -48,6 +51,9 @@
       <svg viewBox="0 0 24 24"><path d={icon.path} fill={icon.color} /></svg>
     {:else if icon.kind === 'monogram'}
       <span class="letter" style={`color:${icon.color}`}>{icon.letter}</span>
+    {:else if card.icon === 'calendar'}
+      <!-- A calendar meeting with no call app's mark (calendar.rs). -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="#26231c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="3" /><path d="M3.5 9.5h17M8 2.8v3.4M16 2.8v3.4" /></svg>
     {:else}
       <svg viewBox="0 0 24 24" fill="none" stroke="#26231c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z" /></svg>
     {/if}
@@ -61,7 +67,7 @@
         <span class="esc">Esc to cancel</span>
       {:else if card.status}
         {#if card.dot}<span class="dot {card.dot}" aria-hidden="true"></span>{/if}
-        <span>{card.status}</span>
+        <span class="line">{card.status}</span>
       {/if}
     </div>
   </div>
@@ -212,6 +218,17 @@
     background: #e5645e;
     box-shadow: 0 0 6px rgba(229, 100, 94, 0.6);
     animation: pulse 1.4s ease-in-out infinite;
+  }
+  /* A calendar meeting about to start (calendar.rs): Yap's amber. */
+  .dot.soon {
+    background: #e2982a;
+    box-shadow: 0 0 6px rgba(226, 152, 42, 0.6);
+  }
+  /* A long line ("Started 12 min ago · with Tanay +3") ends in "…". */
+  .line {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   @keyframes pulse {
     0%,
