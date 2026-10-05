@@ -605,6 +605,15 @@
     };
   });
 
+  // About: a portable install keeps config + models in a Data folder next to
+  // yap.exe instead of %APPDATA%/yap/ (portable.rs).
+  let portable = $state(false);
+  onMount(() => {
+    invoke('is_portable')
+      .then((p) => (portable = !!p))
+      .catch(() => {});
+  });
+
   // ---- Debug logging (Advanced → Debug Logging, OpenWhispr Developer port) ----
   let logInfo = $state(null); // { dir, file } from log_info
   let logCopied = $state(false);
@@ -2013,7 +2022,10 @@
                     If you point AI cleanup at a cloud provider, only the transcript text
                     is sent to it; the built-in local AI keeps that on your PC too.
                   </p>
-                  <p class="adir">Config &amp; models live in <code>%APPDATA%/yap/</code>.</p>
+                  <p class="adir">
+                    Config &amp; models live in
+                    {#if portable}the <code>Data</code> folder next to <code>yap.exe</code> (portable){:else}<code>%APPDATA%/yap/</code>{/if}.
+                  </p>
                   <div class="arow">
                     <a class="alink" href="https://github.com/nayballs/Yap" onclick={createExternalLinkHandler('https://github.com/nayballs/Yap')} target="_blank" rel="noreferrer">GitHub →</a>
                     <button class="alink abtn" onclick={() => invoke('open_onboarding')}>
