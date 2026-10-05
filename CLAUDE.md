@@ -1038,10 +1038,10 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
   (`meetingSplitScreen`, greyed out while the first is off); "Meeting
   shortcut" (`ui/HotkeyInput`, clearable → `meetingHotkey`; paused while
   capturing via `configure_meeting_hotkey`; the three hotkeys can't clash);
-  "Show live transcript" (`meetingLiveTranscript`, the notepad's live lines);
   "Notify before scheduled meetings start" (Select: Right before / 1 minute /
   2 minutes / Never → `meetingReminder`) with a "Calendar" row under it
-  (Connect calendar / Manage → Connectors)
+  (Connected: <account> + Manage, or Connect calendar → Connectors);
+  "Show live transcript" (`meetingLiveTranscript`, the notepad's live lines)
   + an always-visible consent line, "Recording a
   call? Let people know you're taking notes."), **Speech-to-Text** (`ModelManager` + GPU +
   language/translate), **Language Models** (OpenWhispr-style: enable toggle → mode
