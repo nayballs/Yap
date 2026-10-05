@@ -171,6 +171,13 @@ pub fn configure_edit_hotkey(spec: String) {
     let _ = crate::input_hook::configure_edit(&spec);
 }
 
+/// Live-apply the meeting shortcut (the Settings recorder pauses it while
+/// choosing a key, as for the other two).
+#[tauri::command]
+pub fn configure_meeting_hotkey(spec: String) {
+    let _ = crate::input_hook::configure_meeting(&spec);
+}
+
 /// Toggle recording on/off (same action as the global hotkey).
 #[tauri::command]
 pub fn toggle_recording(state: State<'_, AppState>) {
@@ -816,6 +823,9 @@ pub fn save_config(
     if let Err(e) = crate::input_hook::configure_edit(&cfg.edit_hotkey) {
         tracing::warn!("Failed to apply edit hotkey: {}", e);
     }
+    if let Err(e) = crate::input_hook::configure_meeting(&cfg.meeting_hotkey) {
+        tracing::warn!("Failed to apply meeting hotkey: {}", e);
+    }
     // The tray is reconciled on every save (always-on since the pill retired) —
     // reconcile it live instead of waiting for the next app restart.
     crate::tray::ensure_tray(&app, &cfg);
@@ -830,6 +840,8 @@ pub fn save_config(
     crate::bridge::sync(&app, cfg.bridge_enabled);
     // …and the "Detect calls and offer to take notes" toggle.
     crate::meeting_detect::sync(&app, cfg.meeting_detection);
+    // Hiding meeting windows from screen shares may have flipped mid-meeting.
+    crate::capture::sync(&app);
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.update_config(cfg);

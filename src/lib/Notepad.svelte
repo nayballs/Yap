@@ -44,6 +44,9 @@
   let stopping = $state(false);
   let tab = $state('thoughts'); // thoughts | transcript | summary
   let cfg = null; // for the in-page hotkey fallback
+  // "Show live transcript" (Settings → General → Meetings): off, the
+  // Transcript tab stays quiet until the meeting stops.
+  let liveTranscript = $state(true);
 
   const recordingThis = $derived(!!note && meeting.recording && meeting.noteId === note.id);
   const job = $derived(note ? summaries.byNote[note.id] : null);
@@ -153,6 +156,7 @@
     meeting = s || { recording: false };
     if (meeting.recording) {
       startElapsed(meeting.elapsedSecs || 0);
+      if (!was) refreshConfig(); // "Show live transcript" may have changed
     } else {
       stopElapsed();
       stopping = false;
@@ -271,6 +275,10 @@
   // whenever the transcript is on screen and scrolled to its newest line.
   const seen = new Map();
   let windowShown = $state(true);
+  /** The Transcript tab is up, showing its lines, at the newest one. */
+  function transcriptShown() {
+    return tab === 'transcript' && followLog && (liveTranscript || !recordingThis);
+  }
   async function refreshShown() {
     try {
       windowShown = (await appWindow.isVisible()) && !(await appWindow.isMinimized());
@@ -280,7 +288,7 @@
   }
   $effect(() => {
     const n = lineCount;
-    if (note && tab === 'transcript' && windowShown && followLog && document.visibilityState === 'visible') {
+    if (note && transcriptShown() && windowShown && document.visibilityState === 'visible') {
       seen.set(note.id, Math.max(seen.get(note.id) ?? 0, n));
     }
   });
@@ -297,7 +305,7 @@
     const id = note.id;
     const q = question?.trim() || null;
     // Asking with the transcript on screen, at its newest line: that's seen.
-    if (!q && tab === 'transcript' && followLog) {
+    if (!q && transcriptShown()) {
       seen.set(id, Math.max(seen.get(id) ?? 0, lineCount));
     }
     missOpen = true;
@@ -372,21 +380,24 @@
   async function refreshConfig() {
     try {
       cfg = await invoke('get_config');
+      liveTranscript = cfg.meetingLiveTranscript !== false;
     } catch {
       /* keep */
     }
   }
+  // The meeting shortcut (meeting_guard.rs) goes first, as in Settings: a
+  // combo is more specific than a bare dictation key.
   function onKeyDown(e) {
     if (e.repeat || !cfg) return;
-    if (hotkeyMatchesKeydown(e, cfg.hotkey)) {
+    if (cfg.meetingHotkey && hotkeyMatchesKeydown(e, cfg.meetingHotkey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      flushSave();
+      invoke('meeting_shortcut', { origin: LABEL }).catch(() => {});
+    } else if (hotkeyMatchesKeydown(e, cfg.hotkey)) {
       e.preventDefault();
       e.stopPropagation();
       invoke('toggle_recording').catch(() => {});
-    } else if (cfg.meetingHotkey && hotkeyMatchesKeydown(e, cfg.meetingHotkey)) {
-      // The meeting shortcut (meeting_guard.rs), when it's set.
-      e.preventDefault();
-      e.stopPropagation();
-      invoke('meeting_shortcut').catch(() => {});
     }
   }
   function onKeyUp(e) {
@@ -539,6 +550,12 @@
             </span>
           {/if}
         </div>
+        {#if recordingThis && !liveTranscript}
+          <div class="tempty">
+            <p class="t1">Live transcript is off</p>
+            <p class="t2">Yap is still transcribing on this PC. The transcript shows here when you stop.</p>
+          </div>
+        {:else}
         {#if !hintGone}
           <div class="hint">
             <span>Lines arrive about every 15 seconds as Yap transcribes on this PC. When you stop, it fills in the last few seconds and tidies the transcript into one paragraph per speaker.</span>
@@ -582,6 +599,7 @@
           <button class="echonote" onclick={() => (showEcho = !showEcho)}>
             {showEcho ? 'Hide' : 'Show'} {echoCount} {echoCount === 1 ? 'line' : 'lines'} your mic picked up from the speakers
           </button>
+        {/if}
         {/if}
       {:else}
         <div class="summary" role="region" aria-label="Summary">

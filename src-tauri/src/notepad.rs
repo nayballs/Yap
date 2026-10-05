@@ -165,6 +165,13 @@ fn on_screen(w: &tauri::WebviewWindow) -> bool {
     w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false)
 }
 
+/// Whether the notepad is on screen (it shows a meeting's summary as it's
+/// written). Never call with a lock held: window getters wait on the main
+/// thread.
+pub fn shown(app: &AppHandle) -> bool {
+    window(app).is_some_and(|w| on_screen(&w))
+}
+
 /// Closing the notepad hides it (app setup), like the main window.
 pub fn init(app: &AppHandle) {
     if let Some(w) = window(app) {
@@ -423,7 +430,7 @@ mod platform {
 
     /// The live call's main window (call detection's latest call), if any.
     pub fn call_window() -> Option<isize> {
-        let (app_id, exes) = crate::meeting_detect::latest_call()?;
+        let (app_id, exes) = crate::meeting_detect::call_window_exes()?;
         let hwnd = pick_call_window(&candidates(&exes), &exes, std::process::id(), |title| {
             crate::meeting_detect::title_shows(app_id, title)
         });

@@ -7,13 +7,18 @@ background, and at the end turns the whole meeting into an **action plan**: a
 section per person with their tasks and deadlines, then decisions, open
 questions and unassigned tasks, back in seconds however long the meeting ran.
 It can also notice a call starting and offer to take notes
-([Call detection](#call-detection)), and while a meeting records, a
+([Call detection](#call-detection)), keeps a recording in bounds (its
+windows stay out of screen shares, it stops at a maximum length, it can stop
+when the call ends, and a shortcut starts and stops it:
+[Guard rails](#guard-rails)), and while a meeting records, a
 [meeting notepad](#the-meeting-notepad) docks to the edge of the screen beside
 the call.
 
 | Piece | Code |
 |---|---|
 | Recorder: capture, chunking, echo check | `src-tauri/src/meeting.rs` |
+| Guard rails: maximum length, the meeting shortcut, notices | `src-tauri/src/meeting_guard.rs` |
+| Hiding meeting windows from screen capture | `src-tauri/src/capture.rs` |
 | Rolling digests, the final input, the checks; the notepad's catch-up and title inputs | `src-tauri/src/meeting_summary.rs` |
 | The end of a meeting: pause or end, "Started by mistake?", the action plan job | `src-tauri/src/meeting_end.rs` |
 | "What did I miss?", the AI meeting title | `src-tauri/src/meeting_assist.rs` |
@@ -222,6 +227,11 @@ window is created unfocused, so Windows shows it without activating it.
 Closing it only hides it; the recording carries on, and **Notepad** on the
 meeting note in the Notes view brings it back (any meeting note, recording or
 not). It shows one meeting at a time: the one recording, or the one reopened.
+While a meeting records it's left out of screen shares and screenshots with
+the overlay ([Guard rails](#hidden-from-screen-capture-and-sharing)). Like
+every Yap window you can type in, it catches the dictation key and the
+meeting shortcut in the page while it has focus (a focused WebView2 window
+never reaches the global hook).
 
 **Where.** Docked to the right edge of the work area (above the taskbar), full
 height, 30% of the width, between 400 and 600 px at 100% scaling (scaled for
@@ -259,7 +269,11 @@ on this PC, and when you stop it fills in the last few seconds and tidies the
 transcript (each speaker's turn becomes one paragraph). Before the first line:
 "Yap is listening". Echo lines (the call through your speakers) are hidden
 behind "Show N lines your mic picked up from the speakers", as in the Notes
-view.
+view. With **Show live transcript** off (`meetingLiveTranscript`, Wispr's
+setting of that name, on by default) the tab stays quiet while recording
+("Live transcript is off… The transcript shows here when you stop"); Yap
+still transcribes as the meeting goes, and nothing hidden counts as seen for
+"What did I miss?".
 
 **Summary** follows the action plan job: while it's written, "• Turning 12
 minutes of talk into an action plan… · Step 2 of 3" ("Catching up on the
@@ -273,7 +287,9 @@ you stop, and shows the AI notes so far (the rolling digests).
 transcribing others.", **■ Stop** (the end of the meeting, as End meeting &
 summarise) and **What did I miss?**. After it: **Resume** (records on into the
 same note) and **Generate summary** (when there's no summary yet, or it
-failed).
+failed). A stop from anywhere else, including Yap's own (the length limit, a
+call ending with "Stop and summarise automatically", the meeting shortcut),
+shows its progress and plan here too, without bringing up the main window.
 
 ### What did I miss?
 
@@ -359,6 +375,99 @@ notepad and the Notes view.
   restarting Yap) forgets it, and the next "What did I miss?" covers the whole
   meeting.
 
+## Guard rails
+
+Wispr Flow's Notetaker settings, ported (Settings → General → Meetings, one
+block under "Ask about calls in"). Code: `src-tauri/src/meeting_guard.rs`,
+`src-tauri/src/capture.rs`, `src/lib/meetingGuard.js`.
+
+| Setting | Config | Default | Wispr's |
+|---|---|---|---|
+| When a call ends: **Ask me** / **Stop and summarise automatically** | `meetingCallEnd` `"ask"` / `"stop"` | Ask me | "Stop Notetaker when a call ends", on |
+| **Maximum recording length**: 1, 2, 3, 4 hours / No limit | `meetingMaxMinutes` (0 = none) | 2 hours | the same, 2 hours |
+| **Hide Yap's meeting windows from screen sharing** | `meetingHideFromCapture` | on | "Don't show Notepad and Flow Bar in screen capture", on |
+| **Meeting shortcut** | `meetingHotkey` | Win+Alt+M (`kb:alt+win+77`) | Win+Alt+M |
+
+Every stop below goes through `meeting_guard::stop_and_summarise`, which ends
+the meeting as **End meeting & summarise** does (`meeting_end::end`: Rust
+writes the action plan once the last chunk is in, or asks "Started by
+mistake?") without bringing up any window: the [meeting
+notepad](#the-meeting-notepad) shows the progress and the plan when it's open,
+and the note has them either way. The shortcut pressed in one of Yap's windows
+passes that window along (`meeting_shortcut { origin }`), so a question about
+the meeting shows where it was pressed.
+
+### Hidden from screen capture and sharing
+
+While a meeting records, the windows that show it, the docked notepad
+(`notepad`) and the recording overlay (`overlay`, which shows the live
+transcript while you dictate mid-meeting), get Windows' display affinity
+`WDA_EXCLUDEFROMCAPTURE`: they stay on your monitor and leave every capture,
+so a Teams, Zoom or Meet screen share, a screenshot or a recording shows what's
+behind them. Windows 10 before version 2004 doesn't know that value; there
+Yap falls back to `WDA_MONITOR`, which shows them as black boxes in a capture.
+The main window isn't hidden (you might be sharing Yap on purpose).
+
+- It's set when a recording starts and lifted when it stops, applied at once
+  when the setting changes mid-meeting, and set on a meeting window that's
+  created or reloads mid-recording (`on_page_load`). The flag belongs to the
+  window, so hiding and showing it keeps it. All of it runs on the main
+  thread, in order.
+- With the setting **off**, a meeting starting shows Wispr's screen-share tip
+  once per note: "Screen sharing · Your meeting notes show up in screen
+  shares and screenshots." with **Update settings**, which opens General at
+  the switch. In the window, plus a Windows notification while the window
+  isn't focused.
+
+### Maximum recording length
+
+- **Five minutes before** the limit: "Notes stop in 5 minutes · Yap will stop
+  recording and write your action plan. Keep going gives you another hour."
+  A sticky toast in the window (it counts down) and, while the window isn't
+  focused, a Windows notification with **Keep going**. Answering one takes
+  both down.
+- **Keep going** moves the stop an hour past the current limit; the next
+  warning comes five minutes before that.
+- **At the limit** the recording stops and the action plan is written, with
+  "Stopped at 2 hours · The meeting reached the maximum recording length".
+- A warning always gives the full five minutes: when the limit is lowered
+  below the meeting's length, or the PC slept through it, the warning comes
+  then and the stop five minutes later. Raising the limit or choosing No
+  limit takes a warning back. Settings are read every second, so a change
+  applies at once.
+- The limit is per recording: **Pause** then **Resume** starts a new one.
+
+### When a call ends
+
+**Ask me** is call detection's "Stop and summarise?" (below). **Stop
+automatically** stops and summarises without asking, with "Teams call ended ·
+Yap stopped recording and is writing your action plan.". The same rule as
+the prompt applies: only for a call Yap is recording, of an app it asks
+about, so a background Discord call ending never stops an unrelated
+recording.
+
+### The meeting shortcut
+
+**Win+Alt+M** from any app:
+
+1. while a meeting records: stop and write the action plan;
+2. else, during a detected call (any call app, even one Yap doesn't ask
+   about: the shortcut is an explicit ask): **Record notes** for that call, as
+   from its prompt or the tray ("Teams call · 5 Oct, 14:30");
+3. else: a new note "Meeting · 5 Oct, 14:30" in Meetings, recording. It opens
+   in Notes with "Taking notes · Press Win + Alt + M again to stop…", or with
+   the window hidden a Windows notification says so, with **Open note**.
+
+Presses less than a second apart count once. It's a third binding in the
+global hook (`meeting-key-pressed`), rebindable in Settings with the same
+recorder as the dictation key (the three keys can't clash); Yap's own focused
+windows catch it in the page, as for dictation (WebView2 front-runs the
+global hook while one has focus), and call `meeting_shortcut`. Because the
+hook swallows the **M**, a combo holding Alt or Win taps an unassigned "menu
+mask" key while the modifiers are still down (AutoHotkey's `#MenuMaskKey`):
+otherwise releasing Alt would open the focused app's menu bar (Office shows
+KeyTips) and Win the Start menu.
+
 ## How it's tested
 
 - **Unit tests** (`cargo test --lib -- meeting media notes`): chunk cuts land in
@@ -385,6 +494,25 @@ notepad and the Notes view.
     "Mallory" gone, a made-up deadline removed; and Copy text.
   - `e2e/notepad.spec.js`: the meeting notepad (see
     [Testing the notepad](#testing-the-notepad)).
+  - `e2e/meeting-guards.spec.js`: the overlay's and the notepad's display
+    affinity is `WDA_EXCLUDEFROMCAPTURE` while a meeting records and 0 after
+    (read back with the debug-only `capture_affinity`); with hiding off, the
+    screen-share tip and **Update settings** landing on the switch, and
+    switching it back on mid-meeting hiding at once; the length warning,
+    **Keep going**, the second warning and the stop at the limit, with
+    seconds for hours (debug-only `e2e_meeting_limit`); "Stop and summarise
+    automatically" on a simulated call end; the shortcut starting a "Meeting
+    · …" note and stopping it, and taking notes on a live call; the Settings
+    rows, and recording a new shortcut.
+  - Capture hiding, once by hand (2026-10-05): a GDI desktop capture of just
+    the overlay's rectangle (the path screenshot tools use) while a meeting
+    recorded, with the overlay shown. Excluded: identical to the background
+    (0 % of pixels differ); hiding off: the capsule shows (27 % differ). So
+    the flag works on Tauri's transparent WebView2 overlay.
+  - Unit tests (`cargo test --lib -- meeting_guard capture input_hook`): the
+    length guard's steps (on time, late, raised, removed, Keep going), the
+    wording, the shortcut's label, the notification XML, Win combos in hotkey
+    specs and which combos need the menu-mask key.
   - Harness: `support/fake-llm.js`, a deterministic OpenAI-compatible server
     that records every request and tests the checks by inventing an owner,
     dropping a task and slipping in a task for someone never mentioned. It
@@ -432,6 +560,13 @@ notepad and the Notes view.
   meeting chunk holds the warm engine, dictation loads a second copy (an
   older behaviour of the shared slot). Waiting briefly for the engine to come
   back would be cheaper.
+- **Guard rails.** Hiding from capture is checked through the window's
+  affinity and one desktop capture, not yet in a real Teams/Zoom screen
+  share. Stops Yap makes itself (the length limit, "Stop and summarise
+  automatically", the shortcut) bring up the main window to write the
+  action plan, until that's written in Rust. Win+Alt+M is also Wispr Flow's
+  shortcut; with both running, whichever hook is newest gets it (Yap
+  re-installs its hook every 30 s).
 
 ## Call detection
 
@@ -577,22 +712,27 @@ summarise your notes?" with **Stop and summarise** / **Keep recording**, in
 the chosen style. It doesn't fade: it's about a recording that's still
 running. "That
 call" means the recording its prompt started, or one started during the call.
-**Stop and summarise** opens the note and ends it from the Notes view, so the
-action plan is written exactly as after **End meeting & summarise**. If the page
-hasn't stopped it after 8 s, Yap stops it directly. A call that starts while
+**Stop and summarise** ends the meeting, so the action plan is written exactly
+as after **End meeting & summarise** (in Rust, `meeting_end.rs`), and shows
+it where the person looks: the meeting notepad when it's on screen, the note
+in the main window's Notes view when that's on screen, and with neither, the
+main window comes up on the note. A call that starts while
 Yap still records the note "Record notes" started (a rejoin, or after **Keep
 recording**) carries that recording on. If the same app rejoins while this
 prompt is up, the prompt is withdrawn, and the call's own end asks again. A
 recording started by hand before the call, such as an in-person meeting, is
 never offered for stopping just because a call ended.
 
-Yap asks rather than auto-stopping, following OpenWhispr: its engine never
-ends a meeting recording by itself, and its calendar "meeting ended" event
-isn't acted on. The mic signal also can't tell a finished call from one
-moved to a phone, a breakout room or a dropped connection that's about to
-rejoin. Auto-stopping on a guess would cut meetings short and summarise half a
-transcript. The person decides both ends: nothing records without a click,
-and nothing stops without one.
+By default Yap asks rather than auto-stopping, following OpenWhispr: its
+engine never ends a meeting recording by itself, and its calendar "meeting
+ended" event isn't acted on. The mic signal also can't tell a finished call
+from one moved to a phone, a breakout room or a dropped connection that's
+about to rejoin. Auto-stopping on a guess would cut meetings short and
+summarise half a transcript. The person decides both ends: nothing records
+without a click, and nothing stops without one, unless they choose **When a
+call ends: Stop and summarise automatically** (Wispr Flow's "Stop Notetaker
+when a call ends"; see [Guard rails](#when-a-call-ends)), which skips the
+question and says so.
 
 ### Setting
 
@@ -607,6 +747,13 @@ exist. Under it, greyed out while it's off:
 - **Ask about calls in**: a switch per call app in two columns, showing what
   Yap does now (the person's choice, else the default above). Flipping one
   saves it in `meetingDetectApps`.
+
+Then the [guard rails](#guard-rails): when a call ends (greyed out with
+detection, as call ends come from it), the maximum recording length, hiding
+meeting windows from screen sharing; the [meeting notepad's](#the-meeting-notepad)
+**Open the notepad when a meeting starts** and **Split the screen when
+joining**; the meeting shortcut; and **Show live transcript** (Wispr's order:
+detection, while it's active, the notepad, the transcript).
 
 An always-visible line at the bottom reminds people of consent: "Recording a
 call? Let people know you're taking notes." Changes go through the usual

@@ -2,8 +2,10 @@
 // window docked to the right edge of the screen that opens when a meeting
 // starts recording — My thoughts (synced with the Notes view), the live
 // You/Them transcript, the summary Rust writes when the meeting ends
-// (meeting_end.rs, with steps and a Retry), "What did I miss?" and the AI
-// meeting title (meeting_assist.rs), and "Started by mistake?".
+// (meeting_end.rs, with steps and a Retry; also after a stop Yap makes
+// itself, meeting_guard.rs), "What did I miss?" and the AI meeting title
+// (meeting_assist.rs), "Started by mistake?", hiding from screen capture
+// (capture.rs), and the dictation key and meeting shortcut caught in-page.
 //
 // No audio device is opened (test mode records silence); transcript lines
 // are handed to the recorder with `e2e_meeting_feed`. The AI is a local fake
@@ -50,6 +52,10 @@ const test = base.extend({
 
 const visible = (yap, label) => yap.invoke('plugin:window|is_visible', { label });
 const recording = (yap) => yap.invoke('meeting_state').then((s) => s.recording);
+/** The notepad's display affinity (debug-only `capture_affinity`). */
+const affinity = (yap) => yap.invoke('capture_affinity').then((a) => a.windows.notepad);
+/** WDA_EXCLUDEFROMCAPTURE: on screen, left out of every capture. */
+const EXCLUDED_FROM_CAPTURE = 17;
 const toast = (page, title) => page.getByRole('status').filter({ hasText: title });
 const tab = (yap, name) => yap.notepad.getByRole('tab', { name });
 
@@ -129,8 +135,11 @@ test('a meeting starting opens the notepad docked to the right, without taking t
   expect(Math.abs(size.height - work.size.height)).toBeLessThanOrEqual(2);
   expect(size.width).toBeGreaterThanOrEqual(Math.min(400, work.size.width / 2) - 2);
   expect(size.width).toBeLessThanOrEqual(work.size.width / 2 + 2);
-  // It never took the focus (the call stays in front).
+  // It never took the focus (the call stays in front)…
   expect(await yap.invoke('plugin:window|is_focused', { label: 'notepad' })).toBe(false);
+  // …and stays out of screen shares and screenshots while the meeting
+  // records (capture.rs: WDA_EXCLUDEFROMCAPTURE).
+  await expect.poll(() => affinity(yap)).toBe(EXCLUDED_FROM_CAPTURE);
 
   // Notes first: the title (serif), the date, "My thoughts", and the footer.
   await expect(pad.getByRole('textbox', { name: 'Meeting title' })).toHaveValue('Design review');
@@ -188,6 +197,9 @@ test('a meeting starting opens the notepad docked to the right, without taking t
   await main.getByRole('button', { name: 'Notepad' }).click();
   await expect.poll(() => visible(yap, 'notepad')).toBe(true);
   await expect(pad.getByRole('textbox', { name: 'Meeting title' })).toHaveValue('Design review');
+  // Shareable again once the meeting stops.
+  await pauseAll(yap);
+  await expect.poll(() => affinity(yap)).toBe(0);
 });
 
 test('My thoughts sync with the Notes view both ways', async ({ yap, main, shot }) => {
@@ -384,6 +396,56 @@ test('Stop writes the summary in steps; a failure says so and Retry works', asyn
   await shot(pad, '16-summary-done');
 });
 
+test('a stop Yap makes itself writes the plan in the notepad, without bringing up Notes', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  // The length limit in seconds instead of hours (debug-only): stop 4 s in.
+  await openView(main, 'Home');
+  await yap.invoke('e2e_meeting_limit', { limitMs: 4_000, warnMs: 2_000 });
+  try {
+    const plans = fakeLlm.requests.filter((r) => r.kind === 'actionPlan').length;
+    const note = await startMeeting(yap, 'Ops review');
+    await say(yap, ...BUDGET_TALK.slice(0, 2));
+    await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
+
+    // The plan, written by Rust, shows in the notepad…
+    const pad = yap.notepad;
+    await expect(tab(yap, 'Summary')).toHaveAttribute('aria-selected', 'true');
+    await expect(pad.getByRole('region', { name: 'Summary' }).locator('.rendered')).toBeVisible({ timeout: 15_000 });
+    expect(fakeLlm.requests.filter((r) => r.kind === 'actionPlan')).toHaveLength(plans + 1);
+    await expectStore(yap, 'notes.json', (s) => !!s.notes.find((n) => n.id === note.id)?.enhancedContent);
+    await shot(pad, '18-auto-stop-plan-in-notepad');
+    // …and the main window stayed where it was (no jump to Notes).
+    await expect(
+      main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Home', exact: true })
+    ).toHaveAttribute('aria-current', 'page');
+  } finally {
+    await yap.invoke('e2e_meeting_limit', {});
+  }
+});
+
+test('the meeting shortcut works with the notepad focused (in-page fallback)', async ({ yap, shot }) => {
+  // Win+Alt+M in the notepad: notes in a new meeting note…
+  await closeNotepad(yap);
+  await startMeeting(yap, 'Shortcut warm-up');
+  await pauseAll(yap);
+  const pad = yap.notepad;
+  await pad.keyboard.press('Meta+Alt+KeyM');
+  await expect.poll(() => recording(yap), { timeout: 15_000 }).toBe(true);
+  await expect(pad.getByRole('textbox', { name: 'Meeting title' })).toHaveValue(
+    /^Meeting · \d{1,2} [A-Z][a-z]{2}, \d{2}:\d{2}$/
+  );
+  // …and again (a second later): stopped, asked about right here.
+  await pad.waitForTimeout(1_100);
+  await pad.keyboard.press('Meta+Alt+KeyM');
+  await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
+  await expect(toast(pad, 'Started by mistake?')).toBeVisible({ timeout: 20_000 });
+  await shot(pad, '19-shortcut-stopped-in-notepad');
+});
+
 test('Settings → General → Meetings: open the notepad, split the screen', async ({ yap, main, shot }) => {
   const dialog = await openSettings(main, 'General');
   const meetings = dialog.getByRole('group', { name: 'Meetings' });
@@ -414,6 +476,29 @@ test('Settings → General → Meetings: open the notepad, split the screen', as
   await openSettings(main, 'General');
   await open.click();
   await expectStore(yap, 'config.json', (c) => c.meetingOpenNotepad === true);
+
+  // "Show live transcript" off: the Transcript tab stays quiet until the
+  // meeting stops (it's still transcribed).
+  const live = settingsDialog(main)
+    .getByRole('group', { name: 'Meetings' })
+    .getByRole('button', { name: 'Show live transcript' });
+  await expect(live).toHaveAttribute('aria-pressed', 'true');
+  await live.click();
+  await expectStore(yap, 'config.json', (c) => c.meetingLiveTranscript === false);
+  await closeSettings(main);
+  await startMeeting(yap, 'Quiet transcript');
+  await tab(yap, 'Transcript').click();
+  await say(yap, ['them', 'QUIET-LINE nobody sees this until the end.']);
+  const pad = yap.notepad;
+  await expect(pad.getByText('Live transcript is off')).toBeVisible();
+  await expect(pad.getByRole('log', { name: 'Transcript' })).toHaveCount(0);
+  await shot(pad, '20-live-transcript-off');
+  await pauseAll(yap);
+  await expect(pad.getByRole('log', { name: 'Transcript' })).toContainText('QUIET-LINE');
+
+  await openSettings(main, 'General');
+  await live.click();
+  await expectStore(yap, 'config.json', (c) => c.meetingLiveTranscript === true);
   await expect(settingsDialog(main)).toBeVisible();
 });
 

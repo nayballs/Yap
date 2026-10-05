@@ -21,6 +21,7 @@
   import { initUpdates } from './updates.svelte.js';
   import { initMeetingDetect } from './meetingDetect.svelte.js';
   import { initMeetingSummary, askStartedByMistake } from './meetingSummary.svelte.js';
+  import { initMeetingGuard } from './meetingGuard.js';
   import HomeView from './HomeView.svelte';
   import InsightsView from './InsightsView.svelte';
   import DictionaryView from './DictionaryView.svelte';
@@ -52,6 +53,10 @@
   // The action plan Rust writes when a meeting ends (meeting_end.rs), for
   // the Notes view; started here so no job's progress is missed.
   initMeetingSummary();
+  // Meeting guard rails (meeting_guard.rs, capture.rs via meetingGuard.js):
+  // "Notes stop in 5 minutes · Keep going", the screen-share tip → Settings
+  // → General → Meetings, and the stops Yap makes itself.
+  initMeetingGuard({ openSettings: (section) => openSettings(section) });
   let bellOpen = $state(false);
 
   // Sidebar nav (Wispr order: Home, Insights, then the work surfaces).
