@@ -31,6 +31,32 @@ pub struct TranscriptSegment {
     /// hidden in the transcript view.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub echo: bool,
+    /// Not speech: a marker where the person dictated with the hotkey
+    /// mid-meeting (`source` "you", no `text`, `ts` when the dictation began,
+    /// its pre-roll included). The recorder left that audio out of "You"
+    /// (`meeting.rs`); the transcript views show "You dictated here", and
+    /// digests, the action plan, "What did I miss?" and the Ask context skip
+    /// it, like echo.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dictated: bool,
+}
+
+impl TranscriptSegment {
+    /// The marker for a dictation that began at `ts` (unix seconds).
+    pub fn dictation_marker(ts: u64) -> Self {
+        TranscriptSegment {
+            source: "you".to_string(),
+            text: String::new(),
+            ts,
+            echo: false,
+            dictated: true,
+        }
+    }
+
+    /// Talk the summaries read: neither echo nor a dictation marker.
+    pub fn is_talk(&self) -> bool {
+        !self.echo && !self.dictated
+    }
 }
 
 /// One action item in a meeting digest: who (a name, "You", or
@@ -472,11 +498,12 @@ pub fn set_ai_title(id: u64, title: &str) -> Result<bool, String> {
 }
 
 /// Words of speech in a meeting transcript (You and Them, without the echo
-/// segments): what "Started by mistake?" and the AI title go by.
+/// segments or dictation markers): what "Started by mistake?" and the AI
+/// title go by.
 pub fn speech_words(transcript: &[TranscriptSegment]) -> usize {
     transcript
         .iter()
-        .filter(|s| !s.echo)
+        .filter(|s| s.is_talk())
         .flat_map(|s| s.text.split_whitespace())
         .filter(|w| w.chars().any(char::is_alphanumeric))
         .count()
@@ -803,6 +830,27 @@ mod tests {
         // An echo flag only reaches disk when set.
         let seg = serde_json::to_value(&store.notes[0].transcript[0]).unwrap();
         assert!(seg.get("echo").is_none());
+        // Nor does the dictation flag: speech isn't a marker.
+        assert!(seg.get("dictated").is_none());
+        assert!(store.notes[0].transcript[0].is_talk());
+    }
+
+    #[test]
+    fn a_dictation_marker_round_trips_and_is_not_talk() {
+        let marker = TranscriptSegment::dictation_marker(42);
+        let json = serde_json::to_value(&marker).unwrap();
+        assert_eq!(
+            json,
+            json!({ "source": "you", "text": "", "ts": 42, "dictated": true })
+        );
+        let back: TranscriptSegment = serde_json::from_value(json).unwrap();
+        assert!(back.dictated && !back.echo);
+        assert!(!back.is_talk());
+        // Echo isn't talk either.
+        let mut echo = TranscriptSegment::dictation_marker(1);
+        echo.dictated = false;
+        echo.echo = true;
+        assert!(!echo.is_talk());
     }
 
     #[test]
@@ -814,6 +862,7 @@ mod tests {
                 text: format!("line {i}"),
                 ts: i,
                 echo: false,
+                dictated: false,
             })
             .collect();
         let d = |from, to| MeetingDigest {
@@ -868,11 +917,13 @@ mod tests {
             text: text.into(),
             ts: 0,
             echo,
+            dictated: false,
         };
         let t = vec![
             seg("you", "Hi, Notetaker.", false),
             seg("them", "Hello there - how are you?", false),
             seg("you", "Hello there how are you", true),
+            TranscriptSegment::dictation_marker(0),
         ];
         assert_eq!(speech_words(&t), 7);
         assert_eq!(speech_words(&[]), 0);
