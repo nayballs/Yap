@@ -421,6 +421,7 @@
     useGpu: true,
     streamingPartials: true,
     historyEnabled: true,
+    meetingDetection: true,
     inputDevice: null,
     dictionary: [],
     selectedLanguage: 'auto',
@@ -1352,6 +1353,20 @@
             </Row>
             <Row label="Overlay position" desc="Where the overlay appears on screen">
               <Select bind:value={cfg.overlayPosition} options={OVERLAY_POSITIONS} />
+            </Row>
+          </Group>
+
+          <Group title="Meetings">
+            <Row>
+              <Toggle
+                bind:checked={cfg.meetingDetection}
+                label="Detect calls and offer to take notes"
+                desc="Asks when a Teams, Zoom, Meet, Slack, Discord or Webex call starts, and offers to stop and summarise when it ends"
+                hint="Yap reads Windows' own record of which app is using your microphone, on this PC only. Nothing records until you click Record notes."
+              />
+            </Row>
+            <Row>
+              <p class="consent">Recording a call? Let people know you're taking notes.</p>
             </Row>
           </Group>
 
@@ -2608,6 +2623,12 @@
     color: var(--yap-muted-55);
     font-size: 11px;
     margin: 0 0 10px;
+    line-height: 1.5;
+  }
+  .consent {
+    color: var(--yap-muted-55);
+    font-size: 12px;
+    margin: 0;
     line-height: 1.5;
   }
   .rm {

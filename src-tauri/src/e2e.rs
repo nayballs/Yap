@@ -52,7 +52,9 @@ pub fn meeting_speed() -> f32 {
 /// mic buffer and `them.wav` into the loopback buffer, in step, from
 /// `YAP_E2E_MEETING_AUDIO` (any format `media.rs` decodes), then goes quiet
 /// until stop. Without the variable it's silent: segments come from
-/// [`e2e_meeting_feed`] instead.
+/// [`e2e_meeting_feed`] instead. Either way it never records the machine's
+/// real microphone or speakers, and works the same on a CI runner without
+/// any.
 #[cfg(debug_assertions)]
 pub fn spawn_meeting_audio(
     mic: crate::meeting::AudioBuf,
@@ -60,7 +62,19 @@ pub fn spawn_meeting_audio(
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     overflow: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
     use std::sync::atomic::Ordering;
+    // Like the real capture, a configured microphone that isn't plugged in
+    // fails (found by listing the devices; none is opened).
+    if let Some(name) = crate::config::load().input_device {
+        let present = cpal::default_host()
+            .input_devices()
+            .map(|mut devices| devices.any(|d| d.name().is_ok_and(|n| n == name)))
+            .unwrap_or(false);
+        if !present {
+            return Err(format!("Input device not found: {name}"));
+        }
+    }
     let dir = std::env::var("YAP_E2E_MEETING_AUDIO")
         .ok()
         .filter(|d| !d.trim().is_empty())

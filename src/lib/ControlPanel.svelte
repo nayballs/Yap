@@ -19,6 +19,7 @@
   import { attention } from './attention.svelte.js';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
   import { initUpdates } from './updates.svelte.js';
+  import { initMeetingDetect } from './meetingDetect.svelte.js';
   import HomeView from './HomeView.svelte';
   import InsightsView from './InsightsView.svelte';
   import DictionaryView from './DictionaryView.svelte';
@@ -37,6 +38,14 @@
   let acctUser = $derived(account.status?.signedIn ? account.status.user : null);
   let acctImgFailed = $state(false);
   let settingsOpen = $state(false);
+  // Call detection (meeting_detect.rs via meetingDetect.svelte.js): "call
+  // detected — Record notes?" toasts, and opening the meeting note in Notes.
+  initMeetingDetect({
+    showNotes: () => {
+      settingsOpen = false;
+      activeView = 'notes';
+    },
+  });
   let bellOpen = $state(false);
 
   // Sidebar nav (Wispr order: Home, Insights, then the work surfaces).

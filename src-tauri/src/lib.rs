@@ -17,6 +17,7 @@ mod e2e;
 mod fuzzy;
 mod media;
 mod meeting;
+mod meeting_detect;
 mod meeting_summary;
 mod notes;
 mod tools;
@@ -37,6 +38,8 @@ mod text_injector;
 mod tray;
 mod updates;
 mod usage;
+#[cfg(windows)]
+mod win_toast;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -400,6 +403,9 @@ pub fn run() {
             updates::update_install,
             updates::update_ack,
             updates::update_ack_updated,
+            meeting_detect::meeting_detect_status,
+            meeting_detect::meeting_detect_respond,
+            meeting_detect::meeting_detect_simulate,
             // Test mode only (e2e.rs); not in release builds at all.
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_feed,
@@ -609,6 +615,8 @@ pub fn run() {
                         // pending "update ready" toast can happen now.
                         tauri::WindowEvent::Focused(true) if main => {
                             updates::on_main_window_focused(&focus_handle);
+                            // …and a pending call prompt moves into the window.
+                            meeting_detect::on_main_window_focused(&focus_handle);
                         }
                         _ => {}
                     });
@@ -642,6 +650,10 @@ pub fn run() {
             // relaunch after "Restart to update" can reopen the main window
             // once the hidden webviews are initialized.
             updates::init(&handle);
+
+            // Call detection: offer to take notes when a call starts (reads
+            // Windows' per-app microphone record; local only).
+            meeting_detect::init(&handle);
 
             // e2e test runs: announce test mode, quit when stdin closes.
             e2e::start(&handle);

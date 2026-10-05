@@ -12,6 +12,8 @@
 // card. Destructive toasts linger longer (6 s vs 3.5 s) and render the
 // description as a copyable mono error box; `duration <= 0` = sticky. Hovering
 // a toast pauses its timer; leaving resumes with the remaining time.
+// `onClose` runs when the person closes the card with its ✕ (a call prompt
+// takes that as "Not now"); `icon: 'call'` gives the chip a phone.
 // `updateToast(id, patch)` changes a live toast in place (the update toast
 // goes ready → downloading → restarting without stacking new cards).
 
@@ -61,6 +63,7 @@ export function toast({
   progress = null,
   busy = false,
   expand = null,
+  onClose = null,
 } = {}) {
   const id = ++seq;
   const dur = duration ?? (variant === 'destructive' ? 6000 : 3500);
@@ -76,6 +79,7 @@ export function toast({
     progress,
     busy,
     expand,
+    onClose,
     duration: dur,
     createdAt: Date.now(),
     isExiting: false,

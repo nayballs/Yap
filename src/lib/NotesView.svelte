@@ -18,6 +18,7 @@
   import { renderMarkdown, markdownToText } from './markdown.js';
   import { toast } from './ui/toast.svelte.js';
   import ActionManager from './ActionManager.svelte';
+  import { noteRequest } from './meetingDetect.svelte.js';
 
   // `onopensettings(section)` opens the Settings modal (ControlPanel).
   let { onopensettings = null } = $props();
@@ -179,6 +180,17 @@
   }
 
   function summariseMeeting() {
+    if (!selected) return;
+    // A silent recording (muted mic, nobody talking) with no typed notes
+    // has nothing for the model to work with.
+    if (!selected.content?.trim() && !selected.transcript?.some((s) => !s.echo)) {
+      toast({
+        title: 'Nothing to summarise yet',
+        description: 'No speech was transcribed in this recording.',
+        chip: 'Tip',
+      });
+      return;
+    }
     const action = actionPlanAction ?? activeAction;
     if (action) runAction(action);
   }
@@ -580,6 +592,27 @@
       unlisteners.forEach((u) => u && u());
     };
   });
+
+  // Call detection (meetingDetect.svelte.js) opens a note here: the meeting
+  // note "Record notes" just started, or the one to wrap up — "Stop and
+  // summarise" ends it right here (endMeeting), so the action plan is
+  // written as for "End meeting & summarise".
+  $effect(() => {
+    const req = noteRequest.pending;
+    if (!req) return;
+    noteRequest.pending = null;
+    openRequested(req);
+  });
+
+  async function openRequested({ id, stop }) {
+    await select(id);
+    if (selected?.id !== id) return;
+    activeFolder = selected.folder || activeFolder;
+    refreshList();
+    if (!stop) return;
+    meeting = (await invoke('meeting_state').catch(() => null)) || { recording: false };
+    if (meeting.recording && meeting.noteId === id) await endMeeting();
+  }
 </script>
 
 <svelte:window
