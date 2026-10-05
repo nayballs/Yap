@@ -776,6 +776,82 @@ below (✅ = done).
 > patterns → Actions engine → Audio Upload (`decode.rs` + chunker) → notes + editor → meeting
 > recording → meeting-notes Action → AI Chat (keyword-RAG → agent → vectors). Teardown §5.
 
+### Phase 8 — Meeting notes at Wispr Flow quality (Notetaker parity)
+
+> **Goal (Nathan, 2026-10-05): match Wispr Flow's Notetaker** wherever it fits Yap's
+> local-first design: transcription stays on the PC, and the AI is the user's choice
+> (local or BYO key). Reference: a hands-on capture of Wispr Flow v1.6.1034 on Windows
+> (`E:\Projects\references\wispr-flow\README.md` + 20 screenshots, kept **outside** this
+> public repo because they're Wispr's screens) and the public-docs teardown
+> [`docs/wispr-notetaker-teardown.md`](./docs/wispr-notetaker-teardown.md). Port the
+> patterns and the quality bar, not their assets or copy verbatim.
+>
+> **Process:** each item is built by an agent in its own worktree, with e2e specs plus
+> screenshots. Claude reviews, merges and pushes (CI + E2E); Nathan tries it in
+> **Yap - Dev**; then a nightly per batch. Tick an item only when it's merged, green
+> and dev-checked.
+
+Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
+(`meeting_detect.rs`, per-app, pop-up or quiet), mic + system-audio recording
+(`meeting.rs`), rolling digests and a per-person action plan
+(`meeting_summary.rs`), and the meeting UI inside the Notes view.
+
+**Wave 1 — the meeting experience**
+- [ ] **Docked meeting notepad.** A slim window docked to the screen edge (Wispr: right,
+      full height, about a third of the width) that opens when a recording starts, with
+      a setting "Open the notepad when a meeting starts", on by default. It has:
+      - tabs **My thoughts** (your own notes, the default), **Transcript** (live, You/Them
+        speaker labels, follows the newest line, elapsed timer, a hint that the transcript
+        is tidied after the meeting) and **Summary** (the action plan);
+      - a footer with **Stop** / **End meeting & summarise**, a consent line ("Always get
+        consent…") and **What did I miss?**;
+      - after Stop: **Resume**, **Generate summary**, summary progress ("Step 1 of 3") and
+        a retryable error state.
+- [ ] **"Split the screen when joining".** The call window on the left, the notepad on
+      the right (Win32 arrange), as a setting.
+- [ ] **"What did I miss?"** An inline mini chat in the notepad that answers from the
+      transcript **since you last looked** (built on the rolling digests).
+- [ ] **AI meeting title.** Replaces "Teams call · 5 Oct, 14:30" once there's enough
+      talk.
+- [ ] **"Started by mistake?"** After a very short recording: Keep / Discard.
+- [ ] **Hide from screen capture / sharing.** `SetWindowDisplayAffinity(
+      WDA_EXCLUDEFROMCAPTURE)` on the notepad and overlay while a meeting records, so
+      screen shares and screenshots never show your notes. A setting, on by default,
+      plus a warning toast when it's off (as Wispr does).
+- [ ] **Maximum recording length** (Wispr: 2 h) with a warning shortly before it stops.
+- [ ] **"Stop when the call ends"** as an option alongside today's "Stop and summarise?"
+      prompt.
+- [ ] **Global meeting shortcut** (Wispr: Win+Alt+M) to start or stop meeting notes.
+
+**Wave 2 — your AI and your calendar**
+- [ ] **MCP server.** Claude, ChatGPT, Gemini, Cursor and any MCP client can read your
+      meeting notes and transcripts (not your dictations, like Wispr), locally over Yap's
+      bridge, with one-click **Add to Claude / Cursor / …** in Integrations plus a
+      copyable config for everything else.
+- [ ] **Calendar connection, local-first.** A private iCal (ICS) link from Google or
+      Outlook, read on the PC with no OAuth and no cloud. It gives meeting titles, attendee
+      names (for spelling and "who said what"), and upcoming meetings.
+- [ ] **Pre-meeting card** ("Notify before scheduled meetings start"): a bottom-centre
+      card "Meeting with Tanay · In 1 min" with **Join & take notes**, which opens the
+      meeting link and starts recording.
+- [ ] **Meetings hub.** A Wispr-style home for meetings: Today/Upcoming from the calendar,
+      Past notes, and search across meetings.
+
+**Wave 3 — the rest of the product**
+- [ ] **Scratchpad.** A floating quick-notes window with a global shortcut ("For quick
+      thoughts you want to come back to"), dictation into it, and notes saved to Yap's
+      Notes.
+- [ ] **Ask across meetings, with citations.** Answers that link back to the transcript
+      moment (Yap's Chat already does RAG over notes).
+- [ ] **Import from Granola / Otter.** Bring past meetings in (source, date, summary,
+      transcript) from their exports.
+- [ ] **Speaker names.** "Speaker 1" becomes a name using the calendar attendees, plus a
+      one-click rename; diarization of "Them" stays a later item.
+- [ ] Items from the docs teardown's top-10 that aren't above, added once it's merged.
+
+Skipped on purpose, because they need a hosted cloud: share-by-link, auto-share and
+org-wide admin controls. Copy-as-markdown/text and export cover sharing locally.
+
 ---
 
 ## 5. Positioning in one line
