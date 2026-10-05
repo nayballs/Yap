@@ -595,9 +595,10 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
 }
 
 /// Tie meeting note `id` to a calendar event (`calendar.rs`): keep the event,
-/// take its `title` when given (the caller only passes one over a
-/// placeholder), add its attendees after the ones already there, and, for a
-/// note made ahead of the meeting, date it to the meeting (`date`).
+/// take its `title` when given (the caller only passes one over a made-up
+/// title; the meeting's real name, so the AI title leaves it alone), add its
+/// attendees after the ones already there, and, for a note made ahead of the
+/// meeting, date it to the meeting (`date`).
 pub fn link_event(
     id: u64,
     event: NoteEvent,
@@ -613,6 +614,7 @@ pub fn link_event(
             .ok_or("Note not found")?;
         if let Some(title) = title.filter(|t| !t.trim().is_empty()) {
             note.title = title;
+            note.title_auto = false;
         }
         for name in attendees {
             let name = name.trim();

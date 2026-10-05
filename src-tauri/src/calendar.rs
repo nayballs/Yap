@@ -59,8 +59,6 @@ const EVENT_CONNECTED: &str = "yap-calendar-connected";
 /// Something the page didn't directly ask for went wrong (a Google sign-in
 /// finishing in the background): the message.
 const EVENT_ERROR: &str = "yap-calendar-error";
-/// A note was tied to an event behind the page's back: `{ noteId }`.
-const EVENT_NOTE_LINKED: &str = "yap-calendar-note-linked";
 /// Open a note in Notes: `{ noteId, stop }` (call detection's event).
 const EVENT_OPEN: &str = "yap-meeting-open-note";
 
@@ -1070,8 +1068,8 @@ fn start_event(app: &AppHandle, key: &str, join: bool) -> Result<u64, String> {
     Ok(note_id)
 }
 
-/// Back-to-back meetings: end the one recording (its action plan is written
-/// as for "End meeting & summarise"), then take notes on `key`.
+/// Back-to-back meetings: end the one recording (`meeting_end` writes its
+/// action plan, as for any meeting that ends), then take notes on `key`.
 async fn switch_to_event(app: &AppHandle, key: &str, join: bool) -> Result<u64, String> {
     let event = event_by_key(key)?;
     if join {
@@ -1082,7 +1080,7 @@ async fn switch_to_event(app: &AppHandle, key: &str, join: bool) -> Result<u64, 
             return Ok(current);
         }
         tracing::info!(note_id = current, "calendar: switching notes to the next meeting");
-        crate::meeting_guard::stop_and_summarise(app, Some(current));
+        crate::meeting_end::end(app, Some("calendar"))?;
         // The recorder transcribes its last chunk before it lets go.
         for _ in 0..240 {
             if crate::meeting::recording_note().is_none() {
@@ -1192,15 +1190,19 @@ pub fn on_meeting_started(app: &AppHandle, note_id: u64) {
             return;
         }
     }
-    let title = model::is_placeholder_title(&note.title).then(|| event.display_title());
+    // Over a title Yap made up ("Teams call · 5 Oct, 14:30"): the meeting's
+    // real name, which the AI meeting title then leaves alone.
+    let made_up = crate::notes::title_open_to_ai(&note) || model::is_placeholder_title(&note.title);
+    let title = made_up.then(|| event.display_title());
     if let Err(e) = crate::notes::link_event(note_id, note_event(&event), title, &attendee_names(&event), None) {
         tracing::warn!("calendar: couldn't tie the note to its meeting: {e}");
         return;
     }
     answer(&event);
     tracing::info!(note_id, "calendar: a recording started during a meeting; note tied to it");
+    // Every window showing the note (the notepad, Notes) follows.
+    crate::commands::note_changed(app, note_id, "calendar");
     let _ = app.emit("yap-notes-changed", ());
-    let _ = app.emit(EVENT_NOTE_LINKED, json!({ "noteId": note_id }));
     emit(app);
 }
 

@@ -17,9 +17,9 @@
 // or runs out, 5 minutes after the start.
 //
 // Also here: the one-time "Connect your calendar" nudge after a meeting ends
-// (with no calendar connected; "Not now" means never), and refreshing the
-// open note when a recording that just started was tied to a meeting
-// (`yap-calendar-note-linked`).
+// (with no calendar connected; "Not now" means never). A note tied to its
+// meeting when its recording started updates in every window by itself
+// (`yap-note-changed`).
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast, dismiss, isToastLive, updateToast } from './ui/toast.svelte.js';
@@ -37,15 +37,15 @@ export const calendar = $state({
 });
 
 let started = false;
-// Set by the main window: switch view, open a Settings section, which view is up.
-let nav = { showView: () => {}, openSettings: () => {}, activeView: () => '' };
+// Set by the main window: switch view, open a Settings section.
+let nav = { showView: () => {}, openSettings: () => {} };
 // The card on screen: { id, toastId, timer }.
 let shown = null;
 let wasRecording = false;
 
 /**
  * Load the snapshot and follow changes. Idempotent; the main window calls it
- * with `showView(view)`, `openSettings(section)` and `activeView()`.
+ * with `showView(view)` and `openSettings(section)`.
  */
 export function initCalendar(opts = {}) {
   nav = { ...nav, ...opts };
@@ -64,11 +64,6 @@ export function initCalendar(opts = {}) {
   });
   listen('yap-calendar-error', (e) => {
     toast({ title: "Couldn't connect your calendar", description: String(e.payload || ''), variant: 'destructive' });
-  });
-  listen('yap-calendar-note-linked', (e) => {
-    // The open note just got its meeting's title and attendees: reload it.
-    const id = e.payload?.noteId;
-    if (id != null && nav.activeView() === 'notes') noteRequest.pending = { id, stop: false };
   });
   listen('yap-meeting-state', (e) => onMeetingState(e.payload));
   window.addEventListener('keydown', onKeydown);

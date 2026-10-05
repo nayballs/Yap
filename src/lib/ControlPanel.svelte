@@ -67,7 +67,6 @@
       activeView = view;
     },
     openSettings: (section) => openSettings(section),
-    activeView: () => activeView,
   });
   let bellOpen = $state(false);
 
