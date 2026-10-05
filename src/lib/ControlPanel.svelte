@@ -20,6 +20,7 @@
   import { account, displayName, initAccount, initials } from './account.svelte.js';
   import { initUpdates } from './updates.svelte.js';
   import { initMeetingDetect } from './meetingDetect.svelte.js';
+  import { initMeetingSummary, askStartedByMistake } from './meetingSummary.svelte.js';
   import { initMeetingGuard } from './meetingGuard.js';
   import { initCalendar } from './calendar.svelte.js';
   import MeetingsView from './MeetingsView.svelte';
@@ -51,6 +52,9 @@
     },
     openSettings: (section) => openSettings(section),
   });
+  // The action plan Rust writes when a meeting ends (meeting_end.rs), for
+  // the Notes view; started here so no job's progress is missed.
+  initMeetingSummary();
   // Meeting guard rails (meeting_guard.rs, capture.rs via meetingGuard.js):
   // "Notes stop in 5 minutes · Keep going", the screen-share tip → Settings
   // → General → Meetings, and the stops Yap makes itself.
@@ -128,6 +132,11 @@
     // A deep link asked for a Settings section (auth.rs: "Open Yap" on the
     // account service's /security page → "account").
     listen('yap-open-settings', (e) => openSettings(String(e.payload || '') || null)).then((u) => uns.push(u));
+    // A meeting with only a few words ended: "Started by mistake?", when Rust
+    // picked this window to ask (the meeting notepad asks when it's open).
+    listen('yap-meeting-ended', (e) => {
+      if (e.payload?.mistake && e.payload.surface === 'settings') askStartedByMistake(e.payload.noteId);
+    }).then((u) => uns.push(u));
     refreshMaximized();
     appWindow.onResized(() => refreshMaximized()).then((u) => uns.push(u));
     return () => uns.forEach((u) => u && u());

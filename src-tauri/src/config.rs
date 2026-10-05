@@ -332,6 +332,23 @@ pub struct YapConfig {
     #[serde(default = "default_true")]
     pub bridge_enabled: bool,
 
+    /// Open the meeting notepad when a meeting recording starts (Settings →
+    /// General → Meetings; `notepad.rs`): docked to the right edge of the
+    /// screen beside the call, without taking the focus. On by default, as
+    /// Wispr Flow's "Open Notepad when starting Notetaker".
+    #[serde(default = "default_true")]
+    pub meeting_open_notepad: bool,
+    /// "Split the screen when joining": when a recording starts during a
+    /// detected call, put the call's window on the left of the screen and the
+    /// notepad on the right. Off by default (it moves another app's window).
+    #[serde(default)]
+    pub meeting_split_screen: bool,
+    /// "Show live transcript": the notepad's Transcript tab shows the lines
+    /// as they're transcribed. Off, it stays quiet until the meeting stops
+    /// (transcription goes on either way). On by default, as Wispr Flow.
+    #[serde(default = "default_true")]
+    pub meeting_live_transcript: bool,
+
     /// Call detection (`meeting_detect.rs`): when Teams, Zoom, Meet, Slack,
     /// Discord, Webex… start using the mic, offer to take notes, and offer to
     /// stop and summarise when the call ends. On by default, like OpenWhispr's
@@ -506,6 +523,9 @@ impl Default for YapConfig {
             streaming_partials: true,
             history_enabled: true,
             bridge_enabled: true,
+            meeting_open_notepad: true,
+            meeting_split_screen: false,
+            meeting_live_transcript: true,
             meeting_detection: true,
             meeting_detect_apps: std::collections::BTreeMap::new(),
             meeting_detect_style: default_meeting_detect_style(),

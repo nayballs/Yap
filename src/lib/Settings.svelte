@@ -468,6 +468,9 @@
     meetingMaxMinutes: 120,
     meetingCallEnd: 'ask',
     meetingHotkey: 'kb:alt+win+77',
+    meetingOpenNotepad: true,
+    meetingSplitScreen: false,
+    meetingLiveTranscript: true,
     meetingReminder: '15s',
     inputDevice: null,
     dictionary: [],
@@ -643,7 +646,7 @@
     if (hotkeyMatchesKeydown(e, cfg?.meetingHotkey)) {
       e.preventDefault();
       e.stopPropagation();
-      invoke('meeting_shortcut').catch(() => {});
+      invoke('meeting_shortcut', { origin: 'settings' }).catch(() => {});
       return;
     }
     if (!hotkeyMatchesKeydown(e, cfg?.hotkey)) return;
@@ -1536,6 +1539,24 @@
                   />
                 </Row>
               </div>
+              <!-- The meeting notepad (notepad.rs): docked beside the call. -->
+              <Row>
+                <Toggle
+                  bind:checked={cfg.meetingOpenNotepad}
+                  label="Open the notepad when a meeting starts"
+                  desc="Your notes, the live transcript and the summary, docked to the right of your screen"
+                  hint="It opens without taking the focus from your call. Closing it never stops the recording; reopen it from the meeting note."
+                />
+              </Row>
+              <Row>
+                <Toggle
+                  bind:checked={cfg.meetingSplitScreen}
+                  label="Split the screen when joining"
+                  desc="Moves the call's window left of the notepad, so you see both at once"
+                  hint="When a recording starts during a call Yap detected, it moves the call app's window to the left of the screen."
+                  disabled={!cfg.meetingOpenNotepad}
+                />
+              </Row>
               <Row label="Meeting shortcut" desc={meetingShortcutDesc}>
                 <HotkeyInput
                   bind:value={cfg.meetingHotkey}
@@ -1566,6 +1587,14 @@
                 <Button variant="secondary" size="sm" onclick={() => (section = 'connectors')}>
                   {calendar.connections.length ? 'Manage' : 'Connect calendar'}
                 </Button>
+              </Row>
+              <Row>
+                <Toggle
+                  bind:checked={cfg.meetingLiveTranscript}
+                  label="Show live transcript"
+                  desc="See the words appear in the notepad while a meeting records"
+                  hint="Off, the notepad's Transcript tab stays quiet until you stop; Yap still transcribes as the meeting goes."
+                />
               </Row>
               <Row>
                 <p class="consent">Recording a call? Let people know you're taking notes.</p>

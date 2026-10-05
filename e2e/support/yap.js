@@ -185,7 +185,7 @@ function describeWebView2(webview2Dir) {
   return lines.join('\n');
 }
 
-/** The webview's Tauri window label ("settings", "onboarding", "overlay"). */
+/** The webview's Tauri window label ("settings", "onboarding", "notepad", "overlay"). */
 async function labelOf(page) {
   return page
     .evaluate(() => window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label ?? null)
@@ -214,13 +214,18 @@ export class YapApp {
   get overlay() {
     return this.pages.overlay;
   }
+  /** The meeting notepad (docked beside a call while a meeting records). */
+  get notepad() {
+    return this.pages.notepad;
+  }
 
   /**
-   * Find the three webviews, start listening for errors, then reload each one
-   * so its whole boot (which ran before we connected) happens under watch.
+   * Find the webviews, start listening for errors, then reload each one so
+   * its whole boot (which ran before we connected) happens under watch.
    */
   async attachPages() {
     const context = this.browser.contexts()[0];
+    const labels = ['settings', 'onboarding', 'notepad', 'overlay'];
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       for (const page of context.pages()) {
@@ -228,10 +233,10 @@ export class YapApp {
         const label = await labelOf(page);
         if (label) this.pages[label] = page;
       }
-      if (this.pages.settings && this.pages.onboarding && this.pages.overlay) break;
+      if (labels.every((l) => this.pages[l])) break;
       await sleep(250);
     }
-    for (const label of ['settings', 'onboarding', 'overlay']) {
+    for (const label of labels) {
       if (!this.pages[label]) throw new Error(`Yap's "${label}" webview never showed up`);
       // The embedded frontend, not a dev server (which would be someone's Vite).
       if (!this.pages[label].url().startsWith('http://tauri.localhost/')) {
