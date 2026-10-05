@@ -7,7 +7,8 @@
 // Lists the feat/fix/perf commits in <since-ref>..HEAD (no merges), or the
 // last 25 commits when <since-ref> is missing or not an ancestor of HEAD.
 // Skips what doesn't ship in the app: the account server (cloud), the
-// website, CI and docs. Prints markdown (lib/markdown.js renders it).
+// website, CI, docs and test tooling. Prints markdown (lib/markdown.js
+// renders it).
 import { execFileSync } from 'node:child_process';
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
@@ -23,7 +24,7 @@ if (since) {
   }
 }
 
-const SKIP_SCOPES = new Set(['cloud', 'website', 'ci', 'docs', 'deps']);
+const SKIP_SCOPES = new Set(['cloud', 'website', 'ci', 'docs', 'deps', 'e2e', 'test', 'tests', 'lint']);
 const groups = { feat: [], fix: [] };
 const seen = new Set();
 for (const subject of git('log', '--no-merges', '--format=%s', ...range).split('\n')) {
