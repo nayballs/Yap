@@ -276,7 +276,7 @@
     {:else if activeView === 'upload'}
       <UploadView />
     {:else if activeView === 'integrations'}
-      <IntegrationsView />
+      <IntegrationsView onopensettings={openSettings} />
     {/if}
   </main>
   </div>

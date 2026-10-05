@@ -218,6 +218,16 @@ pub struct YapConfig {
     /// Where the transcribing overlay appears: "bottom" or "top".
     #[serde(default = "default_overlay_position")]
     pub overlay_position: String,
+    /// The Yap bar (`bar.rs`): a small pill above the taskbar on the monitor
+    /// you're using, to dictate or take meeting notes, and where Yap's
+    /// notices show while its window isn't focused. Off: the overlay shows
+    /// only while dictating and notices come as Windows notifications.
+    #[serde(default = "default_true")]
+    pub bar_enabled: bool,
+    /// Hide the idle bar while an app is fullscreen on its monitor (games,
+    /// videos, slideshows). It always shows while recording.
+    #[serde(default = "default_true")]
+    pub bar_hide_fullscreen: bool,
     /// Which key auto-submit presses after pasting: "enter", "ctrlEnter",
     /// or "shiftEnter".
     #[serde(default = "default_auto_submit_key")]
@@ -331,6 +341,10 @@ pub struct YapConfig {
     /// loopback-only + bearer token, so nothing is reachable off-machine.
     #[serde(default = "default_true")]
     pub bridge_enabled: bool,
+    /// Let AI apps save notes through Yap's MCP server (its `create_note`
+    /// tool; Settings → MCP). Off by default: they can only read.
+    #[serde(default)]
+    pub mcp_allow_writes: bool,
 
     /// Open the meeting notepad when a meeting recording starts (Settings →
     /// General → Meetings; `notepad.rs`): docked to the right edge of the
@@ -356,6 +370,11 @@ pub struct YapConfig {
     /// locally, and nothing records without a click.
     #[serde(default = "default_true")]
     pub meeting_detection: bool,
+    /// Start notes on a detected call by itself after a 10-second countdown
+    /// on its prompt, unless cancelled (Wispr's "Meeting detected" card).
+    /// Off by default: nothing records without a click.
+    #[serde(default)]
+    pub meeting_auto_start: bool,
     /// Which call apps it asks about (Settings → General → Meetings, or "Don't
     /// ask for Discord" on a prompt): app id → the person's choice. An app
     /// without an entry uses its default in `meeting_detect::APPS` (work apps
@@ -491,6 +510,8 @@ impl Default for YapConfig {
             model_unload_timeout: default_model_unload_timeout(),
             output_device: None,
             overlay_position: default_overlay_position(),
+            bar_enabled: true,
+            bar_hide_fullscreen: true,
             auto_submit_key: default_auto_submit_key(),
             update_checks_enabled: true,
             debug_logging: false,
@@ -512,10 +533,12 @@ impl Default for YapConfig {
             streaming_partials: true,
             history_enabled: true,
             bridge_enabled: true,
+            mcp_allow_writes: false,
             meeting_open_notepad: true,
             meeting_split_screen: false,
             meeting_live_transcript: true,
             meeting_detection: true,
+            meeting_auto_start: false,
             meeting_detect_apps: std::collections::BTreeMap::new(),
             meeting_detect_style: default_meeting_detect_style(),
             meeting_hide_from_capture: true,

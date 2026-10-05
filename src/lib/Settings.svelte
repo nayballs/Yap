@@ -30,6 +30,7 @@
   import { modelStore } from './modelStore.svelte.js';
   import { attention, attentionCount } from './attention.svelte.js';
   import AccountSection from './AccountSection.svelte';
+  import McpSection from './McpSection.svelte';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
   import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from './updates.svelte.js';
   import { meetingDetect } from './meetingDetect.svelte.js';
@@ -71,6 +72,9 @@
       ],
     },
     { label: 'Data', items: [{ id: 'history', label: 'History' }] },
+    // Wispr's Connectors + MCP pages. MCP: AI apps read your meetings
+    // (McpSection.svelte).
+    { label: 'Connections', items: [{ id: 'mcp', label: 'MCP' }] },
     {
       label: 'System',
       items: [
@@ -407,6 +411,8 @@
   ];
   const CALL_PROMPT_STYLE_DESC = {
     popup: 'A card in Yap, or a Windows notification while Yap is in the background',
+    // With the Yap bar on, the card goes on the bar instead (bar.rs).
+    popupBar: 'A card in Yap, or on the Yap bar while you work in another app',
     quiet: 'No pop-up: it waits in the notification centre and the tray menu',
   };
   // General → Meetings guard rails (meeting_guard.rs, capture.rs).
@@ -450,6 +456,7 @@
     streamingPartials: true,
     historyEnabled: true,
     meetingDetection: true,
+    meetingAutoStart: false,
     meetingDetectApps: {},
     meetingDetectStyle: 'popup',
     meetingHideFromCapture: true,
@@ -459,6 +466,8 @@
     meetingOpenNotepad: true,
     meetingSplitScreen: false,
     meetingLiveTranscript: true,
+    barEnabled: true,
+    barHideFullscreen: true,
     inputDevice: null,
     dictionary: [],
     selectedLanguage: 'auto',
@@ -714,12 +723,20 @@
     // copy — adopt its new value or our next auto-save would revert the toggle.
     if (typeof e.detail?.fuzzy === 'boolean') cfg.dictionaryFuzzy = e.detail.fuzzy;
   }
+  // A view outside Settings saved a config field (the Integrations view's
+  // Local API switch): adopt it, or this copy's next auto-save would put the
+  // old value back.
+  function onConfigPatched(e) {
+    if (cfg && e.detail && typeof e.detail === 'object') Object.assign(cfg, e.detail);
+  }
   $effect(() => {
     window.addEventListener('yap-settings-goto', onSettingsGoto);
     window.addEventListener('yap-dictionary-changed', onDictChanged);
+    window.addEventListener('yap-config-patched', onConfigPatched);
     return () => {
       window.removeEventListener('yap-settings-goto', onSettingsGoto);
       window.removeEventListener('yap-dictionary-changed', onDictChanged);
+      window.removeEventListener('yap-config-patched', onConfigPatched);
     };
   });
   // General → Meetings → "Ask about calls in": each app's effective choice
@@ -753,6 +770,27 @@
     });
     return () => un.then((f) => f());
   });
+
+  // General → Yap bar (bar.rs). "Turn off the bar" in the bar's own menu
+  // saves that in Rust: adopt it here, or the next auto-save would turn the
+  // bar back on. "Hide the bar for 1 hour" isn't a setting; the group shows
+  // it with a way to bring the bar back now.
+  let barHiddenUntil = $state(null);
+  onMount(() => {
+    invoke('bar_status')
+      .then((s) => (barHiddenUntil = s?.hiddenUntil ?? null))
+      .catch(() => {});
+    const uns = [
+      listen('yap-bar', (e) => (barHiddenUntil = e.payload?.hiddenUntil ?? null)),
+      listen('yap-bar-changed', (e) => {
+        if (cfg && typeof e.payload?.enabled === 'boolean') cfg.barEnabled = e.payload.enabled;
+      }),
+    ];
+    return () => uns.forEach((u) => u.then((f) => f()));
+  });
+  function hiddenUntilLabel(ms) {
+    return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
 
   // Broadcast Settings-side dictionary edits (e.g. the Voice Agent name save)
   // to DictionaryView — skipping echoes of updates we just received from it.
@@ -1257,6 +1295,13 @@
       <path d="M12 16v-4" />
       <path d="M12 8h.01" />
     </svg>
+  {:else if id === 'mcp'}
+    <!-- The Model Context Protocol's knot mark, redrawn on the 24 grid. -->
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3.1 12 11.4 3.7c1.2-1.2 3.1-1.2 4.2 0s1.2 3.1 0 4.2L9.3 14.2" />
+      <path d="m9.4 14.1 6.2-6.2c1.2-1.2 3.1-1.2 4.2 0c1.2 1.2 1.2 3.1 0 4.2l-7.6 7.6c-.4.4-.4 1 0 1.4l1.6 1.6" />
+      <path d="M13.5 5.8 7.3 12c-1.2 1.2-1.2 3.1 0 4.2s3.1 1.2 4.2 0l6.2-6.2" />
+    </svg>
   {/if}
 {/snippet}
 
@@ -1432,19 +1477,42 @@
             </Row>
           </Group>
 
-          <Group title="Recording overlay">
-            <Row>
-              <Toggle
-                bind:checked={cfg.streamingPartials}
-                label="Live transcription preview"
-                desc="Show your words in the overlay as you speak"
-                hint="Preview only — the final result on stop is always authoritative."
-              />
-            </Row>
-            <Row label="Overlay position" desc="Where the overlay appears on screen">
-              <Select bind:value={cfg.overlayPosition} options={OVERLAY_POSITIONS} />
-            </Row>
-          </Group>
+          <div id="settings-bar">
+            <Group title="Yap bar">
+              <Row>
+                <Toggle
+                  bind:checked={cfg.barEnabled}
+                  label="Show the Yap bar"
+                  desc="A small pill above the taskbar on the screen you're using. Hover it to dictate or take meeting notes; call prompts show on it too."
+                  hint="Off: the overlay shows only while you dictate, and Yap's notices come as Windows notifications."
+                />
+              </Row>
+              {#if cfg.barEnabled && barHiddenUntil}
+                <Row label={`Hidden until ${hiddenUntilLabel(barHiddenUntil)}`} desc="You hid it from its menu for an hour">
+                  <Button variant="secondary" size="sm" onclick={() => invoke('bar_action', { action: 'show' }).catch(() => {})}>Show it now</Button>
+                </Row>
+              {/if}
+              <Row>
+                <Toggle
+                  bind:checked={cfg.barHideFullscreen}
+                  label="Hide in fullscreen apps"
+                  desc="Games, videos and presentations stay clear. It still shows while you're recording."
+                  disabled={!cfg.barEnabled}
+                />
+              </Row>
+              <Row>
+                <Toggle
+                  bind:checked={cfg.streamingPartials}
+                  label="Live transcription preview"
+                  desc="Show your words on the bar as you speak"
+                  hint="Preview only — the final result on stop is always authoritative."
+                />
+              </Row>
+              <Row label="Position" desc="Where the bar and the dictation overlay sit on screen">
+                <Select bind:value={cfg.overlayPosition} options={OVERLAY_POSITIONS} />
+              </Row>
+            </Group>
+          </div>
 
           <div id="settings-meetings">
             <Group title="Meetings">
@@ -1458,12 +1526,22 @@
               </Row>
               <Row
                 label="How Yap asks"
-                desc={CALL_PROMPT_STYLE_DESC[cfg.meetingDetectStyle] ?? CALL_PROMPT_STYLE_DESC.popup}
+                desc={cfg.meetingDetectStyle !== 'quiet' && cfg.barEnabled
+                  ? CALL_PROMPT_STYLE_DESC.popupBar
+                  : (CALL_PROMPT_STYLE_DESC[cfg.meetingDetectStyle] ?? CALL_PROMPT_STYLE_DESC.popup)}
               >
                 <Segmented
                   bind:value={cfg.meetingDetectStyle}
                   options={CALL_PROMPT_STYLES}
                   label="How Yap asks"
+                  disabled={!cfg.meetingDetection}
+                />
+              </Row>
+              <Row>
+                <Toggle
+                  bind:checked={cfg.meetingAutoStart}
+                  label="Start notes automatically after 10 seconds"
+                  desc="The prompt counts down, and you can cancel. Not when Yap asks quietly."
                   disabled={!cfg.meetingDetection}
                 />
               </Row>
@@ -2323,6 +2401,16 @@
               />
             </Row>
           </Group>
+
+        {:else if section === 'mcp'}
+          <div class="page-h">
+            <h1>MCP</h1>
+            <p>
+              Connect Yap to your favourite AI apps, so you can ask about your meeting transcripts
+              and notes. Yap's MCP can't see your dictations, and everything stays on this PC.
+            </p>
+          </div>
+          <McpSection bind:cfg />
 
         {:else if section === 'account'}
           <div class="page-h">

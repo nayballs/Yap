@@ -800,7 +800,7 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
 (`meeting_summary.rs`), and the meeting UI inside the Notes view.
 
 **Wave 1 — the meeting experience**
-- [ ] *(building)* **Docked meeting notepad.** A slim window docked to the screen edge (Wispr: right,
+- [ ] *(merged, dev check: d261ae9)* **Docked meeting notepad.** A slim window docked to the screen edge (Wispr: right,
       full height, about a third of the width) that opens when a recording starts, with
       a setting "Open the notepad when a meeting starts", on by default. It has:
       - tabs **My thoughts** (your own notes, the default), **Transcript** (live, You/Them
@@ -810,13 +810,13 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
         consent…") and **What did I miss?**;
       - after Stop: **Resume**, **Generate summary**, summary progress ("Step 1 of 3") and
         a retryable error state.
-- [ ] *(building)* **"Split the screen when joining".** The call window on the left, the notepad on
+- [ ] *(merged, dev check: d261ae9)* **"Split the screen when joining".** The call window on the left, the notepad on
       the right (Win32 arrange), as a setting.
-- [ ] *(building)* **"What did I miss?"** An inline mini chat in the notepad that answers from the
+- [ ] *(merged, dev check: d261ae9)* **"What did I miss?"** An inline mini chat in the notepad that answers from the
       transcript **since you last looked** (built on the rolling digests).
-- [ ] *(building)* **AI meeting title.** Replaces "Teams call · 5 Oct, 14:30" once there's enough
+- [ ] *(merged, dev check: d261ae9)* **AI meeting title.** Replaces "Teams call · 5 Oct, 14:30" once there's enough
       talk.
-- [ ] *(building)* **"Started by mistake?"** After a very short recording: Keep / Discard.
+- [ ] *(merged, dev check: d261ae9)* **"Started by mistake?"** After a very short recording: Keep / Discard.
 - [ ] *(merged, dev check: e1bbf73)* **Hide from screen capture / sharing.** `SetWindowDisplayAffinity(
       WDA_EXCLUDEFROMCAPTURE)` on the notepad and overlay while a meeting records, so
       screen shares and screenshots never show your notes. A setting, on by default,
@@ -839,7 +839,7 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
       It evolves today's `overlay` window.
 
 **Wave 2 — your AI and your calendar**
-- [ ] *(building)* **MCP server.** Claude, ChatGPT, Gemini, Cursor and any MCP client can read your
+- [ ] *(merged, dev check: eb3069a)* **MCP server.** Claude, ChatGPT, Gemini, Cursor and any MCP client can read your
       meeting notes and transcripts (not your dictations, like Wispr), locally over Yap's
       bridge, with one-click **Add to Claude / Cursor / …** in Integrations plus a
       copyable config for everything else.

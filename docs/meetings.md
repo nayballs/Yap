@@ -815,10 +815,36 @@ has passed, so no prompt).
     alone, it fades after 30 s, a countdown hairline along its bottom edge,
     and that counts as Not now (OpenWhispr hides its meeting prompt after
     30 s and treats it as a dismissal). It stays while the pointer is on it.
-  - Main window hidden, minimized or behind the call app: a silent Windows
-    notification with Yap's logo and the same three answers as buttons. If
-    the window is open but not focused, both surfaces show; answering one
-    withdraws the other. Focusing the window moves a pending prompt into it.
+  - Main window hidden, minimized or behind the call app: a card on the
+    **Yap bar** (`bar.rs`), after Wispr Flow's "Meeting detected" card: the
+    call app's mark, "Teams call detected" over "● Now", a light split
+    button **[Yap] Record notes** whose **^** menu holds **Not now** and
+    **Don't ask for Teams**, and a small **✕** on its top-left corner (Not
+    now). It fades after 30 s as Not now, like the toast, and pauses while
+    the pointer is on it. The marks are Simple Icons glyphs (CC0) where
+    Simple Icons has them; Teams, Slack, Webex and Whereby get a monogram in
+    their colour, anything else a phone. With the bar off or hidden for an
+    hour, a silent Windows notification with Yap's logo and the same three
+    answers as buttons, as before. If the window is open but not focused,
+    both surfaces show; answering one withdraws the other. Focusing the
+    window moves a pending prompt into it.
+  - Over a fullscreen app: a borderless one (a game in a borderless window,
+    a video, a browser in F11) still gets the card, over it, without the
+    idle pill (Wispr's card appeared over a game). An exclusive-fullscreen
+    game or a slideshow (`SHQueryUserNotificationState`) doesn't: the card
+    waits, unseen, and shows when you alt-tab out, unless the call has ended
+    by then (no countdown runs meanwhile, and Esc stays the game's).
+  - **Start notes automatically after 10 seconds** (Settings → General →
+    Meetings, `meetingAutoStart`, **off** by default: nothing records without
+    a click unless you switch it on). Wispr's card starts notes after a
+    countdown; Yap's does too when this is on: "Notes start in 7…" with a
+    ring draining round the Yap logo on the bar's card ("Starting notes in
+    7…" on the in-app toast), **Start now**, Not now or **Esc** to cancel,
+    then Record notes as if clicked (after any dictation in progress). Only
+    where the countdown is sure to be seen — the bar's card or a focused
+    window's toast — and never in the quiet style. The same app's call again
+    within 10 minutes (a rejoin, a reload) is asked about without a
+    countdown, as Wispr does.
 - **Quietly** (`"quiet"`): no in-app toast. The Windows notification goes
   straight into the notification centre without a banner
   (`ToastNotification.SuppressPopup`), and the prompt stays out of the window
@@ -837,9 +863,12 @@ has passed, so no prompt).
   notification.
 - Windows notifications follow Do Not Disturb and Yap's notification switch.
   Portable Yap and test runs post none, so their pop-up prompts show in the
-  window. "Taking notes on your Teams call" and "Couldn't record the call",
-  feedback on a click, keep their banner in either style. Update
-  notifications (`updates.rs`) don't follow the style.
+  window (and on the bar). "Taking notes on your Teams call" and "Couldn't
+  record the call", feedback on a click, keep their banner in either style
+  (on the bar: a card that fades after 8 s). Update notifications
+  (`updates.rs`) don't follow the style; with the bar on, "Yap X is ready"
+  is a bar card too, as are the guard rails' notices (the length warning
+  with Keep going, the screen-share tip, "Stopped at 2 hours").
 
 ### Record notes
 
@@ -917,9 +946,12 @@ on) and stops all detection work.
   the start/end debounce, note titles, prompt wording, the per-app defaults and
   the person's choice winning over them, no prompt for a switched-off app, the
   quiet style (no in-app toast, a quiet notification), the 30 s fade (start
-  prompts only), the tray item, the Settings list's order, and the
+  prompts only), the tray item, the Settings list's order, the
   notification XML (three answers on a start prompt; built into a WinRT toast,
-  never shown, with `SuppressPopup` set only when quiet).
+  never shown, with `SuppressPopup` set only when quiet), the Yap bar's card
+  (the same answers, "● Now" / "● Still recording", its fade, ✕ and Esc), and
+  the auto-start countdown (off by default, only where it's sure to be seen,
+  never quiet, never for a rejoin, never for an end prompt).
 - Read-only check of this PC's microphone record:
   `cargo test --lib meeting_detect::tests::this_machine -- --ignored --nocapture`
   (prints exe/package names and recognised meetings only, never window titles).
@@ -935,7 +967,11 @@ on) and stops all detection work.
   for Teams" (the confirmation, Settings showing it off, switching it back on),
   the quiet style, the Settings list, and the master toggle. The tray item and
   the Windows notifications can't be driven over CDP: their logic is in the
-  unit tests.
+  unit tests. `e2e/bar.spec.js` covers the prompt as a card on the Yap bar
+  (its menu, its ✕, an app's mark), over a borderless and an exclusive
+  fullscreen app, and the countdown (Esc cancels; left alone it records; the
+  end card follows). A test run never counts the main window as focused, so
+  the card shows whatever the desktop does around the suite.
 
 ### Limits
 

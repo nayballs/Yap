@@ -41,7 +41,7 @@ test('every sidebar view renders', async ({ main, shot }) => {
   }
 });
 
-const SECTIONS = ['General', 'Speech-to-Text', 'Language Models', 'History', 'Advanced', 'About'];
+const SECTIONS = ['General', 'Speech-to-Text', 'Language Models', 'History', 'MCP', 'Advanced', 'About'];
 
 test('every Settings section renders', async ({ main, shot }) => {
   for (const [i, section] of SECTIONS.entries()) {

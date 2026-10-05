@@ -4,7 +4,9 @@ Yap is a tiny **local voice-dictation tool**: press a global hotkey, speak, pres
 again — Yap transcribes **locally on the GPU**, optionally runs the text through an
 **AI cleanup pass** (filler/punctuation/grammar), and types it into whatever window
 is focused. A chime marks start/stop, a correction dictionary fixes mis-heard jargon,
-and a floating overlay shows a live waveform while you talk.
+and the **Yap bar** — a tiny pill above the taskbar on whichever screen you're using —
+shows a live waveform while you talk, opens into Dictate / Meeting notes on hover, and
+carries Yap's notices (call prompts) while its window isn't focused.
 
 This file documents how Yap actually runs today. For *where it's going* and the
 competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
@@ -46,9 +48,10 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 - **Shell:** [Tauri 2](https://tauri.app) (Rust backend + webview frontend).
 - **Frontend:** Svelte 5 + Vite 6 (`src/`). Windows: **settings** (the main
   ControlPanel), **onboarding**, **notepad** (the meeting notepad, docked to
-  the screen edge while a meeting records), **overlay**. (The always-on pill
-  window was retired 2026-07-09 — the transcribing overlay + tray are the
-  only floating surfaces.)
+  the screen edge while a meeting records), **overlay** (since 2026-10-05 the
+  **Yap bar**, `bar.rs`: an always-there pill, click-through except over what
+  it draws; with the bar off, the transcribing overlay as before). The old
+  pill window was retired 2026-07-09.
 - **Backend:** Rust (`src-tauri/src/`).
 - **Audio:** `cpal` (capture) + `rodio` (start/stop chime).
 - **STT:** [`transcribe-rs`](https://crates.io/crates/transcribe-rs) — one crate that
@@ -76,6 +79,10 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
   device authorization); the session token lives in Windows Credential Manager
   (`keyring-core` + `windows-native-keyring-store`). Deep-link/single-instance are held on 2.4.x
   (2.5+ needs tauri 2.12).
+- **MCP (AI apps):** [`rmcp`](https://crates.io/crates/rmcp), the official Rust MCP SDK
+  (server + stdio, no macros): `yap.exe mcp` lets Claude, ChatGPT desktop, Gemini CLI,
+  Cursor… read meetings and notes through the local API (`mcp.rs`); `toml_edit` adds Yap to
+  Codex/ChatGPT's `config.toml` (`mcp_clients.rs`).
 - **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`,
   `history.json`, `notes.json` — the AI Notepad store, `chats.json` — AI Chat
   conversations, `updates.json` — update announcements + the restart marker).
@@ -127,7 +134,8 @@ before `meeting::ingest`) and on an Upload's whole text.
 - **`lib.rs`** — app entry / Tauri `setup`. Runs `portable::init()`, registers the
   updater/autostart/single-instance plugins, starts the input hook + pipeline,
   routes `dictation-key-pressed`/`-released` → `Pipeline.on_key()` (so recording works
-  before the webview is ready), drives the **overlay** and **tray** off `yap-state`,
+  before the webview is ready), drives the **overlay** (the Yap bar,
+  `bar::on_pipeline_state`) and **tray** off `yap-state`,
   builds the tray (always — it's the only persistent surface), reconciles
   autostart (release builds only: a dev build shares the installed app's `Yap`
   Run entry, so `set_autostart_enabled` leaves the OS setting alone), and
@@ -382,8 +390,11 @@ before `meeting::ingest`) and on an Upload's whole text.
   are still tracked but get no prompt (start or end) and no tray item. Asks
   **once per call**, never while already recording, in one of two styles
   (`config.meeting_detect_style`): **"popup"** (default) — a sticky in-app
-  toast when the main window is visible, a silent Windows notification
-  (`win_toast.rs`) when it isn't focused; answering either withdraws both,
+  toast when the main window is visible, and when it isn't focused a card on
+  the **Yap bar** (`native::bar_card`: Wispr's "Meeting detected" card — app
+  mark, "● Now", split button Record notes | ^ Not now / Don't ask for Teams,
+  corner ✕; the bar off or hidden → a silent Windows notification via
+  `win_toast.rs`, as before); answering either withdraws both,
   focusing the window moves a pending prompt in-app (`on_main_window_focused`),
   and an in-app start prompt left alone **fades after 30 s as "Not now"**
   (OpenWhispr's auto-dismiss; `fadeMs` in the prompt view, the toast's
@@ -396,7 +407,15 @@ before `meeting::ingest`) and on an Upload's whole text.
   window on screen, a "Won't ask about Teams calls" toast links to Settings →
   General → Meetings); the end prompt follows the style. Prompts wait for a
   dictation to finish (+2.5 s); "Not now" snoozes that app for 5 min
-  (OpenWhispr's cooldown). **Tray**: while a call of an asked-about app is live
+  (OpenWhispr's cooldown). Opt-in **"Start notes automatically after 10
+  seconds"** (`meeting_auto_start`, Wispr's countdown; off by default because
+  nothing records without a click): a start prompt that's sure to be seen (a
+  focused window's toast, or the bar's card) counts down (`auto_start_at` in
+  the prompt view; Start now / Not now / Esc cancel), then runs "Record notes"
+  (`auto_start_later`, after any dictation); the same app's call again within
+  10 min (a rejoin, a reload) is asked about without one. In a test run the
+  main window never counts as focused (`window_view`), so prompts reach the
+  bar deterministically. **Tray**: while a call of an asked-about app is live
   and nothing records, `tray_item()` puts "Record this Teams call" at the top
   of the idle menu (`meeting_record:<call id>` → `on_tray_record`, same as
   Record notes); `sync_tray` calls `tray::refresh` when it changes. **Record
@@ -501,7 +520,41 @@ before `meeting::ingest`) and on an Upload's whole text.
   refreshes live. Toggled by `config.bridge_enabled` (default on; `sync()`
   runs at setup + every config save). A second Yap (dev next to installed)
   leaves a live bridge's file alone, and `stop()` only deletes the file while
-  it's still ours. See `docs/local-api.md`.
+  it's still ours. Also serves the MCP server's meeting views
+  (`/v1/meetings/list`, `/v1/meetings/search`, `/v1/mcp/config`; built in
+  `mcp.rs`). Debug builds take `YAP_BRIDGE_FILE` to move the discovery file
+  (the e2e suite). See `docs/local-api.md`.
+- **`mcp.rs`** — **Yap's MCP server** (Wispr Flow's Notetaker MCP, local): AI apps
+  launch **`yap.exe mcp`** (main.rs sends that argument here before any of the app
+  starts: no window, tray, hook or single-instance check; release builds are
+  GUI-subsystem and inherit the client's stdio pipes fine) and speak MCP over
+  stdin/stdout via `rmcp`, which serves both eras (the 2025 `initialize` handshake
+  and 2026-07-28's per-request `_meta` + `server/discover`). The process holds no
+  data: every tool calls the **running** Yap's local API (discovery file re-read per
+  call), so notes.json keeps one writer; with Yap closed or the Local API off, tools
+  answer "Open Yap to let your AI read your notes". Tools, meetings + notes only,
+  **never dictation history**: `list_meetings`, `search_meetings` (matching
+  transcript lines + page), `get_meeting` (AI summary/action plan, typed notes,
+  digests when there's no summary, transcript in ~6k-token pages via
+  `transcript_page`), `search_notes`, `get_note`, `list_folders`, and `create_note`
+  only when `config.mcp_allow_writes` (Settings → MCP; source `"mcp"`). Markdown
+  for the model, local-time dates (chrono), "You/Them" explained.
+- **`mcp_clients.rs`** — "Add to Claude / ChatGPT / Gemini / Cursor…" (Settings →
+  MCP): edits each AI app's own config to launch `yap.exe mcp`. Claude desktop
+  (`%APPDATA%\Claude\claude_desktop_config.json` **and** the MSIX build's
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\…`), ChatGPT desktop +
+  Codex (`~/.codex/config.toml`, `[mcp_servers.yap]` via toml_edit), Gemini CLI
+  (`~/.gemini/settings.json`), Cursor (`~/.cursor/mcp.json`), Claude Code
+  (`~/.claude.json`, under Claude Code's own proper-lockfile lock), VS Code
+  (`%APPDATA%\Code\User\mcp.json`, `servers`) and Windsurf/Devin Desktop. Only the
+  `yap` entry changes (other entries kept as their original text, so key order,
+  indent, CRLF and BOM survive; remove = same bytes back), non-plain JSON is left
+  alone with the reason, `.bak` on the first edit, temp-file + rename writes.
+  Detects installed apps; status added / available / outdated (exe gone) /
+  missing. Commands `mcp_clients_status`, `mcp_client_add`, `mcp_client_remove`
+  (async, blocking IO off the main thread). Debug builds take
+  `YAP_MCP_CLIENT_ROOT` as a stand-in user profile; test mode never touches the
+  real one.
 - **`auth.rs`** — Yap accounts (optional; nothing in dictation depends on it).
   Email codes: `auth_email_send`/`auth_email_verify` call the account service
   directly. Google/GitHub/Discord: `auth_start` opens the system browser on
@@ -645,9 +698,12 @@ before `meeting::ingest`) and on an Upload's whole text.
   off), call detection:
   meeting_detection + meeting_detect_style ("popup"|"quiet") +
   meeting_detect_apps (app id → bool overrides of `meeting_detect::APPS`'
-  defaults), meeting guard rails: meeting_hide_from_capture (true),
+  defaults) + meeting_auto_start (the opt-in 10-second countdown, off),
+  meeting guard rails: meeting_hide_from_capture (true),
   meeting_max_minutes (120; 0 = no limit), meeting_call_end ("ask"|"stop"),
-  meeting_hotkey (`kb:alt+win+77`)). JSON
+  meeting_hotkey (`kb:alt+win+77`), bridge_enabled, mcp_allow_writes (AI apps
+  may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
+  bar_hide_fullscreen (true)). JSON
   load/save + `apply_dictionary` + `dictionary_prompt` (the Whisper
   `initial_prompt` vocabulary) + `resolve_cleanup` (per-app plan: body + endpoint).
   `data_dir()` is portable-aware. `load()` also migrates saved Groq picks (cleanup,
@@ -679,10 +735,60 @@ before `meeting::ingest`) and on an Upload's whole text.
   `on_tray_record` on a worker thread). Both items are in the idle menu's cache
   key (`idle_menu_key`), so the menu rebuilds when they change; all tray work
   runs on the main thread.
-- **`overlay.rs`** — shows/positions the bottom (or top) center "transcribing" overlay
-  window on `yap-state`. **Screen-aware**: positions on the monitor holding the
-  mouse cursor (Win32 `GetCursorPos` vs Tauri monitor rects, both physical px;
-  Handy's `get_monitor_with_cursor` pattern), primary-monitor fallback.
+- **`bar.rs`** — the **Yap bar** (2026-10-05, after Wispr Flow's Flow Bar —
+  `E:\Projects\references\wispr-flow\README.md`, screenshots 20–22, 25): the
+  `overlay` window as one fixed-size (520×560 logical), transparent,
+  always-on-top tool window. **Idle** a tiny dark pill outline above the
+  taskbar; **hover** opens it into 🎤 Dictate (`toggle_recording`, tooltip
+  "Dictate · F9"), ◉ Meeting notes (`meeting_guard::start_or_stop`, as the
+  meeting shortcut: the live call, else a new meeting note; while recording,
+  `meeting_end::end`) and a ^ menu (Open Yap, New meeting note, Settings,
+  Hide the bar for 1 hour, Turn off the bar — `bar_action`); **dictating** =
+  the dictation overlay (waveform, live partials, Transcribing…, errors);
+  **meeting** = a compact recording pill (dot, bars, timer; body →
+  `notepad::open`, ■ → `meeting_end::end`). **Click-through except over what
+  it draws**: the page reports its interactive rects (`data-region` →
+  `bar_regions`, CSS px) and a poller (`GetCursorPos` every 250 ms, 30 ms
+  while the cursor is near) hit-tests them (`overlay::region_at`, per-monitor
+  scale) and clears `WS_EX_TRANSPARENT` only while the cursor is on one,
+  telling the page (`yap-bar-pointer`; a click-through window gets no
+  mouseleave, so Rust is the authority on hover) — Electron's
+  `setIgnoreMouseEvents(true, {forward:true})` done natively, as Wispr's
+  traced bar does. **Never focused**: `focusable: false` (WS_EX_NOACTIVATE),
+  a window subclass that answers `WM_MOUSEACTIVATE` with MA_NOACTIVATE and
+  keeps TOOLWINDOW/NOACTIVATE/LAYERED through tao's style rewrites
+  (`WM_STYLECHANGING`), and if Windows activates it anyway (`WM_ACTIVATE`)
+  the focus goes back to the app you were in — so 🎤 dictates there.
+  **Follows the cursor's monitor** (not the foreground window) after 200 ms
+  on it, bottom-centre on the work area (`overlay::place`: taskbars on any
+  edge, an auto-hidden one kept clear, per-monitor DPI with a re-place after
+  a DPI-changing move, unplugged monitors), frozen while a dictation records
+  or transcribes. **Fullscreen** (`bar_hide_fullscreen`, on;
+  `overlay::fullscreen_on` = the foreground window covering the whole monitor
+  and not maximised/shell/Yap's own, or `SHQueryUserNotificationState`
+  D3D-exclusive / presentation mode): the idle pill hides; a card still shows
+  over a borderless app, but waits (queued, unseen) out an exclusive one; it
+  always shows while recording. **Cards** (`show_card`/`update_card`/
+  `dismiss_card`, `Card` + an `OnAction` callback; answers come back through
+  `bar_card_action`): Yap's notices while the main window isn't focused,
+  instead of a Windows notification — `false` when the bar is off or hidden
+  for an hour, and the caller posts the notification as before. Users:
+  `meeting_detect` (call prompts as Wispr's "Meeting detected" card, "Taking
+  notes…", failures), `meeting_guard` (length warning with Keep going,
+  notices), `updates` ("Yap X is ready"). An Esc watch (a low-level keyboard
+  hook that only looks) runs only while an on-screen card offers Esc (the
+  auto-start countdown). Debug-only `bar_simulate` (pretend cursor on a
+  region, fake fullscreen kinds, Esc, demo cards) and `bar_debug` (the real
+  ex-styles, WindowFromPoint on the pill, the thread's active window) for the
+  e2e suite. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`;
+  `overlay_position` puts it at the top). Bar off = the old behaviour: the
+  overlay only while dictating, notices as Windows notifications.
+- **`overlay.rs`** — the bar window's Win32 side + its pure, unit-tested maths:
+  `place` (work-area placement), `fullscreen_on` (None / Borderless /
+  Exclusive), `region_at` (hit-testing with slack), `enforced_ex_style`, and
+  `win::` (subclass install, click-through toggle, monitors via
+  `MonitorFromPoint`/`GetMonitorInfoW`/`GetDpiForMonitor`, auto-hidden taskbars
+  via `ABM_GETAUTOHIDEBAREX`, the foreground window, `force_topmost`).
 - **`input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
   `kb:ctrl+shift+VKEY` (modifier combo; `win` is a modifier too, e.g. the
   meeting shortcut `kb:alt+win+77` = Win+Alt+M), `kb:165` (single right-side modifier, e.g.
@@ -893,19 +999,33 @@ before `meeting::ingest`) and on an Upload's whole text.
   plain RAG chat; tool-activity chips render in the thread). No streaming or
   semantic vectors yet (ROADMAP step 3). **`IntegrationsView.svelte`** = the
   Integrations surface (OpenWhispr `IntegrationsView.tsx`, local-first cut):
-  Local API card (enable toggle + live status/port via `bridge_status`,
-  discovery-file path + curl example with copy), a Coding-agents card whose
-  "Copy API guide" button copies a paste-into-your-agent endpoint cheat-sheet,
-  and an endpoint reference table. (OpenWhispr's Google-Calendar OAuth /
-  cloud API-keys / hosted-MCP cards need their paid cloud and are not ported.)
-- **`lib/Overlay.svelte`** — the click-through bottom/top overlay, Yap's only
-  floating dictation surface (the pill was retired 2026-07-09): a **light**
-  capsule matching the app's identity (white `--yap-s2` surface + warm border +
-  ink text; a little Yap card floating on screen), with a **burnt-orange**
-  (`--yap-primary`) scrolling amplitude waveform while recording, "Transcribing…"
-  while processing, and an error state. Red pulsing dot + moving waveform carry
-  visibility on any background, so **no drop shadow** (dodges the boxy-shadow
-  artifact on the tightly-fitted transparent WebView2 window).
+  an **AI apps (MCP)** card (`McpLinkCard.svelte`, Wispr's "Go to MCP" row:
+  opens Settings → MCP via ControlPanel's `openSettings`), the Local API card
+  (enable toggle + live status/port via `bridge_status`, discovery-file path +
+  curl example with copy; the toggle tells Settings' copy via
+  `yap-config-patched` so its auto-save can't switch it back), a
+  Coding-agents card whose "Copy API guide" button copies a
+  paste-into-your-agent endpoint cheat-sheet, and an endpoint reference
+  table. (OpenWhispr's Google-Calendar OAuth / cloud API-keys / hosted-MCP
+  cards need their paid cloud and are not ported; Yap's MCP is local.)
+- **`lib/Overlay.svelte`** — the **Yap bar** page (window `overlay`, `bar.rs`):
+  dark ink throughout (the toasts' palette), one stage anchored to the bottom
+  (or top) edge — cards above, the pill's place below, states sharing one
+  grid cell so they cross-fade. The idle pill (42×10 outline) morphs into the
+  open pill (width/height/padding transitions, buttons fading in); tooltips
+  ("Dictate F9", "New note Win + Alt + M") and the ^ menu sit above it; the
+  meeting pill; `bar/DictationCapsule.svelte` (the dictation overlay — waveform
+  in Yap amber, live partials word-paced by `bar/dictation.svelte.js`, which
+  listens for the page's whole life). Cards: `bar/BarCard.svelte` (notices,
+  toast-style) and `bar/CallCard.svelte` (the call prompt as Wispr's "Meeting
+  detected" card: the app's mark from `bar/callApps.js` — Simple Icons CC0
+  glyphs, monograms for Teams/Slack/Webex/Whereby, a phone otherwise — "●
+  Now", a light split button [Yap] Record notes with the other answers in its
+  ^ menu, a corner ✕, a 30 s fade hairline, the countdown ring); shared fade
+  and countdown timers in `bar/cardTimers.svelte.js`. Every `data-region`
+  element is reported to Rust on layout changes. ⚠ The window is transparent:
+  **no `backdrop-filter`** and shadows kept well inside it (one reaching a
+  transparent WebView2 window's edge draws a grey box).
 - **`lib/Notepad.svelte`** — the **meeting notepad** (window `notepad`,
   `notepad.rs`; Wispr Flow Notetaker's notepad, warm-light): a custom title
   bar (brand, drag region, Open in Yap / minimise / close — close hides it,
@@ -932,9 +1052,13 @@ before `meeting::ingest`) and on an Upload's whole text.
   (`--yap-toast-bottom`). It has the **in-page hotkey fallback** (dictation,
   and the meeting shortcut when one is set), config re-read on focus.
 - **`lib/Settings.svelte`** — the settings surface, now rendered **inside the
-  ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / System):
-  **General** (hotkey, recording mode, mic, sound+volume, mute, recording-overlay
-  group: live-preview toggle + overlay position — the overlay itself is always on,
+  ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / Connections / System):
+  **General** (hotkey, recording mode, mic, sound+volume, mute; **Yap bar** group
+  (`#settings-bar`, the bar menu's Settings → "general#bar"): Show the Yap bar
+  (`barEnabled`; "Turn off the bar" in its menu arrives as `yap-bar-changed`
+  and is adopted), a "Hidden until 15:40 · Show it now" row while hidden for an
+  hour, Hide in fullscreen apps (`barHideFullscreen`), the live-preview toggle
+  and Position (`overlayPosition`) — the dictation overlay itself is always on,
   it's the hot-mic indicator; **Meetings** group (`#settings-meetings`, the
   target of `yap-settings-goto` "general#meetings"): "Detect calls and offer to
   take notes" (`meetingDetection`), then — disabled while it's off — "How Yap
@@ -970,7 +1094,16 @@ before `meeting::ingest`) and on an Upload's whole text.
   dictionary), **About** (version + an **Updates** card on the shared update
   store: "Last checked …" / Check for updates, Downloading… %, "Yap X is ready to
   install" + Restart to update, release notes + release-page link, the
-  "Check for updates automatically" toggle), and **Account** (bottom of the
+  "Check for updates automatically" toggle), **MCP** (a **Connections** group
+  between Data and System; `McpSection.svelte`, laid out like Wispr's Settings →
+  MCP: serif title, a light card each for Claude / ChatGPT / Gemini / Cursor with
+  "Allow X to access your meeting notes and transcripts" + **Add to X** (→ Added ✓
+  · Remove), the ChatGPT card's "desktop app and Codex, not the web" note, then
+  **All other apps:** with one-click rows for Claude Code / VS Code / Windsurf +
+  the command and JSON, the "Let AI apps save notes to Yap" switch
+  (`cfg.mcpAllowWrites`), a Local-API-off warning with "Turn on the Local API",
+  and the privacy line; it re-reads when it comes into view, as Settings stays
+  mounted), and **Account** (bottom of the
   sidebar — `AccountSection.svelte`). The status bar's update link follows the
   same store (Check for updates → Restart to update / Downloading… / Up to date ✓).
 - **`lib/AccountSection.svelte` / `account.svelte.js`** — Settings → Account:
@@ -1037,8 +1170,12 @@ before `meeting::ingest`) and on an Upload's whole text.
   in an invisible window. A
   side effect is that their first `show()` doesn't activate, so every open path must
   `show()` + `set_focus()` (`commands::show_settings`/`show_onboarding` do).
-- **overlay**: 330×48, transparent, click-through, always-on-top, not focused, hidden
-  until recording/processing.
+- **overlay** (the Yap bar, `bar.rs`): 520×560 logical, never resized,
+  transparent, always-on-top, `skipTaskbar`, `focus: false` + **`focusable:
+  false`** (WS_EX_NOACTIVATE); `overlay::win::install` subclasses it at setup
+  (tool window, MA_NOACTIVATE, style enforcement) and it's click-through
+  except over the pill/cards. Shown while the bar is on (hidden for an hour,
+  over fullscreen apps, or off: only while dictating).
 - `plugins.deep-link.desktop.schemes = ["com.contextmirror.yap"]` — the NSIS
   template registers it for normal installs (portable skips it) and
   single-instance forwards a second launch's link to the running app. Routes
@@ -1251,17 +1388,23 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 - Local API bridge discovery: `~/.yap/cli-bridge.json` (fixed path, NOT the
   data dir; written while the app runs, deleted on exit — see `bridge.rs` +
   `docs/local-api.md`).
+- AI apps' own config files (Settings → MCP → Add to …): Yap only adds or
+  removes its `yap` entry, keeps the original as `<file>.bak` the first time,
+  and never edits a file that isn't plain JSON (`mcp_clients.rs`).
 - Account session: a Windows Credential Manager generic credential
   (`yap-account.com.yap.dictation`, Local persistence), not a file — see `auth.rs`.
   Uninstalling with "Delete the application data" removes it too (updates never do).
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
-  recording mode `toggle`, overlay always shown while recording/transcribing (no
-  off switch — it's the hot-mic indicator), live transcription preview **on**
+  recording mode `toggle`, the **Yap bar on** (`bar_enabled`), hidden over
+  fullscreen apps (`bar_hide_fullscreen`), the dictation overlay always shown
+  while recording/transcribing (no off switch — it's the hot-mic indicator),
+  live transcription preview **on**
   (`streaming_partials`), AI cleanup **off**, call detection **on**
   (`meeting_detection` — it only asks; nothing records without a click) as
   **pop-ups** (`meeting_detect_style`), for work apps only (Discord, WhatsApp,
-  Signal and Telegram start switched off; `meeting_detect_apps` holds changes);
+  Signal and Telegram start switched off; `meeting_detect_apps` holds changes),
+  no auto-start countdown (`meeting_auto_start` off);
   meeting guard rails: meeting windows **hidden from screen capture** while
   recording (`meeting_hide_from_capture`), a **2-hour** maximum recording length
   (`meeting_max_minutes`), **ask** when a recorded call ends
@@ -1285,6 +1428,13 @@ validated live 2026-07-10), transcription history + stats, cleanup presets, real
 the Groq usage meter, and the installer + auto-updater (background checks + download
 while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
 `updates.rs`, 2026-10-05) + portable mode + release CI.
+The **Yap bar** (`bar.rs`, 2026-10-05, after Wispr Flow's Flow Bar) is the
+always-there surface: a pill above the taskbar on the cursor's monitor,
+clickable only where it draws, never focused, hidden over fullscreen apps,
+with Dictate / Meeting notes on hover and Yap's notices as cards (call prompts
+as Wispr's "Meeting detected" card) — e2e-tested with real-window checks of
+its ex-styles and hit-testing; real mouse clicks, multi-monitor moves, DPI
+mixes and games still want a hands-on pass.
 On top of that, the main window is now a full **ControlPanel** (Home dictation feed
 w/ Ctrl+K search, Chat, Notes, Upload, Dictionary, Settings as an always-mounted
 modal, app-wide toasts): local audio-**file** transcription (Upload — `media.rs`
@@ -1323,7 +1473,12 @@ Yap's own included, writes the action plan in Rust without bringing up the
 main window; e2e-tested in `notepad.spec.js`, split screen unit-tested only),
 and an **AI Chat** surface (`chats.rs` + eager
 keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six tools,
-≤20-step loop, gated to cloud or ≥4B local models). Every JSON store now writes
+≤20-step loop, gated to cloud or ≥4B local models). An **MCP server** (`mcp.rs`,
+`yap.exe mcp`) lets Claude, ChatGPT desktop/Codex, Gemini CLI, Cursor, Claude Code,
+VS Code and Windsurf read meetings and notes (never dictations) through the local
+API, added in one click from Settings → MCP (`mcp_clients.rs`); tested in-process,
+against the real binary and end to end (2026-10-05), not yet with a real AI app.
+Every JSON store now writes
 atomically with corrupt-file quarantine. The default (no-feature) build still ships
 the stub for fast `cargo check`. **Optional accounts** (`auth.rs` + `cloud/`): email
 codes and Google/GitHub/Discord sign-in, sign-out, delete-account — tested end

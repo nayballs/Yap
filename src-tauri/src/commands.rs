@@ -846,6 +846,8 @@ pub fn save_config(
     crate::meeting_detect::sync(&app, cfg.meeting_detection);
     // Hiding meeting windows from screen shares may have flipped mid-meeting.
     crate::capture::sync(&app);
+    // …and the Yap bar (on/off, fullscreen, position, the tooltips' hotkeys).
+    crate::bar::sync(&app, &cfg);
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.update_config(cfg);
