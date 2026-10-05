@@ -710,7 +710,14 @@ mod native {
         Ok(())
     }
 
+    /// On the Yap bar while it's on screen (`crate::bar`), instead of a
+    /// Windows notification: the same buttons, back through [`activated`].
+    fn bar_card(app: &AppHandle, card: crate::bar::Card) -> bool {
+        crate::bar::show_card(app, card, Box::new(activated))
+    }
+
     pub fn remove(app: &AppHandle, tag: &'static str) {
+        crate::bar::dismiss_card(app, tag);
         if LIVE.lock().unwrap_or_else(|p| p.into_inner()).remove(tag).is_some() {
             crate::win_toast::remove(app, tag);
         }
@@ -730,6 +737,18 @@ mod native {
     }
 
     pub fn limit(app: &AppHandle, w: &LimitWarning) -> Result<(), String> {
+        let card = crate::bar::Card {
+            id: LIMIT.into(),
+            icon: "timer",
+            title: w.title.clone(),
+            body: w.body.clone(),
+            primary: Some(crate::bar::CardAction::new("guard:keep", "Keep going")),
+            secondary: Some(crate::bar::CardAction::new(format!("guard:open:{}", w.note_id), "Open note")),
+            ..Default::default()
+        };
+        if bar_card(app, card) {
+            return Ok(());
+        }
         post(app, LIMIT, &limit_xml(w, &logo_xml()))
     }
 
@@ -759,11 +778,39 @@ mod native {
     }
 
     pub fn notice(app: &AppHandle, n: &Notice) -> Result<(), String> {
+        let action = match (n.settings, n.note_id) {
+            (Some(section), _) => Some(crate::bar::CardAction::new(format!("guard:settings:{section}"), "Update settings")),
+            (None, Some(id)) => Some(crate::bar::CardAction::new(format!("guard:open:{id}"), "Open note")),
+            (None, None) => None,
+        };
+        let card = crate::bar::Card {
+            id: NOTICE.into(),
+            icon: n.icon,
+            title: n.title.clone(),
+            body: n.body.clone(),
+            primary: action,
+            timeout_ms: Some(10_000),
+            ..Default::default()
+        };
+        if bar_card(app, card) {
+            return Ok(());
+        }
         post(app, NOTICE, &notice_xml(n, &logo_xml()))
     }
 
     /// The meeting shortcut couldn't start notes: say why.
     pub fn failed(app: &AppHandle, message: &str) -> Result<(), String> {
+        let card = crate::bar::Card {
+            id: NOTICE.into(),
+            icon: "error",
+            title: "Couldn't start meeting notes".into(),
+            body: message.into(),
+            timeout_ms: Some(10_000),
+            ..Default::default()
+        };
+        if bar_card(app, card) {
+            return Ok(());
+        }
         let xml = format!(
             "<toast launch=\"guard:show\"><visual><binding template=\"ToastGeneric\">\
              <text>Couldn't start meeting notes</text><text>{}</text>{}</binding></visual>\

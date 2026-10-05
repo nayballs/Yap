@@ -22,7 +22,8 @@
 //!   cursor has stayed on another monitor for 200 ms (Wispr: ~340 ms). It
 //!   jumps; there's no slide. While a dictation records or transcribes it
 //!   stays where the dictation started. The poll is cheap: `GetCursorPos`
-//!   every 250 ms, every 30 ms only while the cursor is near the bar.
+//!   every 250 ms, every 30 ms only while the cursor is near the bar, once a
+//!   second while it's hidden over a fullscreen app.
 //! - **Out of the way in fullscreen.** Over a fullscreen app on its monitor
 //!   (a game, a video, a slideshow) the idle pill hides
 //!   (`overlay::fullscreen_on`); it always shows while recording. A card
@@ -71,6 +72,8 @@ const EVENT_CHANGED: &str = "yap-bar-changed";
 const SLOW_TICK: Duration = Duration::from_millis(250);
 /// Hover checks while the cursor is near the bar (or on it).
 const FAST_TICK: Duration = Duration::from_millis(30);
+/// Hidden over a fullscreen app (a game): a lighter watch until it's over.
+const HIDDEN_TICK: Duration = Duration::from_secs(1);
 /// Nothing to watch (the bar is off and no dictation shows it).
 const IDLE_TICK: Duration = Duration::from_secs(60);
 /// The cursor stays on another monitor this long before the bar follows, so
@@ -85,8 +88,6 @@ const SLACK: f64 = 6.0;
 const HIDE_FOR_MS: u64 = 60 * 60_000;
 /// How often the auto-hidden-taskbar check (a message to the shell) reruns.
 const AUTOHIDE_EVERY_MS: u64 = 10_000;
-/// A "stop" the Notes view didn't carry out in this time is done here.
-const STOP_FALLBACK: Duration = Duration::from_secs(8);
 
 // ---- cards -------------------------------------------------------------------------
 
@@ -102,7 +103,8 @@ pub struct Card {
     /// the title over a `status` line, and a light split button (`primary`,
     /// with `secondary` and `link` in its ^ menu); the ✕ sits on its corner.
     pub style: &'static str,
-    /// The glyph by the title: "call" | "update" | "notes" | "error" | "".
+    /// The glyph by the title: "call" | "update" | "notes" | "timer" |
+    /// "screen" | "error" | "".
     pub icon: &'static str,
     /// The call app (`meeting_detect::APPS` id), for its mark.
     pub app: Option<&'static str>,
@@ -574,6 +576,8 @@ fn poller(app: AppHandle, rx: mpsc::Receiver<()>) {
                 IDLE_TICK
             } else if s.interactive || s.near {
                 FAST_TICK
+            } else if !s.shown && s.fullscreen() != Fullscreen::None {
+                HIDDEN_TICK
             } else {
                 SLOW_TICK
             }
@@ -629,7 +633,9 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
         None if crate::e2e::active() => (0, 0),
         None => return,
     };
-    let cursor_screen = win::screen_at(point, true);
+    // The cursor's monitor (its auto-hidden taskbars are read only if the bar
+    // goes there, below).
+    let cursor_screen = win::screen_at(point, false);
     // The bar's own monitor again: its auto-hidden taskbars are re-checked
     // only now and then (a message to the shell), else carried over.
     let current = placed.and_then(|p| {
@@ -654,6 +660,8 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
     };
     if let Some(screen) = target {
         let moved = placed.is_some_and(|p| p.id != screen.id);
+        // Going to another monitor: read its auto-hidden taskbars now.
+        let screen = if moved || placed.is_none() { win::screen(screen.id, true).unwrap_or(screen) } else { screen };
         place(app, screen, edge, moved);
     }
 }
@@ -673,7 +681,12 @@ fn check_fullscreen(app: &AppHandle) {
     let fullscreen = match (wanted, screen) {
         (true, Some(screen)) => {
             let front = overlay::win::front();
-            overlay::fullscreen_on(front.as_ref(), overlay::win::notification_state(), &screen)
+            // Exclusive mode or a slideshow is asked about only when the
+            // window in front covers the bar's monitor (cheaper, and a game
+            // on another monitor leaves this one's bar alone).
+            let covers = front.as_ref().is_some_and(|f| f.rect.covers(&screen.monitor));
+            let quns = if covers { overlay::win::notification_state() } else { 0 };
+            overlay::fullscreen_on(front.as_ref(), quns, &screen)
         }
         _ => Fullscreen::None,
     };
@@ -895,8 +908,9 @@ pub fn on_pipeline_state(app: &AppHandle, state: &str) {
             let s = lock();
             (s.placed, s.edge)
         };
-        if let Some(screen) = cursor().and_then(|c| overlay::win::screen_at(c, true)) {
+        if let Some(screen) = cursor().and_then(|c| overlay::win::screen_at(c, false)) {
             if placed.map(|p| p.id) != Some(screen.id) {
+                let screen = overlay::win::screen(screen.id, true).unwrap_or(screen);
                 place(app, screen, edge, placed.is_some());
             }
         }
@@ -1025,93 +1039,17 @@ fn card_action(app: &AppHandle, id: &str, action: &str) {
 
 // ---- actions -----------------------------------------------------------------------
 
-/// "Meeting · 5 Oct, 14:30" (local time).
-fn meeting_title() -> String {
-    #[cfg(windows)]
-    {
-        const MONTHS: [&str; 12] =
-            ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
-        let mon = MONTHS[usize::from(t.wMonth.clamp(1, 12) - 1)];
-        format!("Meeting \u{b7} {} {mon}, {:02}:{:02}", t.wDay, t.wHour, t.wMinute)
-    }
-    #[cfg(not(windows))]
-    "Meeting".to_string()
-}
-
-/// A new meeting note in the Meetings folder.
-fn new_meeting_note(app: &AppHandle) -> Result<crate::notes::Note, String> {
+/// "New meeting note" (the menu): a meeting note to prepare, not recording
+/// yet, opened in the main window's Notes view.
+fn new_meeting_note(app: &AppHandle) -> Result<(), String> {
     crate::notes::folder_create("Meetings");
-    let note = crate::notes::create(&meeting_title(), "", "meeting", "Meetings");
+    let title = crate::meeting_detect::meeting_note_title();
+    let note = crate::notes::create(&title, "", "meeting", "Meetings");
     crate::notes::mark_meeting(note.id)?;
     let _ = app.emit("yap-notes-changed", ());
-    Ok(note)
-}
-
-/// ◉: start meeting notes — for a call Yap noticed (as its tray item does),
-/// else in a new meeting note — or, while one records, stop it and write the
-/// action plan. (The meeting-notes shortcut does the same; the page calls
-/// that first when it exists.)
-fn meeting_notes(app: &AppHandle) -> Result<(), String> {
-    if crate::meeting::is_recording() {
-        stop_meeting(app);
-        return Ok(());
-    }
-    let call = crate::meeting_detect::tray_item()
-        .and_then(|(id, _)| id.strip_prefix("meeting_record:").and_then(|n| n.parse::<u64>().ok()));
-    if let Some(call_id) = call {
-        crate::meeting_detect::on_tray_record(app, call_id);
-        return Ok(());
-    }
-    let note = new_meeting_note(app)?;
-    let started = crate::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note.id);
-    if let Err(e) = started {
-        crate::notes::delete(note.id);
-        let _ = app.emit("yap-notes-changed", ());
-        return Err(e);
-    }
-    tracing::info!(note_id = note.id, "bar: meeting notes started");
+    crate::commands::show_settings(app)?;
+    let _ = app.emit("yap-meeting-open-note", serde_json::json!({ "noteId": note.id, "stop": false }));
     Ok(())
-}
-
-/// Stop the meeting recording and write its action plan: in the note, in
-/// the Notes view (as "Stop and summarise" does); stopped here if the page
-/// didn't within a few seconds.
-fn stop_meeting(app: &AppHandle) {
-    let note_id = crate::meeting::recording_note();
-    let _ = crate::commands::show_settings(app);
-    let _ = app.emit("yap-meeting-open-note", serde_json::json!({ "noteId": note_id, "stop": true }));
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(STOP_FALLBACK).await;
-        if crate::meeting::is_recording() && crate::meeting::recording_note() == note_id {
-            tracing::warn!("bar: the Notes view didn't stop the meeting; stopping it here");
-            let _ = crate::meeting::stop();
-        }
-    });
-}
-
-/// Open a note in the main window's Notes view.
-fn open_note(app: &AppHandle, note_id: Option<u64>) {
-    let _ = crate::commands::show_settings(app);
-    if let Some(id) = note_id {
-        let _ = app.emit("yap-meeting-open-note", serde_json::json!({ "noteId": id, "stop": false }));
-    }
-}
-
-/// A brief card saying something went wrong, or the main window's error
-/// toast when the bar can't show one.
-fn report(app: &AppHandle, title: &str, message: &str) {
-    let card = Card {
-        id: "notice".into(),
-        icon: "error",
-        title: title.into(),
-        body: message.into(),
-        timeout_ms: Some(8_000),
-        ..Card::default()
-    };
-    if !show_card(app, card, Box::new(|_, _| {})) {
-        let _ = app.emit("yap-error", format!("{title}. {message}"));
-    }
 }
 
 /// What the bar's buttons and menu do (`bar_action`).
@@ -1125,18 +1063,22 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
             let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
             guard.as_ref().ok_or("pipeline not started")?.toggle();
         }
+        // ◉: what the meeting shortcut does — take notes on the call Yap
+        // noticed, else in a new meeting note; while one records, stop it
+        // and write the action plan.
         "meeting" => {
             give_focus_back();
-            if let Err(e) = meeting_notes(app) {
-                report(app, "Couldn't start meeting notes", &e);
-            }
+            crate::meeting_guard::start_or_stop(app);
         }
-        "stop-meeting" => stop_meeting(app),
-        "open-note" => open_note(app, crate::meeting::recording_note()),
-        "new-note" => {
-            let note = new_meeting_note(app)?;
-            open_note(app, Some(note.id));
-        }
+        // ■ on the recording pill: end the meeting, which writes the action
+        // plan in Rust (or asks "Started by mistake?").
+        "stop-meeting" => crate::meeting_end::end(app, Some(overlay::LABEL))?,
+        // The recording pill: its notes, in the meeting notepad.
+        "open-note" => match crate::meeting::recording_note() {
+            Some(note_id) => crate::notepad::open(app, note_id),
+            None => crate::commands::show_settings(app)?,
+        },
+        "new-note" => new_meeting_note(app)?,
         "open" => crate::commands::show_settings(app)?,
         "settings" => {
             crate::commands::show_settings(app)?;

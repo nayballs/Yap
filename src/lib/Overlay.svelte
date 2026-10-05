@@ -102,16 +102,25 @@
   });
 
   // ---- the meeting timer ----
+  // Started from the recording's elapsed time once per recording (later
+  // snapshots carry whole seconds, which would only make it stutter).
   let now = $state(Date.now());
   let meetingStart = $state(0);
+  let timedNote = null;
   $effect(() => {
     const m = bar.meeting;
-    if (m?.recording) meetingStart = Date.now() - (m.elapsedSecs ?? 0) * 1000;
+    if (!m?.recording) {
+      timedNote = null;
+    } else if (m.noteId !== timedNote) {
+      timedNote = m.noteId;
+      meetingStart = Date.now() - (m.elapsedSecs ?? 0) * 1000;
+      now = Date.now();
+    }
   });
   $effect(() => {
     if (mode !== 'meeting') return;
     now = Date.now();
-    const t = setInterval(() => (now = Date.now()), 1000);
+    const t = setInterval(() => (now = Date.now()), 500);
     return () => clearInterval(t);
   });
   const elapsed = $derived.by(() => {
@@ -152,42 +161,25 @@
   }
 
   // ---- actions ----
-  /** Call `cmd` if this build has it (another feature's command), else `fallback`. */
-  async function invokeOr(cmd, args, fallback) {
-    try {
-      return await invoke(cmd, args);
-    } catch (e) {
-      if (/^Command \S+ not found/.test(String(e))) return fallback();
-      throw e;
-    }
-  }
-  function act(action) {
-    return invoke('bar_action', { action });
-  }
-  async function run(what, fn) {
+  // Every button goes through `bar_action`: Rust gives the focus back to the
+  // app you're in first, then dictates, starts or stops meeting notes (as
+  // the meeting shortcut does, meeting_guard.rs; a stop ends the meeting in
+  // meeting_end.rs, which writes the action plan), or opens the notepad.
+  async function act(action) {
     tip = null;
     try {
-      await fn();
+      await invoke('bar_action', { action });
     } catch (e) {
-      invoke('frontend_log', { msg: `bar: ${what} failed: ${e}` }).catch(() => {});
+      invoke('frontend_log', { msg: `bar: ${action} failed: ${e}` }).catch(() => {});
     }
   }
-  const dictate = () => run('dictate', () => act('dictate'));
-  // ◉: the meeting-notes shortcut's command where it exists (start, or
-  // stop and summarise), else the bar's own.
-  const meetingNotes = () =>
-    run('meeting notes', () => invokeOr('meeting_shortcut', { origin: 'overlay' }, () => act('meeting')));
-  const stopMeeting = () =>
-    run('stop', () => invokeOr('meeting_end', { origin: 'overlay' }, () => act('stop-meeting')));
-  const openMeeting = () =>
-    run('open notes', () =>
-      bar.meeting?.noteId != null
-        ? invokeOr('notepad_open', { noteId: bar.meeting.noteId }, () => act('open-note'))
-        : act('open-note')
-    );
+  const dictate = () => act('dictate');
+  const meetingNotes = () => act('meeting');
+  const stopMeeting = () => act('stop-meeting');
+  const openMeeting = () => act('open-note');
   function menuItem(action) {
     menuOpen = false;
-    run(action, () => act(action));
+    act(action);
   }
   function cardAction(card, action) {
     invoke('bar_card_action', { id: card.id, action }).catch((e) =>

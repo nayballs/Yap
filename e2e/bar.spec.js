@@ -126,6 +126,12 @@ test('its menu hides it for an hour, and Settings brings it back', async ({ yap,
     await expect(menu.getByRole('menuitem', { name: item })).toBeVisible();
   }
   await shot(bar, '05-menu');
+  // Clicking it never made it the active window (Windows' own record, not
+  // just the foreground: the active window of Yap's UI thread).
+  const d = await debug(yap);
+  expect(d.barActive).toBe(false);
+  expect(d.threadActiveIsBar).toBe(false);
+  expect(d.barInFront).toBe(false);
 
   await menu.getByRole('menuitem', { name: 'Hide the bar for 1 hour' }).click();
   await expect.poll(() => debug(yap).then((d) => d.shown)).toBe(false);
@@ -266,8 +272,13 @@ test('fullscreen: the pill hides; a card shows over a borderless app, waits out 
   await closeToasts(main);
 });
 
-test('◉ starts meeting notes: the recording pill opens the note and stops it', async ({ yap, main, shot }) => {
+test('◉ starts meeting notes: the recording pill opens the notepad and ends the meeting', async ({ yap, shot }) => {
   const bar = yap.overlay;
+  const notepadShown = () => yap.invoke('plugin:window|is_visible', { label: 'notepad' });
+  // Don't let the notepad open by itself when the meeting starts, so the
+  // pill's own way to it is what's tested.
+  const cfg = await yap.invoke('get_config');
+  await yap.invoke('save_config', { cfg: { ...cfg, meetingOpenNotepad: false } });
   await hoverPill(yap);
   await bar.getByRole('button', { name: 'Meeting notes' }).click();
   await expect.poll(() => yap.invoke('meeting_state').then((m) => m.recording)).toBe(true);
@@ -275,6 +286,7 @@ test('◉ starts meeting notes: the recording pill opens the note and stops it',
   const note = await yap.invoke('note_get', { id: noteId });
   expect(note.title).toMatch(/^Meeting · \d{1,2} \w{3}, \d\d:\d\d$/);
   expect(note.folder).toBe('Meetings');
+  expect(await notepadShown()).toBe(false);
 
   // The pill becomes the recording pill: dot, waveform, timer, stop.
   await pointerAway(yap);
@@ -284,15 +296,15 @@ test('◉ starts meeting notes: the recording pill opens the note and stops it',
   await bar.waitForTimeout(1_200);
   await shot(bar, '12-meeting-pill');
 
-  // Its body opens the note in Notes…
+  // Its body opens the meeting notepad on that note…
   await simulate(yap, { pointer: 'pill' });
   await open.click();
-  await expect(main.getByRole('textbox').filter({ hasText: '' }).first()).toBeVisible();
-  await expect(main.getByText(note.title).first()).toBeVisible();
-  // …and ■ stops it and writes the action plan there.
+  await expect.poll(notepadShown).toBe(true);
+  // …and ■ ends the meeting (the action plan is written in Rust).
   await bar.getByRole('button', { name: 'Stop and summarise' }).click();
   await expect.poll(() => yap.invoke('meeting_state').then((m) => m.recording), { timeout: 20_000 }).toBe(false);
   await expect(bar.getByLabel('Yap bar')).toBeVisible();
+  await yap.invoke('save_config', { cfg: { ...(await yap.invoke('get_config')), meetingOpenNotepad: true } });
 });
 
 test('the opt-in countdown starts notes by itself; Esc cancels it', async ({ yap, main, shot }) => {
@@ -353,7 +365,7 @@ test('dictating: the dictation overlay in the pill\'s place', async ({ yap, main
     await bar.waitForTimeout(1_200);
     await shot(bar, '15-dictating');
     await pressHotkey(main);
-    await expect(main.getByText(/\[STT stub: received [\d.]+s of audio/).first()).toBeVisible({ timeout: 20_000 });
+    await expectStore(yap, 'history.json', (h) => JSON.stringify(h).includes('STT stub'));
   } else {
     // No microphone (CI): the same capsule says so.
     await expect(bar.locator('.capsule')).toContainText('No microphone found');
