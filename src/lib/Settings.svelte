@@ -25,7 +25,7 @@
   import { PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
   import { createExternalLinkHandler } from './externalLinks.js';
   import { toast } from './ui/toast.svelte.js';
-  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
+  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup, formatHotkeySpec } from './hotkeys.js';
   import HotkeyInput from './ui/HotkeyInput.svelte';
   import { modelStore } from './modelStore.svelte.js';
   import { attention, attentionCount } from './attention.svelte.js';
@@ -409,6 +409,22 @@
     popup: 'A card in Yap, or a Windows notification while Yap is in the background',
     quiet: 'No pop-up: it waits in the notification centre and the tray menu',
   };
+  // General → Meetings guard rails (meeting_guard.rs, capture.rs).
+  const CALL_END_OPTIONS = [
+    { value: 'ask', label: 'Ask me' },
+    { value: 'stop', label: 'Stop automatically' },
+  ];
+  const CALL_END_DESC = {
+    ask: 'Yap asks whether to stop and summarise',
+    stop: 'Yap stops recording and writes your action plan',
+  };
+  const MEETING_MAX_LENGTHS = [
+    { value: 60, label: '1 hour' },
+    { value: 120, label: '2 hours' },
+    { value: 180, label: '3 hours' },
+    { value: 240, label: '4 hours' },
+    { value: 0, label: 'No limit' },
+  ];
 
   // Display names for the language codes the backend returns.
   const LANG_NAMES = {
@@ -436,6 +452,10 @@
     meetingDetection: true,
     meetingDetectApps: {},
     meetingDetectStyle: 'popup',
+    meetingHideFromCapture: true,
+    meetingMaxMinutes: 120,
+    meetingCallEnd: 'ask',
+    meetingHotkey: 'kb:alt+win+77',
     inputDevice: null,
     dictionary: [],
     selectedLanguage: 'auto',
@@ -576,28 +596,43 @@
   // combos, modifier-only chords). Settings pauses the LIVE global binding
   // while capturing (so pressing the current hotkey doesn't start a
   // recording) and re-applies the picked spec after — plus validates that the
-  // dictation and edit keys don't collide.
-  const HOTKEY_CMD = { hotkey: 'configure_hotkey', editHotkey: 'configure_edit_hotkey' };
+  // dictation, edit and meeting keys don't collide.
+  const HOTKEY_CMD = {
+    hotkey: 'configure_hotkey',
+    editHotkey: 'configure_edit_hotkey',
+    meetingHotkey: 'configure_meeting_hotkey',
+  };
+  const HOTKEY_NAMES = {
+    hotkey: 'dictation key',
+    editHotkey: 'edit / rewrite key',
+    meetingHotkey: 'meeting shortcut',
+  };
   function onHotkeyCapturing(target, on) {
     if (!cfg) return;
     recording = on;
     invoke(HOTKEY_CMD[target], { spec: on ? '' : cfg[target] });
   }
   function validateHotkey(target, spec) {
-    const other = target === 'hotkey' ? cfg?.editHotkey : cfg?.hotkey;
-    if (spec && other && spec === other) {
-      return `Already used by the ${target === 'hotkey' ? 'edit / rewrite' : 'dictation'} key`;
-    }
-    return null;
+    if (!spec) return null;
+    const clash = Object.keys(HOTKEY_NAMES).find((other) => other !== target && cfg?.[other] === spec);
+    return clash ? `Already used by the ${HOTKEY_NAMES[clash]}` : null;
   }
 
   // In-window hotkey fallback: when OUR OWN window has focus, the global
   // low-level hook never sees the hotkey (WebView2 front-runs the hook chain;
   // log-proven 2026-07-05). The page gets the keydown normally, so drive the
   // pipeline directly — combo-aware via lib/hotkeys.js, matching the Rust
-  // hook's semantics. Guarded while the shortcut recorder is capturing.
+  // hook's semantics. Guarded while the shortcut recorder is capturing. The
+  // meeting shortcut (Win+Alt+M) goes first: a combo is more specific than a
+  // bare dictation key.
   function onFallbackKeyDown(e) {
     if (recording || e.repeat) return;
+    if (hotkeyMatchesKeydown(e, cfg?.meetingHotkey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      invoke('meeting_shortcut').catch(() => {});
+      return;
+    }
     if (!hotkeyMatchesKeydown(e, cfg?.hotkey)) return;
     e.preventDefault();
     e.stopPropagation();
@@ -694,6 +729,18 @@
   function setCallAppAsks(id, asks) {
     cfg.meetingDetectApps = { ...(cfg.meetingDetectApps || {}), [id]: asks };
   }
+  // General → Meetings → "Maximum recording length": a length set outside
+  // the list (config.json by hand) still shows as itself.
+  const maxLengthOptions = $derived(
+    !cfg || MEETING_MAX_LENGTHS.some((o) => o.value === cfg.meetingMaxMinutes)
+      ? MEETING_MAX_LENGTHS
+      : [...MEETING_MAX_LENGTHS, { value: cfg.meetingMaxMinutes, label: `${cfg.meetingMaxMinutes} minutes` }]
+  );
+  const meetingShortcutDesc = $derived(
+    cfg?.meetingHotkey
+      ? `Press ${formatHotkeySpec(cfg.meetingHotkey)} to take notes on a call, and again to stop and write the action plan`
+      : 'Start and stop meeting notes from any app with a shortcut'
+  );
   // "Don't ask for Teams" on a call prompt saves that in Rust: adopt it into
   // this config copy, or the next auto-save would switch Teams back on.
   onMount(() => {
@@ -1431,6 +1478,45 @@
                     {/each}
                   </div>
                 </div>
+              </Row>
+              <!-- Guard rails while a meeting records (meeting_guard.rs,
+                   capture.rs): Wispr Flow's Notetaker settings. -->
+              <Row
+                label="When a call ends"
+                desc={CALL_END_DESC[cfg.meetingCallEnd] ?? CALL_END_DESC.ask}
+              >
+                <Segmented
+                  bind:value={cfg.meetingCallEnd}
+                  options={CALL_END_OPTIONS}
+                  label="When a call ends"
+                  disabled={!cfg.meetingDetection}
+                />
+              </Row>
+              <Row
+                label="Maximum recording length"
+                desc="Yap stops at this length and writes your action plan, with a warning 5 minutes before"
+              >
+                <Select bind:value={cfg.meetingMaxMinutes} options={maxLengthOptions} />
+              </Row>
+              <!-- The screen-share tip's "Update settings" lands here
+                   (yap-settings-goto "general#screen-sharing"). -->
+              <div id="settings-screen-sharing">
+                <Row>
+                  <Toggle
+                    bind:checked={cfg.meetingHideFromCapture}
+                    label="Hide Yap's meeting windows from screen sharing"
+                    desc="While a meeting records, the notepad and the recording overlay stay out of screenshots and screen shares"
+                    hint="Windows leaves them out of every capture (Teams, Zoom and Meet screen shares, the Snipping Tool, OBS) while they stay on your own screen."
+                  />
+                </Row>
+              </div>
+              <Row label="Meeting shortcut" desc={meetingShortcutDesc}>
+                <HotkeyInput
+                  bind:value={cfg.meetingHotkey}
+                  clearable
+                  validate={(s) => validateHotkey('meetingHotkey', s)}
+                  oncapturingchange={(on) => onHotkeyCapturing('meetingHotkey', on)}
+                />
               </Row>
               <Row>
                 <p class="consent">Recording a call? Let people know you're taking notes.</p>

@@ -351,6 +351,29 @@ pub struct YapConfig {
     #[serde(default = "default_meeting_detect_style")]
     pub meeting_detect_style: String,
 
+    // ---- Meeting guard rails (Settings → General → Meetings) ----
+    /// Hide Yap's meeting windows (the notepad and the recording overlay)
+    /// from screenshots and screen sharing while a meeting records
+    /// (`capture.rs`: Windows' exclude-from-capture flag). On by default, as
+    /// Wispr Flow's "Don't show Notepad and Flow Bar in screen capture"; with
+    /// it off, a meeting starting warns that the notes show in a share.
+    #[serde(default = "default_true")]
+    pub meeting_hide_from_capture: bool,
+    /// Longest one meeting recording runs, in minutes (0 = no limit): Yap
+    /// warns 5 minutes before, then stops and writes the action plan
+    /// (`meeting_guard.rs`). 2 hours by default, as Wispr Flow.
+    #[serde(default = "default_meeting_max_minutes")]
+    pub meeting_max_minutes: u32,
+    /// When a call Yap is recording ends: "ask" (the "Stop and summarise?"
+    /// prompt, the default) or "stop" (stop and summarise automatically).
+    #[serde(default = "default_meeting_call_end")]
+    pub meeting_call_end: String,
+    /// The global meeting shortcut (same spec format as `hotkey`): take notes
+    /// on the live call (or in a new meeting note), or stop and write the
+    /// action plan. Empty = unbound. Default Win+Alt+M, as Wispr Flow.
+    #[serde(default = "default_meeting_hotkey")]
+    pub meeting_hotkey: String,
+
     /// Schema version, for the one-time migrations in `migrate_once` (the
     /// kind that must never run twice, unlike `load`'s idempotent fixes). A
     /// config saved before versioning has no field (0); `Default` and every
@@ -415,6 +438,16 @@ fn default_routing_scope() -> String {
 fn default_meeting_detect_style() -> String {
     "popup".into()
 }
+fn default_meeting_max_minutes() -> u32 {
+    120
+}
+fn default_meeting_call_end() -> String {
+    "ask".into()
+}
+fn default_meeting_hotkey() -> String {
+    // Win+Alt+M (VK 'M' = 77), Wispr Flow's Notetaker shortcut.
+    "kb:alt+win+77".into()
+}
 
 impl Default for YapConfig {
     fn default() -> Self {
@@ -465,6 +498,10 @@ impl Default for YapConfig {
             meeting_detection: true,
             meeting_detect_apps: std::collections::BTreeMap::new(),
             meeting_detect_style: default_meeting_detect_style(),
+            meeting_hide_from_capture: true,
+            meeting_max_minutes: default_meeting_max_minutes(),
+            meeting_call_end: default_meeting_call_end(),
+            meeting_hotkey: default_meeting_hotkey(),
             config_version: CONFIG_VERSION,
         }
     }

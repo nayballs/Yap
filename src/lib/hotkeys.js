@@ -14,6 +14,11 @@
 
 export const MOD_ORDER = ['ctrl', 'alt', 'shift', 'win'];
 export const MOD_LABELS = { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', win: 'Win' };
+// How a combo reads: Win first, as Windows writes its own shortcuts
+// ("Win + Alt + M"). Specs keep MOD_ORDER.
+const DISPLAY_ORDER = ['win', 'ctrl', 'alt', 'shift'];
+const byDisplayOrder = (mods) =>
+  [...mods].sort((a, b) => DISPLAY_ORDER.indexOf(a) - DISPLAY_ORDER.indexOf(b));
 
 // DOM e.code → Win32 VK for side-specific modifier keys.
 export const MOD_CODE_TO_VK = {
@@ -118,8 +123,8 @@ export function vkeyName(v) {
 export function hotkeyParts(spec) {
   const p = parseHotkeySpec(spec);
   if (p.kind === 'mouse') return [`Mouse ${p.button}`];
-  if (p.kind === 'mods') return p.mods.map((m) => MOD_LABELS[m] || m);
-  if (p.kind === 'kb') return [...p.mods.map((m) => MOD_LABELS[m] || m), vkeyName(p.vk)];
+  if (p.kind === 'mods') return byDisplayOrder(p.mods).map((m) => MOD_LABELS[m] || m);
+  if (p.kind === 'kb') return [...byDisplayOrder(p.mods).map((m) => MOD_LABELS[m] || m), vkeyName(p.vk)];
   return [];
 }
 
