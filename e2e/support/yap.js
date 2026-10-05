@@ -153,7 +153,13 @@ async function connect(webview2Dir, exited, logPath) {
       const tail = fs.readFileSync(logPath, 'utf8').split('\n').slice(-20).join('\n');
       throw new Error(`Yap exited during startup (${JSON.stringify(exited())}):\n${tail}`);
     }
-    const port = fs.existsSync(portFile) ? fs.readFileSync(portFile, 'utf8').split('\n')[0].trim() : '';
+    let port = '';
+    try {
+      port = fs.existsSync(portFile) ? fs.readFileSync(portFile, 'utf8').split('\n')[0].trim() : '';
+    } catch (e) {
+      // EBUSY: WebView2 is still writing the file. Try again next round.
+      last = e;
+    }
     if (port) {
       try {
         return await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 5_000 });

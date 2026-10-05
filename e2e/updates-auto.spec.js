@@ -32,6 +32,8 @@ const test = base.extend({
     async ({ updateFeed }, use) => {
       await use({
         name: 'updates-auto',
+        // The harness seeds automatic checks off; this spec is about them.
+        config: { updateChecksEnabled: true },
         env: {
           YAP_UPDATE_TEST_ENDPOINT: updateFeed.endpoint,
           YAP_UPDATE_TEST_PUBKEY: updateFeed.pubkey,
