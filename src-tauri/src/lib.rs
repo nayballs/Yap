@@ -10,6 +10,7 @@
 mod agent_detect;
 mod auth;
 mod bridge;
+mod calendar;
 mod chats;
 mod commands;
 mod config;

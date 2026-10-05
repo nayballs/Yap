@@ -1832,7 +1832,7 @@ async fn read_api(resp: reqwest::Response) -> Result<Value, ApiError> {
 // ---- crypto helpers ----
 
 /// Uniform random `[A-Za-z0-9]` (rejection sampling: no modulo bias).
-fn random_alnum(len: usize) -> Result<String, String> {
+pub(crate) fn random_alnum(len: usize) -> Result<String, String> {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     let mut out = String::with_capacity(len);
     while out.len() < len {
@@ -1849,7 +1849,7 @@ fn random_alnum(len: usize) -> Result<String, String> {
 
 /// RFC 7636 S256 pair: 32 random bytes as the verifier, its hash as the
 /// challenge (both base64url, unpadded).
-fn pkce_pair() -> Result<(String, String), String> {
+pub(crate) fn pkce_pair() -> Result<(String, String), String> {
     let mut raw = [0u8; 32];
     getrandom::fill(&mut raw).map_err(|e| e.to_string())?;
     let verifier = URL_SAFE_NO_PAD.encode(raw);
@@ -1862,7 +1862,7 @@ fn pkce_challenge(verifier: &str) -> String {
 }
 
 /// Compare secrets without leaking length/prefix timing: hash both sides.
-fn same_secret(a: &str, b: &str) -> bool {
+pub(crate) fn same_secret(a: &str, b: &str) -> bool {
     Sha256::digest(a.as_bytes()) == Sha256::digest(b.as_bytes())
 }
 

@@ -62,6 +62,14 @@ url = "2"
 # alone (no image/SVG renderers, no dependencies); the Account page draws it.
 qrcode = { version = "0.14", default-features = false }
 
+# Calendar (calendar.rs): meetings read straight from Google Calendar or a
+# private iCal link. `rrule` expands RFC 5545 recurrence rules (the crate the
+# `icalendar` crate builds on); `chrono-tz` is the IANA time-zone database,
+# for TZIDs (Windows zone names are mapped to it, see calendar/tz.rs).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
+rrule = "0.14"
+
 # Model download + directory-model extract/verify (used by stt.rs)
 reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"

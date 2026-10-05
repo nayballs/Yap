@@ -69,6 +69,27 @@ pub struct MeetingDigest {
     pub raw: String,
 }
 
+/// The calendar event a meeting note belongs to (`calendar.rs`): a copy taken
+/// when the note was made from the calendar, or when a recording started
+/// during the event, so the note keeps its context if the event changes or
+/// the calendar is disconnected.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteEvent {
+    /// The calendar's key for this occurrence.
+    pub key: String,
+    pub title: String,
+    /// Unix seconds.
+    pub start: u64,
+    pub end: u64,
+    /// The invite's description, cleaned (no links or dial-in details).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// The meeting service ("teams", "meet", "zoom"…), if it had a link.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub service: String,
+}
+
 /// One note. `note_type`: "personal" | "meeting" (set when a recording starts).
 /// camelCase on the wire + on disk, like `YapConfig`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,11 +125,14 @@ pub struct Note {
     /// and personal notes.
     #[serde(default)]
     pub digests: Vec<MeetingDigest>,
-    /// Where the note came from ("manual" | "upload" | later "meeting").
+    /// Where the note came from ("manual" | "upload" | "meeting" | "calendar").
     #[serde(default)]
     pub source: String,
     pub created_ts: u64,
     pub updated_ts: u64,
+    /// The calendar event this meeting note is for, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<NoteEvent>,
 }
 
 fn default_note_type() -> String {
@@ -485,10 +509,70 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
             source: source.to_string(),
             created_ts: now,
             updated_ts: now,
+            event: None,
         };
         store.notes.push(note.clone());
         save_to_disk(store);
         note
+    })
+}
+
+/// Tie meeting note `id` to a calendar event (`calendar.rs`): keep the event,
+/// take its `title` when given (the caller only passes one over a
+/// placeholder), add its attendees after the ones already there, and, for a
+/// note made ahead of the meeting, date it to the meeting (`date`).
+pub fn link_event(
+    id: u64,
+    event: NoteEvent,
+    title: Option<String>,
+    attendees: &[String],
+    date: Option<u64>,
+) -> Result<(), String> {
+    with_store(|store| {
+        let note = store
+            .notes
+            .iter_mut()
+            .find(|n| n.id == id)
+            .ok_or("Note not found")?;
+        if let Some(title) = title.filter(|t| !t.trim().is_empty()) {
+            note.title = title;
+        }
+        for name in attendees {
+            let name = name.trim();
+            if !name.is_empty() && !note.participants.iter().any(|p| p.eq_ignore_ascii_case(name)) {
+                note.participants.push(name.to_string());
+            }
+        }
+        if let Some(date) = date {
+            note.created_ts = date;
+        }
+        note.note_type = "meeting".to_string();
+        note.event = Some(event);
+        note.updated_ts = now_secs();
+        save_to_disk(store);
+        Ok(())
+    })
+}
+
+/// The note made for calendar event `key` (the most recently edited, if a
+/// meeting was recorded twice).
+pub fn find_by_event(key: &str) -> Option<u64> {
+    with_notes(|notes| {
+        notes
+            .iter()
+            .filter(|n| n.event.as_ref().is_some_and(|e| e.key == key))
+            .max_by_key(|n| n.updated_ts)
+            .map(|n| n.id)
+    })
+}
+
+/// (note id, event key) for every note tied to an event (the Meetings view).
+pub fn event_links() -> Vec<(u64, String)> {
+    with_notes(|notes| {
+        notes
+            .iter()
+            .filter_map(|n| n.event.as_ref().map(|e| (n.id, e.key.clone())))
+            .collect()
     })
 }
 
