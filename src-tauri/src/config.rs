@@ -331,6 +331,10 @@ pub struct YapConfig {
     /// loopback-only + bearer token, so nothing is reachable off-machine.
     #[serde(default = "default_true")]
     pub bridge_enabled: bool,
+    /// Let AI apps save notes through Yap's MCP server (its `create_note`
+    /// tool; Integrations → AI apps). Off by default: they can only read.
+    #[serde(default)]
+    pub mcp_allow_writes: bool,
 
     /// Call detection (`meeting_detect.rs`): when Teams, Zoom, Meet, Slack,
     /// Discord, Webex… start using the mic, offer to take notes, and offer to
@@ -462,6 +466,7 @@ impl Default for YapConfig {
             streaming_partials: true,
             history_enabled: true,
             bridge_enabled: true,
+            mcp_allow_writes: false,
             meeting_detection: true,
             meeting_detect_apps: std::collections::BTreeMap::new(),
             meeting_detect_style: default_meeting_detect_style(),
