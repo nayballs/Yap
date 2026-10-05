@@ -15,8 +15,6 @@
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
-    "updater:default",
-    "process:default",
     "opener:default",
     "dialog:default"
   ]

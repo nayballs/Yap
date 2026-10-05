@@ -1,12 +1,19 @@
 // Toast store — port of OpenWhispr's ui/useToast + ToastProvider timer logic,
 // rendered Wispr-Flow-style (ToastHost.svelte). Usage: toast({ title,
 // description?, variant?: 'default'|'success'|'destructive', duration?,
-// chip?, action?: { label, onClick } }). `chip` overrides the little category
-// pill (defaults: Tip / Done / Error per variant); `action` renders a light
-// button bottom-right (Wispr's "Open Settings"). Destructive toasts linger
-// longer (6 s vs 3.5 s) and render the description as a copyable mono error
-// box. Hovering a toast pauses its timer; leaving resumes with the remaining
-// time.
+// chip?, icon?, action?: { label, onClick, keepOpen? }, secondary?: { label,
+// onClick }, progress?, busy?, expand?: { label, markdown } }). `chip`
+// overrides the little category pill (defaults: Tip / Done / Error per
+// variant) and `icon: 'update'` swaps its glyph; `action` renders a light
+// button bottom-right (Wispr's "Open Settings") and `secondary` a quiet one
+// beside it ("Later"); both close the toast unless `keepOpen`. `progress`
+// (0–100) draws a determinate bar, `busy` a spinner in the chip, and
+// `expand` a "What's new"-style toggle that unfolds markdown notes inside the
+// card. Destructive toasts linger longer (6 s vs 3.5 s) and render the
+// description as a copyable mono error box; `duration <= 0` = sticky. Hovering
+// a toast pauses its timer; leaving resumes with the remaining time.
+// `updateToast(id, patch)` changes a live toast in place (the update toast
+// goes ready → downloading → restarting without stacking new cards).
 
 export const toastStore = $state({ list: [] });
 
@@ -34,7 +41,27 @@ function arm(id, ms) {
   );
 }
 
-export function toast({ title = '', description = '', variant = 'default', duration, chip = '', action = null } = {}) {
+function clearTimer(id) {
+  const timer = timers.get(id);
+  if (timer) {
+    clearTimeout(timer);
+    timers.delete(id);
+  }
+}
+
+export function toast({
+  title = '',
+  description = '',
+  variant = 'default',
+  duration,
+  chip = '',
+  icon = '',
+  action = null,
+  secondary = null,
+  progress = null,
+  busy = false,
+  expand = null,
+} = {}) {
   const id = ++seq;
   const dur = duration ?? (variant === 'destructive' ? 6000 : 3500);
   toastStore.list.push({
@@ -43,7 +70,12 @@ export function toast({ title = '', description = '', variant = 'default', durat
     description,
     variant,
     chip,
+    icon,
     action,
+    secondary,
+    progress,
+    busy,
+    expand,
     duration: dur,
     createdAt: Date.now(),
     isExiting: false,
@@ -52,21 +84,31 @@ export function toast({ title = '', description = '', variant = 'default', durat
   return id;
 }
 
-export function dismiss(id) {
-  const timer = timers.get(id);
-  if (timer) {
-    clearTimeout(timer);
-    timers.delete(id);
+/** Patch a live toast in place. Returns false once it's closed or expiring. */
+export function updateToast(id, patch) {
+  const t = toastStore.list.find((x) => x.id === id);
+  if (!t || t.isExiting) return false;
+  Object.assign(t, patch);
+  if ('duration' in patch) {
+    clearTimer(id);
+    t.createdAt = Date.now();
+    arm(id, t.duration);
   }
+  return true;
+}
+
+/** Whether a toast is still on screen (not closed, not on its way out). */
+export function isToastLive(id) {
+  return toastStore.list.some((x) => x.id === id && !x.isExiting);
+}
+
+export function dismiss(id) {
+  clearTimer(id);
   startExit(id);
 }
 
 export function pauseToast(id) {
-  const timer = timers.get(id);
-  if (timer) {
-    clearTimeout(timer);
-    timers.delete(id);
-  }
+  clearTimer(id);
 }
 
 export function resumeToast(id) {

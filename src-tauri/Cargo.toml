@@ -73,18 +73,21 @@ tar = "0.4"
 # default build ships the STUB and `cargo check` stays fast.
 transcribe-rs = { version = "0.3", optional = true, default-features = false }
 
-# Auto-update via GitHub Releases (+ process for relaunch after install).
-# Desktop-only crates, so they live under a non-mobile target block.
+# Auto-update via GitHub Releases, driven from Rust (updates.rs: background
+# checks + download, install on request; relaunch is the installer's /R).
+# Desktop-only crate, so it lives under a non-mobile target block.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
 
 # Windows UI Automation — read the focused control's text selection for
 # edit/rewrite mode. Version matches the `windows` crate tauri 2 already pulls
 # in (0.61.x) so there's no duplicate copy of the crate.
 [target.'cfg(windows)'.dependencies]
 # ToolHelp + Threading: procs.rs (tell an orphaned sidecar from another Yap's).
-windows = { version = "0.61", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
+# UI_Notifications + Data_Xml_Dom: the "update ready" Windows notification;
+# Networking_Connectivity: skip background update downloads on metered
+# connections (updates.rs).
+windows = { version = "0.61", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Foundation", "UI_Notifications", "Data_Xml_Dom", "Networking_Connectivity"] }
 # Yap accounts: the session token lives in Windows Credential Manager. The
 # keyring crate's own docs steer apps to keyring-core + the one store they use.
 keyring-core = "1"
