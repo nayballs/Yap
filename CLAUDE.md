@@ -715,7 +715,9 @@ Any uncaught JS error in any webview fails the test. ~20 s plus the build
 (`npm run test:app:build`, own target dir `src-tauri/target/e2e` or
 `YAP_E2E_TARGET_DIR`). Safe beside the installed app and a dev build: portable
 data dir, own WebView2 profile + CDP port, F24 hotkey, test mode (`e2e.rs`),
-unreachable account service. CI uploads `test-results/app` as the **`e2e-results`**
+unreachable account service. (Runners are elevated, so WebView2 ignores the suite's
+`WEBVIEW2_*` variables there; e2e.yml sets the DevTools flag as an HKLM WebView2
+policy for `yap.exe` instead.) CI uploads `test-results/app` as the **`e2e-results`**
 artifact on every run — review it with
 `gh run download <run-id> --repo nayballs/Yap --name e2e-results --dir e2e-<run-id>`
 and read the PNGs under `screenshots/`. Full guide (incl. adding a test):

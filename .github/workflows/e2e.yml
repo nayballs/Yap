@@ -43,16 +43,31 @@ jobs:
         shell: pwsh
         run: echo "YAP_E2E_TARGET_DIR=$((Resolve-Path "$env:GITHUB_WORKSPACE\..").Path)\t" >> $env:GITHUB_ENV
 
+      # Saved even when the suite fails: a red run is usually a test, not the
+      # build, and the next run shouldn't pay for a cold build again.
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> ../../t"
+          cache-on-failure: true
 
       - name: Install frontend dependencies
         run: npm ci
 
       - name: Build the test app (stub engine, debug, frontend embedded)
         run: npm run test:app:build
+
+      # Everything on a hosted runner runs elevated, and WebView2 ignores the
+      # WEBVIEW2_* variables of an elevated app (the suite asks for its
+      # DevTools port that way). A machine-wide policy still applies, so set
+      # the same flag there for yap.exe:
+      # https://learn.microsoft.com/microsoft-edge/webview2/concepts/security#for-an-elevated-host-app-use-appropriate-override-flags
+      - name: Let WebView2 open a DevTools port for yap.exe
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+          New-Item -Path $key -Force | Out-Null
+          Set-ItemProperty -Path $key -Name 'yap.exe' -Value '--remote-debugging-port=0'
 
       - name: Run the e2e suite
         run: npx playwright test -c e2e

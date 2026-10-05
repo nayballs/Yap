@@ -66,9 +66,19 @@ each run):
 `.github/workflows/e2e.yml` runs the suite on every push and PR to `main`, and
 on demand (`gh workflow run e2e.yml --repo nayballs/Yap`). It builds the test
 app, runs the suite and uploads `test-results/app` as the **`e2e-results`**
-artifact on every run, pass or fail. The runner has no audio devices, so the
-run also proves Yap starts and works without a microphone. To review a run's
-screenshots and logs:
+artifact on every run, pass or fail (about 3 minutes with a warm Rust cache).
+The runner has no audio devices, so the run also proves Yap starts and works
+without a microphone (the stub dictation test is skipped there), and its
+screen is 1024×768, so CI screenshots are a little smaller than local ones.
+
+Hosted runners run everything elevated, and WebView2 ignores an elevated
+app's `WEBVIEW2_*` variables (Microsoft's
+[security notes](https://learn.microsoft.com/microsoft-edge/webview2/concepts/security#for-an-elevated-host-app-use-appropriate-override-flags)),
+so the workflow sets the DevTools flag as a machine-wide WebView2 policy for
+`yap.exe` instead. The suite reads the port WebView2 picked from
+`DevToolsActivePort` in the instance's profile either way.
+
+To review a run's screenshots and logs:
 
 ```bash
 gh run list --workflow=e2e.yml --repo nayballs/Yap --limit 5

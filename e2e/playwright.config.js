@@ -14,6 +14,9 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   retries: process.env.CI ? 1 : 0,
+  // On CI, a broken environment (say, no DevTools port) should fail in
+  // minutes rather than retrying every test until the job times out.
+  maxFailures: process.env.CI ? 4 : 0,
   forbidOnly: !!process.env.CI,
   reporter: [
     ['list'],

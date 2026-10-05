@@ -87,14 +87,17 @@ export async function launchYap({ name, config = {}, env = {} }) {
     JSON.stringify({ ...BASE_CONFIG, ...config }, null, 2)
   );
 
-  const cdpPort = await freePort();
   const closedPort = await freePort(); // nothing listens here
+  const webview2Dir = path.join(runDir, 'webview2');
   const childEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !SCRUB.test(k)));
   Object.assign(childEnv, {
     YAP_E2E: '1',
     YAP_AUTH_URL: `http://127.0.0.1:${closedPort}`,
-    WEBVIEW2_USER_DATA_FOLDER: path.join(runDir, 'webview2'),
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${cdpPort}`,
+    WEBVIEW2_USER_DATA_FOLDER: webview2Dir,
+    // Port 0: WebView2 picks a free port and writes it to DevToolsActivePort
+    // in the profile. (An elevated process ignores WEBVIEW2_* variables; CI
+    // runners are elevated, so e2e.yml sets the same flag as a machine policy.)
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=0',
     NO_COLOR: '1',
     ...env,
   });
@@ -115,7 +118,7 @@ export async function launchYap({ name, config = {}, env = {} }) {
 
   const app = new YapApp({ name, child, runDir, appDir, dataDir, logPath });
   try {
-    app.browser = await connect(cdpPort, () => exited, logPath);
+    app.browser = await connect(webview2Dir, () => exited, logPath);
     await assertTestMode(logPath);
     await app.attachPages();
   } catch (e) {
@@ -140,22 +143,40 @@ async function assertTestMode(logPath) {
   );
 }
 
-async function connect(port, exited, logPath) {
-  const deadline = Date.now() + 45_000;
-  let last;
+/** Wait for WebView2's DevTools port (from DevToolsActivePort) and connect. */
+async function connect(webview2Dir, exited, logPath) {
+  const portFile = path.join(webview2Dir, 'EBWebView', 'DevToolsActivePort');
+  const deadline = Date.now() + 30_000;
+  let last = 'no DevToolsActivePort yet';
   while (Date.now() < deadline) {
     if (exited()) {
       const tail = fs.readFileSync(logPath, 'utf8').split('\n').slice(-20).join('\n');
       throw new Error(`Yap exited during startup (${JSON.stringify(exited())}):\n${tail}`);
     }
-    try {
-      return await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 5_000 });
-    } catch (e) {
-      last = e;
-      await sleep(250);
+    const port = fs.existsSync(portFile) ? fs.readFileSync(portFile, 'utf8').split('\n')[0].trim() : '';
+    if (port) {
+      try {
+        return await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 5_000 });
+      } catch (e) {
+        last = e;
+      }
     }
+    await sleep(250);
   }
-  throw new Error(`Couldn't connect to Yap's webviews on port ${port}: ${last}`);
+  throw new Error(`Couldn't connect to Yap's webviews: ${last}\n${describeWebView2(webview2Dir)}`);
+}
+
+/** What WebView2 is doing with our profile (for a failed connect). */
+function describeWebView2(webview2Dir) {
+  const lines = [];
+  try {
+    const ps = `Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -like '*${webview2Dir}*' -and $_.CommandLine -notlike '*--type=*' } | ForEach-Object { $_.ProcessId.ToString() + ': ' + $_.CommandLine }`;
+    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { encoding: 'utf8' });
+    lines.push(`WebView2 browser process: ${out.trim() || '(none)'}`);
+  } catch (e) {
+    lines.push(`(couldn't list WebView2 processes: ${e.message})`);
+  }
+  return lines.join('\n');
 }
 
 /** The webview's Tauri window label ("settings", "onboarding", "overlay"). */
