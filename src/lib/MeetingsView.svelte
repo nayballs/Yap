@@ -1,26 +1,25 @@
 <script>
   // Meetings — Wispr Flow's Notetaker hub, local-first (calendar.rs via
-  // calendar.svelte.js): today's and the next 7 days' meetings from the
-  // connected calendars, three at a time, with Conflict / Maybe labels and
-  // their actions (Join + Start from 10 minutes before, Start, Join meeting;
-  // Switch while another meeting records); the past meeting notes with a
-  // search; and an Ask bar that cycles example questions and hands the
-  // question to Chat. Opening a meeting that's still to come makes its note
-  // ahead of time (title, attendees, dated to the meeting).
+  // calendar.svelte.js): a header with ◉ Take notes (the meeting shortcut's
+  // logic: notes on the call that's on, else a new meeting note; Stop and
+  // summarise while one records); today's and the next 7 days' meetings
+  // from the connected calendars, three at a time, with Conflict / Maybe
+  // labels and their actions (Join + Start from 10 minutes before, Start,
+  // Join meeting; Switch while another meeting records) — with no calendar,
+  // one grey "No meetings found" card whose Connect calendar opens the
+  // "Connect your calendar" dialog; the past meeting notes by day, with a
+  // search and "Generate summary" on those without one; and an Ask bar that
+  // cycles example questions and hands the question to Chat. Opening a
+  // meeting that's still to come makes its note ahead of time (title,
+  // attendees, dated to the meeting).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import {
-    calendar,
-    clockTime,
-    whenText,
-    syncCalendar,
-    eventAction,
-    openConnectors,
-    dismissNudge,
-  } from './calendar.svelte.js';
+  import { calendar, clockTime, whenText, syncCalendar, eventAction, openConnectDialog } from './calendar.svelte.js';
   import { noteRequest } from './meetingDetect.svelte.js';
+  import { summarise } from './meetingSummary.svelte.js';
   import { chatRequest } from './chatRequest.svelte.js';
+  import { formatHotkeySpec } from './hotkeys.js';
   import { toast } from './ui/toast.svelte.js';
 
   // `onnavigate(view)` switches the main window's view; `onopensettings(section)`.
@@ -37,6 +36,9 @@
   let past = $state([]);
   let query = $state('');
   let pastShown = $state(5);
+  // The meeting shortcut ("Win + Alt + M"), for Take notes' tooltip.
+  let shortcut = $state('');
+  let starting = $state(false);
 
   const ASK_EXAMPLES = [
     'What questions were left unanswered in my last meeting?',
@@ -110,15 +112,44 @@
     noteRequest.pending = { id, stop: false };
   }
 
-  async function newNote() {
+  // ◉ Take notes: what the meeting shortcut does (meeting_guard.rs) — notes
+  // on the call that's on, else in a new meeting note (both open in Notes);
+  // while a meeting records, stop it and write its action plan.
+  async function takeNotes() {
+    if (starting) return;
+    starting = true;
     try {
-      const note = await invoke('note_create', { folder: 'Meetings', source: 'manual' });
-      onnavigate('notes');
-      noteRequest.pending = { id: note.id, stop: false };
+      await invoke('meeting_shortcut', { origin: 'settings' });
     } catch (e) {
-      toast({ title: "Couldn't make a note", description: String(e), variant: 'destructive' });
+      toast({ title: "Couldn't start meeting notes", description: String(e), variant: 'destructive' });
+    } finally {
+      // The shortcut takes one press a second.
+      setTimeout(() => (starting = false), 1_000);
     }
   }
+
+  // "Generate summary" on a past meeting without one: its action plan, in
+  // the note (where it shows being written, or what it needs).
+  async function generate(n) {
+    try {
+      await summarise(n.id);
+      openNote(n.id);
+    } catch (e) {
+      toast({ title: "Couldn't write the summary", description: String(e), variant: 'destructive' });
+    }
+  }
+
+  // Past meeting notes by day ("Today, 6 Oct"), within what's shown.
+  const pastGroups = $derived.by(() => {
+    const groups = [];
+    for (const n of past.slice(0, pastShown)) {
+      const label = pastDay(n.when);
+      const last = groups[groups.length - 1];
+      if (last?.label === label) last.notes.push(n);
+      else groups.push({ label, notes: [n] });
+    }
+    return groups;
+  });
 
   function ask(e) {
     e?.preventDefault();
@@ -128,17 +159,28 @@
     onnavigate('chat');
   }
 
-  function pastWhen(secs) {
+  /** "Today, 6 Oct", "Yesterday, 5 Oct", "Sat, 3 Oct" (a past note's day). */
+  function pastDay(secs) {
     const d = new Date(secs * 1000);
     const today = new Date(now * 1000);
-    if (d.toDateString() === today.toDateString()) return `Today, ${clockTime(secs)}`;
-    return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) + `, ${clockTime(secs)}`;
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const date = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    if (d.toDateString() === today.toDateString()) return `Today, ${date}`;
+    if (d.toDateString() === yesterday.toDateString()) return `Yesterday, ${date}`;
+    return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
   }
 
   onMount(() => {
     refreshPast();
     invoke('meeting_state')
       .then((s) => (meeting = s || { recording: false }))
+      .catch(() => {});
+    invoke('get_config')
+      .then((c) => {
+        const keys = c?.meetingHotkey ? formatHotkeySpec(c.meetingHotkey) : '';
+        shortcut = keys && keys !== 'None' ? keys : '';
+      })
       .catch(() => {});
     const uns = [];
     listen('yap-meeting-state', (e) => {
@@ -214,48 +256,51 @@
   <div class="scroll">
     <div class="wrap">
       <header class="head">
-        <h1>Meetings</h1>
+        <h1 tabindex="-1" data-dialog-return>Meetings</h1>
         <div class="headbtns">
           {#if connected}
-            <button class="hbtn" onclick={syncCalendar} disabled={calendar.syncing} aria-label="Sync calendar" title="Sync calendar">
+            <button
+              class="hbtn icononly"
+              onclick={syncCalendar}
+              disabled={calendar.syncing}
+              aria-label="Sync calendar"
+              title={calendar.syncing ? 'Syncing…' : 'Sync calendar'}
+            >
               <svg class:spin={calendar.syncing} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" /><path d="M3 21v-5h5" /><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" /><path d="M21 3v5h-5" /></svg>
-              <span>{calendar.syncing ? 'Syncing…' : 'Sync calendar'}</span>
             </button>
           {/if}
           <button class="hbtn icononly" onclick={() => onopensettings('general#meetings')} aria-label="Meeting settings" title="Meeting settings">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
           </button>
-          <button class="hbtn" onclick={newNote}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-            <span>New note</span>
+          <!-- Wispr's "◉ Start Notetaker": the meeting shortcut, as a button. -->
+          <button
+            class="takenotes"
+            class:rec={meeting.recording}
+            onclick={takeNotes}
+            disabled={starting}
+            title={meeting.recording
+              ? `Stop the meeting and write its action plan${shortcut ? ` (${shortcut})` : ''}`
+              : `Take notes on the call you're on, or start a meeting note${shortcut ? ` (${shortcut})` : ''}`}
+          >
+            {#if meeting.recording}
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5" fill="currentColor" /></svg>
+              <span>Stop and summarise</span>
+            {:else}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="7.5" /><circle cx="12" cy="12" r="3.4" fill="currentColor" stroke="none" /></svg>
+              <span>Take notes</span>
+            {/if}
           </button>
         </div>
       </header>
 
-      {#if calendar.nudge.hub}
-        <div class="nudge" role="region" aria-label="Connect your calendar">
-          <div class="nudge-text">
-            <h2>Connect your calendar</h2>
-            <p>See your upcoming meetings, and get notes and action items with everyone's names. Yap reads your calendar straight from this PC.</p>
-          </div>
-          <div class="nudge-btns">
-            <button class="nudge-later" onclick={dismissNudge}>Not now</button>
-            <button class="nudge-go" onclick={openConnectors}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5" /><path d="M3 9.5h18M8 2.5v4M16 2.5v4" /></svg>
-              Connect calendar
-            </button>
-          </div>
-        </div>
-      {/if}
-
       <section class="sec" aria-labelledby="mt-today">
         <div class="seccap"><h2 id="mt-today">Today</h2><span class="secdate">{todayLabel}</span></div>
         {#if !connected}
+          <!-- Wispr's one grey card: the way in is the "Connect your calendar" dialog. -->
           <div class="empty">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5" /><path d="M3 9.5h18M8 2.5v4M16 2.5v4" /></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5" /><path d="M3.5 9.5h17M8 2.8v3.4M16 2.8v3.4" /><path d="M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01" stroke-width="2.2" /></svg>
             <p class="e1">No meetings found</p>
-            <p class="e2">Connect your calendar for meeting names, everyone's names in your notes, and a heads-up before each meeting.</p>
-            <button class="ink" onclick={openConnectors}>Connect calendar</button>
+            <button class="ink connect" onclick={openConnectDialog}>Connect calendar</button>
           </div>
         {:else if todays.length === 0}
           <p class="quiet">Nothing else on your calendar today.</p>
@@ -303,25 +348,34 @@
         {#if past.length === 0}
           <p class="quiet">{query.trim() ? 'No meeting notes match that.' : 'Your meeting notes will appear here.'}</p>
         {:else}
-          <div class="plist" role="list" aria-label="Past meeting notes">
-            {#each past.slice(0, pastShown) as n (n.id)}
-              <div role="listitem"><button class="prow" onclick={() => openNote(n.id)}>
-                <span class="picon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h4" /></svg>
-                </span>
-                <span class="pmain">
-                  <span class="ptitle">
-                    {n.title || 'Untitled meeting'}
-                    {#if n.recording}<span class="recpill small"><span class="recdot" aria-hidden="true"></span>Recording</span>{/if}
-                    {#if n.hasPlan}<span class="tag plan">Action plan</span>{/if}
+          {#each pastGroups as g (g.label)}
+            <div class="pday">{g.label}</div>
+            <div class="plist" role="list" aria-label={`Meeting notes, ${g.label}`}>
+              {#each g.notes as n (n.id)}
+                <!-- The title opens the note (and the whole row, for the
+                     pointer); "Generate summary" is a button of its own. -->
+                <div class="prow" role="listitem">
+                  <span class="picon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h4" /></svg>
                   </span>
-                  <span class="pmeta">
-                    {pastWhen(n.when)}{#if n.participants?.length} · {n.participants.join(', ')}{/if}
+                  <span class="pmain">
+                    <span class="ptitle">
+                      <button class="popen" onclick={() => openNote(n.id)}>{n.title || 'Untitled meeting'}</button>
+                      {#if n.recording}<span class="recpill small"><span class="recdot" aria-hidden="true"></span>Recording</span>{/if}
+                      {#if n.hasPlan}<span class="tag plan">Action plan</span>{/if}
+                    </span>
+                    <span class="pmeta">
+                      <span>{clockTime(n.when)}</span>
+                      {#if n.participants?.length}<span class="pwho">{n.participants.join(', ')}</span>{/if}
+                      {#if !n.hasPlan && !n.recording && n.hasTalk}
+                        <span><button class="gen" onclick={() => generate(n)}>Generate summary</button></span>
+                      {/if}
+                    </span>
                   </span>
-                </span>
-              </button></div>
-            {/each}
-          </div>
+                </div>
+              {/each}
+            </div>
+          {/each}
           {#if past.length > pastShown}
             <button class="more" onclick={() => (pastShown += 10)}>View more</button>
           {/if}
@@ -402,14 +456,61 @@
     cursor: default;
     color: var(--yap-muted);
   }
+  /* Icon buttons (Wispr's gear): no box until hovered. */
   .hbtn.icononly {
     width: 32px;
     padding: 0;
     justify-content: center;
+    border-color: transparent;
+    background: none;
+    color: var(--yap-fg-80);
+  }
+  .hbtn.icononly:hover:not(:disabled) {
+    border-color: transparent;
+    background: var(--yap-raised-soft);
+    color: var(--yap-fg);
   }
   .hbtn svg {
+    width: 17px;
+    height: 17px;
+  }
+  .hbtn:focus-visible,
+  .takenotes:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--yap-primary-wash);
+  }
+  /* Wispr's beige "◉ Start Notetaker" (radius 8, 32 tall). */
+  .takenotes {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 32px;
+    margin-left: 2px;
+    padding: 0 12px 0 10px;
+    border: none;
+    border-radius: var(--yap-r);
+    background: var(--yap-paper-s2);
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--yap-dur) ease;
+  }
+  .takenotes:hover:not(:disabled) {
+    background: var(--yap-paper-s2-strong);
+  }
+  .takenotes:disabled {
+    cursor: default;
+  }
+  .takenotes svg {
     width: 15px;
     height: 15px;
+  }
+  /* Recording: a stop square in the notepad's emerald. */
+  .takenotes.rec svg {
+    color: var(--yap-live-strong);
   }
   .spin {
     animation: spin 0.9s linear infinite;
@@ -418,75 +519,6 @@
     to {
       transform: rotate(360deg);
     }
-  }
-
-  /* The nudge: Wispr's dark card ("Connect your calendar · Not now / Connect calendar"). */
-  .nudge {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 18px;
-    padding: 18px 20px;
-    margin-bottom: 26px;
-    border-radius: var(--yap-r-xl);
-    background: var(--yap-ink);
-    color: var(--yap-ink-fg);
-    box-shadow: var(--yap-shadow-sm);
-  }
-  .nudge h2 {
-    margin: 0 0 4px;
-    font-size: 15px;
-    font-weight: 700;
-  }
-  .nudge p {
-    margin: 0;
-    font-size: 12.5px;
-    line-height: 1.5;
-    color: rgba(247, 245, 240, 0.68);
-    max-width: 52ch;
-  }
-  .nudge-btns {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 0 0 auto;
-  }
-  .nudge-later {
-    height: 34px;
-    padding: 0 12px;
-    border: none;
-    border-radius: 10px;
-    background: none;
-    color: rgba(247, 245, 240, 0.85);
-    font: inherit;
-    font-size: 13px;
-    font-weight: 650;
-    cursor: pointer;
-  }
-  .nudge-later:hover {
-    background: rgba(255, 255, 255, 0.08);
-  }
-  .nudge-go {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    height: 34px;
-    padding: 0 14px;
-    border: none;
-    border-radius: 10px;
-    background: #fbf5e4;
-    color: var(--yap-ink);
-    font: inherit;
-    font-size: 13px;
-    font-weight: 650;
-    cursor: pointer;
-  }
-  .nudge-go:hover {
-    background: #ffffff;
-  }
-  .nudge-go svg {
-    width: 15px;
-    height: 15px;
   }
 
   .sec {
@@ -717,32 +749,36 @@
     font-size: 13px;
     color: var(--yap-muted);
   }
+  /* No calendar: Wispr's one grey card (no meetings, Connect calendar). */
   .empty {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 6px;
-    padding: 26px 20px 28px;
-    border: 1px dashed var(--yap-border);
-    border-radius: var(--yap-r-xl);
+    padding: 30px 20px 32px;
+    border-radius: 16px;
+    background: var(--yap-paper-s1);
     text-align: center;
   }
   .empty svg {
     width: 26px;
     height: 26px;
-    color: var(--yap-muted-55);
+    color: var(--yap-paper-muted);
   }
   .empty .e1 {
-    margin: 4px 0 0;
-    font-size: 14px;
-    font-weight: 650;
+    margin: 2px 0 6px;
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--yap-paper-muted);
   }
-  .empty .e2 {
-    margin: 0 0 8px;
-    max-width: 46ch;
-    font-size: 12.5px;
-    line-height: 1.5;
-    color: var(--yap-muted);
+  .ink.connect {
+    height: 34px;
+    padding: 0 16px;
+    font-size: 13.5px;
+  }
+  .ink:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--yap-s1), 0 0 0 4px var(--yap-ink);
   }
 
   .pasthead {
@@ -784,26 +820,38 @@
     font: inherit;
     font-size: 12.5px;
   }
+  /* Past notes by day ("TODAY, 6 OCT"), as Wispr's. */
+  .pday {
+    margin: 16px 0 4px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--yap-muted-70);
+  }
+  .pasthead + .pday {
+    margin-top: 4px;
+  }
   .plist {
     display: flex;
     flex-direction: column;
   }
   .prow {
+    position: relative;
     display: flex;
     width: 100%;
+    box-sizing: border-box;
     align-items: center;
     gap: 12px;
     padding: 9px 8px;
-    border: none;
     border-radius: var(--yap-r);
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
+    transition: background var(--yap-dur) ease;
   }
   .prow:hover {
     background: var(--yap-s3);
+  }
+  .prow:has(.popen:focus-visible) {
+    box-shadow: 0 0 0 3px var(--yap-primary-wash);
   }
   .picon {
     flex: 0 0 auto;
@@ -830,15 +878,74 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+  }
+  /* The title opens the note; its ::after stretches over the row, so the
+     whole row does (Generate summary sits above it). */
+  .popen {
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
     font-size: 13.5px;
     font-weight: 600;
-  }
-  .pmeta {
-    font-size: 12px;
-    color: var(--yap-muted);
+    text-align: left;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    cursor: pointer;
+  }
+  .popen::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+  }
+  .popen:focus-visible {
+    outline: none;
+  }
+  .pmeta {
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+    gap: 0 6px;
+    font-size: 12px;
+    color: var(--yap-muted);
+    white-space: nowrap;
+  }
+  .pmeta > span + span::before {
+    content: '·';
+    margin-right: 6px;
+    color: var(--yap-muted-55);
+  }
+  .pwho {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .gen {
+    position: relative;
+    z-index: 1;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-fg-80);
+    font: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--yap-muted-55);
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .gen:hover {
+    color: var(--yap-fg);
+    text-decoration-color: currentColor;
+  }
+  .gen:focus-visible {
+    outline: none;
+    border-radius: 3px;
+    box-shadow: 0 0 0 2px var(--yap-primary-wash);
   }
 
   /* The Ask bar, docked to the bottom of the view (Wispr's hub). */

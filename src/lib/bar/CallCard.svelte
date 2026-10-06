@@ -14,18 +14,24 @@
   // over "● In 1 min · with Tanay +1" (amber, then green once it's on),
   // Join & take notes | ^ Start notes, Snooze 2 min; a calendar glyph when
   // the meeting has no call app.
+  //
+  // `preview`: a static picture of the card for the main window (the
+  // "Connect your calendar" dialog's band), drawn from sample data by this
+  // same component so it always matches the bar: inert (nothing to click
+  // or focus), hidden from screen readers, no regions reported to the bar.
   import yapLogo from '../../assets/yap-logo.svg';
   import { callAppIcon } from './callApps.js';
   import CallAppIcon from '../CallAppIcon.svelte';
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
 
-  /** @type {{ card: any, paused?: boolean, hovered?: boolean, onaction: (action: string) => void }} */
-  let { card, paused = false, hovered = false, onaction } = $props();
+  /** @type {{ card: any, paused?: boolean, hovered?: boolean, preview?: boolean, onaction?: (action: string) => void }} */
+  let { card, paused = false, hovered = false, preview = false, onaction = () => {} } = $props();
 
   fadeTimer(() => card, () => paused, (a) => onaction(a));
   const clock = countdownClock(() => card);
   const icon = $derived(callAppIcon(card.app));
-  const region = $derived(`card:${card.id}`);
+  // The bar's hit regions (Overlay.svelte); a preview has none.
+  const region = $derived(preview ? undefined : `card:${card.id}`);
   const RING = 2 * Math.PI * 12;
 
   let menuOpen = $state(false);
@@ -52,10 +58,23 @@
   });
 </script>
 
-<div class="call" class:counting={!!card.countdown} data-region={region} role="status" aria-live="polite">
-  <button class="x" data-region={region} aria-label="Close" onclick={() => answer(card.closeAction)}>
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
-  </button>
+<div
+  class="call"
+  class:counting={!!card.countdown}
+  class:preview
+  data-region={region}
+  role={preview ? undefined : 'status'}
+  aria-live={preview ? undefined : 'polite'}
+  aria-hidden={preview ? 'true' : undefined}
+  inert={preview}
+>
+  {#if !preview}
+    <!-- Not on the picture of the card: Wispr's illustration has no ✕ either,
+         and the dialog showing it has its own. -->
+    <button class="x" data-region={region} aria-label="Close" onclick={() => answer(card.closeAction)}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+    </button>
+  {/if}
 
   <span class="mark" aria-hidden="true">
     {#if icon.kind === 'phone' && card.icon === 'calendar'}
@@ -149,6 +168,10 @@
     box-shadow: 0 1px 2px rgba(26, 26, 26, 0.05);
     color: rgb(252, 252, 251);
     pointer-events: auto;
+  }
+  /* A picture of the card (`preview`): nothing on it reacts to the pointer. */
+  .call.preview {
+    pointer-events: none;
   }
   /* The ✕ sits on the top-left corner (screenshot 25). */
   .x {

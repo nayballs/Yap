@@ -525,13 +525,15 @@ before `meeting::ingest`) and on an Upload's whole text.
   each window's affinity back (`GetWindowDisplayAffinity`) for the e2e suite.
 - **`calendar.rs`** (+ `calendar/`) — **the calendar** (Wispr Flow's,
   local-first: no Yap server; see [`docs/calendar.md`](./docs/calendar.md)).
-  **Connections** (Settings → Connectors, ≤ 8): Google Calendar in one click
+  **Connections** (≤ 8; Settings → Connectors, or the "Connect your
+  calendar" dialog every other Connect calendar opens): Google Calendar in one click
   (`calendar/google.rs`: OAuth for installed apps in the system browser, PKCE
   S256 + `state` via `auth.rs`'s helpers, a one-shot `tiny_http` listener on
   `127.0.0.1`, `access_type=offline`; scopes `calendar.calendarlist.readonly`
   + `calendar.events.owned.readonly` only; the client id/secret baked in from
   `YAP_GOOGLE_CALENDAR_CLIENT_ID`/`_SECRET` by `option_env!` — none = no
-  Google, the page says so; the token is revoked on Disconnect) or any private iCal link
+  Google: "Google sign-in is in the installed Yap. In this build, use a
+  private iCal link…"; the token is revoked on Disconnect) or any private iCal link
   ("Outlook Calendar" = a guided publish-your-calendar ICS flow; "Other
   calendar"; HTTPS only, `webcal://` → https). Secrets (refresh token, link)
   in Credential Manager (`calendar/vault.rs`: `yap-calendar-<n>.com.yap.dictation`,
@@ -574,8 +576,11 @@ before `meeting::ingest`) and on an Upload's whole text.
   prompt. Commands `calendar_status`/`_sync`/`_connect_google`/
   `_cancel_google`/`_add_link`/`_disconnect`/`_event(key, open|join|start|
   joinStart|switch|joinSwitch)`/`_card(id, join|start|snooze|dismiss)`/
-  `_nudge`/`_meeting_notes(query)`; events `yap-calendar` (snapshot),
-  `yap-calendar-connected`, `yap-calendar-error`; `meetings_context` backs the
+  `_nudge`/`_meeting_notes(query)` (`hasPlan`, `hasTalk`: "Generate
+  summary"); events `yap-calendar` (snapshot), `yap-calendar-connected`
+  (`{kind, label, meetings}`: the new calendar's meetings on now or in the
+  next 7 days, which `_add_link` also returns), `yap-calendar-error`;
+  `meetings_context` backs the
   Meetings view's Ask bar (`chat_send` scope "meetings"). Debug-only:
   `YAP_GOOGLE_{AUTH,TOKEN,REVOKE,API}_URL` (+ the client at run time) and
   `calendar_e2e_opened` (test mode records links instead of opening them).
@@ -996,8 +1001,9 @@ before `meeting::ingest`) and on an Upload's whole text.
   `--yap-font-display` (hero headlines, stat numerals, Settings page titles).
   The meeting notepad has its own measured Wispr palette, **`--yap-paper-*`**
   (paper, ink, text-2, muted, faint, date, rule, s1, s2, s2-strong, ring,
-  danger, snag) + `--yap-live`/`--yap-live-strong`, `--yap-ease-spring` and
-  the popover/dialog/sheet shadows (2026-10-05). **Settings attention badge** (`lib/attention.svelte.js`):
+  danger, snag, band — the connect dialog's beige) + `--yap-live`/`--yap-live-strong`, `--yap-ease-spring` and
+  the popover/dialog/sheet shadows (2026-10-05); the Meetings view's grey
+  card, Take notes pill and the "Connect your calendar" dialog use them too. **Settings attention badge** (`lib/attention.svelte.js`):
   Settings computes real needs-action items (update available / no STT model /
   cleanup on a cloud provider with no key) into a shared runes store; the
   ControlPanel cog + the matching Settings nav rows show a red count chip
@@ -1070,21 +1076,47 @@ before `meeting::ingest`) and on an Upload's whole text.
   snapshot, started by ControlPanel: the reminder card as a sticky toast,
   chip Meeting / Next meeting, `icon: 'calendar'`, "In 1 min" counting,
   Join & take notes / Start notes / Snooze 2 min, ✕ or Esc = dismiss,
-  withdrawn when Rust withdraws it; "Calendar connected", sign-in errors;
-  the one-time "Connect your calendar" nudge after a real meeting ends
-  (`yap-meeting-ended`, not a mistake) with Connect calendar / Not now).
-  **`MeetingsView.svelte`** = the Meetings view (Wispr's): serif title, Sync
-  calendar / settings / New note; **Today** and **Upcoming · Next 7 days**
-  (by day, 3 at a time + Show more; time, name, Conflict / Maybe tags,
-  service, attendees, "In 1 min", Note ready; from 10 min before: Join
-  meeting / Start / Join + Start, or Switch notes while another records, or
-  ● Recording · Open note; opening a meeting makes or opens its note via
-  `calendar_event`); the connect-your-calendar empty state and nudge;
-  **Past meeting notes** with search (`calendar_meeting_notes`); a bottom
-  **Ask bar** cycling example questions ("What questions were left
-  unanswered in my last meeting?") that opens Chat with the question (scope
-  `meetings`, through `chatRequest.svelte.js`), plus a **Past chats ↗** chip
-  (opens Chat). **`HomeView.svelte`** = the Wispr-style
+  withdrawn when Rust withdraws it; "Calendar connected", sign-in errors
+  (in the connect dialog instead while it's open); the one-time "Connect
+  your calendar" nudge after a real meeting ends (`yap-meeting-ended`, not a
+  mistake) with Connect calendar (the dialog, over the Meetings view) / Not
+  now; `connectDialog` + `openConnectDialog`/`closeConnectDialog`).
+  **`ConnectCalendarDialog.svelte`** = Wispr Flow's "Connect your calendar"
+  modal (its screenshot 27) in Yap's flows, mounted once by ControlPanel and
+  opened by every Connect calendar outside Settings (the Meetings view's
+  card, the nudge, Integrations' Calendar card): a warm beige band
+  (`--yap-paper-band`) showing the bar's real pre-meeting card
+  (`bar/CallCard.svelte` with `preview`, sample data "Design review · ● In 2
+  min · with Sam", Join / & take notes ^), then "Connect your calendar", one
+  line, and three full-width outlined buttons with `CalendarMark.svelte`'s
+  marks (shared with Connectors): **Continue with Google** (the browser
+  flow, waiting in place with Cancel; closing doesn't cancel it; off in a
+  build without the client, "Google sign-in is in the installed Yap. In this
+  build, use a private iCal link below."), **Continue with Outlook** (the
+  publish steps + the ICS field) and **iCloud or another calendar** (where
+  to find the link + the field; Yap's checks say why a link fails), then
+  "Calendar connected · 6 meetings in the next 7 days" for 2.4 s and it
+  closes. Wispr's dialog tokens (scrim `rgba(26,26,26,.3)`, paper card,
+  radius 20, the dialog shadow, scale-in); Esc / round ✕ / scrim close it;
+  labelled by its title, focus trapped (Tab wraps) and returned (to the
+  opener, or the Meetings title). **`MeetingsView.svelte`** = the Meetings
+  view (Wispr's Notetaker page): serif title, Sync calendar (an icon) /
+  settings gear / **◉ Take notes** (beige, Wispr's "Start Notetaker": the
+  meeting shortcut as a button via `meeting_shortcut` — notes on the live
+  call, else a new meeting note; **■ Stop and summarise** while one
+  records); **Today** and **Upcoming · Next 7 days** (by day, 3 at a time +
+  Show more; time, name, Conflict / Maybe tags, service, attendees, "In 1
+  min", Note ready; from 10 min before: Join meeting / Start / Join +
+  Start, or Switch notes while another records, or ● Recording · Open note;
+  opening a meeting makes or opens its note via `calendar_event`); with no
+  calendar, one grey card (calendar icon, "No meetings found", ink Connect
+  calendar → the dialog); **Past meeting notes** by day ("TODAY, 6 OCT",
+  time · attendees · "Generate summary" on a meeting with talk and no plan
+  → `meeting_summarise` + opens the note) with search
+  (`calendar_meeting_notes`); a bottom **Ask bar** cycling example
+  questions ("What questions were left unanswered in my last meeting?")
+  that opens Chat with the question (scope `meetings`, through
+  `chatRequest.svelte.js`), plus a **Past chats ↗** chip (opens Chat). **`HomeView.svelte`** = the Wispr-style
   Home: time-of-day greeting with the hotkey as **amber keycaps**, a dark
   **rotating hero card** (4 tips — voice edit / AI cleanup / meeting notes /
   per-app profiles — picked by day, dot nav, CTAs open the right Settings
@@ -1138,7 +1170,8 @@ before `meeting::ingest`) and on an Upload's whole text.
   `scope: 'meetings'`). No streaming or
   semantic vectors yet (ROADMAP step 3). **`IntegrationsView.svelte`** = the
   Integrations surface (OpenWhispr `IntegrationsView.tsx`, local-first cut):
-  a **Calendar** card (`CalendarLinkCard.svelte` → Settings → Connectors),
+  a **Calendar** card (`CalendarLinkCard.svelte`: Connect → the "Connect
+  your calendar" dialog, Manage → Settings → Connectors),
   an **AI apps (MCP)** card (`McpLinkCard.svelte`, Wispr's "Go to MCP" row:
   opens Settings → MCP via ControlPanel's `openSettings`), the Local API card
   (enable toggle + live status/port via `bridge_status`, discovery-file path +
@@ -1182,8 +1215,10 @@ before `meeting::ingest`) and on an Upload's whole text.
   countdown ring; also the calendar's reminder, "Design review" over "● In
   1 min · with Tanay +1": a calendar glyph when there's no call app, an amber
   "soon" dot, a long line ending in "…", and a two-line answer "Join / &
-  take notes", as on Wispr's pre-meeting card); shared fade and countdown
-  timers in `bar/cardTimers.svelte.js`. Every `data-region` element is
+  take notes", as on Wispr's pre-meeting card; `preview` draws it as a
+  static, inert, aria-hidden picture with no regions, for the connect
+  dialog's band); shared fade and countdown timers in
+  `bar/cardTimers.svelte.js`. Every `data-region` element is
   reported to Rust on layout changes. ⚠ The window is transparent: **no
   `backdrop-filter`**, no shadow on the pills and only a 1–2 px one on cards
   (one reaching a transparent WebView2 window's edge draws a grey box).
@@ -1304,7 +1339,9 @@ before `meeting::ingest`) and on an Upload's whole text.
   Settings → Connectors: serif title + one line on what a calendar gives you,
   a rounded light card per connector — **Google Calendar** ("Reminders for
   Google meetings before they begin", Connect → the browser, "Finish in your
-  browser…" + Cancel; a build without the client says so), **Outlook
+  browser…" + Cancel; a build without the client says "Google sign-in is in
+  the installed Yap. In this build, use a private iCal link below, under
+  Other calendar."), **Outlook
   Calendar** (Connect → the guided publish-your-calendar ICS form), **Other
   calendar** (an iCal link, help for Google/iCloud/Fastmail) — each
   connection a row with its account or link host, "Synced …" or the error,
