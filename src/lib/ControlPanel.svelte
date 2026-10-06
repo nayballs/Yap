@@ -22,7 +22,8 @@
   import { initMeetingDetect } from './meetingDetect.svelte.js';
   import { initMeetingSummary, askStartedByMistake } from './meetingSummary.svelte.js';
   import { initMeetingGuard } from './meetingGuard.js';
-  import { initCalendar } from './calendar.svelte.js';
+  import { initCalendar, closeConnectDialog } from './calendar.svelte.js';
+  import ConnectCalendarDialog from './ConnectCalendarDialog.svelte';
   import MeetingsView from './MeetingsView.svelte';
   import HomeView from './HomeView.svelte';
   import InsightsView from './InsightsView.svelte';
@@ -60,7 +61,8 @@
   // → General → Meetings, and the stops Yap makes itself.
   initMeetingGuard({ openSettings: (section) => openSettings(section) });
   // The calendar (calendar.rs via calendar.svelte.js): the reminder card
-  // before a meeting, the "Connect your calendar" nudge, and the Meetings view.
+  // before a meeting, the "Connect your calendar" nudge and dialog, and the
+  // Meetings view.
   initCalendar({
     showView: (view) => {
       settingsOpen = false;
@@ -97,6 +99,7 @@
   }
 
   function openSettings(section = null) {
+    closeConnectDialog();
     settingsOpen = true;
     if (section) {
       window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: section }));
@@ -299,6 +302,10 @@
 </div>
 
 <ToastHost />
+
+<!-- "Connect your calendar" (calendar.svelte.js `openConnectDialog`): every
+     Connect calendar button outside Settings opens it. -->
+<ConnectCalendarDialog />
 
 <!-- Settings modal overlay. <Settings> is always mounted (see header comment);
      the backdrop just hides it. -->

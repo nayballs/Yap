@@ -14,6 +14,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { calendar } from './calendar.svelte.js';
   import { toast } from './ui/toast.svelte.js';
+  import CalendarMark from './CalendarMark.svelte';
   import claudeLogo from '../assets/providers/claude.svg';
   import openaiLogo from '../assets/providers/openai.svg';
   import geminiLogo from '../assets/providers/gemini.svg';
@@ -120,16 +121,6 @@
 
 <svelte:window onclick={onWindowClick} />
 
-{#snippet calIcon(kind)}
-  {#if kind === 'google'}
-    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3.5" width="18" height="17.5" rx="3" fill="#fff" stroke="#4285f4" stroke-width="1.6" /><path d="M3 8.5h18" stroke="#4285f4" stroke-width="1.6" /><rect x="3.8" y="4.3" width="16.4" height="3.6" rx="1.6" fill="#4285f4" /><path d="M8 12.5h2.6l-1.6 2.3a1.6 1.6 0 1 1-1.3 2.6" fill="none" stroke="#34a853" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M14 12.8l1.6-.8v5.6" fill="none" stroke="#ea4335" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-  {:else if kind === 'outlook'}
-    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3.5" width="18" height="17.5" rx="3" fill="#0078d4" /><path d="M3 8.5h18" stroke="#50a5ec" stroke-width="1.2" /><ellipse cx="12" cy="14.5" rx="3.3" ry="3.6" fill="none" stroke="#fff" stroke-width="1.7" /></svg>
-  {:else}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3.5" width="18" height="17.5" rx="3" /><path d="M3 8.5h18M8 2v3M16 2v3" /><path d="M10.4 15.6l3.2-3.2M11.7 11.6l.6-.6a1.9 1.9 0 0 1 2.7 2.7l-.6.6M12.3 16.4l-.6.6a1.9 1.9 0 0 1-2.7-2.7l.6-.6" /></svg>
-  {/if}
-{/snippet}
-
 {#snippet connRow(c)}
   <div class="crow">
     <span class="cdot" class:bad={!!c.error} aria-hidden="true"></span>
@@ -202,7 +193,7 @@
 <div class="connectors">
   <div class="ccard" role="group" aria-label="Google Calendar">
     <div class="chead">
-      <span class="cicon">{@render calIcon('google')}</span>
+      <span class="cicon"><CalendarMark kind="google" /></span>
       <div class="ctext">
         <div class="cname">Google Calendar</div>
         <div class="cdesc">Reminders for Google meetings before they begin</div>
@@ -221,14 +212,14 @@
     {/each}
     {#if googleExplain && !calendar.google.available}
       <p class="cnote" role="status">
-        This build of Yap can't connect to Google yet. Add your Google Calendar's secret iCal address under <b>Other calendar</b> instead.
+        Google sign-in is in the installed Yap. In this build, use a private iCal link below, under <b>Other calendar</b>.
       </p>
     {/if}
   </div>
 
   <div class="ccard" role="group" aria-label="Outlook Calendar">
     <div class="chead">
-      <span class="cicon">{@render calIcon('outlook')}</span>
+      <span class="cicon"><CalendarMark kind="outlook" /></span>
       <div class="ctext">
         <div class="cname">Outlook Calendar</div>
         <div class="cdesc">Reminders for Outlook meetings before they begin</div>
@@ -247,7 +238,7 @@
 
   <div class="ccard" role="group" aria-label="Other calendar">
     <div class="chead">
-      <span class="cicon other">{@render calIcon('ics')}</span>
+      <span class="cicon other"><CalendarMark kind="ics" /></span>
       <div class="ctext">
         <div class="cname">Other calendar</div>
         <div class="cdesc">iCloud, Fastmail or any calendar with a private iCal link</div>

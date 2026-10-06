@@ -1,7 +1,7 @@
 <script>
-  // Integrations → Calendar: a pointer to Settings → Connectors, where the
-  // calendars are connected (calendar.rs), with what's connected now.
-  import { calendar, openConnectors } from './calendar.svelte.js';
+  // Integrations → Calendar: what's connected now (calendar.rs). Connect
+  // opens the "Connect your calendar" dialog; Manage, Settings → Connectors.
+  import { calendar, openConnectors, openConnectDialog } from './calendar.svelte.js';
 
   const connected = $derived(calendar.connections.map((c) => c.label));
 </script>
@@ -24,7 +24,7 @@
         {/if}
       </p>
     </div>
-    <button class="go" onclick={openConnectors}>{connected.length ? 'Manage' : 'Connect'}</button>
+    <button class="go" onclick={connected.length ? openConnectors : openConnectDialog}>{connected.length ? 'Manage' : 'Connect'}</button>
   </div>
 </div>
 

@@ -117,6 +117,7 @@ body {
   --yap-paper-s2: rgb(238 235 227);        /* hint strip, chips, buttons, hairlines */
   --yap-paper-s2-strong: rgb(226 222 213); /* hovered / open icon buttons */
   --yap-paper-ring: rgb(241 235 225);      /* focus ring, 3px */
+  --yap-paper-band: rgb(232 228 210);      /* the connect dialog's illustration band (warm beige) */
   --yap-paper-danger: rgb(238 106 106);    /* Delete */
   --yap-paper-snag: rgb(217 119 6);        /* the summary's error line */
   --yap-live: rgb(16 185 129);             /* the recording waveform */

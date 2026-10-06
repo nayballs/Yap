@@ -54,7 +54,8 @@ use model::Event;
 
 /// The snapshot ([`Snapshot`]), on every change.
 const EVENT: &str = "yap-calendar";
-/// A connection was made: `{ kind, label }`.
+/// A connection was made: `{ kind, label, meetings }` (meetings: how many of
+/// its meetings are on now or in the next 7 days).
 const EVENT_CONNECTED: &str = "yap-calendar-connected";
 /// Something the page didn't directly ask for went wrong (a Google sign-in
 /// finishing in the background): the message.
@@ -85,7 +86,7 @@ const BAR_CARD: &str = "calendar";
 /// card's "In 1 min" stays true and the card follows you out of the window.
 const CARD_TICK: i64 = 5;
 
-const NO_GOOGLE: &str = "This build of Yap can't connect to Google yet. Add your Google Calendar's secret iCal address under Other calendar instead.";
+const NO_GOOGLE: &str = "Google sign-in is in the installed Yap. In this build, use a private iCal link under Other calendar.";
 const TOO_MANY: &str = "You've connected as many calendars as Yap holds. Disconnect one first.";
 
 // ---- the store (calendar.json) -------------------------------------------------------------
@@ -340,8 +341,6 @@ struct CardView {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NudgeView {
-    /// The Meetings view's "Connect your calendar" card.
-    hub: bool,
     /// The one-time nudge after a meeting.
     after_meeting: bool,
 }
@@ -400,7 +399,6 @@ fn snapshot_of(s: &Runtime, notes: &HashMap<String, u64>, now: i64) -> Snapshot 
             has_link: c.event.join_url.is_some(),
         }),
         nudge: NudgeView {
-            hub: !connected && !s.store.nudge.dismissed,
             after_meeting: !connected && !s.store.nudge.dismissed && !s.store.nudge.shown_after_meeting,
         },
         max_connections: vault::SLOTS,
@@ -729,6 +727,12 @@ fn free_slot(s: &Runtime) -> Option<String> {
     (1..=vault::SLOTS).map(|n| n.to_string()).find(|id| !s.store.connections.iter().any(|c| c.id == *id))
 }
 
+/// How many of connection `id`'s meetings are on now or in the next 7 days
+/// ("Calendar connected · 6 meetings in the next 7 days").
+fn upcoming_count(events: &[Event], id: &str, now: i64) -> usize {
+    events.iter().filter(|e| e.connection == id && e.end > now && e.start < now + LOOK_AHEAD).count()
+}
+
 // ---- connecting -------------------------------------------------------------------------------
 
 /// Open `link` in the browser. Test runs never do: they keep it, for the
@@ -808,7 +812,7 @@ async fn finish_google(app: AppHandle, client: google::Client, sign_in: google::
             let (verifier, redirect_uri) = (sign_in.verifier.clone(), sign_in.redirect_uri.clone());
             let result = connect_google(&client, &code, &verifier, &redirect_uri).await;
             // The browser tab says how it went; the meetings load after.
-            let _ = reply.send(result.clone());
+            let _ = reply.send(result.clone().map(|(_, label)| label));
             if result.is_ok() {
                 sync_all(&app).await;
             }
@@ -831,8 +835,9 @@ async fn finish_google(app: AppHandle, client: google::Client, sign_in: google::
         current
     };
     match outcome {
-        Ok(Some(label)) => {
-            let _ = app.emit(EVENT_CONNECTED, json!({ "kind": "google", "label": label }));
+        Ok(Some((id, label))) => {
+            let meetings = upcoming_count(&lock().store.events, &id, now_secs());
+            let _ = app.emit(EVENT_CONNECTED, json!({ "kind": "google", "label": label, "meetings": meetings }));
         }
         Err(e) if still_current => {
             tracing::info!("calendar: Google sign-in failed: {e}");
@@ -844,13 +849,13 @@ async fn finish_google(app: AppHandle, client: google::Client, sign_in: google::
 }
 
 /// The code from the browser → tokens → the account → a connection (the
-/// caller syncs it). Returns the account's address.
+/// caller syncs it). Returns its slot and the account's address.
 async fn connect_google(
     client: &google::Client,
     code: &str,
     verifier: &str,
     redirect_uri: &str,
-) -> Result<String, String> {
+) -> Result<(String, String), String> {
     let tokens = google::exchange(client, code, verifier, redirect_uri)
         .await
         .map_err(|f| match f {
@@ -891,14 +896,15 @@ async fn connect_google(
         id
     };
     tracing::info!(connection = %id, "calendar: Google Calendar connected");
-    Ok(label)
+    Ok((id, label))
 }
 
 /// Add a calendar by its private iCal link (`kind`: "outlook" from the
 /// Outlook card, else "ics"). The link is fetched once first, so a wrong one
-/// is caught here, in the form.
+/// is caught here, in the form. Returns what was connected, as the
+/// `yap-calendar-connected` event says it: `{ kind, label, meetings }`.
 #[tauri::command]
-pub async fn calendar_add_link(app: AppHandle, link: String, kind: Option<String>) -> Result<(), String> {
+pub async fn calendar_add_link(app: AppHandle, link: String, kind: Option<String>) -> Result<Value, String> {
     let link = normalize_link(&link)?;
     let kind = if kind.as_deref() == Some("outlook") { "outlook" } else { "ics" };
     let (id, already) = {
@@ -924,7 +930,7 @@ pub async fn calendar_add_link(app: AppHandle, link: String, kind: Option<String
         None if kind == "outlook" => "Outlook calendar".to_string(),
         None => "Calendar".to_string(),
     };
-    {
+    let meetings = {
         let mut s = lock();
         s.store.connections.push(Connection {
             id: id.clone(),
@@ -941,12 +947,14 @@ pub async fn calendar_add_link(app: AppHandle, link: String, kind: Option<String
         s.store.events.sort_by_key(|e| (e.start, e.key.clone()));
         s.next_sync = now + SYNC_EVERY;
         save_store(&s.store);
-    }
-    tracing::info!(connection = %id, kind, "calendar: calendar link added");
-    let _ = app.emit(EVENT_CONNECTED, json!({ "kind": kind, "label": label }));
+        upcoming_count(&s.store.events, &id, now)
+    };
+    tracing::info!(connection = %id, kind, meetings, "calendar: calendar link added");
+    let connected = json!({ "kind": kind, "label": label, "meetings": meetings });
+    let _ = app.emit(EVENT_CONNECTED, connected.clone());
     emit(&app);
     wake();
-    Ok(())
+    Ok(connected)
 }
 
 /// Disconnect a calendar: its meetings, its secret and (Google) Yap's
@@ -1684,6 +1692,8 @@ pub fn calendar_meeting_notes(query: Option<String>) -> Vec<Value> {
                 "participants": n.participants,
                 "preview": preview,
                 "hasPlan": !n.enhanced_content.trim().is_empty(),
+                // Something to summarise ("Generate summary").
+                "hasTalk": n.transcript.iter().any(|s| !s.echo),
                 "recording": recording == Some(n.id),
             });
             (when, value)
@@ -1990,6 +2000,27 @@ mod tests {
         assert_eq!(bar.secondary.as_ref().map(|a| a.id.as_str()), None);
         assert_eq!(when_text(now + 150, now), "In 3 min");
         assert_eq!(when_text(now - 30, now), "Started just now");
+    }
+
+    #[test]
+    fn a_new_connection_counts_its_meetings_in_the_next_7_days() {
+        let now = 1_791_200_000;
+        let event = |key: &str, connection: &str, start: i64, end: i64| -> Event {
+            serde_json::from_value(json!({ "key": key, "connection": connection, "start": start, "end": end })).unwrap()
+        };
+        let events = [
+            event("1:on-now", "1", now - 600, now + 1_200),
+            event("1:over", "1", now - 7_200, now - 3_600),
+            event("1:tomorrow", "1", now + 86_400, now + 88_200),
+            event("1:too-far", "1", now + LOOK_AHEAD + 60, now + LOOK_AHEAD + 1_860),
+            event("2:other", "2", now + 3_600, now + 5_400),
+        ];
+        // "Calendar connected · 2 meetings in the next 7 days": the one on
+        // now and tomorrow's, not one that's over, a week away or another
+        // calendar's.
+        assert_eq!(upcoming_count(&events, "1", now), 2);
+        assert_eq!(upcoming_count(&events, "2", now), 1);
+        assert_eq!(upcoming_count(&events, "3", now), 0);
     }
 
     #[test]

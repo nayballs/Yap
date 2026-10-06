@@ -8,7 +8,7 @@
 //     syncing, google: { available, waiting },
 //     card: { id, kind: 'remind'|'switch', key, title, start, end, with,
 //             serviceLabel, hasLink } | null,
-//     nudge: { hub, afterMeeting }, maxConnections }
+//     nudge: { afterMeeting }, maxConnections }
 //
 // The card ("Design review · In 1 min") shows as a sticky toast that counts
 // down: Join & take notes / Start notes / Snooze; ✕ or Esc dismisses it. A
@@ -17,9 +17,12 @@
 // or runs out, 5 minutes after the start.
 //
 // Also here: the one-time "Connect your calendar" nudge after a meeting ends
-// (with no calendar connected; "Not now" means never). A note tied to its
-// meeting when its recording started updates in every window by itself
-// (`yap-note-changed`).
+// (with no calendar connected; "Not now" means never), and the "Connect your
+// calendar" dialog every Connect calendar button outside Settings opens
+// (`connectDialog`, ConnectCalendarDialog.svelte): while it's open, a
+// connection or a Google sign-in that failed shows in it instead of a toast.
+// A note tied to its meeting when its recording started updates in every
+// window by itself (`yap-note-changed`).
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast, dismiss, isToastLive, updateToast } from './ui/toast.svelte.js';
@@ -32,9 +35,18 @@ export const calendar = $state({
   syncing: false,
   google: { available: false, waiting: false },
   card: null,
-  nudge: { hub: false, afterMeeting: false },
+  nudge: { afterMeeting: false },
   maxConnections: 8,
 });
+
+/**
+ * The "Connect your calendar" dialog: `open`; `done`, the connection it made
+ * (`{ kind, label, meetings }`: meetings = how many in the next 7 days); and
+ * `error`, why a Google sign-in it started didn't connect.
+ */
+export const connectDialog = $state({ open: false, done: null, error: '' });
+// What had the focus when it opened (it goes back there).
+let dialogOpener = null;
 
 let started = false;
 // Set by the main window: switch view, open a Settings section.
@@ -55,10 +67,19 @@ export function initCalendar(opts = {}) {
     .catch(() => {});
   listen('yap-calendar', (e) => apply(e.payload));
   listen('yap-calendar-connected', (e) => {
+    if (connectDialog.open) {
+      connectDialog.error = '';
+      connectDialog.done = e.payload || {};
+      return;
+    }
     const label = e.payload?.label;
     toast({ title: 'Calendar connected', description: label ? `Yap can now see the meetings on ${label}.` : undefined, variant: 'success' });
   });
   listen('yap-calendar-error', (e) => {
+    if (connectDialog.open) {
+      connectDialog.error = String(e.payload || '');
+      return;
+    }
     toast({ title: "Couldn't connect your calendar", description: String(e.payload || ''), variant: 'destructive' });
   });
   // A meeting ended (not paused; meeting_end.rs): maybe the nudge.
@@ -174,7 +195,14 @@ function onMeetingEnded(p) {
       chip: 'Tip',
       icon: 'calendar',
       duration: 0,
-      action: { label: 'Connect calendar', onClick: () => openConnectors() },
+      // The dialog, over the Meetings view (where the meetings will show).
+      action: {
+        label: 'Connect calendar',
+        onClick: () => {
+          nav.showView('meetings');
+          openConnectDialog();
+        },
+      },
       secondary: { label: 'Not now', onClick: () => dismissNudge() },
     });
   }, 6_000);
@@ -187,9 +215,27 @@ export function openConnectors() {
   nav.openSettings('connectors');
 }
 
+/** "Connect calendar": the "Connect your calendar" dialog. */
+export function openConnectDialog() {
+  const focused = document.activeElement;
+  dialogOpener = focused instanceof HTMLElement && focused !== document.body ? focused : null;
+  connectDialog.done = null;
+  connectDialog.error = '';
+  connectDialog.open = true;
+}
+
+export function closeConnectDialog() {
+  connectDialog.open = false;
+}
+
+/** The element that had the focus when the dialog opened, if it's still there. */
+export function connectDialogOpener() {
+  return dialogOpener?.isConnected ? dialogOpener : null;
+}
+
 /** "Not now" on "Connect your calendar": it never comes back. */
 export function dismissNudge() {
-  calendar.nudge = { hub: false, afterMeeting: false };
+  calendar.nudge = { afterMeeting: false };
   invoke('calendar_nudge', { action: 'dismiss' }).catch(() => {});
 }
 
