@@ -839,7 +839,7 @@ before `meeting::ingest`) and on an Upload's whole text.
   meeting_hotkey (`kb:alt+win+77`), meeting_reminder (the calendar's card:
   "15s" | "1min" | "2min" | "never"), bridge_enabled, mcp_allow_writes (AI apps
   may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
-  bar_hide_fullscreen (true)). JSON
+  bar_hide_fullscreen (true) + bar_theme ("light" | "dark", light)). JSON
   load/save + `apply_dictionary` + `dictionary_prompt` (the Whisper
   `initial_prompt` vocabulary) + `resolve_cleanup` (per-app plan: body + endpoint).
   `data_dir()` is portable-aware. `load()` also migrates saved Groq picks (cleanup,
@@ -919,7 +919,7 @@ before `meeting::ingest`) and on an Upload's whole text.
   auto-start countdown). Debug-only `bar_simulate` (pretend cursor on a
   region, fake fullscreen kinds, Esc, demo cards) and `bar_debug` (the real
   ex-styles, WindowFromPoint on the pill, the thread's active window) for the
-  e2e suite. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`;
+  e2e suite. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Light / Dark;
   `overlay_position` puts it at the top). Bar off = the old behaviour: the
   overlay only while dictating, notices as Windows notifications.
 - **`overlay.rs`** — the bar window's Win32 side + its pure, unit-tested maths:
@@ -1214,21 +1214,26 @@ before `meeting::ingest`) and on an Upload's whole text.
 - **`lib/Overlay.svelte`** — the **Yap bar** page (window `overlay`, `bar.rs`),
   laid out to Wispr's measured Flow Bar (`flowbar-spec.md`, checked by
   `bar.spec.js`) but in **Yap's own colours** (2026-10-06, Nathan): every
-  colour is a `--bar-*` token in app.css, the in-app toasts' palette — warm
-  near-black `#1c1a16` surfaces with a `#3a352b` edge, cream text, sand chips,
-  cream buttons, Yap amber waveforms/countdowns, Yap's recording red (one
-  place to change them all):
+  colour is a `--bar-*` token in app.css, in two schemes picked in Settings →
+  General → Yap bar → **Colours** (`bar_theme`, carried to the page in
+  `bar::Status.theme`, which sets `data-bar-theme`; the main window follows it
+  too, for the Connect calendar dialog's card picture). **Light** (default):
+  Yap's window — white cards with the warm `#dcd7cb` edge, ink text, ink
+  primary buttons, amber chips, burnt-orange waveforms. **Dark**: the in-app
+  toasts' palette — warm near-black `#1c1a16`, sand chips, cream buttons, Yap
+  amber. Both keep Yap's recording red:
   one stage anchored to the bottom (or top) edge — the pill's place below,
   states sharing one grid cell so they cross-fade, each in a hit wrapper
   (6 × 10 px of nearly invisible padding, reported as region "pill") whose
   bottom is 8 px up, so every pill sits **14 px above the work area**. The
-  **idle pill** is 40×8, warm ink at 55 % with a 1 px cream border at 50 %,
-  radius 6, no shadow, in a 60×20 wrapper; it morphs into the open
-  pill (not measured yet: Yap's own 128×38); tooltips (warm ink,
+  **idle pill** is 40×8 (light: white at 85 % with a 1 px ink border at
+  30 %; dark: warm ink at 55 %, cream border), radius 6, no shadow, in a
+  60×20 wrapper; it morphs into the open
+  pill (not measured yet: Yap's own 128×38); tooltips (ink in both schemes,
   radius 8, 12 / 600: "Dictate F9", "New note Win + Alt + M") and the ^ menu
-  sit above it. The **meeting pill**: 69×30, warm ink, a 2 px ring in Yap's
+  sit above it. The **meeting pill**: 69×30, the bar surface, a 2 px ring in Yap's
   recording red (`#e5645e`; Wispr's is emerald), radius 22.5, half opacity
-  until hovered; 5 amber 2×18 bars (Wispr's staggered timing), then the 19 px
+  until hovered; 5 2×18 bars in the scheme's amber (Wispr's staggered timing), then the 19 px
   stop circle with its 8×8 square; hovered, it widens to show the timer.
   `bar/DictationCapsule.svelte` (the dictation overlay — waveform in Yap
   amber, live partials word-paced by `bar/dictation.svelte.js`, which listens
@@ -1238,9 +1243,9 @@ before `meeting::ingest`) and on an Upload's whole text.
   0.12 s and has Wispr's 4 px hit strip on the pill's side.
   `bar/BarCard.svelte` (notices: update, guard rails, "Taking notes", the
   call ending, errors) is Wispr's card in Yap's colours: 400 wide,
-  warm ink with a 1 px edge, radius 16, padding 20; a sand chip naming its
+  the bar surface with a 1 px edge, radius 16, padding 20; a chip naming its
   kind (Update, Meeting, Call, Tip, Error), the title 15 / 600, the body 15
-  in muted cream, a ghost button and a cream one at
+  muted, a ghost button and a primary one (ink on light, cream on dark) at
   radius 8, the ✕ 24×24 at 30 % top-right. `bar/CallCard.svelte` (the call
   prompt as Wispr's "Meeting detected" card, on the same tokens but one row
   with slimmer padding: the app's icon on a light tile, drawn by the shared

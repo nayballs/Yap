@@ -297,6 +297,8 @@ fn follow(
 struct State {
     enabled: bool,
     hide_fullscreen: bool,
+    /// "light" | "dark" (`bar_theme`): which `--bar-*` colours the page uses.
+    theme: &'static str,
     edge: Edge,
     /// The dictation hotkey and meeting-notes shortcut specs, for tooltips.
     hotkey: String,
@@ -339,6 +341,7 @@ impl Default for State {
         Self {
             enabled: true,
             hide_fullscreen: true,
+            theme: "light",
             edge: Edge::Bottom,
             hotkey: String::new(),
             meeting_hotkey: None,
@@ -441,6 +444,8 @@ fn on_escape_key() {
 pub struct Status {
     enabled: bool,
     hide_fullscreen: bool,
+    /// "light" | "dark": the page sets `data-bar-theme` from it.
+    theme: &'static str,
     /// On screen right now.
     shown: bool,
     /// "bottom" | "top" (`overlay_position`).
@@ -470,6 +475,7 @@ pub fn status() -> Status {
     Status {
         enabled: s.enabled,
         hide_fullscreen: s.hide_fullscreen,
+        theme: s.theme,
         shown: s.shown,
         edge: s.edge.as_str(),
         hidden_until: (s.hidden_until > now).then_some(s.hidden_until),
@@ -861,6 +867,12 @@ pub fn init(app: &AppHandle) {
     tracing::info!(enabled = cfg.bar_enabled, "bar: started");
 }
 
+/// `bar_theme` as the page wants it: anything but "dark" is light (the
+/// default), so an unknown value from a newer or older Yap stays readable.
+fn theme_from_config(value: &str) -> &'static str {
+    if value.eq_ignore_ascii_case("dark") { "dark" } else { "light" }
+}
+
 fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
     let edge = Edge::from_config(&cfg.overlay_position);
     // Read loosely: the meeting-notes shortcut may not exist in this build.
@@ -868,14 +880,17 @@ fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
         .ok()
         .and_then(|v| v.get("meetingHotkey").and_then(|h| h.as_str()).map(str::to_string))
         .filter(|h| !h.is_empty());
+    let theme = theme_from_config(&cfg.bar_theme);
     let changed = s.enabled != cfg.bar_enabled
         || s.hide_fullscreen != cfg.bar_hide_fullscreen
+        || s.theme != theme
         || s.edge != edge
         || s.hotkey != cfg.hotkey
         || s.meeting_hotkey != meeting_hotkey;
     s.replace |= s.edge != edge;
     s.enabled = cfg.bar_enabled;
     s.hide_fullscreen = cfg.bar_hide_fullscreen;
+    s.theme = theme;
     s.edge = edge;
     s.hotkey = cfg.hotkey.clone();
     s.meeting_hotkey = meeting_hotkey;
@@ -1483,6 +1498,18 @@ mod tests {
             autohide_bottom: 0,
             autohide_top: 0,
         }
+    }
+
+    #[test]
+    fn the_bar_theme_reads_loosely_and_defaults_to_light() {
+        assert_eq!(theme_from_config("dark"), "dark");
+        assert_eq!(theme_from_config("Dark"), "dark");
+        assert_eq!(theme_from_config("light"), "light");
+        assert_eq!(theme_from_config(""), "light");
+        assert_eq!(theme_from_config("sepia"), "light");
+        assert_eq!(crate::config::YapConfig::default().bar_theme, "light");
+        let old: crate::config::YapConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.bar_theme, "light"); // a config saved before the setting
     }
 
     #[test]

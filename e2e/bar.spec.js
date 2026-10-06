@@ -101,9 +101,10 @@ test('idle: a tiny pill above the taskbar, click-through and never activated', a
     size: [40, 8],
     hit: [60, 20],
     fromBottom: 14,
-    // Wispr's sizes in Yap's bar colours (--bar-pill, --bar-pill-border).
-    bg: 'rgba(28, 26, 22, 0.55)',
-    border: '1px rgba(247, 245, 240, 0.5)',
+    // Wispr's sizes in Yap's bar colours, light by default (--bar-pill,
+    // --bar-pill-border; the dark scheme is checked in the Settings test).
+    bg: 'rgba(255, 255, 255, 0.85)',
+    border: '1px rgba(35, 33, 27, 0.3)',
     radius: '6px',
     shadow: 'none',
   });
@@ -133,12 +134,12 @@ test('hovering opens the pill and makes just that clickable, with tooltips', asy
   // Tooltips name each button's shortcut (the seeded hotkey is F24).
   await bar.getByRole('button', { name: 'Dictate' }).hover();
   await expect(bar.getByRole('tooltip')).toHaveText(/Dictate\s*F24/);
-  // Wispr's tooltip (radius 8, 12 / 600) in Yap's warm ink (--bar-tooltip).
+  // Wispr's tooltip (radius 8, 12 / 600) in Yap's ink (--bar-tooltip).
   const tip = await bar.getByRole('tooltip').evaluate((el) => {
     const s = getComputedStyle(el);
     return [s.backgroundColor, s.borderTopLeftRadius, s.fontSize, s.fontWeight];
   });
-  expect(tip).toEqual(['rgb(28, 26, 22)', '8px', '12px', '600']);
+  expect(tip).toEqual(['rgb(38, 35, 28)', '8px', '12px', '600']);
   await shot(bar, '03-tooltip-dictate');
   await bar.getByRole('button', { name: 'Meeting notes' }).hover();
   await expect(bar.getByRole('tooltip')).toContainText('New note');
@@ -212,6 +213,23 @@ test('Settings → General → Yap bar', async ({ yap, main, shot }) => {
   await expect(group.getByRole('button', { name: 'Live transcription preview' })).toBeVisible();
   await expect(group).toContainText('Position');
   await shot(main, '07-settings-yap-bar');
+
+  // Colours: light by default; Dark recolours the bar at once (and the main
+  // window's picture of its cards), and Light brings it back.
+  const theme = () => yap.overlay.evaluate(() => document.documentElement.dataset.barTheme);
+  const surface = () =>
+    yap.overlay.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bar-surface').trim());
+  await expect(group.getByRole('tab', { name: 'Light' })).toHaveAttribute('aria-selected', 'true');
+  expect([await theme(), await surface()]).toEqual(['light', '#ffffff']);
+  await group.getByRole('tab', { name: 'Dark' }).click();
+  await expectStore(yap, 'config.json', (c) => c.barTheme === 'dark');
+  await expect.poll(theme).toBe('dark');
+  expect(await surface()).toBe('#1c1a16');
+  expect(await main.evaluate(() => document.documentElement.dataset.barTheme)).toBe('dark');
+  await shot(main, '07-settings-yap-bar-dark');
+  await group.getByRole('tab', { name: 'Light' }).click();
+  await expectStore(yap, 'config.json', (c) => c.barTheme === 'light');
+  await expect.poll(theme).toBe('light');
   const meetings = settingsDialog(main).getByRole('group', { name: 'Meetings' });
   await meetings.scrollIntoViewIfNeeded();
   await expect(
@@ -314,16 +332,16 @@ test("a notice card has Wispr's measurements in Yap's colours, 26 px above the p
   await expect.poll(measure).toEqual({
     width: 400,
     aboveThePill: 26,
-    bg: 'rgb(28, 26, 22)', // Yap's bar colours (--bar-*, app.css)
-    border: '1px rgb(58, 53, 43)',
+    bg: 'rgb(255, 255, 255)', // Yap's bar colours, light (--bar-*, app.css)
+    border: '1px rgb(220, 215, 203)',
     radius: '16px',
     padding: '20px',
     close: [24, 24, '0.3'],
-    chip: 'rgb(236, 217, 184)',
+    chip: 'rgb(246, 169, 60)',
     title: ['15px', '600'],
-    body: ['15px', 'rgba(247, 245, 240, 0.58)'],
-    cream: ['rgb(245, 243, 238)', '8px'],
-    ghost: ['rgba(247, 245, 240, 0.86)', '8px'],
+    body: ['15px', 'rgb(110, 106, 95)'],
+    cream: ['rgb(38, 35, 28)', '8px'],
+    ghost: ['rgba(35, 33, 27, 0.82)', '8px'],
     strip: 4,
   });
   await shot(bar, '12-update-card');

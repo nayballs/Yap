@@ -129,45 +129,89 @@ body {
   --yap-shadow-sheet: 0 0 0 1px rgb(238 235 227), 0 4px 16px rgba(0, 0, 0, 0.1), 0 1px 4px rgba(0, 0, 0, 0.06);
 
   /* ---- The Yap bar (Overlay.svelte, bar/*: the pill, its cards, the
-     dictation capsule). Layout, sizes and motion follow Wispr Flow's Flow
-     Bar (flowbar-spec.md); the colours are Yap's own, the in-app toasts'
-     palette (ui/ToastHost.svelte): a warm near-black card, sand chips,
-     cream buttons, Yap amber, Yap's recording red. ---- */
-  --bar-surface: #1c1a16;                     /* cards, the open pill, the capsule, menus */
-  --bar-surface-hover: #2a2620;
-  --bar-border: #3a352b;                      /* the cards' 1 px edge, menu rules */
+     dictation capsule, and the cards' picture in the Connect calendar
+     dialog). Layout, sizes and motion follow Wispr Flow's Flow Bar
+     (flowbar-spec.md); the colours are Yap's own, in two schemes picked in
+     Settings → General → Yap bar → Colours (`bar_theme`; the page sets
+     `data-bar-theme`). LIGHT, the default: Yap's window — white cards with
+     its warm edge, ink text and ink primary buttons, amber chips and
+     waveforms, Yap's recording red. DARK: the in-app toasts' palette
+     (below). ---- */
+  --bar-surface: #ffffff;                     /* cards, the open pill, the capsule, menus */
+  --bar-surface-hover: #f2efe9;
+  --bar-border: #dcd7cb;                      /* the cards' 1 px edge, menu rules */
   /* Kept small: a big blur would be cut off at the transparent window's edge. */
+  --bar-shadow: 0 1px 2px rgba(60, 50, 30, 0.14);
+  --bar-text: #23211b;                        /* titles, labels */
+  --bar-text-soft: rgba(35, 33, 27, 0.82);    /* ghost buttons, menu items, the ✕ */
+  --bar-text-muted: #6e6a5f;                  /* body copy, status lines */
+  --bar-text-faint: rgba(35, 33, 27, 0.3);
+  --bar-chip: #f6a93c;                        /* Yap's amber (the keycaps) */
+  --bar-chip-text: #3d2c07;
+  --bar-chip-error: #f0c4bf;
+  --bar-chip-error-text: #5c1a14;
+  --bar-button: #26231c;                      /* the primary button: Yap ink */
+  --bar-button-text: #f7f5f0;
+  --bar-button-text-sub: rgba(247, 245, 240, 0.7);
+  --bar-button-hover: #3a3529;
+  --bar-button-track: rgba(247, 245, 240, 0.2);   /* a countdown ring on the primary button */
+  --bar-button-divider: rgba(247, 245, 240, 0.22); /* the split button's divider */
+  --bar-accent: #c2690a;                      /* countdowns, "soon" dots (Yap's primary) */
+  --bar-wave: #c2690a;                        /* waveforms: dictation and meeting */
+  --bar-recording: #e5645e;                   /* the meeting pill's ring, "recording" dots */
+  --bar-now: #1e8f4d;                         /* "● Now" */
+  --bar-stop: #e8e4dc;                        /* the meeting pill's stop circle */
+  --bar-stop-hover: #dcd7cb;
+  --bar-pill: rgba(255, 255, 255, 0.85);      /* the idle pill */
+  --bar-pill-border: rgba(35, 33, 27, 0.3);
+  --bar-tooltip: #26231c;                     /* tooltips stay ink in both */
+  --bar-tooltip-text: rgba(247, 245, 240, 0.86);
+  --bar-tooltip-key: #f7f5f0;                 /* the shortcut inside a tooltip */
+  --bar-hover: rgba(35, 33, 27, 0.06);        /* hovered buttons and menu rows */
+  --bar-active: rgba(35, 33, 27, 0.1);        /* a pressed / open pill button */
+  --bar-sep: rgba(35, 33, 27, 0.14);          /* the open pill's divider */
+  --bar-track: rgba(35, 33, 27, 0.12);        /* countdown rings and timers, on the card */
+  --bar-mark-tile: #f2efe9;                   /* the app icon's tile on a call card */
+}
+
+/* The Yap bar, DARK (Settings → Yap bar → Colours): the in-app toasts'
+ * palette (ui/ToastHost.svelte) — a warm near-black card, sand chips, cream
+ * buttons, Yap amber, Yap's recording red. */
+:root[data-bar-theme='dark'] {
+  --bar-surface: #1c1a16;
+  --bar-surface-hover: #2a2620;
+  --bar-border: #3a352b;
   --bar-shadow: 0 1px 2px rgba(20, 15, 5, 0.12);
-  --bar-text: #f7f5f0;                        /* titles, labels (Yap's cream) */
-  --bar-text-soft: rgba(247, 245, 240, 0.86); /* ghost buttons, menu items, the ✕ */
-  --bar-text-muted: rgba(247, 245, 240, 0.58); /* body copy, status lines */
+  --bar-text: #f7f5f0;
+  --bar-text-soft: rgba(247, 245, 240, 0.86);
+  --bar-text-muted: rgba(247, 245, 240, 0.58);
   --bar-text-faint: rgba(247, 245, 240, 0.3);
-  --bar-chip: #ecd9b8;                        /* the toasts' sand chip */
+  --bar-chip: #ecd9b8;
   --bar-chip-text: #453413;
   --bar-chip-error: #f0c4bf;
   --bar-chip-error-text: #5c1a14;
-  --bar-button: #f5f3ee;                      /* the primary (cream) button */
+  --bar-button: #f5f3ee;
   --bar-button-text: #23211b;
   --bar-button-text-sub: rgba(35, 33, 27, 0.6);
-  --bar-accent: #f0b04a;                      /* countdowns, "soon" dots (Yap amber) */
-  --bar-wave: #f0b04a;                        /* waveforms: dictation and meeting */
-  --bar-recording: #e5645e;                   /* the meeting pill's ring, "recording" dots */
-  --bar-now: #3dbb74;                         /* "● Now" */
-  --bar-stop: #4a443a;                        /* the meeting pill's stop circle */
+  --bar-button-hover: #ffffff;
+  --bar-button-track: rgba(26, 26, 26, 0.14);
+  --bar-button-divider: rgba(26, 26, 26, 0.16);
+  --bar-accent: #f0b04a;
+  --bar-wave: #f0b04a;
+  --bar-recording: #e5645e;
+  --bar-now: #3dbb74;
+  --bar-stop: #4a443a;
   --bar-stop-hover: #5c5547;
-  --bar-pill: rgba(28, 26, 22, 0.55);         /* the idle pill */
+  --bar-pill: rgba(28, 26, 22, 0.55);
   --bar-pill-border: rgba(247, 245, 240, 0.5);
   --bar-tooltip: #1c1a16;
   --bar-tooltip-text: rgba(247, 245, 240, 0.86);
-  --bar-tooltip-key: #f7f5f0;                /* the shortcut inside a tooltip */
-  --bar-hover: rgba(255, 255, 255, 0.08);   /* hovered buttons and menu rows */
-  --bar-active: rgba(255, 255, 255, 0.12);  /* a pressed / open pill button */
-  --bar-sep: rgba(255, 255, 255, 0.16);     /* the open pill's divider */
-  --bar-track: rgba(255, 255, 255, 0.14);   /* countdown rings and timers, on the card */
-  --bar-button-hover: #ffffff;
-  --bar-button-track: rgba(26, 26, 26, 0.14);   /* a countdown ring on the cream button */
-  --bar-button-divider: rgba(26, 26, 26, 0.16); /* the split button's divider */
-  --bar-mark-tile: #f7f5f0;                   /* the app icon's tile on a call card */
+  --bar-tooltip-key: #f7f5f0;
+  --bar-hover: rgba(255, 255, 255, 0.08);
+  --bar-active: rgba(255, 255, 255, 0.12);
+  --bar-sep: rgba(255, 255, 255, 0.16);
+  --bar-track: rgba(255, 255, 255, 0.14);
+  --bar-mark-tile: #f7f5f0;
 }
 
 /* Dark token scope — currently UNSET everywhere (onboarding went warm-light

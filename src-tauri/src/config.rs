@@ -228,6 +228,11 @@ pub struct YapConfig {
     /// videos, slideshows). It always shows while recording.
     #[serde(default = "default_true")]
     pub bar_hide_fullscreen: bool,
+    /// The bar's colours: "light" (Yap's white cards and ink buttons, the
+    /// default) or "dark" (the in-app toasts' warm near-black). The
+    /// `--bar-*` tokens in app.css; the page sets `data-bar-theme`.
+    #[serde(default = "default_bar_theme")]
+    pub bar_theme: String,
     /// Which key auto-submit presses after pasting: "enter", "ctrlEnter",
     /// or "shiftEnter".
     #[serde(default = "default_auto_submit_key")]
@@ -486,6 +491,9 @@ fn default_routing_scope() -> String {
 fn default_meeting_detect_style() -> String {
     "popup".into()
 }
+fn default_bar_theme() -> String {
+    "light".into()
+}
 fn default_meeting_max_minutes() -> u32 {
     120
 }
@@ -527,6 +535,7 @@ impl Default for YapConfig {
             overlay_position: default_overlay_position(),
             bar_enabled: true,
             bar_hide_fullscreen: true,
+            bar_theme: default_bar_theme(),
             auto_submit_key: default_auto_submit_key(),
             update_checks_enabled: true,
             debug_logging: false,

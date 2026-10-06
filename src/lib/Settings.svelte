@@ -47,6 +47,11 @@
   let { embedded = false, onclose = null } = $props();
 
   let cfg = $state(null);
+  // The main window draws the bar's cards too (the Connect calendar dialog's
+  // picture): in the colours chosen for the bar (`barTheme`, app.css).
+  $effect(() => {
+    document.documentElement.dataset.barTheme = cfg?.barTheme === 'dark' ? 'dark' : 'light';
+  });
   let loaded = $state(false); // gates auto-save until the initial config loads
   let devices = $state([]);
   let outputs = $state([]); // audio output device names (for the chime)
@@ -419,6 +424,11 @@
     { value: 'popup', label: 'Pop-up' },
     { value: 'quiet', label: 'Quietly' },
   ];
+  // General → Yap bar → Colours (`barTheme`, the --bar-* tokens in app.css).
+  const BAR_THEMES = [
+    { value: 'light', label: 'Light' },
+    { value: 'dark', label: 'Dark' },
+  ];
   const CALL_PROMPT_STYLE_DESC = {
     popup: 'A card in Yap, or a Windows notification while Yap is in the background',
     // With the Yap bar on, the card goes on the bar instead (bar.rs).
@@ -487,6 +497,7 @@
     meetingReminder: '15s',
     barEnabled: true,
     barHideFullscreen: true,
+    barTheme: 'light',
     inputDevice: null,
     dictionary: [],
     selectedLanguage: 'auto',
@@ -1534,6 +1545,9 @@
                   desc="Games, videos and presentations stay clear. It still shows while you're recording."
                   disabled={!cfg.barEnabled}
                 />
+              </Row>
+              <Row label="Colours" desc="Light matches Yap's window; dark stands out on a bright screen">
+                <Segmented bind:value={cfg.barTheme} options={BAR_THEMES} label="Bar colours" disabled={!cfg.barEnabled} />
               </Row>
               <Row>
                 <Toggle

@@ -46,6 +46,12 @@
     meeting: { recording: false },
     call: null,
     cards: [],
+    // 'light' (the default) | 'dark': Settings → Yap bar → Colours.
+    theme: 'light',
+  });
+  // The --bar-* colours (app.css): light unless the page is marked dark.
+  $effect(() => {
+    document.documentElement.dataset.barTheme = bar.theme === 'dark' ? 'dark' : 'light';
   });
   /** The region under the pointer, as Rust sees it ('pill' | 'menu' | 'card:…' | null). */
   let pointer = $state(null);
