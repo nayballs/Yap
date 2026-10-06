@@ -9,6 +9,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { toast } from './ui/toast.svelte.js';
+  import CalendarLinkCard from './CalendarLinkCard.svelte';
   import McpLinkCard from './McpLinkCard.svelte';
 
   // ControlPanel's openSettings(section): "Go to MCP" opens Settings → MCP.
@@ -125,6 +126,9 @@ ${curlExample}
         on this machine — loopback only, token-protected, no cloud, no account.
       </p>
     </div>
+
+    <!-- Calendar: connected in Settings → Connectors (calendar.rs) -->
+    <CalendarLinkCard />
 
     <!-- AI apps over MCP: set up in Settings → MCP (needs the Local API below) -->
     <McpLinkCard onopen={() => onopensettings?.('mcp')} />

@@ -10,9 +10,10 @@
   // response per turn, "Thinking…" placeholder), no tool-calling loop yet, no
   // conversation search/archive/rename.
   import { invoke } from '@tauri-apps/api/core';
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { renderMarkdown } from './markdown.js';
   import { toast } from './ui/toast.svelte.js';
+  import { chatRequest } from './chatRequest.svelte.js';
 
   let conversations = $state([]);
   let activeId = $state(null);
@@ -21,6 +22,9 @@
   let sending = $state(false);
   let inputEl = $state(null);
   let threadEl = $state(null);
+  // 'meetings' when the Meetings view's Ask bar started this chat: answers
+  // are grounded in your meeting notes (calendar::meetings_context).
+  let scope = $state(null);
 
   async function refreshList() {
     try {
@@ -35,6 +39,7 @@
     try {
       const conv = await invoke('chat_get', { id });
       activeId = id;
+      scope = null;
       messages = conv.messages || [];
       scrollThread();
     } catch (e) {
@@ -46,6 +51,7 @@
     activeId = null;
     messages = [];
     input = '';
+    scope = null;
     setTimeout(() => inputEl?.focus(), 0);
   }
 
@@ -74,7 +80,7 @@
     sending = true;
     scrollThread();
     try {
-      const res = await invoke('chat_send', { conversationId: activeId, text });
+      const res = await invoke('chat_send', { conversationId: activeId, text, scope });
       activeId = res.conversationId;
       messages = [...messages, { role: 'assistant', text: res.reply, tools: res.toolsUsed || [] }];
       refreshList();
@@ -128,6 +134,20 @@
   onMount(() => {
     refreshList();
     setTimeout(() => inputEl?.focus(), 0);
+  });
+
+  // A question handed over by another view (the Meetings view's Ask bar):
+  // ask it in a new chat.
+  $effect(() => {
+    const req = chatRequest.pending;
+    if (!req) return;
+    chatRequest.pending = null;
+    untrack(() => {
+      newChat();
+      scope = req.scope ?? null;
+      input = req.text;
+      send();
+    });
   });
 </script>
 

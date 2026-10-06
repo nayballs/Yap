@@ -8,7 +8,11 @@
   // as is fading after 30 s (a hairline runs along the bottom; paused while
   // the pointer is on it). With "Start notes automatically" a ring drains
   // around the logo and the line under the title counts down; Esc cancels
-  // (Rust watches the key). (The call ending asks in a notice card.)
+  // (Rust watches the key). (The call ending asks in a notice card.) The
+  // calendar's reminder (calendar.rs `bar_card`) is one too: the meeting
+  // over "● In 1 min · with Tanay +1" (amber, then green once it's on),
+  // Join & take notes | ^ Start notes, Snooze 2 min; a calendar glyph when
+  // the meeting has no call app.
   import yapLogo from '../../assets/yap-logo.svg';
   import { callAppIcon } from './callApps.js';
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
@@ -35,6 +39,15 @@
     menuOpen = false;
     onaction(id ?? '');
   }
+
+  // A long answer ("Join & take notes") goes on two lines, as Wispr's
+  // pre-meeting card's "Join meeting / & start Notetaker", so the row keeps
+  // room for the meeting's name at 400 px.
+  const label = $derived.by(() => {
+    const text = card.primary?.label ?? '';
+    const at = text.indexOf(' & ');
+    return at > 0 ? { main: text.slice(0, at), sub: text.slice(at + 1) } : { main: text, sub: '' };
+  });
 </script>
 
 <div class="call" class:counting={!!card.countdown} data-region={region} role="status" aria-live="polite">
@@ -47,6 +60,9 @@
       <svg viewBox="0 0 24 24"><path d={icon.path} fill={icon.color} /></svg>
     {:else if icon.kind === 'monogram'}
       <span class="letter" style={`color:${icon.color}`}>{icon.letter}</span>
+    {:else if card.icon === 'calendar'}
+      <!-- A calendar meeting with no call app's mark (calendar.rs). -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="#26231c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="3" /><path d="M3.5 9.5h17M8 2.8v3.4M16 2.8v3.4" /></svg>
     {:else}
       <svg viewBox="0 0 24 24" fill="none" stroke="#26231c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z" /></svg>
     {/if}
@@ -60,7 +76,7 @@
         <span class="esc" title="Esc to cancel">Esc</span>
       {:else if card.status}
         {#if card.dot}<span class="dot {card.dot}" aria-hidden="true"></span>{/if}
-        <span>{card.status}</span>
+        <span class="line">{card.status}</span>
       {/if}
     </div>
   </div>
@@ -77,7 +93,10 @@
             </svg>
           {/if}
         </span>
-        <span class="label">{card.primary.label}</span>
+        <span class="label" class:two={!!label.sub}>
+          <span class="main">{label.main}</span>
+          {#if label.sub}<span class="sub">{label.sub}</span>{/if}
+        </span>
       </button>
       {#if card.secondary || card.link}
         <span class="divider" aria-hidden="true"></span>
@@ -196,7 +215,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 13px;
+    font-size: 12.5px;
     line-height: 18px;
     color: rgb(179, 178, 173);
     white-space: nowrap;
@@ -210,6 +229,16 @@
   .dot.recording {
     background: #e5645e;
     animation: pulse 1.4s ease-in-out infinite;
+  }
+  /* A calendar meeting about to start (calendar.rs): the cards' amber. */
+  .dot.soon {
+    background: rgb(255, 169, 70);
+  }
+  /* A long line ("Started 12 min ago · with Tanay +3") ends in "…". */
+  .line {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   @keyframes pulse {
     0%,
@@ -267,6 +296,23 @@
   }
   .split:not(:has(.more)) .go {
     border-radius: 8px;
+  }
+  .label {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    white-space: nowrap;
+  }
+  /* Two lines: the answer, then what comes with it, smaller and muted. */
+  .label.two .main {
+    font-size: 14px;
+    line-height: 16px;
+  }
+  .label .sub {
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 14px;
+    color: rgba(26, 26, 26, 0.6);
   }
   .go:hover,
   .more:hover,

@@ -1003,16 +1003,25 @@ fn on_edges(app: &AppHandle, edges: Vec<Edge>) {
     }
     let view = window_view(app);
     let mut todo = Todo::default();
+    let mut started = Vec::new();
     {
         let mut s = lock();
         for edge in edges {
             match edge {
-                Edge::Started { app: id, since } => call_started(&mut s, &mut todo, id, since),
+                Edge::Started { app: id, since } => {
+                    started.push(id);
+                    call_started(&mut s, &mut todo, id, since)
+                }
                 Edge::Ended { app: id } => call_ended(&mut s, &mut todo, view, id),
             }
         }
     }
     run(app, todo);
+    // The calendar: a call during the next meeting, while the last one's
+    // notes still record, offers to switch notes (calendar.rs).
+    for id in started {
+        crate::calendar::on_call_started(id);
+    }
 }
 
 fn call_started(s: &mut State, todo: &mut Todo, id: &'static str, since: u64) {
@@ -1033,7 +1042,9 @@ fn call_started(s: &mut State, todo: &mut Todo, id: &'static str, since: u64) {
     let asked = asks(&s.choices, app);
     tracing::info!(app = id, carried = carried.is_some(), asked, "meeting detect: call started");
     let snoozed = s.snoozed.get(id).is_some_and(|until| now_ms() < *until);
-    if recording_note.is_none() && !snoozed && asked {
+    // A call during a meeting whose calendar card is up or was answered:
+    // asked about already (calendar.rs).
+    if recording_note.is_none() && !snoozed && asked && !crate::calendar::claims_call(id) {
         s.due = Some(call_id);
     }
 }

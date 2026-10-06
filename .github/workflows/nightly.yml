@@ -17,6 +17,10 @@ name: "Nightly"
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  password for that key (empty string if none)
 #   GITHUB_TOKEN                        provided automatically by Actions
 #
+# Optional (a build without them can't connect Google Calendar; docs/calendar.md):
+#   YAP_GOOGLE_CALENDAR_CLIENT_ID       Google Cloud "Desktop app" OAuth client
+#   YAP_GOOGLE_CALENDAR_CLIENT_SECRET   its secret (public by Google's rules)
+#
 # NOTE: TAURI_SIGNING_PRIVATE_KEY_PASSWORD is NOT set on this repo yet (only
 # TAURI_SIGNING_PRIVATE_KEY exists). If Yap's key HAS a password, add that secret
 # or the build's signing step will fail. If the key has NO password, set the
@@ -147,6 +151,10 @@ jobs:
           # valid and the in-app updater accepts the artifact.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Google Calendar's OAuth client, as in release.yml (unset = no Google
+          # button in this build; iCal links still work).
+          YAP_GOOGLE_CALENDAR_CLIENT_ID: ${{ secrets.YAP_GOOGLE_CALENDAR_CLIENT_ID }}
+          YAP_GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.YAP_GOOGLE_CALENDAR_CLIENT_SECRET }}
           # Disable -march=native / SIMD above SSE4.2 for the broadest CPU
           # compatibility — whisper.cpp CPU inference otherwise SIGILLs on old
           # CPUs lacking AVX/FMA. The default model (Parakeet V3) runs on ONNX +

@@ -843,7 +843,7 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
       meeting notes and transcripts (not your dictations, like Wispr), locally over Yap's
       bridge, with one-click **Add to Claude / Cursor / …** in Integrations plus a
       copyable config for everything else.
-- [ ] *(building)* **Calendar connection, local-first.** **Google in one click** (installed-app OAuth
+- [ ] *(merged, dev check: fec18fd; Google needs its OAuth client)* **Calendar connection, local-first.** **Google in one click** (installed-app OAuth
       with PKCE straight from the PC; read-only scopes; the token kept in Credential
       Manager) plus **any calendar by private iCal link** (Outlook, iCloud and others).
       No Yap server. Synced every ~15 min; the next 7 days; Wispr's filters (invitees
@@ -851,10 +851,10 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
       (for the action plan's owners and for spelling) and join links. The Google OAuth
       client and its scope verification are the coordinator's dashboard work; Microsoft
       Graph is a follow-up.
-- [ ] *(building)* **Pre-meeting card** ("Notify before scheduled meetings start"): a bottom-centre
+- [ ] *(merged, dev check: fec18fd)* **Pre-meeting card** ("Notify before scheduled meetings start"): a bottom-centre
       card "Meeting with Tanay · In 1 min" with **Join & take notes**, which opens the
       meeting link and starts recording.
-- [ ] *(building)* **Meetings hub.** A Wispr-style home for meetings: Today/Upcoming from the calendar,
+- [ ] *(merged, dev check: fec18fd)* **Meetings hub.** A Wispr-style home for meetings: Today/Upcoming from the calendar,
       Past notes, and search across meetings.
 
 **Wave 3 — the rest of the product**

@@ -22,6 +22,8 @@
   import { initMeetingDetect } from './meetingDetect.svelte.js';
   import { initMeetingSummary, askStartedByMistake } from './meetingSummary.svelte.js';
   import { initMeetingGuard } from './meetingGuard.js';
+  import { initCalendar } from './calendar.svelte.js';
+  import MeetingsView from './MeetingsView.svelte';
   import HomeView from './HomeView.svelte';
   import InsightsView from './InsightsView.svelte';
   import DictionaryView from './DictionaryView.svelte';
@@ -57,6 +59,15 @@
   // "Notes stop in 5 minutes · Keep going", the screen-share tip → Settings
   // → General → Meetings, and the stops Yap makes itself.
   initMeetingGuard({ openSettings: (section) => openSettings(section) });
+  // The calendar (calendar.rs via calendar.svelte.js): the reminder card
+  // before a meeting, the "Connect your calendar" nudge, and the Meetings view.
+  initCalendar({
+    showView: (view) => {
+      settingsOpen = false;
+      activeView = view;
+    },
+    openSettings: (section) => openSettings(section),
+  });
   let bellOpen = $state(false);
 
   // Sidebar nav (Wispr order: Home, Insights, then the work surfaces).
@@ -65,6 +76,7 @@
     { id: 'insights', label: 'Insights' },
     { id: 'chat', label: 'Chat' },
     { id: 'notes', label: 'Notes' },
+    { id: 'meetings', label: 'Meetings' },
     { id: 'upload', label: 'Upload' },
     { id: 'dictionary', label: 'Dictionary' },
     { id: 'integrations', label: 'Integrations' },
@@ -139,6 +151,8 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
   {:else if id === 'notes'}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4z" /></svg>
+  {:else if id === 'meetings'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5" /><path d="M3 9.5h18M8 2.5v4M16 2.5v4" /><path d="M8 14h3" /></svg>
   {:else if id === 'upload'}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8l-5-5-5 5" /><path d="M12 3v12" /></svg>
   {:else if id === 'dictionary'}
@@ -273,6 +287,8 @@
       <ChatView />
     {:else if activeView === 'notes'}
       <NotesView onopensettings={openSettings} />
+    {:else if activeView === 'meetings'}
+      <MeetingsView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} />
     {:else if activeView === 'upload'}
       <UploadView />
     {:else if activeView === 'integrations'}
