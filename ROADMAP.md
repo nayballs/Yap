@@ -800,7 +800,7 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
 (`meeting_summary.rs`), and the meeting UI inside the Notes view.
 
 **Wave 1 — the meeting experience**
-- [ ] *(merged, dev check: d261ae9)* **Docked meeting notepad.** A slim window docked to the screen edge (Wispr: right,
+- [ ] *(merged, dev check: a037c58; redesigned to Wispr's measured layout)* **Docked meeting notepad.** A slim window docked to the screen edge (Wispr: right,
       full height, about a third of the width) that opens when a recording starts, with
       a setting "Open the notepad when a meeting starts", on by default. It has:
       - tabs **My thoughts** (your own notes, the default), **Transcript** (live, You/Them
@@ -825,7 +825,7 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
 - [ ] *(merged, dev check: e1bbf73)* **"Stop when the call ends"** as an option alongside today's "Stop and summarise?"
       prompt.
 - [ ] *(merged, dev check: e1bbf73)* **Global meeting shortcut** (Wispr: Win+Alt+M) to start or stop meeting notes.
-- [ ] *(merged, dev check: 9127ad7; polishing to measured values)* **The Yap bar (Wispr's Flow Bar).** Traced 2026-10-05: one fixed, click-through,
+- [ ] *(merged, dev check: d9a60f3; polished to Wispr's measured values)* **The Yap bar (Wispr's Flow Bar).** Traced 2026-10-05: one fixed, click-through,
       never-focused, always-on-top window that follows the **cursor's monitor**
       (about 300 ms after the cursor crosses), bottom-centre above the taskbar. It is:
       - a tiny pill when idle, expanding on hover into 🎤 Dictate and ◉ Meeting notes,
@@ -880,7 +880,7 @@ rails touch `meeting.rs`; the consent message waits for the notepad, where it li
 - [ ] *(merged, dev check: 81d4a35)* **"Them" follows the default output device chosen at start.** A headset picked
       inside Teams leaves "Them" silent with no warning. Follow device changes, and warn
       when one side goes quiet.
-- [ ] *(building)* **An editable "Copy consent message"** for the meeting chat.
+- [ ] *(merged, dev check: a037c58)* **An editable "Copy consent message"** for the meeting chat.
 
 Skipped on purpose, because they need a hosted cloud: share-by-link, auto-share and
 org-wide admin controls. Copy-as-markdown/text and export cover sharing locally.
