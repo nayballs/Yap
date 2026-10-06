@@ -1841,7 +1841,7 @@
   .thread::-webkit-scrollbar-thumb,
   .thoughts::-webkit-scrollbar-thumb {
     border-radius: 4px;
-    background: rgb(26 26 26 / 0.14);
+    background: rgb(35 33 27 / 0.14);
   }
   .group {
     display: flex;
@@ -1893,7 +1893,7 @@
   }
   .bubble mark {
     border-radius: 3px;
-    background: rgb(253 224 71 / 0.6);
+    background: var(--yap-primary-tint); /* Yap amber, not a yellow marker */
     color: inherit;
   }
   .linecopy {
@@ -2178,7 +2178,7 @@
     stroke-width: 2.4;
   }
   .gen:hover {
-    background: rgb(56 56 56);
+    background: var(--yap-ink-hover);
   }
   /* The summary's error, where Generate summary would be, with a Retry. */
   .snag {
@@ -2554,7 +2554,7 @@
   }
   .rec:hover:not(:disabled) {
     border-color: var(--yap-paper-s2-strong);
-    background: rgb(250 250 248);
+    background: var(--yap-s1);
   }
   .rec:disabled {
     opacity: 0.55;
@@ -2675,7 +2675,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(26, 26, 26, 0.3);
+    background: rgba(35, 33, 27, 0.3);
     animation: bodyin 0.15s var(--yap-ease-spring);
   }
   .dialog {
@@ -2729,11 +2729,11 @@
   }
   .dbtn.danger {
     border-color: transparent;
-    background: rgb(214 69 69);
+    background: var(--yap-danger);
     color: #fff;
   }
   .dbtn.danger:hover:not(:disabled) {
-    background: rgb(196 52 52);
+    background: #a8322a;
   }
   .dbtn:disabled {
     opacity: 0.6;

@@ -103,25 +103,27 @@ body {
 
   --yap-dur: 150ms;
 
-  /* ---- The meeting notepad (Notepad.svelte): Wispr Flow's notepad palette,
-     measured from its DOM over CDP (2026-10-05). Neutral warm paper, a pure
-     near-black ink, and an emerald for "live". ---- */
-  --yap-paper: rgb(252 252 251);           /* page */
-  --yap-paper-ink: rgb(26 26 26);          /* text, filled buttons, tooltips */
-  --yap-paper-text-2: rgb(77 74 66);       /* inactive tabs, menu icons */
-  --yap-paper-muted: rgb(113 113 110);     /* timer box, sheet buttons */
-  --yap-paper-faint: rgb(179 178 173);     /* faint icons */
-  --yap-paper-date: rgb(135 134 131);      /* date line, placeholders */
-  --yap-paper-rule: rgb(163 157 142);      /* paused divider */
-  --yap-paper-s1: rgb(245 244 240);        /* bubbles, timer box */
-  --yap-paper-s2: rgb(238 235 227);        /* hint strip, chips, buttons, hairlines */
-  --yap-paper-s2-strong: rgb(226 222 213); /* hovered / open icon buttons */
-  --yap-paper-ring: rgb(241 235 225);      /* focus ring, 3px */
-  --yap-paper-band: rgb(232 228 210);      /* the connect dialog's illustration band (warm beige) */
-  --yap-paper-danger: rgb(238 106 106);    /* Delete */
-  --yap-paper-snag: rgb(217 119 6);        /* the summary's error line */
-  --yap-live: rgb(16 185 129);             /* the recording waveform */
-  --yap-live-strong: rgb(5 150 105);       /* Stop / Resume icons */
+  /* ---- The meeting notepad (Notepad.svelte; also the Meetings view and the
+     Connect calendar dialog): Wispr Flow's measured notepad layout
+     (notepad-spec.md) in Yap's own palette (2026-10-06, Nathan) — Yap's warm
+     paper and ink, its amber for focus and "live", its recording red for
+     Stop / Resume. The names stay "paper" for the layout's roles. ---- */
+  --yap-paper: #faf9f6;                    /* page (Yap's content sheet) */
+  --yap-paper-ink: #26231c;                /* text, filled buttons, tooltips (Yap ink) */
+  --yap-paper-text-2: #4a463c;             /* inactive tabs, menu icons */
+  --yap-paper-muted: #6e6a5f;              /* timer box, sheet buttons (Yap muted) */
+  --yap-paper-faint: #b3ad9f;              /* faint icons */
+  --yap-paper-date: #8a8578;               /* date line, placeholders */
+  --yap-paper-rule: #a39d8e;               /* paused divider */
+  --yap-paper-s1: #f2efe9;                 /* bubbles, timer box (Yap s3) */
+  --yap-paper-s2: #e8e4dc;                 /* hint strip, chips, buttons, hairlines (Yap raised) */
+  --yap-paper-s2-strong: #dcd7cb;          /* hovered / open icon buttons (Yap border) */
+  --yap-paper-ring: rgba(226, 152, 42, 0.22); /* focus ring, 3px (Yap amber) */
+  --yap-paper-band: #ede3cd;               /* the connect dialog's illustration band (warm sand) */
+  --yap-paper-danger: #c23b32;             /* Delete (Yap danger) */
+  --yap-paper-snag: #b07c10;               /* the summary's error line (Yap warning) */
+  --yap-live: #c2690a;                     /* the recording waveform (Yap's burnt orange) */
+  --yap-live-strong: #d9443b;              /* Stop / Resume / Take notes icons (recording red) */
   /* Wispr's spring-like easing: 0.15 s for tabs, 0.4 s for buttons. */
   --yap-ease-spring: linear(0 0%, 0.005 0.9%, 0.019 1.8%, 0.079 3.9%, 0.476 13.5%, 0.663 19.1%, 0.738 22%, 0.8 25.1%, 0.852 28.4%, 0.894 32%, 0.928 36%, 0.953 40.5%, 0.972 45.6%, 0.985 51.6%, 0.997 67.3%, 1 100%);
   --yap-shadow-popover: 0 10px 15px -3px rgba(26, 26, 26, 0.1), 0 4px 6px -4px rgba(26, 26, 26, 0.1);

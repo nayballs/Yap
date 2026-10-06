@@ -1029,11 +1029,14 @@ before `meeting::ingest`) and on an Upload's whole text.
   Fonts, bundled via `@fontsource-variable/*` imports in main.js): **Figtree**
   = UI sans (Segoe UI fallback), **EB Garamond** (+italic) =
   `--yap-font-display` (hero headlines, stat numerals, Settings page titles).
-  The meeting notepad has its own measured Wispr palette, **`--yap-paper-*`**
-  (paper, ink, text-2, muted, faint, date, rule, s1, s2, s2-strong, ring,
-  danger, snag, band — the connect dialog's beige) + `--yap-live`/`--yap-live-strong`, `--yap-ease-spring` and
-  the popover/dialog/sheet shadows (2026-10-05); the Meetings view's grey
-  card, Take notes pill and the "Connect your calendar" dialog use them too. **Settings attention badge** (`lib/attention.svelte.js`):
+  The meeting notepad's layout tokens, **`--yap-paper-*`** (paper, ink,
+  text-2, muted, faint, date, rule, s1, s2, s2-strong, ring, danger, snag,
+  band — the connect dialog's sand) + `--yap-live`/`--yap-live-strong`,
+  `--yap-ease-spring` and the popover/dialog/sheet shadows: Wispr's measured
+  roles (2026-10-05), set to **Yap's own palette** since 2026-10-06 (warm
+  paper and ink, an amber focus ring, burnt-orange "live", recording-red
+  Stop/Resume); the Meetings view's grey card, Take notes pill and the
+  "Connect your calendar" dialog use them too. **Settings attention badge** (`lib/attention.svelte.js`):
   Settings computes real needs-action items (update available / no STT model /
   cleanup on a cloud provider with no key) into a shared runes store; the
   ControlPanel cog + the matching Settings nav rows show a red count chip
@@ -1269,9 +1272,10 @@ before `meeting::ingest`) and on an Upload's whole text.
 - **`lib/Notepad.svelte`** — the **meeting notepad** (window `notepad`,
   `notepad.rs`), **Wispr Flow's notepad, measured** (2026-10-05, from its DOM
   over CDP: `E:\Projects\references\wispr-flow\notepad-spec.md`; sizes, type,
-  colours and motion matched in Yap's own code, wording and icons). Palette =
-  the `--yap-paper-*` tokens in app.css (paper `rgb(252 252 251)`, ink
-  `rgb(26 26 26)`, surfaces s1/s2, the emerald `--yap-live`, the spring
+  motion matched in Yap's own code, wording and icons; the colours are Yap's
+  own since 2026-10-06). Palette = the `--yap-paper-*` tokens in app.css
+  (paper `#faf9f6`, ink `#26231c`, surfaces s1/s2, the burnt-orange
+  `--yap-live` and recording-red `--yap-live-strong`, the spring
   `--yap-ease-spring`, popover/dialog/sheet shadows). Top to bottom:
   **header** (52 px, a drag region): **back** (beige square → the note in the
   main window's Notes, `yap-meeting-open-note`), **⋯** (Copy as Markdown /
@@ -1289,7 +1293,7 @@ before `meeting::ingest`) and on an Upload's whole text.
   the date in the locale's format ("5 Oct, 22:32"). **Tabs** (15/600, ink
   underline, a hairline under the row): My thoughts (the note's `content`,
   autosaved, synced with NotesView both ways via `yap-note-changed`/`origin`),
-  Transcript (a 3-bar emerald waveform while recording), Summary ("+" until a
+  Transcript (a 3-bar burnt-orange waveform while recording), Summary ("+" until a
   summary exists). **Transcript**: the timer box (clock, elapsed, search —
   an inline input that filters and highlights lines, dividers hidden — and
   copy all) with the dismissible tip strip attached; speaker groups ("You" /
@@ -1311,7 +1315,7 @@ before `meeting::ingest`) and on an Upload's whole text.
   the meeting chat"); after the meeting → an ink **Generate summary** pill
   (no summary yet) or the summary's error line ("The summary didn't come
   through" + detail + a Retry icon, `role="alert"`); then the **bar** (a
-  32 px-radius tray): a white pill **Stop** / **Resume** / **Start** (emerald
+  32 px-radius tray): a white pill **Stop** / **Resume** / **Start** (recording-red
   ■ or ring-dot) and the **Ask anything** pill input, with a "What did I
   miss?" chip inside it while recording (a send arrow once typed). Focusing it
   or the chip opens the **Ask sheet** (a bottom sheet, 45% tall, sheet
