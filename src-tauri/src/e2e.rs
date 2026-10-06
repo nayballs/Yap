@@ -253,6 +253,30 @@ pub fn e2e_meeting_quiet(quiet_secs: Option<f32>, talk_secs: Option<f32>) -> Res
     Ok(())
 }
 
+/// Test mode only: the main window back on screen (shown, not minimized) if
+/// the desktop minimized or hid it behind the suite's back, and nothing else.
+/// Unlike `open_settings`, no focus and no "window shown" hooks (an update
+/// re-check, a pending announcement moving in-app), so a spec can call it
+/// before every test without changing what it tests.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_main_on_screen(app: AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let w = app.get_webview_window("settings").ok_or("no main window")?;
+    if w.is_minimized().unwrap_or(false) {
+        tracing::info!("e2e: the main window was minimized; restoring it");
+        w.unminimize().map_err(|e| e.to_string())?;
+    }
+    if !w.is_visible().unwrap_or(false) {
+        tracing::info!("e2e: the main window was hidden; showing it");
+        w.show().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Test mode only: hand the meeting being recorded transcript segments, as
 /// if its recorder had just transcribed them (`{ source, text, ts }`; `ts`
 /// in unix seconds, so a test can stage hours of meeting at once). They're

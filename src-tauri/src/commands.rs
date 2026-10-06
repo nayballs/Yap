@@ -16,6 +16,11 @@ pub fn show_settings(app: &AppHandle) -> Result<(), String> {
     let w = app
         .get_webview_window("settings")
         .ok_or("settings window not found")?;
+    // `show()` leaves a minimized window on the taskbar; `set_focus` would
+    // restore it, but e2e test runs skip that (below).
+    if w.is_minimized().unwrap_or(false) {
+        let _ = w.unminimize();
+    }
     let _ = w.show();
     focus(&w);
     // The window is on screen now: a pending update announcement moves into
@@ -1132,15 +1137,19 @@ pub fn get_history(limit: Option<usize>) -> serde_json::Value {
 
 /// Delete all local transcription history.
 #[tauri::command]
-pub fn clear_history() {
+pub fn clear_history(app: AppHandle) {
+    use tauri::Emitter;
     crate::history::clear();
+    let _ = app.emit("yap-history-changed", ());
 }
 
 /// Delete one history entry (matched by timestamp + final text) — the per-item
 /// trash button in the Home feed.
 #[tauri::command]
-pub fn delete_history_entry(ts: u64, text: String) {
+pub fn delete_history_entry(app: AppHandle, ts: u64, text: String) {
+    use tauri::Emitter;
     crate::history::delete(ts, &text);
+    let _ = app.emit("yap-history-changed", ());
 }
 
 /// Derived stats for the dashboard: totals, today, time saved, streak, and a
