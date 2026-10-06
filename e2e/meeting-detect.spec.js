@@ -293,9 +293,9 @@ test('Settings lists how Yap asks and the apps it asks about', async ({ yap, mai
 
   // Every row: [icon] name [switch]. The app's own icon as installed (the
   // stand-ins), else its bundled mark, else a letter in its colour (Simple
-  // Icons has no Teams, Slack, Webex or Whereby).
+  // Icons has no Teams, Slack, Webex or Whereby, and Zoom's is a wordmark).
   const kinds = {
-    teams: 'installed', zoom: 'mark', meet: 'mark', webex: 'letter', slack: 'letter', goto: 'mark',
+    teams: 'installed', zoom: 'letter', meet: 'mark', webex: 'letter', slack: 'letter', goto: 'mark',
     whereby: 'letter', jitsi: 'mark', discord: 'installed', whatsapp: 'mark', signal: 'mark', telegram: 'mark',
   };
   const iconXs = new Set();
