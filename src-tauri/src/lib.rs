@@ -315,18 +315,19 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init());
 
     // Remember the MAIN window's size/position across launches. Only the
-    // "settings" window is managed: the overlay is positioned
-    // programmatically, and onboarding is one-shot — restoring stale bounds
-    // would misplace them. Flags exclude VISIBLE so the window never un-hides
-    // itself on a start-hidden launch. Not in e2e test runs: the state file
-    // sits outside the portable data dir, shared with the installed app.
+    // "settings" window is managed: the overlay, the notepad and its split
+    // preview are positioned programmatically, and onboarding is one-shot —
+    // restoring stale bounds would misplace them. Flags exclude VISIBLE so the
+    // window never un-hides itself on a start-hidden launch. Not in e2e test
+    // runs: the state file sits outside the portable data dir, shared with the
+    // installed app.
     let builder = if e2e::active() {
         builder
     } else {
         builder.plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
-                .with_denylist(&["overlay", "onboarding", "notepad"])
+                .with_denylist(&["overlay", "onboarding", "notepad", "split-preview"])
                 .build(),
         )
     };
@@ -430,9 +431,13 @@ pub fn run() {
             meeting_end::meeting_summarise,
             meeting_end::meeting_summary_status,
             meeting_end::meeting_discard,
+            meeting_end::meeting_delete,
             meeting_assist::meeting_catch_up,
             notepad::notepad_open,
             notepad::notepad_state,
+            notepad::notepad_split,
+            notepad::notepad_split_preview,
+            notepad::notepad_consent_message,
             meeting_guard::meeting_shortcut,
             meeting_guard::meeting_keep_going,
             meeting_guard::meeting_limit_status,

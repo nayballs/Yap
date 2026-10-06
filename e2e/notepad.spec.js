@@ -1,17 +1,27 @@
-// The meeting notepad (src-tauri/src/notepad.rs, src/lib/Notepad.svelte): a
-// window docked to the right edge of the screen that opens when a meeting
-// starts recording — My thoughts (synced with the Notes view), the live
-// You/Them transcript, the summary Rust writes when the meeting ends
+// The meeting notepad (src-tauri/src/notepad.rs, src/lib/Notepad.svelte), in
+// Wispr Flow's notepad layout: a window docked to the right edge of the
+// screen that opens when a meeting starts recording — the header (back to
+// Notes, the ⋯ menu, Share, split screen, delete), My thoughts (synced with
+// the Notes view), the live transcript (grouped bubbles, paused and dictated
+// dividers, search, copy), the summary Rust writes when the meeting ends
 // (meeting_end.rs, with steps and a Retry; also after a stop Yap makes
-// itself, meeting_guard.rs), "What did I miss?" and the AI meeting title
-// (meeting_assist.rs), "Started by mistake?", hiding from screen capture
-// (capture.rs), and the dictation key and meeting shortcut caught in-page.
+// itself, meeting_guard.rs), the Ask sheet with "What did I miss?" and the AI
+// meeting title (meeting_assist.rs; never over a typed title or a calendar
+// meeting's name — a local iCal feed, support/calendar-feed.js), "Started by mistake?" (in the notepad,
+// or on the Yap bar with no Yap window on screen), the consent message,
+// hiding from screen capture (capture.rs), and the dictation key and meeting
+// shortcut caught in-page.
 //
 // No audio device is opened (test mode records silence); transcript lines
-// are handed to the recorder with `e2e_meeting_feed`. The AI is a local fake
-// (support/fake-llm.js) that records every request. Split screen moves
-// another app's window, which a test run never does: its window picking is
-// unit-tested in notepad.rs.
+// (and "You dictated here" markers) are handed to the recorder with
+// `e2e_meeting_feed`. The AI is a local fake (support/fake-llm.js) that
+// records every request. The clipboard is stubbed in the page. Split screen
+// moves another app's window, which a test run never does (its window
+// picking is unit-tested in notepad.rs); Save as .md and Email open a native
+// dialog and the mail app, so they're checked through the text they'd use.
+//
+// The screenshots are named after the states in Wispr's own captures
+// (E:\Projects\references\wispr-flow), for a side-by-side look.
 import {
   test as base,
   expect,
@@ -25,6 +35,18 @@ import {
 } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { newMeetingNote, meetingNote } from './support/meetings.js';
+import { startCalendarFeed, calendarFile, vevent } from './support/calendar-feed.js';
+import {
+  noteMarkdown,
+  noteText,
+  mailtoUrl,
+  transcriptItems,
+  bubbleShape,
+  highlightParts,
+  consentMessage,
+  consentToSave,
+  DEFAULT_CONSENT_MESSAGE,
+} from '../src/lib/notepadText.js';
 
 const test = base.extend({
   fakeLlm: [
@@ -43,6 +65,8 @@ const test = base.extend({
           llmScopes: {
             noteFormatting: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-notes' },
           },
+          // No calendar reminder cards (the calendar test's meeting is on now).
+          meetingReminder: 'never',
         },
       });
     },
@@ -58,6 +82,10 @@ const affinity = (yap) => yap.invoke('capture_affinity').then((a) => a.windows.n
 const EXCLUDED_FROM_CAPTURE = 17;
 const toast = (page, title) => page.getByRole('status').filter({ hasText: title });
 const tab = (yap, name) => yap.notepad.getByRole('tab', { name });
+const transcript = (pad) => pad.getByRole('log', { name: 'Transcript' });
+const askSheet = (pad) => pad.getByRole('dialog', { name: 'Ask about this meeting' });
+const askInput = (pad) => pad.getByRole('textbox', { name: 'Ask anything' });
+const stopButton = (pad) => pad.getByRole('button', { name: 'Stop', exact: true });
 
 /** A new meeting note (typed title unless `title` is null), recording. */
 async function startMeeting(yap, title) {
@@ -68,14 +96,16 @@ async function startMeeting(yap, title) {
 }
 
 let clockTs = Math.floor(Date.now() / 1000);
-/** Hand the recorder transcript lines (`[source, text, echo?]`), as if just transcribed. */
+/**
+ * Hand the recorder transcript lines (`[source, text, echo?]`), as if just
+ * transcribed; `'dictated'` is a "You dictated here" marker (meeting.rs).
+ */
 async function say(yap, ...lines) {
-  const segments = lines.map(([source, text, echo]) => ({
-    source,
-    text,
-    ts: (clockTs += 6),
-    ...(echo ? { echo: true } : {}),
-  }));
+  const segments = lines.map((line) =>
+    line === 'dictated'
+      ? { source: 'you', text: '', ts: (clockTs += 6), dictated: true }
+      : { source: line[0], text: line[1], ts: (clockTs += 6), ...(line[2] ? { echo: true } : {}) }
+  );
   expect(await yap.invoke('e2e_meeting_feed', { segments })).toBe(segments.length);
 }
 
@@ -95,6 +125,17 @@ async function pauseAll(yap) {
   }
 }
 
+/** The page's clipboard, stubbed (a test never touches the real one): returns what was copied last. */
+async function stubClipboard(page) {
+  await page.evaluate(() => {
+    window.__copied = null;
+    navigator.clipboard.writeText = async (t) => {
+      window.__copied = t;
+    };
+  });
+  return () => page.evaluate(() => window.__copied);
+}
+
 const BUDGET_TALK = [
   ['you', 'Thanks for joining, Alice. Today I want to go through the Q3 budget line by line, starting with travel and the offsite, because those two moved the most since last quarter and finance wants an answer.'],
   ['them', 'Sure. I have the numbers ready. Travel is up twelve percent, mostly flights for the offsite, and the venue deposit landed in this quarter instead of the next one, which makes the budget look worse than it is.'],
@@ -105,7 +146,56 @@ const BUDGET_TALK = [
 
 test.afterEach(async ({ yap }) => {
   await pauseAll(yap);
+  // Popovers, the Ask sheet, a dialog, the search: Escape puts each away.
+  for (let i = 0; i < 3; i += 1) await yap.notepad.keyboard.press('Escape');
   await closeToasts(yap.notepad);
+});
+
+test('the text it copies, saves and emails, and how the transcript is laid out', () => {
+  const note = {
+    title: 'Launch sync',
+    participants: ['Priya'],
+    content: 'Ask about legal',
+    enhancedContent: '## Action plan\n\n### Priya\n- [ ] Book legal review',
+    transcript: [
+      { source: 'you', text: 'Morning.', ts: 1 },
+      { source: 'them', text: 'Hi there.', ts: 2 },
+      { source: 'you', text: 'Hi there.', ts: 3, echo: true },
+      { source: 'you', text: '', ts: 4, dictated: true },
+      { source: 'them', text: 'Legal needs a week.', ts: 5 },
+    ],
+  };
+  // Markdown, as "Save as .md" writes it: no echo, no markers.
+  const md = noteMarkdown(note);
+  expect(md).toMatch(/^# Launch sync\n\nAttendees: Priya\n\n## Action plan/);
+  expect(md).toContain('---\n\n## Raw notes\n\nAsk about legal');
+  expect(md).toContain('**Them:** Legal needs a week.');
+  expect(md.match(/\*\*(You|Them):\*\*/g)).toHaveLength(3);
+  // Text: headings and emphasis dropped, tasks as ☐.
+  const text = noteText(note);
+  expect(text).toContain('☐ Book legal review');
+  expect(text).not.toMatch(/^#|\*\*/m);
+  // Email: the summary as text, in a mailto: link.
+  const mail = new URL(mailtoUrl(note));
+  expect(mail.protocol).toBe('mailto:');
+  expect(mail.searchParams.get('subject')).toBe('Launch sync');
+  expect(mail.searchParams.get('body')).toContain('☐ Book legal review');
+  // The transcript: groups of one speaker, a pause where a recording
+  // stopped (after line 2), the marker on its own; search drops dividers.
+  const kinds = transcriptItems(note.transcript, [2]).map((i) => (i.kind === 'group' ? i.source : i.kind));
+  expect(kinds).toEqual(['you', 'them', 'pause', 'dictated', 'them']);
+  const found = transcriptItems(note.transcript, [2], { query: 'legal' });
+  expect(found.map((i) => i.lines.map((l) => l.text))).toEqual([['Legal needs a week.']]);
+  expect(transcriptItems(note.transcript, [], { showEcho: true })[1].lines).toHaveLength(1);
+  // Grouped corners, and highlighting.
+  expect([0, 1, 2].map((i) => bubbleShape(i, 3))).toEqual(['first', 'mid', 'last']);
+  expect(bubbleShape(0, 1)).toBe('first');
+  expect(highlightParts('Legal needs legal', 'legal').filter((p) => p.hit)).toHaveLength(2);
+  // The consent message: the default until edited, saved empty when it is the default.
+  expect(consentMessage('')).toBe(DEFAULT_CONSENT_MESSAGE);
+  expect(consentMessage('  Mine  ')).toBe('Mine');
+  expect(consentToSave(` ${DEFAULT_CONSENT_MESSAGE} `)).toBe('');
+  expect(consentToSave('Mine ')).toBe('Mine');
 });
 
 test('a meeting starting opens the notepad docked to the right, without taking the focus', async ({
@@ -141,34 +231,52 @@ test('a meeting starting opens the notepad docked to the right, without taking t
   // records (capture.rs: WDA_EXCLUDEFROMCAPTURE).
   await expect.poll(() => affinity(yap)).toBe(EXCLUDED_FROM_CAPTURE);
 
-  // Notes first: the title (serif), the date, "My thoughts", and the footer.
-  await expect(pad.getByRole('textbox', { name: 'Meeting title' })).toHaveValue('Design review');
+  // Notes first: the serif title, the date, My thoughts; the live waveform on
+  // Transcript and "+ Summary"; the consent line over Stop and Ask anything.
+  const title = pad.getByRole('textbox', { name: 'Meeting title' });
+  await expect(title).toHaveValue('Design review');
+  expect(await title.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/EB Garamond/);
+  // The locale's own: "5 Oct, 22:32" (en-GB), "Oct 5, 10:32 PM" (en-US).
+  await expect(pad.locator('.date')).toHaveText(/^\S+ \S+, \d{1,2}:\d{2}(\s?[AaPp]\.?\s?[Mm]\.?)?$/);
   await expect(tab(yap, 'My thoughts')).toHaveAttribute('aria-selected', 'true');
-  await expect(pad.getByText('Always get consent when transcribing others.')).toBeVisible();
-  await expect(pad.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
+  await expect(tab(yap, 'Transcript').locator('.wave')).toBeVisible();
+  await expect(tab(yap, 'Summary').locator('.plus')).toBeVisible();
+  await expect(pad.locator('.consent')).toContainText("Let people know you're taking notes.");
+  await expect(stopButton(pad)).toBeVisible();
+  await expect(askInput(pad)).toBeVisible();
   await expect(pad.getByRole('button', { name: 'What did I miss?' })).toBeVisible();
-  await expect(pad.locator('.meta .live')).toContainText(/Recording \d+:\d\d/);
-  await shot(pad, '01-opens-on-record');
+  await shot(pad, '01-recording-my-thoughts');
 
-  // Transcript: the elapsed time, the tip, and a friendly empty state.
+  // Transcript: the timer box (clock, time, search, copy), the tip, and a
+  // friendly empty state.
   await tab(yap, 'Transcript').click();
-  await expect(pad.locator('.trow .elapsed')).toContainText(/\d+:\d\d/);
+  await expect(pad.locator('.timerbox .elapsed')).toHaveText(/^\d+:\d\d$/);
   await expect(pad.getByText('Yap is listening')).toBeVisible();
   const hint = pad.locator('.hint');
-  await expect(hint).toContainText('tidies the transcript into one paragraph per speaker');
+  await expect(hint).toContainText('lines land about every 15 seconds');
   await shot(pad, '02-transcript-listening');
 
-  // Live lines, with coloured speaker labels, following the newest one.
-  await say(yap, ['you', 'Morning! Shall we start with the onboarding flow?'], ['them', 'Yes, I have the new mocks open.']);
-  const log = pad.getByRole('log', { name: 'Transcript' });
-  await expect(log.locator('.turn.you .who')).toHaveText('You');
-  await expect(log.locator('.turn.them .who')).toHaveText('Them');
+  // Live lines: a group per speaker turn with a coloured label, a bubble per
+  // line, corners grouped like a chat; following the newest one.
+  await say(
+    yap,
+    ['you', 'Morning! Shall we start with the onboarding flow?'],
+    ['you', 'I sent the mocks round last night.'],
+    ['them', 'Yes, I have the new mocks open.']
+  );
+  const log = transcript(pad);
+  await expect(log.locator('.group.you .who')).toHaveText('You');
+  await expect(log.locator('.group.them .who')).toHaveText('Them');
   await expect(log).toContainText('I have the new mocks open.');
-  const [you, them] = await Promise.all([
-    log.locator('.turn.you .who').evaluate((el) => getComputedStyle(el).color),
-    log.locator('.turn.them .who').evaluate((el) => getComputedStyle(el).color),
+  const you = log.locator('.group.you .bubble');
+  await expect(you).toHaveCount(2);
+  await expect(you.nth(0)).toHaveCSS('border-radius', '12px 12px 12px 4px');
+  await expect(you.nth(1)).toHaveCSS('border-radius', '4px 12px 12px');
+  const [youColour, themColour] = await Promise.all([
+    log.locator('.group.you .who').evaluate((el) => getComputedStyle(el).color),
+    log.locator('.group.them .who').evaluate((el) => getComputedStyle(el).color),
   ]);
-  expect(you).not.toBe(them);
+  expect(youColour).not.toBe(themColour);
   // Echo (the call through the speakers) stays hidden, as in the Notes view.
   await say(
     yap,
@@ -178,9 +286,9 @@ test('a meeting starting opens the notepad docked to the right, without taking t
   const echo = pad.getByRole('button', { name: /Show 1 line your mic picked up from the speakers/ });
   await expect(echo).toBeVisible();
   await expect(log).not.toContainText('ECHO');
-  await shot(pad, '03-transcript-live-lines');
+  await shot(pad, '03-recording-transcript');
   await echo.click();
-  await expect(log.locator('.turn.echo')).toContainText('from the speakers');
+  await expect(log.locator('.group.echo')).toContainText('from the speakers');
   await pad.getByRole('button', { name: /Hide 1 line/ }).click();
   expect((await yap.invoke('note_get', { id: note.id })).transcript.filter((s) => s.echo)).toHaveLength(1);
 
@@ -197,9 +305,31 @@ test('a meeting starting opens the notepad docked to the right, without taking t
   await main.getByRole('button', { name: 'Notepad' }).click();
   await expect.poll(() => visible(yap, 'notepad')).toBe(true);
   await expect(pad.getByRole('textbox', { name: 'Meeting title' })).toHaveValue('Design review');
-  // Shareable again once the meeting stops.
+  // Shareable again once the meeting stops; the waveform goes.
   await pauseAll(yap);
   await expect.poll(() => affinity(yap)).toBe(0);
+  await expect(tab(yap, 'Transcript').locator('.wave')).toHaveCount(0);
+});
+
+test('a new meeting note in the notepad: Start, nothing else yet', async ({ yap, shot }) => {
+  const note = await yap.invoke('note_create', { title: '', folder: 'Meetings' });
+  await yap.invoke('notepad_open', { noteId: note.id });
+  await expect.poll(() => visible(yap, 'notepad')).toBe(true);
+  const pad = yap.notepad;
+  await expect(pad.getByRole('textbox', { name: 'Meeting title' })).toHaveAttribute('placeholder', 'New note');
+  await tab(yap, 'Transcript').click();
+  await expect(pad.locator('.timerbox')).toHaveCount(0);
+  await expect(pad.getByText('No transcript yet')).toBeVisible();
+  await expect(pad.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+  await expect(pad.locator('.consent')).toHaveCount(0);
+  await expect(pad.getByRole('button', { name: 'Generate summary' })).toHaveCount(0);
+  await shot(pad, '00-new-note-start');
+
+  // Start records into it.
+  await pad.getByRole('button', { name: 'Start', exact: true }).click();
+  await expect.poll(() => recording(yap)).toBe(true);
+  await expect(stopButton(pad)).toBeVisible();
+  await expect(pad.locator('.timerbox')).toBeVisible();
 });
 
 test('My thoughts sync with the Notes view both ways', async ({ yap, main, shot }) => {
@@ -214,7 +344,7 @@ test('My thoughts sync with the Notes view both ways', async ({ yap, main, shot 
   await thoughts.fill('Ask Priya about the launch date');
   const raw = main.locator('textarea.raw');
   await expect(raw).toHaveValue('Ask Priya about the launch date');
-  await shot(pad, '04-thoughts-typed-in-notepad');
+  await shot(pad, '05-thoughts-typed-in-notepad');
 
   // Typed in the Notes view → the notepad.
   await raw.fill('Ask Priya about the launch date\nPress release needs legal review');
@@ -222,40 +352,113 @@ test('My thoughts sync with the Notes view both ways', async ({ yap, main, shot 
   await expectStore(yap, 'notes.json', (s) =>
     meetingNote(s, 'Sync check')?.content?.includes('legal review')
   );
-  await shot(main, '05-thoughts-synced-in-notes');
+  await shot(main, '06-thoughts-synced-in-notes');
 
   // The title too, from the notepad.
   await pad.getByRole('textbox', { name: 'Meeting title' }).fill('Launch sync with Priya');
   await expect(main.getByPlaceholder('Untitled Note')).toHaveValue('Launch sync with Priya');
 
-  // Pause (Notes view): no summary, Resume in both.
+  // Pause (Notes view): no summary, Resume in both, and a paused divider
+  // after the last line.
   await say(yap, ['them', 'Legal wants a week with it.']);
   await main.getByRole('button', { name: 'Pause recording' }).click();
   await expect(pad.getByRole('button', { name: 'Resume' })).toBeVisible({ timeout: 20_000 });
   await expect(main.getByRole('button', { name: 'Resume' })).toBeVisible();
-  await shot(pad, '06-paused-resume');
+  await tab(yap, 'Transcript').click();
+  await expect(transcript(pad).getByRole('separator', { name: 'Recording paused here' })).toHaveCount(1);
+  await shot(pad, '07-paused-resume');
 });
 
-test('"What did I miss?": nothing new, then what was said since you looked', async ({
-  yap,
-  fakeLlm,
-  shot,
-}) => {
+test('the transcript: paused and dictated dividers, hover copy, search, copy all', async ({ yap, shot }) => {
+  await startMeeting(yap, 'Roadmap review');
+  const pad = yap.notepad;
+  const copied = await stubClipboard(pad);
+  await tab(yap, 'Transcript').click();
+  await say(yap, ['you', 'First, the roadmap for Q4.'], ['you', 'We have three themes.'], ['them', 'Sounds good, go ahead.']);
+  const log = transcript(pad);
+  await expect(log).toContainText('Sounds good');
+
+  // A pause marks its place; Resume carries on under it.
+  await yap.invoke('meeting_pause');
+  await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
+  await expect(log.getByRole('separator', { name: 'Recording paused here' })).toHaveCount(1);
+  await pad.getByRole('button', { name: 'Resume' }).click();
+  await expect.poll(() => recording(yap)).toBe(true);
+  // A dictation mid-meeting leaves a marker (meeting.rs keeps its words out).
+  await say(yap, ['you', 'Back again, where were we?'], 'dictated', ['them', 'The second theme, the budget.']);
+  const dictated = log.getByRole('separator', { name: 'You dictated here' });
+  await expect(dictated).toHaveText('You dictated here · left out of the notes');
+  const kinds = await log.locator(':scope > .group, :scope > .divider').evaluateAll((els) =>
+    els.map((el) =>
+      el.classList.contains('dictated')
+        ? 'dictated'
+        : el.classList.contains('divider')
+          ? 'paused'
+          : el.classList.contains('you')
+            ? 'you'
+            : 'them'
+    )
+  );
+  expect(kinds).toEqual(['you', 'them', 'paused', 'you', 'dictated', 'them']);
+  await shot(pad, '08-transcript-dividers');
+
+  // Hovering a line shows its copy button.
+  const row = log.locator('.row').filter({ hasText: 'Sounds good' });
+  const lineCopy = row.getByRole('button', { name: 'Copy line' });
+  await expect(lineCopy).toHaveCSS('opacity', '0');
+  await row.hover();
+  await expect(lineCopy).toHaveCSS('opacity', '1');
+  await shot(pad, '09-line-hover-copy');
+  await lineCopy.click();
+  await expect.poll(copied).toBe('Sounds good, go ahead.');
+
+  // Search: the matching lines, highlighted, without dividers.
+  await pad.getByRole('button', { name: 'Search the transcript' }).click();
+  const search = pad.getByRole('textbox', { name: 'Search the transcript' });
+  await expect(search).toBeFocused();
+  await search.fill('theme');
+  await expect(log.locator('.bubble')).toHaveCount(2);
+  await expect(log.locator('mark')).toHaveText(['theme', 'theme']);
+  await expect(log.locator('.divider')).toHaveCount(0);
+  await shot(pad, '10-transcript-search');
+  await search.fill('nothing like this');
+  await expect(pad.getByText('Nothing matches')).toBeVisible();
+  await search.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(log.locator('.bubble')).toHaveCount(5);
+
+  // Copy all: the spoken lines, no markers.
+  await pad.getByRole('button', { name: 'Copy transcript' }).click();
+  await expect
+    .poll(copied)
+    .toBe(
+      'You: First, the roadmap for Q4.\nYou: We have three themes.\nThem: Sounds good, go ahead.\n' +
+        'You: Back again, where were we?\nThem: The second theme, the budget.'
+    );
+  await expect(toast(pad, 'Transcript copied')).toBeVisible();
+});
+
+test('"What did I miss?" and Ask anything, in a sheet over the meeting', async ({ yap, fakeLlm, shot }) => {
   await startMeeting(yap, 'Weekly sync');
   const pad = yap.notepad;
   await tab(yap, 'Transcript').click();
   await say(yap, ['you', 'Let us start with the roadmap.'], ['them', 'Sure, the roadmap is on track.'], ['you', 'Great, next item.']);
-  await expect(pad.getByRole('log', { name: 'Transcript' })).toContainText('next item');
+  await expect(transcript(pad)).toContainText('next item');
 
-  // Everything was on screen: nothing new, and no AI call for it.
+  // Everything was on screen: nothing new, and no AI call for it. Stop
+  // shrinks to a circle while the sheet is up.
   const before = fakeLlm.requests.length;
   await pad.getByRole('button', { name: 'What did I miss?' }).click();
-  const chat = pad.getByRole('region', { name: 'What did I miss?' });
-  await expect(chat).toContainText('Nothing new since you last looked.');
+  const sheet = askSheet(pad);
+  await expect(sheet).toContainText('Nothing new since you last looked.');
   expect(fakeLlm.requests.length).toBe(before);
-  await shot(pad, '07-what-did-i-miss-nothing-new');
+  await expect(stopButton(pad)).toHaveClass(/circle/);
+  await shot(pad, '11-ask-nothing-new');
 
-  // Looking away (My thoughts), the meeting goes on.
+  // Minimised; looking away (My thoughts), the meeting goes on.
+  await sheet.getByRole('button', { name: 'Minimise chat' }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect(stopButton(pad)).not.toHaveClass(/circle/);
   await tab(yap, 'My thoughts').click();
   await say(
     yap,
@@ -263,26 +466,198 @@ test('"What did I miss?": nothing new, then what was said since you looked', asy
     ['them', 'MISSED-2 And we moved the demo to Thursday afternoon.']
   );
   await pad.getByRole('button', { name: 'What did I miss?' }).click();
-  await expect(chat).toContainText('2 new lines since you looked, opening with "MISSED-1 Can you send the"');
-  await expect(chat).toContainText('Them asked You to send the slides by Friday.');
+  await expect(sheet).toContainText('2 new lines since you looked, opening with "MISSED-1 Can you send the"');
+  await expect(sheet).toContainText('Them asked You to send the slides by Friday.');
+  await expect(sheet.locator('.mq').last()).toHaveText('What did I miss?');
   const [catchUp] = fakeLlm.requests.filter((r) => r.kind === 'catchUp');
   const since = catchUp.user.split('Since they last looked')[1];
   expect(since).toContain('MISSED-1');
   expect(since).toContain('MISSED-2');
   expect(since).not.toContain('roadmap'); // seen already: context only
-  await shot(pad, '08-what-did-i-miss-answer');
+  await shot(pad, '12-ask-sheet-answer');
 
   // The answer counts as looking.
   await pad.getByRole('button', { name: 'What did I miss?' }).click();
-  await expect(chat.locator('.ma').last()).toContainText('Nothing new since you last looked.');
+  await expect(sheet.locator('.ma').last()).toContainText('Nothing new since you last looked.');
 
-  // A follow-up question, answered from the meeting.
-  await chat.getByRole('textbox', { name: 'Ask about this meeting' }).fill('Who owns the budget?');
-  await chat.getByRole('button', { name: 'Ask' }).click();
-  await expect(chat).toContainText('Alice owns the budget');
+  // 👍 is kept on this PC only; ⎘ copies the answer.
+  const copied = await stubClipboard(pad);
+  const answer = sheet.locator('.ma').filter({ hasText: 'Them asked You' });
+  await answer.getByRole('button', { name: 'Good answer' }).click();
+  await expect(answer.getByRole('button', { name: 'Good answer' })).toHaveAttribute('aria-pressed', 'true');
+  const ratings = await pad.evaluate(() => JSON.parse(localStorage.getItem('yapNotepadFeedback')));
+  expect(Object.values(ratings).map((r) => r.rating)).toContain('up');
+  await answer.getByRole('button', { name: 'Copy answer' }).click();
+  await expect.poll(copied).toContain('Them asked You to send the slides by Friday.');
+
+  // A question of your own, answered from the meeting.
+  const input = askInput(pad);
+  await input.fill('Who owns the budget?');
+  await expect(pad.getByRole('button', { name: 'What did I miss?' })).toHaveCount(0); // the send arrow instead
+  await input.press('Enter');
+  await expect(sheet.locator('.mq').last()).toHaveText('Who owns the budget?');
+  await expect(sheet).toContainText('Alice owns the budget');
   expect(fakeLlm.requests.filter((r) => r.kind === 'meetingAsk')).toHaveLength(1);
-  await chat.getByRole('button', { name: 'Close catch-up' }).click();
-  await expect(chat).toHaveCount(0);
+  await shot(pad, '13-ask-follow-up');
+
+  // New chat clears the thread; Escape puts the sheet away.
+  await sheet.getByRole('button', { name: 'New chat' }).click();
+  await expect(sheet.locator('.mq')).toHaveCount(0);
+  await input.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  // Focusing Ask anything brings it back.
+  await input.focus();
+  await expect(sheet).toBeVisible();
+});
+
+test('the header: back to Notes, the ⋯ menu, Share, split screen, delete', async ({ yap, main, shot }) => {
+  const pad = yap.notepad;
+  const note = await startMeeting(yap, 'Header check');
+  await say(yap, ['you', 'Quick check of the header.'], ['them', 'Looks fine from here.']);
+  const copied = await stubClipboard(pad);
+
+  // ⋯ while recording.
+  const more = pad.getByRole('button', { name: 'More', exact: true });
+  const menu = pad.getByRole('menu', { name: 'More' });
+  await more.click();
+  await expect(menu.getByRole('menuitem')).toHaveText([
+    'Copy as Markdown',
+    'Copy as text',
+    'Copy consent message',
+    'Audio settings',
+    'Save as .md',
+    'Delete',
+  ]);
+  await shot(pad, '14-more-menu-recording');
+  await menu.getByRole('menuitem', { name: 'Copy as Markdown' }).click();
+  await expect(menu).toHaveCount(0);
+  await expect.poll(copied).toContain('# Header check');
+  expect(await copied()).toContain('**Them:** Looks fine from here.');
+  await expect(toast(pad, 'Notes copied as Markdown')).toBeVisible();
+  await more.click();
+  await menu.getByRole('menuitem', { name: 'Copy as text' }).click();
+  await expect.poll(copied).toContain('Them: Looks fine from here.');
+  expect(await copied()).not.toContain('**');
+
+  // Audio settings: Settings → General in Yap's main window.
+  await more.click();
+  await menu.getByRole('menuitem', { name: 'Audio settings' }).click();
+  await expect(settingsDialog(main).getByRole('group', { name: 'Meetings' })).toBeVisible();
+  await closeSettings(main);
+
+  // Share: a local popover; the link half copies the notes in one click.
+  await pad.getByRole('button', { name: 'Share', exact: true }).click();
+  const share = pad.getByRole('dialog', { name: 'Share notes' });
+  await expect(share.getByRole('button')).toHaveText(['Copy as Markdown', 'Copy as text', 'Save as .md', 'Email']);
+  await shot(pad, '15-share-popover');
+  await share.getByRole('button', { name: 'Copy as Markdown' }).click();
+  await expect(share).toHaveCount(0);
+  await pad.evaluate(() => (window.__copied = null));
+  await pad.getByRole('button', { name: 'Copy notes' }).click();
+  await expect.poll(copied).toContain('# Header check');
+  await expect(pad.locator('.linkbtn .swap')).toHaveClass(/on/);
+
+  // Split screen: its tooltip, and a test run never moves another app's window.
+  const split = pad.getByRole('button', { name: 'Split screen with meeting' });
+  await split.hover();
+  await expect(split).toHaveAttribute('data-tip', 'Split screen with meeting');
+  await pad.waitForTimeout(500); // the tooltip's delay
+  await shot(pad, '16-split-tooltip');
+  await split.click();
+  await expect(toast(pad, "Couldn't split the screen")).toContainText("Test runs never move other apps' windows.");
+
+  // Back: the note in Yap's Notes view.
+  await pad.getByRole('button', { name: 'Open in Yap' }).click();
+  await expect(main.getByPlaceholder('Untitled Note')).toHaveValue('Header check');
+
+  // After the meeting the ⋯ menu has no Audio settings; Delete asks first.
+  await pauseAll(yap);
+  await closeToasts(pad);
+  await more.click();
+  await expect(menu.getByRole('menuitem')).toHaveText([
+    'Copy as Markdown',
+    'Copy as text',
+    'Copy consent message',
+    'Save as .md',
+    'Delete',
+  ]);
+  await shot(pad, '17-more-menu-stopped');
+  await menu.getByRole('menuitem', { name: 'Delete' }).click();
+  const confirm = pad.getByRole('alertdialog', { name: 'Delete this meeting?' });
+  await expect(confirm).toBeVisible();
+  await shot(pad, '18-delete-confirm');
+  await confirm.getByRole('button', { name: 'Cancel' }).click();
+  await expect(confirm).toHaveCount(0);
+  expect(meetingNote(yap.readJson('notes.json'), 'Header check')?.id).toBe(note.id);
+  await more.click();
+  await menu.getByRole('menuitem', { name: 'Delete' }).click();
+  await confirm.getByRole('button', { name: 'Delete' }).click();
+  await expectStore(yap, 'notes.json', (s) => !s.notes.some((n) => n.id === note.id));
+  await expect.poll(() => visible(yap, 'notepad')).toBe(false);
+
+  // Deleting the meeting being recorded stops it first.
+  const live = await startMeeting(yap, 'Delete while recording');
+  await say(yap, ['you', 'This one goes.']);
+  await more.click();
+  await menu.getByRole('menuitem', { name: 'Delete' }).click();
+  await expect(confirm).toContainText('The recording stops first.');
+  await confirm.getByRole('button', { name: 'Delete' }).click();
+  await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
+  await expectStore(yap, 'notes.json', (s) => !s.notes.some((n) => n.id === live.id));
+  await expect.poll(() => visible(yap, 'notepad')).toBe(false);
+});
+
+test('the consent line: Learn more offers a message for the chat, editable; ⋯ copies it', async ({
+  yap,
+  main,
+  shot,
+}) => {
+  await startMeeting(yap, 'Consent check');
+  const pad = yap.notepad;
+  const copied = await stubClipboard(pad);
+  const line = pad.locator('.consent');
+  await expect(line).toContainText("Let people know you're taking notes.");
+  await line.getByRole('button', { name: 'Learn more' }).click();
+  const pop = pad.getByRole('dialog', { name: 'Consent message' });
+  await expect(pop).toContainText('Yap transcribes on this PC; nothing is uploaded.');
+  const message = pop.getByRole('textbox', { name: 'Message for the meeting chat' });
+  await expect(message).toHaveValue(DEFAULT_CONSENT_MESSAGE);
+  await shot(pad, '19-consent-message');
+
+  // Copy: the message as shown.
+  await pop.getByRole('button', { name: 'Copy' }).click();
+  await expect.poll(copied).toBe(DEFAULT_CONSENT_MESSAGE);
+  await expect(toast(pad, 'Copied: paste it into the meeting chat')).toBeVisible();
+  await expect(pop).toBeVisible(); // it stays for an edit
+
+  // An edit is saved when the box loses focus (here: a click elsewhere)…
+  const mine = "Hi everyone, Yap is taking notes on my PC for this call. Shout if that's not OK.";
+  await message.fill(mine);
+  await pad.getByRole('textbox', { name: 'Meeting title' }).click();
+  await expect(pop).toHaveCount(0);
+  await expectStore(yap, 'config.json', (c) => c.meetingConsentMessage === mine);
+  // …Settings' copy of the config takes it (its next save keeps it)…
+  const dialog = await openSettings(main, 'General');
+  const split = dialog.getByRole('group', { name: 'Meetings' }).getByRole('button', { name: 'Split the screen when joining' });
+  await split.click();
+  await expectStore(yap, 'config.json', (c) => c.meetingSplitScreen === true && c.meetingConsentMessage === mine);
+  await split.click();
+  await expectStore(yap, 'config.json', (c) => c.meetingSplitScreen === false && c.meetingConsentMessage === mine);
+  await closeSettings(main);
+  // …and the ⋯ menu copies the saved one.
+  await pad.getByRole('button', { name: 'More', exact: true }).click();
+  await pad.getByRole('menuitem', { name: 'Copy consent message' }).click();
+  await expect.poll(copied).toBe(mine);
+
+  // Emptied, it's Yap's default again.
+  await line.getByRole('button', { name: 'Learn more' }).click();
+  await expect(message).toHaveValue(mine);
+  await message.fill('');
+  await message.press('Escape');
+  await expect(pop).toHaveCount(0);
+  await expectStore(yap, 'config.json', (c) => c.meetingConsentMessage === '');
+  await line.getByRole('button', { name: 'Learn more' }).click();
+  await expect(message).toHaveValue(DEFAULT_CONSENT_MESSAGE);
 });
 
 test('the AI names a meeting with a made-up title, never one the person typed', async ({
@@ -299,7 +674,7 @@ test('the AI names a meeting with a made-up title, never one the person typed', 
   const title = pad.getByRole('textbox', { name: 'Meeting title' });
   await expect(title).toHaveValue(/^Zoom call · \d{1,2} [A-Z][a-z]{2}, \d{2}:\d{2}$/);
   await expect(title).toHaveClass(/auto/); // muted until named
-  await shot(pad, '09-made-up-title');
+  await shot(pad, '20-made-up-title');
 
   // About a minute of talk: the meeting gets a real title, everywhere.
   const asked = fakeLlm.requests.filter((r) => r.kind === 'title').length;
@@ -311,9 +686,19 @@ test('the AI names a meeting with a made-up title, never one the person typed', 
   expect(titleCalls).toHaveLength(asked + 1);
   expect(titleCalls.at(-1).user).toContain('Transcript (start):');
   await expectStore(yap, 'notes.json', (s) => !!meetingNote(s, 'Q3 Budget Review with Alice'));
-  await shot(pad, '10-ai-title');
-  await shot(main, '11-ai-title-in-notes');
+  await shot(pad, '21-ai-title');
+  await shot(main, '22-ai-title-in-notes');
+
+  // Stopped (paused: no summary yet): the divider after the last line,
+  // Generate summary over Resume and Ask anything.
   await pauseAll(yap);
+  await tab(yap, 'Transcript').click();
+  await expect(transcript(pad).getByRole('separator', { name: 'Recording paused here' })).toHaveCount(1);
+  await expect(pad.getByRole('button', { name: 'Generate summary' })).toBeVisible();
+  await expect(pad.getByRole('button', { name: 'Resume' })).toBeVisible();
+  await expect(pad.locator('.consent')).toHaveCount(0);
+  await transcript(pad).evaluate((el) => (el.scrollTop = 0));
+  await shot(pad, '23-stopped-ai-title');
   await yap.invoke('meeting_detect_simulate', { appId: 'zoom', active: false });
 
   // A typed title stays, however much is said.
@@ -324,16 +709,63 @@ test('the AI names a meeting with a made-up title, never one the person typed', 
   await expect(title).toHaveValue('Board prep');
 });
 
+test('a meeting note named after its calendar event keeps that name', async ({ yap, fakeLlm }) => {
+  // A local stand-in for a calendar's private iCal link (calendar.spec.js),
+  // with one meeting on now.
+  const feed = await startCalendarFeed();
+  const owner = { name: 'Nathan', email: 'nathan@example.com' };
+  feed.set(
+    calendarFile(owner.email, [
+      vevent({
+        uid: 'partner-sync@e2e',
+        summary: 'Partner sync',
+        start: new Date(Date.now() - 60_000),
+        end: new Date(Date.now() + 30 * 60_000),
+        attendees: [{ name: 'Alice Moreau', email: 'alice@example.com' }, owner],
+      }),
+    ])
+  );
+  try {
+    await yap.invoke('calendar_add_link', { link: feed.url, kind: 'ics' });
+    const synced = await yap.invoke('calendar_sync');
+    const event = synced.events.find((e) => e.title === 'Partner sync');
+    expect(event).toBeTruthy();
+
+    // Take notes on it (the Meetings view's Start notes): a note with its name.
+    const noteId = await yap.invoke('calendar_event', { key: event.key, action: 'start' });
+    await expect.poll(() => visible(yap, 'notepad')).toBe(true);
+    const title = yap.notepad.getByRole('textbox', { name: 'Meeting title' });
+    await expect(title).toHaveValue('Partner sync');
+    await expect(title).not.toHaveClass(/auto/); // a real title, not a made-up one
+
+    // A minute of talk names a made-up title; this one stays, and the model
+    // isn't even asked.
+    const asked = fakeLlm.requests.filter((r) => r.kind === 'title').length;
+    await say(yap, ...BUDGET_TALK);
+    await yap.notepad.waitForTimeout(1_500);
+    await pauseAll(yap);
+    expect(fakeLlm.requests.filter((r) => r.kind === 'title')).toHaveLength(asked);
+    await expect(title).toHaveValue('Partner sync');
+    expect((await yap.invoke('note_get', { id: noteId })).title).toBe('Partner sync');
+  } finally {
+    await pauseAll(yap);
+    // Disconnected again: no meeting "on now" for the tests after this one.
+    const s = await yap.invoke('calendar_status');
+    for (const c of s.connections) await yap.invoke('calendar_disconnect', { id: c.id });
+    await feed.close();
+  }
+});
+
 test('"Started by mistake?": Keep keeps the meeting, Discard deletes it', async ({ yap, shot }) => {
   const pad = yap.notepad;
   const kept = await startMeeting(yap, 'Kept by mistake');
   await say(yap, ['you', 'Hi, Yap.']);
-  await pad.getByRole('button', { name: 'Stop', exact: true }).click();
+  await stopButton(pad).click();
   const ask = toast(pad, 'Started by mistake?');
   await expect(ask).toBeVisible({ timeout: 20_000 });
   await expect(ask).toContainText('Only a few words were captured. Keep this meeting or discard it.');
   await expect(ask.getByRole('button', { name: 'Discard' })).toBeVisible();
-  await shot(pad, '12-started-by-mistake');
+  await shot(pad, '24-started-by-mistake');
 
   // Keep: nothing written, nothing deleted; Resume and Generate summary.
   await ask.getByRole('button', { name: 'Keep' }).click();
@@ -342,23 +774,52 @@ test('"Started by mistake?": Keep keeps the meeting, Discard deletes it', async 
   await expect(pad.getByRole('button', { name: 'Generate summary' })).toBeVisible();
   expect(meetingNote(yap.readJson('notes.json'), 'Kept by mistake')?.id).toBe(kept.id);
   expect((await yap.invoke('note_get', { id: kept.id })).enhancedContent ?? '').toBe('');
-  await shot(pad, '13-kept-resume-generate');
+  await shot(pad, '25-kept-resume-generate');
 
-  // Generate summary, when wanted after all.
+  // Generate summary, when wanted after all: "+ Summary" loses its +.
   await pad.getByRole('button', { name: 'Generate summary' }).click();
   await expect(pad.getByRole('region', { name: 'Summary' }).locator('.rendered')).toBeVisible({ timeout: 15_000 });
   await expect(pad.getByRole('button', { name: 'Generate summary' })).toHaveCount(0);
+  await expect(tab(yap, 'Summary').locator('.plus')).toHaveCount(0);
 
   // Discard: the note goes, and the notepad with it.
   const gone = await startMeeting(yap, 'Discarded by mistake');
   await say(yap, ['you', 'Oops.']);
-  await pad.getByRole('button', { name: 'Stop', exact: true }).click();
+  await stopButton(pad).click();
   await toast(pad, 'Started by mistake?').getByRole('button', { name: 'Discard' }).click();
   await expectStore(yap, 'notes.json', (s) => !s.notes.some((n) => n.id === gone.id));
   await expect.poll(() => visible(yap, 'notepad')).toBe(false);
 });
 
-test('Stop writes the summary in steps; a failure says so and Retry works', async ({
+test('"Started by mistake?" asks on the Yap bar when no Yap window is on screen', async ({ yap, shot }) => {
+  const note = await startMeeting(yap, 'Bar by mistake');
+  await say(yap, ['you', 'Wrong button.']);
+  await closeNotepad(yap);
+  // The main window off screen too, as after a start-hidden launch.
+  await yap.invoke('plugin:window|close', { label: 'settings' });
+  await expect.poll(() => visible(yap, 'settings')).toBe(false);
+
+  // Ended from elsewhere (the bar's ■, an automatic stop): the bar asks.
+  await yap.invoke('meeting_end', {});
+  const bar = yap.overlay;
+  const card = bar.getByRole('status').filter({ hasText: 'Started by mistake?' });
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  await expect(card).toContainText('Only a few words were captured.');
+  await bar.waitForTimeout(300); // the card's entrance
+  await shot(bar, '26-started-by-mistake-on-bar');
+  try {
+    // The pretend cursor onto the card (bar.spec.js): it takes clicks.
+    await expect(() => yap.invoke('bar_simulate', { pointer: 'card:meeting-mistake' })).toPass();
+    await card.getByRole('button', { name: 'Discard' }).click();
+    await expect(card).toHaveCount(0);
+    await expectStore(yap, 'notes.json', (s) => !s.notes.some((n) => n.id === note.id));
+  } finally {
+    await yap.invoke('bar_simulate', { pointer: 'away' });
+    await yap.invoke('open_settings'); // back as the suite started it
+  }
+});
+
+test('Stop writes the summary in steps; a failure says so above the bar and Retry works', async ({
   yap,
   fakeLlm,
   shot,
@@ -372,17 +833,17 @@ test('Stop writes the summary in steps; a failure says so and Retry works', asyn
   // The model answers slowly, then fails.
   fakeLlm.delay('actionPlan', 2_500);
   fakeLlm.failNext('actionPlan', 1);
-  await pad.getByRole('button', { name: 'Stop', exact: true }).click();
+  await stopButton(pad).click();
   const summary = pad.getByRole('region', { name: 'Summary' });
   await expect(summary.locator('.steps')).toContainText('Step 2 of 3', { timeout: 20_000 });
   await expect(summary.locator('.stepline')).toContainText('into an action plan');
-  await shot(pad, '14-summary-step-2-of-3');
+  await shot(pad, '27-summary-step-2-of-3');
 
-  const failed = summary.getByRole('alert');
+  const failed = pad.getByRole('alert');
   await expect(failed).toContainText("The summary didn't come through", { timeout: 15_000 });
   await expect(failed).toContainText('HTTP 500');
-  await expect(pad.getByRole('button', { name: 'Generate summary' })).toBeVisible();
-  await shot(pad, '15-summary-error-retry');
+  await expect(pad.getByRole('button', { name: 'Generate summary' })).toHaveCount(0);
+  await shot(pad, '28-summary-error-retry');
 
   // Retry: the action plan.
   fakeLlm.delay('actionPlan', 0);
@@ -393,7 +854,7 @@ test('Stop writes the summary in steps; a failure says so and Retry works', asyn
   await expect(failed).toHaveCount(0);
   await expect(pad.getByRole('button', { name: 'Generate summary' })).toHaveCount(0);
   await expect(pad.getByRole('button', { name: 'Resume' })).toBeVisible();
-  await shot(pad, '16-summary-done');
+  await shot(pad, '29-summary-done');
 });
 
 test('a stop Yap makes itself writes the plan in the notepad, without bringing up Notes', async ({
@@ -417,7 +878,7 @@ test('a stop Yap makes itself writes the plan in the notepad, without bringing u
     await expect(pad.getByRole('region', { name: 'Summary' }).locator('.rendered')).toBeVisible({ timeout: 15_000 });
     expect(fakeLlm.requests.filter((r) => r.kind === 'actionPlan')).toHaveLength(plans + 1);
     await expectStore(yap, 'notes.json', (s) => !!s.notes.find((n) => n.id === note.id)?.enhancedContent);
-    await shot(pad, '18-auto-stop-plan-in-notepad');
+    await shot(pad, '30-auto-stop-plan-in-notepad');
     // …and the main window stayed where it was (no jump to Notes).
     await expect(
       main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Home', exact: true })
@@ -443,7 +904,7 @@ test('the meeting shortcut works with the notepad focused (in-page fallback)', a
   await pad.keyboard.press('Meta+Alt+KeyM');
   await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
   await expect(toast(pad, 'Started by mistake?')).toBeVisible({ timeout: 20_000 });
-  await shot(pad, '19-shortcut-stopped-in-notepad');
+  await shot(pad, '31-shortcut-stopped-in-notepad');
 });
 
 test('Settings → General → Meetings: open the notepad, split the screen', async ({ yap, main, shot }) => {
@@ -454,7 +915,7 @@ test('Settings → General → Meetings: open the notepad, split the screen', as
   await expect(open).toHaveAttribute('aria-pressed', 'true');
   await expect(split).toHaveAttribute('aria-pressed', 'false');
   await split.scrollIntoViewIfNeeded();
-  await shot(main, '17-settings-notepad-rows');
+  await shot(main, '32-settings-notepad-rows');
 
   await split.click();
   await expectStore(yap, 'config.json', (c) => c.meetingSplitScreen === true);
@@ -491,10 +952,10 @@ test('Settings → General → Meetings: open the notepad, split the screen', as
   await say(yap, ['them', 'QUIET-LINE nobody sees this until the end.']);
   const pad = yap.notepad;
   await expect(pad.getByText('Live transcript is off')).toBeVisible();
-  await expect(pad.getByRole('log', { name: 'Transcript' })).toHaveCount(0);
-  await shot(pad, '20-live-transcript-off');
+  await expect(transcript(pad)).toHaveCount(0);
+  await shot(pad, '33-live-transcript-off');
   await pauseAll(yap);
-  await expect(pad.getByRole('log', { name: 'Transcript' })).toContainText('QUIET-LINE');
+  await expect(transcript(pad)).toContainText('QUIET-LINE');
 
   await openSettings(main, 'General');
   await live.click();

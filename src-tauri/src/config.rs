@@ -362,6 +362,10 @@ pub struct YapConfig {
     /// (transcription goes on either way). On by default, as Wispr Flow.
     #[serde(default = "default_true")]
     pub meeting_live_transcript: bool,
+    /// The message the notepad's "Copy consent message" copies for the
+    /// meeting chat, as the person edited it. Empty: Yap's default.
+    #[serde(default)]
+    pub meeting_consent_message: String,
 
     /// Call detection (`meeting_detect.rs`): when Teams, Zoom, Meet, Slack,
     /// Discord, Webex… start using the mic, offer to take notes, and offer to
@@ -548,6 +552,7 @@ impl Default for YapConfig {
             meeting_open_notepad: true,
             meeting_split_screen: false,
             meeting_live_transcript: true,
+            meeting_consent_message: String::new(),
             meeting_detection: true,
             meeting_auto_start: false,
             meeting_detect_apps: std::collections::BTreeMap::new(),
