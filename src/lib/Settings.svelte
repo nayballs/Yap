@@ -36,6 +36,7 @@
   import { account, displayName, initAccount, initials } from './account.svelte.js';
   import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from './updates.svelte.js';
   import { meetingDetect } from './meetingDetect.svelte.js';
+  import CallAppIcon from './CallAppIcon.svelte';
   import { renderMarkdown } from './markdown.js';
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
@@ -1585,11 +1586,14 @@
                   <span class="callapps-desc">Work apps to start with. Personal ones like Discord and WhatsApp stay quiet unless you switch them on.</span>
                   <div class="callapps-grid">
                     {#each meetingDetect.apps as app (app.id)}
-                      <Toggle
-                        bind:checked={() => callAppAsks(app), (on) => setCallAppAsks(app.id, on)}
-                        label={app.label}
-                        disabled={!cfg.meetingDetection}
-                      />
+                      <div class="callapp">
+                        <CallAppIcon app={app.id} disabled={!cfg.meetingDetection} />
+                        <Toggle
+                          bind:checked={() => callAppAsks(app), (on) => setCallAppAsks(app.id, on)}
+                          label={app.label}
+                          disabled={!cfg.meetingDetection}
+                        />
+                      </div>
                     {/each}
                   </div>
                 </div>
@@ -2970,8 +2974,9 @@
     margin: 0;
     line-height: 1.5;
   }
-  /* General → Meetings → "Ask about calls in": one switch per call app, two
-     columns when the card is wide enough (each column ≥ 190px). */
+  /* General → Meetings → "Ask about calls in": one row per call app, [its
+     icon] [name] [switch], two columns when the card is wide enough (each
+     column ≥ 190px). */
   .callapps {
     display: flex;
     flex-direction: column;
@@ -2995,6 +3000,16 @@
   }
   .callapps-grid :global(.toggle-row .label) {
     font-weight: 500;
+  }
+  .callapp {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .callapp :global(.toggle-row) {
+    flex: 1;
+    min-width: 0;
   }
   .rm {
     background: none;

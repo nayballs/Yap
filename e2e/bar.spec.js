@@ -19,8 +19,10 @@ import {
   settingsDialog,
 } from './support/fixtures.js';
 import { windowFacts } from './support/win32.js';
+import { standInIcons } from './support/icons.js';
 
-test.use({ yapOptions: { name: 'bar' } });
+// Teams "installed" (a stand-in: test mode reads no installed apps' icons).
+test.use({ yapOptions: { name: 'bar', env: { YAP_E2E_APP_ICONS: standInIcons('bar') } } });
 
 const debug = (yap) => yap.invoke('bar_debug');
 const simulate = (yap, args) => yap.invoke('bar_simulate', args);
@@ -236,8 +238,13 @@ test('a call prompt is a "Meeting detected" card; answering one place answers bo
   const prompt = (await yap.invoke('meeting_detect_status')).prompt;
   expect(prompt).toMatchObject({ app: 'teams', kind: 'start' });
   if (prompt.inApp) await expect(main.getByRole('status').filter({ hasText: 'Teams call detected' })).toBeVisible();
+  // The app's own icon, as installed here (CallAppIcon, as in Settings).
+  const teamsIcon = card.locator('[data-app-icon="teams"]');
+  await expect(teamsIcon).toHaveAttribute('data-icon', 'installed');
+  await expect(teamsIcon.locator('img')).toBeVisible();
   await bar.waitForTimeout(300); // the card's entrance
   await shot(bar, '09-call-card');
+  await shot(card, '09-call-card-app-icon');
 
   // The card takes the pointer (and clicks) while the cursor is on it; its
   // ^ menu holds the other answers.
@@ -255,11 +262,12 @@ test('a call prompt is a "Meeting detected" card; answering one place answers bo
   expect((await yap.invoke('meeting_state')).recording).toBe(false);
   await callSim(yap, 'teams', false);
 
-  // Every call app gets its mark (or a stand-in): Google Meet's, here.
+  // An app that isn't installed shows its bundled mark: Google Meet's, here.
   await simulate(yap, { pointer: 'away' });
   await callSim(yap, 'meet', true);
   const meet = callCard(bar, 'Google Meet call');
   await expect(meet).toBeVisible();
+  await expect(meet.locator('[data-app-icon="meet"]')).toHaveAttribute('data-icon', 'mark');
   await bar.waitForTimeout(300);
   await shot(bar, '11-call-card-google-meet');
   // Its corner ✕ is "Not now".

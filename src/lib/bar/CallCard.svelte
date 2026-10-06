@@ -2,7 +2,8 @@
   // The call prompt on the Yap bar (bar.rs `Card` with style "call",
   // meeting_detect.rs `native::bar_card`), after Wispr's "Meeting detected"
   // card (screenshot 25) on the measured card tokens: one black row — the
-  // call app's mark, "Teams call" over "● Now", and a cream split button,
+  // call app's icon (CallAppIcon: its own as installed here, else its
+  // mark), "Teams call" over "● Now", and a cream split button,
   // [Yap] Record notes, whose ^ menu holds the other answers (Not now,
   // Don't ask for Teams). The ✕ on its top-left corner is the quiet answer,
   // as is fading after 30 s (a hairline runs along the bottom; paused while
@@ -15,6 +16,7 @@
   // the meeting has no call app.
   import yapLogo from '../../assets/yap-logo.svg';
   import { callAppIcon } from './callApps.js';
+  import CallAppIcon from '../CallAppIcon.svelte';
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
 
   /** @type {{ card: any, paused?: boolean, hovered?: boolean, onaction: (action: string) => void }} */
@@ -56,15 +58,12 @@
   </button>
 
   <span class="mark" aria-hidden="true">
-    {#if icon.kind === 'glyph'}
-      <svg viewBox="0 0 24 24"><path d={icon.path} fill={icon.color} /></svg>
-    {:else if icon.kind === 'monogram'}
-      <span class="letter" style={`color:${icon.color}`}>{icon.letter}</span>
-    {:else if card.icon === 'calendar'}
+    {#if icon.kind === 'phone' && card.icon === 'calendar'}
       <!-- A calendar meeting with no call app's mark (calendar.rs). -->
       <svg viewBox="0 0 24 24" fill="none" stroke="#26231c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="3" /><path d="M3.5 9.5h17M8 2.8v3.4M16 2.8v3.4" /></svg>
     {:else}
-      <svg viewBox="0 0 24 24" fill="none" stroke="#26231c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z" /></svg>
+      <!-- The app's own icon as installed here, else its mark (CallAppIcon). -->
+      <CallAppIcon app={card.app} />
     {/if}
   </span>
 
@@ -193,11 +192,6 @@
   .mark svg {
     width: 20px;
     height: 20px;
-  }
-  .letter {
-    font-size: 18px;
-    font-weight: 800;
-    line-height: 1;
   }
   .text {
     flex: 1;
