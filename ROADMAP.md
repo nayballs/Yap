@@ -843,7 +843,7 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
       meeting notes and transcripts (not your dictations, like Wispr), locally over Yap's
       bridge, with one-click **Add to Claude / Cursor / …** in Integrations plus a
       copyable config for everything else.
-- [ ] *(merged, dev check: fec18fd; Google needs its OAuth client)* **Calendar connection, local-first.** **Google in one click** (installed-app OAuth
+- [ ] *(merged, dev check: fec18fd; Google client set up 6 Oct, scope verification pending)* **Calendar connection, local-first.** **Google in one click** (installed-app OAuth
       with PKCE straight from the PC; read-only scopes; the token kept in Credential
       Manager) plus **any calendar by private iCal link** (Outlook, iCloud and others).
       No Yap server. Synced every ~15 min; the next 7 days; Wispr's filters (invitees
