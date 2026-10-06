@@ -18,9 +18,53 @@ on the PC.
 | Join links | `src-tauri/src/calendar/links.rs` |
 | Credential Manager | `src-tauri/src/calendar/vault.rs` |
 | A note's meeting (`Note::event`, `link_event`) | `src-tauri/src/notes.rs` |
-| UI | `src/lib/MeetingsView.svelte`, `src/lib/ConnectorsSection.svelte`, `src/lib/calendar.svelte.js`, `src/lib/CalendarLinkCard.svelte` |
+| UI | `src/lib/MeetingsView.svelte`, `src/lib/ConnectCalendarDialog.svelte`, `src/lib/ConnectorsSection.svelte`, `src/lib/calendar.svelte.js`, `src/lib/CalendarLinkCard.svelte`, `src/lib/CalendarMark.svelte` |
 
 ## Connecting a calendar
+
+### The "Connect your calendar" dialog
+
+Every **Connect calendar** outside Settings opens one centred dialog, Wispr
+Flow's connect modal in Yap's flows (`ConnectCalendarDialog.svelte`, mounted
+once by the main window; `openConnectDialog()` in `calendar.svelte.js`): the
+Meetings view's "No meetings found" card, the nudge after a meeting (which
+switches to the Meetings view first) and Integrations' Calendar card.
+
+- **On top**, a warm beige band with Yap's real pre-meeting card: the Yap
+  bar's `bar/CallCard.svelte` in its static `preview` mode (inert, hidden
+  from screen readers, no bar regions) on sample data, "Design review",
+  "● In 2 min · with Sam", **Join / & take notes** with its ^, so the
+  picture always matches the bar.
+- **Below**, "Connect your calendar", one line on what it gives you, and
+  three full-width outlined buttons with the providers' marks
+  (`CalendarMark.svelte`, shared with Settings → Connectors):
+  - **Continue with Google**: the one-click connect below, waiting in the
+    dialog ("Finish connecting in your browser…" with **Cancel**). Closing
+    the dialog doesn't stop it: finishing in the browser still connects,
+    with a toast. A build without Google's client keeps the button off with
+    "Google sign-in is in the installed Yap. In this build, use a private
+    iCal link below."
+  - **Continue with Outlook**: the publish-your-calendar steps (below) and
+    a field for the ICS link, in the dialog.
+  - **iCloud or another calendar**: where to find the private iCal link
+    (iCloud, Google's secret address, Fastmail…) and a field for it.
+
+  Yap fetches a link before keeping it, so a wrong one says why in the
+  dialog ("That calendar link doesn't work any more…").
+- **Connected**: "Calendar connected · 6 meetings in the next 7 days" (the
+  new calendar's meetings, on now or in the next 7 days: the
+  `yap-calendar-connected` event's `meetings`, which `calendar_add_link`
+  also returns) for about 2 seconds, then the dialog closes on a Meetings
+  view that already lists them. While it's open, a connection or a failed
+  Google sign-in shows in it rather than as a toast.
+- Wispr's measured dialog tokens (`notepad-spec.md`): a 30 % ink scrim, a
+  paper card (radius 20, about 506 px wide) with a hairline border and the
+  dialog shadow, scaling in. Esc, the round ✕ and the scrim close it; it's
+  labelled by its title, keeps the focus inside while open and gives it
+  back to the button that opened it (or the Meetings view's title, when a
+  connection replaced that button).
+
+### Settings → Connectors
 
 **Settings → Connectors** (the Connections group, above MCP), laid out like
 Wispr Flow's: a card per connector, **Connect** on the right, and once
@@ -30,8 +74,9 @@ connected, a row with the account and a **⋯** menu (**Sync now**,
 - **Google Calendar**: **Connect** opens Google's consent page in your
   browser. Approve, the page says "Calendar connected", and Yap lists your
   meetings. Only in builds that carry Google's client id (see
-  [Enabling Google](#enabling-google-for-the-maintainer)); others say so and
-  point at the iCal link instead.
+  [Enabling Google](#enabling-google-for-the-maintainer)); in others it
+  says "Google sign-in is in the installed Yap. In this build, use a private
+  iCal link below, under **Other calendar**."
 - **Outlook Calendar**: Yap has no Microsoft app yet, so **Connect** walks
   through publishing the calendar: Outlook on the web → Settings → Calendar
   → Shared calendars → **Publish a calendar**, your calendar, **Can view all
@@ -137,21 +182,31 @@ them.
 
 ### The Meetings view
 
-In the sidebar beside Notes: **Today** and **Upcoming** (the next 7 days,
-grouped by day), three at a time with **Show more**, each row with its
-time, name, service and attendees, a **Conflict** tag on overlapping
-meetings and **Maybe** on tentative ones. From 10 minutes before a meeting
-until its end, its row offers **Join meeting**, **Start** and **Join +
-Start** (just **Start** without a link; **Switch notes** / **Join + Switch**
-while another meeting records, and **Recording** · **Open note** on the one
-recording); opening a meeting makes or opens its note (a draft ahead of
-time: title, date, attendees, Meetings folder). Below, **Past meeting
-notes** with search, and an **Ask bar** that cycles example questions and
-asks Chat about your
-meetings (scope `meetings`: the three latest meetings and up to three that
-match the question, bounded for small local models), with **Past chats ↗**.
-Without a calendar it offers one; a "Connect your calendar" nudge also
-comes once after a meeting ends, and **Not now** means never.
+In the sidebar beside Notes, laid out like Wispr's Notetaker page. The
+header: the serif title, **Sync calendar** (an icon, while a calendar is
+connected), the settings gear, and **◉ Take notes**, the meeting
+shortcut as a button (`meeting_shortcut`, so `meeting_guard::start_or_stop`:
+notes on the call that's on, else a new "Meeting · …" note, opened in
+Notes; **■ Stop and summarise** while a meeting records). Then **Today** and
+**Upcoming** (the next 7 days, grouped by day), three at a time with **Show
+more**, each row with its time, name, service and attendees, a
+**Conflict** tag on overlapping meetings and **Maybe** on tentative ones.
+From 10 minutes before a meeting until its end, its row offers **Join
+meeting**, **Start** and **Join + Start** (just **Start** without a link;
+**Switch notes** / **Join + Switch** while another meeting records, and
+**Recording** · **Open note** on the one recording); opening a meeting
+makes or opens its note (a draft ahead of time: title, date, attendees,
+Meetings folder). Without a calendar, Today is one grey card, "No meetings
+found" and **Connect calendar** (the dialog above). Below, **Past meeting
+notes** by day ("TODAY, 6 OCT"), each with its time and attendees and,
+for a meeting with talk but no summary yet, **Generate summary** (its action
+plan, `meeting_summarise`, then the note opens to show it being written),
+with search; and an **Ask bar** that cycles example questions and asks Chat
+about your meetings (scope `meetings`: the three latest meetings and up to
+three that match the question, bounded for small local models), with
+**Past chats ↗**. A "Connect your calendar" nudge also comes once after a
+meeting ends (its **Connect calendar** opens the dialog over the Meetings
+view), and **Not now** means never.
 
 ### The reminder card
 
@@ -271,7 +326,7 @@ them at run time).
 
 ## Testing
 
-- **Unit tests** (`cargo test --lib calendar`, 46): parsing (unfolding,
+- **Unit tests** (`cargo test --lib calendar`, 48): parsing (unfolding,
   split UTF-8, broken lines, parameters), recurrence (weekly with EXDATE,
   moved and cancelled overrides, UNTIL/COUNT, a date-only UNTIL, RDATE, DST
   wall clock, an override moved into the window, unknown rule parts), time
@@ -282,7 +337,8 @@ them at run time).
   source order), invite cleanup, reminder timing (due, stays 5 minutes,
   snooze), matching a recording to the nearest meeting, placeholder titles,
   Google's events address and items, the card on the Yap bar (mark, status
-  line keeping time, answers) and as a Windows notification (its XML).
+  line keeping time, answers) and as a Windows notification (its XML), and
+  a new connection's count of meetings in the next 7 days.
 - **e2e** (`npm run test:app`): `e2e/calendar.spec.js` against a local iCal
   server (`e2e/support/calendar-feed.js`: a meeting a minute away with two
   attendees and a Teams link, a weekly recurring one, an all-day event,
@@ -297,9 +353,18 @@ them at run time).
   attendees, the bar's copy goes too, and its simulated call isn't asked
   about again); Esc, the bar's ^ menu snoozing it, a snoozed card coming
   back with its call, the bar's ✕; back-to-back switching (on the bar too); Google connect → meetings → ⋯ menu → Disconnect
-  (token revoked, meetings gone). `e2e/calendar-nudge.spec.js`: no calendar
-  yet (and a build without Google), the nudge once after a meeting and "Not
-  now", past notes with search and the Ask bar opening Chat. Test mode keeps
+  (token revoked, meetings gone); the "Connect your calendar" dialog from
+  every Connect calendar (the Meetings view's card, Integrations, the nudge
+  after a meeting), Esc / ✕ / the scrim closing it, the focus kept inside
+  and given back, the bar card in its band; an iCal link through it (the
+  Outlook steps, a reset link, then "Calendar connected · 7 meetings in the
+  next 7 days" and the dialog closing on the meetings) and Google through
+  it (waiting, Cancel, a refusal shown in the dialog, then connected).
+  `e2e/calendar-nudge.spec.js`: no calendar yet (the one grey card, the
+  dialog with Google off in a build without its client, and Connectors'
+  line), the nudge once after a meeting and "Not now", past notes by day
+  with search, Generate summary and the Ask bar opening Chat, and ◉ Take
+  notes starting and stopping meeting notes. Test mode keeps
   secrets in `calendar-secrets.e2e.json` in the portable data dir instead of
   Credential Manager, and records the links Yap would open
   (`calendar_e2e_opened`) instead of opening a browser. Screenshots:
