@@ -66,9 +66,13 @@
   aria-hidden={preview ? 'true' : undefined}
   inert={preview}
 >
-  <button class="x" data-region={region} aria-label="Close" onclick={() => answer(card.closeAction)}>
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
-  </button>
+  {#if !preview}
+    <!-- Not on the picture of the card: Wispr's illustration has no ✕ either,
+         and the dialog showing it has its own. -->
+    <button class="x" data-region={region} aria-label="Close" onclick={() => answer(card.closeAction)}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+    </button>
+  {/if}
 
   <span class="mark" aria-hidden="true">
     {#if icon.kind === 'glyph'}
