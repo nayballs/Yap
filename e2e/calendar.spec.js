@@ -352,6 +352,8 @@ test('the reminder card: Join & take notes records into a note with the meeting\
   await expect(onBar).toContainText(/In \d min|Starting now/);
   await expect(onBar).toContainText('with Tanay +1');
   await expect(onBar.locator('.dot.soon')).toBeVisible();
+  // (Teams' letter badge: test mode reads no installed apps' icons.)
+  await expect(onBar.locator('[data-app-icon="teams"]')).toHaveAttribute('data-icon', 'letter');
   await expect(onBar.getByRole('button', { name: 'Join & take notes' })).toBeVisible();
   await expect(onBar.getByRole('button', { name: 'Close' })).toBeVisible();
   await yap.overlay.waitForTimeout(300); // the card's entrance
@@ -438,6 +440,7 @@ test('Esc dismisses a card and call detection stays quiet about that meeting; a 
   // other answers in its ^ menu. Snoozed there, it leaves the window too.
   const onBar = barCard(yap, 'Roadmap chat');
   await expect(onBar).toBeVisible();
+  await expect(onBar.locator('[data-app-icon]')).toHaveCount(0); // the calendar
   await expect(onBar.getByRole('button', { name: 'Start notes' })).toBeVisible();
   await pointer(yap, 'card:calendar');
   await expect.poll(() => yap.invoke('bar_debug').then((d) => d.interactive)).toBe(true);
@@ -620,6 +623,8 @@ test('Connect calendar opens the "Connect your calendar" dialog (the Meetings vi
   await expect(dialog.getByText('In 2 min · with Sam')).toBeVisible();
   await expect(dialog.getByText('& take notes')).toBeVisible();
   await expect(dialog.getByRole('button', { name: /Join|More answers/ })).toHaveCount(0);
+  // Its sample is a Google Meet call: Meet's mark (a web app, never installed).
+  await expect(dialog.locator('[data-app-icon="meet"]')).toHaveAttribute('data-icon', 'mark');
   // Three ways in; this build has Google's client (the fake's).
   for (const name of ['Continue with Google', 'Continue with Outlook', 'iCloud or another calendar']) {
     await expect(dialog.getByRole('button', { name })).toBeEnabled();

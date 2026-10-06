@@ -6949,6 +6949,7 @@ dependencies = [
  "getrandom 0.3.4",
  "keyring-core",
  "once_cell",
+ "png 0.18.1",
  "qrcode",
  "regex",
  "reqwest 0.12.28",

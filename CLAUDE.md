@@ -92,7 +92,8 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 - **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`,
   `history.json`, `notes.json` — the AI Notepad store, `chats.json` — AI Chat
   conversations, `updates.json` — update announcements + the restart marker,
-  `calendar.json` — connected calendars + the next week of meetings).
+  `calendar.json` — connected calendars + the next week of meetings,
+  `icons/` — a cache of the installed call apps' own icons, `app_icons.rs`).
   Every JSON store writes atomically and quarantines a corrupt file on load
   instead of crashing (`config::atomic_write`/`quarantine_corrupt`, used by all
   seven stores).
@@ -419,8 +420,9 @@ before `meeting::ingest`) and on an Upload's whole text.
   **once per call**, never while already recording, in one of two styles
   (`config.meeting_detect_style`): **"popup"** (default) — a sticky in-app
   toast when the main window is visible, and when it isn't focused a card on
-  the **Yap bar** (`native::bar_card`: Wispr's "Meeting detected" card — app
-  mark, "Teams call" over "● Now", split button Record notes | ^ Not now /
+  the **Yap bar** (`native::bar_card`: Wispr's "Meeting detected" card — the
+  app's icon (its own as installed, `app_icons.rs`, else its mark), "Teams
+  call" over "● Now", split button Record notes | ^ Not now /
   Don't ask for Teams, corner ✕; the call ending asks in a notice card; the
   bar off or hidden → a silent Windows notification via `win_toast.rs`, as
   before); answering either withdraws both,
@@ -477,9 +479,35 @@ before `meeting::ingest`) and on an Upload's whole text.
   active, fadeMs?)` (no debounce; `fadeMs` shortens that call's fade) for the
   e2e suite. Gated by `config.meeting_detection` (default **on**, as
   OpenWhispr's `notifyMeetingDetection`; `sync()` on every config save re-reads
-  the style and per-app choices too). Lock rule: never touch windows/WinRT
+  the style and per-app choices too). `mic_records()` hands `app_icons.rs` the
+  call apps' consent-store keys (exe paths, package families) and their
+  `LastUsedTimeStart`, nothing else. Lock rule: never touch windows/WinRT
   while holding its state lock (window getters wait on the main thread). See
   [`docs/meetings.md`](./docs/meetings.md).
+- **`app_icons.rs`** — the call apps' **own icons as installed on this PC**
+  (`meeting_app_icons` → `{appId: data URL}`, off the main thread) for
+  Settings' "Ask about calls in" list and the bar's call card
+  (`CallAppIcon.svelte`). Read-only and local (nothing launched, no network;
+  only icon and manifest files, plus the consent-store keys call detection
+  reads): **desktop apps** from the exe paths in the microphone record
+  (`meeting_detect::mic_records`, most recently used first), then the usual
+  install folders (`KNOWN_PATHS`; Squirrel's `app-*` → the newest with the
+  exe) — the exe's icon at 48 px (`SHDefExtractIconW` → `GetIconInfo` →
+  32-bit `GetDIBits` → straight RGBA, alpha or mask → PNG via the `png`
+  crate, already built for arboard); **packaged apps** (new Teams, WhatsApp,
+  Telegram/Slack from the Store) from the consent store's family names +
+  `FAMILIES` → `GetPackagesByPackageFamily` + `GetPackagePathByFullName` →
+  `AppxManifest.xml`'s `Square44x44Logo` (a small tag scanner; the listed
+  application's, else the store logo) → the variant made for a light
+  background at ~48 px (`targetsize-48_altform-lightunplated`; high-contrast
+  and dark-theme ones last, folder qualifiers too). Cache `<data>/icons/
+  <app>.png` + `sources.json` (path, size, mtime, when made): remade when the
+  source changes or after a week, dropped when the app's gone. With call
+  detection off the microphone record isn't read. Browser-only apps (Meet,
+  Whereby, Jitsi) have none: their bundled mark. Test mode reads no
+  installed apps: debug-only `YAP_E2E_APP_ICONS` names a folder of stand-in
+  `<app>.png`s. An `#[ignore]`d unit test (`this_machine`, `YAP_ICONS_OUT`)
+  runs the real thing read-only and writes the cache somewhere to look at.
 - **`meeting_guard.rs`** — guard rails around a meeting recording (Phase 8,
   Wispr Flow's Notetaker settings) + their notices. **Maximum recording
   length** (`config.meeting_max_minutes`: 60/120/180/240, 0 = no limit,
@@ -945,7 +973,9 @@ before `meeting::ingest`) and on an Upload's whole text.
   paste/Enter/Ctrl+C into other apps, no `set_focus` (tao's fallback presses Alt
   in the focused app), no Windows notifications, no orphan-sidecar sweep, no
   window-state plugin, no call-detection registry reads (the debug-only
-  `meeting_detect_simulate` stands in), no audio device for meeting recordings
+  `meeting_detect_simulate` stands in), no installed apps' icons (the
+  debug-only `YAP_E2E_APP_ICONS` folder of stand-ins, `app_icons_dir`), no
+  audio device for meeting recordings
   (`spawn_meeting_audio`: `you.wav`/`them.wav` from `YAP_E2E_MEETING_AUDIO` at
   `YAP_E2E_MEETING_SPEED`× real time, or silence; a configured mic that isn't
   plugged in still fails, found by listing devices; it pushes through
@@ -1208,8 +1238,12 @@ before `meeting::ingest`) and on an Upload's whole text.
   `rgb(179,178,173)`, a ghost button and a cream (`rgb(255,255,235)`) one at
   radius 8, the ✕ 24×24 at 30 % top-right. `bar/CallCard.svelte` (the call
   prompt as Wispr's "Meeting detected" card, on the same tokens but one row
-  with slimmer padding: the app's mark from `bar/callApps.js` — Simple Icons
-  CC0 glyphs, monograms for Teams/Slack/Webex/Whereby, a phone otherwise —
+  with slimmer padding: the app's icon on a light tile, drawn by the shared
+  `lib/CallAppIcon.svelte` — its own as installed here (`app_icons.rs`,
+  loaded per window by `callAppIcons.svelte.js` when first drawn, again after
+  10 min), else its mark from `bar/callApps.js` (Simple Icons CC0 glyphs),
+  else a letter badge in its colour (Teams/Slack/Webex/Whereby), else a
+  phone; `data-icon` names which —
   "Teams call" over "● Now", a cream split button [Yap] Record notes with the
   other answers in its ^ menu, a corner ✕, a 30 s fade hairline, the
   countdown ring; also the calendar's reminder, "Design review" over "● In
@@ -1300,9 +1334,11 @@ before `meeting::ingest`) and on an Upload's whole text.
   target of `yap-settings-goto` "general#meetings"): "Detect calls and offer to
   take notes" (`meetingDetection`), then — disabled while it's off — "How Yap
   asks" (`ui/Segmented` Pop-up / Quietly → `meetingDetectStyle`, a one-line
-  explanation of the choice) and "Ask about calls in" (a two-column list of
-  switches, one per call app from the `meetingDetect.apps` snapshot, showing
-  the effective choice; a flip writes `meetingDetectApps[app]`; a
+  explanation of the choice) and "Ask about calls in" (a two-column list,
+  one row per call app from the `meetingDetect.apps` snapshot: [its icon,
+  `CallAppIcon` at 20 px — the real one as installed, else its mark or
+  letter; greyed with the switch while detection is off] [name] [switch],
+  showing the effective choice; a flip writes `meetingDetectApps[app]`; a
   `yap-meeting-detect-choice` from Rust is adopted into Settings' config copy
   so auto-save can't undo it), then, in Wispr's order: the guard rails
   "When a call ends" (Select: Ask me / Stop and summarise automatically →
@@ -1653,6 +1689,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   an installed copy, by the uninstaller's "Delete the application data".
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`).
+- App icons: `%APPDATA%/yap/icons/` — `<app>.png` per installed call app and
+  `sources.json` (what each was made from); a cache, rebuilt whenever it's
+  missing, stale or unreadable (`app_icons.rs`).
 - Local API bridge discovery: `~/.yap/cli-bridge.json` (fixed path, NOT the
   data dir; written while the app runs, deleted on exit — see `bridge.rs` +
   `docs/local-api.md`).

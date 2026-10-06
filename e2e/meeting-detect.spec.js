@@ -7,7 +7,9 @@
 // `fadeMs` shortens a prompt's 30 s fade), and a recording opens no audio
 // device (it's silent here; e2e.rs), so it runs the same with or without a
 // microphone. Each test uses its own call app — "Not now" quiets an app for
-// 5 minutes, and the tests share one instance.
+// 5 minutes, and the tests share one instance. Nor does test mode read the
+// apps installed here for their icons: Teams and Discord get stand-ins
+// (support/icons.js), the rest their bundled marks.
 import {
   test,
   expect,
@@ -19,8 +21,9 @@ import {
   settingsDialog,
   mainOnScreen,
 } from './support/fixtures.js';
+import { standInIcons } from './support/icons.js';
 
-test.use({ yapOptions: { name: 'meeting-detect' } });
+test.use({ yapOptions: { name: 'meeting-detect', env: { YAP_E2E_APP_ICONS: standInIcons('meeting-detect') } } });
 
 const toast = (main, title) => main.getByRole('status').filter({ hasText: title });
 /** A call starting (or ending). The prompt goes in-app only while the main
@@ -287,6 +290,35 @@ test('Settings lists how Yap asks and the apps it asks about', async ({ yap, mai
   const zoom = await callApps(main).getByRole('button', { name: 'Zoom', exact: true }).boundingBox();
   const teams = await callApps(main).getByRole('button', { name: 'Teams', exact: true }).boundingBox();
   expect(Math.abs(zoom.y - teams.y)).toBeLessThan(4); // side by side
+
+  // Every row: [icon] name [switch]. The app's own icon as installed (the
+  // stand-ins), else its bundled mark, else a letter in its colour (Simple
+  // Icons has no Teams, Slack, Webex or Whereby).
+  const kinds = {
+    teams: 'installed', zoom: 'mark', meet: 'mark', webex: 'letter', slack: 'letter', goto: 'mark',
+    whereby: 'letter', jitsi: 'mark', discord: 'installed', whatsapp: 'mark', signal: 'mark', telegram: 'mark',
+  };
+  const iconXs = new Set();
+  const switchXs = new Set();
+  for (const app of apps) {
+    const icon = callApps(main).locator(`[data-app-icon="${app.id}"]`);
+    await expect(icon).toHaveAttribute('data-icon', kinds[app.id]);
+    const [box, name, toggle] = await Promise.all([
+      icon.boundingBox(),
+      callApps(main).getByText(app.label, { exact: true }).boundingBox(),
+      callApps(main).getByRole('button', { name: app.label, exact: true }).boundingBox(),
+    ]);
+    expect([Math.round(box.width), Math.round(box.height)]).toEqual([20, 20]);
+    expect(box.x + box.width).toBeLessThanOrEqual(name.x - 6); // before its name
+    expect(Math.abs(box.y + box.height / 2 - (toggle.y + toggle.height / 2))).toBeLessThan(2); // on its row
+    iconXs.add(Math.round(box.x));
+    switchXs.add(Math.round(toggle.x));
+  }
+  // Two columns, each lined up.
+  expect([iconXs.size, switchXs.size]).toEqual([2, 2]);
+  const installed = callApps(main).locator('[data-app-icon="discord"] img');
+  expect(await installed.evaluate((img) => [img.complete, img.naturalWidth])).toEqual([true, 48]);
+  await shot(callApps(main), '09-settings-call-app-icons');
   await shot(main, '09-settings-meetings');
 
   // Switching one on saves it and Yap asks about its calls at once.
@@ -316,6 +348,11 @@ test('the Settings toggle turns call detection off', async ({ yap, main, shot })
   // How and about which apps it asks wait, greyed out, until it's back on.
   await expect(meetings.getByRole('tab', { name: 'Quietly' })).toBeDisabled();
   await expect(callApps(main).getByRole('button', { name: 'Zoom', exact: true })).toBeDisabled();
+  for (const app of ['zoom', 'teams']) {
+    const icon = callApps(main).locator(`[data-app-icon="${app}"]`);
+    await expect(icon).toHaveCSS('filter', 'grayscale(1)');
+    await expect(icon).toHaveCSS('opacity', '0.5');
+  }
   await meetings.scrollIntoViewIfNeeded();
   await shot(main, '10-settings-detection-off');
   await closeSettings(main);
@@ -331,6 +368,7 @@ test('the Settings toggle turns call detection off', async ({ yap, main, shot })
   await expectStore(yap, 'config.json', (c) => c.meetingDetection === true);
   await expect.poll(() => status(yap).then((s) => s.enabled)).toBe(true);
   await expect(callApps(main).getByRole('button', { name: 'Zoom', exact: true })).toBeEnabled();
+  await expect(callApps(main).locator('[data-app-icon="zoom"]')).toHaveCSS('filter', 'none');
   await closeSettings(main);
   await simulate(yap, 'goto', true);
   await expect(toast(main, 'GoTo Meeting call detected')).toBeVisible();

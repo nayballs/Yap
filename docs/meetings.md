@@ -906,14 +906,14 @@ has passed, so no prompt).
     30 s and treats it as a dismissal). It stays while the pointer is on it.
   - Main window hidden, minimized or behind the call app: a card on the
     **Yap bar** (`bar.rs`), after Wispr Flow's "Meeting detected" card: the
-    call app's mark, "Teams call" over "● Now", a cream split button
+    call app's icon, "Teams call" over "● Now", a cream split button
     **[Yap] Record notes** whose **^** menu holds **Not now** and **Don't
     ask for Teams**, and a small **✕** on its top-left corner (Not now). It
     fades after 30 s as Not now, like the toast, and pauses while the
     pointer is on it. (The call ending asks in an ordinary bar card: "Teams
-    call ended", Keep recording / Stop and summarise.) The marks are Simple Icons glyphs (CC0) where
-    Simple Icons has them; Teams, Slack, Webex and Whereby get a monogram in
-    their colour, anything else a phone. With the bar off or hidden for an
+    call ended", Keep recording / Stop and summarise.) The icon is the app's
+    own as installed on this PC, else its bundled mark or a letter in its
+    colour (see [App icons](#app-icons)). With the bar off or hidden for an
     hour, a silent Windows notification with Yap's logo and the same three
     answers as buttons, as before. If the window is open but not focused,
     both surfaces show; answering one withdraws the other. Focusing the
@@ -1013,9 +1013,11 @@ exist. Under it, greyed out while it's off:
 
 - **How Yap asks**: Pop-up / Quietly (`meetingDetectStyle`), with a line on
   what the choice means.
-- **Ask about calls in**: a switch per call app in two columns, showing what
-  Yap does now (the person's choice, else the default above). Flipping one
-  saves it in `meetingDetectApps`.
+- **Ask about calls in**: a row per call app in two columns, [its icon]
+  [name] [switch], the switch showing what Yap does now (the person's
+  choice, else the default above). Flipping one saves it in
+  `meetingDetectApps`. The icons ([App icons](#app-icons)) line up in both
+  columns and grey out with the switches.
 
 Then the [guard rails](#guard-rails): when a call ends (greyed out with
 detection, as call ends come from it), the maximum recording length, hiding
@@ -1029,6 +1031,55 @@ call? Let people know you're taking notes." Changes go through the usual
 config save, and the detector applies them at once (`meeting_detect::sync`).
 Switching detection off withdraws any prompt (a recording in progress carries
 on) and stops all detection work.
+
+### App icons
+
+The call apps show their real icons, as installed on this PC, beside the
+switches in Settings and on the bar's call card, the way Wispr's "Meeting
+detected" card shows Discord's. One component draws them
+(`src/lib/CallAppIcon.svelte`), in this order:
+
+1. **The app's own icon as installed here** (`app_icons.rs`, the
+   `meeting_app_icons` command);
+2. its bundled mark (`src/lib/bar/callApps.js`: Simple Icons, CC0);
+3. a letter badge in its colour: Teams, Slack, Webex and Whereby, which
+   Simple Icons doesn't carry (their owners had them removed);
+4. a phone, for anything else.
+
+Google Meet, Whereby and Jitsi Meet run in a browser, so they always show
+their mark or letter.
+
+Where Yap finds the installed icons, read-only and local (nothing launched,
+no network, only icon and manifest files read):
+
+- **Desktop apps**: the exe paths in the microphone record call detection
+  reads anyway (`NonPackaged\<path>`, the most recently used first), then
+  each app's usual install folders (`%LOCALAPPDATA%\Discord\app-*\Discord.exe`,
+  `%APPDATA%\Zoom\bin\Zoom.exe`, Slack, Webex, GoTo, Signal, Telegram…; for a
+  Squirrel `app-*` folder, the newest that has the exe). Windows draws the
+  exe's icon at 48 px (`SHDefExtractIconW`); Yap reads its pixels (alpha, or
+  the mask for an old-style icon) and saves them as a PNG.
+- **Packaged apps** (new Teams, WhatsApp, Telegram or Slack from the Store):
+  the family names in the microphone record, plus the known ones for these
+  apps (an app installed but never on the mic isn't in the record), lead to
+  the install folder (`GetPackagesByPackageFamily`,
+  `GetPackagePathByFullName`). Its `AppxManifest.xml` names the app list logo
+  (`Square44x44Logo` of the application shown in the app list), and of that
+  logo's variants Yap takes the one made for a light background at about
+  48 px (`…targetsize-48_altform-lightunplated.png`), never a high-contrast
+  or dark-theme one while there's another.
+
+The icons are cached in `<data>/icons/<app>.png`, with `sources.json`
+noting what each was made from (the file, its size and modified time). An
+icon is made again when its source changes (an update) or after a week, and
+an uninstalled app loses its icon. The command runs off the main thread;
+each window asks the first time it draws an icon and again 10 minutes later,
+showing the bundled marks until the answer comes. With **Detect calls** off,
+Yap doesn't read the microphone record for icons either; the usual install
+folders still find most apps.
+
+On the development PC: Discord (its exe), Teams and WhatsApp (both from the
+Store) resolve to their own icons.
 
 ### Testing
 
@@ -1047,6 +1098,16 @@ on) and stops all detection work.
 - Read-only check of this PC's microphone record:
   `cargo test --lib meeting_detect::tests::this_machine -- --ignored --nocapture`
   (prints exe/package names and recognised meetings only, never window titles).
+- App icons (`cargo test --lib app_icons`): the manifest's logo (fixture
+  XML: a hidden helper application first, comments, entities, Windows 8
+  names, the store logo), the variant chosen for a light background at
+  48 px (on disk too, from a resource package and qualifier folders, never
+  outside the package), `%VARS%` and Squirrel `app-*` paths, the tables
+  naming apps in `APPS`, the microphone record first, an icon's pixels back
+  out of an HICON (alpha and mask icons) and through PNG, the cache (reused,
+  remade after a change or a week, dropped with the app), and the stand-ins.
+  The real thing, read-only, writing the cache where you can look at it:
+  `YAP_ICONS_OUT=<folder> cargo test --lib app_icons::tests::this_machine -- --ignored --nocapture`.
 - e2e (`npm run test:app`): `e2e/meeting-detect.spec.js` and
   `e2e/meeting-detect-no-mic.spec.js` drive the flow through the debug-only
   `meeting_detect_simulate { appId, active, fadeMs? }` hook (no debounce;
@@ -1057,10 +1118,14 @@ on) and stops all detection work.
   configured microphone that isn't plugged in, the error and no note left
   behind), Stop and summarise, Discord not asked about by default, "Don't ask
   for Teams" (the confirmation, Settings showing it off, switching it back on),
-  the quiet style, the Settings list, and the master toggle. The tray item and
-  the Windows notifications can't be driven over CDP: their logic is in the
-  unit tests. `e2e/bar.spec.js` covers the prompt as a card on the Yap bar
-  (its menu, its ✕, an app's mark), over a borderless and an exclusive
+  the quiet style, the Settings list (every row's icon: its kind, 20 px,
+  before the name, lined up in two columns, greyed with detection off), and
+  the master toggle. Test mode reads no installed apps' icons: the specs give
+  Teams and Discord stand-ins (`YAP_E2E_APP_ICONS`, `e2e/support/icons.js`),
+  so both kinds show. The tray item and the Windows notifications can't be
+  driven over CDP: their logic is in the unit tests. `e2e/bar.spec.js`
+  covers the prompt as a card on the Yap bar (its menu, its ✕, Teams'
+  installed icon and Meet's mark), over a borderless and an exclusive
   fullscreen app, and the countdown (Esc cancels; left alone it records; the
   end card follows). A test run never counts the main window as focused, so
   the card shows whatever the desktop does around the suite.
@@ -1070,6 +1135,13 @@ on) and stops all detection work.
 - Apps not in `APPS`/browser titles aren't detected (record manually from a note).
 - Exe names for Webex and GoTo installs vary by version. Only Teams, Discord
   and a browser have been seen in the consent store on the development PC.
+  The same goes for their icons: the install folders `app_icons.rs` knows
+  for Zoom, Slack, Webex, GoTo, Signal and Telegram are those apps' usual
+  ones, not yet checked against a real install (the microphone record finds
+  any that took the mic). A Store app outside the known families is found
+  only once it's been on the mic.
+- Simple Icons' Zoom mark is its wordmark, which reads small at 20 px (Zoom
+  installed shows its own icon instead).
 - The Windows notification's three buttons share its width, so a long label
   like "Don't ask for Google Meet" may be cut short there (the in-app link
   has a line of its own). Not yet seen on a real notification.

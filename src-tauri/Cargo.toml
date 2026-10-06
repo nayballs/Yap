@@ -82,6 +82,10 @@ qrcode = { version = "0.14", default-features = false }
 chrono-tz = "0.10"
 rrule = "0.14"
 
+# Call apps' own icons (app_icons.rs): an exe's icon, drawn by Windows, saved
+# as a PNG. Already built for arboard's image support; this just names it.
+png = "0.18"
+
 # Model download + directory-model extract/verify (used by stt.rs)
 reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"

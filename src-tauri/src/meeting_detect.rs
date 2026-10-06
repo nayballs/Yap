@@ -336,6 +336,52 @@ fn classify(src: &Source) -> Option<Kind> {
     }
 }
 
+/// The call app a desktop exe is ("Discord.exe" → "discord"): `app_icons.rs`
+/// checks its tables against `APPS` with these.
+#[cfg(test)]
+pub(crate) fn app_of_exe(file_name: &str) -> Option<&'static str> {
+    match classify(&Source::Exe(file_name.to_ascii_lowercase())) {
+        Some(Kind::Call(id)) => Some(id),
+        _ => None,
+    }
+}
+
+/// The call app a package family is ("MSTeams_8wekyb3d8bbwe" → "teams").
+#[cfg(test)]
+pub(crate) fn app_of_family(family: &str) -> Option<&'static str> {
+    match classify(&package_source(family)) {
+        Some(Kind::Call(id)) => Some(id),
+        _ => None,
+    }
+}
+
+/// A call app in Windows' microphone record, whether or not it's on the mic
+/// now — where `app_icons.rs` finds the app's exe or package.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MicRecord {
+    pub app: &'static str,
+    /// The subkey's name: a desktop exe's path with `\` spelled `#`, or a
+    /// packaged app's family name.
+    pub key: String,
+    pub packaged: bool,
+    /// When it last took the mic (`LastUsedTimeStart`, a FILETIME; 0 if
+    /// never).
+    pub last_used: u64,
+}
+
+/// The call apps in the microphone record (the keys and values the scan
+/// reads; nothing else).
+pub(crate) fn mic_records() -> Vec<MicRecord> {
+    #[cfg(windows)]
+    {
+        registry::call_app_records()
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
 /// The meeting service a browser window shows, from its title.
 fn app_in_title(title: &str) -> Option<&'static App> {
     let t = title.to_lowercase();
@@ -1701,6 +1747,33 @@ mod registry {
         if let Some(desktop) = open(mic.0, "NonPackaged", KEY_READ) {
             for sub in subkeys(&desktop) {
                 check(&desktop, &sub, exe_source(&sub));
+            }
+        }
+        out
+    }
+
+    /// Every call app's entry, on the mic or not: its subkey and when it
+    /// last took the mic (`app_icons.rs` finds the installed apps there).
+    pub fn call_app_records() -> Vec<super::MicRecord> {
+        let Some(mic) = open(HKEY_CURRENT_USER, MIC, KEY_READ) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let mut add = |key: &Key, sub: String, packaged: bool| {
+            let src = if packaged { package_source(&sub) } else { exe_source(&sub) };
+            if let Some(super::Kind::Call(app)) = classify(&src) {
+                let last_used = qword(key, &sub, "LastUsedTimeStart");
+                out.push(super::MicRecord { app, key: sub, packaged, last_used });
+            }
+        };
+        for sub in subkeys(&mic) {
+            if !sub.eq_ignore_ascii_case("NonPackaged") {
+                add(&mic, sub, true);
+            }
+        }
+        if let Some(desktop) = open(mic.0, "NonPackaged", KEY_READ) {
+            for sub in subkeys(&desktop) {
+                add(&desktop, sub, false);
             }
         }
         out
