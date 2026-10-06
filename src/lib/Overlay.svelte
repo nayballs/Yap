@@ -1,14 +1,18 @@
 <script>
   // The Yap bar (the `overlay` window; behaviour in src-tauri/src/bar.rs).
   // One fixed-size transparent window, bottom-centre on the monitor with the
-  // cursor; everything is drawn inside it:
-  //   idle      a tiny dark pill outline;
+  // cursor; everything is drawn inside it, to the measurements of Wispr
+  // Flow's Flow Bar (E:\Projects\references\wispr-flow\flowbar-spec.md):
+  //   idle      a 40 × 8 pill outline, its bottom 14 px above the work area,
+  //             in a 60 × 20 hit wrapper;
   //   hover     it opens into 🎤 Dictate, ◉ Meeting notes and a ^ menu, with
   //             a tooltip naming each button's shortcut;
   //   dictating the dictation overlay (waveform, live text, Transcribing…,
   //             the error) in the pill's place;
-  //   meeting   a compact recording pill: dot, waveform, timer, stop;
-  //   cards     above it: Yap's notices while its window isn't focused.
+  //   meeting   a 69 × 30 recording pill at half opacity (5 bars, the stop
+  //             circle) that shows its timer when hovered;
+  //   cards     26 px above the pill: Yap's notices while its window isn't
+  //             focused, the first nearest the pill.
   // The window is click-through except over what this page reports as
   // interactive (`data-region`: the pill's hover zone, cards, the menu):
   // Rust watches the cursor against those rects and makes the window
@@ -19,7 +23,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, untrack } from 'svelte';
-  import { fly, fade, scale } from 'svelte/transition';
+  import { fade, scale } from 'svelte/transition';
   import { flip } from 'svelte/animate';
   import { cubicOut } from 'svelte/easing';
   import { formatHotkeySpec } from './hotkeys.js';
@@ -71,8 +75,12 @@
             : 'idle'
   );
   const hovering = $derived(pointer === 'pill' || pointer === 'menu' || domHover);
-  // At most two cards, the newest nearest the pill.
+  // At most two cards: the first stays nearest the pill and a second one
+  // goes above it (Wispr's stacking), so a card being read never jumps.
   const cards = $derived(bar.enabled ? bar.cards.slice(-2) : []);
+  // The pill's place, measured: cards sit 26 px above the pill whatever it
+  // shows (the stage's 8 px + the dock + 20 px), gliding when it grows.
+  let dockH = $state(20);
 
   // Open on hover; close a moment after the pointer leaves, so moving
   // between the pill and its menu doesn't snap it shut.
@@ -261,13 +269,13 @@
 
 
 <div class="stage" class:top={bar.edge === 'top'} class:pop={popping} onpointermove={onStageMove} role="presentation">
-  <div class="cards">
+  <div class="cards" style={`${bar.edge === 'top' ? 'top' : 'bottom'}:${8 + Math.max(dockH, 20) + 20}px`}>
     {#each cards as card (card.id)}
       <div
         class="cardwrap"
-        animate:flip={{ duration: 220, easing: cubicOut }}
-        in:fly={{ y: bar.edge === 'top' ? -10 : 10, duration: 260, easing: cubicOut }}
-        out:fade={{ duration: 170 }}
+        animate:flip={{ duration: 160, easing: cubicOut }}
+        in:fade={{ duration: 120 }}
+        out:fade={{ duration: 120 }}
       >
         {#if card.style === 'call'}
           <CallCard
@@ -279,13 +287,15 @@
         {:else}
           <BarCard {card} paused={pointer === `card:${card.id}` || !bar.shown} onaction={(a) => cardAction(card, a)} />
         {/if}
+        <!-- Wispr's 4 px hit strip on the pill's side of every card. -->
+        <span class="strip" data-region={`card:${card.id}`} aria-hidden="true"></span>
       </div>
     {/each}
   </div>
 
-  <div class="dock">
+  <div class="dock" bind:clientHeight={dockH}>
     {#if mode === 'dictation'}
-      <div class="slot" in:scale={{ start: 0.7, duration: 220, easing: cubicOut }} out:fade={{ duration: 120 }}>
+      <div class="hit quiet" in:scale={{ start: 0.7, duration: 220, easing: cubicOut }} out:fade={{ duration: 120 }}>
         <DictationCapsule />
       </div>
     {:else if mode === 'meeting'}
@@ -297,7 +307,7 @@
         onpointerleave={() => (domHover = false)}
       >
         <div class="slot" in:scale={{ start: 0.7, duration: 220, easing: cubicOut }} out:fade={{ duration: 120 }}>
-          <div class="meeting" aria-label="Recording meeting notes">
+          <div class="meeting" class:hot={hovering} aria-label="Recording meeting notes">
             <button
               class="mbody"
               aria-label="Open the meeting notes"
@@ -305,7 +315,6 @@
               onpointerenter={(e) => hoverTip('open', e)}
               onpointerleave={() => hoverTip(null)}
             >
-              <span class="mdot" aria-hidden="true"></span>
               <span class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
               <span class="time">{elapsed}</span>
             </button>
@@ -378,7 +387,7 @@
           </span>
         {/if}
         {#if menuOpen}
-          <div class="menu" data-region="menu" role="menu" transition:fly={{ y: bar.edge === 'top' ? -6 : 6, duration: 160, easing: cubicOut }}>
+          <div class="menu" data-region="menu" role="menu" transition:fade={{ duration: 120 }}>
             <button role="menuitem" onclick={() => menuItem('open')}>Open Yap</button>
             <button role="menuitem" onclick={() => menuItem('new-note')}>New meeting note</button>
             <button role="menuitem" onclick={() => menuItem('settings')}>Settings</button>
@@ -394,8 +403,9 @@
 
 <style>
   /* The window is transparent and click-through; only what's drawn here
-     shows. Shadows stay soft and well inside it — one reaching a transparent
-     WebView2 window's edge draws a grey box (the 2026-07 pill fixes), and
+     shows. Sizes, colours and timings follow Wispr's measured Flow Bar
+     (flowbar-spec.md). No shadow on the pills, and the cards' is 1–2 px, so
+     nothing reaches a transparent WebView2 window's edge (a grey box) and
      there's no backdrop-filter for the same reason. */
   .stage {
     position: fixed;
@@ -404,25 +414,50 @@
     flex-direction: column;
     justify-content: flex-end;
     align-items: center;
-    gap: 10px;
-    padding: 18px 0 10px;
+    /* The hit wrapper's bottom 8 px up + its 6 px padding: every pill sits
+       14 px above the work area, as Wispr's does. */
+    padding: 0 0 8px;
     box-sizing: border-box;
     font-family: inherit;
     user-select: none;
   }
   .stage.top {
-    flex-direction: column-reverse;
-    padding: 10px 0 18px;
+    justify-content: flex-start;
+    padding: 8px 0 0;
   }
+  /* Cards, anchored 26 px above the pill's top (positioned by the script
+     from the dock's height); the first nearest the pill. */
   .cards {
+    position: absolute;
+    left: 0;
+    right: 0;
     display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
+    flex-direction: column-reverse;
     align-items: center;
-    gap: 14px; /* room for a call card's corner ✕ */
+    gap: 12px;
+    transition:
+      bottom 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95),
+      top 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95);
   }
   .stage.top .cards {
-    flex-direction: column-reverse;
+    flex-direction: column;
+  }
+  .cardwrap {
+    position: relative;
+  }
+  /* Wispr's 4 px hit strip, on the pill's side of each card, so the
+     pointer can travel from the pill up onto a card. */
+  .strip {
+    position: absolute;
+    left: 1px;
+    right: 1px;
+    bottom: -3px;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.004);
+  }
+  .stage.top .strip {
+    bottom: auto;
+    top: -3px;
   }
   .stage.pop .dock,
   .stage.pop .cards {
@@ -444,7 +479,9 @@
   .dock {
     display: grid;
     place-items: end center;
-    min-height: 44px;
+  }
+  .stage.top .dock {
+    place-items: start center;
   }
   .dock > :global(*) {
     grid-area: 1 / 1;
@@ -452,46 +489,49 @@
   .slot {
     display: flex;
   }
-  /* The hover zone (reported as region "pill"): bigger than the tiny idle
-     pill, so reaching for it is easy, and as big as the open pill so it
-     doesn't close under the pointer. */
+  /* The hit wrapper (reported as region "pill"): Wispr's 6 × 10 px of
+     nearly invisible padding round the pill, 60 × 20 when idle, so hovering
+     just outside the pill still counts; it grows with what it holds. */
   .hit {
     position: relative;
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: center;
-    min-width: 150px;
-    height: 48px;
+    padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.004);
+  }
+  .stage.top .hit {
+    align-items: flex-start;
+  }
+  .hit.quiet {
+    background: none;
   }
 
-  /* ---- the idle pill → open pill (one capsule morphing) ---- */
+  /* ---- the idle pill (40 × 8) → the open pill (one capsule morphing) ---- */
   .pill {
     position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 42px;
-    height: 10px;
+    width: 40px;
+    height: 8px;
     padding: 0;
     box-sizing: border-box;
     overflow: hidden;
-    border-radius: 999px;
-    background: rgba(22, 20, 17, 0.72);
-    border: 1.5px solid rgba(255, 255, 255, 0.82);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
-    transition:
-      width 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-      height 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-      padding 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-      background 200ms ease,
-      border-color 200ms ease;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    transition: all 0.1s cubic-bezier(0.05, 0.6, 0.4, 0.95);
   }
+  /* (The open pill isn't measured yet: Yap's own until it is.) */
   .pill.open {
     width: 128px;
     height: 38px;
     padding: 0 4px;
-    background: #151310;
-    border-color: rgba(255, 255, 255, 0.22);
+    border-radius: 19px;
+    background: #000;
+    border-color: rgb(48, 48, 47);
+    transition: all 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95);
   }
   .btn {
     position: relative;
@@ -505,23 +545,23 @@
     border: none;
     border-radius: 999px;
     background: none;
-    color: #f7f5f0;
+    color: rgb(252, 252, 251);
     opacity: 0;
     cursor: pointer;
     pointer-events: none;
     transition:
-      width 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-      opacity 140ms ease,
-      background 150ms ease;
+      width 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95),
+      opacity 0.1s ease,
+      background 0.15s ease;
   }
   .pill.open .btn {
     width: 34px;
     opacity: 1;
     pointer-events: auto;
     transition:
-      width 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-      opacity 180ms ease 90ms,
-      background 150ms ease;
+      width 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95),
+      opacity 0.14s ease 0.06s,
+      background 0.15s ease;
   }
   .pill.open .btn.more {
     width: 26px;
@@ -550,7 +590,7 @@
     margin: 0;
     background: rgba(255, 255, 255, 0.16);
     opacity: 0;
-    transition: opacity 180ms ease;
+    transition: opacity 0.14s ease;
   }
   .pill.open .sep {
     width: 1px;
@@ -566,29 +606,29 @@
     height: 6px;
     border-radius: 50%;
     background: #3dbb74;
-    box-shadow: 0 0 0 1.5px #151310;
+    box-shadow: 0 0 0 1.5px #000;
   }
 
-  /* ---- tooltip: "Dictate F9", "New note Win+Alt+M" ---- */
+  /* ---- tooltip: "Dictate F9", "New note Win + Alt + M" (Wispr's ink
+     tooltip: radius 8, 12 / 600 / 20) ---- */
   .tip {
     position: absolute;
     bottom: calc(100% + 2px);
     transform: translateX(-50%);
     display: inline-flex;
-    gap: 6px;
-    padding: 7px 12px;
-    border-radius: 999px;
-    background: #151310;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 12.5px;
-    font-weight: 500;
+    gap: 5px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: rgb(26, 26, 26);
+    color: rgb(238, 235, 227);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 20px;
     white-space: nowrap;
     pointer-events: none;
   }
   .tip b {
-    font-weight: 700;
+    font-weight: 600;
     color: #fff;
   }
   .stage.top .tip {
@@ -606,10 +646,10 @@
     flex-direction: column;
     min-width: 214px;
     padding: 6px;
-    border-radius: 14px;
-    background: #1c1a16;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.32);
+    border-radius: 12px;
+    background: #000;
+    border: 1px solid rgb(48, 48, 47);
+    box-shadow: 0 1px 2px rgba(26, 26, 26, 0.05);
   }
   .stage.top .menu {
     bottom: auto;
@@ -618,11 +658,12 @@
   .menu button {
     padding: 8px 12px;
     border: none;
-    border-radius: 9px;
+    border-radius: 8px;
     background: none;
-    color: rgba(255, 255, 255, 0.88);
+    color: rgb(238, 235, 227);
     font: inherit;
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 500;
     text-align: left;
     cursor: pointer;
   }
@@ -633,113 +674,119 @@
   .rule {
     height: 1px;
     margin: 5px 8px;
-    background: rgba(255, 255, 255, 0.1);
+    background: rgb(48, 48, 47);
   }
 
-  /* ---- the meeting recording pill ---- */
+  /* ---- the meeting recording pill: 69 × 30, black, a 2 px ring in Yap's
+     recording red (Wispr: emerald), half opacity until hovered, when it
+     comes up and shows its timer ---- */
   .meeting {
     display: flex;
     align-items: center;
-    height: 36px;
-    padding: 0 4px 0 2px;
+    gap: 12px;
+    height: 30px;
+    padding: 0 5px;
     box-sizing: border-box;
-    border-radius: 999px;
-    background: #151310;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+    border-radius: 22.5px;
+    background: #000;
+    border: 2px solid #e5645e;
+    opacity: 0.5;
+    transition:
+      opacity 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95),
+      border-color 0.13s ease;
+  }
+  .meeting.hot {
+    opacity: 1;
   }
   .mbody,
   .mstop {
     position: relative;
     display: inline-flex;
     align-items: center;
+    padding: 0;
     border: none;
     background: none;
-    color: #f7f5f0;
+    color: rgb(252, 252, 251);
     font: inherit;
     cursor: pointer;
-    border-radius: 999px;
-    transition: background 150ms ease;
   }
   .mbody {
-    gap: 8px;
-    height: 30px;
-    padding: 0 10px 0 10px;
+    height: 26px;
+    gap: 0;
   }
-  .mbody:hover,
-  .mstop:hover {
-    background: rgba(255, 255, 255, 0.1);
-  }
-  .mdot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: radial-gradient(circle at 35% 30%, #f0817b, #d9443b);
-    box-shadow: 0 0 7px rgba(229, 100, 94, 0.55);
-    animation: pulse 1.4s ease-in-out infinite;
-  }
+  /* 5 white bars, 2 × 18, gap 2, Wispr's staggered timing. */
   .bars {
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    height: 14px;
+    height: 18px;
+    padding: 0 1.5px 0 4.5px;
   }
   .bars i {
     width: 2px;
-    height: 100%;
-    border-radius: 1px;
-    background: #f0b04a;
+    height: 18px;
+    border-radius: 0.5px;
+    background: #fff;
     transform-origin: center;
-    animation: eq 1.1s ease-in-out infinite;
+    animation: eq 1s ease-in-out infinite;
   }
   .bars i:nth-child(2) {
-    animation-delay: -0.4s;
+    animation-delay: 0.1s;
   }
   .bars i:nth-child(3) {
-    animation-delay: -0.75s;
+    animation-delay: 0.2s;
   }
   .bars i:nth-child(4) {
     animation-delay: -0.2s;
   }
   .bars i:nth-child(5) {
-    animation-delay: -0.55s;
+    animation-delay: -0.1s;
   }
+  /* The timer: folded away at rest (69 px has no room), out on hover. */
   .time {
-    min-width: 34px;
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
     font-size: 12.5px;
     font-weight: 650;
     font-variant-numeric: tabular-nums;
-    color: rgba(255, 255, 255, 0.9);
+    white-space: nowrap;
+    color: rgb(252, 252, 251);
+    transition:
+      max-width 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95),
+      margin 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95),
+      opacity 0.12s ease;
   }
+  .meeting.hot .time {
+    max-width: 52px;
+    margin-left: 10px;
+    opacity: 1;
+  }
+  /* The stop: a 19 px circle holding an 8 × 8 rounded square. */
   .mstop {
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: 19px;
+    height: 19px;
+    border-radius: 50%;
+    background: rgb(77, 74, 66);
+    transition: background 0.15s ease;
+  }
+  .mstop:hover {
+    background: rgb(98, 94, 84);
   }
   .square {
-    width: 10px;
-    height: 10px;
-    border-radius: 2.5px;
-    background: #f7f5f0;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: #fff;
   }
   @keyframes eq {
     0%,
     100% {
-      transform: scaleY(0.35);
+      transform: scaleY(0.3);
     }
     50% {
       transform: scaleY(1);
-    }
-  }
-  @keyframes pulse {
-    0%,
-    100% {
-      transform: scale(1);
-      opacity: 1;
-    }
-    50% {
-      transform: scale(0.8);
-      opacity: 0.65;
     }
   }
 </style>

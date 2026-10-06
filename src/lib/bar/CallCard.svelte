@@ -1,18 +1,18 @@
 <script>
   // The call prompt on the Yap bar (bar.rs `Card` with style "call",
   // meeting_detect.rs `native::bar_card`), after Wispr's "Meeting detected"
-  // card (screenshot 25): one dark row — the call app's mark, "Teams call
-  // detected" over "● Now", and a light split button, [Yap] Record notes,
-  // whose ^ menu holds the other answers (Not now, Don't ask for Teams). The
-  // ✕ on its top-left corner is the quiet answer, as is fading after 30 s
-  // (a hairline runs along the bottom; paused while the pointer is on it).
-  // With "Start notes automatically" a ring drains around the logo and the
-  // line under the title counts down; Esc cancels (Rust watches the key).
-  // A call that ended while Yap records it: "● Still recording" (red),
-  // Stop and summarise | ^ Keep recording. The calendar's reminder
-  // (calendar.rs `bar_card`) is one too: the meeting over "● In 1 min · with
-  // Tanay +1" (amber, then green once it's on), Join & take notes | ^ Start
-  // notes, Snooze 2 min; a calendar glyph when the meeting has no call app.
+  // card (screenshot 25) on the measured card tokens: one black row — the
+  // call app's mark, "Teams call" over "● Now", and a cream split button,
+  // [Yap] Record notes, whose ^ menu holds the other answers (Not now,
+  // Don't ask for Teams). The ✕ on its top-left corner is the quiet answer,
+  // as is fading after 30 s (a hairline runs along the bottom; paused while
+  // the pointer is on it). With "Start notes automatically" a ring drains
+  // around the logo and the line under the title counts down; Esc cancels
+  // (Rust watches the key). (The call ending asks in a notice card.) The
+  // calendar's reminder (calendar.rs `bar_card`) is one too: the meeting
+  // over "● In 1 min · with Tanay +1" (amber, then green once it's on),
+  // Join & take notes | ^ Start notes, Snooze 2 min; a calendar glyph when
+  // the meeting has no call app.
   import yapLogo from '../../assets/yap-logo.svg';
   import { callAppIcon } from './callApps.js';
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
@@ -39,6 +39,15 @@
     menuOpen = false;
     onaction(id ?? '');
   }
+
+  // A long answer ("Join & take notes") goes on two lines, as Wispr's
+  // pre-meeting card's "Join meeting / & start Notetaker", so the row keeps
+  // room for the meeting's name at 400 px.
+  const label = $derived.by(() => {
+    const text = card.primary?.label ?? '';
+    const at = text.indexOf(' & ');
+    return at > 0 ? { main: text.slice(0, at), sub: text.slice(at + 1) } : { main: text, sub: '' };
+  });
 </script>
 
 <div class="call" class:counting={!!card.countdown} data-region={region} role="status" aria-live="polite">
@@ -64,7 +73,7 @@
     <div class="status">
       {#if card.countdown}
         <span class="count">{clock.secs > 0 ? `${card.countdown.label} ${clock.secs}…` : 'Starting notes…'}</span>
-        <span class="esc">Esc to cancel</span>
+        <span class="esc" title="Esc to cancel">Esc</span>
       {:else if card.status}
         {#if card.dot}<span class="dot {card.dot}" aria-hidden="true"></span>{/if}
         <span class="line">{card.status}</span>
@@ -84,7 +93,10 @@
             </svg>
           {/if}
         </span>
-        <span class="label">{card.primary.label}</span>
+        <span class="label" class:two={!!label.sub}>
+          <span class="main">{label.main}</span>
+          {#if label.sub}<span class="sub">{label.sub}</span>{/if}
+        </span>
       </button>
       {#if card.secondary || card.link}
         <span class="divider" aria-hidden="true"></span>
@@ -120,25 +132,26 @@
 </div>
 
 <style>
-  /* Wispr's "Meeting detected" card in Yap's ink: one row, a big radius, a
-     soft shadow that stays well inside the bar window. */
+  /* Wispr's "Meeting detected" card on the measured card tokens: 400 wide,
+     black, a 1 px rgb(48,48,47) border, radius 16, a 1–2 px shadow. One row,
+     so it keeps the screenshot's slimmer padding rather than the notice
+     cards' 20 px. */
   .call {
     position: relative;
     display: flex;
     align-items: center;
     gap: 12px;
-    width: 440px;
+    width: 400px;
     box-sizing: border-box;
     padding: 12px 12px 12px 14px;
-    border-radius: 18px;
-    background: #161411;
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
-    color: rgba(255, 255, 255, 0.95);
-    font-size: 13px;
+    border-radius: 16px;
+    background: #000;
+    border: 1px solid rgb(48, 48, 47);
+    box-shadow: 0 1px 2px rgba(26, 26, 26, 0.05);
+    color: rgb(252, 252, 251);
     pointer-events: auto;
   }
-  /* The ✕ sits on the top-left corner. */
+  /* The ✕ sits on the top-left corner (screenshot 25). */
   .x {
     position: absolute;
     top: -9px;
@@ -149,18 +162,18 @@
     align-items: center;
     justify-content: center;
     padding: 0;
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    border: 1px solid rgb(48, 48, 47);
     border-radius: 50%;
-    background: #2a2620;
-    color: rgba(255, 255, 255, 0.8);
+    background: #000;
+    color: rgba(238, 235, 227, 0.7);
     cursor: pointer;
     transition:
-      background 150ms ease,
-      color 150ms ease;
+      background 0.15s ease,
+      color 0.15s ease;
   }
   .x:hover {
-    background: #3a352c;
-    color: #fff;
+    background: rgb(26, 26, 26);
+    color: rgb(238, 235, 227);
   }
   .x svg {
     width: 11px;
@@ -170,19 +183,19 @@
   .mark {
     flex: 0 0 auto;
     display: flex;
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
     align-items: center;
     justify-content: center;
-    border-radius: 11px;
-    background: #f5f3ee;
+    border-radius: 10px;
+    background: rgb(252, 252, 251);
   }
   .mark svg {
-    width: 21px;
-    height: 21px;
+    width: 20px;
+    height: 20px;
   }
   .letter {
-    font-size: 19px;
+    font-size: 18px;
     font-weight: 800;
     line-height: 1;
   }
@@ -191,9 +204,9 @@
     min-width: 0;
   }
   .title {
-    font-size: 14.5px;
-    font-weight: 700;
-    line-height: 1.25;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 20px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -202,9 +215,9 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-top: 3px;
     font-size: 12.5px;
-    color: rgba(255, 255, 255, 0.55);
+    line-height: 18px;
+    color: rgb(179, 178, 173);
     white-space: nowrap;
   }
   .dot {
@@ -212,17 +225,14 @@
     height: 7px;
     border-radius: 50%;
     background: #3dbb74;
-    box-shadow: 0 0 6px rgba(61, 187, 116, 0.6);
   }
   .dot.recording {
     background: #e5645e;
-    box-shadow: 0 0 6px rgba(229, 100, 94, 0.6);
     animation: pulse 1.4s ease-in-out infinite;
   }
-  /* A calendar meeting about to start (calendar.rs): Yap's amber. */
+  /* A calendar meeting about to start (calendar.rs): the cards' amber. */
   .dot.soon {
-    background: #e2982a;
-    box-shadow: 0 0 6px rgba(226, 152, 42, 0.6);
+    background: rgb(255, 169, 70);
   }
   /* A long line ("Started 12 min ago · with Tanay +3") ends in "…". */
   .line {
@@ -240,74 +250,98 @@
     }
   }
   .count {
-    font-weight: 650;
-    color: #f6c77a;
+    font-weight: 600;
+    color: rgb(255, 169, 70);
   }
+  /* "Esc" as a small key, so the countdown line fits the row. */
   .esc {
-    color: rgba(255, 255, 255, 0.4);
-    font-size: 11.5px;
+    padding: 0 5px;
+    border: 1px solid rgb(48, 48, 47);
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 15px;
+    color: rgb(179, 178, 173);
   }
 
-  /* The light split button: [Yap] Record notes | ^ */
+  /* The cream split button: [Yap] Record notes | ^ (radius 8, 15 / 600). */
   .split {
     position: relative;
     flex: 0 0 auto;
     display: flex;
     align-items: stretch;
-    height: 38px;
-    border-radius: 11px;
-    background: #f5f3ee;
-    color: #26231c;
+    height: 36px;
+    border-radius: 8px;
+    background: rgb(255, 255, 235);
+    color: rgb(26, 26, 26);
   }
   .go,
   .more {
     display: inline-flex;
     align-items: center;
+    padding: 0;
     border: none;
     background: none;
     color: inherit;
     font: inherit;
     cursor: pointer;
-    transition: background 150ms ease;
+    transition: background-color 0.4s cubic-bezier(0.2, 0.9, 0.25, 1.1);
   }
   .go {
     gap: 8px;
     padding: 0 12px 0 7px;
-    border-radius: 11px 0 0 11px;
-    font-size: 13px;
-    font-weight: 650;
+    border-radius: 8px 0 0 8px;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 20px;
   }
   .split:not(:has(.more)) .go {
-    border-radius: 11px;
+    border-radius: 8px;
+  }
+  .label {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    white-space: nowrap;
+  }
+  /* Two lines: the answer, then what comes with it, smaller and muted. */
+  .label.two .main {
+    font-size: 14px;
+    line-height: 16px;
+  }
+  .label .sub {
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 14px;
+    color: rgba(26, 26, 26, 0.6);
   }
   .go:hover,
   .more:hover,
   .more.on {
-    background: #ffffff;
+    background: #fff;
   }
   .logo {
     position: relative;
     display: flex;
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
     align-items: center;
     justify-content: center;
   }
   .logo img {
-    width: 24px;
-    height: 24px;
-    border-radius: 7px;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
   }
   .counting .logo img {
-    width: 18px;
-    height: 18px;
-    border-radius: 5px;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
   }
   .ring {
     position: absolute;
     inset: -1px;
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
     transform: rotate(-90deg);
   }
   .ring circle {
@@ -315,7 +349,7 @@
     stroke-width: 2.6;
   }
   .ring .track {
-    stroke: rgba(38, 35, 28, 0.14);
+    stroke: rgba(26, 26, 26, 0.14);
   }
   .ring .run {
     stroke: #c2690a;
@@ -325,12 +359,12 @@
   .divider {
     width: 1px;
     margin: 8px 0;
-    background: rgba(38, 35, 28, 0.16);
+    background: rgba(26, 26, 26, 0.16);
   }
   .more {
     justify-content: center;
-    width: 34px;
-    border-radius: 0 11px 11px 0;
+    width: 32px;
+    border-radius: 0 8px 8px 0;
   }
   .more svg {
     width: 15px;
@@ -340,7 +374,7 @@
   .more.on svg {
     transform: rotate(180deg);
   }
-  /* The other answers, above the button. */
+  /* The other answers, above the button, on the card tokens. */
   .menu {
     position: absolute;
     right: 0;
@@ -349,20 +383,21 @@
     flex-direction: column;
     min-width: 200px;
     padding: 6px;
-    border-radius: 14px;
-    background: #1c1a16;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.32);
-    animation: menu-in 150ms ease-out;
+    border-radius: 12px;
+    background: #000;
+    border: 1px solid rgb(48, 48, 47);
+    box-shadow: 0 1px 2px rgba(26, 26, 26, 0.05);
+    animation: menu-in 0.12s ease-out;
   }
   .menu button {
     padding: 8px 12px;
     border: none;
-    border-radius: 9px;
+    border-radius: 8px;
     background: none;
-    color: rgba(255, 255, 255, 0.88);
+    color: rgb(238, 235, 227);
     font: inherit;
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 500;
     text-align: left;
     white-space: nowrap;
     cursor: pointer;
@@ -374,18 +409,16 @@
   @keyframes menu-in {
     from {
       opacity: 0;
-      transform: translateY(5px);
     }
     to {
       opacity: 1;
-      transform: none;
     }
   }
 
   .hairline {
     position: absolute;
-    left: 20px;
-    right: 20px;
+    left: 16px;
+    right: 16px;
     bottom: 0;
     height: 2px;
     overflow: hidden;
@@ -393,7 +426,7 @@
   }
   .drain {
     height: 100%;
-    background: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.14);
     animation-name: drain;
     animation-timing-function: linear;
     animation-fill-mode: forwards;

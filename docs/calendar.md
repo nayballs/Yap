@@ -207,7 +207,21 @@ card (`on_call_started`).
 
 A build connects to Google only with an OAuth client baked in at build time
 (`YAP_GOOGLE_CALENDAR_CLIENT_ID` / `_SECRET`, read with `option_env!`; both
-workflows pass them from repository secrets; empty = no Google). Steps:
+workflows pass them from repository secrets; empty = no Google).
+
+**Status (2026-10-06):** done on `yap-accounts`. Steps 1–6 are complete:
+- the Calendar API is enabled;
+- both scopes are added, with the justification;
+- the privacy page is deployed;
+- there's a Desktop client, "Yap desktop - Calendar";
+- both repository secrets are set.
+
+The app stays published, and sign-in's consent page is unchanged ("continue to Yap",
+checked). **Left:** step 7's verification submission for
+`calendar.events.owned.readonly`, which needs a demo video. Until it's approved,
+connecting shows Google's unverified-app screen and is capped at 100 users.
+
+Steps:
 
 1. **Project**: in Google Cloud, either `yap-accounts` (its branding, "Yap"
    with the logo, is already verified, so the consent page looks right;

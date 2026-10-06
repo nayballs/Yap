@@ -2,11 +2,13 @@
 //! (traced 2026-10-05; `E:\Projects\references\wispr-flow\README.md`). It's
 //! the `overlay` window (`overlay.rs` holds its Win32 side and the maths):
 //!
-//! - **Idle** it's a tiny dark pill above the taskbar. Hovering it expands it
-//!   into 🎤 Dictate, ◉ Meeting notes and a ^ menu (Open Yap, New meeting note,
+//! - **Idle** it's a tiny dark pill above the taskbar (Wispr's measured
+//!   40 × 8, 14 px up; `flowbar-spec.md`). Hovering it expands it into
+//!   🎤 Dictate, ◉ Meeting notes and a ^ menu (Open Yap, New meeting note,
 //!   Settings, Hide the bar for 1 hour, Turn off the bar). While a dictation
 //!   records or transcribes it's the dictation overlay (waveform, live text);
-//!   while a meeting records, a compact recording pill (timer, stop).
+//!   while a meeting records, a 69 × 30 recording pill (bars, stop; the timer
+//!   when hovered).
 //! - **Clickable only where it draws something.** The window is click-through
 //!   (`WS_EX_TRANSPARENT`). The page reports its interactive rects (the pill's
 //!   hover zone, cards, the menu; `bar_regions`), and a poller here watches the
@@ -112,7 +114,7 @@ pub struct Card {
     pub app: Option<&'static str>,
     pub title: String,
     pub body: String,
-    /// The line under a call card's title ("Now", "Still recording")…
+    /// The line under a call card's title ("Now")…
     pub status: Option<String>,
     /// …after a dot: "live" (green: happening now), "recording" (red),
     /// "soon" (amber: a calendar meeting about to start), "".
@@ -1173,7 +1175,7 @@ pub async fn bar_card_action(app: AppHandle, id: String, action: String) -> Resu
 /// Debug builds only (the e2e suite): pretend the cursor is on a region
 /// (`pointer`: a region id, or "away"), that an app is fullscreen
 /// (`fullscreen`: "none" | "borderless" | "exclusive"), that Esc was
-/// pressed, or put up a demo card (`card`: "call" | "info").
+/// pressed, or put up a demo card (`card`: "call" | "update" | "info").
 #[tauri::command]
 pub async fn bar_simulate(
     app: AppHandle,
@@ -1250,11 +1252,20 @@ fn demo_card(kind: &str) -> Card {
             close_action: Some("dismiss".into()),
             ..Card::default()
         },
+        "update" => Card {
+            id: "demo".into(),
+            icon: "update",
+            title: "Yap 0.2.0 is ready".into(),
+            body: "Restart Yap to finish updating. It only takes a few seconds.".into(),
+            primary: Some(CardAction::new("install", "Restart to update")),
+            secondary: Some(CardAction::new("", "Later")),
+            ..Card::default()
+        },
         _ => Card {
             id: "demo".into(),
             icon: "notes",
             title: "Taking notes on your Teams call".into(),
-            body: "Yap offers to stop and summarise when it ends.".into(),
+            body: "Let people know you're taking notes. Yap offers to stop and summarise when it ends.".into(),
             primary: Some(CardAction::new("open", "Open note")),
             timeout_ms: Some(8_000),
             ..Card::default()
