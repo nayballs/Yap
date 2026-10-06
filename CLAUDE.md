@@ -402,9 +402,10 @@ before `meeting::ingest`) and on an Upload's whole text.
   (`config.meeting_detect_style`): **"popup"** (default) — a sticky in-app
   toast when the main window is visible, and when it isn't focused a card on
   the **Yap bar** (`native::bar_card`: Wispr's "Meeting detected" card — app
-  mark, "● Now", split button Record notes | ^ Not now / Don't ask for Teams,
-  corner ✕; the bar off or hidden → a silent Windows notification via
-  `win_toast.rs`, as before); answering either withdraws both,
+  mark, "Teams call" over "● Now", split button Record notes | ^ Not now /
+  Don't ask for Teams, corner ✕; the call ending asks in a notice card; the
+  bar off or hidden → a silent Windows notification via `win_toast.rs`, as
+  before); answering either withdraws both,
   focusing the window moves a pending prompt in-app (`on_main_window_focused`),
   and an in-app start prompt left alone **fades after 30 s as "Not now"**
   (OpenWhispr's auto-dismiss; `fadeMs` in the prompt view, the toast's
@@ -813,15 +814,17 @@ before `meeting::ingest`) and on an Upload's whole text.
 - **`bar.rs`** — the **Yap bar** (2026-10-05, after Wispr Flow's Flow Bar —
   `E:\Projects\references\wispr-flow\README.md`, screenshots 20–22, 25): the
   `overlay` window as one fixed-size (520×560 logical), transparent,
-  always-on-top tool window. **Idle** a tiny dark pill outline above the
-  taskbar; **hover** opens it into 🎤 Dictate (`toggle_recording`, tooltip
+  always-on-top tool window, drawn to Wispr's measured Flow Bar
+  (`E:\Projects\references\wispr-flow\flowbar-spec.md`). **Idle** a 40×8
+  pill outline 14 px above the work area; **hover** opens it into 🎤 Dictate (`toggle_recording`, tooltip
   "Dictate · F9"), ◉ Meeting notes (`meeting_guard::start_or_stop`, as the
   meeting shortcut: the live call, else a new meeting note; while recording,
   `meeting_end::end`) and a ^ menu (Open Yap, New meeting note, Settings,
   Hide the bar for 1 hour, Turn off the bar — `bar_action`); **dictating** =
   the dictation overlay (waveform, live partials, Transcribing…, errors);
-  **meeting** = a compact recording pill (dot, bars, timer; body →
-  `notepad::open`, ■ → `meeting_end::end`). **Click-through except over what
+  **meeting** = a 69×30 recording pill at half opacity (5 bars, the stop
+  circle; hovered, full opacity and the timer; body → `notepad::open`, ■ →
+  `meeting_end::end`). **Click-through except over what
   it draws**: the page reports its interactive rects (`data-region` →
   `bar_regions`, CSS px) and a poller (`GetCursorPos` every 250 ms, 30 ms
   while the cursor is near) hit-tests them (`overlay::region_at`, per-monitor
@@ -1110,26 +1113,45 @@ before `meeting::ingest`) and on an Upload's whole text.
   paste-into-your-agent endpoint cheat-sheet, and an endpoint reference
   table. (OpenWhispr's Google-Calendar OAuth / cloud API-keys / hosted-MCP
   cards need their paid cloud and are not ported; Yap's MCP is local.)
-- **`lib/Overlay.svelte`** — the **Yap bar** page (window `overlay`, `bar.rs`):
-  dark ink throughout (the toasts' palette), one stage anchored to the bottom
-  (or top) edge — cards above, the pill's place below, states sharing one
-  grid cell so they cross-fade. The idle pill (42×10 outline) morphs into the
-  open pill (width/height/padding transitions, buttons fading in); tooltips
-  ("Dictate F9", "New note Win + Alt + M") and the ^ menu sit above it; the
-  meeting pill; `bar/DictationCapsule.svelte` (the dictation overlay — waveform
-  in Yap amber, live partials word-paced by `bar/dictation.svelte.js`, which
-  listens for the page's whole life). Cards: `bar/BarCard.svelte` (notices,
-  toast-style) and `bar/CallCard.svelte` (the call prompt as Wispr's "Meeting
-  detected" card: the app's mark from `bar/callApps.js` — Simple Icons CC0
-  glyphs, monograms for Teams/Slack/Webex/Whereby, a phone otherwise — "●
-  Now", a light split button [Yap] Record notes with the other answers in its
-  ^ menu, a corner ✕, a 30 s fade hairline, the countdown ring; also the
-  calendar's reminder: a calendar glyph when there's no call app, an amber
-  "soon" dot, a long status line ending in "…"); shared fade
-  and countdown timers in `bar/cardTimers.svelte.js`. Every `data-region`
-  element is reported to Rust on layout changes. ⚠ The window is transparent:
-  **no `backdrop-filter`** and shadows kept well inside it (one reaching a
-  transparent WebView2 window's edge draws a grey box).
+- **`lib/Overlay.svelte`** — the **Yap bar** page (window `overlay`, `bar.rs`),
+  to Wispr's measured Flow Bar (`flowbar-spec.md`, checked by `bar.spec.js`):
+  one stage anchored to the bottom (or top) edge — the pill's place below,
+  states sharing one grid cell so they cross-fade, each in a hit wrapper
+  (6 × 10 px of nearly invisible padding, reported as region "pill") whose
+  bottom is 8 px up, so every pill sits **14 px above the work area**. The
+  **idle pill** is 40×8, `rgba(0,0,0,.5)` with a 1 px `rgba(255,255,255,.5)`
+  border, radius 6, no shadow, in a 60×20 wrapper; it morphs into the open
+  pill (not measured yet: Yap's own 128×38); tooltips (ink `rgb(26,26,26)`,
+  radius 8, 12 / 600: "Dictate F9", "New note Win + Alt + M") and the ^ menu
+  sit above it. The **meeting pill**: 69×30, black, a 2 px ring in Yap's
+  recording red (`#e5645e`; Wispr's is emerald), radius 22.5, half opacity
+  until hovered; 5 white 2×18 bars (Wispr's staggered timing), then the 19 px
+  stop circle with its 8×8 square; hovered, it widens to show the timer.
+  `bar/DictationCapsule.svelte` (the dictation overlay — waveform in Yap
+  amber, live partials word-paced by `bar/dictation.svelte.js`, which listens
+  for the page's whole life). **Cards** sit 26 px above the pill whatever it
+  shows (positioned from the dock's height, gliding 0.16 s when it grows),
+  the first nearest the pill and a second above it; each fades in and out in
+  0.12 s and has Wispr's 4 px hit strip on the pill's side.
+  `bar/BarCard.svelte` (notices: update, guard rails, "Taking notes", the
+  call ending, errors) is Wispr's card: 400 wide, black, 1 px
+  `rgb(48,48,47)`, radius 16, padding 20; an amber chip naming its kind
+  (Update, Meeting, Call, Tip, Error), the title 15 / 600, the body 15 in
+  `rgb(179,178,173)`, a ghost button and a cream (`rgb(255,255,235)`) one at
+  radius 8, the ✕ 24×24 at 30 % top-right. `bar/CallCard.svelte` (the call
+  prompt as Wispr's "Meeting detected" card, on the same tokens but one row
+  with slimmer padding: the app's mark from `bar/callApps.js` — Simple Icons
+  CC0 glyphs, monograms for Teams/Slack/Webex/Whereby, a phone otherwise —
+  "Teams call" over "● Now", a cream split button [Yap] Record notes with the
+  other answers in its ^ menu, a corner ✕, a 30 s fade hairline, the
+  countdown ring; also the calendar's reminder, "Design review" over "● In
+  1 min · with Tanay +1": a calendar glyph when there's no call app, an amber
+  "soon" dot, a long line ending in "…", and a two-line answer "Join / &
+  take notes", as on Wispr's pre-meeting card); shared fade and countdown
+  timers in `bar/cardTimers.svelte.js`. Every `data-region` element is
+  reported to Rust on layout changes. ⚠ The window is transparent: **no
+  `backdrop-filter`**, no shadow on the pills and only a 1–2 px one on cards
+  (one reaching a transparent WebView2 window's edge draws a grey box).
 - **`lib/Notepad.svelte`** — the **meeting notepad** (window `notepad`,
   `notepad.rs`; Wispr Flow Notetaker's notepad, warm-light): a custom title
   bar (brand, drag region, Open in Yap / minimise / close — close hides it,

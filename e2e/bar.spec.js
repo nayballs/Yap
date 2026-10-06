@@ -78,6 +78,32 @@ test('idle: a tiny pill above the taskbar, click-through and never activated', a
   expect(outside.windowAtPoint).not.toBe(d.hwnd);
   expect(d.clickOnPillReachesBar).toBe(false);
   expect(d.barInFront).toBe(false);
+  // Wispr's measurements (flowbar-spec.md): a 40 × 8 pill, half black with a
+  // 1 px half-white border, radius 6, no shadow, its bottom 14 px above the
+  // work area, in a 60 × 20 hit wrapper.
+  const pill = await bar.locator('.pill').evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const h = el.closest('.hit').getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return {
+      size: [r.width, r.height],
+      hit: [h.width, h.height],
+      fromBottom: window.innerHeight - r.bottom,
+      bg: s.backgroundColor,
+      border: `${s.borderTopWidth} ${s.borderTopColor}`,
+      radius: s.borderTopLeftRadius,
+      shadow: s.boxShadow,
+    };
+  });
+  expect(pill).toEqual({
+    size: [40, 8],
+    hit: [60, 20],
+    fromBottom: 14,
+    bg: 'rgba(0, 0, 0, 0.5)',
+    border: '1px rgba(255, 255, 255, 0.5)',
+    radius: '6px',
+    shadow: 'none',
+  });
   await shot(bar, '01-idle');
 });
 
@@ -104,6 +130,12 @@ test('hovering opens the pill and makes just that clickable, with tooltips', asy
   // Tooltips name each button's shortcut (the seeded hotkey is F24).
   await bar.getByRole('button', { name: 'Dictate' }).hover();
   await expect(bar.getByRole('tooltip')).toHaveText(/Dictate\s*F24/);
+  // Wispr's ink tooltip: radius 8, 12 / 600.
+  const tip = await bar.getByRole('tooltip').evaluate((el) => {
+    const s = getComputedStyle(el);
+    return [s.backgroundColor, s.borderTopLeftRadius, s.fontSize, s.fontWeight];
+  });
+  expect(tip).toEqual(['rgb(26, 26, 26)', '8px', '12px', '600']);
   await shot(bar, '03-tooltip-dictate');
   await bar.getByRole('button', { name: 'Meeting notes' }).hover();
   await expect(bar.getByRole('tooltip')).toContainText('New note');
@@ -196,7 +228,7 @@ test('a call prompt is a "Meeting detected" card; answering one place answers bo
   expect((await yap.invoke('bar_status')).cards).toEqual([]);
   await callSim(yap, 'discord', false);
   await callSim(yap, 'teams', true); // …Teams is
-  const card = callCard(bar, 'Teams call detected');
+  const card = callCard(bar, 'Teams call');
   await expect(card).toBeVisible();
   await expect(card).toContainText('Now');
   await expect(card.getByRole('button', { name: 'Record notes' })).toBeVisible();
@@ -226,7 +258,7 @@ test('a call prompt is a "Meeting detected" card; answering one place answers bo
   // Every call app gets its mark (or a stand-in): Google Meet's, here.
   await simulate(yap, { pointer: 'away' });
   await callSim(yap, 'meet', true);
-  const meet = callCard(bar, 'Google Meet call detected');
+  const meet = callCard(bar, 'Google Meet call');
   await expect(meet).toBeVisible();
   await bar.waitForTimeout(300);
   await shot(bar, '11-call-card-google-meet');
@@ -237,6 +269,60 @@ test('a call prompt is a "Meeting detected" card; answering one place answers bo
   await callSim(yap, 'meet', false);
 });
 
+test("a notice card has Wispr's measurements, 26 px above the pill", async ({ yap, shot }) => {
+  const bar = yap.overlay;
+  // The update card (a demo: a test build never downloads an update).
+  await simulate(yap, { card: 'update' });
+  const card = bar.getByRole('status').filter({ hasText: 'Yap 0.2.0 is ready' });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('Update'); // its chip
+  await expect(card.getByRole('button', { name: 'Restart to update' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Later' })).toBeVisible();
+  const measure = () =>
+    card.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const pill = document.querySelector('.pill').getBoundingClientRect();
+      const s = getComputedStyle(el);
+      const style = (sel) => getComputedStyle(el.querySelector(sel));
+      const close = el.querySelector('.close');
+      const strip = el.parentElement.querySelector('.strip').getBoundingClientRect();
+      return {
+        width: r.width,
+        aboveThePill: Math.round(pill.top - r.bottom),
+        bg: s.backgroundColor,
+        border: `${s.borderTopWidth} ${s.borderTopColor}`,
+        radius: s.borderTopLeftRadius,
+        padding: s.paddingTop,
+        close: [close.offsetWidth, close.offsetHeight, style('.close').opacity],
+        chip: style('.chip').backgroundColor,
+        title: [style('.title').fontSize, style('.title').fontWeight],
+        body: [style('.body').fontSize, style('.body').color],
+        cream: [style('.cream').backgroundColor, style('.cream').borderTopLeftRadius],
+        ghost: [style('.ghost').color, style('.ghost').borderTopLeftRadius],
+        strip: Math.round(strip.height),
+      };
+    });
+  await expect.poll(measure).toEqual({
+    width: 400,
+    aboveThePill: 26,
+    bg: 'rgb(0, 0, 0)',
+    border: '1px rgb(48, 48, 47)',
+    radius: '16px',
+    padding: '20px',
+    close: [24, 24, '0.3'],
+    chip: 'rgb(255, 169, 70)',
+    title: ['15px', '600'],
+    body: ['15px', 'rgb(179, 178, 173)'],
+    cream: ['rgb(255, 255, 235)', '8px'],
+    ghost: ['rgb(238, 235, 227)', '8px'],
+    strip: 4,
+  });
+  await shot(bar, '12-update-card');
+  // "Later" just closes it.
+  await card.getByRole('button', { name: 'Later' }).click();
+  await expect(card).toHaveCount(0);
+});
+
 test('fullscreen: the pill hides; a card shows over a borderless app, waits out an exclusive one', async ({ yap, main }) => {
   const bar = yap.overlay;
   // Borderless (a game in a borderless window, a video, F11): no pill…
@@ -245,7 +331,7 @@ test('fullscreen: the pill hides; a card shows over a borderless app, waits out 
   expect((await yap.invoke('bar_status')).fullscreen).toBe('borderless');
   // …but a call still gets its card, over the app, without the pill.
   await callSim(yap, 'whereby', true);
-  const card = callCard(bar, 'Whereby call detected');
+  const card = callCard(bar, 'Whereby call');
   await expect(card).toBeVisible();
   await expect.poll(() => debug(yap).then((d) => d.shown)).toBe(true);
   await expect(bar.getByLabel('Yap bar')).toHaveCount(0);
@@ -263,7 +349,7 @@ test('fullscreen: the pill hides; a card shows over a borderless app, waits out 
   expect((await debug(yap)).shown).toBe(false);
   await simulate(yap, { fullscreen: 'none' });
   await expect.poll(() => debug(yap).then((d) => d.shown)).toBe(true);
-  const waited = callCard(bar, 'Jitsi Meet call detected');
+  const waited = callCard(bar, 'Jitsi Meet call');
   await expect(waited).toBeVisible();
   await expect(bar.getByLabel('Yap bar')).toBeVisible();
   // The call ending takes it away.
@@ -288,16 +374,46 @@ test('◉ starts meeting notes: the recording pill opens the notepad and ends th
   expect(note.folder).toBe('Meetings');
   expect(await notepadShown()).toBe(false);
 
-  // The pill becomes the recording pill: dot, waveform, timer, stop.
+  // The pill becomes the recording pill (Wispr's measurements): 69 × 30,
+  // black, a 2 px ring in Yap's recording red, radius 22.5, half opacity
+  // until hovered, its bottom 14 px up; 5 bars and the stop circle.
   await pointerAway(yap);
   const open = bar.getByRole('button', { name: 'Open the meeting notes' });
   await expect(open).toBeVisible();
-  await expect(open).toContainText(/\d+:\d\d/);
+  await expect(open).toContainText(/\d+:\d\d/); // the timer, folded away
+  const pillLooks = () =>
+    bar.locator('.meeting').evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      return {
+        size: [Math.round(r.width), r.height],
+        fromBottom: window.innerHeight - r.bottom,
+        opacity: s.opacity,
+        border: `${s.borderTopWidth} ${s.borderTopColor}`,
+        radius: s.borderTopLeftRadius,
+        bars: el.querySelectorAll('.bars i').length,
+        stop: el.querySelector('.mstop').getBoundingClientRect().width,
+      };
+    });
+  await expect.poll(pillLooks).toEqual({
+    size: [69, 30],
+    fromBottom: 14,
+    opacity: '0.5',
+    border: '2px rgb(229, 100, 94)',
+    radius: '22.5px',
+    bars: 5,
+    stop: 19,
+  });
   await bar.waitForTimeout(1_200);
-  await shot(bar, '12-meeting-pill');
+  await shot(bar, '13-meeting-pill');
+
+  // Hovered, it comes up to full opacity and shows the timer.
+  await simulate(yap, { pointer: 'pill' });
+  await expect.poll(() => pillLooks().then((p) => [p.opacity, p.size[0] > 69])).toEqual(['1', true]);
+  await bar.waitForTimeout(300);
+  await shot(bar, '14-meeting-pill-hover');
 
   // Its body opens the meeting notepad on that note…
-  await simulate(yap, { pointer: 'pill' });
   await open.click();
   await expect.poll(notepadShown).toBe(true);
   // …and ■ ends the meeting (the action plan is written in Rust).
@@ -317,12 +433,12 @@ test('the opt-in countdown starts notes by itself; Esc cancels it', async ({ yap
 
   // Esc (watched only while such a card is on screen) cancels: "Not now".
   await callSim(yap, 'zoom', true);
-  const card = callCard(bar, 'Zoom call detected');
+  const card = callCard(bar, 'Zoom call');
   await expect(card).toContainText(/Notes start in \d/);
   await expect(card.getByRole('button', { name: 'Start now' })).toBeVisible();
-  await expect(card).toContainText('Esc to cancel');
+  await expect(card).toContainText('Esc');
   await bar.waitForTimeout(1_200); // a second off the ring
-  await shot(bar, '13-countdown-card');
+  await shot(bar, '15-countdown-card');
   await simulate(yap, { escape: true });
   await expect(card).toHaveCount(0);
   await expect.poll(() => yap.invoke('meeting_detect_status').then((s) => s.prompt)).toBeNull();
@@ -332,7 +448,7 @@ test('the opt-in countdown starts notes by itself; Esc cancels it', async ({ yap
 
   // Left alone, it records once the countdown runs out.
   await callSim(yap, 'webex', true);
-  await expect(callCard(bar, 'Webex call detected')).toBeVisible();
+  await expect(callCard(bar, 'Webex call')).toBeVisible();
   await expect
     .poll(() => yap.invoke('meeting_state').then((m) => m.recording), { timeout: 20_000 })
     .toBe(true);
@@ -342,9 +458,9 @@ test('the opt-in countdown starts notes by itself; Esc cancels it', async ({ yap
   // The call ending asks to stop: on the bar too, with no countdown.
   const end = callCard(bar, 'Webex call ended');
   await expect(end).toBeVisible();
-  await expect(end).toContainText('Still recording');
+  await expect(end).toContainText('Stop recording and summarise your notes?');
   await expect(end).not.toContainText('Notes start');
-  await shot(bar, '14-call-ended-card');
+  await shot(bar, '16-call-ended-card');
   await end.getByRole('button', { name: 'Stop and summarise' }).click();
   await expect.poll(() => yap.invoke('meeting_state').then((m) => m.recording), { timeout: 20_000 }).toBe(false);
 
@@ -363,13 +479,13 @@ test('dictating: the dictation overlay in the pill\'s place', async ({ yap, main
     await expect(bar.getByLabel('Yap bar')).toHaveCount(0);
     expect((await debug(yap)).interactive).toBe(false);
     await bar.waitForTimeout(1_200);
-    await shot(bar, '15-dictating');
+    await shot(bar, '17-dictating');
     await pressHotkey(main);
     await expectStore(yap, 'history.json', (h) => JSON.stringify(h).includes('STT stub'));
   } else {
     // No microphone (CI): the same capsule says so.
     await expect(bar.locator('.capsule')).toContainText('No microphone found');
-    await shot(bar, '15-dictating-no-microphone');
+    await shot(bar, '17-dictating-no-microphone');
   }
   await expect(bar.getByLabel('Yap bar')).toBeVisible({ timeout: 10_000 });
 });

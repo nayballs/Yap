@@ -824,11 +824,12 @@ has passed, so no prompt).
     30 s and treats it as a dismissal). It stays while the pointer is on it.
   - Main window hidden, minimized or behind the call app: a card on the
     **Yap bar** (`bar.rs`), after Wispr Flow's "Meeting detected" card: the
-    call app's mark, "Teams call detected" over "● Now", a light split
-    button **[Yap] Record notes** whose **^** menu holds **Not now** and
-    **Don't ask for Teams**, and a small **✕** on its top-left corner (Not
-    now). It fades after 30 s as Not now, like the toast, and pauses while
-    the pointer is on it. The marks are Simple Icons glyphs (CC0) where
+    call app's mark, "Teams call" over "● Now", a cream split button
+    **[Yap] Record notes** whose **^** menu holds **Not now** and **Don't
+    ask for Teams**, and a small **✕** on its top-left corner (Not now). It
+    fades after 30 s as Not now, like the toast, and pauses while the
+    pointer is on it. (The call ending asks in an ordinary bar card: "Teams
+    call ended", Keep recording / Stop and summarise.) The marks are Simple Icons glyphs (CC0) where
     Simple Icons has them; Teams, Slack, Webex and Whereby get a monogram in
     their colour, anything else a phone. With the bar off or hidden for an
     hour, a silent Windows notification with Yap's logo and the same three
@@ -956,8 +957,9 @@ on) and stops all detection work.
   quiet style (no in-app toast, a quiet notification), the 30 s fade (start
   prompts only), the tray item, the Settings list's order, the
   notification XML (three answers on a start prompt; built into a WinRT toast,
-  never shown, with `SuppressPopup` set only when quiet), the Yap bar's card
-  (the same answers, "● Now" / "● Still recording", its fade, ✕ and Esc), and
+  never shown, with `SuppressPopup` set only when quiet), the Yap bar's cards
+  (the same answers; "Teams call" over "● Now", the call ending as a notice
+  card; the fade, ✕ and Esc), and
   the auto-start countdown (off by default, only where it's sure to be seen,
   never quiet, never for a rejoin, never for an end prompt).
 - Read-only check of this PC's microphone record:
