@@ -1212,18 +1212,23 @@ before `meeting::ingest`) and on an Upload's whole text.
   table. (OpenWhispr's Google-Calendar OAuth / cloud API-keys / hosted-MCP
   cards need their paid cloud and are not ported; Yap's MCP is local.)
 - **`lib/Overlay.svelte`** — the **Yap bar** page (window `overlay`, `bar.rs`),
-  to Wispr's measured Flow Bar (`flowbar-spec.md`, checked by `bar.spec.js`):
+  laid out to Wispr's measured Flow Bar (`flowbar-spec.md`, checked by
+  `bar.spec.js`) but in **Yap's own colours** (2026-10-06, Nathan): every
+  colour is a `--bar-*` token in app.css, the in-app toasts' palette — warm
+  near-black `#1c1a16` surfaces with a `#3a352b` edge, cream text, sand chips,
+  cream buttons, Yap amber waveforms/countdowns, Yap's recording red (one
+  place to change them all):
   one stage anchored to the bottom (or top) edge — the pill's place below,
   states sharing one grid cell so they cross-fade, each in a hit wrapper
   (6 × 10 px of nearly invisible padding, reported as region "pill") whose
   bottom is 8 px up, so every pill sits **14 px above the work area**. The
-  **idle pill** is 40×8, `rgba(0,0,0,.5)` with a 1 px `rgba(255,255,255,.5)`
-  border, radius 6, no shadow, in a 60×20 wrapper; it morphs into the open
-  pill (not measured yet: Yap's own 128×38); tooltips (ink `rgb(26,26,26)`,
+  **idle pill** is 40×8, warm ink at 55 % with a 1 px cream border at 50 %,
+  radius 6, no shadow, in a 60×20 wrapper; it morphs into the open
+  pill (not measured yet: Yap's own 128×38); tooltips (warm ink,
   radius 8, 12 / 600: "Dictate F9", "New note Win + Alt + M") and the ^ menu
-  sit above it. The **meeting pill**: 69×30, black, a 2 px ring in Yap's
+  sit above it. The **meeting pill**: 69×30, warm ink, a 2 px ring in Yap's
   recording red (`#e5645e`; Wispr's is emerald), radius 22.5, half opacity
-  until hovered; 5 white 2×18 bars (Wispr's staggered timing), then the 19 px
+  until hovered; 5 amber 2×18 bars (Wispr's staggered timing), then the 19 px
   stop circle with its 8×8 square; hovered, it widens to show the timer.
   `bar/DictationCapsule.svelte` (the dictation overlay — waveform in Yap
   amber, live partials word-paced by `bar/dictation.svelte.js`, which listens
@@ -1232,10 +1237,10 @@ before `meeting::ingest`) and on an Upload's whole text.
   the first nearest the pill and a second above it; each fades in and out in
   0.12 s and has Wispr's 4 px hit strip on the pill's side.
   `bar/BarCard.svelte` (notices: update, guard rails, "Taking notes", the
-  call ending, errors) is Wispr's card: 400 wide, black, 1 px
-  `rgb(48,48,47)`, radius 16, padding 20; an amber chip naming its kind
-  (Update, Meeting, Call, Tip, Error), the title 15 / 600, the body 15 in
-  `rgb(179,178,173)`, a ghost button and a cream (`rgb(255,255,235)`) one at
+  call ending, errors) is Wispr's card in Yap's colours: 400 wide,
+  warm ink with a 1 px edge, radius 16, padding 20; a sand chip naming its
+  kind (Update, Meeting, Call, Tip, Error), the title 15 / 600, the body 15
+  in muted cream, a ghost button and a cream one at
   radius 8, the ✕ 24×24 at 30 % top-right. `bar/CallCard.svelte` (the call
   prompt as Wispr's "Meeting detected" card, on the same tokens but one row
   with slimmer padding: the app's icon on a light tile, drawn by the shared

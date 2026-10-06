@@ -101,8 +101,9 @@ test('idle: a tiny pill above the taskbar, click-through and never activated', a
     size: [40, 8],
     hit: [60, 20],
     fromBottom: 14,
-    bg: 'rgba(0, 0, 0, 0.5)',
-    border: '1px rgba(255, 255, 255, 0.5)',
+    // Wispr's sizes in Yap's bar colours (--bar-pill, --bar-pill-border).
+    bg: 'rgba(28, 26, 22, 0.55)',
+    border: '1px rgba(247, 245, 240, 0.5)',
     radius: '6px',
     shadow: 'none',
   });
@@ -132,12 +133,12 @@ test('hovering opens the pill and makes just that clickable, with tooltips', asy
   // Tooltips name each button's shortcut (the seeded hotkey is F24).
   await bar.getByRole('button', { name: 'Dictate' }).hover();
   await expect(bar.getByRole('tooltip')).toHaveText(/Dictate\s*F24/);
-  // Wispr's ink tooltip: radius 8, 12 / 600.
+  // Wispr's tooltip (radius 8, 12 / 600) in Yap's warm ink (--bar-tooltip).
   const tip = await bar.getByRole('tooltip').evaluate((el) => {
     const s = getComputedStyle(el);
     return [s.backgroundColor, s.borderTopLeftRadius, s.fontSize, s.fontWeight];
   });
-  expect(tip).toEqual(['rgb(26, 26, 26)', '8px', '12px', '600']);
+  expect(tip).toEqual(['rgb(28, 26, 22)', '8px', '12px', '600']);
   await shot(bar, '03-tooltip-dictate');
   await bar.getByRole('button', { name: 'Meeting notes' }).hover();
   await expect(bar.getByRole('tooltip')).toContainText('New note');
@@ -277,7 +278,7 @@ test('a call prompt is a "Meeting detected" card; answering one place answers bo
   await callSim(yap, 'meet', false);
 });
 
-test("a notice card has Wispr's measurements, 26 px above the pill", async ({ yap, shot }) => {
+test("a notice card has Wispr's measurements in Yap's colours, 26 px above the pill", async ({ yap, shot }) => {
   const bar = yap.overlay;
   // The update card (a demo: a test build never downloads an update).
   await simulate(yap, { card: 'update' });
@@ -313,16 +314,16 @@ test("a notice card has Wispr's measurements, 26 px above the pill", async ({ ya
   await expect.poll(measure).toEqual({
     width: 400,
     aboveThePill: 26,
-    bg: 'rgb(0, 0, 0)',
-    border: '1px rgb(48, 48, 47)',
+    bg: 'rgb(28, 26, 22)', // Yap's bar colours (--bar-*, app.css)
+    border: '1px rgb(58, 53, 43)',
     radius: '16px',
     padding: '20px',
     close: [24, 24, '0.3'],
-    chip: 'rgb(255, 169, 70)',
+    chip: 'rgb(236, 217, 184)',
     title: ['15px', '600'],
-    body: ['15px', 'rgb(179, 178, 173)'],
-    cream: ['rgb(255, 255, 235)', '8px'],
-    ghost: ['rgb(238, 235, 227)', '8px'],
+    body: ['15px', 'rgba(247, 245, 240, 0.58)'],
+    cream: ['rgb(245, 243, 238)', '8px'],
+    ghost: ['rgba(247, 245, 240, 0.86)', '8px'],
     strip: 4,
   });
   await shot(bar, '12-update-card');

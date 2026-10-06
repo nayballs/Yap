@@ -150,8 +150,9 @@
 </div>
 
 <style>
-  /* Wispr's "Meeting detected" card on the measured card tokens: 400 wide,
-     black, a 1 px rgb(48,48,47) border, radius 16, a 1–2 px shadow. One row,
+  /* Wispr's "Meeting detected" card on the measured card layout: 400 wide,
+     a 1 px edge, radius 16, a 1–2 px shadow, in Yap's bar colours (--bar-*,
+     app.css). One row,
      so it keeps the screenshot's slimmer padding rather than the notice
      cards' 20 px. */
   .call {
@@ -163,10 +164,10 @@
     box-sizing: border-box;
     padding: 12px 12px 12px 14px;
     border-radius: 16px;
-    background: #000;
-    border: 1px solid rgb(48, 48, 47);
-    box-shadow: 0 1px 2px rgba(26, 26, 26, 0.05);
-    color: rgb(252, 252, 251);
+    background: var(--bar-surface);
+    border: 1px solid var(--bar-border);
+    box-shadow: var(--bar-shadow);
+    color: var(--bar-text);
     pointer-events: auto;
   }
   /* A picture of the card (`preview`): nothing on it reacts to the pointer. */
@@ -184,18 +185,18 @@
     align-items: center;
     justify-content: center;
     padding: 0;
-    border: 1px solid rgb(48, 48, 47);
+    border: 1px solid var(--bar-border);
     border-radius: 50%;
-    background: #000;
-    color: rgba(238, 235, 227, 0.7);
+    background: var(--bar-surface);
+    color: var(--bar-text-muted);
     cursor: pointer;
     transition:
       background 0.15s ease,
       color 0.15s ease;
   }
   .x:hover {
-    background: rgb(26, 26, 26);
-    color: rgb(238, 235, 227);
+    background: var(--bar-surface-hover);
+    color: var(--bar-text-soft);
   }
   .x svg {
     width: 11px;
@@ -210,7 +211,7 @@
     align-items: center;
     justify-content: center;
     border-radius: 10px;
-    background: rgb(252, 252, 251);
+    background: var(--bar-mark-tile);
   }
   .mark svg {
     width: 20px;
@@ -234,22 +235,22 @@
     gap: 6px;
     font-size: 12.5px;
     line-height: 18px;
-    color: rgb(179, 178, 173);
+    color: var(--bar-text-muted);
     white-space: nowrap;
   }
   .dot {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #3dbb74;
+    background: var(--bar-now);
   }
   .dot.recording {
-    background: #e5645e;
+    background: var(--bar-recording);
     animation: pulse 1.4s ease-in-out infinite;
   }
   /* A calendar meeting about to start (calendar.rs): the cards' amber. */
   .dot.soon {
-    background: rgb(255, 169, 70);
+    background: var(--bar-accent);
   }
   /* A long line ("Started 12 min ago · with Tanay +3") ends in "…". */
   .line {
@@ -268,16 +269,16 @@
   }
   .count {
     font-weight: 600;
-    color: rgb(255, 169, 70);
+    color: var(--bar-accent);
   }
   /* "Esc" as a small key, so the countdown line fits the row. */
   .esc {
     padding: 0 5px;
-    border: 1px solid rgb(48, 48, 47);
+    border: 1px solid var(--bar-border);
     border-radius: 4px;
     font-size: 11px;
     line-height: 15px;
-    color: rgb(179, 178, 173);
+    color: var(--bar-text-muted);
   }
 
   /* The cream split button: [Yap] Record notes | ^ (radius 8, 15 / 600). */
@@ -288,8 +289,8 @@
     align-items: stretch;
     height: 36px;
     border-radius: 8px;
-    background: rgb(255, 255, 235);
-    color: rgb(26, 26, 26);
+    background: var(--bar-button);
+    color: var(--bar-button-text);
   }
   .go,
   .more {
@@ -329,12 +330,12 @@
     font-size: 12px;
     font-weight: 500;
     line-height: 14px;
-    color: rgba(26, 26, 26, 0.6);
+    color: var(--bar-button-text-sub);
   }
   .go:hover,
   .more:hover,
   .more.on {
-    background: #fff;
+    background: var(--bar-button-hover);
   }
   .logo {
     position: relative;
@@ -366,17 +367,17 @@
     stroke-width: 2.6;
   }
   .ring .track {
-    stroke: rgba(26, 26, 26, 0.14);
+    stroke: var(--bar-button-track);
   }
   .ring .run {
-    stroke: #c2690a;
+    stroke: var(--yap-primary);
     stroke-linecap: round;
     transition: stroke-dashoffset 0.2s linear;
   }
   .divider {
     width: 1px;
     margin: 8px 0;
-    background: rgba(26, 26, 26, 0.16);
+    background: var(--bar-button-divider);
   }
   .more {
     justify-content: center;
@@ -401,9 +402,9 @@
     min-width: 200px;
     padding: 6px;
     border-radius: 12px;
-    background: #000;
-    border: 1px solid rgb(48, 48, 47);
-    box-shadow: 0 1px 2px rgba(26, 26, 26, 0.05);
+    background: var(--bar-surface);
+    border: 1px solid var(--bar-border);
+    box-shadow: var(--bar-shadow);
     animation: menu-in 0.12s ease-out;
   }
   .menu button {
@@ -411,7 +412,7 @@
     border: none;
     border-radius: 8px;
     background: none;
-    color: rgb(238, 235, 227);
+    color: var(--bar-text-soft);
     font: inherit;
     font-size: 14px;
     font-weight: 500;
@@ -420,8 +421,8 @@
     cursor: pointer;
   }
   .menu button:hover {
-    background: rgba(255, 255, 255, 0.09);
-    color: #fff;
+    background: var(--bar-hover);
+    color: var(--bar-text);
   }
   @keyframes menu-in {
     from {
@@ -443,7 +444,7 @@
   }
   .drain {
     height: 100%;
-    background: rgba(255, 255, 255, 0.14);
+    background: var(--bar-track);
     animation-name: drain;
     animation-timing-function: linear;
     animation-fill-mode: forwards;

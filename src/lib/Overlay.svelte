@@ -519,8 +519,8 @@
     box-sizing: border-box;
     overflow: hidden;
     border-radius: 6px;
-    background: rgba(0, 0, 0, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.5);
+    background: var(--bar-pill);
+    border: 1px solid var(--bar-pill-border);
     transition: all 0.1s cubic-bezier(0.05, 0.6, 0.4, 0.95);
   }
   /* (The open pill isn't measured yet: Yap's own until it is.) */
@@ -529,8 +529,8 @@
     height: 38px;
     padding: 0 4px;
     border-radius: 19px;
-    background: #000;
-    border-color: rgb(48, 48, 47);
+    background: var(--bar-surface);
+    border-color: var(--bar-border);
     transition: all 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95);
   }
   .btn {
@@ -545,7 +545,7 @@
     border: none;
     border-radius: 999px;
     background: none;
-    color: rgb(252, 252, 251);
+    color: var(--bar-text);
     opacity: 0;
     cursor: pointer;
     pointer-events: none;
@@ -581,14 +581,14 @@
   }
   .btn:hover,
   .btn.on {
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--bar-active);
   }
   .sep {
     flex: 0 0 auto;
     width: 0;
     height: 16px;
     margin: 0;
-    background: rgba(255, 255, 255, 0.16);
+    background: var(--bar-sep);
     opacity: 0;
     transition: opacity 0.14s ease;
   }
@@ -605,8 +605,8 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: #3dbb74;
-    box-shadow: 0 0 0 1.5px #000;
+    background: var(--bar-now);
+    box-shadow: 0 0 0 1.5px var(--bar-surface);
   }
 
   /* ---- tooltip: "Dictate F9", "New note Win + Alt + M" (Wispr's ink
@@ -619,8 +619,8 @@
     gap: 5px;
     padding: 6px 12px;
     border-radius: 8px;
-    background: rgb(26, 26, 26);
-    color: rgb(238, 235, 227);
+    background: var(--bar-tooltip);
+    color: var(--bar-tooltip-text);
     font-size: 12px;
     font-weight: 600;
     line-height: 20px;
@@ -629,7 +629,7 @@
   }
   .tip b {
     font-weight: 600;
-    color: #fff;
+    color: var(--bar-tooltip-key);
   }
   .stage.top .tip {
     bottom: auto;
@@ -647,9 +647,9 @@
     min-width: 214px;
     padding: 6px;
     border-radius: 12px;
-    background: #000;
-    border: 1px solid rgb(48, 48, 47);
-    box-shadow: 0 1px 2px rgba(26, 26, 26, 0.05);
+    background: var(--bar-surface);
+    border: 1px solid var(--bar-border);
+    box-shadow: var(--bar-shadow);
   }
   .stage.top .menu {
     bottom: auto;
@@ -660,7 +660,7 @@
     border: none;
     border-radius: 8px;
     background: none;
-    color: rgb(238, 235, 227);
+    color: var(--bar-text-soft);
     font: inherit;
     font-size: 14px;
     font-weight: 500;
@@ -668,13 +668,13 @@
     cursor: pointer;
   }
   .menu button:hover {
-    background: rgba(255, 255, 255, 0.09);
-    color: #fff;
+    background: var(--bar-hover);
+    color: var(--bar-text);
   }
   .rule {
     height: 1px;
     margin: 5px 8px;
-    background: rgb(48, 48, 47);
+    background: var(--bar-border);
   }
 
   /* ---- the meeting recording pill: 69 × 30, black, a 2 px ring in Yap's
@@ -688,8 +688,8 @@
     padding: 0 5px;
     box-sizing: border-box;
     border-radius: 22.5px;
-    background: #000;
-    border: 2px solid #e5645e;
+    background: var(--bar-surface);
+    border: 2px solid var(--bar-recording);
     opacity: 0.5;
     transition:
       opacity 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95),
@@ -706,7 +706,7 @@
     padding: 0;
     border: none;
     background: none;
-    color: rgb(252, 252, 251);
+    color: var(--bar-text);
     font: inherit;
     cursor: pointer;
   }
@@ -726,7 +726,7 @@
     width: 2px;
     height: 18px;
     border-radius: 0.5px;
-    background: #fff;
+    background: var(--bar-wave); /* Yap amber, as the dictation capsule's */
     transform-origin: center;
     animation: eq 1s ease-in-out infinite;
   }
@@ -751,7 +751,7 @@
     font-weight: 650;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
-    color: rgb(252, 252, 251);
+    color: var(--bar-text);
     transition:
       max-width 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95),
       margin 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95),
@@ -768,17 +768,17 @@
     width: 19px;
     height: 19px;
     border-radius: 50%;
-    background: rgb(77, 74, 66);
+    background: var(--bar-stop);
     transition: background 0.15s ease;
   }
   .mstop:hover {
-    background: rgb(98, 94, 84);
+    background: var(--bar-stop-hover);
   }
   .square {
     width: 8px;
     height: 8px;
     border-radius: 2px;
-    background: #fff;
+    background: var(--bar-text);
   }
   @keyframes eq {
     0%,

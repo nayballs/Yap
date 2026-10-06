@@ -89,9 +89,9 @@
 </div>
 
 <style>
-  /* Wispr's card, measured: 400 × auto, black, 1 px rgb(48,48,47), radius
-     16, padding 20, a 1–2 px shadow (nothing near the transparent window's
-     edge), text rgb(252,252,251). */
+  /* Wispr's card, measured: 400 × auto, a 1 px edge, radius 16, padding 20,
+     a 1–2 px shadow (nothing near the transparent window's edge). Colours:
+     Yap's bar tokens (--bar-*, app.css). */
   .card {
     position: relative;
     display: flex;
@@ -102,10 +102,10 @@
     padding: 20px;
     border-radius: 16px;
     overflow: hidden;
-    background: #000;
-    border: 1px solid rgb(48, 48, 47);
-    box-shadow: 0 1px 2px rgba(26, 26, 26, 0.05);
-    color: rgb(252, 252, 251);
+    background: var(--bar-surface);
+    border: 1px solid var(--bar-border);
+    box-shadow: var(--bar-shadow);
+    color: var(--bar-text);
     pointer-events: auto;
   }
   /* The ✕: 24 × 24, 13 px from the top and right, at 30 %. */
@@ -122,7 +122,7 @@
     border: none;
     border-radius: 6px;
     background: none;
-    color: rgb(238, 235, 227);
+    color: var(--bar-text-soft);
     opacity: 0.3;
     cursor: pointer;
     transition:
@@ -131,7 +131,7 @@
   }
   .close:hover {
     opacity: 0.8;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--bar-hover);
   }
   .close svg {
     width: 14px;
@@ -145,14 +145,15 @@
     margin-bottom: 10px;
     padding: 2px 8px;
     border-radius: 6px;
-    background: rgb(255, 169, 70);
-    color: rgb(26, 26, 26);
+    background: var(--bar-chip);
+    color: var(--bar-chip-text);
     font-size: 12px;
     font-weight: 550;
     line-height: 20px;
   }
   .chip.error {
-    background: rgb(240, 196, 191);
+    background: var(--bar-chip-error);
+    color: var(--bar-chip-error-text);
   }
   .chip svg {
     width: 12px;
@@ -170,7 +171,7 @@
     font-size: 15px;
     font-weight: 400;
     line-height: 20px;
-    color: rgb(179, 178, 173);
+    color: var(--bar-text-muted);
   }
   .countdown {
     display: flex;
@@ -179,7 +180,7 @@
     margin-top: 10px;
     font-size: 14px;
     font-weight: 600;
-    color: rgb(255, 169, 70);
+    color: var(--bar-accent);
   }
   .ring {
     width: 16px;
@@ -191,17 +192,17 @@
     stroke-width: 2.4;
   }
   .ring .track {
-    stroke: rgba(255, 255, 255, 0.14);
+    stroke: var(--bar-track);
   }
   .ring .run {
-    stroke: rgb(255, 169, 70);
+    stroke: var(--bar-accent);
     stroke-linecap: round;
     transition: stroke-dashoffset 0.2s linear;
   }
   .esc {
     font-weight: 500;
     font-size: 12px;
-    color: rgb(179, 178, 173);
+    color: var(--bar-text-muted);
   }
   /* A right-aligned row 12 px under the body: a ghost button and a cream
      one, both radius 8, 15 / 600 / 20. */
@@ -226,18 +227,18 @@
   .ghost {
     padding: 6px 10px;
     background: none;
-    color: rgb(238, 235, 227);
+    color: var(--bar-text-soft);
   }
   .ghost:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--bar-hover);
   }
   .cream {
     padding: 6px 12px;
-    background: rgb(255, 255, 235);
-    color: rgb(26, 26, 26);
+    background: var(--bar-button);
+    color: var(--bar-button-text);
   }
   .cream:hover {
-    background: #fff;
+    background: var(--bar-button-hover);
   }
   .link {
     align-self: stretch;
@@ -251,16 +252,16 @@
     border: none;
     border-radius: 6px;
     background: none;
-    color: rgb(179, 178, 173);
+    color: var(--bar-text-muted);
     font: inherit;
     font-size: 13px;
     text-decoration: underline;
-    text-decoration-color: rgba(179, 178, 173, 0.4);
+    text-decoration-color: var(--bar-text-faint);
     text-underline-offset: 3px;
     cursor: pointer;
   }
   .link button:hover {
-    color: rgb(252, 252, 251);
+    color: var(--bar-text);
     text-decoration-color: currentColor;
   }
   .hairline {
@@ -274,7 +275,7 @@
   }
   .run-down {
     height: 100%;
-    background: rgba(255, 255, 255, 0.14);
+    background: var(--bar-track);
     animation-name: drain;
     animation-timing-function: linear;
     animation-fill-mode: forwards;

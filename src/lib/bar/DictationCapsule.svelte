@@ -58,9 +58,9 @@
     /* The bar's black with the cards' hairline; no shadow: the capsule sits
        14 px above the window's edge, which a shadow would reach (a grey box
        on a transparent WebView2 window). */
-    background: #000;
-    border: 1px solid rgb(48, 48, 47);
-    color: rgba(255, 255, 255, 0.9);
+    background: var(--bar-surface);
+    border: 1px solid var(--bar-border);
+    color: var(--bar-text);
     font-size: 12.5px;
   }
   .capsule.err {
@@ -101,7 +101,7 @@
     width: 2px;
     min-height: 2px;
     border-radius: 1px;
-    background: #f0b04a; /* Yap amber, brightened for the dark capsule */
+    background: var(--bar-wave); /* Yap amber, brightened for the dark capsule */
     transition: height 0.06s linear;
   }
 
@@ -121,7 +121,7 @@
     width: 236px;
     white-space: nowrap;
     overflow: hidden;
-    color: rgba(255, 255, 255, 0.86);
+    color: var(--bar-text-soft);
     mask-image: linear-gradient(90deg, transparent 0, #000 16px);
     -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 16px);
   }
