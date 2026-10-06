@@ -9,6 +9,10 @@ name: "Release"
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  password for that key (empty string if none)
 #   GITHUB_TOKEN                        provided automatically by Actions
 #
+# Optional (a build without them can't connect Google Calendar; docs/calendar.md):
+#   YAP_GOOGLE_CALENDAR_CLIENT_ID       Google Cloud "Desktop app" OAuth client
+#   YAP_GOOGLE_CALENDAR_CLIENT_SECRET   its secret (public by Google's rules)
+#
 # NOT configured yet (the installer ships UNSIGNED for now): Authenticode.
 # Planned via **SignPath Foundation** (free for OSS) — see docs/SIGNING.md for
 # the full setup, incl. the auto-updater signing-order handling. When the
@@ -99,6 +103,12 @@ jobs:
           # the in-app updater accepts the artifact.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Google Calendar's OAuth client (calendar/google.rs reads them with
+          # option_env!): a Google Cloud "Desktop app" client. Google treats an
+          # installed app's secret as public, but it stays out of the repo.
+          # Unset = this build can't offer Google (iCal links still work).
+          YAP_GOOGLE_CALENDAR_CLIENT_ID: ${{ secrets.YAP_GOOGLE_CALENDAR_CLIENT_ID }}
+          YAP_GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.YAP_GOOGLE_CALENDAR_CLIENT_SECRET }}
           # Authenticode (SignPath Foundation, free OSS) — added once the account
           # is approved. Per docs/SIGNING.md the installer is signed AFTER build
           # and the updater signature is regenerated over the signed installer,

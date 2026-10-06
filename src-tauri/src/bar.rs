@@ -33,6 +33,7 @@
 //! - **Cards.** [`show_card`] / [`update_card`] / [`dismiss_card`] put cards
 //!   above the pill — Yap's notices while its main window isn't focused (the
 //!   call prompts of `meeting_detect.rs`, as Wispr's "Meeting detected" card;
+//!   the calendar's "Design review · In 1 min" reminders from `calendar.rs`;
 //!   "update ready" from `updates.rs`), instead of a Windows notification.
 //!   They return `false` when the bar is off or hidden for an hour, and
 //!   callers fall back to the notification.
@@ -104,7 +105,8 @@ pub struct Card {
     /// with `secondary` and `link` in its ^ menu); the ✕ sits on its corner.
     pub style: &'static str,
     /// The glyph by the title: "call" | "update" | "notes" | "timer" |
-    /// "screen" | "error" | "".
+    /// "screen" | "error" | "". On a call card, "calendar" stands in for a
+    /// missing app mark (a calendar meeting with no call app).
     pub icon: &'static str,
     /// The call app (`meeting_detect::APPS` id), for its mark.
     pub app: Option<&'static str>,
@@ -112,7 +114,8 @@ pub struct Card {
     pub body: String,
     /// The line under a call card's title ("Now", "Still recording")…
     pub status: Option<String>,
-    /// …after a dot: "live" (green: happening now), "recording" (red), "".
+    /// …after a dot: "live" (green: happening now), "recording" (red),
+    /// "soon" (amber: a calendar meeting about to start), "".
     pub dot: &'static str,
     /// The light button on the right.
     pub primary: Option<CardAction>,

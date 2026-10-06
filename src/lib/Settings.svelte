@@ -30,6 +30,8 @@
   import { modelStore } from './modelStore.svelte.js';
   import { attention, attentionCount } from './attention.svelte.js';
   import AccountSection from './AccountSection.svelte';
+  import ConnectorsSection from './ConnectorsSection.svelte';
+  import { calendar } from './calendar.svelte.js';
   import McpSection from './McpSection.svelte';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
   import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from './updates.svelte.js';
@@ -72,9 +74,16 @@
       ],
     },
     { label: 'Data', items: [{ id: 'history', label: 'History' }] },
-    // Wispr's Connectors + MCP pages. MCP: AI apps read your meetings
-    // (McpSection.svelte).
-    { label: 'Connections', items: [{ id: 'mcp', label: 'MCP' }] },
+    // Wispr's Connectors + MCP pages. Connectors: your calendars
+    // (calendar.rs, ConnectorsSection.svelte). MCP: AI apps read your
+    // meetings (McpSection.svelte).
+    {
+      label: 'Connections',
+      items: [
+        { id: 'connectors', label: 'Connectors' },
+        { id: 'mcp', label: 'MCP' },
+      ],
+    },
     {
       label: 'System',
       items: [
@@ -424,6 +433,14 @@
     ask: 'Yap asks whether to stop recording and summarise',
     stop: 'Yap stops recording and writes your action plan, no question asked',
   };
+  // General → Meetings → "Notify before scheduled meetings start" (calendar.rs,
+  // `meetingReminder`; Wispr's choices).
+  const REMINDER_OPTIONS = [
+    { value: '15s', label: 'Right before (15 sec)' },
+    { value: '1min', label: '1 minute before' },
+    { value: '2min', label: '2 minutes before' },
+    { value: 'never', label: 'Never' },
+  ];
   const MEETING_MAX_LENGTHS = [
     { value: 60, label: '1 hour' },
     { value: 120, label: '2 hours' },
@@ -466,6 +483,7 @@
     meetingOpenNotepad: true,
     meetingSplitScreen: false,
     meetingLiveTranscript: true,
+    meetingReminder: '15s',
     barEnabled: true,
     barHideFullscreen: true,
     inputDevice: null,
@@ -709,6 +727,9 @@
     if (typeof e.detail !== 'string') return;
     // "general#meetings": a section, then the card in it to scroll to.
     const [target, card] = e.detail.split('#');
+    // A section this build doesn't have (Connectors' "Go to MCP" before the
+    // MCP page lands): stay put.
+    if (target !== 'account' && !NAV_GROUPS.some((g) => g.items.some((i) => i.id === target))) return;
     section = target;
     if (card) {
       tick().then(() => document.getElementById(`settings-${card}`)?.scrollIntoView({ block: 'start' }));
@@ -1296,6 +1317,12 @@
       <circle cx="8" cy="12" r="2" />
       <circle cx="13" cy="18" r="2" />
     </svg>
+  {:else if id === 'connectors'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M9 3v4M15 3v4" />
+      <path d="M6 7h12v3a6 6 0 0 1-12 0z" />
+      <path d="M12 16v5" />
+    </svg>
   {:else if id === 'about'}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="9" />
@@ -1627,6 +1654,29 @@
                   validate={(s) => validateHotkey('meetingHotkey', s)}
                   oncapturingchange={(on) => onHotkeyCapturing('meetingHotkey', on)}
                 />
+              </Row>
+              <!-- The calendar (calendar.rs): a heads-up card before each
+                   meeting on a connected calendar; the calendars themselves are
+                   in Settings → Connectors. -->
+              <Row
+                label="Notify before scheduled meetings start"
+                desc="A heads-up before each meeting on your calendar, with Join & take notes"
+              >
+                <Select
+                  bind:value={cfg.meetingReminder}
+                  options={REMINDER_OPTIONS}
+                  ariaLabel="Notify before scheduled meetings start"
+                />
+              </Row>
+              <Row
+                label="Calendar"
+                desc={calendar.connections.length
+                  ? `Connected: ${calendar.connections.map((c) => c.label).join(', ')}`
+                  : 'Connect Google, Outlook or any calendar for meeting names and attendees'}
+              >
+                <Button variant="secondary" size="sm" onclick={() => (section = 'connectors')}>
+                  {calendar.connections.length ? 'Manage' : 'Connect calendar'}
+                </Button>
               </Row>
               <Row>
                 <Toggle
@@ -2408,6 +2458,13 @@
               />
             </Row>
           </Group>
+
+        {:else if section === 'connectors'}
+          <div class="page-h">
+            <h1>Connectors</h1>
+            <p>Connecting your calendar gives you a reminder before each meeting and notes with the meeting's name and who's in it. Yap reads it straight from this PC.</p>
+          </div>
+          <ConnectorsSection />
 
         {:else if section === 'mcp'}
           <div class="page-h">

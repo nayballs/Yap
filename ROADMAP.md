@@ -843,7 +843,7 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
       meeting notes and transcripts (not your dictations, like Wispr), locally over Yap's
       bridge, with one-click **Add to Claude / Cursor / …** in Integrations plus a
       copyable config for everything else.
-- [ ] *(building)* **Calendar connection, local-first.** **Google in one click** (installed-app OAuth
+- [ ] *(merged, dev check: fec18fd; Google needs its OAuth client)* **Calendar connection, local-first.** **Google in one click** (installed-app OAuth
       with PKCE straight from the PC; read-only scopes; the token kept in Credential
       Manager) plus **any calendar by private iCal link** (Outlook, iCloud and others).
       No Yap server. Synced every ~15 min; the next 7 days; Wispr's filters (invitees
@@ -851,10 +851,10 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
       (for the action plan's owners and for spelling) and join links. The Google OAuth
       client and its scope verification are the coordinator's dashboard work; Microsoft
       Graph is a follow-up.
-- [ ] *(building)* **Pre-meeting card** ("Notify before scheduled meetings start"): a bottom-centre
+- [ ] *(merged, dev check: fec18fd)* **Pre-meeting card** ("Notify before scheduled meetings start"): a bottom-centre
       card "Meeting with Tanay · In 1 min" with **Join & take notes**, which opens the
       meeting link and starts recording.
-- [ ] *(building)* **Meetings hub.** A Wispr-style home for meetings: Today/Upcoming from the calendar,
+- [ ] *(merged, dev check: fec18fd)* **Meetings hub.** A Wispr-style home for meetings: Today/Upcoming from the calendar,
       Past notes, and search across meetings.
 
 **Wave 3 — the rest of the product**
@@ -872,15 +872,15 @@ Already in Yap before Phase 8 (2026-10-05): call detection + "Record notes?"
 **Fixes the docs teardown found in Yap** (`docs/wispr-notetaker-teardown.md` §8; the
 first three are being built alongside Wave 1, since neither the notepad nor the guard
 rails touch `meeting.rs`; the consent message waits for the notepad, where it lives)
-- [ ] *(building)* **Dictation leaks into a meeting's "You" transcript.** The meeting keeps its own
+- [ ] *(merged, dev check: 81d4a35)* **Dictation leaks into a meeting's "You" transcript.** The meeting keeps its own
       mic stream open during a hotkey dictation. Blank it while dictating and leave a
       "Dictated" marker.
-- [ ] *(building)* **Meeting lines (and Upload) skip the correction dictionary** (exact and fuzzy), so
+- [ ] *(merged, dev check: 81d4a35)* **Meeting lines (and Upload) skip the correction dictionary** (exact and fuzzy), so
       with the default Parakeet model meetings get no corrections.
-- [ ] *(building)* **"Them" follows the default output device chosen at start.** A headset picked
+- [ ] *(merged, dev check: 81d4a35)* **"Them" follows the default output device chosen at start.** A headset picked
       inside Teams leaves "Them" silent with no warning. Follow device changes, and warn
       when one side goes quiet.
-- [ ] **An editable "Copy consent message"** for the meeting chat.
+- [ ] *(building)* **An editable "Copy consent message"** for the meeting chat.
 
 Skipped on purpose, because they need a hosted cloud: share-by-link, auto-share and
 org-wide admin controls. Copy-as-markdown/text and export cover sharing locally.

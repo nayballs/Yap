@@ -65,7 +65,7 @@ getrandom = "0.3"
 # local time. Both were already in the dependency tree.
 rmcp = { version = "3.5", default-features = false, features = ["server", "transport-io"] }
 toml_edit = "0.25"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # Yap accounts (auth.rs): base64/url decode the browser handoff code.
 base64 = "0.22"
@@ -73,6 +73,14 @@ url = "2"
 # Sign in with your phone (auth.rs): the QR code, made locally. The encoder
 # alone (no image/SVG renderers, no dependencies); the Account page draws it.
 qrcode = { version = "0.14", default-features = false }
+
+# Calendar (calendar.rs): meetings read straight from Google Calendar or a
+# private iCal link. `rrule` expands RFC 5545 recurrence rules (the crate the
+# `icalendar` crate builds on); `chrono-tz` is the IANA time-zone database,
+# for TZIDs (Windows zone names are mapped to it, see calendar/tz.rs). Both
+# work on the `chrono` above.
+chrono-tz = "0.10"
+rrule = "0.14"
 
 # Model download + directory-model extract/verify (used by stt.rs)
 reqwest = { version = "0.12", features = ["stream", "json"] }

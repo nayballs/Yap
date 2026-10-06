@@ -1258,7 +1258,9 @@
     font-size: 15px;
     overflow: hidden;
   }
-  .pad button {
+  /* A bare element selector, so every button's own class (its size and
+     weight) wins over this. */
+  button {
     font: inherit;
     cursor: pointer;
   }
@@ -1619,7 +1621,7 @@
   .plus :global(svg) {
     width: 11px;
     height: 11px;
-    stroke-width: 2.6;
+    stroke-width: 3.2;
   }
   /* The live waveform on the Transcript tab while recording. */
   .wave {

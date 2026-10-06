@@ -1024,6 +1024,18 @@ Section Uninstall
       ${If} $0 <> 0
         DetailPrint "Removed Yap's saved sign-in from Windows Credential Manager"
       ${EndIf}
+      ; --- YAP DATA --- The connected calendars' secrets (calendar/vault.rs: a
+      ; Google refresh token or a private iCal link), one generic credential per
+      ; connection slot, yap-calendar-1 … yap-calendar-8 (vault::SLOTS). They go
+      ; with the calendar.json above that names them.
+      StrCpy $1 1
+      ${Do}
+        System::Call 'advapi32::CredDeleteW(w "yap-calendar-$1.com.yap.dictation", i 1, i 0) i .r0'
+        ${If} $0 <> 0
+          DetailPrint "Removed a connected calendar's key from Windows Credential Manager"
+        ${EndIf}
+        IntOp $1 $1 + 1
+      ${LoopWhile} $1 <= 8
     ${EndIf}
   ${EndIf}
 

@@ -414,6 +414,14 @@ pub struct YapConfig {
     #[serde(default = "default_meeting_hotkey")]
     pub meeting_hotkey: String,
 
+    /// "Notify before scheduled meetings start" (Wispr's setting, read by
+    /// `calendar.rs`): "15s" (right before, the default), "1min", "2min" or
+    /// "never". Only matters once a calendar is connected (Settings →
+    /// Connectors); the connections themselves live in calendar.json and
+    /// Credential Manager, never here.
+    #[serde(default = "default_meeting_reminder")]
+    pub meeting_reminder: String,
+
     /// Schema version, for the one-time migrations in `migrate_once` (the
     /// kind that must never run twice, unlike `load`'s idempotent fixes). A
     /// config saved before versioning has no field (0); `Default` and every
@@ -488,6 +496,9 @@ fn default_meeting_hotkey() -> String {
     // Win+Alt+M (VK 'M' = 77), Wispr Flow's Notetaker shortcut.
     "kb:alt+win+77".into()
 }
+fn default_meeting_reminder() -> String {
+    "15s".into()
+}
 
 impl Default for YapConfig {
     fn default() -> Self {
@@ -550,6 +561,7 @@ impl Default for YapConfig {
             meeting_max_minutes: default_meeting_max_minutes(),
             meeting_call_end: default_meeting_call_end(),
             meeting_hotkey: default_meeting_hotkey(),
+            meeting_reminder: default_meeting_reminder(),
             config_version: CONFIG_VERSION,
         }
     }

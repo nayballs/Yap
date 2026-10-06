@@ -12,7 +12,10 @@ windows stay out of screen shares, it stops at a maximum length, it can stop
 when the call ends, and a shortcut starts and stops it:
 [Guard rails](#guard-rails)), and while a meeting records, a
 [meeting notepad](#the-meeting-notepad) docks to the edge of the screen beside
-the call.
+the call. With a calendar connected, the Meetings view lists what's coming,
+a card offers **Join & take notes** just before each meeting, and a note
+takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
+[`calendar.md`](./calendar.md)).
 
 | Piece | Code |
 |---|---|
@@ -24,6 +27,7 @@ the call.
 | The end of a meeting: pause or end, "Started by mistake?", the action plan job | `src-tauri/src/meeting_end.rs` |
 | "What did I miss?", the AI meeting title | `src-tauri/src/meeting_assist.rs` |
 | The notepad window: docking, split screen | `src-tauri/src/notepad.rs` |
+| The calendar: meetings, the reminder card, a note's meeting | `src-tauri/src/calendar.rs` (+ `calendar/`; [`calendar.md`](./calendar.md)) |
 | Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_TITLE_PROMPT`) | `src-tauri/src/llm.rs` |
 | Storage (`Note::digests`, `TranscriptSegment::echo` / `::dictated`, `Action::kind`, `Note::title_auto`) | `src-tauri/src/notes.rs` |
 | The action run (`note_enhance` / `run_enhance`) | `src-tauri/src/commands.rs` |
@@ -487,8 +491,12 @@ refusal or a sentence of chat is no title). A failed try is retried after 2
 minutes, three times at most. **A title the person typed is never
 replaced**: any edit of the title clears `title_auto` for good, and the AI
 title is set under the notes store's lock only while the title is still the
-made-up one (or empty). Until it's named, a made-up title shows muted in the
-notepad and the Notes view.
+made-up one (or empty). **Nor is a calendar meeting's name**: a note made
+for an event ("Join & take notes", Start notes) carries its title as a real
+one, and a recording that turns out to be during a calendar meeting swaps a
+made-up title for the meeting's name the same way (`notes::link_event`
+clears `title_auto`), so the model isn't even asked. Until it's named, a
+made-up title shows muted in the notepad and the Notes view.
 
 ### Testing the notepad
 
@@ -518,7 +526,9 @@ notepad and the Notes view.
   recording); the consent message (copy, an edit saved on blur and kept by
   Settings' next save, ⋯ → Copy consent message, back to the default); the AI
   title replacing call detection's and never a typed one, then the stopped
-  state (the divider, Generate summary, Resume); Started by mistake? (Keep
+  state (the divider, Generate summary, Resume); a note started from a
+  calendar meeting (a local iCal feed) keeping the meeting's name, with no
+  title call at all; Started by mistake? (Keep
   then Generate summary, Discard deleting the note, and on the Yap bar with
   no window on screen); the summary's "Step 2 of 3", a failure above the bar
   with Retry, then the plan; an automatic stop; the meeting shortcut and the
@@ -882,7 +892,10 @@ has passed, so no prompt).
 
 ### Asking
 
-- **Once per call**, and never while Yap already records a meeting.
+- **Once per call**, and never while Yap already records a meeting. Nor
+  when the calendar asked already: a call during a meeting whose reminder
+  card is up or was answered isn't asked about (`calendar::claims_call`; see
+  [The calendar](#the-calendar)).
 - **Pop-up** (the default, `meetingDetectStyle: "popup"`):
   - Main window on screen: an in-app toast ("Teams call detected", "Record
     notes? Let people know you're taking notes.", **Record notes** / **Not
@@ -954,7 +967,8 @@ Creates a note through the notes API (`notes::create` + `notes::mark_meeting`):
 - folder **Meetings**, `noteType` **meeting**, `source` **meeting**,
 
 then starts the existing recorder (`meeting_start`: mic = "You", system audio =
-"Them"). With the window visible the note opens in Notes. With it hidden, a
+"Them"). During a calendar meeting the note then takes the meeting's name,
+attendees and invite ([The calendar](#the-calendar)). With the window visible the note opens in Notes. With it hidden, a
 Windows notification says "Taking notes on your Teams call" and offers **Open
 note**. If recording can't start (no microphone, no speakers), the note is
 deleted and the prompt says why.
@@ -1073,3 +1087,40 @@ Microsoft, [RegNotifyChangeKeyValue](https://learn.microsoft.com/en-us/windows/w
 the same consent-store technique in
 [automattermostatus #17](https://gitlab.com/matclab/automattermostatus/-/issues/17)
 (Teams' packaged entry sits directly under `microphone`).
+
+## The calendar
+
+With Google Calendar or a private iCal link connected (Settings →
+Connectors; setup, privacy and how it works: [`calendar.md`](./calendar.md)),
+meetings and their notes meet in four places:
+
+- **The Meetings view** lists today and the next 7 days (Conflict, Maybe,
+  Join meeting / Start / Join + Start from 10 minutes before), then past
+  meeting notes with search and an Ask bar for questions about your
+  meetings.
+- **The reminder card** ("Notify before scheduled meetings start": right
+  before, 1 or 2 minutes, never; Settings → General → Meetings): **Join &
+  take notes**, **Start notes**, Snooze 2 min, ✕ — in the main window, and
+  while it isn't focused on the **Yap bar** (`bar.rs`) as a call card like
+  call detection's ("Design review · ● In 1 min · with Tanay +1"), else a
+  Windows notification. While another meeting's
+  notes record, it offers to **switch** notes: the running meeting ends
+  (`meeting_end::end`, so its action plan is written) and the next one's
+  notes start. A call starting during the next meeting while the last one
+  still records brings the same switch card.
+- **A note's meeting.** However a recording starts during a meeting (the
+  card, the Meetings view, Record notes, Notes, the meeting shortcut),
+  `calendar::on_meeting_started` ties the note to it (`Note::event`): the
+  meeting's name over a made-up title (and the AI title then leaves it
+  alone), its attendees as participants (who the action plan gives tasks
+  to, and spelling hints for Whisper while it transcribes), and the invite's
+  description, cleaned of links and dial-in boilerplate, as context for the
+  action plan and the note's Ask bar (`calendar::invite_context`).
+- **Not asking twice.** Call detection asks the calendar first
+  (`claims_call`): a call during a meeting whose card is up, or was
+  answered, gets no "Record notes?"; a snoozed card comes back instead.
+
+Tested in `e2e/calendar.spec.js` (the card's Join & take notes recording
+into a note with the meeting's name and attendees, its simulated call not
+asked about again, Esc and snooze, back-to-back switching) and
+`e2e/calendar-nudge.spec.js`.

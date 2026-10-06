@@ -6,7 +6,8 @@
 // dividers, search, copy), the summary Rust writes when the meeting ends
 // (meeting_end.rs, with steps and a Retry; also after a stop Yap makes
 // itself, meeting_guard.rs), the Ask sheet with "What did I miss?" and the AI
-// meeting title (meeting_assist.rs), "Started by mistake?" (in the notepad,
+// meeting title (meeting_assist.rs; never over a typed title or a calendar
+// meeting's name — a local iCal feed, support/calendar-feed.js), "Started by mistake?" (in the notepad,
 // or on the Yap bar with no Yap window on screen), the consent message,
 // hiding from screen capture (capture.rs), and the dictation key and meeting
 // shortcut caught in-page.
@@ -34,6 +35,7 @@ import {
 } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { newMeetingNote, meetingNote } from './support/meetings.js';
+import { startCalendarFeed, calendarFile, vevent } from './support/calendar-feed.js';
 import {
   noteMarkdown,
   noteText,
@@ -63,6 +65,8 @@ const test = base.extend({
           llmScopes: {
             noteFormatting: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-notes' },
           },
+          // No calendar reminder cards (the calendar test's meeting is on now).
+          meetingReminder: 'never',
         },
       });
     },
@@ -703,6 +707,53 @@ test('the AI names a meeting with a made-up title, never one the person typed', 
   await pad.waitForTimeout(1_500);
   expect(fakeLlm.requests.filter((r) => r.kind === 'title')).toHaveLength(asked + 1);
   await expect(title).toHaveValue('Board prep');
+});
+
+test('a meeting note named after its calendar event keeps that name', async ({ yap, fakeLlm }) => {
+  // A local stand-in for a calendar's private iCal link (calendar.spec.js),
+  // with one meeting on now.
+  const feed = await startCalendarFeed();
+  const owner = { name: 'Nathan', email: 'nathan@example.com' };
+  feed.set(
+    calendarFile(owner.email, [
+      vevent({
+        uid: 'partner-sync@e2e',
+        summary: 'Partner sync',
+        start: new Date(Date.now() - 60_000),
+        end: new Date(Date.now() + 30 * 60_000),
+        attendees: [{ name: 'Alice Moreau', email: 'alice@example.com' }, owner],
+      }),
+    ])
+  );
+  try {
+    await yap.invoke('calendar_add_link', { link: feed.url, kind: 'ics' });
+    const synced = await yap.invoke('calendar_sync');
+    const event = synced.events.find((e) => e.title === 'Partner sync');
+    expect(event).toBeTruthy();
+
+    // Take notes on it (the Meetings view's Start notes): a note with its name.
+    const noteId = await yap.invoke('calendar_event', { key: event.key, action: 'start' });
+    await expect.poll(() => visible(yap, 'notepad')).toBe(true);
+    const title = yap.notepad.getByRole('textbox', { name: 'Meeting title' });
+    await expect(title).toHaveValue('Partner sync');
+    await expect(title).not.toHaveClass(/auto/); // a real title, not a made-up one
+
+    // A minute of talk names a made-up title; this one stays, and the model
+    // isn't even asked.
+    const asked = fakeLlm.requests.filter((r) => r.kind === 'title').length;
+    await say(yap, ...BUDGET_TALK);
+    await yap.notepad.waitForTimeout(1_500);
+    await pauseAll(yap);
+    expect(fakeLlm.requests.filter((r) => r.kind === 'title')).toHaveLength(asked);
+    await expect(title).toHaveValue('Partner sync');
+    expect((await yap.invoke('note_get', { id: noteId })).title).toBe('Partner sync');
+  } finally {
+    await pauseAll(yap);
+    // Disconnected again: no meeting "on now" for the tests after this one.
+    const s = await yap.invoke('calendar_status');
+    for (const c of s.connections) await yap.invoke('calendar_disconnect', { id: c.id });
+    await feed.close();
+  }
 });
 
 test('"Started by mistake?": Keep keeps the meeting, Discard deletes it', async ({ yap, shot }) => {
