@@ -133,6 +133,21 @@ export function dateLine(ts) {
   return `${day}, ${time}`;
 }
 
+/** What "Copy consent message" copies until the person edits it. */
+export const DEFAULT_CONSENT_MESSAGE =
+  "Hi all, I'm taking notes with Yap, which transcribes this call on my computer. Let me know if you'd rather I didn't.";
+
+/** The consent message as saved (`meetingConsentMessage`; empty = the default). */
+export function consentMessage(saved) {
+  return saved?.trim() || DEFAULT_CONSENT_MESSAGE;
+}
+
+/** What to save for an edited consent message: '' for the default (or nothing). */
+export function consentToSave(text) {
+  const t = (text || '').trim();
+  return t === DEFAULT_CONSENT_MESSAGE ? '' : t;
+}
+
 /** "m:ss", or "h:mm:ss" past the hour. */
 export function clock(secs) {
   const s = Math.max(0, Math.round(secs || 0));

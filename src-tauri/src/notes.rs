@@ -954,6 +954,7 @@ mod tests {
             text: format!("line {i}"),
             ts: i,
             echo: false,
+            dictated: false,
         };
         note.transcript = (0..3).map(seg).collect();
         assert!(push_break(&mut note)); // paused after three lines

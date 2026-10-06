@@ -4,10 +4,10 @@
   // (sizes, type, colours and motion; the palette is `--yap-paper-*` in
   // app.css). Top to bottom:
   //   - the header: back (this note in Yap's Notes), ⋯ (copy as Markdown or
-  //     text, audio settings while recording, save as .md, delete), split the
-  //     screen with the call (a glass preview on hover), Share (a local
-  //     popover: copy, save, email) with a one-click copy, and the window
-  //     buttons;
+  //     text, copy the consent message, audio settings while recording, save
+  //     as .md, delete), split the screen with the call (a glass preview on
+  //     hover), Share (a local popover: copy, save, email) with a one-click
+  //     copy, and the window buttons;
   //   - the title (EB Garamond; a made-up one waits, muted, for the AI title)
   //     and the date in the locale's format;
   //   - tabs: My thoughts (the note's own text, synced with the Notes view
@@ -21,8 +21,10 @@
   //   - the bar: Stop / Resume, and "Ask anything", which opens a bottom
   //     sheet chat grounded in the meeting (meeting_assist.rs; "What did I
   //     miss?" answers from what was said since you last looked: the
-  //     transcript on screen at its newest line, or the last answer). After
-  //     the meeting, Generate summary above it when there's none, or the
+  //     transcript on screen at its newest line, or the last answer). Above
+  //     it while recording, the consent line, whose "Learn more" offers a
+  //     message for the meeting chat (editable, `meetingConsentMessage`);
+  //     after the meeting, Generate summary when there's none, or the
   //     summary's error with a Retry.
   // Like every Yap window you can type in, it catches the dictation key and
   // the meeting shortcut in-page (a focused WebView2 window never reaches the
@@ -54,12 +56,12 @@
     highlightParts,
     dateLine,
     clock,
+    consentMessage,
+    consentToSave,
   } from './notepadText.js';
 
   /** This window's label: the `origin` of its saves and stops. */
   const LABEL = 'notepad';
-  /** "Learn more" on the consent line. */
-  const CONSENT_DOCS = 'https://github.com/nayballs/Yap/blob/main/docs/meetings.md#consent';
   const appWindow = getCurrentWindow();
 
   let note = $state(null); // the meeting note shown (full)
@@ -495,13 +497,55 @@
 
   // ---- the header: menus, share, split, window ----
 
-  let menu = $state(null); // 'more' | 'share' | null
+  let menu = $state(null); // 'more' | 'share' | 'consent' | null
   let confirmOpen = $state(false);
   let deleting = $state(false);
   let linkCopied = $state(false);
 
   function toggleMenu(which) {
-    menu = menu === which ? null : which;
+    const next = menu === which ? null : which;
+    closeMenus();
+    menu = next;
+  }
+  /** Close whichever popover is open (saving an edited consent message). */
+  function closeMenus() {
+    if (menu === 'consent') saveConsent();
+    menu = null;
+  }
+
+  // The consent message: "Learn more" on the consent line opens it, why and
+  // a message for the meeting chat, editable (saved on blur, empty = Yap's
+  // default); the ⋯ menu copies the saved one.
+  let savedConsent = $state(''); // as saved ('' = the default)
+  let consentDraft = $state('');
+  function openConsent() {
+    if (menu !== 'consent') consentDraft = consentMessage(savedConsent);
+    toggleMenu('consent');
+  }
+  async function saveConsent() {
+    const message = consentToSave(consentDraft);
+    if (message === savedConsent) return;
+    savedConsent = message;
+    if (cfg) cfg.meetingConsentMessage = message;
+    try {
+      await invoke('notepad_consent_message', { message });
+    } catch (e) {
+      toast({ title: "Couldn't save the message", description: String(e), variant: 'destructive' });
+    }
+  }
+  /** Copy the message being edited, or (from the ⋯ menu) the saved one. */
+  async function copyConsent(saved) {
+    let text;
+    if (saved) {
+      menu = null;
+      text = consentMessage(savedConsent);
+    } else {
+      await saveConsent();
+      text = consentMessage(consentDraft);
+    }
+    if (await copyToClipboard(text)) {
+      toast({ title: 'Copied: paste it into the meeting chat', variant: 'success' });
+    }
   }
 
   async function copyNote(asText) {
@@ -601,13 +645,13 @@
   function onWindowKeydown(e) {
     if (e.key !== 'Escape') return;
     if (confirmOpen) confirmOpen = false;
-    else if (menu) menu = null;
+    else if (menu) closeMenus();
     else if (searchOpen) closeSearch();
     else if (askOpen) closeAsk();
   }
   function onWindowPointerdown(e) {
     const t = e.target;
-    if (menu && !t.closest?.('.popwrap')) menu = null;
+    if (menu && !t.closest?.('.popwrap')) closeMenus();
     // A click above the sheet puts it away (not on a toast or the dialog).
     if (askOpen && !confirmOpen && !t.closest?.('.tray') && !t.closest?.('[role="status"]')) closeAsk();
   }
@@ -618,6 +662,7 @@
     try {
       cfg = await invoke('get_config');
       liveTranscript = cfg.meetingLiveTranscript !== false;
+      savedConsent = cfg.meetingConsentMessage || '';
     } catch {
       /* keep */
     }
@@ -678,8 +723,11 @@
     on('yap-note-changed', onNoteChanged);
     on('yap-note-deleted', (p) => p?.id === note?.id && (note = null));
     on('yap-notes-changed', () => note && reload());
+    // Something about the recording itself (meeting.rs), as the main window
+    // shows it (meetingGuard.js); Rust adds a Windows notification only when
+    // neither window is in view.
     on('yap-meeting-warning', (msg) =>
-      toast({ title: 'Meeting recording', description: String(msg), chip: 'Tip' })
+      toast({ title: 'Meeting recording', description: String(msg), chip: 'Tip', duration: 12_000 })
     );
     // "Started by mistake?", when Rust picked this window to ask.
     on('yap-meeting-ended', (p) => {
@@ -741,6 +789,7 @@
     {:else if name === 'warn'}<path d="M12 9.5v4" /><path d="M12 17h.01" /><path d="M10.3 4.2L2.6 17.5a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z" />
     {:else if name === 'retry'}<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" /><path d="M19.5 4.5V9H15" />
     {:else if name === 'note'}<path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z" /><path d="M14 3.5v5h5" />
+    {:else if name === 'chat'}<path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4.5 19.5l1.3-4.3A7.5 7.5 0 1 1 20 11.5z" />
     {/if}
   </svg>
 {/snippet}
@@ -788,6 +837,9 @@
               </button>
               <button role="menuitem" class="item" onclick={() => copyNote(true)}>
                 {@render icon('text')}<span>Copy as text</span>
+              </button>
+              <button role="menuitem" class="item" onclick={() => copyConsent(true)}>
+                {@render icon('chat')}<span>Copy consent message</span>
               </button>
               {#if recordingThis}
                 <button role="menuitem" class="item" onclick={audioSettings}>
@@ -908,9 +960,10 @@
             oninput={() => queueSave('content')}
           ></textarea>
         {:else if tab === 'transcript'}
+          {#if recordingThis || lineCount}
           <div class="timerbox">
             <span class="clockico">{@render icon('clock')}</span>
-            <span class="elapsed" class:rec={recordingThis}>{recordingThis ? clock(elapsed) : clock(meetingSecs)}</span>
+            <span class="elapsed">{recordingThis ? clock(elapsed) : clock(meetingSecs)}</span>
             <span class="grow"></span>
             <div class="tboxbtns">
               <button class="tbtn search" aria-label="Search the transcript" aria-expanded={searchOpen} onclick={toggleSearch}>
@@ -939,6 +992,7 @@
               </div>
             {/if}
           </div>
+          {/if}
           {#if recordingThis && !liveTranscript}
             <div class="tempty">
               <p class="t1">Live transcript is off</p>
@@ -989,8 +1043,13 @@
                     <span class="rule"></span>{@render icon('pause')}<span class="rule"></span>
                   </div>
                 {:else}
-                  <div class="divider dictated" role="separator" aria-label="You dictated here">
-                    <span class="rule"></span>{@render icon('mic')}<span class="dtext">You dictated here</span><span class="rule"></span>
+                  <div
+                    class="divider dictated"
+                    role="separator"
+                    aria-label="You dictated here"
+                    title="Yap kept what you dictated out of the meeting's transcript and summaries"
+                  >
+                    <span class="rule"></span>{@render icon('mic')}<span class="dtext">You dictated here · left out of the notes</span><span class="rule"></span>
                   </div>
                 {/if}
               {/each}
@@ -1058,16 +1117,34 @@
         <button class="gen" onclick={generate}>{@render icon('plus')}Generate summary</button>
       {/if}
       {#if recordingThis && !askOpen}
-        <p class="consent">
+        <div class="consent popwrap">
           Let people know you're taking notes.
-          <button class="learn" onclick={() => openExternalLink(CONSENT_DOCS)}>Learn more</button>
-        </p>
+          <button class="learn" aria-haspopup="dialog" aria-expanded={menu === 'consent'} onclick={openConsent}>
+            Learn more
+          </button>
+          {#if menu === 'consent'}
+            <div class="pop consentpop" role="dialog" aria-label="Consent message">
+              <p class="consentwhy">Let people know you're taking notes. Yap transcribes on this PC; nothing is uploaded.</p>
+              <textarea
+                class="consentmsg"
+                rows="4"
+                aria-label="Message for the meeting chat"
+                bind:value={consentDraft}
+                onblur={saveConsent}
+              ></textarea>
+              <div class="consentbtns">
+                <button class="ink small" onclick={() => copyConsent(false)}>{@render icon('copy')}Copy</button>
+              </div>
+            </div>
+          {/if}
+        </div>
       {/if}
       <div class="tray" class:open={askOpen}>
         {#if askOpen}
           <div class="sheet" role="dialog" aria-label="Ask about this meeting">
             <div class="sheethead">
-              <button class="handle" aria-label="Minimise chat" tabindex="-1" onclick={closeAsk}><span></span></button>
+              <!-- The grab handle: a mouse target; the − button is the accessible one. -->
+              <button class="handle" aria-hidden="true" tabindex="-1" onclick={closeAsk}><span></span></button>
               <div class="sheetbtns">
                 <button class="sbtn" aria-label="New chat" data-tip="New chat" onclick={newChat}>{@render icon('newchat')}</button>
                 <button class="sbtn" aria-label="Minimise chat" data-tip="Minimise" onclick={closeAsk}>{@render icon('min')}</button>
@@ -2183,8 +2260,64 @@
     text-decoration: underline;
     text-underline-offset: 2px;
   }
-  .learn:hover {
+  .learn:hover,
+  .learn[aria-expanded='true'] {
     color: var(--yap-paper-ink);
+  }
+  /* "Learn more": the consent message, in the ⋯ menu's popover style. */
+  .pop.consentpop {
+    top: auto;
+    right: auto;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    width: min(400px, calc(100vw - 72px));
+    gap: 10px;
+    padding: 12px;
+    text-align: left;
+    transform: translateX(-50%);
+  }
+  .consentwhy {
+    margin: 0;
+    font-size: 13px;
+    line-height: 19px;
+    color: var(--yap-paper-text-2);
+  }
+  .consentmsg {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid var(--yap-paper-s2);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 14px;
+    line-height: 21px;
+    resize: vertical;
+    outline: none;
+    user-select: text;
+    -webkit-user-select: text;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
+  }
+  .consentmsg:focus {
+    border-color: var(--yap-paper-text-2);
+    box-shadow: 0 0 0 3px var(--yap-paper-ring);
+  }
+  .consentbtns {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .consentbtns .ink {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .consentbtns .ink :global(svg) {
+    width: 13px;
+    height: 13px;
   }
   .tray {
     position: absolute;

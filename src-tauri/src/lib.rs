@@ -436,6 +436,7 @@ pub fn run() {
             notepad::notepad_state,
             notepad::notepad_split,
             notepad::notepad_split_preview,
+            notepad::notepad_consent_message,
             meeting_guard::meeting_shortcut,
             meeting_guard::meeting_keep_going,
             meeting_guard::meeting_limit_status,

@@ -770,6 +770,13 @@
     });
     return () => un.then((f) => f());
   });
+  // The notepad's consent message, edited there (notepad.rs): the same.
+  onMount(() => {
+    const un = listen('yap-consent-message-changed', (e) => {
+      if (cfg && typeof e.payload?.message === 'string') cfg.meetingConsentMessage = e.payload.message;
+    });
+    return () => un.then((f) => f());
+  });
 
   // General → Yap bar (bar.rs). "Turn off the bar" in the bar's own menu
   // saves that in Rust: adopt it here, or the next auto-save would turn the

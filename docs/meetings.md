@@ -267,9 +267,12 @@ writing, 3 checking owners and deadlines — then `done`, `error`, `needsAi` or
 (about ten seconds of talk) and nothing typed gets no summary. Instead the
 window the stop came from (else the notepad, else the main window, whichever
 is on screen) asks "Started by mistake? Only a few words were captured. Keep
-this meeting or discard it." **Discard** deletes the note
-(`meeting_discard`) and closes the notepad; **Keep** (or the ✕) leaves it,
-with **Generate summary** for when it's wanted after all.
+this meeting or discard it." With no Yap window on screen (a stop from the
+Yap bar's ■, or an automatic one), the Yap bar asks it as a card, as Wispr
+Flow's Flow Bar does; left alone for a minute it keeps the meeting, and with
+the bar off nobody asks. **Discard** deletes the note (`meeting_discard`) and
+closes the notepad; **Keep** (or the ✕) leaves it, with **Generate summary**
+for when it's wanted after all.
 
 1. `meeting_summary::prepare_final` waits for a live digest in flight (rather
    than writing it twice), then digests whatever the final call can't take
@@ -313,7 +316,11 @@ asks "Started by mistake?" when it ends; asking for its summary anyway says
 
 While a meeting records, its notes live in a slim window docked to the right
 edge of the screen, beside the call (Wispr Flow's Notetaker notepad, ported to
-Yap: `src-tauri/src/notepad.rs`, `src/lib/Notepad.svelte`).
+Yap: `src-tauri/src/notepad.rs`, `src/lib/Notepad.svelte`). Its look and
+behaviour follow Wispr's notepad as measured from its DOM
+(`E:\Projects\references\wispr-flow\notepad-spec.md`: sizes, type, colours,
+motion), in Yap's own code, wording and icons; the palette is the
+`--yap-paper-*` tokens in `src/app.css`.
 
 **When it opens.** Whenever a meeting recording starts, from anywhere ("Record
 notes" on a call prompt, the Notes view's Record, the tray, the Yap bar), with
@@ -330,9 +337,9 @@ meeting shortcut in the page while it has focus (a focused WebView2 window
 never reaches the global hook).
 
 **Where.** Docked to the right edge of the work area (above the taskbar), full
-height, 30% of the width, between 400 and 600 px at 100% scaling (scaled for
+height, 30% of the width, between 400 and 800 px at 100% scaling (scaled for
 the monitor's DPI) and never more than half the screen: 576 px on a 1920 px
-screen, the third of the screen Wispr uses. It goes on the monitor with the
+screen, 768 px on a 2560 px one (Wispr's own size there). It goes on the monitor with the
 call's window, else the one with the mouse cursor. Already on screen when a
 meeting starts, it stays where the person put it. The window rect reaches a
 few pixels past the edge on purpose: that's the invisible resize border, so
@@ -350,7 +357,29 @@ of Yap's own windows. A maximised window is restored first (it would ignore
 the new size); the move is asynchronous, so a hung app can't hang Yap, and
 it adds back the window's invisible borders so its visible edge meets the
 notepad's. Only the call app's windows have their titles read, and none are
-logged or kept. Test runs never move other apps' windows.
+logged or kept. Test runs never move other apps' windows. The notepad's
+**split button** does the same at any time (`notepad_split`), and while the
+pointer is on it a glass outline shows where the call's window will go: a
+small borderless window over that slot (`split-preview`, created on first
+use; transparent, click-through, never focused, always on top; translucent
+white with a 2 px white border and a soft shadow, so it reads on any
+desktop), gone when the pointer leaves or the split happens. With no call
+Yap noticed, the button says so.
+
+**The header.** **Back** opens the note in Yap's Notes view. **⋯**: Copy as
+Markdown, Copy as text, Copy consent message, Audio settings (while
+recording: Settings → General), Save as .md (a save dialog, the same file as
+the Notes view's export), and **Delete** in red, behind a confirm dialog
+("Delete this meeting?"; a meeting still recording stops first, then its note
+goes: `meeting_delete`). **Share** is local (Wispr's is cloud sharing): a
+"Share notes" popover with Copy as Markdown, Copy as text, Save as .md and
+**Email** (a `mailto:` link with the title as the subject and the summary as
+plain text, or the notes and transcript before there's a summary, cut to fit
+a mail client's link limit); the link button beside it copies the notes in
+one click. Then minimise, maximise and close.
+
+**The title** is in EB Garamond, editable ("New note" when there's none), the
+date under it in the computer's own format ("5 Oct, 22:32").
 
 **My thoughts** (the default tab) is the note's own text, the same as the
 Notes view's editor: typed in either window, it's saved after a short pause
@@ -358,38 +387,67 @@ and shows up in the other (`yap-note-changed`, each window sending only the
 field it edited, so neither overwrites the other's newer text). It goes into
 the summary as "Notes typed during the meeting".
 
-**Transcript** shows the elapsed time, the You (amber) and Them (slate) lines
-as they arrive, following the newest one unless you scroll up, and a tip you
-can dismiss for good: lines arrive about every 15 seconds as Yap transcribes
-on this PC, and when you stop it fills in the last few seconds and tidies the
-transcript (each speaker's turn becomes one paragraph). Before the first line:
-"Yap is listening". Echo lines (the call through your speakers) are hidden
-behind "Show N lines your mic picked up from the speakers", as in the Notes
-view. With **Show live transcript** off (`meetingLiveTranscript`, Wispr's
-setting of that name, on by default) the tab stays quiet while recording
-("Live transcript is off… The transcript shows here when you stop"); Yap
-still transcribes as the meeting goes, and nothing hidden counts as seen for
-"What did I miss?".
+**Transcript** (a small green waveform on the tab while recording) opens with
+the timer box: the elapsed time, **search** (an inline field: only the lines
+that match, highlighted) and **copy** (the whole transcript as "You: …" /
+"Them: …" lines), with a tip under it you can dismiss for good (lines land
+about every 15 seconds as Yap transcribes on this PC, the last few when you
+stop). Then the lines as they arrive, following the newest one unless you
+scroll up: a speaker's run of lines is one group under its label (You, or
+Them in teal), a chat bubble per line with grouped corners, each with a copy
+button on hover. A dashed line with ⏸ marks where a recording stopped
+(`Note::breaks`, the transcript's length at each pause or stop; Resume
+carries on below it), and one with a mic, "You dictated here · left out of
+the notes", where you dictated mid-meeting ([Dictating
+mid-meeting](#dictating-mid-meeting)). Before the first line: "Yap is
+listening". Echo lines (the call through your speakers) are hidden behind
+"Show N lines your mic picked up from the speakers", as in the Notes view.
+With **Show live transcript** off (`meetingLiveTranscript`, Wispr's setting
+of that name, on by default) the tab stays quiet while recording ("Live
+transcript is off… The transcript shows here when you stop"); Yap still
+transcribes as the meeting goes, and nothing hidden counts as seen for "What
+did I miss?".
 
-**Summary** follows the action plan job: while it's written, "• Turning 12
-minutes of talk into an action plan… · Step 2 of 3" ("Catching up on the
-meeting: part 3 of 12…" while a long meeting's last digests are written);
-then the plan, with Copy markdown / Copy text. If it fails: "The summary
-didn't come through", the reason, and **Retry**. With no AI model: the "Your
-meeting is saved…" card. While recording it says the summary is written when
-you stop, and shows the AI notes so far (the rolling digests).
+**Summary** ("+ Summary" until there is one) follows the action plan job:
+while it's written, "• Turning 12 minutes of talk into an action plan… · Step
+2 of 3" ("Catching up on the meeting: part 3 of 12…" while a long meeting's
+last digests are written); then the plan. With no AI model: the "Your meeting
+is saved…" card. While recording it says the summary is written when you
+stop, and shows the AI notes so far (the rolling digests).
 
-**The footer.** While recording: the consent line "Always get consent when
-transcribing others.", **■ Stop** (the end of the meeting, as End meeting &
-summarise) and **What did I miss?**. After it: **Resume** (records on into the
-same note) and **Generate summary** (when there's no summary yet, or it
-failed). A stop from anywhere else, including Yap's own (the length limit, a
-call ending with "Stop and summarise automatically", the meeting shortcut),
-shows its progress and plan here too, without bringing up the main window.
+**The bottom bar.** A white pill **■ Stop** (the end of the meeting, as End
+meeting & summarise) or, after it, **Resume** (records on into the same note;
+**Start** on a note with nothing recorded yet), and the **Ask anything** field
+(with a **What did I miss?** chip inside it while recording). Above it while
+recording, the consent line ([Consent](#consent)). After the meeting, above
+it: **Generate summary** when there's no summary yet, or, if writing it
+failed, "The summary didn't come through", the reason and a **Retry** button.
+A stop from anywhere else, including Yap's own (the length limit, a call
+ending with "Stop and summarise automatically", the meeting shortcut), shows
+its progress and plan here too, without bringing up the main window.
 
-### What did I miss?
+### Consent
 
-An inline chat at the bottom of the notepad that answers from what was said
+While a meeting records, the line above the bar reads "Let people know
+you're taking notes." Its **Learn more** opens a small card: why (Yap
+transcribes on this PC; nothing is uploaded) and a message to paste into the
+meeting chat, which you can edit: "Hi all, I'm taking notes with Yap, which
+transcribes this call on my computer. Let me know if you'd rather I
+didn't." **Copy** copies it ("Copied: paste it into the meeting chat"); an
+edit is saved when the box loses focus (`meetingConsentMessage`, through
+`notepad_consent_message`; empty, or the default text, saves as empty = the
+default). The ⋯ menu's **Copy consent message** copies the saved one
+directly. Recording people without telling them may be against the law
+where you or they are; the message is there to make telling them quick.
+
+### Ask anything and What did I miss?
+
+The **Ask anything** field opens a sheet over the lower half of the notepad
+(a grab handle, **New chat** and **Minimise**; Escape or a click above it
+puts it away; Stop shrinks to a round button meanwhile). Your questions show
+as bubbles on the right, answers as formatted text with 👍 👎 and copy under
+each. A rating is kept in the notepad's own storage on this PC only and never
+sent anywhere. **What did I miss?** answers from what was said
 **since you last looked** (`meeting_assist::meeting_catch_up`). The notepad
 counts a transcript line as seen while the Transcript tab is on screen (the
 window shown and not minimised, asked of the window since WebView2 reports a
@@ -436,24 +494,38 @@ notepad and the Notes view.
 
 - Unit tests: `cargo test --lib -- notepad meeting_end meeting_assist
   meeting_summary notes` cover the notepad's width and docking, split-screen
-  rectangles, the invisible-border compensation, picking the call's window
-  (largest, the browser window showing the meeting, never Yap's own,
-  minimised/tool/owned/cloaked/tiny ones skipped), "Started by mistake?"'s
-  threshold, setup errors, the catch-up input (only what's new, nothing new →
-  no call, a long absence bounded through the digests, all under 4.5k with the
-  reply), follow-up and title inputs, title clean-up, and a typed title never
-  open to the AI.
-- e2e (`e2e/notepad.spec.js`, the notepad is its own page, `yap.notepad`):
-  it opens docked on record without taking the focus; live lines with
-  coloured labels and echo hidden; the tip; closing it keeps recording and
-  Notes brings it back; My thoughts and the title syncing both ways; Pause;
-  What did I miss? (nothing new without a model call, then only the new lines
-  sent, then a follow-up); the AI title replacing call detection's and never a
-  typed one; Started by mistake? (Keep then Generate summary, Discard deleting
-  the note); the summary's "Step 2 of 3", a failure with Retry, then the
-  plan; the Settings rows; and the dictation hotkey caught in the notepad.
-- Not under test mode: split screen (a test never moves another app's
-  window) and placement on a real call's monitor; both need a real call.
+  rectangles, the split preview's frame, the invisible-border compensation,
+  picking the call's window (largest, the browser window showing the meeting,
+  never Yap's own, minimised/tool/owned/cloaked/tiny ones skipped), a stop
+  marking its place once, "Started by mistake?"'s threshold, setup errors,
+  the catch-up input (only what's new, nothing new → no call, a long absence
+  bounded through the digests, all under 4.5k with the reply), follow-up and
+  title inputs, title clean-up, and a typed title never open to the AI.
+- e2e (`e2e/notepad.spec.js`, the notepad is its own page, `yap.notepad`),
+  with screenshots named after the states in Wispr's own captures for a
+  side-by-side look: the text it copies, saves and emails and the
+  transcript's layout (the pure helpers in `notepadText.js`); it opens docked
+  on record without taking the focus, with the serif title, the locale's
+  date, the waveform and "+ Summary"; grouped bubbles with coloured labels
+  and echo hidden; the tip; closing it keeps recording and Notes brings it
+  back; a new note's Start; My thoughts and the title syncing both ways;
+  paused and dictated dividers, hover copy, search and copy all; the Ask
+  sheet (What did I miss? with nothing new and no model call, then only the
+  new lines sent; 👍 kept locally; copy; a typed question; New chat; Escape);
+  the header (the ⋯ menu while recording and after, Copy as Markdown / text,
+  Audio settings, Share and its one-click copy, the split tooltip and test
+  mode's refusal, back to Notes, Delete with its dialog, Delete while
+  recording); the consent message (copy, an edit saved on blur and kept by
+  Settings' next save, ⋯ → Copy consent message, back to the default); the AI
+  title replacing call detection's and never a typed one, then the stopped
+  state (the divider, Generate summary, Resume); Started by mistake? (Keep
+  then Generate summary, Discard deleting the note, and on the Yap bar with
+  no window on screen); the summary's "Step 2 of 3", a failure above the bar
+  with Retry, then the plan; an automatic stop; the meeting shortcut and the
+  dictation hotkey caught in the notepad; the Settings rows.
+- Not under test mode: split screen and its preview (a test never moves
+  another app's window), placement on a real call's monitor, Save as .md's
+  dialog and Email's mail app; the first two need a real call.
 
 ### Limits
 
@@ -463,10 +535,13 @@ notepad and the Notes view.
   meeting into a separate window after joining (Zoom, Teams) is moved only if
   that window is up when the recording starts.
 - Speaker labels are You / Them (the mic and the call); naming the people on
-  the call is a later item (calendar attendees, diarization).
-- The transcript "tidy" after the meeting joins each speaker's turn into a
-  paragraph; it doesn't re-transcribe or relabel speakers (Wispr does both in
-  its cloud).
+  the call is a later item (calendar attendees, diarization). Yap doesn't
+  re-transcribe or relabel speakers after the meeting (Wispr does both in its
+  cloud).
+- Share is local: no links to the notes or shared access (Wispr's sharing is
+  its cloud's). Email hands a `mailto:` link to the mail app, so a long
+  summary is cut to fit.
+- The 👍 👎 ratings stay in the notepad's own storage; nothing reads them yet.
 - "Since you last looked" lives in the notepad page: reloading the window (or
   restarting Yap) forgets it, and the next "What did I miss?" covers the whole
   meeting.
@@ -496,7 +571,8 @@ the meeting shows where it was pressed.
 ### Hidden from screen capture and sharing
 
 While a meeting records, the windows that show it, the docked notepad
-(`notepad`) and the recording overlay (`overlay`, which shows the live
+(`notepad`, and `split-preview`, the outline its split button shows) and the
+recording overlay (`overlay`, which shows the live
 transcript while you dictate mid-meeting), get Windows' display affinity
 `WDA_EXCLUDEFROMCAPTURE`: they stay on your monitor and leave every capture,
 so a Teams, Zoom or Meet screen share, a screenshot or a recording shows what's

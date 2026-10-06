@@ -221,6 +221,8 @@ before `meeting::ingest`) and on an Upload's whole text.
   speaker bleed, `dictated` a "You dictated here" marker — no text, `ts` where
   a mid-meeting dictation began; `is_talk()` = neither, what every summary
   input reads), `digests` (rolling meeting digests, see `meeting_summary.rs`),
+  `breaks` (the transcript's length at each stop — the notepad's paused
+  dividers; `add_break`, never twice at one place or at 0),
   `note_type` ("personal" | "meeting"), `source` ("manual" | "upload" |
   "meeting"), and `title_auto` (the title is one Yap made up — "Teams call ·
   5 Oct, 14:30" — so the AI meeting title may replace it; cleared for good by
@@ -320,21 +322,27 @@ before `meeting::ingest`) and on an Upload's whole text.
   stopped from (notepad Stop, Notes view "End meeting & summarise", the Yap
   bar, call detection, an automatic stop). It follows the recorder through
   `yap-meeting-state` (Rust listener; `meeting.rs` is untouched): a start
-  opens the notepad (`notepad::on_meeting_started`); a stop is the **end** of
+  opens the notepad (`notepad::on_meeting_started`); every stop (pause or end)
+  marks its place (`notes::add_break` → `yap-meeting-breaks {noteId,
+  breaks}`, the notepad's ⏸ divider); a stop is the **end** of
   the meeting unless it came through `meeting_pause` (the Notes view's Pause).
   The end: fewer than 20 words of speech (`MISTAKE_WORDS`) and nothing typed →
   `yap-meeting-ended {noteId, mistake, words, surface}` and no summary (the
   window Rust picks — where the stop came from (`meeting_end`'s `origin`) if
   on screen, else the notepad, else the main window — shows **"Started by
-  mistake?"** Keep / Discard; `meeting_discard` deletes the note, emits
-  `yap-note-deleted`, hides the notepad); otherwise the AI title (if due) and
+  mistake?"** Keep / Discard; with no Yap window on screen, a **Yap bar card**
+  asks instead (`meeting-mistake`; Keep, ✕ or a minute = keep; withdrawn on
+  resume or delete; the bar off: nobody asks); `meeting_discard` deletes the
+  note, emits `yap-note-deleted`, hides the notepad; `meeting_delete` — the
+  notepad's ⋯ → Delete — pauses a recording note first, then the same);
+  otherwise the AI title (if due) and
   the **action plan job** (`start_summary`: one per note, `yap-meeting-summary
   {noteId, run, state: running|done|error|needsAi|nothing, step, steps, error}`,
   "Step 2 of 3"; `meeting_summary_status`; `meeting_summarise` runs it again —
   Generate summary, Retry, the Notes view's Action plan). Commands
   `meeting_end(origin)`, `meeting_pause`, `meeting_summarise`,
-  `meeting_summary_status`, `meeting_discard`; Rust callers use `end()` /
-  `pause()`.
+  `meeting_summary_status`, `meeting_discard`, `meeting_delete`; Rust callers
+  use `end()` / `pause()`.
 - **`meeting_assist.rs`** — the notepad's AI helpers, on the meeting's model
   (Note Formatting scope, else cleanup), bounded for an 8k local model, via
   `chat_beside_dictation`: **"What did I miss?"** (`meeting_catch_up(noteId,
@@ -354,7 +362,8 @@ before `meeting::ingest`) and on an Upload's whole text.
   `on_meeting_started` (from `meeting_end`) switches it to the recording note
   (`yap-notepad-note`) and, with `meeting_open_notepad` (default on), docks it
   to the right edge of the work area — full height, `notepad_width` = 30% of
-  the width clamped to 400–600 px at 100% (scaled) and ≤ half — on the monitor
+  the width clamped to 400–800 px at 100% (scaled) and ≤ half (768 px on a
+  2560 px screen, Wispr's size) — on the monitor
   with the call's window, else the cursor's; already on screen, it stays put.
   **Split the screen** (`meeting_split_screen`, default off): during a
   detected call, `pick_call_window` (unit-tested) finds the call app's main
@@ -363,10 +372,19 @@ before `meeting::ingest`) and on an Upload's whole text.
   first, else the largest — from `meeting_detect::call_window_exes()` (its
   exes, or the browser a meeting tab is in); a maximised window is restored first, then
   moved left of the notepad (`SetWindowPos`, async, invisible borders added
-  back via `DWMWA_EXTENDED_FRAME_BOUNDS`). Never in test mode. `open(app,
-  noteId)` (the Notes view's "Notepad", the Yap bar) docks if hidden and
-  focuses. Commands `notepad_open`, `notepad_state`; `yap-notepad-visible`
-  tells the page when Rust shows/hides it.
+  back via `DWMWA_EXTENDED_FRAME_BOUNDS`). Never in test mode. The notepad's
+  **split button** does it now (`notepad_split` → `split_now`; test mode: an
+  error, "Test runs never move other apps' windows."), and **hovering** it
+  shows a glass outline over the call's slot (`notepad_split_preview(show)`:
+  an on-demand `split-preview` window — transparent, borderless,
+  click-through, unfocusable, always on top, the slot + 24 px for its shadow,
+  `preview_rect`; a generation counter keeps a late show from sticking; never
+  in test mode; in `capture::MEETING_WINDOWS` and the window-state denylist).
+  `open(app, noteId)` (the Notes view's "Notepad", the Yap bar) docks if
+  hidden and focuses. Commands `notepad_open`, `notepad_state`,
+  `notepad_split`, `notepad_split_preview`, `notepad_consent_message` (saves
+  `meeting_consent_message`, emits `yap-consent-message-changed` for Settings'
+  config copy); `yap-notepad-visible` tells the page when Rust shows/hides it.
 - **`meeting_detect.rs`** — **call detection** (OpenWhispr
   `meetingDetectionEngine.js` port): notices a call starting (Teams, Zoom,
   Google Meet, Slack huddles, Discord, Webex, GoTo, WhatsApp/Signal/Telegram…),
@@ -476,8 +494,9 @@ before `meeting::ingest`) and on an Upload's whole text.
 - **`capture.rs`** — hides Yap's meeting windows from screen capture and
   sharing: while a meeting records and `config.meeting_hide_from_capture` is
   on (default **on**, Wispr's "Don't show Notepad and Flow Bar in screen
-  capture"), the windows labelled **`overlay`** and **`notepad`**
-  (`MEETING_WINDOWS`, looked up by label, a missing one skipped) get
+  capture"), the windows labelled **`overlay`**, **`notepad`** and
+  **`split-preview`** (`MEETING_WINDOWS`, looked up by label, a missing one
+  skipped; the preview syncs itself when created) get
   `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` (fallback
   `WDA_MONITOR` before Windows 10 2004): on your monitor, left out of
   screenshots, recordings and every screen share. Lifted when the recording
@@ -695,7 +714,8 @@ before `meeting::ingest`) and on an Upload's whole text.
   provider = inherit global) + `app_routes` smart routing, streaming_partials,
   history_enabled, update_checks_enabled, dictionary_fuzzy, the meeting
   notepad: meeting_open_notepad (default on) + meeting_split_screen (default
-  off), call detection:
+  off) + meeting_live_transcript (default on) + meeting_consent_message (the
+  notepad's "Copy consent message" text; empty = the default), call detection:
   meeting_detection + meeting_detect_style ("popup"|"quiet") +
   meeting_detect_apps (app id → bool overrides of `meeting_detect::APPS`'
   defaults) + meeting_auto_start (the opt-in 10-second countdown, off),
@@ -879,7 +899,11 @@ before `meeting::ingest`) and on an Upload's whole text.
   `%LOCALAPPDATA%\WisprFlow\app-*\resources\assets\fonts`; both OFL/Google
   Fonts, bundled via `@fontsource-variable/*` imports in main.js): **Figtree**
   = UI sans (Segoe UI fallback), **EB Garamond** (+italic) =
-  `--yap-font-display` (hero headlines, stat numerals, Settings page titles). **Settings attention badge** (`lib/attention.svelte.js`):
+  `--yap-font-display` (hero headlines, stat numerals, Settings page titles).
+  The meeting notepad has its own measured Wispr palette, **`--yap-paper-*`**
+  (paper, ink, text-2, muted, faint, date, rule, s1, s2, s2-strong, ring,
+  danger, snag) + `--yap-live`/`--yap-live-strong`, `--yap-ease-spring` and
+  the popover/dialog/sheet shadows (2026-10-05). **Settings attention badge** (`lib/attention.svelte.js`):
   Settings computes real needs-action items (update available / no STT model /
   cleanup on a cloud provider with no key) into a shared runes store; the
   ControlPanel cog + the matching Settings nav rows show a red count chip
@@ -1027,30 +1051,71 @@ before `meeting::ingest`) and on an Upload's whole text.
   **no `backdrop-filter`** and shadows kept well inside it (one reaching a
   transparent WebView2 window's edge draws a grey box).
 - **`lib/Notepad.svelte`** — the **meeting notepad** (window `notepad`,
-  `notepad.rs`; Wispr Flow Notetaker's notepad, warm-light): a custom title
-  bar (brand, drag region, Open in Yap / minimise / close — close hides it,
-  the recording goes on); the meeting title in EB Garamond (editable; a
-  made-up one muted until the AI or the person names it) + date and
-  "● Recording 12:34"; underlined tabs **My thoughts** (the note's `content`,
+  `notepad.rs`), **Wispr Flow's notepad, measured** (2026-10-05, from its DOM
+  over CDP: `E:\Projects\references\wispr-flow\notepad-spec.md`; sizes, type,
+  colours and motion matched in Yap's own code, wording and icons). Palette =
+  the `--yap-paper-*` tokens in app.css (paper `rgb(252 252 251)`, ink
+  `rgb(26 26 26)`, surfaces s1/s2, the emerald `--yap-live`, the spring
+  `--yap-ease-spring`, popover/dialog/sheet shadows). Top to bottom:
+  **header** (52 px, a drag region): **back** (beige square → the note in the
+  main window's Notes, `yap-meeting-open-note`), **⋯** (Copy as Markdown /
+  Copy as text / Copy consent message / Audio settings while recording →
+  Settings → General / Save as .md via the dialog plugin + `note_export` /
+  **Delete** in red → a Wispr-style confirm dialog → `meeting_delete`),
+  **split screen** (tooltip "Split screen with meeting"; hover →
+  `notepad_split_preview`, click → `notepad_split`), a **Share** split button
+  (a local "Share notes" popover: Copy as Markdown / Copy as text / Save as .md
+  / Email = a `mailto:` with the summary as text; the link half copies the
+  notes in one click, its icon swapping to ✓), and min / max / close (close
+  hides; the recording goes on). Ink tooltips via `data-tip`. **Title**: a
+  textarea in EB Garamond 36/45, −0.04em, placeholder "New note", growing with
+  its lines; a made-up title stays muted until the AI or the person names it;
+  the date in the locale's format ("5 Oct, 22:32"). **Tabs** (15/600, ink
+  underline, a hairline under the row): My thoughts (the note's `content`,
   autosaved, synced with NotesView both ways via `yap-note-changed`/`origin`),
-  **Transcript** (elapsed row, a dismissible tip that lines arrive every ~15 s
-  and the transcript is tidied when you stop — after the meeting each speaker
-  turn becomes one paragraph —, a "Yap is listening" empty state, You (amber)
-  / Them (slate) turns following the newest line, echo hidden behind "Show N
-  lines…") and **Summary** (the Rust job: "• Turning 12 minutes of talk into
-  an action plan… · Step 2 of 3", "Catching up on the meeting: part 3 of
-  12…", the rendered plan + Copy markdown/text, "The summary didn't come
-  through" + Retry, the AI-setup card, the digests so far while recording).
-  Footer: recording → "Always get consent when transcribing others." + **■
-  Stop** (`meeting_end` origin notepad) + **What did I miss?**; stopped →
-  **Resume** + **Generate summary** (no summary yet, or it failed). "What did
-  I miss?" opens an inline catch-up chat (`meeting_catch_up` with `since` =
-  the segments seen: all of them whenever the Transcript tab is on screen —
-  window shown per `yap-notepad-visible`/`isVisible` — and scrolled to its
-  newest line, or covered by the last answer; follow-up questions in the same
-  box; no AI → a link to Language Models). Toasts sit above the footer
-  (`--yap-toast-bottom`). It has the **in-page hotkey fallback** (dictation,
-  and the meeting shortcut when one is set), config re-read on focus.
+  Transcript (a 3-bar emerald waveform while recording), Summary ("+" until a
+  summary exists). **Transcript**: the timer box (clock, elapsed, search —
+  an inline input that filters and highlights lines, dividers hidden — and
+  copy all) with the dismissible tip strip attached; speaker groups ("You" /
+  "Them" in teal) of chat bubbles with Wispr's grouped corners and a hover
+  copy button each; a dashed **⏸ divider** wherever a recording stopped
+  (`note.breaks`, `yap-meeting-breaks`) and a "**You dictated here · left
+  out of the notes**" divider (mic glyph) for a `dictated` marker; echo
+  behind "Show N lines…"; "Yap is listening" / "No transcript yet" / "Live
+  transcript is off" states (layout: `notepadText.js` `transcriptItems`,
+  `bubbleShape`, `highlightParts`). **Summary** (the Rust job: "• Turning 12
+  minutes of talk into an action plan… · Step 2 of 3", "Catching up on the
+  meeting: part 3 of 12…", the rendered plan, the AI-setup card, the digests
+  so far while recording). **Bottom** (over the content, a 150 px fade):
+  recording → the consent line "Let people know you're taking notes. **Learn
+  more**" — a popover with why ("Yap transcribes on this PC; nothing is
+  uploaded") and an **editable message for the meeting chat** (default in
+  `notepadText.js`; saved on blur via `notepad_consent_message` →
+  `meetingConsentMessage`, empty = the default; Copy → "Copied: paste it into
+  the meeting chat"); after the meeting → an ink **Generate summary** pill
+  (no summary yet) or the summary's error line ("The summary didn't come
+  through" + detail + a Retry icon, `role="alert"`); then the **bar** (a
+  32 px-radius tray): a white pill **Stop** / **Resume** / **Start** (emerald
+  ■ or ring-dot) and the **Ask anything** pill input, with a "What did I
+  miss?" chip inside it while recording (a send arrow once typed). Focusing it
+  or the chip opens the **Ask sheet** (a bottom sheet, 45% tall, sheet
+  shadow; grab handle, New chat, Minimise; Stop shrinks to a 48 px circle):
+  right-aligned question bubbles, markdown answers with 👍 👎 ⎘ (ratings kept
+  in this webview's localStorage only, `yapNotepadFeedback`, never sent);
+  "What did I miss?" = `meeting_catch_up` with `since` = the segments seen
+  (all of them whenever the Transcript tab is on screen — window shown per
+  `yap-notepad-visible`/`isVisible` — and scrolled to its newest line
+  unsearched, or covered by the last answer); typed questions = the same
+  command with `question`; no AI → a link to Language Models. Escape or a
+  click above it puts it away. Toasts sit above the bar
+  (`--yap-toast-bottom`); `yap-meeting-warning` shows here too (12 s). It has
+  the **in-page hotkey fallback** (dictation, and the meeting shortcut when
+  one is set), config re-read on focus.
+- **`lib/SplitPreview.svelte`** — the split preview window's page (label
+  `split-preview`, App.svelte routes it, transparent body): one glass
+  rectangle inset 24 px (`rgba(255,255,255,.10)`, a 2 px
+  `rgba(255,255,255,.45)` border, radius 12, a dark hairline + soft shadow),
+  readable against any desktop.
 - **`lib/Settings.svelte`** — the settings surface, now rendered **inside the
   ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / Connections / System):
   **General** (hotkey, recording mode, mic, sound+volume, mute; **Yap bar** group
@@ -1154,7 +1219,7 @@ before `meeting::ingest`) and on an Upload's whole text.
   **undecorated** (custom in-page title bar w/ drag region + caption buttons — see the
   "Custom window chrome" bullet above), hidden, hide-on-close. Size/position/maximized
   persisted by `tauri-plugin-window-state`
-  across launches; overlay, onboarding, notepad are excluded from persistence; the VISIBLE flag
+  across launches; overlay, onboarding, notepad, split-preview are excluded from persistence; the VISIBLE flag
   is excluded so the window never un-hides on start-hidden launches (see lib.rs window-state
   plugin setup).
 - **onboarding**: 620×720 (min 520×560), hidden, hide-on-close.
@@ -1162,6 +1227,10 @@ before `meeting::ingest`) and on an Upload's whole text.
   title bar), hidden, **unfocused** (opening it beside a call never takes the
   foreground; only `notepad::open`, a click in Yap, focuses it), hide-on-close
   (`notepad::init`), gets the DWM-cloaked init like settings/onboarding.
+- **split-preview** (not in tauri.conf.json): created on demand by
+  `notepad::show_preview` the first time the notepad's split button is
+  hovered — transparent, borderless, click-through, unfocusable, always on top,
+  skip-taskbar; shown over the call's slot, hidden on pointer leave.
   Placed by `notepad.rs` (docked right, full height), never by the
   window-state plugin.
 - settings + onboarding + notepad are **created unfocused** (`focus: false`): otherwise wry
@@ -1465,12 +1534,17 @@ when a recorded call ends, and the Win+Alt+M meeting shortcut;
 e2e-tested, the capture flag also checked once with a desktop capture of the
 overlay, a real screen share not yet) and the **meeting notepad**
 (`notepad.rs` + `Notepad.svelte`, Phase 8, 2026-10-05: a window docked to the
-right of the screen when a meeting starts — My thoughts synced with Notes,
-the live transcript, the summary written by Rust in steps with a Retry, "What
-did I miss?" since you last looked, the AI meeting title, "Started by
-mistake?" Keep/Discard, optional split screen with the call; every stop,
-Yap's own included, writes the action plan in Rust without bringing up the
-main window; e2e-tested in `notepad.spec.js`, split screen unit-tested only),
+right of the screen when a meeting starts, in Wispr Flow's measured layout —
+My thoughts synced with Notes, the live transcript in grouped bubbles with
+paused/dictated dividers, search and copy, the summary written by Rust in
+steps with a Retry, the Ask sheet ("What did I miss?" since you last looked,
+questions, 👍 👎 kept locally), the AI meeting title, "Started by mistake?"
+Keep/Discard (on the Yap bar when no window is on screen), the ⋯ menu,
+local Share (copy, .md, email), delete, an editable consent message, split
+screen with the call now or when joining (a glass preview on hover); every
+stop, Yap's own included, writes the action plan in Rust without bringing up
+the main window; e2e-tested in `notepad.spec.js`, split screen and its
+preview unit-tested only),
 and an **AI Chat** surface (`chats.rs` + eager
 keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six tools,
 ≤20-step loop, gated to cloud or ≥4B local models). An **MCP server** (`mcp.rs`,

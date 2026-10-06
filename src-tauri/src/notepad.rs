@@ -403,6 +403,26 @@ pub fn notepad_state() -> serde_json::Value {
     serde_json::json!({ "noteId": (id != 0).then_some(id) })
 }
 
+/// The consent message changed: `{ message }` (empty = Yap's default).
+const EVENT_CONSENT: &str = "yap-consent-message-changed";
+
+/// Save the consent message the notepad copies for the meeting chat, as the
+/// person edited it (`meeting_consent_message`; empty = Yap's default).
+/// Settings' copy of the config adopts it from `yap-consent-message-changed`,
+/// or its next auto-save would put the old one back.
+#[tauri::command]
+pub fn notepad_consent_message(app: AppHandle, message: String) -> Result<(), String> {
+    let message = message.trim().to_string();
+    let mut cfg = crate::config::load();
+    if cfg.meeting_consent_message == message {
+        return Ok(());
+    }
+    cfg.meeting_consent_message = message.clone();
+    crate::config::save(&cfg)?;
+    let _ = app.emit(EVENT_CONSENT, serde_json::json!({ "message": message }));
+    Ok(())
+}
+
 // ---- Windows ---------------------------------------------------------------------------------
 
 #[cfg(windows)]

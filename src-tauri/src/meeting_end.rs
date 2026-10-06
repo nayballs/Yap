@@ -184,9 +184,9 @@ fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) {
     start_summary(app, note_id);
 }
 
-/// "Started by mistake?" as a card on the Yap bar: Keep (or its ✕) leaves
-/// the note, Discard deletes it. With the bar off or hidden, nobody asks and
-/// the note stays, as Keep would leave it.
+/// "Started by mistake?" as a card on the Yap bar: Keep (or its ✕, or a
+/// minute left alone) leaves the note, Discard deletes it. With the bar off
+/// or hidden, nobody asks and the note stays, as Keep would leave it.
 fn ask_on_bar(app: &AppHandle, note_id: u64) {
     let card = crate::bar::Card {
         id: MISTAKE_CARD.into(),
@@ -195,6 +195,9 @@ fn ask_on_bar(app: &AppHandle, note_id: u64) {
         body: "Only a few words were captured. Keep this meeting or discard it.".into(),
         primary: Some(crate::bar::CardAction::new("keep", "Keep")),
         secondary: Some(crate::bar::CardAction::new("discard", "Discard")),
+        timeout_ms: Some(60_000),
+        expire_action: Some("keep".into()),
+        close_action: Some("keep".into()),
         ..Default::default()
     };
     let answer = move |app: &AppHandle, action: &str| {
