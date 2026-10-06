@@ -17,13 +17,18 @@ import {
   closeToasts,
   expectStore,
   settingsDialog,
+  mainOnScreen,
 } from './support/fixtures.js';
 
 test.use({ yapOptions: { name: 'meeting-detect' } });
 
 const toast = (main, title) => main.getByRole('status').filter({ hasText: title });
-const simulate = (yap, appId, active, fadeMs) =>
-  yap.invoke('meeting_detect_simulate', { appId, active, ...(fadeMs ? { fadeMs } : {}) });
+/** A call starting (or ending). The prompt goes in-app only while the main
+ *  window is on screen, so a starting call puts it back first (mainOnScreen). */
+const simulate = async (yap, appId, active, fadeMs) => {
+  if (active) await mainOnScreen(yap);
+  return yap.invoke('meeting_detect_simulate', { appId, active, ...(fadeMs ? { fadeMs } : {}) });
+};
 const status = (yap) => yap.invoke('meeting_detect_status');
 const meetingNotes = (yap) => (yap.readJson('notes.json')?.notes ?? []).filter((n) => n.source === 'meeting');
 /** The Meetings card in Settings → General, and its "Ask about calls in" list. */

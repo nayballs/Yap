@@ -556,7 +556,10 @@ fn route(
         }
         (Method::Delete, ["v1", "transcriptions", id]) => {
             match parse_id(id).map(crate::history::delete_by_ts) {
-                Some(true) => respond_no_content(request),
+                Some(true) => {
+                    let _ = app.emit("yap-history-changed", ());
+                    respond_no_content(request)
+                }
                 _ => respond_error(
                     request,
                     404,

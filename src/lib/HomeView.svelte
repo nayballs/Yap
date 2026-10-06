@@ -87,9 +87,11 @@
         if (cfg?.editHotkey) editHotkeyLabel = formatHotkeySpec(cfg.editHotkey);
       })
       .catch(() => {});
-    // New dictation finished → it's already in history; re-pull.
+    // History changed (a dictation or upload saved, an entry deleted, all
+    // cleared) → re-pull. Not `yap-transcript`: a dictation emits that before
+    // it pastes and saves, so a re-pull on it could miss the new entry.
     let un;
-    listen('yap-transcript', () => refresh()).then((u) => (un = u));
+    listen('yap-history-changed', () => refresh()).then((u) => (un = u));
     return () => un && un();
   });
 

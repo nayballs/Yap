@@ -142,8 +142,12 @@ test('chat: the empty state offers a new chat', async ({ yap, main, shot }) => {
 });
 ```
 
-- `main` is the main window, reset before each test (toasts dismissed,
-  Settings closed, Home showing). `yap.onboarding`, `yap.notepad` and
+- `main` is the main window, reset before each test (back on screen if the
+  desktop minimized it, toasts dismissed, Settings closed, Home showing).
+  Yap sends some prompts to the window only while it's on screen (a call
+  prompt goes to a Windows notification otherwise, which test mode never
+  shows), so a test that starts one mid-test calls `mainOnScreen(yap)` first,
+  as `meeting-detect.spec.js` does. `yap.onboarding`, `yap.notepad` and
   `yap.overlay` are the other windows (the notepad isn't reset: a spec that
   uses it tidies up after itself); `yap.invoke(cmd, args)` calls a Tauri command;
   `yap.readJson('notes.json')` reads the instance's data dir, and

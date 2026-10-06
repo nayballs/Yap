@@ -24,8 +24,9 @@
 
   onMount(() => {
     refresh();
+    // After the history write (see HomeView): `yap-transcript` comes first.
     let un;
-    listen('yap-transcript', () => refresh()).then((u) => (un = u));
+    listen('yap-history-changed', () => refresh()).then((u) => (un = u));
     return () => un && un();
   });
 

@@ -470,6 +470,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_quiet,
             #[cfg(debug_assertions)]
+            e2e::e2e_main_on_screen,
+            #[cfg(debug_assertions)]
             meeting_guard::e2e_meeting_limit,
             #[cfg(debug_assertions)]
             calendar::calendar_e2e_opened,

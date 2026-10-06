@@ -67,8 +67,18 @@ export function initUpdates() {
   listen('check-for-updates', () => checkForUpdates());
 }
 
+/** The newest snapshot revision applied (`Status::rev` in updates.rs). */
+let appliedRev = 0;
+
 function apply(s) {
   if (!s) return;
+  // Snapshots arrive as events and as command replies, and a reply can land
+  // after a newer event (a quick download finishing before `update_check`
+  // returns): never let an older one roll the page back.
+  if (typeof s.rev === 'number') {
+    if (s.rev < appliedRev) return;
+    appliedRev = s.rev;
+  }
   Object.assign(updates, s);
   const pending =
     ['downloading', 'installing'].includes(updates.status) || updates.deferred || updates.installQueued;

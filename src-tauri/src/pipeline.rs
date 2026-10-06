@@ -710,6 +710,7 @@ impl Shared {
             .unwrap_or((false, String::new()));
         if history_enabled {
             crate::history::record(&raw, &text, &model, &file_name);
+            let _ = self.app.emit("yap-history-changed", ());
         }
         let _ = self.app.emit("yap-transcript", text.clone());
         let _ = self.app.emit(
@@ -997,6 +998,10 @@ impl Shared {
                                     &model,
                                     &app_name,
                                 );
+                                // After the save: `yap-transcript` went out
+                                // before the paste, so a view that re-pulled
+                                // history on it could miss this dictation.
+                                let _ = self.app.emit("yap-history-changed", ());
                             }
                         }
                     }

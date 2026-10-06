@@ -112,6 +112,11 @@ pub enum Outcome {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
+    /// Goes up with every broadcast (`changed`). The page also gets snapshots
+    /// as command replies, and a reply can arrive after a newer event (a quick
+    /// download finishing before `update_check` returns), so it never lets an
+    /// older revision overwrite a newer one.
+    rev: u64,
     status: Phase,
     /// The newer version (empty while there's none).
     version: String,
@@ -401,8 +406,13 @@ fn announce_due(s: &Inner, rec: &Record) -> Option<Announce> {
     None
 }
 
+/// The snapshot revision (`Status::rev`); bumped by `changed` before it
+/// broadcasts.
+static REV: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 fn snapshot_of(s: &Inner) -> Status {
     Status {
+        rev: REV.load(std::sync::atomic::Ordering::SeqCst),
         status: s.phase,
         version: s.version.clone(),
         current_version: current_version().to_string(),
@@ -428,6 +438,7 @@ fn snapshot() -> Status {
 /// Broadcast the current snapshot and bring the tray (and a download's
 /// Windows notification) in line.
 fn changed(app: &AppHandle) {
+    REV.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let _ = app.emit(EVENT, snapshot());
     crate::tray::refresh(app);
     #[cfg(windows)]
@@ -1340,6 +1351,19 @@ mod tests {
             announced_at: at,
             ..Record::default()
         }
+    }
+
+    #[test]
+    fn snapshots_carry_a_revision_that_only_goes_up() {
+        // The page drops a snapshot older than one it already showed, so a
+        // broadcast must always carry a higher revision than any snapshot
+        // taken before it (`changed` bumps first, then snapshots).
+        let before = snapshot_of(&ready("0.1.2")).rev;
+        REV.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let after = snapshot_of(&ready("0.1.2"));
+        assert!(after.rev > before);
+        let json = serde_json::to_value(&after).unwrap();
+        assert_eq!(json["rev"], serde_json::json!(after.rev));
     }
 
     #[test]

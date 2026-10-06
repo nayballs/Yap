@@ -710,7 +710,11 @@ before `meeting::ingest`) and on an Upload's whole text.
   dictation's timestamp, raw + final text, model, and focused app. Best-effort,
   gated by `history_enabled`. Derives the stats dashboard (words, time-saved vs
   typing, day streak, 30-day activity) without a date crate (UTC day-numbers like
-  `usage.rs`). Powers `get_history`/`clear_history`/`get_stats`.
+  `usage.rs`). Powers `get_history`/`clear_history`/`get_stats`. Every change
+  (a dictation or upload saved, an entry deleted from Home or the local API,
+  all cleared) emits **`yap-history-changed`** after the write, which Home and
+  Insights re-pull on. Not `yap-transcript`: a dictation emits that before it
+  pastes and saves, so a re-pull on it could miss the new entry.
 - **`usage.rs`** — daily Groq usage tracker (tokens summed locally + requests from
   `x-ratelimit-*` headers), persisted to `groq_usage.json`, auto-resets at midnight
   UTC; powers the `get_groq_usage` command + `groq-usage` event.
@@ -725,7 +729,10 @@ before `meeting::ingest`) and on an Upload's whole text.
   `Windows.Networking.Connectivity`), keeping the verified installer in memory,
   so "Restart to update" is instant. One snapshot (`update_status` /
   `yap-update` event: idle | checking | available | downloading | ready |
-  installing + version/notes/progress/error/deferred/…) feeds every surface.
+  installing + version/notes/progress/error/deferred/…) feeds every surface;
+  its `rev` goes up with every broadcast, and the page never applies an
+  older one, since a command reply (`update_check`'s snapshot) can land
+  after a newer event (a quick download already "ready").
   **Announcements** (`updates.json`): once per "pending update" episode. A
   check the user starts (About, status bar, tray → About) IS the announcement
   (`run_check` marks it): the result shows where they asked, no toast or
@@ -945,7 +952,11 @@ before `meeting::ingest`) and on an Upload's whole text.
   audio — no mic involved), `e2e_meeting_output_change { at? }` (a default-
   output switch: "Them" gets nothing for 1 s, then follows the "new device")
   and `e2e_meeting_quiet { quietSecs?, talkSecs? }` (short quiet-side
-  timings), calendar secrets in `<data>/calendar-secrets.e2e.json` instead of
+  timings), `e2e_main_on_screen` (the main window back from a minimize or
+  hide the desktop did behind the suite's back — no focus, no "window shown"
+  hooks; the `main` fixture runs it before every test, since call prompts
+  only go in-app while the window is on screen), calendar secrets in
+  `<data>/calendar-secrets.e2e.json` instead of
   Credential Manager and links recorded (`calendar_e2e_opened`) instead of
   opened in a browser, and it quits when its stdin closes. See
   [`docs/e2e-tests.md`](./docs/e2e-tests.md).
@@ -1079,7 +1090,7 @@ before `meeting::ingest`) and on an Upload's whole text.
   per-app profiles — picked by day, dot nav, CTAs open the right Settings
   section or view via `onnavigate`), the dictation feed (day-grouped flat rows
   w/ hover-revealed meta + copy/delete via `delete_history_entry`, live refresh
-  on `yap-transcript`, icon-expand search on Ctrl+K), and a right-rail stats
+  on `yap-history-changed`, icon-expand search on Ctrl+K), and a right-rail stats
   card with serif display numerals. **`InsightsView.svelte`** = the stats
   dashboard promoted out of Settings→History (serif hero number, stat grid,
   30-day amber heatmap, top-apps-by-words bars from `get_history`); Settings →

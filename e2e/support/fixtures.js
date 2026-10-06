@@ -38,6 +38,7 @@ export const test = base.extend({
       .start({ title: testInfo.title, screenshots: true, snapshots: true })
       .then(() => true)
       .catch(() => false);
+    await mainOnScreen(yap);
     await resetUi(yap.main);
 
     await use(yap.main);
@@ -132,6 +133,32 @@ export async function closeToasts(main) {
     if ((await close.count()) > 0) await close.click({ timeout: 1_000 });
     await expect(toasts).toHaveCount(0, { timeout: 500 });
   }).toPass({ timeout: 20_000 });
+}
+
+/**
+ * The main window on screen (shown, not minimized), as the suite started it.
+ * A busy desktop (Win+D, another app, another test run beside this one) can
+ * minimize it behind the suite's back, and Yap decides where some prompts go
+ * by whether the main window is on screen (`window_view` in
+ * meeting_detect.rs): minimized, a call prompt goes to a Windows
+ * notification, which test mode never shows, instead of the in-app toast.
+ */
+export async function mainOnScreen(yap) {
+  // Not `open_settings`: that also runs the updater's "window shown" hook
+  // (a re-check), which updates.spec.js must stay in charge of.
+  await yap.invoke('e2e_main_on_screen');
+  await expect
+    .poll(
+      async () => {
+        const [visible, minimized] = await Promise.all([
+          yap.invoke('plugin:window|is_visible', { label: 'settings' }),
+          yap.invoke('plugin:window|is_minimized', { label: 'settings' }),
+        ]);
+        return visible && !minimized;
+      },
+      { message: 'the main window to be on screen', timeout: 10_000 },
+    )
+    .toBe(true);
 }
 
 /** Back to a known state between tests: no toasts, Settings closed, Home showing. */
