@@ -1,7 +1,9 @@
 // The calendar (src-tauri/src/calendar.rs): Settings → Connectors, the
 // Meetings view, the reminder card before a meeting, notes that take the
 // meeting's name and attendees, call detection not asking twice, switching
-// notes between back-to-back meetings, and Google Calendar in one click.
+// notes between back-to-back meetings, Google Calendar in one click, and
+// the "Connect your calendar" dialog (ConnectCalendarDialog.svelte) every
+// Connect calendar button opens: an iCal link and Google through it.
 //
 // Nothing here touches a real calendar or account. The "private iCal link"
 // is a local server serving a feed built at test time, relative to now
@@ -22,6 +24,8 @@ import {
   closeToasts,
   expectStore,
   settingsDialog,
+  sidebar,
+  connectDialog,
 } from './support/fixtures.js';
 import { startCalendarFeed, calendarFile, vevent } from './support/calendar-feed.js';
 import { startFakeGoogle } from './support/fake-google.js';
@@ -185,6 +189,21 @@ async function serve(yap, feed, ics) {
   await ensureFeed(yap, feed);
   await yap.invoke('calendar_sync');
 }
+
+/** No calendar connected (Google's access revoked, the links forgotten). */
+async function disconnectAll(yap) {
+  for (const c of (await status(yap)).connections) await yap.invoke('calendar_disconnect', { id: c.id });
+  await expect.poll(() => status(yap).then((s) => s.connections.length)).toBe(0);
+}
+
+/** The consent page's address once Yap has opened a new one (after `before` links). */
+async function nextAuthUrl(yap, before) {
+  await expect.poll(() => opened(yap).then((links) => links.length)).toBeGreaterThan(before);
+  return (await opened(yap)).at(-1);
+}
+
+/** The Meetings view's one "Connect calendar" (no calendar connected). */
+const emptyConnect = (main) => main.getByRole('region', { name: 'Today' }).getByRole('button', { name: 'Connect calendar' });
 
 /** Stop whatever records, without a summary. */
 async function pauseAll(yap) {
@@ -574,4 +593,197 @@ test('Google Calendar in one click (a local fake of Google), read-only, then dis
   await openView(main, 'Meetings');
   await expect(main.getByText('No meetings found')).toBeVisible();
   await expect(settingsDialog(main)).toBeHidden();
+});
+
+test('Connect calendar opens the "Connect your calendar" dialog (the Meetings view, Integrations, the nudge after a meeting); Esc, ✕ and the scrim close it', async ({
+  yap,
+  main,
+  shot,
+}) => {
+  await disconnectAll(yap);
+  await openView(main, 'Meetings');
+  const today = main.getByRole('region', { name: 'Today' });
+  await expect(today.getByText('No meetings found')).toBeVisible();
+  // One grey card, one way in: no banner above it any more.
+  await expect(main.getByRole('button', { name: 'Connect calendar' })).toHaveCount(1);
+  await shot(main, '23-meetings-no-calendar');
+
+  const connect = emptyConnect(main);
+  await connect.click();
+  const dialog = connectDialog(main);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Connect your calendar' })).toBeVisible();
+  await expect(dialog).toContainText("Get a heads-up before each meeting, join in one click, and notes with everyone's names.");
+  // The band shows the bar's own pre-meeting card, as a picture: nothing on
+  // it to press, focus or read out.
+  await expect(dialog.getByText('Design review')).toBeVisible();
+  await expect(dialog.getByText('In 2 min · with Sam')).toBeVisible();
+  await expect(dialog.getByText('& take notes')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /Join|More answers/ })).toHaveCount(0);
+  // Three ways in; this build has Google's client (the fake's).
+  for (const name of ['Continue with Google', 'Continue with Outlook', 'iCloud or another calendar']) {
+    await expect(dialog.getByRole('button', { name })).toBeEnabled();
+  }
+  await expect(dialog.getByText('Google sign-in is in the installed Yap')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Continue with Google' })).toBeFocused();
+  await shot(main, '24-connect-dialog');
+
+  // The focus stays inside, both ways round.
+  const insideDialog = () => main.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'));
+  for (let i = 0; i < 6; i++) {
+    await main.keyboard.press('Tab');
+    expect(await insideDialog()).toBe(true);
+  }
+  for (let i = 0; i < 6; i++) {
+    await main.keyboard.press('Shift+Tab');
+    expect(await insideDialog()).toBe(true);
+  }
+
+  // Esc closes it, and the focus goes back to the button.
+  await main.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(connect).toBeFocused();
+  // So does its ✕…
+  await connect.click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  // …and a click on the scrim beside it.
+  await connect.click();
+  await expect(dialog).toBeVisible();
+  await main.mouse.click(40, 420);
+  await expect(dialog).toBeHidden();
+
+  // Integrations' Calendar card connects through it too.
+  await openView(main, 'Integrations');
+  await main.getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await main.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+
+  // And the one-time nudge after a meeting: over the Meetings view.
+  await openView(main, 'Home');
+  const note = await yap.invoke('note_create', { title: 'Quick sync', folder: 'Meetings' });
+  await yap.invoke('meeting_start', { noteId: note.id });
+  await expect.poll(() => recording(yap)).toBe(true);
+  const ts = Math.floor(Date.now() / 1000);
+  await yap.invoke('e2e_meeting_feed', {
+    segments: [
+      { source: 'them', text: 'Thanks everyone, let us go through the roadmap for next quarter and pick the three things we ship first.', ts },
+      { source: 'you', text: 'Sounds good, I will start with onboarding and then the billing page.', ts: ts + 8 },
+    ],
+  });
+  await yap.invoke('meeting_end', {});
+  await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
+  const nudge = toast(main, 'Connect your calendar');
+  await expect(nudge).toBeVisible({ timeout: 20_000 });
+  await nudge.getByRole('button', { name: 'Connect calendar' }).click();
+  await expect(sidebar(main).getByRole('button', { name: 'Meetings', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Connect your calendar' })).toBeVisible();
+  await shot(main, '25-connect-dialog-from-the-nudge');
+  await main.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  if (await visible(yap, 'notepad')) await yap.notepad.getByRole('button', { name: 'Close notepad' }).click();
+});
+
+test('the dialog connects a private iCal link: Outlook explains its link, a reset link says why, and the right one connects and lists the meetings', async ({
+  yap,
+  main,
+  feed,
+  shot,
+}) => {
+  await disconnectAll(yap);
+  feed.set(baseFeed());
+  await openView(main, 'Meetings');
+  await emptyConnect(main).click();
+  const dialog = connectDialog(main);
+
+  // Outlook: how to publish the calendar, and where its link goes.
+  await dialog.getByRole('button', { name: 'Continue with Outlook' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Outlook Calendar' })).toBeVisible();
+  await expect(dialog.getByText('Shared calendars')).toBeVisible();
+  await expect(dialog.getByRole('textbox', { name: 'Outlook calendar ICS link' })).toBeFocused();
+  await shot(main, '26-dialog-outlook');
+  await dialog.getByRole('button', { name: 'Back' }).click();
+  await expect(dialog.getByRole('button', { name: 'Continue with Outlook' })).toBeFocused();
+
+  // iCloud or any calendar: a link that was reset says so, in the dialog…
+  await dialog.getByRole('button', { name: 'iCloud or another calendar' }).click();
+  await expect(dialog.getByRole('heading', { name: 'iCloud or another calendar' })).toBeVisible();
+  const input = dialog.getByRole('textbox', { name: 'Calendar iCal link' });
+  await expect(input).toBeFocused();
+  const go = dialog.getByRole('button', { name: 'Connect', exact: true });
+  await expect(go).toBeDisabled();
+  await input.fill(feed.missing);
+  await go.click();
+  await expect(dialog.getByRole('alert')).toContainText("doesn't work any more");
+  await shot(main, '27-dialog-link-reset');
+
+  // …and the right one connects: how many meetings, then the dialog goes.
+  await input.fill(feed.url);
+  await input.press('Enter');
+  await expect(dialog.getByRole('heading', { name: 'Calendar connected' })).toBeVisible();
+  const meetings = (await status(yap)).events.length;
+  expect(meetings).toBe(7); // Design review, 1:1, Budget, four stand-ups
+  await expect(dialog).toContainText(`${meetings} meetings in the next 7 days`);
+  await shot(main, '28-dialog-connected');
+  await expect(dialog).toBeHidden({ timeout: 5_000 });
+  await expect(row(main, 'Design review')).toBeVisible();
+  await expect(main.getByRole('heading', { level: 1, name: 'Meetings' })).toBeFocused();
+  // The dialog said so: no toast as well.
+  await expect(toast(main, 'Calendar connected')).toHaveCount(0);
+  expect(Object.values(yap.readJson('calendar-secrets.e2e.json'))).toContain(feed.url);
+  await shot(main, '29-meetings-after-connecting');
+  await disconnectAll(yap);
+});
+
+test('the dialog connects Google (a local fake): it waits for the browser, Cancel and a refusal say so, then it connects', async ({
+  yap,
+  main,
+  google,
+  shot,
+}) => {
+  await disconnectAll(yap);
+  await openView(main, 'Meetings');
+  await emptyConnect(main).click();
+  const dialog = connectDialog(main);
+  const continueGoogle = dialog.getByRole('button', { name: 'Continue with Google' });
+
+  // Waiting for the browser, with Cancel.
+  let links = (await opened(yap)).length;
+  await continueGoogle.click();
+  await expect(dialog.getByText('Finish connecting in your browser…')).toBeVisible();
+  const cancel = dialog.getByRole('button', { name: 'Cancel' });
+  await expect(cancel).toBeFocused();
+  const firstAuth = await nextAuthUrl(yap, links);
+  expect(firstAuth.startsWith(google.env.YAP_GOOGLE_AUTH_URL)).toBe(true);
+  await expect.poll(() => status(yap).then((s) => s.google.waiting)).toBe(true);
+  await shot(main, '30-dialog-google-waiting');
+  await cancel.click();
+  await expect(continueGoogle).toBeVisible();
+  await expect.poll(() => status(yap).then((s) => s.google.waiting)).toBe(false);
+
+  // Refused on Google's page: why, in the dialog (no toast).
+  links = (await opened(yap)).length;
+  await continueGoogle.click();
+  const denied = await fetch(google.deny(await nextAuthUrl(yap, links)));
+  expect(await denied.text()).toContain('Not connected');
+  await expect(dialog.getByRole('alert')).toContainText("You didn't let Yap see your calendar");
+  await expect(continueGoogle).toBeVisible();
+  await expect(toast(main, "Couldn't connect your calendar")).toHaveCount(0);
+  await shot(main, '31-dialog-google-refused');
+
+  // Allowed: connected with its one meeting, and the dialog goes.
+  links = (await opened(yap)).length;
+  await continueGoogle.click();
+  const back = await fetch(google.approve(await nextAuthUrl(yap, links)));
+  expect(back.status).toBe(200);
+  await expect(dialog.getByRole('heading', { name: 'Calendar connected' })).toBeVisible();
+  await expect(dialog).toContainText('1 meeting in the next 7 days');
+  await shot(main, '32-dialog-google-connected');
+  await expect(dialog).toBeHidden({ timeout: 5_000 });
+  await expect(row(main, 'Roadmap review')).toBeVisible();
+  expect((await status(yap)).connections.map((c) => c.label)).toEqual(['tester@example.com']);
+  await disconnectAll(yap);
 });

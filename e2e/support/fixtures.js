@@ -161,8 +161,22 @@ export async function mainOnScreen(yap) {
     .toBe(true);
 }
 
-/** Back to a known state between tests: no toasts, Settings closed, Home showing. */
+/**
+ * The "Connect your calendar" dialog (ConnectCalendarDialog.svelte). Its
+ * title follows the step ("Outlook Calendar", "Calendar connected"…), and
+ * every one of them has "calendar" in it.
+ */
+export function connectDialog(main) {
+  return main.getByRole('dialog', { name: /calendar/i });
+}
+
+/** Back to a known state between tests: no dialog or toasts, Settings closed, Home showing. */
 export async function resetUi(main) {
+  const dialog = connectDialog(main);
+  if (await dialog.isVisible()) {
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(dialog).toBeHidden();
+  }
   await closeToasts(main);
   await closeSettings(main);
   await openView(main, 'Home');
