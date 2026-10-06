@@ -8,6 +8,7 @@
 //! from Voice Mirror; everything else here is the slim glue.
 
 mod agent_detect;
+mod app_icons;
 mod auth;
 mod bar;
 mod bridge;
@@ -426,6 +427,7 @@ pub fn run() {
             meeting_detect::meeting_detect_status,
             meeting_detect::meeting_detect_respond,
             meeting_detect::meeting_detect_simulate,
+            app_icons::meeting_app_icons,
             meeting_end::meeting_end,
             meeting_end::meeting_pause,
             meeting_end::meeting_summarise,

@@ -20,7 +20,9 @@
 //!   (a two-hour meeting in seconds). [`e2e_meeting_dictation`] and
 //!   [`e2e_meeting_output_change`] stage a hotkey dictation and a switch of
 //!   Windows' default output at a point of that audio, and
-//!   [`e2e_meeting_quiet`] shortens the quiet-side warning's timings.
+//!   [`e2e_meeting_quiet`] shortens the quiet-side warning's timings;
+//! - it reads no installed apps' icons (Settings' call apps, the bar's call
+//!   card): [`app_icons_dir`] (`YAP_E2E_APP_ICONS`) names stand-ins instead.
 //!
 //! Release builds compile all of this out: [`active`] is always `false`
 //! without `debug_assertions`, and the meeting hooks don't exist.
@@ -36,6 +38,18 @@ pub fn active() -> bool {
     }
     #[cfg(not(debug_assertions))]
     false
+}
+
+/// Stand-ins for installed call apps' icons (`YAP_E2E_APP_ICONS`: a folder
+/// of `<app id>.png`), since test mode reads no installed apps
+/// (`app_icons.rs`). `None` without it, and always in release builds.
+pub fn app_icons_dir() -> Option<std::path::PathBuf> {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var_os("YAP_E2E_APP_ICONS").filter(|v| !v.is_empty()).map(std::path::PathBuf::from)
+    }
+    #[cfg(not(debug_assertions))]
+    None
 }
 
 /// How much faster than real time the meeting test audio plays
