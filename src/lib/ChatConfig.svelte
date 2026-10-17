@@ -1,9 +1,9 @@
 <script>
   // The "Chat" Language-Models scope, ported from OpenWhispr's
   // settings/ChatAgentSettings.tsx (InferenceConfigEditor scope="chatIntelligence"
-  // + a system-prompt textarea). Yap has no AI Chat surface yet, so the endpoint
-  // config is saved now and takes effect once that surface lands — see the
-  // "coming soon" note below. The provider/model half is the shared
+  // + a system-prompt textarea). It drives the AI Chat view and the Notes
+  // view's Ask bar (commands.rs resolve_chat_endpoint); the Chat view's model
+  // chip switches the same scope (ai_model.rs). The provider/model half is the shared
   // ScopeProviderConfig; this file owns the enable toggle + chat prompt, matching
   // OpenWhispr's section order (config editor → system prompt).
   //
@@ -30,7 +30,7 @@
     <Toggle
       bind:checked={scope.enabled}
       label="Enable chat"
-      desc="A voice assistant that answers questions."
+      desc="Its own model for Chat and the Ask bar on your notes. Off, they use the Dictation Cleanup model."
     />
   </Row>
 
@@ -39,11 +39,11 @@
       <ScopeProviderConfig {scope} {cfg} disabled={!enabled} />
 
       <div class="soonpanel">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 8v4.5M12 16h.01" /></svg>
         <p>
-          <strong>Coming soon.</strong> Chat runs once Yap's AI Chat surface lands —
-          a voice assistant you can ask questions. Your settings here are saved now
-          and will apply automatically when it ships.
+          <strong>Note tools need a bigger model.</strong> Cloud models and local models of
+          4B or more look up and change your notes; smaller ones answer from a plain search
+          of your notes. You can also switch models from the chip under the chat box.
         </p>
       </div>
 

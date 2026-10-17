@@ -23,6 +23,7 @@
   import { noteRequest } from './meetingDetect.svelte.js';
   import { summaries, loadSummary, summarise } from './meetingSummary.svelte.js';
   import { MEETING_HELPERS, meetingHelpers, noteMarkdown } from './notepadText.js';
+  import { nextModel, modelLine, whereItRuns } from './aiModel.js';
   import ContextMenu from './ui/ContextMenu.svelte';
   import ConfirmDialog from './ui/ConfirmDialog.svelte';
 
@@ -805,7 +806,9 @@
   });
 
   // ---- Embedded note chat (the "Ask anything…" bar, useEmbeddedChat port) ----
-  let chatThread = $state([]); // { role: 'user'|'assistant', text }
+  // { role: 'user'|'assistant', text, model? } — `model`: who answered
+  // (typed questions go to the Chat scope, the helpers to Note Formatting).
+  let chatThread = $state([]);
   let chatInput = $state('');
   let asking = $state(false);
 
@@ -818,8 +821,11 @@
     chatThread = [...chatThread, { role: 'user', text: q }];
     asking = true;
     try {
-      const answer = await invoke('note_ask', { id: selected.id, question: q, history });
-      chatThread = [...chatThread, { role: 'assistant', text: answer }];
+      const [answer, model] = await Promise.all([
+        invoke('note_ask', { id: selected.id, question: q, history }),
+        nextModel('chat'),
+      ]);
+      chatThread = [...chatThread, { role: 'assistant', text: answer, model }];
     } catch (e) {
       chatThread = chatThread.slice(0, -1);
       chatInput = q; // give the question back
@@ -845,9 +851,13 @@
     chatThread = [...chatThread, { role: 'user', text: MEETING_HELPERS[kind].label }];
     asking = true;
     try {
-      const r = await invoke('meeting_assist', { noteId: id, kind });
+      const [r, model] = await Promise.all([invoke('meeting_assist', { noteId: id, kind }), nextModel('notes')]);
       if (selected?.id !== id) return;
-      chatThread = [...chatThread, { role: 'assistant', text: r.answer, plain: !!r.plain, copy: true }];
+      // "Too little to go on" comes from Yap, not a model.
+      chatThread = [
+        ...chatThread,
+        { role: 'assistant', text: r.answer, plain: !!r.plain, copy: true, model: r.tooLittle ? null : model },
+      ];
     } catch (e) {
       if (selected?.id !== id) return;
       chatThread = chatThread.slice(0, -1);
@@ -1486,6 +1496,9 @@
                 <button class="ccopy" onclick={() => copyTurn(turn, i)}>{copiedTurn === i ? 'Copied' : 'Copy'}</button>
               {/if}
             </div>
+            {#if turn.role === 'assistant' && turn.model}
+              <div class="byline" title={whereItRuns(turn.model)}>{modelLine(turn.model)}</div>
+            {/if}
           {/each}
           {#if asking}
             <div class="cbubble assistant"><p class="cbody thinking">Thinking…</p></div>
@@ -2334,6 +2347,13 @@
   }
   .cbody.plain {
     white-space: pre-wrap;
+  }
+  /* the model that answered */
+  .byline {
+    align-self: flex-start;
+    margin: -3px 0 2px 4px;
+    font-size: 10.5px;
+    color: var(--yap-muted-55);
   }
   .ccopy {
     margin-top: 4px;

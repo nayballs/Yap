@@ -1,0 +1,212 @@
+// The Chat view's model chip (src/lib/ModelChip.svelte, src-tauri/src/
+// ai_model.rs): it names the model the next message goes to, resolved the
+// way chat_send resolves it; says "no note tools" for a local model under
+// 4B (whose answers come from a plain search of the notes); says "No AI
+// model" and opens Language Models when nothing is set up; and its popover
+// switches the Chat scope's model, which Settings' always-mounted config
+// copy adopts so its auto-save keeps it. Each answer shows the model that
+// wrote it. The "Groq" here is a local fake (support/fake-llm.js) behind a
+// test key: nothing leaves the PC.
+import { test as base, expect, openView, openSettings, closeSettings, settingsDialog, expectStore } from './support/fixtures.js';
+import { startFakeLlm } from './support/fake-llm.js';
+
+const TEST_KEY = 'e2e-fake-key';
+
+const test = base.extend({
+  fakeLlm: [
+    async ({}, use) => {
+      const fake = await startFakeLlm();
+      await use(fake);
+      await fake.close();
+    },
+    { scope: 'worker' },
+  ],
+  yapOptions: [
+    async ({ fakeLlm }, use) => {
+      await use({
+        name: 'chat-model',
+        config: {
+          ppApiKeys: { groq: TEST_KEY },
+          llmScopes: { chat: groqChat(fakeLlm, 'openai/gpt-oss-20b') },
+        },
+      });
+    },
+    { scope: 'worker' },
+  ],
+});
+
+/** A whole Chat scope, as config.json holds one (config.rs `LlmScope`). */
+function chatScope(fields) {
+  return { enabled: true, apiKey: '', apiKeys: {}, prompt: '', disableThinking: false, ...fields };
+}
+function groqChat(fakeLlm, model) {
+  return chatScope({ provider: 'groq', baseUrl: fakeLlm.base, model, apiKey: TEST_KEY });
+}
+
+/**
+ * Change config.json as another surface would, and tell Settings' copy (as
+ * the Integrations view does with `yap-config-patched`), so its auto-save
+ * can't put the old values back.
+ */
+async function setConfig(yap, main, patch) {
+  const cfg = await yap.invoke('get_config');
+  await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
+  await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
+}
+
+const chip = (main) => main.locator('.modelchip .chip');
+const popover = (main) => main.getByRole('dialog', { name: 'Chat model' });
+
+async function send(main, text) {
+  await main.getByPlaceholder('Type a message...').fill(text);
+  await main.getByRole('button', { name: 'Send' }).click();
+}
+
+test('the chip names the chat model, switches it, and every answer keeps its own', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  await setConfig(yap, main, {
+    ppApiKeys: { groq: TEST_KEY },
+    llmScopes: { ...(await yap.invoke('get_config')).llmScopes, chat: groqChat(fakeLlm, 'openai/gpt-oss-20b') },
+  });
+  await openView(main, 'Chat');
+  await expect(chip(main)).toHaveText('GPT-OSS 20B · Groq');
+  await expect(chip(main).locator('.mark')).toHaveAttribute('data-icon', 'groq');
+  await shot(main, '01-chip-groq');
+
+  // An answer, and the model that wrote it under it.
+  fakeLlm.scriptChat([{ content: 'Your launch is on **Friday**.' }]);
+  await send(main, 'When is the launch?');
+  const thread = main.locator('.msgs');
+  await expect(thread).toContainText('Your launch is on Friday.');
+  await expect(thread.locator('.byline')).toHaveText(['GPT-OSS 20B · Groq']);
+
+  // The popover: what it is, where it runs, the switch.
+  await chip(main).click();
+  const pop = popover(main);
+  await expect(pop).toBeVisible();
+  // Where it runs comes from the endpoint: this "Groq" is the local fake.
+  await expect(pop).toContainText('Groq · Runs on this PC (127.0.0.1:');
+  await expect(pop).toContainText("Looks up and changes your notes with Yap's note tools.");
+  const radios = pop.getByRole('radio');
+  await expect(radios).toHaveText(['GPT-OSS 20B', 'GPT-OSS 120B']);
+  await expect(pop.getByRole('radio', { name: 'GPT-OSS 20B' })).toHaveAttribute('aria-checked', 'true');
+  await shot(main, '02-popover');
+
+  // Switch: the Chat scope only, dictation cleanup untouched.
+  await pop.getByRole('radio', { name: 'GPT-OSS 120B' }).click();
+  await expect(pop).toBeHidden();
+  await expect(chip(main)).toHaveText('GPT-OSS 120B · Groq');
+  await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.model === 'openai/gpt-oss-120b');
+  const saved = yap.readJson('config.json');
+  expect(saved.llmScopes.chat).toMatchObject({ enabled: true, provider: 'groq', baseUrl: fakeLlm.base });
+  expect(saved.ppModel).toBe('openai/gpt-oss-20b');
+
+  // The next answer comes from it, and says so; the first one still says its own.
+  fakeLlm.scriptChat([{ content: 'It moved to Monday.' }]);
+  await send(main, 'And now?');
+  await expect(thread).toContainText('It moved to Monday.');
+  await expect(thread.locator('.byline')).toHaveText(['GPT-OSS 20B · Groq', 'GPT-OSS 120B · Groq']);
+  expect(fakeLlm.requests.at(-1).model).toBe('openai/gpt-oss-120b');
+  await shot(main, '03-answers-keep-their-model');
+
+  // Kept with the conversation: opened again, the lines are still there.
+  await main.getByRole('button', { name: 'New chat' }).click();
+  await main.locator('.conv').filter({ hasText: 'When is the launch?' }).click();
+  await expect(main.locator('.msgs .byline')).toHaveText(['GPT-OSS 20B · Groq', 'GPT-OSS 120B · Groq']);
+  const conv = yap.readJson('chats.json').conversations.find((c) => c.title === 'When is the launch?');
+  expect(conv.messages.map((m) => m.model?.id ?? null)).toEqual([
+    null,
+    'openai/gpt-oss-20b',
+    null,
+    'openai/gpt-oss-120b',
+  ]);
+
+  // Settings adopted it: Language Models → Chat shows it, and a save from
+  // Settings (any setting) keeps it.
+  await chip(main).click();
+  await popover(main).getByRole('button', { name: 'Language model settings…' }).click();
+  const dialog = settingsDialog(main);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Language Models' })).toBeVisible();
+  await expect(dialog.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+  await expect(dialog.locator('.srow.sel')).toContainText('GPT-OSS 120B');
+  await shot(main, '04-settings-chat-scope');
+
+  const general = await openSettings(main, 'General');
+  const live = general.getByRole('button', { name: 'Show live transcript' });
+  const was = (await live.getAttribute('aria-pressed')) === 'true';
+  await live.click();
+  await expectStore(yap, 'config.json', (c) => c.meetingLiveTranscript === !was);
+  expect(yap.readJson('config.json').llmScopes.chat.model).toBe('openai/gpt-oss-120b');
+  await live.click();
+  await expectStore(yap, 'config.json', (c) => c.meetingLiveTranscript === was);
+  expect(yap.readJson('config.json').llmScopes.chat.model).toBe('openai/gpt-oss-120b');
+  await closeSettings(main);
+});
+
+test('a small local model says it has no note tools, and answers from notes search', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  const cfg = await yap.invoke('get_config');
+  await setConfig(yap, main, {
+    ppApiKeys: { groq: TEST_KEY },
+    llmScopes: {
+      ...cfg.llmScopes,
+      chat: chatScope({ provider: 'local', baseUrl: fakeLlm.base, model: 'qwen2.5-1.5b-instruct' }),
+    },
+  });
+  await openView(main, 'Chat');
+  await expect(chip(main)).toHaveText('qwen2.5-1.5b-instruct · On this PC · no note tools');
+  await expect(chip(main).locator('.mark')).toHaveAttribute('data-icon', 'qwen');
+  await shot(main, '05-chip-no-note-tools');
+
+  await chip(main).click();
+  const pop = popover(main);
+  await expect(pop).toContainText('Runs on this PC');
+  await expect(pop).toContainText("too small for Yap's note tools");
+  // The current model first (it's none of the switch's), then Groq's.
+  await expect(pop.getByRole('radio')).toHaveText(['qwen2.5-1.5b-instruct no note tools', 'GPT-OSS 20B', 'GPT-OSS 120B']);
+  await shot(main, '06-popover-no-note-tools');
+  await main.keyboard.press('Escape');
+  await expect(pop).toBeHidden();
+
+  // The answer: a plain chat call (no tools offered), from that model.
+  fakeLlm.reply('other', () => 'From your notes: the venue is booked.');
+  const before = fakeLlm.requests.length;
+  await main.getByRole('button', { name: 'New chat' }).click();
+  await send(main, 'Is the venue booked?');
+  const thread = main.locator('.msgs');
+  await expect(thread).toContainText('From your notes: the venue is booked.');
+  const call = fakeLlm.requests.slice(before).at(-1);
+  expect(call.tools).toEqual([]);
+  expect(call.model).toBe('qwen2.5-1.5b-instruct');
+  await expect(thread.locator('.byline')).toHaveText(['qwen2.5-1.5b-instruct · On this PC']);
+});
+
+test('with no AI model set up the chip says so and opens Language Models', async ({ yap, main, shot }) => {
+  const cfg = await yap.invoke('get_config');
+  await setConfig(yap, main, {
+    ppProvider: 'groq',
+    ppApiKey: '',
+    ppApiKeys: {},
+    llmScopes: { ...cfg.llmScopes, chat: { ...cfg.llmScopes.chat, enabled: false, apiKey: '', apiKeys: {} } },
+  });
+  await openView(main, 'Chat');
+  await expect(chip(main)).toHaveText('No AI model');
+  await shot(main, '07-chip-no-ai-model');
+
+  await chip(main).click();
+  const dialog = settingsDialog(main);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Language Models' })).toBeVisible();
+  await expect(dialog.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+  await expect(popover(main)).toHaveCount(0);
+  await closeSettings(main);
+});
