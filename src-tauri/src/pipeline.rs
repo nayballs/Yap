@@ -186,6 +186,76 @@ pub(crate) fn set_test_silent_mic(silent: bool) {
     TEST_SILENT_MIC.store(silent, Ordering::SeqCst);
 }
 
+/// Robot mode only (`realtest.rs`): a WAV is playing into the dictation in
+/// the mic's place — the real mic's audio is dropped meanwhile, and a
+/// recording may start without one.
+#[cfg(debug_assertions)]
+static TEST_FEED: AtomicBool = AtomicBool::new(false);
+
+/// A robot's WAV stands in for the mic right now (never in release builds).
+fn test_feed_on() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        TEST_FEED.load(Ordering::SeqCst)
+    }
+    #[cfg(not(debug_assertions))]
+    false
+}
+
+/// What a dictation sent to the paste — the robot's report
+/// (`realtest.rs`); a spoken dictation ignores it.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Delivered {
+    /// The text as it went to the paste (fitted); empty: nothing to paste.
+    pub text: String,
+    /// The transcript before AI cleanup.
+    pub raw: String,
+    /// The kind of app it went into (`AppKind::describe`).
+    pub kind: String,
+    /// The key pressed after it ("enter", "ctrlEnter"…), if any.
+    pub submit: Option<String>,
+    /// Why the paste or the key didn't happen (a refusal in robot mode).
+    pub error: Option<String>,
+}
+
+/// The latest dictation's report, for the robot's WAV dictations (which
+/// deliver from `run_stt`).
+#[cfg(debug_assertions)]
+static LAST_DELIVERED: Mutex<Option<Delivered>> = Mutex::new(None);
+
+/// The scrolling waveform's level meter: the peak over ~80 ms of audio.
+#[derive(Default)]
+struct AmpMeter {
+    peak: f32,
+    count: usize,
+}
+
+impl AmpMeter {
+    /// Time-domain amplitude meter for the scrolling waveform (Claude Code
+    /// style): one peak level (raw 0..1) per ~1280 samples at 16 kHz ≈ 80 ms
+    /// per bar for a calm, readable scroll; the overlay pushes each onto a
+    /// scrolling history. `Some(peak)` when a bar is due.
+    fn add(&mut self, samples: &[f32]) -> Option<f32> {
+        const AMP_WINDOW: usize = 1280;
+        for &s in samples {
+            let a = s.abs();
+            if a > self.peak {
+                self.peak = a;
+            }
+        }
+        self.count += samples.len();
+        if self.count >= AMP_WINDOW {
+            let peak = self.peak;
+            self.peak = 0.0;
+            self.count = 0;
+            Some(peak)
+        } else {
+            None
+        }
+    }
+}
+
 /// The push-to-talk gesture (`gesture.rs`) and which hotkey its recording
 /// belongs to.
 #[derive(Default)]
@@ -313,6 +383,46 @@ impl Shared {
             .read()
             .map(|c| kind.with_settings(c.terminal_mode, c.chat_no_full_stop))
             .unwrap_or_default()
+    }
+
+    /// Mic audio (16 kHz mono) as it arrives: while recording, into the
+    /// buffer (and the dead-mic watchdog's tally); while idle, into the
+    /// short pre-roll ring the next recording starts with. The waveform's
+    /// level goes out while recording, or idle during a mic test (onboarding).
+    fn take_audio(&self, samples: &[f32], amp: &mut AmpMeter) {
+        if !self.recording.load(Ordering::Relaxed) {
+            if let Ok(mut pr) = self.preroll.lock() {
+                pr.extend(samples.iter().copied());
+                while pr.len() > PREROLL_SAMPLES {
+                    pr.pop_front();
+                }
+            }
+            if !self.mic_test.load(Ordering::Relaxed) {
+                return;
+            }
+        } else {
+            // The dead-mic watchdog's tally: how much arrived, and
+            // whether any of it wasn't digital silence.
+            self.mic_tally.note(samples);
+            if let Ok(mut buf) = self.buffer.lock() {
+                // Bound the buffer so a stuck key can't grow it without limit
+                // (OOM). Past the cap we drop further audio and warn once.
+                if buf.len() < MAX_RECORDING_SAMPLES {
+                    buf.extend_from_slice(samples);
+                    if buf.len() >= MAX_RECORDING_SAMPLES {
+                        tracing::warn!(
+                            "Recording hit the {}-minute cap — further audio dropped; stop the recording",
+                            MAX_RECORDING_SAMPLES / (60 * TARGET_SAMPLE_RATE as usize)
+                        );
+                    }
+                }
+            }
+        }
+        // The next scrolling-waveform bar (recording, or an active mic
+        // test). The frontend shapes (gain/curve) and scrolls it.
+        if let Some(peak) = amp.add(samples) {
+            let _ = self.app.emit("yap-amp", peak);
+        }
     }
 
     /// Reset the idle timer to "now".
@@ -453,8 +563,9 @@ impl Shared {
             return;
         }
         // Nothing to record from (`Pipeline::ensure_mic` has just retried):
-        // say so instead of "recording" silence.
-        if !self.has_mic.load(Ordering::SeqCst) {
+        // say so instead of "recording" silence. (The robot's WAV stands in
+        // for a mic.)
+        if !self.has_mic.load(Ordering::SeqCst) && !test_feed_on() {
             tracing::warn!("Can't record — no microphone");
             let _ = self
                 .app
@@ -473,6 +584,37 @@ impl Shared {
             buf.clear();
             buf.extend_from_slice(&pre);
         }
+        self.capture_target(edit);
+
+        // The dead-mic watchdog's tally starts afresh with each recording.
+        self.mic_tally.reset();
+        self.mic_dead.store(false, Ordering::SeqCst);
+        let session = self.rec_session.fetch_add(1, Ordering::SeqCst) + 1;
+
+        // A meeting recording keeps this dictation out of its "You" side.
+        dictation_began();
+        self.recording.store(true, Ordering::SeqCst);
+        self.touch_activity();
+        if self.mute_while_recording() {
+            crate::mute::mute_system_output();
+        }
+        let _ = self.app.emit("yap-state", "recording");
+        if self.sound_enabled() {
+            crate::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref());
+        }
+        // Live partials: spawn a worker that re-transcribes a bounded sliding
+        // window of the buffer while recording (cost independent of recording
+        // length — see `partials::PartialSession`).
+        self.maybe_start_streaming();
+        self.spawn_mic_watch(session);
+        tracing::info!("Recording started");
+    }
+
+    /// Where the dictation starting now goes: the window in front (captured
+    /// before the overlay or anything else can take the focus; the paste
+    /// goes back into it), what kind of app it is, edit mode's selection,
+    /// and — in the background — the text around its cursor.
+    fn capture_target(self: &Arc<Self>, edit: bool) {
         // Capture the window the user is dictating into, before the overlay
         // (or anything else) can steal focus. Restored at paste time.
         let hwnd = crate::text_injector::current_foreground().unwrap_or(0);
@@ -508,29 +650,6 @@ impl Shared {
         // in a terminal with terminal mode on: its "field" is the screen.
         let smart = !edit && smart_spacing && !in_terminal;
         crate::selection::begin_dictation((hwnd != 0).then_some(hwnd), smart);
-
-        // The dead-mic watchdog's tally starts afresh with each recording.
-        self.mic_tally.reset();
-        self.mic_dead.store(false, Ordering::SeqCst);
-        let session = self.rec_session.fetch_add(1, Ordering::SeqCst) + 1;
-
-        // A meeting recording keeps this dictation out of its "You" side.
-        dictation_began();
-        self.recording.store(true, Ordering::SeqCst);
-        self.touch_activity();
-        if self.mute_while_recording() {
-            crate::mute::mute_system_output();
-        }
-        let _ = self.app.emit("yap-state", "recording");
-        if self.sound_enabled() {
-            crate::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref());
-        }
-        // Live partials: spawn a worker that re-transcribes a bounded sliding
-        // window of the buffer while recording (cost independent of recording
-        // length — see `partials::PartialSession`).
-        self.maybe_start_streaming();
-        self.spawn_mic_watch(session);
-        tracing::info!("Recording started");
     }
 
     /// The dead-mic watchdog for recording `session` (`mic_watch.rs`): polls
@@ -1026,6 +1145,240 @@ impl Shared {
         );
     }
 
+    /// A dictation's transcript (`text`, from the STT), the rest of the way:
+    /// AI cleanup (routed per app), the dictionary, the "press enter"
+    /// command and snippets, fitting to the kind of app and the text around
+    /// the cursor, the paste into the window captured at record start, the
+    /// submit key, history. Returns what went to the paste (the robot's
+    /// report; a dictation ignores it).
+    async fn deliver(self: &Arc<Self>, text: String) -> Delivered {
+        // Smart routing: which app were we dictating into? The
+        // foreground window was captured at record-start; resolve
+        // it to a process name (e.g. "slack.exe") so per-app
+        // cleanup rules can pick a matching body.
+        let target_hwnd = match self.target_hwnd.load(Ordering::Relaxed) {
+            0 => None,
+            h => Some(h),
+        };
+        let target_app = crate::text_injector::app_name_for(target_hwnd);
+
+        // Snapshot the injection- and cleanup-related config under
+        // one read lock. `pp_body` is the routed cleanup body:
+        // `Some(body)` to clean with, `None` to skip cleanup
+        // (selected-apps-only scope + no matching rule). The
+        // endpoint comes from the matched profile's LLM override
+        // when it has one, else the global settings — either way
+        // "ondevice" routes through the sidecar when it's up.
+        let (
+            dict,
+            append_space,
+            auto_submit,
+            auto_submit_key,
+            restore_clipboard,
+            pp_enabled,
+            pp_base_url,
+            pp_api_key,
+            pp_model,
+            pp_provider,
+            pp_body,
+            pp_disable_thinking,
+        ) = self
+            .config
+            .read()
+            .map(|c| {
+                let plan = c.resolve_cleanup(target_app.as_deref());
+                let (pp_base_url, pp_api_key, pp_model, pp_provider) =
+                    match plan.as_ref().and_then(|p| p.endpoint.as_ref()) {
+                        Some((provider, base_url, api_key, model)) => {
+                            // Profile keys fall back to the global
+                            // per-provider store, like scopes do.
+                            let key = c.provider_api_key(provider, api_key);
+                            crate::local_llm::effective_endpoint_for(
+                                provider, base_url, &key, model,
+                            )
+                        }
+                        None => crate::local_llm::effective_endpoint(&c),
+                    };
+                (
+                    c.dictionary.clone(),
+                    c.append_trailing_space,
+                    c.auto_submit,
+                    c.auto_submit_key.clone(),
+                    c.restore_clipboard,
+                    c.post_process_enabled,
+                    pp_base_url,
+                    pp_api_key,
+                    pp_model,
+                    pp_provider,
+                    plan.map(|p| p.body),
+                    c.pp_disable_thinking,
+                )
+            })
+            .unwrap_or_else(|_| {
+                (
+                    Vec::new(),
+                    false,
+                    false,
+                    "enter".to_string(),
+                    true,
+                    false,
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    None,
+                    false,
+                )
+            });
+
+        // Optional AI cleanup pass (best-effort). Runs before the
+        // dictionary so the user's corrections always have the
+        // final say. Any error/timeout falls back to the raw
+        // transcript — dictation is never blocked. The state stays
+        // `processing` for the extra latency.
+        let raw = text.trim().to_string();
+        // `pp_body` is `None` when smart routing says "skip cleanup
+        // for this app" (selected-apps-only scope, unbound app).
+        let cleaned = match (&pp_body, pp_enabled && !pp_base_url.is_empty() && !raw.is_empty())
+        {
+            (Some(body), true) => {
+                match crate::llm::cleanup(
+                    &raw,
+                    &pp_base_url,
+                    &pp_api_key,
+                    &pp_model,
+                    &pp_provider,
+                    body,
+                    &dict,
+                    pp_disable_thinking,
+                )
+                .await
+                {
+                    // Ok(empty) is a DELIBERATE empty result (filler-only
+                    // input) — keep it empty so nothing is injected. Only a
+                    // real request error falls back to the raw transcript.
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!("AI cleanup failed, using raw: {}", e);
+                        raw.clone()
+                    }
+                }
+            }
+            _ => raw.clone(),
+        };
+
+        // The correction dictionary (exact, then fuzzy for
+        // ONNX models), exactly as meetings and Upload get it,
+        // then the "press enter" voice command and snippets
+        // (dictations only).
+        let (mut corrected, voice_enter) = self
+            .config
+            .read()
+            .map(|c| finish_dictation(cleaned.trim(), &raw, &c))
+            .unwrap_or_else(|_| (config::apply_dictionary(cleaned.trim(), &dict), false));
+        // A terminal or a chat app (`app_kind.rs`), as the
+        // settings have it: how the text is fitted and which
+        // key, if any, follows the paste.
+        let kind = self.paste_kind();
+        let submit =
+            crate::app_kind::submit_key(kind, auto_submit, voice_enter, &auto_submit_key)
+                .map(str::to_string);
+        if voice_enter {
+            tracing::info!("Voice command: press {}", submit.as_deref().unwrap_or("enter"));
+        } else if auto_submit && submit.is_none() {
+            tracing::info!("Auto-submit: not pressing Enter at a terminal's prompt");
+        }
+        let mut report = Delivered {
+            raw: raw.clone(),
+            kind: kind.describe(),
+            submit: submit.clone(),
+            ..Delivered::default()
+        };
+        if !corrected.is_empty() {
+            // Fitted to the kind of app and the text around
+            // the cursor (smart spacing), else the trailing
+            // space as before.
+            corrected =
+                crate::text_injector::prepare_dictation(&corrected, append_space, &dict, kind);
+            report.text = corrected.clone();
+            tracing::info!(text = %corrected, "Transcript");
+            let _ = self.app.emit("yap-transcript", corrected.clone());
+            let target = match self.target_hwnd.load(Ordering::Relaxed) {
+                0 => None,
+                h => Some(h),
+            };
+            match crate::text_injector::inject_text(
+                &corrected,
+                restore_clipboard,
+                target,
+            )
+            .await
+            {
+                Ok(()) => {
+                    // Once, whether auto-submit, the voice
+                    // command or both asked for it.
+                    if let Some(key) = &submit {
+                        if let Err(e) = crate::text_injector::press_submit(key).await {
+                            tracing::warn!("Auto-submit failed: {}", e);
+                            report.error = Some(e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Inject failed: {}", e);
+                    report.error = Some(e);
+                }
+            }
+
+            // Local-only history for the stats dashboard
+            // (best-effort, gated by `history_enabled`).
+            let (history_enabled, model) = self
+                .config
+                .read()
+                .map(|c| (c.history_enabled, c.model_size.clone()))
+                .unwrap_or((false, String::new()));
+            if history_enabled {
+                let app_name =
+                    crate::text_injector::app_name_for(target).unwrap_or_default();
+                crate::history::record(
+                    &raw,
+                    corrected.trim(),
+                    &model,
+                    &app_name,
+                );
+                // After the save: `yap-transcript` went out
+                // before the paste, so a view that re-pulled
+                // history on it could miss this dictation.
+                let _ = self.app.emit("yap-history-changed", ());
+            }
+        } else if voice_enter {
+            // Only "press enter" was said: nothing to paste
+            // (which would have refocused the dictation's
+            // window), so press it only while that window
+            // still has the focus — never in another one.
+            let target = match self.target_hwnd.load(Ordering::Relaxed) {
+                0 => None,
+                h => Some(h),
+            };
+            let key = submit.as_deref().unwrap_or(&auto_submit_key);
+            if target.is_none() || crate::text_injector::current_foreground() == target {
+                if let Err(e) = crate::text_injector::press_submit(key).await {
+                    tracing::warn!("Voice command submit failed: {}", e);
+                    report.error = Some(e);
+                }
+            } else {
+                tracing::info!("Voice command: the dictation's window lost the focus, not pressing");
+                report.error = Some("the dictation's window lost the focus".into());
+            }
+            report.submit = Some(key.to_string());
+        }
+        #[cfg(debug_assertions)]
+        if let Ok(mut last) = LAST_DELIVERED.lock() {
+            *last = Some(report.clone());
+        }
+        report
+    }
+
     async fn run_stt(self: Arc<Self>, audio: Vec<f32>) {
         if audio.is_empty() {
             let _ = self.app.emit("yap-state", "idle");
@@ -1138,212 +1491,7 @@ impl Shared {
                         return;
                     }
                     Ok(text) => {
-                        // Smart routing: which app were we dictating into? The
-                        // foreground window was captured at record-start; resolve
-                        // it to a process name (e.g. "slack.exe") so per-app
-                        // cleanup rules can pick a matching body.
-                        let target_hwnd = match self.target_hwnd.load(Ordering::Relaxed) {
-                            0 => None,
-                            h => Some(h),
-                        };
-                        let target_app = crate::text_injector::app_name_for(target_hwnd);
-
-                        // Snapshot the injection- and cleanup-related config under
-                        // one read lock. `pp_body` is the routed cleanup body:
-                        // `Some(body)` to clean with, `None` to skip cleanup
-                        // (selected-apps-only scope + no matching rule). The
-                        // endpoint comes from the matched profile's LLM override
-                        // when it has one, else the global settings — either way
-                        // "ondevice" routes through the sidecar when it's up.
-                        let (
-                            dict,
-                            append_space,
-                            auto_submit,
-                            auto_submit_key,
-                            restore_clipboard,
-                            pp_enabled,
-                            pp_base_url,
-                            pp_api_key,
-                            pp_model,
-                            pp_provider,
-                            pp_body,
-                            pp_disable_thinking,
-                        ) = self
-                            .config
-                            .read()
-                            .map(|c| {
-                                let plan = c.resolve_cleanup(target_app.as_deref());
-                                let (pp_base_url, pp_api_key, pp_model, pp_provider) =
-                                    match plan.as_ref().and_then(|p| p.endpoint.as_ref()) {
-                                        Some((provider, base_url, api_key, model)) => {
-                                            // Profile keys fall back to the global
-                                            // per-provider store, like scopes do.
-                                            let key = c.provider_api_key(provider, api_key);
-                                            crate::local_llm::effective_endpoint_for(
-                                                provider, base_url, &key, model,
-                                            )
-                                        }
-                                        None => crate::local_llm::effective_endpoint(&c),
-                                    };
-                                (
-                                    c.dictionary.clone(),
-                                    c.append_trailing_space,
-                                    c.auto_submit,
-                                    c.auto_submit_key.clone(),
-                                    c.restore_clipboard,
-                                    c.post_process_enabled,
-                                    pp_base_url,
-                                    pp_api_key,
-                                    pp_model,
-                                    pp_provider,
-                                    plan.map(|p| p.body),
-                                    c.pp_disable_thinking,
-                                )
-                            })
-                            .unwrap_or_else(|_| {
-                                (
-                                    Vec::new(),
-                                    false,
-                                    false,
-                                    "enter".to_string(),
-                                    true,
-                                    false,
-                                    String::new(),
-                                    String::new(),
-                                    String::new(),
-                                    String::new(),
-                                    None,
-                                    false,
-                                )
-                            });
-
-                        // Optional AI cleanup pass (best-effort). Runs before the
-                        // dictionary so the user's corrections always have the
-                        // final say. Any error/timeout falls back to the raw
-                        // transcript — dictation is never blocked. The state stays
-                        // `processing` for the extra latency.
-                        let raw = text.trim().to_string();
-                        // `pp_body` is `None` when smart routing says "skip cleanup
-                        // for this app" (selected-apps-only scope, unbound app).
-                        let cleaned = match (&pp_body, pp_enabled && !pp_base_url.is_empty() && !raw.is_empty())
-                        {
-                            (Some(body), true) => {
-                                match crate::llm::cleanup(
-                                    &raw,
-                                    &pp_base_url,
-                                    &pp_api_key,
-                                    &pp_model,
-                                    &pp_provider,
-                                    body,
-                                    &dict,
-                                    pp_disable_thinking,
-                                )
-                                .await
-                                {
-                                    // Ok(empty) is a DELIBERATE empty result (filler-only
-                                    // input) — keep it empty so nothing is injected. Only a
-                                    // real request error falls back to the raw transcript.
-                                    Ok(c) => c,
-                                    Err(e) => {
-                                        tracing::warn!("AI cleanup failed, using raw: {}", e);
-                                        raw.clone()
-                                    }
-                                }
-                            }
-                            _ => raw.clone(),
-                        };
-
-                        // The correction dictionary (exact, then fuzzy for
-                        // ONNX models), exactly as meetings and Upload get it,
-                        // then the "press enter" voice command and snippets
-                        // (dictations only).
-                        let (mut corrected, voice_enter) = self
-                            .config
-                            .read()
-                            .map(|c| finish_dictation(cleaned.trim(), &raw, &c))
-                            .unwrap_or_else(|_| (config::apply_dictionary(cleaned.trim(), &dict), false));
-                        // A terminal or a chat app (`app_kind.rs`), as the
-                        // settings have it: how the text is fitted and which
-                        // key, if any, follows the paste.
-                        let kind = self.paste_kind();
-                        let submit =
-                            crate::app_kind::submit_key(kind, auto_submit, voice_enter, &auto_submit_key)
-                                .map(str::to_string);
-                        if voice_enter {
-                            tracing::info!("Voice command: press {}", submit.as_deref().unwrap_or("enter"));
-                        } else if auto_submit && submit.is_none() {
-                            tracing::info!("Auto-submit: not pressing Enter at a terminal's prompt");
-                        }
-                        if !corrected.is_empty() {
-                            // Fitted to the kind of app and the text around
-                            // the cursor (smart spacing), else the trailing
-                            // space as before.
-                            corrected =
-                                crate::text_injector::prepare_dictation(&corrected, append_space, &dict, kind);
-                            tracing::info!(text = %corrected, "Transcript");
-                            let _ = self.app.emit("yap-transcript", corrected.clone());
-                            let target = match self.target_hwnd.load(Ordering::Relaxed) {
-                                0 => None,
-                                h => Some(h),
-                            };
-                            match crate::text_injector::inject_text(
-                                &corrected,
-                                restore_clipboard,
-                                target,
-                            )
-                            .await
-                            {
-                                Ok(()) => {
-                                    // Once, whether auto-submit, the voice
-                                    // command or both asked for it.
-                                    if let Some(key) = &submit {
-                                        if let Err(e) = crate::text_injector::press_submit(key).await {
-                                            tracing::warn!("Auto-submit failed: {}", e);
-                                        }
-                                    }
-                                }
-                                Err(e) => tracing::warn!("Inject failed: {}", e),
-                            }
-
-                            // Local-only history for the stats dashboard
-                            // (best-effort, gated by `history_enabled`).
-                            let (history_enabled, model) = self
-                                .config
-                                .read()
-                                .map(|c| (c.history_enabled, c.model_size.clone()))
-                                .unwrap_or((false, String::new()));
-                            if history_enabled {
-                                let app_name =
-                                    crate::text_injector::app_name_for(target).unwrap_or_default();
-                                crate::history::record(
-                                    &raw,
-                                    corrected.trim(),
-                                    &model,
-                                    &app_name,
-                                );
-                                // After the save: `yap-transcript` went out
-                                // before the paste, so a view that re-pulled
-                                // history on it could miss this dictation.
-                                let _ = self.app.emit("yap-history-changed", ());
-                            }
-                        } else if voice_enter {
-                            // Only "press enter" was said: nothing to paste
-                            // (which would have refocused the dictation's
-                            // window), so press it only while that window
-                            // still has the focus — never in another one.
-                            let target = match self.target_hwnd.load(Ordering::Relaxed) {
-                                0 => None,
-                                h => Some(h),
-                            };
-                            let key = submit.as_deref().unwrap_or(&auto_submit_key);
-                            if target.is_none() || crate::text_injector::current_foreground() == target {
-                                if let Err(e) = crate::text_injector::press_submit(key).await {
-                                    tracing::warn!("Voice command submit failed: {}", e);
-                                }
-                            } else {
-                                tracing::info!("Voice command: the dictation's window lost the focus, not pressing");
-                            }
-                        }
+                        self.deliver(text).await;
                     }
                     Err(e) => {
                         tracing::error!("Transcription failed: {}", e);
@@ -1564,6 +1712,120 @@ impl Pipeline {
         open_stream(&self.shared, &mut slot, device, true)?;
         tracing::info!(device = device.unwrap_or("default"), "Input device switched");
         Ok(())
+    }
+
+    /// Robot mode's way into the pipeline (`realtest.rs`).
+    #[cfg(debug_assertions)]
+    pub(crate) fn robot(&self) -> Robot {
+        Robot(Arc::clone(&self.shared))
+    }
+}
+
+/// Robot mode's dictations (`realtest.rs`, debug builds only): without a
+/// hotkey, and from a transcript or a WAV instead of the microphone.
+/// Where they paste is up to the guard in `realtest.rs`, as for any
+/// dictation in robot mode.
+#[cfg(debug_assertions)]
+pub(crate) struct Robot(Arc<Shared>);
+
+/// The robot's WAV plays in the mic's place until this drops.
+#[cfg(debug_assertions)]
+struct FeedOn;
+
+#[cfg(debug_assertions)]
+impl FeedOn {
+    fn start() -> FeedOn {
+        TEST_FEED.store(true, Ordering::SeqCst);
+        FeedOn
+    }
+}
+
+#[cfg(debug_assertions)]
+impl Drop for FeedOn {
+    fn drop(&mut self) {
+        TEST_FEED.store(false, Ordering::SeqCst);
+    }
+}
+
+#[cfg(debug_assertions)]
+impl Robot {
+    const BUSY: &'static str = "Yap is busy with another dictation";
+
+    /// `text` as if the STT had just heard it: the window in front becomes
+    /// the target and the text around its cursor is read, as at a
+    /// recording's start (waiting for that read, as a few seconds of talk
+    /// would), then the dictation's own steps from cleanup to the paste.
+    pub(crate) async fn dictate_text(&self, text: String) -> Result<Delivered, String> {
+        let shared = &self.0;
+        if shared.recording.load(Ordering::SeqCst) || shared.processing.swap(true, Ordering::SeqCst) {
+            return Err(Self::BUSY.into());
+        }
+        shared.capture_target(false);
+        crate::selection::wait_for_context(Duration::from_millis(1_500));
+        let _ = shared.app.emit("yap-state", "processing");
+        tracing::info!(len = text.len(), "e2e: robot dictation from a transcript");
+        let report = shared.deliver(text).await;
+        shared.processing.store(false, Ordering::SeqCst);
+        let _ = shared.app.emit("yap-state", "idle");
+        Ok(report)
+    }
+
+    /// `samples` (16 kHz mono) played into the dictation in real time, in
+    /// the mic's place, between a real start and a real stop: the target
+    /// captured at the start, the live preview, the dead-mic watchdog, the
+    /// STT, then the dictation's own steps to the paste. `None`: nothing was
+    /// transcribed (a silent "mic", say).
+    pub(crate) async fn dictate_audio(&self, samples: Vec<f32>) -> Result<Option<Delivered>, String> {
+        let shared = Arc::clone(&self.0);
+        if shared.recording.load(Ordering::SeqCst) || shared.processing.load(Ordering::SeqCst) {
+            return Err(Self::BUSY.into());
+        }
+        if let Ok(mut last) = LAST_DELIVERED.lock() {
+            *last = None;
+        }
+        let _feed = FeedOn::start();
+        // No room audio from before the WAV in the recording.
+        if let Ok(mut pre) = shared.preroll.lock() {
+            pre.clear();
+        }
+        tracing::info!(secs = samples.len() / TARGET_SAMPLE_RATE as usize, "e2e: robot dictation from a WAV");
+        shared.start_recording(false);
+        if !shared.recording.load(Ordering::SeqCst) {
+            return Err("The recording didn't start (see the log)".into());
+        }
+        let session = shared.rec_session.load(Ordering::SeqCst);
+        let feeder = Arc::clone(&shared);
+        tokio::task::spawn_blocking(move || {
+            let mut amp = AmpMeter::default();
+            let started = Instant::now();
+            // 100 ms of audio every 100 ms, as a mic delivers it.
+            for (i, chunk) in samples.chunks(TARGET_SAMPLE_RATE as usize / 10).enumerate() {
+                let due = Duration::from_millis(100 * i as u64);
+                if let Some(wait) = due.checked_sub(started.elapsed()) {
+                    std::thread::sleep(wait);
+                }
+                if !feeder.recording.load(Ordering::SeqCst) || feeder.rec_session.load(Ordering::SeqCst) != session {
+                    break;
+                }
+                feeder.take_audio(chunk, &mut amp);
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        })
+        .await
+        .map_err(|e| format!("The WAV player failed: {e}"))?;
+        // Stop as the hotkey would, if it's still this recording.
+        if shared.recording.load(Ordering::SeqCst) && shared.rec_session.load(Ordering::SeqCst) == session {
+            shared.stop_and_transcribe();
+        }
+        // The transcription and the paste.
+        let deadline = Instant::now() + Duration::from_secs(300);
+        while shared.processing.load(Ordering::SeqCst) || shared.recording.load(Ordering::SeqCst) {
+            if Instant::now() > deadline {
+                return Err("The dictation didn't finish within 5 minutes".into());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        Ok(LAST_DELIVERED.lock().ok().and_then(|mut last| last.take()))
     }
 }
 
@@ -1810,13 +2072,7 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
     let needs_downmix = channels > 1;
 
     let cb_shared = Arc::clone(shared);
-    // Time-domain amplitude meter for the scrolling waveform (Claude Code
-    // style): every ~30 ms emit one peak level (raw 0..1) that the overlay
-    // push onto a scrolling history. ~1280 samples at 16 kHz ≈ 80 ms per bar
-    // for a calm, readable scroll.
-    const AMP_WINDOW: usize = 1280;
-    let mut amp_peak: f32 = 0.0;
-    let mut amp_count: usize = 0;
+    let mut amp = AmpMeter::default();
 
     let stream = device
         .build_input_stream(
@@ -1835,59 +2091,18 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
                 } else {
                     mono
                 };
-                // The e2e suite's "muted mic" (debug builds only).
+                // The e2e suite's "muted mic", and the robot's WAV playing
+                // in the mic's place (debug builds only).
                 #[cfg(debug_assertions)]
                 let resampled = if TEST_SILENT_MIC.load(Ordering::Relaxed) {
                     vec![0.0; resampled.len()]
                 } else {
                     resampled
                 };
-                // While idle, keep a short rolling pre-roll ring (no buffering) so
-                // the next recording starts a moment before the key. Amp is only
-                // emitted while idle if a mic test (onboarding) asked for levels.
-                if !cb_shared.recording.load(Ordering::Relaxed) {
-                    if let Ok(mut pr) = cb_shared.preroll.lock() {
-                        pr.extend(resampled.iter().copied());
-                        while pr.len() > PREROLL_SAMPLES {
-                            pr.pop_front();
-                        }
-                    }
-                    if !cb_shared.mic_test.load(Ordering::Relaxed) {
-                        return;
-                    }
-                } else {
-                    // The dead-mic watchdog's tally: how much arrived, and
-                    // whether any of it wasn't digital silence.
-                    cb_shared.mic_tally.note(&resampled);
-                    if let Ok(mut buf) = cb_shared.buffer.lock() {
-                        // Bound the buffer so a stuck key can't grow it without limit
-                        // (OOM). Past the cap we drop further audio and warn once.
-                        if buf.len() < MAX_RECORDING_SAMPLES {
-                            buf.extend_from_slice(&resampled);
-                            if buf.len() >= MAX_RECORDING_SAMPLES {
-                                tracing::warn!(
-                                    "Recording hit the {}-minute cap — further audio dropped; stop the recording",
-                                    MAX_RECORDING_SAMPLES / (60 * TARGET_SAMPLE_RATE as usize)
-                                );
-                            }
-                        }
-                    }
+                if test_feed_on() {
+                    return;
                 }
-                // Accumulate the peak over ~30 ms, then emit it as the next
-                // scrolling-waveform bar (recording, or an active mic test). The
-                // frontend shapes (gain/curve) and scrolls it.
-                for &s in &resampled {
-                    let a = s.abs();
-                    if a > amp_peak {
-                        amp_peak = a;
-                    }
-                }
-                amp_count += resampled.len();
-                if amp_count >= AMP_WINDOW {
-                    let _ = cb_shared.app.emit("yap-amp", amp_peak);
-                    amp_peak = 0.0;
-                    amp_count = 0;
-                }
+                cb_shared.take_audio(&resampled, &mut amp);
             },
             move |err| tracing::error!("Audio input stream error: {}", err),
             None,
