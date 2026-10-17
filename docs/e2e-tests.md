@@ -329,17 +329,18 @@ included.)
   characters either side (`yaprobot caret` shows it; harmless while a block's
   line break separates them).
 
-Fixed since: the fuzzy pass took the short word before a term into its
-2-word n-gram and swallowed it ("Deploy it to cube and eighties." became
-"Deploy it Kubernetes."); `fuzzy.rs` no longer takes a run whose first word
-adds nothing to the match, and `learn.real.js` now expects "Deploy it to
-Kubernetes.".
+Fixed since, each test now expecting the right result:
 
-Fixed since: a WinForms text box gives UI Automation a value but no caret,
-so Yap read it as if the cursor were at the end ("I want | please" + "The
-blue one." went in as " the blue one."). Yap now asks the edit control for
-its selection (`EM_GETSEL`, `selection.rs`), and the test checks the right
-result.
+- The fuzzy pass took the short word before a term into its 2-word n-gram
+  and swallowed it ("Deploy it to cube and eighties." became "Deploy it
+  Kubernetes."); `fuzzy.rs` no longer takes a run whose first word adds
+  nothing to the match, and `learn.real.js` now expects "Deploy it to
+  Kubernetes.".
+- A WinForms text box gives UI Automation a value but no caret, so Yap read
+  it as if the cursor were at the end ("I want | please" + "The blue one."
+  went in as " the blue one."). Yap now asks the edit control for its
+  selection (`EM_GETSEL`, `selection.rs`), and `testpad.real.js` expects
+  "I want the blue one please".
 
 Also seen, not pinned: now and then (a few in a hundred on Nathan's PC, not
 on demand) a Ctrl+V reaches the test pad's WinForms box and nothing is

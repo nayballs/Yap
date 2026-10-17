@@ -2360,14 +2360,14 @@ device list. Known quirk: Better Auth links accounts by exact email, so
 2026-10-17): paste, smart spacing, snippets, "press enter", Paste last transcript,
 the clipboard, terminals (PowerShell, a Claude Code stand-in), chat apps, the mic
 path, the dead-mic watchdog, learning words from corrections and real Parakeet
-STT, all checked against real windows by Claude. A gap they found is fixed: a
-WinForms text box gives UI Automation no caret, so mid-text dictations were
-fitted as if at the end — Yap now asks the edit control (`EM_GETSEL`). Known gaps
-still pinned (as "known gap: …" tests): Edge/Chrome report an empty text box's text as its
-label or U+FFFC (a web chat message keeps its full stop and gets a trailing
-space), and their context ranges run past the box into the page. (A third,
-the fuzzy pass swallowing a short word before a term — "Deploy it to
-Kubernetes" → "Deploy it Kubernetes" — is fixed, 2026-10-17.)
+STT, all checked against real windows by Claude. Two gaps they found are fixed
+(2026-10-17): a WinForms text box gives UI Automation no caret, so mid-text
+dictations were fitted as if at the end — Yap now asks the edit control
+(`EM_GETSEL`); and the fuzzy pass swallowed a short word before a term ("Deploy
+it to Kubernetes" → "Deploy it Kubernetes"). Still pinned (a "known gap: …"
+test): Edge/Chrome report an empty text box's text as its label or U+FFFC (a web
+chat message keeps its full stop and gets a trailing space), and their context
+ranges run past the box into the page.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
