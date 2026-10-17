@@ -245,36 +245,64 @@ Meetings keep their attendees ahead of the ranked dictionary.
 default on, a switch in the Dictionary view): Yap pastes a dictation, you fix
 a word it got wrong in place, and it asks — "Add “Kubernetes” to your
 dictionary? Yap heard “cube and eighties”." Behaviour after Wispr Flow's
-dictionary auto-learn (teardown `04-dictation-and-other.md`) and OpenWhispr's
-`correctionLearner.js`; Wispr has a **cloud** classifier confirm each word
-and adds it with an Undo, Yap decides **on this PC** and asks first.
+dictionary auto-learn and OpenWhispr's `correctionLearner.js`. The same day
+it was aligned with Wispr's real mechanics, read from its shipped code and
+its native helper (teardown `05-dictionary-learning.md`; behaviour and
+numbers only, none of its code or wording).
 
-**Seeing the fix.** After a paste with no submit key (and not into a
-terminal, whose text is the program's output too), a thread holds the
-focused field over UI Automation (`selection::WatchedField` — the target
-window's process only, never a password box or a read-only field, never in a
-test run) and reads ±2,000 characters around the caret. Right after the paste
-it finds the pasted text there and remembers ~24 characters either side of it;
-every 700 ms for up to 45 s it finds the span between those again (falling
-back to the nearest 8 characters when the neighbours were edited too), so it
-follows the pasted text wherever the caret goes. It stops when the window or
-the element loses the focus, another dictation starts, or the span grows far
-past the paste (you're writing on). A span that changed and then sat still for
-2.5 s is looked at, and the last one when the watch ends. In memory only; the
-log carries lengths and counts.
+### What Wispr Flow measurably does
+
+- **The watch.** Every paste is watched for **60 s** (one-shot). The helper
+  reads the **whole field** over UI Automation (TextPattern, else
+  ValuePattern) on a UIA TextChanged event for that element plus a 1 s poll,
+  reads ≥ 400 ms apart; password and non-editable fields are never watched.
+  **No end on a focus or app change.** It ends on: the window elapsing, the
+  next paste, the field emptied, the transcript's region emptied or removed,
+  a **trailing line break added** (Enter: a message sent), an anchor
+  mismatch, the field unreadable, or the field > 15,000 characters.
+- **The span.** The first occurrence of the pasted text splits the field
+  into *before* and *after*; every read must still start with *before* and
+  end with *after*, and the middle is the edited text.
+- **The drift gate.** Character Levenshtein (lowercased) between pasted and
+  edited text, over the pasted length, must be ≤ `0.4/(len/30+1)+0.2`
+  (≈ 0.6 for a few words, 0.4 at 30 characters, → 0.2 for long text). Each
+  read within it is saved; **learning uses the last read within the gate**,
+  whatever ended the watch.
+- **The candidates.** Token alignment (substitution only when < 50 %
+  different); a run of changes → a phrase, dropped when either side is empty
+  (pure insertion/deletion) or the **edited side is > 4 words**; case-only
+  changes never; tokens ending in `'s 't 'll 've 're 'd 'm` or a bare `'`
+  skipped ("O'Brien" fine); deduped case-insensitively with capitalised
+  forms first; at most 4.
+- **The decision.** A **cloud classifier** accepts or rejects each candidate
+  (offline → nothing); accepted words are **added silently** with a 6 s Undo.
+  A word you removed (or undid) is in the duplicate check as a soft-deleted
+  row, so it's **never learned again**.
+
+### What Yap does
+
+| | Yap (`learn.rs`) | vs Wispr |
+|---|---|---|
+| Watch | 60 s; the whole field (≤ 15,000 chars) read every 700 ms (≥ 400 ms apart) over UIA, focused or not; never a password or read-only field, never a terminal, never after a submit key, never in a test run | same window and reads; polling only (no TextChanged handler — a poll is enough at this cadence) |
+| Ends (`End`, named in the debug log) | `time_up`, `next_dictation`, `field_emptied`, `region_emptied`, `region_gone`, `anchor_mismatch`, `enter_pressed`, `unreadable` (3 failed reads in a row), `too_long` | same set; Yap tolerates two failed reads (a slow app) |
+| Finding the span | the occurrence at the caret right after the paste; ~24 chars either side remembered (8-char fallback when those were edited) | **differs on purpose**: Wispr takes the first occurrence and pins the whole prefix/suffix, so typing anywhere else in the field ends its watch; Yap's nearest-neighbour anchors keep watching |
+| Drift gate | the same formula, char Levenshtein lowercased; the last read within it is the edit judged, whatever the end ("fix a word, press Enter" — even in one read — still counts) | same |
+| Candidates | LCS word alignment (case- and edge-punctuation-blind); 1–4 words → 1–4 words; insertions/deletions, punctuation-only and case-only changes of ordinary words skipped; contractions/possessives skipped; one per spelling, capitals first, **≤ 3** | Yap also caps what it heard at 4 words, and keeps its rule that a case fix making a term of a non-everyday word counts ("github" → "GitHub") |
+| Decision | **local**: the new text must look like a term (a capital inside, an acronym, digits, not an everyday word — the built-in list, then Windows' spell checker — a capital mid-sentence, or several words heard as one) and spell or sound like what Yap typed (`fuzzy::spelling_distance` / `sound_distance`); then it **asks** | **differs on purpose**: no cloud classifier, nothing added without a click |
+| Removed words | `save_config` diffs the dictionary; a correction whose trigger and spelling are both gone goes into `word_suggestions.json`'s `removed`, and that term is never offered again, however it's heard | same effect (Wispr: soft-deleted rows) |
 
 **What counts** (`learn::suggestions`, pure, unit-tested):
 
 | Step | Rule |
 |---|---|
 | Align | pasted vs edited words, longest common subsequence, ignoring case and the punctuation at word edges; the gaps between matches are the changes |
-| Size | 1–3 words replaced by 1–3 words (spelled-out letters, "G P T", count as one); insertions and deletions never count |
+| Size | 1–4 words replaced by 1–4 words (spelled-out letters, "G P T", count as one); insertions and deletions never count |
 | What Yap heard | not a single everyday word — `motion → Notion` would rewrite every "motion" you say (the `json → JSON`/"Jason" problem again) — and not only function words ("and then") |
-| The new text | looks like a term: a capital inside a word ("GitHub"), an acronym ("NASA"), digits ("GPT-4"), a word that isn't an everyday one, a capital mid-sentence, or several words heard as one word that isn't an everyday one ("power to keep" → "Parakeet") |
+| The new text | looks like a term: a capital inside a word ("GitHub"), an acronym ("NASA"), digits ("GPT-4"), a word that isn't an everyday one, a capital mid-sentence, or several words heard as one word that isn't an everyday one ("power to keep" → "Parakeet"); never a word ending in a contraction or possessive ("Sinead's", "it'll", "students'") |
 | Alike | spells or sounds like what Yap typed: `fuzzy::spelling_distance` (Handy's score on the letters alone) or `fuzzy::sound_distance` (Levenshtein over a consonant `sound_key`: c/k/q/g, b/p, d/t, f/v/ph, s/z merged; gh, vowels, h/w/y dropped — "kpnts"/"kprnts") ≤ 0.5; ≤ 0.3 when the keys are 3 or shorter, so "Sam"/"Pam" or "Sarah"/"Priya" aren't mishearings |
 | Case alone | "github" → "GitHub", "nasa" → "NASA", "sinead" → "Sinead" mid-sentence — never for an everyday word ("slack" → "Slack" would capitalise every "slack") |
-| Skipped | words already a correction's spelling or trigger, punctuation-only edits, and edits that rewrite most of the dictation |
-| Cap | 3 per dictation |
+| Skipped | words already a correction's spelling or trigger, words you removed from the dictionary, punctuation-only edits, and edits that rewrite most of the dictation |
+| Cap | one per spelling (case-blind), capitalised terms first, 3 per dictation |
 
 "Everyday word" = the built-in list of frequent English words (with days,
 months, numbers, contractions; plain suffixes stripped: "meetings", "stopped",
@@ -283,15 +311,21 @@ locale plus English, read-only) accepting the word in lower case. Names fail
 that ("jason", "sinead" are only right with a capital), so they stay
 learnable.
 
-**Asking.** A toast in the main window while it's on screen, else a Yap bar
-card (never a Windows notification): Add / Not now / "Don't suggest this".
-Add saves `{from: heard, to: term, fuzzy: true}` — what Yap typed after
-cleanup, which is what the dictionary runs on — to config.json and the live
-pipeline, and tells the windows (`yap-dictionary-learned`) so Settings' and
-the Dictionary view's own saves keep it. "Not now" twice (✕ counts) or "Don't
-suggest this" and that pair is never offered again; at most one prompt every 3
-minutes. The answers live in `word_suggestions.json`, never the text read.
+**Asking.** When the watch ends with an edit worth learning: a toast in the
+main window while it's on screen, else a Yap bar card (never a Windows
+notification): Add / Not now / "Don't suggest this". Add saves `{from:
+heard, to: term, fuzzy: true}` — what Yap typed after cleanup, which is what
+the dictionary runs on — to config.json and the live pipeline, and tells the
+windows (`yap-dictionary-learned`) so Settings' and the Dictionary view's own
+saves keep it. "Not now" twice (✕ counts) or "Don't suggest this" and that
+pair is never offered again; a word you remove from the dictionary is never
+offered again at all; at most one prompt every 3 minutes. The answers live in
+`word_suggestions.json`, never the text read. Since the edit is judged when
+the watch ends, the question comes when you send the message, press Enter,
+start the next dictation or the minute is up — not while you're still
+fixing.
 
-Not (yet): learning from edits made after the 45 s or in fields UI Automation
-can't read (some Electron apps, terminals), and the per-source vocabulary
+Not (yet): learning from edits made after the 60 s or in fields UI Automation
+can't read (some Electron apps, terminals), ending the watch on a "Paste last
+transcript" (only a new dictation ends it), and the per-source vocabulary
 ranking Wispr does (a learned entry ranks like a manual one).

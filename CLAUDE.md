@@ -1036,23 +1036,34 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the order added. The meeting prompt ranks the dictionary but keeps the
   attendees ahead of it. Best-effort everywhere.
 - **`learn.rs`** — **"Suggest words from your corrections"**
-  (`config.learn_words`, default on; Wispr Flow's dictionary auto-learn by
-  behaviour, OpenWhispr's `correctionLearner.js` alignment, but local and
-  asked, never assumed). **The watch** (`after_paste`, from `run_stt` after
-  a paste with no submit key, not into a terminal (`app_kind`: its text is
-  the program's output too); never in a test run): a thread holds the
-  focused field (`selection::WatchedField`: the target window's process, not
-  a password box, not read-only), finds the pasted text in a ±2,000-char
-  read around the caret right after the paste and remembers ~24 chars either
-  side of it (`Anchors`, with an 8-char fallback when those were edited),
-  then every 700 ms for up to 45 s finds the span between them again. It
-  stops when the window or the element loses the focus, another dictation
-  starts (`pipeline::dictation_state`), or the span grows far past the paste
-  (writing on); a changed span that sits still 2.5 s is looked at, and the
-  last one when it stops. In memory only; logs carry lengths and counts.
-  **The candidates** (`suggestions`, pure, unit-tested): pasted vs edited
+  (`config.learn_words`, default on; Wispr Flow's dictionary auto-learn as
+  measured from its shipped code — `references/wispr-flow/rea-teardown/
+  05-dictionary-learning.md` — and OpenWhispr's `correctionLearner.js`
+  alignment, but local and asked, never assumed). **The watch**
+  (`after_paste`, from `run_stt` after a paste with no submit key, not into
+  a terminal (`app_kind`: its text is the program's output too); never in a
+  test run; the rules are `Watch`, pure): a thread holds the focused field
+  (`selection::WatchedField`: the target window's process, not a password
+  box, not read-only) and reads it **whole** (≤ 15,000 chars, the caret in
+  it), finds the pasted text right after the paste (the occurrence at the
+  caret) and remembers ~24 chars either side of it (`Anchors`, with an
+  8-char fallback when those were edited), then every 700 ms (reads ≥ 400 ms
+  apart) for **60 s** finds the span between them again — **focused or
+  not** (no end on a focus/app change: a fix often follows a glance
+  elsewhere). Each read's span within the **drift gate** (`within_drift`:
+  char Levenshtein, lowercased, ≤ `0.4/(len/30+1)+0.2` of the paste's
+  length) becomes the **last good edit**. It ends (`End`, named in the
+  debug log: `time_up`, `next_dictation` (`pipeline::dictation_state`),
+  `field_emptied` (a chat message sent), `region_emptied` (the dictation
+  deleted), `region_gone` (its neighbours deleted), `anchor_mismatch`,
+  `enter_pressed` (a line break added right after it), `unreadable` (3
+  failed reads in a row), `too_long`) and, **whatever the end**, the last
+  good edit is judged — "fix a word, press Enter" still counts (a fix and
+  the Enter in one read too). In memory only; logs carry lengths, counts
+  and the end's name. **The candidates** (`suggestions`, pure,
+  unit-tested): pasted vs edited
   words aligned by LCS (case- and edge-punctuation-blind); the gaps between
-  matches are the changes. Kept: 1–3 words → 1–3 words (spelled-out letters
+  matches are the changes. Kept: 1–4 words → 1–4 words (spelled-out letters
   count as one) whose new text looks like a term — a capital inside a word,
   an acronym, digits, a word that isn't an everyday one (the built-in
   `FREQUENT` list with simple stemming, then **Windows' spell checker**,
@@ -1061,10 +1072,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   keep" → "Parakeet") — and that spells or sounds like what Yap typed
   (`fuzzy::spelling_distance`/`sound_distance` ≤ 0.5, ≤ 0.3 for keys of ≤ 3);
   plus a case change that makes a term of a non-everyday word ("github" →
-  "GitHub"). Skipped: insertions/deletions, punctuation, a single everyday
+  "GitHub"). Skipped: insertions/deletions, punctuation, a new word ending
+  in a contraction/possessive (`'s 't 'll 've 're 'd 'm` or a bare `'`;
+  "O'Brien" is fine), a single everyday
   word heard ("motion" → "Notion" would rewrite every "motion"), only
   function words, terms (or triggers) already in the dictionary, and edits
-  rewriting most of the dictation. ≤ 3. **The prompt** (`offer`): "Add
+  rewriting most of the dictation. One per spelling (case-blind), terms
+  with a capital first, ≤ 3. **The prompt** (`offer`): "Add
   “Kubernetes” to your dictionary? Yap heard “cube and eighties”." — Add /
   Not now / "Don't suggest this"; a toast (`yap-word-suggestion`,
   `wordSuggestions.js`) while the main window is on screen, else a Yap bar
@@ -1075,9 +1089,17 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `yap-dictionary-learned {entries, added}`, which Settings adopts (and
   passes to DictionaryView as `yap-dictionary-external`). Not now twice (✕
   counts) or "Don't suggest this" retires the pair; one prompt per 3 min.
-  Answers in `<data>/word_suggestions.json` (not config.json: Settings'
-  wholesale saves). Debug-only `e2e_learn_correction {pasted, edited,
-  before?, fresh?}` stages an edit for the e2e suite (skips the 3-min gap).
+  **A word you remove** from the dictionary is never suggested again,
+  however it's heard (Wispr's implicit blocklist): `commands::save_config`
+  (every surface's save) hands the old and new dictionaries to
+  `on_dictionary_saved`, and a correction whose trigger and spelling are
+  both gone (an edit of one isn't a removal; snippets don't count) goes
+  into the store's `removed` terms. Answers in
+  `<data>/word_suggestions.json` (not config.json: Settings' wholesale
+  saves). Debug-only `e2e_learn_correction {pasted, edited?, before?,
+  reads?, fresh?}` stages an edit for the e2e suite (skips the 3-min gap):
+  the edited span, or `reads` — the field's whole text read by read (`null`
+  = a failed read) — which the real `Watch` runs over (`staged_watch`).
 - **`tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
   menu (model submenu w/ checkmark, Cancel while recording, Settings/Quit, Check for
   updates → Settings → About + a manual check); left-click opens Settings. A ready
@@ -1216,11 +1238,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the real clipboard code on a private window station (never the person's clipboard).
 - **`selection.rs`** — UI Automation reads of the field Yap types into. **After
   the paste** (`WatchedField`, for `learn.rs`): the focused element held on
-  the watch's thread, `is_focused` (`CompareElements`), `read(chars)` → a
-  `FieldWindow` (text around the caret, line breaks as `\n`, whether it
-  reached the field's start/end; TextPattern, else a short ValuePattern
-  value); same refusals (other processes, passwords, read-only, test runs),
-  300 ms timeouts. **Edit
+  the watch's thread, read whether it still has the focus or not;
+  `read(limit)` → a `FieldWindow` of the **whole field** (TextPattern's
+  document range, else the ValuePattern value; line breaks as `\n`, the
+  caret's offset in it, a field showing only its placeholder (= HelpText)
+  empty; longer than `limit` → its start with `to_end` false); same
+  refusals (other processes, passwords, read-only, test runs), 300 ms
+  timeouts. **Edit
   mode** (`capture_selection(target, copy_fallback)`): the selected text
   (TextPattern, else the Ctrl+C trick — never in a terminal with terminal mode
   on, where Ctrl+C would interrupt the program), 2 s UIA timeouts. **The text around the cursor** (`begin_dictation(target,
@@ -1327,8 +1351,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   only go in-app while the window is on screen), `e2e_dictation_mic { silent }`
   (the dictation mic's real audio zeroed, as a muted mic's — the dead-mic
   watchdog's case, its stream really reopened), `e2e_learn_correction` (an
-  edit of a pasted dictation as the correction watch would see it — the watch
-  itself never runs in a test run), `e2e_coaching_reset` (every
+  edit of a pasted dictation as the correction watch would see it, or the
+  field's text read by read for the watch's rules to run over — the watch
+  thread itself never runs in a test run), `e2e_coaching_reset` (every
   push-to-talk hint due again), calendar secrets in
   `<data>/calendar-secrets.e2e.json` instead of
   Credential Manager and links recorded (`calendar_e2e_opened`) instead of
@@ -2090,8 +2115,10 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 - Hints: `%APPDATA%/yap/hints.json` — how often each push-to-talk coaching hint
   showed, when the last did, and whether double-tap has been used (`coaching.rs`).
 - Word suggestions: `%APPDATA%/yap/word_suggestions.json` — when Yap last
-  offered a word for the dictionary, and per "heard→term" pair your "Not now"
-  count and "Don't suggest this" (`learn.rs`). Never the field text it read.
+  offered a word for the dictionary, per "heard→term" pair your "Not now"
+  count and "Don't suggest this", and the words you removed from the
+  dictionary (`removed`, never suggested again) (`learn.rs`). Never the
+  field text it read.
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`).
 - App icons: `%APPDATA%/yap/icons/` — `<app>.png` per installed call app and
@@ -2156,9 +2183,14 @@ classification and text rules unit-tested, checked read-only against this PC's
 real windows, the Settings switches e2e-tested; not yet dictated into a real
 terminal or chat app), **word suggestions from your corrections** (`learn.rs`,
 2026-10-17: fix a word Yap typed and it offers to add it to the dictionary;
-the rules unit-tested, the prompt/Add/toggle/bar card e2e-tested through a
-staged edit, the UIA reads and Windows' spell checker by `--ignored` tests on
-hidden windows — not yet tried in real apps),
+the same day aligned with Wispr Flow's measured mechanics — a 60 s watch of
+the whole field that survives switching apps, the drift gate, the last good
+edit judged however the watch ends (sent, Enter, time), 4-word corrections,
+no contractions, removed words never offered again; the rules and the
+watch's ends unit-tested, the prompt/Add/toggle/bar card, a fix-then-send
+and a removed word e2e-tested through staged edits and field reads, the UIA
+reads and Windows' spell checker by `--ignored` tests on hidden windows —
+not yet tried in real apps),
 the Groq usage meter, and the installer + auto-updater (background checks + download
 while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
 `updates.rs`, 2026-10-05) + portable mode + release CI.
