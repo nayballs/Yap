@@ -398,6 +398,8 @@ pub fn run() {
             commands::get_note_base_prompt,
             commands::notes_folders,
             commands::notes_folder_create,
+            commands::notes_folder_rename,
+            commands::notes_folder_delete,
             commands::notes_actions,
             commands::action_create,
             commands::action_update,

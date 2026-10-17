@@ -377,9 +377,48 @@ pub fn notes_folder_create(name: String) -> Vec<String> {
     crate::notes::folder_create(&name)
 }
 
+/// Rename a folder (the Notes view's folder menu): its notes go along.
+/// Personal and Meetings can't be renamed, nor a folder given a name another
+/// one has. Returns the folder list; every window follows (each moved note's
+/// `yap-note-changed`, then `yap-notes-changed`).
 #[tauri::command]
-pub fn note_delete(id: u64) {
+pub fn notes_folder_rename(app: AppHandle, from: String, to: String) -> Result<Vec<String>, String> {
+    let change = crate::notes::folder_rename(&from, &to)?;
+    folders_changed(&app, &change);
+    Ok(change.folders)
+}
+
+/// Delete a folder; its notes move to Personal. Personal and Meetings can't
+/// be deleted. Returns the folder list; every window follows.
+#[tauri::command]
+pub fn notes_folder_delete(app: AppHandle, name: String) -> Result<Vec<String>, String> {
+    let change = crate::notes::folder_delete(&name)?;
+    folders_changed(&app, &change);
+    Ok(change.folders)
+}
+
+fn folders_changed(app: &AppHandle, change: &crate::notes::FolderChange) {
+    use tauri::Emitter;
+    for id in &change.moved {
+        note_changed(app, *id, "folders");
+    }
+    let _ = app.emit("yap-notes-changed", ());
+}
+
+/// Delete a note. Never the one a meeting is recording into (that goes
+/// through `meeting_delete`, which stops the recording first). Every window
+/// lets go of it (`yap-note-deleted`; the notepad hides if it showed it).
+#[tauri::command]
+pub fn note_delete(app: AppHandle, id: u64) -> Result<(), String> {
+    use tauri::Emitter;
+    if crate::meeting::recording_note() == Some(id) {
+        return Err("This meeting is still recording".to_string());
+    }
     crate::notes::delete(id);
+    let _ = app.emit("yap-notes-changed", ());
+    let _ = app.emit(crate::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
+    crate::notepad::on_note_deleted(&app, id);
+    Ok(())
 }
 
 /// Run the note-formatting "action" on a note (OpenWhispr's Actions engine,

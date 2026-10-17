@@ -179,11 +179,11 @@ fn default_note_type() -> String {
 }
 
 fn default_folder() -> String {
-    "Personal".to_string()
+    PERSONAL.to_string()
 }
 
 fn default_folders() -> Vec<String> {
-    vec!["Personal".to_string(), "Meetings".to_string()]
+    vec![PERSONAL.to_string(), MEETINGS.to_string()]
 }
 
 /// A note "Action" — a named, user-editable prompt fragment run under the
@@ -482,6 +482,104 @@ pub fn folder_create(name: &str) -> Vec<String> {
         }
         s.folders.clone()
     })
+}
+
+/// The default folder: new notes without one, and the notes of a deleted
+/// folder, go here.
+pub const PERSONAL: &str = "Personal";
+/// Where the meeting recorder, call detection, the Yap bar and the calendar
+/// file meeting notes.
+pub const MEETINGS: &str = "Meetings";
+
+/// Personal and Meetings: Yap files notes into them, so they can't be
+/// renamed or deleted (any case).
+pub fn is_protected_folder(name: &str) -> bool {
+    let name = name.trim();
+    name.eq_ignore_ascii_case(PERSONAL) || name.eq_ignore_ascii_case(MEETINGS)
+}
+
+/// The folder called `name`, as the folder list spells it (any case,
+/// trimmed). `None` when there's no such folder.
+pub fn find_folder(name: &str) -> Option<String> {
+    with_store(|s| folder_named(&s.folders, name).map(|i| s.folders[i].clone()))
+}
+
+fn folder_named(folders: &[String], name: &str) -> Option<usize> {
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    folders
+        .iter()
+        .position(|f| f == name)
+        .or_else(|| folders.iter().position(|f| f.eq_ignore_ascii_case(name)))
+}
+
+/// A folder renamed or deleted: the folder list now, and the notes that
+/// moved (their windows are told: `commands::note_changed`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FolderChange {
+    pub folders: Vec<String>,
+    pub moved: Vec<u64>,
+}
+
+/// Rename folder `from` to `to` (trimmed): every note in it goes along, the
+/// folder keeps its place in the list. Refused for Personal and Meetings, an
+/// empty name, and a name another folder has (any case); a change of case
+/// alone is fine. Notes' `updated_ts` stays: nobody edited them.
+pub fn folder_rename(from: &str, to: &str) -> Result<FolderChange, String> {
+    let to = to.trim();
+    with_store(|s| {
+        let at = folder_named(&s.folders, from).ok_or("Folder not found")?;
+        let old = s.folders[at].clone();
+        if is_protected_folder(&old) {
+            return Err(format!("{old} is one of Yap's own folders: it can't be renamed"));
+        }
+        if to.is_empty() {
+            return Err("A folder needs a name".to_string());
+        }
+        if is_protected_folder(to)
+            || s.folders.iter().enumerate().any(|(i, f)| i != at && f.eq_ignore_ascii_case(to))
+        {
+            return Err(format!("There's already a folder called {to}"));
+        }
+        if old == to {
+            return Ok(FolderChange { folders: s.folders.clone(), moved: Vec::new() });
+        }
+        s.folders[at] = to.to_string();
+        let moved = move_notes(&mut s.notes, &old, to);
+        save_to_disk(s);
+        Ok(FolderChange { folders: s.folders.clone(), moved })
+    })
+}
+
+/// Delete folder `name`; its notes move to Personal (OpenWhispr deletes
+/// them with the folder — Yap never loses a note to a folder clean-up).
+/// Refused for Personal and Meetings.
+pub fn folder_delete(name: &str) -> Result<FolderChange, String> {
+    with_store(|s| {
+        let at = folder_named(&s.folders, name).ok_or("Folder not found")?;
+        let old = s.folders[at].clone();
+        if is_protected_folder(&old) {
+            return Err(format!("{old} is one of Yap's own folders: it can't be deleted"));
+        }
+        s.folders.remove(at);
+        let moved = move_notes(&mut s.notes, &old, PERSONAL);
+        save_to_disk(s);
+        Ok(FolderChange { folders: s.folders.clone(), moved })
+    })
+}
+
+/// Move every note filed under `from` (any case) to `to`; the ids moved.
+fn move_notes(notes: &mut [Note], from: &str, to: &str) -> Vec<u64> {
+    notes
+        .iter_mut()
+        .filter(|n| n.folder.trim().eq_ignore_ascii_case(from))
+        .map(|n| {
+            n.folder = to.to_string();
+            n.id
+        })
+        .collect()
 }
 
 /// Mark note `id` a meeting note before any transcript arrives (call
@@ -1122,6 +1220,90 @@ mod tests {
         ];
         assert_eq!(speech_words(&t), 7);
         assert_eq!(speech_words(&[]), 0);
+    }
+
+    /// A note in `folder`, in this thread's test store, dated 1.
+    fn filed(title: &str, folder: &str) -> u64 {
+        let id = create(title, "", "manual", folder).id;
+        with_notes(|notes| {
+            notes.iter_mut().filter(|n| n.id == id).for_each(|n| n.updated_ts = 1)
+        });
+        id
+    }
+
+    fn folder_of(id: u64) -> String {
+        get(id).unwrap().folder
+    }
+
+    #[test]
+    fn renaming_a_folder_takes_its_notes_along_in_place() {
+        folder_create("Camping");
+        folder_create("Work");
+        let tent = filed("Tent list", "Camping");
+        let stray = filed("Spelled another way", "camping ");
+        let other = filed("Budget", "Work");
+        assert_eq!(find_folder(" CAMPING"), Some("Camping".to_string()));
+
+        let change = folder_rename("camping", "  Trips ").unwrap();
+        assert_eq!(change.folders, ["Personal", "Meetings", "Trips", "Work"]);
+        assert_eq!(change.moved, [tent, stray]);
+        assert_eq!(folder_of(tent), "Trips");
+        assert_eq!(folder_of(stray), "Trips");
+        assert_eq!(folder_of(other), "Work");
+        // Moving isn't editing: the list order stays.
+        assert_eq!(get(tent).unwrap().updated_ts, 1);
+        assert_eq!(find_folder("Camping"), None);
+
+        // A change of case alone is a rename too; the same name is nothing.
+        assert_eq!(folder_rename("Trips", "trips").unwrap().moved, [tent, stray]);
+        assert_eq!(folder_rename("trips", "trips").unwrap().moved, Vec::<u64>::new());
+    }
+
+    #[test]
+    fn a_rename_never_merges_folders_or_touches_yaps_own() {
+        folder_create("Ideas");
+        folder_create("Work");
+        let idea = filed("Idea", "Ideas");
+        for taken in ["work", "WORK ", "personal", "Meetings"] {
+            let e = folder_rename("Ideas", taken).unwrap_err();
+            assert!(e.starts_with("There's already a folder called"), "{taken}: {e}");
+        }
+        assert_eq!(folder_rename("Ideas", "   ").unwrap_err(), "A folder needs a name");
+        assert_eq!(folder_rename("Nope", "Other").unwrap_err(), "Folder not found");
+        for own in ["Personal", "meetings"] {
+            assert!(folder_rename(own, "Mine").unwrap_err().contains("can't be renamed"), "{own}");
+        }
+        assert_eq!(folders(), ["Personal", "Meetings", "Ideas", "Work"]);
+        assert_eq!(folder_of(idea), "Ideas");
+    }
+
+    #[test]
+    fn deleting_a_folder_moves_its_notes_to_personal() {
+        folder_create("Camping");
+        folder_create("Work");
+        let tent = filed("Tent list", "Camping");
+        let stove = filed("Stove", "CAMPING");
+        let other = filed("Budget", "Work");
+        let meeting = filed("Standup", "Meetings");
+
+        let change = folder_delete("camping").unwrap();
+        assert_eq!(change.folders, ["Personal", "Meetings", "Work"]);
+        assert_eq!(change.moved, [tent, stove]);
+        assert_eq!(folder_of(tent), "Personal");
+        assert_eq!(folder_of(stove), "Personal");
+        assert_eq!(folder_of(other), "Work");
+        assert_eq!(folder_of(meeting), "Meetings");
+        assert_eq!(get(tent).unwrap().updated_ts, 1);
+        // An empty folder just goes; a folder with notes, after its notes.
+        assert_eq!(folder_delete("Work").map(|c| c.folders.len()), Ok(2));
+        assert_eq!(folder_of(other), "Personal");
+
+        assert_eq!(folder_delete("Camping").unwrap_err(), "Folder not found");
+        for own in ["Personal", " MEETINGS"] {
+            assert!(folder_delete(own).unwrap_err().contains("can't be deleted"), "{own}");
+        }
+        assert_eq!(folders(), ["Personal", "Meetings"]);
+        assert!(is_protected_folder("personal") && !is_protected_folder("Personal notes"));
     }
 
     #[test]
