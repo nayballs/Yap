@@ -18,6 +18,7 @@ mod chats;
 mod coaching;
 mod commands;
 mod config;
+mod dict_usage;
 mod e2e;
 mod fuzzy;
 mod gesture;

@@ -912,7 +912,7 @@ fn with_attendees(dictionary: &[crate::config::DictionaryEntry]) -> Vec<crate::c
         .unwrap_or_default();
     names
         .into_iter()
-        .map(|to| crate::config::DictionaryEntry { from: String::new(), to, fuzzy: false })
+        .map(|to| crate::config::DictionaryEntry { from: String::new(), to, fuzzy: false, snippet: false })
         .chain(dictionary.iter().cloned())
         .collect()
 }
@@ -953,7 +953,8 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option
         Some(cfg.selected_language.clone())
     };
     let translate = cfg.translate_to_english;
-    let dict_prompt = crate::config::dictionary_prompt(&with_attendees(&cfg.dictionary));
+    let dict_prompt =
+        crate::config::dictionary_prompt(&with_attendees(&crate::dict_usage::ranked(&cfg.dictionary)));
 
     let slot = Arc::clone(engine_slot);
     let outcome = tokio::task::spawn_blocking(move || {

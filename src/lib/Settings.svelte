@@ -475,6 +475,7 @@
     muteWhileRecording: false,
     appendTrailingSpace: false,
     autoSubmit: false,
+    voiceEnter: true,
     restoreClipboard: true,
     startHidden: false,
     autostart: false,
@@ -1224,7 +1225,14 @@
       outputDevice: cfg.outputDevice || null,
       audioFeedbackVolume: Number(cfg.audioFeedbackVolume),
       dictionary: cfg.dictionary
-        .map((e) => ({ from: (e.from || '').trim(), to: (e.to || '').trim(), fuzzy: e.fuzzy ?? true }))
+        .map((e) => ({
+          from: (e.from || '').trim(),
+          to: (e.to || '').trim(),
+          fuzzy: e.fuzzy ?? true,
+          // Snippets (DictionaryView) ride along in this copy: keep the flag,
+          // or this auto-save would turn them into corrections.
+          snippet: !!e.snippet,
+        }))
         .filter((e) => e.from),
       appRoutes: (cfg.appRoutes || [])
         .map((r) => ({
@@ -2264,8 +2272,15 @@
             <Row>
               <Toggle bind:checked={cfg.autoSubmit} label="Auto-submit (press Enter)" desc="Press Enter after pasting the text" />
             </Row>
-            {#if cfg.autoSubmit}
-              <Row label="Auto-submit key" desc="Which key to press after pasting">
+            <Row>
+              <Toggle
+                bind:checked={cfg.voiceEnter}
+                label="Say “press enter” to send"
+                desc="End a dictation with “press enter” or “press return” and Yap leaves the words out and presses the key after pasting"
+              />
+            </Row>
+            {#if cfg.autoSubmit || cfg.voiceEnter}
+              <Row label="Auto-submit key" desc="Which key to press after pasting, for auto-submit and “press enter”">
                 <Select bind:value={cfg.autoSubmitKey} options={AUTO_SUBMIT_KEYS} />
               </Row>
             {/if}
@@ -2283,7 +2298,7 @@
           <Group title="Dictation dictionary">
             <Row
               label="Dictionary"
-              desc="Moved to the main sidebar — corrections now live on their own page"
+              desc="Moved to the main sidebar — corrections and snippets live on their own page"
             >
               {#snippet children()}
                 <span class="dict-moved">Close settings and pick <strong>Dictionary</strong></span>
