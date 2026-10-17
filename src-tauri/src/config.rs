@@ -440,6 +440,15 @@ pub struct YapConfig {
     /// meeting chat, as the person edited it. Empty: Yap's default.
     #[serde(default)]
     pub meeting_consent_message: String,
+    /// "Tell speakers apart in meetings" (beta; Settings → Speech-to-Text,
+    /// and General → Meetings): label the voices on the call side while a
+    /// meeting records, on this PC (`diarize.rs`). Off by default, and it
+    /// only runs once its model is installed.
+    #[serde(default)]
+    pub meeting_diarization: bool,
+    /// Which diarization model (`diarize/registry.rs` id) it uses.
+    #[serde(default = "default_diarization_model")]
+    pub diarization_model: String,
 
     /// Call detection (`meeting_detect.rs`): when Teams, Zoom, Meet, Slack,
     /// Discord, Webex… start using the mic, offer to take notes, and offer to
@@ -586,6 +595,9 @@ fn default_meeting_hotkey() -> String {
 fn default_meeting_reminder() -> String {
     "15s".into()
 }
+fn default_diarization_model() -> String {
+    crate::diarize::DEFAULT_MODEL.into()
+}
 
 impl Default for YapConfig {
     fn default() -> Self {
@@ -649,6 +661,8 @@ impl Default for YapConfig {
             meeting_split_screen: false,
             meeting_live_transcript: true,
             meeting_consent_message: String::new(),
+            meeting_diarization: false,
+            diarization_model: default_diarization_model(),
             meeting_detection: true,
             meeting_auto_start: false,
             meeting_detect_apps: std::collections::BTreeMap::new(),

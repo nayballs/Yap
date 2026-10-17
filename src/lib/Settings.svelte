@@ -16,6 +16,8 @@
   import PillTabs from './ui/PillTabs.svelte';
   import SelectList from './ui/SelectList.svelte';
   import ModelManager from './ModelManager.svelte';
+  import SpeakerModels from './SpeakerModels.svelte';
+  import SpeakersToggle from './SpeakersToggle.svelte';
   import PromptStudio from './PromptStudio.svelte';
   import VoiceAgentConfig from './VoiceAgentConfig.svelte';
   import NoteFormattingConfig from './NoteFormattingConfig.svelte';
@@ -512,6 +514,8 @@
     meetingOpenNotepad: true,
     meetingSplitScreen: false,
     meetingLiveTranscript: true,
+    meetingDiarization: false,
+    diarizationModel: 'nemotron-3-diarization',
     meetingReminder: '15s',
     barEnabled: true,
     barHideFullscreen: true,
@@ -1831,6 +1835,19 @@
                   hint="Off, the notepad's Transcript tab stays quiet until you stop; Yap still transcribes as the meeting goes."
                 />
               </Row>
+              <!-- Speaker diarization (diarize.rs): the same switch as in
+                   Speech-to-Text, where the models are. -->
+              <Row>
+                <SpeakersToggle
+                  bind:enabled={cfg.meetingDiarization}
+                  bind:model={cfg.diarizationModel}
+                  place="meetings"
+                  onopenmodels={() => {
+                    section = 'models';
+                    tick().then(() => document.getElementById('settings-speakers')?.scrollIntoView({ block: 'start' }));
+                  }}
+                />
+              </Row>
               <Row>
                 <p class="consent">Recording a call? Let people know you're taking notes.</p>
               </Row>
@@ -1849,6 +1866,17 @@
               {/snippet}
             </Row>
           </Group>
+          <!-- Speaker diarization's models + its switch (diarize.rs); General →
+               Meetings has the switch too and links here. -->
+          <div id="settings-speakers">
+            <Group title="Speakers in meetings">
+              <Row>
+                {#snippet children()}
+                  <SpeakerModels bind:enabled={cfg.meetingDiarization} bind:model={cfg.diarizationModel} />
+                {/snippet}
+              </Row>
+            </Group>
+          </div>
           <Group title="Language">
             <Row
               label="Language"

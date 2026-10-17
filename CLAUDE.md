@@ -99,13 +99,19 @@ competitive strategy, see `ROADMAP.md` in the **private** docs repo (below).
   (server + stdio, no macros): `yap.exe mcp` lets Claude, ChatGPT desktop, Gemini CLI,
   Cursor… read meetings and notes through the local API (`mcp.rs`); `toml_edit` adds Yap to
   Codex/ChatGPT's `config.toml` (`mcp_clients.rs`).
+- **Speaker diarization (beta):** NVIDIA's Nemotron-3-Diarization (q8_0 GGUF,
+  OpenMDW-1.1) on NeMo-Speech.cpp 0.2.0 (Apache-2.0, ggml), run by `yap.exe
+  diarize`, a child process that loads the runtime's C API DLLs from the data
+  folder with `libloading` (`LoadLibraryExW`, DLL_LOAD_DIR | DEFAULT_DIRS);
+  `zip` unpacks NVIDIA's runtime release (`diarize.rs` + `diarize/`).
 - **Calendar:** Google Calendar (installed-app OAuth in the system browser, PKCE, a
   loopback listener, two read-only scopes) or any private iCal link, read straight from
   the PC (`calendar.rs` + `calendar/`); [`rrule`](https://crates.io/crates/rrule) expands
   RFC 5545 recurrence and [`chrono-tz`](https://crates.io/crates/chrono-tz) is the IANA
   zone database (Windows zone names mapped in `calendar/tz.rs`); tokens and links in
   Windows Credential Manager, like the account session.
-- **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/`, `groq_usage.json`,
+- **Data dir:** `%APPDATA%/yap/` (`config.json`, `models/` — speech models,
+  and `models/diarization/` the speaker model + its runtime, `groq_usage.json`,
   `history.json`, `notes.json` — the AI Notepad store, `chats.json` — AI Chat
   conversations, `updates.json` — update announcements + the restart marker,
   `calendar.json` — connected calendars + the next week of meetings,
@@ -497,6 +503,70 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `meeting_state` (signatures unchanged). Test mode opens no audio device (WAVs
   from `YAP_E2E_MEETING_AUDIO`, or silence; `e2e::e2e_meeting_feed`; the
   player also stages a dictation and an output switch, see `e2e.rs`).
+  **Speaker diarization's tee**: with "Tell speakers apart" on and its model
+  installed, `start` opens a `diarize::Session` before the capture and gives
+  the "Them" `Captured` its `Tee` — every sample appended (device audio,
+  `fill_if_stalled`'s silence) also goes to the engine, so its clock is the
+  session clock; the worker calls `Session::finish` after its last chunk and
+  before the final `yap-meeting-state` (so the summary starts after the final
+  labels). Nothing else in the recorder changes; off, there is no tee.
+- **`diarize.rs`** (+ `diarize/`) — **telling the voices on the call side
+  apart** (beta, off by default; the spike: yap-private
+  `docs/diarization-spike.md`). Engine: **Nemotron-3-Diarization** (q8_0 GGUF,
+  107 MB, OpenMDW-1.1) on **NeMo-Speech.cpp 0.2.0** (CPU build, 5.5 MB zip,
+  Apache-2.0), streaming with the **30 s preset** (`v3-offline`) on 4 OpenMP
+  threads: ~2.4% of real time, labels ~10 s (≤ 21 s) behind the audio, final
+  at the stop, no audio kept. **`yap.exe diarize --runtime <dir> --model
+  <gguf> [--preset] [--every-ms] [--no-dither] [--seed]`** (main.rs →
+  `child.rs`): its own process (a 0.2.0 runtime's asserts abort it; its ggml
+  isn't whisper.cpp's), below-normal priority, no window; loads
+  `nemo_speech_asr_c.dll` with `LoadLibraryExW(…, DLL_LOAD_DIR |
+  DEFAULT_DIRS)` (`libloading`; its ggml + MSVC runtime from that folder),
+  runs in the model's folder (the C ABI's narrow path), adds **−60 dBFS
+  white-noise dither** (`Dither`, seeded; exact digital silence breaks
+  Nemotron), pushes ≥ 0.25 s at a time. **Wire** (`protocol.rs`, `PROTOCOL`
+  1): stdin = frames `tag:u8 len:u32le payload` — `'A'` f32le samples, `'S'`
+  a u32 count of silence; EOF = finish. stdout = JSON lines: `ready
+  {protocol, speakers, frame_ms, runtime, load_ms}`, `segments {final,
+  audio_ms, labelled_ms, compute_ms, lag_ms_median?, lag_ms_max?, segments:
+  [{start_ms, end_ms, speaker}]}` (the whole list each time; speakers 1…8 by
+  first appearance, stable — `timeline::SpeakerOrder`) every 5 s of audio
+  once labels moved on, then `final: true`; or `error {message}`. stderr →
+  the log at debug. **Yap side**: `Session::for_meeting(note_id)` (config +
+  installed) → `tee()` → `finish()` (≤ ~20 s, normally < 1 s; dropped
+  unfinished = cancelled, nobody told). A feeding thread batches the tee's
+  frames into the child's stdin; a child that dies is started again
+  (`MAX_RESTARTS` 2) at its place on the clock as a new `stream` (a voice is
+  `(stream, speaker)`; the gap is in `gaps`); past 5 min of queued audio the
+  tee sends silence (memory bounded, clock right). **The API for the speaker
+  map**: `diarize::on_segments(|tl: &Timeline| …)` — every few seconds while
+  recording and once with `done: true`; `diarize::timeline(note_id)` — the
+  latest. `Timeline {note_id, session, segments: [Segment {start_ms, end_ms,
+  speaker, stream}], audio_ms, labelled_ms, done, restarts, gaps, error}`, ms
+  on that recording's session clock ("Them" sample position / 16; a resumed
+  meeting is a new session, new numbers). Labels aren't put on transcript
+  lines yet. **Models** (`registry.rs`): Nemotron-3 (Recommended, the
+  default; HF `nvidia/Nemotron-3-Diarization` pinned to commit `f667ed73…`)
+  + its runtime package (NVIDIA's v0.2.0 release zip: `bin/*.dll` minus the
+  CLI/llama/nmt/tts, `share/licenses/` → `licenses/`), and the sherpa-onnx
+  fallback (pyannote seg-3.0 + ERes2Net + sherpa 1.13.8, pinned) listed as
+  **"For phone-only calls — coming later"** (`available: false`, no engine).
+  Install = download (resume), size + SHA-256, unpack into
+  `<folder>.installing/`, rename into `<data>/models/diarization/<folder>/`,
+  plus a `NOTICE.txt`; installed = every required file there at its pinned
+  size; delete takes the runtime too when nothing else uses it (refused
+  while a recording uses it). Commands `diarization_status` / `_download`
+  (`diarization-download-progress {id, stage, percent, downloadedBytes,
+  totalBytes}`, then `diarization-changed`) / `_delete`; debug-only
+  `diarize_wav {path, speakers?}` (the real child on a file, a second at a
+  time; `speakers` caps voices afterwards — the engine takes no count) and
+  `diarization_timeline {noteId}`. Debug-only env: `YAP_DIARIZATION_MODELS`
+  (another models folder), `YAP_DIARIZATION_SOURCES` (stand-in URLs + SHA-256s,
+  JSON per package); a test run only fetches from loopback. Logs: counts and
+  times, never audio. Measured (`tests/diarize_child.rs`, the spike's TTS
+  meetings, 0.25 s collar): 0.4–2.7% on 2–3 voices and dial-ins, 2.3% on 4
+  with overlap + noise, 0.3% / 0.7% at 30 / 60 min, 15.9% on 4 voices made
+  from two (as the spike), ~50% on phone-only audio (the fallback's job).
 - **`speakers.rs`** — **who said what** in a meeting: the note's speaker map
   (`Note::speakers`: voice id → `Speaker {name, email, source: user |
   platform | voice | calendar | ai, locked, mergedInto, not}`) and the names
@@ -525,7 +595,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   its words where the speaker changes (most overlap, else nearest ≤ 1.5 s,
   else neighbours; one-word blips < 400 ms smoothed), in proportion without
   word times; a user-locked line, marker or unplaced line comes back
-  unchanged. Unit-tested.
+  unchanged. Lines' `start_ms`/`end_ms` are on the same session clock as
+  `diarize::Timeline` (sample position / 16, 0 at each recording's start),
+  so the wiring step can join its turns to lines. Unit-tested.
 - **`meeting_summary.rs`** — meeting summaries that keep up with long meetings
   (map-reduce, the map done while recording). Every ~10 min of new talk
   (2,000 est. tokens, or 10 min with ≥ 250) a background **digest** (key
@@ -1255,7 +1327,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `notice.rs`), the meeting
   notepad: meeting_open_notepad (default on) + meeting_split_screen (default
   off) + meeting_live_transcript (default on) + meeting_consent_message (the
-  notepad's "Copy consent message" text; empty = the default), call detection:
+  notepad's "Copy consent message" text; empty = the default), speaker
+  diarization: meeting_diarization ("Tell speakers apart in meetings", beta,
+  off) + diarization_model (a `diarize/registry.rs` id, default
+  `nemotron-3-diarization`), call detection:
   meeting_detection + meeting_detect_style ("popup"|"quiet") +
   meeting_detect_apps (app id → bool overrides of `meeting_detect::APPS`'
   defaults) + meeting_auto_start (the opt-in 10-second countdown, off),
@@ -2311,9 +2386,19 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   2 minutes / Never → `meetingReminder`) with a "Calendar" row under it
   (Connected: <account> + Manage, or Connect calendar → Connectors);
   "Show live transcript" (`meetingLiveTranscript`, the notepad's live lines)
-  + an always-visible consent line, "Recording a
+  + "Tell speakers apart in meetings" (`SpeakersToggle`, the same switch as
+  below, + a link to the models) + an always-visible consent line, "Recording a
   call? Let people know you're taking notes."), **Speech-to-Text** (`ModelManager` + GPU +
-  language/translate), **Language Models** (OpenWhispr-style: enable toggle → mode
+  language/translate, and **Speakers in meetings** (`#settings-speakers`,
+  `SpeakerModels.svelte` + `diarization.svelte.js`, `diarize.rs`): the speaker
+  models in `ModelRow`s (Download / Active / delete — the active one too;
+  the fallback greyed "For phone-only calls — coming later", status
+  `unavailable`), the **"Tell speakers apart in meetings"** switch (Beta chip,
+  "It all runs on this PC"; `SpeakersToggle.svelte`: off until a model is
+  installed — switching it on without one offers "Download and turn on" /
+  Not now with a progress bar instead; deleting the active model turns it
+  off), and where the files come from with their licences (OpenMDW-1.1,
+  Apache-2.0)), **Language Models** (OpenWhispr-style: enable toggle → mode
   selector Cloud Providers/Local/Self-Hosted → provider pill tabs (Groq/Anthropic/
   OpenAI/OpenRouter/Custom, brand icons) → API Key (masked + "Get your API key"
   link) → Select Model registry rows (`ppModels.js` + `ui/SelectList.svelte`);
@@ -2395,7 +2480,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `ui/PillTabs.svelte`) + compact one-line rows (status dot, brand icon from
   `providerIcons.js` + `assets/providers/*.svg` (MIT, from OpenWhispr), name,
   size, Download/Active/delete). `ModelCard.svelte` (big cards) remains only in
-  Onboarding.
+  Onboarding. `ModelRow` also draws the speaker models (`SpeakerModels.svelte`:
+  `unavailable` = a listed model's note instead of Download, `deleteActive`).
 - **`lib/Onboarding.svelte`** — first-run **guided setup** (5 steps): model picker →
   mic check (live level meter via `set_mic_test` idle-amp mode + live device switch)
   → one-click **local AI cleanup** install → tray pointer → "try it here" live
@@ -2556,6 +2642,20 @@ artifact on every run — review it with
 and read the PNGs under `screenshots/`. Full guide (incl. adding a test):
 [`docs/e2e-tests.md`](./docs/e2e-tests.md).
 
+**The speaker engine** has three layers of tests: unit tests (`diarize/*`:
+the wire, dither, speaker order, timelines, the registry, the zip), the e2e
+`diarization.spec.js` (Settings with a fake model + runtime from a local
+server via `YAP_DIARIZATION_SOURCES`; test mode never downloads from the
+internet), and, locally with the files on disk (never on CI, never
+downloading): `cargo test --test diarize_child -- --ignored --nocapture`
+(`YAP_DIARIZATION_MODELS`, `YAP_DIARIZATION_AUDIO` = the spike's
+`audio/conv`: the real child on its WAVs, scored against their RTTMs) and
+`diarization-real.spec.js` (`YAP_E2E_DIARIZATION_MODELS` /
+`_AUDIO`: `diarize_wav`, and a meeting recorded from a 3-voice file with
+the engine labelling it). The real download once:
+`cargo test real_download -- --ignored --nocapture`
+(`YAP_DIARIZATION_DOWNLOAD_DIR`, ~112 MB).
+
 ### Real-app robot tests (`npm run test:real`)
 The second layer: a **robot-mode** Yap (`realtest.rs`) pastes into **real windows
 the harness opens** — a WinForms test pad (`e2e-real/support/yaprobot.cs`,
@@ -2715,6 +2815,13 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   `#[serde(default)]`). Portable mode → `<exe>/Data/`.
 - Models: `%APPDATA%/yap/models/` — Whisper `.bin` files and extracted ONNX dirs,
   downloaded from `https://blob.handy.computer/` (SHA-256 verified).
+- Speaker models: `%APPDATA%/yap/models/diarization/` — `nemotron-3-diarization/`
+  (the GGUF from Hugging Face `nvidia/`, pinned commit) and
+  `nemo-speech-0.2.0-cpu/` (NVIDIA's runtime DLLs + `licenses/`), each with a
+  `NOTICE.txt` naming its source and licence (`diarize/registry.rs`; size +
+  SHA-256 verified). Yap has no central third-party notices page: the
+  attribution is in Settings → Speech-to-Text → Speakers in meetings and in
+  those files.
 - Groq usage: `%APPDATA%/yap/groq_usage.json`.
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → History).
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
@@ -2959,11 +3066,12 @@ Windows notifications, Focus Assist) not yet tried.
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
 search/archive/rename; the AI Notepad has no rich markdown editor (plain textarea)
-or folder "add existing note" picker; meetings don't tell voices apart yet
-("Them" is everyone else unless the user names or splits it, or a 1:1
-invite names it as a guess; the speaker map, line times and `split_line` are
-ready for the voice separation; tasks are attributed from attendees, the
-speaker map and names said)
+or folder "add existing note" picker; the speaker engine's labels
+(`diarize.rs`, beta) aren't put on transcript lines yet ("Them" is everyone
+else unless the user names or splits it, or a 1:1 invite names it as a
+guess; the speaker map, line times on the engine's clock and `split_line`
+are ready for that wiring; tasks are attributed from attendees, the speaker
+map and names said)
 and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](./docs/meetings.md) "Limits"), and a real call (live
 WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a

@@ -179,7 +179,8 @@ call) gets the "Them" warning once too; its wording says "If".
 
 Every transcript line has a side (`source`: the mic "you", the call "them")
 and a voice (`speaker`). Until voices are told apart, the call is one voice,
-"them"; the voice separation (a later step) will give "them-1", "them-2"…
+"them"; once the speaker engine's labels (`diarize.rs`, beta) are put on
+lines — the next step — they'll be "them-1", "them-2"…
 A line nobody relabelled stores no `speaker` (its side is its voice), so
 every older note reads as You and Them, unchanged.
 
@@ -215,9 +216,10 @@ guesses: shown as **"Priya?"**, in italics, and told to the AI as a guess.
   each line's `speaker`) and the MCP server's transcript pages. A name in the
   map counts as a known person in the owner checks, like an attendee; an
   invented owner still goes to Unassigned.
-- **Line times** (for the voice separation). A recorded line keeps its place
-  on the recording's clock (`startMs`/`endMs`, ms; each recording — a resume
-  starts a new one — counts from 0) and, with Parakeet, Whisper or
+- **Line times** (for the speaker engine's labels). A recorded line keeps its
+  place on the recording's clock (`startMs`/`endMs`, ms; each recording — a
+  resume starts a new one — counts from 0; the same clock as
+  `diarize::Timeline`: the "Them" sample position / 16) and, with Parakeet, Whisper or
   SenseVoice, its words' times (`words`, ms from `startMs`, one per word of
   the corrected text). `speakers::split_line` cuts a line where the speaker
   changes, at its words (in proportion without them); it isn't called yet.
@@ -951,7 +953,8 @@ KeyTips) and Win the Start menu.
   user, or as a guess from a 1:1 invite). Tasks are attributed from the
   attendee list, the speaker map and names said out loud ("Bob, can you…");
   a remote "I'll do it" from an unnamed "Them" is Unassigned. Telling the
-  voices apart (the local voice separation) is the next step; the speaker
+  voices apart on lines (the speaker engine's labels, `diarize.rs`) is the
+  next step; the speaker
   map, line times and `split_line` are ready for it.
 - **Speakers.** Echo is caught only in chunks that are entirely the call
   coming through the speakers; a chunk where the user also spoke keeps the

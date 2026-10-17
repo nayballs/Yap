@@ -207,6 +207,10 @@ pub(crate) struct Captured {
     talk: u64,
     /// The mic's (see "Dictation" above). `None` for "Them".
     gate: Option<DictationGate>,
+    /// "Them" with speaker diarization on: every sample appended here (the
+    /// device's audio and the silence filled in) also goes to the engine,
+    /// so its clock is this one (`diarize.rs`).
+    tee: Option<crate::diarize::Tee>,
 }
 
 /// One source's audio, shared by its capture and the worker.
@@ -221,6 +225,7 @@ impl Captured {
             heard: 0,
             talk: 0,
             gate,
+            tee: None,
         }
     }
 
@@ -257,6 +262,13 @@ impl Captured {
             } else {
                 self.samples.extend_from_slice(samples);
             }
+            if let Some(tee) = &self.tee {
+                if blank {
+                    tee.silence(n);
+                } else {
+                    tee.audio(samples);
+                }
+            }
             self.real_end = end + n as u64;
             // The device hears something (a dictation counts: the mic works);
             // only what went into the meeting is talk.
@@ -284,6 +296,9 @@ impl Captured {
         let room = MAX_BUFFER_SAMPLES.saturating_sub(self.samples.len());
         let n = ((other_end - end) as usize).min(room);
         self.samples.resize(self.samples.len() + n, 0.0);
+        if let Some(tee) = &self.tee {
+            tee.silence(n);
+        }
     }
 
     /// Take the next chunk (see [`next_cut`]); the rest stays queued.
@@ -1396,6 +1411,13 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
 
     let mic_buf = Captured::mic();
     let sys_buf = Captured::call();
+    // Speaker labels for "Them", when they're on (diarize.rs): the engine
+    // gets every sample from the first one. Dropped unfinished if the
+    // capture fails to start.
+    let diarizer = crate::diarize::Session::for_meeting(note_id);
+    if let (Some(d), Ok(mut buf)) = (diarizer.as_ref(), sys_buf.lock()) {
+        buf.tee = d.tee();
+    }
     let stop = Arc::new(AtomicBool::new(false));
     let overflow = Arc::new(AtomicBool::new(false));
 
@@ -1519,6 +1541,14 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
             if let Err(e) = ingest(&app, note_id, markers.collect()) {
                 tracing::warn!("Meeting segments not saved: {}", e);
             }
+        }
+        // The final speaker labels, before the recording says it ended (the
+        // summary starts on that): normally well under a second.
+        if let Some(d) = diarizer {
+            if let Ok(mut buf) = them.buf.lock() {
+                buf.tee = None;
+            }
+            let _ = tauri::async_runtime::spawn_blocking(move || d.finish()).await;
         }
 
         ACTIVE_NOTE.store(0, Ordering::SeqCst);
