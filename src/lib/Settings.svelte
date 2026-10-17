@@ -475,8 +475,10 @@
     muteWhileRecording: false,
     appendTrailingSpace: false,
     smartSpacing: true,
+    chatNoFullStop: true,
     autoSubmit: false,
     voiceEnter: true,
+    terminalMode: true,
     restoreClipboard: true,
     startHidden: false,
     autostart: false,
@@ -2276,6 +2278,13 @@
             </Row>
             <Row>
               <Toggle
+                bind:checked={cfg.chatNoFullStop}
+                label="Leave the full stop off chat messages"
+                desc="In Slack, Discord, WhatsApp, Teams and other chat apps, a message of one or two sentences ends without a full stop, the way people type them"
+              />
+            </Row>
+            <Row>
+              <Toggle
                 bind:checked={cfg.appendTrailingSpace}
                 label="Append trailing space"
                 desc={cfg.smartSpacing
@@ -2284,7 +2293,13 @@
               />
             </Row>
             <Row>
-              <Toggle bind:checked={cfg.autoSubmit} label="Auto-submit (press Enter)" desc="Press Enter after pasting the text" />
+              <Toggle
+                bind:checked={cfg.autoSubmit}
+                label="Auto-submit (press Enter)"
+                desc={cfg.terminalMode
+                  ? 'Press Enter after pasting the text. In a terminal, only for coding tools like Claude Code'
+                  : 'Press Enter after pasting the text'}
+              />
             </Row>
             <Row>
               <Toggle
@@ -2298,6 +2313,13 @@
                 <Select bind:value={cfg.autoSubmitKey} options={AUTO_SUBMIT_KEYS} />
               </Row>
             {/if}
+            <Row>
+              <Toggle
+                bind:checked={cfg.terminalMode}
+                label="Safer pasting into terminals"
+                desc="In Windows Terminal, PowerShell and other terminals, a dictation pastes as one line and Enter is pressed only when you say “press enter”, so nothing runs by itself. Claude Code and Codex in Windows Terminal keep line breaks"
+              />
+            </Row>
             <Row>
               <Toggle
                 bind:checked={cfg.restoreClipboard}
