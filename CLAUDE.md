@@ -970,7 +970,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   missing. Commands `mcp_clients_status`, `mcp_client_add`, `mcp_client_remove`
   (async, blocking IO off the main thread). Debug builds take
   `YAP_MCP_CLIENT_ROOT` as a stand-in user profile; test mode never touches the
-  real one.
+  real one. ⚠ The exe written is this one, **except in a dev build** (debug, not a
+  test run): there it's the installed Yap's (`installed_exe`, the uninstall
+  entry's `DisplayIcon`) when one is installed — an AI app keeps `yap.exe mcp`
+  running, and a child of `<drive>:\t\debug\yap.exe` locks it, so Yap - Dev's next
+  build fails with "Access is denied" (2026-10-17, Claude Code's `~/.claude.json`).
+  The launcher (`dev-update.ps1`) also stops any such helper before building.
 - **`auth.rs`** — Yap accounts (optional; nothing in dictation depends on it).
   Email codes: `auth_email_send`/`auth_email_verify` call the account service
   directly. Google/GitHub/Discord: `auth_start` opens the system browser on
@@ -2398,6 +2403,9 @@ listing what's new, and running `npm install` when `package-lock.json` changed),
 dev.bat starts its updated self afresh (cmd reads a running batch file line by line, so
 reading on in a rewritten one would go wrong). It skips the update and says why on another
 branch, with real local edits, offline, or when it isn't a fast-forward — Yap still starts.
+It then stops any AI app's `yap.exe mcp` helper running from the dev build's own exe
+(`<drive>:\t\debug\yap.exe`), which would otherwise make the build fail with "Access is
+denied" (see `mcp_clients.rs`).
 So merged work reaches Nathan by pushing to main; never fast-forward his checkout by hand
 while Yap - Dev runs.
 

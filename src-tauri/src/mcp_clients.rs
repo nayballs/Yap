@@ -649,11 +649,78 @@ fn edit_file(path: &Path, format: Format, exe: &str, add: bool) -> Result<bool, 
 
 // ---- status, add, remove ----
 
-/// This exe, as the apps should launch it.
+/// This exe, as the apps should launch it. A dev build (debug, not a test
+/// run) hands out the installed Yap instead when there is one: an AI app
+/// keeps `yap.exe mcp` running, and a child of the dev build's exe locks it,
+/// so the next Yap - Dev build can't replace it ("Access is denied"). The
+/// MCP server holds no data — it reads whichever Yap is running, through
+/// the local API — so the installed copy serves the dev build's notes too.
 fn exe() -> Result<String, String> {
+    #[cfg(debug_assertions)]
+    if !crate::e2e::active() {
+        if let Some(installed) = installed_exe() {
+            return Ok(installed);
+        }
+    }
     std::env::current_exe()
         .map(|p| p.to_string_lossy().into_owned())
         .map_err(|e| format!("Couldn't find Yap's own program file: {e}"))
+}
+
+/// The installed Yap's exe, from the uninstall entry the installer writes
+/// (per user, else per machine), if the file is still there.
+#[cfg(debug_assertions)]
+fn installed_exe() -> Option<String> {
+    #[cfg(windows)]
+    {
+        use windows::core::HSTRING;
+        use windows::Win32::Foundation::ERROR_SUCCESS;
+        use windows::Win32::System::Registry::{
+            RegGetValueW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ,
+        };
+        const KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Yap";
+        let read = |root: HKEY| -> Option<String> {
+            let mut buf = [0u16; 1024];
+            let mut size = std::mem::size_of_val(&buf) as u32;
+            let r = unsafe {
+                RegGetValueW(
+                    root,
+                    &HSTRING::from(KEY),
+                    &HSTRING::from("DisplayIcon"),
+                    RRF_RT_REG_SZ,
+                    None,
+                    Some(buf.as_mut_ptr() as *mut core::ffi::c_void),
+                    Some(&mut size),
+                )
+            };
+            if r != ERROR_SUCCESS {
+                return None;
+            }
+            let units = (size as usize / 2).min(buf.len());
+            exe_from_display_icon(String::from_utf16_lossy(&buf[..units]).trim_end_matches('\0'))
+        };
+        [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE]
+            .into_iter()
+            .filter_map(read)
+            .find(|exe| Path::new(exe).is_file())
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// An uninstall entry's `DisplayIcon` (`"D:\Yap\yap.exe"`, maybe with an
+/// icon index: `D:\Yap\yap.exe,0`) → the exe's path.
+#[cfg_attr(not(all(windows, debug_assertions)), allow(dead_code))]
+fn exe_from_display_icon(icon: &str) -> Option<String> {
+    let s = icon.trim();
+    let s = match s.strip_prefix('"') {
+        Some(rest) => rest.split('"').next().unwrap_or_default(),
+        None => s.rsplit_once(',').filter(|(_, i)| i.trim().parse::<i32>().is_ok()).map_or(s, |(p, _)| p),
+    };
+    let s = s.trim();
+    s.to_ascii_lowercase().ends_with(".exe").then(|| s.to_string())
 }
 
 /// One app's card or row in Settings → MCP.
@@ -772,6 +839,24 @@ pub async fn mcp_client_remove(id: String) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_installed_exe_comes_from_the_uninstall_entrys_icon() {
+        assert_eq!(
+            exe_from_display_icon(r#""D:\Hobby Project\Yap\yap.exe""#).as_deref(),
+            Some(r"D:\Hobby Project\Yap\yap.exe")
+        );
+        assert_eq!(
+            exe_from_display_icon(r"C:\Program Files\Yap\yap.exe,0").as_deref(),
+            Some(r"C:\Program Files\Yap\yap.exe")
+        );
+        assert_eq!(
+            exe_from_display_icon(r#""C:\Yap, Inc\yap.exe",0"#).as_deref(),
+            Some(r"C:\Yap, Inc\yap.exe")
+        );
+        assert_eq!(exe_from_display_icon(r"C:\Yap\yap.ico"), None);
+        assert_eq!(exe_from_display_icon(""), None);
+    }
 
     const EXE: &str = r"C:\Program Files\Yap\yap.exe";
 

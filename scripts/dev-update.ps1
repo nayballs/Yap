@@ -66,4 +66,24 @@ try {
 } catch {
     Say "Update skipped: $_" Yellow
 }
+
+# An AI app (Claude, Cursor...) running Yap's MCP server from the dev build's
+# own exe (`<drive>:\t\debug\yap.exe mcp`, dev.bat's CARGO_TARGET_DIR) holds
+# that file open, and the build fails with "Access is denied". Settings -> MCP
+# in a dev build now writes the installed Yap's path instead; stop any helper
+# left from before, so the build can replace the exe.
+try {
+    $devExe = Join-Path ([IO.Path]::GetPathRoot((Get-Location).Path)) 't\debug\yap.exe'
+    $helpers = @(Get-CimInstance Win32_Process -Filter "Name='yap.exe'" -ErrorAction Stop |
+        Where-Object { $_.ExecutablePath -and ($_.ExecutablePath -ieq $devExe) -and ($_.CommandLine -match '\smcp\s*$') })
+    foreach ($h in $helpers) {
+        Stop-Process -Id $h.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    if ($helpers.Count -gt 0) {
+        Say "Stopped $($helpers.Count) AI-app helper(s) running from the dev build's yap.exe, so it can be rebuilt." Yellow
+        Say 'Those AI apps get Yap back when they restart (Settings -> MCP -> Add points them at the installed Yap).' Yellow
+    }
+} catch {
+    Say "Couldn't check for AI-app helpers: $_" Yellow
+}
 exit 0
