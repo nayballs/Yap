@@ -10,7 +10,9 @@
 //! Deliberately skipped for v1 (documented in ROADMAP): folders, FTS, sync
 //! columns, meeting transcript/participants (arrive with the Phase-6 recorder).
 
+#[cfg(not(test))]
 use std::path::PathBuf;
+#[cfg(not(test))]
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -306,6 +308,7 @@ impl Default for Store {
     }
 }
 
+#[cfg(not(test))]
 static STATE: Mutex<Option<Store>> = Mutex::new(None);
 
 fn now_secs() -> u64 {
@@ -315,10 +318,12 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+#[cfg(not(test))]
 fn notes_path() -> PathBuf {
     crate::config::data_dir().join("notes.json")
 }
 
+#[cfg(not(test))]
 fn load_from_disk() -> Store {
     let path = notes_path();
     let mut store = match std::fs::read_to_string(&path) {
@@ -347,6 +352,7 @@ fn load_from_disk() -> Store {
     store
 }
 
+#[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     match serde_json::to_string(store) {
         Ok(json) => {
@@ -359,6 +365,7 @@ fn save_to_disk(store: &Store) {
     }
 }
 
+#[cfg(not(test))]
 fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     let mut guard = match STATE.lock() {
         Ok(g) => g,
@@ -366,6 +373,22 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     };
     let store = guard.get_or_insert_with(load_from_disk);
     f(store)
+}
+
+// Unit tests never read or write the real notes.json: each test thread gets
+// a store of its own, in memory, that starts empty (so code that goes through
+// this module — the chat's note tools, say — can be tested end to end).
+#[cfg(test)]
+thread_local! {
+    static TEST_STORE: std::cell::RefCell<Store> = std::cell::RefCell::new(Store::default());
+}
+
+#[cfg(test)]
+fn save_to_disk(_store: &Store) {}
+
+#[cfg(test)]
+fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
+    TEST_STORE.with(|s| f(&mut s.borrow_mut()))
 }
 
 fn with_notes<R>(f: impl FnOnce(&mut Vec<Note>) -> R) -> R {
@@ -751,6 +774,31 @@ fn apply_update(
         note.updated_ts = now_secs();
     }
     Ok(changed)
+}
+
+/// Change note `id` with `f`, under the store lock, so what `f` reads is
+/// what it changes (the chat's `edit_note` matches text and replaces it in one
+/// step, never against a copy someone saved over meanwhile). `f` returns its
+/// result and whether it changed the note; only a change bumps `updated_ts`
+/// and hits the disk. An error from `f` leaves the note as it was (`f` must
+/// check before it writes).
+pub fn modify<R>(
+    id: u64,
+    f: impl FnOnce(&mut Note) -> Result<(R, bool), String>,
+) -> Result<R, String> {
+    with_store(|store| {
+        let note = store
+            .notes
+            .iter_mut()
+            .find(|n| n.id == id)
+            .ok_or_else(|| format!("Note with ID {id} not found"))?;
+        let (result, changed) = f(note)?;
+        if changed {
+            note.updated_ts = now_secs();
+            save_to_disk(store);
+        }
+        Ok(result)
+    })
 }
 
 fn set_if_changed<T: PartialEq>(slot: &mut T, value: T) -> bool {

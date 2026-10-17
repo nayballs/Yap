@@ -766,6 +766,14 @@ below (✅ = done).
          it" → `search_notes` → `get_note` → `copy_to_clipboard` with the REAL clipboard
          verified. Skipped (need their cloud/integrations): `web_search`,
          `get_calendar_events`. Streaming still pending.
+         **Safe partial edits (2026-10-17):** `search_in_note` / `read_note` / `edit_note`
+         (Wispr Flow's live-Ask note tools, behaviour only; `note_text.rs`): find the exact
+         text, read long notes/transcripts in bounded pages, replace text that appears
+         exactly once (CRLF = LF, nothing else forgiven; misses say why and quote the
+         note's own text). `update_note` narrowed to folder moves + requested full
+         rewrites; edits reach every window live and their chips are kept in chats.json.
+         Unit-tested against an in-memory store, e2e-tested against a scripted fake AI;
+         not yet tried with a real model.
       3. [ ] **Semantic vectors** *(L, optional)*: only if keyword recall proves insufficient —
          `fastembed-rs` (in-process MiniLM, **no** ONNX utility-process) + `sqlite-vec`/`usearch`
          (**no** Qdrant sidecar) + the RRF merge (K=60, 0.3 cosine threshold, ~15 lines).
