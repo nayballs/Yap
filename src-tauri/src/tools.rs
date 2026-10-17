@@ -11,6 +11,15 @@
 //! `role:"tool"` messages and the model is re-invoked, ≤ `MAX_TOOL_STEPS`
 //! (their 20).
 //!
+//! **Folders are Yap's own rule** (a deliberate change from OpenWhispr, whose
+//! `create_note`/`update_note` made any folder the model named — a chat test
+//! once left an empty "Camping" folder behind): a folder name that exists, in
+//! any case, files the note there as the list spells it; an empty one means
+//! Personal; a new folder is made only with `new_folder: true`, which the
+//! descriptions and instructions keep for a user asking for one. An unknown
+//! name without it changes nothing and tells the model the folders there are
+//! (`note_folder`).
+//!
 //! **Safe note edits** (after the note tools of Wispr Flow's live "Ask
 //! anything"; the matching and paging rules are in `note_text.rs`):
 //! `search_in_note` (the lines a phrase is on, numbered, with context),
@@ -44,16 +53,17 @@ const GET_NOTE_TOKENS: usize = 2_000;
 /// Appended to the persona as "You have access to tools. …": OpenWhispr's
 /// `TOOL_INSTRUCTIONS` (config/prompts.ts) for the tools Yap took from it,
 /// verbatim where nothing changed, and Yap's own lines for reading and
-/// editing part of a note (which also narrow `update_note`).
+/// editing part of a note (which also narrow `update_note`) and for folders
+/// (never a new one the user didn't ask for).
 pub const TOOL_INSTRUCTIONS: &[&str] = &[
     "Use search_notes to find information from the user's past meetings, discussions, or personal notes before answering from memory.",
     "Use get_note to fetch a specific note by ID: its notes (content), its AI summary (enhanced) and, for a meeting, its transcript. If the current note's ID is provided in the context, use it directly. Otherwise, use search_notes first to find the note ID.",
     "Use read_note to read a long note, its summary or a meeting transcript a page at a time; while more is true, call it again with offset set to next_offset.",
     "Use search_in_note to find the exact words in a note before you quote them or change them.",
     "To change part of a note (fix a word, add or remove a line, tick off a task, rename it), first find the text with search_in_note or read_note, then call edit_note with old_text copied exactly from the note, without the line numbers, and new_text with your change. Keep old_text short, but long enough to appear only once. If edit_note says it found no match or more than one, follow its error, search again and retry; never rewrite the whole note to change part of it.",
-    "Use create_note when the user asks you to create, write, or draft a new note. Whenever the note will go into a folder, call list_folders first and reuse an existing folder whose name is a reasonable fit for the note's topic (e.g. a new story belongs in an existing 'Stories' folder) — do this even when the user didn't name a folder but the content clearly fits one. Only pass a new folder name when nothing existing fits. Be tolerant of case, plurals, and typos.",
-    "Use update_note only to move a note to a different folder, or to replace a note's whole content when the user explicitly asks you to rewrite the entire note; for any smaller change, use edit_note. When moving to a folder, call list_folders first and reuse an existing folder whose name fits the note's topic; only create a new folder when nothing existing fits.",
-    "Use list_folders before create_note or update_note whenever a note is going into a folder, so you can reuse an existing folder whose name fits the note's topic instead of creating a near-duplicate.",
+    "Use create_note when the user asks you to create, write, or draft a new note. Leave folder empty (the note goes to Personal) unless the user named a folder or the content clearly fits a folder that already exists (e.g. a new story belongs in an existing 'Stories' folder): then call list_folders first and pass that folder's name. Be tolerant of case, plurals, and typos. Never make up a folder: only when the user asks for a new folder, pass its name with new_folder set to true.",
+    "Use update_note only to move a note to a different folder, or to replace a note's whole content when the user explicitly asks you to rewrite the entire note; for any smaller change, use edit_note. When moving a note, call list_folders first and pass an existing folder's name; only create a new folder (new_folder set to true) when the user asked for one.",
+    "Use list_folders before create_note or update_note whenever a note is going into a folder, so you file it in a folder that exists.",
     "Use copy_to_clipboard when the user asks you to copy something to their clipboard.",
 ];
 
@@ -167,13 +177,14 @@ pub fn definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "create_note",
-                "description": "Always call list_folders first. Reuse an existing folder whenever one is a reasonable semantic fit for the note's topic (e.g. a story goes into an existing 'Stories' folder), even if the user didn't name it. Only pass a new folder name when nothing existing fits. Creates a note with title, content, and optional folder (auto-created if missing).",
+                "description": "Creates a note with title, content, and an optional folder. Leave folder empty to file the note in Personal, the default. To file it in an existing folder (one the user named, or one that clearly fits the note's topic, e.g. a story goes into an existing 'Stories' folder), call list_folders first and pass that folder's name. Never invent a folder: an unknown folder name is refused unless new_folder is true, which only the user asking for a new folder allows.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "title": { "type": "string", "description": "The title of the note" },
                         "content": { "type": "string", "description": "The content of the note" },
-                        "folder": { "type": "string", "description": "Folder name for the note. Created automatically if it does not exist." }
+                        "folder": { "type": "string", "description": "An existing folder's name (from list_folders). Leave empty for Personal." },
+                        "new_folder": { "type": "boolean", "description": "true only when the user asked for a new folder: creates the folder named in folder." }
                     },
                     "required": ["title", "content"],
                     "additionalProperties": false
@@ -184,14 +195,15 @@ pub fn definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "update_note",
-                "description": "Moves a note to another folder, or replaces its title or its whole content. Only replace the whole content when the user explicitly asks for the entire note to be rewritten; to change part of a note, use edit_note instead. Before moving to a folder, always call list_folders first. Reuse an existing folder whenever one is a reasonable semantic fit for the note's topic, even if the user didn't name it. Only pass a new folder name when nothing existing fits (it is auto-created). Use the note ID from context if provided; otherwise search_notes first.",
+                "description": "Moves a note to another folder, or replaces its title or its whole content. Only replace the whole content when the user explicitly asks for the entire note to be rewritten; to change part of a note, use edit_note instead. Before moving a note, always call list_folders first and pass an existing folder's name. Never invent a folder: an unknown folder name is refused unless new_folder is true, which only the user asking for a new folder allows. Use the note ID from context if provided; otherwise search_notes first.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "id": { "type": "number", "description": "The note ID to update" },
                         "title": { "type": "string", "description": "New title for the note (optional)" },
                         "content": { "type": "string", "description": "New content replacing ALL of the note's content (optional; only for a full rewrite the user asked for)" },
-                        "folder": { "type": "string", "description": "Folder name to move the note to. Created automatically if it does not exist." }
+                        "folder": { "type": "string", "description": "An existing folder's name (from list_folders) to move the note to (optional)." },
+                        "new_folder": { "type": "boolean", "description": "true only when the user asked for a new folder: creates the folder named in folder." }
                     },
                     "required": ["id"],
                     "additionalProperties": false
@@ -202,7 +214,7 @@ pub fn definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "list_folders",
-                "description": "List all available note folders. Use before create_note or update_note to reuse an existing folder instead of creating a near-duplicate.",
+                "description": "List all available note folders. Use before create_note or update_note to file a note in a folder that exists.",
                 "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
             }
         },
@@ -427,13 +439,13 @@ pub fn execute(name: &str, args: &Value) -> Value {
             if title.is_empty() && content.trim().is_empty() {
                 return tool_result(false, Value::Null, "Failed to create note".to_string());
             }
-            let folder_created = if !folder.is_empty() {
-                let before = crate::notes::folders().len();
-                crate::notes::folder_create(folder).len() > before
-            } else {
-                false
+            let chip = format!("Couldn't create {}", chip_title(title));
+            let (folder, folder_created) = match note_folder(folder, args, &chip) {
+                Ok(Some(f)) => f,
+                Ok(None) => (String::new(), false),
+                Err(e) => return e,
             };
-            let note = crate::notes::create(title, content, "chat", folder);
+            let note = crate::notes::create(title, content, "chat", &folder);
             let suffix = if folder_created {
                 format!(" in new folder \"{folder}\"")
             } else {
@@ -457,9 +469,18 @@ pub fn execute(name: &str, args: &Value) -> Value {
                     "At least one of title, content, or folder must be provided".to_string(),
                 );
             }
-            if let Some(f) = folder.as_deref() {
-                crate::notes::folder_create(f);
+            if crate::notes::get(id).is_none() {
+                return tool_result(false, Value::Null, format!("Failed to update note: Note with ID {id} not found"));
             }
+            // The folder is checked (and a new one made) before anything
+            // changes: a refused folder leaves the note as it was.
+            let folder = match folder.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
+                None => None,
+                Some(f) => match note_folder(f, args, "Couldn't move the note") {
+                    Ok(found) => found.map(|(name, _)| name),
+                    Err(e) => return e,
+                },
+            };
             match crate::notes::update(id, title, content, folder, None) {
                 Ok(_) => tool_result(true, json!({ "id": id }), "Updated note".to_string()),
                 Err(e) => tool_result(false, Value::Null, format!("Failed to update note: {e}")),
@@ -494,6 +515,47 @@ pub fn execute(name: &str, args: &Value) -> Value {
         }
         other => tool_result(false, Value::Null, format!("Unknown tool: {other}")),
     }
+}
+
+/// The folder `create_note` / `update_note` file a note into (`folder`, as
+/// the model passed it). Yap's own rule, not OpenWhispr's (which made any
+/// folder the model named, so a chat could leave invented folders behind):
+/// - empty → `None` (a new note goes to Personal; a note isn't moved);
+/// - a folder that exists, in any case → that folder, as the list spells it;
+/// - a new name → made only with `new_folder: true` (the user asked for a
+///   new folder); without it, an error for the model naming the folders
+///   there are and telling it to leave `folder` empty instead.
+///
+/// `Some((name, created))`.
+fn note_folder(folder: &str, args: &Value, chip: &str) -> Result<Option<(String, bool)>, Value> {
+    let folder = folder.trim();
+    if folder.is_empty() {
+        return Ok(None);
+    }
+    if let Some(existing) = crate::notes::find_folder(folder) {
+        return Ok(Some((existing, false)));
+    }
+    let asked = match &args["new_folder"] {
+        Value::Bool(b) => *b,
+        Value::String(s) => s.trim().eq_ignore_ascii_case("true"),
+        _ => false,
+    };
+    if asked {
+        crate::notes::folder_create(folder);
+        return Ok(Some((folder.to_string(), true)));
+    }
+    let folders = crate::notes::folders()
+        .iter()
+        .map(|f| format!("\"{f}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(tool_error(
+        format!(
+            "There's no folder called \"{folder}\", so nothing changed. The folders are: {folders}. Use one of them, or leave folder empty (a new note then goes to Personal). Only create a new folder, by passing new_folder: true, when the user asked for a new folder."
+        ),
+        json!({ "folders": crate::notes::folders() }),
+        format!("{chip}: no folder called \"{}\"", clip(folder, 40)),
+    ))
 }
 
 /// The `field` argument of Yap's note tools: `default` when it's missing,
@@ -1071,10 +1133,56 @@ mod tests {
         let created = call("create_note", json!({ "title": "Ideas", "content": "One" }));
         let id = created["data"]["id"].as_u64().unwrap();
         assert_eq!(changed_note("create_note", &created), Some(id));
-        let updated = call("update_note", json!({ "id": id, "folder": "Work" }));
+        let updated = call("update_note", json!({ "id": id, "folder": "Work", "new_folder": true }));
         assert_eq!(changed_note("update_note", &updated), Some(id));
         assert_eq!(changed_note("get_note", &call("get_note", json!({ "id": id }))), None);
         assert_eq!(changed_note("update_note", &call("update_note", json!({ "id": 999, "title": "x" }))), None);
+    }
+
+    #[test]
+    fn the_chat_never_invents_a_folder() {
+        crate::notes::folder_create("Work");
+        // A made-up folder: refused, nothing saved, the model told which
+        // folders there are and to leave it empty.
+        let r = call("create_note", json!({ "title": "Tent list", "content": "Pegs", "folder": "Camping" }));
+        assert_eq!(r["success"], json!(false));
+        let error = r["error"].as_str().unwrap();
+        assert!(error.contains("no folder called \"Camping\""), "{error}");
+        assert!(error.contains("\"Personal\", \"Meetings\", \"Work\""), "{error}");
+        assert!(error.contains("leave folder empty"), "{error}");
+        assert_eq!(r["displayText"], json!("Couldn't create \"Tent list\": no folder called \"Camping\""));
+        assert_eq!(changed_note("create_note", &r), None);
+        assert!(crate::notes::all().is_empty());
+        assert_eq!(crate::notes::folders(), ["Personal", "Meetings", "Work"]);
+
+        // No folder: Personal. An existing one in another case: its spelling.
+        let r = call("create_note", json!({ "title": "Tent list", "content": "Pegs" }));
+        let id = r["data"]["id"].as_u64().unwrap();
+        assert_eq!(r["data"]["folder"], json!("Personal"));
+        let r = call("create_note", json!({ "title": "Budget", "content": "Q3", "folder": " work" }));
+        assert_eq!(r["data"]["folder"], json!("Work"));
+        assert_eq!(r["displayText"], json!("Created note: \"Budget\""));
+
+        // Moving into a made-up folder changes nothing, the title included.
+        let r = call("update_note", json!({ "id": id, "title": "Trip", "folder": "Camping" }));
+        assert_eq!(r["success"], json!(false));
+        assert_eq!(changed_note("update_note", &r), None);
+        let note = crate::notes::get(id).unwrap();
+        assert_eq!((note.title.as_str(), note.folder.as_str()), ("Tent list", "Personal"));
+        // …into an existing one, by any case, moves it.
+        call("update_note", json!({ "id": id, "folder": "WORK" }));
+        assert_eq!(crate::notes::get(id).unwrap().folder, "Work");
+
+        // The user asked for a new folder: made once, then reused.
+        let r = call(
+            "create_note",
+            json!({ "title": "Packing", "content": "Stove", "folder": "Camping", "new_folder": true }),
+        );
+        assert_eq!(r["displayText"], json!("Created note: \"Packing\" in new folder \"Camping\""));
+        let r = call("update_note", json!({ "id": id, "folder": "camping", "new_folder": "true" }));
+        assert_eq!(r["success"], json!(true));
+        assert_eq!(crate::notes::get(id).unwrap().folder, "Camping");
+        assert_eq!(crate::notes::folders(), ["Personal", "Meetings", "Work", "Camping"]);
     }
 
     #[test]

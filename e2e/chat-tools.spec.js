@@ -128,3 +128,47 @@ test('the chat edits one place in a note, and is told when its text is in two', 
   await yap.notepad.getByRole('button', { name: 'Close notepad' }).click();
   await expect.poll(() => visible(yap, 'notepad')).toBe(false);
 });
+
+// Yap's folder rule (tools.rs `note_folder`): the chat never makes up a
+// folder. A name that isn't a folder is refused, with the folders there are
+// and "leave folder empty"; without one the note goes to Personal; a new
+// folder needs `new_folder: true` (the user asked for it).
+test('the chat never invents a folder: an unknown one is refused, none means Personal', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  const ASK = 'Save my tent packing list as a note';
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'create_note', args: { title: 'Tent list', content: 'Pegs, poles, mallet', folder: 'Camping' } }] },
+    { tools: [{ name: 'create_note', args: { title: 'Tent list', content: 'Pegs, poles, mallet' } }] },
+    { content: 'Saved it to **Personal**.' },
+  ]);
+  await openView(main, 'Chat');
+  await main.getByPlaceholder('Type a message...').fill(ASK);
+  await main.getByRole('button', { name: 'Send' }).click();
+  const thread = main.locator('.msgs');
+  await expect(thread).toContainText('Saved it to Personal.');
+  await expect(thread.locator('.toolchip')).toHaveText([
+    'Couldn\'t create "Tent list": no folder called "Camping"',
+    'Created note: "Tent list"',
+  ]);
+  await shot(main, '03-chat-folder-refused');
+
+  // One note, in Personal; no Camping folder.
+  await expectStore(yap, 'notes.json', (s) =>
+    s.notes.filter((n) => n.title === 'Tent list').map((n) => n.folder).join() === 'Personal'
+  );
+  expect(yap.readJson('notes.json').folders).not.toContain('Camping');
+
+  // What the model was told, and the instructions it had.
+  const last = fakeLlm.requests.filter((r) => r.tools.includes('create_note')).at(-1);
+  const results = last.messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content));
+  expect(results[0].success).toBe(false);
+  expect(results[0].error).toContain('There\'s no folder called "Camping"');
+  expect(results[0].error).toContain('leave folder empty');
+  expect(results[0].data.folders).toEqual(expect.arrayContaining(['Personal', 'Meetings']));
+  expect(results[1].data.folder).toBe('Personal');
+  expect(last.system).toContain('Never make up a folder');
+});
