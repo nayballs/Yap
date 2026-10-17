@@ -199,9 +199,10 @@ pub struct WatchedField {
 impl WatchedField {
     /// The focused element now, if it's a text field Yap may read in
     /// `target_hwnd`'s process: not a password box, not read-only. Never in
-    /// a test run.
+    /// a test run — in robot mode only in a window the test opened
+    /// (`realtest::permits`).
     pub fn open(target_hwnd: isize) -> Option<WatchedField> {
-        if crate::e2e::active() {
+        if !crate::realtest::permits(Some(target_hwnd)) {
             return None;
         }
         #[cfg(windows)]
