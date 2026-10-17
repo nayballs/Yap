@@ -336,8 +336,9 @@ mod platform {
         }
     }
 
-    /// Simulate Ctrl+V keystroke via SendInput.
-    pub fn simulate_paste() {
+    /// Simulate Ctrl+V keystroke via SendInput (into `target`: robot mode
+    /// checks it's still in front right after).
+    pub fn simulate_paste(target: Option<isize>) {
         let inputs = [
             make_key(VK_CONTROL, false),
             make_key(VK_V, false),
@@ -352,6 +353,7 @@ mod platform {
                 mem::size_of::<INPUT>() as i32,
             )
         };
+        crate::realtest::check_after(target, "paste");
 
         tracing::debug!(
             sent,
@@ -907,6 +909,7 @@ pub async fn press_submit(key: &str) -> Result<(), String> {
         crate::realtest::recheck_foreground(None, &format!("press {key}"))?;
         #[cfg(target_os = "windows")]
         platform::press_submit(&key);
+        crate::realtest::check_after(None, &format!("{key} key"));
         #[cfg(not(target_os = "windows"))]
         {
             let _ = &key;
@@ -1259,6 +1262,7 @@ fn inject_text_sync(
             let checked = crate::realtest::recheck_foreground(target_hwnd, "type the text");
             if checked.is_ok() {
                 platform::type_unicode(text);
+                crate::realtest::check_after(target_hwnd, "typing");
             }
             if let Some(prev) = previous {
                 clip::restore(prev, private);
@@ -1280,7 +1284,7 @@ fn inject_text_sync(
         }
 
         // Simulate Ctrl+V.
-        platform::simulate_paste();
+        platform::simulate_paste(target_hwnd);
 
         // Restore previous clipboard (delayed to ensure paste completes). Webview/
         // Electron apps process Ctrl+V asynchronously (browser→renderer IPC) and can

@@ -120,6 +120,21 @@ pub fn recheck_foreground(expected: Option<isize>, what: &str) -> Result<(), Str
     }
 }
 
+/// Right after a `SendInput`: in robot mode, whether the window Yap meant is
+/// still in front. The check before the keys leaves a moment between it and
+/// Windows delivering them; a window that took the focus in that moment
+/// (a click elsewhere) may have got them, and this says so loudly: logged,
+/// shown, and listed by `realtest_refusals` as "may have gone to…", which
+/// the robot suite fails on. Nothing in a normal run.
+pub fn check_after(expected: Option<isize>, what: &str) {
+    #[cfg(debug_assertions)]
+    if on() {
+        robot::check_after(expected, what);
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = (expected, what);
+}
+
 // ---- Robot mode's guard, pure (unit-tested) ----
 
 /// What the test allowed: its processes (id, when it started) and the nonce
@@ -231,7 +246,8 @@ mod robot {
         );
     }
 
-    /// The last refusals, newest last (for the harness: `realtest_refusals`).
+    /// Every refusal (and "may have gone to…" warning) so far, oldest first,
+    /// for the harness (`realtest_refusals`; a robot lives for one spec).
     pub static REFUSALS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
     pub fn refuse(what: &str, why: &str) -> String {
@@ -239,8 +255,6 @@ mod robot {
         tracing::warn!("{msg}");
         if let Ok(mut list) = REFUSALS.lock() {
             list.push(msg.clone());
-            let excess = list.len().saturating_sub(50);
-            list.drain(..excess);
         }
         if let Some(app) = APP.get() {
             let _ = app.emit("yap-error", msg.clone());
@@ -253,6 +267,38 @@ mod robot {
         let hwnd = hwnd.ok_or("no target window")?;
         let facts = win::facts(hwnd).ok_or("the window is gone")?;
         decide(&facts, allowed(), std::process::id())
+    }
+
+    /// Checked as `SendInput` returns and again a moment later, by when
+    /// Windows has queued the keys to the window that had the focus.
+    pub fn check_after(expected: Option<isize>, what: &str) {
+        for wait_ms in [0u64, 10] {
+            std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+            let fg = win::foreground();
+            let moved = match expected {
+                Some(t) => win::root(t) != fg,
+                None => verdict(fg).is_err(),
+            };
+            if moved {
+                let pid = fg.and_then(win::facts).map(|f| f.pid).unwrap_or(0);
+                refuse_after(what, pid);
+                return;
+            }
+        }
+    }
+
+    /// A "may have gone to…" warning (see [`super::check_after`]).
+    fn refuse_after(what: &str, pid: u32) {
+        let msg = format!(
+            "Robot mode: the focus moved during the {what} — the keys may have gone to another window (process {pid})"
+        );
+        tracing::error!("{msg}");
+        if let Ok(mut list) = REFUSALS.lock() {
+            list.push(msg.clone());
+        }
+        if let Some(app) = APP.get() {
+            let _ = app.emit("yap-error", msg);
+        }
     }
 
     pub fn recheck(expected: Option<isize>) -> Result<(), String> {
