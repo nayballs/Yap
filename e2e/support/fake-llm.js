@@ -12,7 +12,10 @@
 // mentioned ("Zed", due "Tuesday"), and the action plan invents an owner
 // ("Mallory") and drops one real task. A spec can make the next calls of a
 // kind fail (`failNext`) or answer slowly (`delay`), to see Yap's progress
-// and error states.
+// and error states. For the AI Chat's tool loop (src-tauri/src/tools.rs) a
+// spec scripts the model call by call (`scriptChat`): each chat call that
+// offers tools takes the next step, a tool call or an answer, and the
+// request record keeps the messages (the tool results Yap sent back).
 import http from 'node:http';
 
 /** Yap's own token estimate (meeting_summary::estimate_tokens). */
@@ -129,15 +132,20 @@ function actionPlanReply(user) {
 
 /**
  * Start the server. `requests` collects `{ kind, model, maxTokens, tokens,
- * system, user }` per chat call (`kind`: "digest" | "actionPlan" | "title" |
- * "catchUp" | "meetingAsk" | "other"). `failNext(kind, n)` answers the next
- * `n` calls of a kind with HTTP 500; `delay(kind, ms)` holds that kind's
- * answers back (0 = no delay).
+ * system, user, tools, messages }` per chat call (`kind`: "digest" |
+ * "actionPlan" | "title" | "catchUp" | "meetingAsk" | "other"; `tools`: the
+ * names of the tools offered). `failNext(kind, n)` answers the next `n`
+ * calls of a kind with HTTP 500; `delay(kind, ms)` holds that kind's answers
+ * back (0 = no delay). `scriptChat(steps)` queues the replies to the next
+ * calls that offer tools: `{ tools: [{ name, args }] }` calls those tools,
+ * `{ content }` answers; with the queue empty they answer "OK".
  */
 export async function startFakeLlm() {
   const requests = [];
   const failures = new Map();
   const delays = new Map();
+  const chatScript = [];
+  let callIds = 0;
   const server = http.createServer((req, res) => {
     let raw = '';
     req.on('data', (c) => (raw += c));
@@ -157,6 +165,7 @@ export async function startFakeLlm() {
       const system = messages.find((m) => m.role === 'system')?.content ?? '';
       const user = messages.filter((m) => m.role === 'user').at(-1)?.content ?? '';
       const kind = KINDS.find(([prefix]) => system.startsWith(prefix))?.[1] ?? 'other';
+      const offered = (body.tools ?? []).map((t) => t.function?.name);
       requests.push({
         kind,
         model: body.model,
@@ -164,6 +173,8 @@ export async function startFakeLlm() {
         tokens: messages.reduce((n, m) => n + estimateTokens(String(m.content ?? '')), 0),
         system,
         user,
+        tools: offered,
+        messages,
       });
       const wait = delays.get(kind) ?? 0;
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
@@ -171,6 +182,32 @@ export async function startFakeLlm() {
       if (failing > 0) {
         failures.set(kind, failing - 1);
         res.writeHead(500, { 'content-type': 'text/plain' }).end('fake failure: the model is down');
+        return;
+      }
+      // The chat's tool loop, scripted: the next step's tool calls or answer.
+      const step = offered.length > 0 ? chatScript.shift() : undefined;
+      if (step) {
+        const message = step.tools
+          ? {
+              role: 'assistant',
+              content: null,
+              tool_calls: step.tools.map(({ name, args }) => ({
+                id: `call_${++callIds}`,
+                type: 'function',
+                function: { name, arguments: JSON.stringify(args) },
+              })),
+            }
+          : { role: 'assistant', content: step.content };
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            id: `fake-${requests.length}`,
+            object: 'chat.completion',
+            model: body.model,
+            choices: [{ index: 0, message, finish_reason: step.tools ? 'tool_calls' : 'stop' }],
+            usage: { total_tokens: 0 },
+          })
+        );
         return;
       }
       const content =
@@ -203,6 +240,7 @@ export async function startFakeLlm() {
     requests,
     failNext: (kind, n = 1) => failures.set(kind, n),
     delay: (kind, ms) => delays.set(kind, ms),
+    scriptChat: (steps) => chatScript.push(...steps),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }
