@@ -183,12 +183,25 @@ pub fn configure_meeting_hotkey(spec: String) {
     let _ = crate::input_hook::configure_meeting(&spec);
 }
 
-/// Toggle recording on/off (same action as the global hotkey).
+/// Toggle recording on/off (the bar's Dictate, a view's mic button).
 #[tauri::command]
 pub fn toggle_recording(state: State<'_, AppState>) {
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.toggle();
+        }
+    }
+}
+
+/// The dictation hotkey went down (`pressed`) or up in one of Yap's own
+/// windows — their in-page fallback, since the global hook never sees keys
+/// while a Yap webview has the focus. Same path as the hook's events, so
+/// push-to-talk's hold, tap and double-tap work there too.
+#[tauri::command]
+pub fn dictation_key(state: State<'_, AppState>, pressed: bool) {
+    if let Ok(guard) = state.pipeline.lock() {
+        if let Some(p) = guard.as_ref() {
+            p.on_key(pressed, None);
         }
     }
 }
@@ -715,9 +728,13 @@ pub fn chat_delete(id: u64) {
 /// Send one chat turn. Creates the conversation on first message (title =
 /// first 50 chars, OpenWhispr's rule), persists both sides, and answers via
 /// the Chat scope with eager keyword-RAG over the notes library injected under
-/// their exact framing line. Returns `{ conversationId, reply }`.
+/// their exact framing line. Returns `{ conversationId, reply, toolsUsed }`.
+/// A note the tools create or change is announced as it happens, like any
+/// other note edit (`yap-note-changed` with origin "chat", then
+/// `yap-notes-changed`), so the notepad and the lists follow it live.
 #[tauri::command]
 pub async fn chat_send(
+    app: AppHandle,
     conversation_id: Option<u64>,
     text: String,
     scope: Option<String>,
@@ -750,7 +767,7 @@ pub async fn chat_send(
         .rev()
         .map(|m| (m.role.clone(), m.text.clone()))
         .collect();
-    crate::chats::append(conv.id, "user", &text)?;
+    crate::chats::append(conv.id, "user", &text, &[])?;
 
     // System prompt: persona (+ tool instructions when the model can
     // tool-call) + eager-RAG notes under their exact framing. OpenWhispr runs
@@ -779,6 +796,11 @@ pub async fn chat_send(
     }
 
     let (reply, tools_used) = if tools_supported {
+        let notify = |id: u64| {
+            use tauri::Emitter;
+            note_changed(&app, id, "chat");
+            let _ = app.emit("yap-notes-changed", ());
+        };
         crate::tools::run_tool_loop(
             &system,
             &history,
@@ -788,6 +810,7 @@ pub async fn chat_send(
             &model,
             &provider,
             disable_thinking,
+            &notify,
         )
         .await?
     } else {
@@ -805,7 +828,7 @@ pub async fn chat_send(
         .await?;
         (reply, Vec::new())
     };
-    crate::chats::append(conv.id, "assistant", &reply)?;
+    crate::chats::append(conv.id, "assistant", &reply, &tools_used)?;
     Ok(serde_json::json!({
         "conversationId": conv.id,
         "reply": reply,

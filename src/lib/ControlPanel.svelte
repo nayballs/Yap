@@ -15,6 +15,7 @@
   import yapIcon from '../assets/yap-logo.svg';
   import ToastHost from './ui/ToastHost.svelte';
   import { toast } from './ui/toast.svelte.js';
+  import { fillHotkey } from './hotkeys.js';
   import Settings from './Settings.svelte';
   import { attention } from './attention.svelte.js';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
@@ -130,6 +131,19 @@
     listen('yap-error', (e) => {
       const msg = String(e.payload || 'Something went wrong');
       toast({ title: 'Yap ran into a problem', description: msg, variant: 'destructive' });
+    }).then((u) => uns.push(u));
+    // Push-to-talk coaching (coaching.rs): a lone tap of the dictation
+    // hotkey, or a very long hold, while this window is on screen. The texts
+    // say `{key}`; the hotkey's name is written here.
+    listen('yap-hint', (e) => {
+      const h = e.payload;
+      if (!h?.title) return;
+      toast({
+        title: fillHotkey(h.title, h.hotkey),
+        description: fillHotkey(h.body, h.hotkey),
+        chip: 'Tip',
+        duration: 10_000,
+      });
     }).then((u) => uns.push(u));
     // A deep link asked for a Settings section (auth.rs: "Open Yap" on the
     // account service's /security page → "account").

@@ -15,11 +15,13 @@ mod bridge;
 mod calendar;
 mod capture;
 mod chats;
+mod coaching;
 mod commands;
 mod config;
 mod dict_usage;
 mod e2e;
 mod fuzzy;
+mod gesture;
 mod media;
 mod meeting;
 mod meeting_assist;
@@ -27,6 +29,7 @@ mod meeting_detect;
 mod meeting_end;
 mod meeting_guard;
 mod meeting_summary;
+mod note_text;
 mod notepad;
 mod notes;
 mod tools;
@@ -36,6 +39,7 @@ mod llm;
 mod local_llm;
 mod mcp;
 mod mcp_clients;
+mod mic_watch;
 mod mute;
 mod overlay;
 mod partials;
@@ -341,6 +345,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::toggle_recording,
+            commands::dictation_key,
             commands::get_config,
             commands::save_config,
             commands::download_model,
@@ -477,6 +482,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             e2e::e2e_main_on_screen,
             #[cfg(debug_assertions)]
+            e2e::e2e_dictation_mic,
+            #[cfg(debug_assertions)]
+            coaching::e2e_coaching_reset,
+            #[cfg(debug_assertions)]
             meeting_guard::e2e_meeting_limit,
             #[cfg(debug_assertions)]
             calendar::calendar_e2e_opened,
@@ -566,46 +575,53 @@ pub fn run() {
             // Route hotkey press/release into the pipeline. Done Rust-side so the
             // core loop doesn't depend on any webview being ready. The
             // pipeline picks toggle vs push-to-talk live from its config, so
-            // both events go through `on_key`.
+            // both events go through `on_key`. Each carries the moment the
+            // key moved (`gesture::now_ms`, stamped in the hook): events are
+            // handled one after another, and push-to-talk's tap / double-tap
+            // timing mustn't stretch while the last one is still starting.
             let press_handle = handle.clone();
-            handle.listen("dictation-key-pressed", move |_event| {
+            handle.listen("dictation-key-pressed", move |event| {
+                let at = event.payload().parse::<u64>().ok();
                 let state = press_handle.state::<AppState>();
                 let pipeline = state.pipeline.lock();
                 if let Ok(guard) = pipeline {
                     if let Some(p) = guard.as_ref() {
-                        p.on_key(true);
+                        p.on_key(true, at);
                     }
                 }
             });
             let release_handle = handle.clone();
-            handle.listen("dictation-key-released", move |_event| {
+            handle.listen("dictation-key-released", move |event| {
+                let at = event.payload().parse::<u64>().ok();
                 let state = release_handle.state::<AppState>();
                 let pipeline = state.pipeline.lock();
                 if let Ok(guard) = pipeline {
                     if let Some(p) = guard.as_ref() {
-                        p.on_key(false);
+                        p.on_key(false, at);
                     }
                 }
             });
 
             // Route the edit/rewrite hotkey the same way (its own event pair).
             let edit_press_handle = handle.clone();
-            handle.listen("edit-key-pressed", move |_event| {
+            handle.listen("edit-key-pressed", move |event| {
+                let at = event.payload().parse::<u64>().ok();
                 let state = edit_press_handle.state::<AppState>();
                 let pipeline = state.pipeline.lock();
                 if let Ok(guard) = pipeline {
                     if let Some(p) = guard.as_ref() {
-                        p.on_edit_key(true);
+                        p.on_edit_key(true, at);
                     }
                 }
             });
             let edit_release_handle = handle.clone();
-            handle.listen("edit-key-released", move |_event| {
+            handle.listen("edit-key-released", move |event| {
+                let at = event.payload().parse::<u64>().ok();
                 let state = edit_release_handle.state::<AppState>();
                 let pipeline = state.pipeline.lock();
                 if let Ok(guard) = pipeline {
                     if let Some(p) = guard.as_ref() {
-                        p.on_edit_key(false);
+                        p.on_edit_key(false, at);
                     }
                 }
             });

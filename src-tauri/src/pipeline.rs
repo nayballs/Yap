@@ -14,6 +14,8 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use tauri::{AppHandle, Emitter};
 
 use crate::config::{self, YapConfig};
+use crate::gesture::{Action, Gesture};
+use crate::mic_watch::{DeadMicWatch, MicSilent, MicStep, MicTally};
 use crate::stt::{self, SttAdapter, SttError};
 
 pub(crate) const TARGET_SAMPLE_RATE: u32 = 16_000;
@@ -166,6 +168,32 @@ struct SendStream(#[allow(dead_code)] cpal::Stream);
 // internal threading and we never touch it from another thread.
 unsafe impl Send for SendStream {}
 
+/// Where the running mic stream lives (`None`: no microphone). The
+/// `Pipeline` owns it; `Shared` keeps a weak handle so the dead-mic watchdog
+/// can reopen it (a strong one would be a cycle through the stream's
+/// callback, which holds `Shared`).
+type StreamSlot = Mutex<Option<SendStream>>;
+
+/// Test mode only (`e2e::e2e_dictation_mic`): the mic's audio arrives as
+/// digital silence, as a muted mic's does — the dead-mic watchdog's case,
+/// staged on the real microphone.
+#[cfg(debug_assertions)]
+static TEST_SILENT_MIC: AtomicBool = AtomicBool::new(false);
+
+#[cfg(debug_assertions)]
+pub(crate) fn set_test_silent_mic(silent: bool) {
+    TEST_SILENT_MIC.store(silent, Ordering::SeqCst);
+}
+
+/// The push-to-talk gesture (`gesture.rs`) and which hotkey its recording
+/// belongs to.
+#[derive(Default)]
+struct GestureSlot {
+    machine: Gesture,
+    /// The recording is the edit hotkey's (no coaching hints for it).
+    edit: bool,
+}
+
 /// State shared between the audio callback, the hotkey toggle, and STT.
 struct Shared {
     recording: AtomicBool,
@@ -206,6 +234,21 @@ struct Shared {
     /// A mic stream is running. False when Yap found no microphone (see
     /// `Pipeline::start`); `start_recording` refuses until there is one.
     has_mic: AtomicBool,
+    /// Push-to-talk's hold / tap / double-tap state. Locked while acting on
+    /// a step, so key events and the tap timer take turns.
+    gesture: Mutex<GestureSlot>,
+    /// The current recording's live audio, for the dead-mic watchdog
+    /// (`mic_watch.rs`), tallied by the audio callback.
+    mic_tally: MicTally,
+    /// The watchdog told the user this recording's mic gives nothing.
+    mic_dead: AtomicBool,
+    /// Bumped by every `start_recording`: a recording's watcher stops when
+    /// a newer one starts.
+    rec_session: AtomicU64,
+    /// The pipeline's mic stream, to reopen (see `StreamSlot`).
+    stream_slot: Weak<StreamSlot>,
+    /// The name of the device the mic stream captures from.
+    mic_name: Mutex<String>,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -309,22 +352,81 @@ impl Shared {
     /// Route a hotkey press/release through the configured recording mode.
     ///
     /// - `toggle` mode: act on press only (flip recording on/off). Ignore release.
-    /// - `pushToTalk` mode: press starts (if idle), release stops + transcribes
-    ///   (if recording).
+    /// - `pushToTalk` mode: the gestures of `gesture.rs` — hold to talk
+    ///   (release stops + transcribes), a quick tap then a second press locks
+    ///   it hands-free until the next press, a lone tap is thrown away with a
+    ///   coaching hint.
     ///
     /// `edit` selects edit/rewrite mode (the dictation hotkey passes `false`, the
-    /// edit hotkey passes `true`).
-    fn on_key(self: &Arc<Self>, pressed: bool, edit: bool) {
-        if self.recording_mode() == "pushToTalk" {
+    /// edit hotkey passes `true`). `at`: when the key moved (`gesture::now_ms`,
+    /// stamped by the input hook); `None` = now.
+    fn on_key(self: &Arc<Self>, pressed: bool, edit: bool, at: Option<u64>) {
+        let mut g = self.gesture.lock().unwrap_or_else(|p| p.into_inner());
+        if self.recording_mode() != "pushToTalk" {
+            g.machine.reset();
+            drop(g);
             if pressed {
-                if !self.recording.load(Ordering::SeqCst) {
-                    self.start_recording(edit);
-                }
-            } else if self.recording.load(Ordering::SeqCst) {
-                self.stop_and_transcribe();
+                self.toggle(edit);
             }
-        } else if pressed {
-            self.toggle(edit);
+            return;
+        }
+        let now = at.unwrap_or_else(crate::gesture::now_ms);
+        let recording = self.recording.load(Ordering::SeqCst);
+        let step = if pressed {
+            g.machine.press(now, recording)
+        } else {
+            g.machine.release(now, recording)
+        };
+        self.apply_gesture(&mut g, step, edit);
+    }
+
+    /// The tap timer: a tap whose second press didn't come is thrown away.
+    fn gesture_tick(self: &Arc<Self>) {
+        let mut g = self.gesture.lock().unwrap_or_else(|p| p.into_inner());
+        let step = g.machine.tick(crate::gesture::now_ms(), self.recording.load(Ordering::SeqCst));
+        let edit = g.edit;
+        self.apply_gesture(&mut g, step, edit);
+    }
+
+    /// Do what a gesture step says (with the gesture lock held, so a key
+    /// event and the tap timer never act at once). `edit`: the hotkey that
+    /// starts a recording here.
+    fn apply_gesture(self: &Arc<Self>, g: &mut GestureSlot, step: crate::gesture::Step, edit: bool) {
+        match step.action {
+            Action::Start => {
+                g.edit = edit;
+                self.start_recording(edit);
+                // Refused (still transcribing the last one, no mic): nothing
+                // to hold, tap or lock.
+                if !self.recording.load(Ordering::SeqCst) {
+                    g.machine.reset();
+                }
+            }
+            Action::Stop => self.stop_and_transcribe(),
+            Action::Discard => {
+                tracing::info!("Push-to-talk: a lone tap, nothing to transcribe");
+                self.cancel();
+            }
+            Action::Lock => {
+                tracing::info!("Push-to-talk: double-tap, recording hands-free");
+                let _ = self.app.emit("yap-dictation-locked", true);
+                std::thread::spawn(crate::coaching::hands_free_used);
+            }
+            Action::None => {}
+        }
+        if let Some(ms) = step.tick_in {
+            let shared = Arc::clone(self);
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(ms));
+                shared.gesture_tick();
+            });
+        }
+        // Coaching is about the dictation hotkey. Off the locks: showing it
+        // asks the main thread whether the window is on screen.
+        if let (Some(hint), false) = (step.hint, g.edit) {
+            let hotkey = self.config.read().map(|c| c.hotkey.clone()).unwrap_or_default();
+            let app = self.app.clone();
+            std::thread::spawn(move || crate::coaching::offer(&app, hint, &hotkey));
         }
     }
 
@@ -379,6 +481,11 @@ impl Shared {
         let smart = !edit && self.config.read().map(|c| c.smart_spacing).unwrap_or(false);
         crate::selection::begin_dictation((hwnd != 0).then_some(hwnd), smart);
 
+        // The dead-mic watchdog's tally starts afresh with each recording.
+        self.mic_tally.reset();
+        self.mic_dead.store(false, Ordering::SeqCst);
+        let session = self.rec_session.fetch_add(1, Ordering::SeqCst) + 1;
+
         // A meeting recording keeps this dictation out of its "You" side.
         dictation_began();
         self.recording.store(true, Ordering::SeqCst);
@@ -394,7 +501,76 @@ impl Shared {
         // window of the buffer while recording (cost independent of recording
         // length — see `partials::PartialSession`).
         self.maybe_start_streaming();
+        self.spawn_mic_watch(session);
         tracing::info!("Recording started");
+    }
+
+    /// The dead-mic watchdog for recording `session` (`mic_watch.rs`): polls
+    /// the callback's tally until the mic proves itself or the recording
+    /// ends; reopens the stream once if the start is all digital silence (or
+    /// no audio comes at all), and says so if that didn't help.
+    fn spawn_mic_watch(self: &Arc<Self>, session: u64) {
+        let shared = Arc::clone(self);
+        let spawned = std::thread::Builder::new()
+            .name("dictation-mic-watch".into())
+            .spawn(move || {
+                let started = Instant::now();
+                let mut watch = DeadMicWatch::default();
+                loop {
+                    std::thread::sleep(Duration::from_millis(crate::mic_watch::POLL_MS));
+                    let live = shared.recording.load(Ordering::SeqCst)
+                        && shared.rec_session.load(Ordering::SeqCst) == session;
+                    if !live {
+                        break;
+                    }
+                    let (samples, heard) = shared.mic_tally.read();
+                    match watch.poll(started.elapsed().as_millis() as u64, samples, heard) {
+                        MicStep::Wait => {}
+                        MicStep::Fine => break,
+                        MicStep::Reopen => {
+                            tracing::warn!(samples, "Dictation mic: nothing but silence — reopening it");
+                            if let Err(e) = shared.reopen_mic() {
+                                tracing::warn!("Dictation mic: couldn't reopen it: {}", e);
+                            }
+                        }
+                        MicStep::Report => {
+                            let silent = shared.mic_silent();
+                            tracing::warn!("Dictation mic: {}", silent.message);
+                            shared.mic_dead.store(true, Ordering::SeqCst);
+                            // The overlay says so in the waveform's place (the
+                            // recording carries on), the main window as a toast.
+                            let _ = shared.app.emit("yap-mic-silent", Some(&silent));
+                            let _ = shared.app.emit("yap-error", silent.message);
+                        }
+                        MicStep::Recovered => {
+                            tracing::info!("Dictation mic: sound again");
+                            shared.mic_dead.store(false, Ordering::SeqCst);
+                            let _ = shared.app.emit("yap-mic-silent", None::<MicSilent>);
+                            break;
+                        }
+                    }
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::warn!("Dictation mic: no watchdog ({})", e);
+        }
+    }
+
+    /// "No sound from <the mic> — check it isn't muted or unplugged", and
+    /// the overlay's short form.
+    fn mic_silent(&self) -> MicSilent {
+        let name = self.mic_name.lock().map(|n| n.clone()).unwrap_or_default();
+        MicSilent::for_mic(&name)
+    }
+
+    /// Reopen the mic stream on the configured device, mid-recording (the
+    /// recording carries on into the new stream). The dead stream stops
+    /// first: two running at once would interleave their audio.
+    fn reopen_mic(self: &Arc<Self>) -> Result<(), String> {
+        let slot = self.stream_slot.upgrade().ok_or("the pipeline is gone")?;
+        let device = self.config.read().ok().and_then(|c| c.input_device.clone());
+        let mut slot = slot.lock().unwrap_or_else(|p| p.into_inner());
+        open_stream(self, &mut slot, device.as_deref(), false)
     }
 
     /// Snapshot the language/translate settings for a transcription.
@@ -461,6 +637,25 @@ impl Shared {
         self.recording.store(false, Ordering::SeqCst);
         dictation_ended();
         crate::mute::unmute_system_output();
+        // The dead-mic watchdog reported this recording and it never heard a
+        // thing: it's all digital silence, nothing to transcribe (and Whisper
+        // can make words up from silence). End on the reason instead.
+        if self.mic_dead.load(Ordering::SeqCst) && !self.mic_tally.heard() {
+            if let Ok(mut buf) = self.buffer.lock() {
+                buf.clear();
+            }
+            if let Ok(mut g) = self.selection.lock() {
+                *g = None;
+            }
+            self.edit_mode.store(false, Ordering::SeqCst);
+            tracing::info!("Recording stopped: the mic gave nothing but silence, not transcribed");
+            let _ = self.app.emit("yap-mic-silent", Some(self.mic_silent()));
+            let _ = self.app.emit("yap-state", "error");
+            if self.sound_enabled() {
+                crate::sound::play_stop(self.audio_feedback_volume(), self.output_device().as_deref());
+            }
+            return;
+        }
         let _ = self.app.emit("yap-state", "processing");
         if self.sound_enabled() {
             crate::sound::play_stop(self.audio_feedback_volume(), self.output_device().as_deref());
@@ -1138,8 +1333,9 @@ impl Shared {
 pub struct Pipeline {
     shared: Arc<Shared>,
     /// `None` while there's no microphone to capture from. Behind a lock so a
-    /// hotkey press can retry (`ensure_mic`).
-    stream: Mutex<Option<SendStream>>,
+    /// hotkey press can retry (`ensure_mic`), and shared (weakly) with the
+    /// dead-mic watchdog, which may reopen it.
+    stream: Arc<StreamSlot>,
 }
 
 impl Pipeline {
@@ -1167,6 +1363,7 @@ impl Pipeline {
 
         let has_engine = engine.is_some();
 
+        let stream_slot: Arc<StreamSlot> = Arc::new(Mutex::new(None));
         let shared = Arc::new(Shared {
             recording: AtomicBool::new(false),
             buffer: Mutex::new(Vec::new()),
@@ -1182,24 +1379,28 @@ impl Pipeline {
             upload_cancel: AtomicBool::new(false),
             mic_test: AtomicBool::new(false),
             has_mic: AtomicBool::new(false),
+            gesture: Mutex::new(GestureSlot::default()),
+            mic_tally: MicTally::default(),
+            mic_dead: AtomicBool::new(false),
+            rec_session: AtomicU64::new(0),
+            stream_slot: Arc::downgrade(&stream_slot),
+            mic_name: Mutex::new(String::new()),
         });
 
         spawn_idle_watcher(&shared);
 
-        let stream = match build_input_stream(&shared, cfg.input_device.as_deref()) {
-            Ok(s) => Some(SendStream(s)),
-            Err(e) => {
+        {
+            let mut slot = stream_slot.lock().unwrap_or_else(|p| p.into_inner());
+            if let Err(e) = open_stream(&shared, &mut slot, cfg.input_device.as_deref(), true) {
                 tracing::warn!("No audio input — running without a microphone: {}", e);
-                None
             }
-        };
-        shared.has_mic.store(stream.is_some(), Ordering::SeqCst);
+        }
 
         let _ = app.emit("yap-state", if has_engine { "idle" } else { "needs-model" });
 
         Self {
             shared,
-            stream: Mutex::new(stream),
+            stream: stream_slot,
         }
     }
 
@@ -1215,12 +1416,8 @@ impl Pipeline {
             return;
         }
         let device = self.shared.config.read().ok().and_then(|c| c.input_device.clone());
-        match build_input_stream(&self.shared, device.as_deref()) {
-            Ok(s) => {
-                *slot = Some(SendStream(s));
-                self.shared.has_mic.store(true, Ordering::SeqCst);
-            }
-            Err(e) => tracing::warn!("Still no microphone: {}", e),
+        if let Err(e) = open_stream(&self.shared, &mut slot, device.as_deref(), true) {
+            tracing::warn!("Still no microphone: {}", e);
         }
     }
 
@@ -1231,21 +1428,23 @@ impl Pipeline {
     }
 
     /// Route a **dictation** hotkey press/release through the recording mode.
-    /// Called from the input-hook listeners for both press and release.
-    pub fn on_key(&self, pressed: bool) {
+    /// Called from the input-hook listeners for both press and release (`at`:
+    /// the hook's timestamp, `gesture::now_ms`) and from the windows' in-page
+    /// fallback (`dictation_key`, `None` = now).
+    pub fn on_key(&self, pressed: bool, at: Option<u64>) {
         if pressed {
             self.ensure_mic();
         }
-        self.shared.on_key(pressed, false);
+        self.shared.on_key(pressed, false, at);
     }
 
     /// Route an **edit/rewrite** hotkey press/release. Same as `on_key` but the
     /// session captures the selection and rewrites it from the spoken instruction.
-    pub fn on_edit_key(&self, pressed: bool) {
+    pub fn on_edit_key(&self, pressed: bool, at: Option<u64>) {
         if pressed {
             self.ensure_mic();
         }
-        self.shared.on_key(pressed, true);
+        self.shared.on_key(pressed, true, at);
     }
 
     /// Stop recording and discard the audio (no transcription).
@@ -1318,13 +1517,36 @@ impl Pipeline {
     /// running and an error is returned. Also how capture starts when Yap had
     /// no microphone.
     pub fn set_input_device(&self, device: Option<&str>) -> Result<(), String> {
-        let stream = build_input_stream(&self.shared, device)?;
-        // Dropping the old stream stops it.
-        *self.stream.lock().unwrap_or_else(|p| p.into_inner()) = Some(SendStream(stream));
-        self.shared.has_mic.store(true, Ordering::SeqCst);
+        let mut slot = self.stream.lock().unwrap_or_else(|p| p.into_inner());
+        open_stream(&self.shared, &mut slot, device, true)?;
         tracing::info!(device = device.unwrap_or("default"), "Input device switched");
         Ok(())
     }
+}
+
+/// Open a capture stream on `device` (`None`: Windows' default) into the
+/// (locked) stream `slot`, replacing the one there — how capture starts,
+/// how Settings switches mics live, and how the dead-mic watchdog reopens
+/// one mid-recording (the recording carries on into the new stream).
+/// `keep_old`: build the new stream before stopping the old one, so a
+/// failure leaves the old one running (a mic picked in Settings); otherwise
+/// the old one stops first (the watchdog's: it's broken, and two streams at
+/// once would interleave their audio in the recording). `has_mic` follows.
+fn open_stream(
+    shared: &Arc<Shared>,
+    slot: &mut Option<SendStream>,
+    device: Option<&str>,
+    keep_old: bool,
+) -> Result<(), String> {
+    if !keep_old {
+        *slot = None;
+    }
+    let result = build_input_stream(shared, device).map(|s| {
+        // Dropping the old stream stops it.
+        *slot = Some(SendStream(s));
+    });
+    shared.has_mic.store(slot.is_some(), Ordering::SeqCst);
+    result
 }
 
 /// Streaming-partials worker. Runs on its own thread for one recording session
@@ -1570,6 +1792,13 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
                 } else {
                     mono
                 };
+                // The e2e suite's "muted mic" (debug builds only).
+                #[cfg(debug_assertions)]
+                let resampled = if TEST_SILENT_MIC.load(Ordering::Relaxed) {
+                    vec![0.0; resampled.len()]
+                } else {
+                    resampled
+                };
                 // While idle, keep a short rolling pre-roll ring (no buffering) so
                 // the next recording starts a moment before the key. Amp is only
                 // emitted while idle if a mic test (onboarding) asked for levels.
@@ -1583,16 +1812,21 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
                     if !cb_shared.mic_test.load(Ordering::Relaxed) {
                         return;
                     }
-                } else if let Ok(mut buf) = cb_shared.buffer.lock() {
-                    // Bound the buffer so a stuck key can't grow it without limit
-                    // (OOM). Past the cap we drop further audio and warn once.
-                    if buf.len() < MAX_RECORDING_SAMPLES {
-                        buf.extend_from_slice(&resampled);
-                        if buf.len() >= MAX_RECORDING_SAMPLES {
-                            tracing::warn!(
-                                "Recording hit the {}-minute cap — further audio dropped; stop the recording",
-                                MAX_RECORDING_SAMPLES / (60 * TARGET_SAMPLE_RATE as usize)
-                            );
+                } else {
+                    // The dead-mic watchdog's tally: how much arrived, and
+                    // whether any of it wasn't digital silence.
+                    cb_shared.mic_tally.note(&resampled);
+                    if let Ok(mut buf) = cb_shared.buffer.lock() {
+                        // Bound the buffer so a stuck key can't grow it without limit
+                        // (OOM). Past the cap we drop further audio and warn once.
+                        if buf.len() < MAX_RECORDING_SAMPLES {
+                            buf.extend_from_slice(&resampled);
+                            if buf.len() >= MAX_RECORDING_SAMPLES {
+                                tracing::warn!(
+                                    "Recording hit the {}-minute cap — further audio dropped; stop the recording",
+                                    MAX_RECORDING_SAMPLES / (60 * TARGET_SAMPLE_RATE as usize)
+                                );
+                            }
                         }
                     }
                 }
@@ -1620,6 +1854,9 @@ fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result
     stream
         .play()
         .map_err(|e| format!("Failed to start input stream: {}", e))?;
+    if let Ok(mut name) = shared.mic_name.lock() {
+        *name = dev_name;
+    }
     tracing::info!("Audio capture started");
     Ok(stream)
 }

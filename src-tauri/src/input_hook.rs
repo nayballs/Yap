@@ -104,9 +104,11 @@ static MEETING_BINDING: KeyBinding = KeyBinding::new();
 /// must NEVER do slow work (like `app.emit`, which can block on a busy webview):
 /// Windows silently REMOVES a low-level hook whose callback exceeds the
 /// LowLevelHooksTimeout (~300 ms) — the hotkey then goes dead with no error.
-/// So the callback only does atomics + a non-blocking channel send.
+/// So the callback only does atomics + a non-blocking channel send. Each
+/// event goes with the moment the key moved (`gesture::now_ms`), its payload:
+/// push-to-talk times taps and double-taps from it.
 #[cfg(target_os = "windows")]
-static EVENT_TX: std::sync::OnceLock<std::sync::mpsc::Sender<&'static str>> =
+static EVENT_TX: std::sync::OnceLock<std::sync::mpsc::Sender<(&'static str, u64)>> =
     std::sync::OnceLock::new();
 
 /// Not an event: asks the forwarder thread to tap the menu mask key (see
@@ -489,14 +491,14 @@ fn handle_binding_event(
             // Only emit on first press (not repeats)
             if !binding.active.swap(true, Ordering::Relaxed) {
                 info!("Input hook: queueing {}", event_pressed);
-                let _ = tx.send(event_pressed);
+                let _ = tx.send((event_pressed, crate::gesture::now_ms()));
             }
         }
         true
     } else if binding.active.swap(false, Ordering::Relaxed) {
         if let Some(tx) = EVENT_TX.get() {
             info!("Input hook: queueing {}", event_released);
-            let _ = tx.send(event_released);
+            let _ = tx.send((event_released, crate::gesture::now_ms()));
         }
         true
     } else {
@@ -558,7 +560,7 @@ fn process_keyboard_event(
                         && !binding.active.load(Ordering::Relaxed)
                     {
                         if let Some(tx) = EVENT_TX.get() {
-                            let _ = tx.send(MENU_MASK);
+                            let _ = tx.send((MENU_MASK, 0));
                         }
                     }
                     handle_binding_event(binding, pressed, released, true);
@@ -715,18 +717,18 @@ pub fn start_input_hook(app_handle: AppHandle) {
     // Emit-forwarder: the hook callback queues event names here and this thread
     // does the (potentially slow) `app.emit`, keeping the callback fast enough
     // that Windows never times it out (see EVENT_TX).
-    let (tx, rx) = std::sync::mpsc::channel::<&'static str>();
+    let (tx, rx) = std::sync::mpsc::channel::<(&'static str, u64)>();
     EVENT_TX.set(tx).expect("Input hook event channel already set");
     std::thread::Builder::new()
         .name("input-hook-emit".into())
         .spawn(move || {
-            while let Ok(event) = rx.recv() {
+            while let Ok((event, at)) = rx.recv() {
                 if event == MENU_MASK {
                     send_menu_mask();
                     continue;
                 }
                 info!("Input hook: emitting {}", event);
-                if let Err(e) = app_handle.emit(event, ()) {
+                if let Err(e) = app_handle.emit(event, at) {
                     warn!("Input hook: failed to emit {}: {}", event, e);
                 }
             }

@@ -6,9 +6,12 @@
   // keyword-RAG** over the notes library (chat_send injects top-5 note
   // snippets under their exact framing). Ctrl+N = new chat.
   //
-  // v1 divergences (ROADMAP "AI Chat" escalating plan): no streaming (one
-  // response per turn, "Thinking…" placeholder), no tool-calling loop yet, no
-  // conversation search/archive/rename.
+  // A model that can call tools (tools.rs) looks notes up and changes them;
+  // each answer shows what it did as chips above it ("Edited "Launch plan":
+  // "Friday." → "Monday.""), kept with the message in chats.json. v1
+  // divergences (ROADMAP "AI Chat" escalating plan): no streaming (one
+  // response per turn, "Thinking…" placeholder), no conversation
+  // search/archive/rename.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, untrack } from 'svelte';
   import { renderMarkdown } from './markdown.js';

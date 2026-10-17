@@ -97,10 +97,10 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
   `calendar.json` — connected calendars + the next week of meetings,
   `dictionary_usage.json` — how often/lately each dictionary word was used,
   `dict_usage.rs`, `icons/` — a cache of the installed call apps' own icons,
-  `app_icons.rs`).
+  `app_icons.rs`, `hints.json` — push-to-talk coaching counts, `coaching.rs`).
   Every JSON store writes atomically and quarantines a corrupt file on load
   instead of crashing (`config::atomic_write`/`quarantine_corrupt`, used by all
-  eight stores).
+  nine stores).
 
 ---
 
@@ -180,7 +180,15 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   downmixes→mono, resamples→16 kHz, and emits a throttled **peak amplitude**
   (`yap-amp`) for the scrolling waveform; while idle it keeps a rolling ~300 ms
   **pre-roll** ring that `start_recording` prepends (anti first-word-clipping).
-  `recording_mode` selects toggle vs push-to-talk. `run_stt` (async) does cleanup →
+  `recording_mode` selects toggle vs push-to-talk; in push-to-talk `on_key` reads
+  **gestures** (`gesture.rs`, Wispr Flow's by behaviour): hold to talk, a quick tap
+  (< 300 ms) + a second press within 500 ms locks it **hands-free** until the next
+  press (`yap-dictation-locked` → a lock on the overlay), a lone tap is thrown away
+  (never a junk dictation) and earns a coaching hint (`coaching.rs`), as does a
+  hold of a minute or more. Key events and the tap timer act under one lock
+  (`gesture`), timed by the input hook's own timestamps; a recording started or
+  stopped elsewhere (the bar's Dictate, the tray's Cancel) is followed, and one
+  started by Dictate stops on the next press. `run_stt` (async) does cleanup →
   `finish_dictation` (dictionary via `apply_corrections`, shared with meetings
   and Upload; then the "press enter" command, then snippets) →
   `text_injector::prepare_dictation` (fitted to the text around the cursor, which
@@ -213,7 +221,37 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   pipeline down: it runs without a stream (`has_mic`), a hotkey press retries
   (`ensure_mic`), picking a mic (`set_input_device`) starts capture, and a recording
   attempt without one says "No microphone found" (toast + overlay) — Upload, models
-  and Settings work regardless.
+  and Settings work regardless. **Dead-mic watchdog** (`mic_watch.rs`): the audio
+  callback tallies each recording's live audio (`mic_tally`: how much, any sample
+  not exactly 0.0); a per-recording watcher (`spawn_mic_watch`) reopens the stream
+  once (`reopen_mic`) after 2 s without audio or 3 s of nothing but zeros, and at
+  5 s says "No sound from <mic> — check it isn't muted or unplugged" (`yap-error`,
+  plus `yap-mic-silent` for the overlay's line) while the recording carries on;
+  sound coming back takes it back, and a recording that ends still silent isn't
+  transcribed (the overlay ends on the reason). Capture start, `ensure_mic`,
+  `set_input_device` and the reopen all go through `open_stream` (the stream slot
+  is shared weakly with `Shared`; the reopen stops the dead stream first).
+- **`gesture.rs`** — push-to-talk's pure gesture state machine: key down/up and
+  the clock in (`now_ms`, monotonic, also what the input hook stamps events
+  with), Start / Stop / Discard / Lock + an optional hint + "tick me in N ms"
+  out. States Idle → Held → (TapPending → LockHeld → Locked). `TAP_MAX_MS` 300,
+  `DOUBLE_TAP_GAP_MS` 500, `LONG_HOLD_MS` 60 s. Every call is told whether a
+  dictation records right now and follows that first. Unit-tested.
+- **`coaching.rs`** — push-to-talk coaching hints: a lone tap → "Hold {key} while
+  you talk" (or double-tap for hands-free), a minute-long hold → "Double-tap
+  {key} for hands-free". Each ≤ 3 times, never within 10 min of another, none
+  once double-tap has been used; counts in `<data>/hints.json` (not config.json:
+  Settings' auto-saved copy would write old counts back). Surface: a Tip toast in
+  the main window while it's on screen (`yap-hint`), else a Yap bar card (icon
+  `tip`); neither → nothing shown, nothing counted (never a Windows
+  notification). Texts say `{key}`; the page names the hotkey (`fillHotkey` in
+  `lib/hotkeys.js`; the card's `hotkey` field). Not for the edit hotkey.
+- **`mic_watch.rs`** — the dictation's dead-mic watchdog, pure: `MicTally`
+  (lock-free, fed by the audio callback), `DeadMicWatch::poll(elapsed, samples,
+  heard)` → Wait / Reopen / Report / Recovered / Fine, the messages (the full one
+  and the overlay's short "No sound from <device> — is it muted?"). Only exact
+  zeros count (a quiet room is never all zeros). Unit-tested over simulated
+  callback chunks. Meetings have their own quiet-side watch (`meeting.rs`).
 - **`stt.rs`** — `SttEngine` trait + a real `transcribe-rs` engine (`#[cfg(feature =
   "engines")]`) and a stub (default build). Holds the **14-model registry**
   (`ModelDescriptor`: id/filename/url/sha256/is_directory/engine_type), resolves
@@ -263,7 +301,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   under the store lock). `note_update` takes an `origin` (the saving window's
   label) and emits `yap-note-changed` with the editable fields, which keeps the
   Notes view and the meeting notepad in sync both ways (each sends only the
-  fields it edited). `event` (optional) = the calendar meeting the note
+  fields it edited). `modify(id, f)` changes one note under the store lock
+  (read and write in one step — the chat's `edit_note`; only a change bumps
+  `updated_ts` and saves). Unit tests get an in-memory store per test
+  thread (`cfg(test)`), never `notes.json`. `event` (optional) = the calendar meeting the note
   belongs to (`NoteEvent`: key, title, start/end, the invite's description,
   service), set by `link_event` (also the meeting's title as a real title,
   attendees merged, `note_type` meeting) and found by `find_by_event`.
@@ -651,16 +692,54 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
 - **`chats.rs`** — the AI Chat surface's conversation store (`chats.json`): a
   `Conversation` (title, messages, timestamps) with `list`/`get`/`create`/
   `append`/`delete`; `chat_send` (commands.rs) creates a conversation on the
-  first message using a first-50-chars title rule.
+  first message using a first-50-chars title rule. An answer keeps its tool
+  chips (`ChatMessage.tools`, only written when there are some), so a
+  conversation opened later still shows what the AI looked up and changed.
 - **`tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
-  `copy_to_clipboard` — executed locally over `notes.rs`/`arboard`), plus their
-  `TOOL_INSTRUCTIONS` system-prompt lines. `run_tool_loop` drives the OpenAI
-  tool-call protocol via `llm::post_chat_message` for up to `MAX_TOOL_STEPS`
-  (20) turns. Gated by `supports_tools` — cloud providers always qualify,
-  local models need ≥4B params (`LOCAL_TOOL_MIN_PARAMS_B`) — so smaller local
-  models fall back to plain keyword-RAG chat instead.
+  `copy_to_clipboard` — executed locally over `notes.rs`/`arboard`) and
+  three of Yap's own for **changing part of a note safely** (after the note
+  tools of Wispr Flow's live Ask — behaviour only; the pure part is
+  **`note_text.rs`**): `search_in_note(note_id, query, field?)` (the lines a
+  phrase is on, numbered `12| …`, the note's own text, the lines around the
+  first 5 hits; forgiving — case, whitespace runs, curly quotes, dashes; in
+  content, the `enhanced` summary and the transcript (talk only, `[m:ss]
+  You: …`) unless one is named; ≤ 20 hits / ~4k chars), `read_note(note_id,
+  field, offset?, limit?)` (a page of ≤ 400 lines and ≤ 3,000 tokens — the
+  bound `get_note` puts on a meeting via `ask_context` — with `more` /
+  `next_offset`; a line longer than a page is cut and says so) and
+  `edit_note(note_id, field: content|enhanced|title, old_text, new_text)`:
+  `old_text` must appear **exactly once** (overlapping counts), byte for
+  byte except that `\r\n` = `\n` (the new text takes the note's own line
+  endings); 0 matches → nothing changes and the error lists the places that
+  differ only in spacing/case/quote marks, quoted from the note (`near`),
+  and spots copied line numbers; 2+ → the lines they're on; `old_text` ""
+  only fills an empty field; the transcript is never edited. Bookkeeping: a
+  new title clears `title_auto`, a content edit leaves the summary stale
+  (`enhanced_at_hash` untouched), a summary written into an empty field is
+  stamped fresh, one emptied is no summary. Matched and replaced under the
+  store lock (`notes::modify`). `update_note` stays for folder moves and
+  whole rewrites the user asks for (its description and `TOOL_INSTRUCTIONS`
+  say so; the instructions steer search → `edit_note` for everything else);
+  `get_note` returns the notes (`content`) and the summary (`enhanced`)
+  apart, each ≤ 2,000 tokens (`cut` names what was shortened). Failures
+  carry `error` (for the model) besides `displayText` (the chip).
+  `run_tool_loop` drives the OpenAI tool-call protocol via
+  `llm::post_chat_message` for up to `MAX_TOOL_STEPS` (20) turns, takes
+  arguments as a JSON string or an object (ids as numbers or strings), and
+  hands every note a tool created or changed (`changed_note`; an edit that
+  changed nothing doesn't count) to `on_change` as it happens — `chat_send`
+  emits `yap-note-changed` (origin `"chat"`) + `yap-notes-changed`, so the
+  notepad and the lists follow live. Chips say what happened: `Found
+  "beta" on 2 lines in "Launch plan"`, `Edited "Launch plan": "Friday." →
+  "Monday."`, `Couldn't edit "Launch plan": the text is in 2 places`. Gated
+  by `supports_tools` — cloud providers always qualify, local models need
+  ≥4B params (`LOCAL_TOOL_MIN_PARAMS_B`) — so smaller local models fall back
+  to plain keyword-RAG chat instead. Unit-tested end to end against
+  `notes.rs`' **in-memory test store** (under `cfg(test)` every test thread
+  gets its own empty store and nothing reads or writes `notes.json`), and
+  in `e2e/chat-tools.spec.js` against the scripted fake AI.
 - **`bridge.rs`** — the **local API bridge** (OpenWhispr `cliBridge.js` port,
   backs the Integrations view): a token-authenticated loopback HTTP server
   (`tiny_http`, `127.0.0.1`, OS-assigned port) exposing `/v1` REST routes over
@@ -960,7 +1039,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `meeting_detect` (call prompts as Wispr's "Meeting detected" card, "Taking
   notes…", failures), `meeting_guard` (length warning with Keep going,
   notices), `updates` ("Yap X is ready"), `calendar` (the reminder before a
-  meeting, as a call card). An Esc watch (a low-level keyboard
+  meeting, as a call card), `coaching` (push-to-talk tips). An Esc watch (a low-level keyboard
   hook that only looks) runs only while an on-screen card offers Esc (the
   auto-start countdown). Debug-only `bar_simulate` (pretend cursor on a
   region, fake fullscreen kinds, Esc, demo cards) and `bar_debug` (the real
@@ -989,13 +1068,16 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   while the modifiers are still down, sent by the forwarder thread
   (`needs_menu_mask`): otherwise releasing Alt opens the focused app's menu
   bar (Office KeyTips) and Win the Start menu. Emits press AND release (via an emit-forwarder thread — the hook
-  callback never blocks — plus a 30 s re-hook self-heal). The capture UI is
+  callback never blocks — plus a 30 s re-hook self-heal), each with the moment the
+  key moved as its payload (`gesture::now_ms`): events are handled one after
+  another, and push-to-talk's tap timing mustn't stretch while the last one starts. The capture UI is
   `ui/HotkeyInput.svelte` + shared `lib/hotkeys.js` (parse/format/match — also
   drives the in-window fallbacks; combos read Win first, "Win + Alt + M"). ⚠ **Known Windows
   gotcha:** when one of Yap's OWN WebView2 windows has focus, the LL hook never
   receives the hotkey (WebView2/Chromium front-runs the hook chain on focus) —
-  so the Settings + onboarding pages catch the hotkey **in-page** (keydown
-  fallback → `toggle_recording`; Settings also catches the meeting shortcut →
+  so the Settings + onboarding pages catch the hotkey **in-page** (keydown and
+  keyup → `dictation_key { pressed }`, the hook's own path into `on_key`, so
+  push-to-talk's gestures work there too; Settings also catches the meeting shortcut →
   `meeting_shortcut`). Any new Yap window with focusable UI needs the
   same fallback.
 - **`text_injector.rs`** — clipboard paste (+ optional clipboard restore) and
@@ -1091,7 +1173,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   timings), `e2e_main_on_screen` (the main window back from a minimize or
   hide the desktop did behind the suite's back — no focus, no "window shown"
   hooks; the `main` fixture runs it before every test, since call prompts
-  only go in-app while the window is on screen), calendar secrets in
+  only go in-app while the window is on screen), `e2e_dictation_mic { silent }`
+  (the dictation mic's real audio zeroed, as a muted mic's — the dead-mic
+  watchdog's case, its stream really reopened), `e2e_coaching_reset` (every
+  push-to-talk hint due again), calendar secrets in
   `<data>/calendar-secrets.e2e.json` instead of
   Credential Manager and links recorded (`calendar_e2e_opened`) instead of
   opened in a browser, and it quits when its stdin closes. See
@@ -1104,7 +1189,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   env always wins). `log_info`/`open_logs_folder` commands back the UI (current
   log file + copy path + open folder). ⚠ transcripts DO appear in logs at
   `info` — the UI warns users to skim before sharing.
-- **`commands.rs`** — Tauri commands: recording (`toggle_recording`, `cancel_recording`),
+- **`commands.rs`** — Tauri commands: recording (`toggle_recording`, `cancel_recording`,
+  `dictation_key` — the in-page fallbacks' hotkey down/up),
   config (`get_config`/`save_config`), models (`installed_models`, `download_model`,
   `download_model_size`, `set_active_model`, `delete_model`, `model_language_info`),
   devices (`list_audio_devices`, `list_output_devices`, `set_input_device` — live
@@ -1179,7 +1265,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   "What's new" toggle that unfolds markdown in the card; `updateToast(id,
   patch)` changes a live toast in place; mounted in ControlPanel and wired to
   action runs, meeting start/stop, uploads, clipboard copies, debug-mode
-  toggles, backend `yap-error` events, and the **update toast**
+  toggles, backend `yap-error` events, push-to-talk coaching (`yap-hint` → a
+  10 s Tip toast, `{key}` named by `fillHotkey`), and the **update toast**
   (`updates.svelte.js` — the shared update store started by ControlPanel:
   sticky "Yap X is ready" + Restart to update / Later / What's new, then
   Downloading… / Restarting Yap… in place; "Updated to X" after the
@@ -1305,9 +1392,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   over the notes library (top-5 `<note>` snippets; `chats.rs` persists
   conversations to `chats.json`) **plus the tool-calling agent loop**
   (`tools.rs`: search_notes/get_note/create_note/update_note/list_folders/
-  copy_to_clipboard executed locally, ≤20-step loop over the OpenAI tool
+  copy_to_clipboard, plus search_in_note/read_note/edit_note for changing
+  part of a note, executed locally, ≤20-step loop over the OpenAI tool
   protocol, gated to cloud or ≥4B local models — smaller models fall back to
-  plain RAG chat; tool-activity chips render in the thread; a question from
+  plain RAG chat; tool-activity chips render in the thread above the answer
+  and are kept with it in chats.json; a question from
   the Meetings view's Ask bar arrives through `chatRequest` and is sent with
   `scope: 'meetings'`). No streaming or
   semantic vectors yet (ROADMAP step 3). **`IntegrationsView.svelte`** = the
@@ -1349,14 +1438,17 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   stop circle with its 8×8 square; hovered, it widens to show the timer.
   `bar/DictationCapsule.svelte` (the dictation overlay — waveform in Yap
   amber, live partials word-paced by `bar/dictation.svelte.js`, which listens
-  for the page's whole life). **Cards** sit 26 px above the pill whatever it
+  for the page's whole life; a small amber lock after the dot while push-to-
+  talk's double-tap holds it hands-free; the dead-mic watchdog's "No sound
+  from <device> — is it muted?" in the waveform's place, with a red edge). **Cards** sit 26 px above the pill whatever it
   shows (positioned from the dock's height, gliding 0.16 s when it grows),
   the first nearest the pill and a second above it; each fades in and out in
   0.12 s and has Wispr's 4 px hit strip on the pill's side.
   `bar/BarCard.svelte` (notices: update, guard rails, "Taking notes", the
   call ending, errors) is Wispr's card in Yap's colours: 400 wide,
   the bar surface with a 1 px edge, radius 16, padding 20; a chip naming its
-  kind (Update, Meeting, Call, Tip, Error), the title 15 / 600, the body 15
+  kind (Update, Meeting, Call, Tip, Error; icon `tip` = a bulb, the coaching
+  hints, whose `{key}` the card names from its `hotkey`), the title 15 / 600, the body 15
   muted, a ghost button and a primary one (ink on light, cream on dark) at
   radius 8, the ✕ 24×24 at 30 % top-right. `bar/CallCard.svelte` (the call
   prompt as Wispr's "Meeting detected" card, on the same tokens but one row
@@ -1447,7 +1539,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   readable against any desktop.
 - **`lib/Settings.svelte`** — the settings surface, now rendered **inside the
   ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / Connections / System):
-  **General** (hotkey, recording mode, mic, sound+volume, mute; **Yap bar** group
+  **General** (hotkey, recording mode — in push-to-talk its line says how
+  double-tap goes hands-free, mic, sound+volume, mute; **Yap bar** group
   (`#settings-bar`, the bar menu's Settings → "general#bar"): Show the Yap bar
   (`barEnabled`; "Turn off the bar" in its menu arrives as `yap-bar-changed`
   and is adopted), a "Hidden until 15:40 · Show it now" row while hidden for an
@@ -1666,7 +1759,8 @@ failures.)
 Playwright drives a real **stub** debug build (frontend embedded) over WebView2's
 CDP: every window is a page, tests click through Home / every view / every
 Settings section / Notes / Dictionary / Account / onboarding / a stub dictation /
-the no-mic path / the update toast / meetings and the meeting notepad (its own
+the no-mic path / push-to-talk's tap, hold and double-tap + the dead-mic watchdog /
+the update toast / meetings and the meeting notepad (its own
 page, `yap.notepad`), and save **named screenshots** to
 `test-results/app/screenshots/<spec>/` (git-ignored; HTML report in
 `test-results/app/report/`, each instance's logs + data in `test-results/app/runs/`).
@@ -1817,6 +1911,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 - Dictionary usage: `%APPDATA%/yap/dictionary_usage.json` — each dictionary
   word's use count and last use, which orders the Whisper vocabulary prompt
   (`dict_usage.rs`). Safe to delete (the order falls back to the list's).
+- Hints: `%APPDATA%/yap/hints.json` — how often each push-to-talk coaching hint
+  showed, when the last did, and whether double-tap has been used (`coaching.rs`).
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`).
 - App icons: `%APPDATA%/yap/icons/` — `<app>.png` per installed call app and
@@ -1860,7 +1956,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 
 **Transcription is REAL and GPU-accelerated** (no longer a stub in `engines`
 builds), and the dictation pipeline around it is complete: multi-engine STT
-(Whisper/Vulkan + ONNX/DirectML), the 14-model registry + manager, recording modes,
+(Whisper/Vulkan + ONNX/DirectML), the 14-model registry + manager, recording modes
+(push-to-talk with double-tap hands-free and coaching tips, 2026-10-17), a dead-mic
+watchdog (reopen, then "No sound from <mic>"),
 language/translate, **AI cleanup** (BYO key or local sidecar) with per-app routing +
 named profiles + per-profile model choice, **edit/rewrite mode** + the **Voice Agent
 wake word**, combo hotkeys, the audio pre-roll (anti first-word clipping), **live
@@ -1921,7 +2019,8 @@ stop, Yap's own included, writes the action plan in Rust without bringing up
 the main window; e2e-tested in `notepad.spec.js`, split screen and its
 preview unit-tested only),
 and an **AI Chat** surface (`chats.rs` + eager
-keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six tools,
+keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — nine tools,
+including safe partial note edits (search → exact-once replace, `note_text.rs`),
 ≤20-step loop, gated to cloud or ≥4B local models). An **MCP server** (`mcp.rs`,
 `yap.exe mcp`) lets Claude, ChatGPT desktop/Codex, Gemini CLI, Cursor, Claude Code,
 VS Code and Windsurf read meetings and notes (never dictations) through the local

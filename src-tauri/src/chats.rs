@@ -19,6 +19,11 @@ pub struct ChatMessage {
     pub role: String,
     pub text: String,
     pub ts: u64,
+    /// An answer's tool activity, as its chips say it ("Edited "Launch
+    /// plan": "Friday." → "Monday.""), so a conversation opened later still
+    /// shows what the AI looked up and changed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,7 +135,8 @@ pub fn create(title: &str) -> Conversation {
     })
 }
 
-pub fn append(id: u64, role: &str, text: &str) -> Result<(), String> {
+/// Add a message; `tools` = an answer's tool chips (empty for the user's).
+pub fn append(id: u64, role: &str, text: &str, tools: &[String]) -> Result<(), String> {
     with_store(|s| {
         let conv = s
             .conversations
@@ -141,6 +147,7 @@ pub fn append(id: u64, role: &str, text: &str) -> Result<(), String> {
             role: role.to_string(),
             text: text.to_string(),
             ts: now_secs(),
+            tools: tools.to_vec(),
         });
         conv.updated_ts = now_secs();
         save_to_disk(s);

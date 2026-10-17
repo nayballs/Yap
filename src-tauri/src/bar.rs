@@ -137,6 +137,10 @@ pub struct Card {
     pub escape_action: Option<String>,
     /// A live countdown on the card ("Starting notes in 7…").
     pub countdown: Option<Countdown>,
+    /// A hotkey spec ("kb:120") whose name the page writes in place of
+    /// `{key}` in the title and body (`lib/hotkeys.js`, as the tooltips'):
+    /// the push-to-talk coaching hints.
+    pub hotkey: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
