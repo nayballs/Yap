@@ -94,7 +94,7 @@ your voice to the cloud. Yap refuses the choice:
 
 1. **[Download the installer](https://github.com/nayballs/Yap/releases/latest/download/Yap-setup.exe)** and run it.
    > Builds are not yet Authenticode-signed, so SmartScreen will warn on first run —
-   > click *More info → Run anyway*. (Signing is on the [roadmap](./ROADMAP.md).)
+   > click *More info → Run anyway*. (Signing is on the way.)
 2. Pick a model in onboarding — the default **Parakeet V3** is fast and accurate.
 3. Press **F9**, talk, press **F9** again. That's it.
 4. *(Optional)* Settings → **Language Models** → enable → **Local** for polished
@@ -133,7 +133,6 @@ any GPU, nothing extra to install for end users.
 
 ## Docs & roadmap
 
-- [`ROADMAP.md`](./ROADMAP.md) — where Yap is going, and the competitive strategy.
 - [`CLAUDE.md`](./CLAUDE.md) — architecture deep-dive (modules, pipeline, feature flags).
 
 Yap is pre-1.0 and moving fast. The download above is the **stable** channel: tagged

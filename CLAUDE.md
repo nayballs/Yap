@@ -9,7 +9,7 @@ shows a live waveform while you talk, opens into Dictate / Meeting notes on hove
 carries Yap's notices (call prompts) while its window isn't focused.
 
 This file documents how Yap actually runs today. For *where it's going* and the
-competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
+competitive strategy, see `ROADMAP.md` in the **private** docs repo (below).
 
 > Origin note: the core dictation plumbing (input hook, text injection) was ported
 > from "Voice Mirror"; the multi-engine STT, AI cleanup, settings, tray, overlay,
@@ -24,7 +24,16 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 > its actual implementation first. See ROADMAP.md "North star" +
 > `docs/openwhispr-teardown.md` + `docs/openwhispr-parity.md`. Every Wispr Flow
 > feature with Yap's status, as a checklist with a "Next up" list:
-> [`docs/wispr-flow-features.md`](./docs/wispr-flow-features.md).
+> `docs/wispr-flow-features.md`.
+>
+> **Private docs (2026-10-17).** The roadmap, competitor research, feature
+> checklists and internal test plans are NOT in this public repo: they live in
+> the private repo `nayballs/yap-private`, cloned at **`E:\Projects\yap-private`**
+> (`ROADMAP.md`, `docs/wispr-flow-features.md`, `docs/openwhispr-*.md`,
+> `docs/competitive-analysis.md`, …). Paths in this file named `ROADMAP.md` or
+> one of those `docs/` files mean that repo. Write new competitor research,
+> teardown findings and plans there (or in `E:\Projects\references\`), never in
+> this repo: its `docs/` keeps only how Yap works.
 
 > Active work note: the Settings / Language-Models / Prompt-Studio surface is being
 > reshaped to track **OpenWhispr** (`E:\Projects\references\openwhispr`) as the design
