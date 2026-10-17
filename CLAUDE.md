@@ -271,7 +271,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `MEETING_NOTE_BASE_PROMPT` + `NOTE_DEFAULT_FRAGMENT` (note enhancement's
   guardrails/action fragment), `ACTION_PLAN_BASE_PROMPT` +
   `ACTION_PLAN_DEFAULT_FRAGMENT` (the Action Plan: never invent owners/dates)
-  and `MEETING_DIGEST_PROMPT` (one rolling meeting digest), `enhance_note`
+  and `MEETING_DIGEST_PROMPT` (one rolling meeting digest), the notepad
+  helpers' immutable prompts (`CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`,
+  `MEETING_TITLE_PROMPT`, and the one-tap chips' `MEETING_QUESTIONS_PROMPT`,
+  `MEETING_FOLLOW_UP_PROMPT` — a plain-text email, subject line first — and
+  `MEETING_BLIND_SPOTS_PROMPT`; all: only what's in the meeting, never
+  invent owners/dates/numbers, say when there's too little), `enhance_note`
   (the Actions-engine call, base prompt chosen by the caller), `chat` +
   `ChatOptions` (temperature, `max_tokens` — sent for local servers only —
   and timeout), `note_chat` (embedded per-note chat + Chat-surface turns), and
@@ -407,7 +412,14 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   tokens, else the digests covering it + the latest ≤ 1,400; context ≤ ~700),
   `meeting_ask_messages` (a follow-up question, ≤ ~3.3k), `title_messages` +
   `clean_title` (the AI meeting title: the start of the meeting, one-shot,
-  ≤ 60 chars), and `chat_beside_dictation` (on a local endpoint: wait for
+  ≤ 60 chars), the one-tap helpers' inputs — `questions_input` (the latest
+  ≤ 1,200 tokens of talk + digests of what came before ≤ 500), `recap_input`
+  (the action plan ≤ 1,200 + `ask_context` of the meeting: ≤ 1,800 with no
+  plan, else 500 for the email / 800 for the gaps), both with attendees, the
+  invite ≤ 200 and typed notes ≤ 300, `None` (too little: < 20 words and
+  nothing else) — `helper_messages`, `clean_email` (the email as plain text:
+  preamble, fences and markdown out, "Subject: " first, `email_subject` when
+  missing) — every helper call ≤ ~3.4k with its reply; and `chat_beside_dictation` (on a local endpoint: wait for
   dictation to finish, drop the call when one starts and ask again — never
   slows a dictation). See [`docs/meetings.md`](./docs/meetings.md).
 - **`meeting_end.rs`** — the end of a meeting recording, wherever it was
@@ -440,7 +452,15 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `chat_beside_dictation`: **"What did I miss?"** (`meeting_catch_up(noteId,
   since, question?)` → `{answer, nothingNew, upto}`; with nothing new since
   `since` it answers "Nothing new since you last looked." without a model;
-  `question` = a follow-up from the same mini chat) and the **AI meeting
+  `question` = a follow-up from the same mini chat), the **one-tap helpers**
+  (`meeting_assist(noteId, kind)` → `{answer, plain, tooLittle}`; `kind` =
+  `Helper`: `questions` — "Questions to ask", 3–5 for now, while recording;
+  `followUpEmail` — "Follow-up email", a recap to send the attendees,
+  `plain` text, `clean_email`ed; `blindSpots` — "Gaps and risks": not
+  decided / missing owners or dates / risks nobody followed up; inputs from
+  `meeting_summary::questions_input` / `recap_input`, talk only; too little
+  to go on → `Helper::too_little()` without a model; reply caps 300 / 600 /
+  500 on a local model) and the **AI meeting
   title** (`maybe_title`, on every `yap-meeting-segment` and at the end: once
   the meeting has 150 words of speech or a digest — or, at the end, 20 words
   — and its title is open to the AI, `llm::MEETING_TITLE_PROMPT` → `clean_title`
@@ -1391,7 +1411,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   title shows muted); **Raw ↔ Enhanced dual-view + staleness dot** (safe renderer
   in `lib/markdown.js`) with **Copy markdown / Copy text** (`markdownToText`:
   ☐ tasks, plain headings); embedded per-note **"Ask anything…" bar** = Chat
-  scope grounded in the note, with mic button for in-box dictation; live
+  scope grounded in the note, with mic button for in-box dictation, and on a
+  meeting note the **one-tap helper chips** over it (`meetingHelpers` from
+  `notepadText.js`: Questions to ask while it records, Follow-up email and
+  Gaps and risks after → `meeting_assist`, answered in the thread with a
+  Copy button; no AI → a toast with Open Language Models); live
   **You/Them meeting transcript bubbles** (follow the newest line; echo lines
   hidden behind a "Show N lines…" toggle; a `dictated` marker is a quiet dashed
   "You dictated here · left out of the notes" divider with a mic glyph), an
@@ -1532,12 +1556,19 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (no summary yet) or the summary's error line ("The summary didn't come
   through" + detail + a Retry icon, `role="alert"`); then the **bar** (a
   32 px-radius tray): a white pill **Stop** / **Resume** / **Start** (recording-red
-  ■ or ring-dot) and the **Ask anything** pill input, with a "What did I
-  miss?" chip inside it while recording (a send arrow once typed). Focusing it
+  ■ or ring-dot) and the **Ask anything** pill input, with the lead helper
+  chip inside it while the sheet is down — "What did I miss?" while
+  recording, "Follow-up email" after (a send arrow once typed). Focusing it
   or the chip opens the **Ask sheet** (a bottom sheet, 45% tall, sheet
   shadow; grab handle, New chat, Minimise; Stop shrinks to a 48 px circle):
   right-aligned question bubbles, markdown answers with 👍 👎 ⎘ (ratings kept
-  in this webview's localStorage only, `yapNotepadFeedback`, never sent);
+  in this webview's localStorage only, `yapNotepadFeedback`, never sent; the
+  email shown `plain`, pre-wrapped, exactly as ⎘ copies it), and under the
+  thread a **Suggestions** row of one-tap helper chips switching with the
+  recording state (`meetingHelpers`/`MEETING_HELPERS` in `notepadText.js`:
+  What did I miss? + Questions to ask while recording, Follow-up email +
+  Gaps and risks after; hidden while a question is typed; the pill chip
+  moves the focus to the field as it goes);
   "What did I miss?" = `meeting_catch_up` with `since` = the segments seen
   (all of them whenever the Transcript tab is on screen — window shown per
   `yap-notepad-visible`/`isVisible` — and scrolled to its newest line
@@ -2026,7 +2057,10 @@ right of the screen when a meeting starts, in Wispr Flow's measured layout —
 My thoughts synced with Notes, the live transcript in grouped bubbles with
 paused/dictated dividers, search and copy, the summary written by Rust in
 steps with a Retry, the Ask sheet ("What did I miss?" since you last looked,
-questions, 👍 👎 kept locally), the AI meeting title, "Started by mistake?"
+questions, 👍 👎 kept locally; one-tap helpers, 2026-10-17: Questions to ask
+while recording, a plain-text Follow-up email and Gaps and risks after, also
+on a meeting note in Notes — e2e-tested against the fake AI, not yet tried
+with a real model), the AI meeting title, "Started by mistake?"
 Keep/Discard (on the Yap bar when no window is on screen), the ⋯ menu,
 local Share (copy, .md, email), delete, an editable consent message, split
 screen with the call now or when joining (a glass preview on hover); every
