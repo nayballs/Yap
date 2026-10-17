@@ -22,6 +22,7 @@
   import ActionManager from './ActionManager.svelte';
   import { noteRequest } from './meetingDetect.svelte.js';
   import { summaries, loadSummary, summarise } from './meetingSummary.svelte.js';
+  import { MEETING_HELPERS, meetingHelpers } from './notepadText.js';
 
   /** This window's label: the `origin` of its saves and stops. */
   const LABEL = 'settings';
@@ -622,6 +623,51 @@
     }
   }
 
+  // A meeting note's one-tap helpers (meeting_assist.rs), as chips over the
+  // bar: Questions to ask while it records, Follow-up email and Gaps and
+  // risks after. ("What did I miss?" stays the notepad's: it knows what you
+  // have seen.)
+  const noteHelpers = $derived(
+    selected?.noteType === 'meeting'
+      ? meetingHelpers(selected, recordingThisNote).filter((k) => k !== 'catchUp')
+      : []
+  );
+  async function askHelper(kind) {
+    if (!selected || asking) return;
+    const id = selected.id;
+    flushSave();
+    chatThread = [...chatThread, { role: 'user', text: MEETING_HELPERS[kind].label }];
+    asking = true;
+    try {
+      const r = await invoke('meeting_assist', { noteId: id, kind });
+      if (selected?.id !== id) return;
+      chatThread = [...chatThread, { role: 'assistant', text: r.answer, plain: !!r.plain, copy: true }];
+    } catch (e) {
+      if (selected?.id !== id) return;
+      chatThread = chatThread.slice(0, -1);
+      const msg = String(e);
+      const setup = /No AI model configured|API key/i.test(msg) && onopensettings;
+      toast({
+        title: "Couldn't answer",
+        description: msg,
+        variant: 'destructive',
+        ...(setup ? { action: { label: 'Open Language Models', onClick: () => onopensettings('cleanup') } } : {}),
+      });
+    } finally {
+      asking = false;
+    }
+  }
+  let copiedTurn = $state(-1);
+  async function copyTurn(turn, i) {
+    try {
+      await navigator.clipboard.writeText(turn.text);
+      copiedTurn = i;
+      setTimeout(() => copiedTurn === i && (copiedTurn = -1), 1200);
+    } catch {
+      toast({ title: "Couldn't copy", description: 'The clipboard is busy. Try again.', variant: 'destructive' });
+    }
+  }
+
   // The bar's mic: focus the input and start dictation — Yap types wherever
   // the caret is, so the answer box IS the dictation target.
   let askEl = $state(null);
@@ -1154,17 +1200,31 @@
         <div class="chatthread">
           {#each chatThread as turn, i (i)}
             <div class="cbubble {turn.role}">
-              {#if turn.role === 'assistant'}
+              {#if turn.role === 'assistant' && turn.plain}
+                <!-- An email: shown exactly as it copies. -->
+                <div class="cbody plain">{turn.text}</div>
+              {:else if turn.role === 'assistant'}
                 <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown escapes all input -->
                 <div class="cbody">{@html renderMarkdown(turn.text)}</div>
               {:else}
                 <p class="cbody">{turn.text}</p>
+              {/if}
+              {#if turn.copy}
+                <button class="ccopy" onclick={() => copyTurn(turn, i)}>{copiedTurn === i ? 'Copied' : 'Copy'}</button>
               {/if}
             </div>
           {/each}
           {#if asking}
             <div class="cbubble assistant"><p class="cbody thinking">Thinking…</p></div>
           {/if}
+        </div>
+      {/if}
+
+      {#if noteHelpers.length && !chatInput.trim()}
+        <div class="helperrow" role="group" aria-label="Meeting helpers">
+          {#each noteHelpers as kind (kind)}
+            <button class="helperchip" onclick={() => askHelper(kind)} disabled={asking}>{MEETING_HELPERS[kind].label}</button>
+          {/each}
         </div>
       {/if}
 
@@ -1923,6 +1983,51 @@
   .cbubble.assistant :global(ol) {
     margin: 4px 0;
     padding-left: 18px;
+  }
+  .cbody.plain {
+    white-space: pre-wrap;
+  }
+  .ccopy {
+    margin-top: 4px;
+    padding: 2px 8px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s1);
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+  .ccopy:hover {
+    color: var(--yap-fg);
+    border-color: var(--yap-border-hover);
+  }
+  /* a meeting note's one-tap helpers, over the bar */
+  .helperrow {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .helperchip {
+    height: 26px;
+    padding: 0 11px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: 999px;
+    background: var(--yap-s1);
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .helperchip:hover:not(:disabled) {
+    border-color: var(--yap-border-hover);
+  }
+  .helperchip:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   /* the bottom "Ask anything…" bar */
