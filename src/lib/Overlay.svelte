@@ -8,7 +8,8 @@
   //   hover     it opens into 🎤 Dictate, ◉ Meeting notes and a ^ menu, with
   //             a tooltip naming each button's shortcut;
   //   dictating the dictation overlay (waveform, live text, Transcribing…,
-  //             the error) in the pill's place;
+  //             the error) in the pill's place, with ✕ / ✓ while it records
+  //             and "Dictation cancelled · Undo" after a cancel;
   //   meeting   a 69 × 30 recording pill at half opacity (5 bars, the stop
   //             circle) that shows its timer when hovered;
   //   cards     26 px above the pill: Yap's notices while its window isn't
@@ -67,7 +68,8 @@
     dictation.state === 'recording' ||
       dictation.state === 'processing' ||
       dictation.state === 'processing-slow' ||
-      dictation.state === 'error'
+      dictation.state === 'error' ||
+      dictation.state === 'cancelled'
   );
   const mode = $derived(
     busy

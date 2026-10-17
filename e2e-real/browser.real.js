@@ -99,6 +99,18 @@ test('an empty chat box in Edge reads as empty: no full stop, no space after it'
   await expect.poll(() => chat.value()).toBe('Sounds good');
 });
 
+// A box labelled by a <label> (no aria-label): Chromium names it after the
+// label (UIA Name, and LabeledBy the label element) and reads it empty as
+// that name or U+FFFC. Empty either way.
+test('an empty box labelled by a <label> reads as empty', async ({ robot }) => {
+  const chat = await robot.chat('<label for="box">Your reply</label>', { attrs: '' });
+  await chat.set('');
+  const r = await robot.dictate(chat, 'Sounds good.');
+  expect(r.kind).toBe('chat app');
+  expect(r.text).toBe('Sounds good');
+  await expect.poll(() => chat.value()).toBe('Sounds good');
+});
+
 // The same in a contenteditable message box (WhatsApp Web's, Gmail's): an
 // empty one reads as its label too.
 test('an empty contenteditable message box reads as empty', async ({ robot }) => {

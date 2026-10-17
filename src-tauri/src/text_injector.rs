@@ -15,6 +15,11 @@
 //!   text is typed instead (`type_unicode`). A remote-desktop or VM window is
 //!   the exception: its clipboard sync is a monitor too, so there the
 //!   dictation goes on the clipboard plainly (`syncs_clipboard`).
+//! - **Apps running as administrator** take no keys from Yap (UIPI drops
+//!   them silently): before a paste the target's integrity level is checked
+//!   (`elevated.rs`), and an elevated app gets the text left on the
+//!   clipboard instead ([`Delivery::LeftOnClipboard`]) — the caller says
+//!   "Your text is copied: press Ctrl+V".
 //! - **Fitting the dictation to the cursor** ([`prepare_dictation`],
 //!   `smart_insert.rs`) and to the kind of app (`app_kind.rs`: one line in a
 //!   terminal, no full stop on a short chat message), and remembering it for
@@ -157,6 +162,18 @@ mod platform {
             // Base name only — strip the directory.
             full.rsplit(['\\', '/']).next().map(|s| s.to_string())
         }
+    }
+
+    /// Whether `hwnd_isize` is still a window.
+    pub fn window_exists(hwnd_isize: isize) -> bool {
+        let hwnd = hwnd_isize as HWND;
+        !hwnd.is_null() && unsafe { IsWindow(hwnd) } != 0
+    }
+
+    /// Whether `hwnd_isize` is the window in front.
+    pub fn is_foreground(hwnd_isize: isize) -> bool {
+        let hwnd = hwnd_isize as HWND;
+        !hwnd.is_null() && unsafe { GetForegroundWindow() } == hwnd
     }
 
     /// The process id of the window `hwnd_isize` (0 = none).
@@ -895,6 +912,21 @@ pub(crate) fn syncs_clipboard(app: Option<&str>) -> bool {
     app.is_some_and(|a| CLIPBOARD_SYNC_APPS.iter().any(|s| s.eq_ignore_ascii_case(a.trim())))
 }
 
+/// How a dictation reached the app it was for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivery {
+    /// Pasted (or typed) into it.
+    Pasted,
+    /// The app runs as administrator, so Windows would drop Yap's keys
+    /// (`elevated.rs`): none were sent, and the text is on the clipboard
+    /// for the person to paste. The caller says so (`elevated::alert`).
+    LeftOnClipboard,
+    /// The paste had to go back to its own window (an Undo) and couldn't:
+    /// the window is gone, or Windows wouldn't bring it to the front. No
+    /// keys were sent anywhere else; the text is on the clipboard.
+    WindowGone,
+}
+
 /// Simulate the auto-submit keystroke in the focused window. `key` is one of
 /// "enter", "ctrlEnter", or "shiftEnter".
 pub async fn press_submit(key: &str) -> Result<(), String> {
@@ -907,6 +939,11 @@ pub async fn press_submit(key: &str) -> Result<(), String> {
         // Robot mode: only in a window the test opened, checked right
         // before the key goes out (always fine in a normal run).
         crate::realtest::recheck_foreground(None, &format!("press {key}"))?;
+        // An app running as administrator would drop the key anyway.
+        if current_foreground().is_some_and(crate::elevated::target_blocked) {
+            info!(key, "Not pressing the key: the app runs as administrator");
+            return Err("Yap can't press keys in an app running as administrator".to_string());
+        }
         #[cfg(target_os = "windows")]
         platform::press_submit(&key);
         crate::realtest::check_after(None, &format!("{key} key"));
@@ -1128,16 +1165,37 @@ pub fn has_last_transcript() -> bool {
 
 const NOTHING_TO_PASTE: &str = "Nothing to paste yet — dictate something first";
 
+/// The app at `receiver` runs as administrator: put `text` on the clipboard
+/// (privately, as a paste would: out of Win+V history) and leave it there
+/// for the person to paste. Nothing else is touched.
+#[cfg(target_os = "windows")]
+fn leave_on_clipboard(text: &str, receiver: Option<isize>) -> Result<Delivery, String> {
+    let private = !syncs_clipboard(app_name_for(receiver).as_deref());
+    if clip::put_text_verified(text, private) {
+        warn!(len = text.len(), "Not pasted: the text is left on the clipboard");
+        Ok(Delivery::LeftOnClipboard)
+    } else {
+        Err("The text couldn't be pasted, nor put on the clipboard".into())
+    }
+}
+
 /// "Paste last transcript": the latest dictation into the app window the
 /// person is in (the tray menu borrowed the foreground: the top app window),
 /// fitted to its cursor like a dictation. For when a paste went astray.
-/// Returns what was pasted. A test run pastes nothing and returns it.
-fn paste_last_blocking() -> Result<String, String> {
+/// Returns what was pasted. A test run pastes nothing and returns it. An app
+/// running as administrator gets it on the clipboard instead, and the person
+/// is told (`elevated.rs`).
+fn paste_last_blocking(app: &tauri::AppHandle) -> Result<String, String> {
     let text = last_transcript().ok_or(NOTHING_TO_PASTE)?;
     let cfg = crate::config::load();
     let test_mode = || {
         let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary, AppKind::Other);
-        info!(len = out.len(), "e2e: not pasting the last transcript");
+        if crate::elevated::test_override() {
+            info!(len = out.len(), "e2e: the app counts as an admin app; not pasting the last transcript");
+            crate::alert::show(app, crate::elevated::alert());
+        } else {
+            info!(len = out.len(), "e2e: not pasting the last transcript");
+        }
         Ok(out)
     };
     if crate::e2e::active() && !crate::realtest::on() {
@@ -1150,6 +1208,14 @@ fn paste_last_blocking() -> Result<String, String> {
             crate::realtest::Gate::Go => {}
             crate::realtest::Gate::TestMode => return test_mode(),
             crate::realtest::Gate::Refused(why) => return Err(why),
+        }
+        // An app running as administrator: on the clipboard, as it is.
+        if target.is_some_and(crate::elevated::target_blocked) {
+            let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary, AppKind::Other);
+            warn!("The app runs as administrator: Windows won't let Yap type into it");
+            leave_on_clipboard(&out, target)?;
+            crate::alert::show(app, crate::elevated::alert());
+            return Ok(out);
         }
         if let Some(hwnd) = target {
             platform::focus_window(hwnd);
@@ -1166,11 +1232,14 @@ fn paste_last_blocking() -> Result<String, String> {
         };
         let out = fit_for_paste(&text, ctx.as_ref(), cfg.append_trailing_space, &cfg.dictionary, kind);
         info!(len = out.len(), found_window = target.is_some(), fitted = ctx.is_some(), "Pasting the last transcript");
-        inject_text_sync(&out, cfg.restore_clipboard, target)?;
+        if inject_text_sync(&out, cfg.restore_clipboard, target, false)? == Delivery::LeftOnClipboard {
+            crate::alert::show(app, crate::elevated::alert());
+        }
         Ok(out)
     }
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = app;
         Err("Pasting is only supported on Windows".into())
     }
 }
@@ -1179,16 +1248,17 @@ fn paste_last_blocking() -> Result<String, String> {
 /// pastes the latest dictation into the app you're in and returns it. Errors
 /// when there's nothing yet.
 #[tauri::command]
-pub async fn paste_last_transcript() -> Result<String, String> {
-    tokio::task::spawn_blocking(paste_last_blocking)
+pub async fn paste_last_transcript(app: tauri::AppHandle) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || paste_last_blocking(&app))
         .await
         .map_err(|e| format!("Paste task failed: {e}"))?
 }
 
 /// The tray's "Paste last transcript" (off the main thread).
-pub fn paste_last_from_tray() {
-    std::thread::spawn(|| {
-        if let Err(e) = paste_last_blocking() {
+pub fn paste_last_from_tray(app: &tauri::AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = paste_last_blocking(&app) {
             warn!("Paste last transcript: {}", e);
         }
     });
@@ -1198,34 +1268,73 @@ pub fn paste_last_from_tray() {
 ///
 /// `target_hwnd` (from [`current_foreground`] at record-start) is re-focused
 /// before pasting so focus changes during transcription don't misfire. Runs on a
-/// blocking thread to avoid blocking the tokio runtime.
+/// blocking thread to avoid blocking the tokio runtime. An app running as
+/// administrator gets no keys: the text is left on the clipboard
+/// ([`Delivery::LeftOnClipboard`]) and the caller tells the person.
+/// `strict` (an Undo, seconds after the dictation): the paste goes back to
+/// `target_hwnd` or nowhere — a window that's gone or won't come to the
+/// front leaves the text on the clipboard ([`Delivery::WindowGone`]) rather
+/// than pasting into whatever has the focus now.
 pub async fn inject_text(
     text: &str,
     restore_clipboard: bool,
     target_hwnd: Option<isize>,
-) -> Result<(), String> {
+    strict: bool,
+) -> Result<Delivery, String> {
+    // An Undo whose window has closed since: never into another one.
+    if strict && target_hwnd.is_some_and(|h| !window_exists(h)) {
+        if crate::e2e::active() && !crate::realtest::on() {
+            info!("e2e: the dictation's window is gone; not pasting the text");
+            return Ok(Delivery::WindowGone);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let text = text.to_string();
+            return tokio::task::spawn_blocking(move || leave_on_clipboard(&text, None).map(|_| Delivery::WindowGone))
+                .await
+                .map_err(|e| format!("Inject task panicked: {}", e))?;
+        }
+    }
     // An e2e test run never pastes into another app (or touches the
     // clipboard); robot mode only into a window the test opened.
     match crate::realtest::gate(target_hwnd, "paste") {
         crate::realtest::Gate::Go => {}
         crate::realtest::Gate::TestMode => {
+            if crate::elevated::test_override() {
+                info!(len = text.len(), "e2e: the target counts as an admin app; not pasting the text");
+                return Ok(Delivery::LeftOnClipboard);
+            }
             info!(len = text.len(), "e2e: not pasting the text");
-            return Ok(());
+            return Ok(Delivery::Pasted);
         }
         crate::realtest::Gate::Refused(why) => return Err(why),
     }
     let text = text.to_string();
 
-    tokio::task::spawn_blocking(move || inject_text_sync(&text, restore_clipboard, target_hwnd))
+    tokio::task::spawn_blocking(move || inject_text_sync(&text, restore_clipboard, target_hwnd, strict))
         .await
         .map_err(|e| format!("Inject task panicked: {}", e))?
+}
+
+/// Whether `hwnd` is still a window (`true` off Windows: nothing to check).
+pub fn window_exists(hwnd: isize) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        platform::window_exists(hwnd)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = hwnd;
+        true
+    }
 }
 
 fn inject_text_sync(
     text: &str,
     restore_clipboard: bool,
     target_hwnd: Option<isize>,
-) -> Result<(), String> {
+    strict: bool,
+) -> Result<Delivery, String> {
     info!(len = text.len(), "Injecting text via clipboard paste");
 
     // Small delay to let focus settle after voice recording stops.
@@ -1233,16 +1342,31 @@ fn inject_text_sync(
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (restore_clipboard, target_hwnd);
+        let _ = (restore_clipboard, target_hwnd, strict);
         warn!("Text injection is only supported on Windows");
         Err("Text injection is only supported on Windows".into())
     }
 
     #[cfg(target_os = "windows")]
     {
-        // Re-focus the window the user was dictating into (best-effort).
+        // An app running as administrator takes no keys from Yap (Windows
+        // drops them without a word): the text stays on the clipboard for
+        // the person to paste (`elevated.rs`).
+        let receiver = target_hwnd.or_else(current_foreground);
+        if receiver.is_some_and(crate::elevated::target_blocked) {
+            warn!("The app runs as administrator: Windows won't let Yap type into it");
+            return leave_on_clipboard(text, receiver);
+        }
+
+        // Re-focus the window the user was dictating into (best-effort; an
+        // Undo's paste goes there or nowhere).
         if let Some(hwnd) = target_hwnd {
-            if !platform::focus_window(hwnd) {
+            let back = platform::focus_window(hwnd) && platform::is_foreground(hwnd);
+            if !back && strict {
+                warn!("Couldn't get back to the dictation's window; leaving the text on the clipboard");
+                return leave_on_clipboard(text, None).map(|_| Delivery::WindowGone);
+            }
+            if !back {
                 warn!("Could not re-focus the dictation target window; pasting into current focus");
             }
         }
@@ -1267,7 +1391,7 @@ fn inject_text_sync(
             if let Some(prev) = previous {
                 clip::restore(prev, private);
             }
-            return checked;
+            return checked.map(|()| Delivery::Pasted);
         }
         trace!(private, "Dictation on the clipboard");
 
@@ -1296,7 +1420,7 @@ fn inject_text_sync(
             clip::restore(prev, private);
         }
 
-        Ok(())
+        Ok(Delivery::Pasted)
     }
 }
 

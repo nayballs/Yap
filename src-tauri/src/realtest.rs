@@ -621,12 +621,14 @@ pub mod commands {
     /// into the dictation mic in real time through the real start/stop path
     /// (the mic's own audio is left out meanwhile), so the STT, the live
     /// preview and the dead-mic watchdog all run. `null`: nothing was
-    /// transcribed (a silent mic).
+    /// transcribed (a silent mic). `cancel`: cancelled at the end instead,
+    /// as the bar's ✕ does (kept for Undo: `bar_action` "dictation-undo").
     #[tauri::command]
     pub async fn realtest_dictate_wav(
         state: State<'_, AppState>,
         path: String,
         hwnd: Option<i64>,
+        cancel: Option<bool>,
     ) -> Result<Option<Delivered>, String> {
         only_robot()?;
         in_front(hwnd)?;
@@ -636,7 +638,15 @@ pub mod commands {
         .await
         .map_err(|e| format!("decode task failed: {e}"))??;
         let robot = robot_of(&state)?;
-        robot.dictate_audio(samples).await
+        robot.dictate_audio(samples, cancel.unwrap_or(false)).await
+    }
+
+    /// What the latest dictation sent to the paste (an Undo's), taken:
+    /// `null` until one has since the last ask.
+    #[tauri::command]
+    pub fn realtest_delivered(state: State<'_, AppState>) -> Result<Option<Delivered>, String> {
+        only_robot()?;
+        Ok(robot_of(&state)?.take_delivered())
     }
 
     /// The clipboard, for the clipboard specs, without ever handing its

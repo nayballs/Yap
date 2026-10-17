@@ -25,6 +25,7 @@
   import { initMeetingGuard } from './meetingGuard.js';
   import { initCalendar, closeConnectDialog } from './calendar.svelte.js';
   import { initWordSuggestions } from './wordSuggestions.js';
+  import { initAlerts } from './alerts.js';
   import ConnectCalendarDialog from './ConnectCalendarDialog.svelte';
   import MeetingsView from './MeetingsView.svelte';
   import HomeView from './HomeView.svelte';
@@ -80,6 +81,10 @@
       activeView = view;
     },
   });
+  // A dictation's alerts (alert.rs): a paste into an app running as
+  // administrator left on the clipboard, Windows' microphone privacy
+  // switch — with Open settings.
+  initAlerts();
   let bellOpen = $state(false);
 
   // Sidebar nav (Wispr order: Home, Insights, then the work surfaces).

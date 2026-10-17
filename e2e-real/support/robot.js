@@ -77,10 +77,14 @@ export class Robot {
     );
   }
 
-  /** A dictation of a WAV file into `target`, through the real start/stop path. */
-  async dictateWav(target, file, { retry = true } = {}) {
+  /**
+   * A dictation of a WAV file into `target`, through the real start/stop
+   * path. `cancel`: cancelled at the end instead of stopped (the bar's ✕),
+   * so it's kept for Undo (`null` comes back: nothing was transcribed).
+   */
+  async dictateWav(target, file, { retry = true, cancel = false } = {}) {
     return this.withFocus(target, retry, () =>
-      this.yap.invoke('realtest_dictate_wav', { path: file, hwnd: target.hwnd }),
+      this.yap.invoke('realtest_dictate_wav', { path: file, hwnd: target.hwnd, cancel }),
     );
   }
 
@@ -133,11 +137,12 @@ export class Robot {
 
   /**
    * An Edge app window on a "WhatsApp" page (`note`: text above its box;
-   * `{ editable }`: the box a contenteditable, as WhatsApp Web's is).
+   * `{ editable }`: the box a contenteditable, as WhatsApp Web's is;
+   * `{ attrs }`: the box's attributes instead of its aria-label).
    */
-  async chat(note, { editable = false } = {}) {
+  async chat(note, { editable = false, attrs } = {}) {
     return this.track(
-      await startChatPage({ nonce: this.nonce, dir: path.join(this.dir, `chat-${this.targets.length}`), note, editable }),
+      await startChatPage({ nonce: this.nonce, dir: path.join(this.dir, `chat-${this.targets.length}`), note, editable, attrs }),
     );
   }
 

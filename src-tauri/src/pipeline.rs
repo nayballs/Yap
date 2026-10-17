@@ -217,6 +217,43 @@ pub(crate) struct Delivered {
     pub submit: Option<String>,
     /// Why the paste or the key didn't happen (a refusal in robot mode).
     pub error: Option<String>,
+    /// The app runs as administrator: nothing was pasted, the text was
+    /// left on the clipboard (`elevated.rs`).
+    pub left_on_clipboard: bool,
+}
+
+/// How long a cancelled dictation's audio is kept for **Undo** ("Dictation
+/// cancelled · Undo" on the bar).
+pub(crate) const UNDO_MS: u64 = 10_000;
+/// A cancelled recording shorter than this (0.5 s at 16 kHz), or one that
+/// never heard a sound, isn't offered back: nothing worth transcribing.
+const UNDO_MIN_SAMPLES: usize = 8_000;
+
+/// Undo couldn't get back to the window the dictation was for (it closed,
+/// or Windows wouldn't bring it to the front): the text is on the clipboard
+/// instead of in whatever has the focus now.
+fn undo_window_gone() -> crate::alert::Alert {
+    crate::alert::Alert {
+        kind: "pasteBlocked",
+        icon: "clipboard",
+        title: "Your text is copied: press Ctrl+V".to_string(),
+        body: "Yap couldn't get back to the window you were dictating into, so your dictation is on the clipboard instead."
+            .to_string(),
+        action: None,
+        timeout_ms: 12_000,
+    }
+}
+
+/// A cancelled recording, kept a moment for Undo: its audio and everything
+/// its paste needs — the window it was for, what kind of app that is, edit
+/// mode and its selection.
+struct Kept {
+    id: u64,
+    audio: Vec<f32>,
+    target_hwnd: isize,
+    target_kind: AppKind,
+    edit: bool,
+    selection: Option<String>,
 }
 
 /// The latest dictation's report, for the robot's WAV dictations (which
@@ -323,6 +360,15 @@ struct Shared {
     stream_slot: Weak<StreamSlot>,
     /// The name of the device the mic stream captures from.
     mic_name: Mutex<String>,
+    /// The last cancelled recording, for Undo (dropped after [`UNDO_MS`],
+    /// or when another dictation starts).
+    kept: Mutex<Option<Kept>>,
+    /// Numbers the kept recordings, so an old expiry timer leaves a newer
+    /// one alone.
+    kept_seq: AtomicU64,
+    /// The dictation being delivered is an Undo: its paste goes back to its
+    /// own window or nowhere (`inject_text`'s `strict`).
+    undoing: AtomicBool,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -541,7 +587,7 @@ impl Shared {
             Action::Stop => self.stop_and_transcribe(),
             Action::Discard => {
                 tracing::info!("Push-to-talk: a lone tap, nothing to transcribe");
-                self.cancel();
+                self.cancel(false);
             }
             Action::Lock => {
                 tracing::info!("Push-to-talk: double-tap, recording hands-free");
@@ -578,6 +624,13 @@ impl Shared {
         // say so instead of "recording" silence. (The robot's WAV stands in
         // for a mic.)
         if !self.has_mic.load(Ordering::SeqCst) && !test_feed_on() {
+            // Windows' privacy switches, if they're why: that's what to fix.
+            if let Some(blocked) = crate::mic_privacy::blocked() {
+                tracing::warn!(?blocked, "Can't record — Windows' privacy settings block the microphone");
+                self.say_mic_blocked(blocked);
+                let _ = self.app.emit("yap-state", "error");
+                return;
+            }
             tracing::warn!("Can't record — no microphone");
             let _ = self
                 .app
@@ -619,6 +672,18 @@ impl Shared {
         } else if let Some(quiet) = quiet {
             std::thread::spawn(quiet);
         }
+        // Windows' privacy switches keep desktop apps off the mic: this
+        // recording will hear digital silence. Said now, not after the
+        // watchdog's five seconds; the recording carries on (switching it on
+        // mid-dictation works), and if it ends without a sound it isn't
+        // transcribed, as for a dead mic.
+        if !test_feed_on() {
+            if let Some(blocked) = crate::mic_privacy::blocked() {
+                tracing::warn!(?blocked, "Recording, but Windows' privacy settings block the microphone");
+                self.mic_dead.store(true, Ordering::SeqCst);
+                self.say_mic_blocked(blocked);
+            }
+        }
         // Live partials: spawn a worker that re-transcribes a bounded sliding
         // window of the buffer while recording (cost independent of recording
         // length — see `partials::PartialSession`).
@@ -627,11 +692,23 @@ impl Shared {
         tracing::info!("Recording started");
     }
 
+    /// "Windows is blocking microphone access for desktop apps": in the
+    /// overlay's line (the dead-mic watchdog's place), and as an alert with
+    /// **Open settings** (a toast, a bar card or a Windows notification).
+    fn say_mic_blocked(&self, blocked: crate::mic_privacy::Blocked) {
+        let _ = self.app.emit("yap-mic-silent", Some(crate::mic_privacy::mic_silent()));
+        crate::alert::show_soon(&self.app, crate::mic_privacy::alert(blocked));
+    }
+
     /// Where the dictation starting now goes: the window in front (captured
     /// before the overlay or anything else can take the focus; the paste
     /// goes back into it), what kind of app it is, edit mode's selection,
     /// and — in the background — the text around its cursor.
     fn capture_target(self: &Arc<Self>, edit: bool) {
+        // A new dictation: a cancelled one waiting for Undo is gone for good.
+        if self.kept.lock().map(|mut k| k.take().is_some()).unwrap_or(false) {
+            tracing::info!("A new dictation: the cancelled one can't be undone any more");
+        }
         // Capture the window the user is dictating into, before the overlay
         // (or anything else) can steal focus. Restored at paste time.
         let hwnd = crate::text_injector::current_foreground().unwrap_or(0);
@@ -690,7 +767,14 @@ impl Shared {
                     let (samples, heard) = shared.mic_tally.read();
                     match watch.poll(started.elapsed().as_millis() as u64, samples, heard) {
                         MicStep::Wait => {}
-                        MicStep::Fine => break,
+                        MicStep::Fine => {
+                            // Sound after all, though the privacy switches
+                            // said no at the start: take the warning back.
+                            if shared.mic_dead.swap(false, Ordering::SeqCst) {
+                                let _ = shared.app.emit("yap-mic-silent", None::<MicSilent>);
+                            }
+                            break;
+                        }
                         MicStep::Reopen => {
                             tracing::warn!(samples, "Dictation mic: nothing but silence — reopening it");
                             if let Err(e) = shared.reopen_mic() {
@@ -698,13 +782,26 @@ impl Shared {
                             }
                         }
                         MicStep::Report => {
-                            let silent = shared.mic_silent();
-                            tracing::warn!("Dictation mic: {}", silent.message);
-                            shared.mic_dead.store(true, Ordering::SeqCst);
-                            // The overlay says so in the waveform's place (the
-                            // recording carries on), the main window as a toast.
-                            let _ = shared.app.emit("yap-mic-silent", Some(&silent));
-                            let _ = shared.app.emit("yap-error", silent.message);
+                            // Already said when the recording started:
+                            // Windows' privacy switches block the mic.
+                            if shared.mic_dead.swap(true, Ordering::SeqCst) {
+                                continue;
+                            }
+                            match crate::mic_privacy::blocked() {
+                                // Not the mic's fault: Windows' privacy switches.
+                                Some(blocked) => {
+                                    tracing::warn!(?blocked, "Dictation mic: silent, and Windows' privacy settings block it");
+                                    shared.say_mic_blocked(blocked);
+                                }
+                                None => {
+                                    let silent = shared.mic_silent();
+                                    tracing::warn!("Dictation mic: {}", silent.message);
+                                    // The overlay says so in the waveform's place (the
+                                    // recording carries on), the main window as a toast.
+                                    let _ = shared.app.emit("yap-mic-silent", Some(&silent));
+                                    let _ = shared.app.emit("yap-error", silent.message);
+                                }
+                            }
                         }
                         MicStep::Recovered => {
                             tracing::info!("Dictation mic: sound again");
@@ -721,8 +818,12 @@ impl Shared {
     }
 
     /// "No sound from <the mic> — check it isn't muted or unplugged", and
-    /// the overlay's short form.
+    /// the overlay's short form — or, when Windows' privacy switches block
+    /// the mic, "Windows is blocking microphone access for desktop apps".
     fn mic_silent(&self) -> MicSilent {
+        if crate::mic_privacy::blocked().is_some() {
+            return crate::mic_privacy::mic_silent();
+        }
         let name = self.mic_name.lock().map(|n| n.clone()).unwrap_or_default();
         MicSilent::for_mic(&name)
     }
@@ -778,8 +879,13 @@ impl Shared {
         std::thread::spawn(move || stream_partials(shared, language, translate));
     }
 
-    /// Stop recording and discard the buffered audio (no transcription).
-    fn cancel(&self) {
+    /// Stop recording without transcribing. `undo`: the person cancelled it
+    /// (the bar's ✕, the tray's Cancel), so its audio is kept for
+    /// [`UNDO_MS`] — the bar shows "Dictation cancelled · Undo" (`yap-state`
+    /// "cancelled") — then dropped; a push-to-talk lone tap is just thrown
+    /// away. A recording too short to hold words, or one that never heard a
+    /// sound, isn't offered back.
+    fn cancel(self: &Arc<Self>, undo: bool) {
         if !self.recording.swap(false, Ordering::SeqCst) {
             return;
         }
@@ -787,16 +893,100 @@ impl Shared {
         // No stop chime for a cancel: the other apps' sound comes back now.
         let token = crate::mute::end();
         std::thread::spawn(move || crate::mute::after_stop_chime(token));
-        if let Ok(mut buf) = self.buffer.lock() {
-            buf.clear();
+        let audio = self.buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
+        // The edit-mode selection/state goes with it (into the kept
+        // recording, or nowhere), so it can't leak into a later session.
+        let selection = self.selection.lock().ok().and_then(|mut g| g.take());
+        let edit = self.edit_mode.swap(false, Ordering::SeqCst);
+        if !(undo && audio.len() >= UNDO_MIN_SAMPLES && self.mic_tally.heard()) {
+            let _ = self.app.emit("yap-state", "idle");
+            tracing::info!("Recording cancelled (audio discarded)");
+            return;
         }
-        // Drop any edit-mode selection/state so it can't leak into a later session.
+        let id = self.kept_seq.fetch_add(1, Ordering::SeqCst) + 1;
+        let kept = Kept {
+            id,
+            audio,
+            target_hwnd: self.target_hwnd.load(Ordering::Relaxed),
+            target_kind: self.target_kind.lock().map(|k| *k).unwrap_or_default(),
+            edit,
+            selection,
+        };
+        if let Ok(mut k) = self.kept.lock() {
+            *k = Some(kept);
+        }
+        let _ = self.app.emit("yap-dictation-cancelled", serde_json::json!({ "undoMs": UNDO_MS }));
+        let _ = self.app.emit("yap-state", "cancelled");
+        tracing::info!("Recording cancelled (kept {} s for Undo)", UNDO_MS / 1000);
+        let shared = Arc::clone(self);
+        let spawned = std::thread::Builder::new().name("dictation-undo".into()).spawn(move || {
+            std::thread::sleep(Duration::from_millis(UNDO_MS));
+            let expired = shared
+                .kept
+                .lock()
+                .map(|mut k| {
+                    let ours = k.as_ref().is_some_and(|k| k.id == id);
+                    if ours {
+                        *k = None;
+                    }
+                    ours
+                })
+                .unwrap_or(false);
+            if expired {
+                tracing::info!("The cancelled dictation's audio is gone (Undo timed out)");
+                let _ = shared.app.emit("yap-state", "idle");
+            }
+        });
+        if spawned.is_err() {
+            if let Ok(mut k) = self.kept.lock() {
+                *k = None;
+            }
+            let _ = self.app.emit("yap-state", "idle");
+        }
+    }
+
+    /// **Undo** a cancel: the kept recording is transcribed and pasted
+    /// exactly as if it had been stopped — into the window it was meant for
+    /// (never the one in front now, if that's another), with its own kind of
+    /// app, edit mode and selection. The text around that window's cursor
+    /// is read afresh: it may have changed since.
+    fn undo(self: &Arc<Self>) -> Result<(), String> {
+        if self.recording.load(Ordering::SeqCst) {
+            return Err("A dictation is recording".into());
+        }
+        if self.processing.swap(true, Ordering::SeqCst) {
+            return Err("Yap is busy transcribing — try again in a moment".into());
+        }
+        let Some(k) = self.kept.lock().ok().and_then(|mut k| k.take()) else {
+            self.processing.store(false, Ordering::SeqCst);
+            return Err("Nothing to undo: the cancelled dictation is gone".into());
+        };
+        self.target_hwnd.store(k.target_hwnd, Ordering::Relaxed);
+        if let Ok(mut kind) = self.target_kind.lock() {
+            *kind = k.target_kind;
+        }
+        self.edit_mode.store(k.edit, Ordering::SeqCst);
         if let Ok(mut g) = self.selection.lock() {
-            *g = None;
+            *g = k.selection;
         }
-        self.edit_mode.store(false, Ordering::SeqCst);
-        let _ = self.app.emit("yap-state", "idle");
-        tracing::info!("Recording cancelled (audio discarded)");
+        let (smart_spacing, in_terminal) = self
+            .config
+            .read()
+            .map(|c| (c.smart_spacing, k.target_kind.with_settings(c.terminal_mode, true).is_terminal()))
+            .unwrap_or((false, false));
+        let target = (k.target_hwnd != 0).then_some(k.target_hwnd);
+        crate::selection::begin_dictation(target, smart_spacing && !k.edit && !in_terminal);
+        let _ = self.app.emit("yap-state", "processing");
+        tracing::info!(samples = k.audio.len(), "Undo: transcribing the cancelled dictation for its own window");
+        self.undoing.store(true, Ordering::SeqCst);
+        let shared = Arc::clone(self);
+        tauri::async_runtime::spawn(async move {
+            let flag = Arc::clone(&shared);
+            shared.run_stt(k.audio).await;
+            flag.undoing.store(false, Ordering::SeqCst);
+            flag.processing.store(false, Ordering::SeqCst);
+        });
+        Ok(())
     }
 
     fn stop_and_transcribe(self: &Arc<Self>) {
@@ -993,10 +1183,18 @@ impl Shared {
                 }
                 tracing::info!(text = %out, "Rewrite");
                 let _ = self.app.emit("yap-transcript", out.clone());
-                if let Err(e) =
-                    crate::text_injector::inject_text(&out, restore_clipboard, target).await
-                {
-                    tracing::warn!("Rewrite inject failed: {}", e);
+                let strict = self.undoing.load(Ordering::SeqCst);
+                match crate::text_injector::inject_text(&out, restore_clipboard, target, strict).await {
+                    Ok(crate::text_injector::Delivery::Pasted) => {}
+                    // An app running as administrator: on the clipboard.
+                    Ok(crate::text_injector::Delivery::LeftOnClipboard) => {
+                        crate::alert::show_soon(&self.app, crate::elevated::alert());
+                    }
+                    // An Undo whose window is gone: on the clipboard.
+                    Ok(crate::text_injector::Delivery::WindowGone) => {
+                        crate::alert::show_soon(&self.app, undo_window_gone());
+                    }
+                    Err(e) => tracing::warn!("Rewrite inject failed: {}", e),
                 }
                 let _ = self.app.emit("yap-state", "idle");
             }
@@ -1327,10 +1525,28 @@ impl Shared {
                 &corrected,
                 restore_clipboard,
                 target,
+                self.undoing.load(Ordering::SeqCst),
             )
             .await
             {
-                Ok(()) => {
+                // An app running as administrator took no keys: the
+                // text is on the clipboard, and the person is told
+                // to paste it (no submit key, no correction watch).
+                Ok(crate::text_injector::Delivery::LeftOnClipboard) => {
+                    report.left_on_clipboard = true;
+                    if submit.is_some() {
+                        tracing::info!("Not pressing the submit key: the app runs as administrator");
+                    }
+                    crate::alert::show_soon(&self.app, crate::elevated::alert());
+                }
+                // An Undo whose window is gone (or won't come to the
+                // front): never into another one; on the clipboard.
+                Ok(crate::text_injector::Delivery::WindowGone) => {
+                    report.left_on_clipboard = true;
+                    report.error = Some("the dictation's window is gone".into());
+                    crate::alert::show_soon(&self.app, undo_window_gone());
+                }
+                Ok(crate::text_injector::Delivery::Pasted) => {
                     // Once, whether auto-submit, the voice
                     // command or both asked for it.
                     if let Some(key) = &submit {
@@ -1602,6 +1818,9 @@ impl Pipeline {
             rec_session: AtomicU64::new(0),
             stream_slot: Arc::downgrade(&stream_slot),
             mic_name: Mutex::new(String::new()),
+            kept: Mutex::new(None),
+            kept_seq: AtomicU64::new(0),
+            undoing: AtomicBool::new(false),
         });
 
         spawn_idle_watcher(&shared);
@@ -1611,6 +1830,11 @@ impl Pipeline {
             if let Err(e) = open_stream(&shared, &mut slot, cfg.input_device.as_deref(), true) {
                 tracing::warn!("No audio input — running without a microphone: {}", e);
             }
+        }
+        // Capture starts: if Windows' privacy switches keep desktop apps off
+        // the mic, the log says so now (a recording says it to the person).
+        if let Some(blocked) = crate::mic_privacy::blocked() {
+            tracing::warn!(?blocked, "Windows' privacy settings block the microphone for desktop apps");
         }
 
         let _ = app.emit("yap-state", if has_engine { "idle" } else { "needs-model" });
@@ -1664,9 +1888,24 @@ impl Pipeline {
         self.shared.on_key(pressed, true, at);
     }
 
-    /// Stop recording and discard the audio (no transcription).
+    /// Cancel the recording (the bar's ✕, the tray's Cancel): nothing is
+    /// transcribed, and its audio is kept a moment for **Undo**.
     pub fn cancel(&self) {
-        self.shared.cancel();
+        self.shared.cancel(true);
+    }
+
+    /// Stop the recording and paste it, as a second press of the hotkey does
+    /// (the bar's ✓). Into the window the dictation started in.
+    pub fn stop(&self) {
+        if self.shared.recording.load(Ordering::SeqCst) {
+            self.shared.stop_and_transcribe();
+        }
+    }
+
+    /// **Undo** the last cancel: transcribe its kept audio and paste it into
+    /// the window it was for. Errors once the audio is gone.
+    pub fn undo(&self) -> Result<(), String> {
+        self.shared.undo()
     }
 
     /// Recording, or transcribing a dictation / an Upload file — the updater
@@ -1674,6 +1913,12 @@ impl Pipeline {
     pub fn is_busy(&self) -> bool {
         self.shared.recording.load(Ordering::SeqCst)
             || self.shared.processing.load(Ordering::SeqCst)
+    }
+
+    /// A cancelled dictation is waiting for Undo (the updater doesn't
+    /// restart Yap under it: its "idle" afterwards lets it go ahead).
+    pub fn holds_undo(&self) -> bool {
+        self.shared.kept.lock().map(|k| k.is_some()).unwrap_or(false)
     }
 
     /// Install a freshly-created STT engine (e.g. after a model download).
@@ -1777,6 +2022,12 @@ impl Drop for FeedOn {
 impl Robot {
     const BUSY: &'static str = "Yap is busy with another dictation";
 
+    /// The report of the latest dictation that went to the paste (an Undo's,
+    /// say), taken; `None` while none has since this was last asked.
+    pub(crate) fn take_delivered(&self) -> Option<Delivered> {
+        LAST_DELIVERED.lock().ok().and_then(|mut last| last.take())
+    }
+
     /// `text` as if the STT had just heard it: the window in front becomes
     /// the target and the text around its cursor is read, as at a
     /// recording's start (waiting for that read, as a few seconds of talk
@@ -1800,8 +2051,9 @@ impl Robot {
     /// the mic's place, between a real start and a real stop: the target
     /// captured at the start, the live preview, the dead-mic watchdog, the
     /// STT, then the dictation's own steps to the paste. `None`: nothing was
-    /// transcribed (a silent "mic", say).
-    pub(crate) async fn dictate_audio(&self, samples: Vec<f32>) -> Result<Option<Delivered>, String> {
+    /// transcribed (a silent "mic", say). `cancel`: the recording is
+    /// cancelled instead of stopped, as the bar's ✕ does (kept for Undo).
+    pub(crate) async fn dictate_audio(&self, samples: Vec<f32>, cancel: bool) -> Result<Option<Delivered>, String> {
         let shared = Arc::clone(&self.0);
         if shared.recording.load(Ordering::SeqCst) || shared.processing.load(Ordering::SeqCst) {
             return Err(Self::BUSY.into());
@@ -1839,8 +2091,13 @@ impl Robot {
         })
         .await
         .map_err(|e| format!("The WAV player failed: {e}"))?;
-        // Stop as the hotkey would, if it's still this recording.
+        // Stop as the hotkey would (or cancel, as the bar's ✕), if it's
+        // still this recording.
         if shared.recording.load(Ordering::SeqCst) && shared.rec_session.load(Ordering::SeqCst) == session {
+            if cancel {
+                shared.cancel(true);
+                return Ok(None);
+            }
             shared.stop_and_transcribe();
         }
         // The transcription and the paste.

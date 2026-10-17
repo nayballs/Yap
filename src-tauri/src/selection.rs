@@ -19,9 +19,14 @@
 //!    dictation to them. Only the focused field's own text: Chromium's
 //!    ranges run on into the page around a text box, so they're kept inside
 //!    the field's document range; and an empty field reads as empty,
-//!    whatever stands in for its text (its label, its placeholder, U+FFFC, a
-//!    web editor's CSS placeholder — [`stands_in_for_empty`],
-//!    [`class_says_empty`]). The paste never waits for it: a read that hasn't
+//!    whatever stands in for its text (its label — its Name or the element
+//!    that labels it, LabeledBy —, its placeholder, U+FFFC, a web editor's
+//!    CSS placeholder — [`stands_in_for_empty`], [`class_says_empty`]). A
+//!    focused element with no text of its own (a part of an editor) is read
+//!    through the text field it's in, a few levels up in the same app
+//!    ([`pick_field`]); a field read-only by its ValuePattern **or** by the
+//!    legacy IAccessible state (`STATE_SYSTEM_READONLY`) is never read. The
+//!    paste never waits for it: a read that hasn't
 //!    finished by then (or failed, or found a password box) leaves the
 //!    dictation exactly as it would be without it. The text is kept in memory
 //!    for that one dictation only and never logged (lengths only).
@@ -78,13 +83,14 @@ fn bare(s: &str) -> String {
 /// line break and a zero-width character, and an editor that draws its
 /// placeholder inside itself (Slate) has it in its text. So: nothing but
 /// markers and whitespace, or exactly the field's `placeholder` (HelpText,
-/// shown only while it's empty), is empty. Exactly its `name` (a label, which
+/// shown only while it's empty), is empty. Exactly one of its `labels` (its
+/// Name, and the name of the element labelling it — LabeledBy —, which
 /// someone could also type) is empty unless the field's `value`
 /// (ValuePattern, asked only then; `None` = it has none) says those words
 /// are really there: an empty Chromium box's value is "", and a value of
 /// the same words with a marker in the text is Slate's placeholder.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn stands_in_for_empty(text: &str, name: &str, placeholder: &str, value: impl FnOnce() -> Option<String>) -> bool {
+fn stands_in_for_empty(text: &str, labels: &[String], placeholder: &str, value: impl FnOnce() -> Option<String>) -> bool {
     let shown = bare(text);
     if shown.is_empty() {
         return true;
@@ -96,13 +102,65 @@ fn stands_in_for_empty(text: &str, name: &str, placeholder: &str, value: impl Fn
     if same(placeholder) {
         return true;
     }
-    if !same(name) {
+    if !labels.iter().any(|l| same(l)) {
         return false;
     }
     match value() {
         None => true,
         Some(v) => bare(&v).is_empty() || text.contains(is_marker),
     }
+}
+
+/// How far above the focused element Yap looks for the text field it's
+/// part of (an editor's inner element with no text of its own).
+const PARENT_LEVELS: usize = 3;
+
+/// The legacy IAccessible state bit for read-only (`STATE_SYSTEM_READONLY`).
+#[cfg_attr(not(windows), allow(dead_code))]
+const STATE_SYSTEM_READONLY: u32 = 0x40;
+
+/// A legacy IAccessible state (`LegacyIAccessiblePattern.CurrentState`)
+/// saying the element is read-only.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn legacy_read_only(state: u32) -> bool {
+    state & STATE_SYSTEM_READONLY != 0
+}
+
+/// What an element on the way up from the focus offers ([`pick_field`]).
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Offers {
+    /// Its process.
+    pid: u32,
+    /// A TextPattern.
+    text: bool,
+    /// A ValuePattern on a text control (an edit, a document, a combo box).
+    value: bool,
+    /// Read-only, by its ValuePattern or its legacy IAccessible state.
+    read_only: bool,
+}
+
+/// Which element of `chain` (the focused one first, then its parents) is
+/// the text field to read: the first that offers text (a TextPattern or a
+/// text control's ValuePattern) — the focused element itself, or one of its
+/// first [`PARENT_LEVELS`] parents — unless it's read-only. Never one in
+/// another process than the focused element's, and never past a read-only
+/// element (a viewer's part is no field's).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn pick_field(chain: &[Offers]) -> Option<usize> {
+    let pid = chain.first()?.pid;
+    for (i, e) in chain.iter().enumerate().take(PARENT_LEVELS + 1) {
+        if e.pid != pid {
+            return None;
+        }
+        if e.text || e.value {
+            return (!e.read_only).then_some(i);
+        }
+        if e.read_only {
+            return None;
+        }
+    }
+    None
 }
 
 /// A web editor's class list saying the element shows no text of its own
@@ -232,7 +290,16 @@ pub fn take_context() -> Option<FieldContext> {
 /// when the field can't be read, is a password box, or is read-only.
 pub fn read_context(target_hwnd: Option<isize>) -> Option<FieldContext> {
     let started = std::time::Instant::now();
-    let pid = target_hwnd.and_then(crate::text_injector::window_process);
+    // The window gone (closed since): nothing of its to read, and the
+    // focused field now is someone else's.
+    let pid = match target_hwnd.map(crate::text_injector::window_process) {
+        Some(None) => {
+            tracing::debug!("The dictation's window is gone; not reading the text around the cursor");
+            return None;
+        }
+        Some(pid) => pid,
+        None => None,
+    };
     let ctx = read_focused_context(pid);
     let ms = started.elapsed().as_millis() as u64;
     match &ctx {
@@ -392,14 +459,14 @@ mod uia {
     };
     use windows::Win32::UI::Accessibility::{
         CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement,
-        IUIAutomationTextPattern, IUIAutomationTextPattern2, IUIAutomationTextRange,
-        IUIAutomationValuePattern, TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start,
-        TextUnit_Character, UIA_ComboBoxControlTypeId, UIA_DocumentControlTypeId,
-        UIA_EditControlTypeId, UIA_IsReadOnlyAttributeId, UIA_TextPattern2Id, UIA_TextPatternId,
-        UIA_ValuePatternId,
+        IUIAutomationLegacyIAccessiblePattern, IUIAutomationTextPattern, IUIAutomationTextPattern2,
+        IUIAutomationTextRange, IUIAutomationValuePattern, TextPatternRangeEndpoint_End,
+        TextPatternRangeEndpoint_Start, TextUnit_Character, UIA_ComboBoxControlTypeId,
+        UIA_DocumentControlTypeId, UIA_EditControlTypeId, UIA_IsReadOnlyAttributeId,
+        UIA_LegacyIAccessiblePatternId, UIA_TextPattern2Id, UIA_TextPatternId, UIA_ValuePatternId,
     };
 
-    use super::{FieldWindow, SELECTION_CHARS, SELECTION_ENDS};
+    use super::{FieldWindow, Offers, SELECTION_CHARS, SELECTION_ENDS};
     use crate::smart_insert::{head_chars, tail_chars, FieldContext, CONTEXT_CHARS};
 
     /// COM on this thread for as long as it lives; undone on drop when this
@@ -452,7 +519,10 @@ mod uia {
         let _com = Com::init()?;
         unsafe {
             let automation = automation(super::SELECTION_TIMEOUT_MS)?;
-            let element = automation.GetFocusedElement().ok()?;
+            let focused = automation.GetFocusedElement().ok()?;
+            // The focused element, or the text field it's part of (its
+            // selection is the field's); read-only or not, it's only read.
+            let element = field_for(&automation, &focused, false)?;
 
             // Missing TextPattern → Err / null; the cast resolves both to None.
             let unknown = element.GetCurrentPattern(UIA_TextPatternId).ok()?;
@@ -491,13 +561,81 @@ mod uia {
         }
     }
 
-    /// The text around the caret in `element`, a text field.
+    /// The text around the caret in the text field `element` (the focused
+    /// one) is, or is part of.
     unsafe fn element_context(automation: &IUIAutomation, element: &IUIAutomationElement) -> Option<FieldContext> {
         // Never a password box (and if it can't say, don't risk it).
         if element.CurrentIsPassword().ok()?.as_bool() {
             return None;
         }
-        text_context(automation, element).or_else(|| value_context(element))
+        let field = field_for(automation, element, true)?;
+        if field.CurrentIsPassword().ok()?.as_bool() {
+            return None;
+        }
+        text_context(automation, &field).or_else(|| value_context(&field))
+    }
+
+    /// What `e` offers on the walk up from the focus ([`super::pick_field`]).
+    /// `read_only`: also ask whether it's read-only (else taken not to be).
+    unsafe fn offers(e: &IUIAutomationElement, read_only: bool) -> Offers {
+        let pid = e.CurrentProcessId().map(|p| p as u32).unwrap_or(0);
+        let text = e
+            .GetCurrentPattern(UIA_TextPatternId)
+            .ok()
+            .and_then(|u| u.cast::<IUIAutomationTextPattern>().ok())
+            .is_some();
+        let value = text_value_pattern(e);
+        let read_only = read_only
+            && (value.as_ref().is_some_and(|p| p.CurrentIsReadOnly().is_ok_and(|r| r.as_bool()))
+                || legacy_state(e).is_some_and(super::legacy_read_only));
+        Offers {
+            pid,
+            text,
+            value: value.is_some(),
+            read_only,
+        }
+    }
+
+    /// The legacy IAccessible state (`STATE_SYSTEM_*` bits), if it has one.
+    unsafe fn legacy_state(e: &IUIAutomationElement) -> Option<u32> {
+        let p: IUIAutomationLegacyIAccessiblePattern =
+            e.GetCurrentPattern(UIA_LegacyIAccessiblePatternId).ok()?.cast().ok()?;
+        p.CurrentState().ok()
+    }
+
+    /// The element to read for the focused `element`: itself when it's a
+    /// text field, else the text field it's part of — up to
+    /// [`super::PARENT_LEVELS`] parents, in its own process
+    /// ([`super::pick_field`]). `None` when there's none, or the field is
+    /// read-only (`check_read_only`: by its ValuePattern or its legacy
+    /// IAccessible state).
+    unsafe fn field_for(
+        automation: &IUIAutomation,
+        element: &IUIAutomationElement,
+        check_read_only: bool,
+    ) -> Option<IUIAutomationElement> {
+        let walker = automation.ControlViewWalker().ok();
+        let mut chain: Vec<(IUIAutomationElement, Offers)> = Vec::new();
+        let mut e = element.clone();
+        loop {
+            let o = offers(&e, check_read_only);
+            let first_pid = chain.first().map_or(o.pid, |(_, f)| f.pid);
+            chain.push((e.clone(), o));
+            let decided = o.text || o.value || o.read_only || o.pid != first_pid;
+            if decided || chain.len() > super::PARENT_LEVELS {
+                break;
+            }
+            match walker.as_ref().and_then(|w| w.GetParentElement(&e).ok()) {
+                Some(parent) => e = parent,
+                None => break,
+            }
+        }
+        let list: Vec<Offers> = chain.iter().map(|(_, o)| *o).collect();
+        let i = super::pick_field(&list)?;
+        if i > 0 {
+            tracing::debug!(levels = i, "The focused element has no text of its own; reading the field it's part of");
+        }
+        Some(chain.swap_remove(i).0)
     }
 
     /// [`element_context`] for a window's own element (the tests' edit
@@ -640,11 +778,20 @@ mod uia {
             && (text_stands_in(element, &text) || placeholder_class(automation, element))
     }
 
+    /// A field's labels: its Name, and the name of the element that labels
+    /// it (LabeledBy), when there is one.
+    unsafe fn labels(element: &IUIAutomationElement) -> Vec<String> {
+        let mut out = vec![element.CurrentName().map(|b| b.to_string()).unwrap_or_default()];
+        if let Some(by) = element.CurrentLabeledBy().ok().and_then(|l| l.CurrentName().ok()) {
+            out.push(by.to_string());
+        }
+        out
+    }
+
     /// [`super::stands_in_for_empty`] for a TextPattern field showing `text`.
     unsafe fn text_stands_in(element: &IUIAutomationElement, text: &str) -> bool {
-        let name = element.CurrentName().map(|b| b.to_string()).unwrap_or_default();
         let placeholder = element.CurrentHelpText().map(|b| b.to_string()).unwrap_or_default();
-        super::stands_in_for_empty(text, &name, &placeholder, || {
+        super::stands_in_for_empty(text, &labels(element), &placeholder, || {
             let pattern: IUIAutomationValuePattern = element.GetCurrentPattern(UIA_ValuePatternId).ok()?.cast().ok()?;
             Some(pattern.CurrentValue().ok()?.to_string())
         })
@@ -670,11 +817,17 @@ mod uia {
     }
 
     /// [`super::stands_in_for_empty`] for a ValuePattern-only field: its
-    /// value is what's in it, so only its placeholder (or nothing but
-    /// markers) stands in for empty.
+    /// placeholder, nothing but markers, or — in an edit or a document, whose
+    /// value is its text — exactly its label (its Name, or LabeledBy's) stand
+    /// in for empty, as a field showing its label when empty does. (A combo
+    /// box's Name is often its value: only its placeholder counts.)
     unsafe fn value_stands_in(element: &IUIAutomationElement, value: &str) -> bool {
         let placeholder = element.CurrentHelpText().map(|b| b.to_string()).unwrap_or_default();
-        super::stands_in_for_empty(value, "", &placeholder, || None)
+        let text_control = element
+            .CurrentControlType()
+            .is_ok_and(|k| k == UIA_EditControlTypeId || k == UIA_DocumentControlTypeId);
+        let labels = if text_control { labels(element) } else { Vec::new() };
+        super::stands_in_for_empty(value, &labels, &placeholder, || None)
     }
 
     /// The selected text; a long selection as its start and end.
@@ -717,14 +870,20 @@ mod uia {
         })
     }
 
-    /// A text field's ValuePattern, if it isn't read-only.
-    unsafe fn editable_value(element: &IUIAutomationElement) -> Option<IUIAutomationValuePattern> {
+    /// A text control's ValuePattern (an edit, a document, a combo box).
+    unsafe fn text_value_pattern(element: &IUIAutomationElement) -> Option<IUIAutomationValuePattern> {
         let kind = element.CurrentControlType().ok()?;
         if ![UIA_EditControlTypeId, UIA_DocumentControlTypeId, UIA_ComboBoxControlTypeId].contains(&kind) {
             return None;
         }
-        let pattern: IUIAutomationValuePattern = element.GetCurrentPattern(UIA_ValuePatternId).ok()?.cast().ok()?;
-        if pattern.CurrentIsReadOnly().ok()?.as_bool() {
+        element.GetCurrentPattern(UIA_ValuePatternId).ok()?.cast().ok()
+    }
+
+    /// A text field's ValuePattern, if it isn't read-only (by the pattern,
+    /// or by the legacy IAccessible state).
+    unsafe fn editable_value(element: &IUIAutomationElement) -> Option<IUIAutomationValuePattern> {
+        let pattern = text_value_pattern(element)?;
+        if pattern.CurrentIsReadOnly().ok()?.as_bool() || legacy_state(element).is_some_and(super::legacy_read_only) {
             return None;
         }
         Some(pattern)
@@ -836,8 +995,13 @@ mod uia {
             let com = Com::init()?;
             let automation = automation(super::WATCH_TIMEOUT_MS)?;
             unsafe {
-                let element = automation.GetFocusedElement().ok()?;
-                if element.CurrentProcessId().ok()? as u32 != pid || element.CurrentIsPassword().ok()?.as_bool() {
+                let focused = automation.GetFocusedElement().ok()?;
+                if focused.CurrentProcessId().ok()? as u32 != pid || focused.CurrentIsPassword().ok()?.as_bool() {
+                    return None;
+                }
+                // The text field the focus is (in), not read-only.
+                let element = field_for(&automation, &focused, true)?;
+                if element.CurrentIsPassword().ok()?.as_bool() {
                     return None;
                 }
                 let watched = Watched {
@@ -1008,41 +1172,117 @@ mod field_text_tests {
         assert_eq!(bare("one\u{FFFC}two"), "one two");
     }
 
+    /// A field's labels (its Name, then LabeledBy's), as `labels` reads them.
+    fn l(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
     #[test]
     fn what_chromium_reads_for_an_empty_box_is_empty() {
         // A textarea or contenteditable labelled by aria-label: its label
         // as its text, an empty value.
-        assert!(stands_in_for_empty("Type a message", "Type a message", "", || Some(String::new())));
+        assert!(stands_in_for_empty("Type a message", &l(&["Type a message"]), "", || Some(String::new())));
         // No label: U+FFFC. With a placeholder: U+FFFC, the placeholder as
         // name and HelpText.
-        assert!(stands_in_for_empty("\u{FFFC}", "", "", unasked));
-        assert!(stands_in_for_empty("\u{FFFC}", "Write a reply", "Write a reply", unasked));
+        assert!(stands_in_for_empty("\u{FFFC}", &l(&[""]), "", unasked));
+        assert!(stands_in_for_empty("\u{FFFC}", &l(&["Write a reply"]), "Write a reply", unasked));
         // A rich editor's empty line (Gmail's body, WhatsApp's Lexical box).
-        assert!(stands_in_for_empty("\n", "Message Body", "", unasked));
+        assert!(stands_in_for_empty("\n", &l(&["Message Body"]), "", unasked));
         // Slate's placeholder inside the editor, beside its U+FEFF line: the
         // value has the same words, but the marker gives it away.
         assert!(stands_in_for_empty(
             "Message #random\n\u{FEFF}\n",
-            "Message #random",
+            &l(&["Message #random"]),
             "",
             || Some("Message #random\n\u{FEFF}\n".into())
         ));
         // A field showing its placeholder (HelpText) as its text.
-        assert!(stands_in_for_empty("Search mail", "", "Search mail", unasked));
+        assert!(stands_in_for_empty("Search mail", &l(&[""]), "Search mail", unasked));
         // Exactly the label, and no ValuePattern to say otherwise.
-        assert!(stands_in_for_empty("Notes ", "Notes", "", || None));
+        assert!(stands_in_for_empty("Notes ", &l(&["Notes"]), "", || None));
+    }
+
+    #[test]
+    fn the_element_labelling_a_field_is_its_label_too() {
+        // Its own Name says something else (or nothing); the label next to
+        // it (LabeledBy, a dialog's static text, an HTML <label>) is what
+        // an empty field shows.
+        assert!(stands_in_for_empty("Your reply", &l(&["", "Your reply"]), "", || None));
+        assert!(stands_in_for_empty("Your reply:", &l(&["Reply box", "Your reply:"]), "", || Some(String::new())));
+        // Really typed: the value says so.
+        assert!(!stands_in_for_empty("Your reply", &l(&["", "Your reply"]), "", || Some("Your reply".into())));
+        // Neither label: real text, nothing asked.
+        assert!(!stands_in_for_empty("Hello", &l(&["Reply box", "Your reply"]), "", unasked));
     }
 
     #[test]
     fn real_text_is_never_a_stand_in() {
-        assert!(!stands_in_for_empty("Hello world", "Notes", "Write here", unasked));
-        assert!(!stands_in_for_empty("\u{FFFC} a photo", "", "", unasked));
+        assert!(!stands_in_for_empty("Hello world", &l(&["Notes"]), "Write here", unasked));
+        assert!(!stands_in_for_empty("\u{FFFC} a photo", &l(&[""]), "", unasked));
         // The label's words, really typed: the value says they're there.
-        assert!(!stands_in_for_empty("Notes", "Notes", "", || Some("Notes".into())));
+        assert!(!stands_in_for_empty("Notes", &l(&["Notes"]), "", || Some("Notes".into())));
         // Part of the label isn't the label.
-        assert!(!stands_in_for_empty("Type a", "Type a message", "", unasked));
+        assert!(!stands_in_for_empty("Type a", &l(&["Type a message"]), "", unasked));
         // No label, no placeholder: nothing to match.
-        assert!(!stands_in_for_empty("Hi", "", "", unasked));
+        assert!(!stands_in_for_empty("Hi", &[], "", unasked));
+    }
+
+    fn el(pid: u32, text: bool, value: bool, read_only: bool) -> Offers {
+        Offers { pid, text, value, read_only }
+    }
+
+    #[test]
+    fn the_focused_field_itself_comes_first() {
+        assert_eq!(pick_field(&[el(7, true, false, false)]), Some(0));
+        assert_eq!(pick_field(&[el(7, false, true, false)]), Some(0));
+        // Read-only (by its ValuePattern or its legacy state): never read,
+        // and not the field above it either.
+        assert_eq!(pick_field(&[el(7, true, false, true), el(7, true, false, false)]), None);
+        assert_eq!(pick_field(&[]), None);
+    }
+
+    #[test]
+    fn an_element_with_no_text_is_read_through_the_field_its_in() {
+        // An editor's inner element (a span, a pane) → its parent editor.
+        let chain = [el(7, false, false, false), el(7, false, false, false), el(7, true, false, false)];
+        assert_eq!(pick_field(&chain), Some(2));
+        // Up to three levels…
+        let deep = [
+            el(7, false, false, false),
+            el(7, false, false, false),
+            el(7, false, false, false),
+            el(7, true, false, false),
+        ];
+        assert_eq!(pick_field(&deep), Some(3));
+        // …and no further.
+        let deeper = [
+            el(7, false, false, false),
+            el(7, false, false, false),
+            el(7, false, false, false),
+            el(7, false, false, false),
+            el(7, true, false, false),
+        ];
+        assert_eq!(pick_field(&deeper), None);
+    }
+
+    #[test]
+    fn the_walk_stays_in_the_app_and_stops_at_a_viewer() {
+        // The parent is another process's window (a host): never.
+        assert_eq!(pick_field(&[el(7, false, false, false), el(9, true, false, false)]), None);
+        // A read-only part of a page (static text) → its document: no.
+        assert_eq!(pick_field(&[el(7, false, false, true), el(7, true, false, false)]), None);
+        // A read-only field found on the way up: no.
+        assert_eq!(pick_field(&[el(7, false, false, false), el(7, true, true, true)]), None);
+    }
+
+    #[test]
+    fn the_legacy_state_says_read_only() {
+        // STATE_SYSTEM_READONLY (0x40), among others (focusable 0x100000,
+        // focused 0x4).
+        assert!(legacy_read_only(0x40));
+        assert!(legacy_read_only(0x0010_0044));
+        assert!(!legacy_read_only(0x0010_0004));
+        assert!(!legacy_read_only(0));
     }
 
     #[test]
@@ -1120,6 +1360,8 @@ mod tests {
     }
 
     const WS_POPUP: u32 = 0x8000_0000;
+    const WS_CHILD: u32 = 0x4000_0000;
+    const WS_VISIBLE: u32 = 0x1000_0000;
     const ES_MULTILINE: u32 = 0x0004;
     const ES_PASSWORD: u32 = 0x0020;
     const ES_READONLY: u32 = 0x0800;
@@ -1132,17 +1374,29 @@ mod tests {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    /// A hidden text field on its own message-pumping thread.
+    /// A hidden text field on its own message-pumping thread (and, for the
+    /// walk up from the focus, a child window inside it).
     struct Field {
         hwnd: isize,
+        child: isize,
         thread: u32,
         join: Option<std::thread::JoinHandle<()>>,
     }
 
     impl Field {
         fn new(class: &str, style: u32, text: &str, selection: (usize, usize)) -> Option<Field> {
+            Field::make(class, style, text, selection, None)
+        }
+
+        /// The field with a `child_class` window inside it (no text of its own).
+        fn with_child(class: &str, style: u32, text: &str, selection: (usize, usize), child_class: &str) -> Option<Field> {
+            Field::make(class, style, text, selection, Some(child_class))
+        }
+
+        fn make(class: &str, style: u32, text: &str, selection: (usize, usize), child_class: Option<&str>) -> Option<Field> {
             let (tx, rx) = mpsc::channel();
             let (class, text) = (wide(class), wide(text));
+            let child_class = child_class.map(wide);
             let join = std::thread::spawn(move || unsafe {
                 let hwnd = CreateWindowExW(
                     WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -1163,16 +1417,34 @@ mod tests {
                     return;
                 }
                 SendMessageW(hwnd, EM_SETSEL, selection.0, selection.1 as isize);
-                let _ = tx.send(Some((hwnd as isize, GetCurrentThreadId())));
+                let child = match &child_class {
+                    Some(c) => CreateWindowExW(
+                        0,
+                        c.as_ptr(),
+                        wide("").as_ptr(),
+                        WS_CHILD | WS_VISIBLE,
+                        0,
+                        0,
+                        40,
+                        20,
+                        hwnd,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    ),
+                    None => std::ptr::null_mut(),
+                };
+                let _ = tx.send(Some((hwnd as isize, child as isize, GetCurrentThreadId())));
                 let mut msg: Msg = std::mem::zeroed();
                 while GetMessageW(&mut msg, 0, 0, 0) > 0 {
                     DispatchMessageW(&msg);
                 }
                 DestroyWindow(hwnd);
             });
-            let (hwnd, thread) = rx.recv().ok()??;
+            let (hwnd, child, thread) = rx.recv().ok()??;
             Some(Field {
                 hwnd,
+                child,
                 thread,
                 join: Some(join),
             })
@@ -1272,6 +1544,18 @@ mod tests {
         assert!(w.text.starts_with("word word"), "{class}: {}", w.text.len());
         let w = super::uia::window_watch(field.hwnd, 2_000).expect("the watch's read");
         assert!(w.to_end && w.text == long && w.caret == 750, "{class}: the whole field");
+        drop(field);
+
+        // An element with no text of its own inside the field (a button in
+        // it): read through the field it's part of.
+        let field = Field::with_child(class, ES_MULTILINE, text, (13, 13), "BUTTON").expect("a field");
+        assert_ne!(field.child, 0, "{class}: the child window");
+        let ctx = super::uia::window_context(field.child).expect("the field's context, from inside it");
+        assert_eq!((ctx.before.as_str(), ctx.after.as_str()), ("Hello world. ", "we went home"), "{class}: from a child");
+        drop(field);
+        // …but not through a read-only one.
+        let field = Field::with_child(class, ES_MULTILINE | ES_READONLY, text, (13, 13), "BUTTON").expect("a field");
+        assert_eq!(super::uia::window_context(field.child), None, "{class}: a read-only field, from a child");
         drop(field);
 
         // Never a password box; never a read-only field.

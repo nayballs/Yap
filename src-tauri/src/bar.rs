@@ -107,8 +107,9 @@ pub struct Card {
     /// with `secondary` and `link` in its ^ menu); the ✕ sits on its corner.
     pub style: &'static str,
     /// The glyph by the title: "call" | "update" | "notes" | "timer" |
-    /// "screen" | "error" | "tip" | "dictionary" | "". On a call card, "calendar" stands in for a
-    /// missing app mark (a calendar meeting with no call app).
+    /// "screen" | "error" | "tip" | "dictionary" | "mic" | "clipboard" | "".
+    /// On a call card, "calendar" stands in for a missing app mark (a
+    /// calendar meeting with no call app).
     pub icon: &'static str,
     /// The call app (`meeting_detect::APPS` id), for its mark.
     pub app: Option<&'static str>,
@@ -195,6 +196,8 @@ enum Dictation {
     Recording,
     Processing,
     Error,
+    /// Just cancelled: "Dictation cancelled · Undo" while its audio is kept.
+    Cancelled,
 }
 
 impl Dictation {
@@ -203,6 +206,7 @@ impl Dictation {
             "recording" => Self::Recording,
             "processing" | "processing-slow" => Self::Processing,
             "error" => Self::Error,
+            "cancelled" => Self::Cancelled,
             _ => Self::Idle,
         }
     }
@@ -265,10 +269,11 @@ fn seen_now(v: Visibility) -> bool {
     takes_cards(v) && v.fullscreen != Fullscreen::Exclusive
 }
 
-/// Whether the window should take clicks: only with the bar on and showing,
-/// and only while the cursor is on a region the page reported.
+/// Whether the window should take clicks: only while it shows, and only
+/// while the cursor is on a region the page reported — with the bar on, or
+/// while a dictation shows (its ✕ / ✓ and Undo work with the bar off too).
 fn clickable(v: Visibility, shown: bool, on_region: bool) -> bool {
-    v.enabled && shown && on_region
+    (v.enabled || v.dictation != Dictation::Idle) && shown && on_region
 }
 
 /// A monitor change waiting out [`FOLLOW_AFTER_MS`].
@@ -1109,6 +1114,30 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
             give_focus_back();
             crate::meeting_guard::start_or_stop(app);
         }
+        // The dictation capsule's ✓: stop and paste, as the hotkey's second
+        // press does — into the app the dictation started in (the paste
+        // goes back to that window whatever has the focus now).
+        "dictation-stop" => {
+            give_focus_back();
+            let state = app.state::<crate::AppState>();
+            let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
+            guard.as_ref().ok_or("pipeline not started")?.stop();
+        }
+        // Its ✕: cancel, the audio kept a moment for Undo.
+        "dictation-cancel" => {
+            give_focus_back();
+            let state = app.state::<crate::AppState>();
+            let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
+            guard.as_ref().ok_or("pipeline not started")?.cancel();
+        }
+        // "Dictation cancelled · Undo": transcribe and paste it after all,
+        // into the window it was for.
+        "dictation-undo" => {
+            give_focus_back();
+            let state = app.state::<crate::AppState>();
+            let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
+            guard.as_ref().ok_or("pipeline not started")?.undo()?;
+        }
         // ■ on the recording pill: end the meeting, which writes the action
         // plan in Rust (or asks "Started by mistake?").
         "stop-meeting" => crate::meeting_end::end(app, Some(overlay::LABEL))?,
@@ -1186,7 +1215,8 @@ pub fn bar_pointer_left(app: AppHandle) {
     }
 }
 
-/// A bar button or menu item: "dictate" | "meeting" | "stop-meeting" |
+/// A bar button or menu item: "dictate" | "dictation-stop" |
+/// "dictation-cancel" | "dictation-undo" | "meeting" | "stop-meeting" |
 /// "open-note" | "new-note" | "open" | "settings" | "hide" | "show" | "off".
 #[tauri::command]
 pub async fn bar_action(app: AppHandle, action: String) -> Result<(), String> {
@@ -1633,7 +1663,7 @@ mod tests {
         assert!(!takes_cards(off));
         assert!(!shows(Visibility { meeting: true, ..off }));
         assert!(!shows(Visibility { cards: true, ..off }));
-        for d in [Dictation::Recording, Dictation::Processing, Dictation::Error] {
+        for d in [Dictation::Recording, Dictation::Processing, Dictation::Error, Dictation::Cancelled] {
             assert!(shows(Visibility { dictation: d, ..off }));
         }
     }
@@ -1660,8 +1690,15 @@ mod tests {
         assert!(clickable(vis(), true, true));
         assert!(!clickable(vis(), true, false), "off the regions: click-through");
         assert!(!clickable(vis(), false, true), "hidden");
-        // The bar off (the overlay showing for a dictation): never.
-        assert!(!clickable(Visibility { enabled: false, ..vis() }, true, true));
+        // The bar off and no dictation: never.
+        let off = Visibility { enabled: false, ..vis() };
+        assert!(!clickable(off, true, true));
+        // The bar off, a dictation showing: its ✕ / ✓ and Undo take clicks,
+        // and only on them.
+        for d in [Dictation::Recording, Dictation::Cancelled] {
+            assert!(clickable(Visibility { dictation: d, ..off }, true, true));
+            assert!(!clickable(Visibility { dictation: d, ..off }, true, false));
+        }
     }
 
     #[test]
@@ -1669,6 +1706,7 @@ mod tests {
         assert_eq!(Dictation::from_state("recording"), Dictation::Recording);
         assert_eq!(Dictation::from_state("processing-slow"), Dictation::Processing);
         assert_eq!(Dictation::from_state("error"), Dictation::Error);
+        assert_eq!(Dictation::from_state("cancelled"), Dictation::Cancelled);
         assert_eq!(Dictation::from_state("needs-model"), Dictation::Idle);
         assert_eq!(Dictation::from_state("idle"), Dictation::Idle);
     }
