@@ -1,6 +1,6 @@
-//! Two small AI helpers for a meeting, both on the meeting's own model (the
-//! Note Formatting scope, else the cleanup model; `meeting_summary::
-//! resolve_endpoint`), both bounded to fit an 8k local model, and both
+//! Small AI helpers for a meeting, all on the meeting's own model (the Note
+//! Formatting scope, else the cleanup model; `meeting_summary::
+//! resolve_endpoint`), all bounded to fit an 8k local model, and all
 //! stepping aside for dictation (`meeting_summary::chat_beside_dictation`):
 //!
 //! - **"What did I miss?"** ([`meeting_catch_up`], the notepad's mini chat):
@@ -9,6 +9,14 @@
 //!   answer) and passes it as `since`; with nothing new it answers "Nothing
 //!   new since you last looked." without calling a model. A question typed
 //!   in the same chat is answered from the whole meeting so far.
+//! - **The one-tap helpers** ([`meeting_assist`], chips in the notepad's Ask
+//!   sheet and the Notes view's Ask bar): while a meeting records,
+//!   **Questions to ask** (3–5 questions for now, from the latest talk);
+//!   after it, **Follow-up email** (a recap for the attendees, plain text
+//!   with its subject line first) and **Gaps and risks** (what it left
+//!   undecided, unowned or unasked). Each reads only what the meeting has
+//!   (talk, never echo or dictation markers) and says so, without a model,
+//!   when there's too little to go on.
 //! - **The AI meeting title** ([`maybe_title`]): once there's enough talk
 //!   (150 words, or the first digest) a made-up title like "Teams call · 5
 //!   Oct, 14:30", or none, becomes a short one from what the meeting is about
@@ -19,7 +27,7 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use crate::meeting_summary as summary;
@@ -174,9 +182,124 @@ pub async fn meeting_catch_up(
     Ok(CatchUp { answer, nothing_new: false, upto })
 }
 
+/// The one-tap helpers besides "What did I miss?" (the `kind` of
+/// [`meeting_assist`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Helper {
+    /// While recording: questions to ask now ("Questions to ask").
+    Questions,
+    /// After the meeting: a recap to send the attendees ("Follow-up email").
+    FollowUpEmail,
+    /// After the meeting: what it left open ("Gaps and risks").
+    BlindSpots,
+}
+
+impl Helper {
+    /// Its immutable prompt (`llm.rs`).
+    pub fn prompt(self) -> &'static str {
+        match self {
+            Helper::Questions => crate::llm::MEETING_QUESTIONS_PROMPT,
+            Helper::FollowUpEmail => crate::llm::MEETING_FOLLOW_UP_PROMPT,
+            Helper::BlindSpots => crate::llm::MEETING_BLIND_SPOTS_PROMPT,
+        }
+    }
+
+    /// Reply cap (local models only) and temperature.
+    fn reply(self) -> (u32, f32) {
+        match self {
+            Helper::Questions => (summary::QUESTIONS_REPLY_TOKENS, 0.4),
+            Helper::FollowUpEmail => (summary::FOLLOW_UP_REPLY_TOKENS, 0.3),
+            Helper::BlindSpots => (summary::BLIND_SPOTS_REPLY_TOKENS, 0.2),
+        }
+    }
+
+    /// What it reads of `note`, or `None` when that's too little to go on.
+    pub fn input(self, note: &crate::notes::Note) -> Option<String> {
+        match self {
+            Helper::Questions => summary::questions_input(note),
+            Helper::FollowUpEmail => summary::recap_input(note, summary::EMAIL_BESIDE_SUMMARY_TOKENS),
+            Helper::BlindSpots => summary::recap_input(note, summary::GAPS_BESIDE_SUMMARY_TOKENS),
+        }
+    }
+
+    /// The answer, without a model, when the meeting has too little in it.
+    pub fn too_little(self) -> &'static str {
+        match self {
+            Helper::Questions => {
+                "Not enough has been said yet to suggest questions. Try again once the meeting gets going."
+            }
+            Helper::FollowUpEmail => "There's too little in this meeting to write a follow-up email.",
+            Helper::BlindSpots => "There's too little in this meeting to look for gaps.",
+        }
+    }
+}
+
+/// A helper's answer. `plain`: plain text to show and copy as it is (the
+/// email), not markdown. `too_little`: answered without a model.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Assist {
+    pub answer: String,
+    pub plain: bool,
+    pub too_little: bool,
+}
+
+/// A one-tap helper for meeting `note_id` ([`Helper`]): one call on the
+/// meeting's model, never slowing a dictation.
+#[tauri::command]
+pub async fn meeting_assist(app: AppHandle, note_id: u64, kind: Helper) -> Result<Assist, String> {
+    let note = crate::notes::get(note_id).ok_or("Note not found")?;
+    let plain = kind == Helper::FollowUpEmail;
+    let Some(input) = kind.input(&note) else {
+        return Ok(Assist { answer: kind.too_little().to_string(), plain: false, too_little: true });
+    };
+    let ep = summary::resolve_endpoint(&crate::config::load())?;
+    let (cap, temperature) = kind.reply();
+    let opts = ep.options(cap, temperature);
+    let messages = summary::helper_messages(kind.prompt(), &input);
+    let reply = summary::chat_beside_dictation(&app, &ep, messages, &opts).await?;
+    let answer = if plain {
+        summary::clean_email(&reply, &summary::email_subject(&note))
+    } else {
+        reply.trim().to_string()
+    };
+    if answer.is_empty() {
+        return Err("The model returned an empty answer".to_string());
+    }
+    // A one-line "too little to go on" isn't an email to copy as one.
+    let plain = plain && answer.starts_with("Subject: ");
+    Ok(Assist { answer, plain, too_little: false })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn helpers_are_named_as_the_page_sends_them() {
+        let kind = |s: &str| serde_json::from_value::<Helper>(serde_json::json!(s)).ok();
+        assert_eq!(kind("questions"), Some(Helper::Questions));
+        assert_eq!(kind("followUpEmail"), Some(Helper::FollowUpEmail));
+        assert_eq!(kind("blindSpots"), Some(Helper::BlindSpots));
+        assert_eq!(kind("catchUp"), None); // that one is meeting_catch_up
+    }
+
+    #[test]
+    fn an_empty_meeting_is_too_little_for_every_helper() {
+        let note: crate::notes::Note = serde_json::from_value(serde_json::json!({
+            "id": 1, "title": "", "content": "", "createdTs": 1, "updatedTs": 1,
+        }))
+        .unwrap();
+        for kind in [Helper::Questions, Helper::FollowUpEmail, Helper::BlindSpots] {
+            assert!(kind.input(&note).is_none(), "{kind:?}");
+            assert!(!kind.too_little().is_empty());
+            // Every prompt keeps the guardrails.
+            let prompt = kind.prompt();
+            assert!(prompt.contains("never invent") || prompt.contains("Never invent"), "{kind:?}");
+            assert!(prompt.contains("too little to go on") || prompt.contains("too little in the meeting"), "{kind:?}");
+        }
+    }
 
     #[test]
     fn a_meeting_is_named_once_there_is_enough_talk() {

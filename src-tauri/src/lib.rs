@@ -443,6 +443,7 @@ pub fn run() {
             meeting_end::meeting_discard,
             meeting_end::meeting_delete,
             meeting_assist::meeting_catch_up,
+            meeting_assist::meeting_assist,
             notepad::notepad_open,
             notepad::notepad_state,
             notepad::notepad_split,

@@ -1672,6 +1672,244 @@ pub fn clean_title(reply: &str) -> Option<String> {
     (!cut.is_empty()).then_some(cut)
 }
 
+// ---- The notepad's one-tap helpers: questions to ask, the follow-up email, the gaps ----
+//
+// Built like "What did I miss?": a bounded slice of the meeting (talk only),
+// ≤ ~2.9k tokens in and ≤ 600 out (≤ ~3.4k in all; far less for a meeting
+// without an invite or long typed notes), so an 8k local model has room to
+// spare and one call stays well inside a free cloud tier's per-minute token
+// budget (Groq's is 8,000), and run through [`chat_beside_dictation`].
+
+/// Fewer words of speech than this, with nothing else to go on (no digests,
+/// notes, summary or invite), is too little for a helper: it says so without
+/// calling a model.
+pub const ASSIST_MIN_WORDS: usize = crate::meeting_end::MISTAKE_WORDS;
+/// A helper reads at most this much of the calendar invite…
+const ASSIST_INVITE_TOKENS: usize = 200;
+/// …and of the notes the person typed.
+const ASSIST_NOTES_TOKENS: usize = 300;
+/// "Questions to ask" reads the latest talk, this much…
+pub const QUESTIONS_RECENT_TOKENS: usize = 1_200;
+/// …and the digests of what came before it.
+const QUESTIONS_DIGEST_TOKENS: usize = 500;
+/// After the meeting, the email and the gaps read Yap's notes on it (the
+/// action plan, or what another action wrote), at most this much…
+const RECAP_SUMMARY_TOKENS: usize = 1_200;
+/// …and the meeting itself ([`ask_context`]): this much when there are no
+/// such notes yet…
+const RECAP_MEETING_TOKENS: usize = 1_800;
+/// …beside them, this much for the email (mostly how the meeting ended)…
+pub const EMAIL_BESIDE_SUMMARY_TOKENS: usize = 500;
+/// …and this much for the gaps (what was said, to see what wasn't followed up).
+pub const GAPS_BESIDE_SUMMARY_TOKENS: usize = 800;
+/// Reply caps (local models only, see `ChatOptions::max_tokens`).
+pub const QUESTIONS_REPLY_TOKENS: u32 = 300;
+pub const FOLLOW_UP_REPLY_TOKENS: u32 = 600;
+pub const BLIND_SPOTS_REPLY_TOKENS: u32 = 500;
+
+/// The calendar invite's agenda for a helper, bounded.
+fn invite_part(note: &Note) -> Option<String> {
+    crate::calendar::invite_context(note)
+        .map(|i| format!("{}\n", truncate_to_tokens(i.trim_end(), ASSIST_INVITE_TOKENS)))
+}
+
+/// What "Questions to ask" sends while a meeting records: the latest talk
+/// (≤ [`QUESTIONS_RECENT_TOKENS`]), the digests of what came before it, the
+/// attendees, the invite and the notes the person typed. `None` when there's
+/// too little to go on: under [`ASSIST_MIN_WORDS`] of speech, no digest and
+/// no invite to ask about.
+pub fn questions_input(note: &Note) -> Option<String> {
+    let invite = invite_part(note);
+    let words = crate::notes::speech_words(&note.transcript);
+    if words < ASSIST_MIN_WORDS && note.digests.is_empty() && invite.is_none() {
+        return None;
+    }
+    let t0 = meeting_t0(note);
+    // The latest talk: back from the end until the budget's spent (at least
+    // the last line).
+    let mut from = note.transcript.len();
+    let mut used = 0;
+    while from > 0 {
+        let t = seg_tokens(&note.transcript[from - 1]);
+        if used > 0 && used + t > QUESTIONS_RECENT_TOKENS {
+            break;
+        }
+        used += t;
+        from -= 1;
+    }
+    let mut out = format!("Attendees: {}\n", attendees_line(&note.participants));
+    if let Some(invite) = invite {
+        out.push('\n');
+        out.push_str(&invite);
+    }
+    let typed = note.content.trim();
+    if !typed.is_empty() {
+        out.push_str(&format!(
+            "\nNotes they typed:\n{}\n",
+            truncate_to_tokens(typed, ASSIST_NOTES_TOKENS)
+        ));
+    }
+    let earlier: Vec<MeetingDigest> = note
+        .digests
+        .iter()
+        .filter(|d| d.from_seg < from)
+        .cloned()
+        .collect();
+    if !earlier.is_empty() {
+        out.push_str(&format!(
+            "\nEarlier in the meeting (Yap's notes, context only):\n{}",
+            render_digests(&earlier, t0, QUESTIONS_DIGEST_TOKENS)
+        ));
+    }
+    let recent = &note.transcript[from..];
+    match (
+        recent.iter().find(|s| s.is_talk()),
+        recent.iter().rev().find(|s| s.is_talk()),
+    ) {
+        (Some(first), Some(last)) => out.push_str(&format!(
+            "\nThe latest talk ({}\u{2013}{}):\n{}",
+            clock(first.ts.saturating_sub(t0)),
+            clock(last.ts.saturating_sub(t0)),
+            keep_last_tokens(&transcript_lines(recent), QUESTIONS_RECENT_TOKENS)
+        )),
+        _ => out.push_str("\nThe latest talk:\n(Nothing has been said yet.)\n"),
+    }
+    Some(out)
+}
+
+/// What the after-the-meeting helpers send (the follow-up email, the gaps):
+/// its title when the person gave it one, the attendees, the invite, the
+/// notes the person typed, Yap's notes on it when there are some (the action
+/// plan, ≤ [`RECAP_SUMMARY_TOKENS`]) and the meeting as [`ask_context`]
+/// bounds it — [`RECAP_MEETING_TOKENS`] of it without those notes,
+/// `beside_summary` with them. `None` when there's nothing to go on.
+pub fn recap_input(note: &Note, beside_summary: usize) -> Option<String> {
+    let summary = note.enhanced_content.trim();
+    let typed = note.content.trim();
+    let words = crate::notes::speech_words(&note.transcript);
+    if summary.is_empty() && typed.is_empty() && note.digests.is_empty() && words < ASSIST_MIN_WORDS {
+        return None;
+    }
+    let mut out = String::new();
+    if !crate::notes::title_open_to_ai(note) {
+        out.push_str(&format!("Meeting: {}\n", note.title.trim()));
+    }
+    out.push_str(&format!("Attendees: {}\n", attendees_line(&note.participants)));
+    if let Some(invite) = invite_part(note) {
+        out.push('\n');
+        out.push_str(&invite);
+    }
+    if !typed.is_empty() {
+        out.push_str(&format!(
+            "\nNotes the user typed:\n{}\n",
+            truncate_to_tokens(typed, ASSIST_NOTES_TOKENS)
+        ));
+    }
+    let budget = if summary.is_empty() {
+        RECAP_MEETING_TOKENS
+    } else {
+        out.push_str(&format!(
+            "\nYap's notes on the meeting (written after it):\n{}\n",
+            truncate_to_tokens(summary, RECAP_SUMMARY_TOKENS)
+        ));
+        beside_summary
+    };
+    if budget > 0 && note.transcript.iter().any(|s| s.is_talk()) {
+        out.push('\n');
+        out.push_str(&ask_context(note, budget));
+    }
+    Some(out)
+}
+
+/// The chat messages for a helper: its immutable `system` prompt over `input`.
+pub fn helper_messages(system: &str, input: &str) -> Value {
+    json!([
+        { "role": "system", "content": system },
+        { "role": "user", "content": input },
+    ])
+}
+
+/// The subject a follow-up email gets when the model left it out.
+pub fn email_subject(note: &Note) -> String {
+    if crate::notes::title_open_to_ai(note) {
+        "Meeting follow-up".to_string()
+    } else {
+        format!("Follow-up: {}", note.title.trim())
+    }
+}
+
+/// One line of an email reply without markdown: heading marks and `**` gone,
+/// "* " bullets as "- ".
+fn plain_email_line(line: &str) -> String {
+    let line = line.trim_end().replace("**", "");
+    let indent = line.len() - line.trim_start().len();
+    let (lead, rest) = line.split_at(indent);
+    let rest = if rest.starts_with('#') {
+        rest.trim_start_matches('#').trim_start()
+    } else {
+        rest
+    };
+    match rest.strip_prefix("* ") {
+        Some(item) => format!("{lead}- {item}"),
+        None => format!("{lead}{rest}"),
+    }
+}
+
+/// A follow-up email reply made ready to paste as plain text: anything
+/// before the subject line ("Here's a draft:") and code fences dropped,
+/// markdown taken out ([`plain_email_line`]), at most one blank line in a
+/// row, and a "Subject: " line first — `subject` when the model left it out.
+/// A one-line reply without a subject (the model saying there's too little)
+/// comes back as it is.
+pub fn clean_email(reply: &str, subject: &str) -> String {
+    let mut lines: Vec<String> = reply
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("```"))
+        .map(plain_email_line)
+        .collect();
+    let subject_line = |l: &str| {
+        let t = l.trim();
+        t.get(..8)
+            .filter(|head| head.eq_ignore_ascii_case("subject:"))
+            .map(|_| t[8..].trim().to_string())
+    };
+    match lines.iter().position(|l| subject_line(l).is_some()) {
+        Some(i) => {
+            let said = subject_line(&lines[i]).unwrap_or_default();
+            lines.drain(..i);
+            lines[0] = format!("Subject: {}", if said.is_empty() { subject } else { said.as_str() });
+        }
+        None => {
+            let said: Vec<&String> = lines.iter().filter(|l| !l.trim().is_empty()).collect();
+            if said.len() <= 1 {
+                return said.first().map(|l| l.trim().to_string()).unwrap_or_default();
+            }
+            lines.splice(0..0, [format!("Subject: {subject}"), String::new()]);
+        }
+    }
+    let mut out = String::new();
+    let mut blank = false;
+    for line in &lines {
+        if line.trim().is_empty() {
+            blank = !out.is_empty();
+            continue;
+        }
+        if blank {
+            out.push('\n');
+            blank = false;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    // The subject line is followed by one blank line.
+    if let Some((first, rest)) = out.split_once('\n') {
+        if !rest.is_empty() && !rest.starts_with('\n') {
+            return format!("{first}\n\n{}", rest.trim_end());
+        }
+    }
+    out.trim_end().to_string()
+}
+
 /// A local model stepping aside for a dictation this many times in a row
 /// gives up (the person is dictating nonstop; they can ask again).
 const YIELD_RETRIES: usize = 5;
@@ -2249,6 +2487,159 @@ mod tests {
         // Long: cut at a word, within 60 characters.
         let long = t("Quarterly Planning Review of Marketing Budget Allocations Overall").unwrap();
         assert!(long.chars().count() <= 60 && !long.ends_with(' '), "{long}");
+    }
+
+    /// A helper call's whole size: its messages plus the reply cap.
+    fn call_tokens(system: &str, input: &str, reply: u32) -> usize {
+        helper_messages(system, input)
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| estimate_tokens(m["content"].as_str().unwrap()))
+            .sum::<usize>()
+            + reply as usize
+    }
+
+    fn with_invite(mut note: Note, description: &str) -> Note {
+        note.event = Some(crate::notes::NoteEvent {
+            key: "k".into(),
+            title: "Offsite planning".into(),
+            start: 1000,
+            end: 4600,
+            description: description.into(),
+            service: String::new(),
+        });
+        note
+    }
+
+    #[test]
+    fn questions_read_the_latest_talk_and_digests_of_the_rest() {
+        // 2.5 hours, digested in three parts.
+        let mut note = note_with(talk(600, 40, 15));
+        note.digests = vec![
+            digest(0, 200, 1000, &["early"], &[("Alice", "send the budget", "Friday")]),
+            digest(200, 400, 4000, &["middle point"], &[]),
+            digest(400, 520, 7000, &["late point"], &[]),
+        ];
+        note.content = "ask about catering ".repeat(200);
+        note = with_invite(note, &"Agenda: budget, venue. ".repeat(100));
+        let input = questions_input(&note).unwrap();
+        assert!(input.starts_with("Attendees: Alice, Bob Stone"));
+        assert!(input.contains("From the calendar invite \"Offsite planning\""));
+        assert!(input.contains("Notes they typed"));
+        // The latest talk, raw, on the meeting's clock; old talk only as digests.
+        let (before, latest) = input.split_once("The latest talk (").unwrap();
+        assert!(latest.contains("s599 "));
+        assert!(!input.contains("s100 "));
+        assert!(before.contains("Earlier in the meeting (Yap's notes"));
+        assert!(before.contains("early") && before.contains("Alice: send the budget"));
+        let latest_tokens = estimate_tokens(latest);
+        assert!(latest_tokens <= QUESTIONS_RECENT_TOKENS + 50, "{latest_tokens}");
+        // Lean: well inside an 8k local model and a free cloud tier's minute.
+        let total = call_tokens(
+            crate::llm::MEETING_QUESTIONS_PROMPT,
+            &input,
+            QUESTIONS_REPLY_TOKENS,
+        );
+        assert!(total <= 3_000, "{total}");
+    }
+
+    #[test]
+    fn questions_skip_echo_and_wait_for_enough_talk() {
+        // A few words: too little, unless there's an invite to ask about.
+        let mut note = note_with(vec![seg("them", "Hi everyone, can you hear me?", 1000)]);
+        assert!(questions_input(&note).is_none());
+        let invited = with_invite(note.clone(), "Agenda: pick the venue.");
+        let input = questions_input(&invited).unwrap();
+        assert!(input.contains("Agenda: pick the venue."));
+        // Enough talk; the call through the speakers and dictation markers
+        // aren't part of it.
+        note.transcript = talk(12, 10, 15);
+        note.transcript.push(TranscriptSegment {
+            echo: true,
+            ..seg("you", "ECHOED line from the speakers", 1200)
+        });
+        note.transcript.push(TranscriptSegment::dictation_marker(1210));
+        let input = questions_input(&note).unwrap();
+        assert!(input.contains("s0 ") && input.contains("s11 "), "{input}");
+        assert!(!input.contains("ECHOED"));
+        assert!(!input.contains("You: \n"));
+        assert!(!input.contains("Earlier in the meeting")); // nothing digested
+    }
+
+    #[test]
+    fn the_recap_reads_the_plan_or_else_the_meeting() {
+        let mut note = note_with(talk(600, 40, 15));
+        note.digests = vec![digest(0, 300, 1000, &["early point"], &[("Bob Stone", "book the venue", "")])];
+        // No action plan yet: the meeting as the Ask bar bounds it.
+        let input = recap_input(&note, EMAIL_BESIDE_SUMMARY_TOKENS).unwrap();
+        assert!(input.starts_with("Meeting: Planning\nAttendees: Alice, Bob Stone"));
+        assert!(input.contains("Meeting digest:") && input.contains("Bob Stone: book the venue"));
+        assert!(input.contains("s599 "));
+        assert!(!input.contains("Yap's notes on the meeting"));
+        // The worst case: long typed notes and a long invite too. Every call
+        // stays under ~3.4k with its reply.
+        note.content = "my own notes ".repeat(400);
+        note = with_invite(note, &"Agenda: budget, venue. ".repeat(100));
+        let input = recap_input(&note, EMAIL_BESIDE_SUMMARY_TOKENS).unwrap();
+        assert!(input.contains("Notes the user typed") && input.contains("From the calendar invite"));
+        for prompt in [crate::llm::MEETING_FOLLOW_UP_PROMPT, crate::llm::MEETING_BLIND_SPOTS_PROMPT] {
+            let total = call_tokens(prompt, &input, FOLLOW_UP_REPLY_TOKENS);
+            assert!(total <= 3_400, "{total}");
+        }
+        // With the plan: the plan first, a little of the meeting beside it.
+        note.enhanced_content = "Summary.\n\n## Action plan\n### Alice\n- [ ] send the budget (due: Friday)\n".to_string()
+            + &"- [ ] another task\n".repeat(400);
+        let email = recap_input(&note, EMAIL_BESIDE_SUMMARY_TOKENS).unwrap();
+        let gaps = recap_input(&note, GAPS_BESIDE_SUMMARY_TOKENS).unwrap();
+        for input in [&email, &gaps] {
+            assert!(input.contains("Yap's notes on the meeting (written after it):\nSummary."));
+            assert!(input.contains("send the budget (due: Friday)"));
+            assert!(input.contains("s599 ")); // how it ended
+        }
+        assert!(estimate_tokens(&email) < estimate_tokens(&gaps));
+        let total = call_tokens(crate::llm::MEETING_BLIND_SPOTS_PROMPT, &gaps, BLIND_SPOTS_REPLY_TOKENS);
+        assert!(total <= 3_400, "{total}");
+        let total = call_tokens(crate::llm::MEETING_FOLLOW_UP_PROMPT, &email, FOLLOW_UP_REPLY_TOKENS);
+        assert!(total <= 3_400, "{total}");
+    }
+
+    #[test]
+    fn the_recap_needs_something_to_go_on() {
+        let mut note = note_with(vec![seg("you", "Testing, one two.", 1000)]);
+        assert!(recap_input(&note, EMAIL_BESIDE_SUMMARY_TOKENS).is_none());
+        // Typed notes alone are something.
+        note.content = "Agreed: launch on the 3rd.".to_string();
+        let input = recap_input(&note, EMAIL_BESIDE_SUMMARY_TOKENS).unwrap();
+        assert!(input.contains("Notes the user typed:\nAgreed: launch on the 3rd."));
+        // A made-up title isn't the meeting's name.
+        note.title_auto = true;
+        let input = recap_input(&note, EMAIL_BESIDE_SUMMARY_TOKENS).unwrap();
+        assert!(input.starts_with("Attendees:"), "{input}");
+        assert_eq!(email_subject(&note), "Meeting follow-up");
+        note.title_auto = false;
+        assert_eq!(email_subject(&note), "Follow-up: Planning");
+    }
+
+    #[test]
+    fn a_follow_up_email_pastes_as_plain_text() {
+        // Markdown, a preamble and a fence: the email alone, in plain text.
+        let reply = "Here's a draft you can send:\n\n```\n**Subject:** Q3 budget follow-up\nHi Alice,\n\n\n\nThanks for going through the budget.\n\n## Decisions:\n* The deposit moves to Q3.\n\n**Next steps:**\n- Alice: send the revised budget (Friday)\n\nThanks,\n[Your name]\n```";
+        let email = clean_email(reply, "Meeting follow-up");
+        assert_eq!(
+            email,
+            "Subject: Q3 budget follow-up\n\nHi Alice,\n\nThanks for going through the budget.\n\nDecisions:\n- The deposit moves to Q3.\n\nNext steps:\n- Alice: send the revised budget (Friday)\n\nThanks,\n[Your name]"
+        );
+        // No subject line: it gets one.
+        let email = clean_email("Hi all,\nThanks for today.\nThanks,\n[Your name]", "Follow-up: Planning");
+        assert!(email.starts_with("Subject: Follow-up: Planning\n\nHi all,\n"), "{email}");
+        // An empty subject: the fallback.
+        assert!(clean_email("Subject:\n\nHi all,\nBye", "Meeting follow-up").starts_with("Subject: Meeting follow-up\n\nHi all,"));
+        // One line saying there's too little: left as it is.
+        assert_eq!(
+            clean_email("  There isn't enough here for a recap.  ", "Meeting follow-up"),
+            "There isn't enough here for a recap."
+        );
     }
 
     #[tokio::test]
