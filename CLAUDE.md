@@ -127,10 +127,14 @@ global hotkey ─▶ input_hook ─▶ "dictation-key-pressed" / "-released"
 
 Pipeline order after transcription: **AI cleanup → dictionary (exact, then a
 fuzzy near-miss pass) → the "press enter" voice command → snippets → fit to the
-text around the cursor (smart spacing; where the field couldn't be read,
-append-space as before) → inject → submit key (auto-submit or the voice
-command, once)** (`pipeline::finish_dictation` does the dictionary, the command
-and snippets; `text_injector::prepare_dictation` the fitting). Cleanup is
+kind of app (`app_kind.rs`: a terminal gets one line and no trailing space; a
+chat app's short message loses its full stop) and to the text around the
+cursor (smart spacing; where the field couldn't be read, append-space as
+before) → inject → submit key (auto-submit or the voice command, once; in a
+terminal Enter, only for the voice command or a coding CLI's auto-submit)**
+(`pipeline::finish_dictation` does the dictionary, the command and snippets;
+`text_injector::prepare_dictation` the fitting; `app_kind::submit_key` the
+key). Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation
 never blocks. The dictionary runs Handy's split (ported from its source):
 **Whisper models** get the correct spellings as the decoder's `initial_prompt`
@@ -195,11 +199,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   started by Dictate stops on the next press. `run_stt` (async) does cleanup →
   `finish_dictation` (dictionary via `apply_corrections`, shared with meetings
   and Upload; then the "press enter" command, then snippets) →
-  `text_injector::prepare_dictation` (fitted to the text around the cursor, which
-  `start_recording` started reading in the background via
-  `selection::begin_dictation` — not for edit mode) → inject (into the
+  `text_injector::prepare_dictation` (fitted to the kind of app,
+  `target_kind` — `app_kind::of_window`, read in `start_recording` beside
+  `target_hwnd` — and to the text around the cursor, which `start_recording`
+  started reading in the background via `selection::begin_dictation` — not
+  for edit mode, nor a terminal with terminal mode on) → inject (into the
   captured `target_hwnd`) → the submit key when auto-submit or the voice command
-  asked (once; a dictation of only "press enter" presses it only while the
+  asked (once, `app_kind::submit_key`; a dictation of only "press enter" presses it only while the
   target window still has the focus). **The dictation signal** for a meeting
   recording: `start_recording` (plain dictation, the edit hotkey, the wake-word
   path) calls `dictation_began()` and the stop/cancel `dictation_ended()`, one
@@ -941,8 +947,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   volume, output_device, mute_while_recording, recording_mode,
   overlay_position, dictionary (`DictionaryEntry`: from/to + `fuzzy` (default
   on) + `snippet` (default off)), append_trailing_space, smart_spacing ("Match
-  the text around the cursor", default on), auto_submit(+key),
-  voice_enter (the "press enter" voice command, default on),
+  the text around the cursor", default on), chat_no_full_stop ("Leave the full
+  stop off chat messages", default on), auto_submit(+key),
+  voice_enter (the "press enter" voice command, default on), terminal_mode
+  ("Safer pasting into terminals", default on; both `app_kind.rs`),
   restore_clipboard, show_tray_icon, autostart, model_unload_timeout, selected_language,
   translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
   Notes/Slack/Code/Custom), the editable `pp_prompt` body, `pp_api_keys` (per-provider
@@ -1114,24 +1122,29 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   copied files** (CF_HDROP + drop effect), ≤ 64 MB, and an empty clipboard is left
   empty; `selection_via_copy` (edit-mode fallback) empties the clipboard, polls for
   the Ctrl+C result instead of a fixed sleep, and restores privately.
-  `prepare_dictation(text, append_space, dictionary)` (run_stt's one call) remembers
-  the dictation and fits it to the text around the cursor read at record start
-  (`selection::take_context` → `smart_insert::fit_to_context`; dictionary spellings
-  never lower-cased), or, with no context, appends the space as before. **"Paste
+  `prepare_dictation(text, append_space, dictionary, kind)` (run_stt's one call)
+  remembers the dictation and fits it to the kind of app (`kind`, `app_kind.rs`,
+  already filtered by the settings: a terminal → `terminal_text`, nothing else; a
+  chat app → `drop_chat_full_stop` first) and to the text around the cursor read
+  at record start (`selection::take_context` → `smart_insert::fit_to_context`;
+  dictionary spellings never lower-cased), or, with no context, appends the space
+  as before. **"Paste
   last transcript"** (tray item + `paste_last_transcript` command → the text it
   pasted; errors "Nothing to paste yet"): this session's last dictation (unfitted),
   else history's newest dictation (`history::latest_dictation` — app an `.exe` or
   empty, so never an Upload); forgotten when history entries are deleted/cleared.
   It pastes into the foreground app, or — the tray menu holds the foreground — the
   top real app window (`pick_paste_window`, unit-tested: not Yap's, minimised, tool,
-  no-activate, cloaked, untitled or a shell window), re-reading the cursor's context
-  there (`selection::read_context`). Test mode returns the text without pasting
+  no-activate, cloaked, untitled or a shell window), classifying it
+  (`app_kind::of_window`) and re-reading the cursor's context there
+  (`selection::read_context`, not in a terminal). Test mode returns the text without pasting
   ("e2e: not pasting the last transcript"). No hotkey for it yet. (Verify-after-paste
   over UIA is still a follow-up.) `#[ignore]`d `private_clipboard_round_trip` runs
   the real clipboard code on a private window station (never the person's clipboard).
 - **`selection.rs`** — UI Automation reads of the field Yap types into. **Edit
-  mode** (`capture_selection`): the selected text (TextPattern, else the Ctrl+C
-  trick), 2 s UIA timeouts. **The text around the cursor** (`begin_dictation(target,
+  mode** (`capture_selection(target, copy_fallback)`): the selected text
+  (TextPattern, else the Ctrl+C trick — never in a terminal with terminal mode
+  on, where Ctrl+C would interrupt the program), 2 s UIA timeouts. **The text around the cursor** (`begin_dictation(target,
   read)` from `start_recording`, `take_context()` at paste): when `smart_spacing` is
   on and it isn't edit mode, a background thread reads ≤ 500 characters before and
   after the caret and the selection (a long selection as its start + end) —
@@ -1159,6 +1172,50 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   selection: its first word's case (same safety rules, or the same word again), its
   end punctuation, and any space it began/ended with. Edit mode and the Voice Agent
   (wake word) paste the AI's text untouched, as before.
+- **`app_kind.rs`** — **what kind of app a dictation goes into**, and what that
+  changes about the paste (Wispr Flow's app categories + terminal/coding-CLI
+  handling + chat full stops, by behaviour). `of_window(hwnd)` (at record start
+  beside `target_hwnd`, → `Shared.target_kind`; also "Paste last transcript"):
+  the window's process name (`text_injector::app_name_for`), class and title
+  (`GetWindowTextW`, which never messages another process's window) — no UIA;
+  logs the process + `describe()` at `debug`, never the title; a test run reads
+  nothing (`Other`). Pure `classify(exe, class, title)` → **`Terminal { coding_cli,
+  windows_terminal }`** (Windows Terminal — `CASCADIA_HOSTING_WINDOW_CLASS` —,
+  conhost's `ConsoleWindowClass` whatever process it reports, cmd, PowerShell/
+  pwsh, WezTerm, Alacritty, mintty/Git Bash, Tabby, Hyper, ConEmu, PuTTY/KiTTY,
+  Warp…) | **`Messaging`** (Slack, Discord, WhatsApp, Telegram, Signal, Teams,
+  Element, Mattermost…; or a browser whose title shows WhatsApp Web, Slack,
+  Discord, Messenger, Microsoft Teams, Telegram, Google Chat/Messages — unread
+  counts and Edge's "and 2 more pages" stripped) | **`Other`** (incl. Claude
+  desktop, VS Code — its integrated terminal can't be told apart yet).
+  **Coding CLIs** from the terminal's title, as they set it on Windows (2026):
+  Claude Code "✳ <session>" idle / "◐"/"◑" working / "Claude Code" / "claude";
+  Gemini CLI "◇  Ready (…)", "✦  …", "✋  …", "⏲  …", "Gemini CLI (…)"; Qwen Code;
+  Codex a braille spinner + project while working (idle it's only the project:
+  undetected → treated as a plain shell, the safe side); OpenCode "OpenCode" /
+  "OC | …"; else the program as the title or cmd's "<title> - <command>" (aider,
+  codex, gemini, copilot, cursor-agent, crush…; a folder path never counts).
+  `with_settings(terminal_mode, chat_no_full_stop)` turns a kind off.
+  **`terminal_text(text, keep_lines)`**: `\r\n`/`\r`/U+2028… → `\n`, tabs → a
+  space, control characters out, trimmed; unless `keep_lines` one line
+  (`join_lines`: bullets "- • * –" dropped and items joined "; " — "Fix these:
+  the login bug; the search" —, a header without punctuation gets ": ", numbers
+  kept, other lines joined with a space). `Terminal::keeps_lines` = Windows
+  Terminal + Claude Code or Codex (bracketed paste / Codex's paste-burst check);
+  every other CLI and host is joined until known safe. **`submit_key(kind,
+  auto_submit, voice_enter, key)`**: in a terminal "enter", and only for the
+  voice command or auto-submit in a detected coding CLI (never auto-submit at a
+  plain shell's prompt); elsewhere as configured. **`drop_chat_full_stop(text,
+  ctx, dictionary)`**: a final "." off a message of ≤ 2 sentences in one
+  paragraph (`sentence_count`: abbreviations — "e.g.", "a.m.", "Dr.", "etc." —
+  and initials don't end one), only at the end of the draft (nothing after the
+  cursor, no selection being replaced, the draft before it counted, no line
+  break in it); never "?", "!", "…", "...", an abbreviation's own full stop or a
+  snippet saved ending with one. In a terminal with terminal mode on, the text
+  around the cursor isn't read, edit mode never sends Ctrl+C
+  (`selection::capture_selection(target, false)`) and the rewrite / Voice Agent
+  reply goes through `terminal_text` too. An `#[ignore]`d `this_machines_windows`
+  classifies the PC's real windows (`YAP_APP_KIND_TITLES=1` prints titles).
 - **`sound.rs`** — start/stop chimes (volume + output-device aware).
 - **`mute.rs`** — mute-while-recording: mutes the default render endpoint via
   WASAPI/COM (`IMMDeviceEnumerator` → `IAudioEndpointVolume`) while recording and
@@ -1168,7 +1225,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
 - **`e2e.rs`** — **test mode** for the end-to-end UI suite (debug builds started
   with `YAP_E2E=1`; compiled out of release builds): no global input hook, no
   paste/Enter/Ctrl+C into other apps (nor "Paste last transcript"), no reading the
-  text around another app's cursor, no `set_focus` (tao's fallback presses Alt
+  text around another app's cursor or its window's title (`app_kind`), no `set_focus` (tao's fallback presses Alt
   in the focused app), no Windows notifications, no orphan-sidecar sweep, no
   window-state plugin, no call-detection registry reads (the debug-only
   `meeting_detect_simulate` stands in), no installed apps' icons (the
@@ -1598,9 +1655,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   body + Save/Reset) / Test tabs. Plus usage meter + profiles w/ per-profile
   model override + per-app rules), **History** (stats
   dashboard + recent list + enable/clear), **Advanced** (output toggles —
-  "Match the text around the cursor" (`smartSpacing`) first, then "Append
+  "Match the text around the cursor" (`smartSpacing`) first, "Leave the full
+  stop off chat messages" (`chatNoFullStop`), then "Append
   trailing space", whose line reads "Only where Yap can't read the text around
-  the cursor" while the first is on, auto-submit, and "Restore clipboard after
+  the cursor" while the first is on, auto-submit (its line adds "In a terminal,
+  only for coding tools like Claude Code" while terminal pasting is on), "Say
+  “press enter” to send" + the key, "Safer pasting into terminals"
+  (`terminalMode`), and "Restore clipboard after
   paste", which says dictations never show up in Win+V history — system,
   dictionary), **About** (version + an **Updates** card on the shared update
   store: "Last checked …" / Check for updates, Downloading… %, "Yap X is ready to
@@ -1945,7 +2006,10 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
   recording mode `toggle`, dictations **fitted to the text around the cursor**
-  (`smart_spacing`) and kept out of clipboard history (always), the **Yap bar on** (`bar_enabled`), hidden over
+  (`smart_spacing`) and kept out of clipboard history (always), **one line and
+  no Enter of Yap's own in a terminal** (`terminal_mode`; Claude Code/Codex in
+  Windows Terminal keep line breaks), **no full stop on a short chat message**
+  (`chat_no_full_stop`), the **Yap bar on** (`bar_enabled`), hidden over
   fullscreen apps (`bar_hide_fullscreen`), the dictation overlay always shown
   while recording/transcribing (no off switch — it's the hot-mic indicator),
   live transcription preview **on**
@@ -1981,7 +2045,11 @@ streaming partials** (sliding-window, on by default, word-paced overlay reveal �
 validated live 2026-07-10), transcription history + stats, cleanup presets, real WASAPI mute,
 the dictionary's **snippets**, the **"press enter" voice command** and a Whisper
 vocabulary ranked by use (2026-10-17: unit-tested, the Dictionary/Settings UI
-e2e-tested, not yet tried with real speech),
+e2e-tested, not yet tried with real speech), **terminal & coding-CLI pasting**
+and **no full stop on short chat messages** (`app_kind.rs`, 2026-10-17:
+classification and text rules unit-tested, checked read-only against this PC's
+real windows, the Settings switches e2e-tested; not yet dictated into a real
+terminal or chat app),
 the Groq usage meter, and the installer + auto-updater (background checks + download
 while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
 `updates.rs`, 2026-10-05) + portable mode + release CI.
@@ -2086,7 +2154,10 @@ brief;
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see [`ROADMAP.md`](./ROADMAP.md) Phase 1);
 dictionary auto-learning (from your edits after a paste) and multi-phrase
-entries; verify-after-paste (UIA `ValuePattern`);
+entries; verify-after-paste (UIA `ValuePattern`); terminals that don't paste
+on Ctrl+V (mintty/Git Bash, Alacritty, WezTerm, PuTTY want Shift+Insert or
+Ctrl+Shift+V) and an IDE's integrated terminal (VS Code's counts as the
+editor);
 Authenticode signing (blocked on SignPath approval); audio-history export; and
 non-Windows (Linux/macOS) polish. See [`ROADMAP.md`](./ROADMAP.md).
 
