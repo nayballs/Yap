@@ -229,6 +229,21 @@ pub(crate) const UNDO_MS: u64 = 10_000;
 /// never heard a sound, isn't offered back: nothing worth transcribing.
 const UNDO_MIN_SAMPLES: usize = 8_000;
 
+/// Undo couldn't get back to the window the dictation was for (it closed,
+/// or Windows wouldn't bring it to the front): the text is on the clipboard
+/// instead of in whatever has the focus now.
+fn undo_window_gone() -> crate::alert::Alert {
+    crate::alert::Alert {
+        kind: "pasteBlocked",
+        icon: "clipboard",
+        title: "Your text is copied: press Ctrl+V".to_string(),
+        body: "Yap couldn't get back to the window you were dictating into, so your dictation is on the clipboard instead."
+            .to_string(),
+        action: None,
+        timeout_ms: 12_000,
+    }
+}
+
 /// A cancelled recording, kept a moment for Undo: its audio and everything
 /// its paste needs — the window it was for, what kind of app that is, edit
 /// mode and its selection.
@@ -351,6 +366,9 @@ struct Shared {
     /// Numbers the kept recordings, so an old expiry timer leaves a newer
     /// one alone.
     kept_seq: AtomicU64,
+    /// The dictation being delivered is an Undo: its paste goes back to its
+    /// own window or nowhere (`inject_text`'s `strict`).
+    undoing: AtomicBool,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -941,10 +959,12 @@ impl Shared {
         crate::selection::begin_dictation(target, smart_spacing && !k.edit && !in_terminal);
         let _ = self.app.emit("yap-state", "processing");
         tracing::info!(samples = k.audio.len(), "Undo: transcribing the cancelled dictation for its own window");
+        self.undoing.store(true, Ordering::SeqCst);
         let shared = Arc::clone(self);
         tauri::async_runtime::spawn(async move {
             let flag = Arc::clone(&shared);
             shared.run_stt(k.audio).await;
+            flag.undoing.store(false, Ordering::SeqCst);
             flag.processing.store(false, Ordering::SeqCst);
         });
         Ok(())
@@ -1147,11 +1167,16 @@ impl Shared {
                 }
                 tracing::info!(text = %out, "Rewrite");
                 let _ = self.app.emit("yap-transcript", out.clone());
-                match crate::text_injector::inject_text(&out, restore_clipboard, target).await {
+                let strict = self.undoing.load(Ordering::SeqCst);
+                match crate::text_injector::inject_text(&out, restore_clipboard, target, strict).await {
                     Ok(crate::text_injector::Delivery::Pasted) => {}
                     // An app running as administrator: on the clipboard.
                     Ok(crate::text_injector::Delivery::LeftOnClipboard) => {
                         crate::alert::show_soon(&self.app, crate::elevated::alert());
+                    }
+                    // An Undo whose window is gone: on the clipboard.
+                    Ok(crate::text_injector::Delivery::WindowGone) => {
+                        crate::alert::show_soon(&self.app, undo_window_gone());
                     }
                     Err(e) => tracing::warn!("Rewrite inject failed: {}", e),
                 }
@@ -1484,6 +1509,7 @@ impl Shared {
                 &corrected,
                 restore_clipboard,
                 target,
+                self.undoing.load(Ordering::SeqCst),
             )
             .await
             {
@@ -1496,6 +1522,13 @@ impl Shared {
                         tracing::info!("Not pressing the submit key: the app runs as administrator");
                     }
                     crate::alert::show_soon(&self.app, crate::elevated::alert());
+                }
+                // An Undo whose window is gone (or won't come to the
+                // front): never into another one; on the clipboard.
+                Ok(crate::text_injector::Delivery::WindowGone) => {
+                    report.left_on_clipboard = true;
+                    report.error = Some("the dictation's window is gone".into());
+                    crate::alert::show_soon(&self.app, undo_window_gone());
                 }
                 Ok(crate::text_injector::Delivery::Pasted) => {
                     // Once, whether auto-submit, the voice
@@ -1771,6 +1804,7 @@ impl Pipeline {
             mic_name: Mutex::new(String::new()),
             kept: Mutex::new(None),
             kept_seq: AtomicU64::new(0),
+            undoing: AtomicBool::new(false),
         });
 
         spawn_idle_watcher(&shared);

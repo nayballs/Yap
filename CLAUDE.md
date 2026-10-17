@@ -280,8 +280,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   push-to-talk's lone tap is simply thrown away. `Pipeline::undo` (`bar_action`
   "dictation-undo") puts the target back and runs `run_stt` on the kept audio
   as a stop would — the paste goes back to the window the dictation started
-  in, whatever has the focus now — after reading that window's cursor
-  context afresh. `Pipeline::stop` is the bar's ✓ (the hotkey's second
+  in, whatever has the focus now, or nowhere (`undoing` → `inject_text`'s
+  `strict`: a window that's closed or won't come to the front leaves the
+  text on the clipboard, `Delivery::WindowGone`, with "Your text is copied:
+  press Ctrl+V") — after reading that window's cursor context afresh (a
+  closed window's never: `read_context` refuses a target whose process is
+  gone). `Pipeline::stop` is the bar's ✓ (the hotkey's second
   press). `holds_undo` keeps the updater from restarting under a pending Undo.
 - **`gesture.rs`** — push-to-talk's pure gesture state machine: key down/up and
   the clock in (`now_ms`, monotonic, also what the input hook stamps events

@@ -89,3 +89,33 @@ test('Undo pastes into the window the dictation started in, not the one in front
   await expect.poll(() => pad.text('box'), { timeout: 15_000 }).toContain('STT stub: received');
   expect(await page.value()).toBe('');
 });
+
+test("Undo after the dictation's window closed: never into another one; the text on the clipboard", async ({ robot }) => {
+  test.skip(!edgeExe(), 'Microsoft Edge is not installed');
+  const { yap, pad } = robot;
+  const page = await robot.editor();
+  await page.set('');
+  await pad.set('box', 'untouched');
+  await pad.pastes();
+  const r = await robot.dictateWav(page, speechWav('Undo into a closed window.'), { cancel: true });
+  expect(r).toBeNull();
+  // The page goes; the pad is in front.
+  await page.close();
+  await pad.focus('box');
+  await yap.invoke('realtest_delivered');
+  await yap.invoke('bar_action', { action: 'dictation-undo' });
+  // (realtest_delivered hands a report over once: keep the one that came.)
+  let report = null;
+  await expect
+    .poll(async () => (report = (await yap.invoke('realtest_delivered')) ?? report), { timeout: 15_000 })
+    .not.toBeNull();
+  expect(report.leftOnClipboard).toBe(true);
+  expect(report.text).toContain('STT stub: received');
+  await sleep(800);
+  expect(await pad.text('box')).toBe('untouched');
+  expect(await pad.pastes()).toEqual([]);
+  expect((await robot.clipboard('check', report.text)).matchesText).toBe(true);
+  await expect(
+    yap.main.getByRole('status').filter({ hasText: "couldn't get back to the window you were dictating into" }),
+  ).toBeVisible();
+});

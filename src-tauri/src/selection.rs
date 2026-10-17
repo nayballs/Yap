@@ -290,7 +290,16 @@ pub fn take_context() -> Option<FieldContext> {
 /// when the field can't be read, is a password box, or is read-only.
 pub fn read_context(target_hwnd: Option<isize>) -> Option<FieldContext> {
     let started = std::time::Instant::now();
-    let pid = target_hwnd.and_then(crate::text_injector::window_process);
+    // The window gone (closed since): nothing of its to read, and the
+    // focused field now is someone else's.
+    let pid = match target_hwnd.map(crate::text_injector::window_process) {
+        Some(None) => {
+            tracing::debug!("The dictation's window is gone; not reading the text around the cursor");
+            return None;
+        }
+        Some(pid) => pid,
+        None => None,
+    };
     let ctx = read_focused_context(pid);
     let ms = started.elapsed().as_millis() as u64;
     match &ctx {
