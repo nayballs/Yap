@@ -1,8 +1,8 @@
 // The dictation side of the Yap bar (the overlay as it always was): the
 // pipeline's state, the scrolling amplitude waveform, the live partial text
 // and the last error. Listened to for the page's whole life — not only while
-// the capsule shows — because `yap-error` arrives just before the
-// `yap-state` "error" that brings the capsule up.
+// the capsule shows — because `yap-dictation-error` arrives just before
+// the `yap-state` "error" that brings the capsule up.
 import { listen } from '@tauri-apps/api/event';
 
 // Scrolling amplitude waveform (Claude Code style): newest bar on the right.
@@ -102,9 +102,13 @@ export function initDictation() {
   listen('yap-dictation-cancelled', (e) => {
     if (e.payload?.undoMs > 0) dictation.undoMs = e.payload.undoMs;
   });
-  listen('yap-error', (e) => {
-    if (e.payload) dictation.errorMsg = e.payload;
-  });
+  // A dictation's own errors come only here (`yap-dictation-error`: the
+  // overlay is where the dictation is); `yap-error` too, as before.
+  for (const name of ['yap-dictation-error', 'yap-error']) {
+    listen(name, (e) => {
+      if (e.payload) dictation.errorMsg = e.payload;
+    });
+  }
   listen('yap-dictation-locked', (e) => {
     dictation.locked = !!e.payload;
   });

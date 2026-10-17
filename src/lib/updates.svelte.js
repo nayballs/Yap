@@ -104,6 +104,7 @@ function announce() {
     invoke('update_ack_updated').catch(() => {});
     const url = releaseUrlFor(updates.currentVersion);
     toast({
+      kind: 'info',
       title: `Updated to ${updates.currentVersion}`,
       description: 'Yap restarted on the new version.',
       variant: 'success',
@@ -217,7 +218,8 @@ function showToast() {
   const content = toastContent();
   if (!content) return;
   if (toastId && isToastLive(toastId)) updateToast(toastId, content);
-  else toastId = toast({ ...content, duration: 0 });
+  // An update waits out a dictation or a meeting, and stays till answered.
+  else toastId = toast({ ...content, kind: 'update', duration: 0 });
 }
 
 /** Keep a toast that's already up in step with the state (never opens one). */
@@ -230,7 +232,9 @@ function syncToast() {
 
 function blocked(message) {
   if (!message) return;
+  // The answer to "Restart to update": in the feedback lane, never queued.
   toast({
+    kind: 'error',
     title: "Yap can't restart right now",
     description: message,
     chip: 'Update',

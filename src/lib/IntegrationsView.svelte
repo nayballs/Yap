@@ -48,12 +48,8 @@
       // Settings (always mounted) keeps its own copy: tell it, or its next
       // auto-save would switch the bridge back.
       window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: { bridgeEnabled: on } }));
+      // The switch and the status line under it say it (no toast on top).
       await refresh();
-      toast({
-        title: on ? 'Local API on' : 'Local API off',
-        description: on && status.port ? `Listening on 127.0.0.1:${status.port}` : undefined,
-        variant: 'success',
-      });
     } catch (e) {
       toast({ title: "Couldn't update the bridge", description: String(e), variant: 'destructive' });
       await refresh();

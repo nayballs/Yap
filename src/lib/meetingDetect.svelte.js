@@ -82,6 +82,7 @@ function showPrompt(p) {
   // notes when it runs out; the toast counts down and stays till then.
   const counting = p.autoStartAt != null;
   const toastId = toast({
+    kind: 'prompt',
     title: p.title,
     description: counting ? countdownText(p.autoStartAt) : p.body,
     chip: p.kind === 'start' ? 'Call' : 'Call ended',
@@ -91,7 +92,8 @@ function showPrompt(p) {
     secondary: { label: p.decline, onClick: () => answer(p, no) },
     tertiary: p.never ? { label: p.never, onClick: () => answer(p, 'never') } : null,
     onClose: () => answer(p, no),
-    onExpire: () => answer(p, no),
+    // Left to fade: "Not now" that call-prompt fatigue counts apart.
+    onExpire: () => answer(p, p.kind === 'start' ? 'ignore' : no),
   });
   shown = { id: p.id, toastId };
   if (counting) startCountdown(p, toastId);
@@ -135,14 +137,9 @@ function onCountdownKey(e) {
 async function answer(p, action) {
   if (shown?.id === p.id) shown = null;
   try {
-    const noteId = await invoke('meeting_detect_respond', { promptId: p.id, action });
-    if (action === 'record' && noteId != null) {
-      toast({
-        title: 'Recording notes',
-        description: 'Your mic is "You", the call is "Them". Let people know you\'re taking notes.',
-        variant: 'success',
-      });
-    }
+    // "Record notes" opens the note (and the notepad), which says it's
+    // recording: no toast on top.
+    await invoke('meeting_detect_respond', { promptId: p.id, action });
   } catch (e) {
     toast({
       title: action === 'record' ? "Couldn't record the call" : "Couldn't do that",
@@ -156,6 +153,7 @@ async function answer(p, action) {
 function confirmChoice(c) {
   if (!c?.confirm) return;
   toast({
+    kind: 'done',
     title: c.confirm,
     variant: 'success',
     duration: 6000,

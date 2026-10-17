@@ -3,8 +3,9 @@
 //!
 //! - **Maximum recording length** (`meeting_max_minutes`: 2 hours by
 //!   default, as Wispr; 0 = no limit). Five minutes before it: "Notes stop
-//!   in 5 minutes" with **Keep going** (another hour), as an in-app toast
-//!   plus a Windows notification while the main window isn't focused. At the
+//!   in 5 minutes" with **Keep going** (another hour), in one place: an
+//!   in-app toast while the main window is focused, else a Yap bar card,
+//!   else a Windows notification. At the
 //!   limit the recording stops and the action plan is written. A warning
 //!   always comes at least 5 minutes before the stop, also when the limit is
 //!   lowered mid-meeting or the PC slept through it; raising or removing the
@@ -36,9 +37,12 @@
 //!   the length warning (or within 10 minutes of it), asked once per
 //!   recording, and goes away by itself after 2 minutes unanswered (it only
 //!   asks).
-//! - [`notice`]: one-off messages for these and for the screen-share
-//!   warning (`yap-meeting-notice`, plus [`notice_native`] for a Windows
-//!   notification where it matters).
+//! - [`notice`]: one-off messages for these, the screen-share warning and
+//!   the recorder's own warnings, in one place (`notice::place`): the main
+//!   window's toast (`yap-meeting-notice`) while it's focused, else a Yap
+//!   bar card or a Windows notification ([`notice_native`]), else the
+//!   window if it's on screen; not twice in ten minutes (`notice.rs`). The
+//!   length warning goes the same way.
 //!
 //! The countdown and the check-ins show where the person is looking: the
 //! meeting notepad if it's on screen, else the main window if it's focused
@@ -90,15 +94,10 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// The main window: (on screen, focused). Never call with a lock held:
-/// window getters wait on the main thread.
+/// The main window: (on screen, focused) — `notice::window_view`. Never
+/// call with a lock held: window getters wait on the main thread.
 fn window_view(app: &AppHandle) -> (bool, bool) {
-    app.get_webview_window("settings")
-        .map(|w| {
-            let visible = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
-            (visible, visible && w.is_focused().unwrap_or(false))
-        })
-        .unwrap_or((false, false))
+    crate::notice::window_view(app)
 }
 
 /// The meeting notepad is on screen. Never with a lock held.
@@ -229,12 +228,29 @@ impl Notice {
     }
 }
 
-/// Show `n` in the main window (a toast, whether or not it's on screen).
+/// Show `n` in one place (`notice::place`): the main window's toast while
+/// the person is looking at it, else a card on the Yap bar, else a Windows
+/// notification, else the main window if it's on screen after all. A notice
+/// addressed to a window (`surface`) shows there. The same notice again
+/// within ten minutes isn't shown (`notice.rs`).
 pub fn notice(app: &AppHandle, n: &Notice) {
-    let _ = app.emit(EVENT_NOTICE, n);
+    if n.surface.is_some() {
+        let _ = app.emit(EVENT_NOTICE, n);
+        return;
+    }
+    match crate::notice::place(app, true) {
+        crate::notice::Place::Window => {
+            if crate::notice::admit("meeting-notice", &n.title, &n.body) {
+                let _ = app.emit(EVENT_NOTICE, n);
+            }
+        }
+        crate::notice::Place::Bar | crate::notice::Place::Notification => notice_native(app, n),
+        crate::notice::Place::Nowhere => tracing::info!(kind = n.kind, "meeting guard: nowhere to say {}", n.title),
+    }
 }
 
-/// Post `n` as a Windows notification (not in portable mode or test runs).
+/// Put `n` on the Yap bar, else post it as a Windows notification (not in
+/// portable mode or test runs).
 pub fn notice_native(app: &AppHandle, n: &Notice) {
     #[cfg(windows)]
     if let Err(e) = native::notice(app, n) {
@@ -242,15 +258,6 @@ pub fn notice_native(app: &AppHandle, n: &Notice) {
     }
     #[cfg(not(windows))]
     let _ = (app, n);
-}
-
-/// [`notice`], plus a Windows notification while the main window isn't
-/// focused (the call app is in front, or Yap is in the tray).
-pub fn notice_everywhere(app: &AppHandle, n: &Notice) {
-    notice(app, n);
-    if !window_view(app).1 {
-        notice_native(app, n);
-    }
 }
 
 // ---- stopping -------------------------------------------------------------------------
@@ -397,6 +404,10 @@ pub struct LimitWarning {
     stop_at: u64,
     title: String,
     body: String,
+    /// The main window shows it (the person is looking at it, or nothing
+    /// else could); otherwise it's on the Yap bar or a Windows notification
+    /// and the window doesn't repeat it (one place: `notice.rs`).
+    in_app: bool,
 }
 
 impl LimitWarning {
@@ -413,6 +424,7 @@ impl LimitWarning {
             body: format!(
                 "Yap will stop recording and write your action plan. Keep going gives you {more}."
             ),
+            in_app: true,
         }
     }
 }
@@ -420,9 +432,9 @@ impl LimitWarning {
 fn current_warning() -> Option<LimitWarning> {
     let now = now_ms();
     let t = timings();
-    watch_lock()
-        .as_ref()
-        .and_then(|w| w.warned.map(|stop_at| LimitWarning::new(w.note_id, stop_at, now, &t)))
+    watch_lock().as_ref().and_then(|w| {
+        w.warned.map(|stop_at| LimitWarning { in_app: !w.native, ..LimitWarning::new(w.note_id, stop_at, now, &t) })
+    })
 }
 
 fn emit_limit(app: &AppHandle, warning: Option<&LimitWarning>) {
@@ -483,8 +495,12 @@ fn warn(app: &AppHandle, gen: u64, note_id: u64, stop_at: u64, now: u64, t: &Tim
             _ => return,
         }
     }
-    let warning = LimitWarning::new(note_id, stop_at, now, t);
-    tracing::info!(note_id, title = %warning.title, "meeting guard: length warning");
+    // One place (`notice.rs`): the main window while the person is looking
+    // at it, else the Yap bar, else a Windows notification.
+    let place = crate::notice::place(app, true);
+    let mut warning = LimitWarning::new(note_id, stop_at, now, t);
+    warning.in_app = matches!(place, crate::notice::Place::Window | crate::notice::Place::Nowhere);
+    tracing::info!(note_id, title = %warning.title, ?place, "meeting guard: length warning");
     emit_limit(app, Some(&warning));
     // The recording stopped, or Keep going landed, in between: take it back
     // rather than leave a stale warning up.
@@ -494,7 +510,7 @@ fn warn(app: &AppHandle, gen: u64, note_id: u64, stop_at: u64, now: u64, t: &Tim
         emit_limit(app, None);
         return;
     }
-    if window_view(app).1 {
+    if warning.in_app {
         return;
     }
     #[cfg(windows)]
@@ -510,7 +526,11 @@ fn warn(app: &AppHandle, gen: u64, note_id: u64, stop_at: u64, now: u64, t: &Tim
                 native::remove(app, native::LIMIT);
             }
         }
-        Err(e) => tracing::info!("meeting guard: no Windows notification ({e})"),
+        Err(e) => {
+            tracing::info!("meeting guard: no Windows notification ({e})");
+            // Nowhere else after all: the main window has it.
+            emit_limit(app, Some(&LimitWarning { in_app: true, ..warning }));
+        }
     }
 }
 
@@ -846,10 +866,11 @@ fn pick_surface(notepad: bool, main_focused: bool, bar: bool) -> Surface {
 }
 
 /// [`pick_surface`] now. Window getters: never with a lock held. (A test
-/// run's main window never counts as focused, as in `meeting_detect.rs`.)
+/// run says for itself whether the main window counts as focused:
+/// `notice::window_view`.)
 fn surface_now(app: &AppHandle, countdown: bool) -> Surface {
     let notepad = notepad_on_screen(app);
-    let main_focused = !crate::e2e::active() && window_view(app).1;
+    let main_focused = window_view(app).1;
     let bar = if countdown { crate::bar::cards_seen() } else { crate::bar::cards_available() };
     pick_surface(notepad, main_focused, bar)
 }
@@ -1188,10 +1209,8 @@ fn start_or_stop_from(app: &AppHandle, origin: Option<&str>) {
             let n = Notice::taking_notes(None, shortcut.as_deref(), note_id);
             if window_view(app).0 {
                 let _ = app.emit(EVENT_OPEN, serde_json::json!({ "noteId": note_id, "stop": false }));
-                notice(app, &n);
-            } else {
-                notice_native(app, &n);
             }
+            notice(app, &n);
         }
         Err(e) => {
             tracing::warn!("meeting shortcut: couldn't start ({e})");

@@ -61,6 +61,7 @@ export function initMeetingCheckIns(label) {
     const total = counting ? Math.max(1000, p.until - Date.now()) : 0;
     const progress = () => (counting ? Math.max(0, ((p.until - Date.now()) / total) * 100) : null);
     const toastId = toast({
+      kind: 'prompt',
       title: counting ? `Ending notes in ${secondsLeft(p.until - Date.now())}…` : p.title,
       description: p.body,
       chip: 'Meeting',
@@ -99,6 +100,7 @@ export function initMeetingCheckIns(label) {
       const n = e.payload;
       if (!n?.title || n.surface !== label) return;
       toast({
+        kind: 'info',
         title: n.title,
         description: n.body,
         chip: 'Meeting',

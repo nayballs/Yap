@@ -120,7 +120,8 @@ test('"Record notes" records the call into a meeting note; the call ending offer
   await expect(main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Notes', exact: true }))
     .toHaveAttribute('aria-current', 'page');
   await expect(main.getByRole('button', { name: 'End meeting & summarise' })).toBeVisible();
-  await expect(toast(main, 'Recording notes')).toBeVisible();
+  // The open note says it's recording: no success toast on top (notice.rs).
+  await expect(toast(main, 'Recording notes')).toHaveCount(0);
   const notes = meetingNotes(yap);
   expect(notes).toHaveLength(1);
   expect(notes[0]).toMatchObject({ folder: 'Meetings', noteType: 'meeting', source: 'meeting' });

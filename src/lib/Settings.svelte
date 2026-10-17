@@ -726,7 +726,7 @@
       await navigator.clipboard.writeText(logInfo.file);
       logCopied = true;
       setTimeout(() => (logCopied = false), 1500);
-      toast({ title: 'Copied', description: 'Log file path copied to clipboard' });
+      toast({ title: 'Copied', description: 'Log file path copied to clipboard', variant: 'success' });
     } catch {
       toast({ title: "Couldn't copy", description: 'Something went wrong copying to clipboard.', variant: 'destructive' });
     }
@@ -808,6 +808,8 @@
     const un = listen('yap-meeting-detect-choice', (e) => {
       const c = e.payload;
       if (cfg && c?.app && typeof c.asks === 'boolean') setCallAppAsks(c.app, c.asks);
+      // "Stop asking about calls?" → Stop asking, or "Turn back on".
+      if (cfg && typeof c?.enabled === 'boolean') cfg.meetingDetection = c.enabled;
     });
     return () => un.then((f) => f());
   });
@@ -1609,6 +1611,21 @@
             </Group>
           </div>
 
+          <!-- Yap's notice policy (notice.rs): one notice at a time, held
+               while you dictate. Tips are the one kind you can switch off. -->
+          <div id="settings-notifications">
+            <Group title="Notifications">
+              <Row>
+                <Toggle
+                  bind:checked={cfg.showTips}
+                  label="Show tips"
+                  desc="Short tips on using Yap, like push-to-talk's double-tap, and the nudge to connect your calendar"
+                  hint="Questions, alerts and errors always show. Yap shows one at a time, and holds them back while you dictate."
+                />
+              </Row>
+            </Group>
+          </div>
+
           <div id="settings-meetings">
             <Group title="Meetings">
               <Row>
@@ -2388,25 +2405,13 @@
             <Row>
               {#snippet children()}
                 <div class="dbg">
+                  <!-- The switch and its line say it (no toast on top). -->
                   <Toggle
                     bind:checked={cfg.debugLogging}
                     label="Debug mode"
                     desc={cfg.debugLogging
                       ? 'Logging audio processing, AI requests, and system operations'
                       : 'Enable to capture detailed diagnostic information'}
-                    onchange={(on) =>
-                      toast(
-                        on
-                          ? {
-                              title: 'Debug Logging Enabled',
-                              description: 'Detailed logs are now being written to disk',
-                              variant: 'success',
-                            }
-                          : {
-                              title: 'Debug Logging Disabled',
-                              description: 'Debug logging has been turned off',
-                            }
-                      )}
                   />
 
                   <div class="dbg-row">

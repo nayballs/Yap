@@ -168,13 +168,12 @@ test('a mic giving nothing but digital silence is reopened, then named; stopping
     await expect(capsule(yap)).toBeVisible();
     // At ~3 s the stream is reopened, once; the recording goes on.
     await expect.poll(() => logCount(yap, 'reopening it'), { timeout: 6_000 }).toBe(reopens + 1);
-    // At ~5 s it says so in the waveform's place, and the main window toasts it.
+    // At ~5 s it says so in the waveform's place — and only there (one
+    // place: no toast in the main window as well).
     const warning = capsule(yap).getByRole('alert');
     await expect(warning).toHaveText(/^No sound from .+ — is it muted\?$/, { timeout: 5_000 });
     await expect(warning).toHaveAttribute('title', /^No sound from .+ — check it isn't muted or unplugged$/);
-    const toast = main.getByRole('status').filter({ hasText: 'No sound from' });
-    await expect(toast).toBeVisible();
-    await expect(toast).toContainText("check it isn't muted or unplugged");
+    await expect(main.getByRole('status').filter({ hasText: 'No sound from' })).toHaveCount(0);
     await expect(capsule(yap).locator('.dot.rec')).toBeVisible();
     await shot(yap.overlay, '06-mic-silent');
     expect(logCount(yap, 'reopening it')).toBe(reopens + 1);

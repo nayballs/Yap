@@ -161,12 +161,8 @@
     try {
       await invoke('meeting_start', { noteId: selected.id });
       // state event updates `meeting`; start the local timer optimistically
+      // The ● timer chip (and the notepad, when it opens) says it.
       startElapsed(0);
-      toast({
-        title: resuming ? 'Recording again' : 'Recording meeting',
-        description: 'Mic is "You", call audio is "Them" — use headphones for clean separation',
-        variant: 'success',
-      });
     } catch (e) {
       error = String(e);
       toast({ title: "Couldn't start recording", description: String(e), variant: 'destructive' });
@@ -176,8 +172,8 @@
   // on in the same note).
   async function pauseMeeting() {
     try {
+      // The chip turns into Resume: that says it.
       await invoke('meeting_pause');
-      toast({ title: 'Recording paused', description: 'Press Resume to carry on in this note' });
     } catch (e) {
       error = String(e);
       toast({ title: "Couldn't stop recording", description: String(e), variant: 'destructive' });
@@ -189,8 +185,8 @@
   async function endMeeting() {
     flushSave();
     try {
+      // The summary's runline ("Writing your action plan…") says it.
       await invoke('meeting_end', { origin: LABEL });
-      toast({ title: 'Meeting ended', description: 'Transcribing the last few seconds…' });
     } catch (e) {
       error = String(e);
       toast({ title: "Couldn't stop recording", description: String(e), variant: 'destructive' });
@@ -205,10 +201,13 @@
     // A silent recording (muted mic, nobody talking) with no typed notes
     // has nothing for the model to work with.
     if (!selected.content?.trim() && !selected.transcript?.some((s) => !s.echo && !s.dictated)) {
+      // The answer to the click: the feedback lane, never queued.
       toast({
+        kind: 'done',
         title: 'Nothing to summarise yet',
         description: 'No speech was transcribed in this recording.',
         chip: 'Tip',
+        duration: 5000,
       });
       return;
     }
@@ -265,13 +264,13 @@
     if (s.state === 'done') {
       await reloadSelected();
       if (selected?.id === s.noteId && selected.enhancedContent) {
-        tab = 'enhanced'; // OpenWhispr auto-switches to the Enhanced tab
-        toast({ title: `${actionPlanAction?.name ?? 'Action plan'} complete`, variant: 'success' });
+        tab = 'enhanced'; // OpenWhispr auto-switches to the Enhanced tab: that says it
       }
     } else if (s.state === 'error') {
       toast({ title: "Couldn't write the action plan", description: s.error, variant: 'destructive' });
     } else if (s.state === 'nothing') {
       toast({
+        kind: 'info',
         title: 'Nothing to summarise yet',
         description: 'No speech was transcribed in this recording.',
         chip: 'Tip',
@@ -602,7 +601,7 @@
     try {
       const n = selected?.id === id ? selected : await invoke('note_get', { id });
       await navigator.clipboard.writeText(noteMarkdown(n));
-      toast({ title: 'Copied as markdown' });
+      toast({ title: 'Copied as markdown', variant: 'success' });
     } catch (e) {
       toast({ title: "Couldn't copy", description: String(e), variant: 'destructive' });
     }
@@ -669,8 +668,8 @@
           /* keep current */
         }
       }
+      // The Enhanced tab, opened on the result, says it (no toast on top).
       refreshList();
-      toast({ title: `${action.name} complete`, variant: 'success' });
     } catch (e) {
       const msg = String(e);
       if (needsAiSetup(msg)) {
@@ -701,7 +700,7 @@
       await navigator.clipboard.writeText(text);
       copied = asText ? 'text' : 'markdown';
       setTimeout(() => (copied = false), 1500);
-      toast({ title: asText ? 'Copied as text' : 'Copied as markdown' });
+      toast({ title: asText ? 'Copied as text' : 'Copied as markdown', variant: 'success' });
     } catch {
       /* clipboard unavailable */
     }
@@ -757,7 +756,7 @@
     try {
       await invoke('note_update', { id, folder: f });
       refreshList();
-      toast({ title: `Moved to ${f}` });
+      toast({ title: `Moved to ${f}`, variant: "success" });
     } catch (e) {
       toast({ title: "Couldn't move note", description: String(e), variant: 'destructive' });
     }
@@ -921,7 +920,7 @@
     );
     listen('yap-meeting-summary', (e) => onSummary(e.payload)).then((u) => unlisteners.push(u));
     listen('yap-note-changed', (e) => onNoteChanged(e.payload)).then((u) => unlisteners.push(u));
-    // (`yap-meeting-warning` toasts come from meetingGuard.js, in any view.)
+    // (A recording's warnings are notices from meetingGuard.js, in any view.)
     // The local API bridge (Integrations) can create/update/delete notes from
     // outside the app — refresh the list so external edits show up live.
     listen('yap-notes-changed', () => refreshList()).then((u) => unlisteners.push(u));

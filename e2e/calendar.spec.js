@@ -23,6 +23,7 @@ import {
   closeSettings,
   closeToasts,
   expectStore,
+  inAnotherApp,
   settingsDialog,
   sidebar,
   connectDialog,
@@ -343,12 +344,16 @@ test('the reminder card: Join & take notes records into a note with the meeting\
   await expect(card.getByRole('button', { name: 'Start notes' })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Snooze 2 min' })).toBeVisible();
   await shot(main, '09-reminder-card');
-
-  // The main window never counts as focused in a test run, so the card is
-  // on the Yap bar too: call detection's card, with Teams' mark, the
-  // meeting over "● In 1 min · with Tanay +1", Join & take notes.
+  // One place: while you're looking at Yap, it's only in the window.
   const onBar = barCard(yap, 'Design review');
+  await expect(onBar).toHaveCount(0);
+
+  // You go to another app: the card follows you onto the Yap bar (and
+  // leaves the window) — call detection's card, with Teams' mark, the
+  // meeting over "● In 1 min · with Tanay +1", Join & take notes.
+  await inAnotherApp(yap);
   await expect(onBar).toBeVisible();
+  await expect(card).toHaveCount(0);
   await expect(onBar).toContainText(/In \d min|Starting now/);
   await expect(onBar).toContainText('with Tanay +1');
   await expect(onBar.locator('.dot.soon')).toBeVisible();
@@ -364,9 +369,13 @@ test('the reminder card: Join & take notes records into a note with the meeting\
   await main.waitForTimeout(1_500);
   await expect(toast(main, 'Teams call detected')).toHaveCount(0);
   expect(await barCards(yap)).toEqual(['calendar']);
-  await expect(card).toBeVisible();
+  expect((await yap.invoke('bar_status')).waiting).toEqual([]);
 
-  // Answered in the window, it leaves the bar too.
+  // Back in Yap's window, the card moves in with you (off the bar), and is
+  // answered there.
+  await yap.invoke('e2e_focus', { focused: true });
+  await expect(card).toBeVisible();
+  await expect(onBar).toHaveCount(0);
   await card.getByRole('button', { name: 'Join & take notes' }).click();
   await expect.poll(() => recording(yap), { timeout: 15_000 }).toBe(true);
   await expect(onBar).toHaveCount(0);
@@ -418,7 +427,8 @@ test('Esc dismisses a card and call detection stays quiet about that meeting; a 
 
   const pricing = cardFor(main, 'Pricing sync');
   await expect(pricing).toBeVisible();
-  await expect(barCard(yap, 'Pricing sync')).toBeVisible();
+  // One place: not on the bar as well.
+  await expect(barCard(yap, 'Pricing sync')).toHaveCount(0);
   await main.keyboard.press('Escape');
   await expect(pricing).toHaveCount(0);
   await expect(barCard(yap, 'Pricing sync')).toHaveCount(0);
@@ -436,10 +446,12 @@ test('Esc dismisses a card and call detection stays quiet about that meeting; a 
   await expect(roadmap.getByRole('button', { name: 'Start notes' })).toBeVisible();
   await shot(main, '13-card-without-a-link');
 
-  // On the bar: a calendar for a mark (no call app), Start notes, and the
-  // other answers in its ^ menu. Snoozed there, it leaves the window too.
+  // In another app, on the bar: a calendar for a mark (no call app), Start
+  // notes, and the other answers in its ^ menu.
+  await inAnotherApp(yap);
   const onBar = barCard(yap, 'Roadmap chat');
   await expect(onBar).toBeVisible();
+  await expect(roadmap).toHaveCount(0);
   await expect(onBar.locator('[data-app-icon]')).toHaveCount(0); // the calendar
   await expect(onBar.getByRole('button', { name: 'Start notes' })).toBeVisible();
   await pointer(yap, 'card:calendar');
@@ -453,13 +465,14 @@ test('Esc dismisses a card and call detection stays quiet about that meeting; a 
   expect((await status(yap)).card).toBeNull();
   await pointer(yap, 'away');
 
-  // A call starting during it brings the snoozed card back, instead of a
-  // second question; the bar's ✕ dismisses it everywhere.
+  // A call starting during it brings the snoozed card back (on the bar,
+  // where you are), instead of a second question; its ✕ dismisses it.
   await simulate(yap, 'webex', true);
-  await expect(cardFor(main, 'Roadmap chat')).toBeVisible();
+  await expect(onBar).toBeVisible();
   await main.waitForTimeout(1_000);
   await expect(toast(main, 'Webex call detected')).toHaveCount(0);
-  await expect(onBar).toBeVisible();
+  expect((await yap.invoke('bar_status')).cards.map((c) => c.id)).toEqual(['calendar']);
+  await expect(cardFor(main, 'Roadmap chat')).toHaveCount(0);
   await onBar.getByRole('button', { name: 'Close' }).click();
   await expect(onBar).toHaveCount(0);
   await expect(cardFor(main, 'Roadmap chat')).toHaveCount(0);
@@ -491,12 +504,16 @@ test('back-to-back meetings: a call during the next one offers to switch notes',
   await expect(next).toContainText('Switch your notes to it?');
   await expect(next.getByRole('button', { name: 'Join & switch notes' })).toBeVisible();
   await shot(main, '15-switch-card');
-  // The bar's copy says it's the next meeting.
+  // In the call app, it's on the bar instead: it says it's the next meeting.
+  await inAnotherApp(yap);
   const nextOnBar = barCard(yap, 'Sprint planning');
   await expect(nextOnBar).toContainText('Next meeting');
   await expect(nextOnBar.getByRole('button', { name: 'Join & switch notes' })).toBeVisible();
+  await expect(next).toHaveCount(0);
   await yap.overlay.waitForTimeout(300);
   await shot(yap.overlay, '16-switch-card-on-the-bar');
+  // Back in Yap: answered in the window.
+  await yap.invoke('e2e_focus', { focused: true });
   await next.getByRole('button', { name: 'Switch notes', exact: true }).click();
   await expect(nextOnBar).toHaveCount(0);
 

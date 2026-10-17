@@ -19,6 +19,7 @@ import {
   closeSettings,
   closeToasts,
   expectStore,
+  inAnotherApp,
   settingsDialog,
 } from './support/fixtures.js';
 import { newMeetingNote } from './support/meetings.js';
@@ -119,8 +120,11 @@ test('a quiet meeting counts down in the notepad, then stops and says why', asyn
   await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
   await expect(countdown).toHaveCount(0);
   expect(await prompt(yap)).toBeNull();
-  await expect(toast(yap.notepad, ENDED)).toBeVisible({ timeout: 20_000 });
   await shot(yap.notepad, '02-stopped-because-quiet');
+  // One at a time (notice.rs): the question waits until the reason has
+  // been on screen, then takes its place.
+  await expect(toast(yap.notepad, ENDED)).toBeVisible({ timeout: 20_000 });
+  await expect(stopped).toHaveCount(0);
 });
 
 test('anyone speaking cancels the countdown; Keep going buys time; Stop now stops', async ({ yap, main }) => {
@@ -155,6 +159,7 @@ test('with the notepad closed, the countdown is a Yap bar card you can read at a
   await yap.invoke('e2e_meeting_checkins', { quietMs: 3_000, countdownMs: 20_000, recentMs: NEVER, hourMs: NEVER });
   await record(yap, main, 'Bar check');
   await closeNotepad(yap);
+  await inAnotherApp(yap); // in the call app, the notepad closed
 
   const bar = yap.overlay;
   const card = bar.getByRole('status').filter({ hasText: 'Nobody has spoken for 3 seconds' });

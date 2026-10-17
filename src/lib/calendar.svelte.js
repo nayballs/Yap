@@ -90,7 +90,10 @@ export function initCalendar(opts = {}) {
 function apply(s) {
   if (!s) return;
   Object.assign(calendar, s, { loaded: true });
-  const c = s.card;
+  // One place at a time (notice.rs): the card is this window's toast only
+  // while Rust says so (`inApp`: the person is looking here); otherwise
+  // it's on the Yap bar or a Windows notification.
+  const c = s.card?.inApp ? s.card : null;
   if (shown && shown.id !== c?.id) clearShown();
   if (c && !shown) showCard(c);
 }
@@ -124,6 +127,7 @@ function showCard(c) {
     ? { label: switching ? 'Join & switch notes' : 'Join & take notes', answer: 'join' }
     : { label: switching ? 'Switch notes' : 'Start notes', answer: 'start' };
   const toastId = toast({
+    kind: 'prompt',
     title: c.title,
     description: cardText(c),
     chip: switching ? 'Next meeting' : 'Meeting',
@@ -153,14 +157,9 @@ function clearShown() {
 async function answer(c, action) {
   if (shown?.id === c.id) clearShown();
   try {
-    const noteId = await invoke('calendar_card', { id: c.id, action });
-    if (noteId != null) {
-      toast({
-        title: c.kind === 'switch' ? 'Switched notes' : 'Taking notes',
-        description: `${c.title}. Let people know you're taking notes.`,
-        variant: 'success',
-      });
-    }
+    // The notes start: the recording pill, the notepad and the Meetings
+    // view say so (no toast on top).
+    await invoke('calendar_card', { id: c.id, action });
   } catch (e) {
     toast({ title: "Couldn't start meeting notes", description: String(e), variant: 'destructive' });
   }
@@ -190,6 +189,9 @@ function onMeetingEnded(p) {
     if (!calendar.nudge.afterMeeting) return;
     invoke('calendar_nudge', { action: 'shown' }).catch(() => {});
     toast({
+      // A tip (Rust leaves it out with tips switched off), kept until
+      // answered.
+      kind: 'tip',
       title: 'Connect your calendar',
       description: 'See your upcoming meetings, and get notes and action items with everyone’s names.',
       chip: 'Tip',
@@ -262,15 +264,8 @@ export async function eventAction(ev, action) {
       }
       return;
     }
-    if (action === 'join') {
-      toast({ title: `Joining ${ev.title}`, description: 'Opening the meeting in your browser or its app.' });
-      return;
-    }
-    toast({
-      title: action.includes('witch') ? 'Switched notes' : 'Taking notes',
-      description: `${ev.title}. Let people know you're taking notes.`,
-      variant: 'success',
-    });
+    // Joining opens the meeting in its app; taking notes shows the
+    // recording pill, the notepad and "● Recording" on the row: they say it.
   } catch (e) {
     toast({ title: "Couldn't do that", description: String(e), variant: 'destructive' });
   }

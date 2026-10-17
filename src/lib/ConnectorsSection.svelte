@@ -88,8 +88,8 @@
   async function disconnect(c) {
     menu = null;
     try {
+      // Its row goes: that says it (no toast on top).
       await invoke('calendar_disconnect', { id: c.id });
-      toast({ title: `Disconnected ${c.label}`, description: 'Its meetings are gone from Yap; notes made from them stay.', variant: 'success' });
     } catch (e) {
       toast({ title: "Couldn't disconnect", description: String(e), variant: 'destructive' });
     }

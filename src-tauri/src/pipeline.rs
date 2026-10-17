@@ -156,6 +156,12 @@ fn trailing_enter_command(text: &str) -> Option<(usize, usize)> {
     .then_some((p0, k1))
 }
 
+/// A dictation's own errors ("No microphone found", "Transcription
+/// failed"…): the dictation overlay says them, where the dictation is, and
+/// nothing else does (`notice.rs`: one notice, one place). Other errors
+/// (`yap-error`) are the main window's toasts.
+pub const DICTATION_ERROR: &str = "yap-dictation-error";
+
 /// Hard cap on a single recording's captured audio (16 kHz mono f32 ≈ 64 KB/s).
 /// A stuck hotkey or a forgotten toggle-mode session would otherwise grow the
 /// buffer without bound (~3.8 MB/min) until the process runs out of memory. At
@@ -634,7 +640,7 @@ impl Shared {
             tracing::warn!("Can't record — no microphone");
             let _ = self
                 .app
-                .emit("yap-error", "No microphone found — connect one and try again");
+                .emit(DICTATION_ERROR, "No microphone found — connect one and try again");
             let _ = self.app.emit("yap-state", "error");
             return;
         }
@@ -797,9 +803,9 @@ impl Shared {
                                     let silent = shared.mic_silent();
                                     tracing::warn!("Dictation mic: {}", silent.message);
                                     // The overlay says so in the waveform's place (the
-                                    // recording carries on), the main window as a toast.
+                                    // recording carries on), and only there.
                                     let _ = shared.app.emit("yap-mic-silent", Some(&silent));
-                                    let _ = shared.app.emit("yap-error", silent.message);
+                                    let _ = shared.app.emit(DICTATION_ERROR, silent.message);
                                 }
                             }
                         }
@@ -1133,7 +1139,7 @@ impl Shared {
             tracing::warn!("Edit mode needs an AI cleanup endpoint (none configured)");
             let _ = self
                 .app
-                .emit("yap-error", "Set up AI cleanup to use edit mode");
+                .emit(DICTATION_ERROR, "Set up AI cleanup to use edit mode");
             let _ = self.app.emit("yap-state", "error");
             return;
         }
@@ -1146,7 +1152,7 @@ impl Shared {
         if api_key.is_empty() && KEYED_PROVIDERS.contains(&provider.as_str()) {
             tracing::warn!(provider = %provider, "Rewrite skipped: no API key for provider");
             let _ = self.app.emit(
-                "yap-error",
+                DICTATION_ERROR,
                 format!("Voice Agent: no {provider} API key — add one in Language Models"),
             );
             let _ = self.app.emit("yap-state", "error");
@@ -1203,7 +1209,7 @@ impl Shared {
                 // "make this a list" into the doc. Surface an error instead.
                 tracing::warn!("Rewrite failed: {}", e);
                 let _ = self.app.emit(
-                    "yap-error",
+                    DICTATION_ERROR,
                     format!("Rewrite failed via {provider} — check its key in Language Models"),
                 );
                 let _ = self.app.emit("yap-state", "error");
@@ -1751,7 +1757,7 @@ impl Shared {
         // back to idle.
         match error_msg {
             Some(msg) => {
-                let _ = self.app.emit("yap-error", msg);
+                let _ = self.app.emit(DICTATION_ERROR, msg);
                 let _ = self.app.emit("yap-state", "error");
             }
             None => {

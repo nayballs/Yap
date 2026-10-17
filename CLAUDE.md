@@ -113,10 +113,11 @@ competitive strategy, see `ROADMAP.md` in the **private** docs repo (below).
   `dict_usage.rs`, `icons/` — a cache of the installed call apps' own icons,
   `app_icons.rs`, `hints.json` — push-to-talk coaching counts, `coaching.rs`,
   `word_suggestions.json` — your answers to "Add this word to your
-  dictionary?", `learn.rs`).
+  dictionary?", `learn.rs`, `notices.json` — call-prompt fatigue counts,
+  `notice.rs`).
   Every JSON store writes atomically and quarantines a corrupt file on load
   instead of crashing (`config::atomic_write`/`quarantine_corrupt`, used by all
-  ten stores).
+  eleven stores).
 
 ---
 
@@ -252,14 +253,15 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   plugged in, a headset that connects after login, a CI runner) doesn't take the
   pipeline down: it runs without a stream (`has_mic`), a hotkey press retries
   (`ensure_mic`), picking a mic (`set_input_device`) starts capture, and a recording
-  attempt without one says "No microphone found" (toast + overlay) — or, when
+  attempt without one says "No microphone found" (on the overlay) — or, when
   Windows' privacy switches are why, "Windows is blocking microphone access for
   desktop apps" (`mic_privacy.rs`) — Upload, models and Settings work regardless. **Dead-mic watchdog** (`mic_watch.rs`): the audio
   callback tallies each recording's live audio (`mic_tally`: how much, any sample
   not exactly 0.0); a per-recording watcher (`spawn_mic_watch`) reopens the stream
   once (`reopen_mic`) after 2 s without audio or 3 s of nothing but zeros, and at
-  5 s says "No sound from <mic> — check it isn't muted or unplugged" (`yap-error`,
-  plus `yap-mic-silent` for the overlay's line) while the recording carries on;
+  5 s says "No sound from <mic> — check it isn't muted or unplugged"
+  (`yap-dictation-error`, plus `yap-mic-silent` for the overlay's line) while
+  the recording carries on;
   sound coming back takes it back, and a recording that ends still silent isn't
   transcribed (the overlay ends on the reason). **Windows' microphone privacy
   switches** (`mic_privacy::blocked`) are checked when a recording starts — if
@@ -297,11 +299,14 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   you talk" (or double-tap for hands-free), a minute-long hold → "Double-tap
   {key} for hands-free". Each ≤ 3 times, never within 10 min of another, none
   once double-tap has been used; counts in `<data>/hints.json` (not config.json:
-  Settings' auto-saved copy would write old counts back). Surface: a Tip toast in
-  the main window while it's on screen (`yap-hint`), else a Yap bar card (icon
-  `tip`); neither → nothing shown, nothing counted (never a Windows
-  notification). Texts say `{key}`; the page names the hotkey (`fillHotkey` in
-  `lib/hotkeys.js`; the card's `hotkey` field). Not for the edit hotkey.
+  Settings' auto-saved copy would write old counts back). Surface (one
+  place, `notice::place`): a Tip toast in the main window while it's focused
+  (`yap-hint`), else a Yap bar card (icon `tip`; it waits out a dictation or
+  a meeting and is dropped if it can't show within 10 s), else the window's
+  toast if it's on screen; neither → nothing shown, nothing counted (never a
+  Windows notification). "Show tips" off (`show_tips`) → none. Texts say
+  `{key}`; the page names the hotkey (`fillHotkey` in `lib/hotkeys.js`; the
+  card's `hotkey` field). Not for the edit hotkey.
 - **`mic_watch.rs`** — the dictation's dead-mic watchdog, pure: `MicTally`
   (lock-free, fed by the audio callback), `DeadMicWatch::poll(elapsed, samples,
   heard)` → Wait / Reopen / Report / Recovered / Fine, the messages (the full one
@@ -435,7 +440,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   works; silence-gated), runs the **correction dictionary** over each chunk's
   text (`pipeline::apply_corrections`, both sides, so the echo check compares
   corrected with corrected), works off a backlog in ≤30 s chunks back to back,
-  caps each source's buffer at 20 min (then drops audio + `yap-meeting-warning`),
+  caps each source's buffer at 20 min (then drops audio + a "Transcription
+  is falling behind" notice),
   dates each segment by its speech onset, flags **speaker echo** (a "you"
   chunk whose words repeat "them" in order AND whose 20 ms loudness envelope
   follows the call 0–600 ms later — the timing test keeps a headphone user's
@@ -459,11 +465,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (old stream first, a failure keeps the old one and retries; logged).
   **Quiet sides**: `QuietWatch` (every 200 ms) — one side heard nothing above
   the silence gate for 3 min of meeting while the other talked ≥ 10 s →
-  `yap-meeting-warning` once per quiet stretch ("Yap hasn't heard the call/
-  your Teams call for 3 minutes. If it plays through a headset, make that
-  Windows' default output device." / "…your mic…Settings → General"), plus a
-  Windows notification (`meeting_guard::notice_native`) when neither the
-  notepad is on screen nor the main window focused; a dictation counts as the
+  "Yap can't hear the call" / "…your mic" once per quiet stretch ("Yap
+  hasn't heard the call/your Teams call for 3 minutes. If it plays through a
+  headset, make that Windows' default output device." / "…your mic…Settings
+  → General"), in one place (`warn` → `meeting_guard::notice`: the main
+  window while it's focused, else the Yap bar, else a Windows notification;
+  "Transcription is falling behind" the same way); a dictation counts as the
   mic heard, not as talk. `activity()` (the recording's note, its audio
   clock in ms — captured audio, standing still while none arrives — and a
   talk counter: both sides' talk samples plus talk segments ingested) is
@@ -603,18 +610,20 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   default, so apps added later start at theirs). A switched-off app's calls
   are still tracked but get no prompt (start or end) and no tray item. Asks
   **once per call**, never while already recording, in one of two styles
-  (`config.meeting_detect_style`): **"popup"** (default) — a sticky in-app
-  toast when the main window is visible, and when it isn't focused a card on
-  the **Yap bar** (`native::bar_card`: Wispr's "Meeting detected" card — the
-  app's icon (its own as installed, `app_icons.rs`, else its mark), "Teams
-  call" over "● Now", split button Record notes | ^ Not now /
-  Don't ask for Teams, corner ✕; the call ending asks in a notice card; the
-  bar off or hidden → a silent Windows notification via `win_toast.rs`, as
-  before); answering either withdraws both,
-  focusing the window moves a pending prompt in-app (`on_main_window_focused`),
-  and an in-app start prompt left alone **fades after 30 s as "Not now"**
-  (OpenWhispr's auto-dismiss; `fadeMs` in the prompt view, the toast's
-  `onExpire`) — or **"quiet"** — no in-app toast, the notification goes
+  (`config.meeting_detect_style`): **"popup"** (default) — in **one place**
+  (`notice::place_for`): a sticky in-app toast while the main window is
+  focused, else a card on the **Yap bar** (`native::bar_card`: Wispr's
+  "Meeting detected" card — the app's icon (its own as installed,
+  `app_icons.rs`, else its mark), "Teams call" over "● Now", split button
+  Record notes | ^ Not now / Don't ask for Teams, corner ✕; the call ending
+  asks in a notice card), else — the bar off or hidden — a silent Windows
+  notification via `win_toast.rs`, else the in-app toast if the window is on
+  screen (also when Windows refuses the notification); focusing the window
+  moves a pending prompt in-app (`on_main_window_focused`, off the bar), and
+  a start prompt left alone **fades after 30 s as "Not now"** (OpenWhispr's
+  auto-dismiss; `fadeMs` in the prompt view, the toast's `onExpire`; it
+  answers `ignore`, a "Not now" that fatigue counts apart) — or **"quiet"** —
+  no in-app toast, the notification goes
   silently into the notification centre (`win_toast::post_quietly` →
   `SetSuppressPopup`) and stays out of the window unless its body is clicked.
   Both styles: start prompts carry a third answer, **"Don't ask for Teams"**
@@ -630,16 +639,26 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the prompt view; Start now / Not now / Esc cancel), then runs "Record notes"
   (`auto_start_later`, after any dictation); the same app's call again within
   10 min (a rejoin, a reload) is asked about without one. In a test run the
-  main window never counts as focused (`window_view`), so prompts reach the
-  bar deterministically. **Tray**: while a call of an asked-about app is live
+  suite says whether the main window counts as focused (`notice::window_view`:
+  by default while it's on screen; `e2e_focus`). **Call-prompt fatigue**
+  (`notice::Fatigue`, Wispr's by behaviour; `<data>/notices.json`): three
+  "Not now"s in a row, or five start prompts left to fade, and "Stop asking
+  about calls?" is offered once (`offer_to_stop`, an alert with **Stop
+  asking**); 35 start prompts with no meeting ever recorded and call
+  detection switches itself off with "Yap stopped asking about calls" +
+  **Turn back on** (`stopped_asking`); Record notes / Don't ask reset the
+  streaks; someone who has recorded a meeting (≥ 20 words) is never asked.
+  `set_detection` saves the switch and tells Settings
+  (`yap-meeting-detect-choice {enabled}`). **Tray**: while a call of an asked-about app is live
   and nothing records, `tray_item()` puts "Record this Teams call" at the top
   of the idle menu (`meeting_record:<call id>` → `on_tray_record`, same as
   Record notes); `sync_tray` calls `tray::refresh` when it changes. **Record
   notes** → `notes::create` ("Teams call · 5 Oct, 14:30", folder Meetings,
   source "meeting", `set_title_auto` so the AI title may replace it) +
   `notes::mark_meeting` + the `meeting_start` command (which opens the
-  notepad); opens the note if the window is visible (else a "Taking notes…"
-  Windows notification); a failed start deletes the note and says why.
+  notepad); opens the note if the window is visible — that's the
+  confirmation, no toast on top — (else a "Taking notes…" bar card or Windows
+  notification); a failed start deletes the note and says why.
   **Call ended** while recording it → "Stop and summarise?" — by default never
   an auto-stop (OpenWhispr doesn't, and the mic can't tell an ended call from
   a rejoin, breakout room or phone hand-off): `stop_and_summarise` ends the
@@ -699,9 +718,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   default **120**, as Wispr): a watcher thread per recording (follows
   `yap-meeting-state`; Settings re-read every second) warns 5 min before —
   "Notes stop in 5 minutes" + **Keep going** (another hour;
-  `meeting_keep_going`), a sticky in-app toast (`yap-meeting-limit`,
-  `meeting_limit_status` after a reload) plus a Windows notification while
-  the main window isn't focused — then stops and writes the action plan. A
+  `meeting_keep_going`), in one place (`notice::place`): a sticky in-app
+  toast while the main window is focused (`yap-meeting-limit` with `inApp`,
+  `meeting_limit_status` after a reload), else a Yap bar card, else a
+  Windows notification — then stops and writes the action plan. A
   warning always gives the full 5 min (limit lowered mid-meeting, PC slept
   through it); raising/removing the limit takes it back (`step`/`kept_going`,
   pure + unit-tested). **Quiet meetings** (`config.meeting_end_when_quiet`,
@@ -735,15 +755,19 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   default `kb:alt+win+77` = **Win+Alt+M**, as Wispr; "" = unbound):
   `start_or_stop` — recording → stop and summarise; a live call (any app) →
   `meeting_detect::on_tray_record`; else a new "Meeting · 5 Oct, 14:30" note
-  (Meetings) + `meeting_start`, opened if the window is visible (else a
-  "Taking notes" notification). 1 s debounce. Global hook event
+  (Meetings) + `meeting_start`, opened if the window is visible, and a
+  "Taking notes" notice. 1 s debounce. Global hook event
   `meeting-key-pressed`; the in-page fallbacks (Settings, the notepad) call
   `meeting_shortcut { origin }` with their window label, so a question about
   the meeting ("Started by mistake?") shows where the key was pressed.
-  `notice` / `notice_native` / `notice_everywhere` (`yap-meeting-notice`
-  `{kind, title, body, icon, variant, settings, noteId}`) carry the
-  screen-share tip, "Stopped at 2 hours", "Teams call ended · writing your
-  action plan" and "Taking notes". **Every stop goes through
+  `notice` (`yap-meeting-notice` `{kind, title, body, icon, variant,
+  settings, noteId}`) carries the screen-share tip, "Stopped at 2 hours",
+  "Teams call ended · writing your action plan", "Taking notes" and the
+  recorder's warnings (kind `warning`) in **one place** (`notice::place`:
+  the main window while it's focused, else the Yap bar via `notice_native`,
+  else a Windows notification, else the window on screen); one addressed to
+  a window (`surface`) shows there; the same one again within 10 min isn't
+  shown (`notice.rs`). **Every stop goes through
   `stop_and_summarise`** = `meeting_end::end` (Rust writes the action plan;
   no window comes up — the notepad shows it when open). Debug-only `e2e_meeting_limit
   {limitMs, warnMs, keepGoingMs}` and `e2e_meeting_checkins {quietMs,
@@ -800,15 +824,17 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   review · In 1 min", Join & take notes / Start notes / Snooze 2 min / ✕,
   until 5 min after the start, one at a time; while another meeting records,
   a **switch** card (ends it via `meeting_end::end`, then starts the next).
-  It goes on screen through **`present_card`/`withdraw_card` only**: the
-  in-app toast via the snapshot's `card`, and while the main window isn't
-  focused the **Yap bar** (`bar::show_card`, id "calendar": a call-style card
+  It goes on screen through **`present_card`/`withdraw_card` only**, in
+  **one place** (`notice.rs`): the in-app toast while the main window is
+  focused (the snapshot's `card` with `inApp`), else the **Yap bar**
+  (`bar::show_card`, id "calendar": a call-style card
   — the call app's mark or a calendar, the meeting over "● In 1 min · with
   Tanay +1" in amber, green once it's on, kept current with `update_card`
   every 5 s; Join & take notes | ^ Start notes, Snooze 2 min; ✕ = dismiss; no
   Esc watch), else — the bar off or hidden — a Windows notification under
   the "calendar" tag; a card follows you onto the bar when the window loses
-  focus, and off a bar that goes away. **Into notes**:
+  focus, back into the window when it gets it (`MoveIn`,
+  `on_main_window_focused`), and off a bar that goes away. **Into notes**:
   `on_meeting_started` (from `commands::meeting_start`, every route) ties the
   note to the meeting on now (service of the live call first, nearest start;
   from 10 min before) — title over a placeholder (`is_placeholder_title` /
@@ -1080,18 +1106,53 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   "update" tag (always with a banner), meeting_detect.rs under "call",
   meeting_guard.rs under "meeting-limit" (Keep going) and "meeting-notice"
   (Update settings / Open note), calendar.rs under "calendar" (the reminder
-  card's buttons); each keeps its live toast so the buttons
-  work from the notification center. `allowed()` = not portable, not a test run.
-- **`alert.rs`** — a dictation's alerts the person must act on (`elevated.rs`'s
+  card's buttons), alert.rs under the alert's kind; each keeps its live
+  toast so the buttons work from the notification center. `post` goes
+  through the notice policy: the same notification again within its kind's
+  cooldown isn't posted, and it skips the banner (`notice::native_quietly`)
+  while a dictation records or `SHQueryUserNotificationState` says busy,
+  unless it's an alert or a question. `allowed()` = not portable, not a test
+  run.
+- **`notice.rs`** — **Yap's notice policy** (Wispr Flow's rules, by
+  behaviour), the one place that decides how loud a notice may be; the page
+  runs the same rules (`ui/noticePolicy.js`). **One place**
+  (`place_for`/`place`): the main window's toast while it's focused, else
+  the Yap bar, else a Windows notification, else the window if it's on
+  screen — used by alerts, coaching, learn, call prompts, calendar cards,
+  the length warning and meeting notices (`window_view`: test runs say for
+  themselves whether the window counts as focused, `e2e_focus`). **Rules per
+  kind** (`rule`: a bar card's id / a notification's tag): priority (Prompt —
+  call, calendar, meeting-limit, meeting-checkin — > Alert — micBlocked,
+  pasteBlocked, calls-fatigue — > Info > Tip — hint, word-suggestion), held
+  while dictating (+ `SETTLE_MS` 1.5 s, and while onboarding is on screen)
+  or a meeting records, a cooldown for the same text (micBlocked and
+  meeting-notice 10 min), how long it may wait unseen (tips 10 s, a word
+  suggestion and notices 60 s; questions as long as it takes), whether a
+  sticky offer yields to its equals (meeting-mistake, update), whether "Show
+  tips" mutes it. **`pick`** chooses the one card on screen (rank, then the
+  one up, then the oldest; a card the pointer is on stays) and the stale
+  ones to drop; **`Ledger`** the cooldowns (`admit`); **`Fatigue`** the call
+  prompts' 3 / 5 / 35 rule (`notices.json`, `with_call_fatigue`). The moment
+  comes from `on_pipeline_state` (lib.rs's `yap-state`), `on_meeting` (the
+  bar's `yap-meeting-state`), `on_onboarding` and `sync` (config: `show_tips`).
+  All pure parts unit-tested. Debug-only `e2e_notice_reset` (the `main`
+  fixture runs it before every test), `e2e_focus {focused}` and `e2e_notice
+  {surface: bar|window, kind, title, body, level, timeoutMs, dictating}`
+  (a notice through the real policy, or a pretend dictation's `yap-state`).
+- **`alert.rs`** — one-off notices the person must act on (`elevated.rs`'s
   "Your text is copied: press Ctrl+V", `mic_privacy.rs`'s "Windows is blocking
-  microphone access…"): a toast in the main window while it's on screen
-  (`yap-alert` → `lib/alerts.js`), else a Yap bar card, else a Windows
-  notification (`surface`, pure, unit-tested; coaching.rs and learn.rs pick the
-  same first two, but a tip can go unsaid). One optional button (`Action`:
-  **Open settings**) comes back to `act` from all three (`alert_action` from
-  the toast). `show_soon` runs it on a thread of its own (window queries; a
-  hotkey's handler may hold the pipeline's locks). Test mode only logs what
-  Open settings would open.
+  microphone access…", call-prompt fatigue's "Stop asking about calls?" /
+  "Yap stopped asking about calls"): in one place (`notice::place`) — a
+  toast in the main window while it's focused (`yap-alert` →
+  `lib/alerts.js`, kind `alert`), else a Yap bar card, else a Windows
+  notification, else the window on screen; the same alert again within its
+  kind's cooldown isn't shown (the mic one: once per 10 min; the overlay's
+  line says it every press). One optional button (`Action`: **Open
+  settings**, **Stop asking** / **Turn back on** →
+  `meeting_detect::set_detection`) comes back to `act` from all three
+  (`alert_action` from the toast). `show_soon` runs it on a thread of its
+  own (window queries; a hotkey's handler may hold the pipeline's locks).
+  Test mode only logs what Open settings would open.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
   volume, output_device, quiet_other_apps ("Silence other apps while you
   dictate", off; reads old configs' `muteWhileRecording`) + pause_media
@@ -1109,7 +1170,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   with an optional per-profile LLM override: provider/base_url/model/api_key — empty
   provider = inherit global) + `app_routes` smart routing, streaming_partials,
   history_enabled, update_checks_enabled, dictionary_fuzzy, learn_words
-  ("Suggest words from your corrections", default on, `learn.rs`), the meeting
+  ("Suggest words from your corrections", default on, `learn.rs`),
+  show_tips ("Show tips", default on: coaching hints and nudges;
+  `notice.rs`), the meeting
   notepad: meeting_open_notepad (default on) + meeting_split_screen (default
   off) + meeting_live_transcript (default on) + meeting_consent_message (the
   notepad's "Copy consent message" text; empty = the default), call detection:
@@ -1212,10 +1275,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   rewriting most of the dictation. One per spelling (case-blind), terms
   with a capital first, ≤ 3. **The prompt** (`offer`): "Add
   “Kubernetes” to your dictionary? Yap heard “cube and eighties”." — Add /
-  Not now / "Don't suggest this"; a toast (`yap-word-suggestion`,
-  `wordSuggestions.js`) while the main window is on screen, else a Yap bar
-  card (`word-suggestion`, icon `dictionary`; ✕ = Not now, 30 s fade = no
-  answer); neither → nothing (never a Windows notification). Add
+  Not now / "Don't suggest this"; in one place (`notice::place`): a toast
+  (`yap-word-suggestion`, `wordSuggestions.js`, kind `tip`) while the main
+  window is focused, else a Yap bar card (`word-suggestion`, icon
+  `dictionary`; ✕ = Not now, 30 s fade = no answer; it waits out a
+  dictation, up to a minute), else the window's toast if it's on screen;
+  neither → nothing (never a Windows notification). Add
   (`word_suggestion_respond`) appends `{from: heard, to: term, fuzzy: true}`,
   saves config.json, updates the pipeline's live config and emits
   `yap-dictionary-learned {entries, added}`, which Settings adopts (and
@@ -1288,7 +1353,17 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `dismiss_card`, `Card` + an `OnAction` callback; answers come back through
   `bar_card_action`): Yap's notices while the main window isn't focused,
   instead of a Windows notification — `false` when the bar is off or hidden
-  for an hour, and the caller posts the notification as before. Users:
+  for an hour, and the caller posts the notification as before. **One card
+  at a time** (`notice.rs`): every card asked for goes into `cards` with
+  when it came (`queued`); `repick` (on every change, dictation state,
+  meeting state and poller tick) puts the one `notice::pick` chooses on
+  screen (`front`: a question before an alert before a notice before a tip,
+  then the one up, then the oldest; a card the pointer is on stays), holds
+  tips and notices while a dictation runs, drops ones that waited too long
+  unseen (their `expire_action` reported) and the same notice again within
+  its cooldown (`show_card` still returns `true`: it was said). The page
+  gets only the front card (`bar_status.cards`, the rest in `waiting`).
+  Users:
   `meeting_detect` (call prompts as Wispr's "Meeting detected" card, "Taking
   notes…", failures), `meeting_guard` (length warning with Keep going,
   the quiet countdown and the check-ins, notices), `updates` ("Yap X is ready"), `calendar` (the reminder before a
@@ -1596,7 +1671,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   edit of a pasted dictation as the correction watch would see it, or the
   field's text read by read for the watch's rules to run over — the watch
   thread itself never runs in a test run), `e2e_coaching_reset` (every
-  push-to-talk hint due again), `e2e_paste_elevated { on }` (every paste
+  push-to-talk hint due again), `e2e_notice_reset` / `e2e_focus` /
+  `e2e_notice` (notice.rs: cooldowns and fatigue forgotten before every
+  test, whether the main window counts as focused — by default while it's on
+  screen —, a notice staged through the real policy or a pretend
+  dictation's `yap-state`), `e2e_paste_elevated { on }` (every paste
   target an app running as administrator), `e2e_mic_privacy { blocked }`
   (Windows' microphone privacy switches, never read in a test run), calendar secrets in
   `<data>/calendar-secrets.e2e.json` instead of
@@ -1721,22 +1800,43 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   bottom-right (`action: { label, onClick, keepOpen? }` — Wispr's "Open
   Settings") + a quiet `secondary` ("Later") + a small `tertiary` text link on
   its own line under them ("Don't ask for Teams"), hover-pause, `onClose` (✕) /
-  `onExpire` (timer ran out) callbacks, copyable mono error
-  boxes, progress hairlines (3.5 s / 6 s durations; `duration <= 0` sticky),
-  plus a determinate `progress` bar, a `busy` chip spinner and an `expand`
-  "What's new" toggle that unfolds markdown in the card; `updateToast(id,
-  patch)` changes a live toast in place; mounted in ControlPanel and wired to
-  action runs, meeting start/stop, uploads, clipboard copies, debug-mode
-  toggles, backend `yap-error` events, push-to-talk coaching (`yap-hint` → a
-  10 s Tip toast, `{key}` named by `fillHotkey`), **word suggestions**
+  `onExpire` (timer ran out, or waited too long) callbacks, copyable mono
+  error boxes, progress hairlines (`duration <= 0` sticky), plus a
+  determinate `progress` bar, a `busy` chip spinner and an `expand` "What's
+  new" toggle that unfolds markdown in the card; `updateToast(id, patch)`
+  changes a toast in place (on screen or waiting); `isToastLive` = not
+  closed. It runs **Yap's notice policy** (`ui/noticePolicy.js`, the page's
+  half of `notice.rs`): every toast has a `kind` (prompt | offer | alert |
+  update | info | warning | tip — what Yap says by itself — or error | done —
+  the answer to a click; by default from the variant) and two lanes, **one
+  notice + one answer on screen**, the rest queued (higher priority first,
+  then oldest; a question pushes a tip back unless hovered; an `offer` —
+  "Started by mistake?" — or the update gives way to its equals and comes
+  back); tips/notices/updates held while a dictation records (`yap-state`,
+  + 1.5 s), the update also while a meeting records; a tip waits ≤ 30 s and
+  a notice ≤ 60 s unseen, then is dropped (`onExpire`); the same toast again
+  (kind + text, or `key`) refreshes the one up instead of stacking; a
+  `warning` doesn't repeat within 10 min. Default times: done 3 s, info 6 s,
+  error 6 s, alert / tip 10 s, warning 12 s, prompts until answered. Success
+  toasts only where nothing else shows it (copy from a menu, a file saved,
+  a note moved, "Added to Claude" with its restart step, "Won't ask about
+  Teams", "Updated to X", sign-in); a state the screen already shows gets
+  none (recording / paused / ended, an action run, a switch flipped, a row
+  gone, the transcript's copy ✓). Mounted in ControlPanel (and the notepad)
+  and wired to action runs, uploads, clipboard copies, backend `yap-error`
+  events (kind `alert`; a dictation's own errors are the overlay's only,
+  `yap-dictation-error`), push-to-talk coaching (`yap-hint` → a 10 s Tip
+  toast, kind `tip`, `{key}` named by `fillHotkey`), **word suggestions**
   (`wordSuggestions.js` — learn.rs's `yap-word-suggestion`: "Add
   “Kubernetes” to your dictionary? Yap heard “cube and eighties”." with Add /
   Not now / a "Don't suggest this" link, chip Dictionary, `icon:
   'dictionary'`, 30 s; ✕ = Not now; after Add "“Kubernetes” is in your
-  dictionary" + Open Dictionary), a dictation's **alerts** (`alerts.js` —
-  alert.rs's `yap-alert`: "Your text is copied: press Ctrl+V" with chip
-  Paste, `icon: 'clipboard'`; "Windows is blocking microphone access for
-  desktop apps" + Open settings, chip Microphone, `icon: 'mic'`), and the **update toast**
+  dictionary" + Open Dictionary), **alerts** (`alerts.js` — alert.rs's
+  `yap-alert`, kind `alert` (a test's `level` may name another): "Your text
+  is copied: press Ctrl+V" with chip Paste, `icon: 'clipboard'`; "Windows is
+  blocking microphone access for desktop apps" + Open settings, chip
+  Microphone, `icon: 'mic'`; "Stop asking about calls?" + Stop asking, chip
+  Calls), and the **update toast**
   (`updates.svelte.js` — the shared update store started by ControlPanel:
   sticky "Yap X is ready" + Restart to update / Later / What's new, then
   Downloading… / Restarting Yap… in place; "Updated to X" after the
@@ -1753,13 +1853,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `noteRequest` to open, and stop if asked), the **meeting guard rails**
   (`meetingGuard.js` — meeting_guard.rs / capture.rs: the sticky "Notes stop
   in 5 minutes" + **Keep going** toast (`icon: 'timer'`, counting down,
-  withdrawn when Rust sends `{warning: null}`), and one-off
+  only when `inApp`, withdrawn when Rust sends `{warning: null}`), and one-off
   `yap-meeting-notice` toasts: the screen-share tip (`icon: 'screen'`,
   **Update settings** → `general#screen-sharing`), "Stopped at 2 hours", "Teams
   call ended · Yap stopped recording…", "Taking notes" (a notice addressed
-  to the notepad, `surface`, isn't shown here); plus meeting.rs's
-  `yap-meeting-warning` strings — falling behind, a side gone quiet — as a
-  12 s toast in whichever view is open; and, through `meetingCheckIn.js`
+  to the notepad, `surface`, isn't shown here), and meeting.rs's warnings
+  (kind `warning`, 12 s: "Yap can't hear the call", "Transcription is
+  falling behind") in whichever view is open; and, through `meetingCheckIn.js`
   (shared with the notepad, `initMeetingCheckIns(label)`), the quiet
   countdown "Ending notes in 28 s…" — Keep going / Stop now, a draining
   bar, its ✕ only hiding it — and "Still in your meeting?" — Stop and
@@ -1769,9 +1869,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   action-plan jobs, `summaries.byNote` / `.progress`, also used by NotesView
   and the notepad; `askStartedByMistake` = a sticky "Only a few words were
   captured. Keep this meeting or discard it." with Discard / Keep, `icon:
-  'alert'`, shown by the window `yap-meeting-ended`'s `surface` names), and the
+  'alert'`, kind `offer`, shown by the window `yap-meeting-ended`'s `surface`
+  names), and the
   **calendar** (`calendar.svelte.js` — the shared store of calendar.rs's
-  snapshot, started by ControlPanel: the reminder card as a sticky toast,
+  snapshot, started by ControlPanel: the reminder card as a sticky toast
+  while Rust says `inApp` (else it's on the bar),
   chip Meeting / Next meeting, `icon: 'calendar'`, "In 1 min" counting,
   Join & take notes / Start notes / Snooze 2 min, ✕ or Esc = dismiss,
   withdrawn when Rust withdraws it; "Calendar connected", sign-in errors
@@ -1941,8 +2043,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `data-region` ("dictation") then, so the click-through bar takes clicks on
   it, never focused). **Cards** sit 26 px above the pill whatever it
   shows (positioned from the dock's height, gliding 0.16 s when it grows),
-  the first nearest the pill and a second above it; each fades in and out in
-  0.12 s and has Wispr's 4 px hit strip on the pill's side.
+  one at a time (`notice.rs` picks it; the rest wait in `bar.waiting`); it
+  fades in and out in 0.12 s and has Wispr's 4 px hit strip on the pill's
+  side.
   `bar/BarCard.svelte` (notices: update, guard rails, "Taking notes", the
   call ending, errors) is Wispr's card in Yap's colours: 400 wide,
   the bar surface with a 1 px edge, radius 16, padding 20; a chip naming its
@@ -2040,8 +2143,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   unsearched, or covered by the last answer); typed questions = the same
   command with `question`; no AI → a link to Language Models. Escape or a
   click above it puts it away. Toasts sit above the bar
-  (`--yap-toast-bottom`); `yap-meeting-warning` shows here too (12 s), and
-  so do the quiet countdown, "Still in your meeting?" and the quiet stop's
+  (`--yap-toast-bottom`); the quiet countdown, "Still in your meeting?" and the quiet stop's
   notice whenever Rust picks the notepad (it's on screen;
   `meetingCheckIn.js`). It has
   the **in-page hotkey fallback** (dictation, and the meeting shortcut when
@@ -2062,7 +2164,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   and is adopted), a "Hidden until 15:40 · Show it now" row while hidden for an
   hour, Hide in fullscreen apps (`barHideFullscreen`), the live-preview toggle
   and Position (`overlayPosition`) — the dictation overlay itself is always on,
-  it's the hot-mic indicator; **Meetings** group (`#settings-meetings`, the
+  it's the hot-mic indicator; **Notifications** group
+  (`#settings-notifications`): "Show tips" (`showTips`, on: coaching hints
+  and the calendar nudge; questions, alerts and errors always show);
+  **Meetings** group (`#settings-meetings`, the
   target of `yap-settings-goto` "general#meetings"): "Detect calls and offer to
   take notes" (`meetingDetection`), then — disabled while it's off — "How Yap
   asks" (`ui/Segmented` Pop-up / Quietly → `meetingDetectStyle`, a one-line
@@ -2533,7 +2638,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   live transcription preview **on**
   (`streaming_partials`), AI cleanup **off**, the "press enter" voice command
   **on** (`voice_enter`), word suggestions from your corrections **on**
-  (`learn_words` — it only asks; nothing is added without a click), call
+  (`learn_words` — it only asks; nothing is added without a click), tips
+  **on** (`show_tips`; one notice at a time either way, `notice.rs`), call
   detection **on**
   (`meeting_detection` — it only asks; nothing records without a click) as
   **pop-ups** (`meeting_detect_style`), for work apps only (Discord, WhatsApp,
@@ -2705,6 +2811,17 @@ Unit-tested, e2e-tested (`bar.spec.js`, `dictation-alerts.spec.js`,
 case in `browser.real.js`); a real elevated window and a privacy switch
 really flipped in Windows are still untried (a UAC prompt; Nathan's
 settings).
+**Calmer notices** (2026-10-17, after Wispr Flow's rules by behaviour):
+one notice policy in Rust and on the page (`notice.rs`,
+`ui/noticePolicy.js`): one place per notice (the window while it's focused,
+else the bar), one card on the bar and one notice + one answer in a window
+at a time, by priority; tips and notices held while dictating; stale ones
+dropped; repeats within a cooldown dropped; call-prompt fatigue ("Stop
+asking about calls?"); "Show tips"; a dictation's errors on the overlay
+only; 19 success toasts that repeated what the screen showed removed.
+Unit-tested and e2e-tested (`notices.spec.js` + the updated specs); real
+use (a call while the window sits on a second monitor, the bar off with
+Windows notifications, Focus Assist) not yet tried.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation

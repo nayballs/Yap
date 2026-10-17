@@ -13,7 +13,7 @@
   //   meeting   a 69 × 30 recording pill at half opacity (5 bars, the stop
   //             circle) that shows its timer when hovered;
   //   cards     26 px above the pill: Yap's notices while its window isn't
-  //             focused, the first nearest the pill.
+  //             focused, one at a time (notice.rs picks it; the rest wait).
   // The window is click-through except over what this page reports as
   // interactive (`data-region`: the pill's hover zone, cards, the menu):
   // Rust watches the cursor against those rects and makes the window
@@ -47,6 +47,8 @@
     meeting: { recording: false },
     call: null,
     cards: [],
+    // Ids of the cards waiting their turn.
+    waiting: [],
     // 'light' (the default) | 'dark': Settings → Yap bar → Colours.
     theme: 'light',
   });
@@ -83,9 +85,9 @@
             : 'idle'
   );
   const hovering = $derived(pointer === 'pill' || pointer === 'menu' || domHover);
-  // At most two cards: the first stays nearest the pill and a second one
-  // goes above it (Wispr's stacking), so a card being read never jumps.
-  const cards = $derived(bar.enabled ? bar.cards.slice(-2) : []);
+  // One card at a time: Rust's notice policy (notice.rs) picks which, and
+  // the rest wait their turn (`bar.waiting`), so nothing stacks.
+  const cards = $derived(bar.enabled ? bar.cards.slice(-1) : []);
   // The pill's place, measured: cards sit 26 px above the pill whatever it
   // shows (the stage's 8 px + the dock + 20 px), gliding when it grows.
   let dockH = $state(20);

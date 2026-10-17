@@ -16,7 +16,6 @@
   import Button from './ui/Button.svelte';
   import Group from './ui/Group.svelte';
   import Row from './ui/Row.svelte';
-  import { toast } from './ui/toast.svelte.js';
   import { account, displayName, initAccount, initials, PROVIDER_LABELS } from './account.svelte.js';
   import { openExternalLink } from './externalLinks.js';
 
@@ -421,8 +420,8 @@
     devicesError = '';
     try {
       await invoke('auth_revoke_session', { id: device.id });
+      // The row goes: that says it (no toast on top).
       devices = devices?.filter((d) => d.id !== device.id) ?? null;
-      toast({ title: 'Signed out', description: `${device.label} has been signed out.`, variant: 'success' });
     } catch (e) {
       devicesError = String(e);
     } finally {
@@ -432,23 +431,13 @@
   }
 
   async function signOutOthers() {
-    const count = others.length;
     deviceBusy = 'others';
     devicesError = '';
     try {
       await invoke('auth_revoke_other_sessions');
       confirmOthers = false;
+      // Only this PC is left in the list: that says it (no toast on top).
       devices = devices?.filter((d) => d.current) ?? null;
-      toast({
-        title: 'Signed out',
-        description:
-          count === 1
-            ? 'Your other device has been signed out.'
-            : count > 1
-              ? `Your ${count} other devices have been signed out.`
-              : 'Every other device has been signed out.',
-        variant: 'success',
-      });
     } catch (e) {
       devicesError = String(e);
     } finally {

@@ -12,11 +12,11 @@ test('starts without a microphone and says so when asked to record', async ({ ya
   await expect(main.getByRole('heading', { level: 1 })).toContainText('to start yapping');
 
   await pressHotkey(main);
-  const toast = main.getByRole('status').filter({ hasText: 'No microphone found' });
-  await expect(toast).toBeVisible();
+  // A dictation's own error is said where the dictation is — the overlay —
+  // and only there (notice.rs: one place; no toast in the main window).
   await expect(yap.overlay.getByText('No microphone found')).toBeVisible();
-  await shot(main, '01-toast-no-microphone');
   await shot(yap.overlay, '02-overlay-no-microphone');
+  await expect(main.getByRole('status').filter({ hasText: 'No microphone found' })).toHaveCount(0);
 });
 
 // No device because Windows' privacy switches block the microphone: Yap

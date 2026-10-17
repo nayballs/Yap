@@ -38,7 +38,10 @@
 //!   the calendar's "Design review · In 1 min" reminders from `calendar.rs`;
 //!   "update ready" from `updates.rs`), instead of a Windows notification.
 //!   They return `false` when the bar is off or hidden for an hour, and
-//!   callers fall back to the notification.
+//!   callers fall back to the notification. **One card at a time**, picked
+//!   by Yap's notice policy (`notice.rs`: a question before an alert before
+//!   a notice before a tip; tips and notices wait out a dictation; stale
+//!   ones and repeats within a cooldown dropped); the rest wait their turn.
 //!
 //! Settings → General → Yap bar: `bar_enabled` (on), `bar_hide_fullscreen`
 //! (on); `overlay_position` puts it at the top instead. With the bar off Yap
@@ -351,8 +354,14 @@ struct State {
     pending: Option<Pending>,
     /// When the auto-hidden-taskbar check last ran (unix ms).
     autohide_at: u64,
+    /// Every card asked for, on screen or waiting its turn (`notice.rs`
+    /// decides which one shows: one at a time).
     cards: Vec<Card>,
     handlers: HashMap<String, OnAction>,
+    /// When each card was asked for, and whether it has been on screen.
+    queued: HashMap<String, (u64, bool)>,
+    /// The card on screen, if any.
+    front: Option<String>,
     /// The last foreground window that wasn't Yap's: where the focus goes
     /// back to if a click activates the bar after all.
     prev_front: isize,
@@ -385,6 +394,8 @@ impl Default for State {
             autohide_at: 0,
             cards: Vec::new(),
             handlers: HashMap::new(),
+            queued: HashMap::new(),
+            front: None,
             prev_front: 0,
             sim_cursor: None,
         }
@@ -408,8 +419,27 @@ impl State {
             meeting: self.meeting,
             hidden: self.hidden_until > now,
             fullscreen: self.fullscreen(),
-            cards: !self.cards.is_empty(),
+            cards: self.front.is_some(),
         }
+    }
+
+    /// The card on screen.
+    fn front_card(&self) -> Option<&Card> {
+        let id = self.front.as_deref()?;
+        self.cards.iter().find(|c| c.id == id)
+    }
+
+    /// Take card `id` out (answered, withdrawn, or dropped as stale): its
+    /// handler, if it was there.
+    fn remove_card(&mut self, id: &str) -> Option<Option<OnAction>> {
+        let before = self.cards.len();
+        self.cards.retain(|c| c.id != id);
+        self.queued.remove(id);
+        if self.front.as_deref() == Some(id) {
+            self.front = None;
+        }
+        let handler = self.handlers.remove(id);
+        (self.cards.len() != before).then_some(handler)
     }
 }
 
@@ -487,7 +517,11 @@ pub struct Status {
     meeting: serde_json::Value,
     /// A live call ◉ would record ("Record this Teams call").
     call: Option<String>,
+    /// The card on screen (none or one: `notice.rs` shows them one at a
+    /// time)…
     cards: Vec<Card>,
+    /// …and the ids of those waiting their turn.
+    waiting: Vec<String>,
 }
 
 pub fn status() -> Status {
@@ -508,7 +542,13 @@ pub fn status() -> Status {
         meeting_hotkey: s.meeting_hotkey.clone(),
         meeting,
         call,
-        cards: s.cards.clone(),
+        cards: s.front_card().cloned().into_iter().collect(),
+        waiting: s
+            .cards
+            .iter()
+            .filter(|c| s.front.as_deref() != Some(c.id.as_str()))
+            .map(|c| c.id.clone())
+            .collect(),
     }
 }
 
@@ -637,6 +677,9 @@ fn poller(app: AppHandle, rx: mpsc::Receiver<()>) {
                 follow_cursor(&app, cursor, now);
                 check_fullscreen(&app);
             }
+            // A held card's dictation over, a pinned one let go, a wait gone
+            // stale: maybe another card's turn.
+            repick(&app);
             apply(&app);
         }
         hover(&app, cursor);
@@ -825,14 +868,11 @@ fn give_focus_back() {
     }
 }
 
-/// Esc while a card with an `escape_action` is up: the newest such card.
+/// Esc while the card on screen has an `escape_action`.
 fn escape(app: &AppHandle) {
     let target = {
         let s = lock();
-        s.cards
-            .iter()
-            .rev()
-            .find_map(|c| c.escape_action.clone().map(|a| (c.id.clone(), a)))
+        s.front_card().and_then(|c| c.escape_action.clone().map(|a| (c.id.clone(), a)))
     };
     if let Some((id, action)) = target {
         tracing::info!(card = %id, "bar: Esc");
@@ -883,7 +923,10 @@ pub fn init(app: &AppHandle) {
             .and_then(|v| v["recording"].as_bool())
             .unwrap_or(false);
         lock().meeting = recording;
-        emit(&h);
+        crate::notice::on_meeting(recording);
+        if !repick(&h) {
+            emit(&h);
+        }
         wake();
     });
     let h = app.clone();
@@ -961,6 +1004,9 @@ pub fn on_pipeline_state(app: &AppHandle, state: &str) {
     }
     #[cfg(not(windows))]
     let _ = starting;
+    // Tips and notices wait out a dictation (`notice.rs`): one on screen
+    // steps back now; after it, the poller brings them back.
+    repick(app);
     apply(app);
     wake();
 }
@@ -978,33 +1024,111 @@ pub fn cards_seen() -> bool {
     CARDS_SEEN.load(Ordering::Relaxed)
 }
 
-/// Whether the card `id` is up and on screen.
+/// Whether the card `id` is up and on screen (not waiting its turn).
 pub fn card_on_screen(id: &str) -> bool {
     let s = lock();
-    s.shown && s.cards.iter().any(|c| c.id == id) && cards_seen()
+    s.shown && s.front.as_deref() == Some(id) && cards_seen()
 }
 
-/// Show `card` above the pill (replacing one with the same id); its answers
-/// go to `on_action`. `false` when the bar is off or hidden: the caller
-/// falls back to a Windows notification.
+/// Show `card` above the pill, replacing one with the same id (which keeps
+/// its place); its answers go to `on_action`. One card shows at a time:
+/// `notice.rs` picks which — a call before a tip; tips and notices wait
+/// while a dictation runs — and the rest wait their turn. The same notice
+/// again within its cooldown is dropped (`true`: it was said). `false` when
+/// the bar is off or hidden: the caller falls back to a Windows
+/// notification.
 pub fn show_card(app: &AppHandle, card: Card, on_action: OnAction) -> bool {
     if !cards_available() {
         return false;
     }
+    if !crate::notice::admit(&card.id, &card.title, &card.body) {
+        return true;
+    }
     tracing::info!(card = %card.id, seen = cards_seen(), "bar: card");
     {
         let mut s = lock();
-        s.cards.retain(|c| c.id != card.id);
-        s.handlers.insert(card.id.clone(), on_action);
-        s.cards.push(card);
+        let now = now_ms();
+        let id = card.id.clone();
+        match s.cards.iter_mut().find(|c| c.id == id) {
+            Some(c) => *c = card,
+            None => {
+                s.cards.push(card);
+                s.queued.insert(id.clone(), (now, false));
+            }
+        }
+        s.handlers.insert(id, on_action);
     }
-    after_cards_changed(app);
+    if !repick(app) {
+        // The card on screen changed in place (or a waiting one did).
+        after_cards_changed(app);
+    }
     on_main(app, |app| {
         if let Some(w) = window(app) {
             overlay::force_topmost(&w);
         }
     });
     true
+}
+
+/// Which card shows now (`notice::pick`); `true` if that changed (the page
+/// has been told then). Cards that waited too long unseen are dropped, their
+/// handlers told as if they had faded (`expire_action`).
+fn repick(app: &AppHandle) -> bool {
+    let moment = crate::notice::moment();
+    let (changed, stale) = {
+        let mut s = lock();
+        let m = crate::notice::Moment {
+            meeting: s.meeting || moment.meeting,
+            dictating: moment.dictating
+                || matches!(s.dictation, Dictation::Recording | Dictation::Processing),
+            ..moment
+        };
+        let ids: Vec<String> = s.cards.iter().map(|c| c.id.clone()).collect();
+        let current = s.front.as_ref().and_then(|f| ids.iter().position(|id| id == f));
+        let pinned = current.is_some_and(|i| s.pointer.as_deref() == Some(format!("card:{}", ids[i]).as_str()));
+        let list: Vec<crate::notice::Waiting> = ids
+            .iter()
+            .map(|id| {
+                let (since, seen) = s.queued.get(id).copied().unwrap_or((m.now, false));
+                crate::notice::Waiting { kind: id, since, seen }
+            })
+            .collect();
+        let pick = crate::notice::pick(&list, current, pinned, &m);
+        let front = pick.front.map(|i| ids[i].clone());
+        let mut stale = Vec::new();
+        for i in pick.stale {
+            let id = &ids[i];
+            let expire = s.cards.iter().find(|c| &c.id == id).and_then(|c| c.expire_action.clone());
+            if let Some(handler) = s.remove_card(id) {
+                tracing::info!(card = %id, "bar: waited too long unseen; dropped");
+                stale.push((handler, expire));
+            }
+        }
+        let changed = front != s.front || !stale.is_empty();
+        if let Some(id) = &front {
+            if s.front.as_ref() != Some(id) {
+                tracing::info!(card = %id, waiting = s.cards.len().saturating_sub(1), "bar: card on screen");
+            }
+            // Seen once it's really on screen (not waiting out a game in
+            // exclusive fullscreen): from then on it never goes stale.
+            if cards_seen() {
+                if let Some(q) = s.queued.get_mut(id) {
+                    q.1 = true;
+                }
+            }
+        }
+        s.front = front;
+        (changed, stale)
+    };
+    if changed {
+        after_cards_changed(app);
+    }
+    for (handler, expire) in stale {
+        if let (Some(handler), Some(action)) = (handler, expire) {
+            handler(app, &action);
+        }
+    }
+    changed
 }
 
 /// Change a card that's up. `false` if it isn't.
@@ -1025,16 +1149,10 @@ pub fn update_card(app: &AppHandle, id: &str, f: impl FnOnce(&mut Card)) -> bool
     found
 }
 
-/// Take the card `id` down (no answer is reported).
+/// Take the card `id` down, on screen or waiting (no answer is reported).
 pub fn dismiss_card(app: &AppHandle, id: &str) {
-    let removed = {
-        let mut s = lock();
-        let before = s.cards.len();
-        s.cards.retain(|c| c.id != id);
-        s.handlers.remove(id);
-        s.cards.len() != before
-    };
-    if removed {
+    let removed = lock().remove_card(id).is_some();
+    if removed && !repick(app) {
         after_cards_changed(app);
     }
 }
@@ -1052,7 +1170,7 @@ fn after_cards_changed(app: &AppHandle) {
 fn sync_escape() {
     let wanted = {
         let s = lock();
-        s.shown && cards_seen() && s.cards.iter().any(|c| c.escape_action.is_some())
+        s.shown && cards_seen() && s.front_card().is_some_and(|c| c.escape_action.is_some())
     };
     #[cfg(windows)]
     if wanted && !crate::e2e::active() {
@@ -1068,14 +1186,10 @@ fn sync_escape() {
 /// handler gets `action` (none for an empty one). Blocking handlers are
 /// fine: this runs off the main thread.
 fn card_action(app: &AppHandle, id: &str, action: &str) {
-    let handler = {
-        let mut s = lock();
-        let before = s.cards.len();
-        s.cards.retain(|c| c.id != id);
-        let handler = s.handlers.remove(id);
-        (s.cards.len() != before).then_some(handler).flatten()
-    };
-    after_cards_changed(app);
+    let handler = lock().remove_card(id).flatten();
+    if !repick(app) {
+        after_cards_changed(app);
+    }
     if let (Some(handler), false) = (handler, action.is_empty()) {
         handler(app, action);
     }

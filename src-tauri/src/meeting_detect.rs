@@ -37,12 +37,15 @@
 //! default (work apps yes, personal chat apps like Discord no) that the
 //! person's choice in Settings (`meeting_detect_apps`) or "Don't ask for
 //! Discord" on a prompt overrides. Two styles (`meeting_detect_style`):
-//! - "popup": an in-app toast when the main window is on screen, a Windows
-//!   notification with Yap's logo otherwise. A window that is open but not
-//!   focused (the call app is in front) gets both; answering one withdraws
-//!   the other, and focusing the window moves a pending prompt into it. A
-//!   start prompt left alone in the window fades after 30 s and counts as
-//!   "Not now" (OpenWhispr's 30 s auto-dismiss);
+//! - "popup": in one place (`notice.rs`): an in-app toast while the main
+//!   window is focused, else the Yap bar's card, else a Windows notification
+//!   with Yap's logo (else the in-app toast if the window is on screen);
+//!   focusing the window moves a pending prompt into it. A start prompt
+//!   left alone fades after 30 s and counts as "Not now" (OpenWhispr's 30 s
+//!   auto-dismiss) — an "ignore" for call-prompt fatigue, which offers once
+//!   to stop asking after three "Not now"s or five fades in a row, and stops
+//!   by itself after 35 prompts with no meeting ever recorded
+//!   (`notice::Fatigue`);
 //! - "quiet": the notification goes silently into the notification center,
 //!   with no banner and no in-app toast.
 //!
@@ -526,7 +529,7 @@ struct Prompt {
     app: &'static App,
     /// End prompts: the note being recorded.
     note_id: Option<u64>,
-    /// Shown as the in-app toast (the main window is, or came, on screen).
+    /// Shown as the in-app toast (the main window was, or came, in focus).
     in_app: bool,
     /// Posted as a Windows notification.
     native: bool,
@@ -858,6 +861,9 @@ struct Todo {
     /// A call Yap recorded ended with "Stop and summarise automatically"
     /// on: stop and summarise this note.
     auto_stop: Option<(u64, &'static App)>,
+    /// A start prompt went up: call-prompt fatigue counts it
+    /// (`notice::Fatigue`).
+    prompted: bool,
 }
 
 fn run(app: &AppHandle, todo: Todo) {
@@ -873,7 +879,16 @@ fn run(app: &AppHandle, todo: Todo) {
                         cur.native = true;
                     }
                 }
-                Err(e) => tracing::info!("meeting detect: no Windows notification ({e})"),
+                Err(e) => {
+                    tracing::info!("meeting detect: no Windows notification ({e})");
+                    // Nowhere else after all: the window, if it's on screen.
+                    if !p.quiet && window_view(app).0 {
+                        if let Some(cur) = lock().prompt.as_mut().filter(|cur| cur.id == p.id) {
+                            cur.in_app = true;
+                        }
+                        emit(app);
+                    }
+                }
             }
         }
     }
@@ -887,6 +902,12 @@ fn run(app: &AppHandle, todo: Todo) {
     }
     if let Some((note_id, call)) = todo.auto_stop {
         crate::meeting_guard::stop_after_call(app, note_id, &format!("{} {}", call.label, call.noun));
+    }
+    if todo.prompted {
+        let ever = ever_recorded();
+        if crate::notice::with_call_fatigue(|f| f.prompted(ever)) == crate::notice::Verdict::SwitchOff {
+            stopped_asking(app);
+        }
     }
 }
 
@@ -954,17 +975,11 @@ fn drop_unasked(s: &mut State, todo: &mut Todo) {
     }
 }
 
-/// The main window: (on screen, focused). Never call with the lock held.
-/// A test run never focuses its windows, so one the desktop activates
-/// behind the suite's back doesn't count as focused (e2e.rs).
+/// The main window: (on screen, focused) — `notice::window_view` (a test
+/// run says for itself whether the person is looking at it). Never call
+/// with the lock held.
 fn window_view(app: &AppHandle) -> (bool, bool) {
-    app.get_webview_window("settings")
-        .map(|w| {
-            let visible = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
-            let focused = !crate::e2e::active() && w.is_focused().unwrap_or(false);
-            (visible, visible && focused)
-        })
-        .unwrap_or((false, false))
+    crate::notice::window_view(app)
 }
 
 /// A dictation is recording or transcribing. Locks the pipeline, so never
@@ -979,10 +994,12 @@ fn dictating(app: &AppHandle) -> bool {
     guard.as_ref().is_some_and(|p| p.is_busy())
 }
 
-/// Put up a prompt (replacing whatever was up). Pop-up style: the in-app
-/// toast when the main window is on screen, a Windows notification unless
-/// it's focused. Quietly: a notification without a banner, whatever the
-/// window does.
+/// Put up a prompt (replacing whatever was up), in one place
+/// (`notice::place_for`). Pop-up style: the in-app toast while the person
+/// is looking at the main window (focused), else the Yap bar's card, else a
+/// Windows notification, else — nothing else possible — the in-app toast if
+/// the window is on screen. Quietly: a notification without a banner,
+/// whatever the window does.
 fn show_prompt(
     s: &mut State,
     todo: &mut Todo,
@@ -998,7 +1015,13 @@ fn show_prompt(
     let quiet = s.quiet;
     let fade_ms = (kind == PromptKind::Start)
         .then(|| s.calls.iter().find(|c| c.id == call_id).and_then(|c| c.fade_ms).unwrap_or(FADE_MS));
-    let in_app = visible && !quiet;
+    let place = crate::notice::place_for(
+        focused,
+        visible,
+        crate::bar::cards_available(),
+        crate::notice::notifications_allowed(),
+    );
+    let in_app = !quiet && place == crate::notice::Place::Window;
     // `meeting_auto_start`: a countdown, only where it's sure to be seen
     // (the toast in a focused main window, or the Yap bar's card) and not
     // for a call it just asked about (a rejoin or a reload).
@@ -1012,13 +1035,14 @@ fn show_prompt(
     let auto_start_at = counts_down.then_some(now + AUTO_START_MS);
     if kind == PromptKind::Start {
         s.asked_at.insert(app.id, now);
+        todo.prompted = true;
     }
     let prompt =
         Prompt { id: s.seq, kind, call_id, app, note_id, in_app, native: false, quiet, fade_ms, auto_start_at };
     if let Some(at) = auto_start_at {
         todo.auto_start = Some((prompt.id, at));
     }
-    if quiet || !focused {
+    if quiet || !in_app {
         todo.post_native = Some(prompt.clone());
     }
     tracing::info!(app = app.id, ?kind, in_app, quiet, "meeting detect: prompt");
@@ -1146,11 +1170,12 @@ fn at_call_end(note: Option<u64>, asked: bool, auto_stop: bool) -> AtCallEnd {
 fn tick(app: &AppHandle) {
     let busy = dictating(app);
     let recording = crate::meeting::is_recording();
-    let wants_view = {
+    let (wants_view, in_window) = {
         let s = lock();
-        s.enabled && s.due.is_some() && s.prompt.is_none()
+        let in_window = s.prompt.as_ref().is_some_and(|p| p.in_app && !p.quiet);
+        (s.enabled && s.due.is_some() && s.prompt.is_none(), in_window)
     };
-    let view = if wants_view { window_view(app) } else { (false, false) };
+    let view = if wants_view || in_window { window_view(app) } else { (false, false) };
     let now = now_ms();
     let mut todo = Todo::default();
     {
@@ -1171,6 +1196,16 @@ fn tick(app: &AppHandle) {
         }
         if recording {
             s.due = None;
+        }
+        // One place (`notice.rs`): a prompt in the window follows the person
+        // onto the Yap bar when the window loses the focus (and back when
+        // it gets it, `on_main_window_focused`).
+        if in_window && !view.1 && crate::bar::cards_available() {
+            if let Some(p) = s.prompt.as_mut().filter(|p| p.in_app && !p.quiet) {
+                p.in_app = false;
+                todo.post_native = Some(p.clone());
+                todo.emit = true;
+            }
         }
         if let Some(call_id) = s.due {
             let settled = now.saturating_sub(s.last_dictation) >= AFTER_DICTATION_MS;
@@ -1397,8 +1432,8 @@ fn move_into_window(app: &AppHandle, quiet_too: bool) {
 
 /// The person answered prompt `prompt_id` (the in-app toast or the Windows
 /// notification): "record" | "dismiss" | "never" (start prompts; a prompt
-/// that faded in the window counts as "dismiss"), "stop" | "keep" (end
-/// prompts). "record" returns the new note's id. Blocking (the recorder takes
+/// left to fade answers "ignore", which is "dismiss" that call-prompt
+/// fatigue counts apart), "stop" | "keep" (end prompts). "record" returns the new note's id. Blocking (the recorder takes
 /// up to a few seconds to start): run it off the main thread.
 pub fn respond(app: &AppHandle, prompt_id: u64, action: &str) -> Result<Option<u64>, String> {
     let mut todo = Todo::default();
@@ -1416,13 +1451,31 @@ pub fn respond(app: &AppHandle, prompt_id: u64, action: &str) -> Result<Option<u
         if current {
             withdraw(&mut s, &mut todo);
         }
-        if let Some(p) = prompt.as_ref().filter(|_| action == "dismiss") {
+        if let Some(p) = prompt.as_ref().filter(|_| matches!(action, "dismiss" | "ignore")) {
             s.snoozed.insert(p.app.id, now_ms() + SNOOZE_MS);
         }
         prompt
     };
     run(app, todo);
     tracing::info!(prompt_id, action, current = prompt.is_some(), "meeting detect: answered");
+    // Call-prompt fatigue (`notice::Fatigue`): "Not now"s and prompts left
+    // to fade in a row → offer once to stop asking.
+    if let Some(p) = prompt.as_ref().filter(|p| p.kind == PromptKind::Start) {
+        let answer = match action {
+            "dismiss" => Some(crate::notice::Answer::Closed),
+            "ignore" => Some(crate::notice::Answer::Ignored),
+            "record" | "never" => Some(crate::notice::Answer::Engaged),
+            _ => None,
+        };
+        if let Some(answer) = answer {
+            let ever = ever_recorded();
+            if let crate::notice::Verdict::OfferToStop { ignored } =
+                crate::notice::with_call_fatigue(|f| f.answered(answer, ever))
+            {
+                offer_to_stop(app, p.app, ignored);
+            }
+        }
+    }
     match (action, prompt) {
         ("record", Some(p)) if p.kind == PromptKind::Start => record(app, p.call_id).map(Some),
         ("record", _) => Err("That call has ended.".to_string()),
@@ -1434,9 +1487,83 @@ pub fn respond(app: &AppHandle, prompt_id: u64, action: &str) -> Result<Option<u
             stop_asking(app, p.app);
             Ok(None)
         }
-        ("dismiss" | "keep" | "stop" | "never", _) => Ok(None),
+        ("dismiss" | "ignore" | "keep" | "stop" | "never", _) => Ok(None),
         (other, _) => Err(format!("Unknown answer: {other}")),
     }
+}
+
+/// Someone who has recorded a meeting with Yap (a meeting note with some
+/// speech in it): call-prompt fatigue never asks them anything.
+fn ever_recorded() -> bool {
+    // Once true, always true: no need to read every note again.
+    static RECORDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if RECORDED.load(std::sync::atomic::Ordering::Relaxed) {
+        return true;
+    }
+    let found = crate::notes::all().iter().any(|n| {
+        n.note_type == "meeting" && crate::notes::speech_words(&n.transcript) >= crate::meeting_end::MISTAKE_WORDS
+    });
+    if found {
+        RECORDED.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    found
+}
+
+/// "Stop asking about calls?" (once ever): three "Not now"s in a row, or
+/// five prompts left to fade. **Stop asking** switches call detection off;
+/// ✕ or leaving it keeps asking.
+fn offer_to_stop(app: &AppHandle, call_app: &'static App, ignored: bool) {
+    let body = if ignored {
+        "You've let the last few call prompts go by. Yap can stop asking; you can turn it back on in Settings → General → Meetings."
+    } else {
+        "You've said Not now to the last few calls. Yap can stop asking; you can turn it back on in Settings → General → Meetings."
+    };
+    tracing::info!(app = call_app.id, ignored, "meeting detect: offering to stop asking about calls");
+    crate::alert::show_soon(
+        app,
+        crate::alert::Alert {
+            kind: "calls-fatigue",
+            icon: "call",
+            title: "Stop asking about calls?".into(),
+            body: body.into(),
+            action: Some(crate::alert::Action { id: crate::alert::STOP_ASKING_CALLS, label: "Stop asking" }),
+            timeout_ms: 30_000,
+        },
+    );
+}
+
+/// 35 call prompts and no meeting ever recorded: Yap stops asking by itself,
+/// and says so with **Turn back on**.
+fn stopped_asking(app: &AppHandle) {
+    tracing::info!("meeting detect: many call prompts, no meeting recorded; switching call detection off");
+    set_detection(app, false);
+    crate::alert::show_soon(
+        app,
+        crate::alert::Alert {
+            kind: "calls-fatigue",
+            icon: "call",
+            title: "Yap stopped asking about calls".into(),
+            body: "It asked about many calls and you didn't take notes on any. Turn it back on any time in Settings → General → Meetings.".into(),
+            action: Some(crate::alert::Action { id: crate::alert::ASK_ABOUT_CALLS, label: "Turn back on" }),
+            timeout_ms: 30_000,
+        },
+    );
+}
+
+/// Call detection on or off from a notice ("Stop asking", "Turn back on"):
+/// saved, applied, and told to Settings (`yap-meeting-detect-choice` with
+/// `enabled`), so its auto-save keeps it.
+pub fn set_detection(app: &AppHandle, enabled: bool) {
+    let mut cfg = crate::config::load();
+    if cfg.meeting_detection != enabled {
+        cfg.meeting_detection = enabled;
+        if let Err(e) = crate::config::save(&cfg) {
+            tracing::warn!("meeting detect: couldn't save call detection ({e})");
+        }
+    }
+    sync(app, enabled);
+    let _ = app.emit(EVENT_CHOICE, serde_json::json!({ "enabled": enabled }));
+    tracing::info!(enabled, "meeting detect: call detection set from a notice");
 }
 
 /// "Don't ask for Discord": saved as the person's choice (so Settings shows
@@ -1967,7 +2094,8 @@ mod native {
             secondary: Some(CardAction::new(arg(decline), w.decline)),
             link: w.never.map(|label| CardAction::new(arg("never"), label)),
             timeout_ms: if counting { None } else { p.fade_ms },
-            expire_action: Some(arg(decline)),
+            // Left to fade: "Not now", counted apart by call-prompt fatigue.
+            expire_action: Some(arg(if p.kind == PromptKind::Start { "ignore" } else { decline })),
             close_action: Some(arg(decline)),
             escape_action: counting.then(|| arg(decline)),
             countdown,
@@ -2507,9 +2635,10 @@ mod tests {
         assert_eq!(action(&card.primary), Some(("meeting:record:7".into(), "Record notes".into())));
         assert_eq!(action(&card.secondary), Some(("meeting:dismiss:7".into(), "Not now".into())));
         assert_eq!(action(&card.link), Some(("meeting:never:7".into(), "Don't ask for Google Meet".into())));
-        // Left alone it fades as "Not now", and its ✕ means "Not now".
+        // Left alone it fades as "Not now" (an "ignore", which call-prompt
+        // fatigue counts apart), and its ✕ means "Not now".
         assert_eq!(card.timeout_ms, Some(FADE_MS));
-        assert_eq!(card.expire_action.as_deref(), Some("meeting:dismiss:7"));
+        assert_eq!(card.expire_action.as_deref(), Some("meeting:ignore:7"));
         assert_eq!(card.close_action.as_deref(), Some("meeting:dismiss:7"));
         assert!(card.escape_action.is_none() && card.countdown.is_none());
         // Counting down: "Start now", no fade, Esc cancels.

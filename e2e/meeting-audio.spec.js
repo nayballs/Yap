@@ -238,7 +238,8 @@ test('a side gone quiet while the other talks says so, and the recording carries
 }) => {
   // 6 s of the meeting instead of 3 minutes (2 s of talk instead of 10).
   await yap.invoke('e2e_meeting_quiet', { quietSecs: 6, talkSecs: 2 });
-  const warning = main.getByRole('status').filter({ hasText: 'Meeting recording' });
+  // In one place (notice.rs): the main window, where the person is looking.
+  const warning = main.getByRole('status').filter({ hasText: "Yap can't hear" });
 
   // The call never comes through (Teams on a headset that isn't the
   // default output), while you talk.

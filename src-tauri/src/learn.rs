@@ -44,9 +44,11 @@
 //!    fixes between ordinary words, terms already in the dictionary, and
 //!    edits that rewrite most of the dictation. One per spelling, terms with
 //!    a capital first, at most [`MAX_SUGGESTIONS`].
-//! 3. **The prompt** ([`offer`]): a toast in the main window when it's on
-//!    screen, else a card on the Yap bar (`bar::show_card`); neither → not
-//!    shown, nothing counted, and never a Windows notification. Add → a
+//! 3. **The prompt** ([`offer`]), in one place (`notice::place`): a toast in
+//!    the main window while it's focused, else a card on the Yap bar
+//!    (`bar::show_card`; it waits out a dictation, up to a minute), else the
+//!    window's toast if it's on screen; neither → not shown, nothing
+//!    counted, and never a Windows notification. Add → a
 //!    correction (`from` = what Yap heard, `to` = the term, near-misses on as
 //!    every new correction) saved to config.json, the pipeline's live config
 //!    and the windows' copies (`yap-dictionary-learned`, which Settings
@@ -1342,13 +1344,6 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// The main window is on screen (not hidden, not minimized). Waits on the
-/// main thread: never call with a lock held.
-fn main_window_visible(app: &AppHandle) -> bool {
-    app.get_webview_window("settings")
-        .is_some_and(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false))
-}
-
 /// Ask about `words`: a toast in the main window while it's on screen, else
 /// a Yap bar card. Words turned down before are left out; at most one
 /// prompt per [`MIN_GAP_MS`] (`ignore_gap`: the e2e hook). `true` if shown.
@@ -1371,7 +1366,14 @@ fn offer(app: &AppHandle, words: Vec<Suggestion>, ignore_gap: bool) -> bool {
     }
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
     let (title, body, never) = prompt_text(&words);
-    let in_window = main_window_visible(app);
+    // One place (`notice.rs`): the main window while the person is looking
+    // at it, else the Yap bar (else the window, on screen after all).
+    let place = crate::notice::place(app, false);
+    if place == crate::notice::Place::Nowhere {
+        tracing::debug!("learn: nowhere to show the suggestion");
+        return false;
+    }
+    let in_window = place == crate::notice::Place::Window;
     *pending() = Some(Pending {
         id,
         words: words.clone(),

@@ -329,6 +329,10 @@ struct GoogleView {
 struct CardView {
     id: u64,
     kind: CardKind,
+    /// Shown as the main window's toast (the person is looking at it).
+    /// Otherwise it's on the Yap bar or a Windows notification, and the
+    /// window doesn't repeat it (one place: `notice.rs`).
+    in_app: bool,
     key: String,
     title: String,
     start: i64,
@@ -390,6 +394,7 @@ fn snapshot_of(s: &Runtime, notes: &HashMap<String, u64>, now: i64) -> Snapshot 
         card: s.card.as_ref().map(|c| CardView {
             id: c.id,
             kind: c.kind,
+            in_app: c.surface == Surface::InApp,
             key: c.event.key.clone(),
             title: c.event.display_title(),
             start: c.event.start,
@@ -399,7 +404,11 @@ fn snapshot_of(s: &Runtime, notes: &HashMap<String, u64>, now: i64) -> Snapshot 
             has_link: c.event.join_url.is_some(),
         }),
         nudge: NudgeView {
-            after_meeting: !connected && !s.store.nudge.dismissed && !s.store.nudge.shown_after_meeting,
+            // A tip: not with tips switched off (Settings → Notifications).
+            after_meeting: !connected
+                && !s.store.nudge.dismissed
+                && !s.store.nudge.shown_after_meeting
+                && !crate::notice::tips_off(),
         },
         max_connections: vault::SLOTS,
     }
@@ -490,6 +499,12 @@ fn next_wake(now: i64) -> u64 {
 
 /// Settings were saved: the reminder lead may have changed.
 pub fn on_config_saved() {
+    wake();
+}
+
+/// The main window got the focus: a card on the bar (or in the
+/// notification center) moves into it.
+pub fn on_main_window_focused() {
     wake();
 }
 
@@ -1290,17 +1305,11 @@ pub fn on_call_started(app_id: &str) {
 
 // ---- the reminder card ------------------------------------------------------------------------
 
-/// The main window: (on screen, focused). Never with a lock held. A test
-/// run never focuses its windows, so one the desktop activates behind the
-/// suite's back doesn't count as focused (as in `meeting_detect`).
+/// The main window: (on screen, focused) — `notice::window_view` (a test
+/// run says for itself whether the person is looking at it). Never with a
+/// lock held.
 fn window_view(app: &AppHandle) -> (bool, bool) {
-    app.get_webview_window("settings")
-        .map(|w| {
-            let visible = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
-            let focused = !crate::e2e::active() && w.is_focused().unwrap_or(false);
-            (visible, visible && focused)
-        })
-        .unwrap_or((false, false))
+    crate::notice::window_view(app)
 }
 
 /// What a card is waiting for, after a turn of [`tick_card`].
@@ -1311,6 +1320,9 @@ enum CardChange {
     /// The card up stays: put it on the bar (or a notification) after all —
     /// the main window lost the focus, or the bar went away under it.
     Present(Box<Card>),
+    /// The card up stays: off the bar (or out of the notification center)
+    /// and into the main window, which has the focus now.
+    MoveIn(Box<Card>),
     /// The card up stays: its status line on the bar reads this now.
     Status(String, &'static str),
 }
@@ -1357,6 +1369,12 @@ fn tick_card(app: &AppHandle) {
                 Surface::InApp if !focused && (crate::bar::cards_available() || native_possible()) => {
                     CardChange::Present(Box::new(card))
                 }
+                Surface::Bar | Surface::Notification if focused => {
+                    if let Some(c) = s.card.as_mut() {
+                        c.surface = Surface::InApp;
+                    }
+                    CardChange::MoveIn(Box::new(card))
+                }
                 Surface::Bar if !crate::bar::cards_available() => CardChange::Present(Box::new(card)),
                 Surface::Bar => {
                     let (status, dot) = bar_status(&card, now);
@@ -1395,6 +1413,10 @@ fn tick_card(app: &AppHandle) {
             crate::bar::dismiss_card(app, BAR_CARD);
             present_card(app, &card, focused);
         }
+        CardChange::MoveIn(card) => {
+            tracing::info!(kind = ?card.kind, "calendar: the card moves into the main window");
+            withdraw_card(app, &card);
+        }
         CardChange::Status(status, dot) => {
             crate::bar::update_card(app, BAR_CARD, |c| {
                 c.status = Some(status);
@@ -1404,15 +1426,14 @@ fn tick_card(app: &AppHandle) {
     }
 }
 
-/// **The one place a calendar card goes on screen.** The main window's
-/// in-app toast follows the snapshot (`calendar.svelte.js`), and while the
-/// window isn't focused (the call app is in front, Yap is in the tray) the
-/// card goes on the **Yap bar** (`bar::show_card`, a "Meeting detected"-style
-/// call card), else — the bar off or hidden for an hour — a Windows
-/// notification: as call detection's prompts do.
+/// **The one place a calendar card goes on screen** — one place at a time
+/// (`notice.rs`): the main window's in-app toast while the person is
+/// looking at it (the snapshot's `inApp`, `calendar.svelte.js`), else the
+/// **Yap bar** (`bar::show_card`, a "Meeting detected"-style call card),
+/// else — the bar off or hidden for an hour — a Windows notification, as
+/// call detection's prompts do; nothing else possible, the in-app toast.
 fn present_card(app: &AppHandle, card: &Card, focused: bool) {
     tracing::info!(kind = ?card.kind, focused, "calendar: meeting card");
-    emit(app);
     let now = now_secs();
     let surface = if focused {
         Surface::InApp
@@ -1426,6 +1447,8 @@ fn present_card(app: &AppHandle, card: &Card, focused: bool) {
         Some(c) => {
             c.surface = surface;
             c.bar_status = bar_status(card, now).0;
+            drop(s);
+            emit(app);
         }
         // Answered while it was going up: take it down.
         None => {

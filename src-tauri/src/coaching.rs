@@ -4,10 +4,13 @@
 //! [`MIN_GAP_MS`] of another, and none at all once double-tap has been used
 //! (they're about learning it).
 //!
-//! Where: a toast in the main window while it's on screen (as an update's
-//! announcement does), else a card on the Yap bar. Neither (the bar off or
-//! hidden for an hour, the window in the tray): nothing, and nothing
-//! counted — no Windows notification for a tip. The hotkey's name is
+//! Where: one place (`notice::place`): a toast in the main window while the
+//! person is looking at it, else a card on the Yap bar, else the window's
+//! toast if it's on screen. Neither (the bar off or hidden for an hour, the
+//! window in the tray): nothing, and nothing counted — no Windows
+//! notification for a tip. "Show tips" off (Settings → General →
+//! Notifications): none at all. On the bar a hint waits out a dictation or
+//! a meeting, and is dropped if it can't show within 10 s (`notice.rs`). The hotkey's name is
 //! written by the page, with `lib/hotkeys.js` (`formatHotkeySpec`): the
 //! texts say `{key}` and carry the spec.
 //!
@@ -19,7 +22,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use crate::gesture::Hint;
 
@@ -148,31 +151,31 @@ fn update_record(f: impl FnOnce(Record) -> Record) {
 
 // ---- showing -------------------------------------------------------------------------------
 
-/// The main window is on screen (not hidden, not minimized). Waits on the
-/// main thread: never call with a lock held.
-fn main_window_visible(app: &AppHandle) -> bool {
-    app.get_webview_window("settings")
-        .is_some_and(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false))
-}
-
 /// Show `hint` if it's due, about the dictation hotkey `hotkey` (a spec,
 /// "kb:120"). Blocking (window queries): run it off the pipeline's locks,
 /// on a thread of its own.
 pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
     let now = now_ms();
+    if crate::notice::tips_off() {
+        tracing::debug!(?hint, "coaching: tips are switched off");
+        return;
+    }
     if !eligible(&record(), hint, now) {
         tracing::debug!(?hint, "coaching: not now");
         return;
     }
     let (title, body) = text(hint);
-    let in_window = main_window_visible(app);
+    // One place (`notice.rs`): the main window while the person is looking
+    // at it, else the Yap bar; never a Windows notification for a tip.
+    let place = crate::notice::place(app, false);
+    let in_window = place == crate::notice::Place::Window;
     let shown_now = if in_window {
         let kind = match hint {
             Hint::Tap => "tap",
             Hint::LongHold => "longHold",
         };
         app.emit(EVENT, HintToast { kind, title, body, hotkey: hotkey.to_string() }).is_ok()
-    } else {
+    } else if place == crate::notice::Place::Bar {
         let card = crate::bar::Card {
             id: CARD.into(),
             icon: "tip",
@@ -183,6 +186,8 @@ pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
             ..Default::default()
         };
         crate::bar::show_card(app, card, Box::new(|_, _| {}))
+    } else {
+        false
     };
     if shown_now {
         tracing::info!(?hint, in_window, "coaching: hint shown");

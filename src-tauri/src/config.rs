@@ -184,6 +184,12 @@ pub struct YapConfig {
     /// to the dictionary. Never adds one without asking. See `learn.rs`.
     #[serde(default = "default_true")]
     pub learn_words: bool,
+    /// "Show tips" (Settings → General → Notifications): coaching hints and
+    /// nudges ("Connect your calendar"). Off, Yap's notice policy drops every
+    /// tip (`notice.rs`); alerts, questions and notices still show. On by
+    /// default.
+    #[serde(default = "default_true")]
+    pub show_tips: bool,
 
     /// Recording mode: "toggle" (press to start, press again to stop) or
     /// "pushToTalk" (hold to record, release to stop).
@@ -584,6 +590,7 @@ impl Default for YapConfig {
             dictionary: Vec::new(),
             dictionary_fuzzy: true,
             learn_words: true,
+            show_tips: true,
             recording_mode: default_recording_mode(),
             quiet_other_apps: false,
             pause_media: false,
