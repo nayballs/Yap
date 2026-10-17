@@ -69,19 +69,25 @@ test('smart spacing: fitted to the text before the cursor', async ({ robot }) =>
   await expect.poll(() => pad.text('rich')).toBe('We went home because it was late.');
 });
 
-// Known gap, found by this robot (2026-10-17): a WinForms text box gives UI
-// Automation a value but no caret (its focused element has no TextPattern),
-// so Yap reads the whole text as "before the cursor" (selection.rs's
-// ValuePattern fallback) and a dictation into the middle of a line is
-// fitted as if at its end. This pins today's result; once selection.rs
-// finds the caret another way it fails — then expect the right one:
-// "the blue one" → "I want the blue one please".
-test('known gap: mid-text in a WinForms text box is fitted as if at the end', async ({ robot }) => {
+// Found by this robot (2026-10-17): a WinForms text box gives UI Automation
+// a value but no caret (its focused element has no TextPattern), so Yap read
+// the whole text as "before the cursor" and fitted a dictation into the
+// middle of a line as if at its end (" the blue one." → "I want  the blue
+// one. please"). selection.rs now asks a Win32 text box for its selection
+// (EM_GETSEL).
+test('mid-text in a WinForms text box: fitted to the caret', async ({ robot }) => {
   const { pad } = robot;
   await pad.set('box', 'I want  please', 7);
-  const r = await robot.dictate(pad, 'The blue one.');
-  expect(r.text).toBe(' the blue one.');
-  await expect.poll(() => pad.text('box')).toBe('I want  the blue one. please');
+  let r = await robot.dictate(pad, 'The blue one.');
+  expect(r.text).toBe('the blue one');
+  await expect.poll(() => pad.text('box')).toBe('I want the blue one please');
+
+  // Replacing a selected word mid-sentence: no full stop, its case.
+  await pad.set('box', 'We can meet Tuesday at noon.');
+  await pad.call({ cmd: 'select', field: 'box', start: 12, length: 7 });
+  r = await robot.dictate(pad, 'Wednesday.');
+  expect(r.text).toBe('Wednesday');
+  await expect.poll(() => pad.text('box')).toBe('We can meet Wednesday at noon.');
 });
 
 test('a password box is pasted into but never read', async ({ robot }) => {

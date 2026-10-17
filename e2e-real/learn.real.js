@@ -68,8 +68,7 @@ test('a web page: a fix there is offered too, and Not now leaves the dictionary 
   await forgetAnswers(yap);
   await robot.configure({ dictionary: [] });
   const page = await robot.editor();
-  // (Not an empty box: Edge reads an empty one as holding its label; see
-  // browser.real.js.)
+  // Text before the dictation: the watch finds it mid-field.
   await page.set('Notes: ');
   const mark = robot.logMark();
   await robot.dictate(page, 'Open the graph ana dashboard.');
