@@ -9,6 +9,7 @@
 
 mod agent_detect;
 mod app_icons;
+mod app_kind;
 mod auth;
 mod bar;
 mod bridge;

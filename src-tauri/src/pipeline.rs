@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use tauri::{AppHandle, Emitter};
 
+use crate::app_kind::AppKind;
 use crate::config::{self, YapConfig};
 use crate::gesture::{Action, Gesture};
 use crate::mic_watch::{DeadMicWatch, MicSilent, MicStep, MicTally};
@@ -212,6 +213,9 @@ struct Shared {
     /// window). The transcript is pasted back into this window so focus changes
     /// during transcription don't misfire.
     target_hwnd: AtomicIsize,
+    /// What kind of app `target_hwnd` is (a terminal, a chat app…; read at
+    /// record start, `app_kind::of_window`), for fitting the paste.
+    target_kind: Mutex<AppKind>,
     /// Whether the current recording session is **edit/rewrite mode** (the spoken
     /// words are an instruction to rewrite `selection`) rather than dictation.
     /// Set at record-start, read in `run_stt`.
@@ -299,6 +303,16 @@ impl Shared {
 
     fn output_device(&self) -> Option<String> {
         self.config.read().ok().and_then(|c| c.output_device.clone())
+    }
+
+    /// The kind of app this recording goes into (read at record start), as
+    /// the settings have Yap treat it (`AppKind::with_settings`).
+    fn paste_kind(&self) -> AppKind {
+        let kind = self.target_kind.lock().map(|k| *k).unwrap_or_default();
+        self.config
+            .read()
+            .map(|c| kind.with_settings(c.terminal_mode, c.chat_no_full_stop))
+            .unwrap_or_default()
     }
 
     /// Reset the idle timer to "now".
@@ -463,22 +477,36 @@ impl Shared {
         // (or anything else) can steal focus. Restored at paste time.
         let hwnd = crate::text_injector::current_foreground().unwrap_or(0);
         self.target_hwnd.store(hwnd, Ordering::Relaxed);
+        // And what kind of app it is (a terminal, a chat app…): its process,
+        // class and title only, for fitting the paste.
+        let kind = crate::app_kind::of_window((hwnd != 0).then_some(hwnd));
+        if let Ok(mut k) = self.target_kind.lock() {
+            *k = kind;
+        }
+        let (smart_spacing, in_terminal) = self
+            .config
+            .read()
+            .map(|c| (c.smart_spacing, kind.with_settings(c.terminal_mode, true).is_terminal()))
+            .unwrap_or((false, false));
 
         // Edit/rewrite mode: grab the current selection NOW, while the target app
         // still has focus (before recording), so the spoken instruction can be
-        // applied to it. Empty selection → write mode.
+        // applied to it. Empty selection → write mode. In a terminal (terminal
+        // mode on) never by Ctrl+C: with nothing selected it interrupts the
+        // program running there.
         self.edit_mode.store(edit, Ordering::SeqCst);
         if edit {
             let target = if hwnd == 0 { None } else { Some(hwnd) };
-            let sel = crate::selection::capture_selection(target);
+            let sel = crate::selection::capture_selection(target, !in_terminal);
             if let Ok(mut g) = self.selection.lock() {
                 *g = sel;
             }
         }
         // "Match the text around the cursor": read it in the background now,
         // for the paste (`text_injector::prepare_dictation`). Not for edit
-        // mode, whose rewrite replaces the selection as the AI wrote it.
-        let smart = !edit && self.config.read().map(|c| c.smart_spacing).unwrap_or(false);
+        // mode, whose rewrite replaces the selection as the AI wrote it, nor
+        // in a terminal with terminal mode on: its "field" is the screen.
+        let smart = !edit && smart_spacing && !in_terminal;
         crate::selection::begin_dictation((hwnd != 0).then_some(hwnd), smart);
 
         // The dead-mic watchdog's tally starts afresh with each recording.
@@ -818,10 +846,15 @@ impl Shared {
         .await
         {
             Ok(result) => {
-                let out = result.trim().to_string();
+                let mut out = result.trim().to_string();
                 if out.is_empty() {
                     let _ = self.app.emit("yap-state", "idle");
                     return;
+                }
+                // A terminal gets the AI's text safe for it too (one line at
+                // a shell); anywhere else it's pasted as the AI wrote it.
+                if let AppKind::Terminal(t) = self.paste_kind() {
+                    out = crate::app_kind::terminal_text(&out, t.keeps_lines());
                 }
                 tracing::info!(text = %out, "Rewrite");
                 let _ = self.app.emit("yap-transcript", out.clone());
@@ -1229,14 +1262,24 @@ impl Shared {
                             .read()
                             .map(|c| finish_dictation(cleaned.trim(), &raw, &c))
                             .unwrap_or_else(|_| (config::apply_dictionary(cleaned.trim(), &dict), false));
+                        // A terminal or a chat app (`app_kind.rs`), as the
+                        // settings have it: how the text is fitted and which
+                        // key, if any, follows the paste.
+                        let kind = self.paste_kind();
+                        let submit =
+                            crate::app_kind::submit_key(kind, auto_submit, voice_enter, &auto_submit_key)
+                                .map(str::to_string);
                         if voice_enter {
-                            tracing::info!("Voice command: press {}", auto_submit_key);
+                            tracing::info!("Voice command: press {}", submit.as_deref().unwrap_or("enter"));
+                        } else if auto_submit && submit.is_none() {
+                            tracing::info!("Auto-submit: not pressing Enter at a terminal's prompt");
                         }
                         if !corrected.is_empty() {
-                            // Fitted to the text around the cursor (smart
-                            // spacing), else the trailing space as before.
+                            // Fitted to the kind of app and the text around
+                            // the cursor (smart spacing), else the trailing
+                            // space as before.
                             corrected =
-                                crate::text_injector::prepare_dictation(&corrected, append_space, &dict);
+                                crate::text_injector::prepare_dictation(&corrected, append_space, &dict, kind);
                             tracing::info!(text = %corrected, "Transcript");
                             let _ = self.app.emit("yap-transcript", corrected.clone());
                             let target = match self.target_hwnd.load(Ordering::Relaxed) {
@@ -1253,10 +1296,8 @@ impl Shared {
                                 Ok(()) => {
                                     // Once, whether auto-submit, the voice
                                     // command or both asked for it.
-                                    if auto_submit || voice_enter {
-                                        if let Err(e) =
-                                            crate::text_injector::press_submit(&auto_submit_key).await
-                                        {
+                                    if let Some(key) = &submit {
+                                        if let Err(e) = crate::text_injector::press_submit(key).await {
                                             tracing::warn!("Auto-submit failed: {}", e);
                                         }
                                     }
@@ -1294,8 +1335,9 @@ impl Shared {
                                 0 => None,
                                 h => Some(h),
                             };
+                            let key = submit.as_deref().unwrap_or(&auto_submit_key);
                             if target.is_none() || crate::text_injector::current_foreground() == target {
-                                if let Err(e) = crate::text_injector::press_submit(&auto_submit_key).await {
+                                if let Err(e) = crate::text_injector::press_submit(key).await {
                                     tracing::warn!("Voice command submit failed: {}", e);
                                 }
                             } else {
@@ -1373,6 +1415,7 @@ impl Pipeline {
             config: RwLock::new(cfg.clone()),
             last_activity: AtomicU64::new(now_ms()),
             target_hwnd: AtomicIsize::new(0),
+            target_kind: Mutex::new(AppKind::Other),
             edit_mode: AtomicBool::new(false),
             selection: Mutex::new(None),
             processing: AtomicBool::new(false),
