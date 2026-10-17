@@ -12,12 +12,17 @@
 //   notes show up in screen shares and screenshots", with Update settings →
 //   `settings`), a stop Yap made itself (the length limit, a call ending),
 //   or "Taking notes" from the meeting shortcut.
+//   A notice addressed to another window (`surface`: "notepad") isn't
+//   shown here.
 // `yap-meeting-warning` "…": something about the recording itself, from
 //   meeting.rs (transcription falling behind; "Yap hasn't heard the call
 //   for 3 minutes…" when one side went quiet), in whichever view is open.
+// The quiet-meeting countdown and the "Still in your meeting?" check-ins
+// come through meetingCheckIn.js, when Rust picks this window for them.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast, dismiss, isToastLive, updateToast } from './ui/toast.svelte.js';
+import { initMeetingCheckIns } from './meetingCheckIn.js';
 
 let started = false;
 let openSettings = () => {};
@@ -41,6 +46,7 @@ export function initMeetingGuard(opts = {}) {
   listen('yap-meeting-warning', (e) =>
     toast({ title: 'Meeting recording', description: String(e.payload), chip: 'Tip', duration: 12_000 })
   );
+  initMeetingCheckIns('settings');
 }
 
 /** "5 minutes", "1 minute", "40 seconds" — rounded up, for a countdown. */
@@ -92,7 +98,7 @@ async function keepGoing() {
 const NOTICE_CHIPS = { screenShare: 'Tip', stopped: 'Meeting', recording: 'Recording' };
 
 function showNotice(n) {
-  if (!n?.title) return;
+  if (!n?.title || (n.surface && n.surface !== 'settings')) return;
   toast({
     title: n.title,
     description: n.body,

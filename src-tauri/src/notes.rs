@@ -787,6 +787,12 @@ pub fn link_event(
     })
 }
 
+/// The calendar meeting note `id` belongs to, if any (without cloning the
+/// note: the guard rails ask once a second while a meeting records).
+pub fn event_of(id: u64) -> Option<NoteEvent> {
+    with_notes(|notes| notes.iter().find(|n| n.id == id).and_then(|n| n.event.clone()))
+}
+
 /// The note made for calendar event `key` (the most recently edited, if a
 /// meeting was recorded twice).
 pub fn find_by_event(key: &str) -> Option<u64> {

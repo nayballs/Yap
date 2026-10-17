@@ -1058,6 +1058,7 @@ fn show_note(app: &AppHandle, note_id: u64, title: &str) {
             variant: "success",
             settings: None,
             note_id: Some(note_id),
+            surface: None,
         };
         crate::meeting_guard::notice_native(app, &n);
     }

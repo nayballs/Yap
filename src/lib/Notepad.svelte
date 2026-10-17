@@ -41,6 +41,7 @@
   import { renderMarkdown } from './markdown.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
   import { openExternalLink } from './externalLinks.js';
+  import { initMeetingCheckIns } from './meetingCheckIn.js';
   import {
     summaries,
     initMeetingSummary,
@@ -728,6 +729,9 @@
 
   onMount(() => {
     initMeetingSummary();
+    // "Ending notes in 30 s…" and "Still in your meeting?" (meeting_guard.rs),
+    // here while the notepad is on screen.
+    initMeetingCheckIns(LABEL);
     refreshConfig();
     refreshShown();
     refreshMaximized();

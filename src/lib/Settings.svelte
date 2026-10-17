@@ -472,7 +472,8 @@
   // not yet include, so the bindings always have something to bind to.
   const FIELD_DEFAULTS = {
     recordingMode: 'toggle',
-    muteWhileRecording: false,
+    quietOtherApps: false,
+    pauseMedia: false,
     appendTrailingSpace: false,
     smartSpacing: true,
     chatNoFullStop: true,
@@ -494,6 +495,7 @@
     meetingHideFromCapture: true,
     meetingMaxMinutes: 120,
     meetingCallEnd: 'ask',
+    meetingEndWhenQuiet: true,
     meetingHotkey: 'kb:alt+win+77',
     meetingOpenNotepad: true,
     meetingSplitScreen: false,
@@ -1547,8 +1549,23 @@
                 hint={`${Math.round(cfg.audioFeedbackVolume * 100)}%`}
               />
             </Row>
+            <!-- Other apps' sound while you dictate (mute.rs, media_pause.rs):
+                 after the start chime, back after the stop chime. -->
             <Row>
-              <Toggle bind:checked={cfg.muteWhileRecording} label="Mute while recording" desc="Silence other system audio while you dictate" />
+              <Toggle
+                bind:checked={cfg.quietOtherApps}
+                label="Silence other apps while you dictate"
+                desc="Music, videos and games go quiet while you talk, then come back as they were"
+                hint="Yap's chime still plays, and calls are never silenced: not Teams, Zoom or other call apps, nor a meeting in your browser."
+              />
+            </Row>
+            <Row>
+              <Toggle
+                bind:checked={cfg.pauseMedia}
+                label="Pause music and videos while you dictate"
+                desc="What's playing pauses when you start and plays again when you're done"
+                hint="Anything in Windows' media controls, like Spotify or a YouTube tab. Only what Yap paused plays again, and calls are never paused."
+              />
             </Row>
           </Group>
 
@@ -1662,6 +1679,14 @@
                   bind:value={cfg.meetingMaxMinutes}
                   options={maxLengthOptions}
                   ariaLabel="Maximum recording length"
+                />
+              </Row>
+              <Row>
+                <Toggle
+                  bind:checked={cfg.meetingEndWhenQuiet}
+                  label="End notes when the meeting goes quiet"
+                  desc="After 10 minutes with nobody speaking, Yap counts down 30 seconds, then stops and writes your action plan"
+                  hint="Anyone speaking cancels it, and Keep going gives you another 10 minutes. Separately, Yap asks “Still in your meeting?” when a calendar meeting runs over, and an hour in."
                 />
               </Row>
               <!-- The screen-share tip's "Update settings" lands here

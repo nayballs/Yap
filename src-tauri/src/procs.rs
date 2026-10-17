@@ -28,6 +28,13 @@ pub fn kill(pid: u32) -> bool {
     imp::kill(pid)
 }
 
+/// Every running process's exe file name, lowercased, by process id (one
+/// snapshot: what "Silence other apps" checks audio sessions against).
+#[cfg(windows)]
+pub fn exe_names() -> std::collections::HashMap<u32, String> {
+    imp::snapshot().into_iter().map(|p| (p.pid, p.exe.to_ascii_lowercase())).collect()
+}
+
 /// When the live process `pid` started (a FILETIME, 100 ns since 1601), or
 /// `None` (gone, or not ours to ask). Tells a process from a later one that
 /// was given the same id.

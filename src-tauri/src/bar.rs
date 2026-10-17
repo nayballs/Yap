@@ -163,6 +163,21 @@ pub struct Countdown {
     pub until: u64,
     /// "Starting notes in" → "Starting notes in 7…".
     pub label: String,
+    /// What it says at zero ("Ending notes…"); the page's default otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub done: Option<String>,
+    /// The countdown is the card's headline, big enough to read at a glance
+    /// ("Ending notes in 28 s…" with the seconds in a ring), and the title a
+    /// line under it: the quiet-meeting countdown.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub headline: bool,
+}
+
+impl Countdown {
+    /// A countdown line under the card's title.
+    pub fn new(until: u64, label: impl Into<String>) -> Self {
+        Countdown { until, label: label.into(), done: None, headline: false }
+    }
 }
 
 /// A card's answers: called (off the main thread) with the clicked action's
@@ -1665,7 +1680,7 @@ mod tests {
             icon: "call",
             title: "Teams call detected".into(),
             primary: Some(CardAction::new("meeting:record:3", "Record notes")),
-            countdown: Some(Countdown { until: 99, label: "Starting notes in".into() }),
+            countdown: Some(Countdown::new(99, "Starting notes in")),
             timeout_ms: Some(30_000),
             ..Card::default()
         };

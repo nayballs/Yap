@@ -193,7 +193,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   autostart (release builds only: a dev build shares the installed app's `Yap`
   Run entry, so `set_autostart_enabled` leaves the OS setting alone), and
   starts the update scheduler last (`updates::init`).
-  `shutdown_cleanup()` (sidecar, bridge, WASAPI mute) runs on `RunEvent::Exit`
+  `shutdown_cleanup()` (sidecar, bridge, other apps' sound back — `mute::restore_all`) runs on `RunEvent::Exit`
   AND from the updater's pre-install hook. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
   Gives the hidden settings/onboarding webviews a one-shot **DWM-cloaked** show+hide
   at startup (`init_hidden_webview` — WebView2 created-hidden workaround). ⚠ Never
@@ -422,7 +422,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   Windows' default output device." / "…your mic…Settings → General"), plus a
   Windows notification (`meeting_guard::notice_native`) when neither the
   notepad is on screen nor the main window focused; a dictation counts as the
-  mic heard, not as talk. Commands: `meeting_start`/`meeting_stop`/
+  mic heard, not as talk. `activity()` (the recording's note, its audio
+  clock in ms — captured audio, standing still while none arrives — and a
+  talk counter: both sides' talk samples plus talk segments ingested) is
+  what `meeting_guard`'s quiet-meeting watch reads each second; the
+  `Session` keeps both sources for it. Commands: `meeting_start`/`meeting_stop`/
   `meeting_state` (signatures unchanged). Test mode opens no audio device (WAVs
   from `YAP_E2E_MEETING_AUDIO`, or silence; `e2e::e2e_meeting_feed`; the
   player also stages a dictation and an output switch, see `e2e.rs`).
@@ -658,7 +662,34 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the main window isn't focused — then stops and writes the action plan. A
   warning always gives the full 5 min (limit lowered mid-meeting, PC slept
   through it); raising/removing the limit takes it back (`step`/`kept_going`,
-  pure + unit-tested). **The meeting shortcut** (`config.meeting_hotkey`,
+  pure + unit-tested). **Quiet meetings** (`config.meeting_end_when_quiet`,
+  "End notes when the meeting goes quiet", default **on**, as Wispr), on
+  the same watcher: after 10 min with nobody speaking (from the start or the
+  last speech) "Ending notes in 30 s…" counts down — **Keep going** (another
+  10 min) / **Stop now**; anyone speaking or the setting going off cancels
+  it — then `stop_and_summarise` + a notice that says why ("Stopped: the
+  meeting went quiet"). Speech = `meeting::activity()`'s talk counter (audio
+  above the recorder's silence gate on either side, a dictation's blanked
+  span not; plus transcribed talk segments, the e2e feed's too); quiet time
+  runs on the **meeting's audio clock** (`clock_ms`: captured audio, so a PC
+  asleep or a dead device never counts). **Check-ins** "Still in your
+  meeting?" (Stop and summarise / Keep recording): 10 min after the end of
+  the note's calendar meeting (`notes::event_of`; < 24 h long, recording
+  started before then) and 1 h into any recording; each once per
+  recording, held back while anyone spoke in the last 3 min, never while
+  the length warning is up or due within 10 min (`Watch::length_busy`),
+  gone unanswered after 2 min; the countdown replaces one, the length
+  warning's Keep going counts as one. Rules pure + unit-tested
+  (`QuietWatch::step`, `pick_surface`). **Where they show**
+  (`surface_now`): the notepad if on screen, else the main window if
+  focused (both as a sticky toast: `yap-meeting-checkin {prompt}` with
+  `surface` = the window label, `meeting_checkin_status` after a reload,
+  `meetingCheckIn.js`), else a Yap bar card (id `meeting-checkin`; the
+  countdown as its headline, `Countdown.headline`), else a Windows
+  notification (tag `meeting-checkin`); answers `meeting_checkin_respond {id,
+  answer: keep|stop}`; the stop notice goes to the same surface
+  (`Notice.surface`). The countdown's ✕ only hides it; a check-in's ✕ =
+  Keep recording. **The meeting shortcut** (`config.meeting_hotkey`,
   default `kb:alt+win+77` = **Win+Alt+M**, as Wispr; "" = unbound):
   `start_or_stop` — recording → stop and summarise; a live call (any app) →
   `meeting_detect::on_tray_record`; else a new "Meeting · 5 Oct, 14:30" note
@@ -673,7 +704,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   action plan" and "Taking notes". **Every stop goes through
   `stop_and_summarise`** = `meeting_end::end` (Rust writes the action plan;
   no window comes up — the notepad shows it when open). Debug-only `e2e_meeting_limit
-  {limitMs, warnMs, keepGoingMs}` shortens the timings for the e2e suite.
+  {limitMs, warnMs, keepGoingMs}` and `e2e_meeting_checkins {quietMs,
+  countdownMs, recentMs, afterEndMs, hourMs, fadeMs, marginMs}` (which also
+  turns on the test player's live mic, `e2e::set_live_mic`) shorten the
+  timings for the e2e suite.
 - **`capture.rs`** — hides Yap's meeting windows from screen capture and
   sharing: while a meeting records and `config.meeting_hide_from_capture` is
   on (default **on**, Wispr's "Don't show Notepad and Flow Bar in screen
@@ -1007,7 +1041,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   card's buttons); each keeps its live toast so the buttons
   work from the notification center. `allowed()` = not portable, not a test run.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
-  volume, output_device, mute_while_recording, recording_mode,
+  volume, output_device, quiet_other_apps ("Silence other apps while you
+  dictate", off; reads old configs' `muteWhileRecording`) + pause_media
+  ("Pause music and videos while you dictate", off; both `mute.rs`), recording_mode,
   overlay_position, dictionary (`DictionaryEntry`: from/to + `fuzzy` (default
   on) + `snippet` (default off)), append_trailing_space, smart_spacing ("Match
   the text around the cursor", default on), chat_no_full_stop ("Leave the full
@@ -1030,6 +1066,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   defaults) + meeting_auto_start (the opt-in 10-second countdown, off),
   meeting guard rails: meeting_hide_from_capture (true),
   meeting_max_minutes (120; 0 = no limit), meeting_call_end ("ask"|"stop"),
+  meeting_end_when_quiet ("End notes when the meeting goes quiet", true),
   meeting_hotkey (`kb:alt+win+77`), meeting_reminder (the calendar's card:
   "15s" | "1min" | "2min" | "never"), bridge_enabled, mcp_allow_writes (AI apps
   may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
@@ -1198,7 +1235,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   for an hour, and the caller posts the notification as before. Users:
   `meeting_detect` (call prompts as Wispr's "Meeting detected" card, "Taking
   notes…", failures), `meeting_guard` (length warning with Keep going,
-  notices), `updates` ("Yap X is ready"), `calendar` (the reminder before a
+  the quiet countdown and the check-ins, notices), `updates` ("Yap X is ready"), `calendar` (the reminder before a
   meeting, as a call card), `coaching` (push-to-talk tips), `learn` (a word
   to add to the dictionary). An Esc watch (a low-level keyboard
   hook that only looks) runs only while an on-screen card offers Esc (the
@@ -1390,15 +1427,59 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (`selection::capture_selection(target, false)`) and the rewrite / Voice Agent
   reply goes through `terminal_text` too. An `#[ignore]`d `this_machines_windows`
   classifies the PC's real windows (`YAP_APP_KIND_TITLES=1` prints titles).
-- **`sound.rs`** — start/stop chimes (volume + output-device aware).
-- **`mute.rs`** — mute-while-recording: mutes the default render endpoint via
-  WASAPI/COM (`IMMDeviceEnumerator` → `IAudioEndpointVolume`) while recording and
-  restores it after — only unmuting what Yap itself muted.
+- **`sound.rs`** — start/stop chimes (volume + output-device aware); each
+  takes an optional `Played` callback, run on the chime's thread once it has
+  played (or at once when it can't): how `mute.rs` goes after the start
+  chime and comes back after the stop chime.
+- **`mute.rs`** — **other apps' sound while you dictate** (2026-10-17; it
+  replaced the old endpoint mute, which silenced Yap's own start chime and
+  any call): **"Silence other apps while you dictate"**
+  (`config.quiet_other_apps`, off; old configs' `muteWhileRecording` is its
+  serde alias) and **"Pause music and videos while you dictate"**
+  (`config.pause_media`, off, as Wispr's; `media_pause.rs`). The pipeline
+  calls `begin(plan)` in `start_recording` and `after_start_chime(token)`
+  from the start chime's `Played` (no chime: a thread), `end()` at stop /
+  cancel and `after_stop_chime(token)` after the stop chime (`Pipeline::
+  stop_chime_then_restore`; a cancel: at once). Quieting = per app, never
+  the device: every active output's sessions (`IAudioSessionManager2` →
+  `IAudioSessionControl2` + `ISimpleAudioVolume`) set to 0, never Yap's
+  own pid, system sounds, a call app's exe (`meeting_detect::call_audio`:
+  every `APPS` exe/package, call or not), the browser a live meeting tab is
+  in, or any browser while a meeting records (`quiet_verdict`, pure).
+  Restore = each session by its instance id back to exactly its level, only
+  if it's still at Yap's level (`restore_verdict`: one that moved is left
+  alone); a dictation that ended before its chime finished quiets nothing,
+  one that starts before the last restore keeps everything down and brings
+  it all back at its end (a generation token; COM/WinRT work serialized on
+  `WORK`, never under the state lock the pipeline takes). Bluetooth: if the
+  default output dropped into a call profile (< 44.1 kHz) during the
+  dictation, the restore polls it every 50 ms ≤ 5 s, + 500 ms
+  (`codec_wait`; no wait when it was already in one at the start — Yap's
+  always-open mic on a headset, a call). Crash safety: Windows keeps an
+  app's session level across restarts, so what's down is written to
+  `<data>/quieted_apps.json` while it is; `recover()` at setup and every
+  restore bring back sessions of those apps still at Yap's level (a week).
+  `restore_all()` in `shutdown_cleanup`. **Test runs** touch nothing
+  (`realtest::other_apps` = Nobody); **robot mode** only the sessions of
+  processes the test started (`realtest::audio_permits`: the process or an
+  ancestor is in `YAP_REALTEST_PIDS`, or owns only windows titled with the
+  nonce) and media whose title has the nonce (`media_permits`), never the
+  developer's own music. Debug-only `robot_view` (the robot's
+  `realtest_other_apps`).
+- **`media_pause.rs`** — "Pause music and videos while you dictate":
+  WinRT `GlobalSystemMediaTransportControlsSessionManager` (windows crate
+  feature `Media_Control`), sessions **Playing** → explicit `TryPauseAsync`
+  (never the play/pause toggle), kept; afterwards explicit `TryPlayAsync`
+  only for those still **Paused**. Never a call app's session (its app id
+  against the call apps' exes and package names), no browser's while a
+  meeting records or is live in one (`pause_verdict`, pure). Debug-only
+  `list` for the robot.
 - **`portable.rs`** — portable-mode detection (a `portable` marker next to the exe
   redirects data to `<exe>/Data`).
 - **`e2e.rs`** — **test mode** for the end-to-end UI suite (debug builds started
   with `YAP_E2E=1`; compiled out of release builds): no global input hook, no
-  paste/Enter/Ctrl+C into other apps (nor "Paste last transcript"), no reading the
+  paste/Enter/Ctrl+C into other apps (nor "Paste last transcript"), no other
+  app's sound silenced or paused (`realtest::other_apps`), no reading the
   text around another app's cursor or its window's title (`app_kind`), no `set_focus` (tao's fallback presses Alt
   in the focused app), no Windows notifications, no native context menu on
   screen (`context_menu.rs` records what it would hold; robot mode shows it), no orphan-sidecar sweep, no
@@ -1410,7 +1491,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `YAP_E2E_MEETING_SPEED`× real time, or silence; a configured mic that isn't
   plugged in still fails, found by listing devices; it pushes through
   `meeting::push_audio` + `keep_in_step` like the real capture and logs "the
-  test audio has played to the end"), the debug-only
+  test audio has played to the end"; with `set_live_mic` — the guard rails'
+  `e2e_meeting_checkins` turns it on — its "mic" carries on with digital
+  silence after the files, as a real one does, so the audio clock the
+  quiet-meeting guard counts on runs), the debug-only
   `e2e_meeting_feed { segments }` command (hours of transcript in seconds,
   corrected with the dictionary like real lines), `e2e_meeting_dictation
   { from, to }` (the pipeline's dictation signal over that stretch of the test
@@ -1454,8 +1538,17 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `stop_and_transcribe`, the real mic's audio dropped meanwhile — `TEST_FEED`; a
   recording may start without a mic), `realtest_window`, `realtest_refusals`,
   `realtest_clipboard { save | restore | setText | setImage | check }` (never
-  hands the clipboard's contents out). See [`docs/e2e-tests.md`](./docs/e2e-tests.md)
-  "Real-app robot tests".
+  hands the clipboard's contents out), `realtest_other_apps` (the test's own
+  audio sessions and media, and what `mute.rs` holds down). **Other apps'
+  sound** (`mute.rs`, `media_pause.rs`) has its own guard: `other_apps()` =
+  All in a normal run, Nobody in plain test mode (nothing silenced or
+  paused), TestsOwn in robot mode — an audio session only if its process or
+  an ancestor is in `YAP_REALTEST_PIDS` (by start time) or a process whose
+  visible titled windows **all** carry the nonce (`audio_permits`, pure
+  `decide_audio`: so a Windows Terminal hosting the developer's own windows
+  never counts), media only if its title has the nonce (`media_permits`) —
+  so a robot run never lowers or pauses the developer's own music. See
+  [`docs/e2e-tests.md`](./docs/e2e-tests.md) "Real-app robot tests".
 - **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
   `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
   **Debug mode** (Settings → Advanced → Debug Logging, OpenWhispr Developer-
@@ -1569,9 +1662,15 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   withdrawn when Rust sends `{warning: null}`), and one-off
   `yap-meeting-notice` toasts: the screen-share tip (`icon: 'screen'`,
   **Update settings** → `general#screen-sharing`), "Stopped at 2 hours", "Teams
-  call ended · Yap stopped recording…", "Taking notes"; plus meeting.rs's
+  call ended · Yap stopped recording…", "Taking notes" (a notice addressed
+  to the notepad, `surface`, isn't shown here); plus meeting.rs's
   `yap-meeting-warning` strings — falling behind, a side gone quiet — as a
-  12 s toast in whichever view is open), and **"Started by
+  12 s toast in whichever view is open; and, through `meetingCheckIn.js`
+  (shared with the notepad, `initMeetingCheckIns(label)`), the quiet
+  countdown "Ending notes in 28 s…" — Keep going / Stop now, a draining
+  bar, its ✕ only hiding it — and "Still in your meeting?" — Stop and
+  summarise / Keep recording, ✕ = keep — when `yap-meeting-checkin`'s
+  `surface` names this window), and **"Started by
   mistake?"** (`meetingSummary.svelte.js` — the shared store of the Rust
   action-plan jobs, `summaries.byNote` / `.progress`, also used by NotesView
   and the notepad; `askStartedByMistake` = a sticky "Only a few words were
@@ -1751,7 +1850,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   kind (Update, Meeting, Call, Tip, Error; icon `tip` = a bulb, the coaching
   hints, whose `{key}` the card names from its `hotkey`), the title 15 / 600, the body 15
   muted, a ghost button and a primary one (ink on light, cream on dark) at
-  radius 8, the ✕ 24×24 at 30 % top-right. `bar/CallCard.svelte` (the call
+  radius 8, the ✕ 24×24 at 30 % top-right; a `countdown` line with a ring
+  ("Esc to cancel" only when the card has an `escapeAction`, its `done`
+  text at zero), or as the card's **headline** (`Countdown.headline`: the
+  quiet-meeting countdown, "Ending notes in 28 s…" at 20 / 650 beside the
+  seconds in a 40 px ring, above the title — readable at a glance).
+  `bar/CallCard.svelte` (the call
   prompt as Wispr's "Meeting detected" card, on the same tokens but one row
   with slimmer padding: the app's icon on a light tile, drawn by the shared
   `lib/CallAppIcon.svelte` — its own as installed here (`app_icons.rs`,
@@ -1837,7 +1941,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   unsearched, or covered by the last answer); typed questions = the same
   command with `question`; no AI → a link to Language Models. Escape or a
   click above it puts it away. Toasts sit above the bar
-  (`--yap-toast-bottom`); `yap-meeting-warning` shows here too (12 s). It has
+  (`--yap-toast-bottom`); `yap-meeting-warning` shows here too (12 s), and
+  so do the quiet countdown, "Still in your meeting?" and the quiet stop's
+  notice whenever Rust picks the notepad (it's on screen;
+  `meetingCheckIn.js`). It has
   the **in-page hotkey fallback** (dictation, and the meeting shortcut when
   one is set), config re-read on focus.
 - **`lib/SplitPreview.svelte`** — the split preview window's page (label
@@ -1848,7 +1955,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
 - **`lib/Settings.svelte`** — the settings surface, now rendered **inside the
   ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / Connections / System):
   **General** (hotkey, recording mode — in push-to-talk its line says how
-  double-tap goes hands-free, mic, sound+volume, mute; **Yap bar** group
+  double-tap goes hands-free, mic, sound+volume, then "Silence other apps
+  while you dictate" (`quietOtherApps`) and "Pause music and videos while
+  you dictate" (`pauseMedia`) where "Mute while recording" was; **Yap bar** group
   (`#settings-bar`, the bar menu's Settings → "general#bar"): Show the Yap bar
   (`barEnabled`; "Turn off the bar" in its menu arrives as `yap-bar-changed`
   and is adopted), a "Hidden until 15:40 · Show it now" row while hidden for an
@@ -1867,7 +1976,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   so auto-save can't undo it), then, in Wispr's order: the guard rails
   "When a call ends" (Select: Ask me / Stop and summarise automatically →
   `meetingCallEnd`; disabled while detection is off), "Maximum recording
-  length" (Select 1–4 hours / No limit → `meetingMaxMinutes`), "Hide Yap's
+  length" (Select 1–4 hours / No limit → `meetingMaxMinutes`), "End notes
+  when the meeting goes quiet" (`meetingEndWhenQuiet`, where Wispr has its
+  auto-end switch: after the length), "Hide Yap's
   meeting windows from screen sharing" (`meetingHideFromCapture`, wrapped in
   `#settings-screen-sharing` — the screen-share tip's "Update settings"
   target); the meeting notepad's "Open the notepad when a meeting starts"
@@ -2125,7 +2236,10 @@ pasted), AI cleanup via the fake model, terminal one-line mode / coding-CLI line
 breaks / auto-submit, chat full stops, the mic path from a TTS WAV
 (`realtest_dictate_wav`) incl. the dead-mic watchdog, the **correction-learning
 flow** (the real watch over UI Automation, a word fixed in the field, Enter, the
-suggestion toast, Add → `config.json`), and **real STT** (Parakeet
+suggestion toast, Add → `config.json`), **other apps' sound** (the test pad
+looping a near-silent tone goes to 0 after the start chime and back to exactly
+its level; an Edge page whose media title has the nonce pauses and plays
+again: `other-apps.real.js`), and **real STT** (Parakeet
 hears Windows TTS saying "the quick brown fox…") on an `engines` build
 (`npm run test:real:build -- --engines` → `<drive>:\t-real`; the model copied
 read-only from `%APPDATA%\yap\models`). **The guard**: Yap may paste / press keys /
@@ -2133,7 +2247,10 @@ read only in windows of `YAP_REALTEST_PIDS` (+ descendants, by start time) or
 titled with the run's `YAP_REALTEST_NONCE`; everything else is refused (logged,
 toast, `realtest_refusals`), the foreground re-checked right before every
 `SendInput` and again just after (a focus change in between fails the test,
-naming the process). ⚠ **It takes the keyboard focus for ~2 min** (runs locally
+naming the process). Silencing and pausing other apps follow the same rule
+(sessions of the test's processes, or of a process whose windows all carry
+the nonce; media titled with the nonce): your own music is never touched.
+⚠ **It takes the keyboard focus for ~2 min** (runs locally
 only, not on CI): say so before running it while Nathan's at the PC; another app
 grabbing the focus mid-run makes Yap refuse (the harness retries a refused paste
 twice). Known gaps it found are "known gap: …" tests pinning today's result (see
@@ -2280,6 +2397,10 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   (`dict_usage.rs`). Safe to delete (the order falls back to the list's).
 - Hints: `%APPDATA%/yap/hints.json` — how often each push-to-talk coaching hint
   showed, when the last did, and whether double-tap has been used (`coaching.rs`).
+- Quieted apps: `%APPDATA%/yap/quieted_apps.json` — only while a dictation
+  has other apps silenced (each session's id, exe and level before), so a
+  Yap that crashed mid-dictation brings them back at its next start
+  (`mute.rs`); gone again once they're back.
 - Word suggestions: `%APPDATA%/yap/word_suggestions.json` — when Yap last
   offered a word for the dictionary, per "heard→term" pair your "Not now"
   count and "Don't suggest this", and the words you removed from the
@@ -2320,7 +2441,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   meeting guard rails: meeting windows **hidden from screen capture** while
   recording (`meeting_hide_from_capture`), a **2-hour** maximum recording length
   (`meeting_max_minutes`), **ask** when a recorded call ends
-  (`meeting_call_end`), meeting shortcut **Win+Alt+M** (`meeting_hotkey`); the
+  (`meeting_call_end`), a recording that's gone **quiet for 10 minutes**
+  ending after a 30 s countdown (`meeting_end_when_quiet`), meeting shortcut **Win+Alt+M** (`meeting_hotkey`); the
   meeting notepad opening when a meeting starts (`meeting_open_notepad`) with
   its live transcript (`meeting_live_transcript`), but **not** splitting the
   screen (`meeting_split_screen` off: it moves another app's window); with a
@@ -2340,7 +2462,12 @@ language/translate, **AI cleanup** (BYO key or local sidecar) with per-app routi
 named profiles + per-profile model choice, **edit/rewrite mode** + the **Voice Agent
 wake word**, combo hotkeys, the audio pre-roll (anti first-word clipping), **live
 streaming partials** (sliding-window, on by default, word-paced overlay reveal —
-validated live 2026-07-10), transcription history + stats, cleanup presets, real WASAPI mute,
+validated live 2026-07-10), transcription history + stats, cleanup presets,
+**other apps silenced or paused while you dictate** (`mute.rs` + `media_pause.rs`,
+2026-10-17: per app after the start chime, never calls, back to exactly
+their level after the stop chime; the rules unit-tested, the volume drop and
+restore and the pause and resume checked by the robot on an Edge page it
+opened),
 the dictionary's **snippets**, the **"press enter" voice command** and a Whisper
 vocabulary ranked by use (2026-10-17: unit-tested, the Dictionary/Settings UI
 e2e-tested, not yet tried with real speech), **terminal & coding-CLI pasting**
@@ -2395,7 +2522,11 @@ settings: meeting windows hidden from screen capture while recording, a
 2-hour maximum length with a "Keep going" warning, an optional auto-stop
 when a recorded call ends, and the Win+Alt+M meeting shortcut;
 e2e-tested, the capture flag also checked once with a desktop capture of the
-overlay, a real screen share not yet) and the **meeting notepad**
+overlay, a real screen share not yet; 2026-10-17: a meeting quiet for 10
+minutes ends after an "Ending notes in 30 s…" countdown, and "Still in
+your meeting?" check-ins after a calendar meeting's end and an hour in —
+rules unit-tested, e2e-tested in seconds through the notepad, the bar and
+a local iCal feed, not yet in a real meeting) and the **meeting notepad**
 (`notepad.rs` + `Notepad.svelte`, Phase 8, 2026-10-05: a window docked to the
 right of the screen when a meeting starts, in Wispr Flow's measured layout —
 My thoughts synced with Notes, the live transcript in grouped bubbles with

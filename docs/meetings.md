@@ -9,7 +9,8 @@ questions and unassigned tasks, back in seconds however long the meeting ran.
 It can also notice a call starting and offer to take notes
 ([Call detection](#call-detection)), keeps a recording in bounds (its
 windows stay out of screen shares, it stops at a maximum length, it can stop
-when the call ends, and a shortcut starts and stops it:
+when the call ends or once the meeting has gone quiet, it checks in when a
+meeting runs over, and a shortcut starts and stops it:
 [Guard rails](#guard-rails)), and while a meeting records, a
 [meeting notepad](#the-meeting-notepad) docks to the edge of the screen beside
 the call. With a calendar connected, the Meetings view lists what's coming,
@@ -21,7 +22,7 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 |---|---|
 | Recorder: capture, chunking, echo check, dictations kept out, following the output device, quiet sides | `src-tauri/src/meeting.rs` |
 | The dictation signal; the correction dictionary (`apply_corrections`) | `src-tauri/src/pipeline.rs` |
-| Guard rails: maximum length, the meeting shortcut, notices | `src-tauri/src/meeting_guard.rs` |
+| Guard rails: maximum length, quiet meetings and check-ins, the meeting shortcut, notices | `src-tauri/src/meeting_guard.rs` |
 | Hiding meeting windows from screen capture | `src-tauri/src/capture.rs` |
 | Rolling digests, the final input, the checks; the notepad's catch-up, helper and title inputs | `src-tauri/src/meeting_summary.rs` |
 | The end of a meeting: pause or end, "Started by mistake?", the action plan job | `src-tauri/src/meeting_end.rs` |
@@ -622,12 +623,14 @@ made-up title shows muted in the notepad and the Notes view.
 
 Wispr Flow's Notetaker settings, ported (Settings → General → Meetings, one
 block under "Ask about calls in"). Code: `src-tauri/src/meeting_guard.rs`,
-`src-tauri/src/capture.rs`, `src/lib/meetingGuard.js`.
+`src-tauri/src/capture.rs`, `src/lib/meetingGuard.js`,
+`src/lib/meetingCheckIn.js`.
 
 | Setting | Config | Default | Wispr's |
 |---|---|---|---|
 | When a call ends: **Ask me** / **Stop and summarise automatically** | `meetingCallEnd` `"ask"` / `"stop"` | Ask me | "Stop Notetaker when a call ends", on |
 | **Maximum recording length**: 1, 2, 3, 4 hours / No limit | `meetingMaxMinutes` (0 = none) | 2 hours | the same, 2 hours |
+| **End notes when the meeting goes quiet** | `meetingEndWhenQuiet` | on | on (behind the same "Stop Notetaker when a call ends" switch) |
 | **Hide Yap's meeting windows from screen sharing** | `meetingHideFromCapture` | on | "Don't show Notepad and Flow Bar in screen capture", on |
 | **Meeting shortcut** | `meetingHotkey` | Win+Alt+M (`kb:alt+win+77`) | Win+Alt+M |
 
@@ -680,6 +683,46 @@ The main window isn't hidden (you might be sharing Yap on purpose).
   limit takes a warning back. Settings are read every second, so a change
   applies at once.
 - The limit is per recording: **Pause** then **Resume** starts a new one.
+
+### Quiet meetings and check-ins
+
+Two ways a recording that has outlived its meeting gets noticed, on the same
+watcher thread as the length guard (once a second; `QuietWatch::step`, pure
+and unit-tested).
+
+- **Speech** is what the recorder counts as talk (`meeting::activity`): any
+  audio above its silence gate on either side, or a transcribed line. A
+  hotkey dictation's span ("You dictated here") isn't: the recorder blanks
+  it. Quiet time runs on the **meeting's audio clock** (how much audio the
+  sides have captured), not the wall clock, so a PC asleep or a device that
+  stopped delivering never adds up to a quiet meeting.
+- **End notes when the meeting goes quiet** (on by default): after **10
+  minutes** with nobody speaking (from the start of the recording, or the
+  last speech), "**Ending notes in 30 s…**" counts down with **Keep going**
+  (another 10 minutes) and **Stop now**. Anyone speaking cancels it. At zero
+  the recording stops through `stop_and_summarise` (the action plan, or
+  "Started by mistake?"), and a notice says why: "Stopped: the meeting went
+  quiet · Nobody had spoken for 10 minutes, so Yap stopped recording and is
+  writing your action plan." Switching the setting off mid-countdown cancels
+  it.
+- **"Still in your meeting?"** (Stop and summarise / Keep recording), once
+  per recording each: **10 minutes after the end** of the calendar meeting
+  the note belongs to (`Note::event`; not for a "meeting" a day or longer, or
+  a recording that started after that point), and **an hour into** any
+  recording. A check-in waits while anyone spoke in the last **3 minutes**
+  (it comes once the meeting has been quiet that long), never comes on top
+  of the length warning or within 10 minutes of it (with a 1-hour limit the
+  hour check-in never comes), and goes away by itself after 2 minutes
+  unanswered: it only asks. The countdown takes a check-in's place, and the
+  length warning's **Keep going** counts as having checked in.
+- **Where they show**: the meeting notepad if it's on screen, else the main
+  window if it's focused (a sticky toast in either, `yap-meeting-checkin`
+  with the window's label as `surface`; the countdown's title counts down
+  with a draining bar), else a **Yap bar** card (the countdown as its
+  headline, "Ending notes in 28 s…" with the seconds in a ring, readable at a
+  glance), else a Windows notification with the two buttons. The stop's
+  notice goes to the same place. The countdown's ✕ only hides it (as the
+  length warning's does); a check-in's ✕ is Keep recording.
 
 ### When a call ends
 
@@ -776,6 +819,18 @@ KeyTips) and Win the Start menu.
     automatically" on a simulated call end; the shortcut starting a "Meeting
     · …" note and stopping it, and taking notes on a live call; the Settings
     rows, and recording a new shortcut.
+  - `e2e/meeting-quiet.spec.js`, with seconds for minutes (debug-only
+    `e2e_meeting_checkins`, which also keeps the test player's "mic"
+    delivering digital silence, as a real one does, so the audio clock
+    runs): a quiet recording counting down in the notepad and stopping with
+    "Stopped: the meeting went quiet"; a transcribed line
+    (`e2e_meeting_feed`) cancelling the countdown, **Keep going**, then
+    **Stop now**; with the notepad closed, the countdown as a bar card
+    (`bar_status`, Keep going through the bar's pretend cursor); the hour
+    check-in held back while lines keep coming, then Keep recording and no
+    second ask; the calendar check-in after a meeting from a local iCal feed
+    ran over, then Stop and summarise; and the Settings switch (off: a quiet
+    recording carries on).
   - Capture hiding, once by hand (2026-10-05): a GDI desktop capture of just
     the overlay's rectangle (the path screenshot tools use) while a meeting
     recorded, with the overlay shown. Excluded: identical to the background
@@ -783,8 +838,14 @@ KeyTips) and Win the Start menu.
     the flag works on Tauri's transparent WebView2 overlay.
   - Unit tests (`cargo test --lib -- meeting_guard capture input_hook`): the
     length guard's steps (on time, late, raised, removed, Keep going), the
-    wording, the shortcut's label, the notification XML, Win combos in hotkey
-    specs and which combos need the menu-mask key.
+    quiet guard's (ten quiet minutes from the start, speech putting the
+    count back and cancelling a countdown, quiet time standing still with
+    the audio clock, Keep going, the setting switched off mid-countdown, the
+    hour check-in held back by talk and asked once, fading unanswered, the
+    calendar check-in and a recording that started too late for it, never
+    near the length warning, the countdown replacing a check-in), where a
+    prompt shows, the wording, the shortcut's label, the notification XML,
+    Win combos in hotkey specs and which combos need the menu-mask key.
   - Harness: `support/fake-llm.js`, a deterministic OpenAI-compatible server
     that records every request and tests the checks by inventing an owner,
     dropping a task and slipping in a task for someone never mentioned. It
@@ -799,8 +860,10 @@ KeyTips) and Win the Start menu.
     (corrected with the dictionary like real lines), and for the recorder's
     audio `e2e_meeting_dictation { from, to }`, `e2e_meeting_output_change
     { at? }` (seconds of the test audio) and `e2e_meeting_quiet { quietSecs?,
-    talkSecs? }`. The player logs "the test audio has played to the end", so
-    a test can stop after all of it.
+    talkSecs? }`; for the guard rails `e2e_meeting_limit` and
+    `e2e_meeting_checkins { quietMs?, countdownMs?, recentMs?, afterEndMs?,
+    hourMs?, fadeMs?, marginMs? }` (`meeting_guard.rs`). The player logs "the
+    test audio has played to the end", so a test can stop after all of it.
 - **Real speech, once** (2026-10-05): a 74 s scripted two-voice meeting
   rendered to WAV with Windows TTS (George as You, Zira as Them; to files,
   never played), through a debug `engines` build with Parakeet V3 on
@@ -843,9 +906,11 @@ KeyTips) and Win the Start menu.
   and assumes the two mic streams deliver within ~40 ms of each other. Meeting
   talk in the same chunk as a dictation is one "You" line, dated at its first
   speech, so talk after the dictation can show above the marker (as with
-  turns within a chunk). With **Mute while recording** on, the call itself is
-  muted during a dictation, so "Them" misses that stretch too. Checked with
-  the e2e player's signal; a real hotkey dictation mid-call wants a dev pass.
+  turns within a chunk). "Silence other apps while you dictate" never
+  touches a call app, nor any browser while a meeting records, so "Them"
+  carries on through a dictation (until 2026-10-17 the old "Mute while
+  recording" muted the whole output, the call included). Checked with the
+  e2e player's signal; a real hotkey dictation mid-call wants a dev pass.
 - **The output device.** Yap follows Windows' default ("console") output. A
   call app playing on another device, or on the default *communications*
   device when that differs, isn't heard; the quiet-side warning says so but

@@ -1957,7 +1957,7 @@ mod native {
             PromptKind::End => ("stop", "keep"),
         };
         let arg = |answer: &str| format!("meeting:{answer}:{}", p.id);
-        let countdown = p.auto_start_at.map(|until| Countdown { until, label: "Notes start in".into() });
+        let countdown = p.auto_start_at.map(|until| Countdown::new(until, "Notes start in"));
         let counting = countdown.is_some();
         let card = Card {
             id: super::BAR_CARD.into(),
@@ -2105,6 +2105,25 @@ fn call_window_exes_in(s: &State) -> Option<(&'static str, Vec<String>)> {
             .map(|(exe, _)| exe.clone()),
     );
     Some((call.app.id, exes))
+}
+
+/// What "Silence other apps" / "Pause music and videos" must never touch
+/// (`mute.rs`): every call app's desktop exes and packaged names
+/// (lowercased), whether or not a call is on, and the browsers a meeting is
+/// live in right now (their exes; empty with detection off).
+pub fn call_audio() -> (Vec<String>, Vec<String>) {
+    let names = APPS
+        .iter()
+        .flat_map(|a| a.exes.iter().chain(a.packages.iter()))
+        .map(|n| n.to_ascii_lowercase())
+        .collect();
+    let browsers = lock().browser_calls.keys().cloned().collect();
+    (names, browsers)
+}
+
+/// The browsers' exe file names (lowercased).
+pub fn browser_exes() -> &'static [&'static str] {
+    BROWSERS
 }
 
 /// Whether a window titled `title` shows a call of app `app_id` (a browser

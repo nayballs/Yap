@@ -120,6 +120,77 @@ pub fn recheck_foreground(expected: Option<isize>, what: &str) -> Result<(), Str
     }
 }
 
+/// Whose sound Yap may lower or pause while dictating ("Silence other apps",
+/// "Pause music and videos": `mute.rs`, `media_pause.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OtherApps {
+    /// A normal run: any app's (the rules in `mute.rs` still apply).
+    All,
+    /// Robot mode: only what the test started ([`audio_permits`],
+    /// [`media_permits`]), never the developer's own music.
+    TestsOwn,
+    /// An e2e test run: nobody's.
+    Nobody,
+}
+
+pub fn other_apps() -> OtherApps {
+    if !crate::e2e::active() {
+        OtherApps::All
+    } else if on() {
+        OtherApps::TestsOwn
+    } else {
+        OtherApps::Nobody
+    }
+}
+
+/// May Yap lower the audio session of process `pid`? A normal run: yes. A
+/// test run: no. Robot mode: only if that process, or one it descends from,
+/// is one the test started (`YAP_REALTEST_PIDS`) or owns a window whose
+/// title has the run's nonce (the harness's Edge window: its sound plays
+/// from a child process of the window's).
+pub fn audio_permits(pid: u32) -> bool {
+    match other_apps() {
+        OtherApps::All => true,
+        OtherApps::Nobody => false,
+        #[cfg(debug_assertions)]
+        OtherApps::TestsOwn => match robot::audio_verdict(pid) {
+            Ok(why) => {
+                tracing::debug!(pid, why, "robot: another app's sound may be changed");
+                true
+            }
+            Err(why) => {
+                tracing::debug!(pid, why, "robot: another app's sound left alone");
+                false
+            }
+        },
+        #[cfg(not(debug_assertions))]
+        OtherApps::TestsOwn => {
+            let _ = pid;
+            false
+        }
+    }
+}
+
+/// May Yap pause or play the media titled `title` (Windows' media controls
+/// name no process)? A normal run: yes. A test run: no. Robot mode: only if
+/// the title has the run's nonce (the harness's page sets it).
+pub fn media_permits(title: &str) -> bool {
+    match other_apps() {
+        OtherApps::All => true,
+        OtherApps::Nobody => false,
+        #[cfg(debug_assertions)]
+        OtherApps::TestsOwn => robot::allowed()
+            .nonce
+            .as_deref()
+            .is_some_and(|n| n.chars().count() >= MIN_NONCE && title.contains(n)),
+        #[cfg(not(debug_assertions))]
+        OtherApps::TestsOwn => {
+            let _ = title;
+            false
+        }
+    }
+}
+
 /// Right after a `SendInput`: in robot mode, whether the window Yap meant is
 /// still in front. The check before the keys leaves a moment between it and
 /// Windows delivering them; a window that took the focus in that moment
@@ -205,13 +276,43 @@ pub(crate) fn decide(w: &WindowFacts, allowed: &Allowed, own_pid: u32) -> Result
     Err(format!("the test didn't open it (process {})", w.pid))
 }
 
+/// Robot mode's rule for another app's sound: the process playing it (the
+/// first of `lineage`, then its parents, with when each started), or one it
+/// descends from, is one the test started, or a process whose windows are
+/// all the test's (`nonce_owners`: every visible, titled window it has
+/// carries the nonce — so a process shared with the developer's own windows,
+/// say a Windows Terminal hosting both, never counts). Never Yap itself.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+pub(crate) fn decide_audio(
+    lineage: &[(u32, u64)],
+    nonce_owners: &[u32],
+    allowed: &Allowed,
+    own_pid: u32,
+) -> Result<&'static str, String> {
+    let Some(&(pid, _)) = lineage.first() else {
+        return Err("the process is gone".into());
+    };
+    if pid == own_pid {
+        return Err("it's Yap's own sound".into());
+    }
+    for &(p, started) in lineage {
+        if allowed.pids.iter().any(|&(a, s)| a == p && s == started) {
+            return Ok("the test started its process (or a parent)");
+        }
+        if allowed.nonce.is_some() && nonce_owners.contains(&p) {
+            return Ok("its process (or a parent) has the test's window");
+        }
+    }
+    Err(format!("the test didn't start it (process {pid})"))
+}
+
 #[cfg(debug_assertions)]
 mod robot {
     use std::sync::{Mutex, OnceLock};
 
     use tauri::{AppHandle, Emitter};
 
-    use super::{decide, parse_pids, valid_nonce, Allowed, WindowFacts};
+    use super::{decide, decide_audio, parse_pids, valid_nonce, Allowed, WindowFacts};
 
     static ALLOWED: OnceLock<Allowed> = OnceLock::new();
     static APP: OnceLock<AppHandle> = OnceLock::new();
@@ -267,6 +368,16 @@ mod robot {
         let hwnd = hwnd.ok_or("no target window")?;
         let facts = win::facts(hwnd).ok_or("the window is gone")?;
         decide(&facts, allowed(), std::process::id())
+    }
+
+    /// The guard's answer for the sound of process `pid`.
+    pub fn audio_verdict(pid: u32) -> Result<&'static str, String> {
+        #[cfg(windows)]
+        let lineage = crate::procs::lineage(pid);
+        #[cfg(not(windows))]
+        let lineage = vec![(pid, 0)];
+        let owners = allowed().nonce.as_deref().map(win::nonce_owners).unwrap_or_default();
+        decide_audio(&lineage, &owners, allowed(), std::process::id())
     }
 
     /// Checked as `SendInput` returns and again a moment later, by when
@@ -333,10 +444,51 @@ mod robot {
             fn GetForegroundWindow() -> *mut c_void;
             fn GetAncestor(hwnd: *mut c_void, flags: u32) -> *mut c_void;
             fn IsWindow(hwnd: *mut c_void) -> i32;
+            fn IsWindowVisible(hwnd: *mut c_void) -> i32;
             fn GetWindowThreadProcessId(hwnd: *mut c_void, pid: *mut u32) -> u32;
             fn GetWindowTextW(hwnd: *mut c_void, text: *mut u16, max: i32) -> i32;
+            fn EnumWindows(callback: unsafe extern "system" fn(*mut c_void, isize) -> i32, lparam: isize) -> i32;
         }
         const GA_ROOT: u32 = 2;
+
+        fn title_of(h: *mut c_void) -> String {
+            let mut buf = [0u16; 512];
+            let n = unsafe { GetWindowTextW(h, buf.as_mut_ptr(), buf.len() as i32) };
+            String::from_utf16_lossy(&buf[..n.clamp(0, buf.len() as i32) as usize])
+        }
+
+        /// The processes whose visible, titled top-level windows all have
+        /// `nonce` in their titles (at least one).
+        pub fn nonce_owners(nonce: &str) -> Vec<u32> {
+            unsafe extern "system" fn collect(hwnd: *mut c_void, lparam: isize) -> i32 {
+                if IsWindowVisible(hwnd) != 0 {
+                    (*(lparam as *mut Vec<isize>)).push(hwnd as isize);
+                }
+                1
+            }
+            let mut hwnds: Vec<isize> = Vec::new();
+            unsafe { EnumWindows(collect, &mut hwnds as *mut Vec<isize> as isize) };
+            let mut ours: Vec<u32> = Vec::new();
+            let mut theirs: Vec<u32> = Vec::new();
+            for hwnd in hwnds {
+                let h = hwnd as *mut c_void;
+                let title = title_of(h);
+                if title.is_empty() {
+                    continue;
+                }
+                let mut pid = 0u32;
+                unsafe { GetWindowThreadProcessId(h, &mut pid) };
+                if title.contains(nonce) {
+                    ours.push(pid);
+                } else {
+                    theirs.push(pid);
+                }
+            }
+            ours.retain(|p| *p != 0 && !theirs.contains(p));
+            ours.sort_unstable();
+            ours.dedup();
+            ours
+        }
 
         pub fn root(hwnd: isize) -> Option<isize> {
             let h = hwnd as *mut c_void;
@@ -357,9 +509,7 @@ mod robot {
             let h = root as *mut c_void;
             let mut pid = 0u32;
             unsafe { GetWindowThreadProcessId(h, &mut pid) };
-            let mut buf = [0u16; 512];
-            let n = unsafe { GetWindowTextW(h, buf.as_mut_ptr(), buf.len() as i32) };
-            let title = String::from_utf16_lossy(&buf[..n.clamp(0, buf.len() as i32) as usize]);
+            let title = title_of(h);
             Some(WindowFacts {
                 pid,
                 title,
@@ -379,6 +529,9 @@ mod robot {
         }
         pub fn facts(_: isize) -> Option<WindowFacts> {
             None
+        }
+        pub fn nonce_owners(_: &str) -> Vec<u32> {
+            Vec::new()
         }
     }
 }
@@ -491,6 +644,16 @@ pub mod commands {
     /// and `restore` puts it back; `setText` / `setImage` put a test value
     /// there (privately: out of Win+V history); `check` compares what's
     /// there with `text` and with the last test image.
+    /// Other apps' sound as robot mode may see it: the audio sessions and
+    /// the media of processes the test started (`audio_permits`,
+    /// `media_permits`: never anyone else's), with what Yap holds down
+    /// (`mute::robot_view`).
+    #[tauri::command]
+    pub async fn realtest_other_apps() -> Result<serde_json::Value, String> {
+        only_robot()?;
+        tauri::async_runtime::spawn_blocking(crate::mute::robot_view).await.map_err(|e| e.to_string())
+    }
+
     #[tauri::command]
     pub fn realtest_clipboard(action: String, text: Option<String>) -> Result<serde_json::Value, String> {
         only_robot()?;
@@ -589,6 +752,29 @@ mod tests {
             assert_eq!(gate(Some(1), "paste"), Gate::Go);
             assert!(permits(None));
             assert!(recheck_foreground(None, "paste").is_ok());
+            assert_eq!(other_apps(), OtherApps::All);
+            assert!(audio_permits(1234) && media_permits("Anything"));
         }
+    }
+
+    #[test]
+    fn only_the_tests_own_sound_may_be_changed() {
+        // The test's Edge: its sound plays from a child of the browser
+        // process, whose only windows carry the nonce.
+        let edge_audio = [(501, 8_000), (500, 7_000), (4, 1)];
+        assert!(decide_audio(&edge_audio, &[500], &allowed(), 7).is_ok());
+        // A process the test started, or one of its children.
+        assert!(decide_audio(&[(100, 5_000)], &[], &allowed(), 7).is_ok());
+        assert!(decide_audio(&[(200, 6_000), (100, 5_000)], &[], &allowed(), 7).is_ok());
+        // The developer's music: none of that.
+        assert!(decide_audio(&[(600, 9_000), (4, 1)], &[500], &allowed(), 7).is_err());
+        // A reused id isn't the test's process.
+        assert!(decide_audio(&[(100, 9_999)], &[], &allowed(), 7).is_err());
+        // Yap's own chime, and a process that's gone.
+        assert!(decide_audio(&[(7, 1)], &[7], &allowed(), 7).is_err());
+        assert!(decide_audio(&[], &[500], &allowed(), 7).is_err());
+        // Without a nonce, a window's process counts for nothing.
+        let pids_only = Allowed { pids: vec![], nonce: None };
+        assert!(decide_audio(&edge_audio, &[500], &pids_only, 7).is_err());
     }
 }

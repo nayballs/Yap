@@ -10,6 +10,9 @@
   // A timed card fades after `timeoutMs` with a hairline running down
   // (paused while the pointer is on it, or while the bar is hidden) and
   // reports `expireAction`; a `countdown` shows "Starting notes in 7…" with a
+  // ring (and "Esc to cancel" when the card offers Esc), or, as its
+  // `headline` (the quiet-meeting countdown), reads at a glance: "Ending
+  // notes in 28 s…" in large type above the title, the seconds in a bigger
   // ring. Every answer goes back to Rust (`bar_card_action`).
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
   import { fillHotkey } from '../hotkeys.js';
@@ -20,6 +23,17 @@
   fadeTimer(() => card, () => paused, (a) => onaction(a));
   const clock = countdownClock(() => card);
   const RING = 2 * Math.PI * 7;
+  const BIG_RING = 2 * Math.PI * 16;
+  // The countdown's line: "Starting notes in 7…", at zero its `done` text.
+  const countdownText = $derived(
+    card.countdown
+      ? clock.secs > 0
+        ? card.countdown.headline
+          ? `${card.countdown.label} ${clock.secs} s…`
+          : `${card.countdown.label} ${clock.secs}…`
+        : (card.countdown.done ?? 'Starting notes…')
+      : ''
+  );
 
   // The chip names the card's kind (Wispr's amber "New" chip).
   const CHIPS = {
@@ -64,16 +78,26 @@
       {chip}
     </span>
   {/if}
-  <div class="title">{title}</div>
+  {#if card.countdown?.headline}
+    <div class="headline" role="timer" aria-live="off">
+      <svg class="bigring" viewBox="0 0 40 40" aria-hidden="true">
+        <circle cx="20" cy="20" r="16" class="track" />
+        <circle cx="20" cy="20" r="16" class="run" stroke-dasharray={BIG_RING} stroke-dashoffset={BIG_RING * (1 - clock.fraction)} />
+        <text x="20" y="20" class="secs" text-anchor="middle" dominant-baseline="central">{clock.secs}</text>
+      </svg>
+      <span class="headtext">{countdownText}</span>
+    </div>
+  {/if}
+  <div class="title" class:under={card.countdown?.headline}>{title}</div>
   {#if body}<div class="body">{body}</div>{/if}
-  {#if card.countdown}
+  {#if card.countdown && !card.countdown.headline}
     <div class="countdown">
       <svg class="ring" viewBox="0 0 18 18" aria-hidden="true">
         <circle cx="9" cy="9" r="7" class="track" />
         <circle cx="9" cy="9" r="7" class="run" stroke-dasharray={RING} stroke-dashoffset={RING * (1 - clock.fraction)} />
       </svg>
-      <span>{clock.secs > 0 ? `${card.countdown.label} ${clock.secs}…` : 'Starting notes…'}</span>
-      <span class="esc">Esc to cancel</span>
+      <span>{countdownText}</span>
+      {#if card.escapeAction}<span class="esc">Esc to cancel</span>{/if}
     </div>
   {/if}
   {#if card.primary || card.secondary}
@@ -197,17 +221,57 @@
     height: 16px;
     transform: rotate(-90deg);
   }
-  .ring circle {
+  .ring circle,
+  .bigring circle {
     fill: none;
     stroke-width: 2.4;
   }
-  .ring .track {
+  .ring .track,
+  .bigring .track {
     stroke: var(--bar-track);
   }
-  .ring .run {
+  .ring .run,
+  .bigring .run {
     stroke: var(--bar-accent);
     stroke-linecap: round;
     transition: stroke-dashoffset 0.2s linear;
+  }
+  /* The countdown as the headline (the quiet meeting): readable at a
+     glance — the seconds big in a 40 px ring, the line in 20 / 650. */
+  .headline {
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-right: 32px;
+    margin-bottom: 10px;
+  }
+  .bigring {
+    flex: none;
+    width: 40px;
+    height: 40px;
+  }
+  .bigring .track,
+  .bigring .run {
+    stroke-width: 3;
+    transform: rotate(-90deg);
+    transform-origin: 20px 20px;
+  }
+  .bigring .secs {
+    fill: var(--bar-text);
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .headtext {
+    font-size: 20px;
+    font-weight: 650;
+    line-height: 26px;
+    font-variant-numeric: tabular-nums;
+    color: var(--bar-text);
+  }
+  .title.under {
+    padding-right: 0;
   }
   .esc {
     font-weight: 500;

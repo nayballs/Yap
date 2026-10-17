@@ -26,6 +26,7 @@ import {
   startFakeClaudeCode,
   startChatPage,
   startEditorPage,
+  startMediaPage,
   startNotepad,
 } from './targets.js';
 
@@ -148,6 +149,18 @@ export class Robot {
     return this.track(
       await startEditorPage({ nonce: this.nonce, dir: path.join(this.dir, `editor-${this.targets.length}`), note, beside }),
     );
+  }
+
+  /** An Edge app window playing `wav` on a loop, its title (with the nonce) in Windows' media controls. */
+  async mediaPage(wav) {
+    return this.track(
+      await startMediaPage({ nonce: this.nonce, dir: path.join(this.dir, `media-${this.targets.length}`), wav }),
+    );
+  }
+
+  /** Other apps' sound as Yap's robot mode may see it (only the test's own). */
+  otherApps() {
+    return this.yap.invoke('realtest_other_apps');
   }
 
   /** Notepad on an empty temp file. */

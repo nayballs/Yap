@@ -364,11 +364,23 @@ impl Shared {
             .unwrap_or_else(|_| "toggle".into())
     }
 
-    fn mute_while_recording(&self) -> bool {
+    /// What happens to other apps' sound while dictating (`mute.rs`).
+    fn other_apps(&self) -> crate::mute::Plan {
         self.config
             .read()
-            .map(|c| c.mute_while_recording)
-            .unwrap_or(false)
+            .map(|c| crate::mute::Plan { quiet: c.quiet_other_apps, pause: c.pause_media })
+            .unwrap_or_default()
+    }
+
+    /// The stop chime (if it's on), then the other apps' sound back
+    /// (`mute.rs`), in that order; `token` from `mute::end`.
+    fn stop_chime_then_restore(&self, token: u64) {
+        let restore: crate::sound::Played = Box::new(move || crate::mute::after_stop_chime(token));
+        if self.sound_enabled() {
+            crate::sound::play_stop(self.audio_feedback_volume(), self.output_device().as_deref(), Some(restore));
+        } else {
+            std::thread::spawn(restore);
+        }
     }
 
     fn output_device(&self) -> Option<String> {
@@ -595,12 +607,17 @@ impl Shared {
         dictation_began();
         self.recording.store(true, Ordering::SeqCst);
         self.touch_activity();
-        if self.mute_while_recording() {
-            crate::mute::mute_system_output();
-        }
         let _ = self.app.emit("yap-state", "recording");
+        // The start chime first (Yap's own sound is never silenced), then
+        // the other apps go quiet / pause once it has played (`mute.rs`).
+        let plan = self.other_apps();
+        let token = crate::mute::begin(plan);
+        let quiet: Option<crate::sound::Played> =
+            plan.any().then(|| Box::new(move || crate::mute::after_start_chime(token)) as crate::sound::Played);
         if self.sound_enabled() {
-            crate::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref());
+            crate::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref(), quiet);
+        } else if let Some(quiet) = quiet {
+            std::thread::spawn(quiet);
         }
         // Live partials: spawn a worker that re-transcribes a bounded sliding
         // window of the buffer while recording (cost independent of recording
@@ -767,7 +784,9 @@ impl Shared {
             return;
         }
         dictation_ended();
-        crate::mute::unmute_system_output();
+        // No stop chime for a cancel: the other apps' sound comes back now.
+        let token = crate::mute::end();
+        std::thread::spawn(move || crate::mute::after_stop_chime(token));
         if let Ok(mut buf) = self.buffer.lock() {
             buf.clear();
         }
@@ -783,7 +802,8 @@ impl Shared {
     fn stop_and_transcribe(self: &Arc<Self>) {
         self.recording.store(false, Ordering::SeqCst);
         dictation_ended();
-        crate::mute::unmute_system_output();
+        // The other apps' sound comes back once the stop chime has played.
+        let quiet_token = crate::mute::end();
         // The dead-mic watchdog reported this recording and it never heard a
         // thing: it's all digital silence, nothing to transcribe (and Whisper
         // can make words up from silence). End on the reason instead.
@@ -798,15 +818,11 @@ impl Shared {
             tracing::info!("Recording stopped: the mic gave nothing but silence, not transcribed");
             let _ = self.app.emit("yap-mic-silent", Some(self.mic_silent()));
             let _ = self.app.emit("yap-state", "error");
-            if self.sound_enabled() {
-                crate::sound::play_stop(self.audio_feedback_volume(), self.output_device().as_deref());
-            }
+            self.stop_chime_then_restore(quiet_token);
             return;
         }
         let _ = self.app.emit("yap-state", "processing");
-        if self.sound_enabled() {
-            crate::sound::play_stop(self.audio_feedback_volume(), self.output_device().as_deref());
-        }
+        self.stop_chime_then_restore(quiet_token);
         let audio = self
             .buffer
             .lock()

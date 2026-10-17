@@ -25,6 +25,7 @@ mod e2e;
 mod fuzzy;
 mod gesture;
 mod media;
+mod media_pause;
 mod meeting;
 mod meeting_assist;
 mod meeting_detect;
@@ -108,15 +109,15 @@ pub(crate) fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
 }
 
 /// Clean-up every way out of Yap needs: stop the on-device AI sidecar, take
-/// down the local API bridge (removing its discovery file), and give back the
-/// speakers if mute-while-recording muted them. Runs from the
+/// down the local API bridge (removing its discovery file), and bring back
+/// other apps' sound if a dictation had silenced or paused it (`mute.rs`). Runs from the
 /// `RunEvent::Exit` handler AND from the updater's pre-install hook — on
 /// Windows the installer step force-exits Yap (`std::process::exit`) without
 /// ever reaching the Exit handler (see `updates::build_updater`).
 pub(crate) fn shutdown_cleanup() {
     local_llm::stop();
     bridge::stop();
-    mute::unmute_system_output();
+    mute::restore_all();
 }
 
 /// `yap.exe mcp` (main.rs): serve MCP to an AI app over stdin/stdout until it
@@ -458,6 +459,8 @@ pub fn run() {
             meeting_guard::meeting_shortcut,
             meeting_guard::meeting_keep_going,
             meeting_guard::meeting_limit_status,
+            meeting_guard::meeting_checkin_respond,
+            meeting_guard::meeting_checkin_status,
             commands::configure_meeting_hotkey,
             capture::capture_affinity,
             calendar::calendar_status,
@@ -500,6 +503,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             meeting_guard::e2e_meeting_limit,
             #[cfg(debug_assertions)]
+            meeting_guard::e2e_meeting_checkins,
+            #[cfg(debug_assertions)]
             calendar::calendar_e2e_opened,
             // Robot mode only (realtest.rs): the real-app tests.
             #[cfg(debug_assertions)]
@@ -512,6 +517,8 @@ pub fn run() {
             realtest::commands::realtest_dictate_wav,
             #[cfg(debug_assertions)]
             realtest::commands::realtest_clipboard,
+            #[cfg(debug_assertions)]
+            realtest::commands::realtest_other_apps,
         ])
         .on_page_load(|webview, payload| {
             // No browser context menu (Back, Refresh, Print, Inspect…) in any
@@ -787,6 +794,9 @@ pub fn run() {
             // and keeping meeting windows out of screen shares.
             meeting_guard::init(&handle);
             capture::init(&handle);
+
+            // Other apps' sound a crash left silenced mid-dictation comes back.
+            mute::recover();
 
             // Calendar: the connected calendars' meetings, reminders before
             // them, and their titles and attendees for meeting notes (talks
