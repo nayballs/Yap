@@ -19,6 +19,12 @@ export const dictation = $state({
   // Push-to-talk's double-tap locked this recording hands-free
   // (`yap-dictation-locked`, gesture.rs): the capsule shows a lock.
   locked: false,
+  // The dead-mic watchdog (mic_watch.rs) found nothing but digital silence:
+  // "No sound from <device> — is it muted?", shown in the waveform's place
+  // while the recording carries on (the whole message as its tooltip);
+  // '' once sound arrives (or the recording ends).
+  micSilent: '',
+  micSilentFull: '',
 });
 
 // ---- Live partial transcript (streaming preview) ----
@@ -81,6 +87,8 @@ export function initDictation() {
     if (state !== 'recording') {
       dictation.history = [];
       dictation.locked = false;
+      dictation.micSilent = '';
+      dictation.micSilentFull = '';
     }
     // Keep the partial visible through the brief "processing" state, then
     // drop it once we're idle/needs-model/error so it never lingers.
@@ -93,6 +101,12 @@ export function initDictation() {
   });
   listen('yap-dictation-locked', (e) => {
     dictation.locked = !!e.payload;
+  });
+  listen('yap-mic-silent', (e) => {
+    dictation.micSilent = e.payload?.short || '';
+    dictation.micSilentFull = e.payload?.message || '';
+    // A recording that ends on it ends in the error state, saying the same.
+    if (dictation.micSilent) dictation.errorMsg = dictation.micSilent;
   });
   listen('yap-partial', (e) => {
     if (typeof e.payload === 'string') onPartial(e.payload);

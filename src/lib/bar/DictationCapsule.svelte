@@ -4,7 +4,9 @@
   // the live partial text when there is some, "Transcribing…", or the error.
   // Dark ink like the rest of the bar; the moving waveform and the pulsing
   // dot carry its visibility on any background. A lock after the dot: push-
-  // to-talk's double-tap made it hands-free.
+  // to-talk's double-tap made it hands-free. "No sound from <mic>…" in the
+  // waveform's place: the dead-mic watchdog heard nothing but digital
+  // silence (the recording carries on).
   import { dictation } from './dictation.svelte.js';
 
   // Smooth left glide: keep the newest words visible by translating the text
@@ -22,7 +24,7 @@
   const processing = $derived(dictation.state === 'processing' || dictation.state === 'processing-slow');
 </script>
 
-<div class="capsule" class:err={dictation.state === 'error'}>
+<div class="capsule" class:err={dictation.state === 'error' || !!dictation.micSilent}>
   {#if dictation.state === 'error'}
     <span class="dot errdot"></span>
     <span class="txt">{dictation.errorMsg}</span>
@@ -33,7 +35,9 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7.5a4 4 0 0 1 8 0V11" /></svg>
       </span>
     {/if}
-    {#if dictation.words.length}
+    {#if dictation.micSilent && !processing}
+      <span class="txt warn" role="alert" title={dictation.micSilentFull}>{dictation.micSilent}</span>
+    {:else if dictation.words.length}
       <div class="partial" bind:this={clipEl}>
         <span class="ptext" bind:this={textEl} style="transform: translateX({shift}px)">
           {#each dictation.words as w, i (i)}<span class="pw">{w}&nbsp;</span>{/each}
@@ -128,6 +132,12 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* The dead-mic warning: one line, cut with "…" if a device's name is
+     long (the whole message is its tooltip and the main window's toast). */
+  .txt.warn {
+    max-width: 320px;
+    font-weight: 550;
   }
 
   /* Live partial transcript: one clipped line reading like live captions.

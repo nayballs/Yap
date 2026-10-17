@@ -37,6 +37,7 @@ mod llm;
 mod local_llm;
 mod mcp;
 mod mcp_clients;
+mod mic_watch;
 mod mute;
 mod overlay;
 mod partials;
@@ -476,6 +477,8 @@ pub fn run() {
             e2e::e2e_meeting_quiet,
             #[cfg(debug_assertions)]
             e2e::e2e_main_on_screen,
+            #[cfg(debug_assertions)]
+            e2e::e2e_dictation_mic,
             #[cfg(debug_assertions)]
             coaching::e2e_coaching_reset,
             #[cfg(debug_assertions)]
