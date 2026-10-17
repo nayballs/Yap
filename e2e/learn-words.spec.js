@@ -1,11 +1,14 @@
 // "Suggest words from your corrections" (learn.rs): after a paste Yap
 // watches the field, and when you fix a word it typed it offers to add it to
 // the dictionary. A test run never reads another app's text, so the
-// debug-only `e2e_learn_correction` hands Yap the edit its watch would have
-// seen (pasted → edited); the rest is the real thing: the rules, the prompt
-// (a toast with the main window on screen, else a Yap bar card), the answers
-// and the dictionary they write. The rules are unit-tested in Rust, and the
-// watch's UI Automation reads by `--ignored reads_real_text_fields`.
+// debug-only `e2e_learn_correction` hands Yap what its watch would have
+// seen — the edit (pasted → edited), or the field's whole text read by read
+// (the watch itself runs over those: its ends, the drift gate, the last good
+// edit); the rest is the real thing: the rules, the prompt (a toast with the
+// main window on screen, else a Yap bar card), the answers and the
+// dictionary they write. The rules are unit-tested in Rust, and the watch's
+// UI Automation reads by `--ignored reads_real_text_fields`.
+import fs from 'node:fs';
 import { test, expect, openView, openSettings, closeSettings, expectStore } from './support/fixtures.js';
 
 test.use({ yapOptions: { name: 'learn-words' } });
@@ -13,6 +16,13 @@ test.use({ yapOptions: { name: 'learn-words' } });
 /** Stage an edit; `fresh` (default) forgets every earlier answer first. */
 const stage = (yap, pasted, edited, { fresh = true } = {}) =>
   yap.invoke('e2e_learn_correction', { pasted, edited, fresh });
+
+/** Stage a watch: the field's whole text read by read, the first right after the paste. */
+const stageReads = (yap, pasted, reads, { fresh = true } = {}) =>
+  yap.invoke('e2e_learn_correction', { pasted, reads, fresh });
+
+/** How many times the app's log has said `text` (a watch's end is named there). */
+const logCount = (yap, text) => fs.readFileSync(yap.logPath, 'utf8').split(text).length - 1;
 
 /** The suggestion toast in the main window. */
 const suggestion = (main) => main.getByRole('status').filter({ hasText: 'to your dictionary?' });
@@ -107,6 +117,70 @@ test('"Not now" twice, or "Don\'t suggest this", and that pair isn\'t offered ag
   expect(await stage(yap, p2, e2, { fresh: false })).toEqual([]);
   // Nothing was added.
   expect(yap.readConfig().dictionary.some((e) => e.to === 'Postgres' || e.to === 'ChatGPT')).toBe(false);
+});
+
+test('a word fixed and then sent (the field emptied) is still offered', async ({ yap, main, shot }) => {
+  const pasted = 'Ship the build with turbo repo tonight.';
+  const fixed = 'Ship the build with Turborepo tonight.';
+  // A chat box: the dictation is the whole field; fixed, then sent.
+  const emptied = logCount(yap, 'field_emptied');
+  expect(await stageReads(yap, pasted, [pasted, fixed, ''])).toEqual([{ heard: 'turbo repo', term: 'Turborepo' }]);
+  await expect.poll(() => logCount(yap, 'field_emptied')).toBe(emptied + 1);
+  const prompt = suggestion(main);
+  await expect(prompt).toContainText('Add “Turborepo” to your dictionary?');
+  await expect(prompt).toContainText('Yap heard “turbo repo”.');
+  await shot(main, '06-fixed-then-sent');
+  await prompt.getByRole('button', { name: 'Not now' }).click();
+  await expect(suggestion(main)).toHaveCount(0);
+
+  // In a note, Enter right after the fixed line ends the watch: the fix counts.
+  const note = (span) => `Standup notes.\n${span}\nNext: lunch.`;
+  const entered = logCount(yap, 'enter_pressed');
+  expect(await stageReads(yap, pasted, [note(pasted), note(`${fixed}\n`)])).toHaveLength(1);
+  await expect.poll(() => logCount(yap, 'enter_pressed')).toBe(entered + 1);
+  await suggestion(main).getByRole('button', { name: 'Not now' }).click();
+  await expect(suggestion(main)).toHaveCount(0);
+
+  // Rewritten past the drift gate before it was sent, or sent unfixed: nothing.
+  const rewrite = 'Never mind, we will ship it on Monday with the old pipeline instead.';
+  expect(await stageReads(yap, pasted, [pasted, rewrite, ''])).toEqual([]);
+  expect(await stageReads(yap, pasted, [pasted, ''])).toEqual([]);
+  await main.waitForTimeout(300);
+  await expect(suggestion(main)).toHaveCount(0);
+});
+
+test('a word you remove from the dictionary is never suggested again', async ({ yap, main }) => {
+  const [pasted, edited] = ['Open the super base console.', 'Open the Supabase console.'];
+  expect(await stage(yap, pasted, edited)).toEqual([{ heard: 'super base', term: 'Supabase' }]);
+  await suggestion(main).getByRole('button', { name: 'Add', exact: true }).click();
+  await expectStore(yap, 'config.json', (c) => c.dictionary.some((e) => e.to === 'Supabase'));
+
+  // Removed in the Dictionary view (its own save goes through save_config).
+  await openView(main, 'Dictionary');
+  const corrections = main.getByRole('region', { name: 'Corrections' });
+  await expect(corrections.getByRole('textbox', { name: 'Replace with' }).last()).toHaveValue('Supabase');
+  await corrections.getByRole('button', { name: 'Remove', exact: true }).last().click();
+  await expectStore(yap, 'config.json', (c) => !c.dictionary.some((e) => e.to === 'Supabase'));
+  await expectStore(yap, 'word_suggestions.json', (r) => r.removed?.includes('supabase'));
+  const kept = yap.readConfig().dictionary;
+
+  // Never again: the same fix, or the word heard another way…
+  expect(await stage(yap, pasted, edited, { fresh: false })).toEqual([]);
+  expect(await stage(yap, 'Log in to soup a base now.', 'Log in to Supabase now.', { fresh: false })).toEqual([]);
+  await main.waitForTimeout(300);
+  await expect(suggestion(main)).toHaveCount(0);
+  // …while other words still are.
+  expect(await stage(yap, 'Push it to her oku.', 'Push it to Heroku.', { fresh: false })).toEqual([
+    { heard: 'her oku', term: 'Heroku' },
+  ]);
+  await suggestion(main).getByRole('button', { name: 'Not now' }).click();
+  await expect(suggestion(main)).toHaveCount(0);
+
+  // Settings' auto-saved copy of the config doesn't bring it back, and
+  // keeps every other word.
+  await settingsAutoSave(yap, main);
+  expect(yap.readConfig().dictionary).toEqual(kept);
+  expect(yap.readJson('word_suggestions.json').removed).toEqual(['supabase']);
 });
 
 test('fixing an everyday word, or rewriting, offers nothing', async ({ yap, main }) => {
