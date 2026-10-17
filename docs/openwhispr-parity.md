@@ -135,7 +135,7 @@ Reference repo: `E:/Projects/references/openwhispr`. Last audit: 2026-07-06.
 | Feature | Status | Notes |
 |---|---|---|
 | System Prompt editor | ✅ Done | ChatConfig.svelte uses the full PromptStudio (View/Customize/Test) instead of OpenWhispr's plain 4-row textarea — a superset. |
-| Chat runtime (answers questions over notes) | 🟡 Partial | THREE live layers: the **embedded per-note chat** (note_ask), the **Chat surface** (ChatView.svelte: date-grouped conversation sidebar, chats.json persistence, eager keyword-RAG, last-20 history, Ctrl+N), and the **tool-calling agent loop** (tools.rs: their six tools w/ near-verbatim schemas + TOOL_INSTRUCTIONS, ≤20-step Rust loop, their 4B capability gate, tool-activity chips in the thread — live-verified creating notes and copying to the clipboard). Remaining vs theirs: streaming, semantic vectors, web_search/calendar tools, conversation search/archive/rename. |
+| Chat runtime (answers questions over notes) | 🟡 Partial | THREE live layers: the **embedded per-note chat** (note_ask), the **Chat surface** (ChatView.svelte: date-grouped conversation sidebar, chats.json persistence, eager keyword-RAG, last-20 history, Ctrl+N), and the **tool-calling agent loop** (tools.rs: their six tools w/ near-verbatim schemas + TOOL_INSTRUCTIONS, ≤20-step Rust loop, their 4B capability gate, tool-activity chips in the thread — live-verified creating notes and copying to the clipboard; plus Yap's own `search_in_note` / `read_note` / `edit_note` for changing part of a note safely, beyond theirs). Remaining vs theirs: streaming, semantic vectors, web_search/calendar tools, conversation search/archive/rename. |
 
 ### Area 11 — Prompt Studio
 
