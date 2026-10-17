@@ -458,6 +458,8 @@ pub fn run() {
             meeting_guard::meeting_shortcut,
             meeting_guard::meeting_keep_going,
             meeting_guard::meeting_limit_status,
+            meeting_guard::meeting_checkin_respond,
+            meeting_guard::meeting_checkin_status,
             commands::configure_meeting_hotkey,
             capture::capture_affinity,
             calendar::calendar_status,
@@ -499,6 +501,8 @@ pub fn run() {
             learn::e2e_learn_correction,
             #[cfg(debug_assertions)]
             meeting_guard::e2e_meeting_limit,
+            #[cfg(debug_assertions)]
+            meeting_guard::e2e_meeting_checkins,
             #[cfg(debug_assertions)]
             calendar::calendar_e2e_opened,
             // Robot mode only (realtest.rs): the real-app tests.

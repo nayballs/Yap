@@ -102,10 +102,29 @@ fn script() -> std::sync::MutexGuard<'static, Script> {
 #[cfg(debug_assertions)]
 const SWITCH_GAP_SAMPLES: usize = 16_000;
 
+/// The meeting player's "mic" keeps delivering digital silence once its
+/// test audio has played (or with none), as a real mic does, so the
+/// meeting's audio clock runs on: what the quiet-meeting guard counts
+/// quiet time on (`meeting_guard::e2e_meeting_checkins` turns it on, and
+/// off again). Off, the player goes quiet after its files, as before.
+#[cfg(debug_assertions)]
+static LIVE_MIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(debug_assertions)]
+pub fn set_live_mic(on: bool) {
+    LIVE_MIC.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(debug_assertions)]
+fn live_mic() -> bool {
+    LIVE_MIC.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// The meeting recorder's capture in test mode: plays `you.wav` into the
 /// mic buffer and `them.wav` into the loopback buffer, in step, from
 /// `YAP_E2E_MEETING_AUDIO` (any format `media.rs` decodes), then goes quiet
-/// until stop. Without the variable it's silent: segments come from
+/// until stop (or, with [`set_live_mic`], the mic carries on with digital
+/// silence). Without the variable it's silent: segments come from
 /// [`e2e_meeting_feed`] instead. Either way it never records the machine's
 /// real microphone or speakers, and works the same on a CI runner without
 /// any. Through the same push path as the real capture (`meeting::
@@ -205,6 +224,9 @@ pub fn spawn_meeting_audio(
                     if pos < src.len() {
                         let end = (pos + step).min(src.len());
                         crate::meeting::push_audio(buf, &src[pos..end], &overflow);
+                    } else if side == "you" && live_mic() {
+                        // A real mic never stops delivering: digital silence.
+                        crate::meeting::push_audio(buf, &vec![0.0; step], &overflow);
                     }
                 }
                 crate::meeting::keep_in_step(&mic, &sys);

@@ -422,7 +422,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   Windows' default output device." / "…your mic…Settings → General"), plus a
   Windows notification (`meeting_guard::notice_native`) when neither the
   notepad is on screen nor the main window focused; a dictation counts as the
-  mic heard, not as talk. Commands: `meeting_start`/`meeting_stop`/
+  mic heard, not as talk. `activity()` (the recording's note, its audio
+  clock in ms — captured audio, standing still while none arrives — and a
+  talk counter: both sides' talk samples plus talk segments ingested) is
+  what `meeting_guard`'s quiet-meeting watch reads each second; the
+  `Session` keeps both sources for it. Commands: `meeting_start`/`meeting_stop`/
   `meeting_state` (signatures unchanged). Test mode opens no audio device (WAVs
   from `YAP_E2E_MEETING_AUDIO`, or silence; `e2e::e2e_meeting_feed`; the
   player also stages a dictation and an output switch, see `e2e.rs`).
@@ -658,7 +662,34 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the main window isn't focused — then stops and writes the action plan. A
   warning always gives the full 5 min (limit lowered mid-meeting, PC slept
   through it); raising/removing the limit takes it back (`step`/`kept_going`,
-  pure + unit-tested). **The meeting shortcut** (`config.meeting_hotkey`,
+  pure + unit-tested). **Quiet meetings** (`config.meeting_end_when_quiet`,
+  "End notes when the meeting goes quiet", default **on**, as Wispr), on
+  the same watcher: after 10 min with nobody speaking (from the start or the
+  last speech) "Ending notes in 30 s…" counts down — **Keep going** (another
+  10 min) / **Stop now**; anyone speaking or the setting going off cancels
+  it — then `stop_and_summarise` + a notice that says why ("Stopped: the
+  meeting went quiet"). Speech = `meeting::activity()`'s talk counter (audio
+  above the recorder's silence gate on either side, a dictation's blanked
+  span not; plus transcribed talk segments, the e2e feed's too); quiet time
+  runs on the **meeting's audio clock** (`clock_ms`: captured audio, so a PC
+  asleep or a dead device never counts). **Check-ins** "Still in your
+  meeting?" (Stop and summarise / Keep recording): 10 min after the end of
+  the note's calendar meeting (`notes::event_of`; < 24 h long, recording
+  started before then) and 1 h into any recording; each once per
+  recording, held back while anyone spoke in the last 3 min, never while
+  the length warning is up or due within 10 min (`Watch::length_busy`),
+  gone unanswered after 2 min; the countdown replaces one, the length
+  warning's Keep going counts as one. Rules pure + unit-tested
+  (`QuietWatch::step`, `pick_surface`). **Where they show**
+  (`surface_now`): the notepad if on screen, else the main window if
+  focused (both as a sticky toast: `yap-meeting-checkin {prompt}` with
+  `surface` = the window label, `meeting_checkin_status` after a reload,
+  `meetingCheckIn.js`), else a Yap bar card (id `meeting-checkin`; the
+  countdown as its headline, `Countdown.headline`), else a Windows
+  notification (tag `meeting-checkin`); answers `meeting_checkin_respond {id,
+  answer: keep|stop}`; the stop notice goes to the same surface
+  (`Notice.surface`). The countdown's ✕ only hides it; a check-in's ✕ =
+  Keep recording. **The meeting shortcut** (`config.meeting_hotkey`,
   default `kb:alt+win+77` = **Win+Alt+M**, as Wispr; "" = unbound):
   `start_or_stop` — recording → stop and summarise; a live call (any app) →
   `meeting_detect::on_tray_record`; else a new "Meeting · 5 Oct, 14:30" note
@@ -673,7 +704,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   action plan" and "Taking notes". **Every stop goes through
   `stop_and_summarise`** = `meeting_end::end` (Rust writes the action plan;
   no window comes up — the notepad shows it when open). Debug-only `e2e_meeting_limit
-  {limitMs, warnMs, keepGoingMs}` shortens the timings for the e2e suite.
+  {limitMs, warnMs, keepGoingMs}` and `e2e_meeting_checkins {quietMs,
+  countdownMs, recentMs, afterEndMs, hourMs, fadeMs, marginMs}` (which also
+  turns on the test player's live mic, `e2e::set_live_mic`) shorten the
+  timings for the e2e suite.
 - **`capture.rs`** — hides Yap's meeting windows from screen capture and
   sharing: while a meeting records and `config.meeting_hide_from_capture` is
   on (default **on**, Wispr's "Don't show Notepad and Flow Bar in screen
@@ -1030,6 +1064,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   defaults) + meeting_auto_start (the opt-in 10-second countdown, off),
   meeting guard rails: meeting_hide_from_capture (true),
   meeting_max_minutes (120; 0 = no limit), meeting_call_end ("ask"|"stop"),
+  meeting_end_when_quiet ("End notes when the meeting goes quiet", true),
   meeting_hotkey (`kb:alt+win+77`), meeting_reminder (the calendar's card:
   "15s" | "1min" | "2min" | "never"), bridge_enabled, mcp_allow_writes (AI apps
   may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
@@ -1198,7 +1233,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   for an hour, and the caller posts the notification as before. Users:
   `meeting_detect` (call prompts as Wispr's "Meeting detected" card, "Taking
   notes…", failures), `meeting_guard` (length warning with Keep going,
-  notices), `updates` ("Yap X is ready"), `calendar` (the reminder before a
+  the quiet countdown and the check-ins, notices), `updates` ("Yap X is ready"), `calendar` (the reminder before a
   meeting, as a call card), `coaching` (push-to-talk tips), `learn` (a word
   to add to the dictionary). An Esc watch (a low-level keyboard
   hook that only looks) runs only while an on-screen card offers Esc (the
@@ -1410,7 +1445,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `YAP_E2E_MEETING_SPEED`× real time, or silence; a configured mic that isn't
   plugged in still fails, found by listing devices; it pushes through
   `meeting::push_audio` + `keep_in_step` like the real capture and logs "the
-  test audio has played to the end"), the debug-only
+  test audio has played to the end"; with `set_live_mic` — the guard rails'
+  `e2e_meeting_checkins` turns it on — its "mic" carries on with digital
+  silence after the files, as a real one does, so the audio clock the
+  quiet-meeting guard counts on runs), the debug-only
   `e2e_meeting_feed { segments }` command (hours of transcript in seconds,
   corrected with the dictionary like real lines), `e2e_meeting_dictation
   { from, to }` (the pipeline's dictation signal over that stretch of the test
@@ -1569,9 +1607,15 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   withdrawn when Rust sends `{warning: null}`), and one-off
   `yap-meeting-notice` toasts: the screen-share tip (`icon: 'screen'`,
   **Update settings** → `general#screen-sharing`), "Stopped at 2 hours", "Teams
-  call ended · Yap stopped recording…", "Taking notes"; plus meeting.rs's
+  call ended · Yap stopped recording…", "Taking notes" (a notice addressed
+  to the notepad, `surface`, isn't shown here); plus meeting.rs's
   `yap-meeting-warning` strings — falling behind, a side gone quiet — as a
-  12 s toast in whichever view is open), and **"Started by
+  12 s toast in whichever view is open; and, through `meetingCheckIn.js`
+  (shared with the notepad, `initMeetingCheckIns(label)`), the quiet
+  countdown "Ending notes in 28 s…" — Keep going / Stop now, a draining
+  bar, its ✕ only hiding it — and "Still in your meeting?" — Stop and
+  summarise / Keep recording, ✕ = keep — when `yap-meeting-checkin`'s
+  `surface` names this window), and **"Started by
   mistake?"** (`meetingSummary.svelte.js` — the shared store of the Rust
   action-plan jobs, `summaries.byNote` / `.progress`, also used by NotesView
   and the notepad; `askStartedByMistake` = a sticky "Only a few words were
@@ -1751,7 +1795,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   kind (Update, Meeting, Call, Tip, Error; icon `tip` = a bulb, the coaching
   hints, whose `{key}` the card names from its `hotkey`), the title 15 / 600, the body 15
   muted, a ghost button and a primary one (ink on light, cream on dark) at
-  radius 8, the ✕ 24×24 at 30 % top-right. `bar/CallCard.svelte` (the call
+  radius 8, the ✕ 24×24 at 30 % top-right; a `countdown` line with a ring
+  ("Esc to cancel" only when the card has an `escapeAction`, its `done`
+  text at zero), or as the card's **headline** (`Countdown.headline`: the
+  quiet-meeting countdown, "Ending notes in 28 s…" at 20 / 650 beside the
+  seconds in a 40 px ring, above the title — readable at a glance).
+  `bar/CallCard.svelte` (the call
   prompt as Wispr's "Meeting detected" card, on the same tokens but one row
   with slimmer padding: the app's icon on a light tile, drawn by the shared
   `lib/CallAppIcon.svelte` — its own as installed here (`app_icons.rs`,
@@ -1837,7 +1886,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   unsearched, or covered by the last answer); typed questions = the same
   command with `question`; no AI → a link to Language Models. Escape or a
   click above it puts it away. Toasts sit above the bar
-  (`--yap-toast-bottom`); `yap-meeting-warning` shows here too (12 s). It has
+  (`--yap-toast-bottom`); `yap-meeting-warning` shows here too (12 s), and
+  so do the quiet countdown, "Still in your meeting?" and the quiet stop's
+  notice whenever Rust picks the notepad (it's on screen;
+  `meetingCheckIn.js`). It has
   the **in-page hotkey fallback** (dictation, and the meeting shortcut when
   one is set), config re-read on focus.
 - **`lib/SplitPreview.svelte`** — the split preview window's page (label
@@ -1867,7 +1919,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   so auto-save can't undo it), then, in Wispr's order: the guard rails
   "When a call ends" (Select: Ask me / Stop and summarise automatically →
   `meetingCallEnd`; disabled while detection is off), "Maximum recording
-  length" (Select 1–4 hours / No limit → `meetingMaxMinutes`), "Hide Yap's
+  length" (Select 1–4 hours / No limit → `meetingMaxMinutes`), "End notes
+  when the meeting goes quiet" (`meetingEndWhenQuiet`, where Wispr has its
+  auto-end switch: after the length), "Hide Yap's
   meeting windows from screen sharing" (`meetingHideFromCapture`, wrapped in
   `#settings-screen-sharing` — the screen-share tip's "Update settings"
   target); the meeting notepad's "Open the notepad when a meeting starts"
@@ -2320,7 +2374,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   meeting guard rails: meeting windows **hidden from screen capture** while
   recording (`meeting_hide_from_capture`), a **2-hour** maximum recording length
   (`meeting_max_minutes`), **ask** when a recorded call ends
-  (`meeting_call_end`), meeting shortcut **Win+Alt+M** (`meeting_hotkey`); the
+  (`meeting_call_end`), a recording that's gone **quiet for 10 minutes**
+  ending after a 30 s countdown (`meeting_end_when_quiet`), meeting shortcut **Win+Alt+M** (`meeting_hotkey`); the
   meeting notepad opening when a meeting starts (`meeting_open_notepad`) with
   its live transcript (`meeting_live_transcript`), but **not** splitting the
   screen (`meeting_split_screen` off: it moves another app's window); with a
@@ -2395,7 +2450,11 @@ settings: meeting windows hidden from screen capture while recording, a
 2-hour maximum length with a "Keep going" warning, an optional auto-stop
 when a recorded call ends, and the Win+Alt+M meeting shortcut;
 e2e-tested, the capture flag also checked once with a desktop capture of the
-overlay, a real screen share not yet) and the **meeting notepad**
+overlay, a real screen share not yet; 2026-10-17: a meeting quiet for 10
+minutes ends after an "Ending notes in 30 s…" countdown, and "Still in
+your meeting?" check-ins after a calendar meeting's end and an hour in —
+rules unit-tested, e2e-tested in seconds through the notepad, the bar and
+a local iCal feed, not yet in a real meeting) and the **meeting notepad**
 (`notepad.rs` + `Notepad.svelte`, Phase 8, 2026-10-05: a window docked to the
 right of the screen when a meeting starts, in Wispr Flow's measured layout —
 My thoughts synced with Notes, the live transcript in grouped bubbles with

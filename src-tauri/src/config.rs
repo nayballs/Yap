@@ -457,6 +457,13 @@ pub struct YapConfig {
     /// prompt, the default) or "stop" (stop and summarise automatically).
     #[serde(default = "default_meeting_call_end")]
     pub meeting_call_end: String,
+    /// "End notes when the meeting goes quiet" (`meeting_guard.rs`): after
+    /// 10 minutes with nobody speaking on either side, "Ending notes in
+    /// 30 s…" counts down (Keep going / Stop now; anyone speaking cancels
+    /// it), then the recording stops and the action plan is written. On by
+    /// default, as Wispr Flow's.
+    #[serde(default = "default_true")]
+    pub meeting_end_when_quiet: bool,
     /// The global meeting shortcut (same spec format as `hotkey`): take notes
     /// on the live call (or in a new meeting note), or stop and write the
     /// action plan. Empty = unbound. Default Win+Alt+M, as Wispr Flow.
@@ -618,6 +625,7 @@ impl Default for YapConfig {
             meeting_hide_from_capture: true,
             meeting_max_minutes: default_meeting_max_minutes(),
             meeting_call_end: default_meeting_call_end(),
+            meeting_end_when_quiet: true,
             meeting_hotkey: default_meeting_hotkey(),
             meeting_reminder: default_meeting_reminder(),
             config_version: CONFIG_VERSION,

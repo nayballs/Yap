@@ -494,6 +494,7 @@
     meetingHideFromCapture: true,
     meetingMaxMinutes: 120,
     meetingCallEnd: 'ask',
+    meetingEndWhenQuiet: true,
     meetingHotkey: 'kb:alt+win+77',
     meetingOpenNotepad: true,
     meetingSplitScreen: false,
@@ -1662,6 +1663,14 @@
                   bind:value={cfg.meetingMaxMinutes}
                   options={maxLengthOptions}
                   ariaLabel="Maximum recording length"
+                />
+              </Row>
+              <Row>
+                <Toggle
+                  bind:checked={cfg.meetingEndWhenQuiet}
+                  label="End notes when the meeting goes quiet"
+                  desc="After 10 minutes with nobody speaking, Yap counts down 30 seconds, then stops and writes your action plan"
+                  hint="Anyone speaking cancels it, and Keep going gives you another 10 minutes. Separately, Yap asks “Still in your meeting?” when a calendar meeting runs over, and an hour in."
                 />
               </Row>
               <!-- The screen-share tip's "Update settings" lands here

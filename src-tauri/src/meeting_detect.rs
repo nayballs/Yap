@@ -1957,7 +1957,7 @@ mod native {
             PromptKind::End => ("stop", "keep"),
         };
         let arg = |answer: &str| format!("meeting:{answer}:{}", p.id);
-        let countdown = p.auto_start_at.map(|until| Countdown { until, label: "Notes start in".into() });
+        let countdown = p.auto_start_at.map(|until| Countdown::new(until, "Notes start in"));
         let counting = countdown.is_some();
         let card = Card {
             id: super::BAR_CARD.into(),

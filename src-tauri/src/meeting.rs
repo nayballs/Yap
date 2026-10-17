@@ -51,6 +51,10 @@
 //! (`yap-meeting-warning`) and, when no Yap window that shows it is in view,
 //! with a Windows notification (see "Quiet sides" below).
 //!
+//! Whether anyone is talking: [`activity`] hands the guard rails
+//! (`meeting_guard.rs`, the quiet-meeting countdown and the check-ins) the
+//! meeting's audio clock and a counter that moves with every bit of talk.
+//!
 //! In e2e test runs (debug builds, `YAP_E2E=1`) no device is opened: the
 //! audio comes from test files, or nowhere (`e2e::spawn_meeting_audio`),
 //! which can also stage a dictation and an output-device switch; and
@@ -473,16 +477,54 @@ fn is_echo(correlation: f32, share: f32) -> bool {
 }
 
 /// The active session — the capture thread and drain worker hold the buffers
-/// and streams; this only carries what stop/state need.
+/// and streams; this only carries what stop/state need, and the two sources
+/// for [`activity`].
 struct Session {
     note_id: u64,
     started_ms: u64,
     stop: Arc<AtomicBool>,
+    you: AudioBuf,
+    them: AudioBuf,
 }
 
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 /// Note id of the active session (0 = none).
 static ACTIVE_NOTE: AtomicU64 = AtomicU64::new(0);
+/// Talk segments ingested since Yap started (any recording, the e2e feed's
+/// too): one half of [`Activity::talk`].
+static TALK_SEGMENTS: AtomicU64 = AtomicU64::new(0);
+
+/// Whether anyone is talking in the recording going on, as the guard rails'
+/// quiet-meeting watch reads it (`meeting_guard.rs`, once a second).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Activity {
+    pub note_id: u64,
+    /// The meeting's audio clock (ms): how much audio the sides have
+    /// captured. It stands still while no audio arrives at all (the PC
+    /// asleep, a device that died), so quiet time only counts while the
+    /// recording really listens.
+    pub clock_ms: u64,
+    /// Goes up whenever someone talks: audio above the silence gate on
+    /// either side (a hotkey dictation's blanked span isn't talk), plus
+    /// transcribed talk segments. Only its changes mean anything.
+    pub talk: u64,
+}
+
+/// [`Activity`] of the recording going on, if one is.
+pub fn activity() -> Option<Activity> {
+    let (note_id, you, them) = {
+        let guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
+        let s = guard.as_ref()?;
+        (s.note_id, Arc::clone(&s.you), Arc::clone(&s.them))
+    };
+    let levels = |buf: &AudioBuf| buf.lock().map(|c| c.levels()).unwrap_or_default();
+    let (y, t) = (levels(&you), levels(&them));
+    Some(Activity {
+        note_id,
+        clock_ms: y.end.max(t.end) * 1000 / RATE as u64,
+        talk: y.talk + t.talk + TALK_SEGMENTS.load(Ordering::SeqCst),
+    })
+}
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -1288,6 +1330,7 @@ fn notify_quiet(app: &AppHandle, side: Side, message: String) {
                 variant: "default",
                 settings,
                 note_id: None,
+                surface: None,
             },
         );
     });
@@ -1305,6 +1348,8 @@ pub(crate) fn ingest(
         return Ok(());
     }
     crate::notes::append_transcript(note_id, &segments)?;
+    let talk = segments.iter().filter(|s| s.is_talk() && !s.text.trim().is_empty()).count();
+    TALK_SEGMENTS.fetch_add(talk as u64, Ordering::SeqCst);
     for seg in &segments {
         let _ = app.emit("yap-meeting-segment", serde_json::json!(seg));
     }
@@ -1353,6 +1398,8 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
         note_id,
         started_ms,
         stop: Arc::clone(&stop),
+        you: Arc::clone(&mic_buf),
+        them: Arc::clone(&sys_buf),
     };
     {
         let mut guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
