@@ -144,7 +144,11 @@ extracted `app.asar`, Handy clone):
   n-gram must **strictly reduce absolute edit distance**, because Handy's
   longest-first greedy provably swallows an unrelated adjacent word
   ("Charge B, che" → "ChargeBee" eating "che"; their own unit test can't pass
-  as committed). Gated by `config.dictionary_fuzzy` (default ON, toggle in the
+  as committed). Its mirror image (2026-10-17, found by the real-app robot):
+  a run is never taken when its first word adds nothing — when the later
+  words make the same term at most as many edits away by themselves — so
+  "to Kubernetes" (2/12 from "kubernetes") no longer eats the "to", nor
+  "1. kubernetes" its number, nor "- kubernetes" its space. Gated by `config.dictionary_fuzzy` (default ON, toggle in the
   Dictionary view), ONNX models only. **Per-entry opt-out** (the ≈ button on a
   Dictionary row, `entry.fuzzy`, default on): exempts one correction from the
   near-miss pass for entries whose near-misses are real words — live dogfooding

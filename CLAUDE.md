@@ -1017,8 +1017,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   + Soundex phonetic boost (the `natural` crate's nonstandard variant, replicated
   exactly), threshold 0.18, ≥3-char terms, case/punctuation preserved; shortest-first
   n-gram choice (deliberate fix over Handy's word-swallowing longest-first greedy),
-  and a 2–3-word n-gram that already holds the term as one of its words is never
-  a near-miss of it ("to Kubernetes" was swallowing "to" — found by the real-app
+  and never a run whose first word adds nothing (`first_word_adds_nothing`: the
+  later words make the same term as closely alone), so the word or list marker
+  before a term survives ("to Kubernetes", "1. kubernetes"; found by the real-app
   robot, 2026-10-17). Max 3 words per n-gram, so "Chat G P T" (4) leaves a "T".
   Runs after `apply_dictionary` for ONNX models (`dictionary_fuzzy`, default on);
   snippets are never candidates.
@@ -1257,11 +1258,18 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   on and it isn't edit mode, a background thread reads ≤ 500 characters before and
   after the caret and the selection (a long selection as its start + end) —
   TextPattern (`GetSelection`, else TextPattern2's caret), else ValuePattern for
-  Edit/Document/ComboBox fields (the caret from `EM_GETSEL` in a Win32 text box —
-  class `Edit` or WinForms' `WindowsForms10.EDIT.…`, whose UIA has no TextPattern —
-  when its text length matches the value; else assumed at the end) — cut at word
-  boundaries, with 200 ms UIA connection/transaction timeouts (`CUIAutomation8`).
-  **Only the field's own text**: every range is kept inside the focused element's
+  Edit/Document/ComboBox fields — cut at word boundaries,
+  with 200 ms UIA connection/transaction timeouts (`CUIAutomation8`). A
+  ValuePattern has no caret: when the element's own window is a Win32 edit
+  control (`edit_class`: `Edit`, `RichEdit20W`/`RICHEDIT50W`…, WinForms'
+  `WindowsForms10.EDIT…`/`…RichEdit20W…` — a WinForms TextBox/RichTextBox has no
+  TextPattern) the control is asked (`EM_GETSEL` via `SendMessageTimeoutW`, no
+  pointers, `SMTO_ABORTIFHUNG`, the same time box; positions past 65,535 → unknown)
+  and its UTF-16 units placed in the value (`units_to_bytes`: an EDIT's `\r\n` is
+  two, a RichEdit's break one; a RichEdit's final paragraph mark dropped); any
+  other value-only field (older Chromium/Electron, Firefox through the MSAA proxy)
+  → caret taken to be at the end, where it is after typing. The watch's read finds
+  its caret the same way. **Only the field's own text**: every range is kept inside the focused element's
   `DocumentRange` (`keep_within`; Chromium's ranges are page positions and ran on
   past a text box into the page), a selection outside it isn't read. **An empty
   field reads as empty** (`stands_in_for_empty`, pure): Chromium (Edge/Chrome/
@@ -1273,12 +1281,14 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   placeholder: same words + U+FEFF) is empty; so is a web editor whose class says
   it shows a CSS placeholder, itself or its one line (`class_says_empty`: Quill's
   `ql-blank` = Slack, `is-empty`/`is-editor-empty` = ProseMirror/Tiptap,
-  `ck-placeholder`, `placeholder`). Never: another
+  `ck-placeholder`, `placeholder`); a value-only field only by its placeholder or
+  markers. The post-paste watch applies the same rules. Never: another
   process's element than the target window's, a password box, read-only text, or in
   a test run. The paste
   never waits: still reading → no context. Kept in memory for that dictation only;
   logged as lengths, never text. `#[ignore]`d `reads_real_text_fields` reads hidden
-  EDIT and RichEdit controls end to end (incl. `EM_GETSEL` on the value path).
+  EDIT and RichEdit controls end to end, through TextPattern and through the
+  ValuePattern + `EM_GETSEL` path (mid-text, a selection, over a line break).
 - **`smart_insert.rs`** — `fit_to_context(text, &FieldContext, names)`, pure and
   unit-tested (conservative: a wrong fix is worse than the old capital). Mid-sentence
   (before ends in a letter/digit/`,`/`;`/spaced dash — not `.?!`, `:`, a new line or
@@ -2364,10 +2374,13 @@ device list. Known quirk: Better Auth links accounts by exact email, so
 the clipboard, terminals (PowerShell, a Claude Code stand-in), chat apps, the mic
 path, the dead-mic watchdog, learning words from corrections and real Parakeet
 STT, all checked against real windows by Claude. The three gaps its first run
-found are fixed (2026-10-17): a WinForms text box's caret (now `EM_GETSEL`),
-Chromium's empty text boxes read as their label or U+FFFC and its ranges
-running past the box into the page (now confined to the field and read as
-empty), the fuzzy pass swallowing a short word before a term.
+found are fixed (2026-10-17): a WinForms text box gives UI Automation no caret,
+so mid-text dictations were fitted as if at the end — Yap now asks the edit
+control (`EM_GETSEL`); the fuzzy pass swallowed a short word before a term
+("Deploy it to Kubernetes" → "Deploy it Kubernetes"); and Edge/Chrome report an
+empty text box's text as its label or U+FFFC (a web chat message kept its full
+stop and got a trailing space) and their ranges ran past the box into the page
+— reads now stay in the field and an empty one reads as empty.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation

@@ -69,25 +69,31 @@ test('smart spacing: fitted to the text before the cursor', async ({ robot }) =>
   await expect.poll(() => pad.text('rich')).toBe('We went home because it was late.');
 });
 
-// Found by this robot (2026-10-17): a WinForms text box gives UI Automation
-// a value but no caret (its focused element has no TextPattern), so Yap read
-// the whole text as "before the cursor" and fitted a dictation into the
-// middle of a line as if at its end (" the blue one." → "I want  the blue
-// one. please"). selection.rs now asks a Win32 text box for its selection
-// (EM_GETSEL).
-test('mid-text in a WinForms text box: fitted to the caret', async ({ robot }) => {
+// A WinForms text box gives UI Automation a value but no caret (its focused
+// element has no TextPattern), so Yap asks the edit control itself where the
+// caret is (EM_GETSEL, selection.rs) — found by this robot (2026-10-17),
+// when a dictation into the middle of a line was fitted as if at its end.
+test('mid-text in a WinForms text box: fitted to the text either side of the caret', async ({ robot }) => {
   const { pad } = robot;
   await pad.set('box', 'I want  please', 7);
+  const mark = robot.logMark();
   let r = await robot.dictate(pad, 'The blue one.');
   expect(r.text).toBe('the blue one');
   await expect.poll(() => pad.text('box')).toBe('I want the blue one please');
+  expect(robot.logSince(mark)).toContain('Found the caret by asking the edit control');
 
-  // Replacing a selected word mid-sentence: no full stop, its case.
-  await pad.set('box', 'We can meet Tuesday at noon.');
-  await pad.call({ cmd: 'select', field: 'box', start: 12, length: 7 });
-  r = await robot.dictate(pad, 'Wednesday.');
-  expect(r.text).toBe('Wednesday');
-  await expect.poll(() => pad.text('box')).toBe('We can meet Wednesday at noon.');
+  // Replacing a selection: its case and its spaces.
+  await pad.set('box', 'Pick the red one please', 0);
+  await pad.call({ cmd: 'select', field: 'box', start: 5, length: 11 });
+  r = await robot.dictate(pad, 'The blue one.');
+  expect(r.text).toBe('the blue one');
+  await expect.poll(() => pad.text('box')).toBe('Pick the blue one please');
+
+  // The rich text box, over a line break.
+  await pad.set('rich', 'Dear Sam,\nThanks for  and the notes.', 21);
+  r = await robot.dictate(pad, 'The draft.');
+  expect(r.text).toBe('the draft');
+  await expect.poll(async () => lf(await pad.text('rich'))).toBe('Dear Sam,\nThanks for the draft and the notes.');
 });
 
 test('a password box is pasted into but never read', async ({ robot }) => {

@@ -308,7 +308,7 @@ No microphone or hotkey: debug-only commands drive the real pipeline.
 
 | Spec | Target | Tests |
 |------|--------|-------|
-| `testpad.real.js` | the test pad (WinForms: text box, rich text box, password box) | the guard (the pad allowed by its process, Yap's own window refused, a second pad Yap wasn't given refused for a dictation and for Paste last transcript, its field neither read nor changed, the refusal toast) · smart spacing fitted to the text before the cursor (mid-sentence lower case and space, a new sentence, after a space, a name keeping its capital, the rich text box) · mid-text in the WinForms text box, fitted to its caret (`EM_GETSEL`), and replacing a selected word there · a password box pasted into but never read · snippets (a multi-line sign-off with its full stop dropped, said alone, a one-line link mid-sentence keeping the sentence's) · "press enter" (the text then Enter; only the command: just Enter) · Paste last transcript, fitted where it lands · the clipboard (your text back after the paste, the dictation not left there, the four keep-it-out-of-history formats present at the pad's Ctrl+V and on what came back; an image back byte for byte) · AI cleanup through the fake model, and "press enter" it dropped still sending |
+| `testpad.real.js` | the test pad (WinForms: text box, rich text box, password box) | the guard (the pad allowed by its process, Yap's own window refused, a second pad Yap wasn't given refused for a dictation and for Paste last transcript, its field neither read nor changed, the refusal toast) · smart spacing fitted to the text before the cursor (mid-sentence lower case and space, a new sentence, after a space, a name keeping its capital, the rich text box) · mid-text in a text box with no TextPattern, the caret asked of the control ("I want | please" → "I want the blue one please", a selection replaced, the rich text box over a line break) · a password box pasted into but never read · snippets (a multi-line sign-off with its full stop dropped, said alone, a one-line link mid-sentence keeping the sentence's) · "press enter" (the text then Enter; only the command: just Enter) · Paste last transcript, fitted where it lands · the clipboard (your text back after the paste, the dictation not left there, the four keep-it-out-of-history formats present at the pad's Ctrl+V and on what came back; an image back byte for byte) · AI cleanup through the fake model, and "press enter" it dropped still sending |
 | `browser.real.js` | Edge app windows | a web page's text box: mid-text (lower case, spaces, no full stop before what follows), after a sentence, replacing a selected word · only the box is read, never the page around it (page text on the box's line: empty, at the box's start, at its end) · a chat app (a page titled "WhatsApp - …"): a short message without its full stop, a question with its mark, three sentences with theirs, the setting off · an empty message box reads as empty, no full stop and no space after it (a textarea labelled "Type a message"; a contenteditable, as WhatsApp Web's and Gmail's are, and a draft there followed) |
 | `terminal.real.js` | Windows Terminal | a PowerShell prompt: a list dictated as one line ("List the files: the logs; the notes.") and nothing run · "press enter" running a harmless `Echo` (its output read back) · a stand-in for Claude Code (Claude Code's idle title "✳ …", bracketed paste, runs nothing, logs what arrives): the line breaks kept in one bracketed paste, nothing sent; "press enter" sending it · auto-submit: Enter in the coding CLI, never at the shell prompt · "Safer pasting into terminals" off: just another app |
 | `audio.real.js` | the test pad | a spoken WAV through a real recording to the paste (the stub's transcript) · a dead mic (7 s of digital silence): reopened at ~3 s, "No sound from … — check it isn't muted or unplugged" in the log and as a toast at ~5 s, nothing transcribed or pasted |
@@ -323,19 +323,23 @@ new name. (Not `test.fail()`: that passes on any failure, a stolen focus
 included.) None are open now. The first run (2026-10-17) found three, all
 fixed since, their tests now asserting the right result:
 
-- A WinForms text box gives UI Automation a value but no caret, so Yap read
-  it as if the cursor were at the end ("I want  the blue one. please").
-  `selection.rs` now asks a Win32 text box for its selection (`EM_GETSEL`)
-  (`testpad.real.js`).
 - Chromium (Edge, Chrome, Electron, WebView2) reads an **empty** text box's
   text as its label ("Type a message") or U+FFFC, so a short message in a
   web chat app kept its full stop and got a space after it ("Sounds good. "),
-  and its ranges ran on past the box into the page's text. `selection.rs`
-  now reads only the field's own document range, and an empty field as
-  empty whatever stands in for its text (`browser.real.js`).
+  and its ranges ran on past the box into the page's text (`yaprobot caret`
+  shows the raw ranges). `selection.rs` now reads only the field's own
+  document range, and an empty field as empty whatever stands in for its
+  text; `browser.real.js` expects "Sounds good".
 - The fuzzy pass took the short word before a term into its 2-word n-gram
-  and swallowed it ("Deploy it to cube and eighties." → "Deploy it
-  Kubernetes."; `learn.real.js`).
+  and swallowed it ("Deploy it to cube and eighties." became "Deploy it
+  Kubernetes."); `fuzzy.rs` no longer takes a run whose first word adds
+  nothing to the match, and `learn.real.js` now expects "Deploy it to
+  Kubernetes.".
+- A WinForms text box gives UI Automation a value but no caret, so Yap read
+  it as if the cursor were at the end ("I want | please" + "The blue one."
+  went in as " the blue one."). Yap now asks the edit control for its
+  selection (`EM_GETSEL`, `selection.rs`), and `testpad.real.js` expects
+  "I want the blue one please".
 
 Also seen, not pinned: now and then (a few in a hundred on Nathan's PC, not
 on demand) a Ctrl+V reaches the test pad's WinForms box and nothing is

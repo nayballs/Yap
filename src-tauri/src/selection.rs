@@ -14,9 +14,9 @@
 //! 2. **The text around the cursor** for a dictation ([`begin_dictation`] /
 //!    [`take_context`], `config.smart_spacing`): up to 500 characters before
 //!    and after the caret, and any selection, read in the background at record
-//!    start (`TextPattern`, else `ValuePattern` — with `EM_GETSEL` for the
-//!    caret in a Win32 text box such as WinForms'), so `smart_insert` can fit
-//!    the dictation to them. Only the focused field's own text: Chromium's
+//!    start (`TextPattern`, else `ValuePattern` — with the caret asked of a
+//!    Win32 edit control such as WinForms'), so `smart_insert` can fit the
+//!    dictation to them. Only the focused field's own text: Chromium's
 //!    ranges run on into the page around a text box, so they're kept inside
 //!    the field's document range; and an empty field reads as empty,
 //!    whatever stands in for its text (its label, its placeholder, U+FFFC, a
@@ -49,17 +49,20 @@ const WATCH_TIMEOUT_MS: u32 = 300;
 
 /// A field whose whole text is longer than this holds real text: a label or
 /// a placeholder standing in for an empty field is never this long.
+#[cfg_attr(not(windows), allow(dead_code))]
 const STAND_IN_CHARS: usize = 200;
 
 /// Characters that take a place in a field's text without anything being
 /// written there: U+FFFC (Chromium's text for an empty text box, or an
 /// embedded object) and the zero-width ones (Slate's U+FEFF in an empty
 /// line).
+#[cfg_attr(not(windows), allow(dead_code))]
 fn is_marker(c: char) -> bool {
     matches!(c, '\u{FFFC}' | '\u{FEFF}' | '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{2060}')
 }
 
 /// `s` as it reads: no markers, whitespace runs as one space, trimmed.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn bare(s: &str) -> String {
     s.split(|c: char| c.is_whitespace() || is_marker(c))
         .filter(|w| !w.is_empty())
@@ -80,6 +83,7 @@ fn bare(s: &str) -> String {
 /// (ValuePattern, asked only then; `None` = it has none) says those words
 /// are really there: an empty Chromium box's value is "", and a value of
 /// the same words with a marker in the text is Slate's placeholder.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn stands_in_for_empty(text: &str, name: &str, placeholder: &str, value: impl FnOnce() -> Option<String>) -> bool {
     let shown = bare(text);
     if shown.is_empty() {
@@ -106,31 +110,10 @@ fn stands_in_for_empty(text: &str, name: &str, placeholder: &str, value: impl Fn
 /// Chromium reads as text): Quill's `ql-blank` (Slack's message box),
 /// ProseMirror/Tiptap's `is-empty` / `is-editor-empty` (Claude, ChatGPT),
 /// CKEditor's `ck-placeholder` (Teams), and a plain `placeholder`.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn class_says_empty(class: &str) -> bool {
     const EMPTY: &[&str] = &["ql-blank", "is-empty", "is-editor-empty", "ck-placeholder", "placeholder"];
     class.split_whitespace().any(|token| EMPTY.contains(&token))
-}
-
-/// A Win32 text box (the `Edit` class, or WinForms' `WindowsForms10.EDIT.…`
-/// superclass of it), which answers `EM_GETSEL`.
-fn is_edit_class(class: &str) -> bool {
-    class.eq_ignore_ascii_case("edit")
-        || class
-            .strip_prefix("WindowsForms10.")
-            .is_some_and(|rest| rest.split('.').next().is_some_and(|base| base.eq_ignore_ascii_case("edit")))
-}
-
-/// `value` cut at a text box's selection, `start`…`end` in UTF-16 units
-/// (what `EM_GETSEL` gives): before, selected, after. `None` when the
-/// positions don't fit the value (it changed meanwhile, or isn't the box's
-/// text) or would split a character.
-fn split_utf16(value: &str, start: usize, end: usize) -> Option<(String, String, String)> {
-    let units: Vec<u16> = value.encode_utf16().collect();
-    if start > end || end > units.len() {
-        return None;
-    }
-    let part = |p: &[u16]| String::from_utf16(p).ok();
-    Some((part(&units[..start])?, part(&units[start..end])?, part(&units[end..])?))
 }
 
 /// Capture the current selection for edit mode: UIA first, Ctrl+C fallback
@@ -327,10 +310,83 @@ impl WatchedField {
     }
 }
 
+/// A selection longer than this is read as its start and its end (all
+/// that fitting needs: the first word, the last mark, the spaces).
+const SELECTION_CHARS: usize = 400;
+const SELECTION_ENDS: usize = 120;
+
+/// A selected text as fitting reads it: a long one as its start and end.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn shorten_selection(text: &str) -> String {
+    let n = text.chars().count();
+    if n <= SELECTION_CHARS {
+        return text.to_string();
+    }
+    let head: String = text.chars().take(SELECTION_ENDS).collect();
+    let tail: String = text.chars().skip(n - SELECTION_ENDS).collect();
+    format!("{head} … {tail}")
+}
+
+/// Whether a window class is a Win32 edit control Yap may ask for its
+/// selection (EM_GETSEL): `Some(true)` for a RichEdit (2.0 and later),
+/// `Some(false)` for a plain EDIT, also as WinForms names its own
+/// ("WindowsForms10.EDIT.app.0.…", "WindowsForms10.RichEdit20W.app.0.…").
+#[cfg_attr(not(windows), allow(dead_code))]
+fn edit_class(class: &str) -> Option<bool> {
+    let class = class.to_ascii_lowercase();
+    let base = match class.strip_prefix("windowsforms10.") {
+        Some(rest) => rest.split('.').next().unwrap_or_default(),
+        None => class.as_str(),
+    };
+    if base == "edit" {
+        Some(false)
+    } else if base.starts_with("richedit") && base != "richedit" {
+        // ("RICHEDIT" alone is RichEdit 1.0, which counts line breaks
+        // differently.)
+        Some(true)
+    } else {
+        None
+    }
+}
+
+/// An edit control's selection (`start`..`end`, in its own UTF-16 units) as
+/// byte offsets in `value`, its text as UI Automation gives it. A plain
+/// EDIT counts "\r\n" as two units; a RichEdit any line break as one (it
+/// keeps "\r" where the value may say "\r\n" or "\n"). Never between a "\r"
+/// and its "\n" (moved past the pair). `None` when the selection ends
+/// beyond the text: the control and the value don't agree.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn units_to_bytes(value: &str, start: usize, end: usize, rich: bool) -> Option<(usize, usize)> {
+    let (mut s, mut e) = (None, None);
+    let mut units = 0usize;
+    let mut prev = '\0';
+    for (i, c) in value.char_indices() {
+        let mid_break = prev == '\r' && c == '\n';
+        if !mid_break {
+            if s.is_none() && units >= start {
+                s = Some(i);
+            }
+            if e.is_none() && units >= end {
+                e = Some(i);
+            }
+        }
+        if !(rich && mid_break) {
+            units += c.len_utf16();
+        }
+        prev = c;
+    }
+    if units < end {
+        return None;
+    }
+    let s = s.unwrap_or(value.len());
+    let e = e.unwrap_or(value.len());
+    Some((s, e.max(s)))
+}
+
 #[cfg(windows)]
 mod uia {
     use windows::core::{Interface, BOOL};
-    use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
+    use windows::Win32::Foundation::{HWND, RPC_E_CHANGED_MODE};
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
     };
@@ -343,13 +399,8 @@ mod uia {
         UIA_ValuePatternId,
     };
 
-    use super::FieldWindow;
+    use super::{FieldWindow, SELECTION_CHARS, SELECTION_ENDS};
     use crate::smart_insert::{head_chars, tail_chars, FieldContext, CONTEXT_CHARS};
-
-    /// A selection longer than this is read as its start and its end (all
-    /// that fitting needs: the first word, the last mark, the spaces).
-    const SELECTION_CHARS: usize = 400;
-    const SELECTION_ENDS: usize = 120;
 
     /// COM on this thread for as long as it lives; undone on drop when this
     /// call did it. Declared first in a function, it drops after every COM
@@ -446,7 +497,7 @@ mod uia {
         if element.CurrentIsPassword().ok()?.as_bool() {
             return None;
         }
-        text_context(automation, element).or_else(|| value_context(element, super::CONTEXT_TIMEOUT_MS))
+        text_context(automation, element).or_else(|| value_context(element))
     }
 
     /// [`element_context`] for a window's own element (the tests' edit
@@ -463,17 +514,30 @@ mod uia {
         }
     }
 
-    /// [`value_context`] for a window's own element (the tests' edit
-    /// control: the ValuePattern path, as for a WinForms text box).
+    /// The ValuePattern reads alone, the caret asked of the control, for a
+    /// window's own element (as a WinForms text box, which has no
+    /// TextPattern, is read): [`value_context`], EM_GETSEL's answer and the
+    /// post-paste watch's [`whole_value`].
     #[cfg(test)]
-    pub fn window_value_context(hwnd: isize) -> Option<FieldContext> {
-        let _com = Com::init()?;
-        let automation = automation(super::CONTEXT_TIMEOUT_MS)?;
+    pub fn window_value_reads(
+        hwnd: isize,
+    ) -> (Option<FieldContext>, Option<EditSelection>, Option<FieldWindow>) {
+        let Some(_com) = Com::init() else {
+            return (None, None, None);
+        };
+        let Some(automation) = automation(super::CONTEXT_TIMEOUT_MS) else {
+            return (None, None, None);
+        };
+        let hwnd = HWND(hwnd as *mut core::ffi::c_void);
         unsafe {
-            let element = automation
-                .ElementFromHandle(windows::Win32::Foundation::HWND(hwnd as *mut core::ffi::c_void))
-                .ok()?;
-            value_context(&element, super::CONTEXT_TIMEOUT_MS)
+            let Ok(element) = automation.ElementFromHandle(hwnd) else {
+                return (None, None, None);
+            };
+            (
+                value_context(&element),
+                edit_selection(hwnd, super::CONTEXT_TIMEOUT_MS),
+                whole_value(&element, 2_000),
+            )
         }
     }
 
@@ -605,6 +669,14 @@ mod uia {
             && walker.GetNextSiblingElement(&line).is_err_and(|e| e.code().is_ok())
     }
 
+    /// [`super::stands_in_for_empty`] for a ValuePattern-only field: its
+    /// value is what's in it, so only its placeholder (or nothing but
+    /// markers) stands in for empty.
+    unsafe fn value_stands_in(element: &IUIAutomationElement, value: &str) -> bool {
+        let placeholder = element.CurrentHelpText().map(|b| b.to_string()).unwrap_or_default();
+        super::stands_in_for_empty(value, "", &placeholder, || None)
+    }
+
     /// The selected text; a long selection as its start and end.
     unsafe fn selection_text(range: &IUIAutomationTextRange) -> Option<String> {
         let text = range.GetText(SELECTION_CHARS as i32 + 1).ok()?.to_string();
@@ -621,23 +693,32 @@ mod uia {
         Some(format!("{head} … {tail}"))
     }
 
-    /// [`selection_text`] for a selection Yap has as a string.
-    fn shorten_selection(text: &str) -> String {
-        let n = text.chars().count();
-        if n <= SELECTION_CHARS {
-            return text.to_string();
+    /// ValuePattern (fields with no TextPattern: WinForms text boxes, some
+    /// Electron inputs): the whole value, and the caret in it when the field
+    /// is a Win32 edit control that can say ([`value_selection`]); else the
+    /// caret is taken to be at the end, where it is after typing. Text fields
+    /// only, never read-only ones; a field showing only its placeholder is
+    /// empty.
+    unsafe fn value_context(element: &IUIAutomationElement) -> Option<FieldContext> {
+        let pattern = editable_value(element)?;
+        let value = pattern.CurrentValue().ok()?.to_string();
+        if value_stands_in(element, &value) {
+            return Some(FieldContext::default());
         }
-        let head: String = text.chars().take(SELECTION_ENDS).collect();
-        let tail: String = text.chars().skip(n - SELECTION_ENDS).collect();
-        format!("{head} … {tail}")
+        let (value, at) = value_selection(element, value, super::CONTEXT_TIMEOUT_MS);
+        let (start, end) = at.unwrap_or_else(|| {
+            tracing::debug!("No caret position for this field; taking it to be at the end of its text");
+            (value.len(), value.len())
+        });
+        Some(FieldContext {
+            before: tail_chars(&value[..start], CONTEXT_CHARS),
+            after: head_chars(&value[end..], CONTEXT_CHARS),
+            selection: super::shorten_selection(&value[start..end]),
+        })
     }
 
-    /// ValuePattern (fields with no TextPattern, e.g. some Electron inputs,
-    /// WinForms' TextBox): the whole value, the caret where a Win32 text box
-    /// says it is ([`edit_selection`]), else taken to be at the end, where
-    /// it is after typing. Text fields only, never read-only ones; a field
-    /// showing only its placeholder is empty.
-    unsafe fn value_context(element: &IUIAutomationElement, timeout_ms: u32) -> Option<FieldContext> {
+    /// A text field's ValuePattern, if it isn't read-only.
+    unsafe fn editable_value(element: &IUIAutomationElement) -> Option<IUIAutomationValuePattern> {
         let kind = element.CurrentControlType().ok()?;
         if ![UIA_EditControlTypeId, UIA_DocumentControlTypeId, UIA_ComboBoxControlTypeId].contains(&kind) {
             return None;
@@ -646,32 +727,15 @@ mod uia {
         if pattern.CurrentIsReadOnly().ok()?.as_bool() {
             return None;
         }
-        let value = pattern.CurrentValue().ok()?.to_string();
-        if value_stands_in(element, &value) {
-            return Some(FieldContext::default());
-        }
-        let (before, selection, after) =
-            edit_selection(element, &value, timeout_ms).unwrap_or((value, String::new(), String::new()));
-        Some(FieldContext {
-            before: tail_chars(&before, CONTEXT_CHARS),
-            after: head_chars(&after, CONTEXT_CHARS),
-            selection: shorten_selection(&selection),
-        })
-    }
-
-    /// [`super::stands_in_for_empty`] for a ValuePattern-only field: its
-    /// value is what's in it, so only its placeholder (or nothing but
-    /// markers) stands in for empty.
-    unsafe fn value_stands_in(element: &IUIAutomationElement, value: &str) -> bool {
-        let placeholder = element.CurrentHelpText().map(|b| b.to_string()).unwrap_or_default();
-        super::stands_in_for_empty(value, "", &placeholder, || None)
+        Some(pattern)
     }
 
     #[link(name = "user32")]
     extern "system" {
-        fn GetClassNameW(hwnd: *mut core::ffi::c_void, buf: *mut u16, max: i32) -> i32;
+        fn GetClassNameW(hwnd: HWND, buf: *mut u16, max: i32) -> i32;
+        fn RealGetWindowClassW(hwnd: HWND, buf: *mut u16, max: u32) -> u32;
         fn SendMessageTimeoutW(
-            hwnd: *mut core::ffi::c_void,
+            hwnd: HWND,
             msg: u32,
             wparam: usize,
             lparam: isize,
@@ -681,43 +745,79 @@ mod uia {
         ) -> isize;
     }
 
-    const WM_GETTEXTLENGTH: u32 = 0x000E;
+    /// An edit control's selection: its start and end in the control's own
+    /// units, and whether it's a RichEdit.
+    type EditSelection = (usize, usize, bool);
+
     const EM_GETSEL: u32 = 0x00B0;
     const SMTO_ABORTIFHUNG: u32 = 0x0002;
+    const SMTO_ERRORONEXIT: u32 = 0x0020;
 
-    /// A Win32 text box's selection, which UI Automation doesn't give for
-    /// WinForms' TextBox (a value, no TextPattern): `EM_GETSEL` (no pointers,
-    /// so nothing to marshal; read-only), time-boxed, cutting `value` there
-    /// ([`super::split_utf16`]). Only when the box's text is as long as
-    /// `value` (else the positions would mean nothing) and under 65,536
-    /// characters (`EM_GETSEL`'s limit). `None`: not such a box, or no answer.
-    unsafe fn edit_selection(
+    /// `value`, a field's ValuePattern text, and where the selection (or the
+    /// caret) is in it as byte offsets — for a field that is a Win32 edit
+    /// control (a WinForms TextBox or RichTextBox, whose UI Automation has a
+    /// value but no TextPattern): asked of the control itself. `None` for
+    /// any other field, or when it doesn't answer within `timeout_ms`. A
+    /// RichEdit's value can end with the paragraph mark every RichEdit text
+    /// ends with (its TextPattern leaves it out): left out here too.
+    unsafe fn value_selection(
         element: &IUIAutomationElement,
-        value: &str,
+        mut value: String,
         timeout_ms: u32,
-    ) -> Option<(String, String, String)> {
-        let hwnd = element.CurrentNativeWindowHandle().ok()?.0;
-        if hwnd.is_null() {
-            return None;
-        }
-        let mut class = [0u16; 128];
-        let n = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32);
-        if n <= 0 || !super::is_edit_class(&String::from_utf16_lossy(&class[..n as usize])) {
-            return None;
-        }
-        let ask = |msg: u32| {
-            let mut out = 0usize;
-            (SendMessageTimeoutW(hwnd, msg, 0, 0, SMTO_ABORTIFHUNG, timeout_ms, &mut out) != 0).then_some(out)
+    ) -> (String, Option<(usize, usize)>) {
+        let Some((start, end, rich)) = element
+            .CurrentNativeWindowHandle()
+            .ok()
+            .and_then(|hwnd| edit_selection(hwnd, timeout_ms))
+        else {
+            return (value, None);
         };
-        if ask(WM_GETTEXTLENGTH)? != value.encode_utf16().count() {
+        if rich && value.ends_with('\r') {
+            value.pop();
+        }
+        let at = super::units_to_bytes(&value, start, end, rich);
+        if at.is_some() {
+            tracing::debug!("Found the caret by asking the edit control (EM_GETSEL)");
+        }
+        (value, at)
+    }
+
+    /// The selection of `hwnd` if it's an edit control ([`super::edit_class`]
+    /// by its class or its base class): its start and end in the control's
+    /// own units, and whether it's a RichEdit. EM_GETSEL with no pointers
+    /// (the answer comes back packed in the result, so nothing is written
+    /// into the other process), at most `timeout_ms`, never to a hung app.
+    unsafe fn edit_selection(hwnd: HWND, timeout_ms: u32) -> Option<EditSelection> {
+        if hwnd.is_invalid() {
             return None;
         }
-        // The start in the low word, the end in the high one; -1 past 65,535.
-        let sel = ask(EM_GETSEL)? as u32;
-        if sel == u32::MAX {
+        let mut buf = [0u16; 256];
+        let n = GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32).max(0) as usize;
+        let rich = super::edit_class(&String::from_utf16_lossy(&buf[..n])).or_else(|| {
+            let n = RealGetWindowClassW(hwnd, buf.as_mut_ptr(), buf.len() as u32) as usize;
+            super::edit_class(&String::from_utf16_lossy(&buf[..n.min(buf.len())]))
+        })?;
+        let mut result = 0usize;
+        let sent = SendMessageTimeoutW(
+            hwnd,
+            EM_GETSEL,
+            0,
+            0,
+            SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT,
+            timeout_ms,
+            &mut result,
+        );
+        if sent == 0 {
+            tracing::debug!("The edit control didn't say where its caret is in time");
             return None;
         }
-        super::split_utf16(value, (sel & 0xFFFF) as usize, (sel >> 16) as usize)
+        // -1: a position past 65,535, which the packed answer can't carry.
+        let packed = result as u32;
+        if packed == u32::MAX {
+            return None;
+        }
+        let (start, end) = ((packed & 0xFFFF) as usize, (packed >> 16) as usize);
+        Some((start.min(end), start.max(end), rich))
     }
 
     /// The field a dictation was pasted into, for the post-paste watch.
@@ -851,28 +951,19 @@ mod uia {
         })
     }
 
-    /// ValuePattern: a text field's whole value, if it isn't read-only; the
-    /// caret where a Win32 text box says it is ([`edit_selection`]), else
-    /// at the end.
+    /// ValuePattern: a text field's whole value, if it isn't read-only, and
+    /// the caret in it as [`value_context`] finds it (else its end).
     unsafe fn whole_value(element: &IUIAutomationElement, limit: usize) -> Option<FieldWindow> {
-        let kind = element.CurrentControlType().ok()?;
-        if ![UIA_EditControlTypeId, UIA_DocumentControlTypeId, UIA_ComboBoxControlTypeId].contains(&kind) {
-            return None;
-        }
-        let pattern: IUIAutomationValuePattern = element.GetCurrentPattern(UIA_ValuePatternId).ok()?.cast().ok()?;
-        if pattern.CurrentIsReadOnly().ok()?.as_bool() {
-            return None;
-        }
-        let raw = pattern.CurrentValue().ok()?.to_string();
+        let pattern = editable_value(element)?;
+        let (raw, at) = value_selection(element, pattern.CurrentValue().ok()?.to_string(), super::WATCH_TIMEOUT_MS);
+        let caret = at.map(|(start, _)| tidy(&raw[..start]).len());
         let value = tidy(&raw);
         let to_end = value.chars().count() <= limit;
         let text: String = if to_end { value } else { value.chars().take(limit + 1).collect() };
-        let caret = edit_selection(element, &raw, super::WATCH_TIMEOUT_MS)
-            .map(|(before, _, _)| tidy(&before).len())
-            .filter(|&c| c <= text.len() && text.is_char_boundary(c))
-            .unwrap_or(text.len());
         Some(FieldWindow {
-            caret,
+            caret: caret
+                .filter(|&c| c <= text.len() && text.is_char_boundary(c))
+                .unwrap_or(text.len()),
             text,
             from_start: true,
             to_end,
@@ -898,6 +989,8 @@ fn read_focused_context(_pid: Option<u32>) -> Option<FieldContext> {
     None
 }
 
+/// What a field's text over UI Automation says about whether it's empty
+/// (Chromium's empty boxes, rich editors' placeholders).
 #[cfg(test)]
 mod field_text_tests {
     use super::*;
@@ -964,33 +1057,6 @@ mod field_text_tests {
         assert!(!class_says_empty("RichEditD2DPT"));
         assert!(!class_says_empty("WindowsForms10.EDIT.app.0.34f5582_r6_ad1"));
         assert!(!class_says_empty(""));
-    }
-
-    #[test]
-    fn win32_text_boxes_by_class() {
-        assert!(is_edit_class("Edit"));
-        assert!(is_edit_class("EDIT"));
-        assert!(is_edit_class("WindowsForms10.EDIT.app.0.34f5582_r6_ad1"));
-        assert!(is_edit_class("WindowsForms10.Edit.app.0.2bf8098_r6_ad1"));
-        assert!(!is_edit_class("WindowsForms10.RichEdit20W.app.0.34f5582_r6_ad1"));
-        assert!(!is_edit_class("RICHEDIT50W"));
-        assert!(!is_edit_class("TEdit"));
-        assert!(!is_edit_class("Chrome_RenderWidgetHostHWND"));
-    }
-
-    #[test]
-    fn a_text_box_value_cut_at_its_selection() {
-        let s = |a: &str, b: &str, c: &str| Some((a.to_string(), b.to_string(), c.to_string()));
-        assert_eq!(split_utf16("I want  please", 7, 7), s("I want ", "", " please"));
-        assert_eq!(split_utf16("We can meet Tuesday", 12, 19), s("We can meet ", "Tuesday", ""));
-        // UTF-16 units: a line break is two, an emoji two.
-        assert_eq!(split_utf16("one\r\ntwo", 5, 5), s("one\r\n", "", "two"));
-        assert_eq!(split_utf16("a😀b", 1, 3), s("a", "😀", "b"));
-        assert_eq!(split_utf16("é", 1, 1), s("é", "", ""));
-        // Positions that don't fit the value.
-        assert_eq!(split_utf16("a😀b", 2, 2), None);
-        assert_eq!(split_utf16("abc", 2, 4), None);
-        assert_eq!(split_utf16("abc", 2, 1), None);
     }
 }
 
@@ -1128,7 +1194,19 @@ mod tests {
         }
     }
 
-    fn check(class: &str) {
+    /// The ValuePattern reads with the caret asked of the control, as a
+    /// WinForms text box (no TextPattern) is read: EM_GETSEL must say `sel`;
+    /// → (before, selection, after) and the watch's (text, caret).
+    fn read_by_value(field: &Field, class: &str, rich: bool, sel: (usize, usize)) -> ((String, String, String), (String, usize)) {
+        let (ctx, asked, watch) = super::uia::window_value_reads(field.hwnd);
+        assert_eq!(asked, Some((sel.0, sel.1, rich)), "{class}: EM_GETSEL");
+        let ctx = ctx.expect("the context from the value");
+        let watch = watch.expect("the watch's read of the value");
+        assert!(watch.from_start && watch.to_end, "{class}: the whole value");
+        ((ctx.before, ctx.selection, ctx.after), (watch.text, watch.caret))
+    }
+
+    fn check(class: &str, rich: bool) {
         let text = "Hello world. we went home";
         // A caret after "Hello world. ".
         let field = Field::new(class, ES_MULTILINE, text, (13, 13)).expect("a field");
@@ -1136,17 +1214,17 @@ mod tests {
         assert_eq!(ctx.before, "Hello world. ", "{class}: before");
         assert_eq!(ctx.after, "we went home", "{class}: after");
         assert_eq!(ctx.selection, "", "{class}: selection");
+        let by_value = |field: &Field, sel| read_by_value(field, class, rich, sel);
+        assert_eq!(
+            by_value(&field, (13, 13)),
+            (("Hello world. ".into(), String::new(), "we went home".into()), (text.into(), 13)),
+            "{class}: the value, the caret mid-text"
+        );
         // The post-paste watch's read: the whole field, the caret, both ends.
         let w = super::uia::window_watch(field.hwnd, 2_000).expect("the watch's read");
         assert_eq!(w.text, text, "{class}: the watch's text");
         assert_eq!(w.caret, 13, "{class}: the watch's caret");
         assert!(w.from_start && w.to_end, "{class}: the whole field");
-        // The value-only path (a WinForms text box's): the caret from
-        // EM_GETSEL in a Win32 text box.
-        if class == "EDIT" {
-            let v = super::uia::window_value_context(field.hwnd).expect("the value's context");
-            assert_eq!((v.before.as_str(), v.after.as_str()), ("Hello world. ", "we went home"), "{class}: value path");
-        }
         drop(field);
 
         // "world" selected.
@@ -1157,14 +1235,24 @@ mod tests {
         assert_eq!(ctx.after, ". we went home", "{class}: after a selection");
         let w = super::uia::window_watch(field.hwnd, 2_000).expect("the watch's read");
         assert_eq!((w.text.as_str(), w.caret), (text, 6), "{class}: the watch, a selection");
-        if class == "EDIT" {
-            let v = super::uia::window_value_context(field.hwnd).expect("the value's context");
-            assert_eq!(
-                (v.before.as_str(), v.selection.as_str(), v.after.as_str()),
-                ("Hello ", "world", ". we went home"),
-                "{class}: value path, a selection"
-            );
-        }
+        assert_eq!(
+            by_value(&field, (6, 11)),
+            (("Hello ".into(), "world".into(), ". we went home".into()), (text.into(), 6)),
+            "{class}: the value, a selection"
+        );
+        drop(field);
+
+        // Over a line break: a plain EDIT counts "\r\n" as two, a RichEdit
+        // its paragraph mark as one. The caret after "we ".
+        let lines = "Hello world.\r\nwe went home";
+        let caret = if rich { 16 } else { 17 };
+        let field = Field::new(class, ES_MULTILINE, lines, (caret, caret)).expect("a field");
+        let ((before, selection, after), (watched, at)) = by_value(&field, (caret, caret));
+        // (The value's own line break: "\r\n" from an EDIT, "\r" from a RichEdit.)
+        let line_break = if rich { "\r" } else { "\r\n" };
+        assert_eq!(before, format!("Hello world.{line_break}we "), "{class}: before, over a line break");
+        assert_eq!((selection.as_str(), after.as_str()), ("", "went home"), "{class}: after a line break");
+        assert_eq!((watched.as_str(), at), ("Hello world.\nwe went home", 16), "{class}: the watch over a line break");
         drop(field);
 
         // Long text: 500 characters each side at most, cut between words.
@@ -1199,9 +1287,75 @@ mod tests {
     #[test]
     #[ignore = "makes (hidden) windows: cargo test --lib -- --ignored reads_real_text_fields"]
     fn reads_real_text_fields() {
-        check("EDIT");
+        check("EDIT", false);
         // RichEdit 4.1+ has a TextPattern of its own.
         unsafe { LoadLibraryW(wide("Msftedit.dll").as_ptr()) };
-        check("RICHEDIT50W");
+        check("RICHEDIT50W", true);
+    }
+}
+
+/// The caret of a field with only a ValuePattern (a WinForms text box):
+/// which windows are asked, and their answer placed in the value.
+#[cfg(test)]
+mod caret_tests {
+    use super::{edit_class, shorten_selection, units_to_bytes};
+
+    #[test]
+    fn edit_controls_by_class() {
+        assert_eq!(edit_class("Edit"), Some(false));
+        assert_eq!(edit_class("EDIT"), Some(false));
+        assert_eq!(edit_class("WindowsForms10.EDIT.app.0.1a4c162_r8_ad1"), Some(false));
+        assert_eq!(edit_class("RichEdit20W"), Some(true));
+        assert_eq!(edit_class("RICHEDIT50W"), Some(true));
+        assert_eq!(edit_class("WindowsForms10.RichEdit20W.app.0.1a4c162_r8_ad1"), Some(true));
+        // Not an edit control, or one that counts differently: never asked.
+        for class in [
+            "RICHEDIT",
+            "WindowsForms10.Window.8.app.0.1a4c162_r8_ad1",
+            "WindowsForms10.",
+            "Chrome_RenderWidgetHostHWND",
+            "ComboBox",
+            "Scintilla",
+            "TextEditPane",
+            "EditWnd",
+            "",
+        ] {
+            assert_eq!(edit_class(class), None, "{class}");
+        }
+    }
+
+    #[test]
+    fn units_placed_in_the_value() {
+        // "I want | please".
+        assert_eq!(units_to_bytes("I want  please", 7, 7, false), Some((7, 7)));
+        assert_eq!(units_to_bytes("I want  please", 0, 0, false), Some((0, 0)));
+        assert_eq!(units_to_bytes("I want  please", 14, 14, false), Some((14, 14)));
+        // A selection.
+        assert_eq!(units_to_bytes("Hello world", 6, 11, false), Some((6, 11)));
+        // A plain EDIT counts "\r\n" as two units; a RichEdit any break as one.
+        let v = "One.\r\nTwo";
+        assert_eq!(units_to_bytes(v, 6, 6, false), Some((6, 6)));
+        assert_eq!(units_to_bytes(v, 5, 5, true), Some((6, 6)));
+        assert_eq!(units_to_bytes("One.\nTwo", 5, 5, true), Some((5, 5)));
+        assert_eq!(units_to_bytes("One.\rTwo", 5, 5, true), Some((5, 5)));
+        assert_eq!(units_to_bytes(v, 9, 9, false), Some((9, 9)));
+        assert_eq!(units_to_bytes(v, 8, 8, true), Some((9, 9)));
+        // Never between "\r" and "\n": past the pair.
+        assert_eq!(units_to_bytes(v, 5, 5, false), Some((6, 6)));
+        // UTF-16 units, not bytes or chars: "é" is one unit, "😀" two.
+        assert_eq!(units_to_bytes("café | ok", 5, 5, false), Some((6, 6)));
+        assert_eq!(units_to_bytes("😀 hi", 3, 3, false), Some((5, 5)));
+        // Past the end of the text: the control and the value disagree.
+        assert_eq!(units_to_bytes("short", 9, 9, false), None);
+        assert_eq!(units_to_bytes("short", 2, 9, false), None);
+        assert_eq!(units_to_bytes("", 0, 0, false), Some((0, 0)));
+    }
+
+    #[test]
+    fn a_long_selection_is_its_ends() {
+        assert_eq!(shorten_selection("world"), "world");
+        let long = format!("{}{}", "a".repeat(300), "b".repeat(300));
+        let short = shorten_selection(&long);
+        assert_eq!(short, format!("{} … {}", "a".repeat(120), "b".repeat(120)));
     }
 }
