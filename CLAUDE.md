@@ -1246,8 +1246,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the watch's thread, read whether it still has the focus or not;
   `read(limit)` → a `FieldWindow` of the **whole field** (TextPattern's
   document range, else the ValuePattern value; line breaks as `\n`, the
-  caret's offset in it, a field showing only its placeholder (= HelpText)
-  empty; longer than `limit` → its start with `to_end` false); same
+  caret's offset in it, an empty field empty (the stand-in rules below);
+  longer than `limit` → its start with `to_end` false); same
   refusals (other processes, passwords, read-only, test runs), 300 ms
   timeouts. **Edit
   mode** (`capture_selection(target, copy_fallback)`): the selected text
@@ -1257,13 +1257,28 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   on and it isn't edit mode, a background thread reads ≤ 500 characters before and
   after the caret and the selection (a long selection as its start + end) —
   TextPattern (`GetSelection`, else TextPattern2's caret), else ValuePattern for
-  Edit/Document/ComboBox fields (caret assumed at the end) — cut at word boundaries,
-  with 200 ms UIA connection/transaction timeouts (`CUIAutomation8`). Never: another
+  Edit/Document/ComboBox fields (the caret from `EM_GETSEL` in a Win32 text box —
+  class `Edit` or WinForms' `WindowsForms10.EDIT.…`, whose UIA has no TextPattern —
+  when its text length matches the value; else assumed at the end) — cut at word
+  boundaries, with 200 ms UIA connection/transaction timeouts (`CUIAutomation8`).
+  **Only the field's own text**: every range is kept inside the focused element's
+  `DocumentRange` (`keep_within`; Chromium's ranges are page positions and ran on
+  past a text box into the page), a selection outside it isn't read. **An empty
+  field reads as empty** (`stands_in_for_empty`, pure): Chromium (Edge/Chrome/
+  Electron/WebView2) gives an empty textarea/input/contenteditable an empty
+  ValuePattern value but its accessible name ("Type a message") or U+FFFC as its
+  TextPattern text — so a field's whole text (≤ 200 chars) that's only markers
+  (U+FFFC, zero-widths)/whitespace, its placeholder (HelpText), or its name unless
+  the ValuePattern says those words are really there (Slate's in-editor
+  placeholder: same words + U+FEFF) is empty; so is a web editor whose class says
+  it shows a CSS placeholder, itself or its one line (`class_says_empty`: Quill's
+  `ql-blank` = Slack, `is-empty`/`is-editor-empty` = ProseMirror/Tiptap,
+  `ck-placeholder`, `placeholder`). Never: another
   process's element than the target window's, a password box, read-only text, or in
-  a test run; a field showing its placeholder (= HelpText) counts as empty. The paste
+  a test run. The paste
   never waits: still reading → no context. Kept in memory for that dictation only;
   logged as lengths, never text. `#[ignore]`d `reads_real_text_fields` reads hidden
-  EDIT and RichEdit controls end to end.
+  EDIT and RichEdit controls end to end (incl. `EM_GETSEL` on the value path).
 - **`smart_insert.rs`** — `fit_to_context(text, &FieldContext, names)`, pure and
   unit-tested (conservative: a wrong fix is worse than the old capital). Mid-sentence
   (before ends in a letter/digit/`,`/`;`/spaced dash — not `.?!`, `:`, a new line or
@@ -2348,13 +2363,11 @@ device list. Known quirk: Better Auth links accounts by exact email, so
 2026-10-17): paste, smart spacing, snippets, "press enter", Paste last transcript,
 the clipboard, terminals (PowerShell, a Claude Code stand-in), chat apps, the mic
 path, the dead-mic watchdog, learning words from corrections and real Parakeet
-STT, all checked against real windows by Claude. Known gaps they found (pinned
-as "known gap: …" tests): a WinForms text box gives UI Automation no caret
-(fitted as if at the end); Edge/Chrome report an empty text box's text as its
-label or U+FFFC (a web chat message keeps its full stop and gets a trailing
-space), and their context ranges run past the box into the page; the fuzzy
-pass swallows a short word before a term ("Deploy it to Kubernetes" →
-"Deploy it Kubernetes").
+STT, all checked against real windows by Claude. The three gaps its first run
+found are fixed (2026-10-17): a WinForms text box's caret (now `EM_GETSEL`),
+Chromium's empty text boxes read as their label or U+FFFC and its ranges
+running past the box into the page (now confined to the field and read as
+empty), the fuzzy pass swallowing a short word before a term.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
