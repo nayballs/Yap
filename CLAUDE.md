@@ -193,7 +193,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   autostart (release builds only: a dev build shares the installed app's `Yap`
   Run entry, so `set_autostart_enabled` leaves the OS setting alone), and
   starts the update scheduler last (`updates::init`).
-  `shutdown_cleanup()` (sidecar, bridge, WASAPI mute) runs on `RunEvent::Exit`
+  `shutdown_cleanup()` (sidecar, bridge, other apps' sound back — `mute::restore_all`) runs on `RunEvent::Exit`
   AND from the updater's pre-install hook. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
   Gives the hidden settings/onboarding webviews a one-shot **DWM-cloaked** show+hide
   at startup (`init_hidden_webview` — WebView2 created-hidden workaround). ⚠ Never
@@ -1041,7 +1041,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   card's buttons); each keeps its live toast so the buttons
   work from the notification center. `allowed()` = not portable, not a test run.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
-  volume, output_device, mute_while_recording, recording_mode,
+  volume, output_device, quiet_other_apps ("Silence other apps while you
+  dictate", off; reads old configs' `muteWhileRecording`) + pause_media
+  ("Pause music and videos while you dictate", off; both `mute.rs`), recording_mode,
   overlay_position, dictionary (`DictionaryEntry`: from/to + `fuzzy` (default
   on) + `snippet` (default off)), append_trailing_space, smart_spacing ("Match
   the text around the cursor", default on), chat_no_full_stop ("Leave the full
@@ -1425,15 +1427,59 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (`selection::capture_selection(target, false)`) and the rewrite / Voice Agent
   reply goes through `terminal_text` too. An `#[ignore]`d `this_machines_windows`
   classifies the PC's real windows (`YAP_APP_KIND_TITLES=1` prints titles).
-- **`sound.rs`** — start/stop chimes (volume + output-device aware).
-- **`mute.rs`** — mute-while-recording: mutes the default render endpoint via
-  WASAPI/COM (`IMMDeviceEnumerator` → `IAudioEndpointVolume`) while recording and
-  restores it after — only unmuting what Yap itself muted.
+- **`sound.rs`** — start/stop chimes (volume + output-device aware); each
+  takes an optional `Played` callback, run on the chime's thread once it has
+  played (or at once when it can't): how `mute.rs` goes after the start
+  chime and comes back after the stop chime.
+- **`mute.rs`** — **other apps' sound while you dictate** (2026-10-17; it
+  replaced the old endpoint mute, which silenced Yap's own start chime and
+  any call): **"Silence other apps while you dictate"**
+  (`config.quiet_other_apps`, off; old configs' `muteWhileRecording` is its
+  serde alias) and **"Pause music and videos while you dictate"**
+  (`config.pause_media`, off, as Wispr's; `media_pause.rs`). The pipeline
+  calls `begin(plan)` in `start_recording` and `after_start_chime(token)`
+  from the start chime's `Played` (no chime: a thread), `end()` at stop /
+  cancel and `after_stop_chime(token)` after the stop chime (`Pipeline::
+  stop_chime_then_restore`; a cancel: at once). Quieting = per app, never
+  the device: every active output's sessions (`IAudioSessionManager2` →
+  `IAudioSessionControl2` + `ISimpleAudioVolume`) set to 0, never Yap's
+  own pid, system sounds, a call app's exe (`meeting_detect::call_audio`:
+  every `APPS` exe/package, call or not), the browser a live meeting tab is
+  in, or any browser while a meeting records (`quiet_verdict`, pure).
+  Restore = each session by its instance id back to exactly its level, only
+  if it's still at Yap's level (`restore_verdict`: one that moved is left
+  alone); a dictation that ended before its chime finished quiets nothing,
+  one that starts before the last restore keeps everything down and brings
+  it all back at its end (a generation token; COM/WinRT work serialized on
+  `WORK`, never under the state lock the pipeline takes). Bluetooth: if the
+  default output dropped into a call profile (< 44.1 kHz) during the
+  dictation, the restore polls it every 50 ms ≤ 5 s, + 500 ms
+  (`codec_wait`; no wait when it was already in one at the start — Yap's
+  always-open mic on a headset, a call). Crash safety: Windows keeps an
+  app's session level across restarts, so what's down is written to
+  `<data>/quieted_apps.json` while it is; `recover()` at setup and every
+  restore bring back sessions of those apps still at Yap's level (a week).
+  `restore_all()` in `shutdown_cleanup`. **Test runs** touch nothing
+  (`realtest::other_apps` = Nobody); **robot mode** only the sessions of
+  processes the test started (`realtest::audio_permits`: the process or an
+  ancestor is in `YAP_REALTEST_PIDS`, or owns only windows titled with the
+  nonce) and media whose title has the nonce (`media_permits`), never the
+  developer's own music. Debug-only `robot_view` (the robot's
+  `realtest_other_apps`).
+- **`media_pause.rs`** — "Pause music and videos while you dictate":
+  WinRT `GlobalSystemMediaTransportControlsSessionManager` (windows crate
+  feature `Media_Control`), sessions **Playing** → explicit `TryPauseAsync`
+  (never the play/pause toggle), kept; afterwards explicit `TryPlayAsync`
+  only for those still **Paused**. Never a call app's session (its app id
+  against the call apps' exes and package names), no browser's while a
+  meeting records or is live in one (`pause_verdict`, pure). Debug-only
+  `list` for the robot.
 - **`portable.rs`** — portable-mode detection (a `portable` marker next to the exe
   redirects data to `<exe>/Data`).
 - **`e2e.rs`** — **test mode** for the end-to-end UI suite (debug builds started
   with `YAP_E2E=1`; compiled out of release builds): no global input hook, no
-  paste/Enter/Ctrl+C into other apps (nor "Paste last transcript"), no reading the
+  paste/Enter/Ctrl+C into other apps (nor "Paste last transcript"), no other
+  app's sound silenced or paused (`realtest::other_apps`), no reading the
   text around another app's cursor or its window's title (`app_kind`), no `set_focus` (tao's fallback presses Alt
   in the focused app), no Windows notifications, no native context menu on
   screen (`context_menu.rs` records what it would hold; robot mode shows it), no orphan-sidecar sweep, no
@@ -1492,8 +1538,17 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `stop_and_transcribe`, the real mic's audio dropped meanwhile — `TEST_FEED`; a
   recording may start without a mic), `realtest_window`, `realtest_refusals`,
   `realtest_clipboard { save | restore | setText | setImage | check }` (never
-  hands the clipboard's contents out). See [`docs/e2e-tests.md`](./docs/e2e-tests.md)
-  "Real-app robot tests".
+  hands the clipboard's contents out), `realtest_other_apps` (the test's own
+  audio sessions and media, and what `mute.rs` holds down). **Other apps'
+  sound** (`mute.rs`, `media_pause.rs`) has its own guard: `other_apps()` =
+  All in a normal run, Nobody in plain test mode (nothing silenced or
+  paused), TestsOwn in robot mode — an audio session only if its process or
+  an ancestor is in `YAP_REALTEST_PIDS` (by start time) or a process whose
+  visible titled windows **all** carry the nonce (`audio_permits`, pure
+  `decide_audio`: so a Windows Terminal hosting the developer's own windows
+  never counts), media only if its title has the nonce (`media_permits`) —
+  so a robot run never lowers or pauses the developer's own music. See
+  [`docs/e2e-tests.md`](./docs/e2e-tests.md) "Real-app robot tests".
 - **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
   `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
   **Debug mode** (Settings → Advanced → Debug Logging, OpenWhispr Developer-
@@ -1900,7 +1955,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
 - **`lib/Settings.svelte`** — the settings surface, now rendered **inside the
   ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / Connections / System):
   **General** (hotkey, recording mode — in push-to-talk its line says how
-  double-tap goes hands-free, mic, sound+volume, mute; **Yap bar** group
+  double-tap goes hands-free, mic, sound+volume, then "Silence other apps
+  while you dictate" (`quietOtherApps`) and "Pause music and videos while
+  you dictate" (`pauseMedia`) where "Mute while recording" was; **Yap bar** group
   (`#settings-bar`, the bar menu's Settings → "general#bar"): Show the Yap bar
   (`barEnabled`; "Turn off the bar" in its menu arrives as `yap-bar-changed`
   and is adopted), a "Hidden until 15:40 · Show it now" row while hidden for an
@@ -2179,7 +2236,10 @@ pasted), AI cleanup via the fake model, terminal one-line mode / coding-CLI line
 breaks / auto-submit, chat full stops, the mic path from a TTS WAV
 (`realtest_dictate_wav`) incl. the dead-mic watchdog, the **correction-learning
 flow** (the real watch over UI Automation, a word fixed in the field, Enter, the
-suggestion toast, Add → `config.json`), and **real STT** (Parakeet
+suggestion toast, Add → `config.json`), **other apps' sound** (the test pad
+looping a near-silent tone goes to 0 after the start chime and back to exactly
+its level; an Edge page whose media title has the nonce pauses and plays
+again: `other-apps.real.js`), and **real STT** (Parakeet
 hears Windows TTS saying "the quick brown fox…") on an `engines` build
 (`npm run test:real:build -- --engines` → `<drive>:\t-real`; the model copied
 read-only from `%APPDATA%\yap\models`). **The guard**: Yap may paste / press keys /
@@ -2187,7 +2247,10 @@ read only in windows of `YAP_REALTEST_PIDS` (+ descendants, by start time) or
 titled with the run's `YAP_REALTEST_NONCE`; everything else is refused (logged,
 toast, `realtest_refusals`), the foreground re-checked right before every
 `SendInput` and again just after (a focus change in between fails the test,
-naming the process). ⚠ **It takes the keyboard focus for ~2 min** (runs locally
+naming the process). Silencing and pausing other apps follow the same rule
+(sessions of the test's processes, or of a process whose windows all carry
+the nonce; media titled with the nonce): your own music is never touched.
+⚠ **It takes the keyboard focus for ~2 min** (runs locally
 only, not on CI): say so before running it while Nathan's at the PC; another app
 grabbing the focus mid-run makes Yap refuse (the harness retries a refused paste
 twice). Known gaps it found are "known gap: …" tests pinning today's result (see
@@ -2334,6 +2397,10 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   (`dict_usage.rs`). Safe to delete (the order falls back to the list's).
 - Hints: `%APPDATA%/yap/hints.json` — how often each push-to-talk coaching hint
   showed, when the last did, and whether double-tap has been used (`coaching.rs`).
+- Quieted apps: `%APPDATA%/yap/quieted_apps.json` — only while a dictation
+  has other apps silenced (each session's id, exe and level before), so a
+  Yap that crashed mid-dictation brings them back at its next start
+  (`mute.rs`); gone again once they're back.
 - Word suggestions: `%APPDATA%/yap/word_suggestions.json` — when Yap last
   offered a word for the dictionary, per "heard→term" pair your "Not now"
   count and "Don't suggest this", and the words you removed from the
@@ -2395,7 +2462,12 @@ language/translate, **AI cleanup** (BYO key or local sidecar) with per-app routi
 named profiles + per-profile model choice, **edit/rewrite mode** + the **Voice Agent
 wake word**, combo hotkeys, the audio pre-roll (anti first-word clipping), **live
 streaming partials** (sliding-window, on by default, word-paced overlay reveal —
-validated live 2026-07-10), transcription history + stats, cleanup presets, real WASAPI mute,
+validated live 2026-07-10), transcription history + stats, cleanup presets,
+**other apps silenced or paused while you dictate** (`mute.rs` + `media_pause.rs`,
+2026-10-17: per app after the start chime, never calls, back to exactly
+their level after the stop chime; the rules unit-tested, the volume drop and
+restore and the pause and resume checked by the robot on an Edge page it
+opened),
 the dictionary's **snippets**, the **"press enter" voice command** and a Whisper
 vocabulary ranked by use (2026-10-17: unit-tested, the Dictionary/Settings UI
 e2e-tested, not yet tried with real speech), **terminal & coding-CLI pasting**

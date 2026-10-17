@@ -189,9 +189,22 @@ pub struct YapConfig {
     /// "pushToTalk" (hold to record, release to stop).
     #[serde(default = "default_recording_mode")]
     pub recording_mode: String,
-    /// Mute system output audio while recording (Windows).
+    /// "Silence other apps while you dictate" (`mute.rs`): once the start
+    /// chime has played, other apps' audio sessions go quiet, and after the
+    /// stop chime each comes back to exactly its level. Never Yap's own
+    /// sound, a call app's, or a browser holding a meeting. Off by default.
+    /// Configs from before 2026-10-17 call it `muteWhileRecording` (it muted
+    /// the whole output device, the chime and any call included): the alias
+    /// carries the choice over.
+    #[serde(default, alias = "muteWhileRecording")]
+    pub quiet_other_apps: bool,
+    /// "Pause music and videos while you dictate" (`media_pause.rs`): media
+    /// that's playing (Windows' media controls: Spotify, a YouTube tab…) is
+    /// paused once the start chime has played and played again after the
+    /// stop chime — only what Yap paused. Never a call app. Off by default,
+    /// as Wispr Flow's.
     #[serde(default)]
-    pub mute_while_recording: bool,
+    pub pause_media: bool,
     /// Append a single space after each injected transcription. With
     /// `smart_spacing` on it only applies where Yap couldn't read the field.
     #[serde(default)]
@@ -572,7 +585,8 @@ impl Default for YapConfig {
             dictionary_fuzzy: true,
             learn_words: true,
             recording_mode: default_recording_mode(),
-            mute_while_recording: false,
+            quiet_other_apps: false,
+            pause_media: false,
             append_trailing_space: false,
             smart_spacing: true,
             chat_no_full_stop: true,
@@ -1243,6 +1257,22 @@ mod tests {
         fresh.as_object_mut().unwrap().remove("configVersion");
         from_empty.as_object_mut().unwrap().remove("configVersion");
         assert_eq!(fresh, from_empty);
+    }
+
+    #[test]
+    fn mute_while_recording_carries_over_to_silencing_other_apps() {
+        // Saved before 2026-10-17: the old switch, on or off.
+        let on: YapConfig = serde_json::from_str(r#"{"muteWhileRecording":true}"#).unwrap();
+        assert!(on.quiet_other_apps && !on.pause_media);
+        let off: YapConfig = serde_json::from_str(r#"{"muteWhileRecording":false}"#).unwrap();
+        assert!(!off.quiet_other_apps);
+        // Saved since: the new names, and the old one is gone.
+        let saved = serde_json::to_value(&on).unwrap();
+        assert_eq!(saved["quietOtherApps"], true);
+        assert_eq!(saved["pauseMedia"], false);
+        assert!(saved.get("muteWhileRecording").is_none());
+        let fresh = YapConfig::default();
+        assert!(!fresh.quiet_other_apps && !fresh.pause_media, "both off unless chosen");
     }
 
     #[test]

@@ -7,7 +7,9 @@
 //                                 a multi-line text box, a rich text box and
 //                                 a password box. Driven over stdin/stdout,
 //                                 one JSON object per line; quits when its
-//                                 stdin closes.
+//                                 stdin closes. It can also play a WAV on a
+//                                 loop (`play` / `stop`): sound of the
+//                                 test's own, for "Silence other apps".
 //   yaprobot focus <hwnd>         bring a window to the front (no input sent
 //                                 to any other app)
 //   yaprobot foreground           the window in front (its handle only)
@@ -439,6 +441,7 @@ class TestPad : Form {
     readonly PadRich rich;
     readonly PadBox password;
     readonly List<object> pastes = new List<object>();
+    System.Media.SoundPlayer player;
 
     public static int Run(string label) {
         Application.EnableVisualStyles();
@@ -582,6 +585,19 @@ class TestPad : Form {
             case "pastes": {
                 reply["pastes"] = new List<object>(pastes);
                 pastes.Clear();
+                break;
+            }
+            case "play": {
+                // A WAV on a loop from this process: an audio session of the
+                // test's own for "Silence other apps while you dictate".
+                if (player != null) player.Stop();
+                player = new System.Media.SoundPlayer((string)req["path"]);
+                player.Load();
+                player.PlayLooping();
+                break;
+            }
+            case "stop": {
+                if (player != null) { player.Stop(); player.Dispose(); player = null; }
                 break;
             }
             default: throw new ArgumentException("unknown command " + cmd);

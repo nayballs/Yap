@@ -472,7 +472,8 @@
   // not yet include, so the bindings always have something to bind to.
   const FIELD_DEFAULTS = {
     recordingMode: 'toggle',
-    muteWhileRecording: false,
+    quietOtherApps: false,
+    pauseMedia: false,
     appendTrailingSpace: false,
     smartSpacing: true,
     chatNoFullStop: true,
@@ -1548,8 +1549,23 @@
                 hint={`${Math.round(cfg.audioFeedbackVolume * 100)}%`}
               />
             </Row>
+            <!-- Other apps' sound while you dictate (mute.rs, media_pause.rs):
+                 after the start chime, back after the stop chime. -->
             <Row>
-              <Toggle bind:checked={cfg.muteWhileRecording} label="Mute while recording" desc="Silence other system audio while you dictate" />
+              <Toggle
+                bind:checked={cfg.quietOtherApps}
+                label="Silence other apps while you dictate"
+                desc="Music, videos and games go quiet while you talk, then come back as they were"
+                hint="Yap's chime still plays, and calls are never silenced: not Teams, Zoom or other call apps, nor a meeting in your browser."
+              />
+            </Row>
+            <Row>
+              <Toggle
+                bind:checked={cfg.pauseMedia}
+                label="Pause music and videos while you dictate"
+                desc="What's playing pauses when you start and plays again when you're done"
+                hint="Anything in Windows' media controls, like Spotify or a YouTube tab. Only what Yap paused plays again, and calls are never paused."
+              />
             </Row>
           </Group>
 

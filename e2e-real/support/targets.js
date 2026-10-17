@@ -200,6 +200,13 @@ export async function startTestPad(label) {
     async pastes() {
       return (await call({ cmd: 'pastes' })).pastes;
     },
+    /** Play a WAV on a loop from the pad's own process (its own audio session). */
+    async play(file) {
+      await call({ cmd: 'play', path: file });
+    },
+    async stopPlaying() {
+      await call({ cmd: 'stop' });
+    },
     async close() {
       child.stdin.end();
       const done = await Promise.race([new Promise((r) => child.once('exit', () => r(true))), sleep(5_000)]);
@@ -447,6 +454,79 @@ ${beside ? `<div class="beside"><span>${beside[0]}</span> ${box} <span>${beside[
     async close() {
       await browser.close().catch(() => {});
       // Every process of this profile (and only this profile).
+      for (const pid of processesWith(profile, ['msedge.exe'])) killTree(pid);
+    },
+  };
+}
+
+/**
+ * An Edge app window (a fresh, throwaway profile) playing `wav` on a loop,
+ * titled "Yap robot audio - <nonce>", with that title in Windows' media
+ * controls too (`navigator.mediaSession`): the only media Yap may pause in
+ * robot mode (realtest.rs `media_permits`). `state()` reads the page's
+ * player over the DevTools protocol: `{ paused, time }`.
+ */
+export async function startMediaPage({ nonce, dir, wav }) {
+  const exe = edgeExe();
+  if (!exe) throw new Error('Microsoft Edge not found');
+  fs.mkdirSync(dir, { recursive: true });
+  const title = `Yap robot audio - ${nonce}`;
+  fs.copyFileSync(wav, path.join(dir, 'tone.wav'));
+  const page = path.join(dir, 'audio.html');
+  fs.writeFileSync(
+    page,
+    `<!doctype html><meta charset="utf-8"><title>${title}</title>
+<style>body{font:15px Segoe UI,sans-serif;margin:16px;background:#f4f1ea}</style>
+<p>Yap robot: a quiet tone on a loop.</p>
+<audio id="a" src="tone.wav" loop></audio>
+<script>
+const a = document.getElementById('a');
+if ('mediaSession' in navigator) {
+  navigator.mediaSession.metadata = new MediaMetadata({ title: ${JSON.stringify(title)}, artist: 'Yap robot' });
+}
+a.play().catch((e) => (document.title = 'blocked ' + e.message));
+</script>`,
+  );
+  const before = new Set(findWindows(nonce).map((w) => w.hwnd));
+  const profile = path.join(dir, 'edge-profile');
+  const child = spawn(
+    exe,
+    [
+      `--user-data-dir=${profile}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-sync',
+      '--autoplay-policy=no-user-gesture-required',
+      '--remote-debugging-port=0',
+      '--window-size=520,240',
+      '--window-position=700,140',
+      `--app=file:///${page.replace(/\\/g, '/')}`,
+    ],
+    { stdio: 'ignore', detached: true, windowsHide: false },
+  );
+  child.unref();
+  const win = await waitForWindow(
+    nonce,
+    (w) => w.cls.startsWith('Chrome_WidgetWin') && w.title.startsWith(title) && !before.has(w.hwnd),
+    { what: 'Edge audio window' },
+  );
+  const portFile = path.join(profile, 'DevToolsActivePort');
+  const deadline = Date.now() + 15_000;
+  while (!fs.existsSync(portFile) && Date.now() < deadline) await sleep(100);
+  const port = fs.readFileSync(portFile, 'utf8').split('\n')[0].trim();
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+  const tab = browser
+    .contexts()
+    .flatMap((c) => c.pages())
+    .find((p) => p.url().startsWith('file:'));
+  if (!tab) throw new Error("Couldn't find the audio page over CDP");
+  return {
+    hwnd: win.hwnd,
+    pid: win.pid,
+    title,
+    state: () => tab.evaluate(() => ({ paused: document.getElementById('a').paused, time: document.getElementById('a').currentTime })),
+    async close() {
+      await browser.close().catch(() => {});
       for (const pid of processesWith(profile, ['msedge.exe'])) killTree(pid);
     },
   };

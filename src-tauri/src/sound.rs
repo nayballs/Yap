@@ -17,16 +17,21 @@ const NOTE_ATTACK: f32 = 0.015;
 const MAX_GAIN: f32 = 0.2;
 const MIN_GAIN: f32 = 0.0001;
 
+/// Run once a chime has played (on the chime's thread), or straight away
+/// when it can't play: the other apps go quiet after the start chime and
+/// come back after the stop chime (`mute.rs`).
+pub type Played = Box<dyn FnOnce() + Send + 'static>;
+
 /// Rising chime — recording started. `volume` scales loudness (0.0–1.0).
 /// `device` selects the output device by name (None = system default).
-pub fn play_start(volume: f32, device: Option<&str>) {
-    play_cue(&START_NOTES, volume, device);
+pub fn play_start(volume: f32, device: Option<&str>, played: Option<Played>) {
+    play_cue(&START_NOTES, volume, device, played);
 }
 
 /// Falling chime — recording stopped / processing. `volume` scales loudness.
 /// `device` selects the output device by name (None = system default).
-pub fn play_stop(volume: f32, device: Option<&str>) {
-    play_cue(&STOP_NOTES, volume, device);
+pub fn play_stop(volume: f32, device: Option<&str>, played: Option<Played>) {
+    play_cue(&STOP_NOTES, volume, device, played);
 }
 
 /// Render the note sequence into a mono f32 buffer: per note, a linear
@@ -78,26 +83,30 @@ fn open_output(device: Option<&str>) -> Option<(rodio::OutputStream, rodio::Outp
     rodio::OutputStream::try_default().ok()
 }
 
-fn play_cue(notes: &'static [f32], volume: f32, device: Option<&str>) {
+fn play_cue(notes: &'static [f32], volume: f32, device: Option<&str>, played: Option<Played>) {
     let peak = MAX_GAIN * volume.clamp(0.0, 1.0);
-    if peak <= 0.0 {
+    if peak <= 0.0 && played.is_none() {
         return;
     }
     let device = device.map(str::to_string);
     // Play on a detached thread; OutputStream must stay alive until the
-    // sink drains, and sleep_until_end() blocks.
+    // sink drains, and sleep_until_end() blocks. `played` runs after it
+    // (and after a chime that couldn't play), on the same thread.
     thread::spawn(move || {
         use rodio::buffer::SamplesBuffer;
         use rodio::Sink;
 
-        let Some((_stream, handle)) = open_output(device.as_deref()) else {
-            return;
-        };
-        let Ok(sink) = Sink::try_new(&handle) else {
-            return;
-        };
-        let samples = render_cue(notes, peak);
-        sink.append(SamplesBuffer::new(1, SAMPLE_RATE, samples));
-        sink.sleep_until_end();
+        if peak > 0.0 {
+            if let Some((_stream, handle)) = open_output(device.as_deref()) {
+                if let Ok(sink) = Sink::try_new(&handle) {
+                    let samples = render_cue(notes, peak);
+                    sink.append(SamplesBuffer::new(1, SAMPLE_RATE, samples));
+                    sink.sleep_until_end();
+                }
+            }
+        }
+        if let Some(f) = played {
+            f();
+        }
     });
 }

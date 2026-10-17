@@ -906,9 +906,11 @@ KeyTips) and Win the Start menu.
   and assumes the two mic streams deliver within ~40 ms of each other. Meeting
   talk in the same chunk as a dictation is one "You" line, dated at its first
   speech, so talk after the dictation can show above the marker (as with
-  turns within a chunk). With **Mute while recording** on, the call itself is
-  muted during a dictation, so "Them" misses that stretch too. Checked with
-  the e2e player's signal; a real hotkey dictation mid-call wants a dev pass.
+  turns within a chunk). "Silence other apps while you dictate" never
+  touches a call app, nor any browser while a meeting records, so "Them"
+  carries on through a dictation (until 2026-10-17 the old "Mute while
+  recording" muted the whole output, the call included). Checked with the
+  e2e player's signal; a real hotkey dictation mid-call wants a dev pass.
 - **The output device.** Yap follows Windows' default ("console") output. A
   call app playing on another device, or on the default *communications*
   device when that differs, isn't heard; the quiet-side warning says so but
