@@ -183,12 +183,25 @@ pub fn configure_meeting_hotkey(spec: String) {
     let _ = crate::input_hook::configure_meeting(&spec);
 }
 
-/// Toggle recording on/off (same action as the global hotkey).
+/// Toggle recording on/off (the bar's Dictate, a view's mic button).
 #[tauri::command]
 pub fn toggle_recording(state: State<'_, AppState>) {
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.toggle();
+        }
+    }
+}
+
+/// The dictation hotkey went down (`pressed`) or up in one of Yap's own
+/// windows — their in-page fallback, since the global hook never sees keys
+/// while a Yap webview has the focus. Same path as the hook's events, so
+/// push-to-talk's hold, tap and double-tap work there too.
+#[tauri::command]
+pub fn dictation_key(state: State<'_, AppState>, pressed: bool) {
+    if let Ok(guard) = state.pipeline.lock() {
+        if let Some(p) = guard.as_ref() {
+            p.on_key(pressed, None);
         }
     }
 }

@@ -436,19 +436,17 @@
     if (!hotkeyMatchesKeydown(e, cfg?.hotkey)) return;
     e.preventDefault();
     e.stopPropagation();
-    flog('in-window hotkey fallback: keydown -> toggle_recording');
-    invoke('toggle_recording').catch(() => {});
+    flog('in-window hotkey fallback: keydown -> dictation_key');
+    invoke('dictation_key', { pressed: true }).catch(() => {});
   }
   function onFallbackKeyUp(e) {
     if (recordingKey) return;
     if (!hotkeyMatchesKeyup(e, cfg?.hotkey)) return;
-    // Push-to-talk: the release stops the recording (toggle mode ignores it —
-    // in toggle mode recording only flips on keydown).
-    if (cfg?.recordingMode === 'pushToTalk') {
-      e.preventDefault();
-      flog('in-window hotkey fallback: keyup -> toggle_recording (PTT)');
-      invoke('toggle_recording').catch(() => {});
-    }
+    // Push-to-talk: the release stops the recording, or leaves a double-tap
+    // hands-free (toggle mode ignores it). The mode is Rust's to apply.
+    e.preventDefault();
+    flog('in-window hotkey fallback: keyup -> dictation_key');
+    invoke('dictation_key', { pressed: false }).catch(() => {});
   }
 
   onMount(() => {

@@ -679,14 +679,15 @@
     } else if (hotkeyMatchesKeydown(e, cfg.hotkey)) {
       e.preventDefault();
       e.stopPropagation();
-      invoke('toggle_recording').catch(() => {});
+      invoke('dictation_key', { pressed: true }).catch(() => {});
     }
   }
+  // The key coming up: push-to-talk's release (Rust decides by the mode).
   function onKeyUp(e) {
-    if (!cfg || cfg.recordingMode !== 'pushToTalk') return;
+    if (!cfg) return;
     if (hotkeyMatchesKeyup(e, cfg.hotkey)) {
       e.preventDefault();
-      invoke('toggle_recording').catch(() => {});
+      invoke('dictation_key', { pressed: false }).catch(() => {});
     }
   }
 

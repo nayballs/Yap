@@ -188,11 +188,24 @@ export async function resetUi(main) {
  * (Playwright's key names stop at F12, so this talks CDP directly.)
  */
 export async function pressHotkey(page) {
+  await hotkeyEvents(page, ['rawKeyDown', 'keyUp']);
+}
+
+/** The seeded dictation hotkey going down (push-to-talk: held until `hotkeyUp`). */
+export async function hotkeyDown(page) {
+  await hotkeyEvents(page, ['rawKeyDown']);
+}
+
+/** The seeded dictation hotkey coming up. */
+export async function hotkeyUp(page) {
+  await hotkeyEvents(page, ['keyUp']);
+}
+
+async function hotkeyEvents(page, types) {
   const cdp = await page.context().newCDPSession(page);
   try {
     const key = { key: 'F24', code: 'F24', windowsVirtualKeyCode: 135, nativeVirtualKeyCode: 135 };
-    await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...key });
-    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+    for (const type of types) await cdp.send('Input.dispatchKeyEvent', { type, ...key });
   } finally {
     await cdp.detach().catch(() => {});
   }

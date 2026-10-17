@@ -12,6 +12,7 @@
   // reports `expireAction`; a `countdown` shows "Starting notes in 7…" with a
   // ring. Every answer goes back to Rust (`bar_card_action`).
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
+  import { fillHotkey } from '../hotkeys.js';
 
   /** @type {{ card: any, paused?: boolean, onaction: (action: string) => void }} */
   let { card, paused = false, onaction } = $props();
@@ -28,8 +29,12 @@
     timer: 'Meeting',
     screen: 'Tip',
     error: 'Error',
+    tip: 'Tip',
   };
   const chip = $derived(card.chip ?? CHIPS[card.icon] ?? null);
+  // A card naming a hotkey (the push-to-talk hints) says `{key}`.
+  const title = $derived(card.hotkey ? fillHotkey(card.title, card.hotkey) : card.title);
+  const body = $derived(card.hotkey ? fillHotkey(card.body, card.hotkey) : card.body);
 </script>
 
 <div class="card" data-region={`card:${card.id}`} role="status" aria-live="polite">
@@ -48,14 +53,16 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8" /><path d="M12 16v4" /></svg>
       {:else if card.icon === 'error'}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
+      {:else if card.icon === 'tip'}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6" /><path d="M10 21h4" /><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1.1 2V16h5v-.2c.1-.8.5-1.5 1.1-2A6 6 0 0 0 12 3z" /></svg>
       {:else if card.icon === 'notes'}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" /></svg>
       {/if}
       {chip}
     </span>
   {/if}
-  <div class="title">{card.title}</div>
-  {#if card.body}<div class="body">{card.body}</div>{/if}
+  <div class="title">{title}</div>
+  {#if body}<div class="body">{body}</div>{/if}
   {#if card.countdown}
     <div class="countdown">
       <svg class="ring" viewBox="0 0 18 18" aria-hidden="true">

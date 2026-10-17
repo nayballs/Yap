@@ -291,6 +291,22 @@ pub fn e2e_main_on_screen(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Test mode only: the dictation mic's audio arrives as digital silence
+/// (`silent: true`), as a muted mic's does, until `silent: false` — the
+/// dead-mic watchdog's case (`mic_watch.rs`) on the machine's real
+/// microphone, whose stream it really reopens. Dictation only: a meeting's
+/// test audio never comes from a mic.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_dictation_mic(silent: bool) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    tracing::info!(silent, "e2e: dictation mic");
+    crate::pipeline::set_test_silent_mic(silent);
+    Ok(())
+}
+
 /// Test mode only: hand the meeting being recorded transcript segments, as
 /// if its recorder had just transcribed them (`{ source, text, ts }`; `ts`
 /// in unix seconds, so a test can stage hours of meeting at once). They're
