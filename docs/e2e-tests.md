@@ -328,10 +328,12 @@ included.)
   ranges also run past the box into the page's text when Yap reads 500
   characters either side (`yaprobot caret` shows it; harmless while a block's
   line break separates them).
-- The fuzzy pass takes the short word before a term into its 2-word n-gram
-  and swallows it: with "cube and eighties → Kubernetes" (near-misses on, as
-  a learned word is), "Deploy it to cube and eighties." becomes "Deploy it
-  Kubernetes." (`learn.real.js`).
+
+Fixed since: the fuzzy pass took the short word before a term into its
+2-word n-gram and swallowed it ("Deploy it to cube and eighties." became
+"Deploy it Kubernetes."); `fuzzy.rs` no longer takes a run whose first word
+adds nothing to the match, and `learn.real.js` now expects "Deploy it to
+Kubernetes.".
 
 Fixed since: a WinForms text box gives UI Automation a value but no caret,
 so Yap read it as if the cursor were at the end ("I want | please" + "The
