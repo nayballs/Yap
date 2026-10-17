@@ -19,6 +19,9 @@
 //! `utils/dictionaryEchoFilter.js` — with a dictionary `initial_prompt`,
 //! Whisper on (near-)silence tends to hallucinate the prompt back; that guard
 //! detects a transcript that is essentially just the dictionary words.
+//!
+//! And for learning words from your corrections (`learn.rs`): how alike two
+//! spellings are written (`spelling_distance`) and sound (`sound_distance`).
 
 use crate::config::DictionaryEntry;
 

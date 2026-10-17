@@ -97,10 +97,12 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
   `calendar.json` — connected calendars + the next week of meetings,
   `dictionary_usage.json` — how often/lately each dictionary word was used,
   `dict_usage.rs`, `icons/` — a cache of the installed call apps' own icons,
-  `app_icons.rs`, `hints.json` — push-to-talk coaching counts, `coaching.rs`).
+  `app_icons.rs`, `hints.json` — push-to-talk coaching counts, `coaching.rs`,
+  `word_suggestions.json` — your answers to "Add this word to your
+  dictionary?", `learn.rs`).
   Every JSON store writes atomically and quarantines a corrupt file on load
   instead of crashing (`config::atomic_write`/`quarantine_corrupt`, used by all
-  nine stores).
+  ten stores).
 
 ---
 
@@ -129,8 +131,10 @@ Pipeline order after transcription: **AI cleanup → dictionary (exact, then a
 fuzzy near-miss pass) → the "press enter" voice command → snippets → fit to the
 text around the cursor (smart spacing; where the field couldn't be read,
 append-space as before) → inject → submit key (auto-submit or the voice
-command, once)** (`pipeline::finish_dictation` does the dictionary, the command
-and snippets; `text_injector::prepare_dictation` the fitting). Cleanup is
+command, once) — or, with no submit key, the correction watch (`learn.rs`:
+fix a word Yap typed and it offers to add it to the dictionary)**
+(`pipeline::finish_dictation` does the dictionary, the command and snippets;
+`text_injector::prepare_dictation` the fitting). Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation
 never blocks. The dictionary runs Handy's split (ported from its source):
 **Whisper models** get the correct spellings as the decoder's `initial_prompt`
@@ -949,7 +953,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   key store — the UI swaps the active `pp_api_key` from it on provider switch), `cleanup_profiles` (each
   with an optional per-profile LLM override: provider/base_url/model/api_key — empty
   provider = inherit global) + `app_routes` smart routing, streaming_partials,
-  history_enabled, update_checks_enabled, dictionary_fuzzy, the meeting
+  history_enabled, update_checks_enabled, dictionary_fuzzy, learn_words
+  ("Suggest words from your corrections", default on, `learn.rs`), the meeting
   notepad: meeting_open_notepad (default on) + meeting_split_screen (default
   off) + meeting_live_transcript (default on) + meeting_consent_message (the
   notepad's "Copy consent message" text; empty = the default), call detection:
@@ -985,7 +990,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   Runs after `apply_dictionary` for ONNX models (`dictionary_fuzzy`, default on);
   snippets are never candidates.
   Also `is_prompt_echo` (OpenWhispr `dictionaryEchoFilter` port) used by `stt.rs`
-  against Whisper hallucinating the dictionary prompt on silence.
+  against Whisper hallucinating the dictionary prompt on silence, and, for
+  `learn.rs`, `spelling_distance` (Handy's score on the letters alone, no
+  length gate) and `sound_distance` over `sound_key` (a Soundex/Metaphone-
+  style consonant key: alike sounds merged, silent letters and vowels
+  dropped — "cube and eighties" ≈ "Kubernetes", "kpnts"/"kprnts").
 - **`dict_usage.rs`** — how much each dictionary word is used, for the Whisper
   prompt's order (Wispr Flow ranks its vocabulary the same way):
   `<data>/dictionary_usage.json`, word (lowercased `to`) → `{uses, lastUsed}`
@@ -998,6 +1007,48 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the last day, then 14 days, then the rest; within each most uses first; then
   the order added. The meeting prompt ranks the dictionary but keeps the
   attendees ahead of it. Best-effort everywhere.
+- **`learn.rs`** — **"Suggest words from your corrections"**
+  (`config.learn_words`, default on; Wispr Flow's dictionary auto-learn by
+  behaviour, OpenWhispr's `correctionLearner.js` alignment, but local and
+  asked, never assumed). **The watch** (`after_paste`, from `run_stt` after
+  a paste with no submit key; never in a test run): a thread holds the
+  focused field (`selection::WatchedField`: the target window's process, not
+  a password box, not read-only), finds the pasted text in a ±2,000-char
+  read around the caret right after the paste and remembers ~24 chars either
+  side of it (`Anchors`, with an 8-char fallback when those were edited),
+  then every 700 ms for up to 45 s finds the span between them again. It
+  stops when the window or the element loses the focus, another dictation
+  starts (`pipeline::dictation_state`), or the span grows far past the paste
+  (writing on); a changed span that sits still 2.5 s is looked at, and the
+  last one when it stops. In memory only; logs carry lengths and counts.
+  **The candidates** (`suggestions`, pure, unit-tested): pasted vs edited
+  words aligned by LCS (case- and edge-punctuation-blind); the gaps between
+  matches are the changes. Kept: 1–3 words → 1–3 words (spelled-out letters
+  count as one) whose new text looks like a term — a capital inside a word,
+  an acronym, digits, a word that isn't an everyday one (the built-in
+  `FREQUENT` list with simple stemming, then **Windows' spell checker**,
+  `ISpellChecker` for the user's locale + English, read-only), a capital
+  mid-sentence, or several words heard as one non-everyday word ("power to
+  keep" → "Parakeet") — and that spells or sounds like what Yap typed
+  (`fuzzy::spelling_distance`/`sound_distance` ≤ 0.5, ≤ 0.3 for keys of ≤ 3);
+  plus a case change that makes a term of a non-everyday word ("github" →
+  "GitHub"). Skipped: insertions/deletions, punctuation, a single everyday
+  word heard ("motion" → "Notion" would rewrite every "motion"), only
+  function words, terms (or triggers) already in the dictionary, and edits
+  rewriting most of the dictation. ≤ 3. **The prompt** (`offer`): "Add
+  “Kubernetes” to your dictionary? Yap heard “cube and eighties”." — Add /
+  Not now / "Don't suggest this"; a toast (`yap-word-suggestion`,
+  `wordSuggestions.js`) while the main window is on screen, else a Yap bar
+  card (`word-suggestion`, icon `dictionary`; ✕ = Not now, 30 s fade = no
+  answer); neither → nothing (never a Windows notification). Add
+  (`word_suggestion_respond`) appends `{from: heard, to: term, fuzzy: true}`,
+  saves config.json, updates the pipeline's live config and emits
+  `yap-dictionary-learned {entries, added}`, which Settings adopts (and
+  passes to DictionaryView as `yap-dictionary-external`). Not now twice (✕
+  counts) or "Don't suggest this" retires the pair; one prompt per 3 min.
+  Answers in `<data>/word_suggestions.json` (not config.json: Settings'
+  wholesale saves). Debug-only `e2e_learn_correction {pasted, edited,
+  before?, fresh?}` stages an edit for the e2e suite (skips the 3-min gap).
 - **`tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
   menu (model submenu w/ checkmark, Cancel while recording, Settings/Quit, Check for
   updates → Settings → About + a manual check); left-click opens Settings. A ready
@@ -1054,7 +1105,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `meeting_detect` (call prompts as Wispr's "Meeting detected" card, "Taking
   notes…", failures), `meeting_guard` (length warning with Keep going,
   notices), `updates` ("Yap X is ready"), `calendar` (the reminder before a
-  meeting, as a call card), `coaching` (push-to-talk tips). An Esc watch (a low-level keyboard
+  meeting, as a call card), `coaching` (push-to-talk tips), `learn` (a word
+  to add to the dictionary). An Esc watch (a low-level keyboard
   hook that only looks) runs only while an on-screen card offers Esc (the
   auto-start countdown). Debug-only `bar_simulate` (pretend cursor on a
   region, fake fullscreen kinds, Esc, demo cards) and `bar_debug` (the real
@@ -1129,7 +1181,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   ("e2e: not pasting the last transcript"). No hotkey for it yet. (Verify-after-paste
   over UIA is still a follow-up.) `#[ignore]`d `private_clipboard_round_trip` runs
   the real clipboard code on a private window station (never the person's clipboard).
-- **`selection.rs`** — UI Automation reads of the field Yap types into. **Edit
+- **`selection.rs`** — UI Automation reads of the field Yap types into. **After
+  the paste** (`WatchedField`, for `learn.rs`): the focused element held on
+  the watch's thread, `is_focused` (`CompareElements`), `read(chars)` → a
+  `FieldWindow` (text around the caret, line breaks as `\n`, whether it
+  reached the field's start/end; TextPattern, else a short ValuePattern
+  value); same refusals (other processes, passwords, read-only, test runs),
+  300 ms timeouts. **Edit
   mode** (`capture_selection`): the selected text (TextPattern, else the Ctrl+C
   trick), 2 s UIA timeouts. **The text around the cursor** (`begin_dictation(target,
   read)` from `start_recording`, `take_context()` at paste): when `smart_spacing` is
@@ -1190,7 +1248,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   hooks; the `main` fixture runs it before every test, since call prompts
   only go in-app while the window is on screen), `e2e_dictation_mic { silent }`
   (the dictation mic's real audio zeroed, as a muted mic's — the dead-mic
-  watchdog's case, its stream really reopened), `e2e_coaching_reset` (every
+  watchdog's case, its stream really reopened), `e2e_learn_correction` (an
+  edit of a pasted dictation as the correction watch would see it — the watch
+  itself never runs in a test run), `e2e_coaching_reset` (every
   push-to-talk hint due again), calendar secrets in
   `<data>/calendar-secrets.e2e.json` instead of
   Credential Manager and links recorded (`calendar_e2e_opened`) instead of
@@ -1281,7 +1341,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   patch)` changes a live toast in place; mounted in ControlPanel and wired to
   action runs, meeting start/stop, uploads, clipboard copies, debug-mode
   toggles, backend `yap-error` events, push-to-talk coaching (`yap-hint` → a
-  10 s Tip toast, `{key}` named by `fillHotkey`), and the **update toast**
+  10 s Tip toast, `{key}` named by `fillHotkey`), **word suggestions**
+  (`wordSuggestions.js` — learn.rs's `yap-word-suggestion`: "Add
+  “Kubernetes” to your dictionary? Yap heard “cube and eighties”." with Add /
+  Not now / a "Don't suggest this" link, chip Dictionary, `icon:
+  'dictionary'`, 30 s; ✕ = Not now; after Add "“Kubernetes” is in your
+  dictionary" + Open Dictionary), and the **update toast**
   (`updates.svelte.js` — the shared update store started by ControlPanel:
   sticky "Yap X is ready" + Restart to update / Later / What's new, then
   Downloading… / Restarting Yap… in place; "Updated to X" after the
@@ -1367,7 +1432,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the dictionary (promoted out of Settings → Advanced; syncs with
   Settings' cfg copy via `yap-dictionary-changed`/`-external` events) in two
   sections over the one list: **Corrections** (heard → replace with, the ≈
-  near-miss button, "Catch near-misses") and **Snippets** ("You say" pill →
+  near-miss button, "Catch near-misses", and "Suggest words from your
+  corrections" — `learnWords`, `learn.rs`; it rides along in the
+  `yap-dictionary-changed` detail with `entries` and `fuzzy` so Settings'
+  copy keeps it) and **Snippets** ("You say" pill →
   "Yap types" growing text box, line breaks kept; nothing seeded). Settings'
   `buildClean` keeps each entry's `snippet` flag — drop it and an auto-save
   turns snippets into corrections. Settings → Advanced → Output has "Say
@@ -1928,6 +1996,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   (`dict_usage.rs`). Safe to delete (the order falls back to the list's).
 - Hints: `%APPDATA%/yap/hints.json` — how often each push-to-talk coaching hint
   showed, when the last did, and whether double-tap has been used (`coaching.rs`).
+- Word suggestions: `%APPDATA%/yap/word_suggestions.json` — when Yap last
+  offered a word for the dictionary, and per "heard→term" pair your "Not now"
+  count and "Don't suggest this" (`learn.rs`). Never the field text it read.
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`).
 - App icons: `%APPDATA%/yap/icons/` — `<app>.png` per installed call app and
@@ -1950,7 +2021,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   while recording/transcribing (no off switch — it's the hot-mic indicator),
   live transcription preview **on**
   (`streaming_partials`), AI cleanup **off**, the "press enter" voice command
-  **on** (`voice_enter`), call detection **on**
+  **on** (`voice_enter`), word suggestions from your corrections **on**
+  (`learn_words` — it only asks; nothing is added without a click), call
+  detection **on**
   (`meeting_detection` — it only asks; nothing records without a click) as
   **pop-ups** (`meeting_detect_style`), for work apps only (Discord, WhatsApp,
   Signal and Telegram start switched off; `meeting_detect_apps` holds changes),
@@ -1981,7 +2054,11 @@ streaming partials** (sliding-window, on by default, word-paced overlay reveal �
 validated live 2026-07-10), transcription history + stats, cleanup presets, real WASAPI mute,
 the dictionary's **snippets**, the **"press enter" voice command** and a Whisper
 vocabulary ranked by use (2026-10-17: unit-tested, the Dictionary/Settings UI
-e2e-tested, not yet tried with real speech),
+e2e-tested, not yet tried with real speech), **word suggestions from your
+corrections** (`learn.rs`, 2026-10-17: fix a word Yap typed and it offers to
+add it to the dictionary; the rules unit-tested, the prompt/Add/toggle/bar
+card e2e-tested through a staged edit, the UIA reads and Windows' spell
+checker by `--ignored` tests on hidden windows — not yet tried in real apps),
 the Groq usage meter, and the installer + auto-updater (background checks + download
 while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
 `updates.rs`, 2026-10-05) + portable mode + release CI.
@@ -2085,8 +2162,7 @@ the calendar has no one-click Outlook (Microsoft Graph) and no pre-meeting
 brief;
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see [`ROADMAP.md`](./ROADMAP.md) Phase 1);
-dictionary auto-learning (from your edits after a paste) and multi-phrase
-entries; verify-after-paste (UIA `ValuePattern`);
+multi-phrase dictionary entries; verify-after-paste (UIA `ValuePattern`);
 Authenticode signing (blocked on SignPath approval); audio-history export; and
 non-Windows (Linux/macOS) polish. See [`ROADMAP.md`](./ROADMAP.md).
 
