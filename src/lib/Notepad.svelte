@@ -39,6 +39,7 @@
   import ToastHost from './ui/ToastHost.svelte';
   import { toast } from './ui/toast.svelte.js';
   import { renderMarkdown } from './markdown.js';
+  import { nextModel, modelLine, whereItRuns } from './aiModel.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
   import { openExternalLink } from './externalLinks.js';
   import { initMeetingCheckIns } from './meetingCheckIn.js';
@@ -458,9 +459,15 @@
     askBusyText = busyText;
     scrollThread();
     try {
-      const r = await call();
+      // Who answers (the Note Formatting scope, else cleanup), kept with it;
+      // "Nothing new" and "too little to go on" come from Yap itself.
+      const [r, answeredBy] = await Promise.all([call(), nextModel('notes')]);
       if (note?.id !== id) return;
-      askThread = [...askThread, { id: `${Date.now()}-${++askSeq}`, role: 'assistant', text: r.answer, plain: !!r.plain }];
+      const model = r.nothingNew || r.tooLittle ? null : answeredBy;
+      askThread = [
+        ...askThread,
+        { id: `${Date.now()}-${++askSeq}`, role: 'assistant', text: r.answer, plain: !!r.plain, model },
+      ];
       after?.(r);
     } catch (e) {
       if (note?.id !== id) return;
@@ -1219,6 +1226,9 @@
                         <button class="fb" class:on={feedback[m.id]?.rating === 'up'} aria-label="Good answer" aria-pressed={feedback[m.id]?.rating === 'up'} onclick={() => rate(m, 'up')}>{@render icon('up')}</button>
                         <button class="fb" class:on={feedback[m.id]?.rating === 'down'} aria-label="Bad answer" aria-pressed={feedback[m.id]?.rating === 'down'} onclick={() => rate(m, 'down')}>{@render icon('down')}</button>
                         <button class="fb" aria-label="Copy answer" onclick={() => copyAnswer(m)}>{@render icon(copiedAnswer === m.id ? 'check' : 'copy')}</button>
+                        {#if m.model}
+                          <span class="mamodel" title={whereItRuns(m.model)}>{modelLine(m.model)}</span>
+                        {/if}
                       </div>
                     {/if}
                   </div>
@@ -2545,8 +2555,18 @@
   }
   .mabtns {
     display: flex;
+    align-items: center;
     gap: 4px;
     margin-top: 4px;
+  }
+  /* the model that answered, quietly beside the buttons */
+  .mamodel {
+    margin-left: 6px;
+    font-size: 11px;
+    color: var(--yap-paper-date);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .fb {
     display: inline-flex;

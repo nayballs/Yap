@@ -318,7 +318,7 @@
     {:else if activeView === 'dictionary'}
       <DictionaryView />
     {:else if activeView === 'chat'}
-      <ChatView />
+      <ChatView onopensettings={openSettings} />
     {:else if activeView === 'notes'}
       <NotesView onopensettings={openSettings} />
     {:else if activeView === 'meetings'}

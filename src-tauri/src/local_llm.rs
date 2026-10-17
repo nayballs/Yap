@@ -290,6 +290,28 @@ pub async fn start() -> Result<String, String> {
     Err("llamafile did not become ready in time".to_string())
 }
 
+/// The sidecar's URL: as it is when it's up, after the start already under
+/// way (never a second process), else after starting it. For callers that
+/// need the model now (the AI Chat on the on-device model).
+pub async fn ensure_started() -> Result<String, String> {
+    if let Some(url) = base_url() {
+        return Ok(url);
+    }
+    if PORT.load(Ordering::SeqCst) != 0 && !child_exited() {
+        for _ in 0..HEALTH_TIMEOUT_SECS {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            if let Some(url) = base_url() {
+                return Ok(url);
+            }
+            if PORT.load(Ordering::SeqCst) == 0 {
+                break;
+            }
+        }
+        return base_url().ok_or_else(|| "llamafile did not become ready in time".to_string());
+    }
+    start().await
+}
+
 /// Kill any orphaned llamafile processes left over from a previous session.
 /// Crashes and task-kill end Yap WITHOUT running the `RunEvent::Exit` handler
 /// (so did the Tauri updater before updates.rs ran `shutdown_cleanup` from its

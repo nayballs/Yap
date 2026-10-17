@@ -160,7 +160,7 @@
     cleanup: 'Configure the model that cleans up your dictation.',
     voiceAgent: 'Configure the model that runs your spoken commands ("Hey {name}, …" or the edit / rewrite hotkey).',
     noteFormatting: 'Configure the model that formats dictation into notes. Coming soon.',
-    chat: 'Configure the model that powers voice chat. Coming soon.',
+    chat: 'Configure the model that answers in Chat and in the Ask bar on your notes.',
   };
   // Per-scope UI copy + seed config for the three non-cleanup bubbles.
   const SCOPE_DEFAULTS = {
@@ -766,7 +766,11 @@
     // MCP page lands): stay put.
     if (target !== 'account' && !NAV_GROUPS.some((g) => g.items.some((i) => i.id === target))) return;
     section = target;
-    if (card) {
+    // "cleanup#chat": Language Models on one scope's tab (the Chat view's
+    // model chip).
+    if (target === 'cleanup' && SCOPE_TABS.some((t) => t.value === card)) {
+      llmScope = card;
+    } else if (card) {
       tick().then(() => document.getElementById(`settings-${card}`)?.scrollIntoView({ block: 'start' }));
     }
   }
@@ -785,7 +789,11 @@
   // Local API switch): adopt it, or this copy's next auto-save would put the
   // old value back.
   function onConfigPatched(e) {
-    if (cfg && e.detail && typeof e.detail === 'object') Object.assign(cfg, e.detail);
+    if (cfg && e.detail && typeof e.detail === 'object') {
+      Object.assign(cfg, e.detail);
+      // The scope tabs read their scope once (ScopeProviderConfig).
+      if (e.detail.llmScopes) chatScopeRev += 1;
+    }
   }
   $effect(() => {
     window.addEventListener('yap-settings-goto', onSettingsGoto);
@@ -838,6 +846,30 @@
     const un = listen('yap-dictionary-learned', (e) => {
       const entries = e.payload?.entries;
       if (cfg && Array.isArray(entries)) cfg.dictionary = entries.map((x) => ({ ...x }));
+    });
+    return () => un.then((f) => f());
+  });
+  // The Chat view's model chip switched the Chat scope's model (ai_model.rs
+  // chat_set_model saved it): adopt its endpoint, or the next auto-save
+  // would put the old model back. The prompt stays this copy's. The Chat
+  // tab remounts (`chatScopeRev`): its provider pills read the scope once.
+  let chatScopeRev = $state(0);
+  onMount(() => {
+    const un = listen('yap-chat-model-changed', (e) => {
+      const s = e.payload?.scope;
+      if (!cfg || !s || typeof s !== 'object') return;
+      if (!cfg.llmScopes || typeof cfg.llmScopes !== 'object') cfg.llmScopes = {};
+      const cur = cfg.llmScopes.chat || {};
+      // The whole saved scope (every field, so the tab's bindings have
+      // values), with this copy's keys and prompt kept.
+      cfg.llmScopes.chat = {
+        disableThinking: false,
+        ...cur,
+        ...s,
+        apiKeys: { ...(cur.apiKeys || {}), ...(s.apiKeys || {}) },
+        prompt: cur.prompt || s.prompt || SCOPE_DEFAULTS.chat.prompt,
+      };
+      chatScopeRev += 1;
     });
     return () => un.then((f) => f());
   });
@@ -1896,7 +1928,7 @@
               <NoteFormattingConfig {cfg} scope={cfg.llmScopes.noteFormatting} defaultPrompt={SCOPE_DEFAULTS.noteFormatting.prompt} />
             {/key}
           {:else if llmScope === 'chat'}
-            {#key llmScope}
+            {#key `${llmScope}:${chatScopeRev}`}
               <ChatConfig {cfg} scope={cfg.llmScopes.chat} defaultPrompt={SCOPE_DEFAULTS.chat.prompt} />
             {/key}
           {:else}
