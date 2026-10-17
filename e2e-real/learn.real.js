@@ -44,20 +44,18 @@ test('the test pad: a word fixed after the paste is offered, and Add puts it in 
   await expect.poll(async () => lf(await pad.text('box'))).toBe('We use Kubernetes.');
 });
 
-// Known gap, found by this robot (2026-10-17): with a learned word (near-
-// misses on, as every new correction is), the fuzzy pass (fuzzy.rs) takes
-// the short word before the term into its 2-word n-gram — "to Kubernetes"
-// is within the threshold of "Kubernetes" — and swallows it. This pins
-// today's result; once fuzzy.rs leaves a term that's already right alone it
-// fails — then expect "Deploy it to Kubernetes."
-test('known gap: the fuzzy pass swallows "to" before a learned word', async ({ robot }) => {
+// Found by this robot (2026-10-17): with a learned word (near-misses on, as
+// every new correction is), the fuzzy pass (fuzzy.rs) took the short word
+// before the term into its 2-word n-gram — "to Kubernetes" is within the
+// threshold of "Kubernetes" — and swallowed it ("Deploy it Kubernetes.").
+test('the fuzzy pass keeps the word before a learned word', async ({ robot }) => {
   const { pad } = robot;
   await robot.configure({ dictionary: [{ from: 'cube and eighties', to: 'Kubernetes', fuzzy: true, snippet: false }] });
   try {
     await pad.set('box', '');
     const r = await robot.dictate(pad, 'Deploy it to cube and eighties.');
-    expect(r.text).toBe('Deploy it Kubernetes.');
-    await expect.poll(async () => lf(await pad.text('box'))).toBe('Deploy it Kubernetes.');
+    expect(r.text).toBe('Deploy it to Kubernetes.');
+    await expect.poll(async () => lf(await pad.text('box'))).toBe('Deploy it to Kubernetes.');
   } finally {
     await robot.configure({ dictionary: [] });
   }

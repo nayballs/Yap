@@ -1016,7 +1016,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   1–3-word n-grams vs the dictionary's `from`/`to` spellings, normalized Levenshtein
   + Soundex phonetic boost (the `natural` crate's nonstandard variant, replicated
   exactly), threshold 0.18, ≥3-char terms, case/punctuation preserved; shortest-first
-  n-gram choice (deliberate fix over Handy's word-swallowing longest-first greedy).
+  n-gram choice (deliberate fix over Handy's word-swallowing longest-first greedy),
+  and never a run whose first word adds nothing (`first_word_adds_nothing`: the
+  later words make the same term as closely alone), so the word or list marker
+  before a term survives ("to Kubernetes", "1. kubernetes").
   Runs after `apply_dictionary` for ONNX models (`dictionary_fuzzy`, default on);
   snippets are never candidates.
   Also `is_prompt_echo` (OpenWhispr `dictionaryEchoFilter` port) used by `stt.rs`
@@ -2349,9 +2352,9 @@ STT, all checked against real windows by Claude. Known gaps they found (pinned
 as "known gap: …" tests): a WinForms text box gives UI Automation no caret
 (fitted as if at the end); Edge/Chrome report an empty text box's text as its
 label or U+FFFC (a web chat message keeps its full stop and gets a trailing
-space), and their context ranges run past the box into the page; the fuzzy
-pass swallows a short word before a term ("Deploy it to Kubernetes" →
-"Deploy it Kubernetes").
+space), and their context ranges run past the box into the page. (A third,
+the fuzzy pass swallowing a short word before a term — "Deploy it to
+Kubernetes" → "Deploy it Kubernetes" — is fixed, 2026-10-17.)
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation

@@ -134,37 +134,62 @@ fn build_ngram(words: &[&str]) -> String {
         .concat()
 }
 
-/// Finds the best dictionary spelling for `candidate` (Handy's scoring,
-/// verbatim): normalized Levenshtein, ×0.3 on a Soundex hit, ≤25% length
-/// difference (min 2 chars), accept below `THRESHOLD`. Returns the
-/// replacement and the winner's ABSOLUTE edit distance (used by the n-gram
-/// selection in `apply_fuzzy`).
-fn find_best_match<'a>(candidate: &str, candidates: &'a [Candidate]) -> Option<(&'a str, usize)> {
-    if candidate.len() < MIN_TERM_LEN || candidate.len() > 50 {
+/// Handy's scoring of an n-gram against one spelling, verbatim: normalized
+/// Levenshtein, ×0.3 on a Soundex hit, ≤25% length difference (min 2
+/// chars). `Some((score, ABSOLUTE edit distance))` when it's accepted
+/// (below `THRESHOLD`).
+fn score(ngram: &str, key: &str) -> Option<(f64, usize)> {
+    if ngram.len() < MIN_TERM_LEN || ngram.len() > 50 {
+        return None;
+    }
+    let len_diff = (ngram.len() as i32 - key.len() as i32).abs() as f64;
+    let max_len = ngram.len().max(key.len()) as f64;
+    let max_allowed_diff = (max_len * 0.25).max(2.0);
+    if len_diff > max_allowed_diff {
         return None;
     }
 
+    let lev = levenshtein(ngram, key);
+    let lev_score = if max_len > 0.0 { lev as f64 / max_len } else { 1.0 };
+    let combined = if soundex_eq(ngram, key) { lev_score * 0.3 } else { lev_score };
+    (combined < THRESHOLD).then_some((combined, lev))
+}
+
+/// Finds the best dictionary spelling for `candidate` (the lowest
+/// [`score`]). Returns the replacement and the winner's ABSOLUTE edit
+/// distance (used by the n-gram selection in `apply_fuzzy`).
+fn find_best_match<'a>(candidate: &str, candidates: &'a [Candidate]) -> Option<(&'a str, usize)> {
     let mut best: Option<(&str, usize)> = None;
     let mut best_score = f64::MAX;
 
     for c in candidates {
-        let len_diff = (candidate.len() as i32 - c.key.len() as i32).abs() as f64;
-        let max_len = candidate.len().max(c.key.len()) as f64;
-        let max_allowed_diff = (max_len * 0.25).max(2.0);
-        if len_diff > max_allowed_diff {
-            continue;
-        }
-
-        let lev = levenshtein(candidate, &c.key);
-        let lev_score = if max_len > 0.0 { lev as f64 / max_len } else { 1.0 };
-        let combined = if soundex_eq(candidate, &c.key) { lev_score * 0.3 } else { lev_score };
-
-        if combined < THRESHOLD && combined < best_score {
-            best = Some((c.replacement, lev));
-            best_score = combined;
+        if let Some((combined, lev)) = score(candidate, &c.key) {
+            if combined < best_score {
+                best = Some((c.replacement, lev));
+                best_score = combined;
+            }
         }
     }
     best
+}
+
+/// Whether the words of `run` after its first — all of them, or fewer —
+/// already make `replacement` by themselves, at most `dist` edits away.
+/// Then the first word isn't part of the near-miss and the run would
+/// swallow it: "to Kubernetes" is 2 edits from "kubernetes", and "Deploy it
+/// to Kubernetes." lost its "to"; "1. kubernetes" its number; "- nginx" its
+/// space. (Only the same word counts: in "Chad GPT" the "Chad" still makes
+/// "ChatGPT" with a dictionary that has "GPT" too.)
+fn first_word_adds_nothing(run: &[&str], replacement: &str, dist: usize, candidates: &[Candidate]) -> bool {
+    (1..run.len()).any(|from| {
+        (from + 1..=run.len()).any(|to| {
+            let ngram = build_ngram(&run[from..to]);
+            candidates
+                .iter()
+                .filter(|c| c.replacement == replacement)
+                .any(|c| score(&ngram, &c.key).is_some_and(|(_, lev)| lev <= dist))
+        })
+    })
 }
 
 /// Preserves the case pattern of the original word when applying a replacement
@@ -204,9 +229,9 @@ fn extract_punctuation(word: &str) -> (&str, &str) {
 }
 
 /// Applies fuzzy dictionary correction to `text` (Handy's `apply_custom_words`
-/// adapted to Yap's `{from → to}` entries). Greedy longest-first n-grams
-/// (3 → 1); each match consumes its words and emits the entry's `to` with the
-/// original case pattern + edge punctuation.
+/// adapted to Yap's `{from → to}` entries). Greedy n-grams of 1–3 words (which
+/// one wins: see the loop); each match consumes its words and emits the
+/// entry's `to` with the original case pattern + edge punctuation.
 pub fn apply_fuzzy(text: &str, dict: &[DictionaryEntry]) -> String {
     let candidates = build_candidates(dict);
     if candidates.is_empty() {
@@ -224,14 +249,18 @@ pub fn apply_fuzzy(text: &str, dict: &[DictionaryEntry]) -> String {
         // adjacent word: "Charge B, che" matched "ChargeBee" as a 3-gram
         // at essentially the same score — verified against the real
         // strsim/natural crates — and "che" vanished from the output.)
+        // Nor is a run taken whose first word adds nothing to the match:
+        // that protects the word BEFORE a term ("to Kubernetes").
         let mut chosen: Option<(usize, &str, usize)> = None; // (n, replacement, dist)
         for n in 1..=3usize {
             if i + n > words.len() {
                 break;
             }
-            let ngram = build_ngram(&words[i..i + n]);
-            if let Some((replacement, dist)) = find_best_match(&ngram, &candidates) {
-                if chosen.is_none_or(|(_, _, best)| dist < best) {
+            let run = &words[i..i + n];
+            if let Some((replacement, dist)) = find_best_match(&build_ngram(run), &candidates) {
+                if chosen.is_none_or(|(_, _, best)| dist < best)
+                    && !first_word_adds_nothing(run, replacement, dist, &candidates)
+                {
                     chosen = Some((n, replacement, dist));
                 }
             }
@@ -468,6 +497,39 @@ mod tests {
         // exact rule is jaison→JSON; the fuzzy pass catches "jaisen" too
         let dict = vec![entry("jaison", "JSON")];
         assert_eq!(apply_fuzzy("parse the jaisen file", &dict), "parse the JSON file");
+    }
+
+    #[test]
+    fn word_before_a_term_is_not_swallowed() {
+        // "to Kubernetes" → "tokubernetes" is 2/12 from "kubernetes": the
+        // 2-gram used to win and the "to" vanished (found by the real-app
+        // robot, learn.real.js).
+        let dict = vec![entry("cube and eighties", "Kubernetes")];
+        assert_eq!(apply_fuzzy("Deploy it to Kubernetes.", &dict), "Deploy it to Kubernetes.");
+        assert_eq!(apply_fuzzy("run a Kubernetes cluster", &dict), "run a Kubernetes cluster");
+        // the near-miss itself is still caught, the "to" kept
+        assert_eq!(apply_fuzzy("move it to cube and eighties", &dict), "move it to Kubernetes");
+        assert_eq!(apply_fuzzy("move it to cube and eighty", &dict), "move it to Kubernetes");
+    }
+
+    #[test]
+    fn list_markers_before_a_term_are_kept() {
+        let dict = vec![entry("", "Kubernetes")];
+        assert_eq!(apply_fuzzy("1. kubernetes", &dict), "1. Kubernetes");
+        assert_eq!(apply_fuzzy("- kubernetes", &dict), "- Kubernetes");
+        assert_eq!(apply_fuzzy("deploy — Kubernetes", &dict), "deploy — Kubernetes");
+        // a near-miss after a bullet too (the bullet adds no letters)
+        assert_eq!(apply_fuzzy("- kubernets", &dict), "- Kubernetes");
+    }
+
+    #[test]
+    fn first_word_of_a_longer_term_still_counts() {
+        // "GPT" alone is another dictionary word; "Chad"/"Chat" still make
+        // "ChatGPT" with it.
+        let dict = vec![entry("", "ChatGPT"), entry("", "GPT")];
+        assert_eq!(apply_fuzzy("ask Chad GPT", &dict), "ask ChatGPT");
+        assert_eq!(apply_fuzzy("ask Chat GPT", &dict), "ask ChatGPT");
+        assert_eq!(apply_fuzzy("ask GPT", &dict), "ask GPT");
     }
 
     #[test]
