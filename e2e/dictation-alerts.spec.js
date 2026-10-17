@@ -2,6 +2,13 @@
 // as a toast in the main window while it's on screen, else a card on the
 // Yap bar (else a Windows notification, which a test run never posts).
 //
+// - An app running as administrator (elevated.rs): Windows drops Yap's
+//   keys, so the text is left on the clipboard and Yap says "Your text is
+//   copied: press Ctrl+V". A test run reads no other process's integrity
+//   level: `e2e_paste_elevated` makes every target count as an admin app
+//   (and, as always in a test run, nothing is pasted or copied). The real
+//   check (`OpenProcess` → the token's integrity level) is unit-tested on
+//   Yap's own process; a real elevated window would need a UAC prompt.
 // - Windows' microphone privacy switches (mic_privacy.rs): "Windows is
 //   blocking microphone access for desktop apps" with Open settings, when a
 //   recording starts and in place of the dead-mic watchdog's "No sound from
@@ -37,8 +44,50 @@ async function mainAway(yap) {
 }
 
 test.afterEach(async ({ yap }) => {
+  await yap.invoke('e2e_paste_elevated', { on: false }).catch(() => {});
   await yap.invoke('e2e_mic_privacy', { blocked: null }).catch(() => {});
   await yap.invoke('e2e_dictation_mic', { silent: false }).catch(() => {});
+});
+
+test('an app running as administrator: "Paste last transcript" says the text is copied', async ({ yap, main, shot }) => {
+  await yap.invoke('e2e_paste_elevated', { on: true });
+  expect(await yap.invoke('paste_last_transcript')).toBe(DICTATION.text);
+  const toast = main.getByRole('status').filter({ hasText: 'Your text is copied: press Ctrl+V' });
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText("Yap can't type into apps running as administrator");
+  await expect(toast).toContainText('Paste'); // its chip
+  await expect(toast.getByRole('button', { name: 'Open settings' })).toHaveCount(0);
+  expect(logCount(yap, 'e2e: the app counts as an admin app; not pasting the last transcript')).toBe(1);
+  await shot(main, '01-paste-blocked-toast');
+  await closeToasts(main);
+
+  // The main window away: a card on the Yap bar says it instead.
+  await mainAway(yap);
+  try {
+    expect(await yap.invoke('paste_last_transcript')).toBe(DICTATION.text);
+    const card = yap.overlay.getByRole('status').filter({ hasText: 'Your text is copied: press Ctrl+V' });
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('Paste');
+    await yap.overlay.waitForTimeout(300); // its entrance
+    await shot(yap.overlay, '02-paste-blocked-card');
+    await yap.invoke('bar_card_action', { id: 'pasteBlocked', action: '' });
+    await expect(card).toHaveCount(0);
+  } finally {
+    await yap.invoke('open_settings');
+  }
+});
+
+test('a dictation into an admin app: nothing pasted, the person told, history kept', async ({ yap, main }) => {
+  await needsMic(yap);
+  await yap.invoke('e2e_paste_elevated', { on: true });
+  const before = dictations(yap);
+  await pressHotkey(main);
+  await expect(capsule(yap)).toBeVisible();
+  await main.waitForTimeout(800);
+  await pressHotkey(main);
+  await expect(main.getByRole('status').filter({ hasText: 'Your text is copied: press Ctrl+V' })).toBeVisible();
+  await expectStore(yap, 'history.json', (h) => h.length === before + 1 && JSON.stringify(h).includes('STT stub'));
+  expect(logCount(yap, 'e2e: the target counts as an admin app; not pasting the text')).toBeGreaterThan(0);
 });
 
 test("Windows' microphone privacy: said when a recording starts, with Open settings", async ({ yap, main, shot }) => {

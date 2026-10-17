@@ -217,6 +217,9 @@ pub(crate) struct Delivered {
     pub submit: Option<String>,
     /// Why the paste or the key didn't happen (a refusal in robot mode).
     pub error: Option<String>,
+    /// The app runs as administrator: nothing was pasted, the text was
+    /// left on the clipboard (`elevated.rs`).
+    pub left_on_clipboard: bool,
 }
 
 /// The latest dictation's report, for the robot's WAV dictations (which
@@ -1028,10 +1031,13 @@ impl Shared {
                 }
                 tracing::info!(text = %out, "Rewrite");
                 let _ = self.app.emit("yap-transcript", out.clone());
-                if let Err(e) =
-                    crate::text_injector::inject_text(&out, restore_clipboard, target).await
-                {
-                    tracing::warn!("Rewrite inject failed: {}", e);
+                match crate::text_injector::inject_text(&out, restore_clipboard, target).await {
+                    Ok(crate::text_injector::Delivery::Pasted) => {}
+                    // An app running as administrator: on the clipboard.
+                    Ok(crate::text_injector::Delivery::LeftOnClipboard) => {
+                        crate::alert::show_soon(&self.app, crate::elevated::alert());
+                    }
+                    Err(e) => tracing::warn!("Rewrite inject failed: {}", e),
                 }
                 let _ = self.app.emit("yap-state", "idle");
             }
@@ -1365,7 +1371,17 @@ impl Shared {
             )
             .await
             {
-                Ok(()) => {
+                // An app running as administrator took no keys: the
+                // text is on the clipboard, and the person is told
+                // to paste it (no submit key, no correction watch).
+                Ok(crate::text_injector::Delivery::LeftOnClipboard) => {
+                    report.left_on_clipboard = true;
+                    if submit.is_some() {
+                        tracing::info!("Not pressing the submit key: the app runs as administrator");
+                    }
+                    crate::alert::show_soon(&self.app, crate::elevated::alert());
+                }
+                Ok(crate::text_injector::Delivery::Pasted) => {
                     // Once, whether auto-submit, the voice
                     // command or both asked for it.
                     if let Some(key) = &submit {

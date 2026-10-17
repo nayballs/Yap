@@ -23,6 +23,7 @@ mod config;
 mod context_menu;
 mod dict_usage;
 mod e2e;
+mod elevated;
 mod fuzzy;
 mod gesture;
 mod media;
@@ -496,6 +497,8 @@ pub fn run() {
             e2e::e2e_dictation_mic,
             #[cfg(debug_assertions)]
             mic_privacy::e2e_mic_privacy,
+            #[cfg(debug_assertions)]
+            elevated::e2e_paste_elevated,
             #[cfg(debug_assertions)]
             context_menu::e2e_context_menus,
             #[cfg(debug_assertions)]

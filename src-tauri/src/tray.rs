@@ -305,7 +305,7 @@ fn on_menu_event(app: &AppHandle, id: &str) {
             let _ = crate::commands::show_onboarding(app);
         }
         // Off the main thread: it focuses the app and waits on the paste.
-        "paste_last" => crate::text_injector::paste_last_from_tray(),
+        "paste_last" => crate::text_injector::paste_last_from_tray(app),
         other if other.starts_with("meeting_record:") => {
             // Off the main thread: starting the recorder blocks for a moment
             // and looks at the main window.
