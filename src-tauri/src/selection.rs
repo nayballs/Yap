@@ -20,11 +20,11 @@
 //!    dictation exactly as it would be without it. The text is kept in memory
 //!    for that one dictation only and never logged (lengths only).
 //! 3. **The field after the paste** ([`WatchedField`], for `learn.rs`): the
-//!    element a dictation was just pasted into, held for under a minute and
-//!    read a little either side of the caret to see whether a word Yap typed
-//!    gets corrected. Same rules: that window's process only, never a
-//!    password box or a read-only field, never in a test run, time-boxed
-//!    calls, in memory only.
+//!    element a dictation was just pasted into, held for about a minute and
+//!    read whole (up to 15,000 characters, focused or not) to see whether a
+//!    word Yap typed gets corrected. Same rules: that window's process only,
+//!    never a password box or a read-only field, never in a test run,
+//!    time-boxed calls, in memory only.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -162,12 +162,16 @@ pub fn read_context(target_hwnd: Option<isize>) -> Option<FieldContext> {
     ctx
 }
 
-/// A stretch of a field's text around the caret, as the post-paste watch
-/// reads it: line breaks as `\n`, no-break spaces as spaces.
+/// A field's text as the post-paste watch reads it: line breaks as `\n`,
+/// no-break spaces as spaces, a field showing only its placeholder empty.
+/// [`WatchedField::read`] reads the whole field: `from_start` is always
+/// true there, and `to_end` false only when the field was longer than asked
+/// (then `text` is its start).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FieldWindow {
     pub text: String,
-    /// Byte offset of the caret (or the selection's start) in `text`.
+    /// Byte offset of the caret (or the selection's start) in `text`; its
+    /// end when the field has none Yap can read.
     pub caret: usize,
     /// `text` begins at the field's start / ends at its end.
     pub from_start: bool,
@@ -201,25 +205,18 @@ impl WatchedField {
         }
     }
 
-    /// It still has the keyboard focus.
-    pub fn is_focused(&self) -> bool {
+    /// The whole field now, focused or not (you may have looked elsewhere
+    /// before fixing a word): up to `limit` characters, and the caret in
+    /// them. Longer → its first `limit` + 1 characters, `to_end` false.
+    /// `None`: the element is gone or didn't answer in time.
+    pub fn read(&self, limit: usize) -> Option<FieldWindow> {
         #[cfg(windows)]
         {
-            self.inner.is_focused()
-        }
-        #[cfg(not(windows))]
-        false
-    }
-
-    /// Up to `chars` characters either side of the caret now.
-    pub fn read(&self, chars: usize) -> Option<FieldWindow> {
-        #[cfg(windows)]
-        {
-            self.inner.read(chars)
+            self.inner.read(limit)
         }
         #[cfg(not(windows))]
         {
-            let _ = chars;
+            let _ = limit;
             None
         }
     }
@@ -447,7 +444,8 @@ mod uia {
     /// The field a dictation was pasted into, for the post-paste watch.
     /// Fields drop in order: the COM objects, then COM itself.
     pub struct Watched {
-        automation: IUIAutomation,
+        /// The client the element came from (its timeouts), kept with it.
+        _automation: IUIAutomation,
         element: IUIAutomationElement,
         _com: Com,
     }
@@ -464,7 +462,7 @@ mod uia {
                     return None;
                 }
                 let watched = Watched {
-                    automation,
+                    _automation: automation,
                     element,
                     _com: com,
                 };
@@ -473,31 +471,17 @@ mod uia {
             }
         }
 
-        /// It's still the focused element.
-        pub fn is_focused(&self) -> bool {
-            unsafe {
-                match self.automation.GetFocusedElement() {
-                    Ok(now) => self
-                        .automation
-                        .CompareElements(&self.element, &now)
-                        .map(|same| same.as_bool())
-                        .unwrap_or(false),
-                    Err(_) => false,
-                }
-            }
-        }
-
-        /// Up to `chars` characters either side of the caret (TextPattern),
-        /// or the whole value when it's short enough (ValuePattern).
-        pub fn read(&self, chars: usize) -> Option<FieldWindow> {
-            unsafe { text_window(&self.element, chars).or_else(|| value_window(&self.element, chars)) }
+        /// The whole field, up to `limit` characters (see
+        /// [`super::WatchedField::read`]).
+        pub fn read(&self, limit: usize) -> Option<FieldWindow> {
+            unsafe { whole_field(&self.element, limit) }
         }
     }
 
     /// [`Watched::read`] for a window's own element (the tests' edit
     /// control), by handle rather than by focus.
     #[cfg(test)]
-    pub fn window_watch(hwnd: isize, chars: usize) -> Option<FieldWindow> {
+    pub fn window_watch(hwnd: isize, limit: usize) -> Option<FieldWindow> {
         let _com = Com::init()?;
         let automation = automation(super::WATCH_TIMEOUT_MS)?;
         unsafe {
@@ -507,7 +491,7 @@ mod uia {
             if element.CurrentIsPassword().ok()?.as_bool() {
                 return None;
             }
-            text_window(&element, chars).or_else(|| value_window(&element, chars))
+            whole_field(&element, limit)
         }
     }
 
@@ -516,56 +500,71 @@ mod uia {
         crate::learn::normalise(s)
     }
 
-    /// TextPattern: the text either side of the caret (or the selection),
-    /// and whether it reached the field's start and end.
-    unsafe fn text_window(element: &IUIAutomationElement, chars: usize) -> Option<FieldWindow> {
+    /// The whole text of a field (TextPattern, else ValuePattern), its
+    /// placeholder counting as empty.
+    unsafe fn whole_field(element: &IUIAutomationElement, limit: usize) -> Option<FieldWindow> {
+        let w = whole_text(element, limit).or_else(|| whole_value(element, limit))?;
+        let shown = w.text.trim();
+        if shown.is_empty() {
+            return Some(w);
+        }
+        Some(match element.CurrentHelpText() {
+            Ok(hint) if hint.to_string().trim() == shown => FieldWindow {
+                text: String::new(),
+                caret: 0,
+                ..w
+            },
+            _ => w,
+        })
+    }
+
+    /// TextPattern: the document's text (its first `limit` + 1 characters
+    /// when longer: `to_end` false), and where the caret (or the selection)
+    /// starts in it.
+    unsafe fn whole_text(element: &IUIAutomationElement, limit: usize) -> Option<FieldWindow> {
         let pattern: IUIAutomationTextPattern = element.GetCurrentPattern(UIA_TextPatternId).ok()?.cast().ok()?;
-        let range = match pattern.GetSelection() {
-            Ok(ranges) if ranges.Length().unwrap_or(0) > 0 => ranges.GetElement(0).ok()?,
-            _ => {
-                let p2: IUIAutomationTextPattern2 =
-                    element.GetCurrentPattern(UIA_TextPattern2Id).ok()?.cast().ok()?;
-                let mut active = BOOL(0);
-                p2.GetCaretRange(&mut active).ok()?
-            }
+        let caret: Option<IUIAutomationTextRange> = match pattern.GetSelection() {
+            Ok(ranges) if ranges.Length().unwrap_or(0) > 0 => ranges.GetElement(0).ok(),
+            _ => element
+                .GetCurrentPattern(UIA_TextPattern2Id)
+                .ok()
+                .and_then(|p| p.cast::<IUIAutomationTextPattern2>().ok())
+                .and_then(|p2| {
+                    let mut active = BOOL(0);
+                    p2.GetCaretRange(&mut active).ok()
+                }),
         };
-        if let Ok(v) = range.GetAttributeValue(UIA_IsReadOnlyAttributeId) {
+        let document = pattern.DocumentRange().ok()?;
+        if let Ok(v) = caret.as_ref().unwrap_or(&document).GetAttributeValue(UIA_IsReadOnlyAttributeId) {
             if bool::try_from(&v).unwrap_or(false) {
                 return None;
             }
         }
-        let n = chars as i32;
-        let selection = range.GetText(n).ok()?.to_string();
-        if selection.chars().count() >= chars {
-            return None; // a selection this long can't be read whole
-        }
-        let before = range.Clone().ok()?;
-        before
-            .MoveEndpointByRange(TextPatternRangeEndpoint_End, &range, TextPatternRangeEndpoint_Start)
-            .ok()?;
-        let moved_back = before
-            .MoveEndpointByUnit(TextPatternRangeEndpoint_Start, TextUnit_Character, -n)
-            .ok()?;
-        let before = tidy(&before.GetText(n * 2).ok()?.to_string());
-        let after = range.Clone().ok()?;
-        after
-            .MoveEndpointByRange(TextPatternRangeEndpoint_Start, &range, TextPatternRangeEndpoint_End)
-            .ok()?;
-        let moved_on = after
-            .MoveEndpointByUnit(TextPatternRangeEndpoint_End, TextUnit_Character, n)
-            .ok()?;
-        let after = tidy(&after.GetText(n * 2).ok()?.to_string());
+        let n = i32::try_from(limit.saturating_add(1)).unwrap_or(i32::MAX);
+        let raw = document.GetText(n).ok()?.to_string();
+        let to_end = raw.chars().count() <= limit;
+        let text = tidy(&raw);
+        let caret = caret
+            .and_then(|range| {
+                let before = document.Clone().ok()?;
+                before
+                    .MoveEndpointByRange(TextPatternRangeEndpoint_End, &range, TextPatternRangeEndpoint_Start)
+                    .ok()?;
+                Some(tidy(&before.GetText(n).ok()?.to_string()).len())
+            })
+            .filter(|&c| c <= text.len() && text.is_char_boundary(c))
+            .unwrap_or(text.len());
         Some(FieldWindow {
-            caret: before.len(),
-            text: format!("{before}{}{after}", tidy(&selection)),
-            from_start: moved_back.abs() < n,
-            to_end: moved_on < n,
+            text,
+            caret,
+            from_start: true,
+            to_end,
         })
     }
 
-    /// ValuePattern (no caret): the whole value of a text field, if it isn't
-    /// read-only or longer than the window would be.
-    unsafe fn value_window(element: &IUIAutomationElement, chars: usize) -> Option<FieldWindow> {
+    /// ValuePattern (no caret: its end): a text field's whole value, if it
+    /// isn't read-only.
+    unsafe fn whole_value(element: &IUIAutomationElement, limit: usize) -> Option<FieldWindow> {
         let kind = element.CurrentControlType().ok()?;
         if ![UIA_EditControlTypeId, UIA_DocumentControlTypeId, UIA_ComboBoxControlTypeId].contains(&kind) {
             return None;
@@ -575,14 +574,13 @@ mod uia {
             return None;
         }
         let value = tidy(&pattern.CurrentValue().ok()?.to_string());
-        if value.chars().count() > chars * 2 {
-            return None;
-        }
+        let to_end = value.chars().count() <= limit;
+        let text: String = if to_end { value } else { value.chars().take(limit + 1).collect() };
         Some(FieldWindow {
-            caret: value.len(),
-            text: value,
+            caret: text.len(),
+            text,
             from_start: true,
-            to_end: true,
+            to_end,
         })
     }
 
@@ -774,6 +772,8 @@ mod tests {
         assert_eq!(ctx.before, "Hello ", "{class}: before a selection");
         assert_eq!(ctx.selection, "world", "{class}: the selection");
         assert_eq!(ctx.after, ". we went home", "{class}: after a selection");
+        let w = super::uia::window_watch(field.hwnd, 2_000).expect("the watch's read");
+        assert_eq!((w.text.as_str(), w.caret), (text, 6), "{class}: the watch, a selection");
         drop(field);
 
         // Long text: 500 characters each side at most, cut between words.
@@ -785,10 +785,14 @@ mod tests {
         assert!(ctx.before.ends_with("word "), "{class}: before ends at the caret");
         assert!(ctx.before.starts_with(' '), "{class}: before cut between words: {:?}", &ctx.before[..10]);
         assert!(ctx.after.starts_with("word"), "{class}: after starts at the caret");
-        // The watch's read of a part: neither end of the field.
+        // The watch's read of a field longer than it takes: its start, and
+        // it says so (too long to watch).
         let w = super::uia::window_watch(field.hwnd, 100).expect("the watch's read");
-        assert!(!w.from_start && !w.to_end, "{class}: a part of the field");
-        assert!(w.text.chars().count() <= 400 && w.text.contains("word word"), "{class}: {}", w.text.len());
+        assert!(w.from_start && !w.to_end, "{class}: cut short");
+        assert_eq!(w.text.chars().count(), 101, "{class}: the first 101 characters");
+        assert!(w.text.starts_with("word word"), "{class}: {}", w.text.len());
+        let w = super::uia::window_watch(field.hwnd, 2_000).expect("the watch's read");
+        assert!(w.to_end && w.text == long && w.caret == 750, "{class}: the whole field");
         drop(field);
 
         // Never a password box; never a read-only field.

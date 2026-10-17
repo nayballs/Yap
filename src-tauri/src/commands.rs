@@ -862,8 +862,12 @@ pub fn save_config(
 ) -> Result<(), String> {
     // Live-apply a Debug-mode change (only on change, so an explicit RUST_LOG
     // env override isn't clobbered by unrelated saves).
-    let prev_debug = config::load().debug_logging;
+    let prev = config::load();
+    let prev_debug = prev.debug_logging;
     config::save(&cfg)?;
+    // Words taken out of the dictionary (from any surface) are never
+    // suggested again (learn.rs; its own store, not config.json).
+    crate::learn::on_dictionary_saved(&prev.dictionary, &cfg.dictionary);
     if cfg.debug_logging != prev_debug {
         crate::set_debug_logging(cfg.debug_logging);
     }

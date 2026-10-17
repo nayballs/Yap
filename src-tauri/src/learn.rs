@@ -7,25 +7,29 @@
 //!
 //! Three parts:
 //!
-//! 1. **The watch** ([`after_paste`], a thread of its own per paste): the
-//!    field the dictation went into is held over UI Automation
-//!    (`selection::WatchedField`: the focused element, in the target
-//!    window's process, never a password box or a read-only field) and its
-//!    text around the caret read every [`POLL`] for up to [`WATCH_FOR`].
-//!    Right after the paste Yap finds the pasted text there and remembers
-//!    the text either side of it ([`Anchors`]); later reads find the span
-//!    between those again, so it follows the pasted text wherever the caret
-//!    goes. The watch ends when the window or the field loses the focus,
-//!    another dictation starts, time is up, or the span grows far past what
-//!    was pasted (that's writing on, not correcting). A span that changed
-//!    and then sat still for [`SETTLE`] is looked at, and whatever it was
-//!    when the watch ended. Everything stays in memory; logs carry lengths
-//!    and counts only. Never in a test run; the pipeline doesn't ask after
-//!    a submit key or for a terminal (its text is the program's output too).
+//! 1. **The watch** ([`after_paste`], a thread of its own per paste; its
+//!    rules are [`Watch`], pure): the field the dictation went into is held
+//!    over UI Automation (`selection::WatchedField`: the focused element, in
+//!    the target window's process, never a password box or a read-only
+//!    field) and read whole every [`POLL`] for [`WATCH_FOR`], focused or
+//!    not — a fix often comes after a glance at another window. Right after
+//!    the paste Yap finds the pasted text there and remembers the text
+//!    either side of it ([`Anchors`]); every read finds the span between
+//!    those again, and a span still within the drift gate ([`within_drift`]:
+//!    not rewritten past a share of its length) becomes the last good edit.
+//!    The watch ends ([`End`]) when time is up, another dictation starts,
+//!    the field is emptied (a chat message sent), the dictation's text or
+//!    its neighbours are deleted, a line break follows it (Enter), the field
+//!    stops answering or passes [`MAX_FIELD_CHARS`] — and whatever the
+//!    reason, the last good edit is what's looked at, so "fix a word, press
+//!    Enter" still counts. Everything stays in memory; logs carry lengths,
+//!    counts and the end's name only. Never in a test run; the pipeline
+//!    doesn't ask after a submit key or for a terminal (its text is the
+//!    program's output too).
 //! 2. **The candidates** ([`suggestions`], pure, unit-tested): the pasted
 //!    and the edited words are aligned (longest common subsequence, ignoring
 //!    case and the punctuation at their edges); what's left between matched
-//!    words are the changes. Kept: 1–3 words replaced by 1–3 words where the
+//!    words are the changes. Kept: 1–4 words replaced by 1–4 words where the
 //!    new text looks like a term worth learning (a capital inside the word,
 //!    an acronym, digits, a word that isn't an ordinary word — the built-in
 //!    list of frequent words, then Windows' spell checker for your
@@ -33,11 +37,13 @@
 //!    what Yap typed (`fuzzy::distance`: Handy's Levenshtein + Soundex score,
 //!    or how alike they sound). Also a change of case alone that makes a
 //!    term of a word that isn't ordinary ("github" → "GitHub"). Skipped:
-//!    insertions and deletions, punctuation, a single ordinary word heard
-//!    (an entry would rewrite that word every time you say it: "motion" →
-//!    "Notion"), a phrase of only function words, typo-style fixes between
-//!    ordinary words, terms already in the dictionary, and edits that
-//!    rewrite most of the dictation. At most [`MAX_SUGGESTIONS`].
+//!    insertions and deletions, punctuation, a new word ending in a
+//!    contraction or a possessive ("it's", "Sinead's"), a single ordinary
+//!    word heard (an entry would rewrite that word every time you say it:
+//!    "motion" → "Notion"), a phrase of only function words, typo-style
+//!    fixes between ordinary words, terms already in the dictionary, and
+//!    edits that rewrite most of the dictation. One per spelling, terms with
+//!    a capital first, at most [`MAX_SUGGESTIONS`].
 //! 3. **The prompt** ([`offer`]): a toast in the main window when it's on
 //!    screen, else a card on the Yap bar (`bar::show_card`); neither → not
 //!    shown, nothing counted, and never a Windows notification. Add → a
@@ -46,16 +52,25 @@
 //!    and the windows' copies (`yap-dictionary-learned`, which Settings
 //!    adopts and passes on to the Dictionary view, so neither puts the old
 //!    list back). Not now (or ✕) twice, or "Don't suggest this", and that
-//!    pair is never offered again; at most one prompt per [`MIN_GAP_MS`].
-//!    The answers live in `<data>/word_suggestions.json` (not config.json:
-//!    Settings auto-saves its whole copy of the config).
+//!    pair is never offered again; a word you remove from the dictionary is
+//!    never offered again at all ([`on_dictionary_saved`], from every save
+//!    of the config); at most one prompt per [`MIN_GAP_MS`]. The answers
+//!    live in `<data>/word_suggestions.json` (not config.json: Settings
+//!    auto-saves its whole copy of the config).
 //!
-//! Behaviour after Wispr Flow's dictionary auto-learn (`references/
-//! wispr-flow/rea-teardown/04-dictation-and-other.md`) and OpenWhispr's
-//! `correctionLearner.js` (word alignment); Wispr has a cloud classifier
-//! confirm each word, Yap decides on this PC and asks you instead.
+//! Behaviour after Wispr Flow's dictionary auto-learn as measured from its
+//! shipped code (`references/wispr-flow/rea-teardown/
+//! 05-dictionary-learning.md`: the minute-long watch and its ends, no end on
+//! a focus change, the drift gate, the last good edit, 4 words, the
+//! contraction filter, removed words never learned again) and OpenWhispr's
+//! `correctionLearner.js` (word alignment). Where Yap differs on purpose:
+//! Wispr has a cloud classifier confirm each word and adds it with an
+//! Undo; Yap decides on this PC and asks you instead. Wispr pins the
+//! dictation between everything before and after it in the field, so an
+//! edit anywhere else ends the watch; Yap pins it between its nearest
+//! neighbours, and picks the occurrence at the caret, not the first.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -76,21 +91,24 @@ pub struct Suggestion {
 
 /// At most this many words per dictation (and per prompt).
 pub const MAX_SUGGESTIONS: usize = 3;
-/// A change of more words than this on either side isn't a mishearing.
-const MAX_WORDS: usize = 3;
+/// A change of more words than this on either side isn't a mishearing
+/// (Wispr's limit is on the corrected side; Yap holds what it heard to it
+/// too, so a fix with deletions beside it isn't taken for one long word).
+const MAX_WORDS: usize = 4;
 /// At most one prompt this often.
 pub const MIN_GAP_MS: u64 = 3 * 60_000;
 /// "Not now" this many times and a pair isn't offered again.
 pub const NOT_NOW_LIMIT: u32 = 2;
 
-/// How long a dictation's field is watched after the paste.
-const WATCH_FOR: Duration = Duration::from_secs(45);
-/// How often it's read.
+/// How long a dictation's field is watched after the paste (Wispr's
+/// observation window).
+const WATCH_FOR: Duration = Duration::from_secs(60);
+/// How often it's read: reads at least 400 ms apart, as Wispr's.
 const POLL: Duration = Duration::from_millis(700);
-/// A changed span that has sat still this long is looked at.
-const SETTLE: Duration = Duration::from_millis(2_500);
-/// How much text either side of the caret each read takes.
-const WINDOW_CHARS: usize = 2_000;
+/// A field longer than this isn't watched (or no longer).
+const MAX_FIELD_CHARS: usize = 15_000;
+/// This many reads in a row failing: the field is gone (or hung).
+const UNREADABLE_AFTER: u32 = 3;
 /// Dictations longer than this aren't watched.
 const MAX_PASTE_CHARS: usize = 1_500;
 /// How much of the text either side of the pasted span is remembered to
@@ -119,6 +137,8 @@ struct Word<'a> {
     key: String,
     /// It starts a sentence or a line (a capital there says nothing).
     starts_sentence: bool,
+    /// It ends in a contraction or a possessive ([`contracted`]).
+    contracted: bool,
 }
 
 /// Punctuation that opens a word / closes it, trimmed off its core.
@@ -132,6 +152,21 @@ fn ends_sentence(token: &str) -> bool {
     token
         .trim_end_matches(['"', '\'', '”', '’', '»', ')', ']', '}'])
         .ends_with(['.', '!', '?', '…', ':'])
+}
+
+/// A token ends in a contraction or a possessive — "it's", "don't",
+/// "we'll", "Sinead's", "students'" — so it's no dictionary word. "O'Brien"
+/// isn't one, nor a word in single quotes ('this').
+fn contracted(token: &str) -> bool {
+    let t = token
+        .trim_start_matches(['"', '“', '«', '‹', '(', '[', '{', '<', '*', '_', '¿', '¡'])
+        .trim_end_matches(['"', '”', '»', '›', ')', ']', '}', '>', '*', '_', ',', '.', ';', ':', '!', '?', '…'])
+        .to_lowercase()
+        .replace(['’', 'ʼ'], "'");
+    if t.ends_with('\'') {
+        return !t.starts_with(['\'', '‘']);
+    }
+    ["'s", "'t", "'ll", "'ve", "'re", "'d", "'m"].iter().any(|end| t.ends_with(end))
 }
 
 /// The words of `text`; `first_starts_sentence`: whether the first one
@@ -170,6 +205,7 @@ fn words(text: &str, first_starts_sentence: bool) -> Vec<Word<'_>> {
             core,
             key: core.to_lowercase().replace('’', "'"),
             starts_sentence: here,
+            contracted: contracted(token),
         });
         pending = ends_sentence(token);
     }
@@ -292,6 +328,10 @@ fn judge(heard: &[Word], term: &[Word], dict: &[DictionaryEntry], ordinary: &dyn
     if alnum(&term_text).chars().count() < 3 || alnum(&heard_text).chars().count() < 2 {
         return None;
     }
+    // "Sinead's", "it'll": a form of a word, not one to learn.
+    if term.iter().any(|w| w.contracted) {
+        return None;
+    }
     // One real word heard: an entry would rewrite it every time it's said
     // ("motion" → "Notion", "tuesday" → "Thursday").
     if heard.len() == 1 && ordinary(&heard[0].key) {
@@ -326,7 +366,7 @@ fn judge(heard: &[Word], term: &[Word], dict: &[DictionaryEntry], ordinary: &dyn
 /// word isn't an everyday one ("slack" → "Slack" would capitalise every
 /// "slack").
 fn judge_case(old: &Word, new: &Word, dict: &[DictionaryEntry], ordinary: &dyn Fn(&str) -> bool) -> Option<Suggestion> {
-    if old.core == new.core || alnum(new.core).chars().count() < 3 || ordinary(&new.key) {
+    if old.core == new.core || alnum(new.core).chars().count() < 3 || new.contracted || ordinary(&new.key) {
         return None;
     }
     if in_dictionary(dict, old.core, new.core) {
@@ -383,6 +423,9 @@ pub fn suggestions(
     if rewritten > (a.len() / 2).max(MAX_WORDS) {
         return Vec::new();
     }
+    // Terms with a capital first (that's how a name or a product looks),
+    // then one per spelling whatever its case.
+    out.sort_by_key(|s| !s.term.chars().any(char::is_uppercase));
     let mut seen: HashSet<String> = HashSet::new();
     out.retain(|s| seen.insert(s.term.to_lowercase()));
     out.truncate(MAX_SUGGESTIONS);
@@ -722,10 +765,10 @@ pub(crate) struct Anchors {
 }
 
 impl Anchors {
-    /// Find `pasted` (normalised, trimmed) in a window read right after the
-    /// paste: the occurrence ending nearest the caret, where a paste leaves
-    /// it. `None`: it isn't there as pasted (not landed yet, or the app
-    /// changed it).
+    /// Find `pasted` (normalised, trimmed) in a read of the field right
+    /// after the paste: the occurrence ending nearest the caret, where a
+    /// paste leaves it (Wispr takes the first). `None`: it isn't there as
+    /// pasted (not landed yet, or the app changed it).
     pub fn find(w: &FieldWindow, pasted: &str) -> Option<Anchors> {
         if pasted.is_empty() {
             return None;
@@ -746,15 +789,37 @@ impl Anchors {
         })
     }
 
-    /// The pasted span as the field has it now (trimmed), between the same
+    /// Where the pasted span is in a read of the field: between the same
     /// neighbours (if their text was edited too, their nearest few
-    /// characters). The candidate nearest the pasted length wins. `None`:
-    /// not in this window (the neighbours changed, or the caret is far off).
-    pub fn locate(&self, w: &FieldWindow) -> Option<String> {
-        self.locate_with(w, ANCHOR_CHARS)
+    /// characters), the candidate nearest the pasted length.
+    pub fn locate(&self, w: &FieldWindow) -> Located {
+        if let Some(span) = self
+            .locate_with(w, ANCHOR_CHARS)
             .or_else(|| self.locate_with(w, SHORT_ANCHOR_CHARS))
+        {
+            return Located::Span(span);
+        }
+        let left = tail(&self.left, SHORT_ANCHOR_CHARS);
+        let right = head(&self.right, SHORT_ANCHOR_CHARS);
+        let left_there = if left.is_empty() {
+            self.at_start && w.from_start
+        } else {
+            w.text.contains(left)
+        };
+        let right_there = if right.is_empty() {
+            self.at_end && w.to_end
+        } else {
+            w.text.contains(right)
+        };
+        if left_there && right_there {
+            Located::Mismatch
+        } else {
+            Located::Gone
+        }
     }
 
+    /// The span (as the field has it, untrimmed) between the neighbours'
+    /// nearest `chars` characters.
     fn locate_with(&self, w: &FieldWindow, chars: usize) -> Option<String> {
         let left = tail(&self.left, chars);
         let right = head(&self.right, chars);
@@ -781,8 +846,19 @@ impl Anchors {
                 }
             }
         }
-        best.map(|(s, e, _)| w.text[s..e].trim().to_string())
+        best.map(|(s, e, _)| w.text[s..e].to_string())
     }
+}
+
+/// [`Anchors::locate`]'s answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Located {
+    /// The span between the neighbours, untrimmed.
+    Span(String),
+    /// A neighbour (or both) isn't in the field any more.
+    Gone,
+    /// Both are, but not one after the other.
+    Mismatch,
 }
 
 /// The same words, however the spaces between them changed.
@@ -790,12 +866,198 @@ fn same_text(a: &str, b: &str) -> bool {
     a.split_whitespace().eq(b.split_whitespace())
 }
 
-/// The span has grown far past the paste: you're writing on, not fixing it.
-fn grew_too_much(span: &str, pasted: &str) -> bool {
-    span.chars().count() > pasted.chars().count() * 2 + 200
+/// The most characters an edit of a `len`-character paste may change and
+/// still be a correction of it: Wispr Flow's drift gate, as measured,
+/// `0.4 / (len / 30 + 1) + 0.2` of its length — about half for a few
+/// words, 0.4 at 30 characters, nearer a fifth for a long dictation.
+fn drift_max(len: usize) -> usize {
+    let len = len as f64;
+    let share = 0.4 / (len / 30.0 + 1.0) + 0.2;
+    (share * len + 1e-9).floor() as usize
+}
+
+/// An edited span is still a correction of `pasted`, not a rewrite or
+/// writing on: their edit distance (characters, case ignored) is within
+/// [`drift_max`].
+pub(crate) fn within_drift(pasted: &str, edited: &str) -> bool {
+    let a: Vec<char> = pasted.chars().flat_map(char::to_lowercase).collect();
+    let b: Vec<char> = edited.chars().flat_map(char::to_lowercase).collect();
+    !a.is_empty() && edit_distance_within(&a, &b, drift_max(pasted.chars().count())).is_some()
+}
+
+/// The Levenshtein distance between `a` and `b`, if it's at most `max`
+/// (given up as soon as it can't be).
+fn edit_distance_within(a: &[char], b: &[char], max: usize) -> Option<usize> {
+    if a.len().abs_diff(b.len()) > max {
+        return None;
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        let mut least = cur[0];
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            cur[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(cur[j] + 1);
+            least = least.min(cur[j + 1]);
+        }
+        if least > max {
+            return None;
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    Some(prev[b.len()]).filter(|&d| d <= max)
+}
+
+/// Line breaks in the whitespace that ends `s`.
+fn trailing_line_breaks(s: &str) -> usize {
+    s[s.trim_end().len()..].matches('\n').count()
 }
 
 // ---- the watch ---------------------------------------------------------------------
+
+/// Why a watch ended. The debug log names it ([`End::name`]); never any text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum End {
+    /// [`WATCH_FOR`] is up.
+    TimeUp,
+    /// Another dictation started (its own paste gets a watch of its own).
+    NextDictation,
+    /// The field is empty: a chat message sent, or all of it deleted.
+    Emptied,
+    /// The dictation's text was deleted; the text either side is still there.
+    RegionEmptied,
+    /// The text either side of it is gone (deleted, or the field replaced).
+    RegionGone,
+    /// Both neighbours are there, but not around one span any more.
+    AnchorMismatch,
+    /// A line break was added right after it: Enter (a message sent, or a
+    /// new line begun).
+    EnterPressed,
+    /// The field stopped answering ([`UNREADABLE_AFTER`] reads in a row).
+    Unreadable,
+    /// The field is longer than [`MAX_FIELD_CHARS`].
+    TooLong,
+    /// Right after the paste: the pasted text isn't in the field as pasted.
+    NotFound,
+}
+
+impl End {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            End::TimeUp => "time_up",
+            End::NextDictation => "next_dictation",
+            End::Emptied => "field_emptied",
+            End::RegionEmptied => "region_emptied",
+            End::RegionGone => "region_gone",
+            End::AnchorMismatch => "anchor_mismatch",
+            End::EnterPressed => "enter_pressed",
+            End::Unreadable => "unreadable",
+            End::TooLong => "too_long",
+            End::NotFound => "not_found",
+        }
+    }
+}
+
+/// A read isn't the whole field (it was cut short), or the field is longer
+/// than Yap watches.
+fn too_long(w: &FieldWindow) -> bool {
+    !(w.from_start && w.to_end) || w.text.chars().count() > MAX_FIELD_CHARS
+}
+
+/// One paste's watch, read by read (pure: the thread hands it the time,
+/// whether another dictation started, and what it read).
+pub(crate) struct Watch {
+    pasted: String,
+    anchors: Anchors,
+    /// The latest edit within the drift gate (trimmed): what's judged when
+    /// the watch ends.
+    last_good: Option<String>,
+    /// The span the last read found, untrimmed (not measured twice).
+    last_span: Option<String>,
+    /// Reads in a row that failed.
+    failed: u32,
+}
+
+impl Watch {
+    /// The first read, right after the paste of `pasted` (normalised,
+    /// trimmed): where it landed.
+    pub fn start(first: &FieldWindow, pasted: &str) -> Result<Watch, End> {
+        if too_long(first) {
+            return Err(End::TooLong);
+        }
+        let anchors = Anchors::find(first, pasted).ok_or(End::NotFound)?;
+        Ok(Watch {
+            pasted: pasted.to_string(),
+            anchors,
+            last_good: None,
+            last_span: None,
+            failed: 0,
+        })
+    }
+
+    /// The dictation began a sentence.
+    pub fn starts_sentence(&self) -> bool {
+        self.anchors.starts_sentence
+    }
+
+    /// The edit to look at: the last span within the drift gate, if any
+    /// read found one (it may be the paste unchanged).
+    pub fn last_good(&self) -> Option<&str> {
+        self.last_good.as_deref()
+    }
+
+    /// One poll: `elapsed` since the watch began, `superseded` (another
+    /// dictation started), `read` reads the field (only when it's needed).
+    /// `Some`: the watch is over, and why.
+    pub fn step(
+        &mut self,
+        elapsed: Duration,
+        superseded: bool,
+        read: impl FnOnce() -> Option<FieldWindow>,
+    ) -> Option<End> {
+        if superseded {
+            return Some(End::NextDictation);
+        }
+        if elapsed >= WATCH_FOR {
+            return Some(End::TimeUp);
+        }
+        self.see(read())
+    }
+
+    /// One read of the field (`None`: it failed).
+    fn see(&mut self, read: Option<FieldWindow>) -> Option<End> {
+        let Some(w) = read else {
+            self.failed += 1;
+            return (self.failed >= UNREADABLE_AFTER).then_some(End::Unreadable);
+        };
+        self.failed = 0;
+        if too_long(&w) {
+            return Some(End::TooLong);
+        }
+        if w.text.trim().is_empty() {
+            return Some(End::Emptied);
+        }
+        let raw = match self.anchors.locate(&w) {
+            Located::Span(raw) => raw,
+            Located::Gone => return Some(End::RegionGone),
+            Located::Mismatch => return Some(End::AnchorMismatch),
+        };
+        let span = raw.trim();
+        if span.is_empty() {
+            return Some(End::RegionEmptied);
+        }
+        if self.last_span.as_deref() != Some(raw.as_str()) {
+            // Before an Enter too: a fix and the Enter may come in one read.
+            if within_drift(&self.pasted, span) {
+                self.last_good = Some(span.to_string());
+            }
+            self.last_span = Some(raw.clone());
+        }
+        // More line breaks after it than the paste had: Enter.
+        (trailing_line_breaks(&raw) > trailing_line_breaks(&self.pasted)).then_some(End::EnterPressed)
+    }
+}
 
 /// Each paste's watch has a number; a newer one ends the older.
 static WATCHES: AtomicU64 = AtomicU64::new(0);
@@ -834,78 +1096,59 @@ fn watch(app: &AppHandle, pasted: &str, hwnd: isize, gen: u64, dictations: u64) 
         tracing::debug!("learn: the field can't be read; not watching it");
         return;
     };
-    let mut anchors = None;
+    let mut started = Err(End::NotFound);
     for _ in 0..4 {
         if superseded() {
             return;
         }
-        if let Some(a) = field.read(WINDOW_CHARS).and_then(|w| Anchors::find(&w, pasted)) {
-            anchors = Some(a);
+        started = field
+            .read(MAX_FIELD_CHARS)
+            .map_or(Err(End::Unreadable), |w| Watch::start(&w, pasted));
+        if !matches!(started, Err(End::NotFound | End::Unreadable)) {
             break;
         }
         std::thread::sleep(Duration::from_millis(300));
     }
-    let Some(anchors) = anchors else {
-        tracing::debug!(len = pasted.len(), "learn: the pasted text isn't in the field as pasted; not watching");
-        return;
+    let mut watch = match started {
+        Ok(watch) => watch,
+        Err(end) => {
+            tracing::debug!(len = pasted.len(), end = end.name(), "learn: not watching the field");
+            return;
+        }
     };
     tracing::debug!(len = pasted.len(), "learn: watching the field for corrections");
-    let started = Instant::now();
-    // The latest span that differs from the paste, and since when.
-    let mut changed: Option<(String, Instant)> = None;
-    let mut looked_at: Option<String> = None;
-    let why = loop {
+    let began = Instant::now();
+    let end = loop {
         std::thread::sleep(POLL);
-        if superseded() {
-            break "another dictation";
-        }
-        if started.elapsed() >= WATCH_FOR {
-            break "time";
-        }
-        if crate::text_injector::current_foreground() != Some(hwnd) || !field.is_focused() {
-            break "the focus left";
-        }
-        let Some(span) = field.read(WINDOW_CHARS).and_then(|w| anchors.locate(&w)) else {
-            continue;
-        };
-        if grew_too_much(&span, pasted) {
-            changed = None;
-            break "written on";
-        }
-        if same_text(&span, pasted) {
-            changed = None;
-            continue;
-        }
-        match &changed {
-            Some((last, since)) if *last == span => {
-                if since.elapsed() >= SETTLE && looked_at.as_ref() != Some(&span) {
-                    looked_at = Some(span.clone());
-                    if consider(app, pasted, &span, anchors.starts_sentence) {
-                        return;
-                    }
-                }
-            }
-            _ => changed = Some((span, Instant::now())),
+        if let Some(end) = watch.step(began.elapsed(), superseded(), || field.read(MAX_FIELD_CHARS)) {
+            break end;
         }
     };
-    tracing::debug!(why, "learn: stopped watching the field");
-    if let Some((span, _)) = changed {
-        if looked_at.as_ref() != Some(&span) {
-            consider(app, pasted, &span, anchors.starts_sentence);
-        }
+    let edited = watch.last_good().filter(|e| !same_text(e, pasted));
+    tracing::debug!(
+        end = end.name(),
+        secs = began.elapsed().as_secs(),
+        edited = edited.map_or(0, str::len),
+        "learn: stopped watching the field"
+    );
+    if let Some(edited) = edited {
+        consider(app, pasted, edited, watch.starts_sentence());
     }
 }
 
-/// An edit seen: offer what's worth learning in it. `true` if a prompt went up.
-fn consider(app: &AppHandle, pasted: &str, edited: &str, starts_sentence: bool) -> bool {
+/// The last good edit of a watch that ended: offer what's worth learning
+/// in it.
+fn consider(app: &AppHandle, pasted: &str, edited: &str, starts_sentence: bool) {
     let cfg = crate::config::load();
     if !cfg.learn_words {
-        return false;
+        return;
     }
     let ordinary = Ordinary::new();
     let found = suggestions(pasted, edited, starts_sentence, &cfg.dictionary, &|w| ordinary.is(w));
     tracing::debug!(found = found.len(), "learn: looked at an edit");
-    !found.is_empty() && offer(app, found, false)
+    if !found.is_empty() {
+        offer(app, found, false);
+    }
 }
 
 // ---- word_suggestions.json ---------------------------------------------------------
@@ -918,6 +1161,9 @@ pub struct Record {
     pub last_offered_at: u64,
     /// "heard→term" (lowercased) → your answers to it.
     pub pairs: BTreeMap<String, PairRecord>,
+    /// Terms you took out of the dictionary (lowercased): never suggested
+    /// again, whatever Yap heard (Wispr never re-learns a removed word).
+    pub removed: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -933,11 +1179,13 @@ fn pair_key(s: &Suggestion) -> String {
     format!("{}\u{2192}{}", s.heard.to_lowercase(), s.term.to_lowercase())
 }
 
-/// May `s` be offered (not turned down for good)?
+/// May `s` be offered (not turned down for good, not a word you removed)?
 pub fn allowed(rec: &Record, s: &Suggestion) -> bool {
-    rec.pairs
-        .get(&pair_key(s))
-        .is_none_or(|p| !p.never && p.not_now < NOT_NOW_LIMIT)
+    !rec.removed.contains(&s.term.trim().to_lowercase())
+        && rec
+            .pairs
+            .get(&pair_key(s))
+            .is_none_or(|p| !p.never && p.not_now < NOT_NOW_LIMIT)
 }
 
 /// Has it been long enough since the last prompt (or the clock went back)?
@@ -956,6 +1204,46 @@ pub fn answered(mut rec: Record, words: &[Suggestion], answer: &str) -> Record {
         }
     }
     rec
+}
+
+/// The corrections `old` had that `new` doesn't — neither what they're
+/// heard as nor their spelling is in it any more (changing one of the two
+/// is an edit, not a removal). Snippets aren't words to learn.
+pub fn removed_entries(old: &[DictionaryEntry], new: &[DictionaryEntry]) -> Vec<Suggestion> {
+    let key = |s: &str| s.trim().to_lowercase();
+    let corrections = |d: &[DictionaryEntry]| d.iter().filter(|e| !e.snippet).cloned().collect::<Vec<_>>();
+    let new = corrections(new);
+    let froms: HashSet<String> = new.iter().map(|e| key(&e.from)).collect();
+    let tos: HashSet<String> = new.iter().map(|e| key(&e.to)).collect();
+    corrections(old)
+        .into_iter()
+        .filter(|e| !key(&e.to).is_empty() && !tos.contains(&key(&e.to)) && !froms.contains(&key(&e.from)))
+        .map(|e| Suggestion {
+            heard: e.from.trim().to_string(),
+            term: e.to.trim().to_string(),
+        })
+        .collect()
+}
+
+/// `rec` after `words` left the dictionary: their terms are never offered
+/// again, and the pairs count as "Don't suggest this".
+pub fn forget_removed(mut rec: Record, words: &[Suggestion]) -> Record {
+    for s in words {
+        rec.removed.insert(s.term.to_lowercase());
+    }
+    answered(rec, words, "never")
+}
+
+/// The config was saved (`commands::save_config`: the Dictionary view,
+/// Settings, every surface): words it took out of the dictionary are never
+/// suggested again. Writes `word_suggestions.json` only, never config.json.
+pub fn on_dictionary_saved(old: &[DictionaryEntry], new: &[DictionaryEntry]) {
+    let removed = removed_entries(old, new);
+    if removed.is_empty() {
+        return;
+    }
+    update_record(|r| forget_removed(r, &removed));
+    tracing::info!(count = removed.len(), "learn: words removed from the dictionary won't be suggested again");
 }
 
 static RECORD: Mutex<Option<Record>> = Mutex::new(None);
@@ -1237,17 +1525,22 @@ pub async fn word_suggestion_respond(app: AppHandle, id: u64, answer: String) ->
 }
 
 /// Test mode only: an edit of a pasted dictation, as the watch would have
-/// seen it (`pasted` → `edited`; `before` = the field's text before it,
-/// for whether it starts a sentence: none = it does). Runs it through the
-/// same rules and puts the prompt up the same way (the gap between prompts
-/// aside). `fresh`: forget every answer first. Returns what was offered.
+/// seen it, run through the same rules, the prompt put up the same way
+/// (the gap between prompts aside). Either `edited` (the span as the field
+/// ends up with it; the drift gate still applies; `before` = the field's
+/// text before it, for whether it starts a sentence: none = it does) or
+/// `reads`: the whole field's text read by read, the first right after the
+/// paste (`null` = a read that failed) — the watch runs over them
+/// ([`staged_watch`]: past the last, time is up) and its last good edit is
+/// looked at. `fresh`: forget every answer first. Returns what was offered.
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn e2e_learn_correction(
     app: AppHandle,
     pasted: String,
-    edited: String,
+    edited: Option<String>,
     before: Option<String>,
+    reads: Option<Vec<Option<String>>>,
     fresh: Option<bool>,
 ) -> Result<Vec<Suggestion>, String> {
     if !crate::e2e::active() {
@@ -1263,11 +1556,32 @@ pub async fn e2e_learn_correction(
             tracing::info!("e2e: word suggestions are off");
             return Ok(Vec::new());
         }
-        let starts = before.as_deref().is_none_or(before_starts_sentence);
+        let pasted = normalise(&pasted).trim().to_string();
+        let (edited, starts) = match reads {
+            Some(reads) => match staged_watch(&pasted, &reads) {
+                Ok((edited, starts, end)) => {
+                    tracing::info!(end = end.name(), "e2e: the staged watch ended");
+                    match edited {
+                        Some(edited) => (edited, starts),
+                        None => return Ok(Vec::new()),
+                    }
+                }
+                Err(end) => {
+                    tracing::info!(end = end.name(), "e2e: the staged watch didn't start");
+                    return Ok(Vec::new());
+                }
+            },
+            None => {
+                let edited = normalise(&edited.unwrap_or_default()).trim().to_string();
+                if !within_drift(&pasted, &edited) {
+                    tracing::info!("e2e: the staged edit is past the drift gate");
+                    return Ok(Vec::new());
+                }
+                (edited, before.as_deref().is_none_or(before_starts_sentence))
+            }
+        };
         let ordinary = Ordinary::new();
-        let found = suggestions(&normalise(&pasted), &normalise(&edited), starts, &cfg.dictionary, &|w| {
-            ordinary.is(w)
-        });
+        let found = suggestions(&pasted, &edited, starts, &cfg.dictionary, &|w| ordinary.is(w));
         let rec = record();
         let found: Vec<Suggestion> = found.into_iter().filter(|s| allowed(&rec, s)).collect();
         tracing::info!(found = found.len(), "e2e: a correction is staged");
@@ -1278,6 +1592,39 @@ pub async fn e2e_learn_correction(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// A whole field's text as a read of it, the caret at its end.
+#[cfg(any(test, debug_assertions))]
+fn whole_field(text: &str) -> FieldWindow {
+    let text = normalise(text);
+    FieldWindow {
+        caret: text.len(),
+        to_end: text.chars().count() <= MAX_FIELD_CHARS,
+        text,
+        from_start: true,
+    }
+}
+
+/// [`Watch`] over staged reads of a field (`None`: a read that failed),
+/// the first right after the paste of `pasted`, one [`POLL`] apart; past the
+/// last, time is up. The last good edit (if it isn't the paste unchanged),
+/// whether it starts a sentence, and why the watch ended.
+#[cfg(any(test, debug_assertions))]
+fn staged_watch(pasted: &str, reads: &[Option<String>]) -> Result<(Option<String>, bool, End), End> {
+    let mut reads = reads.iter().map(|r| r.as_deref().map(whole_field));
+    let first = reads.next().flatten().ok_or(End::Unreadable)?;
+    let mut watch = Watch::start(&first, pasted)?;
+    let mut end = End::TimeUp;
+    for (i, read) in reads.enumerate() {
+        let elapsed = POLL * (i as u32 + 1);
+        if let Some(e) = watch.step(elapsed, false, || read) {
+            end = e;
+            break;
+        }
+    }
+    let edited = watch.last_good().filter(|e| !same_text(e, pasted)).map(str::to_string);
+    Ok((edited, watch.starts_sentence(), end))
 }
 
 #[cfg(test)]
@@ -1420,7 +1767,7 @@ mod tests {
             ),
             pair("cube and eighties", "Kubernetes")
         );
-        // More than three words on a side.
+        // More than four words on a side.
         assert!(found("Use the new cube and eighties thing.", "Use Kubernetes.").is_empty());
     }
 
@@ -1495,6 +1842,14 @@ mod tests {
         }
     }
 
+    /// The span [`Anchors::locate`] found, trimmed.
+    fn span(found: Located) -> Option<String> {
+        match found {
+            Located::Span(s) => Some(s.trim().to_string()),
+            _ => None,
+        }
+    }
+
     #[test]
     fn the_pasted_text_is_found_again_after_edits() {
         let pasted = "Deploy it to cube and eighties.";
@@ -1505,25 +1860,27 @@ mod tests {
         assert!(a.starts_sentence);
         // The fix, with the caret moved back into it.
         let edited = format!("{before}Deploy it to Kubernetes.{after}");
-        assert_eq!(a.locate(&window(&edited, 20)).as_deref(), Some("Deploy it to Kubernetes."));
+        assert_eq!(span(a.locate(&window(&edited, 20))).as_deref(), Some("Deploy it to Kubernetes."));
         // Typing on after it, and a word changed a little before it.
         let more = format!("Memo for Monday. Deploy it to Kubernetes. More{after}");
-        assert_eq!(a.locate(&window(&more, 30)).as_deref(), Some("Deploy it to Kubernetes. More"));
+        assert_eq!(span(a.locate(&window(&more, 30))).as_deref(), Some("Deploy it to Kubernetes. More"));
         // Its neighbours gone entirely: lost.
-        assert_eq!(a.locate(&window("Something else entirely", 3)), None);
+        assert_eq!(a.locate(&window("Something else entirely", 3)), Located::Gone);
+        // Both still there, but the wrong way round.
+        assert_eq!(a.locate(&window("\nThen lunch. Notes for Monday. ", 3)), Located::Mismatch);
     }
 
     #[test]
     fn a_paste_at_the_field_start_or_end_is_found_by_the_edges() {
         let pasted = "Graph ana is up.";
         let a = Anchors::find(&window(pasted, pasted.len()), pasted).expect("found");
-        assert_eq!(a.locate(&window("Grafana is up.", 3)).as_deref(), Some("Grafana is up."));
-        // A window that isn't the whole field can't vouch for the edges.
+        assert_eq!(span(a.locate(&window("Grafana is up.", 3))).as_deref(), Some("Grafana is up."));
+        // A read that isn't the whole field can't vouch for the edges.
         let partial = FieldWindow {
             from_start: false,
             ..window("Grafana is up.", 3)
         };
-        assert_eq!(a.locate(&partial), None);
+        assert_eq!(a.locate(&partial), Located::Gone);
         // The occurrence nearest the caret is the paste.
         let twice = "Yes. Yes.";
         let a = Anchors::find(&window(twice, twice.len()), "Yes.").expect("found");
@@ -1532,13 +1889,253 @@ mod tests {
     }
 
     #[test]
-    fn the_watch_tells_corrections_from_writing_on() {
+    fn the_drift_gate_tells_corrections_from_rewrites() {
+        // 0.4 / (len / 30 + 1) + 0.2 of the paste's length, rounded down.
+        assert_eq!(drift_max(3), 1);
+        assert_eq!(drift_max(10), 5);
+        assert_eq!(drift_max(30), 12);
+        assert_eq!(drift_max(300), 70);
+        let thirty = "abcdefghij".repeat(3);
+        let changed = |n: usize| format!("{}{}", "x".repeat(n), &thirty[n..]);
+        assert!(within_drift(&thirty, &changed(12)));
+        assert!(!within_drift(&thirty, &changed(13)));
+        // Case doesn't count.
+        assert!(within_drift("send the json payload", "SEND THE JSON PAYLOAD"));
+        // A fixed word: in; writing on, or a rewrite: out.
+        assert!(within_drift("Deploy it to cube and eighties.", "Deploy it to Kubernetes."));
+        assert!(within_drift("Power to keep is the default model.", "Parakeet is the default model."));
+        assert!(!within_drift("A short one.", &"and then I kept typing ".repeat(3)));
+        assert!(!within_drift("We shipped it.", "We shipped it, and then I wrote on and on."));
+        assert!(!within_drift("Book the room for Sarah.", "Cancel everything this week."));
+        // The distance itself, and giving up early.
+        let chars = |s: &str| s.chars().collect::<Vec<_>>();
+        assert_eq!(edit_distance_within(&chars("kitten"), &chars("sitting"), 3), Some(3));
+        assert_eq!(edit_distance_within(&chars("kitten"), &chars("sitting"), 2), None);
+        assert_eq!(edit_distance_within(&chars("a"), &chars("abcdef"), 2), None);
         assert!(same_text("Deploy  it\nnow", "Deploy it now"));
         assert!(!same_text("Deploy it now", "Deploy it later"));
-        let pasted = "A short one.";
-        assert!(!grew_too_much("A short one, fixed.", pasted));
-        assert!(grew_too_much(&"and then I kept typing ".repeat(12), pasted));
         assert_eq!(normalise("a\r\nb\rc\u{a0}d"), "a\nb\nc d");
+    }
+
+    const PASTED: &str = "Deploy it to cube and eighties.";
+    const BEFORE: &str = "Notes for Monday. ";
+    const AFTER: &str = "\nThen lunch.";
+
+    /// A watch of [`PASTED`] pasted between [`BEFORE`] and [`AFTER`].
+    fn watching() -> Watch {
+        Watch::start(&whole_field(&fixed(PASTED)), PASTED).expect("started")
+    }
+
+    /// One read of the field, a second into the watch.
+    fn read(w: &mut Watch, text: Option<&str>) -> Option<End> {
+        w.step(Duration::from_secs(1), false, || text.map(whole_field))
+    }
+
+    /// The field with `span` where the paste went.
+    fn fixed(span: &str) -> String {
+        format!("{BEFORE}{span}{AFTER}")
+    }
+
+    #[test]
+    fn every_way_a_watch_ends() {
+        // Time, and another dictation: before any read.
+        let mut w = watching();
+        assert_eq!(w.step(WATCH_FOR, false, || unreachable!()), Some(End::TimeUp));
+        assert_eq!(w.step(Duration::from_secs(5), true, || unreachable!()), Some(End::NextDictation));
+        // A read like the paste, or a fix: it goes on. (Nothing here knows
+        // about the focus: switching apps is no end.)
+        assert_eq!(read(&mut w, Some(&fixed(PASTED))), None);
+        assert_eq!(read(&mut w, Some(&fixed("Deploy it to Kubernetes."))), None);
+        // The field emptied (a chat message sent), or only blank.
+        assert_eq!(read(&mut watching(), Some("")), Some(End::Emptied));
+        assert_eq!(read(&mut watching(), Some(" \n ")), Some(End::Emptied));
+        // The dictation deleted, its neighbours kept.
+        assert_eq!(read(&mut watching(), Some(&fixed(""))), Some(End::RegionEmptied));
+        // Its neighbours gone, or the wrong way round.
+        assert_eq!(read(&mut watching(), Some("Then lunch.")), Some(End::RegionGone));
+        assert_eq!(read(&mut watching(), Some("\nThen lunch. Notes for Monday. ")), Some(End::AnchorMismatch));
+        // Enter right after it (a line break it didn't have)…
+        assert_eq!(read(&mut watching(), Some(&fixed(&format!("{PASTED}\n")))), Some(End::EnterPressed));
+        // …but not one before it, or a word typed on.
+        assert_eq!(read(&mut watching(), Some(&fixed(&format!("\n{PASTED}")))), None);
+        assert_eq!(read(&mut watching(), Some(&fixed(&format!("{PASTED} More")))), None);
+        // Reads failing: three in a row is the end; one that works resets it.
+        let mut w = watching();
+        assert_eq!(read(&mut w, None), None);
+        assert_eq!(read(&mut w, None), None);
+        assert_eq!(read(&mut w, Some(&fixed(PASTED))), None);
+        assert_eq!(read(&mut w, None), None);
+        assert_eq!(read(&mut w, None), None);
+        assert_eq!(read(&mut w, None), Some(End::Unreadable));
+        // Past 15,000 characters (a read cut short says so too).
+        let long = fixed(&format!("{PASTED} {}", "word ".repeat(3_000)));
+        assert_eq!(read(&mut watching(), Some(&long)), Some(End::TooLong));
+        let cut = FieldWindow {
+            to_end: false,
+            ..whole_field(&fixed(PASTED))
+        };
+        assert_eq!(watching().step(Duration::from_secs(1), false, || Some(cut)), Some(End::TooLong));
+        // Before it starts: not there as pasted, or already too long.
+        assert!(matches!(Watch::start(&whole_field("Something else."), PASTED), Err(End::NotFound)));
+        assert!(matches!(Watch::start(&whole_field(&long), PASTED), Err(End::TooLong)));
+        for end in [End::TimeUp, End::Emptied, End::EnterPressed, End::RegionGone, End::AnchorMismatch] {
+            assert!(!end.name().contains(' '), "{end:?}");
+        }
+    }
+
+    #[test]
+    fn the_last_edit_within_the_drift_gate_is_judged() {
+        let staged = |reads: &[Option<&str>]| {
+            let reads: Vec<Option<String>> = reads.iter().map(|r| r.map(str::to_string)).collect();
+            staged_watch(PASTED, &reads).expect("started")
+        };
+        let first = fixed(PASTED);
+        let fix = fixed("Deploy it to Kubernetes.");
+        // A fix, then the field sent (emptied): the fix.
+        let (edited, starts, end) = staged(&[Some(&first), Some(&fix), Some("")]);
+        assert_eq!((edited.as_deref(), starts, end), (Some("Deploy it to Kubernetes."), true, End::Emptied));
+        // A fix and Enter in the same read: the fix, without the line break.
+        let entered = fixed("Deploy it to Kubernetes.\n");
+        let (edited, _, end) = staged(&[Some(&first), Some(&entered)]);
+        assert_eq!((edited.as_deref(), end), (Some("Deploy it to Kubernetes."), End::EnterPressed));
+        // A fix, then a rewrite past the gate, then time up: the fix.
+        let rewrite = fixed("Honestly, forget all of that and just ship whatever we have now please.");
+        let (edited, _, end) = staged(&[Some(&first), Some(&fix), Some(&rewrite)]);
+        assert_eq!((edited.as_deref(), end), (Some("Deploy it to Kubernetes."), End::TimeUp));
+        // Two fixes: the later one.
+        let again = fixed("Deploy it to Kubernetes now.");
+        let (edited, _, _) = staged(&[Some(&first), Some(&fix), Some(&again)]);
+        assert_eq!(edited.as_deref(), Some("Deploy it to Kubernetes now."));
+        // Fixed, then put back: nothing to look at.
+        let (edited, _, _) = staged(&[Some(&first), Some(&fix), Some(&first)]);
+        assert_eq!(edited, None);
+        // Never within the gate: nothing, however it ends.
+        let (edited, _, end) = staged(&[Some(&first), Some(&rewrite), None, None, None]);
+        assert_eq!((edited, end), (None, End::Unreadable));
+        // The whole field was the paste (a chat box): fixed, then sent.
+        let (edited, _, end) = staged_watch(
+            PASTED,
+            &[Some(PASTED.into()), Some("Deploy it to Kubernetes.".into()), Some(String::new())],
+        )
+        .expect("started");
+        assert_eq!((edited.as_deref(), end), (Some("Deploy it to Kubernetes."), End::Emptied));
+        // …and what it offers.
+        let edited = edited.expect("an edit");
+        assert_eq!(
+            suggestions(PASTED, &edited, true, &[], &is_frequent),
+            vec![Suggestion {
+                heard: "cube and eighties".into(),
+                term: "Kubernetes".into()
+            }]
+        );
+        // Not in the field as pasted, or not read: no watch at all.
+        assert!(matches!(staged_watch(PASTED, &[Some("Other text".into())]), Err(End::NotFound)));
+        assert!(matches!(staged_watch(PASTED, &[None]), Err(End::Unreadable)));
+    }
+
+    #[test]
+    fn up_to_four_words_on_a_side() {
+        let tail = "on the new cluster before we ship it on Friday";
+        // Four for four.
+        assert_eq!(
+            found(
+                &format!("Set up graffana loky tempoh mimeer {tail}"),
+                &format!("Set up Grafana Loki Tempo Mimir {tail}")
+            ),
+            pair("graffana loky tempoh mimeer", "Grafana Loki Tempo Mimir")
+        );
+        // Five: no longer a mishearing.
+        assert!(found(
+            &format!("Set up graffana loky tempoh mimeer pyroscop {tail}"),
+            &format!("Set up Grafana Loki Tempo Mimir Pyroscope {tail}")
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn contractions_and_possessives_are_not_words_to_learn() {
+        for w in ["it's", "Sinead’s", "don't", "we'll", "they've", "you're", "I'd", "I'm", "students'", "Kubernetes's,"] {
+            assert!(contracted(w), "{w}");
+        }
+        for w in ["O'Brien", "rock'n'roll", "'quoted'", "‘quoted’", "Kubernetes."] {
+            assert!(!contracted(w), "{w}");
+        }
+        // A possessive fixed: not offered (the name alone is, see above).
+        assert!(found("I spoke to Shunade's team.", "I spoke to Sinead's team.").is_empty());
+        assert!(found("Fix the cube and eighties' config.", "Fix the Kubernetes' config.").is_empty());
+        assert!(found("It is hubspot's fault.", "It is HubSpot's fault.").is_empty());
+        // In single quotes it's still the word; a name with an apostrophe is fine.
+        assert_eq!(
+            found("Fix the 'cube and eighties' config.", "Fix the 'Kubernetes' config."),
+            pair("cube and eighties", "Kubernetes")
+        );
+        assert_eq!(found("Call oh brian about it.", "Call O'Brien about it."), pair("oh brian", "O'Brien"));
+    }
+
+    #[test]
+    fn one_suggestion_per_spelling_capitals_first() {
+        // The same word fixed twice, once with a capital: one, the capital.
+        assert_eq!(
+            found(
+                "Use cube and eighties here and cube and eighties there for the team today.",
+                "Use kubernetes here and Kubernetes there for the team today."
+            ),
+            pair("cube and eighties", "Kubernetes")
+        );
+        // Capitals first, then the rest in order.
+        assert_eq!(
+            found(
+                "Run cube cuttle then open graph ana for the whole team now.",
+                "Run kubectl then open Grafana for the whole team now."
+            ),
+            vec![
+                ("graph ana".to_string(), "Grafana".to_string()),
+                ("cube cuttle".to_string(), "kubectl".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn removed_words_are_never_suggested_again() {
+        let snippet = DictionaryEntry {
+            snippet: true,
+            ..entry("k8s", "Kubernetes")
+        };
+        let old = vec![entry("cuber netties", "Kubernetes"), entry("jaison", "JSON"), snippet.clone()];
+        // One removed: that one.
+        let removed = removed_entries(&old, &[entry("jaison", "JSON"), snippet.clone()]);
+        assert_eq!(
+            removed,
+            vec![Suggestion {
+                heard: "cuber netties".into(),
+                term: "Kubernetes".into()
+            }]
+        );
+        // Edits aren't removals: what it's heard as, or its spelling, kept.
+        let respelled = [entry("cuber netties", "Kubernetes!"), entry("jaison", "JSON"), snippet.clone()];
+        assert!(removed_entries(&old, &respelled).is_empty());
+        let reheard = [entry("cube and eighties", "kubernetes"), entry("jaison", "JSON")];
+        assert!(removed_entries(&old, &reheard).is_empty());
+        // A snippet removed isn't a word; nothing removed, nothing.
+        assert!(removed_entries(&[snippet], &[]).is_empty());
+        assert!(removed_entries(&[], &old).is_empty());
+        assert!(removed_entries(&old, &old).is_empty());
+        // Removed: never offered again, whatever Yap heard, in any case.
+        let rec = forget_removed(Record::default(), &removed);
+        for heard in ["cuber netties", "cube and eighties"] {
+            let s = Suggestion {
+                heard: heard.into(),
+                term: "KUBERNETES".into(),
+            };
+            assert!(!allowed(&rec, &s), "{heard}");
+        }
+        assert!(allowed(&rec, &Suggestion { heard: "graph ana".into(), term: "Grafana".into() }));
+        assert_eq!(rec.pairs.get("cuber netties\u{2192}kubernetes").map(|p| p.never), Some(true));
+        // The file's shape, and an older file without it.
+        let json = serde_json::to_string(&rec).unwrap();
+        assert!(json.contains("\"removed\":[\"kubernetes\"]"), "{json}");
+        let old_file: Record = serde_json::from_str(r#"{"lastOfferedAt":5,"pairs":{}}"#).unwrap();
+        assert!(old_file.removed.is_empty() && old_file.last_offered_at == 5);
     }
 
     #[test]
