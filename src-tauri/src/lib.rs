@@ -42,6 +42,7 @@ mod pipeline;
 mod portable;
 mod procs;
 mod selection;
+mod smart_insert;
 mod sound;
 mod stt;
 mod text_injector;

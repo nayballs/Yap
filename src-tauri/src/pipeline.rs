@@ -298,6 +298,11 @@ impl Shared {
                 *g = sel;
             }
         }
+        // "Match the text around the cursor": read it in the background now,
+        // for the paste (`text_injector::prepare_dictation`). Not for edit
+        // mode, whose rewrite replaces the selection as the AI wrote it.
+        let smart = !edit && self.config.read().map(|c| c.smart_spacing).unwrap_or(false);
+        crate::selection::begin_dictation((hwnd != 0).then_some(hwnd), smart);
 
         // A meeting recording keeps this dictation out of its "You" side.
         dictation_began();
@@ -954,9 +959,10 @@ impl Shared {
                             .map(|c| apply_corrections(cleaned.trim(), &c))
                             .unwrap_or_else(|_| config::apply_dictionary(cleaned.trim(), &dict));
                         if !corrected.is_empty() {
-                            if append_space {
-                                corrected.push(' ');
-                            }
+                            // Fitted to the text around the cursor (smart
+                            // spacing), else the trailing space as before.
+                            corrected =
+                                crate::text_injector::prepare_dictation(&corrected, append_space, &dict);
                             tracing::info!(text = %corrected, "Transcript");
                             let _ = self.app.emit("yap-transcript", corrected.clone());
                             let target = match self.target_hwnd.load(Ordering::Relaxed) {

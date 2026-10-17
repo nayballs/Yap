@@ -15,8 +15,13 @@
 //!   text is typed instead (`type_unicode`). A remote-desktop or VM window is
 //!   the exception: its clipboard sync is a monitor too, so there the
 //!   dictation goes on the clipboard plainly (`syncs_clipboard`).
+//! - **Fitting the dictation to the cursor** ([`prepare_dictation`],
+//!   `smart_insert.rs`).
 
-use tracing::{info, trace, warn};
+use tracing::{debug, info, trace, warn};
+
+use crate::config::DictionaryEntry;
+use crate::smart_insert::{self, FieldContext};
 
 #[cfg(target_os = "windows")]
 #[allow(clippy::upper_case_acronyms)] // Win32 FFI names match the Windows API
@@ -126,6 +131,17 @@ mod platform {
             // Base name only — strip the directory.
             full.rsplit(['\\', '/']).next().map(|s| s.to_string())
         }
+    }
+
+    /// The process id of the window `hwnd_isize` (0 = none).
+    pub fn window_process(hwnd_isize: isize) -> u32 {
+        let hwnd = hwnd_isize as HWND;
+        if hwnd.is_null() {
+            return 0;
+        }
+        let mut pid: u32 = 0;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        pid
     }
 
     /// Handle of the current foreground window as an `isize` (0 = none).
@@ -683,6 +699,19 @@ pub fn app_name_for(hwnd: Option<isize>) -> Option<String> {
     }
 }
 
+/// The process id of a window (`None` for none, or off Windows).
+pub fn window_process(hwnd: isize) -> Option<u32> {
+    #[cfg(target_os = "windows")]
+    {
+        Some(platform::window_process(hwnd)).filter(|&pid| pid != 0)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = hwnd;
+        None
+    }
+}
+
 /// Capture the current text selection via the **clipboard Ctrl+C trick** — the
 /// fallback for edit/rewrite mode when UI Automation can't read the selection
 /// (common in Electron/Chromium/terminal apps).
@@ -740,6 +769,42 @@ pub fn selection_via_copy(target_hwnd: Option<isize>) -> Option<String> {
     {
         let _ = target_hwnd;
         None
+    }
+}
+
+// ---- A dictation, finished for the paste ----
+
+/// The finished dictation `text` (cleaned up, corrected) as it should be
+/// pasted: fitted to the text around the cursor when Yap read it at record
+/// start (`smart_spacing`), else as before — with a space after it if
+/// `append_space`.
+pub fn prepare_dictation(text: &str, append_space: bool, dictionary: &[DictionaryEntry]) -> String {
+    let ctx = crate::selection::take_context();
+    fit_for_paste(text, ctx.as_ref(), append_space, dictionary)
+}
+
+/// `text` fitted to `ctx` when there is one; otherwise unchanged, plus a
+/// space if `append_space` (what a dictation always did).
+fn fit_for_paste(text: &str, ctx: Option<&FieldContext>, append_space: bool, dictionary: &[DictionaryEntry]) -> String {
+    match ctx {
+        Some(ctx) => {
+            let names: Vec<&str> = dictionary.iter().map(|e| e.to.trim()).filter(|t| !t.is_empty()).collect();
+            let out = smart_insert::fit_to_context(text, ctx, &names);
+            debug!(
+                changed = out != text,
+                lead_space = out.starts_with(' '),
+                trail_space = out.ends_with(' '),
+                "Fitted the dictation to the text around the cursor"
+            );
+            out
+        }
+        None => {
+            let mut out = text.to_string();
+            if append_space {
+                out.push(' ');
+            }
+            out
+        }
     }
 }
 
@@ -840,6 +905,25 @@ mod tests {
         assert!(syncs_clipboard(Some("VirtualBoxVM.exe")));
         assert!(!syncs_clipboard(Some("chrome.exe")));
         assert!(!syncs_clipboard(None));
+    }
+
+    #[test]
+    fn without_context_a_dictation_pastes_as_it_always_did() {
+        assert_eq!(fit_for_paste("Hello there.", None, false, &[]), "Hello there.");
+        assert_eq!(fit_for_paste("Hello there.", None, true, &[]), "Hello there. ");
+    }
+
+    #[test]
+    fn with_context_smart_spacing_decides_the_spaces() {
+        let ctx = FieldContext {
+            before: "I think".into(),
+            after: String::new(),
+            selection: String::new(),
+        };
+        // `append_trailing_space` is ignored: nothing follows the caret.
+        assert_eq!(fit_for_paste("So we should go.", Some(&ctx), true, &[]), " so we should go.");
+        let dict: Vec<DictionaryEntry> = serde_json::from_str(r#"[{"from":"so","to":"So"}]"#).unwrap();
+        assert_eq!(fit_for_paste("So we should go.", Some(&ctx), true, &dict), " So we should go.");
     }
 
     /// The real clipboard code on a clipboard of its own: the test process
