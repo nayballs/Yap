@@ -67,7 +67,12 @@ pub enum Field {
 impl Field {
     /// The tool argument, with the names a model is likely to use instead.
     pub fn parse(s: &str) -> Option<Field> {
-        match s.trim().to_ascii_lowercase().replace([' ', '-'], "_").as_str() {
+        match s
+            .trim()
+            .to_ascii_lowercase()
+            .replace([' ', '-'], "_")
+            .as_str()
+        {
             "content" | "notes" | "note" | "raw" | "body" | "text" | "my_thoughts" => {
                 Some(Field::Content)
             }
@@ -168,12 +173,19 @@ fn back_chars(s: &str, end: usize, n: usize) -> usize {
     if n == 0 {
         return end;
     }
-    s[..end].char_indices().rev().nth(n - 1).map_or(0, |(i, _)| i)
+    s[..end]
+        .char_indices()
+        .rev()
+        .nth(n - 1)
+        .map_or(0, |(i, _)| i)
 }
 
 /// Byte offset `n` chars after `start` in `s` (or its end).
 fn fwd_chars(s: &str, start: usize, n: usize) -> usize {
-    s[start..].char_indices().nth(n).map_or(s.len(), |(i, _)| start + i)
+    s[start..]
+        .char_indices()
+        .nth(n)
+        .map_or(s.len(), |(i, _)| start + i)
 }
 
 /// The longest start of `s` that fits `budget` tokens (`estimate_tokens`'
@@ -533,7 +545,13 @@ pub fn read_page(text: &str, offset: usize, limit: usize, budget: usize) -> Resu
     }
     let limit = limit.clamp(1, MAX_PAGE_LINES);
     let (mut out, mut used, mut to, mut cut_line) = (String::new(), 0, from - 1, None);
-    for (n, line) in lines.iter().enumerate().skip(from - 1).take(limit).map(|(i, l)| (i + 1, l)) {
+    for (n, line) in lines
+        .iter()
+        .enumerate()
+        .skip(from - 1)
+        .take(limit)
+        .map(|(i, l)| (i + 1, l))
+    {
         let row = numbered(n, line);
         let t = estimate_tokens(&row) + 1;
         if used + t > budget {
@@ -828,7 +846,11 @@ fn around(text: &str, line: usize, last: usize) -> String {
     let first = line.saturating_sub(1).max(1);
     let end = (last + 1).min(lines.len()).min(first + AROUND_LINES - 1);
     (first..=end)
-        .filter_map(|n| lines.get(n - 1).map(|l| numbered(n, &shorten(l, LINE_CHARS))))
+        .filter_map(|n| {
+            lines
+                .get(n - 1)
+                .map(|l| numbered(n, &shorten(l, LINE_CHARS)))
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -882,7 +904,10 @@ mod tests {
     fn a_unique_match_is_replaced_and_nothing_else_moves() {
         let text = "Ship the beta on Friday.\nAsk Dave about the venue.\n";
         let r = replace_once(text, "on Friday", "on Monday").unwrap();
-        assert_eq!(r.text, "Ship the beta on Monday.\nAsk Dave about the venue.\n");
+        assert_eq!(
+            r.text,
+            "Ship the beta on Monday.\nAsk Dave about the venue.\n"
+        );
         assert_eq!(r.old, "on Friday");
         assert_eq!(r.new, "on Monday");
         assert_eq!(&r.text[r.at..r.at + r.new.len()], "on Monday");
@@ -896,17 +921,26 @@ mod tests {
         let text = "Ship the beta.\nDocs.\nShip the beta docs.";
         assert_eq!(
             replace_once(text, "Ship the beta", "x"),
-            Err(Miss::Ambiguous { times: 2, lines: vec![1, 3] })
+            Err(Miss::Ambiguous {
+                times: 2,
+                lines: vec![1, 3]
+            })
         );
         // Twice on one line: one line, two times.
         assert_eq!(
             replace_once("to do, to do", "to do", "x"),
-            Err(Miss::Ambiguous { times: 2, lines: vec![1] })
+            Err(Miss::Ambiguous {
+                times: 2,
+                lines: vec![1]
+            })
         );
         // Overlapping counts too: "aa" could be either half of "aaa".
         assert_eq!(
             replace_once("aaa", "aa", "b"),
-            Err(Miss::Ambiguous { times: 2, lines: vec![1] })
+            Err(Miss::Ambiguous {
+                times: 2,
+                lines: vec![1]
+            })
         );
         // More text around it makes it unique.
         let r = replace_once(text, "Ship the beta docs", "Ship the docs").unwrap();
@@ -916,19 +950,23 @@ mod tests {
     #[test]
     fn whitespace_only_differences_never_match_silently() {
         let cases = [
-            ("Ship  the fix", "Ship the fix"),         // a double space
-            ("Ship\tthe fix", "Ship the fix"),         // a tab
-            ("Ship\u{a0}the fix", "Ship the fix"),     // a no-break space
-            ("Ship the\nfix", "Ship the fix"),         // a line break
-            ("Ship the fix", "Ship the fix\n"),        // a break the note doesn't have
-            ("Ship the fix", " Ship  the fix"),        // spaces the note doesn't have
+            ("Ship  the fix", "Ship the fix"),     // a double space
+            ("Ship\tthe fix", "Ship the fix"),     // a tab
+            ("Ship\u{a0}the fix", "Ship the fix"), // a no-break space
+            ("Ship the\nfix", "Ship the fix"),     // a line break
+            ("Ship the fix", "Ship the fix\n"),    // a break the note doesn't have
+            ("Ship the fix", " Ship  the fix"),    // spaces the note doesn't have
         ];
         for (text, old) in cases {
             match replace_once(text, old, "X") {
                 Err(Miss::NotFound { near, numbered }) => {
                     assert!(!numbered, "{text:?}");
                     // …but the error points at the note's own text.
-                    assert_eq!(near, vec![(1, text.trim().to_string())], "{text:?} / {old:?}");
+                    assert_eq!(
+                        near,
+                        vec![(1, text.trim().to_string())],
+                        "{text:?} / {old:?}"
+                    );
                 }
                 other => panic!("{text:?} / {old:?}: {other:?}"),
             }
@@ -947,7 +985,10 @@ mod tests {
         // Nothing alike: no suggestions.
         assert_eq!(
             replace_once("Ship the fix", "Order pizza", "x"),
-            Err(Miss::NotFound { near: vec![], numbered: false })
+            Err(Miss::NotFound {
+                near: vec![],
+                numbered: false
+            })
         );
     }
 
@@ -970,7 +1011,10 @@ mod tests {
         let r = replace_once(mixed, "one\ntwo\nthree", "1\n2\n3").unwrap();
         assert_eq!(r.text, "1\n2\n3");
         // A lone "\r" is not a line break.
-        assert!(matches!(replace_once("a\rb", "a\nb", "x"), Err(Miss::NotFound { .. })));
+        assert!(matches!(
+            replace_once("a\rb", "a\nb", "x"),
+            Err(Miss::NotFound { .. })
+        ));
     }
 
     #[test]
@@ -1014,7 +1058,10 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert_eq!(strip_line_numbers("  12| a\n\n13|b"), Some("a\n\nb".to_string()));
+        assert_eq!(
+            strip_line_numbers("  12| a\n\n13|b"),
+            Some("a\n\nb".to_string())
+        );
         assert_eq!(strip_line_numbers("10: Doors open"), None);
         assert_eq!(strip_line_numbers("12| a\nb"), None);
     }
@@ -1068,7 +1115,13 @@ mod tests {
             EditError::TitleLines
         );
         assert!(n.title_auto, "a refused edit changes nothing");
-        apply_edit(&mut n, Field::Title, "Teams call · 5 Oct, 14:30", "Budget review").unwrap();
+        apply_edit(
+            &mut n,
+            Field::Title,
+            "Teams call · 5 Oct, 14:30",
+            "Budget review",
+        )
+        .unwrap();
         assert_eq!(n.title, "Budget review");
         assert!(!n.title_auto, "the AI meeting title keeps off it now");
     }
@@ -1079,7 +1132,9 @@ mod tests {
         let before = n.content.clone();
         let err = apply_edit(&mut n, Field::Content, "Ship the beta", "x").unwrap_err();
         assert_eq!(n.content, before);
-        assert!(err.message(Field::Content).contains("appears 2 times in the notes (lines 1, 2)"));
+        assert!(err
+            .message(Field::Content)
+            .contains("appears 2 times in the notes (lines 1, 2)"));
         assert_eq!(err.short(), "the text is in 2 places");
         let err = apply_edit(&mut n, Field::Content, "ship  the beta.", "x").unwrap_err();
         assert!(err.message(Field::Content).contains("listed in `near`"));
@@ -1114,11 +1169,25 @@ mod tests {
         ];
         let all = [Field::Content, Field::Enhanced, Field::Transcript];
         let found = search(&n, "  the   beta ", &all);
-        assert_eq!(found.lines, vec![(Field::Content, 2), (Field::Enhanced, 0), (Field::Transcript, 1)]);
+        assert_eq!(
+            found.lines,
+            vec![
+                (Field::Content, 2),
+                (Field::Enhanced, 0),
+                (Field::Transcript, 1)
+            ]
+        );
         let first = &found.hits[0];
         assert_eq!((first.field, first.line), ("content", 2));
         assert_eq!(first.text, "Ship the BETA on Friday.");
-        assert_eq!(first.context, vec!["1| Agenda", "3| Ask Dave about the venue.", "4| Ship the beta docs too."]);
+        assert_eq!(
+            first.context,
+            vec![
+                "1| Agenda",
+                "3| Ask Dave about the venue.",
+                "4| Ship the beta docs too."
+            ]
+        );
         let said = &found.hits[2];
         assert_eq!((said.field, said.line), ("transcript", 1));
         assert_eq!(said.text, "[0:00] You: When does the beta ship?");
@@ -1139,7 +1208,11 @@ mod tests {
         assert_eq!(found.total(), 200);
         assert!(found.more());
         assert!(found.hits.len() <= MAX_HITS);
-        assert!(found.hits.iter().skip(CONTEXT_HITS).all(|h| h.context.is_empty()));
+        assert!(found
+            .hits
+            .iter()
+            .skip(CONTEXT_HITS)
+            .all(|h| h.context.is_empty()));
         let size: usize = serde_json::to_string(&found.hits).unwrap().len();
         assert!(size < SEARCH_CHARS + 1_500, "{size}");
         // A match in a very long line shows the part around it, the note's own text.
@@ -1179,7 +1252,10 @@ mod tests {
     fn pages_are_bounded_and_say_where_to_go_on() {
         let text: String = (1..=10).map(|i| format!("line {i}\r\n")).collect();
         let p = read_page(&text, 1, 4, PAGE_TOKENS).unwrap();
-        assert_eq!((p.from, p.to, p.total_lines, p.more, p.next_offset), (1, 4, 10, true, Some(5)));
+        assert_eq!(
+            (p.from, p.to, p.total_lines, p.more, p.next_offset),
+            (1, 4, 10, true, Some(5))
+        );
         assert_eq!(p.text, "1| line 1\n2| line 2\n3| line 3\n4| line 4");
         let last = read_page(&text, 9, 4, PAGE_TOKENS).unwrap();
         assert_eq!((last.to, last.more, last.next_offset), (10, false, None));
@@ -1215,10 +1291,19 @@ mod tests {
     #[test]
     fn change_previews_show_what_changed() {
         let p = |o, n| change_preview(o, n);
-        assert_eq!(p("Ship the beta on Friday.", "Ship the beta on Monday."), ("Friday.".into(), "Monday.".into()));
-        assert_eq!(p("Ship the beta.", "Ship the beta and docs."), ("beta.".into(), "beta and docs.".into()));
+        assert_eq!(
+            p("Ship the beta on Friday.", "Ship the beta on Monday."),
+            ("Friday.".into(), "Monday.".into())
+        );
+        assert_eq!(
+            p("Ship the beta.", "Ship the beta and docs."),
+            ("beta.".into(), "beta and docs.".into())
+        );
         assert_eq!(p("a b", "a x b"), ("".into(), "x".into()));
-        assert_eq!(p("- [ ] Book the venue\n", ""), ("- [ ] Book the venue".into(), "".into()));
+        assert_eq!(
+            p("- [ ] Book the venue\n", ""),
+            ("- [ ] Book the venue".into(), "".into())
+        );
         assert_eq!(p("x", "x"), ("".into(), "".into()));
         assert_eq!(p("a  b", "a b"), ("".into(), "".into())); // spacing only
         assert_eq!(p("a b c", "a c"), ("b".into(), "".into()));
