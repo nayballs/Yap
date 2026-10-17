@@ -92,6 +92,10 @@ futures-util = "0.3"
 sha2 = "0.10"
 flate2 = "1"
 tar = "0.4"
+# The speaker-diarization runtime (diarize.rs) comes as NVIDIA's zip. Only
+# its Deflate entries are read (flate2 is above); already in the tree for
+# the updater, which uses it with no compression at all.
+zip = { version = "4.6", default-features = false, features = ["deflate-flate2"] }
 
 # Multi-engine STT (whisper.cpp + ONNX) via transcribe-rs. Optional so the
 # default build ships the STUB and `cargo check` stays fast.
@@ -129,6 +133,10 @@ windows-native-keyring-store = "1"
 # ContextMenuRequested event, filtered to the editing commands. The same
 # webview2-com wry already builds on (0.38, over windows 0.61): no new copy.
 webview2-com = "0.38"
+# `yap.exe diarize` (diarize.rs) loads NeMo-Speech.cpp's C API DLLs from the
+# data folder with LoadLibraryExW(…DLL_LOAD_DIR | DEFAULT_DIRS), so their own
+# ggml and MSVC runtime come from that folder. Already in the tree.
+libloading = "0.8"
 
 [features]
 # Default has NO transcribe-rs so plain `cargo check` compiles the stub (fast).

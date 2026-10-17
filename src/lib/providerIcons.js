@@ -37,6 +37,8 @@ export const ENGINE_PROVIDER = {
   Parakeet: 'nvidia',
   Canary: 'nvidia',
   Whisper: 'openai',
+  // The speaker model (diarization.svelte.js).
+  Nemotron: 'nvidia',
 };
 
 export function getProviderIcon(id) {
