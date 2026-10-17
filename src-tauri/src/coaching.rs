@@ -111,24 +111,29 @@ fn record_path() -> std::path::PathBuf {
     crate::config::data_dir().join("hints.json")
 }
 
-fn record() -> Record {
-    let mut guard = RECORD.lock().unwrap_or_else(|p| p.into_inner());
-    guard
-        .get_or_insert_with(|| {
-            let path = record_path();
-            match std::fs::read_to_string(&path) {
-                Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| {
-                    crate::config::quarantine_corrupt(&path);
-                    Record::default()
-                }),
-                Err(_) => Record::default(),
-            }
-        })
-        .clone()
+/// The cached record, read from disk the first time.
+fn loaded(slot: &mut Option<Record>) -> &mut Record {
+    slot.get_or_insert_with(|| {
+        let path = record_path();
+        match std::fs::read_to_string(&path) {
+            Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| {
+                crate::config::quarantine_corrupt(&path);
+                Record::default()
+            }),
+            Err(_) => Record::default(),
+        }
+    })
 }
 
+fn record() -> Record {
+    loaded(&mut RECORD.lock().unwrap_or_else(|p| p.into_inner())).clone()
+}
+
+/// Change the record and save it, under the one lock (a hint shown and
+/// double-tap used at once both stick).
 fn update_record(f: impl FnOnce(Record) -> Record) {
-    let rec = f(record());
+    let mut guard = RECORD.lock().unwrap_or_else(|p| p.into_inner());
+    let rec = f(loaded(&mut guard).clone());
     match serde_json::to_string_pretty(&rec) {
         Ok(json) => {
             let _ = std::fs::create_dir_all(crate::config::data_dir());
@@ -138,7 +143,7 @@ fn update_record(f: impl FnOnce(Record) -> Record) {
         }
         Err(e) => tracing::warn!("coaching: couldn't serialize hints.json: {}", e),
     }
-    *RECORD.lock().unwrap_or_else(|p| p.into_inner()) = Some(rec);
+    *guard = Some(rec);
 }
 
 // ---- showing -------------------------------------------------------------------------------
