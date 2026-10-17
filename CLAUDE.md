@@ -150,7 +150,11 @@ in its result count as used (`dict_usage::record`). **Snippets** (an entry
 with `snippet: true`: a spoken phrase → text, may span lines;
 `config::apply_snippets`) are dictation-only: whole phrase, any case and
 punctuation, longest first in one pass, a phrase said alone becomes exactly
-its text; never in the corrections, the fuzzy pass or the Whisper prompt (the
+its text, and cleanup's full stop after a phrase is dropped where it would
+spoil the text (`stray_full_stop`: after a text ending in punctuation, or as
+the dictation's last character after a text of several lines — a sign-off or
+address ends as saved; a one-line snippet mid-sentence keeps the sentence's
+"."); never in the corrections, the fuzzy pass or the Whisper prompt (the
 cleanup model is told to keep the phrases word for word). The **"press
 enter" voice command** (`voice_enter`, default on;
 `pipeline::take_voice_enter`): a dictation whose LAST words are "press
@@ -272,7 +276,18 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `ChatOptions` (temperature, `max_tokens` — sent for local servers only —
   and timeout), `note_chat` (embedded per-note chat + Chat-surface turns), and
   `post_chat_message` (the tool-loop variant that returns the whole assistant
-  message, incl. `tool_calls`, instead of just the text).
+  message, incl. `tool_calls`, instead of just the text). **Rate limits**
+  (HTTP 429 — Groq's free plan allows 8,000 tokens a minute, and one
+  tool-using chat answer can ask for more): calls someone is happy to wait for
+  (`chat` — meeting summaries/digests/assist —, `note_chat`,
+  `post_chat_message` — the chat tool loop) wait as long as the provider says
+  (`rate_limit_wait`: `retry-after-ms`, `retry-after`, else "try again in
+  10.98s" in the body; else 2 s, 4 s…) and retry, ≤ 30 s in all
+  (`RATE_LIMIT_PATIENCE`, ≤ 4 retries); dictation cleanup and edit mode never
+  wait (the raw text is the fallback). A limit that outlasts that is said
+  plainly (`rate_limited_error`: "Groq is limiting how much Yap can ask for
+  right now (its free plan allows 8,000 tokens a minute). Try again in 11
+  s."), not as a raw `HTTP 429` body.
 - **`local_llm.rs`** — the on-device AI cleanup sidecar: runs **Mozilla llamafile**
   (llama.cpp, single-file OpenAI-compatible server) as a hidden child process on a
   free localhost port, serving **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) by default

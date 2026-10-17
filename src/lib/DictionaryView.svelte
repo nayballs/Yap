@@ -183,11 +183,11 @@
                       <rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5" />
                       <path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2.5" />
                     </svg>
-                    <input placeholder="my sign-off" aria-label="Phrase you say" bind:value={entry.from} />
+                    <input placeholder="e.g. my address" aria-label="Phrase you say" bind:value={entry.from} />
                   </div>
                   <span class="arrow">→</span>
                   <textarea
-                    placeholder={'Speak soon,\nYour name'}
+                    placeholder={'e.g. 12 Station Road\nLeeds LS1 4AB'}
                     aria-label="Text Yap types"
                     rows={snippetRows(entry.to)}
                     bind:value={entry.to}
@@ -209,6 +209,12 @@
 </div>
 
 <style>
+  /* Hints, not entries: an empty row must never pass for a saved one. */
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--yap-fg-45);
+    font-style: italic;
+  }
   .wrap {
     flex: 1 1 auto;
     overflow-y: auto;
