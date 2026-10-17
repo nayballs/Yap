@@ -1259,6 +1259,11 @@ impl Shared {
                                         {
                                             tracing::warn!("Auto-submit failed: {}", e);
                                         }
+                                    } else {
+                                        // "Suggest words from your corrections":
+                                        // watch the field for a fix (learn.rs).
+                                        let learn = self.config.read().map(|c| c.learn_words).unwrap_or(false);
+                                        crate::learn::after_paste(&self.app, &corrected, target, learn);
                                     }
                                 }
                                 Err(e) => tracing::warn!("Inject failed: {}", e),

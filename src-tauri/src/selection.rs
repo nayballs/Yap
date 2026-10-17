@@ -19,6 +19,12 @@
 //!    finished by then (or failed, or found a password box) leaves the
 //!    dictation exactly as it would be without it. The text is kept in memory
 //!    for that one dictation only and never logged (lengths only).
+//! 3. **The field after the paste** ([`WatchedField`], for `learn.rs`): the
+//!    element a dictation was just pasted into, held for under a minute and
+//!    read a little either side of the caret to see whether a word Yap typed
+//!    gets corrected. Same rules: that window's process only, never a
+//!    password box or a read-only field, never in a test run, time-boxed
+//!    calls, in memory only.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -32,6 +38,8 @@ const CONTEXT_TIMEOUT_MS: u32 = 200;
 /// The same for edit mode's selection, which the pipeline waits for. Long
 /// enough for a big selection in Word, far below UIA's own 20 s.
 const SELECTION_TIMEOUT_MS: u32 = 2_000;
+/// The same for the post-paste watch's reads (a thread of its own).
+const WATCH_TIMEOUT_MS: u32 = 300;
 
 /// Capture the current selection for edit mode: UIA first, Ctrl+C fallback.
 ///
@@ -148,6 +156,69 @@ pub fn read_context(target_hwnd: Option<isize>) -> Option<FieldContext> {
     ctx
 }
 
+/// A stretch of a field's text around the caret, as the post-paste watch
+/// reads it: line breaks as `\n`, no-break spaces as spaces.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FieldWindow {
+    pub text: String,
+    /// Byte offset of the caret (or the selection's start) in `text`.
+    pub caret: usize,
+    /// `text` begins at the field's start / ends at its end.
+    pub from_start: bool,
+    pub to_end: bool,
+}
+
+/// The field a dictation was just pasted into, held for the correction
+/// watch (`learn.rs`). COM: it lives and dies on the thread that opened it.
+pub struct WatchedField {
+    #[cfg(windows)]
+    inner: uia::Watched,
+}
+
+impl WatchedField {
+    /// The focused element now, if it's a text field Yap may read in
+    /// `target_hwnd`'s process: not a password box, not read-only. Never in
+    /// a test run.
+    pub fn open(target_hwnd: isize) -> Option<WatchedField> {
+        if crate::e2e::active() {
+            return None;
+        }
+        #[cfg(windows)]
+        {
+            let pid = crate::text_injector::window_process(target_hwnd)?;
+            uia::Watched::open(pid).map(|inner| WatchedField { inner })
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = target_hwnd;
+            None
+        }
+    }
+
+    /// It still has the keyboard focus.
+    pub fn is_focused(&self) -> bool {
+        #[cfg(windows)]
+        {
+            self.inner.is_focused()
+        }
+        #[cfg(not(windows))]
+        false
+    }
+
+    /// Up to `chars` characters either side of the caret now.
+    pub fn read(&self, chars: usize) -> Option<FieldWindow> {
+        #[cfg(windows)]
+        {
+            self.inner.read(chars)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = chars;
+            None
+        }
+    }
+}
+
 #[cfg(windows)]
 mod uia {
     use windows::core::{Interface, BOOL};
@@ -164,6 +235,7 @@ mod uia {
         UIA_ValuePatternId,
     };
 
+    use super::FieldWindow;
     use crate::smart_insert::{head_chars, tail_chars, FieldContext, CONTEXT_CHARS};
 
     /// A selection longer than this is read as its start and its end (all
@@ -366,6 +438,148 @@ mod uia {
         })
     }
 
+    /// The field a dictation was pasted into, for the post-paste watch.
+    /// Fields drop in order: the COM objects, then COM itself.
+    pub struct Watched {
+        automation: IUIAutomation,
+        element: IUIAutomationElement,
+        _com: Com,
+    }
+
+    impl Watched {
+        /// The focused element, if it's in process `pid`, not a password box
+        /// and a text field that reads (not read-only).
+        pub fn open(pid: u32) -> Option<Watched> {
+            let com = Com::init()?;
+            let automation = automation(super::WATCH_TIMEOUT_MS)?;
+            unsafe {
+                let element = automation.GetFocusedElement().ok()?;
+                if element.CurrentProcessId().ok()? as u32 != pid || element.CurrentIsPassword().ok()?.as_bool() {
+                    return None;
+                }
+                let watched = Watched {
+                    automation,
+                    element,
+                    _com: com,
+                };
+                watched.read(16)?;
+                Some(watched)
+            }
+        }
+
+        /// It's still the focused element.
+        pub fn is_focused(&self) -> bool {
+            unsafe {
+                match self.automation.GetFocusedElement() {
+                    Ok(now) => self
+                        .automation
+                        .CompareElements(&self.element, &now)
+                        .map(|same| same.as_bool())
+                        .unwrap_or(false),
+                    Err(_) => false,
+                }
+            }
+        }
+
+        /// Up to `chars` characters either side of the caret (TextPattern),
+        /// or the whole value when it's short enough (ValuePattern).
+        pub fn read(&self, chars: usize) -> Option<FieldWindow> {
+            unsafe { text_window(&self.element, chars).or_else(|| value_window(&self.element, chars)) }
+        }
+    }
+
+    /// [`Watched::read`] for a window's own element (the tests' edit
+    /// control), by handle rather than by focus.
+    #[cfg(test)]
+    pub fn window_watch(hwnd: isize, chars: usize) -> Option<FieldWindow> {
+        let _com = Com::init()?;
+        let automation = automation(super::WATCH_TIMEOUT_MS)?;
+        unsafe {
+            let element = automation
+                .ElementFromHandle(windows::Win32::Foundation::HWND(hwnd as *mut core::ffi::c_void))
+                .ok()?;
+            if element.CurrentIsPassword().ok()?.as_bool() {
+                return None;
+            }
+            text_window(&element, chars).or_else(|| value_window(&element, chars))
+        }
+    }
+
+    /// Line breaks as `\n`, no-break spaces as spaces.
+    fn tidy(s: &str) -> String {
+        crate::learn::normalise(s)
+    }
+
+    /// TextPattern: the text either side of the caret (or the selection),
+    /// and whether it reached the field's start and end.
+    unsafe fn text_window(element: &IUIAutomationElement, chars: usize) -> Option<FieldWindow> {
+        let pattern: IUIAutomationTextPattern = element.GetCurrentPattern(UIA_TextPatternId).ok()?.cast().ok()?;
+        let range = match pattern.GetSelection() {
+            Ok(ranges) if ranges.Length().unwrap_or(0) > 0 => ranges.GetElement(0).ok()?,
+            _ => {
+                let p2: IUIAutomationTextPattern2 =
+                    element.GetCurrentPattern(UIA_TextPattern2Id).ok()?.cast().ok()?;
+                let mut active = BOOL(0);
+                p2.GetCaretRange(&mut active).ok()?
+            }
+        };
+        if let Ok(v) = range.GetAttributeValue(UIA_IsReadOnlyAttributeId) {
+            if bool::try_from(&v).unwrap_or(false) {
+                return None;
+            }
+        }
+        let n = chars as i32;
+        let selection = range.GetText(n).ok()?.to_string();
+        if selection.chars().count() >= chars {
+            return None; // a selection this long can't be read whole
+        }
+        let before = range.Clone().ok()?;
+        before
+            .MoveEndpointByRange(TextPatternRangeEndpoint_End, &range, TextPatternRangeEndpoint_Start)
+            .ok()?;
+        let moved_back = before
+            .MoveEndpointByUnit(TextPatternRangeEndpoint_Start, TextUnit_Character, -n)
+            .ok()?;
+        let before = tidy(&before.GetText(n * 2).ok()?.to_string());
+        let after = range.Clone().ok()?;
+        after
+            .MoveEndpointByRange(TextPatternRangeEndpoint_Start, &range, TextPatternRangeEndpoint_End)
+            .ok()?;
+        let moved_on = after
+            .MoveEndpointByUnit(TextPatternRangeEndpoint_End, TextUnit_Character, n)
+            .ok()?;
+        let after = tidy(&after.GetText(n * 2).ok()?.to_string());
+        Some(FieldWindow {
+            caret: before.len(),
+            text: format!("{before}{}{after}", tidy(&selection)),
+            from_start: moved_back.abs() < n,
+            to_end: moved_on < n,
+        })
+    }
+
+    /// ValuePattern (no caret): the whole value of a text field, if it isn't
+    /// read-only or longer than the window would be.
+    unsafe fn value_window(element: &IUIAutomationElement, chars: usize) -> Option<FieldWindow> {
+        let kind = element.CurrentControlType().ok()?;
+        if ![UIA_EditControlTypeId, UIA_DocumentControlTypeId, UIA_ComboBoxControlTypeId].contains(&kind) {
+            return None;
+        }
+        let pattern: IUIAutomationValuePattern = element.GetCurrentPattern(UIA_ValuePatternId).ok()?.cast().ok()?;
+        if pattern.CurrentIsReadOnly().ok()?.as_bool() {
+            return None;
+        }
+        let value = tidy(&pattern.CurrentValue().ok()?.to_string());
+        if value.chars().count() > chars * 2 {
+            return None;
+        }
+        Some(FieldWindow {
+            caret: value.len(),
+            text: value,
+            from_start: true,
+            to_end: true,
+        })
+    }
+
     /// An empty field that reports its placeholder ("Message #general") as
     /// its text: it's empty.
     unsafe fn without_placeholder(ctx: FieldContext, element: &IUIAutomationElement) -> FieldContext {
@@ -541,6 +755,11 @@ mod tests {
         assert_eq!(ctx.before, "Hello world. ", "{class}: before");
         assert_eq!(ctx.after, "we went home", "{class}: after");
         assert_eq!(ctx.selection, "", "{class}: selection");
+        // The post-paste watch's read: the whole field, the caret, both ends.
+        let w = super::uia::window_watch(field.hwnd, 2_000).expect("the watch's read");
+        assert_eq!(w.text, text, "{class}: the watch's text");
+        assert_eq!(w.caret, 13, "{class}: the watch's caret");
+        assert!(w.from_start && w.to_end, "{class}: the whole field");
         drop(field);
 
         // "world" selected.
@@ -560,14 +779,20 @@ mod tests {
         assert!(ctx.before.ends_with("word "), "{class}: before ends at the caret");
         assert!(ctx.before.starts_with(' '), "{class}: before cut between words: {:?}", &ctx.before[..10]);
         assert!(ctx.after.starts_with("word"), "{class}: after starts at the caret");
+        // The watch's read of a part: neither end of the field.
+        let w = super::uia::window_watch(field.hwnd, 100).expect("the watch's read");
+        assert!(!w.from_start && !w.to_end, "{class}: a part of the field");
+        assert!(w.text.chars().count() <= 400 && w.text.contains("word word"), "{class}: {}", w.text.len());
         drop(field);
 
         // Never a password box; never a read-only field.
         let field = Field::new(class, ES_PASSWORD, "secret", (6, 6)).expect("a field");
         assert_eq!(field.context(), None, "{class}: a password box");
+        assert_eq!(super::uia::window_watch(field.hwnd, 2_000), None, "{class}: the watch, a password box");
         drop(field);
         let field = Field::new(class, ES_MULTILINE | ES_READONLY, text, (13, 13)).expect("a field");
         assert_eq!(field.context(), None, "{class}: a read-only field");
+        assert_eq!(super::uia::window_watch(field.hwnd, 2_000), None, "{class}: the watch, read-only");
     }
 
     #[test]

@@ -178,6 +178,12 @@ pub struct YapConfig {
     /// `initial_prompt` bias instead.
     #[serde(default = "default_true")]
     pub dictionary_fuzzy: bool,
+    /// "Suggest words from your corrections" (the Dictionary view): after a
+    /// paste Yap watches the field for a little while (UI Automation, in
+    /// memory only) and, when you fix a word it got wrong, offers to add it
+    /// to the dictionary. Never adds one without asking. See `learn.rs`.
+    #[serde(default = "default_true")]
+    pub learn_words: bool,
 
     /// Recording mode: "toggle" (press to start, press again to stop) or
     /// "pushToTalk" (hold to record, release to stop).
@@ -543,6 +549,7 @@ impl Default for YapConfig {
             sound_enabled: true,
             dictionary: Vec::new(),
             dictionary_fuzzy: true,
+            learn_words: true,
             recording_mode: default_recording_mode(),
             mute_while_recording: false,
             append_trailing_space: false,
@@ -1117,6 +1124,7 @@ mod tests {
         assert!(e.fuzzy && !e.snippet);
         let cfg: YapConfig = serde_json::from_str("{}").unwrap();
         assert!(cfg.voice_enter, "the voice command is on unless switched off");
+        assert!(cfg.learn_words, "word suggestions are on unless switched off");
     }
 
     #[test]

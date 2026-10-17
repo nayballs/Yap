@@ -35,6 +35,7 @@ mod notes;
 mod tools;
 mod history;
 mod input_hook;
+mod learn;
 mod llm;
 mod local_llm;
 mod mcp;
@@ -468,6 +469,7 @@ pub fn run() {
             bar::bar_pointer_left,
             bar::bar_action,
             bar::bar_card_action,
+            learn::word_suggestion_respond,
             bar::bar_simulate,
             bar::bar_debug,
             // Test mode only (e2e.rs); not in release builds at all.
@@ -485,6 +487,8 @@ pub fn run() {
             e2e::e2e_dictation_mic,
             #[cfg(debug_assertions)]
             coaching::e2e_coaching_reset,
+            #[cfg(debug_assertions)]
+            learn::e2e_learn_correction,
             #[cfg(debug_assertions)]
             meeting_guard::e2e_meeting_limit,
             #[cfg(debug_assertions)]
