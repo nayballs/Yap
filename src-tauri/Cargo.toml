@@ -124,6 +124,10 @@ windows = { version = "0.61", features = ["Win32_UI_Accessibility", "Win32_Syste
 # keyring crate's own docs steer apps to keyring-core + the one store they use.
 keyring-core = "1"
 windows-native-keyring-store = "1"
+# No browser context menu in Yap's windows (context_menu.rs): WebView2's
+# ContextMenuRequested event, filtered to the editing commands. The same
+# webview2-com wry already builds on (0.38, over windows 0.61): no new copy.
+webview2-com = "0.38"
 
 [features]
 # Default has NO transcribe-rs so plain `cargo check` compiles the stub (fast).
