@@ -937,10 +937,32 @@ pub fn apply_snippets(text: &str, dict: &[DictionaryEntry]) -> String {
     for (range, expansion) in &found {
         out.push_str(&text[last..range.start]);
         out.push_str(expansion);
-        last = range.end;
+        last = range.end + stray_full_stop(expansion, &text[range.end..]);
     }
     out.push_str(&text[last..]);
     out
+}
+
+/// How many bytes of `rest` (the text after an expanded snippet) to drop: a
+/// full stop that cleanup put after the spoken phrase, when it would spoil
+/// the snippet's own text — straight after text that ends in punctuation
+/// ("Speak soon," + "." → ",."), or as the dictation's last character after a
+/// snippet of several lines (a sign-off or an address ends where its text
+/// ends, not on "Leeds."). A one-line snippet mid-sentence keeps the
+/// sentence's punctuation ("Mail it to sam@example.com.").
+fn stray_full_stop(expansion: &str, rest: &str) -> usize {
+    let after = rest.trim_start();
+    if !after.starts_with('.') || after.starts_with("..") {
+        return 0;
+    }
+    let text = expansion.trim_end();
+    let ends_in_punctuation = text.ends_with(['.', ',', ';', ':', '!', '?']);
+    let last_thing = after[1..].trim().is_empty();
+    if ends_in_punctuation || (last_thing && text.contains('\n')) {
+        rest.len() - after.len() + 1
+    } else {
+        0
+    }
 }
 
 /// Build the Whisper `initial_prompt` vocabulary from the dictionary: the
@@ -1017,11 +1039,28 @@ mod tests {
         // Cleanup made a sentence of it: no capital, no full stop survives.
         assert_eq!(apply_snippets("My address.", &dict), "1 Long Lane\nLeeds");
         assert_eq!(apply_snippets("  \"my address!\" ", &dict), "1 Long Lane\nLeeds");
-        // In a sentence, the sentence's punctuation stays.
+        // Ending a dictation, a snippet of several lines ends where its text
+        // does: no full stop on its last line (a sign-off, an address).
+        assert_eq!(apply_snippets("Send it to my address.", &dict), "Send it to 1 Long Lane\nLeeds");
+        let sign_off = vec![snippet("my sign-off", "Speak soon,\nNathan")];
         assert_eq!(
-            apply_snippets("Send it to my address.", &dict),
-            "Send it to 1 Long Lane\nLeeds."
+            apply_snippets("I'll see you soon. My sign off.", &sign_off),
+            "I'll see you soon. Speak soon,\nNathan"
         );
+        // Mid-dictation it stays: more text follows.
+        assert_eq!(
+            apply_snippets("It's my address. Thanks!", &dict),
+            "It's 1 Long Lane\nLeeds. Thanks!"
+        );
+        // A one-line snippet keeps the sentence's punctuation…
+        let email = vec![snippet("my email", "sam@example.com")];
+        assert_eq!(apply_snippets("Mail it to my email.", &email), "Mail it to sam@example.com.");
+        assert_eq!(apply_snippets("Is it my email?", &email), "Is it sam@example.com?");
+        // …unless its own text ends in punctuation: no ",." anywhere.
+        let thanks = vec![snippet("my thanks", "Many thanks,")];
+        assert_eq!(apply_snippets("Great work. My thanks. Bye", &thanks), "Great work. Many thanks, Bye");
+        // An ellipsis isn't a stray full stop.
+        assert_eq!(apply_snippets("Send it to my address...", &dict), "Send it to 1 Long Lane\nLeeds...");
     }
 
     #[test]

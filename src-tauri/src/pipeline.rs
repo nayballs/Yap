@@ -1936,9 +1936,11 @@ mod tests {
         let mut dict = vec![entry("jaison", "JSON", true)];
         dict.push(DictionaryEntry { snippet: true, ..entry("my address", "1 Long Lane\nLeeds", true) });
         let mut c = cfg("parakeet-tdt-0.6b-v3", true, dict);
+        // A snippet of several lines ending the dictation ends where its own
+        // text does (no "Leeds.").
         assert_eq!(
             finish_dictation("The jaison is at my address, press enter.", "x", &c),
-            ("The JSON is at 1 Long Lane\nLeeds.".to_string(), true)
+            ("The JSON is at 1 Long Lane\nLeeds".to_string(), true)
         );
         // The command off first, so the snippet is all that's left: exactly its text.
         assert_eq!(

@@ -197,7 +197,14 @@ address" beats "my email" and an inserted text is never expanded again. If
 nothing but punctuation and spaces is left around a single match (the phrase
 was all you said), the result is exactly the snippet's text, without the
 capital or full stop cleanup added; inside a sentence only the phrase is
-replaced. The text goes in verbatim (`$1` is text). Snippets are never in the
+replaced. A full stop cleanup put straight after the phrase is dropped where
+it would spoil the snippet's own text: after a text that ends in punctuation
+("Many thanks," never becomes "Many thanks,."), and as the dictation's last
+character after a text of several lines, so a sign-off or an address ends as
+saved ("…see you soon. Speak soon,⏎Nathan", not "Nathan."). A one-line
+snippet mid-sentence keeps the sentence's punctuation ("Mail it to
+sam@example.com."), and an ellipsis, "?" or "!" always stays. The text goes
+in verbatim (`$1` is text). Snippets are never in the
 exact or fuzzy correction passes or the Whisper prompt, so meetings and Upload
 (which run `apply_corrections` only) keep what was said. Corrections run first,
 so the snippet's text is never fuzzed; the cost is that a correction could, in
