@@ -30,6 +30,7 @@
     screen: 'Tip',
     error: 'Error',
     tip: 'Tip',
+    dictionary: 'Dictionary',
   };
   const chip = $derived(card.chip ?? CHIPS[card.icon] ?? null);
   // A card naming a hotkey (the push-to-talk hints) says `{key}`.
@@ -57,6 +58,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6" /><path d="M10 21h4" /><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1.1 2V16h5v-.2c.1-.8.5-1.5 1.1-2A6 6 0 0 0 12 3z" /></svg>
       {:else if card.icon === 'notes'}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" /></svg>
+      {:else if card.icon === 'dictionary'}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h14v15H6a2 2 0 0 0-2 2 2 2 0 0 0 2 2h14" /><path d="M9 7.5h7" /></svg>
       {/if}
       {chip}
     </span>
