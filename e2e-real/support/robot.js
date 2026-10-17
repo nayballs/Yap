@@ -76,10 +76,14 @@ export class Robot {
     );
   }
 
-  /** A dictation of a WAV file into `target`, through the real start/stop path. */
-  async dictateWav(target, file, { retry = true } = {}) {
+  /**
+   * A dictation of a WAV file into `target`, through the real start/stop
+   * path. `cancel`: cancelled at the end instead of stopped (the bar's ✕),
+   * so it's kept for Undo (`null` comes back: nothing was transcribed).
+   */
+  async dictateWav(target, file, { retry = true, cancel = false } = {}) {
     return this.withFocus(target, retry, () =>
-      this.yap.invoke('realtest_dictate_wav', { path: file, hwnd: target.hwnd }),
+      this.yap.invoke('realtest_dictate_wav', { path: file, hwnd: target.hwnd, cancel }),
     );
   }
 

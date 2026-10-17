@@ -516,3 +516,154 @@ test('dictating: the dictation overlay in the pill\'s place', async ({ yap, main
   }
   await expect(bar.getByLabel('Yap bar')).toBeVisible({ timeout: 10_000 });
 });
+
+// ✕ / ✓ on the dictation capsule, and "Dictation cancelled · Undo"
+// (pipeline.rs: a cancelled recording's audio is kept `UNDO_MS`; bar.rs:
+// the capsule is a clickable region of the click-through bar, never
+// activated). A test run pastes nothing: what Undo and ✓ deliver shows in
+// history.json (the stub's "[STT stub: …]").
+const dictations = (yap) => (yap.readJson('history.json') || []).length;
+
+async function needsMic(yap) {
+  const mics = await yap.invoke('list_audio_devices');
+  test.skip(mics.length === 0, 'no microphone here; recording needs one');
+}
+
+/** Wait until no dictation shows in the bar. */
+async function dictationOver(yap) {
+  await expect(yap.overlay.locator('.capsule')).toBeHidden({ timeout: 15_000 });
+}
+
+/** An invoke that fails: its error, as a string (null if it worked). */
+function invokeError(yap, cmd, args) {
+  return yap.main.evaluate(
+    ([c, a]) =>
+      window.__TAURI_INTERNALS__.invoke(c, a).then(
+        () => null,
+        (e) => String(e)
+      ),
+    [cmd, args]
+  );
+}
+
+test('while dictating, ✓ stops and pastes; the capsule takes clicks without activating the bar', async ({ yap, main, shot }) => {
+  await needsMic(yap);
+  const bar = yap.overlay;
+  const capsule = bar.locator('.capsule');
+  const before = dictations(yap);
+
+  await pressHotkey(main);
+  const cancel = capsule.getByRole('button', { name: 'Cancel dictation' });
+  const done = capsule.getByRole('button', { name: 'Stop and paste' });
+  await expect(cancel).toBeVisible();
+  await expect(done).toBeVisible();
+  // A clickable region of the click-through window: clickable with the
+  // pointer on it, never the active window.
+  await expect.poll(() => capsule.getAttribute('data-region')).toBe('dictation');
+  await simulate(yap, { pointer: 'dictation' });
+  await expect.poll(() => debug(yap).then((d) => d.interactive)).toBe(true);
+  await bar.waitForTimeout(1_200); // some audio, and the waveform
+  await shot(bar, '18-dictating-cancel-and-done');
+
+  // ✓: stopped and transcribed, as the hotkey's second press would.
+  await done.click();
+  await expectStore(yap, 'history.json', (h) => h.length === before + 1 && JSON.stringify(h).includes('STT stub'));
+  const d = await debug(yap);
+  expect(d.barActive).toBe(false);
+  expect(d.threadActiveIsBar).toBe(false);
+  expect(d.barInFront).toBe(false);
+  await dictationOver(yap);
+  await pointerAway(yap);
+});
+
+test('✕ keeps the audio for Undo: "Dictation cancelled", then Undo transcribes it', async ({ yap, main, shot }) => {
+  await needsMic(yap);
+  const bar = yap.overlay;
+  const capsule = bar.locator('.capsule');
+  const before = dictations(yap);
+
+  await pressHotkey(main);
+  await expect(capsule.getByRole('button', { name: 'Cancel dictation' })).toBeVisible();
+  await bar.waitForTimeout(1_500); // more than the half second Undo needs
+  await simulate(yap, { pointer: 'dictation' });
+  await expect.poll(() => debug(yap).then((d) => d.interactive)).toBe(true);
+  await capsule.getByRole('button', { name: 'Cancel dictation' }).click();
+
+  // Cancelled: nothing transcribed, and the bar offers it back.
+  await expect(capsule).toContainText('Dictation cancelled');
+  const undo = capsule.getByRole('button', { name: 'Undo' });
+  await expect(undo).toBeVisible();
+  await bar.waitForTimeout(300);
+  await shot(bar, '19-dictation-cancelled-undo');
+  await bar.waitForTimeout(500);
+  expect(dictations(yap)).toBe(before);
+  // Still a region (Undo takes the click), still never activated.
+  await simulate(yap, { pointer: 'dictation' });
+  await expect.poll(() => debug(yap).then((d) => d.interactive)).toBe(true);
+  expect((await debug(yap)).barActive).toBe(false);
+
+  // Undo: transcribed and delivered as if it had been stopped.
+  await undo.click();
+  await expectStore(yap, 'history.json', (h) => h.length === before + 1 && JSON.stringify(h).includes('STT stub'));
+  await dictationOver(yap);
+  // Once only: the audio is gone.
+  expect(await invokeError(yap, 'bar_action', { action: 'dictation-undo' })).toMatch(/Nothing to undo/);
+  await pointerAway(yap);
+});
+
+test('a new dictation drops a cancelled one; left alone, Undo goes after 10 s', async ({ yap, main }) => {
+  await needsMic(yap);
+  const bar = yap.overlay;
+  const capsule = bar.locator('.capsule');
+  const before = dictations(yap);
+
+  // The tray's Cancel (cancel_recording) keeps it for Undo too…
+  await pressHotkey(main);
+  await expect(capsule).toBeVisible();
+  await bar.waitForTimeout(1_500);
+  await yap.invoke('cancel_recording');
+  await expect(capsule).toContainText('Dictation cancelled');
+  // …until another dictation starts: then it's gone, and only the new one
+  // is transcribed.
+  await pressHotkey(main);
+  await expect(capsule.getByRole('button', { name: 'Stop and paste' })).toBeVisible();
+  await bar.waitForTimeout(800);
+  await pressHotkey(main);
+  await expectStore(yap, 'history.json', (h) => h.length === before + 1);
+  await dictationOver(yap);
+  expect(await invokeError(yap, 'bar_action', { action: 'dictation-undo' })).toMatch(/Nothing to undo/);
+
+  // Cancelled and left alone: the offer goes when the time's up.
+  await pressHotkey(main);
+  await expect(capsule).toBeVisible();
+  await bar.waitForTimeout(1_500);
+  await yap.invoke('cancel_recording');
+  await expect(capsule).toContainText('Dictation cancelled');
+  await expect(capsule).toBeHidden({ timeout: 13_000 });
+  expect(await invokeError(yap, 'bar_action', { action: 'dictation-undo' })).toMatch(/Nothing to undo/);
+  expect(dictations(yap)).toBe(before + 1);
+});
+
+test('with the bar off, the dictation capsule still takes clicks on ✓', async ({ yap, main }) => {
+  await needsMic(yap);
+  const bar = yap.overlay;
+  const capsule = bar.locator('.capsule');
+  await yap.invoke('save_config', { cfg: { ...(await yap.invoke('get_config')), barEnabled: false } });
+  try {
+    await expect.poll(() => debug(yap).then((d) => d.shown)).toBe(false);
+    const before = dictations(yap);
+    await pressHotkey(main);
+    await expect(capsule.getByRole('button', { name: 'Stop and paste' })).toBeVisible();
+    await expect.poll(() => debug(yap).then((d) => d.shown)).toBe(true);
+    await simulate(yap, { pointer: 'dictation' });
+    await expect.poll(() => debug(yap).then((d) => d.interactive)).toBe(true);
+    await bar.waitForTimeout(800);
+    await capsule.getByRole('button', { name: 'Stop and paste' }).click();
+    await expectStore(yap, 'history.json', (h) => h.length === before + 1);
+    await dictationOver(yap);
+    await expect.poll(() => debug(yap).then((d) => d.shown)).toBe(false);
+  } finally {
+    await simulate(yap, { pointer: 'away' }).catch(() => {});
+    await yap.invoke('save_config', { cfg: { ...(await yap.invoke('get_config')), barEnabled: true } });
+  }
+});

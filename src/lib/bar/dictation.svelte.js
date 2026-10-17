@@ -10,7 +10,8 @@ const MAX_BARS = 80;
 const AMP_GAIN = 3.5;
 
 export const dictation = $state({
-  // idle | recording | processing | processing-slow | needs-model | error
+  // idle | recording | processing | processing-slow | needs-model | error |
+  // cancelled ("Dictation cancelled · Undo" while the audio is kept)
   state: 'idle',
   errorMsg: 'Transcription failed',
   history: [],
@@ -25,6 +26,8 @@ export const dictation = $state({
   // '' once sound arrives (or the recording ends).
   micSilent: '',
   micSilentFull: '',
+  // How long a cancelled dictation can be undone (`yap-dictation-cancelled`).
+  undoMs: 10_000,
 });
 
 // ---- Live partial transcript (streaming preview) ----
@@ -92,9 +95,12 @@ export function initDictation() {
     }
     // Keep the partial visible through the brief "processing" state, then
     // drop it once we're idle/needs-model/error so it never lingers.
-    if (state === 'idle' || state === 'needs-model' || state === 'error' || state === 'recording') {
+    if (state === 'idle' || state === 'needs-model' || state === 'error' || state === 'recording' || state === 'cancelled') {
       clearPartial();
     }
+  });
+  listen('yap-dictation-cancelled', (e) => {
+    if (e.payload?.undoMs > 0) dictation.undoMs = e.payload.undoMs;
   });
   listen('yap-error', (e) => {
     if (e.payload) dictation.errorMsg = e.payload;

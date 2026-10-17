@@ -520,6 +520,8 @@ pub fn run() {
             realtest::commands::realtest_dictate_wav,
             #[cfg(debug_assertions)]
             realtest::commands::realtest_clipboard,
+            #[cfg(debug_assertions)]
+            realtest::commands::realtest_delivered,
         ])
         .on_page_load(|webview, payload| {
             // No browser context menu (Back, Refresh, Print, Inspect…) in any

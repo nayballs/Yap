@@ -7,6 +7,15 @@
   // to-talk's double-tap made it hands-free. "No sound from <mic>…" in the
   // waveform's place: the dead-mic watchdog heard nothing but digital
   // silence (the recording carries on).
+  //
+  // While it records: ✕ (cancel) on the left and ✓ (stop and paste, as the
+  // hotkey's second press) on the right. Cancelled: "Dictation cancelled"
+  // with Undo while Rust keeps the audio (pipeline.rs, `UNDO_MS`; a hairline
+  // runs down meanwhile) — Undo transcribes it and pastes it into the app
+  // the dictation started in. The capsule is a `data-region` then, so the
+  // click-through bar takes clicks on it (bar.rs); it's never focused, so
+  // the app you were in keeps the keyboard.
+  import { invoke } from '@tauri-apps/api/core';
   import { dictation } from './dictation.svelte.js';
 
   // Smooth left glide: keep the newest words visible by translating the text
@@ -22,13 +31,38 @@
   });
 
   const processing = $derived(dictation.state === 'processing' || dictation.state === 'processing-slow');
+  const recording = $derived(dictation.state === 'recording');
+  const cancelled = $derived(dictation.state === 'cancelled');
+
+  // Every button goes through `bar_action` (Rust gives the focus back to the
+  // app you're in, should the click have activated the bar).
+  function act(action) {
+    invoke('bar_action', { action }).catch((e) =>
+      invoke('frontend_log', { msg: `bar: ${action} failed: ${e}` }).catch(() => {})
+    );
+  }
 </script>
 
-<div class="capsule" class:err={dictation.state === 'error' || !!dictation.micSilent}>
-  {#if dictation.state === 'error'}
+<div
+  class="capsule"
+  class:err={dictation.state === 'error' || (!!dictation.micSilent && !cancelled)}
+  class:rec={recording}
+  class:cancelled
+  data-region={recording || cancelled ? 'dictation' : undefined}
+>
+  {#if cancelled}
+    <span class="txt">Dictation cancelled</span>
+    <button class="undo" onclick={() => act('dictation-undo')}>Undo</button>
+    <span class="undoline" aria-hidden="true"><span style={`animation-duration:${dictation.undoMs}ms`}></span></span>
+  {:else if dictation.state === 'error'}
     <span class="dot errdot"></span>
     <span class="txt">{dictation.errorMsg}</span>
   {:else}
+    {#if recording}
+      <button class="cbtn cancel" aria-label="Cancel dictation" title="Cancel" onclick={() => act('dictation-cancel')}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+      </button>
+    {/if}
     <span class="dot" class:rec={!processing} class:proc={processing}></span>
     {#if dictation.locked && !processing}
       <span class="lock" role="img" aria-label="Hands-free: press the hotkey to stop" title="Hands-free: press the hotkey to stop">
@@ -52,11 +86,17 @@
         {/each}
       </div>
     {/if}
+    {#if recording}
+      <button class="cbtn done" aria-label="Stop and paste" title="Stop and paste" onclick={() => act('dictation-stop')}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4 4 9-9" /></svg>
+      </button>
+    {/if}
   {/if}
 </div>
 
 <style>
   .capsule {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -65,6 +105,7 @@
     box-sizing: border-box;
     padding: 0 16px 0 14px;
     border-radius: 999px;
+    overflow: hidden;
     /* The bar's black with the cards' hairline; no shadow: the capsule sits
        14 px above the window's edge, which a shadow would reach (a grey box
        on a transparent WebView2 window). */
@@ -73,8 +114,95 @@
     color: var(--bar-text);
     font-size: 12.5px;
   }
+  /* Recording: the ✕ and ✓ sit in the capsule's ends. */
+  .capsule.rec {
+    padding: 0 5px;
+    gap: 8px;
+  }
+  .capsule.cancelled {
+    padding: 0 5px 0 16px;
+    gap: 12px;
+  }
   .capsule.err {
     border-color: rgba(229, 100, 94, 0.7);
+  }
+
+  /* ✕ and ✓: 26 px circles; ✕ quiet, ✓ the bar's primary (ink on light,
+     cream on dark). */
+  .cbtn {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  .cbtn svg {
+    width: 14px;
+    height: 14px;
+  }
+  .cbtn.cancel {
+    background: var(--bar-hover);
+    color: var(--bar-text-soft);
+  }
+  .cbtn.cancel:hover {
+    background: var(--bar-active);
+    color: var(--bar-text);
+  }
+  .cbtn.done {
+    background: var(--bar-button);
+    color: var(--bar-button-text);
+  }
+  .cbtn.done:hover {
+    background: var(--bar-button-hover);
+  }
+
+  /* "Dictation cancelled · Undo", and the time left as a hairline. */
+  .undo {
+    flex: 0 0 auto;
+    height: 26px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 13px;
+    background: var(--bar-button);
+    color: var(--bar-button-text);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .undo:hover {
+    background: var(--bar-button-hover);
+  }
+  .undoline {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 3px;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--bar-track);
+    overflow: hidden;
+  }
+  .undoline span {
+    display: block;
+    height: 100%;
+    background: var(--bar-text-faint);
+    transform-origin: left;
+    animation: run-down linear forwards;
+  }
+  @keyframes run-down {
+    from {
+      transform: scaleX(1);
+    }
+    to {
+      transform: scaleX(0);
+    }
   }
 
   .dot {
@@ -136,7 +264,7 @@
   /* The dead-mic warning: one line, cut with "…" if a device's name is
      long (the whole message is its tooltip and the main window's toast). */
   .txt.warn {
-    max-width: 320px;
+    max-width: 236px;
     font-weight: 550;
   }
 

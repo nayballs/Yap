@@ -542,7 +542,7 @@ fn busy_reason(app: &AppHandle) -> Option<Busy> {
     let guard = state.pipeline.lock().ok()?;
     guard
         .as_ref()
-        .filter(|p| p.is_busy())
+        .filter(|p| p.is_busy() || p.holds_undo())
         .map(|_| Busy::Dictation)
 }
 

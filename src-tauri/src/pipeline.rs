@@ -222,6 +222,25 @@ pub(crate) struct Delivered {
     pub left_on_clipboard: bool,
 }
 
+/// How long a cancelled dictation's audio is kept for **Undo** ("Dictation
+/// cancelled · Undo" on the bar).
+pub(crate) const UNDO_MS: u64 = 10_000;
+/// A cancelled recording shorter than this (0.5 s at 16 kHz), or one that
+/// never heard a sound, isn't offered back: nothing worth transcribing.
+const UNDO_MIN_SAMPLES: usize = 8_000;
+
+/// A cancelled recording, kept a moment for Undo: its audio and everything
+/// its paste needs — the window it was for, what kind of app that is, edit
+/// mode and its selection.
+struct Kept {
+    id: u64,
+    audio: Vec<f32>,
+    target_hwnd: isize,
+    target_kind: AppKind,
+    edit: bool,
+    selection: Option<String>,
+}
+
 /// The latest dictation's report, for the robot's WAV dictations (which
 /// deliver from `run_stt`).
 #[cfg(debug_assertions)]
@@ -326,6 +345,12 @@ struct Shared {
     stream_slot: Weak<StreamSlot>,
     /// The name of the device the mic stream captures from.
     mic_name: Mutex<String>,
+    /// The last cancelled recording, for Undo (dropped after [`UNDO_MS`],
+    /// or when another dictation starts).
+    kept: Mutex<Option<Kept>>,
+    /// Numbers the kept recordings, so an old expiry timer leaves a newer
+    /// one alone.
+    kept_seq: AtomicU64,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -532,7 +557,7 @@ impl Shared {
             Action::Stop => self.stop_and_transcribe(),
             Action::Discard => {
                 tracing::info!("Push-to-talk: a lone tap, nothing to transcribe");
-                self.cancel();
+                self.cancel(false);
             }
             Action::Lock => {
                 tracing::info!("Push-to-talk: double-tap, recording hands-free");
@@ -645,6 +670,10 @@ impl Shared {
     /// goes back into it), what kind of app it is, edit mode's selection,
     /// and — in the background — the text around its cursor.
     fn capture_target(self: &Arc<Self>, edit: bool) {
+        // A new dictation: a cancelled one waiting for Undo is gone for good.
+        if self.kept.lock().map(|mut k| k.take().is_some()).unwrap_or(false) {
+            tracing::info!("A new dictation: the cancelled one can't be undone any more");
+        }
         // Capture the window the user is dictating into, before the overlay
         // (or anything else) can steal focus. Restored at paste time.
         let hwnd = crate::text_injector::current_foreground().unwrap_or(0);
@@ -815,23 +844,110 @@ impl Shared {
         std::thread::spawn(move || stream_partials(shared, language, translate));
     }
 
-    /// Stop recording and discard the buffered audio (no transcription).
-    fn cancel(&self) {
+    /// Stop recording without transcribing. `undo`: the person cancelled it
+    /// (the bar's ✕, the tray's Cancel), so its audio is kept for
+    /// [`UNDO_MS`] — the bar shows "Dictation cancelled · Undo" (`yap-state`
+    /// "cancelled") — then dropped; a push-to-talk lone tap is just thrown
+    /// away. A recording too short to hold words, or one that never heard a
+    /// sound, isn't offered back.
+    fn cancel(self: &Arc<Self>, undo: bool) {
         if !self.recording.swap(false, Ordering::SeqCst) {
             return;
         }
         dictation_ended();
         crate::mute::unmute_system_output();
-        if let Ok(mut buf) = self.buffer.lock() {
-            buf.clear();
+        let audio = self.buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
+        // The edit-mode selection/state goes with it (into the kept
+        // recording, or nowhere), so it can't leak into a later session.
+        let selection = self.selection.lock().ok().and_then(|mut g| g.take());
+        let edit = self.edit_mode.swap(false, Ordering::SeqCst);
+        if !(undo && audio.len() >= UNDO_MIN_SAMPLES && self.mic_tally.heard()) {
+            let _ = self.app.emit("yap-state", "idle");
+            tracing::info!("Recording cancelled (audio discarded)");
+            return;
         }
-        // Drop any edit-mode selection/state so it can't leak into a later session.
+        let id = self.kept_seq.fetch_add(1, Ordering::SeqCst) + 1;
+        let kept = Kept {
+            id,
+            audio,
+            target_hwnd: self.target_hwnd.load(Ordering::Relaxed),
+            target_kind: self.target_kind.lock().map(|k| *k).unwrap_or_default(),
+            edit,
+            selection,
+        };
+        if let Ok(mut k) = self.kept.lock() {
+            *k = Some(kept);
+        }
+        let _ = self.app.emit("yap-dictation-cancelled", serde_json::json!({ "undoMs": UNDO_MS }));
+        let _ = self.app.emit("yap-state", "cancelled");
+        tracing::info!("Recording cancelled (kept {} s for Undo)", UNDO_MS / 1000);
+        let shared = Arc::clone(self);
+        let spawned = std::thread::Builder::new().name("dictation-undo".into()).spawn(move || {
+            std::thread::sleep(Duration::from_millis(UNDO_MS));
+            let expired = shared
+                .kept
+                .lock()
+                .map(|mut k| {
+                    let ours = k.as_ref().is_some_and(|k| k.id == id);
+                    if ours {
+                        *k = None;
+                    }
+                    ours
+                })
+                .unwrap_or(false);
+            if expired {
+                tracing::info!("The cancelled dictation's audio is gone (Undo timed out)");
+                let _ = shared.app.emit("yap-state", "idle");
+            }
+        });
+        if spawned.is_err() {
+            if let Ok(mut k) = self.kept.lock() {
+                *k = None;
+            }
+            let _ = self.app.emit("yap-state", "idle");
+        }
+    }
+
+    /// **Undo** a cancel: the kept recording is transcribed and pasted
+    /// exactly as if it had been stopped — into the window it was meant for
+    /// (never the one in front now, if that's another), with its own kind of
+    /// app, edit mode and selection. The text around that window's cursor
+    /// is read afresh: it may have changed since.
+    fn undo(self: &Arc<Self>) -> Result<(), String> {
+        if self.recording.load(Ordering::SeqCst) {
+            return Err("A dictation is recording".into());
+        }
+        if self.processing.swap(true, Ordering::SeqCst) {
+            return Err("Yap is busy transcribing — try again in a moment".into());
+        }
+        let Some(k) = self.kept.lock().ok().and_then(|mut k| k.take()) else {
+            self.processing.store(false, Ordering::SeqCst);
+            return Err("Nothing to undo: the cancelled dictation is gone".into());
+        };
+        self.target_hwnd.store(k.target_hwnd, Ordering::Relaxed);
+        if let Ok(mut kind) = self.target_kind.lock() {
+            *kind = k.target_kind;
+        }
+        self.edit_mode.store(k.edit, Ordering::SeqCst);
         if let Ok(mut g) = self.selection.lock() {
-            *g = None;
+            *g = k.selection;
         }
-        self.edit_mode.store(false, Ordering::SeqCst);
-        let _ = self.app.emit("yap-state", "idle");
-        tracing::info!("Recording cancelled (audio discarded)");
+        let (smart_spacing, in_terminal) = self
+            .config
+            .read()
+            .map(|c| (c.smart_spacing, k.target_kind.with_settings(c.terminal_mode, true).is_terminal()))
+            .unwrap_or((false, false));
+        let target = (k.target_hwnd != 0).then_some(k.target_hwnd);
+        crate::selection::begin_dictation(target, smart_spacing && !k.edit && !in_terminal);
+        let _ = self.app.emit("yap-state", "processing");
+        tracing::info!(samples = k.audio.len(), "Undo: transcribing the cancelled dictation for its own window");
+        let shared = Arc::clone(self);
+        tauri::async_runtime::spawn(async move {
+            let flag = Arc::clone(&shared);
+            shared.run_stt(k.audio).await;
+            flag.processing.store(false, Ordering::SeqCst);
+        });
+        Ok(())
     }
 
     fn stop_and_transcribe(self: &Arc<Self>) {
@@ -1653,6 +1769,8 @@ impl Pipeline {
             rec_session: AtomicU64::new(0),
             stream_slot: Arc::downgrade(&stream_slot),
             mic_name: Mutex::new(String::new()),
+            kept: Mutex::new(None),
+            kept_seq: AtomicU64::new(0),
         });
 
         spawn_idle_watcher(&shared);
@@ -1720,9 +1838,24 @@ impl Pipeline {
         self.shared.on_key(pressed, true, at);
     }
 
-    /// Stop recording and discard the audio (no transcription).
+    /// Cancel the recording (the bar's ✕, the tray's Cancel): nothing is
+    /// transcribed, and its audio is kept a moment for **Undo**.
     pub fn cancel(&self) {
-        self.shared.cancel();
+        self.shared.cancel(true);
+    }
+
+    /// Stop the recording and paste it, as a second press of the hotkey does
+    /// (the bar's ✓). Into the window the dictation started in.
+    pub fn stop(&self) {
+        if self.shared.recording.load(Ordering::SeqCst) {
+            self.shared.stop_and_transcribe();
+        }
+    }
+
+    /// **Undo** the last cancel: transcribe its kept audio and paste it into
+    /// the window it was for. Errors once the audio is gone.
+    pub fn undo(&self) -> Result<(), String> {
+        self.shared.undo()
     }
 
     /// Recording, or transcribing a dictation / an Upload file — the updater
@@ -1730,6 +1863,12 @@ impl Pipeline {
     pub fn is_busy(&self) -> bool {
         self.shared.recording.load(Ordering::SeqCst)
             || self.shared.processing.load(Ordering::SeqCst)
+    }
+
+    /// A cancelled dictation is waiting for Undo (the updater doesn't
+    /// restart Yap under it: its "idle" afterwards lets it go ahead).
+    pub fn holds_undo(&self) -> bool {
+        self.shared.kept.lock().map(|k| k.is_some()).unwrap_or(false)
     }
 
     /// Install a freshly-created STT engine (e.g. after a model download).
@@ -1833,6 +1972,12 @@ impl Drop for FeedOn {
 impl Robot {
     const BUSY: &'static str = "Yap is busy with another dictation";
 
+    /// The report of the latest dictation that went to the paste (an Undo's,
+    /// say), taken; `None` while none has since this was last asked.
+    pub(crate) fn take_delivered(&self) -> Option<Delivered> {
+        LAST_DELIVERED.lock().ok().and_then(|mut last| last.take())
+    }
+
     /// `text` as if the STT had just heard it: the window in front becomes
     /// the target and the text around its cursor is read, as at a
     /// recording's start (waiting for that read, as a few seconds of talk
@@ -1856,8 +2001,9 @@ impl Robot {
     /// the mic's place, between a real start and a real stop: the target
     /// captured at the start, the live preview, the dead-mic watchdog, the
     /// STT, then the dictation's own steps to the paste. `None`: nothing was
-    /// transcribed (a silent "mic", say).
-    pub(crate) async fn dictate_audio(&self, samples: Vec<f32>) -> Result<Option<Delivered>, String> {
+    /// transcribed (a silent "mic", say). `cancel`: the recording is
+    /// cancelled instead of stopped, as the bar's ✕ does (kept for Undo).
+    pub(crate) async fn dictate_audio(&self, samples: Vec<f32>, cancel: bool) -> Result<Option<Delivered>, String> {
         let shared = Arc::clone(&self.0);
         if shared.recording.load(Ordering::SeqCst) || shared.processing.load(Ordering::SeqCst) {
             return Err(Self::BUSY.into());
@@ -1895,8 +2041,13 @@ impl Robot {
         })
         .await
         .map_err(|e| format!("The WAV player failed: {e}"))?;
-        // Stop as the hotkey would, if it's still this recording.
+        // Stop as the hotkey would (or cancel, as the bar's ✕), if it's
+        // still this recording.
         if shared.recording.load(Ordering::SeqCst) && shared.rec_session.load(Ordering::SeqCst) == session {
+            if cancel {
+                shared.cancel(true);
+                return Ok(None);
+            }
             shared.stop_and_transcribe();
         }
         // The transcription and the paste.
