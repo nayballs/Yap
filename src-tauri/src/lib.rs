@@ -8,6 +8,7 @@
 //! from Voice Mirror; everything else here is the slim glue.
 
 mod agent_detect;
+mod ai_model;
 mod alert;
 mod app_icons;
 mod app_kind;
@@ -421,6 +422,8 @@ pub fn run() {
             commands::chat_get,
             commands::chat_delete,
             commands::chat_send,
+            ai_model::ai_model_status,
+            ai_model::chat_set_model,
             commands::bridge_status,
             mcp_clients::mcp_clients_status,
             mcp_clients::mcp_client_add,

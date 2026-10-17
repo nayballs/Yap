@@ -924,7 +924,23 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `append`/`delete`; `chat_send` (commands.rs) creates a conversation on the
   first message using a first-50-chars title rule. An answer keeps its tool
   chips (`ChatMessage.tools`, only written when there are some), so a
-  conversation opened later still shows what the AI looked up and changed.
+  conversation opened later still shows what the AI looked up and changed,
+  and the model that wrote it (`ChatMessage.model` = `ChatModel {provider,
+  id, name?, onThisPc?}`, only when known; older answers have none).
+- **`ai_model.rs`** — which model a scope's next call goes to, resolved the
+  calls' way (`Scope::Chat` → `commands::resolve_chat_endpoint`;
+  `Scope::Notes` → `meeting_summary::resolve_endpoint`): `ai_model_status
+  {scope}` → `{ready, error, model, host, tools (supports_tools), fromScope,
+  keyed, onDevice}` for the Chat view's model chip and the Ask bars' model
+  lines; `chat_set_model {provider, model}` = the chip's switch (Chat scope
+  only, switched on; a keyed provider or the installed on-device model;
+  same provider keeps its URL + key, a new one gets its standard URL + the
+  shared key), saved through `save_config`, then `yap-chat-model-changed
+  {scope}` (Settings adopts it). `wake_on_device` (in `chat_send` and
+  `note_ask`): a chat on the on-device model starts the sidecar
+  (`local_llm::ensure_started`) or says it isn't installed, never a silent
+  fallback to the endpoint underneath. `save_config` emits
+  `yap-config-saved`, which the chip re-reads on. Unit-tested.
 - **`tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
@@ -2068,7 +2084,17 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   plain RAG chat; tool-activity chips render in the thread above the answer
   and are kept with it in chats.json; a question from
   the Meetings view's Ask bar arrives through `chatRequest` and is sent with
-  `scope: 'meetings'`). No streaming or
+  `scope: 'meetings'`). The composer (message on top; mic, **model chip**,
+  Send under it — `ModelChip.svelte`, names in `aiModel.js` from
+  `ppModels.js` + `providerIcons.js`) shows the model the next message goes
+  to ("GPT-OSS 20B · Groq", "· no note tools" for a local model under 4B,
+  "No AI model" → Settings → Language Models → Chat via `cleanup#chat`);
+  its popover says where it runs, switches the Chat scope between the
+  keyed providers' registry models and the on-device model
+  (`chat_set_model`), and links to Language model settings. Each answer
+  shows its model quietly under it, as do the Notes view's Ask bar and the
+  notepad's Ask sheet (`nextModel(scope)` fetched beside the call; none for
+  Yap's own "Nothing new" / "too little"). No streaming or
   semantic vectors yet (ROADMAP step 3). **`IntegrationsView.svelte`** = the
   Integrations surface (OpenWhispr `IntegrationsView.tsx`, local-first cut):
   a **Calendar** card (`CalendarLinkCard.svelte`: Connect → the "Connect

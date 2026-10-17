@@ -484,6 +484,10 @@ test('"What did I miss?" and Ask anything, in a sheet over the meeting', async (
   expect(since).toContain('MISSED-1');
   expect(since).toContain('MISSED-2');
   expect(since).not.toContain('roadmap'); // seen already: context only
+  // The answer says which model wrote it (the Note Formatting scope's); the
+  // "Nothing new" one came from Yap itself and doesn't.
+  await expect(sheet.locator('.ma').last().locator('.mamodel')).toHaveText('fake-notes · On this PC');
+  await expect(sheet.locator('.ma').first().locator('.mamodel')).toHaveCount(0);
   await shot(pad, '12-ask-sheet-answer');
 
   // The answer counts as looking.
@@ -618,6 +622,8 @@ test('one-tap helpers: Questions to ask while recording, a follow-up email and t
   await expect(mainEmail.locator('.cbody.plain')).toContainText('Subject: Q3 budget follow-up');
   await mainEmail.getByRole('button', { name: 'Copy' }).click();
   await expect.poll(mainCopied).toMatch(/^Subject: Q3 budget follow-up\n\n/);
+  // …and under it, the model that wrote it.
+  await expect(main.locator('.chatthread .byline').last()).toHaveText('fake-notes · On this PC');
   await shot(main, '44-notes-view-follow-up-email');
 
   // Without an AI model the sheet says so and links to Language Models.

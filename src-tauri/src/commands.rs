@@ -581,33 +581,30 @@ pub fn get_note_base_prompt() -> String {
 
 /// Resolve the **Chat** scope's endpoint + persona (falling back to the global
 /// cleanup endpoint when the scope is off) and fail fast on keyless cloud
-/// providers. Shared by the embedded note chat and the AI Chat surface.
-fn resolve_chat_endpoint(
+/// providers. Shared by the embedded note chat and the AI Chat surface, and
+/// by the Chat view's model chip (`ai_model::target`), which must name the
+/// model these calls use.
+pub(crate) fn resolve_chat_endpoint(
     cfg: &YapConfig,
 ) -> Result<(String, String, String, String, String, bool), String> {
-    let (base_url, api_key, model, provider, persona, disable_thinking) =
-        match cfg.llm_scopes.get("chat") {
-            Some(s) if s.enabled && !s.provider.is_empty() => {
-                let key = cfg.provider_api_key(&s.provider, &s.api_key);
-                let (b, k, m, p) = crate::local_llm::effective_endpoint_for(
-                    &s.provider,
-                    &s.base_url,
-                    &key,
-                    &s.model,
-                );
-                (b, k, m, p, s.prompt.clone(), s.disable_thinking)
-            }
-            scope => {
-                let (b, k, m, p) = crate::local_llm::effective_endpoint(cfg);
-                let persona = scope
-                    .map(|s| s.prompt.clone())
-                    .filter(|p| !p.trim().is_empty())
-                    .unwrap_or_else(|| {
-                        "You are a helpful assistant. Answer concisely.".to_string()
-                    });
-                (b, k, m, p, persona, cfg.pp_disable_thinking)
-            }
-        };
+    let scope = cfg.llm_scopes.get("chat");
+    // A scope switched on from the chat's model chip may have no prompt yet.
+    let persona = scope
+        .map(|s| s.prompt.clone())
+        .filter(|p| !p.trim().is_empty())
+        .unwrap_or_else(|| "You are a helpful assistant. Answer concisely.".to_string());
+    let (base_url, api_key, model, provider, persona, disable_thinking) = match scope {
+        Some(s) if s.enabled && !s.provider.is_empty() => {
+            let key = cfg.provider_api_key(&s.provider, &s.api_key);
+            let (b, k, m, p) =
+                crate::local_llm::effective_endpoint_for(&s.provider, &s.base_url, &key, &s.model);
+            (b, k, m, p, persona, s.disable_thinking)
+        }
+        _ => {
+            let (b, k, m, p) = crate::local_llm::effective_endpoint(cfg);
+            (b, k, m, p, persona, cfg.pp_disable_thinking)
+        }
+    };
     if base_url.is_empty() {
         return Err(
             "No AI model configured — set one in Settings → Language Models → Chat".to_string(),
@@ -635,6 +632,7 @@ pub async fn note_ask(
 ) -> Result<String, String> {
     let note = crate::notes::get(id).ok_or("Note not found")?;
     let cfg = config::load();
+    crate::ai_model::wake_on_device(&cfg).await?;
     let (base_url, api_key, model, provider, persona, disable_thinking) =
         resolve_chat_endpoint(&cfg)?;
 
@@ -800,8 +798,17 @@ pub async fn chat_send(
         return Err("Type a message first".to_string());
     }
     let cfg = config::load();
+    crate::ai_model::wake_on_device(&cfg).await?;
     let (base_url, api_key, model, provider, persona, disable_thinking) =
         resolve_chat_endpoint(&cfg)?;
+    // Who answers, as the chip named it, kept with the answer.
+    let answered_by = crate::ai_model::describe(
+        &provider,
+        &model,
+        &base_url,
+        &crate::local_llm::active_model_display(&cfg),
+    )
+    .chat_model();
 
     // Conversation bookkeeping (create on first message, OpenWhispr-style).
     let conv = match conversation_id.and_then(crate::chats::get) {
@@ -823,7 +830,7 @@ pub async fn chat_send(
         .rev()
         .map(|m| (m.role.clone(), m.text.clone()))
         .collect();
-    crate::chats::append(conv.id, "user", &text, &[])?;
+    crate::chats::append(conv.id, "user", &text, &[], None)?;
 
     // System prompt: persona (+ tool instructions when the model can
     // tool-call) + eager-RAG notes under their exact framing. OpenWhispr runs
@@ -884,11 +891,12 @@ pub async fn chat_send(
         .await?;
         (reply, Vec::new())
     };
-    crate::chats::append(conv.id, "assistant", &reply, &tools_used)?;
+    crate::chats::append(conv.id, "assistant", &reply, &tools_used, Some(answered_by.clone()))?;
     Ok(serde_json::json!({
         "conversationId": conv.id,
         "reply": reply,
         "toolsUsed": tools_used,
+        "model": answered_by,
     }))
 }
 
@@ -962,6 +970,12 @@ pub fn save_config(
         if let Some(p) = guard.as_ref() {
             p.update_config(cfg);
         }
+    }
+    // Pages that show what the config resolves to (the Chat view's model
+    // chip) read it again.
+    {
+        use tauri::Emitter;
+        let _ = app.emit("yap-config-saved", ());
     }
     Ok(())
 }

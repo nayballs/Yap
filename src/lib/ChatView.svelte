@@ -12,15 +12,25 @@
   // divergences (ROADMAP "AI Chat" escalating plan): no streaming (one
   // response per turn, "Thinking…" placeholder), no conversation
   // search/archive/rename.
+  //
+  // The composer's model chip (ModelChip.svelte) says which model the next
+  // message goes to and switches the Chat scope's; each answer keeps the
+  // model that wrote it (chats.rs `model`), shown quietly under it.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, untrack } from 'svelte';
   import { renderMarkdown } from './markdown.js';
   import { toast } from './ui/toast.svelte.js';
   import { chatRequest } from './chatRequest.svelte.js';
+  import ModelChip from './ModelChip.svelte';
+  import { modelLine, whereItRuns } from './aiModel.js';
+
+  // Opens a Settings section (ControlPanel's openSettings): the chip's
+  // "Language model settings…".
+  let { onopensettings = null } = $props();
 
   let conversations = $state([]);
   let activeId = $state(null);
-  let messages = $state([]); // { role, text }
+  let messages = $state([]); // { role, text, tools?, model? }
   let input = $state('');
   let sending = $state(false);
   let inputEl = $state(null);
@@ -85,7 +95,10 @@
     try {
       const res = await invoke('chat_send', { conversationId: activeId, text, scope });
       activeId = res.conversationId;
-      messages = [...messages, { role: 'assistant', text: res.reply, tools: res.toolsUsed || [] }];
+      messages = [
+        ...messages,
+        { role: 'assistant', text: res.reply, tools: res.toolsUsed || [], model: res.model ?? null },
+      ];
       refreshList();
       scrollThread();
     } catch (e) {
@@ -226,6 +239,10 @@
               <p class="cbody">{m.text}</p>
             {/if}
           </div>
+          {#if m.role === 'assistant' && m.model}
+            <!-- The model that wrote it (older answers don't say). -->
+            <div class="byline" title={whereItRuns(m.model)}>{modelLine(m.model)}</div>
+          {/if}
         {/each}
         {#if sending}
           <div class="cbubble assistant"><p class="cbody thinking">Thinking…</p></div>
@@ -233,10 +250,9 @@
       </div>
     {/if}
 
+    <!-- Composer: the message on top; the mic, the model it goes to and
+         Send under it. -->
     <div class="inputbar">
-      <button class="micbtn" title="Dictate your message" aria-label="Dictate your message" onclick={micChat}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
-      </button>
       <input
         class="msginput"
         bind:this={inputEl}
@@ -245,9 +261,16 @@
         disabled={sending}
         onkeydown={(e) => e.key === 'Enter' && send()}
       />
-      <button class="sendbtn" disabled={sending || !input.trim()} onclick={send} aria-label="Send">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" /></svg>
-      </button>
+      <div class="composerrow">
+        <button class="micbtn" title="Dictate your message" aria-label="Dictate your message" onclick={micChat}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
+        </button>
+        <ModelChip {onopensettings} />
+        <span class="spacer"></span>
+        <button class="sendbtn" disabled={sending || !input.trim()} onclick={send} aria-label="Send">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" /></svg>
+        </button>
+      </div>
     </div>
   </section>
 </div>
@@ -471,21 +494,40 @@
     padding: 1px 5px;
   }
 
+  .byline {
+    align-self: flex-start;
+    margin: -4px 0 2px 4px;
+    font-size: 10.5px;
+    color: var(--yap-muted-55);
+  }
+
   .inputbar {
     flex: 0 0 auto;
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    gap: 6px;
     margin-top: 10px;
     padding: 8px;
     border: 1px solid var(--yap-border-subtle);
     border-radius: var(--yap-r-lg);
     background: var(--yap-s2);
   }
+  .inputbar:focus-within {
+    border-color: var(--yap-border-hover);
+  }
+  .composerrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .spacer {
+    flex: 1 1 auto;
+  }
   .micbtn {
     display: inline-flex;
-    width: 30px;
-    height: 30px;
+    width: 28px;
+    height: 28px;
     align-items: center;
     justify-content: center;
     border: 1px solid var(--yap-border-subtle);
@@ -507,7 +549,7 @@
     flex: 1 1 auto;
     min-width: 0;
     height: 30px;
-    padding: 0 10px;
+    padding: 0 6px;
     border: none;
     background: transparent;
     color: var(--yap-fg);
@@ -522,8 +564,8 @@
   }
   .sendbtn {
     display: inline-flex;
-    width: 30px;
-    height: 30px;
+    width: 28px;
+    height: 28px;
     align-items: center;
     justify-content: center;
     border: none;
