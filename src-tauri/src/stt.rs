@@ -695,6 +695,26 @@ fn compute_sha256(path: &Path) -> std::io::Result<String> {
 
 // ── STT Engine Trait ────────────────────────────────────────────────
 
+/// A stretch of a transcript with its time in the audio, in seconds from the
+/// audio's start: a word (Parakeet, SenseVoice) or a phrase of a few words
+/// (Whisper's segments). `speakers::word_times` lines them up with the text
+/// as kept.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimedText {
+    pub text: String,
+    pub start: f32,
+    pub end: f32,
+}
+
+/// A transcription with the times of its words ([`SttEngine::transcribe_timed`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Timed {
+    pub text: String,
+    /// Empty for engines that give no timings (Moonshine, GigaAM, Canary,
+    /// Cohere, the stub).
+    pub words: Vec<TimedText>,
+}
+
 /// Common trait for all Speech-to-Text engines.
 ///
 /// Implementations must be Send + Sync so the warm engine can be moved into a
@@ -718,6 +738,20 @@ pub trait SttEngine: Send + Sync {
         translate: bool,
         initial_prompt: Option<&str>,
     ) -> Result<String, SttError>;
+
+    /// [`SttEngine::transcribe`], keeping the times of the words the model
+    /// gives (a meeting's lines need them to be split between voices).
+    /// Default: the text, no times.
+    fn transcribe_timed(
+        &self,
+        audio: &[f32],
+        language: Option<&str>,
+        translate: bool,
+        initial_prompt: Option<&str>,
+    ) -> Result<Timed, SttError> {
+        self.transcribe(audio, language, translate, initial_prompt)
+            .map(|text| Timed { text, words: Vec::new() })
+    }
 
     /// Process a streaming audio chunk and return a partial transcript when
     /// enough audio has accumulated. Default: no partials (returns `None`).
@@ -847,20 +881,23 @@ mod engine_real {
         }
     }
 
-    impl SttEngine for RealEngine {
-        fn transcribe(
+    impl RealEngine {
+        /// Run the model ([`SttEngine::transcribe`]); `timed` keeps the
+        /// times of the words (Parakeet then reports words, not segments).
+        fn run(
             &self,
             audio: &[f32],
             language: Option<&str>,
             translate: bool,
             initial_prompt: Option<&str>,
-        ) -> Result<String, SttError> {
+            timed: bool,
+        ) -> Result<Timed, SttError> {
             if audio.is_empty() {
-                return Ok(String::new());
+                return Ok(Timed::default());
             }
             if audio.len() < MIN_SAMPLES {
                 tracing::debug!(samples = audio.len(), "Audio too short, skipping");
-                return Ok(String::new());
+                return Ok(Timed::default());
             }
 
             let duration_secs = audio.len() as f64 / 16_000.0;
@@ -900,7 +937,11 @@ mod engine_real {
                 }
                 LoadedEngine::Parakeet(e) => {
                     let params = ParakeetParams {
-                        timestamp_granularity: Some(TimestampGranularity::Segment),
+                        timestamp_granularity: Some(if timed {
+                            TimestampGranularity::Word
+                        } else {
+                            TimestampGranularity::Segment
+                        }),
                         ..Default::default()
                     };
                     e.transcribe_with(audio, &params).map_err(tx_err)?
@@ -963,12 +1004,71 @@ mod engine_real {
             }) {
                 if crate::fuzzy::is_prompt_echo(&text, prompt) {
                     tracing::info!("Transcript matched the dictionary prompt (echo) — dropping");
-                    return Ok(String::new());
+                    return Ok(Timed::default());
                 }
             }
 
             tracing::info!(text_len = text.len(), "Transcription complete");
-            Ok(text)
+            let words = if timed {
+                timed_words(self.name, result.segments.unwrap_or_default())
+            } else {
+                Vec::new()
+            };
+            Ok(Timed { text, words })
+        }
+    }
+
+    /// The model's timed pieces as [`TimedText`]: Whisper's segments (a
+    /// phrase each) and Parakeet's words as they come; SenseVoice's tokens
+    /// joined into words at its word marks ("▁").
+    fn timed_words(engine: &str, segments: Vec<transcribe_rs::TranscriptionSegment>) -> Vec<TimedText> {
+        let mut out: Vec<TimedText> = Vec::new();
+        for seg in segments {
+            if engine == "sense-voice" {
+                let starts_word = seg.text.starts_with('\u{2581}') || seg.text.starts_with(' ');
+                let piece = seg.text.replace('\u{2581}', " ");
+                match out.last_mut() {
+                    Some(last) if !starts_word => {
+                        last.text.push_str(piece.trim());
+                        last.end = seg.end;
+                    }
+                    _ if !piece.trim().is_empty() => out.push(TimedText {
+                        text: piece.trim().to_string(),
+                        start: seg.start,
+                        end: seg.end,
+                    }),
+                    _ => {}
+                }
+            } else if !seg.text.trim().is_empty() {
+                out.push(TimedText {
+                    text: seg.text.trim().to_string(),
+                    start: seg.start,
+                    end: seg.end.max(seg.start),
+                });
+            }
+        }
+        out
+    }
+
+    impl SttEngine for RealEngine {
+        fn transcribe(
+            &self,
+            audio: &[f32],
+            language: Option<&str>,
+            translate: bool,
+            initial_prompt: Option<&str>,
+        ) -> Result<String, SttError> {
+            self.run(audio, language, translate, initial_prompt, false).map(|t| t.text)
+        }
+
+        fn transcribe_timed(
+            &self,
+            audio: &[f32],
+            language: Option<&str>,
+            translate: bool,
+            initial_prompt: Option<&str>,
+        ) -> Result<Timed, SttError> {
+            self.run(audio, language, translate, initial_prompt, true)
         }
 
         fn name(&self) -> &str {
@@ -1074,6 +1174,18 @@ impl SttAdapter {
         initial_prompt: Option<&str>,
     ) -> Result<String, SttError> {
         self.engine.transcribe(audio, language, translate, initial_prompt)
+    }
+
+    /// [`SttAdapter::transcribe`] with the words' times (see
+    /// [`SttEngine::transcribe_timed`]): what a meeting's lines use.
+    pub fn transcribe_timed(
+        &self,
+        audio: &[f32],
+        language: Option<&str>,
+        translate: bool,
+        initial_prompt: Option<&str>,
+    ) -> Result<Timed, SttError> {
+        self.engine.transcribe_timed(audio, language, translate, initial_prompt)
     }
 
     /// Process a streaming audio chunk (returns a partial transcript or `None`).

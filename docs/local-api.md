@@ -52,7 +52,7 @@ Same envelope contract as OpenWhispr's v1 API:
 | GET | `/v1/health` | `{data:{ok,version,app:"yap"}}` |
 | GET | `/v1/notes/list` | query: `folder` (name, case-insensitive), `note_type` (`personal`\|`meeting`), `limit` (default 100). Summaries, newest-updated first. |
 | GET | `/v1/notes/search?q=&limit=` | keyword scorer (same as the Chat RAG / `search_notes` tool); `limit` default 20. Items: `{id, title, folder, noteType, score, preview, createdTs, updatedTs}` |
-| GET | `/v1/notes/{id}` | the full note: raw `content`, `enhancedContent`, `transcript`, `participants`, … |
+| GET | `/v1/notes/{id}` | the full note: raw `content`, `enhancedContent`, `transcript` (each line's `source` "you"/"them", `speaker` when relabelled — else its source is its voice —, `startMs`/`endMs` and `words` when recorded with them), `speakers` (the speaker map: `{voice → {name, email, source, locked, mergedInto, not}}`), `participants`, … |
 | POST | `/v1/notes/create` | body `{title?, content?, folder?, source?}`; source is recorded as `"api"` (or `"mcp"` when the MCP server saves it) |
 | PATCH | `/v1/notes/{id}` | body `{title?, content?, folder?, participants?}`; returns the updated note |
 | DELETE | `/v1/notes/{id}` | 204 |
@@ -140,7 +140,7 @@ off, the page says that too, with a "Turn on the Local API" button.
 | Tool | Arguments | What the model gets (markdown) |
 |------|-----------|--------------------------------|
 | `list_meetings` | `limit` (1–100, default 20) | meetings newest first: id, title, local date and time, length, attendees, whether there's an AI summary, how many transcript pages |
-| `search_meetings` | `query`, `limit` (1–20, default 5) | matching meetings with their best transcript lines (`[12:04] Them: …`, and the page each is on) and the matching summary line |
+| `search_meetings` | `query`, `limit` (1–20, default 5) | matching meetings with their best transcript lines (`[12:04] Them: …`, or the speaker's name — "Priya?" for a guess —, and the page each is on) and the matching summary line |
 | `get_meeting` | `id`, `transcript_page` (default 1) | header (when, length, attendees, folder), the AI summary or action plan, notes typed during the meeting, the rolling AI notes when there's no summary yet, and one page of transcript |
 | `search_notes` | `query`, `limit` (1–30, default 10) | all notes (personal and meetings): id, title, type, folder, date, preview |
 | `get_note` | `id` | the note's AI-enhanced version and text; for a meeting, a pointer to `get_meeting` |

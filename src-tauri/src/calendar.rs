@@ -1024,8 +1024,10 @@ fn note_event(e: &Event) -> crate::notes::NoteEvent {
     }
 }
 
-fn attendee_names(e: &Event) -> Vec<String> {
-    e.attendees.iter().map(|a| a.name.clone()).collect()
+/// Everyone invited but you (no rooms, no declines), as (name, email): the
+/// note's attendees, and for a 1:1 call the guess for "Them".
+fn attendees_of(e: &Event) -> Vec<(String, String)> {
+    e.attendees.iter().map(|a| (a.name.clone(), a.email.clone())).collect()
 }
 
 /// The note for `event`: the one made before, or a new meeting note with its
@@ -1037,7 +1039,7 @@ fn note_for(event: &Event, ahead: bool) -> Result<(u64, bool), String> {
     crate::notes::folder_create("Meetings");
     let note = crate::notes::create(&event.display_title(), "", "calendar", "Meetings");
     let date = ahead.then_some(event.start.max(0) as u64);
-    crate::notes::link_event(note.id, note_event(event), None, &attendee_names(event), date)?;
+    crate::notes::link_event(note.id, note_event(event), None, &attendees_of(event), date)?;
     Ok((note.id, true))
 }
 
@@ -1237,7 +1239,7 @@ pub fn on_meeting_started(app: &AppHandle, note_id: u64) {
     // real name, which the AI meeting title then leaves alone.
     let made_up = crate::notes::title_open_to_ai(&note) || model::is_placeholder_title(&note.title);
     let title = made_up.then(|| event.display_title());
-    if let Err(e) = crate::notes::link_event(note_id, note_event(&event), title, &attendee_names(&event), None) {
+    if let Err(e) = crate::notes::link_event(note_id, note_event(&event), title, &attendees_of(&event), None) {
         tracing::warn!("calendar: couldn't tie the note to its meeting: {e}");
         return;
     }

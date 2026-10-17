@@ -1,8 +1,78 @@
-// Pure helpers for the meeting notepad (Notepad.svelte): what its copy, save
-// and email actions put out, and how its transcript is laid out.
+// Pure helpers for the meeting notepad (Notepad.svelte) and the Notes view's
+// transcript: what the copy, save and email actions put out, how a
+// transcript is laid out, and what each line's speaker is called (the
+// note's speaker map, src-tauri/src/speakers.rs, read the same way).
 import { markdownToText } from './markdown.js';
 
-const who = (seg) => (seg.source === 'you' ? 'You' : 'Them');
+/** The voice of the person using Yap (the mic). */
+export const YOU = 'you';
+
+/**
+ * The voice a line is (speakers.rs `voice_of`): its `speaker`, else its side
+ * (`source`, every line nobody relabelled), through any merges in the map.
+ */
+export function speakerId(speakers, seg) {
+  let id = seg?.speaker || seg?.source || 'them';
+  for (let i = 0; i < 16; i += 1) {
+    const into = speakers?.[id]?.mergedInto;
+    if (!into || into === id) break;
+    id = into;
+  }
+  return id;
+}
+
+/** What an unnamed voice is called: "You", "Them", "Speaker 2". */
+export function defaultSpeakerName(id) {
+  if (id === YOU) return 'You';
+  if (id === 'them') return 'Them';
+  const n = /^them-(\d+)$/.exec(id || '');
+  return n ? `Speaker ${n[1]}` : 'Someone';
+}
+
+/**
+ * What voice `id` (resolved) is called (speakers.rs `name_of`/`display`):
+ * `{ id, name, label, guess, named, locked }`. A calendar or AI name nobody
+ * confirmed is a guess, labelled "Priya?". "You" is always You.
+ */
+export function speakerInfo(speakers, id) {
+  if (id === YOU) return { id, name: 'You', label: 'You', guess: false, named: false, locked: false };
+  const s = speakers?.[id];
+  const named = !!s?.name?.trim();
+  const guess = named && !s.locked && (s.source === 'calendar' || s.source === 'ai');
+  const name = named ? s.name.trim() : defaultSpeakerName(id);
+  return { id, name, label: guess ? `${name}?` : name, guess, named, locked: !!s?.locked };
+}
+
+/** How the transcript labels line `seg`: "You", "Them", "Priya", "Priya?". */
+export const speakerLabel = (speakers, seg) => speakerInfo(speakers, speakerId(speakers, seg)).label;
+const who = speakerLabel;
+
+/**
+ * The voices of a note, resolved (speakers.rs `voices`): those its lines are
+ * in, in order, then any other the map knows.
+ */
+export function noteVoices(note) {
+  const out = [];
+  const add = (id) => !out.includes(id) && out.push(id);
+  for (const s of note?.transcript || []) if (!s.echo && !s.dictated) add(speakerId(note.speakers, s));
+  for (const id of Object.keys(note?.speakers || {})) add(speakerId(note.speakers, { speaker: id }));
+  return out;
+}
+
+/**
+ * A transcript with each line's voice from a `yap-note-changed` after a
+ * speaker edit (`lineSpeakers`: `[speaker, locked]` per line), or `null`
+ * when the lengths differ (a line arrived meanwhile: fetch the note).
+ */
+export function withLineSpeakers(transcript, lineSpeakers) {
+  if (!Array.isArray(lineSpeakers) || !Array.isArray(transcript) || lineSpeakers.length !== transcript.length) {
+    return null;
+  }
+  return transcript.map((s, i) => {
+    const [speaker, locked] = lineSpeakers[i] || [];
+    return { ...s, speaker: speaker && speaker !== s.source ? speaker : '', speakerLocked: !!locked };
+  });
+}
 
 /** Spoken lines worth sharing: no echo (the call through the speakers), no markers. */
 const spoken = (transcript) => (transcript || []).filter((s) => !s.echo && !s.dictated);
@@ -27,7 +97,7 @@ export function noteMarkdown(note) {
   const lines = spoken(note?.transcript);
   if (lines.length) {
     out += '\n## Meeting Transcript\n\n';
-    for (const s of lines) out += `**${who(s)}:** ${s.text}\n\n`;
+    for (const s of lines) out += `**${who(note.speakers, s)}:** ${s.text}\n\n`;
   }
   return out.trimEnd() + '\n';
 }
@@ -37,10 +107,10 @@ export function noteText(note) {
   return markdownToText(noteMarkdown(note));
 }
 
-/** The transcript as "You: …" / "Them: …" lines. */
-export function transcriptText(transcript) {
+/** The transcript as "You: …" / "Them: …" lines (or the speakers' names). */
+export function transcriptText(transcript, speakers = {}) {
   return spoken(transcript)
-    .map((s) => `${who(s)}: ${s.text}`)
+    .map((s) => `${who(speakers, s)}: ${s.text}`)
     .join('\n');
 }
 
@@ -55,22 +125,24 @@ export function mailtoUrl(note) {
   const title = note?.title?.trim() || 'Meeting notes';
   let body = note?.enhancedContent?.trim()
     ? markdownToText(note.enhancedContent)
-    : [note?.content?.trim(), transcriptText(note?.transcript)].filter(Boolean).join('\n\n');
+    : [note?.content?.trim(), transcriptText(note?.transcript, note?.speakers)].filter(Boolean).join('\n\n');
   if (body.length > MAIL_BODY_MAX) body = `${body.slice(0, MAIL_BODY_MAX).trimEnd()}…`;
   return `mailto:?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
 }
 
 /**
  * What the Transcript tab shows, in order: speaker groups of lines (one chat
- * bubble each), a paused divider wherever a recording stopped (`breaks`: the
- * transcript's length at each stop), and a marker where the person dictated
- * mid-meeting (a `dictated` segment). Echo lines only with `showEcho`. With a
- * search `query`, only the lines that match it, in their groups, without
- * dividers.
- *   { kind: 'group', key, source, echo, lines: [{ text, i }] }
+ * bubble each; a group per run of one voice, named from the note's
+ * `speakers` map), a paused divider wherever a recording stopped (`breaks`:
+ * the transcript's length at each stop), and a marker where the person
+ * dictated mid-meeting (a `dictated` segment). Echo lines only with
+ * `showEcho`. With a search `query`, only the lines that match it, in their
+ * groups, without dividers.
+ *   { kind: 'group', key, source ('you' | 'them': the user or someone else),
+ *     speaker (the voice), label, guess, echo, lines: [{ text, i }] }
  *   { kind: 'pause', key } | { kind: 'dictated', key }
  */
-export function transcriptItems(transcript, breaks = [], { showEcho = false, query = '' } = {}) {
+export function transcriptItems(transcript, breaks = [], { showEcho = false, query = '', speakers = {} } = {}) {
   const q = query.trim().toLowerCase();
   const stops = new Set(breaks || []);
   const items = [];
@@ -81,10 +153,13 @@ export function transcriptItems(transcript, breaks = [], { showEcho = false, que
       group = null;
     } else if ((!s.echo || showEcho) && (!q || (s.text || '').toLowerCase().includes(q))) {
       const echo = !!s.echo;
-      if (group && group.source === s.source && group.echo === echo) {
+      const speaker = speakerId(speakers, s);
+      if (group && group.speaker === speaker && group.echo === echo) {
         group.lines.push({ text: s.text, i });
       } else {
-        group = { kind: 'group', key: `g${i}`, source: s.source, echo, lines: [{ text: s.text, i }] };
+        const { label, guess } = speakerInfo(speakers, speaker);
+        const source = speaker === YOU ? 'you' : 'them';
+        group = { kind: 'group', key: `g${i}`, source, speaker, label, guess, echo, lines: [{ text: s.text, i }] };
         items.push(group);
       }
     }

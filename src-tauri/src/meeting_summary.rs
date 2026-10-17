@@ -30,8 +30,9 @@
 //! local models are capped (`max_tokens`).
 //!
 //! Never invents owners or dates: digests and the action plan go through
-//! deterministic checks. An owner must be "You", "Everyone", an attendee, or a
-//! name that was actually said, else the task is Unassigned; a deadline's
+//! deterministic checks. An owner must be "You", "Everyone", an attendee, a
+//! name in the meeting's speaker map (`speakers.rs`), or a name that was
+//! actually said, else the task is Unassigned; a deadline's
 //! words must appear in what the model read, else it's dropped; and the
 //! action plan gets back any digest task the final merge left out
 //! (summaries of summaries are where tasks get lost).
@@ -47,6 +48,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::config::YapConfig;
 use crate::llm::ChatOptions;
 use crate::notes::{DigestAction, MeetingDigest, Note, TranscriptSegment};
+use crate::speakers::Speakers;
 
 /// A digest is due once the new talk spans this much meeting time…
 pub const DIGEST_EVERY_SECS: u64 = 10 * 60;
@@ -141,20 +143,14 @@ fn keep_last_tokens(s: &str, budget: usize) -> String {
     format!("(…earlier lines left out)\n{}\n", kept.join("\n"))
 }
 
-fn speaker(seg: &TranscriptSegment) -> &'static str {
-    if seg.source == "you" {
-        "You"
-    } else {
-        "Them"
-    }
-}
-
-/// Transcript lines as the models read them ("You: …" / "Them: …"), without
-/// the echo segments or the "you dictated here" markers.
-pub fn transcript_lines(segs: &[TranscriptSegment]) -> String {
+/// Transcript lines as the models read them, each under its speaker's name
+/// ("You: …", "Them: …", or "Priya: …" / "Speaker 2: …" once the speaker map
+/// knows them: `speakers::prompt_label`), without the echo segments or the
+/// "you dictated here" markers.
+pub fn transcript_lines(speakers: &Speakers, segs: &[TranscriptSegment]) -> String {
     segs.iter()
         .filter(|s| s.is_talk())
-        .map(|s| format!("{}: {}\n", speaker(s), s.text.trim()))
+        .map(|s| format!("{}: {}\n", crate::speakers::prompt_label(speakers, s), s.text.trim()))
         .collect()
 }
 
@@ -194,9 +190,21 @@ fn attendees_line(attendees: &[String]) -> String {
     }
 }
 
+/// The people part of every meeting call's input: "Attendees: …", then
+/// "Speakers besides You: …" when the transcript names anyone or tells
+/// voices apart (`speakers::speakers_line`; a guess is said to be one).
+fn people_lines(note: &Note) -> String {
+    let mut out = format!("Attendees: {}\n", attendees_line(&note.participants));
+    if let Some(line) = crate::speakers::speakers_line(note) {
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
 /// Whether the whole raw transcript (and typed notes) fit one pass.
 pub fn fits_single_pass(note: &Note) -> bool {
-    estimate_tokens(&transcript_lines(&note.transcript)) + estimate_tokens(note.content.trim())
+    estimate_tokens(&transcript_lines(&note.speakers, &note.transcript)) + estimate_tokens(note.content.trim())
         <= SINGLE_PASS_TOKENS
 }
 
@@ -292,18 +300,10 @@ pub fn context_so_far(digests: &[MeetingDigest], t0: u64) -> String {
 }
 
 /// The chat messages for digest `part` over `lines` (one-shot example first:
-/// it's what keeps a 1.5B model in the four-heading layout).
-pub fn digest_messages(
-    attendees: &[String],
-    context: &str,
-    part: usize,
-    range: &str,
-    lines: &str,
-) -> Value {
-    let user = format!(
-        "Attendees: {}\n\nThe meeting so far:\n{context}\n\nTranscript, part {part} ({range}):\n{lines}",
-        attendees_line(attendees)
-    );
+/// it's what keeps a 1.5B model in the four-heading layout). `people`: the
+/// attendees and speakers lines ([`people_lines`]).
+pub fn digest_messages(people: &str, context: &str, part: usize, range: &str, lines: &str) -> Value {
+    let user = format!("{people}\nThe meeting so far:\n{context}\n\nTranscript, part {part} ({range}):\n{lines}");
     json!([
         { "role": "system", "content": crate::llm::MEETING_DIGEST_PROMPT },
         { "role": "user", "content": DIGEST_EXAMPLE_IN },
@@ -785,7 +785,7 @@ pub struct MeetingInput {
 /// most [`FINAL_INPUT_TOKENS`] either way (callers run [`prepare_final`]
 /// first so the tail is already short; a tail that isn't keeps its end).
 pub fn compose_meeting_input(note: &Note) -> MeetingInput {
-    let mut text = format!("Attendees: {}\n", attendees_line(&note.participants));
+    let mut text = people_lines(note);
     // The calendar invite's agenda (calendar.rs), when the meeting had one.
     if let Some(invite) = crate::calendar::invite_context(note) {
         text.push_str(&invite);
@@ -798,7 +798,7 @@ pub fn compose_meeting_input(note: &Note) -> MeetingInput {
         }
         text.push_str(&format!(
             "\n## Meeting Transcript\n{}",
-            transcript_lines(&note.transcript)
+            transcript_lines(&note.speakers, &note.transcript)
         ));
         return MeetingInput {
             text,
@@ -820,7 +820,7 @@ pub fn compose_meeting_input(note: &Note) -> MeetingInput {
     }
     let upto = crate::notes::digested_upto(note).min(note.transcript.len());
     let tail = &note.transcript[upto..];
-    let tail_lines = keep_last_tokens(&transcript_lines(tail), FINAL_TAIL_TOKENS);
+    let tail_lines = keep_last_tokens(&transcript_lines(&note.speakers, tail), FINAL_TAIL_TOKENS);
     if let (Some(first), Some(last)) = (note.digests.first(), note.digests.last()) {
         let header = format!(
             "\n## Digest of the meeting so far ({}\u{2013}{})\n",
@@ -850,7 +850,7 @@ pub fn compose_meeting_input(note: &Note) -> MeetingInput {
 /// `budget` tokens: the whole transcript when it fits, else the digests and
 /// as much of the latest transcript as fits.
 pub fn ask_context(note: &Note, budget: usize) -> String {
-    let all = transcript_lines(&note.transcript);
+    let all = transcript_lines(&note.speakers, &note.transcript);
     if estimate_tokens(&all) <= budget || note.digests.is_empty() {
         return format!("Meeting transcript:\n{}", keep_last_tokens(&all, budget));
     }
@@ -860,7 +860,7 @@ pub fn ask_context(note: &Note, budget: usize) -> String {
     let rest = budget.saturating_sub(estimate_tokens(&digests));
     format!(
         "Meeting digest:\n{digests}\nLatest transcript:\n{}",
-        keep_last_tokens(&transcript_lines(&note.transcript[upto..]), rest)
+        keep_last_tokens(&transcript_lines(&note.speakers, &note.transcript[upto..]), rest)
     )
 }
 
@@ -1270,20 +1270,14 @@ async fn digest_window(
         _ => return Err(DigestError::Failed("empty window".to_string())),
     };
     let t0 = meeting_t0(note);
-    let lines = transcript_lines(segs);
+    let lines = transcript_lines(&note.speakers, segs);
     let range = format!(
         "{}\u{2013}{}",
         clock(first.ts.saturating_sub(t0)),
         clock(last.ts.saturating_sub(t0))
     );
     let context = context_so_far(&note.digests, t0);
-    let messages = digest_messages(
-        &note.participants,
-        &context,
-        note.digests.len() + 1,
-        &range,
-        &lines,
-    );
+    let messages = digest_messages(&people_lines(note), &context, note.digests.len() + 1, &range, &lines);
     let opts = ep.options(DIGEST_REPLY_TOKENS, 0.2);
     let call = crate::llm::chat(
         &ep.base_url,
@@ -1306,7 +1300,7 @@ async fn digest_window(
             "the model returned an empty digest".to_string(),
         ));
     }
-    let parsed = check_digest(parse_digest(&reply), &note.participants, &lines);
+    let parsed = check_digest(parse_digest(&reply), &crate::speakers::known_people(note), &lines);
     let raw = if parsed.recognized {
         String::new()
     } else {
@@ -1519,7 +1513,7 @@ pub fn catch_up_input(note: &Note, since: usize) -> Option<String> {
         context.push('\n');
     }
     let from = earlier.last().map(|d| d.to_seg).unwrap_or(0).min(since);
-    let before = transcript_lines(&note.transcript[from..since]);
+    let before = transcript_lines(&note.speakers, &note.transcript[from..since]);
     if !before.trim().is_empty() {
         context.push_str(&keep_last_tokens(&before, CATCH_UP_CONTEXT_TOKENS));
     }
@@ -1527,7 +1521,7 @@ pub fn catch_up_input(note: &Note, since: usize) -> Option<String> {
         context = "(Nothing: this is the start of the meeting.)".to_string();
     }
 
-    let raw = transcript_lines(new);
+    let raw = transcript_lines(&note.speakers, new);
     let body = if estimate_tokens(&raw) <= CATCH_UP_RAW_TOKENS {
         raw
     } else {
@@ -1541,7 +1535,7 @@ pub fn catch_up_input(note: &Note, since: usize) -> Option<String> {
             keep_last_tokens(&raw, CATCH_UP_RAW_TOKENS)
         } else {
             let upto = crate::notes::digested_upto(note).clamp(since, note.transcript.len());
-            let tail = transcript_lines(&note.transcript[upto..]);
+            let tail = transcript_lines(&note.speakers, &note.transcript[upto..]);
             let mut body = format!(
                 "Notes on the first part of it:\n{}",
                 render_digests(&covering, t0, CATCH_UP_DIGEST_TOKENS)
@@ -1556,8 +1550,8 @@ pub fn catch_up_input(note: &Note, since: usize) -> Option<String> {
         }
     };
     Some(format!(
-        "Attendees: {}\n\nEarlier in the meeting (context only):\n{}\n\nSince they last looked ({}\u{2013}{}):\n{}",
-        attendees_line(&note.participants),
+        "{}\nEarlier in the meeting (context only):\n{}\n\nSince they last looked ({}\u{2013}{}):\n{}",
+        people_lines(note),
         context.trim_end(),
         clock(first.ts.saturating_sub(t0)),
         clock(last.ts.saturating_sub(t0)),
@@ -1576,7 +1570,7 @@ pub fn catch_up_messages(input: &str) -> Value {
 /// The chat messages for a follow-up question about the meeting: attendees,
 /// the notes the person typed and the meeting as [`ask_context`] bounds it.
 pub fn meeting_ask_messages(note: &Note, question: &str) -> Value {
-    let mut input = format!("Attendees: {}\n", attendees_line(&note.participants));
+    let mut input = people_lines(note);
     let typed = note.content.trim();
     if !typed.is_empty() {
         input.push_str(&format!(
@@ -1602,7 +1596,7 @@ const TITLE_EXAMPLE_OUT: &str = "Launch Date Planning with Priya";
 /// key points when there are some. One-shot, so a small model answers with a
 /// title and nothing else.
 pub fn title_messages(note: &Note) -> Value {
-    let lines = truncate_to_tokens(&transcript_lines(&note.transcript), TITLE_TRANSCRIPT_TOKENS);
+    let lines = truncate_to_tokens(&transcript_lines(&note.speakers, &note.transcript), TITLE_TRANSCRIPT_TOKENS);
     let points: Vec<String> = note
         .digests
         .iter()
@@ -1615,10 +1609,7 @@ pub fn title_messages(note: &Note) -> Value {
     } else {
         format!("Main points so far:\n{}\n\n", points.join("\n"))
     };
-    let user = format!(
-        "Attendees: {}\n\n{points}Transcript (start):\n{lines}",
-        attendees_line(&note.participants)
-    );
+    let user = format!("{}\n{points}Transcript (start):\n{lines}", people_lines(note));
     json!([
         { "role": "system", "content": crate::llm::MEETING_TITLE_PROMPT },
         { "role": "user", "content": TITLE_EXAMPLE_IN },
@@ -1737,7 +1728,7 @@ pub fn questions_input(note: &Note) -> Option<String> {
         used += t;
         from -= 1;
     }
-    let mut out = format!("Attendees: {}\n", attendees_line(&note.participants));
+    let mut out = people_lines(note);
     if let Some(invite) = invite {
         out.push('\n');
         out.push_str(&invite);
@@ -1770,7 +1761,7 @@ pub fn questions_input(note: &Note) -> Option<String> {
             "\nThe latest talk ({}\u{2013}{}):\n{}",
             clock(first.ts.saturating_sub(t0)),
             clock(last.ts.saturating_sub(t0)),
-            keep_last_tokens(&transcript_lines(recent), QUESTIONS_RECENT_TOKENS)
+            keep_last_tokens(&transcript_lines(&note.speakers, recent), QUESTIONS_RECENT_TOKENS)
         )),
         _ => out.push_str("\nThe latest talk:\n(Nothing has been said yet.)\n"),
     }
@@ -1794,7 +1785,7 @@ pub fn recap_input(note: &Note, beside_summary: usize) -> Option<String> {
     if !crate::notes::title_open_to_ai(note) {
         out.push_str(&format!("Meeting: {}\n", note.title.trim()));
     }
-    out.push_str(&format!("Attendees: {}\n", attendees_line(&note.participants)));
+    out.push_str(&people_lines(note));
     if let Some(invite) = invite_part(note) {
         out.push('\n');
         out.push_str(&invite);
@@ -1950,8 +1941,7 @@ mod tests {
             source: source.to_string(),
             text: text.to_string(),
             ts,
-            echo: false,
-            dictated: false,
+            ..Default::default()
         }
     }
 
@@ -2038,10 +2028,49 @@ mod tests {
     }
 
     #[test]
+    fn named_speakers_reach_every_input_and_count_as_known_people() {
+        let mut note = note_with(vec![
+            seg("you", "Can you send the deck by Friday?", 1000),
+            seg("them", "Sure, I will send it.", 1010),
+            seg("them", "And I will book the room for the offsite next week.", 1020),
+        ]);
+        note.participants.clear();
+        // The call's voice a calendar guess; a second voice told apart, then
+        // named by the user.
+        note.transcript[2].speaker = "them-2".into();
+        crate::speakers::calendar_guess(&mut note, &[("Priya Shah".into(), String::new())]);
+        crate::speakers::rename(&mut note, "them-2", "Tom").unwrap();
+        let lines = transcript_lines(&note.speakers, &note.transcript);
+        assert_eq!(
+            lines,
+            "You: Can you send the deck by Friday?\nPriya Shah: Sure, I will send it.\nTom: And I will book the room for the offsite next week.\n"
+        );
+        let header = "Speakers besides You: Priya Shah (a guess: the only other person invited); Tom";
+        let input = compose_meeting_input(&note).text;
+        assert!(input.contains(header) && input.contains("\nTom: And I will book"), "{input}");
+        assert!(catch_up_input(&note, 0).unwrap().contains(header));
+        assert!(user_turn(&title_messages(&note)).contains("Priya Shah: Sure"));
+        assert!(user_turn(&meeting_ask_messages(&note, "Who books the room?")).contains("Tom: And"));
+        assert!(ask_context(&note, 3_000).contains("Priya Shah: Sure"));
+        assert!(recap_input(&note, 500).unwrap().contains(header));
+        // A name in the speaker map is a known person, said or not.
+        let known = crate::speakers::known_people(&note);
+        assert_eq!(resolve_owner("Tom", &known, "nothing said"), "Tom");
+        assert_eq!(resolve_owner("priya", &known, ""), "Priya Shah");
+        assert_eq!(resolve_owner("Mallory", &known, &lines), UNASSIGNED);
+        let plan = postcheck_action_plan("## Action plan\n### Tom\n- [ ] book the room", &known, "", &[]);
+        assert!(plan.contains("### Tom\n- [ ] book the room"), "{plan}");
+        // Just You and Them: no speakers line, the labels as they were.
+        let plain = note_with(vec![seg("you", "hi", 1), seg("them", "hello", 2)]);
+        assert!(!compose_meeting_input(&plain).text.contains("Speakers"));
+        assert_eq!(transcript_lines(&plain.speakers, &plain.transcript), "You: hi\nThem: hello\n");
+    }
+
+    #[test]
     fn echo_segments_are_left_out() {
         let mut t = talk(4, 10, 15);
         t[1].echo = true;
-        let lines = transcript_lines(&t);
+        let lines = transcript_lines(&Speakers::new(), &t);
         assert_eq!(lines.lines().count(), 3);
         assert_eq!(seg_tokens(&t[1]), 0);
     }
@@ -2054,12 +2083,12 @@ mod tests {
         t.insert(20, TranscriptSegment::dictation_marker(1000 + 20 * 15));
         t.push(TranscriptSegment::dictation_marker(1000 + 41 * 15));
         assert_eq!(seg_tokens(&t[20]), 0);
-        let lines = transcript_lines(&t);
+        let lines = transcript_lines(&Speakers::new(), &t);
         assert_eq!(lines.lines().count(), 40);
         assert!(!lines.contains("You: \n"), "no empty line for a marker");
         // Digest windows, the final input and the Ask context never show it.
         let (from, to) = next_window(&t, 0, Plan::Live).unwrap();
-        assert!(!transcript_lines(&t[from..to]).contains("You: \n"));
+        assert!(!transcript_lines(&Speakers::new(), &t[from..to]).contains("You: \n"));
         let note = note_with(t.clone());
         let input = compose_meeting_input(&note);
         assert!(!input.text.contains("You: \n"));

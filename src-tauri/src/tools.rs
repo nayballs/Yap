@@ -1027,8 +1027,7 @@ mod tests {
                 source: "them".into(),
                 text: "Friday works".into(),
                 ts: 5,
-                echo: false,
-                dictated: false,
+                ..Default::default()
             }],
         )
         .unwrap();

@@ -44,6 +44,7 @@ use serde_json::{json, Value};
 
 use crate::meeting_summary::{clock, estimate_tokens, render_digests};
 use crate::notes::{Note, TranscriptSegment};
+use crate::speakers::Speakers;
 
 /// Transcript tokens per `get_meeting` page: about 20 minutes of talk, small
 /// enough for any client's context next to the rest of a conversation.
@@ -56,7 +57,7 @@ const MAX_MATCHES: usize = 3;
 /// What an AI app reads when Yap isn't there to ask.
 pub const NOT_RUNNING: &str = "Yap isn't open, so your notes can't be read right now. Open Yap to let your AI read your notes (and check that Integrations → Local API is switched on in Yap).";
 
-const INSTRUCTIONS: &str = "Yap is the user's voice-dictation and meeting-notes app on this computer. These tools read their Yap meetings (AI summaries, notes typed during the meeting and You/Them transcripts) and their other Yap notes, through the Yap app running on this PC. Their dictation history is never available here. Find a meeting with list_meetings (by date) or search_meetings (by topic, name or words said), then read it with get_meeting; long transcripts come in pages. In a transcript 'You' is the user and 'Them' is everyone else on the call, not told apart. Times are in the user's local time zone. If a tool says Yap isn't open, ask the user to open Yap.";
+const INSTRUCTIONS: &str = "Yap is the user's voice-dictation and meeting-notes app on this computer. These tools read their Yap meetings (AI summaries, notes typed during the meeting and transcripts) and their other Yap notes, through the Yap app running on this PC. Their dictation history is never available here. Find a meeting with list_meetings (by date) or search_meetings (by topic, name or words said), then read it with get_meeting; long transcripts come in pages. In a transcript 'You' is the user; every other line says who spoke when Yap knows (a name; one ending in '?' is Yap's guess, from the calendar invite), 'Speaker 2' and so on for voices told apart but not named yet, and 'Them' for everyone else on the call, not told apart. Times are in the user's local time zone. If a tool says Yap isn't open, ask the user to open Yap.";
 
 // ---- the meetings, as the bridge serves them (runs inside the app) ----
 
@@ -71,36 +72,51 @@ fn t0(n: &Note) -> u64 {
     n.transcript.first().map(|s| s.ts).unwrap_or(n.created_ts)
 }
 
-fn speaker(seg: &TranscriptSegment) -> &'static str {
-    if seg.source == "you" {
-        "You"
-    } else {
-        "Them"
-    }
-}
-
-/// One transcript line as the tools show it: `[12:34] Them: …`.
-fn line(seg: &TranscriptSegment, t0: u64) -> String {
+/// One transcript line as the tools show it: `[12:34] Them: …`, or the
+/// speaker's name once the meeting's speaker map has one ("Priya?" for a
+/// guess: `speakers::display_line`).
+fn line(speakers: &Speakers, seg: &TranscriptSegment, t0: u64) -> String {
     format!(
         "[{}] {}: {}",
         clock(seg.ts.saturating_sub(t0)),
-        speaker(seg),
+        crate::speakers::display_line(speakers, seg),
         seg.text.trim()
     )
+}
+
+/// What a meeting's transcript labels mean, as the page says it: You and
+/// Them, plus who the other names are when voices are named or told apart.
+fn who_is_who(n: &Note) -> String {
+    let mut out = "'You' is the person using Yap; 'Them' is everyone else on the call, not told apart.".to_string();
+    use crate::speakers::{display, voice_of, voices, THEM, YOU};
+    let named_them = n.speakers.get(THEM).is_some_and(|s| !s.name.trim().is_empty());
+    let others: Vec<String> = voices(n)
+        .into_iter()
+        .filter(|id| id != YOU && (id != THEM || named_them))
+        .filter(|id| n.transcript.iter().any(|s| s.is_talk() && voice_of(&n.speakers, s) == id))
+        .map(|id| display(&n.speakers, &id))
+        .collect();
+    if !others.is_empty() {
+        out = format!(
+            "'You' is the person using Yap. Other lines are labelled with who spoke: {} (a name ending in '?' is Yap's guess from the calendar invite; 'Speaker 2' and so on are voices told apart but not named; 'Them' is anyone else on the call).",
+            others.join(", ")
+        );
+    }
+    out
 }
 
 /// The transcript's pages, as ranges of segment indices, each within
 /// [`PAGE_TOKENS`] (echo segments, the call leaking into the mic, and "You
 /// dictated here" markers are skipped, as in summaries). Empty when nothing
 /// was said.
-pub fn pages(segs: &[TranscriptSegment], t0: u64) -> Vec<Range<usize>> {
+pub fn pages(speakers: &Speakers, segs: &[TranscriptSegment], t0: u64) -> Vec<Range<usize>> {
     let mut out = Vec::new();
     let (mut start, mut used) = (0, 0);
     for (i, seg) in segs.iter().enumerate() {
         if !seg.is_talk() {
             continue;
         }
-        let tokens = estimate_tokens(&line(seg, t0)) + 1;
+        let tokens = estimate_tokens(&line(speakers, seg, t0)) + 1;
         if used > 0 && used + tokens > PAGE_TOKENS {
             out.push(start..i);
             (start, used) = (i, 0);
@@ -145,7 +161,7 @@ pub fn meeting_summary(n: &Note) -> Value {
         "endTs": end,
         "durationSecs": end.saturating_sub(start),
         "lines": spoken(n).count(),
-        "pages": pages(&n.transcript, t0(n)).len(),
+        "pages": pages(&n.speakers, &n.transcript, t0(n)).len(),
         "hasSummary": !n.enhanced_content.trim().is_empty(),
         "hasNotes": !n.content.trim().is_empty(),
         "digests": n.digests.len(),
@@ -225,14 +241,14 @@ pub fn search_meetings(notes: &[Note], query: &str, limit: usize) -> Vec<Value> 
         matched.truncate(MAX_MATCHES);
         matched.sort_by_key(|m| m.1);
         let zero = t0(n);
-        let pages = pages(&n.transcript, zero);
+        let pages = pages(&n.speakers, &n.transcript, zero);
         let lines: Vec<Value> = matched
             .iter()
             .map(|&(_, i)| {
                 let seg = &n.transcript[i];
                 json!({
                     "at": clock(seg.ts.saturating_sub(zero)),
-                    "speaker": speaker(seg),
+                    "speaker": crate::speakers::display_line(&n.speakers, seg),
                     "text": excerpt(&seg.text, 280),
                     "page": page_of(&pages, i),
                 })
@@ -595,7 +611,7 @@ pub fn tools(writes: bool) -> Vec<Tool> {
         .annotate(read_only("Search meetings")),
         Tool::new(
             "get_meeting",
-            "Read one meeting by id: when it was, who attended, the AI summary or action plan, notes the user typed during it, and the transcript as timestamped lines. 'You' is the user; 'Them' is everyone else on the call (one voice: speakers aren't told apart). Long transcripts come in pages of about 20 minutes: the reply says how many there are, and transcript_page fetches the next.",
+            "Read one meeting by id: when it was, who attended, the AI summary or action plan, notes the user typed during it, and the transcript as timestamped lines. 'You' is the user; other lines name who spoke when Yap knows (a name ending in '?' is a guess from the calendar invite), 'Speaker 2' and so on for voices told apart but not named, and 'Them' for everyone else on the call, not told apart. Long transcripts come in pages of about 20 minutes: the reply says how many there are, and transcript_page fetches the next.",
             schema(json!({
                 "type": "object",
                 "properties": {
@@ -849,7 +865,7 @@ fn render_meeting_search(query: &str, data: &Value) -> String {
 /// transcript, to spare the context).
 pub fn render_meeting(n: &Note, page: usize) -> Result<String, String> {
     let zero = t0(n);
-    let pages = pages(&n.transcript, zero);
+    let pages = pages(&n.speakers, &n.transcript, zero);
     let total = pages.len();
     if total > 0 && page > total {
         return Err(format!(
@@ -911,7 +927,7 @@ pub fn render_meeting(n: &Note, page: usize) -> Result<String, String> {
     let lines: Vec<String> = n.transcript[range.clone()]
         .iter()
         .filter(|s| s.is_talk())
-        .map(|s| line(s, zero))
+        .map(|s| line(&n.speakers, s, zero))
         .collect();
     if total > 1 {
         let first = n.transcript[range.clone()].iter().find(|s| s.is_talk());
@@ -925,7 +941,7 @@ pub fn render_meeting(n: &Note, page: usize) -> Result<String, String> {
     } else {
         out.push_str("\n## Transcript\n");
     }
-    out.push_str("'You' is the person using Yap; 'Them' is everyone else on the call (not told apart).\n");
+    out.push_str(&format!("{}\n", who_is_who(n)));
     out.push_str(&lines.join("\n"));
     out.push('\n');
     if page < total {
@@ -1110,8 +1126,7 @@ mod tests {
             source: source.to_string(),
             text: text.to_string(),
             ts,
-            echo: false,
-            dictated: false,
+            ..Default::default()
         }
     }
 
@@ -1174,7 +1189,7 @@ mod tests {
     fn pages_cover_every_line_once_within_budget() {
         let n = long_meeting();
         let zero = t0(&n);
-        let p = pages(&n.transcript, zero);
+        let p = pages(&n.speakers, &n.transcript, zero);
         assert!(p.len() >= 3, "{} pages", p.len());
         assert_eq!(p.first().unwrap().start, 0);
         assert_eq!(p.last().unwrap().end, n.transcript.len());
@@ -1182,7 +1197,7 @@ mod tests {
             assert_eq!(w[0].end, w[1].start);
         }
         for r in &p {
-            let text: String = n.transcript[r.clone()].iter().map(|s| line(s, zero) + "\n").collect();
+            let text: String = n.transcript[r.clone()].iter().map(|s| line(&n.speakers, s, zero) + "\n").collect();
             assert!(estimate_tokens(&text) <= PAGE_TOKENS + 10);
         }
         assert_eq!(page_of(&p, 0), 1);
@@ -1190,10 +1205,10 @@ mod tests {
         // Echo lines don't count, and a transcript of only echo has no pages.
         let mut echo = standup();
         echo.transcript.iter_mut().for_each(|s| s.echo = true);
-        assert!(pages(&echo.transcript, 0).is_empty());
+        assert!(pages(&Speakers::new(), &echo.transcript, 0).is_empty());
         // Nor do "You dictated here" markers.
         let marker = vec![TranscriptSegment::dictation_marker(5)];
-        assert!(pages(&marker, 0).is_empty());
+        assert!(pages(&Speakers::new(), &marker, 0).is_empty());
     }
 
     #[test]
@@ -1221,6 +1236,23 @@ mod tests {
         // An attendee's name finds their meetings; short words find nothing.
         assert_eq!(search_meetings(&notes, "tom", 5)[0]["id"], 1);
         assert!(search_meetings(&notes, "is a", 5).is_empty());
+    }
+
+    #[test]
+    fn named_speakers_read_as_names_and_a_guess_as_a_guess() {
+        // Plain You/Them: the transcript explains the two labels.
+        let plain = render_meeting(&standup(), 1).unwrap();
+        assert!(plain.contains("'Them' is everyone else on the call, not told apart."));
+        // A 1:1 invite's guess, and a voice the user named on one line.
+        let mut n = standup();
+        crate::speakers::calendar_guess(&mut n, &[("Priya".into(), String::new())]);
+        crate::speakers::rename_lines(&mut n, &[2], "Tom").unwrap();
+        let text = render_meeting(&n, 1).unwrap();
+        assert!(text.contains("[0:15] Priya?: Priya here: I will send"), "{text}");
+        assert!(text.contains("[0:30] Tom: Great, and Tom books the venue."));
+        assert!(text.contains("labelled with who spoke: Priya?, Tom"), "{text}");
+        let found = search_meetings(&[n], "venue", 5);
+        assert_eq!(found[0]["matches"][0]["speaker"], "Tom");
     }
 
     #[test]

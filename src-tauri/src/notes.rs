@@ -16,18 +16,48 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-/// One You/Them transcript segment from the meeting recorder (OpenWhispr
-/// `TranscriptSegment`, trimmed to what Yap uses: source "you"|"them", text,
-/// unix-seconds timestamp of the audio it came from).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use crate::speakers::Speakers;
+
+/// One transcript line from the meeting recorder (OpenWhispr
+/// `TranscriptSegment`, trimmed to what Yap uses): its side (`source`: the
+/// mic "you" or the call "them"), its voice (`speaker`), text, the
+/// unix-seconds timestamp of the audio it came from, and its place on the
+/// recording's clock.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptSegment {
     pub source: String,
     pub text: String,
     pub ts: u64,
+    /// The voice that said it (`speakers.rs`): "you", "them", "them-1"…
+    /// (told apart by voice), "p-1"… (a person the user named on this line).
+    /// Empty = its side's own voice (`source`): every line nobody
+    /// relabelled, and every line recorded before voices existed. Read it
+    /// with [`TranscriptSegment::speaker_id`].
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub speaker: String,
+    /// The user said who this line is ("Rename just this line"): no
+    /// automatic relabel (the voice separation) moves it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub speaker_locked: bool,
+    /// Where the line's speech starts and ends, in ms on the recording's
+    /// clock (0 = when that recording started; a resume starts a new one,
+    /// and `Note::breaks` marks where each ended). `None` on lines from
+    /// before, and on markers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_ms: Option<u64>,
+    /// Each word's start and end (ms from `start_ms`), one per
+    /// whitespace-separated word of `text`, when the speech model gave word
+    /// times (Parakeet, Whisper, SenseVoice). Empty otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<[u32; 2]>,
     /// A "you" segment that was the call audio leaking from the speakers into
     /// the mic (`meeting::is_echo`). Kept, but left out of the summary and
     /// hidden in the transcript view.
@@ -48,10 +78,19 @@ impl TranscriptSegment {
     pub fn dictation_marker(ts: u64) -> Self {
         TranscriptSegment {
             source: "you".to_string(),
-            text: String::new(),
             ts,
-            echo: false,
             dictated: true,
+            ..Default::default()
+        }
+    }
+
+    /// The voice of this line (before any merges in the note's speaker
+    /// map): its `speaker`, else its side.
+    pub fn speaker_id(&self) -> &str {
+        if self.speaker.is_empty() {
+            &self.source
+        } else {
+            &self.speaker
         }
     }
 
@@ -172,6 +211,11 @@ pub struct Note {
     /// The calendar event this meeting note is for, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event: Option<NoteEvent>,
+    /// The meeting's speaker map (`speakers.rs`): voice id → its name, where
+    /// the name came from (user > call app > voice > calendar / AI guess),
+    /// whether the user locked it, merges and refused names.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub speakers: Speakers,
 }
 
 fn default_note_type() -> String {
@@ -741,6 +785,7 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
             created_ts: now,
             updated_ts: now,
             event: None,
+            speakers: Speakers::new(),
         };
         store.notes.push(note.clone());
         save_to_disk(store);
@@ -751,13 +796,15 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
 /// Tie meeting note `id` to a calendar event (`calendar.rs`): keep the event,
 /// take its `title` when given (the caller only passes one over a made-up
 /// title; the meeting's real name, so the AI title leaves it alone), add its
-/// attendees after the ones already there, and, for a note made ahead of the
-/// meeting, date it to the meeting (`date`).
+/// attendees (name, email: everyone invited but you, no rooms) after the
+/// ones already there, and, for a note made ahead of the meeting, date it to
+/// the meeting (`date`). A 1:1 call's other invitee becomes the guess for
+/// "Them" (`speakers::calendar_guess`).
 pub fn link_event(
     id: u64,
     event: NoteEvent,
     title: Option<String>,
-    attendees: &[String],
+    attendees: &[(String, String)],
     date: Option<u64>,
 ) -> Result<(), String> {
     with_store(|store| {
@@ -770,12 +817,13 @@ pub fn link_event(
             note.title = title;
             note.title_auto = false;
         }
-        for name in attendees {
+        for (name, _) in attendees {
             let name = name.trim();
             if !name.is_empty() && !note.participants.iter().any(|p| p.eq_ignore_ascii_case(name)) {
                 note.participants.push(name.to_string());
             }
         }
+        crate::speakers::calendar_guess(note, attendees);
         if let Some(date) = date {
             note.created_ts = date;
         }
@@ -1133,8 +1181,7 @@ mod tests {
                 source: "them".into(),
                 text: format!("line {i}"),
                 ts: i,
-                echo: false,
-                dictated: false,
+                ..Default::default()
             })
             .collect();
         let d = |from, to| MeetingDigest {
@@ -1191,8 +1238,7 @@ mod tests {
             source: "you".into(),
             text: format!("line {i}"),
             ts: i,
-            echo: false,
-            dictated: false,
+            ..Default::default()
         };
         note.transcript = (0..3).map(seg).collect();
         assert!(push_break(&mut note)); // paused after three lines
@@ -1214,9 +1260,8 @@ mod tests {
         let seg = |source: &str, text: &str, echo: bool| TranscriptSegment {
             source: source.into(),
             text: text.into(),
-            ts: 0,
             echo,
-            dictated: false,
+            ..Default::default()
         };
         let t = vec![
             seg("you", "Hi, Notetaker.", false),
