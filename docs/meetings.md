@@ -23,12 +23,12 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 | The dictation signal; the correction dictionary (`apply_corrections`) | `src-tauri/src/pipeline.rs` |
 | Guard rails: maximum length, the meeting shortcut, notices | `src-tauri/src/meeting_guard.rs` |
 | Hiding meeting windows from screen capture | `src-tauri/src/capture.rs` |
-| Rolling digests, the final input, the checks; the notepad's catch-up and title inputs | `src-tauri/src/meeting_summary.rs` |
+| Rolling digests, the final input, the checks; the notepad's catch-up, helper and title inputs | `src-tauri/src/meeting_summary.rs` |
 | The end of a meeting: pause or end, "Started by mistake?", the action plan job | `src-tauri/src/meeting_end.rs` |
-| "What did I miss?", the AI meeting title | `src-tauri/src/meeting_assist.rs` |
+| "What did I miss?", the one-tap helpers (Questions to ask, Follow-up email, Gaps and risks), the AI meeting title | `src-tauri/src/meeting_assist.rs` |
 | The notepad window: docking, split screen | `src-tauri/src/notepad.rs` |
 | The calendar: meetings, the reminder card, a note's meeting | `src-tauri/src/calendar.rs` (+ `calendar/`; [`calendar.md`](./calendar.md)) |
-| Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_TITLE_PROMPT`) | `src-tauri/src/llm.rs` |
+| Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_QUESTIONS_PROMPT`, `MEETING_FOLLOW_UP_PROMPT`, `MEETING_BLIND_SPOTS_PROMPT`, `MEETING_TITLE_PROMPT`) | `src-tauri/src/llm.rs` |
 | Storage (`Note::digests`, `TranscriptSegment::echo` / `::dictated`, `Action::kind`, `Note::title_auto`) | `src-tauri/src/notes.rs` |
 | The action run (`note_enhance` / `run_enhance`) | `src-tauri/src/commands.rs` |
 | UI | `src/lib/NotesView.svelte`, `src/lib/Notepad.svelte`, `src/lib/meetingSummary.svelte.js` |
@@ -422,7 +422,9 @@ stop, and shows the AI notes so far (the rolling digests).
 **The bottom bar.** A white pill **■ Stop** (the end of the meeting, as End
 meeting & summarise) or, after it, **Resume** (records on into the same note;
 **Start** on a note with nothing recorded yet), and the **Ask anything** field
-(with a **What did I miss?** chip inside it while recording). Above it while
+(with a **What did I miss?** chip inside it while recording, **Follow-up
+email** after; the sheet shows all the [one-tap helpers](#one-tap-helpers)).
+Above it while
 recording, the consent line ([Consent](#consent)). After the meeting, above
 it: **Generate summary** when there's no summary yet, or, if writing it
 failed, "The summary didn't come through", the reason and a **Retry** button.
@@ -477,6 +479,48 @@ transcribing (+2 s), and if one starts mid-call the request is dropped (the
 closed connection cancels it in llama.cpp) and asked again after it. Without
 an AI model the chat says so and links to Language Models.
 
+### One-tap helpers
+
+Chips in the Ask sheet (a row under the thread) do the common asks in one
+tap, built like What did I miss?: one call on the meeting's model through
+`meeting_assist::meeting_assist(noteId, kind)`, talk only (never echo or "You
+dictated here" markers), never slowing a dictation, the answer in the sheet
+with 👍 👎 and copy, and the setup card linking to Language Models when
+there's no AI model. The set follows the recording state
+(`notepadText.js` `meetingHelpers`):
+
+| Chip | When | Reads (estimated tokens) | Answer |
+|---|---|---|---|
+| **What did I miss?** | recording | see above | ≤ 5 bullets |
+| **Questions to ask** (`questions`) | recording | the latest talk (≤ 1,200), digests of what came before it (≤ 500), attendees, the invite (≤ 200), your typed notes (≤ 300) | 3–5 questions you could ask now, in your voice (`MEETING_QUESTIONS_PROMPT`; reply cap 300) |
+| **Follow-up email** (`followUpEmail`) | after | the action plan (or what another action wrote, ≤ 1,200) and ≤ 500 of the meeting, mostly how it ended; with no plan yet, ≤ 1,800 of the meeting (the transcript, or digests + the latest talk); title, attendees, invite, typed notes | a recap to send the attendees in plain text: "Subject: …", greeting, what it covered, decisions, next steps ("Me" for yours, "Unassigned"), deadlines only as said, "Thanks," + "[Your name]" (`MEETING_FOLLOW_UP_PROMPT`; reply cap 600) |
+| **Gaps and risks** (`blindSpots`) | after | the same, with ≤ 800 of the meeting beside the plan | Not decided / Missing owners or dates / Risks and open questions, ≤ 8 bullets, each tied to what was said (`MEETING_BLIND_SPOTS_PROMPT`; reply cap 500) |
+
+Every call is at most ~3.4k tokens with its reply, and far less without an
+invite or long typed notes: well inside an 8k local model, and a single call
+stays well below a free cloud tier's per-minute budget, such as Groq's 8,000
+(a rate limit is waited out, as for every AI call). Each prompt says to use only what's in the
+meeting, never invent owners, dates or numbers, and say so in one line when
+there's too little to go on. With fewer than 20 words of speech and nothing
+else (no digests, typed notes, summary, or an invite to ask about), Yap says
+so itself without calling a model ("Not enough has been said yet to suggest
+questions…").
+
+The email is cleaned up in Rust (`meeting_summary::clean_email`): anything
+before the subject line ("Here's a draft:") and code fences go, markdown
+(`**`, `#`, `* ` bullets) becomes plain text, blank lines are single, and a
+missing subject line becomes "Follow-up: <title>" (or "Meeting follow-up"
+for a made-up title). The sheet shows it as it copies (`plain`), so the copy
+button puts exactly that on the clipboard, ready to paste into any mail app.
+
+While a question is being typed the chips step aside. When the sheet is down
+the lead chip sits in the Ask pill (pressing it opens the sheet and moves the
+focus to the field). The **Notes view** shows the same helpers on a meeting
+note, as chips over its Ask bar (Questions to ask while that note records,
+Follow-up email and Gaps and risks after; What did I miss? stays the
+notepad's, which knows what you've seen), answering in its chat with a Copy
+button; without an AI model a toast says so with **Open Language Models**.
+
 ### The AI meeting title
 
 A meeting with a made-up title — call detection's "Teams call · 5 Oct, 14:30"
@@ -508,7 +552,14 @@ made-up title shows muted in the notepad and the Notes view.
   marking its place once, "Started by mistake?"'s threshold, setup errors,
   the catch-up input (only what's new, nothing new → no call, a long absence
   bounded through the digests, all under 4.5k with the reply), follow-up and
-  title inputs, title clean-up, and a typed title never open to the AI.
+  title inputs, title clean-up, a typed title never open to the AI, and the
+  one-tap helpers: Questions to ask reading the latest talk and digests of
+  the rest (no echo or markers; too little → no call, unless there's an
+  invite), the email and the gaps reading the plan or else the meeting, a
+  worst case (2.5 hours, long notes and invite, a long plan) ≤ ~3.4k with
+  the reply, the helper kinds as the page names them, and `clean_email`
+  (preamble, fence and markdown out, a subject line first, a one-line "too
+  little" left alone).
 - e2e (`e2e/notepad.spec.js`, the notepad is its own page, `yap.notepad`),
   with screenshots named after the states in Wispr's own captures for a
   side-by-side look: the text it copies, saves and emails and the
@@ -520,6 +571,13 @@ made-up title shows muted in the notepad and the Notes view.
   paused and dictated dividers, hover copy, search and copy all; the Ask
   sheet (What did I miss? with nothing new and no model call, then only the
   new lines sent; 👍 kept locally; copy; a typed question; New chat; Escape);
+  the one-tap helpers (Questions to ask while recording, pressed from the
+  keyboard, its input talk only and lean; after the meeting Follow-up email
+  from the pill, the fake AI's markdown and preamble cleaned up and copied
+  as plain text, then Gaps and risks reading the action plan; the chips
+  switching with the recording state and stepping aside while typing; the
+  same chips in the Notes view with Copy; with no AI model, the setup card
+  and its link to Language Models, without a model call);
   the header (the ⋯ menu while recording and after, Copy as Markdown / text,
   Audio settings, Share and its one-click copy, the split tooltip and test
   mode's refusal, back to Notes, Delete with its dialog, Delete while
@@ -555,6 +613,10 @@ made-up title shows muted in the notepad and the Notes view.
 - "Since you last looked" lives in the notepad page: reloading the window (or
   restarting Yap) forgets it, and the next "What did I miss?" covers the whole
   meeting.
+- The Ask sheet's answers (the helpers' included) live in the page too: they
+  aren't saved with the note. The follow-up email is copied, not sent: there's
+  no "open in my mail app" with the attendees filled in yet (the calendar
+  invite has their addresses; the note keeps only names).
 
 ## Guard rails
 
@@ -726,7 +788,9 @@ KeyTips) and Win the Start menu.
   - Harness: `support/fake-llm.js`, a deterministic OpenAI-compatible server
     that records every request and tests the checks by inventing an owner,
     dropping a task and slipping in a task for someone never mentioned. It
-    also answers the notepad's title, catch-up and question calls, and can
+    also answers the notepad's title, catch-up and question calls and its
+    one-tap helpers (the email in markdown behind a preamble, for Yap to
+    clean up), and can
     fail (`failNext`) or slow down (`delay`) a kind of call, for the summary's
     progress and error states.
     Test-mode hooks, all compiled out of release builds (`e2e.rs`):

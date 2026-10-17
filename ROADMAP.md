@@ -555,6 +555,17 @@ below (✅ = done).
             `selection::begin_dictation` + `smart_insert.rs`): ±500 characters around
             the caret over UIA at record start, then spaces, a mid-sentence capital
             and a full stop before more of the sentence fitted to them.
+      - [x] **Terminal & coding-CLI mode, chat-app full stops** (2026-10-17, after
+            Wispr Flow's app categories; `app_kind.rs`): the target's process, class
+            and title at record start → terminal (+ Claude Code / Codex / Gemini CLI…
+            from its title) | chat app (desktop or WhatsApp Web, Slack… in a browser) |
+            other. A terminal gets one line, no trailing space and Enter only for
+            "press enter" (`terminal_mode`; Claude Code and Codex in Windows Terminal
+            keep line breaks); a short chat message loses its full stop
+            (`chat_no_full_stop`). Next: Shift+Insert for terminals that don't paste
+            on Ctrl+V (mintty, Alacritty, WezTerm, PuTTY), VS Code's integrated
+            terminal (needs the focused element over UIA), app-category defaults for
+            `app_routes`.
       - [ ] **Verify-after-paste** via UI Automation `ValuePattern` (read the focused
             element's value before/after) — still open; the UIA reading it needs now
             exists in `selection.rs`.

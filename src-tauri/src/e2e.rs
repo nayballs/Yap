@@ -8,9 +8,10 @@
 //! - nothing is pasted, typed or copied into other apps (a dictation's text
 //!   still reaches history and the Home feed; "Paste last transcript" only
 //!   returns what it would paste), and the text around another app's cursor
-//!   is never read (`selection::begin_dictation`), nor the field watched for
-//!   corrections after a paste (`learn::after_paste`; the debug-only
-//!   `learn::e2e_learn_correction` hands it an edit instead);
+//!   is never read (`selection::begin_dictation`), nor its window's title
+//!   (`app_kind::of_window`: every target counts as `Other`), nor the field
+//!   watched for corrections after a paste (`learn::after_paste`; the
+//!   debug-only `learn::e2e_learn_correction` hands it an edit instead);
 //! - its windows never take the foreground (tao's `set_focus` fallback presses
 //!   Alt in whichever app has focus) and it posts no Windows notifications;
 //! - it leaves other processes alone (no "orphaned sidecar" sweep) and never

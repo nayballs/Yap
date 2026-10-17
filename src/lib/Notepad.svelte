@@ -21,7 +21,10 @@
   //   - the bar: Stop / Resume, and "Ask anything", which opens a bottom
   //     sheet chat grounded in the meeting (meeting_assist.rs; "What did I
   //     miss?" answers from what was said since you last looked: the
-  //     transcript on screen at its newest line, or the last answer). Above
+  //     transcript on screen at its newest line, or the last answer). One-tap
+  //     helpers sit in the sheet (the lead one in the pill while it's down):
+  //     What did I miss? and Questions to ask while recording, Follow-up
+  //     email and Gaps and risks after (`meetingHelpers`). Above
   //     it while recording, the consent line, whose "Learn more" offers a
   //     message for the meeting chat (editable, `meetingConsentMessage`);
   //     after the meeting, Generate summary when there's none, or the
@@ -58,6 +61,8 @@
     clock,
     consentMessage,
     consentToSave,
+    MEETING_HELPERS,
+    meetingHelpers,
   } from './notepadText.js';
 
   /** This window's label: the `origin` of its saves and stops. */
@@ -382,9 +387,12 @@
   });
 
   let askOpen = $state(false);
-  let askThread = $state([]); // { id, role: 'user' | 'assistant', text, error? }
+  let askThread = $state([]); // { id, role: 'user' | 'assistant', text, error?, plain? }
   let askBusy = $state(false);
+  let askBusyText = $state(''); // what the busy line says
   let askSetup = $state(null); // the "set up an AI model" reason
+  // The one-tap helpers on offer, by the recording state (notepadText.js).
+  const helpers = $derived(meetingHelpers(note, recordingThis));
   let askInput = $state('');
   let askFocused = $state(false);
   let askEl = $state(null);
@@ -409,7 +417,7 @@
   }
 
   /** Ask: no `question` = "What did I miss?" (since you last looked). */
-  async function ask(question = null) {
+  function ask(question = null) {
     if (!note || askBusy) return;
     const id = note.id;
     const q = question?.trim() || null;
@@ -417,17 +425,44 @@
     if (!q && transcriptShown()) {
       seen.set(id, Math.max(seen.get(id) ?? 0, lineCount));
     }
+    return converse(
+      q ?? MEETING_HELPERS.catchUp.label,
+      q ? 'Looking through the meeting…' : MEETING_HELPERS.catchUp.busy,
+      () => invoke('meeting_catch_up', { noteId: id, since: seen.get(id) ?? 0, question: q }),
+      (r) => !q && seen.set(id, Math.max(seen.get(id) ?? 0, r.upto))
+    );
+  }
+
+  /** A one-tap helper (a chip): "What did I miss?", or one of meeting_assist's. */
+  function runHelper(kind) {
+    if (kind === 'catchUp') return ask(null);
+    if (!note || askBusy) return;
+    const id = note.id;
+    return converse(MEETING_HELPERS[kind].label, MEETING_HELPERS[kind].busy, () =>
+      invoke('meeting_assist', { noteId: id, kind })
+    );
+  }
+
+  /**
+   * One turn in the sheet: `question` as the person's bubble, then `call()`'s
+   * `{answer, plain?}` (or what went wrong; no AI model = the setup card).
+   */
+  async function converse(question, busyText, call, after = null) {
+    if (!note || askBusy) return;
+    const id = note.id;
     openAsk();
     askSetup = null;
-    askThread = [...askThread, { id: `${Date.now()}-${++askSeq}`, role: 'user', text: q ?? 'What did I miss?' }];
+    askThread = [...askThread, { id: `${Date.now()}-${++askSeq}`, role: 'user', text: question }];
     askBusy = true;
+    askBusyText = busyText;
     scrollThread();
     try {
-      const r = await invoke('meeting_catch_up', { noteId: id, since: seen.get(id) ?? 0, question: q });
+      const r = await call();
       if (note?.id !== id) return;
-      askThread = [...askThread, { id: `${Date.now()}-${++askSeq}`, role: 'assistant', text: r.answer }];
-      if (!q) seen.set(id, Math.max(seen.get(id) ?? 0, r.upto));
+      askThread = [...askThread, { id: `${Date.now()}-${++askSeq}`, role: 'assistant', text: r.answer, plain: !!r.plain }];
+      after?.(r);
     } catch (e) {
+      if (note?.id !== id) return;
       const msg = String(e);
       if (/No AI model configured|API key/i.test(msg)) askSetup = msg;
       else
@@ -1153,15 +1188,28 @@
             </div>
             <div class="thread" bind:this={threadEl} aria-live="polite">
               {#if !askThread.length && !askSetup && !askBusy}
-                <p class="threadhint">Ask anything about this meeting. Yap answers from the transcript and your notes{recordingThis ? ', and What did I miss? catches you up on what was said since you last looked' : ''}.</p>
+                <p class="threadhint">
+                  Ask anything about this meeting. Yap answers from the transcript and your notes.
+                  {#if recordingThis}
+                    What did I miss? catches you up on what was said since you last looked, and Questions to ask
+                    suggests what to ask next.
+                  {:else if helpers.length}
+                    Follow-up email drafts a recap to send, and Gaps and risks finds what the meeting left open.
+                  {/if}
+                </p>
               {/if}
               {#each askThread as m (m.id)}
                 {#if m.role === 'user'}
                   <p class="mq">{m.text}</p>
                 {:else}
                   <div class="ma">
-                    <!-- renderMarkdown escapes all input first. -->
-                    <div class="mabody" class:err={m.error}>{@html renderMarkdown(m.text)}</div>
+                    {#if m.plain}
+                      <!-- An email: shown exactly as it copies. -->
+                      <div class="mabody plain">{m.text}</div>
+                    {:else}
+                      <!-- renderMarkdown escapes all input first. -->
+                      <div class="mabody" class:err={m.error}>{@html renderMarkdown(m.text)}</div>
+                    {/if}
                     {#if !m.error}
                       <div class="mabtns">
                         <button class="fb" class:on={feedback[m.id]?.rating === 'up'} aria-label="Good answer" aria-pressed={feedback[m.id]?.rating === 'up'} onclick={() => rate(m, 'up')}>{@render icon('up')}</button>
@@ -1173,7 +1221,7 @@
                 {/if}
               {/each}
               {#if askBusy}
-                <p class="ma busy"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>Catching you up…</p>
+                <p class="ma busy"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>{askBusyText}</p>
               {/if}
               {#if askSetup}
                 <div class="ma setup">
@@ -1182,6 +1230,14 @@
                 </div>
               {/if}
             </div>
+            <!-- The one-tap helpers, out of the way while a question is typed. -->
+            {#if helpers.length && !askInput.trim()}
+              <div class="helpers" role="group" aria-label="Suggestions">
+                {#each helpers as kind (kind)}
+                  <button class="chip" onclick={() => runHelper(kind)} disabled={askBusy}>{MEETING_HELPERS[kind].label}</button>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/if}
         <div class="barrow">
@@ -1215,8 +1271,17 @@
             ></textarea>
             {#if askInput.trim()}
               <button class="send" aria-label="Ask" onclick={sendTyped} disabled={askBusy}>{@render icon('send')}</button>
-            {:else if recordingThis}
-              <button class="chip" onclick={() => ask(null)} disabled={askBusy}>What did I miss?</button>
+            {:else if helpers.length && !askOpen}
+              <!-- The lead helper (the sheet shows them all when it's up, and
+                   the focus goes to the field, as this chip goes away). -->
+              <button
+                class="chip"
+                onclick={() => {
+                  runHelper(helpers[0]);
+                  askEl?.focus();
+                }}
+                disabled={askBusy}>{MEETING_HELPERS[helpers[0]].label}</button
+              >
             {/if}
           </div>
         </div>
@@ -2463,6 +2528,9 @@
   .mabody.err {
     color: var(--yap-paper-danger);
   }
+  .mabody.plain {
+    white-space: pre-wrap;
+  }
   .mabody :global(p) {
     margin: 0 0 6px;
   }
@@ -2644,6 +2712,18 @@
   .chip:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+  .chip:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--yap-paper-ring);
+  }
+  /* The sheet's one-tap helpers, under the thread. */
+  .helpers {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 16px 0;
   }
   .send {
     flex: 0 0 auto;

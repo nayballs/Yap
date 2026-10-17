@@ -66,3 +66,35 @@ test('settings: "Match the text around the cursor" is on, and off is saved', asy
   await smart.click();
   await expectStore(yap, 'config.json', (c) => c.smartSpacing === true);
 });
+
+// What they do to a dictation (app_kind.rs: telling terminals and chat apps
+// apart, one line at a shell, a chat message's full stop, which key follows
+// the paste) is unit-tested in Rust: a test run reads no other app's window
+// and pastes nothing.
+test('settings: chat full stops and safer terminal pasting are on, and off is saved', async ({ yap, main, shot }) => {
+  const dialog = await openSettings(main, 'Advanced');
+  const output = dialog.getByRole('group', { name: 'Output' });
+  const chat = output.getByRole('button', { name: 'Leave the full stop off chat messages' });
+  const terminal = output.getByRole('button', { name: 'Safer pasting into terminals' });
+  await expect(chat).toHaveAttribute('aria-pressed', 'true');
+  await expect(terminal).toHaveAttribute('aria-pressed', 'true');
+  await expect(output.getByText(/a message of one or two sentences ends without a full stop/)).toBeVisible();
+  await expect(output.getByText(/a dictation pastes as one line and Enter is pressed only when you say/)).toBeVisible();
+  // Auto-submit says where it doesn't press Enter.
+  await expect(output.getByText(/In a terminal, only for coding tools like Claude Code/)).toBeVisible();
+  await terminal.scrollIntoViewIfNeeded();
+  await shot(main, '03-settings-chat-and-terminals');
+
+  await chat.click();
+  await expect(chat).toHaveAttribute('aria-pressed', 'false');
+  await expectStore(yap, 'config.json', (c) => c.chatNoFullStop === false && c.terminalMode === true);
+  await terminal.click();
+  await expect(terminal).toHaveAttribute('aria-pressed', 'false');
+  await expectStore(yap, 'config.json', (c) => c.terminalMode === false);
+  await expect(output.getByText('Press Enter after pasting the text', { exact: true })).toBeVisible();
+  await shot(main, '04-settings-chat-and-terminals-off');
+
+  await chat.click();
+  await terminal.click();
+  await expectStore(yap, 'config.json', (c) => c.chatNoFullStop === true && c.terminalMode === true);
+});

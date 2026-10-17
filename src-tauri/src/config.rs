@@ -204,6 +204,12 @@ pub struct YapConfig {
     /// read, a dictation pastes exactly as without it.
     #[serde(default = "default_true")]
     pub smart_spacing: bool,
+    /// "Leave the full stop off chat messages" (Settings → Advanced →
+    /// Output): in a chat app (Slack, Discord, WhatsApp, Teams…, desktop or
+    /// in a browser; `app_kind.rs`), a message of one or two sentences in one
+    /// paragraph pastes without its final full stop.
+    #[serde(default = "default_true")]
+    pub chat_no_full_stop: bool,
     /// After injecting text, simulate pressing Enter (auto-submit).
     #[serde(default)]
     pub auto_submit: bool,
@@ -213,6 +219,14 @@ pub struct YapConfig {
     /// `auto_submit` on. See `pipeline::take_voice_enter`.
     #[serde(default = "default_true")]
     pub voice_enter: bool,
+    /// "Safer pasting into terminals" (Settings → Advanced → Output): in a
+    /// terminal (`app_kind.rs`) a dictation pastes as one line with no space
+    /// after it, and Enter is pressed only for "press enter" (auto-submit
+    /// only in a coding CLI, where it sends a prompt); Claude Code and Codex
+    /// in Windows Terminal keep the line breaks. The text around a
+    /// terminal's cursor isn't read.
+    #[serde(default = "default_true")]
+    pub terminal_mode: bool,
     /// Restore the user's previous clipboard contents after pasting.
     #[serde(default = "default_true")]
     pub restore_clipboard: bool,
@@ -554,8 +568,10 @@ impl Default for YapConfig {
             mute_while_recording: false,
             append_trailing_space: false,
             smart_spacing: true,
+            chat_no_full_stop: true,
             auto_submit: false,
             voice_enter: true,
+            terminal_mode: true,
             restore_clipboard: true,
             start_hidden: false,
             show_tray_icon: true,
@@ -1125,6 +1141,10 @@ mod tests {
         let cfg: YapConfig = serde_json::from_str("{}").unwrap();
         assert!(cfg.voice_enter, "the voice command is on unless switched off");
         assert!(cfg.learn_words, "word suggestions are on unless switched off");
+        // So are terminal pasting and chat full stops, for configs saved before them.
+        assert!(cfg.terminal_mode && cfg.chat_no_full_stop);
+        let off: YapConfig = serde_json::from_str(r#"{"terminalMode":false,"chatNoFullStop":false}"#).unwrap();
+        assert!(!off.terminal_mode && !off.chat_no_full_stop);
     }
 
     #[test]

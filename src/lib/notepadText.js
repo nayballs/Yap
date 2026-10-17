@@ -148,6 +148,31 @@ export function consentToSave(text) {
   return t === DEFAULT_CONSENT_MESSAGE ? '' : t;
 }
 
+/**
+ * The one-tap AI helpers on a meeting (meeting_assist.rs): the chip's label
+ * (also the question bubble) and the line shown while it works. `catchUp` is
+ * "What did I miss?" (`meeting_catch_up`); the others go to `meeting_assist`
+ * with their key as the `kind`.
+ */
+export const MEETING_HELPERS = {
+  catchUp: { label: 'What did I miss?', busy: 'Catching you up…' },
+  questions: { label: 'Questions to ask', busy: 'Thinking of questions…' },
+  followUpEmail: { label: 'Follow-up email', busy: 'Drafting the email…' },
+  blindSpots: { label: 'Gaps and risks', busy: 'Looking for loose ends…' },
+};
+
+/**
+ * Which helpers a meeting note offers: while it records, catching up and
+ * questions to ask; after it, the follow-up email and the gaps, once there's
+ * something to go on (talk, typed notes or a summary).
+ */
+export function meetingHelpers(note, recording) {
+  if (!note) return [];
+  if (recording) return ['catchUp', 'questions'];
+  const material = spoken(note.transcript).length || note.content?.trim() || note.enhancedContent?.trim();
+  return material ? ['followUpEmail', 'blindSpots'] : [];
+}
+
 /** "m:ss", or "h:mm:ss" past the hour. */
 export function clock(secs) {
   const s = Math.max(0, Math.round(secs || 0));
