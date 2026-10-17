@@ -115,7 +115,11 @@ tauri-plugin-updater = "2"
 # Registry + SystemInformation: call detection reads Windows' per-app
 # microphone record and the local time for a meeting note's title
 # (meeting_detect.rs).
-windows = { version = "0.61", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Foundation", "Foundation_Collections", "UI_Notifications", "Data_Xml_Dom", "Networking_Connectivity", "Win32_System_Registry", "Win32_System_SystemInformation"] }
+# Ole + Variant: a text range's read-only attribute (selection.rs reads the
+# text around the cursor). DataExchange + Memory: the paste's clipboard
+# write, with the formats that keep a dictation out of Win+V history and
+# cloud clipboard sync (text_injector.rs).
+windows = { version = "0.61", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Foundation", "Foundation_Collections", "UI_Notifications", "Data_Xml_Dom", "Networking_Connectivity", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Ole", "Win32_System_Variant", "Win32_System_DataExchange", "Win32_System_Memory"] }
 # Yap accounts: the session token lives in Windows Credential Manager. The
 # keyring crate's own docs steer apps to keyring-core + the one store they use.
 keyring-core = "1"
