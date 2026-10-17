@@ -296,6 +296,12 @@ pub struct YapConfig {
     /// `--bar-*` tokens in app.css; the page sets `data-bar-theme`.
     #[serde(default = "default_bar_theme")]
     pub bar_theme: String,
+    /// The dictation capsule's ✕ (cancel) and ✓ (stop and paste) while it
+    /// records: "off" (the default: Cancel stays in the tray), "hover" (only
+    /// while the pointer is on the capsule) or "always". Never while the
+    /// push-to-talk key is held. `bar.rs` carries it to the bar page.
+    #[serde(default = "default_bar_dictation_buttons")]
+    pub bar_dictation_buttons: String,
     /// Which key auto-submit presses after pasting: "enter", "ctrlEnter",
     /// or "shiftEnter".
     #[serde(default = "default_auto_submit_key")]
@@ -564,6 +570,9 @@ fn default_meeting_detect_style() -> String {
 fn default_bar_theme() -> String {
     "light".into()
 }
+fn default_bar_dictation_buttons() -> String {
+    "off".into()
+}
 fn default_meeting_max_minutes() -> u32 {
     120
 }
@@ -613,6 +622,7 @@ impl Default for YapConfig {
             bar_enabled: true,
             bar_hide_fullscreen: true,
             bar_theme: default_bar_theme(),
+            bar_dictation_buttons: default_bar_dictation_buttons(),
             auto_submit_key: default_auto_submit_key(),
             update_checks_enabled: true,
             debug_logging: false,

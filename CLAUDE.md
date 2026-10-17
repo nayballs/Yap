@@ -1185,7 +1185,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   meeting_hotkey (`kb:alt+win+77`), meeting_reminder (the calendar's card:
   "15s" | "1min" | "2min" | "never"), bridge_enabled, mcp_allow_writes (AI apps
   may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
-  bar_hide_fullscreen (true) + bar_theme ("light" | "dark", light)). JSON
+  bar_hide_fullscreen (true) + bar_theme ("light" | "dark", light) +
+  bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
+  off)). JSON
   load/save + `apply_dictionary` (corrections; skips snippets) +
   `apply_snippets` + `term_regex` (the whole-word matcher both use) +
   `dictionary_prompt` (the Whisper `initial_prompt` vocabulary, in the order
@@ -1323,8 +1325,14 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the dictation overlay (waveform, live partials, Transcribing…, errors), with
   ✕ (`dictation-cancel`) and ✓ (`dictation-stop`: stop and paste, as the
   hotkey's second press — into the app the dictation started in) while it
-  records, and after a cancel "Dictation cancelled · Undo" (`yap-state`
-  "cancelled", `dictation-undo`) while the audio is kept;
+  records, as `bar_dictation_buttons` says (`Status.dictationButtons`):
+  **"off"** (the default, Nathan's call: Cancel stays in the tray), "hover"
+  (only while Rust's pointer is on the capsule, which is then a region) or
+  "always"; never while the push-to-talk key is held (`yap-dictation-held`,
+  from the press until it locks hands-free), as Wispr's bar draws them only
+  hands-free; and after a cancel "Dictation
+  cancelled · Undo" (`yap-state` "cancelled", `dictation-undo`, whatever the
+  setting) while the audio is kept;
   **meeting** = a 69×30 recording pill at half opacity (5 bars, the stop
   circle; hovered, full opacity and the timer; body → `notepad::open`, ■ →
   `meeting_end::end`). **Click-through except over what
@@ -1374,8 +1382,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   auto-start countdown). Debug-only `bar_simulate` (pretend cursor on a
   region, fake fullscreen kinds, Esc, demo cards) and `bar_debug` (the real
   ex-styles, WindowFromPoint on the pill, the thread's active window) for the
-  e2e suite. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Light / Dark;
-  `overlay_position` puts it at the top). Bar off = the old behaviour: the
+  e2e suite. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Light / Dark,
+  `bar_dictation_buttons`; `overlay_position` puts it at the top). Bar off = the old behaviour: the
   overlay only while dictating, notices as Windows notifications — but a
   showing dictation's ✕ / ✓ and Undo still take clicks (`clickable`).
 - **`overlay.rs`** — the bar window's Win32 side + its pure, unit-tested maths:
@@ -2038,10 +2046,16 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   talk's double-tap holds it hands-free; the dead-mic watchdog's "No sound
   from <device> — is it muted?" — or "Windows is blocking the microphone" — in
   the waveform's place, with a red edge; while it records a quiet ✕ on the
-  left and the primary ✓ on the right, 26 px circles; cancelled, "Dictation
-  cancelled" + Undo with a hairline running down the kept time. It's a
-  `data-region` ("dictation") then, so the click-through bar takes clicks on
-  it, never focused). **Cards** sit 26 px above the pill whatever it
+  left and the primary ✓ on the right, 26 px circles — `buttons` "off" (the
+  default) never, "hover" only while `hovered` (Overlay's `pointer ===
+  'dictation'`), "always" always, and none while `dictation.held` (the
+  push-to-talk key down, not locked); where they may show, their places in
+  the capsule's ends are kept (39 px padding) and they only fade (and
+  settle from 0.82×) in and out there, `visibility: hidden` at rest, so
+  pointing never changes the width or moves the words; cancelled,
+  "Dictation cancelled" + Undo with a hairline running down the kept time.
+  It's a `data-region` ("dictation") whenever it has a button to offer, so
+  the click-through bar takes clicks on it, never focused). **Cards** sit 26 px above the pill whatever it
   shows (positioned from the dock's height, gliding 0.16 s when it grows),
   one at a time (`notice.rs` picks it; the rest wait in `bar.waiting`); it
   fades in and out in 0.12 s and has Wispr's 4 px hit strip on the pill's
@@ -2162,7 +2176,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (`#settings-bar`, the bar menu's Settings → "general#bar"): Show the Yap bar
   (`barEnabled`; "Turn off the bar" in its menu arrives as `yap-bar-changed`
   and is adopted), a "Hidden until 15:40 · Show it now" row while hidden for an
-  hour, Hide in fullscreen apps (`barHideFullscreen`), the live-preview toggle
+  hour, Hide in fullscreen apps (`barHideFullscreen`), the live-preview toggle,
+  "Cancel and finish buttons while dictating" (`ui/Segmented` When you point
+  at it / Always / Off → `barDictationButtons`, Off by default, a line per
+  choice)
   and Position (`overlayPosition`) — the dictation overlay itself is always on,
   it's the hot-mic indicator; **Notifications** group
   (`#settings-notifications`): "Show tips" (`showTips`, on: coaching hints
@@ -2645,6 +2662,7 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   (`chat_no_full_stop`), the **Yap bar on** (`bar_enabled`), hidden over
   fullscreen apps (`bar_hide_fullscreen`), the dictation overlay always shown
   while recording/transcribing (no off switch — it's the hot-mic indicator),
+  without ✕ / ✓ (`bar_dictation_buttons` "off": Cancel is in the tray),
   live transcription preview **on**
   (`streaming_partials`), AI cleanup **off**, the "press enter" voice command
   **on** (`voice_enter`), word suggestions from your corrections **on**
@@ -2814,7 +2832,9 @@ administrator is spotted (its integrity level) and left on the clipboard
 with "Your text is copied: press Ctrl+V" (`elevated.rs`, `alert.rs`); text
 boxes read through their labels (LabeledBy), the text field a focused part
 is in, and the legacy read-only bit (`selection.rs`); ✕ / ✓ on the
-dictation capsule and "Dictation cancelled · Undo" (10 s); Windows'
+dictation capsule (off by default, the same day: Settings → Yap bar turns
+them on when pointed at, or always; never while push-to-talk is held) and
+"Dictation cancelled · Undo" (10 s); Windows'
 microphone privacy switches named with Open settings (`mic_privacy.rs`).
 Unit-tested, e2e-tested (`bar.spec.js`, `dictation-alerts.spec.js`,
 `no-mic.spec.js`) and robot-tested (`dictation-extras.real.js`, the label

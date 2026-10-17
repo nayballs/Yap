@@ -9,14 +9,25 @@
   // silence (the recording carries on).
   //
   // While it records: ✕ (cancel) on the left and ✓ (stop and paste, as the
-  // hotkey's second press) on the right. Cancelled: "Dictation cancelled"
-  // with Undo while Rust keeps the audio (pipeline.rs, `UNDO_MS`; a hairline
-  // runs down meanwhile) — Undo transcribes it and pastes it into the app
-  // the dictation started in. The capsule is a `data-region` then, so the
+  // hotkey's second press) on the right, as Settings → Yap bar says
+  // (`buttons`, bar.rs' `dictationButtons`): "off" (the default), "hover" —
+  // only while the pointer is on the capsule (`hovered`: Rust's pointer,
+  // the authority on hover in a click-through window) — or "always". Never
+  // while the push-to-talk key is held (Wispr's bar draws them only
+  // hands-free). Where
+  // they may show, their places are kept (the capsule's ends) and they only
+  // fade in and out there, so the capsule's width and the words never move.
+  // Cancelled: "Dictation cancelled" with Undo while Rust keeps the audio
+  // (pipeline.rs, `UNDO_MS`; a hairline runs down meanwhile) — Undo
+  // transcribes it and pastes it into the app the dictation started in. The
+  // capsule is a `data-region` whenever it has a button to offer, so the
   // click-through bar takes clicks on it (bar.rs); it's never focused, so
   // the app you were in keeps the keyboard.
   import { invoke } from '@tauri-apps/api/core';
   import { dictation } from './dictation.svelte.js';
+
+  /** buttons: 'off' | 'hover' | 'always'; hovered: the pointer is on it. */
+  let { buttons = 'off', hovered = false } = $props();
 
   // Smooth left glide: keep the newest words visible by translating the text
   // run left whenever it outgrows the clip box (transition on the transform).
@@ -33,6 +44,12 @@
   const processing = $derived(dictation.state === 'processing' || dictation.state === 'processing-slow');
   const recording = $derived(dictation.state === 'recording');
   const cancelled = $derived(dictation.state === 'cancelled');
+  // The push-to-talk key is down (not locked hands-free): no buttons.
+  const keyHeld = $derived(dictation.held && !dictation.locked);
+  // ✕ / ✓ have their places (and the capsule takes the pointer)…
+  const offer = $derived(recording && buttons !== 'off' && !keyHeld);
+  // …and are on screen.
+  const showButtons = $derived(offer && (buttons === 'always' || hovered));
 
   // Every button goes through `bar_action` (Rust gives the focus back to the
   // app you're in, should the click have activated the bar).
@@ -47,8 +64,10 @@
   class="capsule"
   class:err={dictation.state === 'error' || (!!dictation.micSilent && !cancelled)}
   class:rec={recording}
+  class:offer
+  class:show={showButtons}
   class:cancelled
-  data-region={recording || cancelled ? 'dictation' : undefined}
+  data-region={offer || cancelled ? 'dictation' : undefined}
 >
   {#if cancelled}
     <span class="txt">Dictation cancelled</span>
@@ -58,7 +77,7 @@
     <span class="dot errdot"></span>
     <span class="txt">{dictation.errorMsg}</span>
   {:else}
-    {#if recording}
+    {#if offer}
       <button class="cbtn cancel" aria-label="Cancel dictation" title="Cancel" onclick={() => act('dictation-cancel')}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
       </button>
@@ -86,7 +105,7 @@
         {/each}
       </div>
     {/if}
-    {#if recording}
+    {#if offer}
       <button class="cbtn done" aria-label="Stop and paste" title="Stop and paste" onclick={() => act('dictation-stop')}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4 4 9-9" /></svg>
       </button>
@@ -114,9 +133,11 @@
     color: var(--bar-text);
     font-size: 12.5px;
   }
-  /* Recording: the ✕ and ✓ sit in the capsule's ends. */
-  .capsule.rec {
-    padding: 0 5px;
+  /* Recording with ✕ / ✓ on offer: their places are kept in the capsule's
+     ends (5 px in, 26 px wide, 8 px to the dot and the words) whether they
+     show or not, so pointing at it moves nothing: they only fade in there. */
+  .capsule.offer {
+    padding: 0 39px;
     gap: 8px;
   }
   .capsule.cancelled {
@@ -127,26 +148,54 @@
     border-color: rgba(229, 100, 94, 0.7);
   }
 
-  /* ✕ and ✓: 26 px circles; ✕ quiet, ✓ the bar's primary (ink on light,
-     cream on dark). */
+  /* ✕ and ✓: 26 px circles in the kept places; ✕ quiet, ✓ the bar's
+     primary (ink on light, cream on dark). Hidden (not only transparent, so
+     never clicked unseen) until shown; they fade and settle in, and fade out
+     a little slower. */
   .cbtn {
+    position: absolute;
+    top: 50%;
     display: inline-flex;
-    flex: 0 0 auto;
     align-items: center;
     justify-content: center;
     width: 26px;
     height: 26px;
+    margin-top: -13px;
     padding: 0;
     border: none;
     border-radius: 50%;
     cursor: pointer;
-    transition: background 0.15s ease;
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.82);
+    transition:
+      opacity 0.2s ease,
+      transform 0.2s ease,
+      visibility 0s linear 0.2s,
+      background 0.15s ease;
+  }
+  .capsule.show .cbtn {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition:
+      opacity 0.14s ease,
+      transform 0.18s cubic-bezier(0.05, 0.6, 0.4, 0.95),
+      visibility 0s,
+      background 0.15s ease;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cbtn,
+    .capsule.show .cbtn {
+      transform: none;
+    }
   }
   .cbtn svg {
     width: 14px;
     height: 14px;
   }
   .cbtn.cancel {
+    left: 5px;
     background: var(--bar-hover);
     color: var(--bar-text-soft);
   }
@@ -155,6 +204,7 @@
     color: var(--bar-text);
   }
   .cbtn.done {
+    right: 5px;
     background: var(--bar-button);
     color: var(--bar-button-text);
   }

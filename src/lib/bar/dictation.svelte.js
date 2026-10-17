@@ -20,6 +20,10 @@ export const dictation = $state({
   // Push-to-talk's double-tap locked this recording hands-free
   // (`yap-dictation-locked`, gesture.rs): the capsule shows a lock.
   locked: false,
+  // The push-to-talk key started this recording (`yap-dictation-held`):
+  // held until it locks hands-free, the capsule shows no ✕ / ✓ (as Wispr's
+  // bar draws them only hands-free).
+  held: false,
   // The dead-mic watchdog (mic_watch.rs) found nothing but digital silence:
   // "No sound from <device> — is it muted?", shown in the waveform's place
   // while the recording carries on (the whole message as its tooltip);
@@ -90,6 +94,7 @@ export function initDictation() {
     if (state !== 'recording') {
       dictation.history = [];
       dictation.locked = false;
+      dictation.held = false;
       dictation.micSilent = '';
       dictation.micSilentFull = '';
     }
@@ -111,6 +116,11 @@ export function initDictation() {
   }
   listen('yap-dictation-locked', (e) => {
     dictation.locked = !!e.payload;
+  });
+  // Said just before the recording starts (pipeline.rs), so it's never
+  // reset by that recording's own "recording" state.
+  listen('yap-dictation-held', (e) => {
+    dictation.held = !!e.payload;
   });
   listen('yap-mic-silent', (e) => {
     dictation.micSilent = e.payload?.short || '';

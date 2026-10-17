@@ -50,6 +50,12 @@ async function pointerAway(yap) {
 
 test.afterEach(async ({ yap }) => {
   await simulate(yap, { pointer: 'away', fullscreen: 'none' }).catch(() => {});
+  // The dictation capsule's ✕ / ✓ back to the default, off (tests that
+  // switch them on leave them so).
+  const cfg = await yap.invoke('get_config').catch(() => null);
+  if (cfg && cfg.barDictationButtons !== 'off') {
+    await yap.invoke('save_config', { cfg: { ...cfg, barDictationButtons: 'off' } });
+  }
 });
 
 test('idle: a tiny pill above the taskbar, click-through and never activated', async ({ yap, shot }) => {
@@ -231,6 +237,27 @@ test('Settings → General → Yap bar', async ({ yap, main, shot }) => {
   await group.getByRole('tab', { name: 'Light' }).click();
   await expectStore(yap, 'config.json', (c) => c.barTheme === 'light');
   await expect.poll(theme).toBe('light');
+
+  // The capsule's ✕ / ✓: Off by default; a choice is saved and reaches the
+  // bar at once, its line saying what it means.
+  const buttons = group.getByRole('tablist', { name: 'Cancel and finish buttons while dictating' });
+  const barButtons = () => yap.invoke('bar_status').then((s) => s.dictationButtons);
+  await buttons.scrollIntoViewIfNeeded();
+  await expect(buttons.getByRole('tab', { name: 'Off' })).toHaveAttribute('aria-selected', 'true');
+  expect(await barButtons()).toBe('off');
+  await expect(group).toContainText('Cancel from the tray icon instead; Undo still shows after a cancel');
+  await buttons.getByRole('tab', { name: 'When you point at it' }).click();
+  await expectStore(yap, 'config.json', (c) => c.barDictationButtons === 'hover');
+  await expect.poll(barButtons).toBe('hover');
+  await expect(group).toContainText('✕ to cancel and ✓ to paste appear when you point at the bar');
+  await shot(main, '07-settings-yap-bar-buttons');
+  await buttons.getByRole('tab', { name: 'Always' }).click();
+  await expectStore(yap, 'config.json', (c) => c.barDictationButtons === 'always');
+  await expect.poll(barButtons).toBe('always');
+  await buttons.getByRole('tab', { name: 'Off' }).click();
+  await expectStore(yap, 'config.json', (c) => c.barDictationButtons === 'off');
+  await expect.poll(barButtons).toBe('off');
+
   const meetings = settingsDialog(main).getByRole('group', { name: 'Meetings' });
   await meetings.scrollIntoViewIfNeeded();
   await expect(
@@ -524,9 +551,41 @@ test('dictating: the dictation overlay in the pill\'s place', async ({ yap, main
 // ✕ / ✓ on the dictation capsule, and "Dictation cancelled · Undo"
 // (pipeline.rs: a cancelled recording's audio is kept `UNDO_MS`; bar.rs:
 // the capsule is a clickable region of the click-through bar, never
-// activated). A test run pastes nothing: what Undo and ✓ deliver shows in
-// history.json (the stub's "[STT stub: …]").
+// activated). ✕ / ✓ are off by default (`barDictationButtons` "off"): the
+// tests of them switch on "When you point at it" ("hover": they show only
+// while the pointer is on the capsule — Rust's pointer, here the pretend
+// cursor) or "always" first. A test run pastes nothing: what Undo and ✓
+// deliver shows in history.json (the stub's "[STT stub: …]").
 const dictations = (yap) => (yap.readJson('history.json') || []).length;
+
+/** Settings → Yap bar → Cancel and finish buttons, saved and on the bar. */
+async function setButtons(yap, value) {
+  await yap.invoke('save_config', { cfg: { ...(await yap.invoke('get_config')), barDictationButtons: value } });
+  await expect.poll(() => yap.invoke('bar_status').then((s) => s.dictationButtons)).toBe(value);
+}
+
+/** The pretend cursor onto the dictation capsule: the window takes clicks. */
+async function pointAtCapsule(yap) {
+  await simulate(yap, { pointer: 'dictation' });
+  await expect.poll(() => debug(yap).then((d) => d.interactive)).toBe(true);
+}
+
+/**
+ * Where the capsule, its dot and its waveform or words are laid out (what
+ * pointing at it must not move; layout boxes, as the dot pulses).
+ */
+function capsuleLayout(capsule) {
+  return capsule.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const content = el.querySelector('.wave, .partial, .txt');
+    return {
+      x: r.x,
+      width: el.offsetWidth,
+      dot: el.querySelector('.dot').offsetLeft,
+      content: content ? content.offsetLeft : null,
+    };
+  });
+}
 
 async function needsMic(yap) {
   const mics = await yap.invoke('list_audio_devices');
@@ -550,22 +609,63 @@ function invokeError(yap, cmd, args) {
   );
 }
 
+test('"When you point at it": ✕ / ✓ show while the pointer is on the capsule, and nothing moves', async ({
+  yap,
+  main,
+  shot,
+}) => {
+  await needsMic(yap);
+  const bar = yap.overlay;
+  const capsule = bar.locator('.capsule');
+  const cancel = capsule.getByRole('button', { name: 'Cancel dictation' });
+  const done = capsule.getByRole('button', { name: 'Stop and paste' });
+  await setButtons(yap, 'hover');
+
+  await pressHotkey(main);
+  await expect(capsule.locator('.dot.rec')).toBeVisible();
+  // Just the dot, the waveform and the words: ✕ / ✓ are hidden…
+  await expect(cancel).toBeHidden();
+  await expect(done).toBeHidden();
+  // …but the capsule is a region, so Rust sees the pointer arrive.
+  await expect.poll(() => capsule.getAttribute('data-region')).toBe('dictation');
+  expect((await debug(yap)).interactive).toBe(false);
+  await bar.waitForTimeout(1_200); // some audio, and the waveform
+  const resting = await capsuleLayout(capsule);
+  await shot(bar, '18a-dictating-buttons-hidden');
+
+  // Pointed at: they fade in, in places the capsule kept for them.
+  await pointAtCapsule(yap);
+  await expect(cancel).toBeVisible();
+  await expect(done).toBeVisible();
+  await bar.waitForTimeout(300); // their fade
+  expect(await capsuleLayout(capsule)).toEqual(resting);
+  await shot(bar, '18b-dictating-buttons-on-hover');
+
+  // The pointer leaves: they fade out again, the capsule as it was.
+  await pointerAway(yap);
+  await expect(cancel).toBeHidden();
+  await expect(done).toBeHidden();
+  expect(await capsuleLayout(capsule)).toEqual(resting);
+  await pressHotkey(main);
+  await dictationOver(yap);
+});
+
 test('while dictating, ✓ stops and pastes; the capsule takes clicks without activating the bar', async ({ yap, main, shot }) => {
   await needsMic(yap);
   const bar = yap.overlay;
   const capsule = bar.locator('.capsule');
   const before = dictations(yap);
+  await setButtons(yap, 'hover');
 
   await pressHotkey(main);
   const cancel = capsule.getByRole('button', { name: 'Cancel dictation' });
   const done = capsule.getByRole('button', { name: 'Stop and paste' });
+  // A clickable region of the click-through window: clickable with the
+  // pointer on it (which shows ✕ / ✓), never the active window.
+  await expect.poll(() => capsule.getAttribute('data-region')).toBe('dictation');
+  await pointAtCapsule(yap);
   await expect(cancel).toBeVisible();
   await expect(done).toBeVisible();
-  // A clickable region of the click-through window: clickable with the
-  // pointer on it, never the active window.
-  await expect.poll(() => capsule.getAttribute('data-region')).toBe('dictation');
-  await simulate(yap, { pointer: 'dictation' });
-  await expect.poll(() => debug(yap).then((d) => d.interactive)).toBe(true);
   await bar.waitForTimeout(1_200); // some audio, and the waveform
   await shot(bar, '18-dictating-cancel-and-done');
 
@@ -585,12 +685,13 @@ test('✕ keeps the audio for Undo: "Dictation cancelled", then Undo transcribes
   const bar = yap.overlay;
   const capsule = bar.locator('.capsule');
   const before = dictations(yap);
+  await setButtons(yap, 'hover');
 
   await pressHotkey(main);
-  await expect(capsule.getByRole('button', { name: 'Cancel dictation' })).toBeVisible();
+  await expect(capsule.locator('.dot.rec')).toBeVisible();
   await bar.waitForTimeout(1_500); // more than the half second Undo needs
-  await simulate(yap, { pointer: 'dictation' });
-  await expect.poll(() => debug(yap).then((d) => d.interactive)).toBe(true);
+  await pointAtCapsule(yap);
+  await expect(capsule.getByRole('button', { name: 'Cancel dictation' })).toBeVisible();
   await capsule.getByRole('button', { name: 'Cancel dictation' }).click();
 
   // Cancelled: nothing transcribed, and the bar offers it back.
@@ -630,7 +731,7 @@ test('a new dictation drops a cancelled one; left alone, Undo goes after 10 s', 
   // …until another dictation starts: then it's gone, and only the new one
   // is transcribed.
   await pressHotkey(main);
-  await expect(capsule.getByRole('button', { name: 'Stop and paste' })).toBeVisible();
+  await expect(capsule.locator('.dot.rec')).toBeVisible();
   await bar.waitForTimeout(800);
   await pressHotkey(main);
   await expectStore(yap, 'history.json', (h) => h.length === before + 1);
@@ -652,15 +753,16 @@ test('with the bar off, the dictation capsule still takes clicks on ✓', async 
   await needsMic(yap);
   const bar = yap.overlay;
   const capsule = bar.locator('.capsule');
+  await setButtons(yap, 'hover');
   await yap.invoke('save_config', { cfg: { ...(await yap.invoke('get_config')), barEnabled: false } });
   try {
     await expect.poll(() => debug(yap).then((d) => d.shown)).toBe(false);
     const before = dictations(yap);
     await pressHotkey(main);
-    await expect(capsule.getByRole('button', { name: 'Stop and paste' })).toBeVisible();
+    await expect(capsule.locator('.dot.rec')).toBeVisible();
     await expect.poll(() => debug(yap).then((d) => d.shown)).toBe(true);
-    await simulate(yap, { pointer: 'dictation' });
-    await expect.poll(() => debug(yap).then((d) => d.interactive)).toBe(true);
+    await pointAtCapsule(yap);
+    await expect(capsule.getByRole('button', { name: 'Stop and paste' })).toBeVisible();
     await bar.waitForTimeout(800);
     await capsule.getByRole('button', { name: 'Stop and paste' }).click();
     await expectStore(yap, 'history.json', (h) => h.length === before + 1);
@@ -670,4 +772,69 @@ test('with the bar off, the dictation capsule still takes clicks on ✓', async 
     await simulate(yap, { pointer: 'away' }).catch(() => {});
     await yap.invoke('save_config', { cfg: { ...(await yap.invoke('get_config')), barEnabled: true } });
   }
+});
+
+test('"Always": ✕ / ✓ on the capsule the whole time it records, as wide as when pointed at', async ({ yap, main, shot }) => {
+  await needsMic(yap);
+  const bar = yap.overlay;
+  const capsule = bar.locator('.capsule');
+  const cancel = capsule.getByRole('button', { name: 'Cancel dictation' });
+  const done = capsule.getByRole('button', { name: 'Stop and paste' });
+  // "When you point at it"'s capsule, at rest, to compare.
+  await setButtons(yap, 'hover');
+  await pressHotkey(main);
+  await expect(capsule.locator('.dot.rec')).toBeVisible();
+  await bar.waitForTimeout(600);
+  const hover = await capsuleLayout(capsule);
+  await pressHotkey(main);
+  await dictationOver(yap);
+
+  await setButtons(yap, 'always');
+  const before = dictations(yap);
+  await pressHotkey(main);
+  await expect(cancel).toBeVisible();
+  await expect(done).toBeVisible();
+  // On screen, yet the bar stays click-through until the pointer's on it.
+  expect((await debug(yap)).interactive).toBe(false);
+  await bar.waitForTimeout(1_200);
+  expect(await capsuleLayout(capsule)).toEqual(hover);
+  await shot(bar, '20-dictating-buttons-always');
+  await pointAtCapsule(yap);
+  await done.click();
+  await expectStore(yap, 'history.json', (h) => h.length === before + 1);
+  expect((await debug(yap)).barActive).toBe(false);
+  await dictationOver(yap);
+  await pointerAway(yap);
+});
+
+test('off by default: no ✕ / ✓, even pointed at; the tray cancels, and Undo still shows', async ({ yap, main, shot }) => {
+  await needsMic(yap);
+  const bar = yap.overlay;
+  const capsule = bar.locator('.capsule');
+  expect((await yap.invoke('bar_status')).dictationButtons).toBe('off'); // the default
+  const before = dictations(yap);
+  await pressHotkey(main);
+  await expect(capsule.locator('.dot.rec')).toBeVisible();
+  await expect(capsule.getByRole('button', { name: 'Cancel dictation' })).toHaveCount(0);
+  await expect(capsule.getByRole('button', { name: 'Stop and paste' })).toHaveCount(0);
+  // Nothing to point at: not a region, so the bar stays click-through over it.
+  await expect.poll(() => capsule.getAttribute('data-region')).toBe(null);
+  expect(await invokeError(yap, 'bar_simulate', { pointer: 'dictation' })).toMatch(/no region dictation/);
+  expect((await debug(yap)).interactive).toBe(false);
+  await bar.waitForTimeout(1_500); // more than the half second Undo needs
+  await expect(capsule.getByRole('button')).toHaveCount(0);
+  await shot(bar, '21-dictating-buttons-off');
+
+  // The tray's Cancel: "Dictation cancelled · Undo", and Undo takes the click.
+  await yap.invoke('cancel_recording');
+  await expect(capsule).toContainText('Dictation cancelled');
+  const undo = capsule.getByRole('button', { name: 'Undo' });
+  await expect(undo).toBeVisible();
+  await pointAtCapsule(yap);
+  await bar.waitForTimeout(300);
+  await shot(bar, '21b-cancelled-from-the-tray-undo');
+  await undo.click();
+  await expectStore(yap, 'history.json', (h) => h.length === before + 1 && JSON.stringify(h).includes('STT stub'));
+  await dictationOver(yap);
+  await pointerAway(yap);
 });

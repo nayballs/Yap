@@ -429,6 +429,18 @@
     { value: 'light', label: 'Light' },
     { value: 'dark', label: 'Dark' },
   ];
+  // General → Yap bar: the dictation capsule's ✕ / ✓ (`barDictationButtons`,
+  // bar.rs → DictationCapsule.svelte), one line on what each choice means.
+  const DICTATION_BUTTONS = [
+    { value: 'hover', label: 'When you point at it' },
+    { value: 'always', label: 'Always' },
+    { value: 'off', label: 'Off' },
+  ];
+  const DICTATION_BUTTONS_DESC = {
+    hover: '✕ to cancel and ✓ to paste appear when you point at the bar',
+    always: '✕ to cancel and ✓ to paste show the whole time you dictate',
+    off: 'Cancel from the tray icon instead; Undo still shows after a cancel',
+  };
   const CALL_PROMPT_STYLE_DESC = {
     popup: 'A card in Yap, or a Windows notification while Yap is in the background',
     // With the Yap bar on, the card goes on the bar instead (bar.rs).
@@ -504,6 +516,7 @@
     barEnabled: true,
     barHideFullscreen: true,
     barTheme: 'light',
+    barDictationButtons: 'off',
     inputDevice: null,
     dictionary: [],
     selectedLanguage: 'auto',
@@ -1603,6 +1616,17 @@
                   label="Live transcription preview"
                   desc="Show your words on the bar as you speak"
                   hint="Preview only — the final result on stop is always authoritative."
+                />
+              </Row>
+              <Row
+                label="Cancel and finish buttons while dictating"
+                desc={DICTATION_BUTTONS_DESC[cfg.barDictationButtons] ?? DICTATION_BUTTONS_DESC.off}
+                hint="Never while you hold the push-to-talk key: letting go finishes it. A double-tap's hands-free recording follows this setting."
+              >
+                <Segmented
+                  bind:value={cfg.barDictationButtons}
+                  options={DICTATION_BUTTONS}
+                  label="Cancel and finish buttons while dictating"
                 />
               </Row>
               <Row label="Position" desc="Where the bar and the dictation overlay sit on screen">
