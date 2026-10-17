@@ -1065,9 +1065,10 @@ static WATCHES: AtomicU64 = AtomicU64::new(0);
 /// A dictation's text `pasted` (as pasted, fitted to the cursor) just went
 /// into `target`: watch that field for a while for corrections, on a thread
 /// of its own (see the module docs). `enabled`: `learn_words`. Never in a
-/// test run.
+/// test run — in robot mode only a window the test opened
+/// (`realtest::permits`), the real-app tests' correction flow.
 pub fn after_paste(app: &AppHandle, pasted: &str, target: Option<isize>, enabled: bool) {
-    if !enabled || crate::e2e::active() {
+    if !enabled || !crate::realtest::permits(target) {
         return;
     }
     let Some(hwnd) = target else {

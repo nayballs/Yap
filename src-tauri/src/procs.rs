@@ -28,6 +28,42 @@ pub fn kill(pid: u32) -> bool {
     imp::kill(pid)
 }
 
+/// When the live process `pid` started (a FILETIME, 100 ns since 1601), or
+/// `None` (gone, or not ours to ask). Tells a process from a later one that
+/// was given the same id.
+#[cfg(windows)]
+#[cfg_attr(not(debug_assertions), allow(dead_code))] // robot mode (realtest.rs) only
+pub fn created(pid: u32) -> Option<u64> {
+    imp::created(pid)
+}
+
+/// `pid`, then its parent, grandparent… with when each started, for as long
+/// as the chain can be followed: a parent that's gone, that can't be asked,
+/// or that started after its "child" (its id was reused) ends it. At most
+/// 32 steps.
+#[cfg(windows)]
+#[cfg_attr(not(debug_assertions), allow(dead_code))] // robot mode (realtest.rs) only
+pub fn lineage(pid: u32) -> Vec<(u32, u64)> {
+    let parents: std::collections::HashMap<u32, u32> =
+        imp::snapshot().into_iter().map(|p| (p.pid, p.parent)).collect();
+    let mut out: Vec<(u32, u64)> = Vec::new();
+    let mut current = pid;
+    while out.len() < 32 && current != 0 {
+        let Some(started) = imp::created(current) else {
+            break;
+        };
+        if out.last().is_some_and(|&(_, child)| started > child) {
+            break;
+        }
+        out.push((current, started));
+        match parents.get(&current) {
+            Some(&parent) if parent != current => current = parent,
+            _ => break,
+        }
+    }
+    out
+}
+
 #[cfg(windows)]
 mod imp {
     use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
@@ -99,6 +135,24 @@ mod imp {
         }
     }
 
+    pub fn created(pid: u32) -> Option<u64> {
+        use windows::Win32::Foundation::FILETIME;
+        use windows::Win32::System::Threading::GetProcessTimes;
+        if pid == 0 {
+            return None;
+        }
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+            let (mut created, mut exited, mut kernel, mut user) =
+                (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+            let ok = GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user).is_ok();
+            let mut code = 0u32;
+            let alive = GetExitCodeProcess(handle, &mut code).is_ok() && code == STILL_ACTIVE.0 as u32;
+            let _ = CloseHandle(handle);
+            (ok && alive).then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
+        }
+    }
+
     pub fn kill(pid: u32) -> bool {
         unsafe {
             let Ok(handle) = OpenProcess(PROCESS_TERMINATE, false, pid) else {
@@ -124,6 +178,17 @@ mod tests {
         assert!(imp::live_image_name(me).is_some());
         // The test runner isn't Yap, so nothing it spawned would count as Yap's.
         assert!(!is_running_yap(0));
+    }
+
+    #[test]
+    fn follows_this_process_up_to_its_parent() {
+        let me = std::process::id();
+        let chain = lineage(me);
+        assert_eq!(chain.first().map(|&(pid, _)| pid), Some(me));
+        assert_eq!(created(me), Some(chain[0].1));
+        // Every step started no later than the one below it.
+        assert!(chain.windows(2).all(|w| w[1].1 <= w[0].1));
+        assert_eq!(created(0), None);
     }
 
     #[test]

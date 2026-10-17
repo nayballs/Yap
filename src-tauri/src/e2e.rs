@@ -29,6 +29,11 @@
 //! - it reads no installed apps' icons (Settings' call apps, the bar's call
 //!   card): [`app_icons_dir`] (`YAP_E2E_APP_ICONS`) names stand-ins instead.
 //!
+//! The real-app robot tests (`e2e-real/`) run test mode with
+//! `YAP_REALTEST=1` on top: **robot mode** (`realtest.rs`), where the paste,
+//! the submit key and the reads of the target field are real again — but
+//! only into the windows the test opened itself.
+//!
 //! Release builds compile all of this out: [`active`] is always `false`
 //! without `debug_assertions`, and the meeting hooks don't exist.
 
@@ -349,6 +354,9 @@ pub fn start(app: &AppHandle) {
         return;
     }
     tracing::info!("e2e: test mode on");
+    // The real-app tests' robot mode (YAP_REALTEST=1): real pastes, keys and
+    // reads, only into the test's own windows (realtest.rs).
+    crate::realtest::start(app);
     let app = app.clone();
     std::thread::spawn(move || {
         let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());

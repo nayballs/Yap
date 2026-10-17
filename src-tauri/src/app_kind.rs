@@ -409,12 +409,13 @@ fn page_name(seg: &str) -> &str {
 /// What kind of app the window `hwnd` is (`None`: one of Yap's own, or none
 /// → `Other`). Reads its process name, class and title; logs the process
 /// name and the kind at `debug`, never the title. A test run reads nothing
-/// (it would be whatever the developer has in front).
+/// (it would be whatever the developer has in front); robot mode, only a
+/// window the test opened (`realtest::permits`).
 pub fn of_window(hwnd: Option<isize>) -> AppKind {
     let Some(hwnd) = hwnd else {
         return AppKind::Other;
     };
-    if crate::e2e::active() {
+    if !crate::realtest::permits(Some(hwnd)) {
         return AppKind::Other;
     }
     #[cfg(windows)]

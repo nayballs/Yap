@@ -336,8 +336,9 @@ mod platform {
         }
     }
 
-    /// Simulate Ctrl+V keystroke via SendInput.
-    pub fn simulate_paste() {
+    /// Simulate Ctrl+V keystroke via SendInput (into `target`: robot mode
+    /// checks it's still in front right after).
+    pub fn simulate_paste(target: Option<isize>) {
         let inputs = [
             make_key(VK_CONTROL, false),
             make_key(VK_V, false),
@@ -352,6 +353,7 @@ mod platform {
                 mem::size_of::<INPUT>() as i32,
             )
         };
+        crate::realtest::check_after(target, "paste");
 
         tracing::debug!(
             sent,
@@ -667,6 +669,31 @@ mod clip {
         }
     }
 
+    /// Robot mode: put raw formats on the clipboard, privately.
+    #[cfg(debug_assertions)]
+    pub fn put_private(items: &[(u32, Vec<u8>)]) -> Result<(), String> {
+        put(items, true)
+    }
+
+    /// Robot mode: one format's bytes, if it's there.
+    #[cfg(debug_assertions)]
+    pub fn read_format(format: u32) -> Option<Vec<u8>> {
+        let _open = Open::new()?;
+        available(format).then(|| read(format)).flatten()
+    }
+
+    /// Robot mode: every privacy format is on the clipboard now.
+    #[cfg(debug_assertions)]
+    pub fn all_private() -> bool {
+        let Some(_open) = Open::new() else {
+            return false;
+        };
+        PRIVATE.iter().all(|(name, _)| available(registered(name)))
+    }
+
+    #[cfg(debug_assertions)]
+    pub const DIBV5: u32 = CF_DIBV5;
+
     /// Tests: each privacy format's bytes on the clipboard now (`None` = absent).
     #[cfg(test)]
     pub fn privacy_formats() -> Vec<(&'static str, Option<Vec<u8>>)> {
@@ -695,6 +722,103 @@ mod clip {
 
     #[cfg(test)]
     pub const HDROP: u32 = CF_HDROP;
+}
+
+/// Robot mode's clipboard (`realtest_clipboard`), which never hands the
+/// clipboard's contents out: `save` keeps what's there now (the
+/// developer's) in memory, `restore` puts it back (as a paste does: text,
+/// an image or files); `setText` / `setImage` put a test value there,
+/// privately (out of Win+V history); `check` says whether what's there is
+/// `text`, the last test image, any text at all, and private.
+#[cfg(all(target_os = "windows", debug_assertions))]
+pub(crate) fn robot_clipboard(action: &str, text: Option<&str>) -> Result<serde_json::Value, String> {
+    use serde_json::json;
+    static SAVED: Mutex<Option<clip::Snapshot>> = Mutex::new(None);
+    static IMAGE: Mutex<Option<Vec<u8>>> = Mutex::new(None);
+    fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+        m.lock().unwrap_or_else(|p| p.into_inner())
+    }
+    match action {
+        "save" => {
+            let mut saved = lock(&SAVED);
+            if saved.is_none() {
+                *saved = Some(clip::snapshot());
+            }
+            Ok(json!({ "saved": true }))
+        }
+        "restore" => {
+            let snap: Option<clip::Snapshot> = lock(&SAVED).take();
+            let restored = snap.is_some();
+            if let Some(snap) = snap {
+                clip::restore(snap, true);
+            }
+            Ok(json!({ "restored": restored }))
+        }
+        "setText" => {
+            let text = text.ok_or("setText needs a text")?;
+            if !clip::put_text_verified(text, true) {
+                return Err("Couldn't put the text on the clipboard".into());
+            }
+            Ok(json!({ "set": true }))
+        }
+        "setImage" => {
+            let dib = test_image();
+            clip::put_private(&[(clip::DIBV5, dib.clone())])?;
+            *lock(&IMAGE) = Some(dib);
+            Ok(json!({ "set": true }))
+        }
+        "check" => {
+            let now = clip::read_text();
+            let image = lock(&IMAGE).clone();
+            let dib = clip::read_format(clip::DIBV5);
+            let matches_image = match (image, dib) {
+                // (The clipboard's copy can be padded to its allocation size.)
+                (Some(want), Some(got)) => got.len() >= want.len() && got[..want.len()] == want[..],
+                _ => false,
+            };
+            Ok(json!({
+                "hasText": now.is_some(),
+                "matchesText": text.is_some_and(|t| now.as_deref() == Some(t)),
+                "matchesImage": matches_image,
+                "private": clip::all_private(),
+            }))
+        }
+        other => Err(format!("Unknown clipboard action: {other}")),
+    }
+}
+
+/// A 16 × 16 32-bit test image as a BITMAPV5HEADER DIB (a diagonal
+/// gradient: any change to a byte shows).
+#[cfg(all(target_os = "windows", debug_assertions))]
+fn test_image() -> Vec<u8> {
+    const SIDE: i32 = 16;
+    let mut b: Vec<u8> = Vec::with_capacity(124 + (SIDE * SIDE * 4) as usize);
+    b.extend_from_slice(&124u32.to_le_bytes()); // bV5Size
+    b.extend_from_slice(&SIDE.to_le_bytes()); // width
+    b.extend_from_slice(&SIDE.to_le_bytes()); // height (bottom-up)
+    b.extend_from_slice(&1u16.to_le_bytes()); // planes
+    b.extend_from_slice(&32u16.to_le_bytes()); // bits per pixel
+    b.extend_from_slice(&3u32.to_le_bytes()); // BI_BITFIELDS
+    b.extend_from_slice(&((SIDE * SIDE * 4) as u32).to_le_bytes()); // image size
+    b.extend_from_slice(&2835i32.to_le_bytes()); // 72 dpi
+    b.extend_from_slice(&2835i32.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes()); // colours used
+    b.extend_from_slice(&0u32.to_le_bytes()); // colours important
+    for mask in [0x00FF_0000u32, 0x0000_FF00, 0x0000_00FF, 0xFF00_0000] {
+        b.extend_from_slice(&mask.to_le_bytes());
+    }
+    b.extend_from_slice(&0x7352_4742u32.to_le_bytes()); // LCS_sRGB
+    b.extend_from_slice(&[0u8; 36]); // endpoints
+    b.extend_from_slice(&[0u8; 12]); // gamma
+    b.extend_from_slice(&4u32.to_le_bytes()); // LCS_GM_IMAGES
+    b.extend_from_slice(&[0u8; 12]); // profile data, size, reserved
+    debug_assert_eq!(b.len(), 124);
+    for y in 0..SIDE {
+        for x in 0..SIDE {
+            b.extend_from_slice(&[(x * 16) as u8, (y * 16) as u8, ((x + y) * 8) as u8, 0xFF]);
+        }
+    }
+    b
 }
 
 /// Window classes of the shell itself (taskbars, the desktop, the tray's
@@ -774,22 +898,27 @@ pub(crate) fn syncs_clipboard(app: Option<&str>) -> bool {
 /// Simulate the auto-submit keystroke in the focused window. `key` is one of
 /// "enter", "ctrlEnter", or "shiftEnter".
 pub async fn press_submit(key: &str) -> Result<(), String> {
-    if crate::e2e::active() {
+    if crate::e2e::active() && !crate::realtest::on() {
         info!("e2e: not pressing {} in another app", key);
         return Ok(());
     }
     let key = key.to_string();
     tokio::task::spawn_blocking(move || {
+        // Robot mode: only in a window the test opened, checked right
+        // before the key goes out (always fine in a normal run).
+        crate::realtest::recheck_foreground(None, &format!("press {key}"))?;
         #[cfg(target_os = "windows")]
         platform::press_submit(&key);
+        crate::realtest::check_after(None, &format!("{key} key"));
         #[cfg(not(target_os = "windows"))]
         {
             let _ = &key;
             warn!("press_submit is only supported on Windows");
         }
+        Ok(())
     })
     .await
-    .map_err(|e| format!("press_submit task panicked: {}", e))
+    .map_err(|e| format!("press_submit task panicked: {}", e))?
 }
 
 /// Handle of the current foreground window (as an `isize`, `None` if none).
@@ -1006,14 +1135,22 @@ const NOTHING_TO_PASTE: &str = "Nothing to paste yet — dictate something first
 fn paste_last_blocking() -> Result<String, String> {
     let text = last_transcript().ok_or(NOTHING_TO_PASTE)?;
     let cfg = crate::config::load();
-    if crate::e2e::active() {
+    let test_mode = || {
         let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary, AppKind::Other);
         info!(len = out.len(), "e2e: not pasting the last transcript");
-        return Ok(out);
+        Ok(out)
+    };
+    if crate::e2e::active() && !crate::realtest::on() {
+        return test_mode();
     }
     #[cfg(target_os = "windows")]
     {
         let target = platform::paste_target();
+        match crate::realtest::gate(target, "paste the last transcript") {
+            crate::realtest::Gate::Go => {}
+            crate::realtest::Gate::TestMode => return test_mode(),
+            crate::realtest::Gate::Refused(why) => return Err(why),
+        }
         if let Some(hwnd) = target {
             platform::focus_window(hwnd);
             // The app puts its own focus back in its field on activation.
@@ -1067,10 +1204,15 @@ pub async fn inject_text(
     restore_clipboard: bool,
     target_hwnd: Option<isize>,
 ) -> Result<(), String> {
-    // An e2e test run never pastes into another app (or touches the clipboard).
-    if crate::e2e::active() {
-        info!(len = text.len(), "e2e: not pasting the text");
-        return Ok(());
+    // An e2e test run never pastes into another app (or touches the
+    // clipboard); robot mode only into a window the test opened.
+    match crate::realtest::gate(target_hwnd, "paste") {
+        crate::realtest::Gate::Go => {}
+        crate::realtest::Gate::TestMode => {
+            info!(len = text.len(), "e2e: not pasting the text");
+            return Ok(());
+        }
+        crate::realtest::Gate::Refused(why) => return Err(why),
     }
     let text = text.to_string();
 
@@ -1115,19 +1257,34 @@ fn inject_text_sync(
         if !clip::put_text_verified(text, private) {
             // The clipboard can't be written: type the text instead.
             warn!("Couldn't put the text on the clipboard; typing it instead");
-            platform::type_unicode(text);
+            // Robot mode: still the test's window in front (always fine in a
+            // normal run).
+            let checked = crate::realtest::recheck_foreground(target_hwnd, "type the text");
+            if checked.is_ok() {
+                platform::type_unicode(text);
+                crate::realtest::check_after(target_hwnd, "typing");
+            }
             if let Some(prev) = previous {
                 clip::restore(prev, private);
             }
-            return Ok(());
+            return checked;
         }
         trace!(private, "Dictation on the clipboard");
 
         // Small delay to ensure clipboard is ready.
         std::thread::sleep(std::time::Duration::from_millis(30));
 
+        // Robot mode: the window in front must still be the test's, and the
+        // one this paste is for — checked right before the keys go out.
+        if let Err(why) = crate::realtest::recheck_foreground(target_hwnd, "paste") {
+            if let Some(prev) = previous {
+                clip::restore(prev, private);
+            }
+            return Err(why);
+        }
+
         // Simulate Ctrl+V.
-        platform::simulate_paste();
+        platform::simulate_paste(target_hwnd);
 
         // Restore previous clipboard (delayed to ensure paste completes). Webview/
         // Electron apps process Ctrl+V asynchronously (browser→renderer IPC) and can

@@ -48,6 +48,7 @@ mod partials;
 mod pipeline;
 mod portable;
 mod procs;
+mod realtest;
 mod selection;
 mod smart_insert;
 mod sound;
@@ -495,6 +496,17 @@ pub fn run() {
             meeting_guard::e2e_meeting_limit,
             #[cfg(debug_assertions)]
             calendar::calendar_e2e_opened,
+            // Robot mode only (realtest.rs): the real-app tests.
+            #[cfg(debug_assertions)]
+            realtest::commands::realtest_window,
+            #[cfg(debug_assertions)]
+            realtest::commands::realtest_refusals,
+            #[cfg(debug_assertions)]
+            realtest::commands::realtest_dictate_text,
+            #[cfg(debug_assertions)]
+            realtest::commands::realtest_dictate_wav,
+            #[cfg(debug_assertions)]
+            realtest::commands::realtest_clipboard,
         ])
         // A meeting window (the notepad, the overlay) that loads while a
         // meeting records leaves screen captures too (capture.rs).

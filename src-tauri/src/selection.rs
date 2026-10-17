@@ -100,10 +100,11 @@ fn session() -> std::sync::MutexGuard<'static, Session> {
 /// record start; `None` = one of Yap's own). With `read`, the text around
 /// the caret is read on a background thread for [`take_context`]; either
 /// way the previous dictation's context is forgotten. Never in a test run
-/// (it would read whatever app the developer has focused).
+/// (it would read whatever app the developer has focused) — in robot mode
+/// only a window the test opened (`realtest::permits`).
 pub fn begin_dictation(target_hwnd: Option<isize>, read: bool) {
     let id = NEXT_SESSION.fetch_add(1, Ordering::SeqCst);
-    let hwnd = target_hwnd.filter(|_| read && !crate::e2e::active());
+    let hwnd = target_hwnd.filter(|&h| read && crate::realtest::permits(Some(h)));
     {
         let mut s = session();
         s.id = id;
@@ -123,6 +124,16 @@ pub fn begin_dictation(target_hwnd: Option<isize>, read: bool) {
         });
     if spawned.is_err() {
         session().reading = Reading::Off;
+    }
+}
+
+/// Robot mode: wait (at most `max`) for the read [`begin_dictation`]
+/// started, as the seconds of a spoken dictation would.
+#[cfg(debug_assertions)]
+pub fn wait_for_context(max: std::time::Duration) {
+    let until = std::time::Instant::now() + max;
+    while matches!(session().reading, Reading::Pending) && std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 
@@ -188,9 +199,10 @@ pub struct WatchedField {
 impl WatchedField {
     /// The focused element now, if it's a text field Yap may read in
     /// `target_hwnd`'s process: not a password box, not read-only. Never in
-    /// a test run.
+    /// a test run — in robot mode only in a window the test opened
+    /// (`realtest::permits`).
     pub fn open(target_hwnd: isize) -> Option<WatchedField> {
-        if crate::e2e::active() {
+        if !crate::realtest::permits(Some(target_hwnd)) {
             return None;
         }
         #[cfg(windows)]
