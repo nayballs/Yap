@@ -3,7 +3,8 @@
   // transcribes or just failed: the red dot + scrolling amplitude waveform,
   // the live partial text when there is some, "Transcribing…", or the error.
   // Dark ink like the rest of the bar; the moving waveform and the pulsing
-  // dot carry its visibility on any background.
+  // dot carry its visibility on any background. A lock after the dot: push-
+  // to-talk's double-tap made it hands-free.
   import { dictation } from './dictation.svelte.js';
 
   // Smooth left glide: keep the newest words visible by translating the text
@@ -27,6 +28,11 @@
     <span class="txt">{dictation.errorMsg}</span>
   {:else}
     <span class="dot" class:rec={!processing} class:proc={processing}></span>
+    {#if dictation.locked && !processing}
+      <span class="lock" role="img" aria-label="Hands-free: press the hotkey to stop" title="Hands-free: press the hotkey to stop">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7.5a4 4 0 0 1 8 0V11" /></svg>
+      </span>
+    {/if}
     {#if dictation.words.length}
       <div class="partial" bind:this={clipEl}>
         <span class="ptext" bind:this={textEl} style="transform: translateX({shift}px)">
@@ -103,6 +109,17 @@
     border-radius: 1px;
     background: var(--bar-wave); /* Yap amber, brightened for the dark capsule */
     transition: height 0.06s linear;
+  }
+
+  /* Hands-free: a small lock in the bar's amber, after the dot. */
+  .lock {
+    display: flex;
+    flex: 0 0 auto;
+    color: var(--bar-wave);
+  }
+  .lock svg {
+    width: 13px;
+    height: 13px;
   }
 
   .txt {

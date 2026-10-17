@@ -135,6 +135,15 @@ export function formatHotkeySpec(spec) {
   return parts.join(' + ') + (p.kind === 'mods' ? ' (hold)' : '');
 }
 
+/// A notice's text with `{key}` written as the hotkey's name: Rust's
+/// push-to-talk coaching hints (coaching.rs) carry the spec and leave the
+/// naming to the page. ("Hold Right Alt while you talk", no "(hold)".)
+export function fillHotkey(text, spec) {
+  if (!text) return '';
+  const parts = hotkeyParts(spec);
+  return text.replaceAll('{key}', parts.length ? parts.join(' + ') : 'the hotkey');
+}
+
 /// Does this keydown event trigger the binding? (In-window fallback matcher —
 /// mirrors input_hook.rs semantics: combos need their modifiers held, a
 /// modifier-only chord fires when it completes, side-specific modifier

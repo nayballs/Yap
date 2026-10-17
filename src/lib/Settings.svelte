@@ -25,7 +25,7 @@
   import { PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
   import { createExternalLinkHandler } from './externalLinks.js';
   import { toast } from './ui/toast.svelte.js';
-  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup, formatHotkeySpec } from './hotkeys.js';
+  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup, formatHotkeySpec, fillHotkey } from './hotkeys.js';
   import HotkeyInput from './ui/HotkeyInput.svelte';
   import { modelStore } from './modelStore.svelte.js';
   import { attention, attentionCount } from './attention.svelte.js';
@@ -666,7 +666,9 @@
   // pipeline directly — combo-aware via lib/hotkeys.js, matching the Rust
   // hook's semantics. Guarded while the shortcut recorder is capturing. The
   // meeting shortcut (Win+Alt+M) goes first: a combo is more specific than a
-  // bare dictation key.
+  // bare dictation key. Down and up both go to `dictation_key`, the hook's
+  // own path: the recording mode (and push-to-talk's tap / double-tap) is
+  // Rust's to decide.
   function onFallbackKeyDown(e) {
     if (recording || e.repeat) return;
     if (hotkeyMatchesKeydown(e, cfg?.meetingHotkey)) {
@@ -678,15 +680,13 @@
     if (!hotkeyMatchesKeydown(e, cfg?.hotkey)) return;
     e.preventDefault();
     e.stopPropagation();
-    invoke('toggle_recording').catch(() => {});
+    invoke('dictation_key', { pressed: true }).catch(() => {});
   }
   function onFallbackKeyUp(e) {
     if (recording) return;
     if (!hotkeyMatchesKeyup(e, cfg?.hotkey)) return;
-    if (cfg?.recordingMode === 'pushToTalk') {
-      e.preventDefault();
-      invoke('toggle_recording').catch(() => {});
-    }
+    e.preventDefault();
+    invoke('dictation_key', { pressed: false }).catch(() => {});
   }
   $effect(() => {
     window.addEventListener('keydown', onFallbackKeyDown, true);
@@ -1470,7 +1470,12 @@
                 oncapturingchange={(on) => onHotkeyCapturing('hotkey', on)}
               />
             </Row>
-            <Row label="Recording mode" desc="Press to start and stop, or hold the key while you talk">
+            <Row
+              label="Recording mode"
+              desc={cfg.recordingMode === 'pushToTalk'
+                ? fillHotkey('Hold {key} while you talk. Double-tap it to keep recording hands-free, then press it once more to stop.', cfg.hotkey)
+                : 'Press to start and stop, or hold the key while you talk'}
+            >
               <Segmented
                 bind:value={cfg.recordingMode}
                 options={[

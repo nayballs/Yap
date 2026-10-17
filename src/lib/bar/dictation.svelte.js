@@ -16,6 +16,9 @@ export const dictation = $state({
   history: [],
   // Revealed partial words (rendered as keyed spans).
   words: [],
+  // Push-to-talk's double-tap locked this recording hands-free
+  // (`yap-dictation-locked`, gesture.rs): the capsule shows a lock.
+  locked: false,
 });
 
 // ---- Live partial transcript (streaming preview) ----
@@ -75,7 +78,10 @@ export function initDictation() {
   listen('yap-state', (e) => {
     const state = e.payload;
     dictation.state = state;
-    if (state !== 'recording') dictation.history = [];
+    if (state !== 'recording') {
+      dictation.history = [];
+      dictation.locked = false;
+    }
     // Keep the partial visible through the brief "processing" state, then
     // drop it once we're idle/needs-model/error so it never lingers.
     if (state === 'idle' || state === 'needs-model' || state === 'error' || state === 'recording') {
@@ -84,6 +90,9 @@ export function initDictation() {
   });
   listen('yap-error', (e) => {
     if (e.payload) dictation.errorMsg = e.payload;
+  });
+  listen('yap-dictation-locked', (e) => {
+    dictation.locked = !!e.payload;
   });
   listen('yap-partial', (e) => {
     if (typeof e.payload === 'string') onPartial(e.payload);

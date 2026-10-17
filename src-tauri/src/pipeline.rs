@@ -14,6 +14,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use tauri::{AppHandle, Emitter};
 
 use crate::config::{self, YapConfig};
+use crate::gesture::{Action, Gesture};
 use crate::stt::{self, SttAdapter, SttError};
 
 pub(crate) const TARGET_SAMPLE_RATE: u32 = 16_000;
@@ -91,6 +92,15 @@ struct SendStream(#[allow(dead_code)] cpal::Stream);
 // internal threading and we never touch it from another thread.
 unsafe impl Send for SendStream {}
 
+/// The push-to-talk gesture (`gesture.rs`) and which hotkey its recording
+/// belongs to.
+#[derive(Default)]
+struct GestureSlot {
+    machine: Gesture,
+    /// The recording is the edit hotkey's (no coaching hints for it).
+    edit: bool,
+}
+
 /// State shared between the audio callback, the hotkey toggle, and STT.
 struct Shared {
     recording: AtomicBool,
@@ -131,6 +141,9 @@ struct Shared {
     /// A mic stream is running. False when Yap found no microphone (see
     /// `Pipeline::start`); `start_recording` refuses until there is one.
     has_mic: AtomicBool,
+    /// Push-to-talk's hold / tap / double-tap state. Locked while acting on
+    /// a step, so key events and the tap timer take turns.
+    gesture: Mutex<GestureSlot>,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -234,22 +247,81 @@ impl Shared {
     /// Route a hotkey press/release through the configured recording mode.
     ///
     /// - `toggle` mode: act on press only (flip recording on/off). Ignore release.
-    /// - `pushToTalk` mode: press starts (if idle), release stops + transcribes
-    ///   (if recording).
+    /// - `pushToTalk` mode: the gestures of `gesture.rs` — hold to talk
+    ///   (release stops + transcribes), a quick tap then a second press locks
+    ///   it hands-free until the next press, a lone tap is thrown away with a
+    ///   coaching hint.
     ///
     /// `edit` selects edit/rewrite mode (the dictation hotkey passes `false`, the
-    /// edit hotkey passes `true`).
-    fn on_key(self: &Arc<Self>, pressed: bool, edit: bool) {
-        if self.recording_mode() == "pushToTalk" {
+    /// edit hotkey passes `true`). `at`: when the key moved (`gesture::now_ms`,
+    /// stamped by the input hook); `None` = now.
+    fn on_key(self: &Arc<Self>, pressed: bool, edit: bool, at: Option<u64>) {
+        let mut g = self.gesture.lock().unwrap_or_else(|p| p.into_inner());
+        if self.recording_mode() != "pushToTalk" {
+            g.machine.reset();
+            drop(g);
             if pressed {
-                if !self.recording.load(Ordering::SeqCst) {
-                    self.start_recording(edit);
-                }
-            } else if self.recording.load(Ordering::SeqCst) {
-                self.stop_and_transcribe();
+                self.toggle(edit);
             }
-        } else if pressed {
-            self.toggle(edit);
+            return;
+        }
+        let now = at.unwrap_or_else(crate::gesture::now_ms);
+        let recording = self.recording.load(Ordering::SeqCst);
+        let step = if pressed {
+            g.machine.press(now, recording)
+        } else {
+            g.machine.release(now, recording)
+        };
+        self.apply_gesture(&mut g, step, edit);
+    }
+
+    /// The tap timer: a tap whose second press didn't come is thrown away.
+    fn gesture_tick(self: &Arc<Self>) {
+        let mut g = self.gesture.lock().unwrap_or_else(|p| p.into_inner());
+        let step = g.machine.tick(crate::gesture::now_ms(), self.recording.load(Ordering::SeqCst));
+        let edit = g.edit;
+        self.apply_gesture(&mut g, step, edit);
+    }
+
+    /// Do what a gesture step says (with the gesture lock held, so a key
+    /// event and the tap timer never act at once). `edit`: the hotkey that
+    /// starts a recording here.
+    fn apply_gesture(self: &Arc<Self>, g: &mut GestureSlot, step: crate::gesture::Step, edit: bool) {
+        match step.action {
+            Action::Start => {
+                g.edit = edit;
+                self.start_recording(edit);
+                // Refused (still transcribing the last one, no mic): nothing
+                // to hold, tap or lock.
+                if !self.recording.load(Ordering::SeqCst) {
+                    g.machine.reset();
+                }
+            }
+            Action::Stop => self.stop_and_transcribe(),
+            Action::Discard => {
+                tracing::info!("Push-to-talk: a lone tap, nothing to transcribe");
+                self.cancel();
+            }
+            Action::Lock => {
+                tracing::info!("Push-to-talk: double-tap, recording hands-free");
+                let _ = self.app.emit("yap-dictation-locked", true);
+                std::thread::spawn(crate::coaching::hands_free_used);
+            }
+            Action::None => {}
+        }
+        if let Some(ms) = step.tick_in {
+            let shared = Arc::clone(self);
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(ms));
+                shared.gesture_tick();
+            });
+        }
+        // Coaching is about the dictation hotkey. Off the locks: showing it
+        // asks the main thread whether the window is on screen.
+        if let (Some(hint), false) = (step.hint, g.edit) {
+            let hotkey = self.config.read().map(|c| c.hotkey.clone()).unwrap_or_default();
+            let app = self.app.clone();
+            std::thread::spawn(move || crate::coaching::offer(&app, hint, &hotkey));
         }
     }
 
@@ -1079,6 +1151,7 @@ impl Pipeline {
             upload_cancel: AtomicBool::new(false),
             mic_test: AtomicBool::new(false),
             has_mic: AtomicBool::new(false),
+            gesture: Mutex::new(GestureSlot::default()),
         });
 
         spawn_idle_watcher(&shared);
@@ -1128,21 +1201,23 @@ impl Pipeline {
     }
 
     /// Route a **dictation** hotkey press/release through the recording mode.
-    /// Called from the input-hook listeners for both press and release.
-    pub fn on_key(&self, pressed: bool) {
+    /// Called from the input-hook listeners for both press and release (`at`:
+    /// the hook's timestamp, `gesture::now_ms`) and from the windows' in-page
+    /// fallback (`dictation_key`, `None` = now).
+    pub fn on_key(&self, pressed: bool, at: Option<u64>) {
         if pressed {
             self.ensure_mic();
         }
-        self.shared.on_key(pressed, false);
+        self.shared.on_key(pressed, false, at);
     }
 
     /// Route an **edit/rewrite** hotkey press/release. Same as `on_key` but the
     /// session captures the selection and rewrites it from the spoken instruction.
-    pub fn on_edit_key(&self, pressed: bool) {
+    pub fn on_edit_key(&self, pressed: bool, at: Option<u64>) {
         if pressed {
             self.ensure_mic();
         }
-        self.shared.on_key(pressed, true);
+        self.shared.on_key(pressed, true, at);
     }
 
     /// Stop recording and discard the audio (no transcription).
