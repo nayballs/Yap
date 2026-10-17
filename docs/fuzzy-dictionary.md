@@ -169,3 +169,62 @@ Still open from the original list: multi-trigger entries (`triggers[] → to`)
 and OpenWhispr-style auto-learning (needs an edit-observation channel).
 (The per-entry fuzzy flag from option 3's guardrails shipped 2026-07-10,
 see above.)
+
+---
+
+## 2026-10-17 — snippets, "press enter", and a ranked vocabulary
+
+Three behaviours from the Wispr Flow teardown
+(`references/wispr-flow/rea-teardown/04-dictation-and-other.md`, behaviour and
+numbers only — Yap's own code and words):
+
+**Snippets** (voice text expansion). A dictionary entry with `snippet: true`:
+`from` is the phrase you say, `to` the text Yap types (it may span lines).
+`config::apply_snippets` runs on a **dictation's** final text only:
+
+| Step | What runs |
+|---|---|
+| 1 | AI cleanup (told to keep snippet phrases word for word; never sees their text) |
+| 2 | corrections: exact, then fuzzy (`pipeline::apply_corrections` — snippets skipped) |
+| 3 | the "press enter" voice command (below) |
+| 4 | snippets |
+
+Matching: the phrase's words (runs of letters/digits, lowercased) must appear
+in order as whole words, with any non-letter/digit run between them, any case
+— so cleanup's "My sign-off," still matches `my sign off`. One regex, one
+pass, the longest phrase first (most words, then most letters), so "my email
+address" beats "my email" and an inserted text is never expanded again. If
+nothing but punctuation and spaces is left around a single match (the phrase
+was all you said), the result is exactly the snippet's text, without the
+capital or full stop cleanup added; inside a sentence only the phrase is
+replaced. The text goes in verbatim (`$1` is text). Snippets are never in the
+exact or fuzzy correction passes or the Whisper prompt, so meetings and Upload
+(which run `apply_corrections` only) keep what was said. Corrections run first,
+so the snippet's text is never fuzzed; the cost is that a correction could, in
+theory, change a phrase's word before step 4.
+
+**"Press enter"** (`voice_enter`, default on; `pipeline::take_voice_enter`).
+Only the LAST two words count ("press enter" / "press return", any case or
+punctuation): the phrase goes, with a comma/semicolon/dash before it, and a
+full stop or question mark after it moves onto the text ("Can you check,
+press enter?" → "Can you check?"). Checked in the final text first, then the
+raw transcript (cleanup may drop or reword it; the final text is then pasted
+as it is). The submit key is `auto_submit_key`, pressed once even with
+auto-submit on. A dictation of just "press enter" pastes nothing and presses
+only while the dictation's window still has the focus. Before snippets, so
+"my address, press enter" still gives exactly the address. Test mode presses
+nothing (`text_injector::press_submit`).
+
+**Ranked Whisper vocabulary** (`dict_usage.rs`). The prompt is capped at ~600
+chars, so with a long dictionary the order decides which words Whisper hears
+about. `<data>/dictionary_usage.json` keeps `{uses, lastUsed}` per word
+(lowercased `to`), outside config.json (Settings auto-saves its whole config
+copy and would put old counts back). A word counts as used whenever it's in
+a corrected dictation, meeting line or Upload — which covers its correction
+firing, and also a Whisper decode that spelled it right thanks to the prompt
+(with Whisper, the fuzzy pass is off and a well-biased decode never fires the
+exact rule, so counting only firings would never learn anything). Order: used
+within the last day, then the last 14 days, then the rest; inside each tier
+most uses first; then the order you added them. Wispr also ranks by an entry's
+*source* (manual > learned from edits > …); Yap has only manual entries so far.
+Meetings keep their attendees ahead of the ranked dictionary.
