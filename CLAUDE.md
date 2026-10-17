@@ -146,7 +146,9 @@ fuzzy near-miss pass) → the "press enter" voice command → snippets → fit t
 kind of app (`app_kind.rs`: a terminal gets one line and no trailing space; a
 chat app's short message loses its full stop) and to the text around the
 cursor (smart spacing; where the field couldn't be read, append-space as
-before) → inject → submit key (auto-submit or the voice command, once; in a
+before) → inject (an app running as administrator takes no keys from Yap:
+the text is left on the clipboard and the person told, `elevated.rs`) →
+submit key (auto-submit or the voice command, once; in a
 terminal Enter, only for the voice command or a coding CLI's auto-submit) —
 or, with no submit key, the correction watch (`learn.rs`: fix a word Yap
 typed and it offers to add it to the dictionary)**
@@ -250,17 +252,37 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   plugged in, a headset that connects after login, a CI runner) doesn't take the
   pipeline down: it runs without a stream (`has_mic`), a hotkey press retries
   (`ensure_mic`), picking a mic (`set_input_device`) starts capture, and a recording
-  attempt without one says "No microphone found" (toast + overlay) — Upload, models
-  and Settings work regardless. **Dead-mic watchdog** (`mic_watch.rs`): the audio
+  attempt without one says "No microphone found" (toast + overlay) — or, when
+  Windows' privacy switches are why, "Windows is blocking microphone access for
+  desktop apps" (`mic_privacy.rs`) — Upload, models and Settings work regardless. **Dead-mic watchdog** (`mic_watch.rs`): the audio
   callback tallies each recording's live audio (`mic_tally`: how much, any sample
   not exactly 0.0); a per-recording watcher (`spawn_mic_watch`) reopens the stream
   once (`reopen_mic`) after 2 s without audio or 3 s of nothing but zeros, and at
   5 s says "No sound from <mic> — check it isn't muted or unplugged" (`yap-error`,
   plus `yap-mic-silent` for the overlay's line) while the recording carries on;
   sound coming back takes it back, and a recording that ends still silent isn't
-  transcribed (the overlay ends on the reason). Capture start, `ensure_mic`,
+  transcribed (the overlay ends on the reason). **Windows' microphone privacy
+  switches** (`mic_privacy::blocked`) are checked when a recording starts — if
+  they block desktop apps it's said at once (`say_mic_blocked`: the overlay's
+  "Windows is blocking the microphone" + an alert with **Open settings**,
+  `alert.rs`; `mic_dead` set, so a stop with no sound isn't transcribed; the
+  recording goes on, and sound arriving takes it back) — and again before the
+  watchdog's report, which then blames the switch instead of the mic.
+  Capture start, `ensure_mic`,
   `set_input_device` and the reopen all go through `open_stream` (the stream slot
   is shared weakly with `Shared`; the reopen stops the dead stream first).
+  **Cancel and Undo**: `cancel(undo)` — the bar's ✕, the tray's Cancel and
+  `cancel_recording` keep a recording of ≥ 0.5 s that heard a sound in `kept`
+  (`Kept`: its audio, `target_hwnd`, `target_kind`, edit mode and selection)
+  for `UNDO_MS` (10 s): `yap-dictation-cancelled { undoMs }` + `yap-state`
+  "cancelled" (the bar's "Dictation cancelled · Undo"), then "idle" and it's
+  dropped; a new dictation drops it too (`capture_target`), and
+  push-to-talk's lone tap is simply thrown away. `Pipeline::undo` (`bar_action`
+  "dictation-undo") puts the target back and runs `run_stt` on the kept audio
+  as a stop would — the paste goes back to the window the dictation started
+  in, whatever has the focus now — after reading that window's cursor
+  context afresh. `Pipeline::stop` is the bar's ✓ (the hotkey's second
+  press). `holds_undo` keeps the updater from restarting under a pending Undo.
 - **`gesture.rs`** — push-to-talk's pure gesture state machine: key down/up and
   the clock in (`now_ms`, monotonic, also what the input hook stamps events
   with), Start / Stop / Discard / Lock + an optional hint + "tick me in N ms"
@@ -281,7 +303,23 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   heard)` → Wait / Reopen / Report / Recovered / Fine, the messages (the full one
   and the overlay's short "No sound from <device> — is it muted?"). Only exact
   zeros count (a quiet room is never all zeros). Unit-tested over simulated
-  callback chunks. Meetings have their own quiet-side watch (`meeting.rs`).
+  callback chunks. Before it blames the mic, the pipeline asks Windows' privacy
+  switches (`mic_privacy.rs`). Meetings have their own quiet-side watch (`meeting.rs`).
+- **`mic_privacy.rs`** — Windows' microphone privacy switches, read only (never
+  written): HKLM `…\CapabilityAccessManager\ConsentStore\microphone` `Value`
+  ("Microphone access", the device), HKCU's ("Let apps access your
+  microphone"), HKCU's — else HKLM's — `…\microphone\NonPackaged` ("Let desktop
+  apps access your microphone"), and HKLM `…\Policies\Microsoft\Windows\AppPrivacy`
+  `LetAppsAccessMicrophone` = 2 (an organisation's policy); a
+  missing value is no answer. Pure `decide` names the widest switch that's off
+  (policy, device, apps, desktop apps), unit-tested. Asked at a recording's
+  start, in the no-mic path and before the dead-mic watchdog's report (see
+  `pipeline.rs`): "Windows is blocking microphone access for desktop apps" +
+  which switch to turn on + **Open settings** (`ms-settings:privacy-microphone`)
+  as an alert (`alert.rs`), "Windows is blocking the microphone" in the
+  overlay's line; logged when capture starts. Test mode reads no registry:
+  debug-only `e2e_mic_privacy { blocked }` stands in; an `#[ignore]`d
+  `mic_privacy_this_machine` prints this PC's switches.
 - **`stt.rs`** — `SttEngine` trait + a real `transcribe-rs` engine (`#[cfg(feature =
   "engines")]`) and a stub (default build). Holds the **14-model registry**
   (`ModelDescriptor`: id/filename/url/sha256/is_directory/engine_type), resolves
@@ -1006,6 +1044,16 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (Update settings / Open note), calendar.rs under "calendar" (the reminder
   card's buttons); each keeps its live toast so the buttons
   work from the notification center. `allowed()` = not portable, not a test run.
+- **`alert.rs`** — a dictation's alerts the person must act on (`elevated.rs`'s
+  "Your text is copied: press Ctrl+V", `mic_privacy.rs`'s "Windows is blocking
+  microphone access…"): a toast in the main window while it's on screen
+  (`yap-alert` → `lib/alerts.js`), else a Yap bar card, else a Windows
+  notification (`surface`, pure, unit-tested; coaching.rs and learn.rs pick the
+  same first two, but a tip can go unsaid). One optional button (`Action`:
+  **Open settings**) comes back to `act` from all three (`alert_action` from
+  the toast). `show_soon` runs it on a thread of its own (window queries; a
+  hotkey's handler may hold the pipeline's locks). Test mode only logs what
+  Open settings would open.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
   volume, output_device, mute_while_recording, recording_mode,
   overlay_position, dictionary (`DictionaryEntry`: from/to + `fuzzy` (default
@@ -1144,7 +1192,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the edited span, or `reads` — the field's whole text read by read (`null`
   = a failed read) — which the real `Watch` runs over (`staged_watch`).
 - **`tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
-  menu (model submenu w/ checkmark, Cancel while recording, Settings/Quit, Check for
+  menu (model submenu w/ checkmark, Cancel while recording — kept for Undo —, Settings/Quit, Check for
   updates → Settings → About + a manual check); left-click opens Settings. A ready
   update adds **"Restart to update to X"** under the version line (replacing
   "Check for updates…"; portable: "Get Yap X on GitHub…"), a green dot on the icon
@@ -1166,7 +1214,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   meeting shortcut: the live call, else a new meeting note; while recording,
   `meeting_end::end`) and a ^ menu (Open Yap, New meeting note, Settings,
   Hide the bar for 1 hour, Turn off the bar — `bar_action`); **dictating** =
-  the dictation overlay (waveform, live partials, Transcribing…, errors);
+  the dictation overlay (waveform, live partials, Transcribing…, errors), with
+  ✕ (`dictation-cancel`) and ✓ (`dictation-stop`: stop and paste, as the
+  hotkey's second press — into the app the dictation started in) while it
+  records, and after a cancel "Dictation cancelled · Undo" (`yap-state`
+  "cancelled", `dictation-undo`) while the audio is kept;
   **meeting** = a 69×30 recording pill at half opacity (5 bars, the stop
   circle; hovered, full opacity and the timer; body → `notepad::open`, ■ →
   `meeting_end::end`). **Click-through except over what
@@ -1200,14 +1252,16 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   notes…", failures), `meeting_guard` (length warning with Keep going,
   notices), `updates` ("Yap X is ready"), `calendar` (the reminder before a
   meeting, as a call card), `coaching` (push-to-talk tips), `learn` (a word
-  to add to the dictionary). An Esc watch (a low-level keyboard
+  to add to the dictionary), `alert` (a paste into an admin app, Windows'
+  microphone privacy). An Esc watch (a low-level keyboard
   hook that only looks) runs only while an on-screen card offers Esc (the
   auto-start countdown). Debug-only `bar_simulate` (pretend cursor on a
   region, fake fullscreen kinds, Esc, demo cards) and `bar_debug` (the real
   ex-styles, WindowFromPoint on the pill, the thread's active window) for the
   e2e suite. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Light / Dark;
   `overlay_position` puts it at the top). Bar off = the old behaviour: the
-  overlay only while dictating, notices as Windows notifications.
+  overlay only while dictating, notices as Windows notifications — but a
+  showing dictation's ✕ / ✓ and Undo still take clicks (`clickable`).
 - **`overlay.rs`** — the bar window's Win32 side + its pure, unit-tested maths:
   `place` (work-area placement), `fullscreen_on` (None / Borderless /
   Exclusive), `region_at` (hit-testing with slack), `enforced_ex_style`, and
@@ -1246,7 +1300,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `meeting_shortcut`). Any new Yap window with focusable UI needs the
   same fallback.
 - **`text_injector.rs`** — clipboard paste (+ optional clipboard restore) and
-  `press_submit` (Enter / Ctrl+Enter / Shift+Enter) via `SendInput`. Captures the
+  `press_submit` (Enter / Ctrl+Enter / Shift+Enter) via `SendInput`. **An app
+  running as administrator** (`elevated.rs`, checked first — the paste's target,
+  "Paste last transcript"'s, the submit key's window) gets no keys: the text is
+  left on the clipboard (`leave_on_clipboard`, as privately as a paste) and
+  `inject_text` returns `Delivery::LeftOnClipboard` for the caller to say so.
+  Captures the
   dictation **target window** at record-start (`current_foreground`, skipping Yap's
   own windows) and **re-focuses** it before pasting (`focus_window`, via the
   `AttachThreadInput` workaround) so focus changes mid-transcription don't misfire.
@@ -1283,6 +1342,19 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   ("e2e: not pasting the last transcript"). No hotkey for it yet. (Verify-after-paste
   over UIA is still a follow-up.) `#[ignore]`d `private_clipboard_round_trip` runs
   the real clipboard code on a private window station (never the person's clipboard).
+- **`elevated.rs`** — apps running as administrator: Windows (UIPI) drops keys
+  sent to a higher integrity level, and `SendInput` doesn't say so. The target's
+  level is compared with Yap's (`OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`
+  → its token → `TokenIntegrityLevel`; a token Windows won't show plus a refused
+  `PROCESS_QUERY_INFORMATION` = above Yap; anything unknown pastes as before);
+  pure `blocks_input`, unit-tested (and against Yap's own token). Above Yap →
+  the text stays on the clipboard (`text_injector`) and the dictation, the
+  rewrite or "Paste last transcript" shows "Your text is copied: press Ctrl+V"
+  (`alert()`, through `alert.rs`) — no submit key, no correction watch;
+  history keeps it. Test mode reads no other process: debug-only
+  `e2e_paste_elevated { on }` makes every target count as one (plain test
+  mode just says so; robot mode really leaves the text on the clipboard). ⚠ A
+  real elevated window can't be robot-tested: opening one takes a UAC prompt.
 - **`selection.rs`** — UI Automation reads of the field Yap types into. **After
   the paste** (`WatchedField`, for `learn.rs`): the focused element held on
   the watch's thread, read whether it still has the focus or not;
@@ -1317,19 +1389,29 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   Electron/WebView2) gives an empty textarea/input/contenteditable an empty
   ValuePattern value but its accessible name ("Type a message") or U+FFFC as its
   TextPattern text — so a field's whole text (≤ 200 chars) that's only markers
-  (U+FFFC, zero-widths)/whitespace, its placeholder (HelpText), or its name unless
+  (U+FFFC, zero-widths)/whitespace, its placeholder (HelpText), or its label —
+  its Name or the name of the element labelling it (LabeledBy) — unless
   the ValuePattern says those words are really there (Slate's in-editor
   placeholder: same words + U+FEFF) is empty; so is a web editor whose class says
   it shows a CSS placeholder, itself or its one line (`class_says_empty`: Quill's
   `ql-blank` = Slack, `is-empty`/`is-editor-empty` = ProseMirror/Tiptap,
-  `ck-placeholder`, `placeholder`); a value-only field only by its placeholder or
-  markers. The post-paste watch applies the same rules. Never: another
+  `ck-placeholder`, `placeholder`); a value-only field by its placeholder,
+  markers or — an edit or a document, not a combo box — exactly its label. The
+  post-paste watch applies the same rules. **A focused element with no text of
+  its own** (an editor's inner part) is read through the text field it's part
+  of: `field_for` walks up to 3 parents (`ControlViewWalker`), in the same
+  process, never past a read-only element (`pick_field`, pure); edit mode's
+  selection and the post-paste watch walk the same way. **Read-only** = the
+  ValuePattern's flag **or** the legacy IAccessible state's
+  `STATE_SYSTEM_READONLY` (`legacy_read_only`). Never: another
   process's element than the target window's, a password box, read-only text, or in
   a test run. The paste
   never waits: still reading → no context. Kept in memory for that dictation only;
   logged as lengths, never text. `#[ignore]`d `reads_real_text_fields` reads hidden
   EDIT and RichEdit controls end to end, through TextPattern and through the
-  ValuePattern + `EM_GETSEL` path (mid-text, a selection, over a line break).
+  ValuePattern + `EM_GETSEL` path (mid-text, a selection, over a line break),
+  and from a child window inside the field (read through it; not through a
+  read-only one).
 - **`smart_insert.rs`** — `fit_to_context(text, &FieldContext, names)`, pure and
   unit-tested (conservative: a wrong fix is worse than the old capital). Mid-sentence
   (before ends in a letter/digit/`,`/`;`/spaced dash — not `.?!`, `:`, a new line or
@@ -1426,7 +1508,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   edit of a pasted dictation as the correction watch would see it, or the
   field's text read by read for the watch's rules to run over — the watch
   thread itself never runs in a test run), `e2e_coaching_reset` (every
-  push-to-talk hint due again), calendar secrets in
+  push-to-talk hint due again), `e2e_paste_elevated { on }` (every paste
+  target an app running as administrator), `e2e_mic_privacy { blocked }`
+  (Windows' microphone privacy switches, never read in a test run), calendar secrets in
   `<data>/calendar-secrets.e2e.json` instead of
   Credential Manager and links recorded (`calendar_e2e_opened`) instead of
   opened in a browser, and it quits when its stdin closes. See
@@ -1449,10 +1533,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   commands: `realtest_dictate_text { text, hwnd }` (`pipeline::Robot::dictate_text`:
   `capture_target` → `selection::wait_for_context` → `deliver`, the same code a
   spoken dictation runs after its STT; returns `Delivered { text, raw, kind,
-  submit, error }`), `realtest_dictate_wav { path, hwnd }` (`dictate_audio`: the
+  submit, error, leftOnClipboard }`), `realtest_dictate_wav { path, hwnd,
+  cancel? }` (`dictate_audio`: the
   WAV fed through `take_audio` in real time between a real `start_recording` and
-  `stop_and_transcribe`, the real mic's audio dropped meanwhile — `TEST_FEED`; a
-  recording may start without a mic), `realtest_window`, `realtest_refusals`,
+  `stop_and_transcribe` — or, with `cancel`, the bar's ✕, kept for Undo —, the
+  real mic's audio dropped meanwhile — `TEST_FEED`; a
+  recording may start without a mic), `realtest_delivered` (what the latest
+  dictation — an Undo's — sent to the paste), `realtest_window`, `realtest_refusals`,
   `realtest_clipboard { save | restore | setText | setImage | check }` (never
   hands the clipboard's contents out). See [`docs/e2e-tests.md`](./docs/e2e-tests.md)
   "Real-app robot tests".
@@ -1549,7 +1636,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   “Kubernetes” to your dictionary? Yap heard “cube and eighties”." with Add /
   Not now / a "Don't suggest this" link, chip Dictionary, `icon:
   'dictionary'`, 30 s; ✕ = Not now; after Add "“Kubernetes” is in your
-  dictionary" + Open Dictionary), and the **update toast**
+  dictionary" + Open Dictionary), a dictation's **alerts** (`alerts.js` —
+  alert.rs's `yap-alert`: "Your text is copied: press Ctrl+V" with chip
+  Paste, `icon: 'clipboard'`; "Windows is blocking microphone access for
+  desktop apps" + Open settings, chip Microphone, `icon: 'mic'`), and the **update toast**
   (`updates.svelte.js` — the shared update store started by ControlPanel:
   sticky "Yap X is ready" + Restart to update / Later / What's new, then
   Downloading… / Restarting Yap… in place; "Updated to X" after the
@@ -1741,7 +1831,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   amber, live partials word-paced by `bar/dictation.svelte.js`, which listens
   for the page's whole life; a small amber lock after the dot while push-to-
   talk's double-tap holds it hands-free; the dead-mic watchdog's "No sound
-  from <device> — is it muted?" in the waveform's place, with a red edge). **Cards** sit 26 px above the pill whatever it
+  from <device> — is it muted?" — or "Windows is blocking the microphone" — in
+  the waveform's place, with a red edge; while it records a quiet ✕ on the
+  left and the primary ✓ on the right, 26 px circles; cancelled, "Dictation
+  cancelled" + Undo with a hairline running down the kept time. It's a
+  `data-region` ("dictation") then, so the click-through bar takes clicks on
+  it, never focused). **Cards** sit 26 px above the pill whatever it
   shows (positioned from the dock's height, gliding 0.16 s when it grows),
   the first nearest the pill and a second above it; each fades in and out in
   0.12 s and has Wispr's 4 px hit strip on the pill's side.
@@ -2125,7 +2220,9 @@ pasted), AI cleanup via the fake model, terminal one-line mode / coding-CLI line
 breaks / auto-submit, chat full stops, the mic path from a TTS WAV
 (`realtest_dictate_wav`) incl. the dead-mic watchdog, the **correction-learning
 flow** (the real watch over UI Automation, a word fixed in the field, Enter, the
-suggestion toast, Add → `config.json`), and **real STT** (Parakeet
+suggestion toast, Add → `config.json`), an admin app (a stand-in: the
+text left on the clipboard, nothing pasted), ✕ then Undo pasting into the
+window the dictation started in (even with another window in front), and **real STT** (Parakeet
 hears Windows TTS saying "the quick brown fox…") on an `engines` build
 (`npm run test:real:build -- --engines` → `<drive>:\t-real`; the model copied
 read-only from `%APPDATA%\yap\models`). **The guard**: Yap may paste / press keys /
@@ -2461,6 +2558,18 @@ control (`EM_GETSEL`); the fuzzy pass swallowed a short word before a term
 empty text box's text as its label or U+FFFC (a web chat message kept its full
 stop and got a trailing space) and their ranges ran past the box into the page
 — reads now stay in the field and an empty one reads as empty.
+**Dictation extras** (2026-10-17): a paste into an app running as
+administrator is spotted (its integrity level) and left on the clipboard
+with "Your text is copied: press Ctrl+V" (`elevated.rs`, `alert.rs`); text
+boxes read through their labels (LabeledBy), the text field a focused part
+is in, and the legacy read-only bit (`selection.rs`); ✕ / ✓ on the
+dictation capsule and "Dictation cancelled · Undo" (10 s); Windows'
+microphone privacy switches named with Open settings (`mic_privacy.rs`).
+Unit-tested, e2e-tested (`bar.spec.js`, `dictation-alerts.spec.js`,
+`no-mic.spec.js`) and robot-tested (`dictation-extras.real.js`, the label
+case in `browser.real.js`); a real elevated window and a privacy switch
+really flipped in Windows are still untried (a UAC prompt; Nathan's
+settings).
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
