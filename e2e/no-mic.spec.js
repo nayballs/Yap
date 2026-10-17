@@ -19,6 +19,26 @@ test('starts without a microphone and says so when asked to record', async ({ ya
   await shot(yap.overlay, '02-overlay-no-microphone');
 });
 
+// No device because Windows' privacy switches block the microphone: Yap
+// says that, with Open settings, instead of "No microphone found"
+// (mic_privacy.rs; a test run reads no registry — `e2e_mic_privacy`).
+test("when Windows' privacy settings block the mic, it says so instead", async ({ yap, main, shot }) => {
+  await yap.invoke('e2e_mic_privacy', { blocked: 'device' });
+  try {
+    await pressHotkey(main);
+    const toast = main.getByRole('status').filter({ hasText: 'Windows is blocking microphone access for desktop apps' });
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('Turn on “Microphone access”');
+    await expect(toast.getByRole('button', { name: 'Open settings' })).toBeVisible();
+    await expect(yap.overlay.getByText('Windows is blocking the microphone')).toBeVisible();
+    await shot(yap.overlay, '06-overlay-mic-blocked'); // (the error clears after 4 s)
+    await expect(main.getByRole('status').filter({ hasText: 'No microphone found' })).toHaveCount(0);
+    await shot(main, '05-toast-mic-blocked');
+  } finally {
+    await yap.invoke('e2e_mic_privacy', { blocked: null });
+  }
+});
+
 test('Upload still transcribes a file', async ({ yap, main, shot }) => {
   await openView(main, 'Upload');
   const wav = writeWav(path.join(yap.runDir, 'voice-memo.wav'));

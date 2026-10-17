@@ -107,8 +107,9 @@ pub struct Card {
     /// with `secondary` and `link` in its ^ menu); the ✕ sits on its corner.
     pub style: &'static str,
     /// The glyph by the title: "call" | "update" | "notes" | "timer" |
-    /// "screen" | "error" | "tip" | "dictionary" | "". On a call card, "calendar" stands in for a
-    /// missing app mark (a calendar meeting with no call app).
+    /// "screen" | "error" | "tip" | "dictionary" | "mic" | "clipboard" | "".
+    /// On a call card, "calendar" stands in for a missing app mark (a
+    /// calendar meeting with no call app).
     pub icon: &'static str,
     /// The call app (`meeting_detect::APPS` id), for its mark.
     pub app: Option<&'static str>,

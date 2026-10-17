@@ -31,6 +31,8 @@
     error: 'Error',
     tip: 'Tip',
     dictionary: 'Dictionary',
+    mic: 'Microphone',
+    clipboard: 'Paste',
   };
   const chip = $derived(card.chip ?? CHIPS[card.icon] ?? null);
   // A card naming a hotkey (the push-to-talk hints) says `{key}`.
@@ -60,6 +62,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" /></svg>
       {:else if card.icon === 'dictionary'}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h14v15H6a2 2 0 0 0-2 2 2 2 0 0 0 2 2h14" /><path d="M9 7.5h7" /></svg>
+      {:else if card.icon === 'mic'}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0" /><path d="M12 17.5V21" /></svg>
+      {:else if card.icon === 'clipboard'}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 4V3h6v1" /><path d="M9 10h6M9 14h4" /></svg>
       {/if}
       {chip}
     </span>

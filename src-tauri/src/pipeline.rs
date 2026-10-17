@@ -566,6 +566,13 @@ impl Shared {
         // say so instead of "recording" silence. (The robot's WAV stands in
         // for a mic.)
         if !self.has_mic.load(Ordering::SeqCst) && !test_feed_on() {
+            // Windows' privacy switches, if they're why: that's what to fix.
+            if let Some(blocked) = crate::mic_privacy::blocked() {
+                tracing::warn!(?blocked, "Can't record — Windows' privacy settings block the microphone");
+                self.say_mic_blocked(blocked);
+                let _ = self.app.emit("yap-state", "error");
+                return;
+            }
             tracing::warn!("Can't record — no microphone");
             let _ = self
                 .app
@@ -602,12 +609,32 @@ impl Shared {
         if self.sound_enabled() {
             crate::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref());
         }
+        // Windows' privacy switches keep desktop apps off the mic: this
+        // recording will hear digital silence. Said now, not after the
+        // watchdog's five seconds; the recording carries on (switching it on
+        // mid-dictation works), and if it ends without a sound it isn't
+        // transcribed, as for a dead mic.
+        if !test_feed_on() {
+            if let Some(blocked) = crate::mic_privacy::blocked() {
+                tracing::warn!(?blocked, "Recording, but Windows' privacy settings block the microphone");
+                self.mic_dead.store(true, Ordering::SeqCst);
+                self.say_mic_blocked(blocked);
+            }
+        }
         // Live partials: spawn a worker that re-transcribes a bounded sliding
         // window of the buffer while recording (cost independent of recording
         // length — see `partials::PartialSession`).
         self.maybe_start_streaming();
         self.spawn_mic_watch(session);
         tracing::info!("Recording started");
+    }
+
+    /// "Windows is blocking microphone access for desktop apps": in the
+    /// overlay's line (the dead-mic watchdog's place), and as an alert with
+    /// **Open settings** (a toast, a bar card or a Windows notification).
+    fn say_mic_blocked(&self, blocked: crate::mic_privacy::Blocked) {
+        let _ = self.app.emit("yap-mic-silent", Some(crate::mic_privacy::mic_silent()));
+        crate::alert::show_soon(&self.app, crate::mic_privacy::alert(blocked));
     }
 
     /// Where the dictation starting now goes: the window in front (captured
@@ -673,7 +700,14 @@ impl Shared {
                     let (samples, heard) = shared.mic_tally.read();
                     match watch.poll(started.elapsed().as_millis() as u64, samples, heard) {
                         MicStep::Wait => {}
-                        MicStep::Fine => break,
+                        MicStep::Fine => {
+                            // Sound after all, though the privacy switches
+                            // said no at the start: take the warning back.
+                            if shared.mic_dead.swap(false, Ordering::SeqCst) {
+                                let _ = shared.app.emit("yap-mic-silent", None::<MicSilent>);
+                            }
+                            break;
+                        }
                         MicStep::Reopen => {
                             tracing::warn!(samples, "Dictation mic: nothing but silence — reopening it");
                             if let Err(e) = shared.reopen_mic() {
@@ -681,13 +715,26 @@ impl Shared {
                             }
                         }
                         MicStep::Report => {
-                            let silent = shared.mic_silent();
-                            tracing::warn!("Dictation mic: {}", silent.message);
-                            shared.mic_dead.store(true, Ordering::SeqCst);
-                            // The overlay says so in the waveform's place (the
-                            // recording carries on), the main window as a toast.
-                            let _ = shared.app.emit("yap-mic-silent", Some(&silent));
-                            let _ = shared.app.emit("yap-error", silent.message);
+                            // Already said when the recording started:
+                            // Windows' privacy switches block the mic.
+                            if shared.mic_dead.swap(true, Ordering::SeqCst) {
+                                continue;
+                            }
+                            match crate::mic_privacy::blocked() {
+                                // Not the mic's fault: Windows' privacy switches.
+                                Some(blocked) => {
+                                    tracing::warn!(?blocked, "Dictation mic: silent, and Windows' privacy settings block it");
+                                    shared.say_mic_blocked(blocked);
+                                }
+                                None => {
+                                    let silent = shared.mic_silent();
+                                    tracing::warn!("Dictation mic: {}", silent.message);
+                                    // The overlay says so in the waveform's place (the
+                                    // recording carries on), the main window as a toast.
+                                    let _ = shared.app.emit("yap-mic-silent", Some(&silent));
+                                    let _ = shared.app.emit("yap-error", silent.message);
+                                }
+                            }
                         }
                         MicStep::Recovered => {
                             tracing::info!("Dictation mic: sound again");
@@ -704,8 +751,12 @@ impl Shared {
     }
 
     /// "No sound from <the mic> — check it isn't muted or unplugged", and
-    /// the overlay's short form.
+    /// the overlay's short form — or, when Windows' privacy switches block
+    /// the mic, "Windows is blocking microphone access for desktop apps".
     fn mic_silent(&self) -> MicSilent {
+        if crate::mic_privacy::blocked().is_some() {
+            return crate::mic_privacy::mic_silent();
+        }
         let name = self.mic_name.lock().map(|n| n.clone()).unwrap_or_default();
         MicSilent::for_mic(&name)
     }
@@ -1595,6 +1646,11 @@ impl Pipeline {
             if let Err(e) = open_stream(&shared, &mut slot, cfg.input_device.as_deref(), true) {
                 tracing::warn!("No audio input — running without a microphone: {}", e);
             }
+        }
+        // Capture starts: if Windows' privacy switches keep desktop apps off
+        // the mic, the log says so now (a recording says it to the person).
+        if let Some(blocked) = crate::mic_privacy::blocked() {
+            tracing::warn!(?blocked, "Windows' privacy settings block the microphone for desktop apps");
         }
 
         let _ = app.emit("yap-state", if has_engine { "idle" } else { "needs-model" });

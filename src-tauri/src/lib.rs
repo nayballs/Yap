@@ -8,6 +8,7 @@
 //! from Voice Mirror; everything else here is the slim glue.
 
 mod agent_detect;
+mod alert;
 mod app_icons;
 mod app_kind;
 mod auth;
@@ -42,6 +43,7 @@ mod llm;
 mod local_llm;
 mod mcp;
 mod mcp_clients;
+mod mic_privacy;
 mod mic_watch;
 mod mute;
 mod overlay;
@@ -476,6 +478,7 @@ pub fn run() {
             bar::bar_action,
             bar::bar_card_action,
             learn::word_suggestion_respond,
+            alert::alert_action,
             bar::bar_simulate,
             bar::bar_debug,
             // Test mode only (e2e.rs); not in release builds at all.
@@ -491,6 +494,8 @@ pub fn run() {
             e2e::e2e_main_on_screen,
             #[cfg(debug_assertions)]
             e2e::e2e_dictation_mic,
+            #[cfg(debug_assertions)]
+            mic_privacy::e2e_mic_privacy,
             #[cfg(debug_assertions)]
             context_menu::e2e_context_menus,
             #[cfg(debug_assertions)]
