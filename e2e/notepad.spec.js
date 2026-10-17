@@ -46,6 +46,7 @@ import {
   consentMessage,
   consentToSave,
   DEFAULT_CONSENT_MESSAGE,
+  meetingHelpers,
 } from '../src/lib/notepadText.js';
 
 const test = base.extend({
@@ -196,6 +197,13 @@ test('the text it copies, saves and emails, and how the transcript is laid out',
   expect(consentMessage('  Mine  ')).toBe('Mine');
   expect(consentToSave(` ${DEFAULT_CONSENT_MESSAGE} `)).toBe('');
   expect(consentToSave('Mine ')).toBe('Mine');
+  // The one-tap AI helpers: by the recording state, once there's something to go on.
+  expect(meetingHelpers(note, true)).toEqual(['catchUp', 'questions']);
+  expect(meetingHelpers(note, false)).toEqual(['followUpEmail', 'blindSpots']);
+  expect(meetingHelpers({ transcript: [] }, true)).toEqual(['catchUp', 'questions']);
+  expect(meetingHelpers({ transcript: [{ source: 'you', text: '', ts: 1, dictated: true }] }, false)).toEqual([]);
+  expect(meetingHelpers({ transcript: [], content: 'Ask about legal' }, false)).toHaveLength(2);
+  expect(meetingHelpers(null, true)).toEqual([]);
 });
 
 test('a meeting starting opens the notepad docked to the right, without taking the focus', async ({
@@ -508,6 +516,128 @@ test('"What did I miss?" and Ask anything, in a sheet over the meeting', async (
   // Focusing Ask anything brings it back.
   await input.focus();
   await expect(sheet).toBeVisible();
+});
+
+test('one-tap helpers: Questions to ask while recording, a follow-up email and the gaps after', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  await newMeetingNote(main, 'Offsite planning', ['Alice']);
+  await main.getByRole('button', { name: 'Record' }).click();
+  await expect.poll(() => visible(yap, 'notepad')).toBe(true);
+  const pad = yap.notepad;
+  await say(yap, ...BUDGET_TALK, ['you', 'ECHO-LINE from the speakers', true]);
+
+  // While recording: What did I miss? in the pill; the sheet adds Questions
+  // to ask. The Notes view offers Questions to ask over its Ask bar.
+  const sheet = askSheet(pad);
+  const suggestions = sheet.getByRole('group', { name: 'Suggestions' });
+  await expect(pad.getByRole('button', { name: 'What did I miss?' })).toBeVisible();
+  await expect(pad.getByRole('button', { name: 'Follow-up email' })).toHaveCount(0);
+  const noteHelpers = main.getByRole('group', { name: 'Meeting helpers' });
+  await expect(noteHelpers.getByRole('button')).toHaveText(['Questions to ask']);
+  await askInput(pad).focus();
+  await expect(suggestions.getByRole('button')).toHaveText(['What did I miss?', 'Questions to ask']);
+  await expect(sheet).toContainText('Questions to ask suggests what to ask next');
+  await shot(pad, '40-helpers-recording');
+
+  // From the keyboard: the chip is a button like any other.
+  await suggestions.getByRole('button', { name: 'Questions to ask' }).focus();
+  await pad.keyboard.press('Enter');
+  await expect(sheet.locator('.mq').last()).toHaveText('Questions to ask');
+  await expect(sheet).toContainText('Who will own catering for the offsite, and by when?');
+  const questions = fakeLlm.requests.filter((r) => r.kind === 'questions').at(-1);
+  expect(questions.user).toMatch(/^Attendees: Alice\n/);
+  expect(questions.user).toContain('The latest talk (');
+  expect(questions.user).toContain('send the revised budget to finance by Friday');
+  expect(questions.user).not.toContain('ECHO-LINE'); // talk only
+  expect(questions.tokens).toBeLessThan(2_500); // lean: one call fits a free tier's minute
+  const answer = sheet.locator('.ma').last();
+  await expect(answer.getByRole('button', { name: 'Good answer' })).toBeVisible();
+  await shot(pad, '41-questions-to-ask');
+
+  // Typing a question puts the chips away; clearing it brings them back.
+  await askInput(pad).fill('Who owns the budget?');
+  await expect(suggestions).toHaveCount(0);
+  await askInput(pad).fill('');
+  await expect(suggestions).toBeVisible();
+
+  // After the meeting (stopped, no summary yet): the follow-up email leads in
+  // the pill, a recap from the transcript, in plain text that copies as is.
+  await sheet.getByRole('button', { name: 'Minimise chat' }).click();
+  await pauseAll(yap);
+  const emailChip = pad.getByRole('button', { name: 'Follow-up email' });
+  await expect(emailChip).toBeVisible();
+  await expect(pad.getByRole('button', { name: 'What did I miss?' })).toHaveCount(0);
+  await expect(noteHelpers.getByRole('button')).toHaveText(['Follow-up email', 'Gaps and risks']);
+  const copied = await stubClipboard(pad);
+  await emailChip.click();
+  await expect(askInput(pad)).toBeFocused(); // the chip went into the sheet
+  await expect(suggestions.getByRole('button')).toHaveText(['Follow-up email', 'Gaps and risks']);
+  await expect(sheet.locator('.mq').last()).toHaveText('Follow-up email');
+  const email = sheet.locator('.ma').last();
+  await expect(email.locator('.mabody.plain')).toContainText('Subject: Q3 budget follow-up');
+  await email.getByRole('button', { name: 'Copy answer' }).click();
+  await expect.poll(copied).toMatch(/^Subject: Q3 budget follow-up\n\nHi all,\n\nThanks for going through/);
+  const text = await copied();
+  expect(text).not.toContain('**');
+  expect(text).not.toContain("Here's a follow-up email");
+  expect(text).toContain('Next steps:\n- Alice: send the revised budget (by Friday)');
+  expect(text).toMatch(/Thanks,\n\[Your name\]$/);
+  const followUp = fakeLlm.requests.filter((r) => r.kind === 'followUpEmail').at(-1);
+  expect(followUp.user).toMatch(/^Meeting: Offsite planning\nAttendees: Alice\n/);
+  expect(followUp.user).toContain('Meeting transcript:');
+  expect(followUp.user).not.toContain("Yap's notes on the meeting");
+  expect(followUp.user).not.toContain('ECHO-LINE');
+  await shot(pad, '42-follow-up-email');
+
+  // With the action plan written, Gaps and risks reads it first.
+  await sheet.getByRole('button', { name: 'Minimise chat' }).click();
+  await pad.getByRole('button', { name: 'Generate summary' }).click();
+  await expect(pad.getByRole('region', { name: 'Summary' }).locator('.rendered')).toBeVisible({ timeout: 15_000 });
+  await askInput(pad).focus();
+  await suggestions.getByRole('button', { name: 'Gaps and risks' }).click();
+  await expect(sheet.locator('.mq').last()).toHaveText('Gaps and risks');
+  const gapsAnswer = sheet.locator('.ma').last();
+  await expect(gapsAnswer.getByRole('heading', { name: 'Missing owners or dates' })).toBeVisible();
+  await expect(gapsAnswer).toContainText('nobody checked the dates');
+  const gaps = fakeLlm.requests.filter((r) => r.kind === 'blindSpots').at(-1);
+  expect(gaps.user).toContain("Yap's notes on the meeting (written after it):\nThe team planned the Q3 offsite");
+  expect(gaps.user).toContain('Meeting transcript:');
+  expect(gaps.tokens).toBeLessThan(2_500);
+  await shot(pad, '43-gaps-and-risks');
+
+  // The Notes view's chips answer in its chat, with a Copy.
+  const mainCopied = await stubClipboard(main);
+  await noteHelpers.getByRole('button', { name: 'Follow-up email' }).click();
+  const mainEmail = main.locator('.cbubble.assistant').last();
+  await expect(mainEmail.locator('.cbody.plain')).toContainText('Subject: Q3 budget follow-up');
+  await mainEmail.getByRole('button', { name: 'Copy' }).click();
+  await expect.poll(mainCopied).toMatch(/^Subject: Q3 budget follow-up\n\n/);
+  await shot(main, '44-notes-view-follow-up-email');
+
+  // Without an AI model the sheet says so and links to Language Models.
+  const cfg = await yap.invoke('get_config');
+  const noAi = { ...cfg.llmScopes, noteFormatting: { ...cfg.llmScopes.noteFormatting, enabled: false } };
+  await yap.invoke('save_config', { cfg: { ...cfg, llmScopes: noAi } });
+  try {
+    const asked = fakeLlm.requests.length;
+    await sheet.getByRole('button', { name: 'New chat' }).click();
+    await suggestions.getByRole('button', { name: 'Follow-up email' }).click();
+    const setup = sheet.locator('.ma.setup');
+    await expect(setup).toContainText('Yap needs an AI model to answer');
+    expect(fakeLlm.requests.length).toBe(asked);
+    await shot(pad, '45-helpers-no-ai');
+    await setup.getByRole('button', { name: 'Open Language Models' }).click();
+    await expect(
+      settingsDialog(main).getByRole('heading', { level: 1, name: 'Language Models' })
+    ).toBeVisible();
+    await closeSettings(main);
+  } finally {
+    await yap.invoke('save_config', { cfg });
+  }
 });
 
 test('the header: back to Notes, the ⋯ menu, Share, split screen, delete', async ({ yap, main, shot }) => {

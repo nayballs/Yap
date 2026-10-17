@@ -5,8 +5,10 @@
 //
 // It knows Yap's meeting calls by their system prompts (src-tauri/src/llm.rs):
 // a rolling DIGEST of one part of a meeting, the final ACTION PLAN, and the
-// meeting notepad's helpers: the meeting TITLE, "What did I miss?" (CATCH UP)
-// and a follow-up question (MEETING ASK). Replies are built from the trigger
+// meeting notepad's helpers: the meeting TITLE, "What did I miss?" (CATCH UP),
+// a follow-up question (MEETING ASK) and the one-tap chips (QUESTIONS to ask,
+// the FOLLOW-UP email — in markdown, with a preamble, for Yap to clean up —
+// and BLIND SPOTS, "Gaps and risks"). Replies are built from the trigger
 // phrases the specs put in their synthetic meetings — and, to prove Yap's
 // checks (meeting_summary.rs), the digests slip in a task for someone nobody
 // mentioned ("Zed", due "Tuesday"), and the action plan invents an owner
@@ -34,6 +36,9 @@ const ACTION_PLAN = 'You are a meeting assistant';
 const TITLE = 'You name meetings';
 const CATCH_UP = 'You help someone catch up on a meeting';
 const MEETING_ASK = 'You answer questions about a meeting';
+const QUESTIONS = 'You suggest questions for someone';
+const FOLLOW_UP = 'You write the follow-up email';
+const BLIND_SPOTS = 'You review a meeting for what it left open';
 
 const KINDS = [
   [DIGEST, 'digest'],
@@ -41,7 +46,50 @@ const KINDS = [
   [TITLE, 'title'],
   [CATCH_UP, 'catchUp'],
   [MEETING_ASK, 'meetingAsk'],
+  [QUESTIONS, 'questions'],
+  [FOLLOW_UP, 'followUpEmail'],
+  [BLIND_SPOTS, 'blindSpots'],
 ];
+
+/** "Questions to ask": from the latest talk. */
+function questionsReply(user) {
+  const latest = user.split('The latest talk')[1] ?? '';
+  const lines = latest.split('\n').filter((l) => /^(You|Them): /.test(l));
+  const out = [`- What should we do next about the ${lines.length} points just raised?`];
+  if (/catering/i.test(latest)) out.push('- Who will own catering for the offsite, and by when?');
+  if (/budget/i.test(latest)) out.push('- Does finance need anything else with the revised budget?');
+  return out.join('\n');
+}
+
+/**
+ * "Follow-up email": markdown and a preamble a small model might add, which
+ * Yap must take out (meeting_summary::clean_email).
+ */
+function followUpReply(user) {
+  const planned = /Yap's notes on the meeting/.test(user);
+  return [
+    "Sure! Here's a follow-up email you can send:",
+    '',
+    '**Subject:** Q3 budget follow-up',
+    'Hi all,',
+    '',
+    `Thanks for going through the Q3 budget${planned ? ' and the action plan' : ''}.`,
+    '',
+    '**Next steps:**',
+    '* Alice: send the revised budget (by Friday)',
+    '* Unassigned: catering for the offsite',
+    '',
+    'Thanks,',
+    '[Your name]',
+  ].join('\n');
+}
+
+/** "Gaps and risks": headings over what was left open. */
+function blindSpotsReply(user) {
+  const out = ['### Missing owners or dates', '- Catering for the offsite has no owner.'];
+  if (/Yap's notes on the meeting/.test(user)) out.push('### Risks and open questions', '- The plan mentions Lisbon, but nobody checked the dates.');
+  return out.join('\n');
+}
 
 /** The meeting's title, from what was said. */
 function titleReply(user) {
@@ -133,7 +181,8 @@ function actionPlanReply(user) {
 /**
  * Start the server. `requests` collects `{ kind, model, maxTokens, tokens,
  * system, user, tools, messages }` per chat call (`kind`: "digest" |
- * "actionPlan" | "title" | "catchUp" | "meetingAsk" | "other"; `tools`: the
+ * "actionPlan" | "title" | "catchUp" | "meetingAsk" | "questions" |
+ * "followUpEmail" | "blindSpots" | "other"; `tools`: the
  * names of the tools offered). `failNext(kind, n)` answers the next `n`
  * calls of a kind with HTTP 500; `delay(kind, ms)` holds that kind's answers
  * back (0 = no delay). `scriptChat(steps)` queues the replies to the next
@@ -221,7 +270,13 @@ export async function startFakeLlm() {
                 ? catchUpReply(user)
                 : kind === 'meetingAsk'
                   ? meetingAskReply(user)
-                  : 'OK';
+                  : kind === 'questions'
+                    ? questionsReply(user)
+                    : kind === 'followUpEmail'
+                      ? followUpReply(user)
+                      : kind === 'blindSpots'
+                        ? blindSpotsReply(user)
+                        : 'OK';
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(
         JSON.stringify({
