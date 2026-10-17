@@ -455,6 +455,22 @@ mod tests {
     }
 
     #[test]
+    fn a_term_already_right_never_takes_the_word_before_it() {
+        // Found by the real-app robot: "to Kubernetes" is within the
+        // threshold of "Kubernetes" only because the term is there.
+        let dict = vec![entry("cube and eighties", "Kubernetes")];
+        assert_eq!(apply_fuzzy("Deploy it to Kubernetes.", &dict), "Deploy it to Kubernetes.");
+        assert_eq!(apply_fuzzy("Use a Kubernetes cluster", &dict), "Use a Kubernetes cluster");
+        let json = vec![entry("jaison", "JSON")];
+        assert_eq!(apply_fuzzy("send it as JSON", &json), "send it as JSON");
+        // A real near-miss next to a short word is still fixed, and only it.
+        assert_eq!(apply_fuzzy("Deploy it to Kubernetis.", &dict), "Deploy it to Kubernetes.");
+        // Split terms still join ("Chat G PT" holds no word that IS the term).
+        let gpt = vec![entry("", "ChatGPT")];
+        assert_eq!(apply_fuzzy("ask Chat G PT now", &gpt), "ask ChatGPT now");
+    }
+
+    #[test]
     fn adjacent_word_not_swallowed() {
         let dict = vec![entry("", "ChargeBee")];
         let result = apply_fuzzy("CHARGE B is great", &dict);

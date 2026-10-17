@@ -1019,7 +1019,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   n-gram choice (deliberate fix over Handy's word-swallowing longest-first greedy),
   and never a run whose first word adds nothing (`first_word_adds_nothing`: the
   later words make the same term as closely alone), so the word or list marker
-  before a term survives ("to Kubernetes", "1. kubernetes").
+  before a term survives ("to Kubernetes", "1. kubernetes"; found by the real-app
+  robot, 2026-10-17). Max 3 words per n-gram, so "Chat G P T" (4) leaves a "T".
   Runs after `apply_dictionary` for ONNX models (`dictionary_fuzzy`, default on);
   snippets are never candidates.
   Also `is_prompt_echo` (OpenWhispr `dictionaryEchoFilter` port) used by `stt.rs`
