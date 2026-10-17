@@ -22,7 +22,9 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
 > **OpenWhispr is cloned at `E:\Projects\references\openwhispr`** (Handy at
 > `references/Handy`) — when working on a feature one of these apps does well, read
 > its actual implementation first. See ROADMAP.md "North star" +
-> `docs/openwhispr-teardown.md` + `docs/openwhispr-parity.md`.
+> `docs/openwhispr-teardown.md` + `docs/openwhispr-parity.md`. Every Wispr Flow
+> feature with Yap's status, as a checklist with a "Next up" list:
+> [`docs/wispr-flow-features.md`](./docs/wispr-flow-features.md).
 
 > Active work note: the Settings / Language-Models / Prompt-Studio surface is being
 > reshaped to track **OpenWhispr** (`E:\Projects\references\openwhispr`) as the design
