@@ -24,6 +24,7 @@
   import { initMeetingSummary, askStartedByMistake } from './meetingSummary.svelte.js';
   import { initMeetingGuard } from './meetingGuard.js';
   import { initCalendar, closeConnectDialog } from './calendar.svelte.js';
+  import { initWordSuggestions } from './wordSuggestions.js';
   import ConnectCalendarDialog from './ConnectCalendarDialog.svelte';
   import MeetingsView from './MeetingsView.svelte';
   import HomeView from './HomeView.svelte';
@@ -70,6 +71,14 @@
       activeView = view;
     },
     openSettings: (section) => openSettings(section),
+  });
+  // "Add “Kubernetes” to your dictionary?" after you fix a word Yap typed
+  // (learn.rs via wordSuggestions.js), with Open Dictionary once added.
+  initWordSuggestions({
+    showView: (view) => {
+      settingsOpen = false;
+      activeView = view;
+    },
   });
   let bellOpen = $state(false);
 

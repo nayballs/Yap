@@ -756,9 +756,11 @@
     if (!cfg || !Array.isArray(entries)) return;
     lastReceivedDictJson = JSON.stringify(entries);
     cfg.dictionary = entries.map((x) => ({ ...x }));
-    // dictionaryFuzzy is owned by DictionaryView but rides along in this cfg
-    // copy — adopt its new value or our next auto-save would revert the toggle.
+    // dictionaryFuzzy and learnWords are owned by DictionaryView but ride
+    // along in this cfg copy — adopt their new values or our next auto-save
+    // would revert the toggles.
     if (typeof e.detail?.fuzzy === 'boolean') cfg.dictionaryFuzzy = e.detail.fuzzy;
+    if (typeof e.detail?.learnWords === 'boolean') cfg.learnWords = e.detail.learnWords;
   }
   // A view outside Settings saved a config field (the Integrations view's
   // Local API switch): adopt it, or this copy's next auto-save would put the
@@ -804,6 +806,17 @@
     const un = listen('yap-meeting-detect-choice', (e) => {
       const c = e.payload;
       if (cfg && c?.app && typeof c.asks === 'boolean') setCallAppAsks(c.app, c.asks);
+    });
+    return () => un.then((f) => f());
+  });
+  // Words added from a suggestion ("Add “Kubernetes” to your dictionary?",
+  // learn.rs) are saved in Rust: adopt the list, or the next auto-save would
+  // drop them. Not marked as received, so the effect below passes the new
+  // list on to the Dictionary view.
+  onMount(() => {
+    const un = listen('yap-dictionary-learned', (e) => {
+      const entries = e.payload?.entries;
+      if (cfg && Array.isArray(entries)) cfg.dictionary = entries.map((x) => ({ ...x }));
     });
     return () => un.then((f) => f());
   });

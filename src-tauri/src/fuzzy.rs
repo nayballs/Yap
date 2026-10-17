@@ -19,6 +19,9 @@
 //! `utils/dictionaryEchoFilter.js` — with a dictionary `initial_prompt`,
 //! Whisper on (near-)silence tends to hallucinate the prompt back; that guard
 //! detects a transcript that is essentially just the dictionary words.
+//!
+//! And for learning words from your corrections (`learn.rs`): how alike two
+//! spellings are written (`spelling_distance`) and sound (`sound_distance`).
 
 use crate::config::DictionaryEntry;
 
@@ -250,6 +253,106 @@ pub fn apply_fuzzy(text: &str, dict: &[DictionaryEntry]) -> String {
     result.join(" ")
 }
 
+// ── How alike two spellings are (learning words, learn.rs) ──────────
+
+/// Lowercased letters and digits only: "Chat G P T" → "chatgpt".
+fn letters_key(s: &str) -> String {
+    s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+fn normalized_levenshtein(a: &str, b: &str) -> f64 {
+    let max = a.chars().count().max(b.chars().count());
+    if max == 0 {
+        return 0.0;
+    }
+    levenshtein(a, b) as f64 / max as f64
+}
+
+/// How differently `a` and `b` are spelled, 0.0 (the same letters) … 1.0,
+/// by Handy's score above (normalised Levenshtein, × 0.3 when the Soundex
+/// codes agree) on their letters alone (case, spaces and punctuation
+/// ignored), with the longer key's length. No length gate: a phrase heard
+/// for one word ("graph ana" / "Grafana") is compared whole.
+pub(crate) fn spelling_distance(a: &str, b: &str) -> (f64, usize) {
+    let (ka, kb) = (letters_key(a), letters_key(b));
+    let len = ka.chars().count().max(kb.chars().count());
+    if ka.is_empty() || kb.is_empty() {
+        return (1.0, len);
+    }
+    let score = normalized_levenshtein(&ka, &kb);
+    (if soundex_eq(&ka, &kb) { score * 0.3 } else { score }, len)
+}
+
+/// How differently `a` and `b` sound, 0.0 … 1.0: normalised Levenshtein
+/// between their [`sound_key`]s, with the longer key's length. Catches
+/// mishearings across word boundaries that spelling can't — "cube and
+/// eighties" / "Kubernetes" ("kpnts" / "kprnts").
+pub(crate) fn sound_distance(a: &str, b: &str) -> (f64, usize) {
+    let (ka, kb) = (sound_key(&letters_key(a)), sound_key(&letters_key(b)));
+    let len = ka.chars().count().max(kb.chars().count());
+    if ka.is_empty() || kb.is_empty() {
+        return (1.0, len);
+    }
+    (normalized_levenshtein(&ka, &kb), len)
+}
+
+/// A rough sound of an (English) word's letters (`letters_key`): its
+/// consonants, with letters that sound alike as one (c/k/q/g → k, b/p → p,
+/// d/t → t, f/v/ph → f, s/z and soft c → s, sh/ch → x, th → t, x → ks),
+/// silent ones dropped (gh, an initial k/g/p before n, w before r…), vowels,
+/// h, w and y only at the start (as "a" for a vowel), and a sound said twice
+/// in a row once. A phonetic key in the spirit of Soundex/Metaphone, tuned
+/// for what a speech model mishears (voiced/unvoiced pairs, merged words).
+pub(crate) fn sound_key(key: &str) -> String {
+    let c: Vec<char> = key.chars().collect();
+    let vowel = |ch: char| {
+        matches!(ch, 'a' | 'e' | 'i' | 'o' | 'u' | 'y' | 'à'..='æ' | 'è'..='ï' | 'ò'..='ö' | 'ø'..='ý' | 'ÿ')
+    };
+    let mut out: Vec<char> = Vec::new();
+    let mut emit = |code: char| {
+        if out.last() != Some(&code) {
+            out.push(code);
+        }
+    };
+    let mut i = 0;
+    while i < c.len() {
+        let ch = c[i];
+        let next = c.get(i + 1).copied();
+        let first = i == 0;
+        let (code, step): (Option<char>, usize) = match (ch, next) {
+            ('y', Some(n)) if first && vowel(n) => (Some('y'), 1),
+            (v, _) if vowel(v) => (first.then_some('a'), 1),
+            ('p', Some('h')) => (Some('f'), 2),
+            ('g', Some('h')) => (first.then_some('k'), 2),
+            ('c', Some('k')) => (Some('k'), 2),
+            ('s' | 'c', Some('h')) => (Some('x'), 2),
+            ('t', Some('h')) => (Some('t'), 2),
+            ('w', Some('h')) => (first.then_some('w'), 2),
+            ('k' | 'g' | 'p', Some('n')) if first => (Some('n'), 2),
+            ('w', Some('r')) if first => (Some('r'), 2),
+            ('p', Some('s')) if first => (Some('s'), 2),
+            ('c', Some('e' | 'i' | 'y')) => (Some('s'), 1),
+            ('d', Some('g')) => (Some('j'), 2),
+            ('x', _) => {
+                emit('k');
+                (Some('s'), 1)
+            }
+            ('b' | 'p', _) => (Some('p'), 1),
+            ('d' | 't', _) => (Some('t'), 1),
+            ('c' | 'g' | 'k' | 'q', _) => (Some('k'), 1),
+            ('f' | 'v', _) => (Some('f'), 1),
+            ('s' | 'z', _) => (Some('s'), 1),
+            ('h' | 'w', _) => (first.then_some(ch), 1),
+            (other, _) => (Some(other), 1),
+        };
+        if let Some(code) = code {
+            emit(code);
+        }
+        i += step;
+    }
+    out.into_iter().collect()
+}
+
 // ── Dictionary-prompt echo guard ────────────────────────────────────
 
 // Only called from the `engines`-gated real engine (stub builds never pass a
@@ -416,6 +519,33 @@ mod tests {
         assert!(soundex_eq("Robert", "Rupert"));
         assert!(soundex_eq("jason", "json"));
         assert!(!soundex_eq("hello", "world"));
+    }
+
+    // ── how alike two spellings are (learn.rs) ──
+
+    #[test]
+    fn sound_keys_merge_what_sounds_alike() {
+        assert_eq!(sound_key("cubeandeighties"), "kpnts");
+        assert_eq!(sound_key("kubernetes"), "kprnts");
+        assert_eq!(sound_key("graphana"), sound_key("grafana"));
+        assert_eq!(sound_key("jason"), sound_key("json"));
+        assert_eq!(sound_key("knight"), "nt");
+        assert_eq!(sound_key("express"), "aksprs");
+    }
+
+    #[test]
+    fn mishearings_across_word_boundaries_sound_close() {
+        // Too far apart by spelling, close by sound.
+        let (spelled, _) = spelling_distance("cube and eighties", "Kubernetes");
+        let (sounded, len) = sound_distance("cube and eighties", "Kubernetes");
+        assert!(spelled > 0.4, "{spelled}");
+        assert!(sounded < 0.2 && len == 6, "{sounded} {len}");
+        assert!(sound_distance("power to keep", "Parakeet").0 <= 0.4);
+        // Spelling: case, spaces and punctuation don't count.
+        assert_eq!(spelling_distance("Chat G P T", "ChatGPT"), (0.0, 7));
+        // Unrelated words are far apart either way.
+        assert!(spelling_distance("the meeting", "Sarah").0 > 0.8);
+        assert!(sound_distance("the meeting", "Sarah").0 > 0.8);
     }
 
     // ── echo guard (port of OpenWhispr's dictionaryEchoFilter tests) ──

@@ -51,7 +51,10 @@ points the suite at an exe directly), so it never competes with a running
   timings, without any microphone or speakers. For dictation,
   `e2e_dictation_mic { silent }` zeroes the real microphone's audio (a
   "muted" mic for the dead-mic watchdog) and `e2e_coaching_reset` makes every
-  push-to-talk hint due again. It reads no installed apps'
+  push-to-talk hint due again. The correction watch after a paste
+  (`learn.rs`) never reads another app's field in a test run:
+  `e2e_learn_correction { pasted, edited, fresh }` hands Yap the edit it
+  would have seen, and the rules, the prompt and the dictionary are real. It reads no installed apps'
   icons (Settings' call apps, the bar's call card): a spec that wants one
   to look installed points `YAP_E2E_APP_ICONS` at a folder of
   `<app id>.png` stand-ins (`support/icons.js` draws them). It quits when
