@@ -1,6 +1,7 @@
 // The main window, end to end: launch, every sidebar view, every Settings
-// section, a persisted setting, Notes, Dictionary, the signed-out Account
-// page, onboarding and (with a microphone) a stub dictation.
+// section, a persisted setting, Notes, Dictionary (corrections and
+// snippets), the "press enter" voice command's switch, the signed-out
+// Account page, onboarding and (with a microphone) a stub dictation.
 import {
   test,
   expect,
@@ -105,6 +106,76 @@ test('dictionary: a new correction is saved', async ({ yap, main, shot }) => {
   await openView(main, 'Dictionary');
   await expect(main.getByPlaceholder('Power to Keep').last()).toHaveValue('jaison');
   await shot(main, '06-dictionary');
+});
+
+test('dictionary: a snippet is added, kept, edited and removed', async ({ yap, main, shot }) => {
+  await openView(main, 'Dictionary');
+  const snippets = main.getByRole('region', { name: 'Snippets' });
+  const corrections = main.getByRole('region', { name: 'Corrections' });
+  await expect(snippets.getByText(/No snippets yet/)).toBeVisible();
+  await shot(main, '06b-dictionary-snippets-empty');
+
+  await snippets.getByRole('button', { name: '+ Add snippet' }).click();
+  const phrase = snippets.getByRole('textbox', { name: 'Phrase you say' }).last();
+  const text = snippets.getByRole('textbox', { name: 'Text Yap types' }).last();
+  await expect(phrase).toBeFocused();
+  await phrase.fill('my sign-off');
+  await text.fill('Speak soon,\nSam');
+  await expectStore(yap, 'config.json', (c) =>
+    c.dictionary.some((e) => e.snippet === true && e.from === 'my sign-off' && e.to === 'Speak soon,\nSam')
+  );
+  // A snippet isn't a correction: not in that list.
+  const correctionValues = () =>
+    corrections.getByRole('textbox').evaluateAll((els) => els.map((el) => el.value));
+  expect(await correctionValues()).not.toContain('my sign-off');
+  await shot(main, '06c-dictionary-snippet');
+
+  // Kept across a view switch, its text still on two lines.
+  await openView(main, 'Home');
+  await openView(main, 'Dictionary');
+  await expect(phrase).toHaveValue('my sign-off');
+  await expect(text).toHaveValue('Speak soon,\nSam');
+
+  // Edited: a third line.
+  await text.fill('Speak soon,\nSam\nThe Yap team');
+  await expectStore(yap, 'config.json', (c) =>
+    c.dictionary.some((e) => e.snippet && e.to === 'Speak soon,\nSam\nThe Yap team')
+  );
+
+  // Settings auto-saves its own copy of the config (with the dictionary):
+  // that must keep the snippet a snippet.
+  const dialog = await openSettings(main, 'Advanced');
+  const space = dialog.getByRole('button', { name: 'Append trailing space' });
+  const before = await space.getAttribute('aria-pressed');
+  await space.click();
+  await expectStore(yap, 'config.json', (c) => String(c.appendTrailingSpace) !== before);
+  await space.click();
+  await expectStore(yap, 'config.json', (c) => String(c.appendTrailingSpace) === before);
+  expect(yap.readConfig().dictionary.filter((e) => e.from === 'my sign-off')).toEqual([
+    { from: 'my sign-off', to: 'Speak soon,\nSam\nThe Yap team', fuzzy: true, snippet: true },
+  ]);
+  await closeSettings(main);
+
+  await snippets.getByRole('button', { name: 'Remove snippet' }).last().click();
+  await expectStore(yap, 'config.json', (c) => !c.dictionary.some((e) => e.from === 'my sign-off'));
+  await expect(snippets.getByText(/No snippets yet/)).toBeVisible();
+});
+
+test('settings: "press enter" to send is on by default and can be switched off', async ({ yap, main, shot }) => {
+  const toggle = (dialog) => dialog.getByRole('button', { name: /^Say “press enter” to send/ });
+  const dialog = await openSettings(main, 'Advanced');
+  await expect(toggle(dialog)).toHaveAttribute('aria-pressed', 'true');
+  // It presses the auto-submit key, so that choice shows with it on.
+  await expect(dialog.getByText('Auto-submit key')).toBeVisible();
+  await shot(main, '04b-settings-press-enter');
+
+  await toggle(dialog).click();
+  await expect(toggle(dialog)).toHaveAttribute('aria-pressed', 'false');
+  await expectStore(yap, 'config.json', (c) => c.voiceEnter === false);
+  if (!yap.readConfig().autoSubmit) await expect(dialog.getByText('Auto-submit key')).toBeHidden();
+
+  await toggle(dialog).click();
+  await expectStore(yap, 'config.json', (c) => c.voiceEnter === true);
 });
 
 test('account: signed out, with the account service unreachable', async ({ main, shot }) => {

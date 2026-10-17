@@ -17,6 +17,7 @@ mod capture;
 mod chats;
 mod commands;
 mod config;
+mod dict_usage;
 mod e2e;
 mod fuzzy;
 mod media;

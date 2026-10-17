@@ -93,10 +93,12 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
   `history.json`, `notes.json` — the AI Notepad store, `chats.json` — AI Chat
   conversations, `updates.json` — update announcements + the restart marker,
   `calendar.json` — connected calendars + the next week of meetings,
-  `icons/` — a cache of the installed call apps' own icons, `app_icons.rs`).
+  `dictionary_usage.json` — how often/lately each dictionary word was used,
+  `dict_usage.rs`, `icons/` — a cache of the installed call apps' own icons,
+  `app_icons.rs`).
   Every JSON store writes atomically and quarantines a corrupt file on load
   instead of crashing (`config::atomic_write`/`quarantine_corrupt`, used by all
-  seven stores).
+  eight stores).
 
 ---
 
@@ -122,12 +124,15 @@ global hotkey ─▶ input_hook ─▶ "dictation-key-pressed" / "-released"
 ```
 
 Pipeline order after transcription: **AI cleanup → dictionary (exact, then a
-fuzzy near-miss pass) → append-space → auto-submit (Enter) → inject**. Cleanup is
+fuzzy near-miss pass) → the "press enter" voice command → snippets →
+append-space → inject → submit key (auto-submit or the voice command, once)**
+(`pipeline::finish_dictation` does the middle three). Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation
 never blocks. The dictionary runs Handy's split (ported from its source):
 **Whisper models** get the correct spellings as the decoder's `initial_prompt`
 (ASR biasing, threaded through `SttEngine::transcribe` at every call site —
-dictation/partials/upload/meeting — plus an OpenWhispr-ported prompt-echo guard
+dictation/partials/upload/meeting — the words used most lately first,
+`dict_usage::ranked`; plus an OpenWhispr-ported prompt-echo guard
 in `stt.rs`), **ONNX models** get **`fuzzy.rs`** — Levenshtein + Soundex 1–3-word
 n-gram correction ("jaison"→"JSON", "Chat G P T"→"ChatGPT"; threshold 0.18,
 ≥3-char terms), gated by `config.dictionary_fuzzy` (default on, "Catch
@@ -136,7 +141,17 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
 `json → JSON` eating the name "Jason"). See `docs/fuzzy-dictionary.md`. The
 exact + fuzzy correction is ONE function, `pipeline::apply_corrections(text,
 &cfg)`, run the same way on a dictation, on every meeting segment (both sides,
-before `meeting::ingest`) and on an Upload's whole text.
+before `meeting::ingest`) and on an Upload's whole text; the dictionary words
+in its result count as used (`dict_usage::record`). **Snippets** (an entry
+with `snippet: true`: a spoken phrase → text, may span lines;
+`config::apply_snippets`) are dictation-only: whole phrase, any case and
+punctuation, longest first in one pass, a phrase said alone becomes exactly
+its text; never in the corrections, the fuzzy pass or the Whisper prompt (the
+cleanup model is told to keep the phrases word for word). The **"press
+enter" voice command** (`voice_enter`, default on;
+`pipeline::take_voice_enter`): a dictation whose LAST words are "press
+enter"/"press return" (final text, else the raw transcript in case cleanup
+dropped it) loses them and presses `auto_submit_key` after the paste.
 
 ### Key modules (`src-tauri/src/`)
 - **`lib.rs`** — app entry / Tauri `setup`. Runs `portable::init()`, registers the
@@ -162,8 +177,11 @@ before `meeting::ingest`) and on an Upload's whole text.
   (`yap-amp`) for the scrolling waveform; while idle it keeps a rolling ~300 ms
   **pre-roll** ring that `start_recording` prepends (anti first-word-clipping).
   `recording_mode` selects toggle vs push-to-talk. `run_stt` (async) does cleanup →
-  dictionary (`apply_corrections`, shared with meetings and Upload) → inject
-  (into the captured `target_hwnd`). **The dictation signal** for a meeting
+  `finish_dictation` (dictionary via `apply_corrections`, shared with meetings
+  and Upload; then the "press enter" command, then snippets) → inject (into the
+  captured `target_hwnd`) → the submit key when auto-submit or the voice command
+  asked (once; a dictation of only "press enter" presses it only while the
+  target window still has the focus). **The dictation signal** for a meeting
   recording: `start_recording` (plain dictation, the edit hotkey, the wake-word
   path) calls `dictation_began()` and the stop/cancel `dictation_ended()`, one
   atomic (`DICTATION`: dictations started << 1 | recording) that
@@ -861,7 +879,9 @@ before `meeting::ingest`) and on an Upload's whole text.
   work from the notification center. `allowed()` = not portable, not a test run.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
   volume, output_device, mute_while_recording, recording_mode,
-  overlay_position, dictionary, append_trailing_space, auto_submit(+key),
+  overlay_position, dictionary (`DictionaryEntry`: from/to + `fuzzy` (default
+  on) + `snippet` (default off)), append_trailing_space, auto_submit(+key),
+  voice_enter (the "press enter" voice command, default on),
   restore_clipboard, show_tray_icon, autostart, model_unload_timeout, selected_language,
   translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
   Notes/Slack/Code/Custom), the editable `pp_prompt` body, `pp_api_keys` (per-provider
@@ -881,8 +901,11 @@ before `meeting::ingest`) and on an Upload's whole text.
   "15s" | "1min" | "2min" | "never"), bridge_enabled, mcp_allow_writes (AI apps
   may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
   bar_hide_fullscreen (true) + bar_theme ("light" | "dark", light)). JSON
-  load/save + `apply_dictionary` + `dictionary_prompt` (the Whisper
-  `initial_prompt` vocabulary) + `resolve_cleanup` (per-app plan: body + endpoint).
+  load/save + `apply_dictionary` (corrections; skips snippets) +
+  `apply_snippets` + `term_regex` (the whole-word matcher both use) +
+  `dictionary_prompt` (the Whisper `initial_prompt` vocabulary, in the order
+  given — callers pass `dict_usage::ranked(..)`; no snippets; ~600-char cap) +
+  `resolve_cleanup` (per-app plan: body + endpoint).
   `data_dir()` is portable-aware. `load()` also migrates saved Groq picks (cleanup,
   LLM scopes, profiles) off models Groq retired in 2026 (`RETIRED_GROQ_MODELS` —
   default is now `openai/gpt-oss-20b`); extend that table when Groq retires more.
@@ -898,9 +921,22 @@ before `meeting::ingest`) and on an Upload's whole text.
   + Soundex phonetic boost (the `natural` crate's nonstandard variant, replicated
   exactly), threshold 0.18, ≥3-char terms, case/punctuation preserved; shortest-first
   n-gram choice (deliberate fix over Handy's word-swallowing longest-first greedy).
-  Runs after `apply_dictionary` for ONNX models (`dictionary_fuzzy`, default on).
+  Runs after `apply_dictionary` for ONNX models (`dictionary_fuzzy`, default on);
+  snippets are never candidates.
   Also `is_prompt_echo` (OpenWhispr `dictionaryEchoFilter` port) used by `stt.rs`
   against Whisper hallucinating the dictionary prompt on silence.
+- **`dict_usage.rs`** — how much each dictionary word is used, for the Whisper
+  prompt's order (Wispr Flow ranks its vocabulary the same way):
+  `<data>/dictionary_usage.json`, word (lowercased `to`) → `{uses, lastUsed}`
+  (unix secs) — its own store, never config.json (Settings' wholesale saves
+  would put old counts back); cached in memory, atomic write, corrupt file
+  quarantined. `record(dict, text)` (from `apply_corrections`: dictations,
+  meeting lines, Upload) counts every dictionary word in the corrected text —
+  a correction that fired, or a word the recognizer (with the prompt) spelled
+  right by itself; a no-op in unit tests. `rank` (pure) / `ranked`: used in
+  the last day, then 14 days, then the rest; within each most uses first; then
+  the order added. The meeting prompt ranks the dictionary but keeps the
+  attendees ahead of it. Best-effort everywhere.
 - **`tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
   menu (model submenu w/ checkmark, Cancel while recording, Settings/Quit, Check for
   updates → Settings → About + a manual check); left-click opens Settings. A ready
@@ -1201,8 +1237,15 @@ before `meeting::ingest`) and on an Upload's whole text.
   dashboard promoted out of Settings→History (serif hero number, stat grid,
   30-day amber heatmap, top-apps-by-words bars from `get_history`); Settings →
   History keeps only the enable toggle + recent list + clear. **`DictionaryView.svelte`** =
-  the correction dictionary (promoted out of Settings → Advanced; syncs with
-  Settings' cfg copy via `yap-dictionary-changed`/`-external` events).
+  the dictionary (promoted out of Settings → Advanced; syncs with
+  Settings' cfg copy via `yap-dictionary-changed`/`-external` events) in two
+  sections over the one list: **Corrections** (heard → replace with, the ≈
+  near-miss button, "Catch near-misses") and **Snippets** ("You say" pill →
+  "Yap types" growing text box, line breaks kept; nothing seeded). Settings'
+  `buildClean` keeps each entry's `snippet` flag — drop it and an auto-save
+  turns snippets into corrections. Settings → Advanced → Output has "Say
+  “press enter” to send" (`voiceEnter`) under Auto-submit; the key picker
+  shows when either is on.
   **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
   Symphonia decode → chunked transcription on the warm engine with progress +
   cancel — see `media.rs`); **`NotesView.svelte`** = the AI Notepad (OpenWhispr
@@ -1744,6 +1787,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   Manager generic credentials `yap-calendar-<1-8>.com.yap.dictation` (Local
   persistence; portable adds a data-dir hash), deleted on Disconnect and, for
   an installed copy, by the uninstaller's "Delete the application data".
+- Dictionary usage: `%APPDATA%/yap/dictionary_usage.json` — each dictionary
+  word's use count and last use, which orders the Whisper vocabulary prompt
+  (`dict_usage.rs`). Safe to delete (the order falls back to the list's).
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`).
 - App icons: `%APPDATA%/yap/icons/` — `<app>.png` per installed call app and
@@ -1764,7 +1810,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   fullscreen apps (`bar_hide_fullscreen`), the dictation overlay always shown
   while recording/transcribing (no off switch — it's the hot-mic indicator),
   live transcription preview **on**
-  (`streaming_partials`), AI cleanup **off**, call detection **on**
+  (`streaming_partials`), AI cleanup **off**, the "press enter" voice command
+  **on** (`voice_enter`), call detection **on**
   (`meeting_detection` — it only asks; nothing records without a click) as
   **pop-ups** (`meeting_detect_style`), for work apps only (Discord, WhatsApp,
   Signal and Telegram start switched off; `meeting_detect_apps` holds changes),
@@ -1791,6 +1838,9 @@ named profiles + per-profile model choice, **edit/rewrite mode** + the **Voice A
 wake word**, combo hotkeys, the audio pre-roll (anti first-word clipping), **live
 streaming partials** (sliding-window, on by default, word-paced overlay reveal —
 validated live 2026-07-10), transcription history + stats, cleanup presets, real WASAPI mute,
+the dictionary's **snippets**, the **"press enter" voice command** and a Whisper
+vocabulary ranked by use (2026-10-17: unit-tested, the Dictionary/Settings UI
+e2e-tested, not yet tried with real speech),
 the Groq usage meter, and the installer + auto-updater (background checks + download
 while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
 `updates.rs`, 2026-10-05) + portable mode + release CI.
@@ -1894,7 +1944,8 @@ the calendar has no one-click Outlook (Microsoft Graph) and no pre-meeting
 brief;
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see [`ROADMAP.md`](./ROADMAP.md) Phase 1);
-fuzzy/near-miss dictionary matching; verify-after-paste (UIA `ValuePattern`);
+dictionary auto-learning (from your edits after a paste) and multi-phrase
+entries; verify-after-paste (UIA `ValuePattern`);
 Authenticode signing (blocked on SignPath approval); audio-history export; and
 non-Windows (Linux/macOS) polish. See [`ROADMAP.md`](./ROADMAP.md).
 
