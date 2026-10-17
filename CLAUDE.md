@@ -1254,13 +1254,24 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   on and it isn't edit mode, a background thread reads ≤ 500 characters before and
   after the caret and the selection (a long selection as its start + end) —
   TextPattern (`GetSelection`, else TextPattern2's caret), else ValuePattern for
-  Edit/Document/ComboBox fields (caret assumed at the end) — cut at word boundaries,
-  with 200 ms UIA connection/transaction timeouts (`CUIAutomation8`). Never: another
+  Edit/Document/ComboBox fields — cut at word boundaries,
+  with 200 ms UIA connection/transaction timeouts (`CUIAutomation8`). A
+  ValuePattern has no caret: when the element's own window is a Win32 edit
+  control (`edit_class`: `Edit`, `RichEdit20W`/`RICHEDIT50W`…, WinForms'
+  `WindowsForms10.EDIT…`/`…RichEdit20W…` — a WinForms TextBox/RichTextBox has no
+  TextPattern) the control is asked (`EM_GETSEL` via `SendMessageTimeoutW`, no
+  pointers, `SMTO_ABORTIFHUNG`, the same time box; positions past 65,535 → unknown)
+  and its UTF-16 units placed in the value (`units_to_bytes`: an EDIT's `\r\n` is
+  two, a RichEdit's break one; a RichEdit's final paragraph mark dropped); any
+  other value-only field (older Chromium/Electron, Firefox through the MSAA proxy)
+  → caret taken to be at the end, where it is after typing. The watch's read finds
+  its caret the same way. Never: another
   process's element than the target window's, a password box, read-only text, or in
   a test run; a field showing its placeholder (= HelpText) counts as empty. The paste
   never waits: still reading → no context. Kept in memory for that dictation only;
   logged as lengths, never text. `#[ignore]`d `reads_real_text_fields` reads hidden
-  EDIT and RichEdit controls end to end.
+  EDIT and RichEdit controls end to end, through TextPattern and through the
+  ValuePattern + `EM_GETSEL` path (mid-text, a selection, over a line break).
 - **`smart_insert.rs`** — `fit_to_context(text, &FieldContext, names)`, pure and
   unit-tested (conservative: a wrong fix is worse than the old capital). Mid-sentence
   (before ends in a letter/digit/`,`/`;`/spaced dash — not `.?!`, `:`, a new line or
@@ -2345,9 +2356,10 @@ device list. Known quirk: Better Auth links accounts by exact email, so
 2026-10-17): paste, smart spacing, snippets, "press enter", Paste last transcript,
 the clipboard, terminals (PowerShell, a Claude Code stand-in), chat apps, the mic
 path, the dead-mic watchdog, learning words from corrections and real Parakeet
-STT, all checked against real windows by Claude. Known gaps they found (pinned
-as "known gap: …" tests): a WinForms text box gives UI Automation no caret
-(fitted as if at the end); Edge/Chrome report an empty text box's text as its
+STT, all checked against real windows by Claude. A gap they found is fixed: a
+WinForms text box gives UI Automation no caret, so mid-text dictations were
+fitted as if at the end — Yap now asks the edit control (`EM_GETSEL`). Known gaps
+still pinned (as "known gap: …" tests): Edge/Chrome report an empty text box's text as its
 label or U+FFFC (a web chat message keeps its full stop and gets a trailing
 space), and their context ranges run past the box into the page; the fuzzy
 pass swallows a short word before a term ("Deploy it to Kubernetes" →
