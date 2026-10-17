@@ -60,7 +60,9 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
   `engines` feature flag (see below).
 - **AI cleanup:** `reqwest` → any **OpenAI-compatible** chat endpoint (Groq/OpenAI/
   OpenRouter, or local Ollama/LM Studio). `src/llm.rs`.
-- **Text injection:** `arboard` (clipboard) + Win32 `SendInput` (paste / Enter).
+- **Text injection:** the Win32 clipboard (`windows` crate: private formats + a
+  verified write) + Win32 `SendInput` (paste / Enter); UI Automation reads the text
+  around the cursor (`selection.rs`). `arboard` remains for the chat's copy tool.
 - **Model download:** `reqwest` streaming + `sha2` verify + `flate2`/`tar` extract.
 - **Updates/install:** `tauri-plugin-updater` (GitHub Releases), driven Rust-side by
   `updates.rs` (background checks every ~4 h + background download, install on
@@ -124,9 +126,11 @@ global hotkey ─▶ input_hook ─▶ "dictation-key-pressed" / "-released"
 ```
 
 Pipeline order after transcription: **AI cleanup → dictionary (exact, then a
-fuzzy near-miss pass) → the "press enter" voice command → snippets →
-append-space → inject → submit key (auto-submit or the voice command, once)**
-(`pipeline::finish_dictation` does the middle three). Cleanup is
+fuzzy near-miss pass) → the "press enter" voice command → snippets → fit to the
+text around the cursor (smart spacing; where the field couldn't be read,
+append-space as before) → inject → submit key (auto-submit or the voice
+command, once)** (`pipeline::finish_dictation` does the dictionary, the command
+and snippets; `text_injector::prepare_dictation` the fitting). Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation
 never blocks. The dictionary runs Handy's split (ported from its source):
 **Whisper models** get the correct spellings as the decoder's `initial_prompt`
@@ -186,7 +190,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   stopped elsewhere (the bar's Dictate, the tray's Cancel) is followed, and one
   started by Dictate stops on the next press. `run_stt` (async) does cleanup →
   `finish_dictation` (dictionary via `apply_corrections`, shared with meetings
-  and Upload; then the "press enter" command, then snippets) → inject (into the
+  and Upload; then the "press enter" command, then snippets) →
+  `text_injector::prepare_dictation` (fitted to the text around the cursor, which
+  `start_recording` started reading in the background via
+  `selection::begin_dictation` — not for edit mode) → inject (into the
   captured `target_hwnd`) → the submit key when auto-submit or the voice command
   asked (once; a dictation of only "press enter" presses it only while the
   target window still has the focus). **The dictation signal** for a meeting
@@ -918,7 +925,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
 - **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
   volume, output_device, mute_while_recording, recording_mode,
   overlay_position, dictionary (`DictionaryEntry`: from/to + `fuzzy` (default
-  on) + `snippet` (default off)), append_trailing_space, auto_submit(+key),
+  on) + `snippet` (default off)), append_trailing_space, smart_spacing ("Match
+  the text around the cursor", default on), auto_submit(+key),
   voice_enter (the "press enter" voice command, default on),
   restore_clipboard, show_tray_icon, autostart, model_unload_timeout, selected_language,
   translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
@@ -983,9 +991,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   and "· Update X ready" in the tooltip (`tray::refresh`, driven by updates.rs).
   A live call Yap asks about, while nothing records, puts **"Record this Teams
   call"** above it (`meeting_detect::tray_item`; the click runs
-  `on_tray_record` on a worker thread). Both items are in the idle menu's cache
-  key (`idle_menu_key`), so the menu rebuilds when they change; all tray work
-  runs on the main thread.
+  `on_tray_record` on a worker thread). **"Paste last transcript"** sits above
+  the model submenu (greyed out until there's a dictation;
+  `text_injector::paste_last_from_tray`, worker thread). All three are in the
+  idle menu's cache key (`idle_menu_key`), so the menu rebuilds when they
+  change; all tray work runs on the main thread.
 - **`bar.rs`** — the **Yap bar** (2026-10-05, after Wispr Flow's Flow Bar —
   `E:\Projects\references\wispr-flow\README.md`, screenshots 20–22, 25): the
   `overlay` window as one fixed-size (520×560 logical), transparent,
@@ -1075,11 +1085,65 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   dictation **target window** at record-start (`current_foreground`, skipping Yap's
   own windows) and **re-focuses** it before pasting (`focus_window`, via the
   `AttachThreadInput` workaround) so focus changes mid-transcription don't misfire.
-  The clipboard snapshot/restore preserves **text or image** so a paste doesn't wipe
-  a copied image; `selection_via_copy` (edit-mode fallback) polls for the Ctrl+C
-  result instead of a fixed sleep. Falls back to direct Unicode typing
-  (`type_unicode`) if the clipboard is unavailable. (UI-Automation content
-  verification is a deferred follow-up.)
+  **Paste privacy** (`clip`, Win32 via the `windows` crate — arboard can't add
+  formats): the dictation goes on the clipboard with
+  `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory` = 0,
+  `CanUploadToCloudClipboard` = 0 and `Clipboard Viewer Ignore`, so it never lands in
+  Win+V history, cloud clipboard sync or a well-behaved clipboard manager; the restore
+  of the user's own clipboard carries them too (it's in their history already). A
+  remote-desktop/VM target (`syncs_clipboard`: mstsc, msrdc, vmconnect, Citrix,
+  VMware, VirtualBox, Parsec, AnyDesk…) gets a plain write — its clipboard sync is a
+  monitor too. **Every write is verified** (`GetClipboardSequenceNumber` must move;
+  4 tries, 0/15/40/80 ms), else the text is typed (`type_unicode`); outcomes at
+  `debug`. The snapshot keeps **text, an image** (CF_DIBV5 + PNG, raw bytes) **or
+  copied files** (CF_HDROP + drop effect), ≤ 64 MB, and an empty clipboard is left
+  empty; `selection_via_copy` (edit-mode fallback) empties the clipboard, polls for
+  the Ctrl+C result instead of a fixed sleep, and restores privately.
+  `prepare_dictation(text, append_space, dictionary)` (run_stt's one call) remembers
+  the dictation and fits it to the text around the cursor read at record start
+  (`selection::take_context` → `smart_insert::fit_to_context`; dictionary spellings
+  never lower-cased), or, with no context, appends the space as before. **"Paste
+  last transcript"** (tray item + `paste_last_transcript` command → the text it
+  pasted; errors "Nothing to paste yet"): this session's last dictation (unfitted),
+  else history's newest dictation (`history::latest_dictation` — app an `.exe` or
+  empty, so never an Upload); forgotten when history entries are deleted/cleared.
+  It pastes into the foreground app, or — the tray menu holds the foreground — the
+  top real app window (`pick_paste_window`, unit-tested: not Yap's, minimised, tool,
+  no-activate, cloaked, untitled or a shell window), re-reading the cursor's context
+  there (`selection::read_context`). Test mode returns the text without pasting
+  ("e2e: not pasting the last transcript"). No hotkey for it yet. (Verify-after-paste
+  over UIA is still a follow-up.) `#[ignore]`d `private_clipboard_round_trip` runs
+  the real clipboard code on a private window station (never the person's clipboard).
+- **`selection.rs`** — UI Automation reads of the field Yap types into. **Edit
+  mode** (`capture_selection`): the selected text (TextPattern, else the Ctrl+C
+  trick), 2 s UIA timeouts. **The text around the cursor** (`begin_dictation(target,
+  read)` from `start_recording`, `take_context()` at paste): when `smart_spacing` is
+  on and it isn't edit mode, a background thread reads ≤ 500 characters before and
+  after the caret and the selection (a long selection as its start + end) —
+  TextPattern (`GetSelection`, else TextPattern2's caret), else ValuePattern for
+  Edit/Document/ComboBox fields (caret assumed at the end) — cut at word boundaries,
+  with 200 ms UIA connection/transaction timeouts (`CUIAutomation8`). Never: another
+  process's element than the target window's, a password box, read-only text, or in
+  a test run; a field showing its placeholder (= HelpText) counts as empty. The paste
+  never waits: still reading → no context. Kept in memory for that dictation only;
+  logged as lengths, never text. `#[ignore]`d `reads_real_text_fields` reads hidden
+  EDIT and RichEdit controls end to end.
+- **`smart_insert.rs`** — `fit_to_context(text, &FieldContext, names)`, pure and
+  unit-tested (conservative: a wrong fix is worse than the old capital). Mid-sentence
+  (before ends in a letter/digit/`,`/`;`/spaced dash — not `.?!`, `:`, a new line or
+  a bullet) → lower-case the first letter only for a plainly sentence-case word
+  (never "I"/"I'm", all-caps, "iPhone", a dictionary `to` term, or a word written
+  capitalised mid-sentence nearby) that's a known ordinary word (`COMMON_WORDS`:
+  English + common fr/de/es/it/pt/nl function words, no names like Will/May, no
+  "El"/"Las"/"Los") or that the surrounding text writes in lower case — so names keep
+  their capital. Text after the caret starting lower-case or with `,.;:!?)…` → drop
+  one final `.`. Leading space only after a letter/digit/closing punctuation (a
+  straight quote after a word, a spaced dash), never after whitespace, an opening
+  bracket/quote or at the field start; trailing space only before a letter/digit;
+  none next to Chinese/Japanese (`is_cjk`; Hangul uses spaces). Replacing a
+  selection: its first word's case (same safety rules, or the same word again), its
+  end punctuation, and any space it began/ended with. Edit mode and the Voice Agent
+  (wake word) paste the AI's text untouched, as before.
 - **`sound.rs`** — start/stop chimes (volume + output-device aware).
 - **`mute.rs`** — mute-while-recording: mutes the default render endpoint via
   WASAPI/COM (`IMMDeviceEnumerator` → `IAudioEndpointVolume`) while recording and
@@ -1088,7 +1152,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   redirects data to `<exe>/Data`).
 - **`e2e.rs`** — **test mode** for the end-to-end UI suite (debug builds started
   with `YAP_E2E=1`; compiled out of release builds): no global input hook, no
-  paste/Enter/Ctrl+C into other apps, no `set_focus` (tao's fallback presses Alt
+  paste/Enter/Ctrl+C into other apps (nor "Paste last transcript"), no reading the
+  text around another app's cursor, no `set_focus` (tao's fallback presses Alt
   in the focused app), no Windows notifications, no orphan-sidecar sweep, no
   window-state plugin, no call-detection registry reads (the debug-only
   `meeting_detect_simulate` stands in), no installed apps' icons (the
@@ -1139,6 +1204,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `meeting_start` (then `calendar::on_meeting_started`)/`meeting_stop`/
   `meeting_state`, `transcribe_file`/`cancel_file_transcription`/
   `audio_file_info`, `log_info`/`open_logs_folder`, `delete_history_entry`.
+  (`paste_last_transcript` lives in `text_injector.rs`.)
 
 ### Frontend (`src/`)
 - **Theme (2026-07-09)** — the main window is **warm-light, Wispr-Flow-inspired**:
@@ -1516,7 +1582,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   View (full effective prompt via `get_base_prompt`) / Customize (preset +
   body + Save/Reset) / Test tabs. Plus usage meter + profiles w/ per-profile
   model override + per-app rules), **History** (stats
-  dashboard + recent list + enable/clear), **Advanced** (output toggles, system,
+  dashboard + recent list + enable/clear), **Advanced** (output toggles —
+  "Match the text around the cursor" (`smartSpacing`) first, then "Append
+  trailing space", whose line reads "Only where Yap can't read the text around
+  the cursor" while the first is on, auto-submit, and "Restore clipboard after
+  paste", which says dictations never show up in Win+V history — system,
   dictionary), **About** (version + an **Updates** card on the shared update
   store: "Last checked …" / Check for updates, Downloading… %, "Yap X is ready to
   install" + Restart to update, release notes + release-page link, the
@@ -1859,7 +1929,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   Uninstalling with "Delete the application data" removes it too (updates never do).
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
-  recording mode `toggle`, the **Yap bar on** (`bar_enabled`), hidden over
+  recording mode `toggle`, dictations **fitted to the text around the cursor**
+  (`smart_spacing`) and kept out of clipboard history (always), the **Yap bar on** (`bar_enabled`), hidden over
   fullscreen apps (`bar_hide_fullscreen`), the dictation overlay always shown
   while recording/transcribing (no off switch — it's the hot-mic indicator),
   live transcription preview **on**

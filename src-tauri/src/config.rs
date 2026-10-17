@@ -186,9 +186,18 @@ pub struct YapConfig {
     /// Mute system output audio while recording (Windows).
     #[serde(default)]
     pub mute_while_recording: bool,
-    /// Append a single space after each injected transcription.
+    /// Append a single space after each injected transcription. With
+    /// `smart_spacing` on it only applies where Yap couldn't read the field.
     #[serde(default)]
     pub append_trailing_space: bool,
+    /// "Match the text around the cursor" (Settings → Advanced → Output): at
+    /// record start Yap reads a little text either side of the caret over UI
+    /// Automation (`selection::begin_dictation`, in memory only) and fits the
+    /// dictation to it — spaces, a capital mid-sentence, a full stop before
+    /// more of the sentence (`smart_insert.rs`). Where the field can't be
+    /// read, a dictation pastes exactly as without it.
+    #[serde(default = "default_true")]
+    pub smart_spacing: bool,
     /// After injecting text, simulate pressing Enter (auto-submit).
     #[serde(default)]
     pub auto_submit: bool,
@@ -537,6 +546,7 @@ impl Default for YapConfig {
             recording_mode: default_recording_mode(),
             mute_while_recording: false,
             append_trailing_space: false,
+            smart_spacing: true,
             auto_submit: false,
             voice_enter: true,
             restore_clipboard: true,

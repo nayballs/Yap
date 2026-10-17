@@ -474,6 +474,7 @@
     recordingMode: 'toggle',
     muteWhileRecording: false,
     appendTrailingSpace: false,
+    smartSpacing: true,
     autoSubmit: false,
     voiceEnter: true,
     restoreClipboard: true,
@@ -2267,7 +2268,20 @@
           </div>
           <Group title="Output">
             <Row>
-              <Toggle bind:checked={cfg.appendTrailingSpace} label="Append trailing space" desc="Add a space after each transcription" />
+              <Toggle
+                bind:checked={cfg.smartSpacing}
+                label="Match the text around the cursor"
+                desc="Fit spaces, capitals and full stops to where you're typing. Yap reads a little of the text beside your cursor, on this PC only"
+              />
+            </Row>
+            <Row>
+              <Toggle
+                bind:checked={cfg.appendTrailingSpace}
+                label="Append trailing space"
+                desc={cfg.smartSpacing
+                  ? "Only where Yap can't read the text around the cursor"
+                  : 'Add a space after each transcription'}
+              />
             </Row>
             <Row>
               <Toggle bind:checked={cfg.autoSubmit} label="Auto-submit (press Enter)" desc="Press Enter after pasting the text" />
@@ -2285,7 +2299,11 @@
               </Row>
             {/if}
             <Row>
-              <Toggle bind:checked={cfg.restoreClipboard} label="Restore clipboard after paste" desc="Put your previous clipboard contents back" />
+              <Toggle
+                bind:checked={cfg.restoreClipboard}
+                label="Restore clipboard after paste"
+                desc="Put your previous clipboard contents back. Dictations never show up in Win+V clipboard history"
+              />
             </Row>
           </Group>
 
