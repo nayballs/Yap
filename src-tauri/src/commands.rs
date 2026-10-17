@@ -715,9 +715,13 @@ pub fn chat_delete(id: u64) {
 /// Send one chat turn. Creates the conversation on first message (title =
 /// first 50 chars, OpenWhispr's rule), persists both sides, and answers via
 /// the Chat scope with eager keyword-RAG over the notes library injected under
-/// their exact framing line. Returns `{ conversationId, reply }`.
+/// their exact framing line. Returns `{ conversationId, reply, toolsUsed }`.
+/// A note the tools create or change is announced as it happens, like any
+/// other note edit (`yap-note-changed` with origin "chat", then
+/// `yap-notes-changed`), so the notepad and the lists follow it live.
 #[tauri::command]
 pub async fn chat_send(
+    app: AppHandle,
     conversation_id: Option<u64>,
     text: String,
     scope: Option<String>,
@@ -750,7 +754,7 @@ pub async fn chat_send(
         .rev()
         .map(|m| (m.role.clone(), m.text.clone()))
         .collect();
-    crate::chats::append(conv.id, "user", &text)?;
+    crate::chats::append(conv.id, "user", &text, &[])?;
 
     // System prompt: persona (+ tool instructions when the model can
     // tool-call) + eager-RAG notes under their exact framing. OpenWhispr runs
@@ -779,6 +783,11 @@ pub async fn chat_send(
     }
 
     let (reply, tools_used) = if tools_supported {
+        let notify = |id: u64| {
+            use tauri::Emitter;
+            note_changed(&app, id, "chat");
+            let _ = app.emit("yap-notes-changed", ());
+        };
         crate::tools::run_tool_loop(
             &system,
             &history,
@@ -788,6 +797,7 @@ pub async fn chat_send(
             &model,
             &provider,
             disable_thinking,
+            &notify,
         )
         .await?
     } else {
@@ -805,7 +815,7 @@ pub async fn chat_send(
         .await?;
         (reply, Vec::new())
     };
-    crate::chats::append(conv.id, "assistant", &reply)?;
+    crate::chats::append(conv.id, "assistant", &reply, &tools_used)?;
     Ok(serde_json::json!({
         "conversationId": conv.id,
         "reply": reply,

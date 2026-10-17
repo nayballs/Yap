@@ -26,6 +26,7 @@ mod meeting_detect;
 mod meeting_end;
 mod meeting_guard;
 mod meeting_summary;
+mod note_text;
 mod notepad;
 mod notes;
 mod tools;
