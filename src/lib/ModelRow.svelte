@@ -5,8 +5,11 @@
   import { formatSize } from './models.js';
   import { ENGINE_PROVIDER, PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
 
-  // status: downloadable | downloading | available | active | switching
-  let { model, status = 'downloadable', percent = 0, onclick, ondelete = null } = $props();
+  // status: downloadable | downloading | available | active | switching |
+  // unavailable (listed, can't be installed yet: `model.note` says why).
+  // `deleteActive`: the active model can be deleted too (the speaker models,
+  // whose switch turns off with it; a speech model must be switched first).
+  let { model, status = 'downloadable', percent = 0, onclick, ondelete = null, deleteActive = false } = $props();
 
   const busy = $derived(status === 'downloading' || status === 'switching');
   const prov = $derived(ENGINE_PROVIDER[model.engine]);
@@ -50,6 +53,8 @@
     <span class="mpct">Switching…</span>
   {:else if status === 'downloading'}
     <span class="mpct">{percent}%</span>
+  {:else if status === 'unavailable'}
+    <span class="msoon">{model.note || 'Coming later'}</span>
   {:else if status === 'downloadable'}
     <button class="dl" onclick={(e) => { e.stopPropagation(); onclick?.(model); }}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -59,7 +64,7 @@
     </button>
   {/if}
 
-  {#if ondelete && status === 'available'}
+  {#if ondelete && (status === 'available' || (deleteActive && status === 'active'))}
     <button
       class="trash"
       title="Delete this model"
@@ -173,6 +178,18 @@
     color: var(--yap-muted);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+  }
+  .mrow.unavailable .mname,
+  .mrow.unavailable .micon {
+    opacity: 0.6;
+  }
+  .msoon {
+    font-size: 11px;
+    color: var(--yap-fg-45);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
 
   .spacer {

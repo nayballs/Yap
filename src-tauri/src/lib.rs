@@ -22,6 +22,7 @@ mod coaching;
 mod commands;
 mod config;
 mod context_menu;
+mod diarize;
 mod dict_usage;
 mod e2e;
 mod elevated;
@@ -130,6 +131,14 @@ pub(crate) fn shutdown_cleanup() {
 /// process exit code. Nothing of the app itself starts.
 pub fn run_mcp_server() -> i32 {
     mcp::run_stdio()
+}
+
+/// `yap.exe diarize` (main.rs): the speaker-diarization engine a meeting
+/// recording runs as a child process, fed audio on stdin, answering with
+/// JSON lines on stdout (see `diarize.rs`). Returns the exit code. Nothing of
+/// the app itself starts.
+pub fn run_diarize_child() -> i32 {
+    diarize::run_child()
 }
 
 /// Reload handle for the global log filter — lets the Settings "Debug mode"
@@ -489,6 +498,13 @@ pub fn run() {
             alert::alert_action,
             bar::bar_simulate,
             bar::bar_debug,
+            diarize::diarization_status,
+            diarize::diarization_download,
+            diarize::diarization_delete,
+            #[cfg(debug_assertions)]
+            diarize::diarize_wav,
+            #[cfg(debug_assertions)]
+            diarize::diarization_timeline,
             // Test mode only (e2e.rs); not in release builds at all.
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_feed,

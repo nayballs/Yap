@@ -1,8 +1,9 @@
 <script>
   import Tooltip from './Tooltip.svelte';
   // `desc` renders as a muted line under the label (preferred, OpenWhispr-style);
-  // `hint` keeps the ⓘ tooltip for longer help text.
-  let { checked = $bindable(false), label = '', hint = '', desc = '', disabled = false, onchange } = $props();
+  // `hint` keeps the ⓘ tooltip for longer help text; `badge` is a small chip
+  // after the label ("Beta").
+  let { checked = $bindable(false), label = '', hint = '', desc = '', badge = '', disabled = false, onchange } = $props();
 
   function toggle() {
     if (disabled) return;
@@ -16,6 +17,7 @@
     <span class="lhs">
       <span class="ldesc">
         <span class="label">{label}</span>
+        {#if badge}<span class="badge">{badge}</span>{/if}
         {#if hint}<Tooltip text={hint} />{/if}
       </span>
       {#if desc}<span class="desc">{desc}</span>{/if}
@@ -60,6 +62,17 @@
     color: var(--yap-fg);
     font-size: 13px;
     font-weight: 650;
+  }
+  .badge {
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--yap-primary);
+    background: var(--yap-primary-tint);
+    padding: 1px 6px;
+    border-radius: var(--yap-r-sm);
+    white-space: nowrap;
   }
   .desc {
     color: var(--yap-muted-70);

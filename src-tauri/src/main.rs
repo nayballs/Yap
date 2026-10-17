@@ -9,5 +9,11 @@ fn main() {
     if std::env::args_os().nth(1).is_some_and(|arg| arg == "mcp") {
         std::process::exit(yap_lib::run_mcp_server());
     }
+    // `yap.exe diarize`: the speaker-diarization engine a meeting recording
+    // starts as a child (diarize.rs): audio in on stdin, JSON lines out on
+    // stdout, NeMo-Speech.cpp's own DLLs loaded in this process only.
+    if std::env::args_os().nth(1).is_some_and(|arg| arg == "diarize") {
+        std::process::exit(yap_lib::run_diarize_child());
+    }
     yap_lib::run()
 }
