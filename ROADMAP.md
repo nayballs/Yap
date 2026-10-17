@@ -539,9 +539,28 @@ below (✅ = done).
             windows) and **re-focus** it before pasting — fixes "typed into the wrong
             window" when focus shifts mid-transcription.
       - [x] **Unicode `SendInput` fallback** when the clipboard is unavailable.
-      - [x] Clipboard snapshot+restore (already existed).
+      - [x] Clipboard snapshot+restore (already existed; since 2026-10-17 copied files
+            come back too, and an empty clipboard is left empty).
+      - [x] **Paste privacy** (2026-10-17, after Wispr Flow's teardown): the paste's
+            clipboard write is Win32 (`text_injector::clip`) with
+            `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`
+            = 0, `CanUploadToCloudClipboard` = 0 and `Clipboard Viewer Ignore`, so
+            dictations stay out of Win+V history, cloud sync and clipboard managers
+            (the restore carries them too); remote-desktop/VM windows get a plain write
+            (their clipboard sync is a monitor). Every write is **verified** by
+            `GetClipboardSequenceNumber`, retried, then typed as a fallback.
+      - [x] **"Paste last transcript"** (tray menu + `paste_last_transcript`): the
+            recovery when a paste missed. (A rebindable hotkey for it: not yet.)
+      - [x] **Match the text around the cursor** (`smart_spacing`, default on;
+            `selection::begin_dictation` + `smart_insert.rs`): ±500 characters around
+            the caret over UIA at record start, then spaces, a mid-sentence capital
+            and a full stop before more of the sentence fitted to them.
       - [ ] **Verify-after-paste** via UI Automation `ValuePattern` (read the focused
-            element's value before/after) — deferred; needs a COM/UIA integration.
+            element's value before/after) — still open; the UIA reading it needs now
+            exists in `selection.rs`.
+      - [ ] **Restore-race detection** (the target read the *old* clipboard because the
+            paste landed late) and **context-aware cleanup** (the text around the cursor
+            in the cleanup prompt) — next candidates from the same teardown.
 
 - [x] **Debug Logging (OpenWhispr Developer-section port)** (2026-07-06) — Yap already had
       the hard part (daily-rolling `<data>/logs/yap.log.*` at `info` + panic hook, since the
