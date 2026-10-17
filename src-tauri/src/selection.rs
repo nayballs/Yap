@@ -33,17 +33,23 @@ const CONTEXT_TIMEOUT_MS: u32 = 200;
 /// enough for a big selection in Word, far below UIA's own 20 s.
 const SELECTION_TIMEOUT_MS: u32 = 2_000;
 
-/// Capture the current selection for edit mode: UIA first, Ctrl+C fallback.
+/// Capture the current selection for edit mode: UIA first, Ctrl+C fallback
+/// when `copy_fallback` (not in a terminal, where Ctrl+C with nothing
+/// selected interrupts the program running there).
 ///
 /// `target_hwnd` is the foreground window captured at hotkey-press (used to
 /// aim the Ctrl+C fallback). Returns `None` if nothing is selected.
-pub fn capture_selection(target_hwnd: Option<isize>) -> Option<String> {
+pub fn capture_selection(target_hwnd: Option<isize>, copy_fallback: bool) -> Option<String> {
     if let Some(text) = uia_selected_text() {
         let t = text.trim();
         if !t.is_empty() {
             tracing::debug!(len = t.len(), "Selection captured via UI Automation");
             return Some(t.to_string());
         }
+    }
+    if !copy_fallback {
+        tracing::debug!("No selection found over UI Automation; no Ctrl+C in a terminal (edit mode → write mode)");
+        return None;
     }
     match crate::text_injector::selection_via_copy(target_hwnd) {
         Some(t) => {

@@ -16,13 +16,16 @@
 //!   the exception: its clipboard sync is a monitor too, so there the
 //!   dictation goes on the clipboard plainly (`syncs_clipboard`).
 //! - **Fitting the dictation to the cursor** ([`prepare_dictation`],
-//!   `smart_insert.rs`) and remembering it for **"Paste last transcript"**
-//!   ([`paste_last_transcript`], also in the tray menu).
+//!   `smart_insert.rs`) and to the kind of app (`app_kind.rs`: one line in a
+//!   terminal, no full stop on a short chat message), and remembering it for
+//!   **"Paste last transcript"** ([`paste_last_transcript`], also in the
+//!   tray menu).
 
 use std::sync::Mutex;
 
 use tracing::{debug, info, trace, warn};
 
+use crate::app_kind::{self, AppKind};
 use crate::config::DictionaryEntry;
 use crate::smart_insert::{self, FieldContext};
 
@@ -908,18 +911,50 @@ fn last_dictation() -> std::sync::MutexGuard<'static, Option<String>> {
 }
 
 /// The finished dictation `text` (cleaned up, corrected) as it should be
-/// pasted, remembered for "Paste last transcript": fitted to the text around
-/// the cursor when Yap read it at record start (`smart_spacing`), else as
-/// before — with a space after it if `append_space`.
-pub fn prepare_dictation(text: &str, append_space: bool, dictionary: &[DictionaryEntry]) -> String {
+/// pasted, remembered for "Paste last transcript": fitted to the kind of app
+/// it goes into (`kind`, `app_kind.rs`, already filtered by the settings)
+/// and to the text around the cursor when Yap read it at record start
+/// (`smart_spacing`), else as before — with a space after it if
+/// `append_space`.
+pub fn prepare_dictation(text: &str, append_space: bool, dictionary: &[DictionaryEntry], kind: AppKind) -> String {
     *last_dictation() = Some(text.trim().to_string());
     let ctx = crate::selection::take_context();
-    fit_for_paste(text, ctx.as_ref(), append_space, dictionary)
+    fit_for_paste(text, ctx.as_ref(), append_space, dictionary, kind)
 }
 
-/// `text` fitted to `ctx` when there is one; otherwise unchanged, plus a
-/// space if `append_space` (what a dictation always did).
-fn fit_for_paste(text: &str, ctx: Option<&FieldContext>, append_space: bool, dictionary: &[DictionaryEntry]) -> String {
+/// `text` for the paste. A terminal gets it as `app_kind::terminal_text`
+/// makes it (one line unless the coding CLI there takes a paste; no space
+/// after it, no cursor context). A chat app's short message loses its final
+/// full stop first. Then it's fitted to `ctx` when there is one; otherwise
+/// unchanged, plus a space if `append_space` (what a dictation always did).
+fn fit_for_paste(
+    text: &str,
+    ctx: Option<&FieldContext>,
+    append_space: bool,
+    dictionary: &[DictionaryEntry],
+    kind: AppKind,
+) -> String {
+    let chat;
+    let text = match kind {
+        AppKind::Terminal(t) => {
+            let out = app_kind::terminal_text(text, t.keeps_lines());
+            debug!(
+                changed = out != text.trim(),
+                lines = out.lines().count(),
+                "Fitted the dictation for {}",
+                kind.describe()
+            );
+            return out;
+        }
+        AppKind::Messaging => {
+            chat = app_kind::drop_chat_full_stop(text, ctx, dictionary);
+            if chat != text {
+                debug!("Left the full stop off a short chat message");
+            }
+            chat.as_str()
+        }
+        AppKind::Other => text,
+    };
     match ctx {
         Some(ctx) => {
             let names: Vec<&str> = dictionary.iter().map(|e| e.to.trim()).filter(|t| !t.is_empty()).collect();
@@ -972,7 +1007,7 @@ fn paste_last_blocking() -> Result<String, String> {
     let text = last_transcript().ok_or(NOTHING_TO_PASTE)?;
     let cfg = crate::config::load();
     if crate::e2e::active() {
-        let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary);
+        let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary, AppKind::Other);
         info!(len = out.len(), "e2e: not pasting the last transcript");
         return Ok(out);
     }
@@ -984,12 +1019,15 @@ fn paste_last_blocking() -> Result<String, String> {
             // The app puts its own focus back in its field on activation.
             std::thread::sleep(std::time::Duration::from_millis(60));
         }
-        let ctx = if cfg.smart_spacing && target.is_some() {
+        // A terminal or a chat app gets it as a dictation would; a
+        // terminal's screen isn't read.
+        let kind = app_kind::of_window(target).with_settings(cfg.terminal_mode, cfg.chat_no_full_stop);
+        let ctx = if cfg.smart_spacing && target.is_some() && !kind.is_terminal() {
             crate::selection::read_context(target)
         } else {
             None
         };
-        let out = fit_for_paste(&text, ctx.as_ref(), cfg.append_trailing_space, &cfg.dictionary);
+        let out = fit_for_paste(&text, ctx.as_ref(), cfg.append_trailing_space, &cfg.dictionary, kind);
         info!(len = out.len(), found_window = target.is_some(), fitted = ctx.is_some(), "Pasting the last transcript");
         inject_text_sync(&out, cfg.restore_clipboard, target)?;
         Ok(out)
@@ -1148,8 +1186,8 @@ mod tests {
 
     #[test]
     fn without_context_a_dictation_pastes_as_it_always_did() {
-        assert_eq!(fit_for_paste("Hello there.", None, false, &[]), "Hello there.");
-        assert_eq!(fit_for_paste("Hello there.", None, true, &[]), "Hello there. ");
+        assert_eq!(fit_for_paste("Hello there.", None, false, &[], AppKind::Other), "Hello there.");
+        assert_eq!(fit_for_paste("Hello there.", None, true, &[], AppKind::Other), "Hello there. ");
     }
 
     #[test]
@@ -1160,9 +1198,63 @@ mod tests {
             selection: String::new(),
         };
         // `append_trailing_space` is ignored: nothing follows the caret.
-        assert_eq!(fit_for_paste("So we should go.", Some(&ctx), true, &[]), " so we should go.");
+        assert_eq!(fit_for_paste("So we should go.", Some(&ctx), true, &[], AppKind::Other), " so we should go.");
         let dict: Vec<DictionaryEntry> = serde_json::from_str(r#"[{"from":"so","to":"So"}]"#).unwrap();
-        assert_eq!(fit_for_paste("So we should go.", Some(&ctx), true, &dict), " So we should go.");
+        assert_eq!(fit_for_paste("So we should go.", Some(&ctx), true, &dict, AppKind::Other), " So we should go.");
+    }
+
+    fn terminal(cli: Option<app_kind::CodingCli>) -> AppKind {
+        AppKind::Terminal(app_kind::Terminal {
+            coding_cli: cli,
+            windows_terminal: true,
+        })
+    }
+
+    #[test]
+    fn a_terminal_gets_one_line_and_no_trailing_space() {
+        let list = "Fix these:\n- the login bug\n- the slow search.";
+        assert_eq!(
+            fit_for_paste(list, None, true, &[], terminal(None)),
+            "Fix these: the login bug; the slow search."
+        );
+        // Claude Code in Windows Terminal takes the paste as one block.
+        assert_eq!(
+            fit_for_paste(list, None, true, &[], terminal(Some(app_kind::CodingCli::ClaudeCode))),
+            list
+        );
+        // Gemini CLI: not known to, so one line.
+        assert_eq!(
+            fit_for_paste("One.\nTwo.", None, true, &[], terminal(Some(app_kind::CodingCli::GeminiCli))),
+            "One. Two."
+        );
+        // A terminal's context (if any) never fits it: no space either side.
+        let ctx = FieldContext {
+            before: "PS C:\\> git commit -m".into(),
+            after: "x".into(),
+            selection: String::new(),
+        };
+        assert_eq!(fit_for_paste("The fix.", Some(&ctx), true, &[], terminal(None)), "The fix.");
+    }
+
+    #[test]
+    fn a_chat_message_drops_its_full_stop_then_fits_the_cursor() {
+        assert_eq!(fit_for_paste("Sounds good.", None, false, &[], AppKind::Messaging), "Sounds good");
+        assert_eq!(fit_for_paste("Sounds good.", None, true, &[], AppKind::Messaging), "Sounds good ");
+        assert_eq!(fit_for_paste("Are you in?", None, false, &[], AppKind::Messaging), "Are you in?");
+        // After a sentence in the draft: the space smart spacing adds, no full stop.
+        let ctx = FieldContext {
+            before: "Thanks!".into(),
+            after: String::new(),
+            selection: String::new(),
+        };
+        assert_eq!(fit_for_paste("See you then.", Some(&ctx), false, &[], AppKind::Messaging), " See you then");
+        // Replacing a selection that ended with one: the selection's end wins.
+        let sel = FieldContext {
+            before: String::new(),
+            after: String::new(),
+            selection: "Maybe later.".into(),
+        };
+        assert_eq!(fit_for_paste("See you then.", Some(&sel), false, &[], AppKind::Messaging), "See you then.");
     }
 
     /// The real clipboard code on a clipboard of its own: the test process
