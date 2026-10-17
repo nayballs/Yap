@@ -1,7 +1,8 @@
 # Meetings
 
 Yap records a meeting into a note, from any call app or none (no bot joins):
-your microphone is "You", the computer's sound output is "Them". It
+your microphone is "You", the computer's sound output is "Them" (until you,
+or a 1:1 meeting's invite, name who it is: [Who said what](#who-said-what)). It
 transcribes locally as the meeting goes, summarises every ~10 minutes in the
 background, and at the end turns the whole meeting into an **action plan**: a
 section per person with their tasks and deadlines, then decisions, open
@@ -28,9 +29,10 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 | The end of a meeting: pause or end, "Started by mistake?", the action plan job | `src-tauri/src/meeting_end.rs` |
 | "What did I miss?", the one-tap helpers (Questions to ask, Follow-up email, Gaps and risks), the AI meeting title | `src-tauri/src/meeting_assist.rs` |
 | The notepad window: docking, split screen | `src-tauri/src/notepad.rs` |
+| Who said what: the speaker map, names on lines, 1:1 calendar guesses, line times and splitting | `src-tauri/src/speakers.rs`, `src/lib/SpeakerMenu.svelte` |
 | The calendar: meetings, the reminder card, a note's meeting | `src-tauri/src/calendar.rs` (+ `calendar/`; [`calendar.md`](./calendar.md)) |
 | Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_QUESTIONS_PROMPT`, `MEETING_FOLLOW_UP_PROMPT`, `MEETING_BLIND_SPOTS_PROMPT`, `MEETING_TITLE_PROMPT`) | `src-tauri/src/llm.rs` |
-| Storage (`Note::digests`, `TranscriptSegment::echo` / `::dictated`, `Action::kind`, `Note::title_auto`) | `src-tauri/src/notes.rs` |
+| Storage (`Note::digests`, `Note::speakers`, `TranscriptSegment::echo` / `::dictated` / `::speaker` / `::start_ms` / `::words`, `Action::kind`, `Note::title_auto`) | `src-tauri/src/notes.rs` |
 | The action run (`note_enhance` / `run_enhance`) | `src-tauri/src/commands.rs` |
 | UI | `src/lib/NotesView.svelte`, `src/lib/Notepad.svelte`, `src/lib/meetingSummary.svelte.js` |
 
@@ -172,6 +174,53 @@ isn't focused: the person is in their call app), it's also a Windows
 notification ("Yap can't hear the call", or "…your mic" with **Update
 settings**). The recording carries on either way. An in-person meeting (no
 call) gets the "Them" warning once too; its wording says "If".
+
+## Who said what
+
+Every transcript line has a side (`source`: the mic "you", the call "them")
+and a voice (`speaker`). Until voices are told apart, the call is one voice,
+"them"; the voice separation (a later step) will give "them-1", "them-2"…
+A line nobody relabelled stores no `speaker` (its side is its voice), so
+every older note reads as You and Them, unchanged.
+
+The note's **speaker map** (`Note::speakers`, `speakers.rs`) names voices:
+`{ "them": { "name": "Priya Shah", "email": "…", "source": "calendar" } }`.
+Where a name comes from, most trusted first: **the user** (locked: nothing
+automatic ever renames it) > **the call app** > **a voice match** > **the
+calendar invite** or **an AI guess**. A name never gives way to a less
+trusted source, and a line the user assigned (`speakerLocked`) is never
+moved by an automatic relabel (OpenWhispr's rule). The last two are
+guesses: shown as **"Priya?"**, in italics, and told to the AI as a guess.
+
+- **1:1 calls.** When a meeting note is tied to a calendar event whose
+  invite has exactly one other person (not you, not a room, not someone who
+  declined), "Them" is named after them, as a guess. Someone else joining
+  makes it wrong, but no worse than "Them", and it stays visibly a guess.
+- **The menu on a name** (the notepad and the Notes view; on a line's person
+  button for that line alone): **It's Priya** / **Not Priya** on a guess
+  (Not keeps that name off the voice for good: the calendar won't guess it
+  again), **Rename X everywhere…** (every line of the voice, now and later;
+  a name another voice already has merges the two), **Rename just this line
+  / these lines…** (to a voice by that name, else a new person, "p-1"; the
+  lines are then the user's), **Merge with…** (two voices are one person;
+  the merged one keeps the more trusted name, and later lines of either read
+  as one). "You" is always you: it's never renamed or merged, though a line
+  can say someone else said it. Every window follows (`yap-note-changed`
+  with each line's voice).
+- **Where names go.** The transcript (grouped by voice), Copy as Markdown /
+  text, Save as .md, the email body, every AI input — digests, the action
+  plan, "What did I miss?", Ask, the helpers, the AI title — as the line
+  labels plus a "Speakers besides You: …" line (only when someone is named or
+  voices are told apart), the chat's note tools, the local API (`speakers`,
+  each line's `speaker`) and the MCP server's transcript pages. A name in the
+  map counts as a known person in the owner checks, like an attendee; an
+  invented owner still goes to Unassigned.
+- **Line times** (for the voice separation). A recorded line keeps its place
+  on the recording's clock (`startMs`/`endMs`, ms; each recording — a resume
+  starts a new one — counts from 0) and, with Parakeet, Whisper or
+  SenseVoice, its words' times (`words`, ms from `startMs`, one per word of
+  the corrected text). `speakers::split_line` cuts a line where the speaker
+  changes, at its words (in proportion without them); it isn't called yet.
 
 ## Summaries that keep up with long meetings
 
@@ -395,12 +444,14 @@ the summary as "Notes typed during the meeting".
 **Transcript** (a small green waveform on the tab while recording) opens with
 the timer box: the elapsed time, **search** (an inline field: only the lines
 that match, highlighted) and **copy** (the whole transcript as "You: …" /
-"Them: …" lines), with a tip under it you can dismiss for good (lines land
+"Them: …" lines, or the speakers' names), with a tip under it you can dismiss for good (lines land
 about every 15 seconds as Yap transcribes on this PC, the last few when you
 stop). Then the lines as they arrive, following the newest one unless you
-scroll up: a speaker's run of lines is one group under its label (You, or
-Them in teal), a chat bubble per line with grouped corners, each with a copy
-button on hover. A dashed line with ⏸ marks where a recording stopped
+scroll up: a speaker's run of lines is one group under its name (You, or
+Them / a name in teal; "Priya?" in italics for a guess), a chat bubble per
+line with grouped corners, each with a person button ("Who said this?") and
+a copy button on hover. The name, or the person button, opens the speaker
+menu ([Who said what](#who-said-what)). A dashed line with ⏸ marks where a recording stopped
 (`Note::breaks`, the transcript's length at each pause or stop; Resume
 carries on below it), and one with a mic, "You dictated here · left out of
 the notes", where you dictated mid-meeting ([Dictating
@@ -603,10 +654,9 @@ made-up title shows muted in the notepad and the Notes view.
 - Split screen moves only the call's main window; a call app that pops its
   meeting into a separate window after joining (Zoom, Teams) is moved only if
   that window is up when the recording starts.
-- Speaker labels are You / Them (the mic and the call); naming the people on
-  the call is a later item (calendar attendees, diarization). Yap doesn't
-  re-transcribe or relabel speakers after the meeting (Wispr does both in its
-  cloud).
+- Voices on the call aren't told apart yet: "Them" is one voice until the
+  user names or splits it, or a 1:1 invite names it as a guess. Yap doesn't
+  re-transcribe after the meeting (Wispr does in its cloud).
 - Share is local: no links to the notes or shared access (Wispr's sharing is
   its cloud's). Email hands a `mailto:` link to the mail app, so a long
   summary is cut to fit.
@@ -781,7 +831,27 @@ KeyTips) and Win the Start menu.
   markers left out of every summary input, the catch-up and the word count;
   the dictation signal; and `apply_corrections` (exact then fuzzy for ONNX,
   exact only for Whisper or with near-misses off, the per-entry opt-out).
+  Speakers (`cargo test --lib -- speakers named_speakers`): unnamed voices
+  reading as today, the 1:1 calendar guess, "Not Priya" for good, the user's
+  name locked against every automatic source, the order of trust, renaming
+  lines (a new person, back to You, a guess confirmed), merges either way
+  round and later lines following, a rename that merges, old notes loading
+  and the map's shape on disk; word times lined up with the corrected text
+  (joined, swapped, Whisper phrases, none), line timing, and `split_line`
+  (at words, in proportion, blips, far words, the user's lines unchanged);
+  names in every AI input with the "Speakers besides You" line, the owner
+  checks accepting the map's names, and the MCP page.
 - **e2e** (`npm run test:app`), with no audio device and no real AI:
+  - `e2e/speakers.spec.js`: lines fed with voices (`speaker: "them-1"`):
+    rename everywhere, merge (a later line of the merged voice follows), just
+    this line, in the notepad and the Notes view (each following the other),
+    copy with names, "You" only offering a line; a local iCal feed's 1:1
+    meeting naming "Them" "Alice Moreau?" (the catch-up prompt sees her and
+    the guess), "Not Alice Moreau", and no guess again on the next start;
+    names in the AI title, Ask and the action plan's input, a plan keeping
+    "### Priya" and moving an invented owner, Copy as Markdown, Save as .md,
+    the local API and `yap.exe mcp`; an old notes.json reading as You/Them
+    and taking a name.
   - `e2e/meeting-audio.spec.js` (test WAVs at 4×): a dictation staged over
     18–32 s of a meeting (`e2e_meeting_dictation`, the pipeline's own signal)
     while "You" talks at 1–9 s and 21–30 s: one "You" line, a "You dictated
@@ -877,10 +947,12 @@ KeyTips) and Win the Start menu.
 
 ## Limits and follow-ups
 
-- **Who's who on the call.** Everyone remote is "Them". Tasks are attributed
-  from the attendee list and names said out loud ("Bob, can you…"); a remote
-  "I'll do it" with no name is Unassigned. Speaker diarization (OpenWhispr's
-  `liveSpeakerIdentifier.js`) is the follow-up.
+- **Who's who on the call.** Everyone remote is "Them" unless named (by the
+  user, or as a guess from a 1:1 invite). Tasks are attributed from the
+  attendee list, the speaker map and names said out loud ("Bob, can you…");
+  a remote "I'll do it" from an unnamed "Them" is Unassigned. Telling the
+  voices apart (the local voice separation) is the next step; the speaker
+  map, line times and `split_line` are ready for it.
 - **Speakers.** Echo is caught only in chunks that are entirely the call
   coming through the speakers; a chunk where the user also spoke keeps the
   repeated words. Finer-grained removal (gating mic frames by the loopback

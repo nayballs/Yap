@@ -58,6 +58,7 @@ mod realtest;
 mod selection;
 mod smart_insert;
 mod sound;
+mod speakers;
 mod stt;
 mod text_injector;
 mod tray;
@@ -455,6 +456,10 @@ pub fn run() {
             meeting_end::meeting_delete,
             meeting_assist::meeting_catch_up,
             meeting_assist::meeting_assist,
+            speakers::speaker_rename,
+            speakers::speaker_rename_lines,
+            speakers::speaker_merge,
+            speakers::speaker_not,
             notepad::notepad_open,
             notepad::notepad_state,
             notepad::notepad_split,

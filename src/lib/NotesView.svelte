@@ -22,7 +22,8 @@
   import ActionManager from './ActionManager.svelte';
   import { noteRequest } from './meetingDetect.svelte.js';
   import { summaries, loadSummary, summarise } from './meetingSummary.svelte.js';
-  import { MEETING_HELPERS, meetingHelpers, noteMarkdown } from './notepadText.js';
+  import { MEETING_HELPERS, meetingHelpers, noteMarkdown, transcriptItems, withLineSpeakers } from './notepadText.js';
+  import SpeakerMenu from './SpeakerMenu.svelte';
   import ContextMenu from './ui/ContextMenu.svelte';
   import ConfirmDialog from './ui/ConfirmDialog.svelte';
 
@@ -116,6 +117,25 @@
   const shownTranscript = $derived(
     (selected?.transcript || []).filter((s) => showEcho || !s.echo)
   );
+  // The transcript as runs of one speaker (named from the note's speaker
+  // map, notepadText.js): a bubble per line, the name on the first.
+  const transcriptRuns = $derived(
+    transcriptItems(selected?.transcript, [], { showEcho, speakers: selected?.speakers })
+  );
+  // The menu on a speaker's name: `{ key, voice, lines, start }`.
+  let speakerMenu = $state(null);
+  function toggleSpeakerMenu(key, voice, lines, start = 'menu') {
+    speakerMenu = speakerMenu?.key === key ? null : { key, voice, lines, start };
+  }
+  /** A speaker edit made here: the map, and each line's voice. */
+  function onSpeakerChanged(updated) {
+    if (!selected || updated?.id !== selected.id) return;
+    selected.speakers = updated.speakers || {};
+    const t = updated.transcript || [];
+    selected.transcript = (selected.transcript || []).map((s, i) =>
+      t[i] ? { ...s, speaker: t[i].speaker || '', speakerLocked: !!t[i].speakerLocked } : s
+    );
+  }
   // "AI notes up to 40:12": where the digests reach, from the meeting's start.
   const digestedUpTo = $derived.by(() => {
     const d = selected?.digests;
@@ -290,6 +310,23 @@
     if (!dirty.content) selected.content = p.content;
     selected.participants = p.participants;
     selected.folder = p.folder;
+    if (p.speakers) selected.speakers = p.speakers;
+    // A speaker renamed or merged in the notepad: every line's voice.
+    if (p.lineSpeakers) {
+      const t = withLineSpeakers(selected.transcript, p.lineSpeakers);
+      if (t) selected.transcript = t;
+      else {
+        const id = selected.id;
+        invoke('note_get', { id })
+          .then((n) => {
+            if (selected?.id === id) {
+              selected.transcript = n.transcript;
+              selected.speakers = n.speakers;
+            }
+          })
+          .catch(() => {});
+      }
+    }
   }
 
   // The meeting notepad, on this note (it opens on its own when a meeting
@@ -1440,19 +1477,45 @@
               onscroll={() =>
                 (followLog = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40)}
             >
-              {#each shownTranscript as seg, i (i)}
-                {#if seg.dictated}
+              {#each transcriptRuns as run (run.key)}
+                {#if run.kind === 'dictated'}
                   <div class="dictated" title="Yap kept what you dictated out of the meeting's transcript and summaries">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>
                     <span>You dictated here · left out of the notes</span>
                   </div>
-                {:else}
-                  <div class="bubble {seg.source === 'you' ? 'you' : 'them'}" class:echo={seg.echo}>
-                    <span class="who">
-                      {seg.source === 'you' ? 'You' : 'Them'}{seg.echo ? ' · from the speakers' : ''}
-                    </span>
-                    <p>{seg.text}</p>
-                  </div>
+                {:else if run.kind === 'group'}
+                  {#each run.lines as line, j (line.i)}
+                    <div class="bubble {run.source}" class:echo={run.echo} class:cont={j > 0}>
+                      {#if j === 0}
+                        {#if run.echo}
+                          <span class="who">{run.label} · from the speakers</span>
+                        {:else}
+                          <span class="spkwrap">
+                            <button
+                              class="who"
+                              class:guess={run.guess}
+                              aria-haspopup="menu"
+                              aria-expanded={speakerMenu?.key === run.key}
+                              title={run.guess ? 'A guess from the calendar invite: click to confirm or change' : 'Rename, merge or correct this speaker'}
+                              onclick={() => toggleSpeakerMenu(run.key, run.speaker, run.lines.map((l) => l.i))}
+                            >{run.label}</button>
+                            {#if speakerMenu?.key === run.key}
+                              <SpeakerMenu
+                                note={selected}
+                                voice={speakerMenu.voice}
+                                lines={speakerMenu.lines}
+                                origin={LABEL}
+                                align={run.source === 'you' ? 'right' : 'left'}
+                                onclose={() => (speakerMenu = null)}
+                                onchanged={onSpeakerChanged}
+                              />
+                            {/if}
+                          </span>
+                        {/if}
+                      {/if}
+                      <p>{line.text}</p>
+                    </div>
+                  {/each}
                 {/if}
               {/each}
             </div>
@@ -2181,6 +2244,31 @@
     letter-spacing: 0.07em;
     margin-bottom: 1px;
     color: var(--yap-muted-55);
+  }
+  /* The next lines of one speaker's run sit close, without the name. */
+  .bubble.cont {
+    margin-top: -3px;
+  }
+  .spkwrap {
+    position: relative;
+    display: inline-block;
+  }
+  .bubble button.who {
+    padding: 0 3px;
+    margin: 0 -3px 1px;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    font-family: inherit;
+    line-height: inherit;
+    cursor: pointer;
+  }
+  .bubble button.who:hover,
+  .bubble button.who[aria-expanded='true'] {
+    background: var(--yap-s2);
+  }
+  .bubble button.who.guess {
+    font-style: italic;
   }
   .bubble.you {
     align-self: flex-end;

@@ -54,6 +54,15 @@ const KINDS = [
   [CLEANUP, 'cleanup'],
 ];
 
+/**
+ * A transcript line as Yap's meeting prompts write it: "You: …", "Them: …",
+ * or the speaker's name once the note's speaker map has one ("Priya Shah: …",
+ * "Speaker 2: …"; meeting_summary::transcript_lines). Not the headers.
+ */
+const SPOKEN = /^(?!(?:Attendees|Speakers besides You|Question|Meeting|Subject|Notes|Latest)\b)[A-Z][\w.' -]{0,40}: /;
+const isSpoken = (l) => SPOKEN.test(l);
+const unlabel = (l) => l.replace(SPOKEN, '');
+
 /** The transcript a cleanup call frames between triple quotes (llm.rs). */
 export function cleanupTranscript(user) {
   return /"""\n([\s\S]*?)\n"""/.exec(user)?.[1] ?? user;
@@ -62,7 +71,7 @@ export function cleanupTranscript(user) {
 /** "Questions to ask": from the latest talk. */
 function questionsReply(user) {
   const latest = user.split('The latest talk')[1] ?? '';
-  const lines = latest.split('\n').filter((l) => /^(You|Them): /.test(l));
+  const lines = latest.split('\n').filter(isSpoken);
   const out = [`- What should we do next about the ${lines.length} points just raised?`];
   if (/catering/i.test(latest)) out.push('- Who will own catering for the offsite, and by when?');
   if (/budget/i.test(latest)) out.push('- Does finance need anything else with the revised budget?');
@@ -108,8 +117,8 @@ function titleReply(user) {
 /** "What did I miss?": from the lines said since the person last looked. */
 function catchUpReply(user) {
   const since = user.split('Since they last looked')[1] ?? '';
-  const lines = since.split('\n').filter((l) => /^(You|Them): /.test(l));
-  const first = (lines[0] ?? '').replace(/^(You|Them): /, '').split(' ').slice(0, 5).join(' ');
+  const lines = since.split('\n').filter(isSpoken);
+  const first = unlabel(lines[0] ?? '').split(' ').slice(0, 5).join(' ');
   const out = [`- ${lines.length} new ${lines.length === 1 ? 'line' : 'lines'} since you looked, opening with "${first}".`];
   if (lines.some((l) => /send the slides/i.test(l))) out.push('- Them asked You to send the slides by Friday.');
   return out.join('\n');
@@ -132,9 +141,10 @@ const TRIGGERS = [
 function digestReply(user) {
   const part = /Transcript, part (\d+)/.exec(user)?.[1] ?? '?';
   const body = user.split(/Transcript, part \d+ \([^)]*\):\n/)[1] ?? '';
-  const lines = body.split('\n').filter((l) => /^(You|Them): /.test(l));
+  const lines = body.split('\n').filter(isSpoken);
   const first = (lines[0] ?? '')
-    .replace(/^(You|Them): (SEG-\d+ )?/, '')
+    .replace(SPOKEN, '')
+    .replace(/^SEG-\d+ /, '')
     .split(' ')
     .slice(0, 6)
     .join(' ');

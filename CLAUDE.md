@@ -334,6 +334,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (`ModelDescriptor`: id/filename/url/sha256/is_directory/engine_type), resolves
   legacy/custom ids, and does download → SHA-256 verify → (tar.gz) extract.
   `apply_accelerator_settings` sets whisper→Vulkan(Auto) / ONNX→DirectML.
+  `transcribe_timed` (default: `transcribe`, no times) keeps the times the
+  model gives (`Timed { text, words: Vec<TimedText> }`, seconds from the
+  audio's start): Parakeet's words (`TimestampGranularity::Word`), Whisper's
+  segments (a phrase each), SenseVoice's tokens joined at "▁"; none for
+  Moonshine/GigaAM/Canary/Cohere or the stub. Only meetings call it.
 - **`llm.rs`** — the AI cleanup client (OpenAI-compatible). Frames the transcript as
   data (delimiters + one-shot) so small models *clean* it instead of *answering* it.
   The system prompt is split FluidVoice-style: an immutable `BASE_PROMPT` (guardrails:
@@ -349,7 +354,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `MEETING_TITLE_PROMPT`, and the one-tap chips' `MEETING_QUESTIONS_PROMPT`,
   `MEETING_FOLLOW_UP_PROMPT` — a plain-text email, subject line first — and
   `MEETING_BLIND_SPOTS_PROMPT`; all: only what's in the meeting, never
-  invent owners/dates/numbers, say when there's too little), `enhance_note`
+  invent owners/dates/numbers, say when there's too little; every meeting
+  prompt explains the labels through one `other_speakers!()` phrase: "You:",
+  a speaker's name (a known person, like an attendee; the "Speakers besides
+  You" line says which are guesses), "Speaker 2", or "Them"), `enhance_note`
   (the Actions-engine call, base prompt chosen by the caller), `chat` +
   `ChatOptions` (temperature, `max_tokens` — sent for local servers only —
   and timeout), `note_chat` (embedded per-note chat + Chat-surface turns), and
@@ -381,10 +389,16 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   Enhanced tab), `enhanced_at_hash` (OpenWhispr's `len+first-50` staleness
   marker), `folder` (string, seeded with Personal + Meetings), `participants`
   (attendee names, shown as chips and fed to prompts for attribution),
-  `transcript` (meeting-recorder You/Them segments, time-ordered; `echo` marks
+  `transcript` (meeting-recorder segments, time-ordered; `source` = the side,
+  "you" (mic) | "them" (call); `speaker` = the voice (`speakers.rs`; empty =
+  the side's own, read through `speaker_id()` — every old note reads as
+  You/Them), `speaker_locked` (the user said who this line is), `start_ms`/
+  `end_ms` (place on that recording's clock, ms; none on old lines and
+  markers), `words` (`[start, end]` ms from `start_ms` per word of `text`,
+  when the model gave times); `echo` marks
   speaker bleed, `dictated` a "You dictated here" marker — no text, `ts` where
   a mid-meeting dictation began; `is_talk()` = neither, what every summary
-  input reads), `digests` (rolling meeting digests, see `meeting_summary.rs`),
+  input reads), `speakers` (the speaker map, see `speakers.rs`), `digests` (rolling meeting digests, see `meeting_summary.rs`),
   `breaks` (the transcript's length at each stop — the notepad's paused
   dividers; `add_break`, never twice at one place or at 0),
   `note_type` ("personal" | "meeting"), `source` ("manual" | "upload" |
@@ -392,9 +406,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   5 Oct, 14:30" — so the AI meeting title may replace it; cleared for good by
   a title edit, so a typed title is never overwritten: `set_ai_title` checks
   under the store lock). `note_update` takes an `origin` (the saving window's
-  label) and emits `yap-note-changed` with the editable fields, which keeps the
-  Notes view and the meeting notepad in sync both ways (each sends only the
-  fields it edited). `modify(id, f)` changes one note under the store lock
+  label) and emits `yap-note-changed` with the editable fields (+ `speakers`;
+  after a speaker edit also `lineSpeakers`, `[voice, locked]` per line), which
+  keeps the Notes view and the meeting notepad in sync both ways (each sends
+  only the fields it edited). `modify(id, f)` changes one note under the store lock
   (read and write in one step — the chat's `edit_note`; only a change bumps
   `updated_ts` and saves). Unit tests get an in-memory store per test
   thread (`cfg(test)`), never `notes.json`. `event` (optional) = the calendar meeting the note
@@ -442,7 +457,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   corrected with corrected), works off a backlog in ≤30 s chunks back to back,
   caps each source's buffer at 20 min (then drops audio + a "Transcription
   is falling behind" notice),
-  dates each segment by its speech onset, flags **speaker echo** (a "you"
+  dates each segment by its speech onset, places it on the recording's clock
+  (`start_ms`/`end_ms`) with its words' times (`stt::transcribe_timed` →
+  `speakers::word_times`, lined up with the corrected text; `Heard::line`),
+  flags **speaker echo** (a "you"
   chunk whose words repeat "them" in order AND whose 20 ms loudness envelope
   follows the call 0–600 ms later — the timing test keeps a headphone user's
   own reply; flagged segments are kept, hidden, left out of summaries), and
@@ -479,6 +497,35 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `meeting_state` (signatures unchanged). Test mode opens no audio device (WAVs
   from `YAP_E2E_MEETING_AUDIO`, or silence; `e2e::e2e_meeting_feed`; the
   player also stages a dictation and an output switch, see `e2e.rs`).
+- **`speakers.rs`** — **who said what** in a meeting: the note's speaker map
+  (`Note::speakers`: voice id → `Speaker {name, email, source: user |
+  platform | voice | calendar | ai, locked, mergedInto, not}`) and the names
+  it puts on lines everywhere. Voices: "you", "them" (the call, not told
+  apart), later "them-1"… (the voice separation), "p-1"… (a person the user
+  named on some lines). **Precedence** (OpenWhispr's `speakerAssignmentPolicy`
+  by behaviour): the user's name is locked against every automatic relabel,
+  and so is a line they assigned (`speaker_locked`); otherwise call app >
+  voice match > calendar = AI guess, never downwards; "Not Priya" (`not`)
+  keeps that name off the voice for good. A calendar/AI name is a guess:
+  displayed "Priya?" (`display`), told to the prompts as a guess
+  (`speakers_line`). Edits (`rename` everywhere — to another voice's name =
+  merge; `rename_lines` — a voice by that name, else a new person, lines
+  locked; naming a line after a guess confirms it; `merge` — the more trusted
+  name wins, later lines of the merged id follow; `not`; "You" never renamed
+  or merged) are the commands `speaker_rename` / `speaker_rename_lines` /
+  `speaker_merge` / `speaker_not` (return the note, emit `yap-note-changed`
+  with `lineSpeakers` + `yap-notes-changed`); `suggest` is the automatic
+  path. **1:1 calls** (`calendar_guess`, from `notes::link_event`): exactly
+  one other invitee (no you, rooms or declines) → "Them" named after them,
+  source calendar. `known_people` (attendees + map names) is what owner
+  checks accept. **Groundwork for the voice separation**: `word_times(text,
+  timed)` (LCS line-up of the model's words with the corrected text; a word
+  the dictionary changed takes what it replaced), `line_timing`, and
+  `split_line(seg, &[Turn {start_ms, end_ms, speaker}])` — a line split at
+  its words where the speaker changes (most overlap, else nearest ≤ 1.5 s,
+  else neighbours; one-word blips < 400 ms smoothed), in proportion without
+  word times; a user-locked line, marker or unplaced line comes back
+  unchanged. Unit-tested.
 - **`meeting_summary.rs`** — meeting summaries that keep up with long meetings
   (map-reduce, the map done while recording). Every ~10 min of new talk
   (2,000 est. tokens, or 10 min with ≥ 250) a background **digest** (key
@@ -486,8 +533,14 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `llm::MEETING_DIGEST_PROMPT` + a one-shot; ≤ 2,600 tokens of transcript + the
   meeting so far ≤ 400) is written with the Note Formatting endpoint and
   stored on the note (`yap-meeting-digest`); owners must be You/Everyone/an
-  attendee/a name said in that part (else Unassigned) and deadlines must have
-  been said (`check_digest`). On a **local** endpoint digests wait for
+  attendee/a name in the speaker map/a name said in that part (else
+  Unassigned; `speakers::known_people`) and deadlines must have
+  been said (`check_digest`). **Speakers**: every input labels lines with the
+  speaker map's names (`transcript_lines(&note.speakers, …)` →
+  `speakers::prompt_label`: "You", "Them", "Priya", "Speaker 2") and, when
+  anyone is named or voices are told apart, adds "Speakers besides You: …"
+  under "Attendees" (`people_lines`; a calendar guess is said to be one);
+  plain You/Them meetings read exactly as before. On a **local** endpoint digests wait for
   dictations to finish and are dropped mid-call when one starts
   (`unless_busy` — closing the connection cancels it in llama.cpp), and
   replies are capped. `prepare_final` (one digest turn at a time,
@@ -839,10 +892,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   note to the meeting on now (service of the live call first, nearest start;
   from 10 min before) — title over a placeholder (`is_placeholder_title` /
   `title_open_to_ai`; then a real title), attendees, the cleaned invite
-  (`invite_context` → action plan + Ask) — and `note_changed`s every window;
+  (`invite_context` → action plan + Ask), and for a 1:1 meeting "Them" named
+  after the one other invitee as a guess (`notes::link_event` →
+  `speakers::calendar_guess`) — and `note_changed`s every window;
   `claims_call` / `on_call_started` for call detection (above);
-  `meeting::with_attendees` puts a meeting note's participants into Whisper's
-  prompt. Commands `calendar_status`/`_sync`/`_connect_google`/
+  `meeting::with_attendees` puts a meeting note's participants (and the
+  speaker map's names) into Whisper's prompt. Commands `calendar_status`/`_sync`/`_connect_google`/
   `_cancel_google`/`_add_link`/`_disconnect`/`_event(key, open|join|start|
   joinStart|switch|joinSwitch)`/`_card(id, join|start|snooze|dismiss)`/
   `_nudge`/`_meeting_notes(query)` (`hasPlan`, `hasTalk`: "Generate
@@ -954,7 +1009,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   digests when there's no summary, transcript in ~6k-token pages via
   `transcript_page`), `search_notes`, `get_note`, `list_folders`, and `create_note`
   only when `config.mcp_allow_writes` (Settings → MCP; source `"mcp"`). Markdown
-  for the model, local-time dates (chrono), "You/Them" explained.
+  for the model, local-time dates (chrono). Transcript lines carry the
+  speaker map's names (`speakers::display_line`: "You", "Them", "Priya",
+  "Priya?" for a guess, "Speaker 2"), and the instructions/page explain the
+  labels whether or not voices are told apart (`who_is_who`); the local API's
+  `/v1/notes/<id>` hands out `speakers` and each line's `speaker` as stored.
 - **`mcp_clients.rs`** — "Add to Claude / ChatGPT / Gemini / Cursor…" (Settings →
   MCP): edits each AI app's own config to launch `yap.exe mcp`. Claude desktop
   (`%APPDATA%\Claude\claude_desktop_config.json` **and** the MSIX build's
@@ -1986,7 +2045,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `notepadText.js`: Questions to ask while it records, Follow-up email and
   Gaps and risks after → `meeting_assist`, answered in the thread with a
   Copy button; no AI → a toast with Open Language Models); live
-  **You/Them meeting transcript bubbles** (follow the newest line; echo lines
+  **meeting transcript bubbles** under their speaker's name, once per run of
+  one voice (`transcriptItems`; the name opens the speaker menu, below; follow
+  the newest line; echo lines
   hidden behind a "Show N lines…" toggle; a `dictated` marker is a quiet dashed
   "You dictated here · left out of the notes" divider with a mic glyph), an
   **AI notes so far** view of the
@@ -2123,9 +2184,17 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   Transcript (a 3-bar burnt-orange waveform while recording), Summary ("+" until a
   summary exists). **Transcript**: the timer box (clock, elapsed, search —
   an inline input that filters and highlights lines, dividers hidden — and
-  copy all) with the dismissible tip strip attached; speaker groups ("You" /
-  "Them" in teal) of chat bubbles with Wispr's grouped corners and a hover
-  copy button each; a dashed **⏸ divider** wherever a recording stopped
+  copy all) with the dismissible tip strip attached; speaker groups (a run of
+  one voice: "You" / "Them" in teal, or the speaker map's names — "Priya",
+  "Speaker 2", a guess in italics as "Priya?") of chat bubbles with Wispr's
+  grouped corners and, on hover, a person button ("Who said this?") and a
+  copy button each; the name (or the person button, for one line) opens
+  **`SpeakerMenu.svelte`** (shared with the Notes view): "It's Priya" / "Not
+  Priya" on a guess, Rename X everywhere…, Rename just this line / these N
+  lines… (a name field with the attendees and known names as picks), Merge
+  with… (other voices; never You) → the `speaker_*` commands; other windows
+  follow `yap-note-changed`'s `lineSpeakers` (`withLineSpeakers`); Escape
+  closes just the menu; a dashed **⏸ divider** wherever a recording stopped
   (`note.breaks`, `yap-meeting-breaks`) and a "**You dictated here · left
   out of the notes**" divider (mic glyph) for a `dictated` marker; echo
   behind "Show N lines…"; "Yap is listening" / "No transcript yet" / "Live
@@ -2864,8 +2933,11 @@ Windows notifications, Focus Assist) not yet tried.
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
 search/archive/rename; the AI Notepad has no rich markdown editor (plain textarea)
-or folder "add existing note" picker; meetings have no speaker diarization
-("Them" is everyone else; tasks are attributed from attendees and names said)
+or folder "add existing note" picker; meetings don't tell voices apart yet
+("Them" is everyone else unless the user names or splits it, or a 1:1
+invite names it as a guess; the speaker map, line times and `split_line` are
+ready for the voice separation; tasks are attributed from attendees, the
+speaker map and names said)
 and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](./docs/meetings.md) "Limits"), and a real call (live
 WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a

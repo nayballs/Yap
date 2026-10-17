@@ -945,13 +945,13 @@ fn peak(samples: &[f32]) -> f32 {
     samples.iter().fold(0.0f32, |m, s| m.max(s.abs()))
 }
 
-/// The meeting's attendees (from its calendar invite, or typed in) ahead of
-/// the dictionary's spellings, for the Whisper prompt: names come out spelled
-/// as the invite has them.
+/// The meeting's attendees (from its calendar invite, or typed in) and the
+/// people its speaker map names, ahead of the dictionary's spellings, for the
+/// Whisper prompt: names come out spelled as the invite has them.
 fn with_attendees(dictionary: &[crate::config::DictionaryEntry]) -> Vec<crate::config::DictionaryEntry> {
     let names = recording_note()
         .and_then(crate::notes::get)
-        .map(|n| n.participants)
+        .map(|n| crate::speakers::known_people(&n))
         .unwrap_or_default();
     names
         .into_iter()
@@ -965,8 +965,10 @@ fn with_attendees(dictionary: &[crate::config::DictionaryEntry]) -> Vec<crate::c
 /// run the correction dictionary over it as a dictation's text gets it
 /// (`pipeline::apply_corrections`: exact, then fuzzy for ONNX models). Both
 /// sides go through here, so the echo check compares corrected text with
-/// corrected text.
-async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option<String> {
+/// corrected text. Also the times of its words, when the model gives them
+/// (ms from the chunk's start, one per word of the corrected text:
+/// `speakers::word_times`), for the voice separation to split lines at.
+async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option<(String, Vec<(u64, u64)>)> {
     if samples.len() < MIN_CHUNK_SECS * RATE || peak(&samples) < SILENCE_PEAK {
         return None;
     }
@@ -1001,7 +1003,7 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option
 
     let slot = Arc::clone(engine_slot);
     let outcome = tokio::task::spawn_blocking(move || {
-        let result = engine.transcribe(
+        let result = engine.transcribe_timed(
             &samples,
             language.as_deref(),
             translate,
@@ -1019,13 +1021,14 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option
                 }
             }
             match result {
-                Ok(text) => {
-                    let t = crate::pipeline::apply_corrections(text.trim(), &cfg);
+                Ok(timed) => {
+                    let t = crate::pipeline::apply_corrections(timed.text.trim(), &cfg);
                     let t = t.trim().to_string();
                     if t.is_empty() {
                         None
                     } else {
-                        Some(t)
+                        let words = crate::speakers::word_times(&t, &timed.words);
+                        Some((t, words))
                     }
                 }
                 Err(e) => {
@@ -1063,12 +1066,16 @@ impl Source {
         let to = from + chunk.samples.len() as u64;
         self.loudness.push(&chunk.samples);
         let onset = from + speech_onset(&chunk.samples) as u64;
-        let text = transcribe_chunk(engine_slot, chunk.samples).await;
+        let (text, words) = match transcribe_chunk(engine_slot, chunk.samples).await {
+            Some((text, words)) => (Some(text), words),
+            None => (None, Vec::new()),
+        };
         Some(Heard {
             from,
             to,
             onset,
             text,
+            words,
             dictated: chunk.dictated,
         })
     }
@@ -1083,8 +1090,30 @@ struct Heard {
     onset: u64,
     /// `None`: silence (a dictation blanked, say), or nothing came of it.
     text: Option<String>,
+    /// Its words' times, ms from `from` (empty: the model gives none).
+    words: Vec<(u64, u64)>,
     /// Where dictations began that are due a "you dictated here" marker.
     dictated: Vec<u64>,
+}
+
+impl Heard {
+    /// Line `text` of this chunk on the recording's clock: dated (`ts`, unix
+    /// seconds, via `at`) where its speech starts, placed in ms
+    /// (`speakers::line_timing`), its words' times kept.
+    fn line(&self, source: &str, text: String, at: impl Fn(u64) -> u64) -> TranscriptSegment {
+        let ms = |pos: u64| pos * 1000 / RATE as u64;
+        let (start_ms, end_ms, words) =
+            crate::speakers::line_timing(ms(self.from), ms(self.onset), ms(self.to), &self.words);
+        TranscriptSegment {
+            source: source.to_string(),
+            text,
+            ts: at(self.onset),
+            start_ms: Some(start_ms),
+            end_ms: Some(end_ms),
+            words,
+            ..Default::default()
+        }
+    }
 }
 
 /// Offset of the first 20 ms frame of speech in `samples`: the first at a
@@ -1434,14 +1463,8 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
             // a dictation marker by where the dictation began.
             let mut batch: Vec<(u64, TranscriptSegment)> = Vec::new();
             if let Some(h) = them.next(&engine_slot, stopping).await {
-                if let Some(text) = h.text {
-                    let seg = TranscriptSegment {
-                        source: "them".to_string(),
-                        text: text.clone(),
-                        ts: at(h.onset),
-                        echo: false,
-                        dictated: false,
-                    };
+                if let Some(text) = h.text.clone() {
+                    let seg = h.line("them", text.clone(), at);
                     batch.push((h.onset, seg));
                     theirs.push_back((h.from, h.to, text));
                     while theirs.len() > 4 {
@@ -1450,19 +1473,16 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
                 }
             }
             if let Some(h) = you.next(&engine_slot, stopping).await {
-                for from in h.dictated {
+                for &from in &h.dictated {
                     tracing::info!(note_id, "Meeting: a dictation was left out of \"You\"");
                     batch.push((from, TranscriptSegment::dictation_marker(at(from))));
                 }
-                if let Some(text) = h.text {
+                if let Some(text) = h.text.clone() {
                     let (mic, call) = (&you.loudness, &them.loudness);
                     let echo = sounds_like_echo(mic, call, h.from, h.to, &text, &theirs);
                     let seg = TranscriptSegment {
-                        source: "you".to_string(),
-                        text,
-                        ts: at(h.onset),
                         echo,
-                        dictated: false,
+                        ..h.line("you", text, at)
                     };
                     batch.push((h.onset, seg));
                 }

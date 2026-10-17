@@ -282,25 +282,35 @@ pub fn note_update(
 /// Tell every window that note `id`'s editable fields changed (`origin`:
 /// who changed them, a window label or "ai"); see [`note_update`].
 pub(crate) fn note_changed(app: &AppHandle, id: u64, origin: &str) {
+    note_changed_with(app, id, origin, None);
+}
+
+/// [`note_changed`], with each transcript line's voice and lock
+/// (`[speaker, locked]` per line) after a speaker edit (`speakers.rs`), so
+/// the notepad and the Notes view relabel their lines too.
+pub(crate) fn note_changed_with(app: &AppHandle, id: u64, origin: &str, line_speakers: Option<Vec<serde_json::Value>>) {
     use tauri::Emitter;
     if let Some(n) = crate::notes::get(id) {
-        let _ = app.emit(
-            "yap-note-changed",
-            serde_json::json!({
-                "id": n.id,
-                "title": n.title,
-                "titleAuto": n.title_auto,
-                "content": n.content,
-                "folder": n.folder,
-                "participants": n.participants,
-                "origin": origin,
-            }),
-        );
+        let mut payload = serde_json::json!({
+            "id": n.id,
+            "title": n.title,
+            "titleAuto": n.title_auto,
+            "content": n.content,
+            "folder": n.folder,
+            "participants": n.participants,
+            "speakers": n.speakers,
+            "origin": origin,
+        });
+        if let Some(lines) = line_speakers {
+            payload["lineSpeakers"] = serde_json::Value::Array(lines);
+        }
+        let _ = app.emit("yap-note-changed", payload);
     }
 }
 
 /// Export a note as a markdown file at `path` (the editor's download button):
-/// title heading + enhanced content (or raw) + the You/Them transcript.
+/// title heading + enhanced content (or raw) + the transcript, each line
+/// under its speaker's name ("You", "Priya", "Priya?" for a guess, "Them").
 #[tauri::command]
 pub fn note_export(id: u64, path: String) -> Result<(), String> {
     let note = crate::notes::get(id).ok_or("Note not found")?;
@@ -326,12 +336,12 @@ pub fn note_export(id: u64, path: String) -> Result<(), String> {
     }
     if !note.transcript.is_empty() {
         out.push_str("\n## Meeting Transcript\n\n");
-        for seg in &note.transcript {
+        for seg in note.transcript.iter().filter(|s| !s.echo) {
             if seg.dictated {
                 out.push_str("_You dictated here (left out of the notes)._\n\n");
                 continue;
             }
-            let who = if seg.source == "you" { "You" } else { "Them" };
+            let who = crate::speakers::display_line(&note.speakers, seg);
             out.push_str(&format!("**{who}:** {}\n\n", seg.text));
         }
     }
@@ -480,7 +490,8 @@ pub(crate) async fn run_enhance(
     let (content, attendees, digest_actions) = if is_meeting {
         let note = crate::meeting_summary::prepare_final(app, id, &ep).await?;
         let input = crate::meeting_summary::compose_meeting_input(&note);
-        (input.text, note.participants, input.digest_actions)
+        // The owner checks know the speaker map's names too.
+        (input.text, crate::speakers::known_people(&note), input.digest_actions)
     } else if note.participants.is_empty() {
         (note.content.clone(), Vec::new(), Vec::new())
     } else {
@@ -633,6 +644,9 @@ pub async fn note_ask(
     let mut context = String::new();
     if !note.participants.is_empty() {
         context.push_str(&format!("Attendees: {}\n", note.participants.join(", ")));
+    }
+    if let Some(line) = crate::speakers::speakers_line(&note) {
+        context.push_str(&format!("{line}\n"));
     }
     if let Some(invite) = crate::calendar::invite_context(&note) {
         context.push_str(&invite);

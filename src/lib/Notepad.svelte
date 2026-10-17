@@ -13,7 +13,10 @@
   //   - tabs: My thoughts (the note's own text, synced with the Notes view
   //     both ways: `yap-note-changed`, `origin` = window label), Transcript (a
   //     live waveform on the tab while recording; the timer box with search
-  //     and copy; speaker groups of chat bubbles with a hover copy; a paused
+  //     and copy; speaker groups of chat bubbles with a hover copy, named
+  //     from the note's speaker map — the menu on a name, or on a line's
+  //     person button, renames a voice everywhere or just that line, merges
+  //     two voices, and undoes a guess ("Priya?" → Not Priya); a paused
   //     divider where a recording stopped, `Note::breaks`; a marker where the
   //     person dictated mid-meeting, a `dictated` segment) and + Summary (the
   //     action plan Rust writes when the meeting ends, meeting_end.rs, with
@@ -37,6 +40,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { onMount, tick } from 'svelte';
   import ToastHost from './ui/ToastHost.svelte';
+  import SpeakerMenu from './SpeakerMenu.svelte';
   import { toast } from './ui/toast.svelte.js';
   import { renderMarkdown } from './markdown.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
@@ -64,6 +68,7 @@
     consentToSave,
     MEETING_HELPERS,
     meetingHelpers,
+    withLineSpeakers,
   } from './notepadText.js';
 
   /** This window's label: the `origin` of its saves and stops. */
@@ -108,6 +113,7 @@
         searchOpen = false;
         query = '';
         menu = null;
+        speakerMenu = null;
         confirmOpen = false;
       }
       note = n;
@@ -129,6 +135,7 @@
       }
       if (!dirty.content) note.content = n.content;
       note.transcript = n.transcript;
+      note.speakers = n.speakers;
       note.breaks = n.breaks;
       note.digests = n.digests;
       note.enhancedContent = n.enhancedContent;
@@ -169,6 +176,13 @@
     }
     if (!dirty.content) note.content = p.content;
     note.participants = p.participants;
+    if (p.speakers) note.speakers = p.speakers;
+    // A speaker renamed or merged in another window: every line's voice.
+    if (p.lineSpeakers) {
+      const t = withLineSpeakers(note.transcript, p.lineSpeakers);
+      if (t) note.transcript = t;
+      else reload();
+    }
   }
 
   // The title grows with what it says (a textarea, like Wispr's), one line
@@ -286,8 +300,24 @@
   let searchEl = $state(null);
   const searchQuery = $derived(searchOpen ? query.trim() : '');
   const items = $derived(
-    transcriptItems(note?.transcript, note?.breaks, { showEcho, query: searchQuery })
+    transcriptItems(note?.transcript, note?.breaks, { showEcho, query: searchQuery, speakers: note?.speakers })
   );
+
+  // The menu on a speaker's name (a group's: its lines) or on one line's
+  // person button: `{ key, voice, lines, start }` (SpeakerMenu.svelte).
+  let speakerMenu = $state(null);
+  function toggleSpeakerMenu(key, voice, lines, start = 'menu') {
+    speakerMenu = speakerMenu?.key === key ? null : { key, voice, lines, start };
+  }
+  /** A speaker edit made here: the map, and each line's voice. */
+  function onSpeakerChanged(updated) {
+    if (!note || updated?.id !== note.id) return;
+    note.speakers = updated.speakers || {};
+    const t = updated.transcript || [];
+    note.transcript = (note.transcript || []).map((s, i) =>
+      t[i] ? { ...s, speaker: t[i].speaker || '', speakerLocked: !!t[i].speakerLocked } : s
+    );
+  }
   const echoCount = $derived((note?.transcript || []).filter((s) => s.echo).length);
   const lineCount = $derived((note?.transcript || []).length);
   const meetingSecs = $derived.by(() => {
@@ -334,7 +364,8 @@
   $effect(() => {
     void items.length;
     void lineCount;
-    if (logEl && followLog && !searchQuery) logEl.scrollTop = logEl.scrollHeight;
+    // (Not while a speaker's menu is open over a line.)
+    if (logEl && followLog && !searchQuery && !speakerMenu) logEl.scrollTop = logEl.scrollHeight;
   });
 
   // Copy: one line (from its bubble), or the whole transcript.
@@ -347,7 +378,7 @@
     }
   }
   async function copyTranscript() {
-    if (await copyToClipboard(transcriptText(note?.transcript))) {
+    if (await copyToClipboard(transcriptText(note?.transcript, note?.speakers))) {
       // The button's ✓ says it (no toast on top).
       transcriptCopied = true;
       setTimeout(() => (transcriptCopied = false), 1200);
@@ -805,6 +836,7 @@
     {:else if name === 'close'}<path d="M6 6l12 12M18 6L6 18" />
     {:else if name === 'clock'}<circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" />
     {:else if name === 'search'}<circle cx="11" cy="11" r="6" /><path d="M20 20l-4.5-4.5" />
+    {:else if name === 'person'}<circle cx="12" cy="8.5" r="3.5" /><path d="M5 19.5a7 7 0 0 1 14 0" />
     {:else if name === 'copy'}<rect x="8.5" y="8.5" width="11" height="11" rx="2.5" /><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" />
     {:else if name === 'x'}<path d="M7 7l10 10M17 7L7 17" />
     {:else if name === 'pause'}<rect x="7" y="5" width="3.2" height="14" rx="1" /><rect x="13.8" y="5" width="3.2" height="14" rx="1" />
@@ -1064,16 +1096,60 @@
               {#each items as item (item.key)}
                 {#if item.kind === 'group'}
                   <div class="group {item.source === 'you' ? 'you' : 'them'}" class:echo={item.echo}>
-                    <span class="who">{item.source === 'you' ? 'You' : 'Them'}{item.echo ? ' · from the speakers' : ''}</span>
+                    {#if item.echo}
+                      <span class="who">{item.label} · from the speakers</span>
+                    {:else}
+                      <span class="spkwrap">
+                        <button
+                          class="who"
+                          class:guess={item.guess}
+                          aria-haspopup="menu"
+                          aria-expanded={speakerMenu?.key === item.key}
+                          title={item.guess ? 'A guess from the calendar invite: click to confirm or change' : 'Rename, merge or correct this speaker'}
+                          onclick={() => toggleSpeakerMenu(item.key, item.speaker, item.lines.map((l) => l.i))}
+                        >{item.label}</button>
+                        {#if speakerMenu?.key === item.key}
+                          <SpeakerMenu
+                            {note}
+                            voice={speakerMenu.voice}
+                            lines={speakerMenu.lines}
+                            origin={LABEL}
+                            onclose={() => (speakerMenu = null)}
+                            onchanged={onSpeakerChanged}
+                          />
+                        {/if}
+                      </span>
+                    {/if}
                     <div class="bubbles">
                       {#each item.lines as line, j (line.i)}
-                        <div class="row">
+                        <div class="row" class:menuopen={speakerMenu?.key === `l${line.i}`}>
                           <div class="bubble {bubbleShape(j, item.lines.length)}">
                             {#each highlightParts(line.text, searchQuery) as part, k (k)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}
                           </div>
+                          {#if !item.echo}
+                            <button
+                              class="linewho"
+                              aria-label="Who said this?"
+                              onclick={() => toggleSpeakerMenu(`l${line.i}`, item.speaker, [line.i], 'lines')}
+                            >
+                              {@render icon('person')}
+                            </button>
+                          {/if}
                           <button class="linecopy" aria-label="Copy line" onclick={() => copyLine(line)}>
                             {@render icon(copiedLine === line.i ? 'check' : 'copy')}
                           </button>
+                          {#if speakerMenu?.key === `l${line.i}`}
+                            <SpeakerMenu
+                              {note}
+                              voice={speakerMenu.voice}
+                              lines={speakerMenu.lines}
+                              start="lines"
+                              align="right"
+                              origin={LABEL}
+                              onclose={() => (speakerMenu = null)}
+                              onchanged={onSpeakerChanged}
+                            />
+                          {/if}
                         </div>
                       {/each}
                     </div>
@@ -1928,12 +2004,35 @@
     font-weight: 550;
     line-height: 18px;
   }
+  .spkwrap {
+    position: relative;
+    align-self: flex-start;
+  }
+  button.who {
+    padding: 0 4px;
+    margin: 0 -4px;
+    border: none;
+    border-radius: 5px;
+    background: none;
+    color: inherit;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  button.who:hover,
+  button.who[aria-expanded='true'] {
+    background: var(--yap-paper-s2);
+  }
+  /* A guess ("Priya?"): the name, a little quieter. */
+  button.who.guess {
+    font-style: italic;
+  }
   .group.them .who {
     color: var(--them);
   }
   .row {
     position: relative;
-    padding-right: 24px;
+    padding-right: 50px;
   }
   .bubble {
     width: fit-content;
@@ -1984,9 +2083,37 @@
     transform: translateY(-50%);
     transition: opacity 0.12s;
   }
-  .linecopy :global(svg) {
+  .linecopy :global(svg),
+  .linewho :global(svg) {
     width: 14px;
     height: 14px;
+  }
+  .linewho {
+    position: absolute;
+    top: 50%;
+    right: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--yap-paper-text-2);
+    opacity: 0;
+    transform: translateY(-50%);
+    transition: opacity 0.12s;
+  }
+  .row:hover .linewho,
+  .row.menuopen .linewho,
+  .linewho:focus-visible {
+    opacity: 1;
+  }
+  .linewho:hover {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
   }
   .row:hover .linecopy,
   .linecopy:focus-visible {

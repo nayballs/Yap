@@ -117,14 +117,15 @@ pub fn field_text(note: &Note, field: Field) -> String {
 }
 
 /// A meeting's talk, one line per segment, timed from the first segment
-/// (as the notepad's timer counts): `[12:04] Them: …`.
+/// (as the notepad's timer counts), under its speaker's name: `[12:04]
+/// Them: …`, `[12:20] Priya: …` (`speakers::display_line`).
 fn transcript_text(note: &Note) -> String {
     let t0 = note.transcript.first().map(|s| s.ts).unwrap_or(0);
     note.transcript
         .iter()
         .filter(|s| s.is_talk() && !s.text.trim().is_empty())
         .map(|s| {
-            let who = if s.source == "you" { "You" } else { "Them" };
+            let who = crate::speakers::display_line(&note.speakers, s);
             let text = s.text.split_whitespace().collect::<Vec<_>>().join(" ");
             format!(
                 "[{}] {who}: {text}",
@@ -893,8 +894,7 @@ mod tests {
             source: source.into(),
             text: text.into(),
             ts,
-            echo: false,
-            dictated: false,
+            ..Default::default()
         }
     }
 
