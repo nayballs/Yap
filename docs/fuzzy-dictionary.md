@@ -249,7 +249,8 @@ dictionary auto-learn (teardown `04-dictation-and-other.md`) and OpenWhispr's
 `correctionLearner.js`; Wispr has a **cloud** classifier confirm each word
 and adds it with an Undo, Yap decides **on this PC** and asks first.
 
-**Seeing the fix.** After a paste with no submit key, a thread holds the
+**Seeing the fix.** After a paste with no submit key (and not into a
+terminal, whose text is the program's output too), a thread holds the
 focused field over UI Automation (`selection::WatchedField` — the target
 window's process only, never a password box or a read-only field, never in a
 test run) and reads ±2,000 characters around the caret. Right after the paste

@@ -20,7 +20,8 @@
 //!    was pasted (that's writing on, not correcting). A span that changed
 //!    and then sat still for [`SETTLE`] is looked at, and whatever it was
 //!    when the watch ended. Everything stays in memory; logs carry lengths
-//!    and counts only. Never in a test run, never after a submit key.
+//!    and counts only. Never in a test run; the pipeline doesn't ask after
+//!    a submit key or for a terminal (its text is the program's output too).
 //! 2. **The candidates** ([`suggestions`], pure, unit-tested): the pasted
 //!    and the edited words are aligned (longest common subsequence, ignoring
 //!    case and the punctuation at their edges); what's left between matched

@@ -1303,7 +1303,12 @@ impl Shared {
                                     } else {
                                         // "Suggest words from your corrections":
                                         // watch the field for a fix (learn.rs).
-                                        let learn = self.config.read().map(|c| c.learn_words).unwrap_or(false);
+                                        // Not a terminal's: its text is the
+                                        // program's output too.
+                                        let terminal =
+                                            self.target_kind.lock().map(|k| k.is_terminal()).unwrap_or(true);
+                                        let learn = !terminal
+                                            && self.config.read().map(|c| c.learn_words).unwrap_or(false);
                                         crate::learn::after_paste(&self.app, &corrected, target, learn);
                                     }
                                 }
