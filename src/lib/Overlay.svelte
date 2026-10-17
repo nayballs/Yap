@@ -9,7 +9,9 @@
   //             a tooltip naming each button's shortcut;
   //   dictating the dictation overlay (waveform, live text, Transcribing…,
   //             the error) in the pill's place, with ✕ / ✓ while it records
-  //             and "Dictation cancelled · Undo" after a cancel;
+  //             (as Settings says: off by default, when pointed at, or
+  //             always; never while the push-to-talk key is held) and "Dictation
+  //             cancelled · Undo" after a cancel;
   //   meeting   a 69 × 30 recording pill at half opacity (5 bars, the stop
   //             circle) that shows its timer when hovered;
   //   cards     26 px above the pill: Yap's notices while its window isn't
@@ -51,6 +53,8 @@
     waiting: [],
     // 'light' (the default) | 'dark': Settings → Yap bar → Colours.
     theme: 'light',
+    // The dictation capsule's ✕ / ✓: 'off' (the default) | 'hover' | 'always'.
+    dictationButtons: 'off',
   });
   // The --bar-* colours (app.css): light unless the page is marked dark.
   $effect(() => {
@@ -306,7 +310,7 @@
   <div class="dock" bind:clientHeight={dockH}>
     {#if mode === 'dictation'}
       <div class="hit quiet" in:scale={{ start: 0.7, duration: 220, easing: cubicOut }} out:fade={{ duration: 120 }}>
-        <DictationCapsule />
+        <DictationCapsule buttons={bar.dictationButtons} hovered={pointer === 'dictation'} />
       </div>
     {:else if mode === 'meeting'}
       <div

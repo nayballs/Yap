@@ -44,7 +44,10 @@
 //!   ones and repeats within a cooldown dropped); the rest wait their turn.
 //!
 //! Settings → General → Yap bar: `bar_enabled` (on), `bar_hide_fullscreen`
-//! (on); `overlay_position` puts it at the top instead. With the bar off Yap
+//! (on), `bar_dictation_buttons` (the dictation capsule's ✕ / ✓: "off" by
+//! default, "hover" — only while the pointer is on the capsule, which is a
+//! region then so this poller sees it — or "always"; never while the
+//! push-to-talk key is held); `overlay_position` puts it at the top instead. With the bar off Yap
 //! behaves as before: the overlay only while dictating, notices as Windows
 //! notifications.
 //!
@@ -326,6 +329,9 @@ struct State {
     hide_fullscreen: bool,
     /// "light" | "dark" (`bar_theme`): which `--bar-*` colours the page uses.
     theme: &'static str,
+    /// "hover" | "always" | "off" (`bar_dictation_buttons`): the dictation
+    /// capsule's ✕ / ✓.
+    dictation_buttons: &'static str,
     edge: Edge,
     /// The dictation hotkey and meeting-notes shortcut specs, for tooltips.
     hotkey: String,
@@ -375,6 +381,7 @@ impl Default for State {
             enabled: true,
             hide_fullscreen: true,
             theme: "light",
+            dictation_buttons: "off",
             edge: Edge::Bottom,
             hotkey: String::new(),
             meeting_hotkey: None,
@@ -500,6 +507,11 @@ pub struct Status {
     hide_fullscreen: bool,
     /// "light" | "dark": the page sets `data-bar-theme` from it.
     theme: &'static str,
+    /// The dictation capsule's ✕ / ✓ while it records: "off" (the default) |
+    /// "hover" (only while the pointer is on it) | "always". None while the
+    /// push-to-talk key is held, whatever this says (the page follows the
+    /// gesture).
+    dictation_buttons: &'static str,
     /// On screen right now.
     shown: bool,
     /// "bottom" | "top" (`overlay_position`).
@@ -534,6 +546,7 @@ pub fn status() -> Status {
         enabled: s.enabled,
         hide_fullscreen: s.hide_fullscreen,
         theme: s.theme,
+        dictation_buttons: s.dictation_buttons,
         shown: s.shown,
         edge: s.edge.as_str(),
         hidden_until: (s.hidden_until > now).then_some(s.hidden_until),
@@ -940,6 +953,18 @@ fn theme_from_config(value: &str) -> &'static str {
     if value.eq_ignore_ascii_case("dark") { "dark" } else { "light" }
 }
 
+/// `bar_dictation_buttons` as the page wants it: "hover" or "always" as
+/// written, anything else the default, "off".
+fn dictation_buttons_from_config(value: &str) -> &'static str {
+    if value.eq_ignore_ascii_case("hover") {
+        "hover"
+    } else if value.eq_ignore_ascii_case("always") {
+        "always"
+    } else {
+        "off"
+    }
+}
+
 fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
     let edge = Edge::from_config(&cfg.overlay_position);
     // Read loosely: the meeting-notes shortcut may not exist in this build.
@@ -948,9 +973,11 @@ fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
         .and_then(|v| v.get("meetingHotkey").and_then(|h| h.as_str()).map(str::to_string))
         .filter(|h| !h.is_empty());
     let theme = theme_from_config(&cfg.bar_theme);
+    let dictation_buttons = dictation_buttons_from_config(&cfg.bar_dictation_buttons);
     let changed = s.enabled != cfg.bar_enabled
         || s.hide_fullscreen != cfg.bar_hide_fullscreen
         || s.theme != theme
+        || s.dictation_buttons != dictation_buttons
         || s.edge != edge
         || s.hotkey != cfg.hotkey
         || s.meeting_hotkey != meeting_hotkey;
@@ -958,6 +985,7 @@ fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
     s.enabled = cfg.bar_enabled;
     s.hide_fullscreen = cfg.bar_hide_fullscreen;
     s.theme = theme;
+    s.dictation_buttons = dictation_buttons;
     s.edge = edge;
     s.hotkey = cfg.hotkey.clone();
     s.meeting_hotkey = meeting_hotkey;
@@ -1673,6 +1701,27 @@ mod tests {
         assert_eq!(crate::config::YapConfig::default().bar_theme, "light");
         let old: crate::config::YapConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(old.bar_theme, "light"); // a config saved before the setting
+    }
+
+    #[test]
+    fn the_capsule_buttons_read_loosely_and_default_to_off() {
+        assert_eq!(dictation_buttons_from_config("always"), "always");
+        assert_eq!(dictation_buttons_from_config("Always"), "always");
+        assert_eq!(dictation_buttons_from_config("hover"), "hover");
+        assert_eq!(dictation_buttons_from_config("off"), "off");
+        assert_eq!(dictation_buttons_from_config(""), "off");
+        assert_eq!(dictation_buttons_from_config("sometimes"), "off");
+        assert_eq!(crate::config::YapConfig::default().bar_dictation_buttons, "off");
+        let old: crate::config::YapConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.bar_dictation_buttons, "off"); // saved before the setting
+        assert_eq!(State::default().dictation_buttons, "off");
+        // Settings' save reaches the page's snapshot.
+        let mut s = State::default();
+        let cfg = crate::config::YapConfig { bar_dictation_buttons: "hover".into(), ..Default::default() };
+        read_config(&mut s, &cfg);
+        assert_eq!(s.dictation_buttons, "hover");
+        assert!(read_config(&mut s, &crate::config::YapConfig::default()));
+        assert_eq!(s.dictation_buttons, "off");
     }
 
     #[test]

@@ -64,6 +64,9 @@ test('a hold records while the key is down and transcribes when it comes up', as
   await main.waitForTimeout(1_200);
   await expect(capsule(yap).locator('.dot.rec')).toBeVisible();
   await expect(capsule(yap).getByRole('img', { name: /Hands-free/ })).toHaveCount(0);
+  // Held: no ✕ / ✓ to point at (letting go is the stop).
+  await expect(capsule(yap).getByRole('button')).toHaveCount(0);
+  expect(await capsule(yap).getAttribute('data-region')).toBe(null);
   await shot(yap.overlay, '02-holding');
   await hotkeyUp(main);
   await expectStore(yap, 'history.json', (h) => h.length === before + 1 && JSON.stringify(h).includes('STT stub'));
@@ -127,6 +130,67 @@ test('a double-tap records hands-free until the next press', async ({ yap, main,
   await idle(yap);
   await main.waitForTimeout(500);
   await expect(main.getByRole('status').filter({ hasText: 'while you talk' })).toHaveCount(0);
+});
+
+// The capsule's ✕ / ✓ are off by default (bar.spec.js); switched on, they
+// follow push-to-talk's gestures.
+test('the capsule\'s ✕ / ✓: never while the key is held, even on "Always"; hands-free, as set', async ({
+  yap,
+  main,
+  shot,
+}) => {
+  await needsMic(yap);
+  const buttons = () => capsule(yap).getByRole('button');
+  const done = capsule(yap).getByRole('button', { name: 'Stop and paste' });
+  const setButtons = async (value) => {
+    await yap.invoke('save_config', { cfg: { ...(await yap.invoke('get_config')), barDictationButtons: value } });
+    await expect.poll(() => yap.invoke('bar_status').then((s) => s.dictationButtons)).toBe(value);
+  };
+  await setButtons('always');
+  try {
+    // Held: none, and nothing for the pointer (the capsule isn't a region).
+    const before = dictations(yap);
+    await hotkeyDown(main);
+    await expect(capsule(yap).locator('.dot.rec')).toBeVisible();
+    await main.waitForTimeout(1_000);
+    await expect(buttons()).toHaveCount(0);
+    expect(await capsule(yap).getAttribute('data-region')).toBe(null);
+    await shot(yap.overlay, '08-held-no-buttons-even-on-always');
+    await hotkeyUp(main);
+    await expectStore(yap, 'history.json', (h) => h.length === before + 1);
+    await idle(yap);
+
+    // A double-tap: hands-free, so "Always" shows them (with the lock).
+    await pressHotkey(main);
+    await pressHotkey(main);
+    await expect(capsule(yap).getByRole('img', { name: /Hands-free/ })).toBeVisible();
+    await expect(done).toBeVisible();
+    await expect(capsule(yap).getByRole('button', { name: 'Cancel dictation' })).toBeVisible();
+    await main.waitForTimeout(800);
+    await shot(yap.overlay, '09-hands-free-buttons-always');
+    // ✓ stops it, as the next press would.
+    await yap.invoke('bar_simulate', { pointer: 'dictation' });
+    await done.click();
+    await expectStore(yap, 'history.json', (h) => h.length === before + 2);
+    await idle(yap);
+
+    // "When you point at it": hands-free shows them only then.
+    await setButtons('hover');
+    await yap.invoke('bar_simulate', { pointer: 'away' });
+    await pressHotkey(main);
+    await pressHotkey(main);
+    await expect(capsule(yap).getByRole('img', { name: /Hands-free/ })).toBeVisible();
+    await expect(done).toBeHidden();
+    await expect.poll(() => capsule(yap).getAttribute('data-region')).toBe('dictation');
+    await yap.invoke('bar_simulate', { pointer: 'dictation' });
+    await expect(done).toBeVisible();
+    await pressHotkey(main);
+    await expectStore(yap, 'history.json', (h) => h.length === before + 3);
+    await idle(yap);
+  } finally {
+    await yap.invoke('bar_simulate', { pointer: 'away' }).catch(() => {});
+    await setButtons('off'); // the default
+  }
 });
 
 test('with the main window away, the hint is a card on the Yap bar', async ({ yap, shot }) => {

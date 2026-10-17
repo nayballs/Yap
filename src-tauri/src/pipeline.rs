@@ -583,6 +583,12 @@ impl Shared {
         match step.action {
             Action::Start => {
                 g.edit = edit;
+                // Held: the bar's capsule shows no ✕ / ✓ until it locks
+                // hands-free (`yap-dictation-locked`) — the tap's wait for a
+                // second press included, so nothing flashes. Said before the
+                // recording starts, so its first frame already knows; the
+                // page forgets it with the recording.
+                let _ = self.app.emit("yap-dictation-held", true);
                 self.start_recording(edit);
                 // Refused (still transcribing the last one, no mic): nothing
                 // to hold, tap or lock.
