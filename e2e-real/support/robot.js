@@ -132,11 +132,12 @@ export class Robot {
 
   /**
    * An Edge app window on a "WhatsApp" page (`note`: text above its box;
-   * `{ editable }`: the box a contenteditable, as WhatsApp Web's is).
+   * `{ editable }`: the box a contenteditable, as WhatsApp Web's is;
+   * `{ attrs }`: the box's attributes instead of its aria-label).
    */
-  async chat(note, { editable = false } = {}) {
+  async chat(note, { editable = false, attrs } = {}) {
     return this.track(
-      await startChatPage({ nonce: this.nonce, dir: path.join(this.dir, `chat-${this.targets.length}`), note, editable }),
+      await startChatPage({ nonce: this.nonce, dir: path.join(this.dir, `chat-${this.targets.length}`), note, editable, attrs }),
     );
   }
 

@@ -464,10 +464,10 @@ export function startEditorPage({ nonce, dir, note, beside }) {
 /**
  * A page titled "WhatsApp - <nonce>": a chat app to Yap (nothing is sent
  * anywhere); `editable`: its message box a contenteditable, as WhatsApp
- * Web's is.
+ * Web's is; `attrs`: the box's attributes (default: its aria-label).
  */
-export function startChatPage({ nonce, dir, note, editable }) {
-  return startPage({ nonce, dir, title: `WhatsApp - ${nonce}`, note, editable, attrs: 'aria-label="Type a message"' });
+export function startChatPage({ nonce, dir, note, editable, attrs = 'aria-label="Type a message"' }) {
+  return startPage({ nonce, dir, title: `WhatsApp - ${nonce}`, note, editable, attrs });
 }
 
 // ---- Notepad ----
