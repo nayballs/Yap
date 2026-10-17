@@ -22,7 +22,9 @@
   import ActionManager from './ActionManager.svelte';
   import { noteRequest } from './meetingDetect.svelte.js';
   import { summaries, loadSummary, summarise } from './meetingSummary.svelte.js';
-  import { MEETING_HELPERS, meetingHelpers } from './notepadText.js';
+  import { MEETING_HELPERS, meetingHelpers, noteMarkdown } from './notepadText.js';
+  import ContextMenu from './ui/ContextMenu.svelte';
+  import ConfirmDialog from './ui/ConfirmDialog.svelte';
 
   /** This window's label: the `origin` of its saves and stops. */
   const LABEL = 'settings';
@@ -397,14 +399,213 @@
     }
   }
 
+  // Delete a note. A meeting note goes the notepad's way (`meeting_delete`:
+  // a recording into it stops first, the notepad lets go of it, its summary
+  // job is dropped); anything else is `note_delete`, which refuses a note
+  // that's recording.
   async function removeNote(id) {
+    const n = notes.find((x) => x.id === id);
+    const meetingNote = n?.noteType === 'meeting' || (meeting.recording && meeting.noteId === id);
+    // What's being typed is saved first: kept if the delete fails.
+    if (selected?.id === id) flushSave();
     try {
-      await invoke('note_delete', { id });
-    } catch {
-      /* ignore */
+      await invoke(meetingNote ? 'meeting_delete' : 'note_delete', meetingNote ? { noteId: id } : { id });
+    } catch (e) {
+      toast({ title: "Couldn't delete the note", description: String(e), variant: 'destructive' });
+      refreshList();
+      return false;
     }
     if (selected?.id === id) selected = null;
     refreshList();
+    return true;
+  }
+
+  // ---- Right-click menus (OpenWhispr's folder and note dropdowns, as
+  // context menus too: ui/ContextMenu.svelte) ----
+
+  // Yap files notes into these two: they can't be renamed or deleted (Rust
+  // refuses too, notes.rs `is_protected_folder`).
+  const PROTECTED = { personal: 'new notes go here.', meetings: 'meeting notes go here.' };
+  const protectedReason = (f) => PROTECTED[f.trim().toLowerCase()] ?? null;
+
+  let menu = $state({ open: false, x: 0, y: 0, items: [], label: '', keyboard: false, alignEnd: false, returnFocus: null });
+
+  /**
+   * Open a row's menu: at the pointer (a right-click), under its ⋯ button,
+   * or at the row (the ContextMenu key, Shift+F10). Cancels the event, so
+   * WebView2 never shows its own.
+   */
+  function openMenu(e, items, label, row) {
+    // (A `contextmenu` the key may send after its keydown goes to the open
+    // menu, which has the focus by then, and cancels it.)
+    e.preventDefault();
+    e.stopPropagation();
+    const fromButton = e.currentTarget?.dataset?.more != null;
+    const byKey =
+      e.type === 'keydown' ||
+      (e.type === 'contextmenu' && e.button !== 2) ||
+      (e.type === 'click' && e.detail === 0);
+    let x = e.clientX;
+    let y = e.clientY;
+    let alignEnd = false;
+    if (fromButton || byKey) {
+      const r = (fromButton ? e.currentTarget : row).getBoundingClientRect();
+      x = fromButton ? r.right : r.left + 12;
+      y = r.bottom + 4;
+      alignEnd = fromButton;
+    }
+    menu = { open: true, x, y, items, label, keyboard: byKey, alignEnd, returnFocus: row };
+  }
+  function menuKey(e, open) {
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) open(e);
+  }
+
+  // Folders: Rename (inline), Delete… (confirm; its notes go to Personal).
+  let renamingFolder = $state(null);
+  let renameValue = $state('');
+  let folderEls = $state({});
+  function folderMenu(e, f) {
+    const reason = protectedReason(f);
+    const items = [
+      { label: 'Rename', icon: 'pencil', disabled: !!reason, onselect: () => startFolderRename(f) },
+      { separator: true },
+      { label: 'Delete…', icon: 'trash', danger: true, disabled: !!reason, onselect: () => askDeleteFolder(f) },
+    ];
+    if (reason) items.push({ note: `Yap's own folder: ${reason}` });
+    openMenu(e, items, `Folder ${f}`, folderEls[f]);
+  }
+  function startFolderRename(f) {
+    renamingFolder = f;
+    renameValue = f;
+  }
+  async function finishFolderRename(save = true) {
+    const from = renamingFolder;
+    if (from == null) return;
+    renamingFolder = null;
+    const to = renameValue.trim();
+    renameValue = '';
+    if (!save || !to || to === from) {
+      setTimeout(() => folderEls[from]?.focus({ preventScroll: true }), 0);
+      return;
+    }
+    try {
+      folders = await invoke('notes_folder_rename', { from, to });
+      if (activeFolder === from) activeFolder = to;
+      if (selected?.folder === from) selected.folder = to;
+      await refreshList();
+      setTimeout(() => folderEls[to]?.focus({ preventScroll: true }), 0);
+    } catch (e) {
+      toast({ title: "Couldn't rename the folder", description: String(e), variant: 'destructive' });
+    }
+  }
+  function focusOnMount(el) {
+    el.focus();
+    el.select();
+  }
+
+  // A confirm dialog for every delete here: `{ title, body, run }`.
+  let ask = $state({ open: false, title: '', body: '', run: null, busy: false, returnFocus: null });
+  function askDeleteFolder(f) {
+    const count = folderCounts[f] || 0;
+    ask = {
+      open: true,
+      title: `Delete “${f}”?`,
+      body:
+        count === 0
+          ? 'The folder is empty.'
+          : `${count === 1 ? 'Its note' : `Its ${count} notes`} will move to Personal.`,
+      run: () => deleteFolder(f),
+      busy: false,
+      returnFocus: folderEls[f],
+    };
+  }
+  async function deleteFolder(f) {
+    try {
+      folders = await invoke('notes_folder_delete', { name: f });
+      if (activeFolder === f) activeFolder = 'Personal';
+      if (selected?.folder === f) selected.folder = 'Personal';
+      await refreshList();
+      setTimeout(() => folderEls.Personal?.focus({ preventScroll: true }), 0);
+      return true;
+    } catch (e) {
+      toast({ title: "Couldn't delete the folder", description: String(e), variant: 'destructive' });
+      return false;
+    }
+  }
+  async function runAsk() {
+    if (!ask.run || ask.busy) return;
+    ask.busy = true;
+    const ok = await ask.run();
+    ask.busy = false;
+    // Done: its row is gone, so the focus isn't sent back to it.
+    if (ok) ask = { ...ask, open: false, returnFocus: null };
+  }
+
+  // Notes: Rename (the title), Move to ▸, Copy as Markdown, Export…, Delete….
+  let itemEls = $state({});
+  function noteMenu(e, n) {
+    const here = n.folder || 'Personal';
+    const recording = meeting.recording && meeting.noteId === n.id;
+    openMenu(
+      e,
+      [
+        { label: 'Rename', icon: 'pencil', onselect: () => renameNote(n.id) },
+        {
+          label: 'Move to',
+          icon: 'folder',
+          items: folders.map((f) => ({
+            label: f,
+            checked: f === here,
+            disabled: f === here,
+            onselect: () => moveToFolder(f, n.id),
+          })),
+        },
+        { separator: true },
+        { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyNoteMarkdown(n.id) },
+        { label: 'Export…', icon: 'download', onselect: () => exportNote(n.id) },
+        { separator: true },
+        {
+          label: 'Delete…',
+          icon: 'trash',
+          danger: true,
+          onselect: () => {
+            ask = {
+              open: true,
+              title: `Delete “${displayTitle(n)}”?`,
+              body: recording
+                ? 'The recording stops first. Its transcript, your notes and the summary go for good.'
+                : n.noteType === 'meeting'
+                  ? 'Its transcript, your notes and the summary go for good.'
+                  : 'The note goes for good.',
+              run: () => removeNote(n.id),
+              busy: false,
+              returnFocus: itemEls[n.id],
+            };
+          },
+        },
+      ],
+      `Note ${displayTitle(n)}`,
+      itemEls[n.id]
+    );
+  }
+  let titleEl = $state(null);
+  async function renameNote(id) {
+    if (selected?.id !== id) await select(id);
+    if (selected?.id !== id) return;
+    setTimeout(() => {
+      titleEl?.focus();
+      titleEl?.select();
+    }, 0);
+  }
+  async function copyNoteMarkdown(id) {
+    if (selected?.id === id) flushSave();
+    try {
+      const n = selected?.id === id ? selected : await invoke('note_get', { id });
+      await navigator.clipboard.writeText(noteMarkdown(n));
+      toast({ title: 'Copied as markdown' });
+    } catch (e) {
+      toast({ title: "Couldn't copy", description: String(e), variant: 'destructive' });
+    }
   }
 
   // Debounced autosave of title + content while typing. flushSave() only
@@ -545,30 +746,36 @@
     selected.participants = (selected.participants || []).filter((_, j) => j !== i);
     persistParticipants();
   }
-  async function moveToFolder(f) {
+  // Move the open note (the folder chip), or note `id` (its row's menu).
+  async function moveToFolder(f, id = selected?.id) {
     folderMenuOpen = false;
-    if (!selected || selected.folder === f) return;
-    selected.folder = f;
+    if (id == null) return;
+    const open = selected?.id === id ? selected : null;
+    const from = open ? open.folder : notes.find((n) => n.id === id)?.folder;
+    if ((from || 'Personal') === f) return;
+    if (open) open.folder = f;
     try {
-      await invoke('note_update', { id: selected.id, folder: f });
+      await invoke('note_update', { id, folder: f });
       refreshList();
       toast({ title: `Moved to ${f}` });
     } catch (e) {
       toast({ title: "Couldn't move note", description: String(e), variant: 'destructive' });
     }
   }
-  async function exportNote() {
-    if (!selected) return;
-    flushSave();
+  // Export the open note (the editor's button), or note `id` (its row's menu).
+  async function exportNote(id = selected?.id) {
+    if (id == null) return;
+    if (selected?.id === id) flushSave();
     try {
+      const n = selected?.id === id ? selected : notes.find((x) => x.id === id);
       const { save } = await import('@tauri-apps/plugin-dialog');
-      const suggested = (displayTitle(selected) || 'note').replace(/[\\/:*?"<>|]/g, '-');
+      const suggested = (displayTitle(n || {}) || 'note').replace(/[\\/:*?"<>|]/g, '-');
       const path = await save({
         defaultPath: `${suggested}.md`,
         filters: [{ name: 'Markdown', extensions: ['md'] }],
       });
       if (!path) return;
-      await invoke('note_export', { id: selected.id, path });
+      await invoke('note_export', { id, path });
       toast({ title: 'Note exported', description: path, variant: 'success' });
     } catch (e) {
       toast({ title: 'Export failed', description: String(e), variant: 'destructive' });
@@ -762,6 +969,24 @@
 />
 
 <ActionManager bind:open={actionsOpen} onchanged={refreshActions} />
+<ContextMenu
+  bind:open={menu.open}
+  x={menu.x}
+  y={menu.y}
+  items={menu.items}
+  label={menu.label}
+  keyboard={menu.keyboard}
+  alignEnd={menu.alignEnd}
+  returnFocus={menu.returnFocus}
+/>
+<ConfirmDialog
+  bind:open={ask.open}
+  title={ask.title}
+  body={ask.body}
+  busy={ask.busy}
+  returnFocus={ask.returnFocus}
+  onconfirm={runAsk}
+/>
 
 <div class="notes">
   <aside class="list">
@@ -799,11 +1024,52 @@
     </div>
     <div class="folderlist">
       {#each folders as f (f)}
-        <button class="folder" class:active={activeFolder === f} onclick={() => (activeFolder = f)}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.2 3.9A2 2 0 0 0 7.5 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z" /></svg>
-          <span class="fname">{f}</span>
-          {#if folderCounts[f]}<span class="fcount">{folderCounts[f]}</span>{/if}
-        </button>
+        {#if renamingFolder === f}
+          <!-- Rename in place (OpenWhispr's): Enter or leaving it saves, Esc cancels. -->
+          <div class="renamerow">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.2 3.9A2 2 0 0 0 7.5 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z" /></svg>
+            <input
+              class="renameinput"
+              aria-label={`Rename folder ${f}`}
+              bind:value={renameValue}
+              use:focusOnMount
+              onkeydown={(e) => {
+                if (e.key === 'Enter') finishFolderRename(true);
+                if (e.key === 'Escape') {
+                  e.stopPropagation();
+                  finishFolderRename(false);
+                }
+              }}
+              onblur={() => finishFolderRename(true)}
+            />
+          </div>
+        {:else}
+          <div class="folderrow" class:menuopen={menu.open && menu.returnFocus === folderEls[f]}>
+            <button
+              bind:this={folderEls[f]}
+              class="folder"
+              class:active={activeFolder === f}
+              aria-haspopup="menu"
+              onclick={() => (activeFolder = f)}
+              oncontextmenu={(e) => folderMenu(e, f)}
+              onkeydown={(e) => menuKey(e, (ev) => folderMenu(ev, f))}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.2 3.9A2 2 0 0 0 7.5 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z" /></svg>
+              <span class="fname">{f}</span>
+              {#if folderCounts[f]}<span class="fcount">{folderCounts[f]}</span>{/if}
+            </button>
+            <button
+              class="more"
+              title="More"
+              aria-label={`More for folder ${f}`}
+              aria-haspopup="menu"
+              data-more
+              onclick={(e) => folderMenu(e, f)}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
+            </button>
+          </div>
+        {/if}
       {/each}
       {#if addingFolder}
         <input
@@ -841,12 +1107,20 @@
       <div class="items">
         {#each shownNotes as n (n.id)}
           <div
+            bind:this={itemEls[n.id]}
             class="item"
             class:active={selected?.id === n.id}
+            class:menuopen={menu.open && menu.returnFocus === itemEls[n.id]}
             role="button"
             tabindex="0"
+            aria-haspopup="menu"
             onclick={() => select(n.id)}
-            onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && select(n.id)}
+            oncontextmenu={(e) => noteMenu(e, n)}
+            onkeydown={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (e.key === 'Enter' || e.key === ' ') select(n.id);
+              else menuKey(e, (ev) => noteMenu(ev, n));
+            }}
           >
             <div class="itembody">
               <p class="ititle">
@@ -860,15 +1134,14 @@
               </p>
             </div>
             <button
-              class="idel"
-              title="Delete note"
-              aria-label="Delete note"
-              onclick={(e) => {
-                e.stopPropagation();
-                removeNote(n.id);
-              }}
+              class="more"
+              title="More"
+              aria-label={`More for ${displayTitle(n)}`}
+              aria-haspopup="menu"
+              data-more
+              onclick={(e) => noteMenu(e, n)}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
             </button>
           </div>
         {/each}
@@ -888,6 +1161,7 @@
     {:else}
       <div class="edhead">
         <input
+          bind:this={titleEl}
           class="title"
           class:auto={selected.titleAuto}
           placeholder="Untitled Note"
@@ -1027,7 +1301,7 @@
             {selected.transcript?.length ? 'Resume' : 'Record'}
           </button>
         {/if}
-        <button class="iconbtn" title="Export as Markdown" aria-label="Export as Markdown" onclick={exportNote}>
+        <button class="iconbtn" title="Export as Markdown" aria-label="Export as Markdown" onclick={() => exportNote()}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
         </button>
       </div>
@@ -1548,7 +1822,9 @@
   .enhtag {
     color: var(--yap-primary);
   }
-  .idel {
+  /* The ⋯ on a row (its menu without right-clicking): shown on hover, on
+     focus and while its menu is open. On a folder it takes the count's place. */
+  .more {
     display: inline-flex;
     width: 22px;
     height: 22px;
@@ -1557,20 +1833,93 @@
     border: none;
     border-radius: var(--yap-r-sm);
     background: none;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
     cursor: pointer;
     opacity: 0;
     flex: 0 0 auto;
   }
-  .item:hover .idel {
+  .more:hover {
+    background: var(--yap-s3);
+    color: var(--yap-fg);
+  }
+  .more:focus-visible {
+    opacity: 1;
+    outline: 1.5px solid var(--yap-primary-line);
+    outline-offset: -1px;
+  }
+  .more svg {
+    width: 13px;
+    height: 13px;
+  }
+  .item:hover .more,
+  .item:focus-within .more,
+  .item.menuopen .more {
     opacity: 1;
   }
-  .idel:hover {
-    color: var(--yap-danger);
+  .item.menuopen {
+    background: var(--yap-s2);
   }
-  .idel svg {
-    width: 12px;
-    height: 12px;
+  .item.active.menuopen {
+    background: var(--yap-primary-wash);
+  }
+  .folderrow {
+    position: relative;
+    display: flex;
+  }
+  .folderrow .more {
+    position: absolute;
+    top: 50%;
+    right: 5px;
+    transform: translateY(-50%);
+  }
+  .folderrow:hover .more,
+  .folderrow:focus-within .more,
+  .folderrow.menuopen .more {
+    opacity: 1;
+  }
+  .folderrow:hover .fcount,
+  .folderrow:focus-within .fcount,
+  .folderrow.menuopen .fcount {
+    visibility: hidden;
+  }
+  .folderrow.menuopen .folder:not(.active) {
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+  }
+  .folderrow:hover .folder,
+  .folderrow:focus-within .folder,
+  .folderrow.menuopen .folder {
+    padding-right: 30px;
+  }
+  /* The folder being renamed: the row's own layout, its name a text box. */
+  .renamerow {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .renamerow svg {
+    position: absolute;
+    left: 10px;
+    width: 13px;
+    height: 13px;
+    color: var(--yap-primary);
+    pointer-events: none;
+  }
+  .renameinput {
+    width: 100%;
+    height: 30px;
+    box-sizing: border-box;
+    padding: 0 9px 0 31px;
+    border: 1px solid var(--yap-primary);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 12px;
+    box-shadow: 0 0 0 3px var(--yap-primary-wash);
+  }
+  .renameinput:focus {
+    outline: none;
   }
 
   .editor {

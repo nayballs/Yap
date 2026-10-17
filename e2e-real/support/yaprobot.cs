@@ -23,6 +23,14 @@
 //                                 in that window (in front, titled with the
 //                                 nonce), the way Yap reads it: for
 //                                 diagnosing a fit
+//   yaprobot yapwindow <pid>      the robot's own Yap's main window (the
+//                                 largest visible window of that process)
+//   yaprobot rightclick <hwnd> <pid> <x> <y>   a real right-click at CSS
+//                                 point (x, y) of that Yap window (in front,
+//                                 the point on it), then the windows of
+//                                 Yap's process tree (WebView2's included)
+//                                 that came up — a context menu — closed
+//                                 again with Esc; the pointer goes back
 //
 // Every command prints one JSON object. Nothing here reads or prints the
 // title or text of a window the test didn't open.
@@ -54,6 +62,28 @@ static class Native {
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
     [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint n, INPUT[] inputs, int size);
+    [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr ctx);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool Process32FirstW(IntPtr snap, ref PROCESSENTRY32W e);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool Process32NextW(IntPtr snap, ref PROCESSENTRY32W e);
+    [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X; public int Y; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct PROCESSENTRY32W {
+        public uint dwSize; public uint cntUsage; public uint th32ProcessID; public IntPtr th32DefaultHeapID;
+        public uint th32ModuleID; public uint cntThreads; public uint th32ParentProcessID; public int pcPriClassBase;
+        public uint dwFlags; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExeFile;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
@@ -113,6 +143,12 @@ static class Program {
                 case "keys": Print(PressKey(new IntPtr(long.Parse(args[1])), args[2], args[3])); return 0;
                 case "close": Print(Close(new IntPtr(long.Parse(args[1])), args[2])); return 0;
                 case "caret": Print(Caret(new IntPtr(long.Parse(args[1])), args[2])); return 0;
+                case "yapwindow": Print(YapWindow(uint.Parse(args[1]))); return 0;
+                case "rightclick":
+                    Print(RightClick(new IntPtr(long.Parse(args[1])), uint.Parse(args[2]),
+                        double.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture),
+                        double.Parse(args[4], System.Globalization.CultureInfo.InvariantCulture)));
+                    return 0;
                 default: throw new ArgumentException("unknown command " + args[0]);
             }
         } catch (Exception e) {
@@ -264,6 +300,104 @@ static class Program {
         uint sent = Native.SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf(typeof(Native.INPUT)));
         Thread.Sleep(50);
         return Obj("ok", sent == inputs.Count);
+    }
+
+    // ---- right-clicking the robot's own Yap (context_menu.rs) ----
+
+    /// The processes of Yap's tree: the robot's Yap and every process it
+    /// started, WebView2's browser and renderers included.
+    static HashSet<uint> Tree(uint root) {
+        var parent = new Dictionary<uint, uint>();
+        IntPtr snap = Native.CreateToolhelp32Snapshot(2, 0); // TH32CS_SNAPPROCESS
+        var e = new Native.PROCESSENTRY32W { dwSize = (uint)Marshal.SizeOf(typeof(Native.PROCESSENTRY32W)) };
+        if (Native.Process32FirstW(snap, ref e)) {
+            do { parent[e.th32ProcessID] = e.th32ParentProcessID; } while (Native.Process32NextW(snap, ref e));
+        }
+        Native.CloseHandle(snap);
+        var tree = new HashSet<uint> { root };
+        bool grew = true;
+        while (grew) {
+            grew = false;
+            foreach (var kv in parent) if (!tree.Contains(kv.Key) && tree.Contains(kv.Value)) { tree.Add(kv.Key); grew = true; }
+        }
+        return tree;
+    }
+
+    /// The visible top-level windows of those processes (handle → class).
+    static Dictionary<long, string> Shown(HashSet<uint> pids) {
+        var shown = new Dictionary<long, string>();
+        Native.EnumWindows(delegate (IntPtr h, IntPtr l) {
+            uint pid;
+            Native.GetWindowThreadProcessId(h, out pid);
+            if (pids.Contains(pid) && Native.IsWindowVisible(h)) shown[(long)h] = Native.Class(h);
+            return true;
+        }, IntPtr.Zero);
+        return shown;
+    }
+
+    static Dictionary<string, object> YapWindow(uint pid) {
+        Native.SetProcessDpiAwarenessContext(new IntPtr(-4)); // per-monitor v2
+        IntPtr best = IntPtr.Zero;
+        long area = 0;
+        Native.EnumWindows(delegate (IntPtr h, IntPtr l) {
+            uint p;
+            Native.GetWindowThreadProcessId(h, out p);
+            if (p != pid || !Native.IsWindowVisible(h)) return true;
+            Native.RECT r;
+            Native.GetWindowRect(h, out r);
+            long a = (long)(r.Right - r.Left) * (r.Bottom - r.Top);
+            if (a > area) { area = a; best = h; }
+            return true;
+        }, IntPtr.Zero);
+        if (best == IntPtr.Zero) return Obj("error", "no visible window of that process");
+        return Obj("hwnd", (long)best, "title", Native.Title(best));
+    }
+
+    static Dictionary<string, object> RightClick(IntPtr h, uint pid, double x, double y) {
+        Native.SetProcessDpiAwarenessContext(new IntPtr(-4)); // per-monitor v2: physical pixels
+        uint owner;
+        Native.GetWindowThreadProcessId(h, out owner);
+        if (owner != pid) return Obj("error", "not the robot's Yap");
+        var focus = Focus(h);
+        if (!(bool)focus["ok"]) return Obj("error", "Yap's window didn't come to the front");
+        double scale = Native.GetDpiForWindow(h) / 96.0;
+        var pt = new Native.POINT();
+        Native.ClientToScreen(h, ref pt);
+        pt.X += (int)Math.Round(x * scale);
+        pt.Y += (int)Math.Round(y * scale);
+        if (Native.Root(Native.WindowFromPoint(pt)) != h) return Obj("error", "the point isn't on Yap's window");
+        var pids = Tree(pid);
+        var before = Shown(pids);
+        Native.POINT back;
+        Native.GetCursorPos(out back);
+        // Checked again right before the click goes out.
+        if (Native.Root(Native.GetForegroundWindow()) != h) return Obj("error", "Yap's window lost the focus");
+        Native.SetCursorPos(pt.X, pt.Y);
+        Thread.Sleep(60);
+        var click = new Native.INPUT[2];
+        click[0].type = 0;
+        click[0].u.mi = new Native.MOUSEINPUT { dwFlags = 0x0008 }; // right down
+        click[1].type = 0;
+        click[1].u.mi = new Native.MOUSEINPUT { dwFlags = 0x0010 }; // right up
+        Native.SendInput(2, click, Marshal.SizeOf(typeof(Native.INPUT)));
+        Thread.Sleep(900);
+        var after = Shown(pids);
+        var came = new List<object>();
+        foreach (var kv in after) if (!before.ContainsKey(kv.Key)) {
+            Native.RECT r;
+            Native.GetWindowRect(new IntPtr(kv.Key), out r);
+            came.Add(Obj("cls", kv.Value, "w", r.Right - r.Left, "h", r.Bottom - r.Top));
+        }
+        bool closed = true;
+        if (came.Count > 0) {
+            // Esc closes a menu (it has the keyboard while it's up).
+            Native.SendInput(2, new[] { Key(0x1B, false), Key(0x1B, true) }, Marshal.SizeOf(typeof(Native.INPUT)));
+            Thread.Sleep(400);
+            var left = Shown(pids);
+            foreach (var kv in left) if (!before.ContainsKey(kv.Key)) closed = false;
+        }
+        Native.SetCursorPos(back.X, back.Y);
+        return Obj("ok", true, "popups", came, "closed", closed, "x", pt.X, "y", pt.Y);
     }
 
     static Native.INPUT Key(ushort vk, bool up) {

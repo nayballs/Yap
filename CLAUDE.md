@@ -72,6 +72,9 @@ competitive strategy, see [`ROADMAP.md`](./ROADMAP.md).
   maximized state across launches (overlay, onboarding denylisted; VISIBLE flag excluded
   so the window never un-hides on start-hidden launches).
 - **External links:** `tauri-plugin-opener` (opens URLs in the default browser).
+- **No browser context menu:** `webview2-com` (the copy wry already builds on)
+  hooks each webview's `ContextMenuRequested`, cutting WebView2's menu down to
+  the editing commands (`context_menu.rs`).
 - **Dialogs:** `tauri-plugin-dialog` (file open/save dialogs for note export and upload).
 - **Accounts (optional):** `cloud/` is the sign-in server — [Better Auth](https://better-auth.com)
   on a Cloudflare Worker + D1 at `auth.contextmirror.com` (see `cloud/README.md`). Yap's side
@@ -341,7 +344,19 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   service), set by `link_event` (also the meeting's title as a real title,
   attendees merged, `note_type` meeting) and found by `find_by_event`.
   **Folders** are user-creatable (backend `notes_folder_create` command) with
-  counts shown in the sidebar; notes filter by active folder. **Actions** (named
+  counts shown in the sidebar; notes filter by active folder. `folder_rename`
+  (trimmed, non-empty, never a name another folder has in any case — a
+  change of case is fine; every note in it goes along, the folder keeps its
+  place) and `folder_delete` (its notes move to **Personal**: OpenWhispr
+  deletes them with the folder, Yap never loses a note to a clean-up) both
+  refuse **Personal** and **Meetings** (`PERSONAL`/`MEETINGS`,
+  `is_protected_folder`: the default folder, and where the recorder, call
+  detection, the bar and the calendar file meeting notes), work under the
+  store lock, leave the notes' `updated_ts` alone and return a
+  `FolderChange` (the folders, the ids moved); `find_folder` = a folder by
+  any case, as the list spells it. Commands `notes_folder_rename(from, to)` /
+  `notes_folder_delete(name)` emit `yap-note-changed` (origin "folders") per
+  moved note + `yap-notes-changed`. **Actions** (named
   prompt fragments) are built-in protected set (seeded "Generate Notes",
   "Meeting Notes", "Action Items", "Action Plan") + user-created; `note_enhance`
   (commands.rs) invokes the **Actions engine**: picks an action by id, runs the
@@ -786,7 +801,18 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   to plain keyword-RAG chat instead. Unit-tested end to end against
   `notes.rs`' **in-memory test store** (under `cfg(test)` every test thread
   gets its own empty store and nothing reads or writes `notes.json`), and
-  in `e2e/chat-tools.spec.js` against the scripted fake AI.
+  in `e2e/chat-tools.spec.js` against the scripted fake AI. **Folders are
+  Yap's own rule** (a deliberate change from OpenWhispr, whose
+  `create_note`/`update_note` made any folder the model named — a chat once
+  left an empty "Camping" folder behind): `note_folder` files a note into a
+  folder that exists, by any case (as the list spells it); no folder = Personal
+  (a new note) / no move; a new folder only with `new_folder: true`, which the
+  tool descriptions and `TOOL_INSTRUCTIONS` keep for a user asking for one
+  ("Never make up a folder"). An unknown name without it changes nothing
+  (an `update_note`'s title included) and tells the model the folders there
+  are and to leave `folder` empty; chip `Couldn't create "Tent list": no
+  folder called "Camping"`. (The MCP server's `create_note` still makes the
+  folder it's given.)
 - **`bridge.rs`** — the **local API bridge** (OpenWhispr `cliBridge.js` port,
   backs the Integrations view): a token-authenticated loopback HTTP server
   (`tiny_http`, `127.0.0.1`, OS-assigned port) exposing `/v1` REST routes over
@@ -1177,6 +1203,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `win::` (subclass install, click-through toggle, monitors via
   `MonitorFromPoint`/`GetMonitorInfoW`/`GetDpiForMonitor`, auto-hidden taskbars
   via `ABM_GETAUTOHIDEBAREX`, the foreground window, `force_topmost`).
+- **`context_menu.rs`** — no browser context menu in Yap's windows: each
+  webview's `ContextMenuRequested` (WebView2, via `webview2-com`) keeps only
+  the editing commands, or shows nothing (pure `keep`, unit-tested on the
+  menus WebView2 really offered). See "Window config" below.
 - **`input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
   `kb:ctrl+shift+VKEY` (modifier combo; `win` is a modifier too, e.g. the
   meeting shortcut `kb:alt+win+77` = Win+Alt+M), `kb:165` (single right-side modifier, e.g.
@@ -1359,7 +1389,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   with `YAP_E2E=1`; compiled out of release builds): no global input hook, no
   paste/Enter/Ctrl+C into other apps (nor "Paste last transcript"), no reading the
   text around another app's cursor or its window's title (`app_kind`), no `set_focus` (tao's fallback presses Alt
-  in the focused app), no Windows notifications, no orphan-sidecar sweep, no
+  in the focused app), no Windows notifications, no native context menu on
+  screen (`context_menu.rs` records what it would hold; robot mode shows it), no orphan-sidecar sweep, no
   window-state plugin, no call-detection registry reads (the debug-only
   `meeting_detect_simulate` stands in), no installed apps' icons (the
   debug-only `YAP_E2E_APP_ICONS` folder of stand-ins, `app_icons_dir`), no
@@ -1431,7 +1462,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `open_onboarding`, `close_onboarding`),
   `configure_hotkey`, `set_autostart`, `is_portable`, `test_post_process`,
   `get_groq_usage`, history (`get_history`, `clear_history`, `get_stats`),
-  plus the notes/actions/folders CRUD + `note_enhance`/`note_ask`/`note_export`,
+  plus the notes/actions/folders CRUD (`notes_folder_rename`/`_delete`;
+  `note_delete` refuses the note a meeting is recording into — that's
+  `meeting_delete` — and tells every window, `yap-note-deleted`) +
+  `note_enhance`/`note_ask`/`note_export`,
   chats CRUD + `chat_send` (RAG + tool loop; `scope: "meetings"` = the
   Meetings view's Ask bar, grounded in `calendar::meetings_context`),
   `meeting_start` (then `calendar::on_meeting_started`)/`meeting_stop`/
@@ -1603,7 +1637,18 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   Symphonia decode → chunked transcription on the warm engine with progress +
   cancel — see `media.rs`); **`NotesView.svelte`** = the AI Notepad (OpenWhispr
   sidebar port: **New note / Search notes / Actions** rows; **FOLDERS with
-  counts + NOTES list**; meta chip row shows date + attendees popover
+  counts + NOTES list**; **right-click menus** (OpenWhispr's folder and note
+  dropdowns, as context menus too: `ui/ContextMenu.svelte`, also from a row's
+  hover **⋯** and the keyboard — the ContextMenu key, Shift+F10): a folder's
+  **Rename** (in place: Enter or leaving it saves, Esc cancels) and
+  **Delete…** (`ui/ConfirmDialog.svelte`: "Delete “Camping”?" · "Its 3 notes
+  will move to Personal."; the view goes to Personal if it was on it),
+  Personal and Meetings showing both off with the reason; a note's
+  **Rename** (its title, focused), **Move to ▸** (the folders, this one
+  ticked), **Copy as Markdown** (`noteMarkdown`), **Export…**, **Delete…**
+  (asked first; a meeting note goes through `meeting_delete`, which stops its
+  recording first and makes the notepad let go, any other through
+  `note_delete`); meta chip row shows date + attendees popover
   → add/remove participants, folder-move menu w/ New folder option, meeting
   **Record / ● 12:34 · Pause / Resume** chip (Pause = `meeting_pause`) and,
   on meeting notes, a **Notepad** chip (`notepad_open`), export-to-markdown;
@@ -1912,7 +1957,14 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   mic check (live level meter via `set_mic_test` idle-amp mode + live device switch)
   → one-click **local AI cleanup** install → tray pointer → "try it here" live
   dictation test with a change-shortcut recorder.
-- **`lib/ui/`** — primitives: Toggle, Select, Slider, Group, Row, Button, Input, Textarea.
+- **`lib/ui/`** — primitives: Toggle, Select, Slider, Group, Row, Button, Input, Textarea,
+  **ContextMenu** (at the pointer or under a ⋯ (`alignEnd`), clamped to the
+  window; ↑/↓/Home/End/Enter, → into a submenu, ← / Esc back; Esc, Tab, a
+  click outside, a resize or a scroll close it and the focus goes back to the
+  row; `{ label, icon, onselect, disabled, danger, checked, items }`,
+  separators and a quiet `note`; it cancels `contextmenu` on itself) and
+  **ConfirmDialog** (the notepad's Wispr-style confirm for the main window:
+  Cancel focused, Esc/scrim cancel, Tab kept inside, the focus returned).
 
 ### Window config (`src-tauri/tauri.conf.json`)
 - **settings**: 1200×800 (min 860×600), titled "Yap" (it hosts the ControlPanel — see above),
@@ -1945,6 +1997,23 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (tool window, MA_NOACTIVATE, style enforcement) and it's click-through
   except over the pill/cards. Shown while the bar is on (hidden for an hour,
   over fullscreen apps, or off: only while dictating).
+- **No browser context menu, in any window** (`context_menu.rs`): WebView2's
+  own right-click menu (Back, Refresh, Save as, Print, More tools, Inspect) is
+  cut down to the editing commands. `on_page_load` (Started) hooks every
+  webview once — settings, onboarding, notepad, overlay, and split-preview
+  when it's made — through `ICoreWebView2_11::add_ContextMenuRequested`. The
+  pure `keep` keeps undo, redo, cut, copy, paste, paste as plain text
+  (`pasteAndMatchStyle`), select all, emoji and the spelling items
+  (`spellcheck` — WebView2 says that, the reference says `spellCheck`; both
+  kept), with only the separators that still separate something, plus
+  Inspect (`inspectElement`) in debug builds; nothing left → handled, no menu;
+  a failure reading it → no menu (fail closed). Plain UI: nothing; a text
+  field: its edit menu; Yap's own menus (Notes) cancel `contextmenu` first.
+  The names are the ones this PC's runtime reported (Oct 2026). Debug-only
+  `e2e_context_menus` = each webview's hook + last menu (names, kinds,
+  kept, handled, editable, target; labels in debug builds only); test mode
+  marks every menu handled, `YAP_E2E_NO_INSPECT=1` drops Inspect (the
+  robot's release-build check, `e2e-real/context-menu.real.js`).
 - `plugins.deep-link.desktop.schemes = ["com.contextmirror.yap"]` — the NSIS
   template registers it for normal installs (portable skips it) and
   single-instance forwards a second launch's link to the running app. Routes

@@ -19,6 +19,7 @@ mod chats;
 mod coaching;
 mod commands;
 mod config;
+mod context_menu;
 mod dict_usage;
 mod e2e;
 mod fuzzy;
@@ -397,6 +398,8 @@ pub fn run() {
             commands::get_note_base_prompt,
             commands::notes_folders,
             commands::notes_folder_create,
+            commands::notes_folder_rename,
+            commands::notes_folder_delete,
             commands::notes_actions,
             commands::action_create,
             commands::action_update,
@@ -489,6 +492,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             e2e::e2e_dictation_mic,
             #[cfg(debug_assertions)]
+            context_menu::e2e_context_menus,
+            #[cfg(debug_assertions)]
             coaching::e2e_coaching_reset,
             #[cfg(debug_assertions)]
             learn::e2e_learn_correction,
@@ -508,9 +513,16 @@ pub fn run() {
             #[cfg(debug_assertions)]
             realtest::commands::realtest_clipboard,
         ])
-        // A meeting window (the notepad, the overlay) that loads while a
-        // meeting records leaves screen captures too (capture.rs).
         .on_page_load(|webview, payload| {
+            // No browser context menu (Back, Refresh, Print, Inspect…) in any
+            // Yap window: only the editing commands (context_menu.rs). Once
+            // per webview, whichever window it is (the split preview is made
+            // on demand).
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                context_menu::install(webview);
+            }
+            // A meeting window (the notepad, the overlay) that loads while a
+            // meeting records leaves screen captures too (capture.rs).
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
                 if let Some(window) = webview.app_handle().get_webview_window(webview.label()) {
                     capture::sync_window(&window);

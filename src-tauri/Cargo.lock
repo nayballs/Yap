@@ -6978,6 +6978,7 @@ dependencies = [
  "tracing-subscriber",
  "transcribe-rs",
  "url",
+ "webview2-com",
  "windows 0.61.3",
  "windows-native-keyring-store",
 ]
