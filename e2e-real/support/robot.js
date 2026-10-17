@@ -130,17 +130,23 @@ export class Robot {
     return this.track(await startFakeClaudeCode({ nonce: this.nonce, cwd: path.join(this.dir, `${label}-${this.targets.length}`) }));
   }
 
-  /** An Edge app window on a "WhatsApp" page (`note`: text above its box). */
-  async chat(note) {
+  /**
+   * An Edge app window on a "WhatsApp" page (`note`: text above its box;
+   * `{ editable }`: the box a contenteditable, as WhatsApp Web's is).
+   */
+  async chat(note, { editable = false } = {}) {
     return this.track(
-      await startChatPage({ nonce: this.nonce, dir: path.join(this.dir, `chat-${this.targets.length}`), note }),
+      await startChatPage({ nonce: this.nonce, dir: path.join(this.dir, `chat-${this.targets.length}`), note, editable }),
     );
   }
 
-  /** An Edge app window on a page with a text box, an ordinary app (`note`: text above it). */
-  async editor(note) {
+  /**
+   * An Edge app window on a page with a text box, an ordinary app (`note`:
+   * text above it; `beside`: `[before, after]`, page text on its line).
+   */
+  async editor(note, beside) {
     return this.track(
-      await startEditorPage({ nonce: this.nonce, dir: path.join(this.dir, `editor-${this.targets.length}`), note }),
+      await startEditorPage({ nonce: this.nonce, dir: path.join(this.dir, `editor-${this.targets.length}`), note, beside }),
     );
   }
 

@@ -1398,6 +1398,10 @@ mod tests {
         assert_eq!(fit_for_paste("Sounds good.", None, false, &[], AppKind::Messaging), "Sounds good");
         assert_eq!(fit_for_paste("Sounds good.", None, true, &[], AppKind::Messaging), "Sounds good ");
         assert_eq!(fit_for_paste("Are you in?", None, false, &[], AppKind::Messaging), "Are you in?");
+        // An empty message box, read as empty (selection.rs): no full stop,
+        // and no space after it whatever "Append trailing space" says.
+        let empty = FieldContext::default();
+        assert_eq!(fit_for_paste("Sounds good.", Some(&empty), true, &[], AppKind::Messaging), "Sounds good");
         // After a sentence in the draft: the space smart spacing adds, no full stop.
         let ctx = FieldContext {
             before: "Thanks!".into(),

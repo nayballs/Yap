@@ -333,20 +333,27 @@ export function edgeExe() {
  * An Edge app window (a fresh, throwaway profile: none of your Edge's
  * windows, tabs or sign-ins) on a local page titled `title` (which has the
  * nonce) with one text box that has the focus. `value()` reads the box and
- * `set(text, caret?)` fills it, over the DevTools protocol.
+ * `set(text, caret?)` fills it, over the DevTools protocol. `note`: a
+ * paragraph above the box; `beside`: `[before, after]`, page text on the
+ * box's own line, either side of it (an inline box); `editable`: the box is
+ * a contenteditable (a paragraph, as WhatsApp Web's and Gmail's are), not a
+ * textarea.
  */
-export async function startPage({ nonce, dir, title, note = '', attrs = 'aria-label="Message"' }) {
+export async function startPage({ nonce, dir, title, note = '', beside = null, editable = false, attrs = 'aria-label="Message"' }) {
   const exe = edgeExe();
   if (!exe) throw new Error('Microsoft Edge not found');
   fs.mkdirSync(dir, { recursive: true });
   const page = path.join(dir, 'page.html');
   const before = new Set(findWindows(nonce).map((w) => w.hwnd));
+  const box = editable
+    ? `<div id="box" contenteditable="true" role="textbox" aria-multiline="true" ${attrs}><p><br></p></div>`
+    : `<textarea id="box" ${attrs} autofocus></textarea>`;
   fs.writeFileSync(
     page,
     `<!doctype html><meta charset="utf-8"><title>${title}</title>
-<style>body{font:15px Segoe UI,sans-serif;margin:16px;background:#f4f1ea}textarea{width:100%;height:120px;font:inherit}</style>
+<style>body{font:15px Segoe UI,sans-serif;margin:16px;background:#f4f1ea}textarea,#box{width:100%;height:120px;font:inherit}#box[contenteditable]{background:#fff;border:1px solid #888;box-sizing:border-box;padding:4px}#box p{margin:0}.beside textarea{display:inline-block;width:50%;height:60px;vertical-align:middle}</style>
 ${note ? `<p>${note}</p>` : ''}
-<textarea id="box" ${attrs} autofocus></textarea>
+${beside ? `<div class="beside"><span>${beside[0]}</span> ${box} <span>${beside[1]}</span></div>` : box}
 <script>document.getElementById('box').focus();</script>`,
   );
   const profile = path.join(dir, 'edge-profile');
@@ -395,7 +402,15 @@ ${note ? `<p>${note}</p>` : ''}
     hwnd: win.hwnd,
     pid: win.pid,
     focus: () => focus(win.hwnd),
-    value: () => tab.evaluate(() => document.getElementById('box').value),
+    /**
+     * The box's text (a contenteditable's as it reads: no final line break,
+     * the no-break spaces editing puts in as spaces).
+     */
+    value: () =>
+      tab.evaluate(() => {
+        const box = document.getElementById('box');
+        return 'value' in box ? box.value : box.innerText.replace(/\n+$/, '').replace(/ /g, ' ');
+      }),
     /**
      * Fill the box: the caret at `caret` (default: the end), or `caret`…`end`
      * selected. Then a moment for Chromium's accessibility tree (what Yap
@@ -406,10 +421,24 @@ ${note ? `<p>${note}</p>` : ''}
       await tab.evaluate(
         ([t, c, e]) => {
           const box = document.getElementById('box');
-          box.value = t;
-          box.focus();
           const at = c ?? t.length;
-          box.setSelectionRange(at, e ?? at);
+          box.focus();
+          if ('value' in box) {
+            box.value = t;
+            box.setSelectionRange(at, e ?? at);
+            return;
+          }
+          // A contenteditable: one paragraph, empty as an editor leaves it.
+          box.innerHTML = '<p><br></p>';
+          const p = box.firstChild;
+          if (t) p.textContent = t;
+          const node = t ? p.firstChild : p;
+          const range = document.createRange();
+          range.setStart(node, t ? at : 0);
+          range.setEnd(node, t ? (e ?? at) : 0);
+          const selection = getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
         },
         [text, caret ?? null, end ?? null],
       );
@@ -425,15 +454,20 @@ ${note ? `<p>${note}</p>` : ''}
 
 /**
  * A web page's text box ("Yap robot editor - <nonce>": an ordinary app to
- * Yap); `note`: text on the page above the box (none by default).
+ * Yap); `note`: text on the page above the box (none by default); `beside`:
+ * page text either side of it, on its line.
  */
-export function startEditorPage({ nonce, dir, note }) {
-  return startPage({ nonce, dir, title: `Yap robot editor - ${nonce}`, note });
+export function startEditorPage({ nonce, dir, note, beside }) {
+  return startPage({ nonce, dir, title: `Yap robot editor - ${nonce}`, note, beside });
 }
 
-/** A page titled "WhatsApp - <nonce>": a chat app to Yap (nothing is sent anywhere). */
-export function startChatPage({ nonce, dir, note }) {
-  return startPage({ nonce, dir, title: `WhatsApp - ${nonce}`, note, attrs: 'aria-label="Type a message"' });
+/**
+ * A page titled "WhatsApp - <nonce>": a chat app to Yap (nothing is sent
+ * anywhere); `editable`: its message box a contenteditable, as WhatsApp
+ * Web's is.
+ */
+export function startChatPage({ nonce, dir, note, editable }) {
+  return startPage({ nonce, dir, title: `WhatsApp - ${nonce}`, note, editable, attrs: 'aria-label="Type a message"' });
 }
 
 // ---- Notepad ----

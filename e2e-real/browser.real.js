@@ -27,9 +27,35 @@ test('a web page: fitted to the text either side of the cursor', async ({ robot 
   await expect.poll(() => page.value()).toBe('We can meet Wednesday at noon.');
 });
 
+// Found by this robot (2026-10-17): Chromium's text ranges are positions in
+// the whole page, so reading 500 characters either side of the caret ran on
+// past the box into the page's own text (here, words on the box's line).
+// selection.rs keeps the read inside the focused field.
+test('a web page: only the text box is read, never the page around it', async ({ robot }) => {
+  const page = await robot.editor('', ['We talked about it', 'and then left']);
+  // Empty: the dictation as it is (not " the plan" after the page's words).
+  await page.set('');
+  let r = await robot.dictate(page, 'The plan.');
+  expect(r.text).toBe('The plan.');
+  await expect.poll(() => page.value()).toBe('The plan.');
+
+  // At the box's start: its capital, fitted to the box's own text after it.
+  await page.set('and more', 0);
+  r = await robot.dictate(page, 'The plan.');
+  expect(r.text).toBe('The plan ');
+  await expect.poll(() => page.value()).toBe('The plan and more');
+
+  // At the box's end: its full stop (the page's "and then left" isn't the
+  // sentence going on).
+  await page.set('I want ');
+  r = await robot.dictate(page, 'The blue one.');
+  expect(r.text).toBe('the blue one.');
+  await expect.poll(() => page.value()).toBe('I want the blue one.');
+});
+
 test('a chat app: a short message without its full stop, three sentences with it', async ({ robot }) => {
-  // Smart spacing off: the rule on its own (see the known gap below for
-  // what Edge's empty message box does to it).
+  // Smart spacing off: the rule on its own (the tests below have it on,
+  // as it is by default).
   await robot.configure({ smartSpacing: false });
   try {
     const chat = await robot.chat();
@@ -59,19 +85,32 @@ test('a chat app: a short message without its full stop, three sentences with it
   }
 });
 
-// Known gap, found by this robot (2026-10-17): Chromium reports an empty
-// text box's text as its label ("Type a message", from aria-label) — or as
-// U+FFFC when it has none — so Yap reads something "after the cursor" in an
-// empty message box: the chat full stop stays and a space follows it. This
-// pins today's result; once selection.rs treats such a box as empty it
-// fails — then expect "Sounds good". (Chromium's ranges also move past the
-// box into the page's text when Yap reads 500 characters either side; seen
-// with `yaprobot caret`, and harmless while a block's line break separates
-// them.)
-test('known gap: an empty chat box in Edge reads as holding its label', async ({ robot }) => {
+// Found by this robot (2026-10-17): Chromium reads an empty text box's text
+// as its label ("Type a message", from aria-label), or as U+FFFC when it has
+// none, so Yap took the empty message box for a draft: the chat full stop
+// stayed and a space followed it ("Sounds good. "). selection.rs now reads
+// such a box as empty (its value is "", its text only stands in).
+test('an empty chat box in Edge reads as empty: no full stop, no space after it', async ({ robot }) => {
   const chat = await robot.chat();
   await chat.set('');
   const r = await robot.dictate(chat, 'Sounds good.');
-  expect(r.text).toBe('Sounds good. ');
-  await expect.poll(() => chat.value()).toBe('Sounds good. ');
+  expect(r.kind).toBe('chat app');
+  expect(r.text).toBe('Sounds good');
+  await expect.poll(() => chat.value()).toBe('Sounds good');
+});
+
+// The same in a contenteditable message box (WhatsApp Web's, Gmail's): an
+// empty one reads as its label too.
+test('an empty contenteditable message box reads as empty', async ({ robot }) => {
+  const chat = await robot.chat('', { editable: true });
+  await chat.set('');
+  const r = await robot.dictate(chat, 'Sounds good.');
+  expect(r.text).toBe('Sounds good');
+  await expect.poll(() => chat.value()).toBe('Sounds good');
+
+  // A draft there: the dictation follows it.
+  await chat.set('I can do Friday');
+  const next = await robot.dictate(chat, 'Or Monday.');
+  expect(next.text).toBe(' or Monday');
+  await expect.poll(() => chat.value()).toBe('I can do Friday or Monday');
 });

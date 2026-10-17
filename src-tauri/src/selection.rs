@@ -14,8 +14,14 @@
 //! 2. **The text around the cursor** for a dictation ([`begin_dictation`] /
 //!    [`take_context`], `config.smart_spacing`): up to 500 characters before
 //!    and after the caret, and any selection, read in the background at record
-//!    start (`TextPattern`, else `ValuePattern`), so `smart_insert` can fit the
-//!    dictation to them. The paste never waits for it: a read that hasn't
+//!    start (`TextPattern`, else `ValuePattern` — with the caret asked of a
+//!    Win32 edit control such as WinForms'), so `smart_insert` can fit the
+//!    dictation to them. Only the focused field's own text: Chromium's
+//!    ranges run on into the page around a text box, so they're kept inside
+//!    the field's document range; and an empty field reads as empty,
+//!    whatever stands in for its text (its label, its placeholder, U+FFFC, a
+//!    web editor's CSS placeholder — [`stands_in_for_empty`],
+//!    [`class_says_empty`]). The paste never waits for it: a read that hasn't
 //!    finished by then (or failed, or found a password box) leaves the
 //!    dictation exactly as it would be without it. The text is kept in memory
 //!    for that one dictation only and never logged (lengths only).
@@ -40,6 +46,75 @@ const CONTEXT_TIMEOUT_MS: u32 = 200;
 const SELECTION_TIMEOUT_MS: u32 = 2_000;
 /// The same for the post-paste watch's reads (a thread of its own).
 const WATCH_TIMEOUT_MS: u32 = 300;
+
+/// A field whose whole text is longer than this holds real text: a label or
+/// a placeholder standing in for an empty field is never this long.
+#[cfg_attr(not(windows), allow(dead_code))]
+const STAND_IN_CHARS: usize = 200;
+
+/// Characters that take a place in a field's text without anything being
+/// written there: U+FFFC (Chromium's text for an empty text box, or an
+/// embedded object) and the zero-width ones (Slate's U+FEFF in an empty
+/// line).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_marker(c: char) -> bool {
+    matches!(c, '\u{FFFC}' | '\u{FEFF}' | '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{2060}')
+}
+
+/// `s` as it reads: no markers, whitespace runs as one space, trimmed.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn bare(s: &str) -> String {
+    s.split(|c: char| c.is_whitespace() || is_marker(c))
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Is a field whose whole text over UI Automation is `text` really empty?
+///
+/// Chromium (Edge, Chrome, every Electron and WebView2 app) reads an empty
+/// text box as holding its accessible name ("Type a message", from
+/// `aria-label`) or U+FFFC when it has none; a rich editor's empty line is a
+/// line break and a zero-width character, and an editor that draws its
+/// placeholder inside itself (Slate) has it in its text. So: nothing but
+/// markers and whitespace, or exactly the field's `placeholder` (HelpText,
+/// shown only while it's empty), is empty. Exactly its `name` (a label, which
+/// someone could also type) is empty unless the field's `value`
+/// (ValuePattern, asked only then; `None` = it has none) says those words
+/// are really there: an empty Chromium box's value is "", and a value of
+/// the same words with a marker in the text is Slate's placeholder.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn stands_in_for_empty(text: &str, name: &str, placeholder: &str, value: impl FnOnce() -> Option<String>) -> bool {
+    let shown = bare(text);
+    if shown.is_empty() {
+        return true;
+    }
+    let same = |label: &str| {
+        let label = bare(label);
+        !label.is_empty() && label == shown
+    };
+    if same(placeholder) {
+        return true;
+    }
+    if !same(name) {
+        return false;
+    }
+    match value() {
+        None => true,
+        Some(v) => bare(&v).is_empty() || text.contains(is_marker),
+    }
+}
+
+/// A web editor's class list saying the element shows no text of its own
+/// (its text is a CSS placeholder, `::before { content: attr(…) }`, which
+/// Chromium reads as text): Quill's `ql-blank` (Slack's message box),
+/// ProseMirror/Tiptap's `is-empty` / `is-editor-empty` (Claude, ChatGPT),
+/// CKEditor's `ck-placeholder` (Teams), and a plain `placeholder`.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn class_says_empty(class: &str) -> bool {
+    const EMPTY: &[&str] = &["ql-blank", "is-empty", "is-editor-empty", "ck-placeholder", "placeholder"];
+    class.split_whitespace().any(|token| EMPTY.contains(&token))
+}
 
 /// Capture the current selection for edit mode: UIA first, Ctrl+C fallback
 /// when `copy_fallback` (not in a terminal, where Ctrl+C with nothing
@@ -174,7 +249,8 @@ pub fn read_context(target_hwnd: Option<isize>) -> Option<FieldContext> {
 }
 
 /// A field's text as the post-paste watch reads it: line breaks as `\n`,
-/// no-break spaces as spaces, a field showing only its placeholder empty.
+/// no-break spaces as spaces, an empty field empty (not the label or
+/// placeholder that stands in for its text: [`stands_in_for_empty`]).
 /// [`WatchedField::read`] reads the whole field: `from_start` is always
 /// true there, and `to_end` false only when the field was longer than asked
 /// (then `text` is its start).
@@ -411,18 +487,17 @@ mod uia {
                     return None;
                 }
             }
-            element_context(&element)
+            element_context(&automation, &element)
         }
     }
 
     /// The text around the caret in `element`, a text field.
-    unsafe fn element_context(element: &IUIAutomationElement) -> Option<FieldContext> {
+    unsafe fn element_context(automation: &IUIAutomation, element: &IUIAutomationElement) -> Option<FieldContext> {
         // Never a password box (and if it can't say, don't risk it).
         if element.CurrentIsPassword().ok()?.as_bool() {
             return None;
         }
-        let ctx = text_context(element).or_else(|| value_context(element))?;
-        Some(without_placeholder(ctx, element))
+        text_context(automation, element).or_else(|| value_context(element))
     }
 
     /// [`element_context`] for a window's own element (the tests' edit
@@ -435,7 +510,7 @@ mod uia {
             let element = automation
                 .ElementFromHandle(windows::Win32::Foundation::HWND(hwnd as *mut core::ffi::c_void))
                 .ok()?;
-            element_context(&element)
+            element_context(&automation, &element)
         }
     }
 
@@ -466,8 +541,12 @@ mod uia {
         }
     }
 
-    /// TextPattern: the selection (or the caret) and the text either side.
-    unsafe fn text_context(element: &IUIAutomationElement) -> Option<FieldContext> {
+    /// TextPattern: the selection (or the caret) and the text either side,
+    /// all of it inside the field: Chromium's ranges run on past a text box
+    /// into the page around it, so every range is kept within the field's
+    /// own document range. An empty field reads as empty, whatever stands
+    /// in for its text ([`shows_nothing`]).
+    unsafe fn text_context(automation: &IUIAutomation, element: &IUIAutomationElement) -> Option<FieldContext> {
         let pattern: IUIAutomationTextPattern = element.GetCurrentPattern(UIA_TextPatternId).ok()?.cast().ok()?;
         let range = match pattern.GetSelection() {
             Ok(ranges) if ranges.Length().unwrap_or(0) > 0 => ranges.GetElement(0).ok()?,
@@ -485,6 +564,14 @@ mod uia {
                 return None;
             }
         }
+        let document = pattern.DocumentRange().ok()?;
+        if !keep_within(&range, &document) {
+            tracing::debug!("The selection isn't in the focused field; not reading it");
+            return None;
+        }
+        if shows_nothing(automation, element, &document) {
+            return Some(FieldContext::default());
+        }
         let selection = selection_text(&range)?;
 
         let before = range.Clone().ok()?;
@@ -494,6 +581,7 @@ mod uia {
         before
             .MoveEndpointByUnit(TextPatternRangeEndpoint_Start, TextUnit_Character, -(CONTEXT_CHARS as i32 + 1))
             .ok()?;
+        keep_within(&before, &document);
         let before = before.GetText((CONTEXT_CHARS * 2) as i32).ok()?.to_string();
 
         let after = range.Clone().ok()?;
@@ -503,6 +591,7 @@ mod uia {
         after
             .MoveEndpointByUnit(TextPatternRangeEndpoint_End, TextUnit_Character, CONTEXT_CHARS as i32 + 1)
             .ok()?;
+        keep_within(&after, &document);
         let after = after.GetText((CONTEXT_CHARS * 2) as i32).ok()?.to_string();
 
         Some(FieldContext {
@@ -510,6 +599,82 @@ mod uia {
             after: head_chars(&after, CONTEXT_CHARS),
             selection,
         })
+    }
+
+    /// Keep `range` inside `document` (the field's own text): its start no
+    /// earlier, its end no later. `false` when it lies wholly outside it (a
+    /// selection elsewhere on the page). A provider that can't compare
+    /// ranges leaves it as it was.
+    unsafe fn keep_within(range: &IUIAutomationTextRange, document: &IUIAutomationTextRange) -> bool {
+        let (start, end) = (TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End);
+        // CompareEndpoints' sign says which comes first (its size varies).
+        let cmp = |mine, theirs| range.CompareEndpoints(mine, document, theirs).ok();
+        if cmp(end, start).is_some_and(|c| c < 0) || cmp(start, end).is_some_and(|c| c > 0) {
+            return false;
+        }
+        if cmp(start, start).is_some_and(|c| c < 0) {
+            let _ = range.MoveEndpointByRange(start, document, start);
+        }
+        if cmp(end, end).is_some_and(|c| c > 0) {
+            let _ = range.MoveEndpointByRange(end, document, end);
+        }
+        true
+    }
+
+    /// Is the field (its whole text: `document`) empty, whatever its text
+    /// says? Its text is only a stand-in ([`super::stands_in_for_empty`]:
+    /// the field's label, its placeholder, U+FFFC…), or it's a web editor
+    /// showing a CSS placeholder: its own class says so (Quill), or that of
+    /// its one line (ProseMirror, CKEditor). Never for a field with more
+    /// than a line's worth of text.
+    unsafe fn shows_nothing(
+        automation: &IUIAutomation,
+        element: &IUIAutomationElement,
+        document: &IUIAutomationTextRange,
+    ) -> bool {
+        let Ok(text) = document.GetText(super::STAND_IN_CHARS as i32 + 1) else {
+            return false;
+        };
+        let text = text.to_string();
+        text.chars().count() <= super::STAND_IN_CHARS
+            && (text_stands_in(element, &text) || placeholder_class(automation, element))
+    }
+
+    /// [`super::stands_in_for_empty`] for a TextPattern field showing `text`.
+    unsafe fn text_stands_in(element: &IUIAutomationElement, text: &str) -> bool {
+        let name = element.CurrentName().map(|b| b.to_string()).unwrap_or_default();
+        let placeholder = element.CurrentHelpText().map(|b| b.to_string()).unwrap_or_default();
+        super::stands_in_for_empty(text, &name, &placeholder, || {
+            let pattern: IUIAutomationValuePattern = element.GetCurrentPattern(UIA_ValuePatternId).ok()?.cast().ok()?;
+            Some(pattern.CurrentValue().ok()?.to_string())
+        })
+    }
+
+    /// A web editor whose class (or its one and only line's) says it shows
+    /// a placeholder, not text ([`super::class_says_empty`]).
+    unsafe fn placeholder_class(automation: &IUIAutomation, element: &IUIAutomationElement) -> bool {
+        let class = |e: &IUIAutomationElement| e.CurrentClassName().map(|b| b.to_string()).unwrap_or_default();
+        if super::class_says_empty(&class(element)) {
+            return true;
+        }
+        // The raw view: a paragraph is no control, so the control view skips it.
+        let Ok(walker) = automation.RawViewWalker() else {
+            return false;
+        };
+        let Ok(line) = walker.GetFirstChildElement(element) else {
+            return false;
+        };
+        // No next sibling = a null element (an error with no code), not a failed call.
+        super::class_says_empty(&class(&line))
+            && walker.GetNextSiblingElement(&line).is_err_and(|e| e.code().is_ok())
+    }
+
+    /// [`super::stands_in_for_empty`] for a ValuePattern-only field: its
+    /// value is what's in it, so only its placeholder (or nothing but
+    /// markers) stands in for empty.
+    unsafe fn value_stands_in(element: &IUIAutomationElement, value: &str) -> bool {
+        let placeholder = element.CurrentHelpText().map(|b| b.to_string()).unwrap_or_default();
+        super::stands_in_for_empty(value, "", &placeholder, || None)
     }
 
     /// The selected text; a long selection as its start and end.
@@ -532,10 +697,14 @@ mod uia {
     /// Electron inputs): the whole value, and the caret in it when the field
     /// is a Win32 edit control that can say ([`value_selection`]); else the
     /// caret is taken to be at the end, where it is after typing. Text fields
-    /// only, never read-only ones.
+    /// only, never read-only ones; a field showing only its placeholder is
+    /// empty.
     unsafe fn value_context(element: &IUIAutomationElement) -> Option<FieldContext> {
         let pattern = editable_value(element)?;
         let value = pattern.CurrentValue().ok()?.to_string();
+        if value_stands_in(element, &value) {
+            return Some(FieldContext::default());
+        }
         let (value, at) = value_selection(element, value, super::CONTEXT_TIMEOUT_MS);
         let (start, end) = at.unwrap_or_else(|| {
             tracing::debug!("No caret position for this field; taking it to be at the end of its text");
@@ -655,7 +824,7 @@ mod uia {
     /// Fields drop in order: the COM objects, then COM itself.
     pub struct Watched {
         /// The client the element came from (its timeouts), kept with it.
-        _automation: IUIAutomation,
+        automation: IUIAutomation,
         element: IUIAutomationElement,
         _com: Com,
     }
@@ -672,7 +841,7 @@ mod uia {
                     return None;
                 }
                 let watched = Watched {
-                    _automation: automation,
+                    automation,
                     element,
                     _com: com,
                 };
@@ -684,7 +853,7 @@ mod uia {
         /// The whole field, up to `limit` characters (see
         /// [`super::WatchedField::read`]).
         pub fn read(&self, limit: usize) -> Option<FieldWindow> {
-            unsafe { whole_field(&self.element, limit) }
+            unsafe { whole_field(&self.automation, &self.element, limit) }
         }
     }
 
@@ -701,7 +870,7 @@ mod uia {
             if element.CurrentIsPassword().ok()?.as_bool() {
                 return None;
             }
-            whole_field(&element, limit)
+            whole_field(&automation, &element, limit)
         }
     }
 
@@ -710,21 +879,31 @@ mod uia {
         crate::learn::normalise(s)
     }
 
-    /// The whole text of a field (TextPattern, else ValuePattern), its
-    /// placeholder counting as empty.
-    unsafe fn whole_field(element: &IUIAutomationElement, limit: usize) -> Option<FieldWindow> {
-        let w = whole_text(element, limit).or_else(|| whole_value(element, limit))?;
-        let shown = w.text.trim();
-        if shown.is_empty() {
-            return Some(w);
-        }
-        Some(match element.CurrentHelpText() {
-            Ok(hint) if hint.to_string().trim() == shown => FieldWindow {
+    /// The whole text of a field (TextPattern, else ValuePattern); a field
+    /// whose text only stands in for "empty" — its label, its placeholder,
+    /// U+FFFC ([`shows_nothing`]'s rules) — reads as empty.
+    unsafe fn whole_field(automation: &IUIAutomation, element: &IUIAutomationElement, limit: usize) -> Option<FieldWindow> {
+        // Text that's only whitespace is kept as it is; text this long is real.
+        let maybe = |w: &FieldWindow| !w.text.trim().is_empty() && w.text.chars().count() <= super::STAND_IN_CHARS;
+        let (w, empty) = match whole_text(element, limit) {
+            Some(w) => {
+                let empty = maybe(&w) && (text_stands_in(element, &w.text) || placeholder_class(automation, element));
+                (w, empty)
+            }
+            None => {
+                let w = whole_value(element, limit)?;
+                let empty = maybe(&w) && value_stands_in(element, &w.text);
+                (w, empty)
+            }
+        };
+        Some(if empty {
+            FieldWindow {
                 text: String::new(),
                 caret: 0,
                 ..w
-            },
-            _ => w,
+            }
+        } else {
+            w
         })
     }
 
@@ -790,20 +969,6 @@ mod uia {
             to_end,
         })
     }
-
-    /// An empty field that reports its placeholder ("Message #general") as
-    /// its text: it's empty.
-    unsafe fn without_placeholder(ctx: FieldContext, element: &IUIAutomationElement) -> FieldContext {
-        let whole = format!("{}{}{}", ctx.before, ctx.selection, ctx.after);
-        let whole = whole.trim();
-        if whole.is_empty() {
-            return ctx;
-        }
-        match element.CurrentHelpText() {
-            Ok(hint) if hint.to_string().trim() == whole => FieldContext::default(),
-            _ => ctx,
-        }
-    }
 }
 
 #[cfg(windows)]
@@ -822,6 +987,77 @@ fn uia_selected_text() -> Option<String> {
 #[cfg(not(windows))]
 fn read_focused_context(_pid: Option<u32>) -> Option<FieldContext> {
     None
+}
+
+/// What a field's text over UI Automation says about whether it's empty
+/// (Chromium's empty boxes, rich editors' placeholders).
+#[cfg(test)]
+mod field_text_tests {
+    use super::*;
+
+    /// A value that must not be asked for.
+    fn unasked() -> Option<String> {
+        panic!("the value was asked for")
+    }
+
+    #[test]
+    fn bare_drops_markers_and_folds_whitespace() {
+        assert_eq!(bare("  Type a\n message \u{FEFF}\n"), "Type a message");
+        assert_eq!(bare("\u{FFFC}"), "");
+        assert_eq!(bare("\u{200B}\n\t "), "");
+        assert_eq!(bare("one\u{FFFC}two"), "one two");
+    }
+
+    #[test]
+    fn what_chromium_reads_for_an_empty_box_is_empty() {
+        // A textarea or contenteditable labelled by aria-label: its label
+        // as its text, an empty value.
+        assert!(stands_in_for_empty("Type a message", "Type a message", "", || Some(String::new())));
+        // No label: U+FFFC. With a placeholder: U+FFFC, the placeholder as
+        // name and HelpText.
+        assert!(stands_in_for_empty("\u{FFFC}", "", "", unasked));
+        assert!(stands_in_for_empty("\u{FFFC}", "Write a reply", "Write a reply", unasked));
+        // A rich editor's empty line (Gmail's body, WhatsApp's Lexical box).
+        assert!(stands_in_for_empty("\n", "Message Body", "", unasked));
+        // Slate's placeholder inside the editor, beside its U+FEFF line: the
+        // value has the same words, but the marker gives it away.
+        assert!(stands_in_for_empty(
+            "Message #random\n\u{FEFF}\n",
+            "Message #random",
+            "",
+            || Some("Message #random\n\u{FEFF}\n".into())
+        ));
+        // A field showing its placeholder (HelpText) as its text.
+        assert!(stands_in_for_empty("Search mail", "", "Search mail", unasked));
+        // Exactly the label, and no ValuePattern to say otherwise.
+        assert!(stands_in_for_empty("Notes ", "Notes", "", || None));
+    }
+
+    #[test]
+    fn real_text_is_never_a_stand_in() {
+        assert!(!stands_in_for_empty("Hello world", "Notes", "Write here", unasked));
+        assert!(!stands_in_for_empty("\u{FFFC} a photo", "", "", unasked));
+        // The label's words, really typed: the value says they're there.
+        assert!(!stands_in_for_empty("Notes", "Notes", "", || Some("Notes".into())));
+        // Part of the label isn't the label.
+        assert!(!stands_in_for_empty("Type a", "Type a message", "", unasked));
+        // No label, no placeholder: nothing to match.
+        assert!(!stands_in_for_empty("Hi", "", "", unasked));
+    }
+
+    #[test]
+    fn web_editors_say_they_are_empty_in_their_classes() {
+        assert!(class_says_empty("ql-editor ql-blank"));
+        assert!(class_says_empty("is-empty is-editor-empty"));
+        assert!(class_says_empty("ck ck-placeholder"));
+        assert!(class_says_empty("placeholder"));
+        assert!(!class_says_empty("ql-editor"));
+        assert!(!class_says_empty("ProseMirror"));
+        assert!(!class_says_empty("has-placeholder"));
+        assert!(!class_says_empty("RichEditD2DPT"));
+        assert!(!class_says_empty("WindowsForms10.EDIT.app.0.34f5582_r6_ad1"));
+        assert!(!class_says_empty(""));
+    }
 }
 
 /// Reads real Win32 text fields over UI Automation, the way a dictation

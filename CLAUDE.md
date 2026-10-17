@@ -1247,8 +1247,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the watch's thread, read whether it still has the focus or not;
   `read(limit)` → a `FieldWindow` of the **whole field** (TextPattern's
   document range, else the ValuePattern value; line breaks as `\n`, the
-  caret's offset in it, a field showing only its placeholder (= HelpText)
-  empty; longer than `limit` → its start with `to_end` false); same
+  caret's offset in it, an empty field empty (the stand-in rules below);
+  longer than `limit` → its start with `to_end` false); same
   refusals (other processes, passwords, read-only, test runs), 300 ms
   timeouts. **Edit
   mode** (`capture_selection(target, copy_fallback)`): the selected text
@@ -1269,9 +1269,22 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   two, a RichEdit's break one; a RichEdit's final paragraph mark dropped); any
   other value-only field (older Chromium/Electron, Firefox through the MSAA proxy)
   → caret taken to be at the end, where it is after typing. The watch's read finds
-  its caret the same way. Never: another
+  its caret the same way. **Only the field's own text**: every range is kept inside the focused element's
+  `DocumentRange` (`keep_within`; Chromium's ranges are page positions and ran on
+  past a text box into the page), a selection outside it isn't read. **An empty
+  field reads as empty** (`stands_in_for_empty`, pure): Chromium (Edge/Chrome/
+  Electron/WebView2) gives an empty textarea/input/contenteditable an empty
+  ValuePattern value but its accessible name ("Type a message") or U+FFFC as its
+  TextPattern text — so a field's whole text (≤ 200 chars) that's only markers
+  (U+FFFC, zero-widths)/whitespace, its placeholder (HelpText), or its name unless
+  the ValuePattern says those words are really there (Slate's in-editor
+  placeholder: same words + U+FEFF) is empty; so is a web editor whose class says
+  it shows a CSS placeholder, itself or its one line (`class_says_empty`: Quill's
+  `ql-blank` = Slack, `is-empty`/`is-editor-empty` = ProseMirror/Tiptap,
+  `ck-placeholder`, `placeholder`); a value-only field only by its placeholder or
+  markers. The post-paste watch applies the same rules. Never: another
   process's element than the target window's, a password box, read-only text, or in
-  a test run; a field showing its placeholder (= HelpText) counts as empty. The paste
+  a test run. The paste
   never waits: still reading → no context. Kept in memory for that dictation only;
   logged as lengths, never text. `#[ignore]`d `reads_real_text_fields` reads hidden
   EDIT and RichEdit controls end to end, through TextPattern and through the
@@ -2360,14 +2373,14 @@ device list. Known quirk: Better Auth links accounts by exact email, so
 2026-10-17): paste, smart spacing, snippets, "press enter", Paste last transcript,
 the clipboard, terminals (PowerShell, a Claude Code stand-in), chat apps, the mic
 path, the dead-mic watchdog, learning words from corrections and real Parakeet
-STT, all checked against real windows by Claude. Two gaps they found are fixed
-(2026-10-17): a WinForms text box gives UI Automation no caret, so mid-text
-dictations were fitted as if at the end — Yap now asks the edit control
-(`EM_GETSEL`); and the fuzzy pass swallowed a short word before a term ("Deploy
-it to Kubernetes" → "Deploy it Kubernetes"). Still pinned (a "known gap: …"
-test): Edge/Chrome report an empty text box's text as its label or U+FFFC (a web
-chat message keeps its full stop and gets a trailing space), and their context
-ranges run past the box into the page.
+STT, all checked against real windows by Claude. The three gaps its first run
+found are fixed (2026-10-17): a WinForms text box gives UI Automation no caret,
+so mid-text dictations were fitted as if at the end — Yap now asks the edit
+control (`EM_GETSEL`); the fuzzy pass swallowed a short word before a term
+("Deploy it to Kubernetes" → "Deploy it Kubernetes"); and Edge/Chrome report an
+empty text box's text as its label or U+FFFC (a web chat message kept its full
+stop and got a trailing space) and their ranges ran past the box into the page
+— reads now stay in the field and an empty one reads as empty.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
