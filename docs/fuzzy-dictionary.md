@@ -165,8 +165,9 @@ sides, before they're saved) and on an Upload's whole text as well as on a
 dictation. Before, meetings and Upload got the dictionary only as Whisper's
 `initial_prompt`, so with the default Parakeet model they got no corrections.
 
-Still open from the original list: multi-trigger entries (`triggers[] → to`)
-and OpenWhispr-style auto-learning (needs an edit-observation channel).
+Still open from the original list: multi-trigger entries (`triggers[] → to`).
+(OpenWhispr-style auto-learning shipped 2026-10-17 as word *suggestions*, see
+the last section.)
 (The per-entry fuzzy flag from option 3's guardrails shipped 2026-07-10,
 see above.)
 
@@ -235,3 +236,62 @@ within the last day, then the last 14 days, then the rest; inside each tier
 most uses first; then the order you added them. Wispr also ranks by an entry's
 *source* (manual > learned from edits > …); Yap has only manual entries so far.
 Meetings keep their attendees ahead of the ranked dictionary.
+
+---
+
+## 2026-10-17 — words suggested from your corrections
+
+"Suggest words from your corrections" (`learn.rs`, `config.learn_words`,
+default on, a switch in the Dictionary view): Yap pastes a dictation, you fix
+a word it got wrong in place, and it asks — "Add “Kubernetes” to your
+dictionary? Yap heard “cube and eighties”." Behaviour after Wispr Flow's
+dictionary auto-learn (teardown `04-dictation-and-other.md`) and OpenWhispr's
+`correctionLearner.js`; Wispr has a **cloud** classifier confirm each word
+and adds it with an Undo, Yap decides **on this PC** and asks first.
+
+**Seeing the fix.** After a paste with no submit key (and not into a
+terminal, whose text is the program's output too), a thread holds the
+focused field over UI Automation (`selection::WatchedField` — the target
+window's process only, never a password box or a read-only field, never in a
+test run) and reads ±2,000 characters around the caret. Right after the paste
+it finds the pasted text there and remembers ~24 characters either side of it;
+every 700 ms for up to 45 s it finds the span between those again (falling
+back to the nearest 8 characters when the neighbours were edited too), so it
+follows the pasted text wherever the caret goes. It stops when the window or
+the element loses the focus, another dictation starts, or the span grows far
+past the paste (you're writing on). A span that changed and then sat still for
+2.5 s is looked at, and the last one when the watch ends. In memory only; the
+log carries lengths and counts.
+
+**What counts** (`learn::suggestions`, pure, unit-tested):
+
+| Step | Rule |
+|---|---|
+| Align | pasted vs edited words, longest common subsequence, ignoring case and the punctuation at word edges; the gaps between matches are the changes |
+| Size | 1–3 words replaced by 1–3 words (spelled-out letters, "G P T", count as one); insertions and deletions never count |
+| What Yap heard | not a single everyday word — `motion → Notion` would rewrite every "motion" you say (the `json → JSON`/"Jason" problem again) — and not only function words ("and then") |
+| The new text | looks like a term: a capital inside a word ("GitHub"), an acronym ("NASA"), digits ("GPT-4"), a word that isn't an everyday one, a capital mid-sentence, or several words heard as one word that isn't an everyday one ("power to keep" → "Parakeet") |
+| Alike | spells or sounds like what Yap typed: `fuzzy::spelling_distance` (Handy's score on the letters alone) or `fuzzy::sound_distance` (Levenshtein over a consonant `sound_key`: c/k/q/g, b/p, d/t, f/v/ph, s/z merged; gh, vowels, h/w/y dropped — "kpnts"/"kprnts") ≤ 0.5; ≤ 0.3 when the keys are 3 or shorter, so "Sam"/"Pam" or "Sarah"/"Priya" aren't mishearings |
+| Case alone | "github" → "GitHub", "nasa" → "NASA", "sinead" → "Sinead" mid-sentence — never for an everyday word ("slack" → "Slack" would capitalise every "slack") |
+| Skipped | words already a correction's spelling or trigger, punctuation-only edits, and edits that rewrite most of the dictation |
+| Cap | 3 per dictation |
+
+"Everyday word" = the built-in list of frequent English words (with days,
+months, numbers, contractions; plain suffixes stripped: "meetings", "stopped",
+"happily") **or** Windows' own spell checker (`ISpellChecker`, the user's
+locale plus English, read-only) accepting the word in lower case. Names fail
+that ("jason", "sinead" are only right with a capital), so they stay
+learnable.
+
+**Asking.** A toast in the main window while it's on screen, else a Yap bar
+card (never a Windows notification): Add / Not now / "Don't suggest this".
+Add saves `{from: heard, to: term, fuzzy: true}` — what Yap typed after
+cleanup, which is what the dictionary runs on — to config.json and the live
+pipeline, and tells the windows (`yap-dictionary-learned`) so Settings' and
+the Dictionary view's own saves keep it. "Not now" twice (✕ counts) or "Don't
+suggest this" and that pair is never offered again; at most one prompt every 3
+minutes. The answers live in `word_suggestions.json`, never the text read.
+
+Not (yet): learning from edits made after the 45 s or in fields UI Automation
+can't read (some Electron apps, terminals), and the per-source vocabulary
+ranking Wispr does (a learned entry ranks like a manual one).

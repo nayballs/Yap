@@ -9,12 +9,17 @@
   // corrections (heard → replace with) and snippets (`snippet: true` — a
   // phrase you say → the text Yap types, which may span lines;
   // config::apply_snippets). They're shown as separate sections.
+  //
+  // "Suggest words from your corrections" (`learnWords`, learn.rs): words
+  // added from a suggestion are saved in Rust; Settings adopts them and
+  // passes them on here as `yap-dictionary-external`.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, tick } from 'svelte';
   import Toggle from './ui/Toggle.svelte';
 
   let dict = $state([]);
   let fuzzy = $state(true);
+  let learnWords = $state(true);
   let loaded = $state(false);
   let saveTimer = null;
   let priming = true;
@@ -27,6 +32,7 @@
       const cfg = await invoke('get_config');
       dict = Array.isArray(cfg?.dictionary) ? cfg.dictionary : [];
       fuzzy = cfg?.dictionaryFuzzy ?? true;
+      learnWords = cfg?.learnWords ?? true;
     } catch {
       dict = [];
     }
@@ -68,12 +74,15 @@
           snippet: !!e.snippet,
         }))
         .filter((e) => e.from && e.to);
-      await invoke('save_config', { cfg: { ...fresh, dictionary: cleaned, dictionaryFuzzy: fuzzy } });
+      await invoke('save_config', {
+        cfg: { ...fresh, dictionary: cleaned, dictionaryFuzzy: fuzzy, learnWords },
+      });
       // The always-mounted Settings component keeps its own full-cfg copy and
       // auto-saves it wholesale — the event must carry EVERY dictionary field
-      // we own (entries + fuzzy), or Settings' next save reverts the missing one.
+      // we own (entries, fuzzy, learnWords), or Settings' next save reverts
+      // the missing one.
       window.dispatchEvent(
-        new CustomEvent('yap-dictionary-changed', { detail: { entries: cleaned, fuzzy } })
+        new CustomEvent('yap-dictionary-changed', { detail: { entries: cleaned, fuzzy, learnWords } })
       );
     } catch {
       /* best-effort */
@@ -82,6 +91,10 @@
 
   function setFuzzy(on) {
     fuzzy = on;
+    persist();
+  }
+  function setLearnWords(on) {
+    learnWords = on;
     persist();
   }
 
@@ -156,6 +169,15 @@
           desc="Also fix words that ALMOST match a correction — “jaison” still becomes “JSON”. Uses spelling + sound-alike matching (same engine as Handy). The ≈ button on a row exempts that correction — handy when a near-miss is a real word (“Jason”). With a Whisper model the dictionary is fed straight into the recognizer instead, the words you've used most lately first."
           checked={fuzzy}
           onchange={setFuzzy}
+        />
+      </div>
+
+      <div class="fuzzycard">
+        <Toggle
+          label="Suggest words from your corrections"
+          desc="Fix a word Yap typed — “cube and eighties” to “Kubernetes” — and Yap offers to add it here. It never adds one without asking. For under a minute after each dictation, Yap reads the text around your cursor to notice the fix; it stays on this PC and never looks into password fields."
+          checked={learnWords}
+          onchange={setLearnWords}
         />
       </div>
     </section>

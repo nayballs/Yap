@@ -18,7 +18,8 @@
 // both as "Not now"); `icon: 'call'` gives the chip a phone, `'screen'` a
 // monitor (the screen-share tip), `'timer'` a stopwatch (a meeting's
 // length limit), `'alert'` a warning triangle ("Started by mistake?") and
-// `'calendar'` a calendar (a meeting reminder).
+// `'calendar'` a calendar (a meeting reminder), `'dictionary'` a book (a
+// word to add to the dictionary).
 // `updateToast(id, patch)` changes a live toast in place (the update toast
 // goes ready → downloading → restarting without stacking new cards).
 
