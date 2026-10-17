@@ -194,6 +194,159 @@ test('chat: the empty state offers a new chat', async ({ yap, main, shot }) => {
   pipeline, so gestures behave as with the real hook. The
   meeting shortcut the same way: `main.keyboard.press('Meta+Alt+KeyM')`.
 
+## Real-app robot tests (`npm run test:real`)
+
+The suite above never lets Yap touch another app: nothing is pasted, no key
+is pressed, no other window is read. The **robot suite** (`e2e-real/`) does
+exactly that, safely: a **robot-mode** Yap pastes into real windows the
+harness opens itself — a WinForms test pad, Windows Terminal, Edge, Notepad —
+and every spec asserts **what actually landed there** (the field's text, the
+terminal's buffer, what a stand-in coding CLI received). It's how Claude
+tests paste, smart spacing, snippets, "press enter", the clipboard, terminal
+and chat-app handling, the microphone path and real speech-to-text without
+handing Nathan a checklist.
+
+```bash
+npm run test:real                         # build the test app (stub), then run
+npx playwright test -c e2e-real           # only run, against the last build
+npx playwright test -c e2e-real terminal  # one spec
+npm run test:real:build -- --engines      # the real-STT build for stt.real.js
+npx playwright show-report test-results/real/report
+```
+
+> ⚠ **It takes the keyboard focus** for about a minute and a half (the
+> suite says so when it starts): windows open, come to the front and close.
+> Don't type or click meanwhile — a key pressed into a robot window can
+> spoil a test (never anything else: see below). The window that was in
+> front gets the focus back at the end. It needs a desktop session, so it
+> doesn't run on CI.
+
+The stub build is the UI suite's own (robot mode is part of every debug
+build). `--engines` builds the real STT (whisper on Vulkan, ONNX on DirectML;
+needs the Vulkan SDK) into a short target dir of its own,
+`YAP_REAL_ENGINES_TARGET_DIR` (default `<drive>:\t-real`: whisper.cpp's CMake
+build nests paths past `MAX_PATH` under `src-tauri\target`, the same reason
+`scripts/dev.bat` uses `<drive>:\t`). `stt.real.js` uses it when it's there
+(`YAP_REAL_ENGINES_EXE` points elsewhere), and Yap's default model, Parakeet
+V3, **copied read-only** from `%APPDATA%\yap\models\parakeet-tdt-0.6b-v3-int8`
+(or `YAP_REAL_MODEL_DIR`) into `test-results/real/cache` once, then
+hard-linked into the robot's portable data dir. Nothing else in
+`%APPDATA%\yap` is read. Without the build or the model the spec is skipped,
+and says why.
+
+### The guard: only the robot's own windows
+
+Robot mode is test mode (`YAP_E2E=1`: portable data dir, own WebView2
+profile and DevTools port, no global hooks, no account service, no
+notifications, no update checks, F24 hotkey — `launchYap` from the UI suite)
+plus `YAP_REALTEST=1`, **debug builds only** (`src-tauri/src/realtest.rs`;
+compiled out of release builds). It lets Yap paste, press a submit key, read
+the field around the cursor (UI Automation) and look at a window's title
+(`app_kind`) **only in a window the test opened**:
+
+- a window of a process in `YAP_REALTEST_PIDS` (the test pad) or one of its
+  descendants — matched by start time too, so an id Windows has since given
+  to another process never counts;
+- or a window whose title contains `YAP_REALTEST_NONCE`, a random value of
+  at least 12 characters made for each run and put in the title of every
+  other window the harness opens (Windows Terminal, Edge, Notepad).
+
+Anything else — your windows, Yap's own — is **refused**: nothing is sent,
+"Robot mode refused to paste: …" goes to the log and to Yap's window as an
+error toast, and `realtest_refusals` lists it. The window in front is checked
+again **right before every `SendInput`** (the paste's Ctrl+V, typing, the
+submit key), so clicking elsewhere mid-run can't redirect a paste: Yap
+refuses instead. Reads follow the same rule, quietly. `testpad.real.js`'s
+first test proves it with a second test pad Yap wasn't given.
+
+The harness keeps to the same rule. Its helper (`support/yaprobot.cs`,
+compiled with the C# compiler every Windows has into
+`test-results/real/bin/yaprobot.exe`) presses keys or closes a window only
+when it's titled with the nonce, and never prints another window's title or
+text. Windows Terminal windows are new windows (`wt -w new`) that may live in
+your own terminal's process, which is why they're known by title and closed
+one by one (confirming its "close all tabs?" for that window only). Each Edge
+window gets a throwaway profile (none of your tabs, sign-ins or extensions).
+Notepad is skipped while Notepad is open: Windows 11 would open the test
+file as a tab in your window. The clipboard is snapshotted when a robot
+starts (in Yap's memory, never printed) and put back when it stops; the
+clipboard spec's test values are put there privately (out of Win+V history).
+
+### How a robot dictates
+
+No microphone or hotkey: debug-only commands drive the real pipeline.
+
+- `realtest_dictate_text { text, hwnd }` — `text` as if the STT had just
+  heard it, into the window in front (`hwnd` must be it): the target and the
+  text around its cursor read as at a recording's start, then cleanup, the
+  dictionary, "press enter", snippets, fitting to the kind of app and the
+  cursor, the paste, the submit key, history. Returns what went to the paste:
+  `{ text, raw, kind, submit, error }` (`kind` as `AppKind::describe` says
+  it: "terminal (Claude Code in Windows Terminal)", "chat app"…).
+- `realtest_dictate_wav { path, hwnd }` — a WAV played into the dictation
+  **in real time, in the mic's place** (the real mic's audio is dropped
+  meanwhile), between a real `start_recording` and the stop the hotkey would
+  make: the live preview, the dead-mic watchdog, the STT and the paste all
+  run. `null` when nothing was transcribed. The speech comes from Windows'
+  own text-to-speech written straight to a 16 kHz WAV (`support/tts.js`,
+  never played aloud, cached in `test-results/real/cache/tts`).
+- `realtest_window { hwnd }` (the guard's verdict, no side effects),
+  `realtest_refusals`, and `realtest_clipboard { action: save | restore |
+  setText | setImage | check }` (`check` compares, it never hands the
+  clipboard's contents out).
+
+### What's covered
+
+| Spec | Target | Tests |
+|------|--------|-------|
+| `testpad.real.js` | the test pad (WinForms: text box, rich text box, password box) | the guard (the pad allowed by its process, Yap's own window refused, a second pad Yap wasn't given refused for a dictation and for Paste last transcript, its field neither read nor changed, the refusal toast) · smart spacing fitted to the text before the cursor (mid-sentence lower case and space, a new sentence, after a space, a name keeping its capital, the rich text box) · a password box pasted into but never read · snippets (a multi-line sign-off with its full stop dropped, said alone, a one-line link mid-sentence keeping the sentence's) · "press enter" (the text then Enter; only the command: just Enter) · Paste last transcript, fitted where it lands · the clipboard (your text back after the paste, the dictation not left there, the four keep-it-out-of-history formats present at the pad's Ctrl+V and on what came back; an image back byte for byte) · AI cleanup through the fake model, and "press enter" it dropped still sending |
+| `browser.real.js` | Edge app windows | a web page's text box: mid-text (lower case, spaces, no full stop before what follows), after a sentence, replacing a selected word · a chat app (a page titled "WhatsApp - …"): a short message without its full stop, a question with its mark, three sentences with theirs, the setting off |
+| `terminal.real.js` | Windows Terminal | a PowerShell prompt: a list dictated as one line ("List the files: the logs; the notes.") and nothing run · "press enter" running a harmless `Echo` (its output read back) · a stand-in for Claude Code (Claude Code's idle title "✳ …", bracketed paste, runs nothing, logs what arrives): the line breaks kept in one bracketed paste, nothing sent; "press enter" sending it · auto-submit: Enter in the coding CLI, never at the shell prompt · "Safer pasting into terminals" off: just another app |
+| `audio.real.js` | the test pad | a spoken WAV through a real recording to the paste (the stub's transcript) · a dead mic (7 s of digital silence): reopened at ~3 s, "No sound from … — check it isn't muted or unplugged" in the log and as a toast at ~5 s, nothing transcribed or pasted |
+| `stt.real.js` | the test pad, an `engines` build | Parakeet V3 hears "The quick brown fox jumps over the lazy dog" (Windows TTS) and it lands in the field |
+| `notepad.real.js` | Windows 11 Notepad | a dictation lands, the next one follows it after a space (skipped while Notepad is open) |
+
+**Known gaps** the robot found (2026-10-17), kept as `test.fail()` tests so
+the suite stays green and says so once they're fixed: a WinForms text box
+gives UI Automation no caret (Yap reads it as if the cursor were at the end
+of the text), and in Edge/Chrome the 500 characters "before the cursor" run
+past the text box into the page above it, and an empty box reports its
+label ("Type a message") as its text — so a short chat message in a web
+chat app keeps its full stop and gets a space after it.
+
+### Results
+
+`test-results/real/` (git-ignored): `report/` (Playwright's), `playwright/`
+(failure details), `runs/<spec>-w<N>/` (each robot Yap's `stdout.log` — with
+debug logging on: what kind of app each dictation went into, how much text
+around the cursor was read, as lengths — and its `app/Data/`, and the test
+windows' temp folders under `targets/`), `screenshots/`, `cache/` (TTS
+speech, the model copy) and `bin/yaprobot.exe`.
+
+### Adding a robot test
+
+```js
+import { test, expect } from './support/robot.js';
+
+test('a snippet in the test pad', async ({ robot }) => {
+  const { pad } = robot;
+  await robot.configure({ dictionary: [{ from: 'my email', to: 'me@example.com', fuzzy: false, snippet: true }] });
+  await pad.set('box', 'Write to ');
+  const r = await robot.dictate(pad, 'My email.');
+  await expect.poll(() => pad.text('box')).toBe('Write to me@example.com');
+  await robot.configure({ dictionary: [] });
+});
+```
+
+`robot` is one robot-mode Yap plus the test pad per spec file (`robotOptions`
+changes how Yap starts: `config`, `exe`, `prepare`); `robot.shell()`,
+`robot.claudeCode()`, `robot.editor()`, `robot.chat()` and `robot.notepad()`
+open the other targets, which close when the test ends. `robot.dictate(target,
+text)` / `robot.dictateWav(target, file)` bring the target to the front and
+dictate; `robot.logMark()` / `robot.logSince(mark)` read Yap's log. Assert
+on what landed in the target, and on the returned `{ text, kind, submit,
+error }`. Only harmless text in a shell: nothing but `echo` is ever run.
+
 ## Why Playwright over CDP
 
 Tauri's official route is WebDriver: `tauri-driver` plus a Microsoft Edge

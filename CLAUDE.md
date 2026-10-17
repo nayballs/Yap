@@ -196,7 +196,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   hold of a minute or more. Key events and the tap timer act under one lock
   (`gesture`), timed by the input hook's own timestamps; a recording started or
   stopped elsewhere (the bar's Dictate, the tray's Cancel) is followed, and one
-  started by Dictate stops on the next press. `run_stt` (async) does cleanup →
+  started by Dictate stops on the next press. `run_stt` (async) transcribes, then
+  `deliver` (also robot mode's way in, `realtest.rs`; the target is captured by
+  `capture_target`, mic audio arrives through `take_audio`) does cleanup →
   `finish_dictation` (dictionary via `apply_corrections`, shared with meetings
   and Upload; then the "press enter" command, then snippets) →
   `text_injector::prepare_dictation` (fitted to the kind of app,
@@ -1273,6 +1275,27 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   Credential Manager and links recorded (`calendar_e2e_opened`) instead of
   opened in a browser, and it quits when its stdin closes. See
   [`docs/e2e-tests.md`](./docs/e2e-tests.md).
+- **`realtest.rs`** — **robot mode** for the real-app robot tests (`e2e-real/`,
+  `npm run test:real`): test mode + `YAP_REALTEST=1`, debug builds only. The paste,
+  the submit key, "Paste last transcript", the UI Automation reads and `app_kind`'s
+  title read are real again (`gate` / `permits` / `recheck_foreground`, called from
+  `text_injector`, `selection`, `app_kind`; in a normal run they're always "go",
+  in plain test mode always "no") — **only into windows the test opened**: a
+  process in `YAP_REALTEST_PIDS` or a descendant (`procs::lineage`, matched by
+  start time) or a title containing `YAP_REALTEST_NONCE` (≥ 12 chars; pure
+  `decide`, unit-tested). A refusal is logged, emitted as `yap-error` and kept for
+  `realtest_refusals`; the foreground is re-checked right before every `SendInput`
+  (the paste, typing, the submit key). Edit mode's Ctrl+C stays off. Debug-only
+  commands: `realtest_dictate_text { text, hwnd }` (`pipeline::Robot::dictate_text`:
+  `capture_target` → `selection::wait_for_context` → `deliver`, the same code a
+  spoken dictation runs after its STT; returns `Delivered { text, raw, kind,
+  submit, error }`), `realtest_dictate_wav { path, hwnd }` (`dictate_audio`: the
+  WAV fed through `take_audio` in real time between a real `start_recording` and
+  `stop_and_transcribe`, the real mic's audio dropped meanwhile — `TEST_FEED`; a
+  recording may start without a mic), `realtest_window`, `realtest_refusals`,
+  `realtest_clipboard { save | restore | setText | setImage | check }` (never
+  hands the clipboard's contents out). See [`docs/e2e-tests.md`](./docs/e2e-tests.md)
+  "Real-app robot tests".
 - **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
   `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
   **Debug mode** (Settings → Advanced → Debug Logging, OpenWhispr Developer-
@@ -1883,13 +1906,40 @@ artifact on every run — review it with
 and read the PNGs under `screenshots/`. Full guide (incl. adding a test):
 [`docs/e2e-tests.md`](./docs/e2e-tests.md).
 
+### Real-app robot tests (`npm run test:real`)
+The second layer: a **robot-mode** Yap (`realtest.rs`) pastes into **real windows
+the harness opens** — a WinForms test pad (`e2e-real/support/yaprobot.cs`,
+compiled with the .NET Framework's `csc`), Windows Terminal (a PowerShell prompt,
+and a stand-in for Claude Code: its "✳ …" title + bracketed paste, runs nothing),
+Edge app windows with throwaway profiles (a web page's text box; a "WhatsApp"
+page = a chat app), Notepad (skipped while Notepad is open) — and the specs
+(`e2e-real/*.real.js`) assert what actually landed: smart spacing, snippets,
+"press enter", Paste last transcript, the clipboard (yours back, private while
+pasted), AI cleanup via the fake model, terminal one-line mode / coding-CLI line
+breaks / auto-submit, chat full stops, the mic path from a TTS WAV
+(`realtest_dictate_wav`) incl. the dead-mic watchdog, and **real STT** (Parakeet
+hears Windows TTS saying "the quick brown fox…") on an `engines` build
+(`npm run test:real:build -- --engines` → `<drive>:\t-real`; the model copied
+read-only from `%APPDATA%\yap\models`). **The guard**: Yap may paste / press keys /
+read only in windows of `YAP_REALTEST_PIDS` (+ descendants, by start time) or
+titled with the run's `YAP_REALTEST_NONCE`; everything else is refused (logged,
+toast, `realtest_refusals`), the foreground re-checked right before every
+`SendInput`. ⚠ **It takes the keyboard focus for ~1.5 min** (runs locally only, not
+on CI): say so before running it while Nathan's at the PC. Known gaps it found
+are `test.fail()` tests (see docs). Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md)
+"Real-app robot tests".
+
 ### The dev → nightly → stable workflow (agreed with Nathan, 2026-10-05)
 **Dev first, nightly for batches.** Every change goes through these steps in order:
 1. **Claude builds it and tests it.** `npm run build` + `cargo clippy --all-targets
    --locked -- -D warnings` + `cargo test`, then the e2e robot suite (`npm run
    test:app`: drives the real app in ~20 s and leaves screenshots to look at; add or
-   extend a spec for anything new). Push to main: CI and the E2E workflow re-check
-   every push.
+   extend a spec for anything new). For anything about **pasting, inserting text,
+   the clipboard, terminals/chat apps, the mic path or STT**, also the real-app
+   robot tests (`npm run test:real`, + `npm run test:real:build -- --engines` for
+   real STT): they paste into real windows, so Claude checks it itself instead of
+   handing Nathan a checklist (they take the keyboard focus ~1.5 min). Push to
+   main: CI and the E2E workflow re-check every push.
 2. **Nathan tries it in the dev build** ("Yap - Dev" desktop shortcut =
    `scripts\dev.bat`, the real GPU pipeline from this checkout). Anything visual or
    about how it feels gets checked HERE: Vite hot-reloads `src/` edits in seconds;
@@ -2173,6 +2223,15 @@ with your phone** (QR code, device flow) verified end to end in the installed
 nightly `0.1.1-nightly.107` (2026-10-04), along with the "Where you're signed in"
 device list. Known quirk: Better Auth links accounts by exact email, so
 `…@gmail.com` and `…@googlemail.com` (same Gmail inbox) are separate accounts.
+**Real-app robot tests** (`npm run test:real`, `realtest.rs` + `e2e-real/`,
+2026-10-17): paste, smart spacing, snippets, "press enter", Paste last transcript,
+the clipboard, terminals (PowerShell, a Claude Code stand-in), chat apps, the mic
+path, the dead-mic watchdog and real Parakeet STT, all checked against real
+windows by Claude. Known gaps they found (kept as `test.fail()` tests): a
+WinForms text box gives UI Automation no caret (fitted as if at the end), and in
+Edge/Chrome the context read runs past the text box into the page above it and
+an empty box reports its label as its text (a web chat message keeps its full
+stop and gets a trailing space).
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
