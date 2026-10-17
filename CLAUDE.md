@@ -2374,6 +2374,15 @@ Use **`scripts/dev.bat`** ("yap.dev") — it runs `npm run tauri dev -- --featur
 fast no-GPU stub for pure UI work. Dev hot-reloads the frontend on every edit (Vite on **:51437**).
 A **"Yap - Dev"** desktop shortcut launches it; the plain **"Yap"** desktop shortcut is the
 *installed* app (`D:\Hobby Project\Yap`, follows the nightly channel).
+**It always runs the latest main** (2026-10-17): before starting, dev.bat runs
+`scripts/dev-update.ps1`, which fast-forwards the checkout to `origin/main` (putting back
+files whose only change is line endings — the Tauri CLI rewrites `src-tauri/Cargo.toml` —
+listing what's new, and running `npm install` when `package-lock.json` changed), then
+dev.bat starts its updated self afresh (cmd reads a running batch file line by line, so
+reading on in a rewritten one would go wrong). It skips the update and says why on another
+branch, with real local edits, offline, or when it isn't a fast-forward — Yap still starts.
+So merged work reaches Nathan by pushing to main; never fast-forward his checkout by hand
+while Yap - Dev runs.
 
 ```bash
 # real GPU pipeline (default in dev.bat) — requires the Vulkan SDK
@@ -2492,7 +2501,8 @@ it in dev": give him the exact steps, every time:
 - **Quit the installed Yap first** (tray icon → Quit). The dev build skips the
   single-instance lock and shares `%APPDATA%\yap` (config, hotkey, notes) with
   the installed app, so with both running one hotkey press starts two dictations.
-- **Double-click "Yap - Dev"** on the desktop. It opens a console window: leave it
+- **Double-click "Yap - Dev"** on the desktop (it updates itself to the latest main
+  first). It opens a console window: leave it
   open, closing it closes the dev Yap. The first start after Rust changes compiles
   for a few minutes; it's ready when the Yap window appears (and Vite listens on
   :51437).

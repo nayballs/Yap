@@ -8,6 +8,17 @@ REM Keep this window open while you work; close it to stop Yap.
 title Yap Dev (live)
 cd /d "%~dp0.."
 
+REM Always run the latest: bring this checkout up to date with origin/main
+REM first (dev-update.ps1 says why when it skips: another branch, local
+REM edits, offline). The update can rewrite THIS file, and cmd reads a batch
+REM file line by line as it runs, so this block (parsed whole before it runs)
+REM starts the updated copy afresh instead of reading on in a changed file.
+if not defined YAP_DEV_UPDATED (
+  set YAP_DEV_UPDATED=1
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0dev-update.ps1"
+  "%~f0"
+)
+
 REM whisper-rs-sys' cmake build nests paths past Windows MAX_PATH (260) and
 REM MSBuild's FileTracker fails with FTK1011 regardless of the LongPathsEnabled
 REM registry opt-in — same workaround as CI (nightly.yml): build into a SHORT
