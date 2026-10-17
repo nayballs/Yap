@@ -170,7 +170,9 @@ NEVER respond with commentary, status, or meta-remarks such as \"Nothing to clea
         { "role": "user", "content": wrap(text) },
     ]);
 
-    let out = post_chat(base_url, api_key, model, provider, 0.2, messages).await?;
+    // Never waits out a rate limit: the dictation would wait with it, and the
+    // raw transcript is a fine fallback.
+    let out = post_chat(base_url, api_key, model, provider, 0.2, messages, Duration::ZERO).await?;
     Ok(if disable_thinking { strip_thinking(&out) } else { out })
 }
 
@@ -297,6 +299,7 @@ pub(crate) async fn chat(
         None,
         opts.max_tokens,
         opts.timeout,
+        RATE_LIMIT_PATIENCE,
     )
     .await?;
     let content = message["content"]
@@ -341,6 +344,7 @@ pub async fn note_chat(
         provider,
         0.5,
         serde_json::Value::Array(messages),
+        RATE_LIMIT_PATIENCE,
     )
     .await?;
     let out = if disable_thinking {
@@ -406,7 +410,7 @@ pub async fn rewrite(
     ]);
 
     // Slightly higher temperature than cleanup — rewriting is generative.
-    let out = post_chat(base_url, api_key, model, provider, 0.7, messages).await?;
+    let out = post_chat(base_url, api_key, model, provider, 0.7, messages, Duration::ZERO).await?;
     Ok(if disable_thinking { strip_thinking(&out) } else { out })
 }
 
@@ -415,6 +419,7 @@ pub async fn rewrite(
 /// given `temperature`, records best-effort daily usage, and returns the
 /// `strip_wrapping`-cleaned assistant content (or an `Err` string on any
 /// network/HTTP/parse failure or empty output).
+#[allow(clippy::too_many_arguments)]
 async fn post_chat(
     base_url: &str,
     api_key: &str,
@@ -422,9 +427,21 @@ async fn post_chat(
     provider: &str,
     temperature: f32,
     messages: Value,
+    rate_limit_patience: Duration,
 ) -> Result<String, String> {
-    let message =
-        post_chat_message(base_url, api_key, model, provider, temperature, messages, None).await?;
+    let message = post_chat_request(
+        base_url,
+        api_key,
+        model,
+        provider,
+        temperature,
+        messages,
+        None,
+        None,
+        CLEANUP_TIMEOUT,
+        rate_limit_patience,
+    )
+    .await?;
     let content = message["content"]
         .as_str()
         .ok_or_else(|| "response missing choices[0].message.content".to_string())?;
@@ -437,7 +454,9 @@ async fn post_chat(
 
 /// Lower-level variant returning the WHOLE assistant message object (so the
 /// chat tool loop can inspect `tool_calls`). `tools` is an optional OpenAI
-/// `tools` array attached to the request.
+/// `tools` array attached to the request. Waits out a rate limit (up to
+/// [`RATE_LIMIT_PATIENCE`]): a tool-using answer makes several calls, which
+/// is just what runs into a free plan's tokens-per-minute cap.
 pub(crate) async fn post_chat_message(
     base_url: &str,
     api_key: &str,
@@ -457,8 +476,76 @@ pub(crate) async fn post_chat_message(
         tools,
         None,
         CLEANUP_TIMEOUT,
+        RATE_LIMIT_PATIENCE,
     )
     .await
+}
+
+/// How long, in all, a call that someone is happy to wait for (the chat, the
+/// note's Ask bar, meeting summaries and digests) waits out a provider's rate
+/// limit (HTTP 429) before giving up. Groq's free plan allows 8,000 tokens a
+/// minute, and one tool-using chat answer can ask for more than that.
+/// Dictation cleanup and edit mode never wait (`Duration::ZERO`).
+const RATE_LIMIT_PATIENCE: Duration = Duration::from_secs(30);
+
+/// How long a rate-limited (HTTP 429) provider asks us to wait: the
+/// `retry-after-ms` or `retry-after` header (seconds), else the "try again in
+/// 10.98s" / "1m2.5s" / "450ms" wording in the body (Groq, OpenAI). `None` =
+/// it didn't say.
+fn rate_limit_wait(retry_after_ms: Option<&str>, retry_after: Option<&str>, body: &str) -> Option<Duration> {
+    if let Some(ms) = retry_after_ms.and_then(|v| v.trim().parse::<f64>().ok()) {
+        return Some(Duration::from_secs_f64(ms.max(0.0) / 1000.0));
+    }
+    if let Some(s) = retry_after.and_then(|v| v.trim().parse::<f64>().ok()) {
+        return Some(Duration::from_secs_f64(s.max(0.0)));
+    }
+    let lower = body.to_ascii_lowercase();
+    let at = lower.find("try again in")? + "try again in".len();
+    // "10.98s", "1m30.5s", "450ms", "2h3m": number + unit pairs.
+    let mut rest = lower[at..].trim_start();
+    let mut total = 0.0;
+    let mut any = false;
+    loop {
+        let num_len = rest.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(rest.len());
+        let Ok(n) = rest[..num_len].parse::<f64>() else { break };
+        rest = &rest[num_len..];
+        let (scale, unit_len) = if rest.starts_with("ms") {
+            (0.001, 2)
+        } else if rest.starts_with('h') {
+            (3600.0, 1)
+        } else if rest.starts_with('m') {
+            (60.0, 1)
+        } else if rest.starts_with('s') {
+            (1.0, 1)
+        } else {
+            break;
+        };
+        total += n * scale;
+        any = true;
+        rest = &rest[unit_len..];
+    }
+    any.then(|| Duration::from_secs_f64(total))
+}
+
+/// The error for a rate limit we didn't (or couldn't) wait out: said plainly,
+/// with how long to wait when the provider told us.
+fn rate_limited_error(provider: &str, wait: Option<Duration>) -> String {
+    let who = match provider {
+        "groq" => "Groq",
+        "openai" => "OpenAI",
+        "anthropic" => "Anthropic",
+        "openrouter" => "OpenRouter",
+        "gemini" => "Gemini",
+        _ => "The AI provider",
+    };
+    let free = if provider == "groq" { " (its free plan allows 8,000 tokens a minute)" } else { "" };
+    match wait {
+        Some(w) => format!(
+            "{who} is limiting how much Yap can ask for right now{free}. Try again in {} s.",
+            w.as_secs_f64().ceil().max(1.0) as u64
+        ),
+        None => format!("{who} is limiting how much Yap can ask for right now{free}. Try again in a minute."),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -472,6 +559,7 @@ async fn post_chat_request(
     tools: Option<&Value>,
     max_tokens: Option<u32>,
     timeout: Duration,
+    rate_limit_patience: Duration,
 ) -> Result<Value, String> {
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let mut body = json!({
@@ -492,24 +580,56 @@ async fn post_chat_request(
         .build()
         .map_err(|e| format!("failed to build HTTP client: {}", e))?;
 
-    let mut req = client.post(&endpoint).json(&body);
-    // Local servers (Ollama / LM Studio) need no key; only send one if set.
-    if !api_key.is_empty() {
-        req = req.bearer_auth(api_key);
-    }
-
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("request failed: {}", e))?;
-
-    let status = resp.status();
-    if !status.is_success() {
+    // A rate limit (429) is waited out when the caller is happy to wait
+    // (`rate_limit_patience` in all, as long as the provider says — else 2 s,
+    // then 4 s), then the same request goes again.
+    let mut waited = Duration::ZERO;
+    let mut attempt = 0u32;
+    let resp = loop {
+        let mut req = client.post(&endpoint).json(&body);
+        // Local servers (Ollama / LM Studio) need no key; only send one if set.
+        if !api_key.is_empty() {
+            req = req.bearer_auth(api_key);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("request failed: {}", e))?;
+        let status = resp.status();
+        if status.is_success() {
+            break resp;
+        }
+        let header = |name: &str| {
+            resp.headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        };
+        let (retry_ms, retry_s) = (header("retry-after-ms"), header("retry-after"));
         // Surface a little of the body to help the user debug (no key in it).
         let detail = resp.text().await.unwrap_or_default();
+        if status.as_u16() == 429 {
+            let hinted = rate_limit_wait(retry_ms.as_deref(), retry_s.as_deref(), &detail);
+            // A little more than asked: the window has to have moved on.
+            let wait = hinted.unwrap_or(Duration::from_secs(2u64 << attempt.min(3)))
+                + Duration::from_millis(250);
+            if attempt < 4 && waited + wait <= rate_limit_patience {
+                tracing::info!(
+                    "{} is rate-limiting this key; trying again in {:.1} s",
+                    provider,
+                    wait.as_secs_f64()
+                );
+                tokio::time::sleep(wait).await;
+                waited += wait;
+                attempt += 1;
+                continue;
+            }
+            tracing::warn!("Rate-limited by {}: {}", provider, detail.chars().take(300).collect::<String>());
+            return Err(rate_limited_error(provider, hinted));
+        }
         let detail: String = detail.chars().take(300).collect();
         return Err(format!("HTTP {}: {}", status.as_u16(), detail));
-    }
+    };
 
     // Capture Groq's daily request headers BEFORE consuming the body. These are
     // absent on non-Groq endpoints (local servers, OpenAI), which is fine — the
@@ -602,6 +722,38 @@ fn strip_wrapping(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rate_limit_wait_reads_headers_then_the_message() {
+        let ms = |d: Option<Duration>| d.map(|d| d.as_millis());
+        // Groq's own wording (2026-10-17).
+        let groq = r#"{"error":{"message":"Rate limit reached for model `openai/gpt-oss-20b` ... Please try again in 10.9875s. Need more tokens?"}}"#;
+        assert_eq!(ms(rate_limit_wait(None, None, groq)), Some(10_987));
+        assert_eq!(ms(rate_limit_wait(None, None, "Please try again in 1m30.5s.")), Some(90_500));
+        assert_eq!(ms(rate_limit_wait(None, None, "please try again in 450ms")), Some(450));
+        assert_eq!(ms(rate_limit_wait(None, None, "Try again in 2h3m")), Some(7_380_000));
+        // Headers win over the wording; ms over seconds.
+        assert_eq!(ms(rate_limit_wait(None, Some("7"), groq)), Some(7_000));
+        assert_eq!(ms(rate_limit_wait(Some("1500"), Some("7"), groq)), Some(1_500));
+        // Not said, or not a number of seconds (an HTTP date): None.
+        assert_eq!(rate_limit_wait(None, None, "Too many requests"), None);
+        assert_eq!(rate_limit_wait(None, None, "try again in a moment"), None);
+        assert_eq!(rate_limit_wait(None, Some("Wed, 21 Oct 2026 07:28:00 GMT"), "busy"), None);
+    }
+
+    #[test]
+    fn rate_limit_errors_say_it_plainly() {
+        let e = rate_limited_error("groq", Some(Duration::from_millis(10_987)));
+        assert_eq!(
+            e,
+            "Groq is limiting how much Yap can ask for right now (its free plan allows 8,000 tokens a minute). Try again in 11 s."
+        );
+        assert!(!e.contains("HTTP"));
+        assert_eq!(
+            rate_limited_error("custom", None),
+            "The AI provider is limiting how much Yap can ask for right now. Try again in a minute."
+        );
+    }
 
     #[test]
     fn empty_body_is_base_alone() {
