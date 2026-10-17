@@ -217,12 +217,12 @@ npm run test:real:build -- --engines      # the real-STT build for stt.real.js
 npx playwright show-report test-results/real/report
 ```
 
-> ⚠ **It takes the keyboard focus** for about a minute and a half (the
-> suite says so when it starts): windows open, come to the front and close.
-> Don't type or click meanwhile — a key pressed into a robot window can
-> spoil a test (never anything else: see below). The window that was in
-> front gets the focus back at the end. It needs a desktop session, so it
-> doesn't run on CI.
+> ⚠ **It takes the keyboard focus** for about two minutes (the suite says
+> so when it starts): windows open, come to the front and close. Don't type
+> or click meanwhile — a key pressed into a robot window can spoil a test,
+> and a click elsewhere makes Yap refuse the paste (the harness tries a
+> refused paste again, twice). The window that was in front gets the focus
+> back at the end. It needs a desktop session, so it doesn't run on CI.
 
 The stub build is the UI suite's own (robot mode is part of every debug
 build). `--engines` builds the real STT (whisper on Vulkan, ONNX on DirectML;
@@ -259,8 +259,14 @@ Anything else — your windows, Yap's own — is **refused**: nothing is sent,
 error toast, and `realtest_refusals` lists it. The window in front is checked
 again **right before every `SendInput`** (the paste's Ctrl+V, typing, the
 submit key), so clicking elsewhere mid-run can't redirect a paste: Yap
-refuses instead. Reads follow the same rule, quietly. `testpad.real.js`'s
-first test proves it with a second test pad Yap wasn't given.
+refuses instead. That leaves the moment between the check and Windows
+delivering the keys; Yap checks again as `SendInput` returns and 10 ms later,
+and if the window in front changed it says "the keys may have gone to
+another window (process N)" — the suite fails that test, naming the
+process. Reads follow the same rule, quietly (the text around the cursor,
+`app_kind`'s look at the title, and the correction-learning watch).
+`testpad.real.js`'s first test proves it with a second test pad Yap wasn't
+given.
 
 The harness keeps to the same rule. Its helper (`support/yaprobot.cs`,
 compiled with the C# compiler every Windows has into
@@ -307,15 +313,34 @@ No microphone or hotkey: debug-only commands drive the real pipeline.
 | `terminal.real.js` | Windows Terminal | a PowerShell prompt: a list dictated as one line ("List the files: the logs; the notes.") and nothing run · "press enter" running a harmless `Echo` (its output read back) · a stand-in for Claude Code (Claude Code's idle title "✳ …", bracketed paste, runs nothing, logs what arrives): the line breaks kept in one bracketed paste, nothing sent; "press enter" sending it · auto-submit: Enter in the coding CLI, never at the shell prompt · "Safer pasting into terminals" off: just another app |
 | `audio.real.js` | the test pad | a spoken WAV through a real recording to the paste (the stub's transcript) · a dead mic (7 s of digital silence): reopened at ~3 s, "No sound from … — check it isn't muted or unplugged" in the log and as a toast at ~5 s, nothing transcribed or pasted |
 | `stt.real.js` | the test pad, an `engines` build | Parakeet V3 hears "The quick brown fox jumps over the lazy dog" (Windows TTS) and it lands in the field |
+| `learn.real.js` | the test pad, an Edge page | "Suggest words from your corrections" for real: the watch reads the field after the paste ("learn: watching the field…" in the log), the word is fixed in the field, Enter ends the watch (`enter_pressed`), the suggestion toast shows in Yap's window — Add writes "cube and eighties → Kubernetes" to `config.json` and the next dictation uses it; on the web page "graph ana → Grafana", and Not now leaves the dictionary alone |
 | `notepad.real.js` | Windows 11 Notepad | a dictation lands, the next one follows it after a space (skipped while Notepad is open) |
 
-**Known gaps** the robot found (2026-10-17), kept as `test.fail()` tests so
-the suite stays green and says so once they're fixed: a WinForms text box
-gives UI Automation no caret (Yap reads it as if the cursor were at the end
-of the text), and in Edge/Chrome the 500 characters "before the cursor" run
-past the text box into the page above it, and an empty box reports its
-label ("Type a message") as its text — so a short chat message in a web
-chat app keeps its full stop and gets a space after it.
+**Known gaps** the robot found (2026-10-17). Each is a test named "known
+gap: …" that pins **today's** result, with a comment saying what the right
+one is: when the gap is fixed the test fails, and gets the right
+expectation. (Not `test.fail()`: that passes on any failure, a stolen focus
+included.)
+
+- A WinForms text box gives UI Automation a value but no caret, so Yap reads
+  it as if the cursor were at the end: mid-text, "The blue one." goes in as
+  " the blue one." (`testpad.real.js`).
+- Edge/Chrome report an **empty** text box's text as its label ("Type a
+  message") or U+FFFC, so a short message in a web chat app keeps its full
+  stop and gets a space after it, "Sounds good. " (`browser.real.js`). Their
+  ranges also run past the box into the page's text when Yap reads 500
+  characters either side (`yaprobot caret` shows it; harmless while a block's
+  line break separates them).
+- The fuzzy pass takes the short word before a term into its 2-word n-gram
+  and swallows it: with "cube and eighties → Kubernetes" (near-misses on, as
+  a learned word is), "Deploy it to cube and eighties." becomes "Deploy it
+  Kubernetes." (`learn.real.js`).
+
+Also seen, not pinned: now and then (a few in a hundred on Nathan's PC, not
+on demand) a Ctrl+V reaches the test pad's WinForms box and nothing is
+pasted — the pad says so on stderr ("Ctrl+V reached the box but nothing was
+pasted"); a bare Ctrl+V from the harness did the same, so it looks like the
+box's own clipboard read losing a race, not Yap.
 
 ### Results
 
