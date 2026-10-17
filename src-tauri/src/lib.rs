@@ -375,6 +375,7 @@ pub fn run() {
             commands::clear_history,
             commands::delete_history_entry,
             commands::get_stats,
+            text_injector::paste_last_transcript,
             commands::transcribe_file,
             commands::cancel_file_transcription,
             commands::audio_file_info,

@@ -10,6 +10,8 @@
 //!   tooltip — Windows Update's own "restart required" idiom.
 //! - **Calls** (meeting_detect.rs): while a detected call is live and nothing
 //!   records, "Record this Teams call" sits at the top of the idle menu.
+//! - **Paste last transcript** (text_injector.rs): the latest dictation again,
+//!   into the app you were in — for a paste that went astray.
 //! - **Left-click** opens Settings.
 //!
 //! The tray is rebuilt on every `yap-state` change via [`update_tray`], and on
@@ -219,6 +221,15 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     let update = crate::updates::tray_item()
         .map(|(id, label, enabled)| MenuItem::with_id(app, id, label, enabled, None::<&str>))
         .transpose()?;
+    // The latest dictation again, into the app you're in: for a paste that
+    // went astray (greyed out until there's one).
+    let paste_last = MenuItem::with_id(
+        app,
+        "paste_last",
+        "Paste last transcript",
+        crate::text_injector::has_last_transcript(),
+        None::<&str>,
+    )?;
     let (sep_update, sep_models, sep_quit) = (sep()?, sep()?, sep()?);
     let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&version, &sep_update];
     if let Some(call) = &call {
@@ -230,6 +241,9 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     if call.is_some() || update.is_some() {
         items.push(&sep_models);
     }
+    let sep_paste = sep()?;
+    items.push(&paste_last);
+    items.push(&sep_paste);
     items.push(models.as_ref());
     let sep_settings = sep()?;
     items.push(&sep_settings);
@@ -290,6 +304,8 @@ fn on_menu_event(app: &AppHandle, id: &str) {
         "open_models" => {
             let _ = crate::commands::show_onboarding(app);
         }
+        // Off the main thread: it focuses the app and waits on the paste.
+        "paste_last" => crate::text_injector::paste_last_from_tray(),
         other if other.starts_with("meeting_record:") => {
             // Off the main thread: starting the recorder blocks for a moment
             // and looks at the main window.
@@ -317,9 +333,10 @@ fn on_menu_event(app: &AppHandle, id: &str) {
     }
 }
 
-/// The active model + installed set + update and call items the idle menu
-/// depends on. When this changes (model switched/downloaded/deleted, an
-/// update got ready, a call to record came or went) the idle menu is stale.
+/// The active model + installed set + update and call items + whether
+/// there's a transcript to paste: what the idle menu depends on. When this
+/// changes (model switched/downloaded/deleted, an update got ready, a call to
+/// record came or went, the first dictation) the idle menu is stale.
 fn idle_menu_key() -> String {
     let data_dir = config::data_dir();
     let installed: Vec<&str> = stt::all_model_ids()
@@ -332,7 +349,14 @@ fn idle_menu_key() -> String {
     let call = crate::meeting_detect::tray_item()
         .map(|(id, label)| format!("{id}:{label}"))
         .unwrap_or_default();
-    format!("{}|{}|{}|{}", config::load().model_size, installed.join(","), update, call)
+    format!(
+        "{}|{}|{}|{}|{}",
+        config::load().model_size,
+        installed.join(","),
+        update,
+        call,
+        crate::text_injector::has_last_transcript()
+    )
 }
 
 /// Build the tray icon and install it. The app keeps the tray in its registry

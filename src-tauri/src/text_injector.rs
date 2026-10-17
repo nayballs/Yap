@@ -16,7 +16,10 @@
 //!   the exception: its clipboard sync is a monitor too, so there the
 //!   dictation goes on the clipboard plainly (`syncs_clipboard`).
 //! - **Fitting the dictation to the cursor** ([`prepare_dictation`],
-//!   `smart_insert.rs`).
+//!   `smart_insert.rs`) and remembering it for **"Paste last transcript"**
+//!   ([`paste_last_transcript`], also in the tray menu).
+
+use std::sync::Mutex;
 
 use tracing::{debug, info, trace, warn};
 
@@ -77,6 +80,10 @@ mod platform {
     const VK_C: u16 = 0x43;
     const VK_V: u16 = 0x56;
     const VK_RETURN: u16 = 0x0D;
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_TOOLWINDOW: i32 = 0x0000_0080;
+    const WS_EX_NOACTIVATE: i32 = 0x0800_0000;
+    const DWMWA_CLOAKED: u32 = 14;
 
     type HWND = *mut core::ffi::c_void;
 
@@ -98,6 +105,22 @@ mod platform {
             size: *mut u32,
         ) -> i32;
         fn CloseHandle(h: HANDLE) -> i32;
+    }
+
+    // Declared as notepad.rs / overlay.rs declare them
+    // (`clashing_extern_declarations`).
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumWindows(callback: unsafe extern "system" fn(*mut core::ffi::c_void, isize) -> i32, lparam: isize) -> i32;
+        fn IsWindowVisible(hwnd: *mut core::ffi::c_void) -> i32;
+        fn IsIconic(hwnd: *mut core::ffi::c_void) -> i32;
+        fn GetWindowLongW(hwnd: *mut core::ffi::c_void, index: i32) -> i32;
+        fn GetClassNameW(hwnd: HWND, buf: *mut u16, max: i32) -> i32;
+        fn GetWindowTextLengthW(hwnd: HWND) -> i32;
+    }
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmGetWindowAttribute(hwnd: *mut core::ffi::c_void, attribute: u32, value: *mut core::ffi::c_void, size: u32) -> i32;
     }
 
     type HANDLE = *mut core::ffi::c_void;
@@ -163,6 +186,61 @@ mod platform {
             }
             hwnd as isize
         }
+    }
+
+    fn class_of(hwnd: HWND) -> String {
+        let mut buf = [0u16; 128];
+        let len = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+        String::from_utf16_lossy(&buf[..len.max(0) as usize])
+    }
+
+    unsafe extern "system" fn collect(hwnd: *mut core::ffi::c_void, lparam: isize) -> i32 {
+        let list = &mut *(lparam as *mut Vec<isize>);
+        if IsWindowVisible(hwnd) != 0 {
+            list.push(hwnd as isize);
+        }
+        1
+    }
+
+    /// Where "Paste last transcript" pastes: the foreground window when it's
+    /// an app's (a hotkey, the bar), else — the tray menu just had the
+    /// foreground — the app window on top, the one the person was in.
+    /// Titles are never read, only whether there is one.
+    pub fn paste_target() -> Option<isize> {
+        let fg = foreground_window();
+        if fg != 0 && !super::SHELL_CLASSES.contains(&class_of(fg as HWND).as_str()) {
+            return Some(fg);
+        }
+        let mut hwnds: Vec<isize> = Vec::new();
+        unsafe {
+            EnumWindows(collect, &mut hwnds as *mut Vec<isize> as isize);
+        }
+        // EnumWindows goes top to bottom.
+        let windows: Vec<super::WindowInfo> = hwnds
+            .into_iter()
+            .map(|id| unsafe {
+                let hwnd = id as HWND;
+                let ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
+                let mut cloaked = 0u32;
+                DwmGetWindowAttribute(
+                    hwnd,
+                    DWMWA_CLOAKED,
+                    &mut cloaked as *mut u32 as *mut core::ffi::c_void,
+                    mem::size_of::<u32>() as u32,
+                );
+                super::WindowInfo {
+                    hwnd: id,
+                    pid: window_process(id),
+                    minimized: IsIconic(hwnd) != 0,
+                    tool: ex & WS_EX_TOOLWINDOW != 0,
+                    no_activate: ex & WS_EX_NOACTIVATE != 0,
+                    cloaked: cloaked != 0,
+                    titled: GetWindowTextLengthW(hwnd) > 0,
+                    class: class_of(hwnd),
+                }
+            })
+            .collect();
+        super::pick_paste_window(&windows, unsafe { GetCurrentProcessId() })
     }
 
     /// Best-effort: bring `hwnd` back to the foreground before pasting.
@@ -616,6 +694,51 @@ mod clip {
     pub const HDROP: u32 = CF_HDROP;
 }
 
+/// Window classes of the shell itself (taskbars, the desktop, the tray's
+/// overflow): never where a paste goes.
+const SHELL_CLASSES: &[&str] = &[
+    "Shell_TrayWnd",
+    "Shell_SecondaryTrayWnd",
+    "Progman",
+    "WorkerW",
+    "NotifyIconOverflowWindow",
+    "TopLevelWindowForOverflowXamlIsland",
+    "XamlExplorerHostIslandWindow",
+    "Windows.UI.Core.CoreWindow",
+];
+
+/// A visible top-level window, for picking where "Paste last transcript"
+/// goes ([`pick_paste_window`]).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct WindowInfo {
+    pub hwnd: isize,
+    pub pid: u32,
+    pub minimized: bool,
+    pub tool: bool,
+    pub no_activate: bool,
+    pub cloaked: bool,
+    pub titled: bool,
+    pub class: String,
+}
+
+/// The first real app window in z-order (`windows` top to bottom): not
+/// Yap's own, not minimised, a tool, unactivatable or cloaked (a suspended
+/// UWP app, another virtual desktop's) window, titled, and not the shell's.
+pub(crate) fn pick_paste_window(windows: &[WindowInfo], own_pid: u32) -> Option<isize> {
+    windows
+        .iter()
+        .find(|w| {
+            w.pid != own_pid
+                && !w.minimized
+                && !w.tool
+                && !w.no_activate
+                && !w.cloaked
+                && w.titled
+                && !SHELL_CLASSES.contains(&w.class.as_str())
+        })
+        .map(|w| w.hwnd)
+}
+
 /// Remote-desktop and VM windows: the clipboard reaches the remote machine
 /// through their clipboard sync, a clipboard monitor, so there the
 /// dictation goes on the clipboard without the keep-it-out formats.
@@ -772,13 +895,24 @@ pub fn selection_via_copy(target_hwnd: Option<isize>) -> Option<String> {
     }
 }
 
-// ---- A dictation, finished for the paste ----
+// ---- A dictation, finished for the paste; "Paste last transcript" ----
+
+/// The latest dictation this session, as it was before fitting it to the
+/// cursor (so a paste somewhere else fits it afresh). Forgotten when history
+/// entries are deleted or cleared; after a restart, history's newest
+/// dictation stands in.
+static LAST_DICTATION: Mutex<Option<String>> = Mutex::new(None);
+
+fn last_dictation() -> std::sync::MutexGuard<'static, Option<String>> {
+    LAST_DICTATION.lock().unwrap_or_else(|p| p.into_inner())
+}
 
 /// The finished dictation `text` (cleaned up, corrected) as it should be
-/// pasted: fitted to the text around the cursor when Yap read it at record
-/// start (`smart_spacing`), else as before — with a space after it if
-/// `append_space`.
+/// pasted, remembered for "Paste last transcript": fitted to the text around
+/// the cursor when Yap read it at record start (`smart_spacing`), else as
+/// before — with a space after it if `append_space`.
 pub fn prepare_dictation(text: &str, append_space: bool, dictionary: &[DictionaryEntry]) -> String {
+    *last_dictation() = Some(text.trim().to_string());
     let ctx = crate::selection::take_context();
     fit_for_paste(text, ctx.as_ref(), append_space, dictionary)
 }
@@ -806,6 +940,83 @@ fn fit_for_paste(text: &str, ctx: Option<&FieldContext>, append_space: bool, dic
             out
         }
     }
+}
+
+/// History entries changed under it (one deleted, all cleared): don't paste
+/// a dictation the person just removed; history's newest stands in.
+pub fn forget_last_transcript() {
+    *last_dictation() = None;
+}
+
+/// What "Paste last transcript" would paste (before fitting): this
+/// session's latest dictation, else history's newest.
+pub fn last_transcript() -> Option<String> {
+    let remembered = last_dictation().clone();
+    remembered
+        .or_else(crate::history::latest_dictation)
+        .filter(|t| !t.trim().is_empty())
+}
+
+/// Whether there's anything for "Paste last transcript" (the tray item).
+pub fn has_last_transcript() -> bool {
+    last_transcript().is_some()
+}
+
+const NOTHING_TO_PASTE: &str = "Nothing to paste yet — dictate something first";
+
+/// "Paste last transcript": the latest dictation into the app window the
+/// person is in (the tray menu borrowed the foreground: the top app window),
+/// fitted to its cursor like a dictation. For when a paste went astray.
+/// Returns what was pasted. A test run pastes nothing and returns it.
+fn paste_last_blocking() -> Result<String, String> {
+    let text = last_transcript().ok_or(NOTHING_TO_PASTE)?;
+    let cfg = crate::config::load();
+    if crate::e2e::active() {
+        let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary);
+        info!(len = out.len(), "e2e: not pasting the last transcript");
+        return Ok(out);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let target = platform::paste_target();
+        if let Some(hwnd) = target {
+            platform::focus_window(hwnd);
+            // The app puts its own focus back in its field on activation.
+            std::thread::sleep(std::time::Duration::from_millis(60));
+        }
+        let ctx = if cfg.smart_spacing && target.is_some() {
+            crate::selection::read_context(target)
+        } else {
+            None
+        };
+        let out = fit_for_paste(&text, ctx.as_ref(), cfg.append_trailing_space, &cfg.dictionary);
+        info!(len = out.len(), found_window = target.is_some(), fitted = ctx.is_some(), "Pasting the last transcript");
+        inject_text_sync(&out, cfg.restore_clipboard, target)?;
+        Ok(out)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Pasting is only supported on Windows".into())
+    }
+}
+
+/// "Paste last transcript" (the tray menu; also callable from the page):
+/// pastes the latest dictation into the app you're in and returns it. Errors
+/// when there's nothing yet.
+#[tauri::command]
+pub async fn paste_last_transcript() -> Result<String, String> {
+    tokio::task::spawn_blocking(paste_last_blocking)
+        .await
+        .map_err(|e| format!("Paste task failed: {e}"))?
+}
+
+/// The tray's "Paste last transcript" (off the main thread).
+pub fn paste_last_from_tray() {
+    std::thread::spawn(|| {
+        if let Err(e) = paste_last_blocking() {
+            warn!("Paste last transcript: {}", e);
+        }
+    });
 }
 
 /// Inject text into the target field via clipboard + Ctrl+V.
@@ -897,6 +1108,34 @@ fn inject_text_sync(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn win(hwnd: isize, pid: u32) -> WindowInfo {
+        WindowInfo {
+            hwnd,
+            pid,
+            titled: true,
+            class: "Chrome_WidgetWin_1".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn paste_goes_to_the_top_real_app_window() {
+        let own = 7;
+        let windows = vec![
+            WindowInfo { class: "Shell_TrayWnd".into(), ..win(1, 2) }, // the taskbar
+            win(2, own),                                                // Yap's own
+            WindowInfo { tool: true, ..win(3, 3) },                     // a tool window
+            WindowInfo { cloaked: true, ..win(4, 4) },                  // a suspended UWP app
+            WindowInfo { no_activate: true, ..win(5, 5) },              // an overlay
+            WindowInfo { minimized: true, ..win(6, 6) },
+            WindowInfo { titled: false, ..win(7, 8) },
+            win(8, 9), // the app the person was in
+            win(9, 10),
+        ];
+        assert_eq!(pick_paste_window(&windows, own), Some(8));
+        assert_eq!(pick_paste_window(&windows[..7], own), None);
+    }
 
     #[test]
     fn remote_desktops_keep_their_clipboard_sync() {

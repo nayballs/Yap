@@ -142,6 +142,26 @@ pub fn list(limit: usize) -> Value {
     json!(items)
 }
 
+/// The newest dictation's final text — not an Upload's (those record the
+/// file's name where a dictation records the app's exe, or nothing).
+/// "Paste last transcript" falls back to it, e.g. after a restart.
+pub fn latest_dictation() -> Option<String> {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    entries
+        .iter()
+        .rev()
+        .find(|e| is_dictation_app(&e.app))
+        .map(|e| e.text.clone())
+}
+
+fn is_dictation_app(app: &str) -> bool {
+    app.trim().is_empty() || app.trim().to_ascii_lowercase().ends_with(".exe")
+}
+
 /// One entry by timestamp (the local-API bridge's transcription id; first
 /// match wins on the rare same-second collision).
 pub fn get_by_ts(ts: u64) -> Option<HistoryEntry> {
@@ -156,6 +176,7 @@ pub fn get_by_ts(ts: u64) -> Option<HistoryEntry> {
 /// Delete one entry by timestamp alone (bridge delete route). Returns whether
 /// anything was removed.
 pub fn delete_by_ts(ts: u64) -> bool {
+    crate::text_injector::forget_last_transcript();
     let mut guard = match STATE.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
@@ -173,6 +194,7 @@ pub fn delete_by_ts(ts: u64) -> bool {
 /// Delete one entry, matched by timestamp + final text (the pair is unique
 /// enough for a per-item delete from the Home feed; first match wins).
 pub fn delete(ts: u64, text: &str) {
+    crate::text_injector::forget_last_transcript();
     let mut guard = match STATE.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
@@ -186,6 +208,7 @@ pub fn delete(ts: u64, text: &str) {
 
 /// Delete all history (and the on-disk file).
 pub fn clear() {
+    crate::text_injector::forget_last_transcript();
     let mut guard = match STATE.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
