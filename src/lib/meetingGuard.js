@@ -1,9 +1,12 @@
 // Meeting guard rails in the main window (meeting_guard.rs, capture.rs).
 // Rust decides; this shows what it says:
 //
-// `yap-meeting-limit` { warning: { noteId, stopAt, title, body } | null }:
+// Rust puts each in one place (notice.rs): this window only gets what it's
+// meant to show.
+// `yap-meeting-limit` { warning: { noteId, stopAt, title, body, inApp } | null }:
 //   the maximum-length warning ("Notes stop in 5 minutes") as a sticky toast
-//   with Keep going (`meeting_keep_going`), counting down while it's up.
+//   with Keep going (`meeting_keep_going`), counting down while it's up —
+//   when `inApp` (else it's on the Yap bar or a Windows notification).
 //   Rust takes it back with `null`: kept going (here or in the Windows
 //   notification), the limit moved in Settings, or the recording ended.
 //   `meeting_limit_status` restores it after a reload.
@@ -11,12 +14,11 @@
 //   a one-off toast: the screen-share tip when hiding is off ("Your meeting
 //   notes show up in screen shares and screenshots", with Update settings →
 //   `settings`), a stop Yap made itself (the length limit, a call ending),
-//   or "Taking notes" from the meeting shortcut.
+//   "Taking notes" from the meeting shortcut, or something about the
+//   recording itself (kind "warning", meeting.rs: transcription falling
+//   behind; "Yap can't hear the call" when one side went quiet).
 //   A notice addressed to another window (`surface`: "notepad") isn't
 //   shown here.
-// `yap-meeting-warning` "…": something about the recording itself, from
-//   meeting.rs (transcription falling behind; "Yap hasn't heard the call
-//   for 3 minutes…" when one side went quiet), in whichever view is open.
 // The quiet-meeting countdown and the "Still in your meeting?" check-ins
 // come through meetingCheckIn.js, when Rust picks this window for them.
 import { invoke } from '@tauri-apps/api/core';
@@ -42,10 +44,6 @@ export function initMeetingGuard(opts = {}) {
     .catch(() => {});
   listen('yap-meeting-limit', (e) => applyLimit(e.payload?.warning));
   listen('yap-meeting-notice', (e) => showNotice(e.payload));
-  // Long enough to read two sentences (hovering pauses it).
-  listen('yap-meeting-warning', (e) =>
-    toast({ title: 'Meeting recording', description: String(e.payload), chip: 'Tip', duration: 12_000 })
-  );
   initMeetingCheckIns('settings');
 }
 
@@ -64,9 +62,12 @@ function clearShown() {
 }
 
 function applyLimit(w) {
+  // In one place: on the bar (or a Windows notification) it isn't here too.
+  if (w && w.inApp === false) w = null;
   if (shown && shown.stopAt !== w?.stopAt) clearShown();
   if (!w || shown) return;
   const toastId = toast({
+    kind: 'prompt',
     title: w.title,
     description: w.body,
     chip: 'Meeting',
@@ -95,17 +96,21 @@ async function keepGoing() {
   }
 }
 
-const NOTICE_CHIPS = { screenShare: 'Tip', stopped: 'Meeting', recording: 'Recording' };
+const NOTICE_CHIPS = { screenShare: 'Meeting', stopped: 'Meeting', recording: 'Recording', warning: 'Meeting' };
 
 function showNotice(n) {
   if (!n?.title || (n.surface && n.surface !== 'settings')) return;
   toast({
+    // A recording's own trouble is a warning (not twice in ten minutes);
+    // the rest are notices. Long enough to read two sentences (hovering
+    // pauses it).
+    kind: n.kind === 'warning' ? 'warning' : 'info',
     title: n.title,
     description: n.body,
     variant: n.variant === 'success' ? 'success' : 'default',
     chip: NOTICE_CHIPS[n.kind] ?? '',
     icon: n.icon || '',
-    duration: n.kind === 'screenShare' ? 10_000 : 6_000,
+    duration: n.kind === 'warning' ? 12_000 : n.kind === 'screenShare' ? 10_000 : 6_000,
     action: n.settings ? { label: 'Update settings', onClick: () => openSettings(n.settings) } : null,
   });
 }

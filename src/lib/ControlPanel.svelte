@@ -138,13 +138,15 @@
     if (bellOpen && !e.target.closest?.('.bellwrap')) bellOpen = false;
   }
 
-  // Backend error events (rewrite failures, missing keys, …) surface as
-  // destructive toasts in the main window (OpenWhispr-style notifications).
+  // Backend errors that aren't a dictation's (a call that couldn't be
+  // recorded, meeting notes that didn't start…) surface as alert toasts in
+  // the main window. A dictation's own errors are the dictation overlay's
+  // (`yap-dictation-error`): one place.
   onMount(() => {
     const uns = [];
     listen('yap-error', (e) => {
       const msg = String(e.payload || 'Something went wrong');
-      toast({ title: 'Yap ran into a problem', description: msg, variant: 'destructive' });
+      toast({ kind: 'alert', title: 'Yap ran into a problem', description: msg, variant: 'destructive' });
     }).then((u) => uns.push(u));
     // Push-to-talk coaching (coaching.rs): a lone tap of the dictation
     // hotkey, or a very long hold, while this window is on screen. The texts
@@ -153,6 +155,7 @@
       const h = e.payload;
       if (!h?.title) return;
       toast({
+        kind: 'tip',
         title: fillHotkey(h.title, h.hotkey),
         description: fillHotkey(h.body, h.hotkey),
         chip: 'Tip',

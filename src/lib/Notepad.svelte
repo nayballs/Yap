@@ -348,9 +348,9 @@
   }
   async function copyTranscript() {
     if (await copyToClipboard(transcriptText(note?.transcript))) {
+      // The button's ✓ says it (no toast on top).
       transcriptCopied = true;
       setTimeout(() => (transcriptCopied = false), 1200);
-      toast({ title: 'Transcript copied', variant: 'success' });
     }
   }
   async function copyToClipboard(text) {
@@ -649,7 +649,7 @@
     try {
       await invoke('notepad_split');
     } catch (e) {
-      toast({ title: "Couldn't split the screen", description: String(e) });
+      toast({ kind: 'error', title: "Couldn't split the screen", description: String(e) });
     }
   }
 
@@ -763,12 +763,6 @@
     on('yap-note-changed', onNoteChanged);
     on('yap-note-deleted', (p) => p?.id === note?.id && (note = null));
     on('yap-notes-changed', () => note && reload());
-    // Something about the recording itself (meeting.rs), as the main window
-    // shows it (meetingGuard.js); Rust adds a Windows notification only when
-    // neither window is in view.
-    on('yap-meeting-warning', (msg) =>
-      toast({ title: 'Meeting recording', description: String(msg), chip: 'Tip', duration: 12_000 })
-    );
     // "Started by mistake?", when Rust picked this window to ask.
     on('yap-meeting-ended', (p) => {
       if (p?.mistake && p.surface === LABEL) askStartedByMistake(p.noteId);
@@ -1019,7 +1013,13 @@
                 tabindex={searchOpen ? 0 : -1}
                 onkeydown={(e) => e.key === 'Escape' && (e.stopPropagation(), closeSearch())}
               />
-              <button class="tbtn" aria-label="Copy transcript" onclick={copyTranscript} disabled={!lineCount}>
+              <button
+                class="tbtn"
+                aria-label="Copy transcript"
+                data-copied={transcriptCopied ? '' : undefined}
+                onclick={copyTranscript}
+                disabled={!lineCount}
+              >
                 {@render icon(transcriptCopied ? 'check' : 'copy')}
               </button>
             </div>

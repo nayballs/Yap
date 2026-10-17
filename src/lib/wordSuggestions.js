@@ -38,6 +38,7 @@ function ask(s) {
   const answer = (a) => invoke('word_suggestion_respond', { id: s.id, answer: a });
   const quietly = (a) => answer(a).catch(() => {});
   toast({
+    kind: 'tip',
     title: s.title,
     description: s.body,
     chip: 'Dictionary',

@@ -177,7 +177,14 @@ test('chat: the empty state offers a new chat', async ({ yap, main, shot }) => {
   Yap sends some prompts to the window only while it's on screen (a call
   prompt goes to a Windows notification otherwise, which test mode never
   shows), so a test that starts one mid-test calls `mainOnScreen(yap)` first,
-  as `meeting-detect.spec.js` does. `yap.onboarding`, `yap.notepad` and
+  as `meeting-detect.spec.js` does. Yap's notice policy (`notice.rs`) puts
+  each notice in one place: the window's toast while the person is looking
+  at it — in a test run, by default, while it's on screen — else the Yap
+  bar. A test that wants the bar calls `inAnotherApp(yap)` (the person is in
+  the call app); the `main` fixture puts it back, and forgets the notice
+  cooldowns and fatigue counts, before every test (`e2e_notice_reset`).
+  `notices.spec.js` stages notices through the real policy with
+  `e2e_notice`. `yap.onboarding`, `yap.notepad` and
   `yap.overlay` are the other windows (the notepad isn't reset: a spec that
   uses it tidies up after itself); `yap.invoke(cmd, args)` calls a Tauri command;
   `yap.readJson('notes.json')` reads the instance's data dir, and

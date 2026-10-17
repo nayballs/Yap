@@ -1,25 +1,35 @@
-//! One-off notices about a dictation that the person needs to act on — a
-//! paste Windows wouldn't let through (`elevated.rs`: an app running as
-//! administrator), the microphone switched off in Windows' privacy settings
-//! (`mic_privacy.rs`) — put where they'll be seen: a toast in the main
-//! window while it's on screen, else a card on the Yap bar, else a Windows
-//! notification. (coaching.rs and learn.rs pick the first two the same way;
-//! a tip can go unsaid, these can't.) An alert may carry one button
-//! ([`Action`]), whichever surface shows it; its id comes back to [`act`].
+//! One-off notices the person needs to act on — a paste Windows wouldn't
+//! let through (`elevated.rs`: an app running as administrator), the
+//! microphone switched off in Windows' privacy settings (`mic_privacy.rs`),
+//! call prompts' fatigue ("Stop asking about calls?", `meeting_detect.rs`)
+//! — put in **one place** (`notice::place`): a toast in the main window
+//! while the person is looking at it, else a card on the Yap bar, else a
+//! Windows notification, else the window if it's on screen. Yap's notice
+//! policy (`notice.rs`) applies on each: an alert about a dictation is
+//! never held back behind it, and the same one again within its kind's
+//! cooldown isn't shown. (coaching.rs and learn.rs place their tips the
+//! same way, minus the Windows notification: a tip can go unsaid, these
+//! can't.) An alert may carry one button ([`Action`]), whichever surface
+//! shows it; its id comes back to [`act`].
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 /// The main window's event: an [`Alert`].
 const EVENT: &str = "yap-alert";
 
 /// **Open settings**: Windows Settings → Privacy & security → Microphone.
 pub const OPEN_MIC_SETTINGS: &str = "openMicSettings";
+/// **Stop asking**: call detection off ("Stop asking about calls?").
+pub const STOP_ASKING_CALLS: &str = "callsStopAsking";
+/// **Turn back on**: call detection on again (after Yap stopped asking).
+pub const ASK_ABOUT_CALLS: &str = "callsTurnBackOn";
 
 /// An alert's one button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Action {
-    /// What [`act`] does: [`OPEN_MIC_SETTINGS`].
+    /// What [`act`] does: [`OPEN_MIC_SETTINGS`], [`STOP_ASKING_CALLS`],
+    /// [`ASK_ABOUT_CALLS`].
     pub id: &'static str,
     pub label: &'static str,
 }
@@ -27,10 +37,11 @@ pub struct Action {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Alert {
-    /// "pasteBlocked" | "micBlocked": the bar card's id and the Windows
-    /// notification's tag (a newer one replaces it).
+    /// "pasteBlocked" | "micBlocked" | "calls-fatigue": the bar card's id,
+    /// the Windows notification's tag (a newer one replaces it) and its
+    /// rule in `notice.rs`.
     pub kind: &'static str,
-    /// The chip's glyph: "clipboard" | "mic".
+    /// The chip's glyph: "clipboard" | "mic" | "call".
     pub icon: &'static str,
     pub title: String,
     pub body: String,
@@ -39,49 +50,8 @@ pub struct Alert {
     pub timeout_ms: u64,
 }
 
-/// Where an alert goes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Surface {
-    /// A toast in the main window.
-    Window,
-    /// A card on the Yap bar.
-    Bar,
-    /// A Windows notification.
-    Notification,
-    /// Nowhere (the bar off and notifications not allowed: portable, a test
-    /// run). The log has it.
-    Nowhere,
-}
-
-/// The main window if it's on screen, else the bar if it takes cards, else
-/// a Windows notification if Yap may post one.
-pub fn surface(window_on_screen: bool, bar_takes_cards: bool, notifications: bool) -> Surface {
-    if window_on_screen {
-        Surface::Window
-    } else if bar_takes_cards {
-        Surface::Bar
-    } else if notifications {
-        Surface::Notification
-    } else {
-        Surface::Nowhere
-    }
-}
-
-/// The main window is on screen (not hidden, not minimized). Waits on the
-/// main thread: never call with a lock held.
-fn main_window_visible(app: &AppHandle) -> bool {
-    app.get_webview_window("settings")
-        .is_some_and(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false))
-}
-
-fn notifications_allowed() -> bool {
-    #[cfg(windows)]
-    {
-        crate::win_toast::allowed()
-    }
-    #[cfg(not(windows))]
-    false
-}
+/// Where an alert went (`notice::Place`).
+pub use crate::notice::Place as Surface;
 
 /// Show `alert` where it'll be seen; returns where. Blocking (window
 /// queries): call it off the pipeline's locks — [`show_soon`] does.
@@ -95,12 +65,19 @@ pub fn show(app: &AppHandle, alert: Alert) -> Surface {
         timeout_ms: Some(alert.timeout_ms),
         ..Default::default()
     };
-    let mut place = surface(main_window_visible(app), crate::bar::cards_available(), notifications_allowed());
+    let mut place = crate::notice::place(app, true);
+    // The same alert again within its cooldown (`notice.rs`: the mic
+    // privacy one is said once per ten minutes; the overlay's line says it
+    // on every press). The bar and Windows check for themselves.
+    if place == Surface::Window && !crate::notice::admit(alert.kind, &alert.title, &alert.body) {
+        tracing::info!(kind = alert.kind, "alert: said a moment ago; not again");
+        return Surface::Nowhere;
+    }
     if place == Surface::Window && app.emit(EVENT, &alert).is_err() {
         place = Surface::Bar;
     }
     if place == Surface::Bar && !crate::bar::show_card(app, card(), Box::new(act)) {
-        place = if notifications_allowed() { Surface::Notification } else { Surface::Nowhere };
+        place = if crate::notice::notifications_allowed() { Surface::Notification } else { Surface::Nowhere };
     }
     if place == Surface::Notification {
         #[cfg(windows)]
@@ -128,6 +105,8 @@ pub fn show_soon(app: &AppHandle, alert: Alert) {
 pub fn act(app: &AppHandle, action: &str) {
     match action {
         OPEN_MIC_SETTINGS => open_uri(app, crate::mic_privacy::SETTINGS_URI),
+        STOP_ASKING_CALLS => crate::meeting_detect::set_detection(app, false),
+        ASK_ABOUT_CALLS => crate::meeting_detect::set_detection(app, true),
         "" => {}
         other => tracing::debug!("alert: no such action {other}"),
     }
@@ -203,15 +182,6 @@ mod native {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_window_first_then_the_bar_then_a_notification() {
-        assert_eq!(surface(true, true, true), Surface::Window);
-        assert_eq!(surface(true, false, false), Surface::Window);
-        assert_eq!(surface(false, true, true), Surface::Bar);
-        assert_eq!(surface(false, false, true), Surface::Notification);
-        assert_eq!(surface(false, false, false), Surface::Nowhere);
-    }
 
     #[cfg(windows)]
     #[test]

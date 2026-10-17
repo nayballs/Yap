@@ -437,13 +437,15 @@ test('the transcript: paused and dictated dividers, hover copy, search, copy all
 
   // Copy all: the spoken lines, no markers.
   await pad.getByRole('button', { name: 'Copy transcript' }).click();
+  // The button's ✓ says it: no toast on top (notice.rs).
+  await expect(pad.getByRole('button', { name: 'Copy transcript' })).toHaveAttribute('data-copied', '');
   await expect
     .poll(copied)
     .toBe(
       'You: First, the roadmap for Q4.\nYou: We have three themes.\nThem: Sounds good, go ahead.\n' +
         'You: Back again, where were we?\nThem: The second theme, the budget.'
     );
-  await expect(toast(pad, 'Transcript copied')).toBeVisible();
+  await expect(toast(pad, 'Transcript copied')).toHaveCount(0);
 });
 
 test('"What did I miss?" and Ask anything, in a sheet over the meeting', async ({ yap, fakeLlm, shot }) => {

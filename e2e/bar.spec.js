@@ -15,6 +15,7 @@ import {
   closeSettings,
   closeToasts,
   expectStore,
+  inAnotherApp,
   pressHotkey,
   settingsDialog,
 } from './support/fixtures.js';
@@ -239,11 +240,11 @@ test('Settings → General → Yap bar', async ({ yap, main, shot }) => {
   await closeSettings(main);
 });
 
-test('a call prompt is a "Meeting detected" card; answering one place answers both', async ({ yap, main, shot }) => {
+test('a call prompt is a "Meeting detected" card, in one place: the bar while you\'re in another app', async ({ yap, main, shot }) => {
   const bar = yap.overlay;
-  // The main window never counts as focused in a test run, so the prompt
-  // goes on the bar instead of a Windows notification (and in the main
-  // window's toasts too while that's on screen).
+  // You're in another app (the call): the prompt goes on the bar, and only
+  // there — not in the main window's toasts as well (notice.rs).
+  await inAnotherApp(yap);
   await callSim(yap, 'discord', true); // not asked about by default…
   await expect.poll(() => yap.invoke('meeting_detect_status').then((s) => s.calls.length)).toBe(1);
   expect((await yap.invoke('bar_status')).cards).toEqual([]);
@@ -255,8 +256,8 @@ test('a call prompt is a "Meeting detected" card; answering one place answers bo
   await expect(card.getByRole('button', { name: 'Record notes' })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Close' })).toBeVisible();
   const prompt = (await yap.invoke('meeting_detect_status')).prompt;
-  expect(prompt).toMatchObject({ app: 'teams', kind: 'start' });
-  if (prompt.inApp) await expect(main.getByRole('status').filter({ hasText: 'Teams call detected' })).toBeVisible();
+  expect(prompt).toMatchObject({ app: 'teams', kind: 'start', inApp: false });
+  await expect(main.getByRole('status').filter({ hasText: 'Teams call detected' })).toHaveCount(0);
   // The app's own icon, as installed here (CallAppIcon, as in Settings).
   const teamsIcon = card.locator('[data-app-icon="teams"]');
   await expect(teamsIcon).toHaveAttribute('data-icon', 'installed');
@@ -273,7 +274,7 @@ test('a call prompt is a "Meeting detected" card; answering one place answers bo
   await expect(card.getByRole('menuitem', { name: 'Not now' })).toBeVisible();
   await expect(card.getByRole('menuitem', { name: "Don't ask for Teams" })).toBeVisible();
   await shot(bar, '10-call-card-menu');
-  // "Not now" there answers the prompt: the toast goes too.
+  // "Not now" there answers the prompt.
   await card.getByRole('menuitem', { name: 'Not now' }).click();
   await expect(card).toHaveCount(0);
   await expect(main.getByRole('status').filter({ hasText: 'Teams call detected' })).toHaveCount(0);
@@ -352,6 +353,7 @@ test("a notice card has Wispr's measurements in Yap's colours, 26 px above the p
 
 test('fullscreen: the pill hides; a card shows over a borderless app, waits out an exclusive one', async ({ yap, main }) => {
   const bar = yap.overlay;
+  await inAnotherApp(yap); // the game is in front
   // Borderless (a game in a borderless window, a video, F11): no pill…
   await simulate(yap, { fullscreen: 'borderless' });
   await expect.poll(() => debug(yap).then((d) => d.shown)).toBe(false);
@@ -457,6 +459,7 @@ test('the opt-in countdown starts notes by itself; Esc cancels it', async ({ yap
   await meetings.getByRole('button', { name: 'Start notes automatically after 10 seconds' }).click();
   await expectStore(yap, 'config.json', (c) => c.meetingAutoStart === true);
   await closeSettings(main);
+  await inAnotherApp(yap); // the call app is in front
 
   // Esc (watched only while such a card is on screen) cancels: "Not now".
   await callSim(yap, 'zoom', true);
@@ -490,6 +493,7 @@ test('the opt-in countdown starts notes by itself; Esc cancels it', async ({ yap
   await shot(bar, '16-call-ended-card');
   await end.getByRole('button', { name: 'Stop and summarise' }).click();
   await expect.poll(() => yap.invoke('meeting_state').then((m) => m.recording), { timeout: 20_000 }).toBe(false);
+  await yap.invoke('e2e_focus', { focused: true });
 
   await openSettings(main, 'General');
   await meetings.getByRole('button', { name: 'Start notes automatically after 10 seconds' }).click();

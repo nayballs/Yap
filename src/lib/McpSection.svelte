@@ -105,7 +105,7 @@
       if (add) {
         toast({ title: `Added to ${client.name}`, description: client.restart, variant: 'success' });
       } else {
-        toast({ title: `Removed from ${client.name}`, variant: 'success' });
+        // The card flips back to "Add to …": that says it.
       }
     } catch (e) {
       toast({

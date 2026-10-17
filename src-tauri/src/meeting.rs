@@ -47,9 +47,10 @@
 //!
 //! Quiet sides: one side heard nothing for 3 minutes while the other talked
 //! (the call plays through a headset that isn't Windows' default output, or
-//! the mic is muted or the wrong one): the person is told once, in Yap
-//! (`yap-meeting-warning`) and, when no Yap window that shows it is in view,
-//! with a Windows notification (see "Quiet sides" below).
+//! the mic is muted or the wrong one): the person is told once, in one
+//! place (`meeting_guard::notice`: the main window while they're looking at
+//! it, else the Yap bar, else a Windows notification; see "Quiet sides"
+//! below).
 //!
 //! Whether anyone is talking: [`activity`] hands the guard rails
 //! (`meeting_guard.rs`, the quiet-meeting countdown and the check-ins) the
@@ -66,7 +67,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use crate::notes::TranscriptSegment;
 use crate::pipeline::{resample_linear, EngineSlot, TARGET_SAMPLE_RATE};
@@ -1283,8 +1284,7 @@ fn quiet_message(side: Side, quiet: u64, call: Option<&str>) -> String {
 }
 
 /// Watch the two sides (see "Quiet sides" above); tell the person about one
-/// that went quiet: `yap-meeting-warning`, as the main window and the
-/// notepad show it, plus a Windows notification when neither is in view.
+/// that went quiet, in one place ([`warn`]).
 fn watch_quiet(app: &AppHandle, note_id: u64, watch: &mut QuietWatch, you: &AudioBuf, them: &AudioBuf) {
     let levels = |buf: &AudioBuf| buf.lock().map(|c| c.levels()).unwrap_or_default();
     let t = quiet_timings();
@@ -1294,36 +1294,25 @@ fn watch_quiet(app: &AppHandle, note_id: u64, watch: &mut QuietWatch, you: &Audi
     let call = crate::meeting_detect::latest_call().map(|(_, name)| name);
     let message = quiet_message(side, t.quiet, call.as_deref());
     tracing::info!(note_id, ?side, "Meeting: one side was quiet while the other talked; telling the person");
-    let _ = app.emit("yap-meeting-warning", &message);
-    notify_quiet(app, side, message);
+    let (title, settings) = match side {
+        Side::Them => ("Yap can't hear the call", None),
+        Side::You => ("Yap can't hear your mic", Some("general")),
+    };
+    warn(app, title, message, settings);
 }
 
-/// The quiet-side warning as a Windows notification as well, when neither
-/// the meeting notepad (docked beside the call) is on screen nor the main
-/// window focused: the person is in their call app, where an in-app toast
-/// would go unseen until the meeting is over. (None in test runs or portable
-/// mode.)
-fn notify_quiet(app: &AppHandle, side: Side, message: String) {
+/// Something about the recording itself (a side gone quiet, transcription
+/// falling behind), in one place (`meeting_guard::notice`: the main window
+/// while the person is looking at it, else the Yap bar, else a Windows
+/// notification). Window getters wait on the main thread: not from the
+/// worker's task.
+fn warn(app: &AppHandle, title: &'static str, message: String, settings: Option<&'static str>) {
     let app = app.clone();
-    // Window getters wait on the main thread: not from the worker's task.
     std::thread::spawn(move || {
-        let notepad_up = app.get_webview_window(crate::notepad::LABEL).is_some_and(|w| {
-            w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false)
-        });
-        let main_focused = app
-            .get_webview_window("settings")
-            .is_some_and(|w| w.is_focused().unwrap_or(false));
-        if notepad_up || main_focused {
-            return;
-        }
-        let (title, settings) = match side {
-            Side::Them => ("Yap can't hear the call", None),
-            Side::You => ("Yap can't hear your mic", Some("general")),
-        };
-        crate::meeting_guard::notice_native(
+        crate::meeting_guard::notice(
             &app,
             &crate::meeting_guard::Notice {
-                kind: "quiet",
+                kind: "warning",
                 title: title.to_string(),
                 body: message,
                 icon: "call",
@@ -1490,9 +1479,11 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
             if !warned && overflow.load(Ordering::Relaxed) {
                 warned = true;
                 tracing::warn!("Meeting transcription is falling behind; audio was dropped");
-                let _ = app.emit(
-                    "yap-meeting-warning",
-                    "Transcription is falling behind, so some audio was skipped. A faster speech model (Settings → Speech-to-Text) keeps up better.",
+                warn(
+                    &app,
+                    "Transcription is falling behind",
+                    "Some audio was skipped. A faster speech model (Settings → Speech-to-Text) keeps up better.".to_string(),
+                    None,
                 );
             }
 

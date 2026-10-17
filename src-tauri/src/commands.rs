@@ -57,6 +57,8 @@ pub fn show_onboarding(app: &AppHandle) -> Result<(), String> {
     // stays: it gives fresh event listeners and a fresh wizard every open.
     let _ = w.show();
     focus(&w);
+    // Tips and notices wait while the first-run setup is on screen.
+    crate::notice::on_onboarding(true);
     let _ = w.eval("window.location.reload()");
     // Compositor nudge: a 1px resize round-trip forces DWM to recomposite the
     // webview surface, un-sticking any stale frame.
@@ -79,6 +81,7 @@ pub fn close_onboarding(app: AppHandle) {
     if let Some(w) = app.get_webview_window("onboarding") {
         let _ = w.hide();
     }
+    crate::notice::on_onboarding(false);
 }
 
 /// Which registry models are already downloaded on disk (by model id).
@@ -939,6 +942,8 @@ pub fn save_config(
     crate::calendar::on_config_saved();
     // …and the Yap bar (on/off, fullscreen, position, the tooltips' hotkeys).
     crate::bar::sync(&app, &cfg);
+    // …and "Show tips" (the notice policy).
+    crate::notice::sync(&cfg);
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.update_config(cfg);

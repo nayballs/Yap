@@ -90,6 +90,8 @@ function dismissMistake(noteId) {
 export function askStartedByMistake(noteId, { onDiscarded } = {}) {
   if (mistakes.has(noteId) && isToastLive(mistakes.get(noteId))) return;
   const id = toast({
+    // A question that can wait its turn: gives way to a call.
+    kind: 'offer',
     title: 'Started by mistake?',
     description: 'Only a few words were captured. Keep this meeting or discard it.',
     chip: 'Meeting',
@@ -101,8 +103,8 @@ export function askStartedByMistake(noteId, { onDiscarded } = {}) {
       onClick: async () => {
         mistakes.delete(noteId);
         try {
+          // The note goes from the list: that says it (no toast on top).
           await invoke('meeting_discard', { noteId });
-          toast({ title: 'Meeting discarded', variant: 'success' });
           onDiscarded?.();
         } catch (e) {
           toast({ title: "Couldn't discard it", description: String(e), variant: 'destructive' });

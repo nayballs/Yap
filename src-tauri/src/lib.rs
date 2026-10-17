@@ -37,6 +37,7 @@ mod meeting_summary;
 mod note_text;
 mod notepad;
 mod notes;
+mod notice;
 mod tools;
 mod history;
 mod input_hook;
@@ -507,6 +508,12 @@ pub fn run() {
             #[cfg(debug_assertions)]
             coaching::e2e_coaching_reset,
             #[cfg(debug_assertions)]
+            notice::e2e_notice_reset,
+            #[cfg(debug_assertions)]
+            notice::e2e_notice,
+            #[cfg(debug_assertions)]
+            notice::e2e_focus,
+            #[cfg(debug_assertions)]
             learn::e2e_learn_correction,
             #[cfg(debug_assertions)]
             meeting_guard::e2e_meeting_limit,
@@ -609,6 +616,8 @@ pub fn run() {
             // The overlay window is the Yap bar: click-through, always on
             // top, never focused, following the cursor's monitor (bar.rs).
             bar::init(&handle);
+            // Yap's notice policy reads "Show tips" from Settings.
+            notice::sync(&config::load());
 
             // Dev builds: show Settings on launch. Every Yap window is hidden
             // at startup by design (tray-first UX), which leaves dev runs — and
@@ -683,6 +692,7 @@ pub fn run() {
                 let state = event.payload().trim_matches('"'); // payload is a JSON string
                 let generation = STATE_GEN.fetch_add(1, Ordering::Relaxed) + 1;
                 let show = matches!(state, "recording" | "processing" | "processing-slow" | "error");
+                notice::on_pipeline_state(state);
                 bar::on_pipeline_state(&overlay_handle, state);
                 OVERLAY_ACTIVE.store(show, Ordering::Relaxed);
                 // Keep the tray icon + menu in sync with the recording state.
@@ -748,14 +758,19 @@ pub fn run() {
                         tauri::WindowEvent::CloseRequested { api, .. } => {
                             api.prevent_close();
                             let _ = w.hide();
+                            if !main {
+                                notice::on_onboarding(false);
+                            }
                         }
                         // The main window came up (tray, notification, second
                         // launch) or was clicked: a stale update check and a
                         // pending "update ready" toast can happen now.
                         tauri::WindowEvent::Focused(true) if main => {
                             updates::on_main_window_focused(&focus_handle);
-                            // …and a pending call prompt moves into the window.
+                            // …and a pending call prompt or calendar card
+                            // moves into the window (one place: notice.rs).
                             meeting_detect::on_main_window_focused(&focus_handle);
+                            calendar::on_main_window_focused();
                         }
                         _ => {}
                     });
