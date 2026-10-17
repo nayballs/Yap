@@ -256,7 +256,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   under the store lock). `note_update` takes an `origin` (the saving window's
   label) and emits `yap-note-changed` with the editable fields, which keeps the
   Notes view and the meeting notepad in sync both ways (each sends only the
-  fields it edited). `event` (optional) = the calendar meeting the note
+  fields it edited). `modify(id, f)` changes one note under the store lock
+  (read and write in one step — the chat's `edit_note`; only a change bumps
+  `updated_ts` and saves). Unit tests get an in-memory store per test
+  thread (`cfg(test)`), never `notes.json`. `event` (optional) = the calendar meeting the note
   belongs to (`NoteEvent`: key, title, start/end, the invite's description,
   service), set by `link_event` (also the meeting's title as a real title,
   attendees merged, `note_type` meeting) and found by `find_by_event`.
@@ -644,16 +647,54 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
 - **`chats.rs`** — the AI Chat surface's conversation store (`chats.json`): a
   `Conversation` (title, messages, timestamps) with `list`/`get`/`create`/
   `append`/`delete`; `chat_send` (commands.rs) creates a conversation on the
-  first message using a first-50-chars title rule.
+  first message using a first-50-chars title rule. An answer keeps its tool
+  chips (`ChatMessage.tools`, only written when there are some), so a
+  conversation opened later still shows what the AI looked up and changed.
 - **`tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
-  `copy_to_clipboard` — executed locally over `notes.rs`/`arboard`), plus their
-  `TOOL_INSTRUCTIONS` system-prompt lines. `run_tool_loop` drives the OpenAI
-  tool-call protocol via `llm::post_chat_message` for up to `MAX_TOOL_STEPS`
-  (20) turns. Gated by `supports_tools` — cloud providers always qualify,
-  local models need ≥4B params (`LOCAL_TOOL_MIN_PARAMS_B`) — so smaller local
-  models fall back to plain keyword-RAG chat instead.
+  `copy_to_clipboard` — executed locally over `notes.rs`/`arboard`) and
+  three of Yap's own for **changing part of a note safely** (after the note
+  tools of Wispr Flow's live Ask — behaviour only; the pure part is
+  **`note_text.rs`**): `search_in_note(note_id, query, field?)` (the lines a
+  phrase is on, numbered `12| …`, the note's own text, the lines around the
+  first 5 hits; forgiving — case, whitespace runs, curly quotes, dashes; in
+  content, the `enhanced` summary and the transcript (talk only, `[m:ss]
+  You: …`) unless one is named; ≤ 20 hits / ~4k chars), `read_note(note_id,
+  field, offset?, limit?)` (a page of ≤ 400 lines and ≤ 3,000 tokens — the
+  bound `get_note` puts on a meeting via `ask_context` — with `more` /
+  `next_offset`; a line longer than a page is cut and says so) and
+  `edit_note(note_id, field: content|enhanced|title, old_text, new_text)`:
+  `old_text` must appear **exactly once** (overlapping counts), byte for
+  byte except that `\r\n` = `\n` (the new text takes the note's own line
+  endings); 0 matches → nothing changes and the error lists the places that
+  differ only in spacing/case/quote marks, quoted from the note (`near`),
+  and spots copied line numbers; 2+ → the lines they're on; `old_text` ""
+  only fills an empty field; the transcript is never edited. Bookkeeping: a
+  new title clears `title_auto`, a content edit leaves the summary stale
+  (`enhanced_at_hash` untouched), a summary written into an empty field is
+  stamped fresh, one emptied is no summary. Matched and replaced under the
+  store lock (`notes::modify`). `update_note` stays for folder moves and
+  whole rewrites the user asks for (its description and `TOOL_INSTRUCTIONS`
+  say so; the instructions steer search → `edit_note` for everything else);
+  `get_note` returns the notes (`content`) and the summary (`enhanced`)
+  apart, each ≤ 2,000 tokens (`cut` names what was shortened). Failures
+  carry `error` (for the model) besides `displayText` (the chip).
+  `run_tool_loop` drives the OpenAI tool-call protocol via
+  `llm::post_chat_message` for up to `MAX_TOOL_STEPS` (20) turns, takes
+  arguments as a JSON string or an object (ids as numbers or strings), and
+  hands every note a tool created or changed (`changed_note`; an edit that
+  changed nothing doesn't count) to `on_change` as it happens — `chat_send`
+  emits `yap-note-changed` (origin `"chat"`) + `yap-notes-changed`, so the
+  notepad and the lists follow live. Chips say what happened: `Found
+  "beta" on 2 lines in "Launch plan"`, `Edited "Launch plan": "Friday." →
+  "Monday."`, `Couldn't edit "Launch plan": the text is in 2 places`. Gated
+  by `supports_tools` — cloud providers always qualify, local models need
+  ≥4B params (`LOCAL_TOOL_MIN_PARAMS_B`) — so smaller local models fall back
+  to plain keyword-RAG chat instead. Unit-tested end to end against
+  `notes.rs`' **in-memory test store** (under `cfg(test)` every test thread
+  gets its own empty store and nothing reads or writes `notes.json`), and
+  in `e2e/chat-tools.spec.js` against the scripted fake AI.
 - **`bridge.rs`** — the **local API bridge** (OpenWhispr `cliBridge.js` port,
   backs the Integrations view): a token-authenticated loopback HTTP server
   (`tiny_http`, `127.0.0.1`, OS-assigned port) exposing `/v1` REST routes over
@@ -1239,9 +1280,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   over the notes library (top-5 `<note>` snippets; `chats.rs` persists
   conversations to `chats.json`) **plus the tool-calling agent loop**
   (`tools.rs`: search_notes/get_note/create_note/update_note/list_folders/
-  copy_to_clipboard executed locally, ≤20-step loop over the OpenAI tool
+  copy_to_clipboard, plus search_in_note/read_note/edit_note for changing
+  part of a note, executed locally, ≤20-step loop over the OpenAI tool
   protocol, gated to cloud or ≥4B local models — smaller models fall back to
-  plain RAG chat; tool-activity chips render in the thread; a question from
+  plain RAG chat; tool-activity chips render in the thread above the answer
+  and are kept with it in chats.json; a question from
   the Meetings view's Ask bar arrives through `chatRequest` and is sent with
   `scope: 'meetings'`). No streaming or
   semantic vectors yet (ROADMAP step 3). **`IntegrationsView.svelte`** = the
@@ -1850,7 +1893,8 @@ stop, Yap's own included, writes the action plan in Rust without bringing up
 the main window; e2e-tested in `notepad.spec.js`, split screen and its
 preview unit-tested only),
 and an **AI Chat** surface (`chats.rs` + eager
-keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — six tools,
+keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — nine tools,
+including safe partial note edits (search → exact-once replace, `note_text.rs`),
 ≤20-step loop, gated to cloud or ≥4B local models). An **MCP server** (`mcp.rs`,
 `yap.exe mcp`) lets Claude, ChatGPT desktop/Codex, Gemini CLI, Cursor, Claude Code,
 VS Code and Windsurf read meetings and notes (never dictations) through the local
