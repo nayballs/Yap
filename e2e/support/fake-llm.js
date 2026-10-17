@@ -39,6 +39,8 @@ const MEETING_ASK = 'You answer questions about a meeting';
 const QUESTIONS = 'You suggest questions for someone';
 const FOLLOW_UP = 'You write the follow-up email';
 const BLIND_SPOTS = 'You review a meeting for what it left open';
+// A dictation's AI cleanup (llm.rs BASE_PROMPT).
+const CLEANUP = 'You are a dictation cleanup engine';
 
 const KINDS = [
   [DIGEST, 'digest'],
@@ -49,7 +51,13 @@ const KINDS = [
   [QUESTIONS, 'questions'],
   [FOLLOW_UP, 'followUpEmail'],
   [BLIND_SPOTS, 'blindSpots'],
+  [CLEANUP, 'cleanup'],
 ];
+
+/** The transcript a cleanup call frames between triple quotes (llm.rs). */
+export function cleanupTranscript(user) {
+  return /"""\n([\s\S]*?)\n"""/.exec(user)?.[1] ?? user;
+}
 
 /** "Questions to ask": from the latest talk. */
 function questionsReply(user) {
@@ -182,8 +190,11 @@ function actionPlanReply(user) {
  * Start the server. `requests` collects `{ kind, model, maxTokens, tokens,
  * system, user, tools, messages }` per chat call (`kind`: "digest" |
  * "actionPlan" | "title" | "catchUp" | "meetingAsk" | "questions" |
- * "followUpEmail" | "blindSpots" | "other"; `tools`: the
- * names of the tools offered). `failNext(kind, n)` answers the next `n`
+ * "followUpEmail" | "blindSpots" | "cleanup" | "other"; `tools`: the
+ * names of the tools offered; "cleanup" is a dictation's AI cleanup, answered
+ * with the transcript as it is unless `reply("cleanup", fn)` says otherwise).
+ * `reply(kind, fn)` answers that kind with `fn(user)` from then on.
+ * `failNext(kind, n)` answers the next `n`
  * calls of a kind with HTTP 500; `delay(kind, ms)` holds that kind's answers
  * back (0 = no delay). `scriptChat(steps)` queues the replies to the next
  * calls that offer tools: `{ tools: [{ name, args }] }` calls those tools,
@@ -194,6 +205,7 @@ export async function startFakeLlm() {
   const failures = new Map();
   const delays = new Map();
   const chatScript = [];
+  const replies = new Map();
   let callIds = 0;
   const server = http.createServer((req, res) => {
     let raw = '';
@@ -259,24 +271,18 @@ export async function startFakeLlm() {
         );
         return;
       }
-      const content =
-        kind === 'digest'
-          ? digestReply(user)
-          : kind === 'actionPlan'
-            ? actionPlanReply(user)
-            : kind === 'title'
-              ? titleReply(user)
-              : kind === 'catchUp'
-                ? catchUpReply(user)
-                : kind === 'meetingAsk'
-                  ? meetingAskReply(user)
-                  : kind === 'questions'
-                    ? questionsReply(user)
-                    : kind === 'followUpEmail'
-                      ? followUpReply(user)
-                      : kind === 'blindSpots'
-                        ? blindSpotsReply(user)
-                        : 'OK';
+      const answer = {
+        cleanup: cleanupTranscript,
+        digest: digestReply,
+        actionPlan: actionPlanReply,
+        title: titleReply,
+        catchUp: catchUpReply,
+        meetingAsk: meetingAskReply,
+        questions: questionsReply,
+        followUpEmail: followUpReply,
+        blindSpots: blindSpotsReply,
+      };
+      const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user);
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(
         JSON.stringify({
@@ -296,6 +302,7 @@ export async function startFakeLlm() {
     failNext: (kind, n = 1) => failures.set(kind, n),
     delay: (kind, ms) => delays.set(kind, ms),
     scriptChat: (steps) => chatScript.push(...steps),
+    reply: (kind, fn) => replies.set(kind, fn),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }

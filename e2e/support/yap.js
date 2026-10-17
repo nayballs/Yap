@@ -75,17 +75,22 @@ function rmrf(dir) {
  * @param {Record<string,string>} [opts.env]  extra environment for the app
  * @param {Record<string,object>} [opts.data]  files to seed in Data/ before
  *   launch, e.g. `{ 'notes.json': {...} }` (written as JSON)
+ * @param {string} [opts.runsDir]  where the run folder goes (the real-app
+ *   robot tests keep theirs in test-results/real/runs)
+ * @param {string} [opts.exe]  the build to run (copied into the run folder)
+ * @param {(dataDir: string) => void} [opts.prepare]  last touches to Data/
+ *   before launch (the robot's STT spec links a model in)
  */
-export async function launchYap({ name, config = {}, env = {}, data = {} }) {
-  if (!fs.existsSync(EXE)) {
-    throw new Error(`No test build at ${EXE} — run \`npm run test:app:build\` first.`);
+export async function launchYap({ name, config = {}, env = {}, data = {}, runsDir = RUNS, exe = EXE, prepare }) {
+  if (!fs.existsSync(exe)) {
+    throw new Error(`No test build at ${exe} — run \`npm run test:app:build\` first.`);
   }
-  const runDir = path.join(RUNS, name);
+  const runDir = path.join(runsDir, name);
   rmrf(runDir);
   const appDir = path.join(runDir, 'app');
   const dataDir = path.join(appDir, 'Data');
   fs.mkdirSync(dataDir, { recursive: true });
-  fs.copyFileSync(EXE, path.join(appDir, 'yap.exe'));
+  fs.copyFileSync(exe, path.join(appDir, 'yap.exe'));
   fs.writeFileSync(path.join(appDir, 'portable'), 'Yap Portable Mode');
   fs.writeFileSync(
     path.join(dataDir, 'config.json'),
@@ -94,6 +99,7 @@ export async function launchYap({ name, config = {}, env = {}, data = {} }) {
   for (const [file, value] of Object.entries(data)) {
     fs.writeFileSync(path.join(dataDir, file), JSON.stringify(value, null, 2));
   }
+  prepare?.(dataDir);
 
   const closedPort = await freePort(); // nothing listens here
   const webview2Dir = path.join(runDir, 'webview2');
@@ -130,7 +136,7 @@ export async function launchYap({ name, config = {}, env = {}, data = {} }) {
   const app = new YapApp({ name, child, runDir, appDir, dataDir, logPath, bridgeFile: childEnv.YAP_BRIDGE_FILE });
   try {
     app.browser = await connect(webview2Dir, () => exited, logPath);
-    await assertTestMode(logPath);
+    await assertTestMode(logPath, exe);
     await app.attachPages();
   } catch (e) {
     await app.stop();
@@ -143,14 +149,14 @@ export async function launchYap({ name, config = {}, env = {}, data = {} }) {
  * Refuse to drive a build without test mode (a release build ignores
  * YAP_E2E, so it would hook the keyboard and paste into other apps).
  */
-async function assertTestMode(logPath) {
+async function assertTestMode(logPath, exe) {
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     if (fs.readFileSync(logPath, 'utf8').includes('e2e: test mode on')) return;
     await sleep(200);
   }
   throw new Error(
-    `${EXE} didn't start in test mode. The suite needs the debug build from \`npm run test:app:build\`.`
+    `${exe} didn't start in test mode. The suite needs the debug build from \`npm run test:app:build\`.`
   );
 }
 
