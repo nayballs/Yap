@@ -231,6 +231,15 @@ pub fn apply_fuzzy(text: &str, dict: &[DictionaryEntry]) -> String {
             }
             let ngram = build_ngram(&words[i..i + n]);
             if let Some((replacement, dist)) = find_best_match(&ngram, &candidates) {
+                // A phrase that already holds the term as one of its words
+                // isn't a near-miss of it: "to Kubernetes" sits within the
+                // threshold of "Kubernetes" only because the term is there,
+                // and replacing it would swallow "to" (found by the real-app
+                // robot, 2026-10-17). The term's own word matches as a 1-gram.
+                let term = build_ngram(&[replacement]);
+                if n > 1 && words[i..i + n].iter().any(|w| build_ngram(&[w]) == term) {
+                    continue;
+                }
                 if chosen.is_none_or(|(_, _, best)| dist < best) {
                     chosen = Some((n, replacement, dist));
                 }
@@ -423,6 +432,22 @@ mod tests {
         // the word AFTER the match must survive (Handy's longest-first
         // greedy swallowed it)
         assert!(result.contains("che permette"), "{result}");
+    }
+
+    #[test]
+    fn a_term_already_right_never_takes_the_word_before_it() {
+        // Found by the real-app robot: "to Kubernetes" is within the
+        // threshold of "Kubernetes" only because the term is there.
+        let dict = vec![entry("cube and eighties", "Kubernetes")];
+        assert_eq!(apply_fuzzy("Deploy it to Kubernetes.", &dict), "Deploy it to Kubernetes.");
+        assert_eq!(apply_fuzzy("Use a Kubernetes cluster", &dict), "Use a Kubernetes cluster");
+        let json = vec![entry("jaison", "JSON")];
+        assert_eq!(apply_fuzzy("send it as JSON", &json), "send it as JSON");
+        // A real near-miss next to a short word is still fixed, and only it.
+        assert_eq!(apply_fuzzy("Deploy it to Kubernetis.", &dict), "Deploy it to Kubernetes.");
+        // Split terms still join ("Chat G PT" holds no word that IS the term).
+        let gpt = vec![entry("", "ChatGPT")];
+        assert_eq!(apply_fuzzy("ask Chat G PT now", &gpt), "ask ChatGPT now");
     }
 
     #[test]

@@ -1016,7 +1016,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   1–3-word n-grams vs the dictionary's `from`/`to` spellings, normalized Levenshtein
   + Soundex phonetic boost (the `natural` crate's nonstandard variant, replicated
   exactly), threshold 0.18, ≥3-char terms, case/punctuation preserved; shortest-first
-  n-gram choice (deliberate fix over Handy's word-swallowing longest-first greedy).
+  n-gram choice (deliberate fix over Handy's word-swallowing longest-first greedy),
+  and a 2–3-word n-gram that already holds the term as one of its words is never
+  a near-miss of it ("to Kubernetes" was swallowing "to" — found by the real-app
+  robot, 2026-10-17). Max 3 words per n-gram, so "Chat G P T" (4) leaves a "T".
   Runs after `apply_dictionary` for ONNX models (`dictionary_fuzzy`, default on);
   snippets are never candidates.
   Also `is_prompt_echo` (OpenWhispr `dictionaryEchoFilter` port) used by `stt.rs`
