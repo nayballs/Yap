@@ -24,6 +24,30 @@ pub struct ChatMessage {
     /// shows what the AI looked up and changed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<String>,
+    /// The model that wrote an answer (`ai_model::Target::chat_model`), so
+    /// a conversation that switched models stays clear. Only written when
+    /// known: the person's own messages and older answers have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<ChatModel>,
+}
+
+/// Which model wrote an answer: the provider and the model id the call went
+/// to (the page names them: "GPT-OSS 20B · Groq").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatModel {
+    /// "groq" | "anthropic" | "openai" | "gemini" | "openrouter" |
+    /// "ondevice" | "local" | "custom".
+    pub provider: String,
+    /// The model id sent to the endpoint.
+    pub id: String,
+    /// The on-device model's name ("Qwen2.5 1.5B Instruct"): the sidecar
+    /// serves whichever GGUF is loaded under one id.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    /// It ran on this PC (the on-device model, or a server on localhost).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub on_this_pc: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,8 +159,15 @@ pub fn create(title: &str) -> Conversation {
     })
 }
 
-/// Add a message; `tools` = an answer's tool chips (empty for the user's).
-pub fn append(id: u64, role: &str, text: &str, tools: &[String]) -> Result<(), String> {
+/// Add a message; `tools` = an answer's tool chips (empty for the user's),
+/// `model` = the model that wrote it (`None` for the user's).
+pub fn append(
+    id: u64,
+    role: &str,
+    text: &str,
+    tools: &[String],
+    model: Option<ChatModel>,
+) -> Result<(), String> {
     with_store(|s| {
         let conv = s
             .conversations
@@ -148,6 +179,7 @@ pub fn append(id: u64, role: &str, text: &str, tools: &[String]) -> Result<(), S
             text: text.to_string(),
             ts: now_secs(),
             tools: tools.to_vec(),
+            model,
         });
         conv.updated_ts = now_secs();
         save_to_disk(s);
