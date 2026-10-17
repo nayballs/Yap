@@ -69,13 +69,88 @@ pub(crate) fn dictation_ended() {
 /// when "Catch near-misses" is on and the model isn't Whisper. (Whisper got
 /// the vocabulary as its `initial_prompt` instead: Handy's split.) Entries
 /// opted out of the fuzzy pass (`DictionaryEntry::fuzzy`) are exact-only.
+/// Snippets aren't corrections and are left alone (a dictation expands them
+/// afterwards, [`finish_dictation`]). The dictionary words in the result
+/// count as used, for the Whisper prompt's ranking (`dict_usage`).
 pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
     let corrected = config::apply_dictionary(text, &cfg.dictionary);
-    if cfg.dictionary_fuzzy && !stt::is_whisper_model(&cfg.model_size) {
+    let corrected = if cfg.dictionary_fuzzy && !stt::is_whisper_model(&cfg.model_size) {
         crate::fuzzy::apply_fuzzy(&corrected, &cfg.dictionary)
     } else {
         corrected
+    };
+    crate::dict_usage::record(&cfg.dictionary, &corrected);
+    corrected
+}
+
+/// A dictation's text after AI cleanup (`cleaned`; `raw` = the transcript
+/// before it): the corrections ([`apply_corrections`]), then the "press
+/// enter" voice command when `voice_enter` is on ([`take_voice_enter`]),
+/// then snippets (`config::apply_snippets` — after the command is off, so
+/// "my address, press enter" still gives exactly the address). Returns the
+/// text to paste and whether the voice command asked for the submit key.
+pub(crate) fn finish_dictation(cleaned: &str, raw: &str, cfg: &YapConfig) -> (String, bool) {
+    let corrected = apply_corrections(cleaned, cfg);
+    let (text, enter) = match cfg.voice_enter.then(|| take_voice_enter(&corrected, raw)).flatten() {
+        Some(text) => (text, true),
+        None => (corrected, false),
+    };
+    (config::apply_snippets(&text, &cfg.dictionary), enter)
+}
+
+/// The "press enter" voice command: a dictation that ENDS with "press enter"
+/// or "press return" (any case, any punctuation around it) is sent. Returns
+/// the text to paste when it was said — `text` with the command taken off,
+/// along with a comma or dash before it; a full stop or question mark after
+/// it moves onto the text ("Can you check, press enter?" → "Can you
+/// check?"). The command only counts as the last two words, never
+/// mid-sentence. When `text` (the final text) doesn't end with it but `raw`
+/// (the transcript before AI cleanup) does, cleanup dropped or reworded it:
+/// `text` is pasted as it is and the key still pressed. `None`: not said.
+pub(crate) fn take_voice_enter(text: &str, raw: &str) -> Option<String> {
+    if let Some((start, end)) = trailing_enter_command(text) {
+        let kept = text[..start].trim_end_matches(|c: char| {
+            c.is_whitespace() || matches!(c, ',' | ';' | ':' | '-' | '–' | '—')
+        });
+        let mut out = kept.to_string();
+        let ends_sentence = kept.ends_with(['.', '!', '?', '…']);
+        if !kept.is_empty() && !ends_sentence {
+            if let Some(stop) = text[end..].chars().find(|c| matches!(c, '.' | '!' | '?')) {
+                out.push(stop);
+            }
+        }
+        return Some(out);
     }
+    trailing_enter_command(raw).map(|_| text.to_string())
+}
+
+/// Where a trailing "press enter" / "press return" is in `text`: the byte
+/// range from "press" to the end of the last word (only punctuation and
+/// spaces may follow it).
+fn trailing_enter_command(text: &str) -> Option<(usize, usize)> {
+    // The last two words: runs of letters and digits.
+    let mut words: Vec<(usize, usize)> = Vec::new();
+    let mut start = None;
+    for (i, c) in text.char_indices() {
+        match (c.is_alphanumeric(), start) {
+            (true, None) => start = Some(i),
+            (false, Some(s)) => {
+                words.push((s, i));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = start {
+        words.push((s, text.len()));
+    }
+    let [.., (p0, p1), (k0, k1)] = words[..] else {
+        return None;
+    };
+    let key = &text[k0..k1];
+    (text[p0..p1].eq_ignore_ascii_case("press")
+        && (key.eq_ignore_ascii_case("enter") || key.eq_ignore_ascii_case("return")))
+    .then_some((p0, k1))
 }
 
 /// Hard cap on a single recording's captured audio (16 kHz mono f32 ≈ 64 KB/s).
@@ -339,13 +414,12 @@ impl Shared {
     }
 
     /// The dictionary vocabulary as a Whisper `initial_prompt` bias (None when
-    /// the dictionary is empty). Snapshotted per transcription like
+    /// the dictionary is empty), the words used most lately first
+    /// (`dict_usage::ranked`). Snapshotted per transcription like
     /// `language_settings`; only Whisper engines consume it.
     fn dictionary_prompt(&self) -> Option<String> {
-        self.config
-            .read()
-            .ok()
-            .and_then(|c| config::dictionary_prompt(&c.dictionary))
+        let dict = self.config.read().ok()?.dictionary.clone();
+        config::dictionary_prompt(&crate::dict_usage::ranked(&dict))
     }
 
     /// If streaming partials are enabled, spawn the worker thread for this
@@ -952,12 +1026,17 @@ impl Shared {
                         };
 
                         // The correction dictionary (exact, then fuzzy for
-                        // ONNX models), exactly as meetings and Upload get it.
-                        let mut corrected = self
+                        // ONNX models), exactly as meetings and Upload get it,
+                        // then the "press enter" voice command and snippets
+                        // (dictations only).
+                        let (mut corrected, voice_enter) = self
                             .config
                             .read()
-                            .map(|c| apply_corrections(cleaned.trim(), &c))
-                            .unwrap_or_else(|_| config::apply_dictionary(cleaned.trim(), &dict));
+                            .map(|c| finish_dictation(cleaned.trim(), &raw, &c))
+                            .unwrap_or_else(|_| (config::apply_dictionary(cleaned.trim(), &dict), false));
+                        if voice_enter {
+                            tracing::info!("Voice command: press {}", auto_submit_key);
+                        }
                         if !corrected.is_empty() {
                             // Fitted to the text around the cursor (smart
                             // spacing), else the trailing space as before.
@@ -977,7 +1056,9 @@ impl Shared {
                             .await
                             {
                                 Ok(()) => {
-                                    if auto_submit {
+                                    // Once, whether auto-submit, the voice
+                                    // command or both asked for it.
+                                    if auto_submit || voice_enter {
                                         if let Err(e) =
                                             crate::text_injector::press_submit(&auto_submit_key).await
                                         {
@@ -1008,6 +1089,22 @@ impl Shared {
                                 // before the paste, so a view that re-pulled
                                 // history on it could miss this dictation.
                                 let _ = self.app.emit("yap-history-changed", ());
+                            }
+                        } else if voice_enter {
+                            // Only "press enter" was said: nothing to paste
+                            // (which would have refocused the dictation's
+                            // window), so press it only while that window
+                            // still has the focus — never in another one.
+                            let target = match self.target_hwnd.load(Ordering::Relaxed) {
+                                0 => None,
+                                h => Some(h),
+                            };
+                            if target.is_none() || crate::text_injector::current_foreground() == target {
+                                if let Err(e) = crate::text_injector::press_submit(&auto_submit_key).await {
+                                    tracing::warn!("Voice command submit failed: {}", e);
+                                }
+                            } else {
+                                tracing::info!("Voice command: the dictation's window lost the focus, not pressing");
                             }
                         }
                     }
@@ -1248,11 +1345,7 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
 
     // Dictionary vocabulary bias (Whisper models only) — snapshotted once per
     // session like `language`/`translate`.
-    let dict_prompt = shared
-        .config
-        .read()
-        .ok()
-        .and_then(|c| config::dictionary_prompt(&c.dictionary));
+    let dict_prompt = shared.dictionary_prompt();
 
     // If the idle watcher unloaded the model, warm-load it now — otherwise a
     // session started after an idle unload silently produces no partials at
@@ -1560,7 +1653,77 @@ mod tests {
             from: from.to_string(),
             to: to.to_string(),
             fuzzy,
+            snippet: false,
         }
+    }
+
+    #[test]
+    fn press_enter_at_the_end_is_taken_off() {
+        let t = |text: &str| take_voice_enter(text, text);
+        assert_eq!(t("Sounds good press enter").as_deref(), Some("Sounds good"));
+        assert_eq!(t("Sounds good, press enter.").as_deref(), Some("Sounds good."));
+        assert_eq!(t("Sounds good. Press Enter.").as_deref(), Some("Sounds good."));
+        assert_eq!(t("Can you check this — PRESS RETURN?").as_deref(), Some("Can you check this?"));
+        assert_eq!(t("Done!\npress-enter").as_deref(), Some("Done!"));
+        assert_eq!(t("He said \"hi\", press enter").as_deref(), Some("He said \"hi\""));
+        // Nothing but the command: nothing to paste, still a press.
+        assert_eq!(t("Press enter.").as_deref(), Some(""));
+        assert_eq!(t("press return").as_deref(), Some(""));
+    }
+
+    #[test]
+    fn press_enter_only_counts_as_the_last_words() {
+        let t = |text: &str| take_voice_enter(text, text);
+        assert_eq!(t("press enter and wait for the prompt"), None);
+        assert_eq!(t("I pressed enter"), None);
+        assert_eq!(t("press the enter key"), None);
+        assert_eq!(t("express enter"), None);
+        assert_eq!(t("press enters"), None);
+        assert_eq!(t("enter"), None);
+        assert_eq!(t(""), None);
+    }
+
+    #[test]
+    fn press_enter_dropped_by_cleanup_is_found_in_the_raw_transcript() {
+        // Cleanup took the command out: the text stays as cleanup left it.
+        assert_eq!(
+            take_voice_enter("Sounds good.", "sounds good press enter").as_deref(),
+            Some("Sounds good.")
+        );
+        // Said nowhere: nothing.
+        assert_eq!(take_voice_enter("Sounds good.", "sounds good"), None);
+    }
+
+    #[test]
+    fn a_dictation_gets_corrections_then_the_voice_command_then_snippets() {
+        let mut dict = vec![entry("jaison", "JSON", true)];
+        dict.push(DictionaryEntry { snippet: true, ..entry("my address", "1 Long Lane\nLeeds", true) });
+        let mut c = cfg("parakeet-tdt-0.6b-v3", true, dict);
+        assert_eq!(
+            finish_dictation("The jaison is at my address, press enter.", "x", &c),
+            ("The JSON is at 1 Long Lane\nLeeds.".to_string(), true)
+        );
+        // The command off first, so the snippet is all that's left: exactly its text.
+        assert_eq!(
+            finish_dictation("My address, press enter.", "x", &c),
+            ("1 Long Lane\nLeeds".to_string(), true)
+        );
+        assert_eq!(finish_dictation("Hi.", "hi", &c), ("Hi.".to_string(), false));
+        // Switched off: the words stay and nothing is pressed.
+        c.voice_enter = false;
+        assert_eq!(
+            finish_dictation("Hi, press enter.", "hi press enter", &c),
+            ("Hi, press enter.".to_string(), false)
+        );
+    }
+
+    #[test]
+    fn corrections_leave_snippets_to_the_dictation() {
+        // Meetings and Upload run apply_corrections alone: a snippet's phrase
+        // stays as said there.
+        let snip = DictionaryEntry { snippet: true, ..entry("my address", "1 Long Lane", true) };
+        let c = cfg("parakeet-tdt-0.6b-v3", true, vec![snip]);
+        assert_eq!(apply_corrections("at my address", &c), "at my address");
     }
 
     fn cfg(model: &str, fuzzy: bool, dictionary: Vec<DictionaryEntry>) -> YapConfig {

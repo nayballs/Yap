@@ -55,22 +55,27 @@ pub fn build_system_prompt(body: &str) -> String {
 /// before the mechanical `apply_dictionary` find/replace runs. Returns `""` for
 /// an empty dictionary. Same-word entries (`from == to`, e.g. an agent name)
 /// become "use this spelling"; differing entries become explicit corrections.
+/// A snippet's phrase is listed to keep word for word (Yap expands it after
+/// cleanup, `config::apply_snippets`); its text never goes to the model.
 fn dictionary_suffix(dictionary: &[crate::config::DictionaryEntry]) -> String {
     let mut spellings: Vec<&str> = Vec::new();
     let mut corrections: Vec<String> = Vec::new();
+    let mut phrases: Vec<String> = Vec::new();
     for e in dictionary {
         let from = e.from.trim();
         let to = e.to.trim();
         if from.is_empty() || to.is_empty() {
             continue;
         }
-        if from.eq_ignore_ascii_case(to) {
+        if e.snippet {
+            phrases.push(format!("\"{from}\""));
+        } else if from.eq_ignore_ascii_case(to) {
             spellings.push(to);
         } else {
             corrections.push(format!("\"{from}\" → \"{to}\""));
         }
     }
-    if spellings.is_empty() && corrections.is_empty() {
+    if spellings.is_empty() && corrections.is_empty() && phrases.is_empty() {
         return String::new();
     }
     let mut parts: Vec<String> = Vec::new();
@@ -79,6 +84,12 @@ fn dictionary_suffix(dictionary: &[crate::config::DictionaryEntry]) -> String {
     }
     if !corrections.is_empty() {
         parts.push(format!("apply these corrections: {}", corrections.join(", ")));
+    }
+    if !phrases.is_empty() {
+        parts.push(format!(
+            "keep these phrases word for word, they are voice shortcuts: {}",
+            phrases.join(", ")
+        ));
     }
     format!(
         "\n\nCustom dictionary — when these appear in the transcript, {}.",
@@ -623,7 +634,12 @@ mod tests {
     #[test]
     fn dictionary_suffix_formats_spellings_and_corrections() {
         use crate::config::DictionaryEntry;
-        let de = |from: &str, to: &str| DictionaryEntry { from: from.into(), to: to.into(), fuzzy: true };
+        let de = |from: &str, to: &str| DictionaryEntry {
+            from: from.into(),
+            to: to.into(),
+            fuzzy: true,
+            snippet: false,
+        };
         assert_eq!(dictionary_suffix(&[]), "");
         // same-word entry (e.g. an agent name) → exact-spelling bias
         let s = dictionary_suffix(&[de("Kubernetes", "Kubernetes")]);
@@ -636,6 +652,14 @@ mod tests {
         );
         // blank entries are skipped → empty suffix
         assert_eq!(dictionary_suffix(&[de("", "")]), "");
+        // a snippet: its phrase kept as said, its text never sent
+        let snip = DictionaryEntry { snippet: true, ..de("my sign off", "Best wishes,\nSam") };
+        let s = dictionary_suffix(&[snip]);
+        assert!(
+            s.contains("keep these phrases word for word, they are voice shortcuts: \"my sign off\""),
+            "{s}"
+        );
+        assert!(!s.contains("Best wishes") && !s.contains("corrections"), "{s}");
     }
 
     #[test]

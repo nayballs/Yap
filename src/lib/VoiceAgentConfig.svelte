@@ -65,10 +65,11 @@
     // pipeline preserves. Drop the previous name's entry when it's being renamed.
     if (!Array.isArray(cfg.dictionary)) cfg.dictionary = [];
     let dict = cfg.dictionary;
+    // (Snippets share the list; a snippet's phrase is never the name's entry.)
     if (prev && prev.toLowerCase() !== trimmed.toLowerCase()) {
-      dict = dict.filter((e) => (e?.from || '').trim().toLowerCase() !== prev.toLowerCase());
+      dict = dict.filter((e) => e?.snippet || (e?.from || '').trim().toLowerCase() !== prev.toLowerCase());
     }
-    const has = dict.some((e) => (e?.from || '').trim().toLowerCase() === trimmed.toLowerCase());
+    const has = dict.some((e) => !e?.snippet && (e?.from || '').trim().toLowerCase() === trimmed.toLowerCase());
     if (!has) dict = [{ from: trimmed, to: trimmed }, ...dict];
     cfg.dictionary = dict;
 

@@ -9,6 +9,10 @@ use std::path::PathBuf;
 /// A single transcription correction: replace `from` with `to`.
 /// Post-processing fix for words the STT model mishears
 /// (e.g. "Power to Keep" -> "Parakeet"). Model-agnostic.
+///
+/// With `snippet` set it's a **snippet** instead (voice text expansion):
+/// `from` is the phrase you say, `to` the text Yap types in its place (it may
+/// span lines). See [`apply_snippets`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DictionaryEntry {
@@ -20,6 +24,11 @@ pub struct DictionaryEntry {
     /// Whisper `initial_prompt` bias always apply regardless.
     #[serde(default = "default_true")]
     pub fuzzy: bool,
+    /// A snippet, not a correction: say `from`, get `to` (verbatim). Applied
+    /// to dictations only, after cleanup and the corrections; never part of
+    /// the exact/fuzzy correction passes or the Whisper vocabulary prompt.
+    #[serde(default)]
+    pub snippet: bool,
 }
 
 /// A reusable, named cleanup profile (FluidVoice's `DictationPromptProfile`): a
@@ -192,6 +201,12 @@ pub struct YapConfig {
     /// After injecting text, simulate pressing Enter (auto-submit).
     #[serde(default)]
     pub auto_submit: bool,
+    /// The "press enter" voice command: a dictation that ENDS with "press
+    /// enter" (or "press return") has the phrase taken off and the submit key
+    /// (`auto_submit_key`) pressed after the paste — once, even with
+    /// `auto_submit` on. See `pipeline::take_voice_enter`.
+    #[serde(default = "default_true")]
+    pub voice_enter: bool,
     /// Restore the user's previous clipboard contents after pasting.
     #[serde(default = "default_true")]
     pub restore_clipboard: bool,
@@ -533,6 +548,7 @@ impl Default for YapConfig {
             append_trailing_space: false,
             smart_spacing: true,
             auto_submit: false,
+            voice_enter: true,
             restore_clipboard: true,
             start_hidden: false,
             show_tray_icon: true,
@@ -829,17 +845,9 @@ impl YapConfig {
 /// match. Uses a replacement closure so `$` in the target is never treated as a
 /// regex backreference.
 pub fn apply_dictionary(text: &str, dict: &[DictionaryEntry]) -> String {
-    let is_word = |c: char| c.is_alphanumeric() || c == '_';
     let mut out = text.to_string();
-    for entry in dict {
-        let from = entry.from.trim();
-        if from.is_empty() {
-            continue;
-        }
-        let lead = if from.chars().next().is_some_and(is_word) { "\\b" } else { "" };
-        let trail = if from.chars().last().is_some_and(is_word) { "\\b" } else { "" };
-        let pattern = format!("(?i){}{}{}", lead, regex::escape(from), trail);
-        if let Ok(re) = regex::Regex::new(&pattern) {
+    for entry in dict.iter().filter(|e| !e.snippet) {
+        if let Some(re) = term_regex(&entry.from) {
             let to = entry.to.clone();
             out = re
                 .replace_all(&out, |_: &regex::Captures| to.clone())
@@ -849,17 +857,106 @@ pub fn apply_dictionary(text: &str, dict: &[DictionaryEntry]) -> String {
     out
 }
 
+/// The case-insensitive, whole-word matcher for one dictionary term (see
+/// [`apply_dictionary`]): `\b` only where the term starts/ends with a word
+/// character. `None` for an empty term.
+pub(crate) fn term_regex(term: &str) -> Option<regex::Regex> {
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    let term = term.trim();
+    if term.is_empty() {
+        return None;
+    }
+    let lead = if term.chars().next().is_some_and(is_word) { "\\b" } else { "" };
+    let trail = if term.chars().last().is_some_and(is_word) { "\\b" } else { "" };
+    regex::Regex::new(&format!("(?i){}{}{}", lead, regex::escape(term), trail)).ok()
+}
+
+/// The words of a snippet's spoken phrase, as matching sees them: runs of
+/// letters and digits, lowercased ("My sign-off!" → my, sign, off).
+fn phrase_words(phrase: &str) -> Vec<String> {
+    phrase
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// Expand **snippets** (voice text expansion): wherever a snippet's spoken
+/// phrase (`from`) appears as a whole phrase, put its text (`to`) in its
+/// place, verbatim. Run on a dictation's final text, after AI cleanup and the
+/// corrections, so the matching forgives what those did around the phrase:
+/// case, and any punctuation or spacing between and around its words
+/// ("My sign-off." matches "my sign off"). One pass, longest phrase first
+/// ("my email address" beats "my email"), so an inserted text is never
+/// expanded again. When the phrase is all that was said (nothing but
+/// punctuation around it, as cleanup tends to add) the result is exactly the
+/// snippet's text, without a stray capital or full stop.
+pub fn apply_snippets(text: &str, dict: &[DictionaryEntry]) -> String {
+    let mut snippets: Vec<(Vec<String>, &str)> = dict
+        .iter()
+        .filter(|e| e.snippet && !e.to.trim().is_empty())
+        .map(|e| (phrase_words(&e.from), e.to.as_str()))
+        .filter(|(words, _)| !words.is_empty())
+        .collect();
+    if snippets.is_empty() {
+        return text.to_string();
+    }
+    // Most words first, then the longest; stable, so ties keep list order.
+    snippets.sort_by_key(|(words, _)| {
+        std::cmp::Reverse((words.len(), words.iter().map(|w| w.chars().count()).sum::<usize>()))
+    });
+    // Between the words: anything that isn't a letter or digit (spaces,
+    // commas, hyphens…). At one position the regex takes the first
+    // alternative that matches, i.e. the longest phrase.
+    let alternatives: Vec<String> = snippets
+        .iter()
+        .map(|(words, _)| {
+            let words: Vec<String> = words.iter().map(|w| regex::escape(w)).collect();
+            format!("({})", words.join(r"[^\p{Alphabetic}\p{N}]+"))
+        })
+        .collect();
+    let Ok(re) = regex::Regex::new(&format!(r"(?i)\b(?:{})\b", alternatives.join("|"))) else {
+        return text.to_string();
+    };
+    let found: Vec<(std::ops::Range<usize>, &str)> = re
+        .captures_iter(text)
+        .filter_map(|caps| {
+            let whole = caps.get(0)?;
+            let which = (1..=snippets.len()).find(|&i| caps.get(i).is_some())?;
+            Some((whole.range(), snippets[which - 1].1))
+        })
+        .collect();
+    if let [(range, expansion)] = found.as_slice() {
+        let mut around = text[..range.start].chars().chain(text[range.end..].chars());
+        if !around.any(char::is_alphanumeric) {
+            return expansion.to_string();
+        }
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+    for (range, expansion) in &found {
+        out.push_str(&text[last..range.start]);
+        out.push_str(expansion);
+        last = range.end;
+    }
+    out.push_str(&text[last..]);
+    out
+}
+
 /// Build the Whisper `initial_prompt` vocabulary from the dictionary: the
 /// distinct canonical (`to`) spellings joined ", " (Handy's format — the
-/// prompt biases whisper.cpp's decoder toward these spellings). Capped at
-/// ~600 chars cut at a comma boundary (Whisper only reads ~224 tokens of
-/// prompt; OpenWhispr truncates the same way). `None` when the dictionary is
-/// empty.
+/// prompt biases whisper.cpp's decoder toward these spellings), in the order
+/// given — callers pass `dict_usage::ranked(..)`, so the words you use most
+/// lately come first and survive the cap. Capped at ~600 chars cut at a
+/// comma boundary (Whisper only reads ~224 tokens of prompt; OpenWhispr
+/// truncates the same way). Snippets are left out (their text isn't
+/// vocabulary). `None` when there's nothing to bias towards.
 pub fn dictionary_prompt(dict: &[DictionaryEntry]) -> Option<String> {
     const MAX_PROMPT_CHARS: usize = 600;
     let mut seen = std::collections::HashSet::new();
     let words: Vec<&str> = dict
         .iter()
+        .filter(|e| !e.snippet)
         .map(|e| e.to.trim())
         .filter(|t| !t.is_empty() && seen.insert(t.to_lowercase()))
         .collect();
@@ -887,7 +984,100 @@ mod tests {
             from: from.to_string(),
             to: to.to_string(),
             fuzzy: true,
+            snippet: false,
         }
+    }
+
+    fn snippet(from: &str, to: &str) -> DictionaryEntry {
+        DictionaryEntry { snippet: true, ..entry(from, to) }
+    }
+
+    #[test]
+    fn snippets_expand_a_whole_phrase_whatever_the_case_and_punctuation() {
+        let dict = vec![snippet("my sign off", "Best wishes,\nSam")];
+        // Cleanup capitalised it, hyphenated it and added commas around it.
+        assert_eq!(
+            apply_snippets("Thanks again, My sign-off, see you", &dict),
+            "Thanks again, Best wishes,\nSam, see you"
+        );
+        assert_eq!(apply_snippets("ok MY SIGN OFF now", &dict), "ok Best wishes,\nSam now");
+        // Only whole words: "mysign off" and "my sign offer" aren't it.
+        assert_eq!(apply_snippets("mysign off", &dict), "mysign off");
+        assert_eq!(apply_snippets("my sign offer stands", &dict), "my sign offer stands");
+        // Every time it's said.
+        assert_eq!(
+            apply_snippets("my sign off and my sign off", &dict),
+            "Best wishes,\nSam and Best wishes,\nSam"
+        );
+    }
+
+    #[test]
+    fn a_snippet_said_on_its_own_is_exactly_its_text() {
+        let dict = vec![snippet("my address", "1 Long Lane\nLeeds")];
+        // Cleanup made a sentence of it: no capital, no full stop survives.
+        assert_eq!(apply_snippets("My address.", &dict), "1 Long Lane\nLeeds");
+        assert_eq!(apply_snippets("  \"my address!\" ", &dict), "1 Long Lane\nLeeds");
+        // In a sentence, the sentence's punctuation stays.
+        assert_eq!(
+            apply_snippets("Send it to my address.", &dict),
+            "Send it to 1 Long Lane\nLeeds."
+        );
+    }
+
+    #[test]
+    fn the_longest_snippet_wins_and_expansions_are_never_expanded_again() {
+        let dict = vec![
+            snippet("my email", "short"),
+            snippet("my email address", "long, and my email too"),
+        ];
+        assert_eq!(apply_snippets("it's my email address ok", &dict), "it's long, and my email too ok");
+        assert_eq!(apply_snippets("it's my email ok", &dict), "it's short ok");
+    }
+
+    #[test]
+    fn snippets_insert_their_text_literally() {
+        // `$1` is text, not a regex reference; regex characters in the
+        // phrase are just punctuation.
+        let dict = vec![snippet("price (list)", "$1 each")];
+        assert_eq!(apply_snippets("the price list today", &dict), "the $1 each today");
+    }
+
+    #[test]
+    fn snippets_need_a_phrase_and_a_text_and_leave_corrections_alone() {
+        let dict = vec![
+            snippet("", "orphan"),
+            snippet("?!", "no words"),
+            snippet("blank", "   "),
+            entry("my sign off", "a correction"),
+        ];
+        assert_eq!(apply_snippets("blank my sign off", &dict), "blank my sign off");
+        assert_eq!(apply_snippets("anything", &[]), "anything");
+    }
+
+    #[test]
+    fn corrections_and_the_whisper_prompt_skip_snippets() {
+        let dict = vec![snippet("brb", "Be right back"), entry("jaison", "JSON")];
+        assert_eq!(apply_dictionary("brb, the jaison", &dict), "brb, the JSON");
+        assert_eq!(dictionary_prompt(&dict).as_deref(), Some("JSON"));
+        assert_eq!(dictionary_prompt(&[snippet("brb", "Be right back")]), None);
+    }
+
+    #[test]
+    fn the_whisper_prompt_keeps_the_given_order_and_its_cap() {
+        let dict = vec![entry("", "Zed"), entry("x", "alpha"), entry("y", "zed")];
+        assert_eq!(dictionary_prompt(&dict).as_deref(), Some("Zed, alpha"));
+        let many: Vec<DictionaryEntry> =
+            (0..200).map(|i| entry("", &format!("Term{i:03}"))).collect();
+        let p = dictionary_prompt(&many).unwrap();
+        assert!(p.len() <= 600 && p.starts_with("Term000, Term001") && !p.ends_with(", "), "{p}");
+    }
+
+    #[test]
+    fn old_dictionary_entries_load_as_corrections() {
+        let e: DictionaryEntry = serde_json::from_str(r#"{"from":"a","to":"b"}"#).unwrap();
+        assert!(e.fuzzy && !e.snippet);
+        let cfg: YapConfig = serde_json::from_str("{}").unwrap();
+        assert!(cfg.voice_enter, "the voice command is on unless switched off");
     }
 
     #[test]
