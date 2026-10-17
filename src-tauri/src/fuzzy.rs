@@ -99,8 +99,10 @@ struct Candidate<'a> {
 fn build_candidates(dict: &[DictionaryEntry]) -> Vec<Candidate<'_>> {
     let mut out = Vec::new();
     for entry in dict {
-        if !entry.fuzzy {
-            continue; // per-entry opt-out: exact-match only (config.rs)
+        if !entry.fuzzy || entry.snippet {
+            // per-entry opt-out: exact-match only (config.rs); a snippet's
+            // phrase is matched by `config::apply_snippets`, never fuzzed
+            continue;
         }
         let to = entry.to.trim();
         if to.is_empty() {
@@ -298,7 +300,7 @@ mod tests {
     use super::*;
 
     fn entry(from: &str, to: &str) -> DictionaryEntry {
-        DictionaryEntry { from: from.to_string(), to: to.to_string(), fuzzy: true }
+        DictionaryEntry { from: from.to_string(), to: to.to_string(), fuzzy: true, snippet: false }
     }
 
     // ── ports of Handy's apply_custom_words tests ──
@@ -388,6 +390,15 @@ mod tests {
         let mut e = entry("json", "JSON");
         e.fuzzy = false;
         assert_eq!(apply_fuzzy("Dear Jason", &[e]), "Dear Jason");
+    }
+
+    #[test]
+    fn snippets_are_never_fuzzed() {
+        // "my sine of" is a near-miss of the phrase, but a snippet only ever
+        // expands on its own words (config::apply_snippets).
+        let mut e = entry("my sign off", "Best wishes");
+        e.snippet = true;
+        assert_eq!(apply_fuzzy("my sine of", &[e]), "my sine of");
     }
 
     #[test]
