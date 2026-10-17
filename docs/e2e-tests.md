@@ -47,7 +47,10 @@ points the suite at an exe directly), so it never competes with a running
   segments directly. `e2e_meeting_dictation`, `e2e_meeting_output_change`
   and `e2e_meeting_quiet` stage a hotkey dictation and a switch of output
   device at a point of that audio, and shorten the quiet-side warning's
-  timings, without any microphone or speakers. It reads no installed apps'
+  timings, without any microphone or speakers. For dictation,
+  `e2e_dictation_mic { silent }` zeroes the real microphone's audio (a
+  "muted" mic for the dead-mic watchdog) and `e2e_coaching_reset` makes every
+  push-to-talk hint due again. It reads no installed apps'
   icons (Settings' call apps, the bar's call card): a spec that wants one
   to look installed points `YAP_E2E_APP_ICONS` at a folder of
   `<app id>.png` stand-ins (`support/icons.js` draws them). It quits when
@@ -113,6 +116,7 @@ then open `screenshots/` (Claude can read the PNGs directly) or
 | Spec | Instance | Tests |
 |------|----------|-------|
 | `e2e/app.spec.js` | default | Home renders in portable mode · every sidebar view · every Settings section · a setting saved to `config.json` and read back after a reload · a new note survives a view switch · a dictionary entry is saved · Account signed out with the service unreachable · onboarding opens on its first step · a stub dictation lands in the Home feed (skipped without a microphone) |
+| `e2e/push-to-talk.spec.js` | push-to-talk mode | Settings → General's line on double-tap · (with a microphone:) a hold transcribing when the key comes up · a lone tap thrown away (nothing transcribed) with the "Hold F24 while you talk" Tip toast, once (`hints.json`; not again within ten minutes) · a double-tap recording hands-free past the gap, the overlay's lock, the next press transcribing, no hints after · the hint as a card on the Yap bar with the main window away · a "muted" mic (`e2e_dictation_mic`): its stream reopened once at ~3 s, "No sound from … — is it muted?" in the overlay and the full message as a toast at ~5 s, the recording going on, nothing transcribed on stop and the overlay ending on the reason · the sound coming back taking the warning back and the dictation going through |
 | `e2e/no-mic.spec.js` | configured mic missing | starts anyway and says "No microphone found" (toast + overlay) when asked to record · Upload still transcribes a file |
 | `e2e/bar.spec.js` | default | the Yap bar (`yap.overlay`), through the debug-only `bar_simulate` (a pretend cursor on a region, fake fullscreen kinds, Esc) and `bar_debug`: idle, bottom-centre on the work area, click-through and never activated — its ex-styles read inside the app and from outside it (`support/win32.js`: GetWindowLongPtr, and WindowFromPoint on the pill showing a click would go through) — and Wispr's measured pill (40 × 8, 14 px up, a 60 × 20 hit wrapper, its colours; `flowbar-spec.md`) · the cursor on the pill opens it and makes just that clickable, then click-through again; tooltips with the shortcut, in Wispr's tooltip style · a notice card (the update card, as a demo) to Wispr's card measurements, 26 px above the pill, with its hit strip · its menu: hide for an hour (Settings shows it, Show it now) and Turn off the bar (saved; Settings adopts it and turns it back on) · Settings → General → Yap bar · a call prompt as a "Meeting detected" card (its ^ menu, ✕, an installed app's own icon — a stand-in for Teams — and Google Meet's mark), answered on the bar · fullscreen: no pill, a card over a borderless app, a card waiting out an exclusive one · ◉ starts meeting notes; the recording pill (69 × 30, half opacity, its ring, 5 bars, the stop circle; hovered, the timer) opens the notepad and ■ ends the meeting · the opt-in countdown (Esc cancels; left alone it records; the call-ended card) · dictating in the pill's place |
 | `e2e/updates.spec.js` | pointed at a local `latest.json` | a manual check finds the next patch version, downloads and verifies it, the "ready" toast and Settings → About say so, and "Restart to update" stops short of the installer (debug builds never run it) |
@@ -177,7 +181,10 @@ test('chat: the empty state offers a new chat', async ({ yap, main, shot }) => {
   file dialogs, Windows notifications, dragging from Explorer) can't be
   driven over CDP; `no-mic.spec.js` shows how to stand in for a file drop.
 - The hotkey reaches the app through the main window's in-page fallback:
-  `pressHotkey(main)` presses F24 (the global hook is off in test mode). The
+  `pressHotkey(main)` presses F24 (the global hook is off in test mode);
+  `hotkeyDown(main)` / `hotkeyUp(main)` hold it for push-to-talk. The
+  fallback sends both to `dictation_key`, the hook's own path into the
+  pipeline, so gestures behave as with the real hook. The
   meeting shortcut the same way: `main.keyboard.press('Meta+Alt+KeyM')`.
 
 ## Why Playwright over CDP
