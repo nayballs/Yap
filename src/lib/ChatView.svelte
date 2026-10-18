@@ -653,7 +653,8 @@
                 <button class="srcchip" title={s.url} onclick={() => openExternalLink(s.url)}>
                   <span class="srcn" aria-hidden="true">{s.n}</span>
                   <span class="srctitle">{s.title || s.site}</span>
-                  {#if s.site}<span class="srcsite">{s.site}</span>{/if}
+                  <!-- (Google Search's links are titled with their site: once is enough.) -->
+                  {#if s.site && s.site !== s.title}<span class="srcsite">{s.site}</span>{/if}
                 </button>
               {/each}
             </div>

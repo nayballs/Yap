@@ -18,7 +18,100 @@
 // spec scripts the model call by call (`scriptChat`): each chat call that
 // offers tools takes the next step, a tool call or an answer, and the
 // request record keeps the messages (the tool results Yap sent back).
+//
+// It also answers the providers' own web searches (src-tauri/src/web/
+// native.rs), the sub-call Yap makes for a `web_search` with "The AI's own
+// search" on: Groq's chat completions with `tools: [{type:
+// "browser_search"}]` (kind "groqSearch": gpt-oss's answer with its
+// `executed_tools` and a 【1†L4-L5】 citation) and Gemini's native
+// `…/models/<model>:generateContent` with `google_search` (kind
+// "geminiSearch": grounding chunks with Google's redirect links). Both find
+// Gale in Baldur's Gate 3. `failNext("groqSearch", 1, 429)` answers the
+// next one with an HTTP error, to see Yap fall back to its own search.
 import http from 'node:http';
+
+export const GALE_URL = 'https://bg3.wiki/wiki/Gale';
+export const GUIDE_URL = 'https://guides.example/bg3-gale';
+export const GROUNDING_REDIRECT = 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/';
+
+/** Groq's gpt-oss answer with browser_search (the shape the eval spike recorded). */
+function groqSearchReply(query) {
+  const found = /gale|baldur|bg3/i.test(query);
+  return {
+    role: 'assistant',
+    content: found
+      ? 'Gale is stuck in a rune circle on the beach west of the Nautiloid crash site.【1†L4-L5】'
+      : 'I found nothing about that.',
+    reasoning: 'Search, open the wiki, answer.',
+    executed_tools: found
+      ? [
+          {
+            index: 0,
+            name: 'browser.search',
+            type: 'browser_search',
+            arguments: JSON.stringify({ query, topn: 5 }),
+            output: `L0: \nL1: URL: https://exa.ai/search?q=${encodeURIComponent(query)}\nL2: # Search Results\nL4: * 【0†Gale - bg3.wiki†bg3.wiki】\nL5: * 【1†Where to find Gale in BG3†guides.example】`,
+            search_results: {
+              results: [
+                { title: 'Gale - bg3.wiki', url: GALE_URL, content: '', score: 0 },
+                { title: 'Where to find Gale in BG3', url: GUIDE_URL, content: '', score: 0 },
+              ],
+            },
+          },
+          {
+            index: 1,
+            name: 'browser.open',
+            type: 'browser_search',
+            arguments: '{"cursor": 0, "id": 0}',
+            output: '',
+            search_results: {
+              results: [
+                {
+                  title: 'bg3.wiki - viewing lines [0 - 6] of 6',
+                  url: GALE_URL,
+                  content: `L0: \nL1: URL: ${GALE_URL}\nL2: Gale - bg3.wiki\nL3: \nL4: Gale is found on the beach west of the Nautiloid crash site,\nL5: stuck in a rune circle. Pull him out to recruit him.\nL6: Gale can be romanced.`,
+                  score: 0,
+                },
+              ],
+            },
+          },
+        ]
+      : [],
+  };
+}
+
+/** Gemini's generateContent answer grounded with Google Search. */
+function geminiSearchReply(query) {
+  if (!/gale|baldur|bg3/i.test(query)) {
+    return { candidates: [{ content: { role: 'model', parts: [{ text: 'Nothing found.' }] }, finishReason: 'STOP' }] };
+  }
+  const text = 'Gale is stuck in a rune circle on the beach west of the Nautiloid crash site. Pull him out to recruit him.';
+  const first = 'Gale is stuck in a rune circle on the beach west of the Nautiloid crash site.';
+  return {
+    candidates: [
+      {
+        content: { role: 'model', parts: [{ text }] },
+        finishReason: 'STOP',
+        groundingMetadata: {
+          webSearchQueries: [query],
+          searchEntryPoint: { renderedContent: '<div class="container">Google</div>' },
+          groundingChunks: [
+            { web: { uri: `${GROUNDING_REDIRECT}gale-1`, title: 'bg3.wiki' } },
+            { web: { uri: `${GROUNDING_REDIRECT}gale-2`, title: 'guides.example' } },
+          ],
+          groundingSupports: [
+            { segment: { startIndex: 0, endIndex: Buffer.byteLength(first), text: first }, groundingChunkIndices: [0] },
+            {
+              segment: { startIndex: Buffer.byteLength(first) + 1, endIndex: Buffer.byteLength(text), text: 'Pull him out to recruit him.' },
+              groundingChunkIndices: [0, 1],
+            },
+          ],
+        },
+      },
+    ],
+    usageMetadata: { promptTokenCount: 30, candidatesTokenCount: 25, totalTokenCount: 55 },
+  };
+}
 
 /** Yap's own token estimate (meeting_summary::estimate_tokens). */
 export function estimateTokens(text) {
@@ -204,8 +297,10 @@ function actionPlanReply(user) {
  * names of the tools offered; "cleanup" is a dictation's AI cleanup, answered
  * with the transcript as it is unless `reply("cleanup", fn)` says otherwise).
  * `reply(kind, fn)` answers that kind with `fn(user)` from then on.
- * `failNext(kind, n)` answers the next `n`
- * calls of a kind with HTTP 500; `delay(kind, ms)` holds that kind's answers
+ * `failNext(kind, n, status = 500)` answers the next `n`
+ * calls of a kind with that HTTP error ("groqSearch" / "geminiSearch": a
+ * provider's own web search, recorded with `url`, `headers`, `query`,
+ * `toolTypes`, `toolChoice` and the `body`); `delay(kind, ms)` holds that kind's answers
  * back (0 = no delay). `scriptChat(steps)` queues the replies to the next
  * calls that offer tools: `{ tools: [{ name, args }] }` calls those tools,
  * `{ content }` answers; with the queue empty they answer "OK".
@@ -221,7 +316,8 @@ export async function startFakeLlm() {
     let raw = '';
     req.on('data', (c) => (raw += c));
     req.on('end', async () => {
-      if (req.method !== 'POST' || !req.url.endsWith('/chat/completions')) {
+      const gemini = req.url.endsWith(':generateContent');
+      if (req.method !== 'POST' || !(req.url.endsWith('/chat/completions') || gemini)) {
         res.writeHead(404).end();
         return;
       }
@@ -230,6 +326,53 @@ export async function startFakeLlm() {
         body = JSON.parse(raw);
       } catch {
         res.writeHead(400).end();
+        return;
+      }
+      const json = (status, value) => {
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(value));
+      };
+      // A provider's own web search (web/native.rs): Groq's browser_search
+      // or Gemini's google_search, the sub-call's only tool.
+      const toolTypes = (body.tools ?? []).map((t) => t.type ?? Object.keys(t)[0]);
+      const search = gemini ? 'geminiSearch' : toolTypes.includes('browser_search') ? 'groqSearch' : null;
+      if (search) {
+        const messages = body.messages ?? [];
+        const user = gemini
+          ? (body.contents ?? []).at(-1)?.parts?.map((p) => p.text).join('') ?? ''
+          : messages.filter((m) => m.role === 'user').at(-1)?.content ?? '';
+        const system = gemini ? body.systemInstruction?.parts?.[0]?.text ?? '' : messages.find((m) => m.role === 'system')?.content ?? '';
+        const query = /Search the web for: (.*)/.exec(user)?.[1] ?? user;
+        requests.push({
+          kind: search,
+          model: gemini ? decodeURIComponent(/models\/([^/:]+):generateContent/.exec(req.url)?.[1] ?? '') : body.model,
+          url: req.url,
+          headers: req.headers,
+          system,
+          user,
+          query,
+          tools: [],
+          toolTypes,
+          toolChoice: body.tool_choice ?? null,
+          body,
+        });
+        const failing = failures.get(search);
+        if (failing?.n > 0) {
+          failing.n -= 1;
+          json(failing.status, { error: { message: `fake ${search} error ${failing.status}: Rate limit reached. Please try again in 9.5s.` } });
+          return;
+        }
+        if (gemini) {
+          json(200, geminiSearchReply(query));
+        } else {
+          json(200, {
+            id: `fake-${requests.length}`,
+            object: 'chat.completion',
+            model: body.model,
+            choices: [{ index: 0, message: groqSearchReply(query), finish_reason: 'stop' }],
+            usage: { prompt_tokens: 3400, completion_tokens: 190, total_tokens: 3590 },
+          });
+        }
         return;
       }
       const messages = body.messages ?? [];
@@ -249,10 +392,10 @@ export async function startFakeLlm() {
       });
       const wait = delays.get(kind) ?? 0;
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      const failing = failures.get(kind) ?? 0;
-      if (failing > 0) {
-        failures.set(kind, failing - 1);
-        res.writeHead(500, { 'content-type': 'text/plain' }).end('fake failure: the model is down');
+      const failing = failures.get(kind);
+      if (failing?.n > 0) {
+        failing.n -= 1;
+        res.writeHead(failing.status, { 'content-type': 'text/plain' }).end('fake failure: the model is down');
         return;
       }
       // The chat's tool loop, scripted: the next step's tool calls or answer.
@@ -309,7 +452,7 @@ export async function startFakeLlm() {
   return {
     base: `http://127.0.0.1:${server.address().port}/v1`,
     requests,
-    failNext: (kind, n = 1) => failures.set(kind, n),
+    failNext: (kind, n = 1, status = 500) => failures.set(kind, { n, status }),
     delay: (kind, ms) => delays.set(kind, ms),
     scriptChat: (steps) => chatScript.push(...steps),
     reply: (kind, fn) => replies.set(kind, fn),

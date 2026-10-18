@@ -1190,7 +1190,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
 - **`web.rs`** — **looking things up on the web** (2026-10-18; Settings →
   Voice Assistant → Web search, `web_search` off by default; design in
   yap-private `docs/web-search-research.md` §7). **Backends** (`search`):
-  **Exa** (`POST https://api.exa.ai/search`, `x-api-key`, its guide's
+  a cloud model's **own search** (`web/native.rs`, below) by default, else
+  Yap's own (`own_search`): **Exa** (`POST https://api.exa.ai/search`, `x-api-key`, its guide's
   recommended `{query, type: "auto", contents: {highlights: true}}` +
   `numResults: 5`) or **Tavily** (`POST https://api.tavily.com/search`,
   Bearer, `{query, max_results: 5}`), keys in `web_search_keys` (service →
@@ -1235,10 +1236,60 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (`fit_history`, ≤ 2,000) for an 8k model; no search → `no_search_line`,
   and an answer that `claims_browsing` anyway gets "*Yap didn't search the
   web for this answer.*". Chips `Searched the web…` + `Answered from 1 web
-  page`. **Provider-native search** (Groq's `browser_search` on gpt-oss):
-  not built — the seam is `native_backend(provider, model)` (None) →
-  `Settings::with_chat_model` → `backend`. Not for the Meetings view's Ask
-  bar. Test mode never goes online: debug-only `YAP_EXA_URL`,
+  page`. **The AI's own search** (`web/native.rs`, 2026-10-18, Nathan's
+  call: "let the cloud models use their own search tools, and only give
+  local models Yap's"; `web_search_native`, on by default): a cloud chat
+  model (`Settings::for_chat(cfg, provider, model, base_url, key)` →
+  `NativeSearch::for_chat`) keeps the ONE tool loop and calls Yap's own
+  `web_search`; running it is a short **sub-call** to the same provider,
+  on the chat's endpoint and key, with nothing but its search tool
+  (`NativeSearch::body`, pure): **Groq** chat completions +
+  `tools: [{type: "browser_search"}]`, `tool_choice: "required"`,
+  `reasoning_effort: "low"`, `max_completion_tokens` 1,024, on gpt-oss
+  (another Groq model searches with `openai/gpt-oss-20b`); **Gemini**
+  `…/v1beta/models/<model>:generateContent` beside the chat's `/openai`
+  endpoint, `tools: [{google_search: {}}]`, `x-goog-api-key` (no forcing
+  exists; Gemini 2+ text models); **Anthropic** `POST /v1/messages`
+  (`anthropic-version: 2023-06-01`, `x-api-key`) with the basic
+  `web_search_20250305` (`max_uses: 2`; no `tool_choice` — forced is a 400
+  on Opus/Sonnet 5.5 —, no temperature/thinking); **OpenAI** the
+  Responses API `POST /v1/responses`, `tools: [{type: "web_search"}]`,
+  `tool_choice: "required"`, `include: ["web_search_call.action.sources"]`,
+  `store: false`, `reasoning.effort: "low"` on gpt-5+/o3/o4 (gpt-4o,
+  gpt-4.1 not nano); **OpenRouter** chat completions + `plugins: [{id:
+  "web", max_results: 5}]` (any model). Docs as read 2026-10-18 (sources in
+  the module doc). Parsers (pure, fixtures from each provider's documented
+  shape; Groq's from the eval spike): Groq's `executed_tools` (`browser.search`
+  results, `browser.open` pages as `L<n>:` lines; `【cursor†L4-L9】` →
+  those lines are the passage), Gemini's `groundingChunks` + `groundingSupports`
+  (segment text = passage; byte offsets), Anthropic's `web_search_result`s +
+  text `citations[].cited_text` (`page_age` → date; an `error_code` in a
+  200 = failure), OpenAI's/OpenRouter's `url_citation` annotations (the
+  sentence before it, or OpenRouter's `content`; the markdown link at the
+  span → the mark; `utm_*` ignored when matching pages) → ≤ 5 `Hit`s (read
+  or cited first) + the provider's short answer as `summary` with its
+  citations renumbered to Yap's `[n]` (`render_summary`; gpt-oss's 【…】
+  out). The tool result is the usual numbered `results` + `summary`, under
+  `DATA_NOT_INSTRUCTIONS`, so the safety rule, the 3-search cap, chips,
+  pills, the Sources row and chats.json are unchanged. Chip `Searched the
+  web with Groq: "q"` (Google / Anthropic / OpenAI / OpenRouter). **Fallback**
+  (unsupported model, 4xx, 429 — never waited out —, unreachable, nothing
+  found): Yap's own search (`own_search`), its reason first in the `note`
+  (`http_error`: "Groq's search is limiting how much Yap can search right
+  now.") → `Searched the web: "q" (Exa) · Groq's search is limiting…`; not
+  cached. A failure that will repeat (400/401/402/403/404/422, or Gemini's
+  429 "check your plan and billing" with no retry delay = grounding not on
+  a free key's plan: Gemini 3+ needs billing) is remembered 30 min per
+  provider + model + endpoint (`UNAVAILABLE`, cleared by `clear_caches`):
+  Yap's own search answers straight away, same reason in the chip. **Gemini's terms** (Gemini API Additional Terms, 2026-04-28): a
+  grounded result may feed a follow-up answer when that answer shows its
+  Links (≤ 5) — `Turn::sources_for` lists every Google link of a grounded
+  turn (cited first, ≤ 5), unmodified (Google's
+  `vertexaisearch.cloud.google.com/grounding-api-redirect/…`, the site from
+  its title: `source_site`); the sub-call's text is never stored. Usage goes
+  to `usage::record`; a model evaluation logs and paces the sub-call
+  (`eval::Call`, ~4k tokens estimated). Custom/self-hosted/on-device models
+  have none (Yap's own). Not for the Meetings view's Ask bar. Test mode never goes online: debug-only `YAP_EXA_URL`,
   `YAP_TAVILY_URL`, `YAP_WEB_STANDIN` (every other site as
   `<standin>/<host><path>`), else an error. `#[ignore]`d
   `real_keyless_lookup` (read-only, no key: Wikipedia + bg3.wiki).
@@ -1642,6 +1693,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   = unbound, the default), opening apps (`apps.rs`): open_apps (true) +
   apps_blocked (app ids, "Don't open this one") + app_nicknames
   (`AppNickname {say, app, name}`), the web (`web.rs`): web_search (false) +
+  web_search_native (true: cloud models use their provider's own search) +
   web_search_service ("exa" | "tavily") + web_search_keys (service → key),
   Commands' edit_hotkey (the rewrite shortcut)
   + agent_name + the `voiceAgent` scope (field and key names unchanged by
@@ -2345,7 +2397,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `YAP_E2E_APPS` names, no icons), never the internet for the web
   (`web.rs`: the debug-only `YAP_EXA_URL` / `YAP_TAVILY_URL` /
   `YAP_WEB_STANDIN` point at `e2e/support/fake-web.js`; unset, a search or a
-  page read fails), `e2e_coaching_reset` (every
+  page read fails; a provider's own search goes to the chat's configured
+  endpoint, the fake AI in the suite, which answers Groq's
+  `browser_search` and Gemini's `generateContent` shapes), `e2e_coaching_reset` (every
   push-to-talk hint due again), `e2e_notice_reset` / `e2e_focus` /
   `e2e_notice` (notice.rs: cooldowns and fatigue forgotten before every
   test, whether the main window counts as focused — by default while it's on
@@ -2948,12 +3002,26 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   own icon (`apps_icons`, else its letter) + a switch each, off = "Yap
   won't open this one" `appsBlocked`; the first 40, then Show all),
   **Web search** (`WebSearchSettings.svelte`, `#settings-web-search`:
-  "Look things up on the web" `webSearch`, off; "Search with" Exa
-  (Recommended) / Tavily `webSearchService`, each key masked in
-  `webSearchKeys` with "Get a free key →" (its dashboard via
+  "Look things up on the web" `webSearch`, off; **"Search with"**, a radio
+  list: **The AI's own search** (Recommended, `webSearchNative`, the
+  default: "Cloud models (Groq, Google Gemini, Anthropic, OpenAI,
+  OpenRouter) search with their provider's built-in search, on the API key
+  Chat already uses. Local and self-hosted models use Yap's search below.")
+  / **Exa** / **Tavily** (every model, `webSearchService`); with the AI's
+  own search, **"What each provider charges for its search"** (Groq: no
+  charge on the free plan but ~4,000 of its 8,000 tokens a minute per
+  searched answer, paid $5/1k + $1/1k pages; Gemini 3+ billing only,
+  5,000 a month free then $14/1k — on a free key Yap's own search answers —,
+  2.5 Flash/Flash-Lite where still offered 500 a day free, free tier used
+  to improve Google's products; Anthropic and OpenAI $10/1k + tokens; OpenRouter the
+  provider's price or $0.007 a search; as published 18 Oct 2026) and
+  **"Yap's search"** (Exa (Recommended) / Tavily, for local and
+  self-hosted models and when a provider's search is unavailable); each
+  key masked in `webSearchKeys` with "Get a free key →" (its dashboard via
   `open_external`) and its free allowance; "Wikipedia and reference wikis"
-  (no key needed), always included; where the search words go; the explain line
-  adds a web example while it's on), **Spoken replies in Chat** ("Speak replies" `speakReplies`;
+  (no key needed), always included; where the search words go (a cloud
+  model's provider, else the service / Wikipedia); the explain line adds a
+  web example while it's on), **Spoken replies in Chat** ("Speak replies" `speakReplies`;
   "When to speak" Segmented When I asked by voice / Always `speakWhen`;
   "Talk back hands-free" `talkBackHandsFree`, greyed while replies are off),
   switching "Speak replies" on while Kokoro isn't downloaded offers it
@@ -3582,7 +3650,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   (`streaming_partials`), AI cleanup **off**, the "press enter" voice command
   **on** (`voice_enter`), word suggestions from your corrections **on**
   (`learn_words` — it only asks; nothing is added without a click), looking
-  things up on the web **off** (`web_search`; Exa is the service once on),
+  things up on the web **off** (`web_search`; once on, cloud models use
+  their provider's own search — `web_search_native` — and local ones Exa),
   opening apps when asked **on** (`open_apps` — only apps in the Start
   menu, `apps.rs`), tips
   **on** (`show_tips`; one notice at a time either way, `notice.rs`), call
@@ -3819,8 +3888,7 @@ checked once for real (Wikipedia, bg3.wiki); not yet tried with a real Exa
 or Tavily key, and Groq's own `browser_search` isn't used yet.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
-search (keyword-RAG only), no provider-native web search (Groq's
-`browser_search`, OpenAI's, Anthropic's), no calendar tools and no conversation
+search (keyword-RAG only), no calendar tools and no conversation
 search/archive; spoken replies have no cloud voices, read Kokoro's
 Japanese and Mandarin voices' text as English, don't check a slow PC's
 speed before choosing Kokoro (the research's first-use RTF check), wait for the whole answer

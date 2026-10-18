@@ -574,6 +574,7 @@
     appsBlocked: [],
     appNicknames: [],
     webSearch: false,
+    webSearchNative: true,
     webSearchService: 'exa',
     webSearchKeys: {},
     speakReplies: false,
