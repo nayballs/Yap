@@ -6,6 +6,7 @@
   import { modelStore, refreshModels, setActiveModel } from './modelStore.svelte.js';
   import ModelRow from './ModelRow.svelte';
   import PillTabs from './ui/PillTabs.svelte';
+  import ConfirmDialog from './ui/ConfirmDialog.svelte';
   import { ENGINE_PROVIDER, PROVIDER_ICONS } from './providerIcons.js';
 
   let busyId = $state(null); // model id being downloaded / switched to
@@ -80,19 +81,32 @@
     }
   }
 
-  async function onDelete(model) {
+  // Delete asks first, in Yap's own dialog: `window.confirm()` in a Tauri
+  // window goes to the dialog plugin, which this window isn't allowed, so it
+  // threw and the model was never deleted.
+  let ask = $state({ open: false, model: null, busy: false });
+
+  function onDelete(model) {
     if (busyId) return;
     if (modelStore.active === model.id) {
       error = `${model.name} is the active model — switch to another model first.`;
       return;
     }
-    if (!confirm(`Delete ${model.name}? You can re-download it later.`)) return;
     error = '';
+    ask = { open: true, model, busy: false };
+  }
+
+  async function confirmDelete() {
+    const model = ask.model;
+    if (!model) return;
+    ask.busy = true;
     try {
       await invoke('delete_model', { modelSize: model.id });
       await refreshModels();
     } catch (e) {
       error = `Couldn't delete ${model.name}: ${e}`;
+    } finally {
+      ask = { open: false, model: null, busy: false };
     }
   }
 </script>
@@ -112,6 +126,14 @@
     <p class="error">{error}</p>
   {/if}
 </div>
+
+<ConfirmDialog
+  bind:open={ask.open}
+  title={ask.model ? `Delete ${ask.model.name}?` : ''}
+  body="You can download it again later."
+  busy={ask.busy}
+  onconfirm={confirmDelete}
+/>
 
 <style>
   .manager {

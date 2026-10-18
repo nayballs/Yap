@@ -2525,7 +2525,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   browser, OpenWhispr-style: vendor pill tabs (All/NVIDIA/OpenAI/Community via
   `ui/PillTabs.svelte`) + compact one-line rows (status dot, brand icon from
   `providerIcons.js` + `assets/providers/*.svg` (MIT, from OpenWhispr), name,
-  size, Download/Active/delete). `ModelCard.svelte` (big cards) remains only in
+  size, Download/Active/delete; delete asks first in `ui/ConfirmDialog.svelte` —
+  ⚠ never `window.confirm/alert/prompt` in a Yap window: Tauri routes them to the
+  dialog plugin, which these windows aren't allowed, so they throw).
+  `ModelCard.svelte` (big cards) remains only in
   Onboarding. `ModelRow` also draws the speaker models (`SpeakerModels.svelte`:
   `unavailable` = a listed model's note instead of Download, `deleteActive`).
 - **`lib/Onboarding.svelte`** — first-run **guided setup** (5 steps): model picker →
