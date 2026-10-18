@@ -30,7 +30,11 @@
 //!    the one in front (`notice::place`), a quiet card on the Yap bar shows
 //!    the answer too; it goes when the voice ends, on ■ (the capsule), ✕ or
 //!    Esc. Pressing the shortcut again asks a follow-up in the same
-//!    conversation.
+//!    conversation. An answer written from the web (`web.rs`, with
+//!    "Look things up on the web" on) is said short — its first one or two
+//!    sentences, citation markers left out — then "The details and sources
+//!    are in Chat." ([`spoken_answer`]); the card shows the short answer and
+//!    "3 sources in Chat".
 //!
 //! "Open Teams" needs no model: Yap opens the app itself and says "Opening
 //! Microsoft Teams." (`apps.rs`, through `chat_turn`), and so does "Yes."
@@ -150,6 +154,25 @@ pub fn reply(meeting: bool, interrupted: bool) -> Reply {
 pub fn card_on_bar(show_answer_card: bool, spoken: bool) -> bool {
     show_answer_card || !spoken
 }
+
+/// What the assistant says, and what its card shows, for an answer.
+/// Written from the web (`sources` > 0): the short answer — its first one
+/// or two sentences, without citation markers (`tts::brief`) — then "The
+/// details and sources are in Chat."; the card shows the short answer.
+/// Otherwise the whole answer, both ways. Pure.
+pub fn spoken_answer(reply: &str, sources: usize) -> (String, String) {
+    if sources == 0 {
+        return (reply.to_string(), reply.to_string());
+    }
+    let brief = crate::tts::brief(reply, 2);
+    if brief.is_empty() {
+        return ("The answer and its sources are in Chat.".to_string(), reply.to_string());
+    }
+    (format!("{brief} {DETAILS_IN_CHAT}"), brief)
+}
+
+/// Said after a web answer's short version.
+pub const DETAILS_IN_CHAT: &str = "The details and sources are in Chat.";
 
 /// How long a shown-only answer's card stays: about 15 characters a second
 /// of reading, 8 s to a minute.
@@ -413,14 +436,22 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     } else {
         None
     };
+    // An answer from the web: one or two sentences out loud (and on the
+    // card), the details and sources in Chat.
+    let (said, shown) = spoken_answer(&turn.reply, turn.sources.len());
+    let sources_note = (!turn.sources.is_empty()).then(|| match turn.sources.len() {
+        1 => "1 source in Chat".to_string(),
+        n => format!("{n} sources in Chat"),
+    });
+    let note = note.or(sources_note.as_deref());
     // The card first (the voice may be short), then the voice. With "Show
     // the answer on the Yap bar" off, a spoken answer has no card.
     let on_bar = crate::notice::place(&app, false) == crate::notice::Place::Bar;
     let mut carded = on_bar
         && card_on_bar(cfg.assistant_answer_card, how == Reply::Speak)
-        && show_card(&app, &question, &turn.reply, how == Reply::Speak, note);
+        && show_card(&app, &question, &shown, how == Reply::Speak, note);
     if how == Reply::Speak {
-        if let Err(e) = crate::tts::speak(&turn.reply, Some(message_id.clone())) {
+        if let Err(e) = crate::tts::speak(&said, Some(message_id.clone())) {
             tracing::warn!("Voice Assistant: couldn't read the answer aloud ({e})");
             how = Reply::Show;
             let ev = {
@@ -438,7 +469,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             }
             let why = format!("Couldn't read it aloud: {e}");
             if carded {
-                let ms = read_ms(&turn.reply);
+                let ms = read_ms(&shown);
                 crate::bar::update_card(&app, CARD, |c| {
                     c.timeout_ms = Some(ms);
                     c.status = Some(why);
@@ -446,7 +477,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             } else if on_bar {
                 // The card was left out for the voice, and there's no voice:
                 // show the answer after all.
-                carded = show_card(&app, &question, &turn.reply, false, Some(why.as_str()));
+                carded = show_card(&app, &question, &shown, false, Some(why.as_str()));
             }
         }
     }
@@ -656,6 +687,20 @@ mod tests {
         assert!(!crate::tts::auto_speak(false, "always", true, false, false));
         // Both keep quiet over a meeting.
         assert!(!crate::tts::auto_speak(true, "always", true, false, true));
+    }
+
+    #[test]
+    fn a_web_answer_is_said_short_with_the_rest_in_chat() {
+        let reply = "Gale is on the beach west of the Nautiloid crash site [1]. Pull him out of the portal to recruit him [1][2].\n\n## Details\n- He offers to join you [2].";
+        let (said, shown) = spoken_answer(reply, 2);
+        assert_eq!(
+            said,
+            "Gale is on the beach west of the Nautiloid crash site. Pull him out of the portal to recruit him. The details and sources are in Chat."
+        );
+        assert!(!said.contains('['));
+        assert_eq!(shown, "Gale is on the beach west of the Nautiloid crash site. Pull him out of the portal to recruit him.");
+        // Not from the web: all of it, as before.
+        assert_eq!(spoken_answer("Your notes say Friday.", 0), ("Your notes say Friday.".into(), "Your notes say Friday.".into()));
     }
 
     #[test]

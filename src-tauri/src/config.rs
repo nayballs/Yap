@@ -450,6 +450,20 @@ pub struct YapConfig {
     /// "Say … → open …": nicknames for apps ([`AppNickname`]).
     #[serde(default)]
     pub app_nicknames: Vec<AppNickname>,
+    /// "Look things up on the web" (Settings → Voice Assistant → Web search;
+    /// `web.rs`): Chat and the Voice Assistant may search the web and read
+    /// pages when a question needs it, showing the sources. Off by default:
+    /// the search words leave the PC.
+    #[serde(default)]
+    pub web_search: bool,
+    /// The search service with a key: "exa" (the default, recommended) or
+    /// "tavily". Without its key, Yap uses Wikipedia and game wikis.
+    #[serde(default = "default_web_search_service")]
+    pub web_search_service: String,
+    /// Each service's key (service id → key), like `pp_api_keys`: stored
+    /// in config.json, never logged.
+    #[serde(default)]
+    pub web_search_keys: std::collections::HashMap<String, String>,
     /// The speech engine (`tts::ENGINES`): "kokoro" (the default: Kokoro's
     /// natural voices once downloaded, Windows voices until then) or
     /// "windows" (Windows' own voices, chosen).
@@ -667,6 +681,9 @@ fn default_meeting_hotkey() -> String {
 fn default_meeting_reminder() -> String {
     "15s".into()
 }
+fn default_web_search_service() -> String {
+    "exa".into()
+}
 fn default_speak_when() -> String {
     "voice".into()
 }
@@ -745,6 +762,9 @@ impl Default for YapConfig {
             open_apps: true,
             apps_blocked: Vec::new(),
             app_nicknames: Vec::new(),
+            web_search: false,
+            web_search_service: default_web_search_service(),
+            web_search_keys: std::collections::HashMap::new(),
             tts_engine: default_tts_engine(),
             tts_voice: default_tts_voice(),
             tts_windows_voice: String::new(),

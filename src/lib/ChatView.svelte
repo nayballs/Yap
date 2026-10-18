@@ -43,6 +43,13 @@
   // (`yap-assistant-turn`: the question, marked asked by voice, then
   // "Thinking…", then the answer, which Rust reads aloud). With no shortcut
   // set, the empty thread says how to set one.
+  //
+  // The web (web.rs, "Look things up on the web" in Settings → Voice
+  // Assistant): an answer written from web pages cites them as [1], drawn
+  // as small pills (markdown.js), with a Sources row under it — number,
+  // title, site — that opens each in the browser (open_external). Kept with
+  // the message (chats.rs `sources`). Its search / read chips carry a globe,
+  // and an action refused after reading the web a shield.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy, tick, untrack } from 'svelte';
@@ -55,6 +62,11 @@
   import { formatHotkeySpec } from './hotkeys.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
   import { copyText, messageItems, conversationMarkdown } from './itemMenus.js';
+  import { openExternalLink } from './externalLinks.js';
+
+  // A chip about the web (web.rs) or the safety rule (tools.rs).
+  const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;
+  const chipKind = (t) => (/: not after reading the web$/.test(t) ? 'guard' : WEB_CHIP.test(t) ? 'web' : 'tool');
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…".
@@ -361,6 +373,7 @@
         text: res.reply,
         tools: res.toolsUsed || [],
         model: res.model ?? null,
+        sources: res.sources || [],
         id: res.messageId ?? null,
       };
       messages = [...messages.slice(0, -1), { ...asked, id: res.userMessageId ?? null }, answer];
@@ -577,8 +590,15 @@
             <!-- Tool-activity chips (OpenWhispr shows tool calls above the answer) -->
             <div class="toolchips">
               {#each m.tools as t, j (j)}
-                <span class="toolchip">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4.5 4.5 0 0 0 5.8 5.8L17 15.6a4.5 4.5 0 0 1-5.8-5.8z" transform="rotate(90 12 12)" /><path d="m3 21 6.5-6.5" /><path d="M14.7 6.3 21 3l-3.3 6.3" /></svg>
+                {@const kind = chipKind(t)}
+                <span class="toolchip {kind}">
+                  {#if kind === 'web'}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z" /></svg>
+                  {:else if kind === 'guard'}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.2 7.5 9.5 4.4-1.3 7.5-4.9 7.5-9.5V6z" /><path d="m9 12 2 2 4-4" /></svg>
+                  {:else}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4.5 4.5 0 0 0 5.8 5.8L17 15.6a4.5 4.5 0 0 1-5.8-5.8z" transform="rotate(90 12 12)" /><path d="m3 21 6.5-6.5" /><path d="M14.7 6.3 21 3l-3.3 6.3" /></svg>
+                  {/if}
                   {t}
                 </span>
               {/each}
@@ -598,7 +618,7 @@
           >
             {#if m.role === 'assistant'}
               <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown escapes all input -->
-              <div class="cbody">{@html renderMarkdown(m.text)}</div>
+              <div class="cbody">{@html renderMarkdown(m.text, { sources: m.sources })}</div>
             {:else}
               <p class="cbody">
                 {#if m.voice}
@@ -609,6 +629,19 @@
               </p>
             {/if}
           </div>
+          {#if m.role === 'assistant' && m.sources?.length}
+            <!-- Where a web answer came from: each opens in the browser. -->
+            <div class="sources" role="group" aria-label="Sources">
+              <span class="srclabel">Sources</span>
+              {#each m.sources as s (s.n)}
+                <button class="srcchip" title={s.url} onclick={() => openExternalLink(s.url)}>
+                  <span class="srcn" aria-hidden="true">{s.n}</span>
+                  <span class="srctitle">{s.title || s.site}</span>
+                  {#if s.site}<span class="srcsite">{s.site}</span>{/if}
+                </button>
+              {/each}
+            </div>
+          {/if}
           {#if m.role === 'assistant'}
             <div class="msgfoot">
               {#if m.id}
@@ -961,6 +994,99 @@
     height: 10px;
     flex: 0 0 auto;
     color: var(--yap-primary);
+  }
+  .toolchip.guard svg {
+    color: var(--yap-success);
+  }
+  /* A web answer's citations: small numbered pills in the text. */
+  .cbubble.assistant :global(.md-cites) {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 2px;
+    vertical-align: 1px;
+  }
+  .cbubble.assistant :global(a.md-cite) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border-subtle);
+    color: var(--yap-muted);
+    font-size: 9.5px;
+    font-weight: 650;
+    line-height: 1;
+    text-decoration: none;
+  }
+  .cbubble.assistant :global(a.md-cite:hover) {
+    color: var(--yap-primary);
+    border-color: color-mix(in srgb, var(--yap-primary) 45%, var(--yap-border-subtle));
+  }
+  /* The Sources row under a web answer. */
+  .sources {
+    align-self: flex-start;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    max-width: 78%;
+    margin: -2px 0 0 2px;
+  }
+  .srclabel {
+    margin-right: 2px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--yap-muted-55);
+  }
+  .srcchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 260px;
+    padding: 2px 8px 2px 3px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s1);
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 10.5px;
+    cursor: pointer;
+  }
+  .srcchip:hover {
+    border-color: var(--yap-border-hover);
+    background: var(--yap-s2);
+  }
+  .srcchip:focus-visible {
+    outline: 2px solid var(--yap-primary-line);
+    outline-offset: 1px;
+  }
+  .srcn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 15px;
+    height: 15px;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s2);
+    color: var(--yap-muted);
+    font-size: 9.5px;
+    font-weight: 650;
+  }
+  .srctitle {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .srcsite {
+    flex: 0 0 auto;
+    color: var(--yap-muted-55);
   }
   .cbubble.assistant :global(p) {
     margin: 4px 0;

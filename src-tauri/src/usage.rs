@@ -160,6 +160,10 @@ pub fn record(
     remaining_requests: Option<u64>,
     limit_requests: Option<u64>,
 ) {
+    // Unit tests that talk to a local fake model never write groq_usage.json.
+    if cfg!(test) {
+        return;
+    }
     let snap = {
         let mut guard = match STATE.lock() {
             Ok(g) => g,
