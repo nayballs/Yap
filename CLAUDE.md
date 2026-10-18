@@ -1091,7 +1091,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   id, name?, onThisPc?}`, only when known; older answers have none). A
   question that was dictated carries `voice: true` ("Only when I asked by
   voice" reads its answer out); `append` returns the message's index, which
-  the pages use as its id (`chat:<conversation>:<index>`).
+  the pages use as its id (`chat:<conversation>:<index>`). A web answer keeps
+  its sources (`ChatMessage.sources` = `Source {n, title, url, site}`,
+  numbered as it cites them; `append_sourced`; only written when there are
+  some).
 - **`ai_model.rs`** — which model a scope's next call goes to, resolved the
   calls' way (`Scope::Chat` → `commands::resolve_chat_endpoint`;
   `Scope::Notes` → `meeting_summary::resolve_endpoint`): `ai_model_status
@@ -1161,9 +1164,78 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (an `update_note`'s title included) and tells the model the folders there
   are and to leave `folder` empty; chip `Couldn't create "Tent list": no
   folder called "Camping"`. (The MCP server's `create_note` still makes the
-  folder it's given.) Plus **`open_app(name)` / `list_apps(query?)`**
+  folder it's given.) Plus **`open_app(name)` / `list_apps(query)`**
   (`app_definitions` + `APP_TOOL_INSTRUCTIONS`, offered while
-  `open_apps` is on; run by `apps.rs` off the async runtime).
+  `open_apps` is on; run by `apps.rs` off the async runtime, with the
+  answer just before the question for its consent check). Every step
+  re-sends the instructions + schemas, so they're kept short
+  (`a_tool_step_stays_light`: ≤ 2,250 est. tokens; 2,879 before the
+  2026-10-18 trim, ~2,180 after). Plus **`web_search(query)` /
+  `read_page(url, offset?)`** (`web_definitions` + `WEB_TOOL_INSTRUCTIONS`,
+  ~470 tokens more, `the_web_tools_stay_light`; offered while "Look things
+  up on the web" is on; run by `web.rs`'s per-turn `web::Turn`, passed as
+  `run_tool_loop`'s last argument). **The safety rule**
+  (`refused_after_web`, `ACTION_TOOLS` = open_app, create_note,
+  update_note, edit_note, copy_to_clipboard): once web content is in a turn
+  (`Turn::seen`), those are no longer offered (`without_actions`) and a call
+  to one is refused with a reason for the model (chip `Didn't open an app:
+  not after reading the web`); the person's next message is a clean turn.
+  Unit-tested through the real loop against a local fake model + Exa
+  (`a_web_page_can_never_make_the_chat_act`).
+- **`web.rs`** — **looking things up on the web** (2026-10-18; Settings →
+  Voice Assistant → Web search, `web_search` off by default; design in
+  yap-private `docs/web-search-research.md` §7). **Backends** (`search`):
+  **Exa** (`POST https://api.exa.ai/search`, `x-api-key`, its guide's
+  recommended `{query, type: "auto", contents: {highlights: true}}` +
+  `numResults: 5`) or **Tavily** (`POST https://api.tavily.com/search`,
+  Bearer, `{query, max_results: 5}`), keys in `web_search_keys` (service →
+  key, like `pp_api_keys`, never logged); with no key — or when the service
+  fails (its error kept as `note`, said in the chip: 401/403 wrong key, Exa
+  402 / Tavily 432 out of free searches, 433, 429, offline) — the **keyless
+  lookup**: the game's own MediaWiki (`GAME_WIKIS`: bg3.wiki, warcraft.wiki.gg,
+  minecraft.wiki, Fandom wikis…; any `*.wiki.gg` / `*.fandom.com` named in
+  the question) else Wikipedia in the person's language (`wiki_language`:
+  the speech language, else Windows', else English; English again when it
+  finds nothing), through `api.php` (`generator=search` + `inprop=url`, then
+  TextExtracts on Wikipedia, `action=parse` HTML elsewhere → `fragment_text`
+  with dom_query, infoboxes/navboxes/footnotes out → `best_passages` by
+  keyword); `wiki_terms` drops the game's names and question words ("Where
+  do I find Gale in Baldur's Gate 3?" → "Gale"), `wiki_retry` tries fewer.
+  A keyed game question gets the wiki's best article first too. Descriptive
+  User-Agent (`USER_AGENT`, contact URL), one request at a time per host
+  250 ms apart, ≤ 5 results, ~700 chars each, 10-minute cache. Never a
+  key-less scrape of Google/Bing/DuckDuckGo. **`read_page`**: `check_url`
+  (http(s), ports 80/443, no user:pass, not `localhost`/`.local`/… or a
+  local IP — `is_public`: loopback, private, link-local, CGNAT, ULA,
+  mapped/NAT64/6to4 carrying one, documentation, reserved), the host
+  resolved and every address checked (`resolve_public`), the connection
+  pinned to them (`resolve_to_addrs`, no proxy, no cookies), redirects
+  followed by hand (≤ 5, each checked), 10 s, 3 MB, HTML/plain text only;
+  `page_text` = dom_smoothie (readability.js port, `TextMode::Formatted`),
+  `page_part` ≈ 3,000 tokens a read with `next_offset`. **`Turn`**: only
+  links the person gave (their messages, `links_in`) or a search this turn
+  returned (`allowed`); ≤ 3 searches and ≤ 3 reads a turn (`offers`);
+  sources numbered as they come (`number`), `sources_for(reply)` = the ones
+  cited (`citations`: [1], [2, 3], [1][4]) or all; results carry
+  `DATA_NOT_INSTRUCTIONS`. Chips: `Searched the web: "q"` (+ " (bg3.wiki)"
+  when keyless, + the service's error), `Read bg3.wiki/wiki/Gale`, `Didn't
+  read evil.example/…: not a link from you or the search`. **Models that
+  can't call tools** (`commands::small_model_answer`): the fixed pipeline —
+  `needs_web` (conservative: "look up", "search the web", "google",
+  "latest", "news", "price of", "where do I find", a known game; never
+  "my notes"/"my meeting"), `search_query` (the ask stripped),
+  `grounded_sources` (≤ 3 sources, ≤ 1,500 tokens) + `grounded_prompt`
+  (answer only from them, cite, < 80 words) with the history fitted
+  (`fit_history`, ≤ 2,000) for an 8k model; no search → `no_search_line`,
+  and an answer that `claims_browsing` anyway gets "*Yap didn't search the
+  web for this answer.*". Chips `Searched the web…` + `Answered from 1 web
+  page`. **Provider-native search** (Groq's `browser_search` on gpt-oss):
+  not built — the seam is `native_backend(provider, model)` (None) →
+  `Settings::with_chat_model` → `backend`. Not for the Meetings view's Ask
+  bar. Test mode never goes online: debug-only `YAP_EXA_URL`,
+  `YAP_TAVILY_URL`, `YAP_WEB_STANDIN` (every other site as
+  `<standin>/<host><path>`), else an error. `#[ignore]`d
+  `real_keyless_lookup` (read-only, no key: Wikipedia + bg3.wiki).
 - **`apps.rs`** — **opening apps when you ask** (2026-10-18; Settings →
   Voice Assistant → Opening apps): "open Teams" in Chat or to the Voice
   Assistant opens an app installed on this PC — only an entry of the
@@ -1173,53 +1245,111 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `shell:AppsFolder`'s children (`SHGetKnownFolderItem(FOLDERID_AppsFolder)`
   → `BHID_EnumItems`, on an STA thread of its own): display name, parsing
   name as the id (an AppUserModelID like `MSTeams_8wekyb3d8bbwe!MSTeams`,
-  or a known-folder path `{6D809377-…}\7-Zip\7zFM.exe`) and the item's ID
-  list; ~240 entries → ~190 apps in ~300 ms on Nathan's PC. Fallback: the
-  Start menu `.lnk`s (ProgramData + AppData) + App Paths. `tidy`: junk out
-  (`is_junk`: "Uninstall …"/`unins*.exe`, read-mes, help/`.chm`, docs,
-  licences, `http(s)://` and `.url` links, "… on the Web", `.msi`, folders;
-  a Store app keeps "Help" — Get Help; "Revo Uninstaller" stays), one entry
-  per name. **Opening** (`open`): a packaged app (`id` has `!`) by
+  or a known-folder path `{6D809377-…}\7-Zip\7zFM.exe`), the item's ID
+  list and, for a desktop app, **the Start menu shortcut behind it**
+  (`System.AppUserModel.BestShortcut`, an ID list → a `.lnk`/`.url` path
+  in one of the Start menu's Programs folders) plus its target and
+  arguments (`System.Link.*`, read for the launcher label, never passed);
+  ~240 entries → ~190 apps in ~300 ms on Nathan's PC (204 of 205 desktop
+  entries have a shortcut). Fallback: the Start menu `.lnk`s (ProgramData
+  + AppData; a `.url` only with a game store's link) + App Paths. `tidy`:
+  junk out (`junk` → `is_junk`: "Uninstall …"/`unins*.exe`, read-mes,
+  help/`.chm`, docs, licences, `http(s)://` and `.url` links, "… on the
+  Web", `.msi`, folders; a Store app keeps "Help" — Get Help; "Revo
+  Uninstaller" stays; a **game store link** — `steam://`,
+  `com.epicgames.launcher://`, `battlenet://`, `uplay://`, EA, GOG,
+  Amazon (`LAUNCHER_LINKS`) — is an app whatever file holds it; a shortcut
+  to a web page is junk), one entry per name. **Opening** (`open`): a
+  packaged app (`id` has `!`) by
   `IApplicationActivationManager::ActivateApplication` (brings it forward,
-  gives its pid), else `ShellExecuteExW(SEE_MASK_IDLIST)` on the entry's
-  own ID list (what a Start menu click does: a shortcut's own target/args,
-  a game's `steam://`), then `bring_forward(pid)` (≤ 8 s, its main window);
-  logs the app's name only. **Matching** (`find`, pure): `keys(name)` — the
+  gives its pid); a desktop app by **its shortcut file** with
+  `ShellExecuteExW`'s default verb, as a Start menu click (its arguments,
+  working folder, run-as apply); only without one by the entry's ID list
+  (`SEE_MASK_IDLIST`). ⚠ Opened by its ID list, World of Warcraft said
+  "Opened" and showed nothing (2026-10-18): its launcher needs the
+  shortcut's `--productcode=wow`, which nothing documents the ID list to
+  carry (not confirmed by a launch; the shortcut file is the documented
+  way). Then
+  `bring_forward(pid, since)` (≤ 8 s: the started process's main window,
+  or that of a process it started since the launch — `procs::family`, a
+  launcher handing over; a Battle.net already running isn't one, and may
+  stay behind the window in front). Logs the app's name and how it opened ("its
+  Start menu shortcut" / "app activation" / "its app-list entry"), never a
+  path. A launch Windows refuses → "Windows couldn't start X: …", never
+  "Opening…". `launcher(target, args)`: "Steam" for `steam://`, "Battle.net"
+  for `… Launcher.exe --productcode=…` → "Opening World of Warcraft (in
+  Battle.net)." **Matching** (`find`, pure): `keys(name)` — the
   full name, without qualifiers ("(64-bit)", " - Insiders", versions),
-  without the maker (`VENDORS`: "Teams"), initials ("VS Code"), the last
-  word (not a `GENERIC` one) — vs the request (`FILLER` "the/app/please"
-  out, "my", a maker, `ALIASES`: calc, cmd, files, vscode, store…), exact,
+  without the maker (`VENDORS`: "Teams"), initials ("VS Code", "WoW"), the
+  last word (not a `GENERIC` one), each also with **numbers as digits**
+  (`numerals`: one–twenty, II–X: "three" = "3" = "III") — vs the request
+  (`FILLER` "the/app/please" out, apostrophes dropped, "my", a maker,
+  `ALIASES`: calc, cmd, files, vscode, store…, numbers as digits), exact,
   a few of its words, or a near-miss (`fuzzy::spelling_distance` ≤ 0.2
   and `plain_spelling_distance` ≤ 0.3: "spottify" yes, "spotifire" no);
   nicknames first (`app_nicknames`); `CONFIDENT` 0.80, others within
   `MARGIN` 0.03 → `Several` (four Pythons, two Teams: ask, never guess);
-  `apps_blocked` → `Blocked`; else `Nothing` + close names. **Fast path**
-  (`plan` / `plan_for`, before any model, in `commands::chat_turn` →
+  `apps_blocked` → `Blocked`; else **by sound** (`sound_of`:
+  `fuzzy::sound_distance` ≤ 0.1 over ≥ 5 sounds, spelled ≤ 0.45 apart —
+  "bolders gait" → Baldur's Gate 3) when exactly one app sounds so and no
+  other scores ≥ 0.6 or sounds within 0.25; else `Nothing` + close names
+  (sound-alikes first). **Fast path** (`plan_with` / `plan_for(text, cfg,
+  conversation)`, before any model, in `commands::chat_turn` →
   `app_turn` and `assistant::answer`): `open_request(text)` (pure: the
-  whole message is "[greeting/please/can you…] open|launch|start|run|fire
-  up… <app> [please/for me/now]", one sentence; `plain` = no joining words
-  "and/about/for/to…") → one app → opened, "Opening Microsoft Teams." +
-  chip `Opened Microsoft Teams` (no model call: works with no AI and the
-  1.5B local model); several → "I found 2 apps for “teams”: … Which
-  one?"; switched off → "You've asked Yap not to open …"; a plain name
-  not installed → "I couldn't find an app called …" (+ "Did you mean …?")
-  unless a tool-capable model is there; "Let Yap open apps" off → it says
-  so; "open my notes", "start the meeting" (`NOT_APPS`), "open the notes
-  about Teams" → the model. **Model tools** (`execute_tool`): `open_app`
+  whole message is "[greeting/please/can you/try to/yes…] open|launch|
+  start|play|run|fire up|boot up|load up… <app> [please/for me/now/
+  again]", one sentence; `plain` = no joining words "and/about/for/to…";
+  `play` — a phrase naming no app is the model's, "play the next song")
+  → one app → opened, "Opening Microsoft Teams." + chip `Opened Microsoft
+  Teams` (no model call: works with no AI and the 1.5B local model);
+  several → "I found 2 apps for “teams”: … Which one?"; switched off →
+  "You've asked Yap not to open …"; a plain name not installed → "I
+  couldn't find an app called …" (+ "Did you mean …?") unless a
+  tool-capable model is there; "Let Yap open apps" off → it says so; "open
+  my notes", "start the meeting" (`NOT_APPS`), "open the notes about Teams"
+  → the model. **Yap's own questions, answered** (a per-conversation
+  memory, `recall` / `remember` / `moved_on`, in memory only): its
+  question's apps (`OFFER_FOR` 5 min, gone when a message goes to the
+  model) and the app it last opened or suggested (`LAST_FOR` 30 min) —
+  `follow_up` (pure): after "Did you mean X?" a "yes" (`is_affirmative`:
+  yes/yeah/sure/please/do it/go ahead/open it/that one/"Yes, I do.") opens
+  X; after "Which one?" "the second one" / "2" / "the last one" / "3.13" /
+  "the classic one" / a name opens that one (a "yes" → "Which one: A or
+  B?"); "no"/"never mind"/"neither" → "Okay, I won't open anything." (no
+  chip); "open it (again)" → the last app (none: the model's). **Model
+  tools** (`execute_tool(name, args, question, previous)`): `open_app`
   acts only when the person's own message asks to open something
-  (`asked_to_open`: open/launch/start/run…), so a note saying "open X"
-  can't (chip `Didn't open "X": you didn't ask to open an app`). Spoken
-  "Opening …" follows the usual meeting rule (the Voice Assistant is off
-  during meetings; Chat's auto-speak stays quiet). Commands `apps_list
-  {refresh}`, `apps_icons {ids}` (`IShellItemImageFactory`, 32 px →
+  (`asked_to_open`: open/launch/start/run/play…) or is a plain yes to the
+  answer just before, which asked a question naming that app
+  (`consented`: "Would you like me to open Baldur's Gate 3?" → "Yes."; not
+  "Are you struggling?"), so a note saying "open X" can't (chip `Didn't
+  open "X": you didn't ask to open an app`). `list_apps` takes a query
+  and gives ≤ 15 names (`LIST_MAX`; no query: the count, 15, "pass a
+  query" — 840 → 135 est. tokens on Nathan's PC). **A model without
+  tools** gets `NO_TOOLS_NOTE` (+ `NO_TOOLS_OPEN`: say "open" and the
+  name), and an answer that claims an open the person asked for
+  (`claims_unasked`: "Opening …", "I'm trying to open …", "I've
+  launched …") becomes `correct_claim`'s "I can't open apps myself. Say
+  “open Baldur's Gate 3” and Yap will." (a long answer keeps its text).
+  Spoken "Opening …" follows the usual meeting rule (the Voice Assistant
+  is off during meetings; Chat's auto-speak stays quiet; TTS reads
+  "Battle.net" as "Battle dot net"). Commands `apps_list {refresh}`,
+  `apps_icons {ids}` (`IShellItemImageFactory`, 32 px →
   `app_icons::encode_png`, cached per run). Test mode: nothing launched
   (recorded, debug-only `e2e_opened_apps {clear}`), index =
-  `YAP_E2E_APPS` (a JSON `[{id, name}]`, read each call), no icons; unit
-  tests never read `config.json` or this PC's apps (`run_tool`, a
-  thread-local stand-in index). `#[ignore]`d `this_pcs_apps` (read-only:
-  names, junk, sample matches, icons) and `opens_notepad_for_real` (opens
-  Notepad the app's way, closes only that pid's window; skipped while a
-  Notepad runs).
+  `YAP_E2E_APPS` (a JSON `[{id, name, target?, args?}]`, read each call),
+  no icons; unit tests never read `config.json` or this PC's apps
+  (`run_tool`, a thread-local stand-in index; `games()` = Nathan's WoW /
+  Classic / Battle.net / Baldur's Gate 3 / Steam entries). `#[ignore]`d
+  `this_pcs_apps` (read-only: names, junk, the games' shortcuts and
+  launchers, sample matches, `list_apps`' size, icons),
+  `opens_notepad_for_real` (opens Notepad the app's way, closes only that
+  pid's window; skipped while a Notepad runs) and
+  `opens_shortcuts_for_real` (in its own temp folder, never the Start
+  menu: a `.url` to `ms-settings:about` — or `calculator:` while Settings
+  is open — closes only the new window; a `.lnk` to cmd.exe whose
+  arguments write a file into its working folder; a `.lnk` to Notepad with
+  a file, skipped while a Notepad runs).
 - **`bridge.rs`** — the **local API bridge** (OpenWhispr `cliBridge.js` port,
   backs the Integrations view): a token-authenticated loopback HTTP server
   (`tiny_http`, `127.0.0.1`, OS-assigned port) exposing `/v1` REST routes over
@@ -1505,7 +1635,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
   = unbound, the default), opening apps (`apps.rs`): open_apps (true) +
   apps_blocked (app ids, "Don't open this one") + app_nicknames
-  (`AppNickname {say, app, name}`), Commands' edit_hotkey (the rewrite shortcut)
+  (`AppNickname {say, app, name}`), the web (`web.rs`): web_search (false) +
+  web_search_service ("exa" | "tavily") + web_search_keys (service → key),
+  Commands' edit_hotkey (the rewrite shortcut)
   + agent_name + the `voiceAgent` scope (field and key names unchanged by
   the 2026-10-18 rename, so no setting resets). JSON
   load/save + `apply_dictionary` (corrections; skips snippets) +
@@ -1955,7 +2087,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `speakable_blocks` (markdown → one block per heading / list item / table
   row / paragraph, each ending like a sentence; a fenced code block →
   "(code block)", links → their text, bare URLs → their domain, `[x]`/☑ →
-  "Done: …", emphasis, HTML, emoji and arrows out, "→" read "to"), then
+  "Done: …", emphasis, HTML, emoji and arrows out, "→" read "to", a web
+  answer's `[1]` / `[2, 3]` / gpt-oss `【…】` markers never read), then
   **`tts/normalize.rs`** (`for_speech`, every engine, UK style,
   conservative — a clear pattern or nothing: £ $ € amounts incl. pence/cents
   and k/m/bn ("twelve thousand four hundred pounds", "three dollars fifty"),
@@ -2079,9 +2212,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `Idle → Listening → Thinking → Speaking` in `yap-assistant {phase,
   conversationId, messageId}` (the bar). `listening` (from
   `capture_target`; bumps a generation, drops the last answer's card),
-  `heard(question)` (after the STT + dictionary) → `answer`: "Open Teams"
-  needs no model (`apps::plan_for`, below: opened, "Opening Microsoft
-  Teams." said); otherwise no Chat model
+  `heard(question)` (after the STT + dictionary) → `answer`: the
+  conversation chosen first, then "Open Teams" — or "Yes." to Yap's "Did
+  you mean …?" — needs no model (`apps::plan_for`, below: opened,
+  "Opening Microsoft Teams." said); the turn goes through `chat_turn` with
+  scope "assistant" (8 history messages, not 19); otherwise no Chat model
   (`commands::resolve_chat_endpoint` errs) → the `assistantNoModel` alert
   with **Open settings** (`alert::OPEN_AI_SETTINGS` → Language Models →
   Chat & Voice Assistant; a model that fails → `assistantFailed`, the
@@ -2105,7 +2240,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (`assistant_answer_card`, on) decides it for a spoken answer; one not
   read aloud always shows (`card_on_bar`, pure), also when the voice
   fails —, shown before the voice starts; it goes when the
-  voice ends (`on_tts_state`), or after `read_ms` when shown only. `stop`
+  voice ends (`on_tts_state`), or after `read_ms` when shown only. **A web
+  answer** (`turn.sources`, `web.rs`) is said short (`spoken_answer`:
+  `tts::brief` — its first two sentences, no `[n]` — then "The details and
+  sources are in Chat."), its card shows that and "2 sources in Chat"; the
+  model is told a spoken question wants the answer first. `stop`
   (■ on the capsule = `bar_action "assistant-stop"`, `assistant_stop`).
   The bar's capsule shows while `phase != Idle`, the bar on or off.
   Debug-only `e2e_assistant_ask {text, listenMs}` (`Robot::ask_assistant`:
@@ -2197,7 +2336,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   {text, listenMs}` (a question to the Voice Assistant, as its shortcut
   asks it, no mic needed), no app ever launched (`apps.rs`: "open Teams"
   is recorded for `e2e_opened_apps`, the index is the stand-in list
-  `YAP_E2E_APPS` names, no icons), `e2e_coaching_reset` (every
+  `YAP_E2E_APPS` names, no icons), never the internet for the web
+  (`web.rs`: the debug-only `YAP_EXA_URL` / `YAP_TAVILY_URL` /
+  `YAP_WEB_STANDIN` point at `e2e/support/fake-web.js`; unset, a search or a
+  page read fails), `e2e_coaching_reset` (every
   push-to-talk hint due again), `e2e_notice_reset` / `e2e_focus` /
   `e2e_notice` (notice.rs: cooldowns and fatigue forgotten before every
   test, whether the main window counts as focused — by default while it's on
@@ -2554,7 +2696,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   plain RAG chat; tool-activity chips render in the thread above the answer
   and are kept with it in chats.json; a question from
   the Meetings view's Ask bar arrives through `chatRequest` and is sent with
-  `scope: 'meetings'`). The composer (message on top; mic, **model chip**,
+  `scope: 'meetings'`). **A web answer** (`web.rs`): its `[1]` citations are
+  small pills that open their source (`renderMarkdown(md, {sources})` in
+  `markdown.js`, where only the sources' links stay links — any other
+  address the model wrote is plain text), a **Sources** row under it
+  (number, title, site; `openExternalLink`), kept in chats.json; web chips
+  carry a globe, a refused action (the safety rule) a shield. The composer (message on top; mic, **model chip**,
   Send under it — `ModelChip.svelte`, names in `aiModel.js` from
   `ppModels.js` + `providerIcons.js`) shows the model the next message goes
   to ("GPT-OSS 20B · Groq", "· no note tools" for a local model under 4B,
@@ -2790,7 +2937,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `apps_list`, a count, Refresh, a search box, two columns of the app's
   own icon (`apps_icons`, else its letter) + a switch each, off = "Yap
   won't open this one" `appsBlocked`; the first 40, then Show all),
-  **Spoken replies in Chat** ("Speak replies" `speakReplies`;
+  **Web search** (`WebSearchSettings.svelte`, `#settings-web-search`:
+  "Look things up on the web" `webSearch`, off; "Search with" Exa
+  (Recommended) / Tavily `webSearchService`, each key masked in
+  `webSearchKeys` with "Get a free key →" (its dashboard via
+  `open_external`) and its free allowance; "Wikipedia and game wikis (no
+  key)", always included; where the search words go; the explain line
+  adds a web example while it's on), **Spoken replies in Chat** ("Speak replies" `speakReplies`;
   "When to speak" Segmented When I asked by voice / Always `speakWhen`;
   "Talk back hands-free" `talkBackHandsFree`, greyed while replies are off),
   switching "Speak replies" on while Kokoro isn't downloaded offers it
@@ -3418,7 +3571,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   live transcription preview **on**
   (`streaming_partials`), AI cleanup **off**, the "press enter" voice command
   **on** (`voice_enter`), word suggestions from your corrections **on**
-  (`learn_words` — it only asks; nothing is added without a click),
+  (`learn_words` — it only asks; nothing is added without a click), looking
+  things up on the web **off** (`web_search`; Exa is the service once on),
   opening apps when asked **on** (`open_apps` — only apps in the Start
   menu, `apps.rs`), tips
   **on** (`show_tips`; one notice at a time either way, `notice.rs`), call
@@ -3463,7 +3617,14 @@ apps when asked** (`apps.rs`, 2026-10-18: "open Teams" in Chat or out loud,
 from the Start menu's list, with no model needed; nicknames, apps switched
 off, the `open_app`/`list_apps` tools; matching and the request patterns
 unit-tested, this PC's real list indexed read-only, the flows e2e-tested
-against a stand-in list — never launching anything), **spoken replies** (`tts.rs`, 2026-10-18: Chat's answers read
+against a stand-in list — never launching anything; same day, games: a
+desktop app opens through its Start menu shortcut (World of Warcraft's
+launcher had lost its `--productcode`), numbers and sound-alikes ("boulders
+gate three"), "play X", "open it again", Yap answering "yes" / "the second
+one" to its own questions, a yes to the model's offer as consent, lighter
+tool steps for Groq's rate limit, no "Opening…" from a model that can't —
+checked with real shortcut launches in a temp folder, not yet with a real
+game), **spoken replies** (`tts.rs`, 2026-10-18: Chat's answers read
 aloud in Windows' voices — the Voice replies toggle, ▶ on every answer,
 "only when I asked by voice", hands-free talk-back, barge-in; text prep, the
 queue and the decisions unit-tested, synthesis checked silently on this PC's
@@ -3636,8 +3797,20 @@ Unit-tested and e2e-tested (`notices.spec.js` + the updated specs); real
 use (a call while the window sits on a second monitor, the bar off with
 Windows notifications, Focus Assist) not yet tried.
 
+**Looking things up on the web** (`web.rs`, 2026-10-18, off by default):
+Chat and the Voice Assistant search (Exa or Tavily with the person's free
+key, else Wikipedia and game wikis with none), read pages on the PC behind
+an SSRF guard, cite `[1]` with a Sources row, and never act (apps, note
+writes, clipboard) once web content is in a turn; small local models get
+a fixed search-then-answer pipeline. Unit-tested (recorded Exa/Tavily/wiki
+JSON, the URL guard, the safety rule through the real loop), e2e-tested
+against a local fake web (`web-search.spec.js`), and the keyless lookup
+checked once for real (Wikipedia, bg3.wiki); not yet tried with a real Exa
+or Tavily key, and Groq's own `browser_search` isn't used yet.
+
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
-search (keyword-RAG only), and no `web_search`/calendar tools or conversation
+search (keyword-RAG only), no provider-native web search (Groq's
+`browser_search`, OpenAI's, Anthropic's), no calendar tools and no conversation
 search/archive; spoken replies have no cloud voices, read Kokoro's
 Japanese and Mandarin voices' text as English, don't check a slow PC's
 speed before choosing Kokoro (the research's first-use RTF check), wait for the whole answer

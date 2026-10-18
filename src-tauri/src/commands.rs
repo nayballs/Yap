@@ -839,6 +839,8 @@ pub fn chat_get(id: u64) -> Result<crate::chats::Conversation, String> {
 #[tauri::command]
 pub fn chat_delete(id: u64) {
     crate::chats::delete(id);
+    // A later conversation may get its id: nothing of this one carries over.
+    crate::apps::moved_on(Some(id));
 }
 
 /// Rename a conversation (the Chat sidebar's Rename, in place): the title as
@@ -858,6 +860,9 @@ pub(crate) struct ChatTurn {
     pub tools_used: Vec<String>,
     /// Who answered; `None` when Yap did itself (an app opened, `apps.rs`).
     pub model: Option<crate::chats::ChatModel>,
+    /// The web pages the answer was written from (`web.rs`), numbered as
+    /// it cites them.
+    pub sources: Vec<crate::chats::Source>,
 }
 
 impl ChatTurn {
@@ -879,7 +884,10 @@ impl ChatTurn {
 ///
 /// "Open Teams" and other plain requests to open an app are answered by Yap
 /// itself, before any model (`apps::plan_for`): with no AI set up, with a
-/// small local model, and without a model call at all.
+/// small local model, and without a model call at all — and so are the
+/// answers to its own questions ("Did you mean Baldur's Gate 3?" → "yes").
+/// `scope` "meetings": grounded in the meetings (the Meetings view's Ask
+/// bar); "assistant": the Voice Assistant, which sends a shorter history.
 ///
 /// `app`: the windows told of note changes; `None` in a model evaluation
 /// (`eval.rs`), which runs this same turn with no windows.
@@ -896,7 +904,7 @@ pub(crate) async fn chat_turn(
         return Err("Type a message first".to_string());
     }
     let cfg = config::load();
-    if let Some(plan) = crate::apps::plan_for(&text, &cfg).await {
+    if let Some(plan) = crate::apps::plan_for(&text, &cfg, conversation_id).await {
         return app_turn(conversation_id, &text, by_voice, asked, plan).await;
     }
     crate::ai_model::wake_on_device(&cfg).await?;
@@ -913,11 +921,16 @@ pub(crate) async fn chat_turn(
 
     // Conversation bookkeeping (create on first message, OpenWhispr-style).
     let conv = turn_conversation(conversation_id, &text);
+    // The model answers this one: Yap's own question about apps has lapsed.
+    crate::apps::moved_on(Some(conv.id));
+    // The last 19 (+ the new user turn ≈ their slice(-20)); a spoken
+    // question, the last 8: every tool step sends them again.
+    let keep = if scope == Some("assistant") { 8 } else { 19 };
     let history: Vec<(String, String)> = conv
         .messages
         .iter()
         .rev()
-        .take(19) // + the new user turn ≈ their slice(-20)
+        .take(keep)
         .rev()
         .map(|m| (m.role.clone(), m.text.clone()))
         .collect();
@@ -928,6 +941,9 @@ pub(crate) async fn chat_turn(
     // tool-call) + eager-RAG notes under their exact framing. OpenWhispr runs
     // BOTH: the model gets relevant notes up front AND can search for more.
     let tools_supported = crate::tools::supports_tools(&provider, &model);
+    // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
+    // bar: that's about the meetings.
+    let web_on = cfg.web_search && scope != Some("meetings");
     let mut system = persona.trim().to_string();
     if tools_supported {
         system.push_str("\n\nYou have access to tools. ");
@@ -935,6 +951,22 @@ pub(crate) async fn chat_turn(
         if cfg.open_apps {
             system.push(' ');
             system.push_str(&crate::tools::APP_TOOL_INSTRUCTIONS.join(" "));
+        }
+        if web_on {
+            system.push(' ');
+            system.push_str(&crate::tools::WEB_TOOL_INSTRUCTIONS.join(" "));
+            system.push_str(&format!(" Today is {}.", crate::web::today()));
+            if by_voice {
+                system.push_str(" This question was asked out loud: start your answer with the answer itself, in one or two short sentences, then any details.");
+            }
+        }
+    } else {
+        // No tools: it can't do anything on the PC, so it mustn't say so.
+        system.push_str("\n\n");
+        system.push_str(crate::apps::NO_TOOLS_NOTE);
+        if cfg.open_apps {
+            system.push(' ');
+            system.push_str(crate::apps::NO_TOOLS_OPEN);
         }
     }
     // Asked from the Meetings view: grounded in the latest meetings and the
@@ -954,7 +986,7 @@ pub(crate) async fn chat_turn(
         ));
     }
 
-    let (reply, tools_used) = if tools_supported {
+    let (reply, tools_used, sources) = if tools_supported {
         let notify = |id: u64| {
             use tauri::Emitter;
             if let Some(app) = app {
@@ -962,7 +994,14 @@ pub(crate) async fn chat_turn(
                 let _ = app.emit("yap-notes-changed", ());
             }
         };
-        crate::tools::run_tool_loop(
+        // The turn's web side: the person's links (this message and their
+        // earlier ones), the sources found, the safety rule's flag.
+        let mut web = web_on.then(|| {
+            let earlier: Vec<&str> = history.iter().filter(|(r, _)| r == "user").map(|(_, t)| t.as_str()).collect();
+            let settings = crate::web::Settings::from_config(&cfg).with_chat_model(&provider, &model);
+            crate::web::Turn::new(settings, crate::web::Endpoints::current(), &text, &earlier)
+        });
+        let (reply, tools_used) = crate::tools::run_tool_loop(
             &system,
             &history,
             &text,
@@ -973,25 +1012,110 @@ pub(crate) async fn chat_turn(
             disable_thinking,
             cfg.open_apps,
             &notify,
-        )
-        .await?
-    } else {
-        // Small/local models: plain chat + eager RAG (their fallback).
-        let reply = crate::llm::note_chat(
-            &system,
-            &history,
-            &text,
-            &base_url,
-            &api_key,
-            &model,
-            &provider,
-            disable_thinking,
+            web.as_mut(),
         )
         .await?;
-        (reply, Vec::new())
+        let sources = web.map(|w| w.sources_for(&reply)).unwrap_or_default();
+        (reply, tools_used, sources)
+    } else {
+        // Small/local models: plain chat + eager RAG (their fallback), or
+        // Yap's fixed web pipeline when the question needs the web.
+        let endpoint = (base_url.as_str(), api_key.as_str(), model.as_str(), provider.as_str(), disable_thinking);
+        let (reply, chips, sources) =
+            small_model_answer(&cfg, &persona, &system, &history, &text, endpoint, web_on, by_voice).await?;
+        // "Opening Baldur's Gate 3." from a model that can't open anything:
+        // said as it is instead (apps.rs).
+        let corrected = if crate::apps::claims_unasked(&reply, &text) {
+            let (question, said, open_apps) = (text.clone(), reply.clone(), cfg.open_apps);
+            tauri::async_runtime::spawn_blocking(move || {
+                crate::apps::correct_claim(&said, &question, &crate::apps::apps(false), open_apps)
+            })
+            .await
+            .ok()
+            .flatten()
+        } else {
+            None
+        };
+        (corrected.unwrap_or(reply), chips, sources)
     };
-    let index = crate::chats::append(conv.id, "assistant", &reply, &tools_used, Some(answered_by.clone()), false)?;
-    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by) })
+    let index = crate::chats::append_sourced(
+        conv.id,
+        "assistant",
+        &reply,
+        &tools_used,
+        Some(answered_by.clone()),
+        false,
+        &sources,
+    )?;
+    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by), sources })
+}
+
+/// The fixed web pipeline's budgets for a model that can't call tools (an
+/// 8k on-device model): the web passages, and the history kept beside them.
+const SMALL_WEB_TOKENS: usize = 1_500;
+const SMALL_HISTORY_TOKENS: usize = 2_000;
+
+/// A turn for a model that can't call tools (the on-device Qwen2.5-1.5B, a
+/// local model under 4B): plain chat over the notes — or, with web search
+/// on and a question that needs it (`web::needs_web`), **Yap's fixed
+/// pipeline**: it searches (the keyed service, else Wikipedia and game
+/// wikis), puts the best few passages in the prompt, numbered, and asks the
+/// model to answer only from them and cite them. It never lets the model
+/// claim a search that didn't happen: it's told so, and an answer that
+/// claims one anyway says Yap didn't search.
+#[allow(clippy::too_many_arguments)]
+async fn small_model_answer(
+    cfg: &YapConfig,
+    persona: &str,
+    system: &str,
+    history: &[(String, String)],
+    text: &str,
+    (base_url, api_key, model, provider, disable_thinking): (&str, &str, &str, &str, bool),
+    web_on: bool,
+    by_voice: bool,
+) -> Result<(String, Vec<String>, Vec<crate::chats::Source>), String> {
+    let mut chips = Vec::new();
+    let mut sources = Vec::new();
+    let mut system = system.to_string();
+    let mut history = history.to_vec();
+    if web_on && crate::web::needs_web(text) {
+        let query = crate::web::search_query(text);
+        let settings = crate::web::Settings::from_config(cfg).with_chat_model(provider, model);
+        match crate::web::search(&settings, &crate::web::Endpoints::current(), &query, text).await {
+            Ok(found) if found.hits.iter().any(|h| !h.text.trim().is_empty()) => {
+                let (found_sources, block) = crate::web::grounded_sources(&found.hits, SMALL_WEB_TOKENS);
+                system = crate::web::grounded_prompt(persona, &block, &crate::web::today(), by_voice);
+                // Still only text: it can't open or change anything (apps.rs).
+                system.push_str("\n\n");
+                system.push_str(crate::apps::NO_TOOLS_NOTE);
+                history = crate::web::fit_history(&history, SMALL_HISTORY_TOKENS);
+                chips.push(crate::web::search_chip(&query, &found, &settings));
+                chips.push(match found_sources.len() {
+                    1 => "Answered from 1 web page".to_string(),
+                    n => format!("Answered from {n} web pages"),
+                });
+                sources = found_sources;
+            }
+            Ok(found) => {
+                chips.push(crate::web::search_chip(&query, &found, &settings));
+                system.push_str(&format!("\n\n{}", crate::web::no_search_line(Some("the search found nothing for it"))));
+            }
+            Err(e) => {
+                tracing::info!("Chat: the web search for a small model failed");
+                chips.push(format!("Couldn't search the web: {}", crate::web::short(&e)));
+                system.push_str(&format!("\n\n{}", crate::web::no_search_line(Some(&e))));
+            }
+        }
+    } else {
+        system.push_str(&format!("\n\n{}", crate::web::no_search_line(None)));
+    }
+    let mut reply =
+        crate::llm::note_chat(&system, &history, text, base_url, api_key, model, provider, disable_thinking).await?;
+    if sources.is_empty() && crate::web::claims_browsing(&reply) {
+        reply.push_str("\n\n");
+        reply.push_str(crate::web::NOT_SEARCHED_NOTE);
+    }
+    Ok((reply, chips, sources))
 }
 
 /// The conversation a turn goes to: `conversation_id`'s, or a new one named
@@ -1023,17 +1147,28 @@ async fn app_turn(
     let conv = turn_conversation(conversation_id, text);
     let user_index = crate::chats::append(conv.id, "user", text, &[], None, by_voice)?;
     asked(conv.id, user_index);
+    // What its answer leaves open: "Did you mean …?", "Which one?", the app
+    // "open it again" means.
+    crate::apps::remember(conv.id, &plan);
     let answer = tauri::async_runtime::spawn_blocking(move || crate::apps::carry_out(&plan))
         .await
         .map_err(|e| e.to_string())?;
-    let tools_used = vec![answer.chip];
+    let tools_used: Vec<String> = Some(answer.chip).filter(|c| !c.is_empty()).into_iter().collect();
     let index = crate::chats::append(conv.id, "assistant", &answer.reply, &tools_used, None, false)?;
-    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply: answer.reply, tools_used, model: None })
+    Ok(ChatTurn {
+        conversation_id: conv.id,
+        user_index,
+        index,
+        reply: answer.reply,
+        tools_used,
+        model: None,
+        sources: Vec::new(),
+    })
 }
 
 /// Send one chat turn from the Chat view ([`chat_turn`]). Returns `{
-/// conversationId, reply, toolsUsed, model, messageId, userMessageId, speak
-/// }`: the two messages' ids ("chat:<conversation>:<index>", what the page
+/// conversationId, reply, toolsUsed, model, sources, messageId,
+/// userMessageId, speak }`: the two messages' ids ("chat:<conversation>:<index>", what the page
 /// calls them) and whether the answer is read out by itself
 /// (`tts::auto_speak`: spoken replies on, and "When to speak" says so —
 /// `voice`: the question was dictated, kept with it).
@@ -1063,6 +1198,7 @@ pub async fn chat_send(
         "reply": turn.reply,
         "toolsUsed": turn.tools_used,
         "model": turn.model,
+        "sources": turn.sources,
         "messageId": turn.message_id(),
         "userMessageId": format!("chat:{}:{}", turn.conversation_id, turn.user_index),
         "speak": speak,
