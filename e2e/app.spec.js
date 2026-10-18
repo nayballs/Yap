@@ -45,7 +45,8 @@ test('every sidebar view renders', async ({ main, shot }) => {
 
 const SECTIONS = [
   'General',
-  'Voice Agent',
+  'Commands',
+  'Voice Assistant',
   'Speech-to-Text',
   'Language Models',
   'History',

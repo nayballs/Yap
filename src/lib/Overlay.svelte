@@ -11,7 +11,9 @@
   //             the error) in the pill's place, with ✕ / ✓ while it records
   //             (as Settings says: off by default, when pointed at, or
   //             always; never while the push-to-talk key is held) and "Dictation
-  //             cancelled · Undo" after a cancel;
+  //             cancelled · Undo" after a cancel; a question to the Voice
+  //             Assistant gets its own variant (✦ "Ask Yap…", "Thinking…",
+  //             "Speaking…" with ■) and its answer a card;
   //   meeting   a 69 × 30 recording pill at half opacity (5 bars, the stop
   //             circle) that shows its timer when hovered;
   //   cards     26 px above the pill: Yap's notices while its window isn't
@@ -75,7 +77,9 @@
       dictation.state === 'processing' ||
       dictation.state === 'processing-slow' ||
       dictation.state === 'error' ||
-      dictation.state === 'cancelled'
+      dictation.state === 'cancelled' ||
+      // A question to the Voice Assistant, until its answer has been said.
+      dictation.assistant !== 'idle'
   );
   const mode = $derived(
     busy
@@ -248,7 +252,10 @@
   onMount(() => {
     const uns = [];
     invoke('bar_status')
-      .then((s) => Object.assign(bar, s))
+      .then((s) => {
+        Object.assign(bar, s);
+        if (s?.assistant) dictation.assistant = s.assistant;
+      })
       .catch(() => {});
     listen('yap-bar', (e) => Object.assign(bar, e.payload)).then((u) => uns.push(u));
     listen('yap-bar-pointer', (e) => {

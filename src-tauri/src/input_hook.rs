@@ -1,4 +1,5 @@
-//! Unified input hook for the dictation, edit and meeting key bindings.
+//! Unified input hook for the dictation, edit (Commands' rewrite), meeting
+//! and Voice Assistant key bindings.
 //!
 //! Installs both WH_KEYBOARD_LL and WH_MOUSE_LL hooks to capture:
 //! - Keyboard keys (including those sent by mouse side buttons via driver software)
@@ -9,6 +10,10 @@
 //! NOT a separate binding: the dictation key emits both press and release, and
 //! the pipeline's `recording_mode` decides toggle vs hold. The meeting
 //! shortcut (Win+Alt+M by default) only acts on its press (`meeting_guard`).
+//! The assistant shortcut (unbound by default) records like the dictation
+//! key, for a question to Yap's Chat (`assistant.rs`). No two bindings may
+//! fire on one press ([`clashes`]: Settings refuses such a key, and setup /
+//! `save_config` leave a clashing assistant shortcut unbound).
 //!
 //! A combo holding **Alt or Win** whose main key is swallowed taps an
 //! unassigned "menu mask" key while the modifiers are still down
@@ -43,7 +48,7 @@ const MOD_ALT: u8 = 2;
 const MOD_SHIFT: u8 = 4;
 const MOD_WIN: u8 = 8;
 
-/// A configurable key binding (dictation key, edit key).
+/// A configurable key binding (dictation, edit, meeting, assistant).
 struct KeyBinding {
     /// 0=none, 1=keyboard vkey, 2=mouse button, 3=modifier-only chord
     key_type: AtomicU8,
@@ -99,6 +104,7 @@ impl KeyBinding {
 static DICTATION_BINDING: KeyBinding = KeyBinding::new();
 static EDIT_BINDING: KeyBinding = KeyBinding::new();
 static MEETING_BINDING: KeyBinding = KeyBinding::new();
+static ASSISTANT_BINDING: KeyBinding = KeyBinding::new();
 
 /// Channel from the hook callback to the emit-forwarder thread. The callback
 /// must NEVER do slow work (like `app.emit`, which can block on a busy webview):
@@ -153,6 +159,98 @@ pub fn configure_meeting(key_spec: &str) -> Result<String, String> {
     let desc = format_binding(key_type, key_code, mods);
     info!("Meeting key configured: {} (spec: {:?})", desc, key_spec);
     Ok(desc)
+}
+
+/// Parse a key spec string and configure the **Voice Assistant** shortcut
+/// (`assistant.rs`: a question to Yap's Chat, answered out loud). An empty
+/// spec unbinds it (the default).
+pub fn configure_assistant(key_spec: &str) -> Result<String, String> {
+    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
+    ASSISTANT_BINDING.configure(key_type, key_code, mods);
+    let desc = format_binding(key_type, key_code, mods);
+    info!("Assistant key configured: {} (spec: {:?})", desc, key_spec);
+    Ok(desc)
+}
+
+/// The assistant shortcut from config, unless it clashes with one of the
+/// other three (a hand-edited config.json: Settings never saves one), in
+/// which case it stays unbound and the log says why.
+pub fn configure_assistant_from(cfg: &crate::config::YapConfig) {
+    let spec = cfg.assistant_hotkey.trim();
+    let others = [
+        ("dictation hotkey", cfg.hotkey.as_str()),
+        ("rewrite shortcut", cfg.edit_hotkey.as_str()),
+        ("meeting shortcut", cfg.meeting_hotkey.as_str()),
+    ];
+    let spec = match others.iter().find(|(_, other)| clashes(spec, other)) {
+        Some((name, _)) => {
+            tracing::warn!("The assistant shortcut {spec:?} clashes with the {name}: left unbound");
+            ""
+        }
+        None => spec,
+    };
+    if let Err(e) = configure_assistant(spec) {
+        tracing::warn!("Failed to apply the assistant shortcut: {}", e);
+    }
+}
+
+/// The modifier family of a virtual key (any platform; the hook's own
+/// `modifier_family` is Windows-only).
+fn vk_family(vk: u32) -> u8 {
+    match vk {
+        0x11 | 0xA2 | 0xA3 => MOD_CTRL,
+        0x12 | 0xA4 | 0xA5 => MOD_ALT,
+        0x10 | 0xA0 | 0xA1 => MOD_SHIFT,
+        0x5B | 0x5C => MOD_WIN,
+        _ => 0,
+    }
+}
+
+/// Whether two key specs would fire on **one press**: the hook checks every
+/// binding against every key event, so both would start. Pure (the same
+/// rule as `hotkeysClash` in `lib/hotkeys.js`, which Settings checks with).
+///
+/// - The same key, button or chord, however it's written.
+/// - A bare key fires only while no modifier is held (`process_keyboard_event`),
+///   so F9 and Ctrl+F9 are two keys — unless the bare key is itself a
+///   modifier (RightAlt), which fires whatever else is held.
+/// - Combos on one main key fire with *at least* their modifiers held:
+///   Ctrl+Space also fires inside Ctrl+Shift+Space.
+/// - A modifier-only chord completes while a combo's modifiers go down
+///   (Ctrl+Alt inside Ctrl+Alt+K), and inside a bigger chord.
+///
+/// An empty or unreadable spec clashes with nothing.
+pub fn clashes(a: &str, b: &str) -> bool {
+    let (Ok(a), Ok(b)) = (parse_key_spec(a.trim()), parse_key_spec(b.trim())) else {
+        return false;
+    };
+    let within = |x: u8, y: u8| x & y == x;
+    let nested = |x: u8, y: u8| within(x, y) || within(y, x);
+    match (a, b) {
+        ((KEY_TYPE_NONE, ..), _) | (_, (KEY_TYPE_NONE, ..)) => false,
+        ((KEY_TYPE_MOUSE, x, _), (KEY_TYPE_MOUSE, y, _)) => x == y,
+        ((KEY_TYPE_KEYBOARD, x, m), (KEY_TYPE_KEYBOARD, y, n)) => {
+            if x != y {
+                false
+            } else if m == 0 || n == 0 {
+                m == n || vk_family(x) != 0
+            } else {
+                nested(m, n)
+            }
+        }
+        ((KEY_TYPE_MODS, _, m), (KEY_TYPE_MODS, _, n)) => nested(m, n),
+        ((KEY_TYPE_MODS, _, chord), (KEY_TYPE_KEYBOARD, vk, m))
+        | ((KEY_TYPE_KEYBOARD, vk, m), (KEY_TYPE_MODS, _, chord)) => {
+            if m == 0 {
+                // A modifier key bound alone (RightAlt) goes down inside a
+                // chord holding its family.
+                chord & vk_family(vk) != 0
+            } else {
+                within(chord, m)
+            }
+        }
+        _ => false,
+    }
 }
 
 /// Whether pressing a combo should tap the menu mask key: it holds Alt or
@@ -627,6 +725,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
             ),
             (&EDIT_BINDING, "edit-key-pressed", "edit-key-released"),
             (&MEETING_BINDING, "meeting-key-pressed", "meeting-key-released"),
+            (&ASSISTANT_BINDING, "assistant-key-pressed", "assistant-key-released"),
         ] {
             suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
         }
@@ -694,6 +793,17 @@ unsafe extern "system" fn low_level_mouse_proc(
                     &MEETING_BINDING,
                     "meeting-key-pressed",
                     "meeting-key-released",
+                    is_press,
+                );
+                return 1;
+            }
+
+            // …and the Voice Assistant's.
+            if ASSISTANT_BINDING.matches_mouse(id) {
+                handle_binding_event(
+                    &ASSISTANT_BINDING,
+                    "assistant-key-pressed",
+                    "assistant-key-released",
                     is_press,
                 );
                 return 1;
@@ -938,6 +1048,64 @@ mod tests {
     #[test]
     fn parse_empty_spec() {
         assert_eq!(parse_key_spec("").unwrap(), (KEY_TYPE_NONE, 0, 0));
+    }
+
+    #[test]
+    fn the_same_key_clashes_however_it_is_written() {
+        assert!(clashes("kb:120", "kb:120"));
+        assert!(clashes("kb:alt+win+77", "kb:win+alt+77"));
+        assert!(clashes("mouse:4", "MouseButton4"));
+        assert!(clashes("mods:ctrl+alt", "mods:alt+ctrl"));
+        // Different keys and buttons never do.
+        assert!(!clashes("kb:120", "kb:121"));
+        assert!(!clashes("mouse:4", "mouse:5"));
+        assert!(!clashes("kb:4", "mouse:4"));
+    }
+
+    #[test]
+    fn a_bare_key_and_its_combos_are_different_keys() {
+        // F9 fires only with no modifier held (Ctrl+F9 passes through).
+        assert!(!clashes("kb:120", "kb:ctrl+120"));
+        assert!(!clashes("kb:alt+win+77", "kb:77"));
+        // …unless the bare key is a modifier itself: RightAlt fires inside
+        // a RightAlt combo, and inside a chord holding Alt.
+        assert!(clashes("kb:165", "kb:ctrl+165"));
+        assert!(clashes("kb:165", "mods:ctrl+alt"));
+        assert!(!clashes("kb:165", "mods:ctrl+shift"));
+        assert!(!clashes("kb:120", "mods:ctrl+alt"));
+    }
+
+    #[test]
+    fn a_combo_inside_a_bigger_one_clashes() {
+        // Ctrl+Space fires inside Ctrl+Shift+Space (extra modifiers are
+        // tolerated): one press would start both.
+        assert!(clashes("kb:ctrl+32", "kb:ctrl+shift+32"));
+        assert!(clashes("kb:ctrl+shift+32", "kb:ctrl+32"));
+        // Different modifiers on one key don't nest.
+        assert!(!clashes("kb:ctrl+32", "kb:alt+32"));
+        assert!(!clashes("kb:ctrl+alt+32", "kb:ctrl+shift+32"));
+    }
+
+    #[test]
+    fn a_chord_clashes_with_what_completes_it() {
+        // Ctrl+Alt completes on the way to Ctrl+Alt+K…
+        assert!(clashes("mods:ctrl+alt", "kb:ctrl+alt+75"));
+        assert!(clashes("kb:ctrl+alt+shift+75", "mods:ctrl+alt"));
+        // …and inside a bigger chord.
+        assert!(clashes("mods:ctrl+alt", "mods:ctrl+alt+shift"));
+        // A combo not holding all of it is fine.
+        assert!(!clashes("mods:ctrl+alt", "kb:ctrl+75"));
+        assert!(!clashes("mods:ctrl+alt", "mods:ctrl+shift"));
+        // The meeting shortcut's default against a Win+Alt chord.
+        assert!(clashes("mods:win+alt", &crate::config::YapConfig::default().meeting_hotkey));
+    }
+
+    #[test]
+    fn nothing_clashes_with_an_unbound_or_unreadable_key() {
+        assert!(!clashes("", ""));
+        assert!(!clashes("", "kb:120"));
+        assert!(!clashes("kb:120", "  "));
+        assert!(!clashes("garbage", "garbage"));
     }
 
     #[test]

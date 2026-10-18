@@ -12,6 +12,7 @@ mod ai_model;
 mod alert;
 mod app_icons;
 mod app_kind;
+mod assistant;
 mod auth;
 mod bar;
 mod bridge;
@@ -438,6 +439,10 @@ pub fn run() {
             ai_model::chat_set_model,
             commands::chat_dictate,
             commands::chat_input_focus,
+            commands::configure_assistant_hotkey,
+            commands::assistant_key,
+            assistant::chat_view_state,
+            assistant::assistant_stop,
             tts::tts_voices,
             tts::tts_speak,
             tts::tts_preview,
@@ -567,6 +572,8 @@ pub fn run() {
             tts::tts_e2e_spoken,
             #[cfg(debug_assertions)]
             commands::e2e_chat_dictation,
+            #[cfg(debug_assertions)]
+            assistant::e2e_assistant_ask,
             // Robot mode only (realtest.rs): the real-app tests.
             #[cfg(debug_assertions)]
             realtest::commands::realtest_window,
@@ -625,6 +632,9 @@ pub fn run() {
             if let Err(e) = input_hook::configure_meeting(&cfg.meeting_hotkey) {
                 tracing::warn!("Failed to configure meeting hotkey: {}", e);
             }
+            // The Voice Assistant's shortcut (assistant.rs; unbound by
+            // default, and never one that clashes with the other three).
+            input_hook::configure_assistant_from(&cfg);
 
             // Clear ort's 0-byte DirectML.dll stub so ONNX uses the real system
             // DirectML, then fix the transcribe-rs accelerator policy before any
@@ -726,6 +736,31 @@ pub fn run() {
                 if let Ok(guard) = pipeline {
                     if let Some(p) = guard.as_ref() {
                         p.on_edit_key(false, at);
+                    }
+                }
+            });
+
+            // …and the Voice Assistant's shortcut (a question for Chat,
+            // answered out loud; assistant.rs).
+            let assistant_press_handle = handle.clone();
+            handle.listen("assistant-key-pressed", move |event| {
+                let at = event.payload().parse::<u64>().ok();
+                let state = assistant_press_handle.state::<AppState>();
+                let pipeline = state.pipeline.lock();
+                if let Ok(guard) = pipeline {
+                    if let Some(p) = guard.as_ref() {
+                        p.on_assistant_key(true, at);
+                    }
+                }
+            });
+            let assistant_release_handle = handle.clone();
+            handle.listen("assistant-key-released", move |event| {
+                let at = event.payload().parse::<u64>().ok();
+                let state = assistant_release_handle.state::<AppState>();
+                let pipeline = state.pipeline.lock();
+                if let Ok(guard) = pipeline {
+                    if let Some(p) = guard.as_ref() {
+                        p.on_assistant_key(false, at);
                     }
                 }
             });

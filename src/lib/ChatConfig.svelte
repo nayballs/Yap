@@ -1,8 +1,9 @@
 <script>
-  // The "Chat" Language-Models scope, ported from OpenWhispr's
-  // settings/ChatAgentSettings.tsx (InferenceConfigEditor scope="chatIntelligence"
-  // + a system-prompt textarea). It drives the AI Chat view and the Notes
-  // view's Ask bar (commands.rs resolve_chat_endpoint); the Chat view's model
+  // The "Chat & Voice Assistant" Language-Models scope (key `chat`), ported
+  // from OpenWhispr's settings/ChatAgentSettings.tsx (InferenceConfigEditor
+  // scope="chatIntelligence" + a system-prompt textarea). It drives the AI Chat
+  // view, the Notes view's Ask bar and the Voice Assistant's spoken answers
+  // (commands.rs resolve_chat_endpoint / chat_turn); the Chat view's model
   // chip switches the same scope (ai_model.rs). The provider/model half is the shared
   // ScopeProviderConfig; this file owns the enable toggle + chat prompt, matching
   // OpenWhispr's section order (config editor → system prompt).
@@ -23,6 +24,11 @@
   };
   const providerLabel = $derived(PROVIDER_NAMES[scope.provider] || scope.provider);
   const modelLabel = $derived(scope.provider === 'ondevice' ? 'Built-in model' : scope.model);
+
+  // Its voice, shortcut and spoken replies are on the Voice Assistant page.
+  function openVoiceAssistant() {
+    window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: 'voice' }));
+  }
 </script>
 
 <div class="scope">
@@ -30,9 +36,13 @@
     <Toggle
       bind:checked={scope.enabled}
       label="Enable chat"
-      desc="Its own model for Chat and the Ask bar on your notes. Off, they use the Dictation Cleanup model."
+      desc="Its own model for Chat, the Ask bar on your notes and the Voice Assistant. Off, they use the Dictation Cleanup model."
     />
   </Row>
+  <p class="valine">
+    The Voice Assistant asks this model too, and reads its answers aloud.
+    <button class="golink" onclick={openVoiceAssistant}>Voice, shortcut and spoken replies in Voice Assistant</button>
+  </p>
 
   {#if enabled}
     <div class="cfg">
@@ -63,6 +73,31 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
+  }
+  /* "The Voice Assistant asks this model too" + the way to its page. */
+  .valine {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin: 0;
+    font-size: 12px;
+    color: var(--yap-muted);
+    line-height: 1.5;
+  }
+  .golink {
+    padding: 5px 10px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s1);
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .golink:hover {
+    background: var(--yap-s2);
   }
   .cfg {
     display: flex;

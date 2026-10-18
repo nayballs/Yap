@@ -14,7 +14,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from './ui/toast.svelte.js';
 
-const CHIPS = { clipboard: 'Paste', mic: 'Microphone', call: 'Calls' };
+// "assistant": the Voice Assistant has no AI model, or couldn't answer
+// (assistant.rs), with Open settings → Language Models.
+const CHIPS = { clipboard: 'Paste', mic: 'Microphone', call: 'Calls', assistant: 'Voice Assistant' };
 
 let started = false;
 

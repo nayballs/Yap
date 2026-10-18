@@ -138,6 +138,14 @@ pub fn rule(kind: &str) -> Rule {
         // "Stop asking about calls?": after a prompt, never during a
         // dictation.
         "calls-fatigue" => Rule { hold_dictation: true, max_wait_ms: None, ..alert },
+        // The Voice Assistant's answer (assistant.rs): the person just asked
+        // for it, so it shows at once — over a meeting too (that's when it
+        // isn't read aloud) — and steps aside only for a question against
+        // the clock (a call), coming back after. It goes with its voice.
+        "assistant" => Rule { hold_meeting: false, max_wait_ms: None, ..alert },
+        // The Voice Assistant has no AI model, or its model failed: right
+        // after its own question.
+        "assistantNoModel" | "assistantFailed" => alert,
         // Ready to install: waits for a dictation or a meeting to end, as
         // long as it takes.
         "update" => Rule { hold_meeting: true, max_wait_ms: None, yields: true, ..info },
@@ -754,6 +762,26 @@ mod tests {
         }
         // A held card on screen goes back to waiting while you dictate.
         assert_eq!(pick(&[w("update", 0)], Some(0), false, &dictating).front, None);
+    }
+
+    #[test]
+    fn the_voice_assistants_answer_shows_at_once_but_a_call_goes_first() {
+        // Right after its own question (the settle after a dictation), and
+        // over a meeting, where it isn't read aloud.
+        for moment in [m(true, false), m(false, true), m(true, true)] {
+            assert_eq!(pick(&[w("assistant", 0)], None, false, &moment).front, Some(0));
+            assert_eq!(pick(&[w("assistantNoModel", 0)], None, false, &moment).front, Some(0));
+            assert_eq!(pick(&[w("assistantFailed", 0)], None, false, &moment).front, Some(0));
+        }
+        // It never goes stale while it waits behind a call…
+        let list = [w("assistant", 10 * MIN), w("call", 0)];
+        let p = pick(&list, Some(0), false, &m(false, false));
+        assert_eq!(p.front, Some(1));
+        assert!(p.stale.is_empty());
+        // …and keeps its place against a tip or a notice.
+        let list = [w("assistant", 1_000), w("hint", 0), w("meeting-notice", 0)];
+        assert_eq!(pick(&list, Some(0), false, &m(false, false)).front, Some(0));
+        assert!(!rule("assistant").tip);
     }
 
     #[test]

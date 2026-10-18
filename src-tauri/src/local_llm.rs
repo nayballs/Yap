@@ -350,7 +350,7 @@ fn ondevice_selected(cfg: &crate::config::YapConfig) -> bool {
             .cleanup_profiles
             .iter()
             .any(|p| p.provider == PROVIDER_ONDEVICE)
-        // A Language-Models scope (Voice Agent, etc.) pointed at the local model.
+        // A Language-Models scope (Commands, etc.) pointed at the local model.
         || cfg
             .llm_scopes
             .values()

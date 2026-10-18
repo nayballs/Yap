@@ -23,6 +23,14 @@
   // capsule is a `data-region` whenever it has a button to offer, so the
   // click-through bar takes clicks on it (bar.rs); it's never focused, so
   // the app you were in keeps the keyboard.
+  //
+  // A question to the **Voice Assistant** (assistant.rs; `dictation.assistant`
+  // isn't 'idle') has its own variant, never mistaken for a dictation: an
+  // amber edge and a ✦ where the red dot was; "Ask Yap…" beside the
+  // waveform (or your words) while it listens, "Thinking…" while it's
+  // transcribed and answered, then "Speaking…" with three bars while the
+  // answer is read aloud. ■ stops the answer (`assistant-stop`) while it
+  // thinks or speaks; ✕ / ✓ work as for a dictation while it listens.
   import { invoke } from '@tauri-apps/api/core';
   import { dictation } from './dictation.svelte.js';
 
@@ -51,6 +59,12 @@
   // …and are on screen.
   const showButtons = $derived(offer && (buttons === 'always' || hovered));
 
+  // The Voice Assistant's variant.
+  const ask = $derived(dictation.assistant !== 'idle' && !cancelled && dictation.state !== 'error');
+  const askListening = $derived(ask && recording);
+  const askSpeaking = $derived(ask && !recording && dictation.assistant === 'speaking');
+  const askThinking = $derived(ask && !recording && !askSpeaking);
+
   // Every button goes through `bar_action` (Rust gives the focus back to the
   // app you're in, should the click have activated the bar).
   function act(action) {
@@ -67,9 +81,59 @@
   class:offer
   class:show={showButtons}
   class:cancelled
-  data-region={offer || cancelled ? 'dictation' : undefined}
+  class:ask
+  class:askstop={askThinking || askSpeaking}
+  data-region={offer || cancelled ? 'dictation' : askThinking || askSpeaking ? 'assistant' : undefined}
+  data-ask={ask ? dictation.assistant : undefined}
 >
-  {#if cancelled}
+  {#if ask}
+    {#if offer}
+      <button class="cbtn cancel" aria-label="Cancel the question" title="Cancel" onclick={() => act('dictation-cancel')}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+      </button>
+    {/if}
+    <span class="spark" class:listen={askListening} class:think={askThinking} aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
+    </span>
+    {#if askListening}
+      {#if dictation.locked}
+        <span class="lock" role="img" aria-label="Hands-free: press the shortcut to stop" title="Hands-free: press the shortcut to stop">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7.5a4 4 0 0 1 8 0V11" /></svg>
+        </span>
+      {/if}
+      {#if dictation.micSilent}
+        <span class="txt warn" role="alert" title={dictation.micSilentFull}>{dictation.micSilent}</span>
+      {:else if dictation.words.length}
+        <div class="partial" bind:this={clipEl}>
+          <span class="ptext" bind:this={textEl} style="transform: translateX({shift}px)">
+            {#each dictation.words as w, i (i)}<span class="pw">{w}&nbsp;</span>{/each}
+          </span>
+        </div>
+      {:else}
+        <span class="txt asklabel">Ask Yap…</span>
+        <div class="wave short">
+          {#each dictation.history.slice(-48) as v}
+            <span style="height:{Math.max(7, Math.round(v * 100))}%"></span>
+          {/each}
+        </div>
+      {/if}
+    {:else if askThinking}
+      <span class="txt" role="status">Thinking…</span>
+    {:else}
+      <span class="speakbars" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="txt" role="status">Speaking…</span>
+    {/if}
+    {#if offer}
+      <button class="cbtn done" aria-label="Stop and ask" title="Stop and ask" onclick={() => act('dictation-stop')}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4 4 9-9" /></svg>
+      </button>
+    {/if}
+    {#if askThinking || askSpeaking}
+      <button class="sbtn" aria-label={askSpeaking ? 'Stop speaking' : 'Stop the answer'} title="Stop" onclick={() => act('assistant-stop')}>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
+      </button>
+    {/if}
+  {:else if cancelled}
     <span class="txt">Dictation cancelled</span>
     <button class="undo" onclick={() => act('dictation-undo')}>Undo</button>
     <span class="undoline" aria-hidden="true"><span style={`animation-duration:${dictation.undoMs}ms`}></span></span>
@@ -146,6 +210,111 @@
   }
   .capsule.err {
     border-color: rgba(229, 100, 94, 0.7);
+  }
+
+  /* The Voice Assistant's variant: an amber edge (a 1.5 px ring, inside
+     the capsule so nothing reaches the window's edge) and a ✦ for the dot. */
+  .capsule.ask {
+    border-color: var(--bar-wave);
+    box-shadow: inset 0 0 0 0.5px var(--bar-wave);
+  }
+  .capsule.ask.err {
+    border-color: rgba(229, 100, 94, 0.7);
+    box-shadow: none;
+  }
+  .capsule.askstop {
+    padding-right: 6px;
+  }
+  .spark {
+    display: flex;
+    flex: 0 0 auto;
+    color: var(--bar-wave);
+  }
+  .spark svg {
+    width: 14px;
+    height: 14px;
+  }
+  .spark.listen {
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  .spark.think {
+    animation: twinkle 1.6s linear infinite;
+  }
+  @keyframes twinkle {
+    from {
+      transform: rotate(0deg) scale(1);
+    }
+    50% {
+      transform: rotate(180deg) scale(0.8);
+    }
+    to {
+      transform: rotate(360deg) scale(1);
+    }
+  }
+  .asklabel {
+    color: var(--bar-text-soft);
+  }
+  .wave.short {
+    width: 120px;
+  }
+  /* Speaking: three bars in the bar's amber, then ■. */
+  .speakbars {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 14px;
+  }
+  .speakbars i {
+    display: block;
+    width: 2.5px;
+    height: 100%;
+    border-radius: 1px;
+    background: var(--bar-wave);
+    animation: speak 0.9s ease-in-out infinite;
+  }
+  .speakbars i:nth-child(2) {
+    animation-delay: -0.3s;
+  }
+  .speakbars i:nth-child(3) {
+    animation-delay: -0.6s;
+  }
+  @keyframes speak {
+    0%,
+    100% {
+      transform: scaleY(0.35);
+    }
+    50% {
+      transform: scaleY(1);
+    }
+  }
+  .sbtn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    margin-left: 2px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--bar-button);
+    color: var(--bar-button-text);
+    cursor: pointer;
+  }
+  .sbtn:hover {
+    background: var(--bar-button-hover);
+  }
+  .sbtn svg {
+    width: 16px;
+    height: 16px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .spark.listen,
+    .spark.think,
+    .speakbars i {
+      animation: none;
+    }
   }
 
   /* ✕ and ✓: 26 px circles in the kept places; ✕ quiet, ✓ the bar's

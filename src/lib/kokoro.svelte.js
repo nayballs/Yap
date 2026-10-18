@@ -1,6 +1,6 @@
 // Kokoro, the natural voice of spoken replies (tts.rs, tts/kokoro.rs,
 // tts/registry.rs): whether this build has it, whether it's installed, a
-// download in progress, and the actions. Shared by Settings → Voice Agent's
+// download in progress, and the actions. Shared by Settings → Voice Assistant's
 // engine row and its "Download Kokoro" offer.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';

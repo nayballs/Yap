@@ -1,11 +1,25 @@
-// Spoken replies and the Voice Agent page (src-tauri/src/tts.rs,
-// src/lib/ChatView.svelte, Settings → Voice Agent): the Chat view's Voice
-// replies toggle (the same setting as Settings' "Speak replies", kept in
-// step both ways and through Settings' auto-save), ▶ Read aloud on every
-// answer (markdown out, a code block said as "(code block)"), ■ / Esc to
-// stop, "When to speak" (only for a question that came by voice, or
-// always), "Talk back hands-free" (a dictated question sent by itself), and
-// barge-in (a dictation starting stops the voice).
+// The Voice Assistant and spoken replies (src-tauri/src/assistant.rs,
+// tts.rs, src/lib/ChatView.svelte, Settings → Voice Assistant), and how
+// they differ from Commands (Settings → Commands: the agent's name in a
+// dictation, the rewrite shortcut — the AI types for you):
+// - Settings: two pages that each say what they do, with links between
+//   them; Language Models' tabs named alike; General's way to the shortcuts.
+// - The assistant shortcut: set, refused when it clashes with another
+//   shortcut, cleared; the gentle "Set an assistant shortcut" in Chat.
+// - A question asked with it (staged with the debug-only
+//   `e2e_assistant_ask`: the shortcut's own steps, a transcript in the mic's
+//   place): the bar's capsule ("Ask Yap…", "Thinking…", "Speaking…" with ■),
+//   the answer read aloud whatever "When to speak" says, a card on the bar
+//   while the main window isn't in front, the conversation in Chat
+//   continued; a press while it speaks cuts it off (barge-in); during a
+//   meeting the answer is shown, never spoken; no AI model → Open settings.
+// - The Chat view's Voice replies toggle (the same setting as Settings'
+//   "Speak replies", kept in step both ways and through Settings'
+//   auto-save), ▶ Read aloud on every answer (markdown out, a code block
+//   said as "(code block)"), ■ / Esc to stop, "When to speak" (only for a
+//   question that came by voice, or always), "Talk back hands-free" (a
+//   dictated question sent by itself), and barge-in (a dictation starting
+//   stops the voice).
 //
 // Test mode plays nothing and opens no audio device: two stand-in voices,
 // silence of a plausible length on a simulated clock, and everything Yap
@@ -22,7 +36,17 @@
 // Once installed, test mode's Kokoro is silence too.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, openSettings, closeSettings, settingsDialog, expectStore } from './support/fixtures.js';
+import {
+  test as base,
+  expect,
+  openView,
+  openSettings,
+  closeSettings,
+  settingsDialog,
+  expectStore,
+  inAnotherApp,
+  mainOnScreen,
+} from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { startFakeKokoro } from './support/kokoro.js';
 import { RUNS } from './support/yap.js';
@@ -49,7 +73,7 @@ const test = base.extend({
   yapOptions: [
     async ({ fakeLlm, kokoro }, use) => {
       await use({
-        name: 'voice-agent',
+        name: 'voice-assistant',
         env: kokoro.env,
         config: {
           ppApiKeys: { groq: TEST_KEY },
@@ -96,11 +120,357 @@ async function freshChat(main) {
 }
 
 test.beforeEach(async ({ yap }) => {
+  await yap.invoke('assistant_stop');
   await yap.invoke('tts_stop');
   await yap.invoke('tts_e2e_spoken', { clear: true });
 });
 
-test('Settings → Voice Agent: spoken replies, the engine, the voice and its preview, the wake word', async ({ yap, main, shot }) => {
+// ---- The Voice Assistant (assistant.rs)
+
+/** A question to the Voice Assistant, as its shortcut asks it (the transcript in the mic's place). */
+const ask = (yap, text, listenMs = 0) => yap.invoke('e2e_assistant_ask', { text, listenMs });
+/** The dictation capsule on the Yap bar (its assistant variant has `data-ask`). */
+const capsule = (yap) => yap.overlay.locator('.capsule');
+/** The answer's card on the Yap bar. */
+const answerCard = (yap) => yap.overlay.getByRole('status').filter({ has: yap.overlay.locator('.asked') });
+
+/** The person's in another app, Yap's main window closed (hidden in the tray). */
+async function hideMain(yap) {
+  await yap.invoke('plugin:window|close', { label: 'settings' });
+  await expect.poll(() => yap.invoke('plugin:window|is_visible', { label: 'settings' })).toBe(false);
+}
+
+/** A key going down and up in one of Yap's windows (its in-page fallbacks). */
+async function pressKey(page, key, vk) {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const ev = { key, code: key, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
+    await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...ev });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...ev });
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
+}
+
+test('Commands and the Voice Assistant: two pages that say what they do, with links between them', async ({ main, shot }) => {
+  let dialog = await openSettings(main, 'Commands');
+  await expect(dialog.getByRole('heading', { level: 1, name: 'Commands' })).toBeVisible();
+  // One plain sentence and an example.
+  await expect(dialog.getByText('Tell Yap\'s AI what to write, and it types the result where you are.')).toBeVisible();
+  const example = dialog.getByRole('note');
+  await expect(example).toContainText("Hey Yap, reply that I'll be late");
+  await expect(example).toContainText('Yap writes it and types it there.');
+  // The agent's name and its switch, and the rewrite shortcut, live here.
+  const name = dialog.getByRole('group', { name: 'Say its name' });
+  await expect(name.getByRole('button', { name: 'Answer to its name in any dictation' })).toBeVisible();
+  await expect(name.getByPlaceholder('e.g. Jarvis, Nova, Atlas...')).toBeVisible();
+  const rewrite = dialog.getByRole('group', { name: 'Rewrite selected text' });
+  await expect(rewrite).toContainText('Rewrite shortcut');
+  await expect(rewrite.getByRole('button', { name: 'Click to set' })).toBeVisible();
+  // No spoken replies or voices: that's the Voice Assistant.
+  await expect(dialog.getByRole('button', { name: 'Speak replies' })).toHaveCount(0);
+  await shot(main, '10-settings-commands');
+
+  // Its model: Language Models → Commands, which points back for the name.
+  await dialog.getByRole('button', { name: 'Language Models → Commands' }).click();
+  await expect(dialog.getByRole('heading', { level: 1, name: 'Language Models' })).toBeVisible();
+  await expect(dialog.locator('.scope-tabs').getByRole('tab')).toHaveText([
+    'Dictation Cleanup',
+    'Commands',
+    'Note Formatting',
+    'Chat & Voice Assistant',
+  ]);
+  await expect(dialog.getByRole('tab', { name: 'Commands' })).toHaveAttribute('aria-selected', 'true');
+  await expect(dialog.getByText('The model that carries out Commands: "Hey Yap, …" in a dictation')).toBeVisible();
+  await expect(dialog.getByText('Agent name:')).toContainText('Yap');
+  await shot(main, '11-language-models-commands');
+  await dialog.getByRole('button', { name: 'Name and shortcut in Commands' }).click();
+  await expect(dialog.getByRole('heading', { level: 1, name: 'Commands' })).toBeVisible();
+
+  // Over to the Voice Assistant, which says what it does and links back.
+  await dialog.getByRole('note').getByRole('button', { name: 'Voice Assistant' }).click();
+  await expect(dialog.getByRole('heading', { level: 1, name: 'Voice Assistant' })).toBeVisible();
+  await expect(dialog.getByText('Ask Yap something by voice and hear the answer, like a voice assistant.')).toBeVisible();
+  await expect(dialog.getByRole('note')).toContainText('Yap answers out loud, and the conversation is in Chat.');
+  await expect(dialog.getByRole('button', { name: 'Answer to its name in any dictation' })).toHaveCount(0);
+  await shot(main, '12-settings-voice-assistant-top');
+  await dialog.getByRole('note').getByRole('button', { name: 'Commands' }).click();
+  await expect(dialog.getByRole('heading', { level: 1, name: 'Commands' })).toBeVisible();
+
+  // General says where the other shortcuts are.
+  dialog = await openSettings(main, 'General');
+  const activation = dialog.getByRole('group', { name: 'Activation' });
+  await expect(activation).toContainText('Rewrite selected text: not set · Ask the Voice Assistant: not set');
+  await activation.getByRole('button', { name: 'Voice Assistant' }).click();
+  await expect(dialog.getByRole('heading', { level: 1, name: 'Voice Assistant' })).toBeVisible();
+  await closeSettings(main);
+});
+
+test('the assistant shortcut: set in Settings, never one that clashes, and Chat points to it', async ({ yap, main, shot }) => {
+  // None set: an empty chat says how to ask out loud.
+  await freshChat(main);
+  await expect(main.locator('.asknote')).toContainText('Set an assistant shortcut to ask out loud from any app');
+  await shot(main, '13-chat-set-an-assistant-shortcut');
+  await main.getByRole('button', { name: 'Set an assistant shortcut' }).click();
+  const dialog = settingsDialog(main);
+  await expect(dialog.getByRole('heading', { level: 1, name: 'Voice Assistant' })).toBeVisible();
+  const group = dialog.getByRole('group', { name: 'Assistant shortcut' });
+  await expect(group).toContainText('Set an assistant shortcut to ask Yap from any app');
+
+  await group.getByRole('button', { name: 'Set a shortcut' }).click();
+  // The dictation hotkey (F24 in the suite): refused.
+  await pressKey(main, 'F24', 135);
+  await expect(group).toContainText('Already used by the dictation hotkey');
+  // A combo the meeting shortcut (Win+Alt+M) fires inside: refused too.
+  await main.keyboard.press('Control+Meta+Alt+KeyM');
+  await expect(group).toContainText('Clashes with the meeting shortcut (Win + Alt + M): one press would start both');
+  await shot(main, '14-assistant-shortcut-clash');
+  expect(yap.readJson('config.json').assistantHotkey ?? '').toBe('');
+  // F23: taken, saved, and the page's example names it.
+  await pressKey(main, 'F23', 134);
+  await expectStore(yap, 'config.json', (c) => c.assistantHotkey === 'kb:134');
+  await expect(group.getByRole('button', { name: /^F23$/ })).toBeVisible();
+  await expect(group).not.toContainText('Set an assistant shortcut to ask Yap');
+  await expect(dialog.getByRole('note')).toContainText('Press F23 in any app');
+  await shot(main, '15-assistant-shortcut-set');
+  // The rewrite shortcut can't take it now.
+  await openSettings(main, 'Commands');
+  const rewrite = dialog.getByRole('group', { name: 'Rewrite selected text' });
+  await rewrite.getByRole('button', { name: 'Click to set' }).click();
+  await pressKey(main, 'F23', 134);
+  await expect(rewrite).toContainText('Already used by the assistant shortcut');
+  await main.keyboard.press('Escape');
+  expect(yap.readJson('config.json').editHotkey).toBe('');
+  await closeSettings(main);
+  // Chat names it.
+  await expect(main.locator('.asknote')).toContainText('Or press F23 in any app to ask out loud');
+
+  // Cleared again.
+  await openSettings(main, 'Voice Assistant');
+  await group.getByRole('button', { name: 'Remove hotkey' }).click();
+  await expectStore(yap, 'config.json', (c) => c.assistantHotkey === '');
+  await closeSettings(main);
+});
+
+test('asked from another app with Yap closed: listening, thinking, speaking, a card, and the chat continued', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  // Spoken replies off: the shortcut's answers are read aloud anyway.
+  await setConfig(yap, main, { speakReplies: false, speakWhen: 'voice' });
+  await freshChat(main);
+  fakeLlm.scriptChat([{ content: 'The launch party is on Friday.' }]);
+  await send(main, 'When is the launch party?');
+  await expect(thread(main)).toContainText('The launch party is on Friday.');
+  const conv = () => yap.readJson('chats.json').conversations.find((c) => c.title === 'When is the launch party?');
+  const id = conv().id;
+  await hideMain(yap);
+
+  // The question: "Ask Yap…" while it listens, then "Thinking…".
+  fakeLlm.delay('other', 1500);
+  fakeLlm.scriptChat([{ content: 'It starts at **ten**, in the big room. Sam has the slides.' }]);
+  const cap = capsule(yap);
+  const asking = ask(yap, 'what time does it start', 1500);
+  await expect(cap).toHaveAttribute('data-ask', 'listening');
+  await expect(cap).toContainText('Ask Yap…');
+  await shot(yap.overlay, '20-assistant-listening');
+  await asking;
+  await expect(cap).toHaveAttribute('data-ask', 'thinking');
+  await expect(cap).toContainText('Thinking…');
+  await shot(yap.overlay, '21-assistant-thinking');
+  fakeLlm.delay('other', 0);
+
+  // The answer, read aloud, with ■ on the capsule and the answer on a card.
+  await expect(cap).toHaveAttribute('data-ask', 'speaking', { timeout: 10_000 });
+  await expect(cap).toContainText('Speaking…');
+  await expect(cap.getByRole('button', { name: 'Stop speaking' })).toBeVisible();
+  const card = answerCard(yap);
+  await expect(card).toContainText('what time does it start');
+  await expect(card).toContainText('It starts at ten, in the big room. Sam has the slides.');
+  await expect(card.getByRole('button', { name: 'Open in Chat' })).toBeVisible();
+  await shot(yap.overlay, '22-assistant-speaking-card');
+  const [said] = await spoken(yap);
+  expect(said).toMatchObject({ messageId: `chat:${id}:3`, text: 'It starts at ten, in the big room. Sam has the slides.' });
+  // The conversation open in Chat, continued; the question asked by voice.
+  expect(conv().messages.map((m) => [m.role, !!m.voice])).toEqual([
+    ['user', false],
+    ['assistant', false],
+    ['user', true],
+    ['assistant', false],
+  ]);
+  expect(conv().messages[2].text).toBe('what time does it start');
+
+  // The voice ends: the capsule and the card go.
+  await expect.poll(() => speaking(yap), { timeout: 30_000 }).toBe(false);
+  await expect(cap).toHaveCount(0);
+  await expect(card).toHaveCount(0);
+
+  // Again: a follow-up in the same conversation.
+  fakeLlm.scriptChat([{ content: 'Sam has them.' }]);
+  await ask(yap, 'who has the slides');
+  await expect.poll(() => conv().messages.length).toBe(6);
+  await expect.poll(async () => (await spoken(yap)).map((s) => s.text)).toEqual([said.text, 'Sam has them.']);
+  await yap.invoke('tts_stop');
+
+  // Back in Yap: the Chat view followed it all.
+  await mainOnScreen(yap);
+  const asked = thread(main).locator('.cbubble.user');
+  await expect(asked).toHaveCount(3);
+  await expect(asked.nth(1)).toContainText('what time does it start');
+  await expect(asked.nth(1).getByLabel('Asked by voice')).toBeVisible();
+  await expect(asked.nth(2).getByLabel('Asked by voice')).toBeVisible();
+  await expect(thread(main)).toContainText('Sam has them.');
+  await shot(main, '23-chat-followed-the-assistant');
+});
+
+test('asked while Yap is in front: Chat comes up with the question and the answer, no card', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  await expect(main.locator('.chat')).toHaveCount(0);
+  fakeLlm.delay('other', 800);
+  fakeLlm.scriptChat([{ content: 'Your next meeting is the design review.' }]);
+  await ask(yap, 'what is my next meeting');
+  // Chat comes up on it: the question at once, "Thinking…", then the answer.
+  await expect(thread(main).locator('.cbubble.user').last()).toContainText('what is my next meeting');
+  await expect(thread(main).locator('.thinking')).toBeVisible();
+  fakeLlm.delay('other', 0);
+  await expect(thread(main)).toContainText('Your next meeting is the design review.');
+  await expect(thread(main).getByRole('status').filter({ hasText: 'Speaking…' })).toBeVisible();
+  await expect(thread(main).locator('.cbubble.user').last().getByLabel('Asked by voice')).toBeVisible();
+  // The window's in front: no card on the bar.
+  await expect(answerCard(yap)).toHaveCount(0);
+  await shot(main, '24-asked-in-front-of-yap');
+  await yap.invoke('tts_stop');
+  await expect(capsule(yap)).toHaveCount(0);
+});
+
+test('■ stops the answer, and a press while Yap speaks cuts it off to listen (barge-in)', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  await inAnotherApp(yap);
+  const long = Array.from({ length: 8 }, (_, i) => `Point number ${i + 1} of a long answer.`).join(' ');
+  const cap = capsule(yap);
+
+  // ■ on the capsule: the voice stops, the capsule and the card go.
+  fakeLlm.scriptChat([{ content: long }]);
+  await ask(yap, 'tell me everything');
+  await expect(cap).toHaveAttribute('data-ask', 'speaking', { timeout: 10_000 });
+  await cap.getByRole('button', { name: 'Stop speaking' }).click();
+  await expect.poll(() => speaking(yap)).toBe(false);
+  await expect(cap).toHaveCount(0);
+  await expect(answerCard(yap)).toHaveCount(0);
+
+  // ✕ on the card (or Esc): the same.
+  fakeLlm.scriptChat([{ content: long }]);
+  await ask(yap, 'once more');
+  await expect(answerCard(yap)).toBeVisible({ timeout: 10_000 });
+  await answerCard(yap).getByRole('button', { name: 'Close' }).click();
+  await expect.poll(() => speaking(yap)).toBe(false);
+  await expect(cap).toHaveCount(0);
+
+  // A new question while it speaks: the voice stops at once and it listens.
+  fakeLlm.scriptChat([{ content: long }, { content: 'Just the first: point one.' }]);
+  await ask(yap, 'again please');
+  await expect(cap).toHaveAttribute('data-ask', 'speaking', { timeout: 10_000 });
+  const asking = ask(yap, 'actually, just the first point', 1500);
+  await expect.poll(() => speaking(yap), { timeout: 1_000 }).toBe(false);
+  await expect(cap).toHaveAttribute('data-ask', 'listening');
+  await shot(yap.overlay, '25-barge-in-listening');
+  await asking;
+  await expect.poll(async () => (await spoken(yap)).map((s) => s.text).at(-1), { timeout: 10_000 }).toBe(
+    'Just the first: point one.'
+  );
+  await yap.invoke('tts_stop');
+
+  // The shortcut pressed in Yap's own window (its in-page fallback) while
+  // Yap speaks: the voice stops there too.
+  await setConfig(yap, main, { assistantHotkey: 'kb:134' });
+  await yap.invoke('tts_speak', { text: long, messageId: 'chat:999:1' });
+  await expect.poll(() => speaking(yap)).toBe(true);
+  await pressKey(main, 'F23', 134);
+  await expect.poll(() => speaking(yap), { timeout: 2_000 }).toBe(false);
+  // With a microphone it's listening now: called off.
+  await yap.invoke('cancel_recording');
+  await setConfig(yap, main, { assistantHotkey: '' });
+});
+
+test('during a meeting: the answer is shown on the bar, never spoken', async ({ yap, main, fakeLlm, shot }) => {
+  await inAnotherApp(yap);
+  const note = await yap.invoke('note_create', { title: 'Standup', folder: 'Meetings' });
+  await yap.invoke('meeting_start', { noteId: note.id });
+  await expect.poll(async () => (await yap.invoke('meeting_state')).recording).toBe(true);
+  try {
+    fakeLlm.scriptChat([{ content: 'The budget review is at three.' }]);
+    await ask(yap, 'when is the budget review');
+    const card = answerCard(yap);
+    await expect(card).toContainText('The budget review is at three.', { timeout: 10_000 });
+    await expect(card).toContainText('Not read aloud while a meeting records');
+    // Nothing to stop: the meeting's pill is back under the card.
+    await expect(capsule(yap)).toHaveCount(0);
+    await expect(yap.overlay.getByLabel('Recording meeting notes')).toBeVisible();
+    await shot(yap.overlay, '26-meeting-answer-shown-only');
+    await main.waitForTimeout(500);
+    expect(await spoken(yap)).toEqual([]);
+    await card.getByRole('button', { name: 'Close' }).click();
+    await expect(card).toHaveCount(0);
+  } finally {
+    await yap.invoke('meeting_delete', { noteId: note.id });
+  }
+});
+
+test('no AI model: the assistant says so, with a way to Language Models', async ({ yap, main, shot }) => {
+  const cfg = await yap.invoke('get_config');
+  const chat = cfg.llmScopes.chat;
+  await setConfig(yap, main, { llmScopes: { ...cfg.llmScopes, chat: { ...chat, enabled: false } } });
+  try {
+    await inAnotherApp(yap);
+    await ask(yap, 'is anyone there');
+    const card = yap.overlay.getByRole('status').filter({ hasText: 'Pick an AI model for the Voice Assistant' });
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(card).toContainText('Language Models → Chat & Voice Assistant');
+    await expect(capsule(yap)).toHaveCount(0);
+    await shot(yap.overlay, '27-no-ai-model');
+    await card.getByRole('button', { name: 'Open settings' }).click();
+    const dialog = settingsDialog(main);
+    await expect(dialog.getByRole('heading', { level: 1, name: 'Language Models' })).toBeVisible();
+    await expect(dialog.getByRole('tab', { name: 'Chat & Voice Assistant' })).toHaveAttribute('aria-selected', 'true');
+    expect(await spoken(yap)).toEqual([]);
+  } finally {
+    await setConfig(yap, main, { llmScopes: { ...cfg.llmScopes, chat } });
+    await closeSettings(main);
+  }
+});
+
+test("the model fails: the assistant says why, and the question waits in Chat", async ({ yap, main, fakeLlm }) => {
+  await inAnotherApp(yap);
+  fakeLlm.failNext('other', 1);
+  try {
+    await ask(yap, 'will this fail');
+    const card = yap.overlay.getByRole('status').filter({ hasText: "The Voice Assistant couldn't answer" });
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(card).toContainText('Your question is in Chat.');
+    await expect(capsule(yap)).toHaveCount(0);
+    expect(await spoken(yap)).toEqual([]);
+    const asked = yap
+      .readJson('chats.json')
+      .conversations.flatMap((c) => c.messages)
+      .filter((m) => m.text === 'will this fail');
+    expect(asked).toEqual([expect.objectContaining({ role: 'user', voice: true })]);
+    await card.getByRole('button', { name: 'Close' }).click();
+  } finally {
+    fakeLlm.failNext('other', 0);
+  }
+});
+
+test('Settings → Voice Assistant: spoken replies, the engine, the voice and its preview', async ({ yap, main, shot }) => {
   await setConfig(yap, main, {
     speakReplies: false,
     speakWhen: 'voice',
@@ -110,8 +480,8 @@ test('Settings → Voice Agent: spoken replies, the engine, the voice and its pr
     ttsWindowsVoice: '',
     ttsRate: 1,
   });
-  const dialog = await openSettings(main, 'Voice Agent');
-  await expect(dialog.getByRole('heading', { level: 1, name: 'Voice Agent' })).toBeVisible();
+  const dialog = await openSettings(main, 'Voice Assistant');
+  await expect(dialog.getByRole('heading', { level: 1, name: 'Voice Assistant' })).toBeVisible();
 
   // Off by default; what hangs on it is greyed out until it's on.
   const speak = dialog.getByRole('button', { name: 'Speak replies' });
@@ -152,11 +522,10 @@ test('Settings → Voice Agent: spoken replies, the engine, the voice and its pr
   await expect(dialog.locator('.credit')).toContainText('Apache-2.0');
   await expect(dialog.locator('.credit')).toContainText('eSpeak NG');
   await expect(dialog.locator('.credit')).toContainText('GPL-3.0');
-  // One Voice Agent: the wake word lives here too.
-  const wake = dialog.getByRole('group', { name: 'Wake word' });
-  await expect(wake.getByRole('button', { name: 'Answer to its name in any dictation' })).toBeVisible();
-  await expect(wake.getByPlaceholder('e.g. Jarvis, Nova, Atlas...')).toBeVisible();
-  await shot(main, '01-settings-voice-agent');
+  // The agent's name isn't here: that's Commands.
+  await expect(dialog.getByRole('button', { name: 'Answer to its name in any dictation' })).toHaveCount(0);
+  await dialog.getByRole('group', { name: 'Spoken replies in Chat' }).scrollIntoViewIfNeeded();
+  await shot(main, '01-settings-voice-assistant');
 
   // Windows voices: no download, the voices Windows gives apps (test mode:
   // two stand-ins), the default named.
@@ -197,15 +566,15 @@ test('Settings → Voice Agent: spoken replies, the engine, the voice and its pr
   await expect(dialog.getByRole('button', { name: 'Preview the voice' })).toBeVisible();
   expect(await speaking(yap)).toBe(false);
 
-  // The wake word's model and prompt: Language Models → Voice Agent, which
-  // points back here for the name.
-  await wake.getByRole('button', { name: 'Language Models → Voice Agent' }).click();
+  // Its model is Chat's: Language Models → Chat & Voice Assistant, which
+  // points back here.
+  await dialog.getByRole('group', { name: 'Model', exact: true }).getByRole('button', { name: 'Language Models → Chat & Voice Assistant' }).click();
   await expect(dialog.getByRole('heading', { level: 1, name: 'Language Models' })).toBeVisible();
-  await expect(dialog.getByRole('tab', { name: 'Voice Agent' })).toHaveAttribute('aria-selected', 'true');
-  await expect(dialog.getByText('Agent name:')).toContainText('Yap');
-  await shot(main, '03-language-models-points-back');
-  await dialog.getByRole('button', { name: 'Name and voice in Voice Agent' }).click();
-  await expect(dialog.getByRole('heading', { level: 1, name: 'Voice Agent' })).toBeVisible();
+  await expect(dialog.getByRole('tab', { name: 'Chat & Voice Assistant' })).toHaveAttribute('aria-selected', 'true');
+  await expect(dialog.getByText('The Voice Assistant asks this model too')).toBeVisible();
+  await shot(main, '03-language-models-chat-and-voice-assistant');
+  await dialog.getByRole('button', { name: 'Voice, shortcut and spoken replies in Voice Assistant' }).click();
+  await expect(dialog.getByRole('heading', { level: 1, name: 'Voice Assistant' })).toBeVisible();
 
   await speak.click();
   await expectStore(yap, 'config.json', (c) => c.speakReplies === false);
@@ -225,7 +594,7 @@ test("Chat's Voice replies toggle is Settings' Speak replies, and survives auto-
   await shot(main, '04-chat-voice-on');
 
   // Settings' copy adopted it: shown on, and another setting's save keeps it.
-  const dialog = await openSettings(main, 'Voice Agent');
+  const dialog = await openSettings(main, 'Voice Assistant');
   await expect(dialog.getByRole('button', { name: 'Speak replies' })).toHaveAttribute('aria-pressed', 'true');
   await dialog.getByRole('tab', { name: 'Always' }).click();
   await expectStore(yap, 'config.json', (c) => c.speakWhen === 'always');
@@ -475,7 +844,7 @@ test('switching replies on offers Kokoro; it downloads, becomes the voice, and d
   shot,
 }) => {
   await setConfig(yap, main, { speakReplies: false, ttsEngine: 'kokoro', ttsVoice: 'bf_emma', ttsWindowsVoice: '', ttsRate: 1 });
-  const dialog = await openSettings(main, 'Voice Agent');
+  const dialog = await openSettings(main, 'Voice Assistant');
   const speak = dialog.getByRole('button', { name: 'Speak replies' });
 
   // Replies on without Kokoro: the offer, and replies stay on (Windows

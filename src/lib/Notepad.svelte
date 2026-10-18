@@ -767,7 +767,9 @@
     }
   }
   // The meeting shortcut (meeting_guard.rs) goes first, as in Settings: a
-  // combo is more specific than a bare dictation key.
+  // combo is more specific than a bare dictation key; then the Voice
+  // Assistant's (assistant.rs: during a meeting it answers on the bar,
+  // without speaking).
   function onKeyDown(e) {
     if (e.repeat || !cfg) return;
     if (cfg.meetingHotkey && hotkeyMatchesKeydown(e, cfg.meetingHotkey)) {
@@ -775,6 +777,10 @@
       e.stopPropagation();
       flushSave();
       invoke('meeting_shortcut', { origin: LABEL }).catch(() => {});
+    } else if (cfg.assistantHotkey && hotkeyMatchesKeydown(e, cfg.assistantHotkey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      invoke('assistant_key', { pressed: true }).catch(() => {});
     } else if (hotkeyMatchesKeydown(e, cfg.hotkey)) {
       e.preventDefault();
       e.stopPropagation();
@@ -784,7 +790,10 @@
   // The key coming up: push-to-talk's release (Rust decides by the mode).
   function onKeyUp(e) {
     if (!cfg) return;
-    if (hotkeyMatchesKeyup(e, cfg.hotkey)) {
+    if (cfg.assistantHotkey && hotkeyMatchesKeyup(e, cfg.assistantHotkey)) {
+      e.preventDefault();
+      invoke('assistant_key', { pressed: false }).catch(() => {});
+    } else if (hotkeyMatchesKeyup(e, cfg.hotkey)) {
       e.preventDefault();
       invoke('dictation_key', { pressed: false }).catch(() => {});
     }

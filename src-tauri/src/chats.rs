@@ -146,6 +146,17 @@ pub fn get(id: u64) -> Option<Conversation> {
     with_store(|s| s.conversations.iter().find(|c| c.id == id).cloned())
 }
 
+/// The conversation updated last: `(id, updated_ts)` (the Voice Assistant
+/// continues it while it's recent, `assistant::choose_conversation`).
+pub fn latest() -> Option<(u64, u64)> {
+    with_store(|s| {
+        s.conversations
+            .iter()
+            .max_by_key(|c| (c.updated_ts, c.id))
+            .map(|c| (c.id, c.updated_ts))
+    })
+}
+
 pub fn create(title: &str) -> Conversation {
     with_store(|s| {
         let id = s.conversations.iter().map(|c| c.id).max().unwrap_or(0) + 1;

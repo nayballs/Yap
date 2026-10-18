@@ -21,7 +21,7 @@
 //!   configured (it sends a prompt, not a shell command). The text around a
 //!   terminal's cursor isn't read: it's the screen, not a text field. Edit
 //!   mode never reaches for Ctrl+C there (it would interrupt the program),
-//!   and the AI's rewrite or Voice Agent text gets the same one-line rule.
+//!   and the AI's rewrite or Command text gets the same one-line rule.
 //! - **Chat apps** (`config.chat_no_full_stop`, "Leave the full stop off
 //!   chat messages"): a message of one or two sentences in one paragraph
 //!   doesn't end with a full stop ([`drop_chat_full_stop`]).

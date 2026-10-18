@@ -1,11 +1,13 @@
 <script>
-  // Voice Agent tab, ported from OpenWhispr's DictationAgentSettings.tsx. Lets you
-  // dictate *instructions* to an AI assistant by prefixing them with a wake word
-  // ("Hey <agentName>, …") — the agent executes the command (compose / reformat /
-  // answer) instead of transcribing it verbatim. Section order mirrors OpenWhispr:
-  //   enable toggle → provider/model config → Voice Agent (its name: a link to
-  //   Settings → Voice Agent, where the name and spoken replies live) → How it works →
-  //   Examples → Agent prompt.
+  // Language Models → **Commands** tab (the `voiceAgent` scope; called "Voice
+  // Agent" until 2026-10-18), ported from OpenWhispr's DictationAgentSettings.tsx.
+  // Lets you dictate *instructions* to the AI by saying its name ("Hey
+  // <agentName>, …") or with the rewrite shortcut — it executes the command
+  // (compose / reformat / answer) and types the result instead of your words.
+  // Not the Voice Assistant (answers out loud: the Chat & Voice Assistant
+  // tab). Section order mirrors OpenWhispr:
+  //   enable toggle → provider/model config → Commands (its name and shortcut:
+  //   a link to Settings → Commands) → How it works → Examples → Agent prompt.
   //
   //   scope: the reactive { enabled, provider, baseUrl, model, apiKey, apiKeys,
   //          prompt } object for cfg.llmScopes.voiceAgent (parent seeds it).
@@ -47,10 +49,10 @@
     `Hey ${displayName}, convert this to bullet points`,
   ]);
 
-  // The name (the wake word) and spoken replies live in Settings → Voice
-  // Agent; this tab is the agent's model and prompt.
-  function openVoiceAgent() {
-    window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: 'voice' }));
+  // The name and the rewrite shortcut live in Settings → Commands; this tab
+  // is their model and prompt.
+  function openCommands() {
+    window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: 'commands' }));
   }
 </script>
 
@@ -66,28 +68,28 @@
   <div class="panel">
     <Toggle
       bind:checked={scope.enabled}
-      label="Enable voice agent"
-      desc={`Dictate instructions to your agent. Activate by saying "${displayName}". Configurable below.`}
+      label="Enable Commands"
+      desc={`Dictate instructions to the AI and it types the result. Activate by saying "${displayName}". Configurable below.`}
     />
   </div>
 
-  <!-- 2. Provider / model config (dimmed + disabled when the agent is off) -->
+  <!-- 2. Provider / model config (dimmed + disabled when Commands are off) -->
   <div class="providercfg" class:off={!enabled}>
     <ScopeProviderConfig {scope} {cfg} disabled={!enabled} />
   </div>
 
-  <!-- 3. Voice Agent — its name (the wake word) and spoken replies live in
-       Settings → Voice Agent; this tab is its model and prompt. -->
+  <!-- 3. Commands — the name and the rewrite shortcut live in Settings →
+       Commands; this tab is their model and prompt. -->
   <section class="hairline">
     {@render sectionHeader(
-      'Voice Agent',
-      'The model above runs it. Its name, and whether Chat answers out loud, are on the Voice Agent page'
+      'Commands',
+      'The model above carries them out. The name they answer to and the rewrite shortcut are on the Commands page'
     )}
 
     <div class="panelcard linkcard">
       <p class="body">Agent name: <strong>{displayName}</strong></p>
-      <button class="golink" onclick={openVoiceAgent}>
-        Name and voice in Voice Agent
+      <button class="golink" onclick={openCommands}>
+        Name and shortcut in Commands
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
       </button>
     </div>
@@ -99,8 +101,9 @@
     <div class="panelcard">
       <p class="body">
         When you say "Hey {displayName}" followed by an instruction, the AI executes your
-        command — composing content, formatting text, or answering questions — instead of
-        transcribing it verbatim.
+        command — composing content, formatting text, or answering questions — and types
+        the result into the app you're in, instead of transcribing it verbatim. To hear an
+        answer instead, use the Voice Assistant.
       </p>
     </div>
   </section>

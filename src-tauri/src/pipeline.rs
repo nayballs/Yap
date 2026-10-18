@@ -91,6 +91,38 @@ pub(crate) fn chat_target(edit: bool, armed: bool, focused: bool, own_window: bo
     !edit && (armed || (focused && own_window))
 }
 
+/// The **Voice Assistant** shortcut asked for the next recording
+/// (`Pipeline::on_assistant_key`; taken by the recording it starts, cleared
+/// right after the press).
+static ASSISTANT_ARMED: AtomicBool = AtomicBool::new(false);
+
+/// Where a recording starting now goes. Pure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Goes {
+    /// Pasted into the app in front (a dictation, a Command, a rewrite).
+    Paste,
+    /// Into the Chat view's box (`chat_target`).
+    ChatBox,
+    /// A question for the Voice Assistant (`assistant.rs`): answered out
+    /// loud, never pasted.
+    Assistant,
+}
+
+/// The edit hotkey's recording is always a rewrite; the assistant shortcut's
+/// is always the assistant's, even with the chat box focused (its answer
+/// lands in Chat anyway); else as [`chat_target`] says. Pure.
+pub(crate) fn destination(edit: bool, assistant: bool, chat_armed: bool, chat_focused: bool, own_window: bool) -> Goes {
+    if edit {
+        Goes::Paste
+    } else if assistant {
+        Goes::Assistant
+    } else if chat_target(edit, chat_armed, chat_focused, own_window) {
+        Goes::ChatBox
+    } else {
+        Goes::Paste
+    }
+}
+
 /// Run the correction dictionary over a transcript, the same way for a
 /// dictation, a meeting segment and an Upload: exact replacements
 /// (`config::apply_dictionary`), then the fuzzy near-miss pass (`fuzzy.rs`)
@@ -331,6 +363,9 @@ struct GestureSlot {
     machine: Gesture,
     /// The recording is the edit hotkey's (no coaching hints for it).
     edit: bool,
+    /// …or the assistant shortcut's (no coaching hints for it either: they
+    /// name the dictation hotkey).
+    assistant: bool,
 }
 
 /// State shared between the audio callback, the hotkey toggle, and STT.
@@ -362,6 +397,10 @@ struct Shared {
     /// ([`chat_target`], decided at record start): its text goes to the page
     /// (`yap-chat-dictation`) instead of a paste, never to the wake word.
     to_chat: AtomicBool,
+    /// The current recording is a question for the **Voice Assistant**
+    /// ([`destination`], at record start): transcribed, corrected and handed
+    /// to `assistant::heard` — no cleanup, wake word, paste or history.
+    assistant: AtomicBool,
     /// Text selected in the target app, captured at edit-mode record-start. Empty
     /// (`None`) → "write mode" (generate new text from the instruction alone).
     selection: Mutex<Option<String>>,
@@ -612,6 +651,7 @@ impl Shared {
         match step.action {
             Action::Start => {
                 g.edit = edit;
+                g.assistant = ASSISTANT_ARMED.load(Ordering::SeqCst);
                 // Held: the bar's capsule shows no ✕ / ✓ until it locks
                 // hands-free (`yap-dictation-locked`) — the tap's wait for a
                 // second press included, so nothing flashes. Said before the
@@ -646,7 +686,7 @@ impl Shared {
         }
         // Coaching is about the dictation hotkey. Off the locks: showing it
         // asks the main thread whether the window is on screen.
-        if let (Some(hint), false) = (step.hint, g.edit) {
+        if let (Some(hint), false, false) = (step.hint, g.edit, g.assistant) {
             let hotkey = self.config.read().map(|c| c.hotkey.clone()).unwrap_or_default();
             let app = self.app.clone();
             std::thread::spawn(move || crate::coaching::offer(&app, hint, &hotkey));
@@ -763,13 +803,26 @@ impl Shared {
         // (or anything else) can steal focus. Restored at paste time.
         let hwnd = crate::text_injector::current_foreground().unwrap_or(0);
         self.target_hwnd.store(hwnd, Ordering::Relaxed);
-        // A question for the Chat view (its mic, or the hotkey while its box
-        // has the focus): the page gets the text, nothing is pasted.
+        // A question for the Voice Assistant (its shortcut: answered out
+        // loud, nothing pasted), or for the Chat view (its mic, or the hotkey
+        // while its box has the focus: the page gets the text).
         let armed = CHAT_ARMED.swap(false, Ordering::SeqCst);
-        let to_chat = chat_target(edit, armed, CHAT_FOCUSED.load(Ordering::SeqCst), hwnd == 0);
-        self.to_chat.store(to_chat, Ordering::SeqCst);
-        if to_chat {
-            tracing::info!("Dictation: a question for the Chat view");
+        let goes = destination(
+            edit,
+            ASSISTANT_ARMED.swap(false, Ordering::SeqCst),
+            armed,
+            CHAT_FOCUSED.load(Ordering::SeqCst),
+            hwnd == 0,
+        );
+        let assistant = goes == Goes::Assistant;
+        self.to_chat.store(goes == Goes::ChatBox, Ordering::SeqCst);
+        self.assistant.store(assistant, Ordering::SeqCst);
+        match goes {
+            Goes::ChatBox => tracing::info!("Dictation: a question for the Chat view"),
+            // Said before the "recording" state, so the capsule's first
+            // frame is the assistant's.
+            Goes::Assistant => crate::assistant::listening(&self.app),
+            Goes::Paste => {}
         }
         // And what kind of app it is (a terminal, a chat app…): its process,
         // class and title only, for fitting the paste.
@@ -799,8 +852,9 @@ impl Shared {
         // "Match the text around the cursor": read it in the background now,
         // for the paste (`text_injector::prepare_dictation`). Not for edit
         // mode, whose rewrite replaces the selection as the AI wrote it, nor
-        // in a terminal with terminal mode on: its "field" is the screen.
-        let smart = !edit && smart_spacing && !in_terminal;
+        // in a terminal with terminal mode on: its "field" is the screen —
+        // nor for the assistant, which pastes nothing.
+        let smart = !edit && !assistant && smart_spacing && !in_terminal;
         crate::selection::begin_dictation((hwnd != 0).then_some(hwnd), smart);
     }
 
@@ -956,7 +1010,13 @@ impl Shared {
         // recording, or nowhere), so it can't leak into a later session.
         let selection = self.selection.lock().ok().and_then(|mut g| g.take());
         let edit = self.edit_mode.swap(false, Ordering::SeqCst);
-        if !(undo && audio.len() >= UNDO_MIN_SAMPLES && self.mic_tally.heard()) {
+        // A question for the assistant that's called off isn't kept for
+        // Undo (Undo pastes; the assistant never does).
+        let assistant = self.assistant.swap(false, Ordering::SeqCst);
+        if assistant {
+            crate::assistant::nothing(&self.app);
+        }
+        if assistant || !(undo && audio.len() >= UNDO_MIN_SAMPLES && self.mic_tally.heard()) {
             let _ = self.app.emit("yap-state", "idle");
             tracing::info!("Recording cancelled (audio discarded)");
             return;
@@ -1063,6 +1123,9 @@ impl Shared {
                 *g = None;
             }
             self.edit_mode.store(false, Ordering::SeqCst);
+            if self.assistant.swap(false, Ordering::SeqCst) {
+                crate::assistant::nothing(&self.app);
+            }
             tracing::info!("Recording stopped: the mic gave nothing but silence, not transcribed");
             let _ = self.app.emit("yap-mic-silent", Some(self.mic_silent()));
             let _ = self.app.emit("yap-state", "error");
@@ -1090,9 +1153,10 @@ impl Shared {
         });
     }
 
-    /// Should this dictation wake the Voice Agent? Port of OpenWhispr's
+    /// Is this dictation a **Command** (it says the agent's name; was "the
+    /// Voice Agent's wake word")? Port of OpenWhispr's
     /// `resolveDictationAgentReachability` + `detectAgentName` gate: the
-    /// Voice-Agent scope must be enabled with a provider (BYOK/custom providers
+    /// Commands scope (`voiceAgent`) must be enabled with a provider (BYOK/custom providers
     /// also need a model; ondevice/self-hosted have defaults), and the
     /// transcript must address the agent by name — fuzzy-matched, so STT
     /// mis-hearings still wake it. Default name "Yap" (the tab's copy).
@@ -1118,7 +1182,7 @@ impl Shared {
 
     /// Edit/rewrite-mode finish: apply the spoken `instruction` to the selection
     /// captured at record-start and paste the result back into the target window.
-    /// Uses the **Voice Agent** scope's own provider/model/prompt when that scope is
+    /// Uses the **Commands** scope's own provider/model/prompt when that scope is
     /// enabled + configured, otherwise the global AI-cleanup endpoint; either way it
     /// needs a base URL configured. Emits the final `yap-state` itself.
     async fn run_rewrite(self: &Arc<Self>, instruction: String) {
@@ -1132,7 +1196,8 @@ impl Shared {
         self.run_agent(instruction, selection).await
     }
 
-    /// Shared agent runner: apply `instruction` via the Voice-Agent scope (or
+    /// Shared runner for **Commands**: apply `instruction` via the Commands
+    /// scope (`voiceAgent`) (or
     /// the global cleanup endpoint) and paste the result. `selection` empty =
     /// write mode. Two callers: the edit hotkey (`run_rewrite`, selection
     /// captured at key-press) and the **wake-word path** (no selection — the
@@ -1151,7 +1216,7 @@ impl Shared {
             .config
             .read()
             .map(|c| {
-                // Voice Agent scope (OpenWhispr "Language Models" bubble, step 3):
+                // Commands scope (OpenWhispr "Language Models" bubble, step 3):
                 // when it's enabled and configured, run edit/rewrite on THAT scope's own
                 // provider/model/prompt. Otherwise fall back to the global AI-cleanup
                 // endpoint (the original edit-mode behaviour). "ondevice" routes
@@ -1205,7 +1270,7 @@ impl Shared {
             tracing::warn!(provider = %provider, "Rewrite skipped: no API key for provider");
             let _ = self.app.emit(
                 DICTATION_ERROR,
-                format!("Voice Agent: no {provider} API key — add one in Language Models"),
+                format!("Commands: no {provider} API key — add one in Language Models"),
             );
             let _ = self.app.emit("yap-state", "error");
             return;
@@ -1725,8 +1790,32 @@ impl Shared {
         report
     }
 
+    /// A question for the **Voice Assistant**, transcribed: the correction
+    /// dictionary as for any dictation (no cleanup, voice command or
+    /// snippets: the AI reads it as asked), then `assistant::heard` — Chat
+    /// answers and Yap reads it aloud. `false`: nothing was said.
+    fn ask_assistant(&self, transcript: &str) -> bool {
+        let question = self
+            .config
+            .read()
+            .map(|c| apply_corrections(transcript, &c))
+            .unwrap_or_else(|_| transcript.to_string());
+        let question = question.trim().to_string();
+        if question.is_empty() {
+            tracing::info!("Voice Assistant: nothing heard");
+            crate::assistant::nothing(&self.app);
+            return false;
+        }
+        tracing::info!(len = question.len(), "Voice Assistant: a question");
+        crate::assistant::heard(&self.app, question);
+        true
+    }
+
     async fn run_stt(self: Arc<Self>, audio: Vec<f32>) {
         if audio.is_empty() {
+            if self.assistant.swap(false, Ordering::SeqCst) {
+                crate::assistant::nothing(&self.app);
+            }
             let _ = self.app.emit("yap-state", "idle");
             return;
         }
@@ -1755,6 +1844,9 @@ impl Shared {
                     }
                     Err(e) => {
                         tracing::warn!("No STT engine (model missing) — cannot transcribe: {}", e);
+                        if self.assistant.swap(false, Ordering::SeqCst) {
+                            crate::assistant::nothing(&self.app);
+                        }
                         let _ = self.app.emit("yap-state", "needs-model");
                         return;
                     }
@@ -1818,6 +1910,13 @@ impl Shared {
                     }
                 }
                 match transcription {
+                    // A question for the Voice Assistant: corrected, then
+                    // to Chat and read aloud (assistant.rs). Nothing pasted.
+                    Ok(text) if self.assistant.swap(false, Ordering::SeqCst) => {
+                        if !self.ask_assistant(text.trim()) {
+                            error_msg = Some("Yap didn't catch a question — try again");
+                        }
+                    }
                     Ok(text) if self.edit_mode.load(Ordering::SeqCst) => {
                         // Edit/rewrite mode: the transcript is an INSTRUCTION, not
                         // dictation. Apply it to the captured selection and paste
@@ -1825,16 +1924,16 @@ impl Shared {
                         self.run_rewrite(text.trim().to_string()).await;
                         return;
                     }
-                    // Wake-word Voice Agent (port of OpenWhispr's detectAgentName
+                    // A Command by name (port of OpenWhispr's detectAgentName
                     // + dictation routing): a normal dictation that addresses the
                     // agent by name ("Hey {name}, …") routes the WHOLE transcript
-                    // through the Voice-Agent scope in write mode instead of
+                    // through the Commands scope in write mode instead of
                     // cleanup — the agent prompt strips the name + command from
                     // the output. Agent unreachable / no match → normal cleanup.
                     // (Not a question for the Chat view: that already goes to
                     // the AI, name or no name.)
                     Ok(text) if !self.to_chat.load(Ordering::SeqCst) && self.wake_word_hit(text.trim()) => {
-                        tracing::info!("Wake word detected — routing dictation to the Voice Agent");
+                        tracing::info!("Agent's name heard — running the dictation as a Command");
                         self.run_agent(text.trim().to_string(), String::new()).await;
                         return;
                     }
@@ -1853,6 +1952,10 @@ impl Shared {
             }
         }
 
+        // A question for the assistant that never got transcribed.
+        if self.assistant.swap(false, Ordering::SeqCst) {
+            crate::assistant::nothing(&self.app);
+        }
         // Never fail silently: surface a brief error to the UI, otherwise drop
         // back to idle.
         match error_msg {
@@ -1914,6 +2017,7 @@ impl Pipeline {
             target_kind: Mutex::new(AppKind::Other),
             edit_mode: AtomicBool::new(false),
             to_chat: AtomicBool::new(false),
+            assistant: AtomicBool::new(false),
             selection: Mutex::new(None),
             processing: AtomicBool::new(false),
             upload_cancel: AtomicBool::new(false),
@@ -2003,6 +2107,22 @@ impl Pipeline {
             self.ensure_mic();
         }
         self.shared.on_key(pressed, true, at);
+    }
+
+    /// Route a **Voice Assistant** shortcut press/release (the hook, or a Yap
+    /// window's in-page fallback): the same recording mode and gestures as
+    /// the dictation key, but the recording a press starts is a question for
+    /// Yap's Chat, answered out loud (`assistant.rs`). A press while Yap is
+    /// speaking stops the voice first (`start_recording`'s barge-in); a
+    /// press while any recording runs stops it, as the other keys do.
+    pub fn on_assistant_key(&self, pressed: bool, at: Option<u64>) {
+        if pressed {
+            self.ensure_mic();
+        }
+        ASSISTANT_ARMED.store(pressed, Ordering::SeqCst);
+        self.shared.on_key(pressed, false, at);
+        // Taken by the recording if one started; never left for another.
+        ASSISTANT_ARMED.store(false, Ordering::SeqCst);
     }
 
     /// Cancel the recording (the bar's ✕, the tray's Cancel): nothing is
@@ -2172,6 +2292,37 @@ impl Robot {
         let out = self.dictate_text(text).await;
         arm_chat_dictation(false);
         out
+    }
+
+    /// A question for the **Voice Assistant** without a microphone (test
+    /// mode's `assistant::e2e_assistant_ask`): what a press of its shortcut
+    /// does — the barge-in, the target, "listening" on the capsule for
+    /// `listen_ms` (a dictation as the meeting recorder and the speaker see
+    /// it) — then `text` as the transcript, from the dictionary on.
+    pub(crate) async fn ask_assistant(&self, text: String, listen_ms: u64) -> Result<(), String> {
+        let shared = &self.0;
+        if shared.recording.load(Ordering::SeqCst) || shared.processing.swap(true, Ordering::SeqCst) {
+            return Err(Self::BUSY.into());
+        }
+        crate::tts::stop_for_dictation();
+        ASSISTANT_ARMED.store(true, Ordering::SeqCst);
+        shared.capture_target(false);
+        ASSISTANT_ARMED.store(false, Ordering::SeqCst);
+        dictation_began();
+        let _ = shared.app.emit("yap-state", "recording");
+        tokio::time::sleep(Duration::from_millis(listen_ms)).await;
+        dictation_ended();
+        let _ = shared.app.emit("yap-state", "processing");
+        tracing::info!(len = text.len(), "e2e: a question for the Voice Assistant from a transcript");
+        let asked = shared.assistant.swap(false, Ordering::SeqCst) && shared.ask_assistant(text.trim());
+        shared.processing.store(false, Ordering::SeqCst);
+        let _ = shared.app.emit("yap-state", "idle");
+        if asked {
+            Ok(())
+        } else {
+            crate::assistant::nothing(&shared.app);
+            Err("Nothing to ask".into())
+        }
     }
 
     /// `samples` (16 kHz mono) played into the dictation in real time, in
@@ -2574,6 +2725,21 @@ mod tests {
         assert!(!chat_target(false, false, false, true));
         // Edit mode rewrites a selection, never a chat question.
         assert!(!chat_target(true, true, true, true));
+    }
+
+    #[test]
+    fn the_assistant_shortcuts_recordings_are_the_assistants() {
+        // Wherever the focus is, the chat box's included: the answer lands
+        // in Chat anyway, and is read aloud.
+        assert_eq!(destination(false, true, false, false, false), Goes::Assistant);
+        assert_eq!(destination(false, true, true, true, true), Goes::Assistant);
+        // The edit hotkey's recording stays a rewrite.
+        assert_eq!(destination(true, true, false, false, false), Goes::Paste);
+        // Without the shortcut: as before.
+        assert_eq!(destination(false, false, true, false, false), Goes::ChatBox);
+        assert_eq!(destination(false, false, false, true, true), Goes::ChatBox);
+        assert_eq!(destination(false, false, false, true, false), Goes::Paste);
+        assert_eq!(destination(false, false, false, false, false), Goes::Paste);
     }
 
     #[test]

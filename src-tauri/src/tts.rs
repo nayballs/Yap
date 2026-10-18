@@ -1,5 +1,6 @@
 //! **Spoken replies** — Yap reads the AI's answers aloud (Settings → Voice
-//! Agent, the Chat view's speaker toggle and each answer's ▶).
+//! Assistant, the Chat view's speaker toggle, each answer's ▶, and every
+//! answer to the assistant shortcut, `assistant.rs`).
 //!
 //! Three parts:
 //!
@@ -925,6 +926,8 @@ pub fn init(app: &tauri::AppHandle) {
         Box::new(move |s| {
             use tauri::Emitter;
             let _ = app.emit("yap-tts-state", s);
+            // The Voice Assistant's answer ended (or was stopped).
+            crate::assistant::on_tts_state(&app, s.speaking, s.message_id.as_deref());
         }),
         Box::new(|| crate::pipeline::dictation_state().1),
     ));
@@ -1009,7 +1012,7 @@ fn say(
 
 // ------------------------------------------------------------ commands
 
-/// One engine's voices, for Settings → Voice Agent.
+/// One engine's voices, for Settings → Voice Assistant.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineVoices {
@@ -1018,7 +1021,7 @@ pub struct EngineVoices {
     pub error: Option<String>,
 }
 
-/// Settings → Voice Agent: the engines, each one's voices, Kokoro's
+/// Settings → Voice Assistant: the engines, each one's voices, Kokoro's
 /// download, and which engine would speak now (`active`: Windows voices
 /// while Kokoro isn't installed or isn't in this build).
 #[derive(Debug, Serialize)]
