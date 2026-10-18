@@ -386,6 +386,7 @@ pub fn run() {
             commands::configure_edit_hotkey,
             commands::set_active_model,
             commands::delete_model,
+            commands::open_external,
             commands::cancel_recording,
             commands::set_autostart,
             commands::is_portable,
@@ -560,6 +561,8 @@ pub fn run() {
             meeting_guard::e2e_meeting_checkins,
             #[cfg(debug_assertions)]
             calendar::calendar_e2e_opened,
+            #[cfg(debug_assertions)]
+            commands::e2e_opened_urls,
             #[cfg(debug_assertions)]
             tts::tts_e2e_spoken,
             #[cfg(debug_assertions)]

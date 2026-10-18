@@ -1,16 +1,18 @@
 // External-link helper, ported from OpenWhispr's utils/externalLinks.ts.
 // A plain target="_blank" anchor does nothing inside a Tauri webview (new-window
-// requests are denied), so every external link routes through the opener plugin
-// — falling back to window.open when running outside Tauri (plain-browser dev).
+// requests are denied), so every external link goes through Rust's
+// `open_external` (the opener plugin; web and mail links only). A test run
+// records the link there instead of opening a browser on the PC running it.
+// Outside Tauri (plain-browser dev) it falls back to window.open.
 export async function openExternalLink(url) {
-  try {
-    if ('__TAURI_INTERNALS__' in window) {
-      const { openUrl } = await import('@tauri-apps/plugin-opener');
-      await openUrl(url);
-      return;
+  if ('__TAURI_INTERNALS__' in window) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('open_external', { url });
+    } catch (e) {
+      console.warn("Couldn't open link:", e);
     }
-  } catch {
-    /* plugin missing/denied — fall through to window.open */
+    return;
   }
   window.open(url, '_blank', 'noopener,noreferrer');
 }
