@@ -633,9 +633,13 @@ async fn post_chat_request(
     }
 
     let client = reqwest::Client::builder()
-        .timeout(timeout)
+        .timeout(crate::eval::timeout(timeout))
         .build()
         .map_err(|e| format!("failed to build HTTP client: {}", e))?;
+
+    // A model evaluation (`eval.rs`, debug builds) paces its calls and logs
+    // every request and response; otherwise a no-op.
+    let call = crate::eval::Call::start(provider, &endpoint, &body).await;
 
     // A rate limit (429) is waited out when the caller is happy to wait
     // (`rate_limit_patience` in all, as long as the provider says — else 2 s,
@@ -643,6 +647,7 @@ async fn post_chat_request(
     let mut waited = Duration::ZERO;
     let mut attempt = 0u32;
     let resp = loop {
+        call.send(&body);
         let mut req = client.post(&endpoint).json(&body);
         // Local servers (Ollama / LM Studio) need no key; only send one if set.
         if !api_key.is_empty() {
@@ -651,7 +656,7 @@ async fn post_chat_request(
         let resp = req
             .send()
             .await
-            .map_err(|e| format!("request failed: {}", e))?;
+            .map_err(|e| call.failed(format!("request failed: {}", e)))?;
         let status = resp.status();
         if status.is_success() {
             break resp;
@@ -663,8 +668,10 @@ async fn post_chat_request(
                 .map(str::to_string)
         };
         let (retry_ms, retry_s) = (header("retry-after-ms"), header("retry-after"));
+        let limits = crate::eval::limit_headers(resp.headers());
         // Surface a little of the body to help the user debug (no key in it).
         let detail = resp.text().await.unwrap_or_default();
+        call.refused(status.as_u16(), &limits, &detail);
         if status.as_u16() == 429 {
             let hinted = rate_limit_wait(retry_ms.as_deref(), retry_s.as_deref(), &detail);
             // A little more than asked: the window has to have moved on.
@@ -676,13 +683,14 @@ async fn post_chat_request(
                     provider,
                     wait.as_secs_f64()
                 );
+                call.waiting(wait);
                 tokio::time::sleep(wait).await;
                 waited += wait;
                 attempt += 1;
                 continue;
             }
             tracing::warn!("Rate-limited by {}: {}", provider, detail.chars().take(300).collect::<String>());
-            return Err(rate_limited_error(provider, hinted));
+            return Err(call.failed(rate_limited_error(provider, hinted)));
         }
         // A model that only takes its default temperature (a newer one than
         // `takes_temperature` knows): the same request again without it, once.
@@ -706,8 +714,9 @@ async fn post_chat_request(
             continue;
         }
         let detail: String = detail.chars().take(300).collect();
-        return Err(format!("HTTP {}: {}", status.as_u16(), detail));
+        return Err(call.failed(format!("HTTP {}: {}", status.as_u16(), detail)));
     };
+    let limits = crate::eval::limit_headers(resp.headers());
 
     // Capture Groq's daily request headers BEFORE consuming the body. These are
     // absent on non-Groq endpoints (local servers, OpenAI), which is fine — the
@@ -724,7 +733,8 @@ async fn post_chat_request(
     let value: Value = resp
         .json()
         .await
-        .map_err(|e| format!("failed to parse response: {}", e))?;
+        .map_err(|e| call.failed(format!("failed to parse response: {}", e)))?;
+    call.answered(&limits, &value);
 
     // Best-effort daily-usage accounting (never fails the call).
     let total_tokens = value["usage"]["total_tokens"].as_u64().unwrap_or(0);

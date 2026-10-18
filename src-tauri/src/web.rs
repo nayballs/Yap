@@ -209,7 +209,9 @@ impl Endpoints {
             standin: None,
             offline: false,
         };
-        if !crate::e2e::active() {
+        // A model evaluation's live web scenario (eval.rs) runs in test mode
+        // but asks the real services and wikis.
+        if !crate::e2e::active() || crate::eval::web_live() {
             return real;
         }
         #[cfg(debug_assertions)]
@@ -960,8 +962,9 @@ static SEARCHES: LazyLock<Mutex<HashMap<String, (Instant, Found)>>> = LazyLock::
 /// Search the web for `query` (`context`: the person's question, to spot a
 /// game the query leaves out): the keyed service, with the game's wiki's
 /// best article first when the question names a game Yap knows; the keyless
-/// lookup with no key, or when the service fails (its error kept as the
-/// `note`). Answers are kept for 10 minutes.
+/// lookup with no key, when the service fails (its error kept as the
+/// `note`), or when it found nothing ("Exa found nothing."). Answers are
+/// kept for 10 minutes.
 pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) -> Result<Found, String> {
     let query = tidy(query, 300);
     if query.is_empty() {
@@ -987,7 +990,19 @@ pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
                         }
                     }
                 }
-                Found { hits, from: service.name().into(), note: None }
+                if hits.is_empty() {
+                    // Nothing on the web for it: Wikipedia (or the game's
+                    // wiki) may still know, and the chip says where it's from.
+                    match keyless(s, ep, &query, context).await {
+                        Ok(mut f) if !f.hits.is_empty() => {
+                            f.note = Some(format!("{} found nothing.", service.name()));
+                            f
+                        }
+                        _ => Found { hits, from: service.name().into(), note: None },
+                    }
+                } else {
+                    Found { hits, from: service.name().into(), note: None }
+                }
             }
             Err(e) => {
                 tracing::info!("Web search: {} failed, trying the keyless lookup", service.name());
@@ -1114,6 +1129,14 @@ pub struct Page {
 }
 
 static PAGES: LazyLock<Mutex<HashMap<String, (Instant, Page)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// The model evaluation (`eval.rs`): every scenario starts with empty search
+/// and page caches (a stand-in web's answers never leak into the next).
+#[cfg(debug_assertions)]
+pub fn clear_caches() {
+    SEARCHES.lock().unwrap_or_else(|p| p.into_inner()).clear();
+    PAGES.lock().unwrap_or_else(|p| p.into_inner()).clear();
+}
 
 /// What a page fetch brought back.
 struct Fetched {
@@ -1941,10 +1964,15 @@ mod tests {
         assert_eq!(search_chip("Gale bg3", &wiki, &settings("")), "Searched the web: \"Gale bg3\" (bg3.wiki)");
         let exa = Found { hits: vec![hit.clone()], from: "Exa".into(), note: None };
         assert_eq!(search_chip("Gale bg3", &exa, &settings("k")), "Searched the web: \"Gale bg3\"");
-        let fell_back = Found { hits: vec![hit], from: "Wikipedia".into(), note: Some("Exa says the API key is wrong. Check it.".into()) };
+        let fell_back = Found { hits: vec![hit.clone()], from: "Wikipedia".into(), note: Some("Exa says the API key is wrong. Check it.".into()) };
         assert_eq!(
             search_chip("Gale bg3", &fell_back, &settings("k")),
             "Searched the web: \"Gale bg3\" (Wikipedia) · Exa says the API key is wrong"
+        );
+        let nothing_on_exa = Found { hits: vec![hit.clone()], from: "Wikipedia".into(), note: Some("Exa found nothing.".into()) };
+        assert_eq!(
+            search_chip("Gale bg3", &nothing_on_exa, &settings("k")),
+            "Searched the web: \"Gale bg3\" (Wikipedia) · Exa found nothing"
         );
         let none = Found { hits: vec![], from: "Wikipedia".into(), note: None };
         assert_eq!(search_chip("zzz", &none, &settings("")), "Searched the web: \"zzz\" (Wikipedia) · nothing found");

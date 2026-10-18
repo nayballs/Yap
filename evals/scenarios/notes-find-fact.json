@@ -1,0 +1,31 @@
+{
+  "name": "notes-find-fact",
+  "description": "Find one fact in the notes: the cabin's Wi-Fi password, not the home one in another note.",
+  "tags": ["notes"],
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Cabin trip",
+        "content": "Lake cabin, Fri 14 to Sun 16 Nov.\nAddress: 3 Pine Lane, Windermere.\nWi-Fi network: CabinGuest, password: MooseLake42\nThe key is under the blue plant pot by the back door.\nBring sleeping bags and board games."
+      },
+      {
+        "title": "Home network",
+        "content": "Router: Netgear, in the hall cupboard.\nHome Wi-Fi password: Gr33nTea!77\nISP support: 0800 123 4567"
+      },
+      { "title": "Groceries", "content": "milk, eggs, sourdough, coffee beans" }
+    ]
+  },
+  "turns": [
+    {
+      "user": "What's the wifi password at the cabin?",
+      "expect": {
+        "answer_contains": ["MooseLake42"],
+        "answer_not_contains": ["Gr33nTea"],
+        "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"],
+        "no_false_claims": true
+      },
+      "soft": { "max_steps": 3 }
+    }
+  ]
+}

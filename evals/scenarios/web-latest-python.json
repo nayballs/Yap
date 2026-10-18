@@ -1,0 +1,14 @@
+{
+  "name": "web-latest-python",
+  "description": "A current fact no model's training knows (the latest Python release in October 2026: 3.14, or 3.15 since 9 Oct 2026). Web search on, live; with no key, Wikipedia.",
+  "tags": ["web", "current"],
+  "needs_web": true,
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "What's the latest stable version of Python?",
+      "expect": { "answer_matches": "3\\.1[4-9]", "min_sources": 1, "opened_none": true, "no_false_claims": true },
+      "soft": { "tools_called": [{ "name": "web_search" }] }
+    }
+  ]
+}

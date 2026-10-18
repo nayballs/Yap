@@ -888,8 +888,11 @@ impl ChatTurn {
 /// answers to its own questions ("Did you mean Baldur's Gate 3?" → "yes").
 /// `scope` "meetings": grounded in the meetings (the Meetings view's Ask
 /// bar); "assistant": the Voice Assistant, which sends a shorter history.
+///
+/// `app`: the windows told of note changes; `None` in a model evaluation
+/// (`eval.rs`), which runs this same turn with no windows.
 pub(crate) async fn chat_turn(
-    app: &AppHandle,
+    app: Option<&AppHandle>,
     conversation_id: Option<u64>,
     text: &str,
     scope: Option<&str>,
@@ -986,8 +989,10 @@ pub(crate) async fn chat_turn(
     let (reply, tools_used, sources) = if tools_supported {
         let notify = |id: u64| {
             use tauri::Emitter;
-            note_changed(app, id, "chat");
-            let _ = app.emit("yap-notes-changed", ());
+            if let Some(app) = app {
+                note_changed(app, id, "chat");
+                let _ = app.emit("yap-notes-changed", ());
+            }
         };
         // The turn's web side: the person's links (this message and their
         // earlier ones), the sources found, the safety rule's flag.
@@ -1176,7 +1181,7 @@ pub async fn chat_send(
     voice: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let by_voice = voice.unwrap_or(false);
-    let turn = chat_turn(&app, conversation_id, &text, scope.as_deref(), by_voice, |_, _| {}).await?;
+    let turn = chat_turn(Some(&app), conversation_id, &text, scope.as_deref(), by_voice, |_, _| {}).await?;
     // Read out by itself? (Asked at the answer: a dictation may have started
     // meanwhile, and the settings may have changed.)
     let now = config::load();

@@ -1,0 +1,14 @@
+{
+  "name": "voice-who-wrote",
+  "description": "A one-fact question asked out loud: one short sentence is the right answer.",
+  "tags": ["voice", "knowledge"],
+  "voice": true,
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "who wrote pride and prejudice",
+      "expect": { "answer_contains": ["Austen"], "max_words": 25, "no_false_claims": true },
+      "soft": { "tools_not_called": ["*"] }
+    }
+  ]
+}

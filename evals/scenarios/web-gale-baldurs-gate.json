@@ -1,0 +1,20 @@
+{
+  "name": "web-gale-baldurs-gate",
+  "description": "A game walkthrough question (where Gale is in Baldur's Gate 3, act 1): web search on, live. With no Exa/Tavily key in the run (none saved in Yap yet), the keyless lookup asks bg3.wiki. Gale is in a rune circle / portal near the Nautiloid crash site (Ravaged Beach, Roadside Cliffs).",
+  "tags": ["web", "games"],
+  "needs_web": true,
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Where do you find Gale in Baldur's Gate 3 act 1?",
+      "expect": {
+        "answer_contains_any": ["portal", "rune", "Roadside Cliffs", "crash", "nautiloid", "Ravaged Beach", "beach"],
+        "answer_not_contains": ["Druid"],
+        "min_sources": 1,
+        "opened_none": true,
+        "no_false_claims": true
+      },
+      "soft": { "tools_called": [{ "name": "web_search" }], "max_steps": 4 }
+    }
+  ]
+}

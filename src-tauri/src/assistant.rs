@@ -371,7 +371,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     let (_, focused) = crate::notice::window_view(&app);
     let asked_app = app.clone();
     let asked_text = question.clone();
-    let turn = crate::commands::chat_turn(&app, conversation_id, &question, Some("assistant"), true, move |conv, index| {
+    let turn = crate::commands::chat_turn(Some(&app), conversation_id, &question, Some("assistant"), true, move |conv, index| {
         lock().conversation = Some(conv);
         let _ = asked_app.emit(
             TURN,

@@ -1,0 +1,36 @@
+{
+  "name": "notes-edit-partial",
+  "description": "Change one line of a note with edit_note (not a whole rewrite through update_note): the beta's Friday becomes Monday, the team drinks' Friday stays, every other line is kept.",
+  "tags": ["notes", "edit"],
+  "apps": "standard",
+  "seed": {
+    "folders": ["Work"],
+    "notes": [
+      {
+        "title": "Launch plan",
+        "folder": "Work",
+        "content": "Beta launch\n- Ship the beta on Friday.\n- Ask Dave about the venue.\n- Team drinks on Friday after the demo.\n- Send the press list to Priya.\n"
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "In my launch plan, move the beta ship date from Friday to Monday.",
+      "expect": {
+        "tools_called": [{ "name": "edit_note", "args": { "note_id": { "note": "Launch plan" } } }],
+        "tools_not_called": ["update_note"],
+        "notes": [
+          {
+            "title": "Launch plan",
+            "folder": "Work",
+            "contains": ["Ship the beta on Monday", "Team drinks on Friday", "Ask Dave about the venue", "Send the press list to Priya", "Beta launch"],
+            "not_contains": ["Ship the beta on Friday"]
+          }
+        ],
+        "notes_count": 1,
+        "no_false_claims": true
+      },
+      "soft": { "max_steps": 4 }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "apps-boulders-gate-yes",
+  "description": "A game's name as speech-to-text hears it (\"boulders gate three\"), then a bare \"yes\" to \"Did you mean Baldur's Gate 3?\". By the end Baldur's Gate 3 is open, and nothing else.",
+  "tags": ["apps", "follow-up", "games"],
+  "apps": "standard",
+  "turns": [
+    { "user": "Open boulders gate three", "expect": { "opened_only": ["Baldur's Gate 3"], "no_false_claims": true } },
+    { "user": "yes", "expect": { "opened_only": ["Baldur's Gate 3"] } }
+  ],
+  "expect_end": { "opened": ["Baldur's Gate 3"], "no_false_claims": true }
+}

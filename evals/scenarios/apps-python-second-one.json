@@ -1,0 +1,16 @@
+{
+  "name": "apps-python-second-one",
+  "description": "\"open python\" matches two Pythons, so Yap asks which (fast path, no model). \"the second one\" should then open the second it listed, Python 3.13.",
+  "tags": ["apps", "follow-up", "fast-path"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "open python",
+      "expect": { "fast_path": true, "opened_none": true, "answer_contains": ["Python 3.12", "Python 3.13"] }
+    },
+    {
+      "user": "the second one",
+      "expect": { "opened": ["Python 3.13 (64-bit)"], "opened_only": ["Python 3.13 (64-bit)"], "no_false_claims": true }
+    }
+  ]
+}
