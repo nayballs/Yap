@@ -34,8 +34,8 @@
   import SpeakerMenu from './SpeakerMenu.svelte';
   import { nextModel, modelLine, whereItRuns } from './aiModel.js';
   import { speech, initSpeech, readAloud, stopReading } from './speech.svelte.js';
-  import ContextMenu from './ui/ContextMenu.svelte';
-  import ConfirmDialog from './ui/ConfirmDialog.svelte';
+  import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
+  import { copyText, messageItems } from './itemMenus.js';
 
   /** This window's label: the `origin` of its saves and stops. */
   const LABEL = 'settings';
@@ -137,6 +137,31 @@
   function toggleSpeakerMenu(key, voice, lines, start = 'menu') {
     speakerMenu = speakerMenu?.key === key ? null : { key, voice, lines, start };
   }
+  // A transcript line's right-click menu (ui/contextMenu.svelte.js), as the
+  // meeting notepad's: Copy line, Who said this? (the speaker menu at the
+  // line) — not for a line from the speakers.
+  let lineEls = $state({});
+  function lineMenu(e, run, line) {
+    openContextMenu(
+      e,
+      [
+        {
+          label: 'Copy line',
+          icon: 'copy',
+          onselect: () => copyText(line.text),
+        },
+        !run.echo
+          ? {
+              label: 'Who said this?',
+              icon: 'person',
+              onselect: () => (speakerMenu = { key: `l${line.i}`, voice: run.speaker, lines: [line.i], start: 'lines' }),
+            }
+          : null,
+      ],
+      { label: 'Transcript line', row: lineEls[line.i] }
+    );
+  }
+
   /** A speaker edit made here: the map, and each line's voice. */
   function onSpeakerChanged(updated) {
     if (!selected || updated?.id !== selected.id) return;
@@ -488,36 +513,14 @@
   const PROTECTED = { personal: 'new notes go here.', meetings: 'meeting notes go here.' };
   const protectedReason = (f) => PROTECTED[f.trim().toLowerCase()] ?? null;
 
-  let menu = $state({ open: false, x: 0, y: 0, items: [], label: '', keyboard: false, alignEnd: false, returnFocus: null });
-
   /**
    * Open a row's menu: at the pointer (a right-click), under its ⋯ button,
-   * or at the row (the ContextMenu key, Shift+F10). Cancels the event, so
-   * WebView2 never shows its own.
+   * or at the row (the ContextMenu key, Shift+F10) — the app's one menu
+   * (ui/contextMenu.svelte.js), which cancels the event, so WebView2 never
+   * shows its own.
    */
   function openMenu(e, items, label, row) {
-    // (A `contextmenu` the key may send after its keydown goes to the open
-    // menu, which has the focus by then, and cancels it.)
-    e.preventDefault();
-    e.stopPropagation();
-    const fromButton = e.currentTarget?.dataset?.more != null;
-    const byKey =
-      e.type === 'keydown' ||
-      (e.type === 'contextmenu' && e.button !== 2) ||
-      (e.type === 'click' && e.detail === 0);
-    let x = e.clientX;
-    let y = e.clientY;
-    let alignEnd = false;
-    if (fromButton || byKey) {
-      const r = (fromButton ? e.currentTarget : row).getBoundingClientRect();
-      x = fromButton ? r.right : r.left + 12;
-      y = r.bottom + 4;
-      alignEnd = fromButton;
-    }
-    menu = { open: true, x, y, items, label, keyboard: byKey, alignEnd, returnFocus: row };
-  }
-  function menuKey(e, open) {
-    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) open(e);
+    openContextMenu(e, items, { label, row });
   }
 
   // Folders: Rename (inline), Delete… (confirm; its notes go to Personal).
@@ -532,6 +535,8 @@
       { label: 'Delete…', icon: 'trash', danger: true, disabled: !!reason, onselect: () => askDeleteFolder(f) },
     ];
     if (reason) items.push({ note: `Yap's own folder: ${reason}` });
+    // A right-click picks the folder too, as a click does.
+    if (e.type === 'contextmenu' && !devInspect(e)) activeFolder = f;
     openMenu(e, items, `Folder ${f}`, folderEls[f]);
   }
   function startFolderRename(f) {
@@ -563,21 +568,18 @@
     el.select();
   }
 
-  // A confirm dialog for every delete here: `{ title, body, run }`.
-  let ask = $state({ open: false, title: '', body: '', run: null, busy: false, returnFocus: null });
+  // Every delete here asks first (the window's confirm dialog, askConfirm).
   function askDeleteFolder(f) {
     const count = folderCounts[f] || 0;
-    ask = {
-      open: true,
+    askConfirm({
       title: `Delete “${f}”?`,
       body:
         count === 0
           ? 'The folder is empty.'
           : `${count === 1 ? 'Its note' : `Its ${count} notes`} will move to Personal.`,
       run: () => deleteFolder(f),
-      busy: false,
       returnFocus: folderEls[f],
-    };
+    });
   }
   async function deleteFolder(f) {
     try {
@@ -592,20 +594,23 @@
       return false;
     }
   }
-  async function runAsk() {
-    if (!ask.run || ask.busy) return;
-    ask.busy = true;
-    const ok = await ask.run();
-    ask.busy = false;
-    // Done: its row is gone, so the focus isn't sent back to it.
-    if (ok) ask = { ...ask, open: false, returnFocus: null };
-  }
-
   // Notes: Rename (the title), Move to ▸, Copy as Markdown, Export…, Delete….
   let itemEls = $state({});
   function noteMenu(e, n) {
     const here = n.folder || 'Personal';
     const recording = meeting.recording && meeting.noteId === n.id;
+    // A right-click opens the note too, as a click does — unless that would
+    // throw away a question being asked about the open one.
+    if (
+      e.type === 'contextmenu' &&
+      !devInspect(e) &&
+      selected?.id !== n.id &&
+      !chatInput.trim() &&
+      !chatThread.length &&
+      !asking
+    ) {
+      select(n.id);
+    }
     openMenu(
       e,
       [
@@ -628,9 +633,8 @@
           label: 'Delete…',
           icon: 'trash',
           danger: true,
-          onselect: () => {
-            ask = {
-              open: true,
+          onselect: () =>
+            askConfirm({
               title: `Delete “${displayTitle(n)}”?`,
               body: recording
                 ? 'The recording stops first. Its transcript, your notes and the summary go for good.'
@@ -638,10 +642,8 @@
                   ? 'Its transcript, your notes and the summary go for good.'
                   : 'The note goes for good.',
               run: () => removeNote(n.id),
-              busy: false,
               returnFocus: itemEls[n.id],
-            };
-          },
+            }),
         },
       ],
       `Note ${displayTitle(n)}`,
@@ -938,6 +940,15 @@
     }
   }
   let copiedTurn = $state(-1);
+  function turnMenu(e, turn) {
+    const reading = !!turn.id && speech.speakingId === turn.id;
+    openContextMenu(
+      e,
+      messageItems(turn, { read: turn.role === 'assistant' && turn.id ? () => readAloud(turn.text, turn.id) : null, reading }),
+      { label: turn.role === 'assistant' ? 'Answer' : 'Question', row: e.currentTarget }
+    );
+  }
+
   async function copyTurn(turn, i) {
     try {
       await navigator.clipboard.writeText(turn.text);
@@ -1044,24 +1055,6 @@
 />
 
 <ActionManager bind:open={actionsOpen} onchanged={refreshActions} />
-<ContextMenu
-  bind:open={menu.open}
-  x={menu.x}
-  y={menu.y}
-  items={menu.items}
-  label={menu.label}
-  keyboard={menu.keyboard}
-  alignEnd={menu.alignEnd}
-  returnFocus={menu.returnFocus}
-/>
-<ConfirmDialog
-  bind:open={ask.open}
-  title={ask.title}
-  body={ask.body}
-  busy={ask.busy}
-  returnFocus={ask.returnFocus}
-  onconfirm={runAsk}
-/>
 
 <div class="notes">
   <aside class="list">
@@ -1119,7 +1112,7 @@
             />
           </div>
         {:else}
-          <div class="folderrow" class:menuopen={menu.open && menu.returnFocus === folderEls[f]}>
+          <div class="folderrow" class:menuopen={menuOpenFor(folderEls[f])}>
             <button
               bind:this={folderEls[f]}
               class="folder"
@@ -1185,7 +1178,7 @@
             bind:this={itemEls[n.id]}
             class="item"
             class:active={selected?.id === n.id}
-            class:menuopen={menu.open && menu.returnFocus === itemEls[n.id]}
+            class:menuopen={menuOpenFor(itemEls[n.id])}
             role="button"
             tabindex="0"
             aria-haspopup="menu"
@@ -1524,7 +1517,20 @@
                   </div>
                 {:else if run.kind === 'group'}
                   {#each run.lines as line, j (line.i)}
-                    <div class="bubble {run.source}" class:echo={run.echo} class:cont={j > 0}>
+                    <!-- Focusable for its menu from the keyboard (the ContextMenu key, Shift+F10). -->
+                    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+                    <div
+                      class="bubble {run.source}"
+                      class:echo={run.echo}
+                      class:cont={j > 0}
+                      class:menuopen={menuOpenFor(lineEls[line.i]) || speakerMenu?.key === `l${line.i}`}
+                      bind:this={lineEls[line.i]}
+                      role="article"
+                      tabindex="0"
+                      aria-label={`${run.label}: ${line.text}`}
+                      oncontextmenu={(e) => lineMenu(e, run, line)}
+                      onkeydown={(e) => e.target === e.currentTarget && menuKey(e, (k) => lineMenu(k, run, line))}
+                    >
                       {#if j === 0}
                         {#if run.echo}
                           <span class="who">{run.label} · from the speakers</span>
@@ -1553,6 +1559,19 @@
                         {/if}
                       {/if}
                       <p>{line.text}</p>
+                      {#if speakerMenu?.key === `l${line.i}`}
+                        <!-- "Who said this?" from the line's menu: the speaker menu at the line. -->
+                        <SpeakerMenu
+                          note={selected}
+                          voice={speakerMenu.voice}
+                          lines={speakerMenu.lines}
+                          start="lines"
+                          origin={LABEL}
+                          align={run.source === 'you' ? 'right' : 'left'}
+                          onclose={() => (speakerMenu = null)}
+                          onchanged={onSpeakerChanged}
+                        />
+                      {/if}
                     </div>
                   {/each}
                 {/if}
@@ -1574,7 +1593,18 @@
       {#if chatThread.length > 0}
         <div class="chatthread">
           {#each chatThread as turn, i (i)}
-            <div class="cbubble {turn.role}">
+            <!-- Its right-click menu, as Chat's: an answer's Copy / Copy as
+                 Markdown / Read aloud, a question's Copy. Focusable for it
+                 from the keyboard (the ContextMenu key, Shift+F10). -->
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+            <div
+              class="cbubble {turn.role}"
+              role="article"
+              tabindex="0"
+              aria-label={turn.role === 'assistant' ? 'Answer' : 'Your question'}
+              oncontextmenu={(e) => turnMenu(e, turn)}
+              onkeydown={(e) => e.target === e.currentTarget && menuKey(e, (k) => turnMenu(k, turn))}
+            >
               {#if turn.role === 'assistant' && turn.plain}
                 <!-- An email: shown exactly as it copies. -->
                 <div class="cbody plain">{turn.text}</div>
@@ -2292,11 +2322,19 @@
     gap: 6px;
   }
   .bubble {
+    position: relative;
     max-width: 82%;
     border-radius: 10px;
     padding: 6px 10px;
     font-size: 12px;
     line-height: 1.5;
+  }
+  .bubble:focus-visible {
+    outline: 1.5px solid var(--yap-primary-line);
+    outline-offset: 1px;
+  }
+  .bubble.menuopen {
+    box-shadow: 0 0 0 2px var(--yap-border-hover);
   }
   .bubble p {
     margin: 0;

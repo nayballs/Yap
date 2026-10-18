@@ -313,8 +313,9 @@ test('WebView2’s own menu: nothing on plain UI, the edit commands in a text fi
   const last = () => menus().then((m) => m.settings.last);
   const kept = (m) => m.items.filter((i) => i.kept && i.kind !== 'separator').map((i) => i.name);
 
-  // Plain UI: Back, Refresh, Save as, Print… all dropped (Inspect stays in
-  // debug builds, which this is); no menu on screen.
+  // Plain UI: Back, Refresh, Save as, Print, Inspect… all dropped — Inspect
+  // too, though this is a debug build: only a Shift+right-click offers it
+  // there (context_menu.rs), never a plain one; no menu on screen.
   await openView(main, 'Home');
   let before = await seen();
   await main.getByRole('navigation', { name: 'Main' }).click({ button: 'right', position: { x: 20, y: 200 } });
@@ -322,7 +323,8 @@ test('WebView2’s own menu: nothing on plain UI, the edit commands in a text fi
   let m = await last();
   expect(m.editable).toBe(false);
   expect(m.items.map((i) => i.name)).toEqual(expect.arrayContaining(['back', 'reload', 'saveAs', 'print']));
-  expect(kept(m)).toEqual(['inspectElement']);
+  expect(kept(m)).toEqual([]);
+  expect(m.inspect).toBe(false);
   expect(m.handled).toBe(true);
 
   // A text field: the edit commands, nothing that navigates or prints.
@@ -337,7 +339,7 @@ test('WebView2’s own menu: nothing on plain UI, the edit commands in a text fi
   expect(m.editable).toBe(true);
   expect(kept(m)).toEqual(expect.arrayContaining(['cut', 'copy', 'paste', 'selectAll']));
   for (const name of kept(m)) {
-    expect(['undo', 'redo', 'cut', 'copy', 'paste', 'pasteAndMatchStyle', 'selectAll', 'emoji', 'spellcheck', 'inspectElement']).toContain(name);
+    expect(['undo', 'redo', 'cut', 'copy', 'paste', 'pasteAndMatchStyle', 'selectAll', 'emoji', 'spellcheck']).toContain(name);
   }
   // Test mode puts no native menu on screen at all.
   expect(m.handled).toBe(true);

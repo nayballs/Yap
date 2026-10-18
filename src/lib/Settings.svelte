@@ -46,6 +46,7 @@
   import { meetingDetect } from './meetingDetect.svelte.js';
   import CallAppIcon from './CallAppIcon.svelte';
   import { renderMarkdown } from './markdown.js';
+  import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
   // (OpenWhispr SettingsModal-style) instead of filling the window. The parent
@@ -1211,6 +1212,43 @@
     await onLocalModelChange();
   }
 
+  // The trash button and the card's right-click Delete… ask first, as the
+  // speech models do.
+  let curatedEls = $state({});
+  function askDeleteCurated(m) {
+    askConfirm({
+      title: `Delete ${m.display}?`,
+      body: `The ${fmtLlmSize(m.sizeMb)} download leaves this PC. You can download it again at any time.`,
+      run: () => deleteCurated(m),
+      returnFocus: curatedEls[m.id],
+    });
+  }
+
+  // A local model card's right-click menu (ui/contextMenu.svelte.js): what
+  // its buttons do — Download, or Use — and Delete…. Nothing while it
+  // downloads, or with cleanup off (its buttons are off then too).
+  function curatedMenu(e, m) {
+    const isActive = m.installed && activeLocalFile === m.filename;
+    if (downloadingId === m.id) return;
+    const off = !cfg.postProcessEnabled;
+    openContextMenu(
+      e,
+      [
+        !m.installed
+          ? { label: 'Download', icon: 'download', disabled: off || !!downloadingId, onselect: () => downloadCurated(m) }
+          : null,
+        m.installed && !isActive
+          ? { label: 'Use', icon: 'use', disabled: off || localSwitching, onselect: () => activateCurated(m) }
+          : null,
+        m.installed && !isActive ? { separator: true } : null,
+        m.installed && !isActive
+          ? { label: 'Delete…', icon: 'trash', danger: true, onselect: () => askDeleteCurated(m) }
+          : null,
+      ],
+      { label: m.display, row: e.type === 'keydown' ? e.target : curatedEls[m.id] }
+    );
+  }
+
   // Delete a downloaded curated model; if it was active, fall back to default.
   async function deleteCurated(m) {
     localError = '';
@@ -2297,7 +2335,16 @@
                   {#each familyModels as m (m.id)}
                     {@const isActive = m.installed && activeLocalFile === m.filename}
                     {@const isDownloading = downloadingId === m.id}
-                    <div class="lb-card" class:sel={isActive}>
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div
+                      class="lb-card"
+                      class:sel={isActive}
+                      class:menuopen={menuOpenFor(curatedEls[m.id])}
+                      bind:this={curatedEls[m.id]}
+                      tabindex="-1"
+                      oncontextmenu={(e) => curatedMenu(e, m)}
+                      onkeydown={(e) => menuKey(e, (k) => curatedMenu(k, m))}
+                    >
                       <span class="lb-dot" class:on={isActive}></span>
                       {#if familyIcon(m.family)}
                         <img class="lb-brand" src={familyIcon(m.family)} alt="" aria-hidden="true" />
@@ -2328,7 +2375,7 @@
                           <span class="lb-activetag">✓ Active</span>
                         {:else if m.installed}
                           <button class="lb-use" onclick={() => activateCurated(m)} disabled={!cfg.postProcessEnabled || localSwitching}>Use</button>
-                          <button class="lb-del" title="Delete download" aria-label="Delete download" onclick={() => deleteCurated(m)}>
+                          <button class="lb-del" title="Delete download" aria-label="Delete download" onclick={() => askDeleteCurated(m)}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6M10 11v6M14 11v6" /></svg>
                           </button>
                         {:else}
@@ -3732,6 +3779,12 @@
   .lb-card.sel {
     border-color: var(--yap-primary-line);
     background: var(--yap-primary-wash);
+  }
+  .lb-card.menuopen {
+    border-color: var(--yap-border-hover);
+  }
+  .lb-card:focus {
+    outline: none;
   }
   .lb-dot {
     width: 7px;

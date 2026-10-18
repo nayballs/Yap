@@ -576,6 +576,33 @@ fn rate_limited_error(provider: &str, wait: Option<Duration>) -> String {
     }
 }
 
+/// Does `model` take a `temperature`? Claude 4.7 and newer (every Claude 5
+/// model too) only take their default on Anthropic's OpenAI-compatible
+/// endpoint — any other value is a 400 — so Yap leaves it out for them,
+/// whichever provider routes them (`anthropic/claude-…` on OpenRouter too).
+/// Older Claude models and every other model keep the caller's value. A
+/// Claude id whose version can't be read is treated as new: leaving the
+/// temperature out is always accepted. Pure.
+pub(crate) fn takes_temperature(model: &str) -> bool {
+    let id = model.rsplit('/').next().unwrap_or(model).to_ascii_lowercase();
+    let Some(rest) = id.strip_prefix("claude-") else {
+        return true;
+    };
+    // claude-haiku-4-5, claude-opus-4-8, claude-sonnet-4-5-20250929,
+    // claude-3-5-sonnet-20241022, anthropic/claude-haiku-4.5: the first two
+    // small numbers are the version (dates are left out).
+    let version: Vec<u32> = rest
+        .split(['-', '.'])
+        .filter_map(|p| p.parse::<u32>().ok())
+        .filter(|n| *n < 100)
+        .collect();
+    match version.as_slice() {
+        [major, minor, ..] => (*major, *minor) < (4, 7),
+        [major] => *major < 4,
+        [] => false,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn post_chat_request(
     base_url: &str,
@@ -592,10 +619,12 @@ async fn post_chat_request(
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let mut body = json!({
         "model": model,
-        "temperature": temperature,
         "stream": false,
         "messages": messages,
     });
+    if takes_temperature(model) {
+        body["temperature"] = json!(temperature);
+    }
     if let Some(t) = tools {
         body["tools"] = t.clone();
     }
@@ -654,6 +683,15 @@ async fn post_chat_request(
             }
             tracing::warn!("Rate-limited by {}: {}", provider, detail.chars().take(300).collect::<String>());
             return Err(rate_limited_error(provider, hinted));
+        }
+        // A model that only takes its default temperature (a newer one than
+        // `takes_temperature` knows): the same request again without it, once.
+        if status.as_u16() == 400
+            && detail.to_ascii_lowercase().contains("temperature")
+            && body.as_object_mut().and_then(|b| b.remove("temperature")).is_some()
+        {
+            tracing::info!("{} wants {}'s default temperature; asking again without one", provider, model);
+            continue;
         }
         let detail: String = detail.chars().take(300).collect();
         return Err(format!("HTTP {}: {}", status.as_u16(), detail));
@@ -745,6 +783,42 @@ fn strip_wrapping(s: &str) -> String {
     }
 
     t.to_string()
+}
+
+#[cfg(test)]
+mod temperature_tests {
+    use super::takes_temperature;
+
+    #[test]
+    fn newer_claude_models_get_no_temperature() {
+        // Claude 4.7 and newer, and every Claude 5 model: their default only.
+        for m in [
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-sonnet-5-5",
+            "claude-haiku-5-5",
+            "claude-opus-5-5",
+            "claude-fable-5-1",
+            "anthropic/claude-sonnet-5.5",
+            "claude-latest",
+        ] {
+            assert!(!takes_temperature(m), "{m}");
+        }
+        // Older Claude models and every other model keep it.
+        for m in [
+            "claude-haiku-4-5",
+            "claude-sonnet-4-6",
+            "claude-opus-4-6",
+            "claude-sonnet-4-5-20250929",
+            "claude-3-5-sonnet-20241022",
+            "anthropic/claude-haiku-4.5",
+            "openai/gpt-oss-20b",
+            "gpt-5-mini",
+            "qwen2.5-1.5b-instruct",
+        ] {
+            assert!(takes_temperature(m), "{m}");
+        }
+    }
 }
 
 #[cfg(test)]

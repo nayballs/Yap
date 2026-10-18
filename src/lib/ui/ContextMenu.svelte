@@ -1,17 +1,20 @@
 <script>
-  // A right-click menu of Yap's own (the Notes view's folder and note rows).
-  // Opens at the pointer — or under a row's ⋯ button, or from the keyboard
-  // (the ContextMenu key, Shift+F10) — clamped to the window. Arrow keys,
-  // Home/End and Enter work; → opens a submenu, ← or Esc goes back; Esc,
-  // Tab, a click outside, a resize or a scroll close it, and the focus goes
-  // back to `returnFocus` (the row) when it was in the menu. The pages that
-  // use it cancel the `contextmenu` event first (`openContextMenu` below), so
-  // WebView2's own menu never comes up there.
+  // Yap's right-click menu, in every window (one per window, drawn by
+  // ContextMenuHost; views open it through contextMenu.svelte.js's
+  // `openContextMenu`). Opens at the pointer — or under a row's ⋯ button, or
+  // from the keyboard (the ContextMenu key, Shift+F10) — clamped to the
+  // window. Arrow keys, Home/End and Enter work; → opens a submenu, ← or Esc
+  // goes back; Esc, Tab, a click outside, a resize or a scroll close it, and
+  // the focus goes back to `returnFocus` (the row) when it was in the menu.
+  // `openContextMenu` cancels the `contextmenu` event first, so WebView2's
+  // own menu never comes up there.
   //
-  // `items`: { label, onselect, icon?, disabled?, danger?, checked?,
-  // items? (a submenu) } | { separator: true } | { note } (a quiet line, e.g.
-  // why the items above are off). Icons: pencil, trash, folder, copy,
-  // download, check.
+  // `items`: { label, onselect, icon?, disabled?, danger?, checked?, toggle?
+  // (a checkbox item rather than a choice), items? (a submenu) } |
+  // { separator: true } | { note } (a quiet line, e.g. why the items above
+  // are off). Icons: pencil, trash, folder, copy, download, check, open,
+  // play, stop, sparkle, join, record, person, sync, unlink, signout,
+  // approx, use.
   import { tick } from 'svelte';
   import ContextMenu from './ContextMenu.svelte';
 
@@ -42,12 +45,14 @@
 
   const enabled = (it) => it && !it.separator && !it.note && !it.disabled;
 
+  let openedAt = 0;
   $effect(() => {
     if (!open) {
       subIndex = -1;
       pos = { left: 0, top: 0, ready: false };
       return;
     }
+    openedAt = performance.now();
     place();
   });
 
@@ -192,6 +197,13 @@
   function onWindowScroll(e) {
     if (!open || isSub) return;
     if (e.target?.closest?.('[data-context-menu]')) return;
+    // The right-click focusing a row half out of view scrolls it in a frame
+    // later: that's not the person scrolling away.
+    if (performance.now() - openedAt < 250) return;
+    // Something else scrolling (a thread loading beside the row) leaves the
+    // row where it was.
+    const t = e.target;
+    if (returnFocus && t?.nodeType === 1 && !t.contains(returnFocus)) return;
     close(false);
   }
   function onWindowAway() {
@@ -230,6 +242,30 @@
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" />
     {:else if name === 'check'}
       <path d="M4 12l5 5L20 6" />
+    {:else if name === 'open'}
+      <path d="M14 4h6v6" /><path d="M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+    {:else if name === 'play'}
+      <path d="M8 5.5v13l10.5-6.5z" fill="currentColor" stroke="none" />
+    {:else if name === 'stop'}
+      <rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" stroke="none" />
+    {:else if name === 'sparkle'}
+      <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
+    {:else if name === 'join'}
+      <rect x="3" y="6.5" width="12.5" height="11" rx="2" /><path d="M15.5 10.5l5-3v9l-5-3" />
+    {:else if name === 'record'}
+      <circle cx="12" cy="12" r="7.5" /><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" />
+    {:else if name === 'person'}
+      <circle cx="12" cy="8" r="3.6" /><path d="M5 20a7 7 0 0 1 14 0" />
+    {:else if name === 'sync'}
+      <path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" /><path d="M3 21v-5h5" /><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" /><path d="M21 3v5h-5" />
+    {:else if name === 'unlink'}
+      <path d="M9.5 14.5l5-5" /><path d="M7 11l-2 2a3.5 3.5 0 0 0 5 5l2-2" /><path d="M17 13l2-2a3.5 3.5 0 0 0-5-5l-2 2" />
+    {:else if name === 'signout'}
+      <path d="M9 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h4" /><path d="M16 16l4-4-4-4" /><path d="M20 12H9" />
+    {:else if name === 'approx'}
+      <path d="M4 9.5c2.5-2 5.5 2 8 0s5.5-2 8 0" /><path d="M4 15c2.5-2 5.5 2 8 0s5.5-2 8 0" />
+    {:else if name === 'use'}
+      <circle cx="12" cy="12" r="8" /><path d="M8.5 12.2l2.4 2.4 4.6-4.9" />
     {/if}
   </svg>
 {/snippet}
@@ -259,7 +295,7 @@
           class="item"
           class:danger={it.danger}
           class:open={subIndex === i}
-          role={it.checked != null ? 'menuitemradio' : 'menuitem'}
+          role={it.checked != null ? (it.toggle ? 'menuitemcheckbox' : 'menuitemradio') : 'menuitem'}
           aria-checked={it.checked != null ? !!it.checked : undefined}
           aria-disabled={it.disabled ? 'true' : undefined}
           aria-haspopup={it.items ? 'menu' : undefined}

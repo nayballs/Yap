@@ -21,6 +21,9 @@
   import { chatRequest } from './chatRequest.svelte.js';
   import { formatHotkeySpec } from './hotkeys.js';
   import { toast } from './ui/toast.svelte.js';
+  import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
+  import { copyText } from './itemMenus.js';
+  import { noteMarkdown } from './notepadText.js';
 
   // `onnavigate(view)` switches the main window's view; `onopensettings(section)`.
   let { onnavigate = () => {}, onopensettings = () => {} } = $props();
@@ -139,6 +142,90 @@
     }
   }
 
+  // ---- Right-click menus (ui/contextMenu.svelte.js, as in Notes) ----
+
+  // A meeting from the calendar: what its row offers, in its order — Open
+  // note first, then Join / Start / Switch as its buttons say.
+  let eventEls = $state({});
+  function eventMenu(e, ev) {
+    const items = [];
+    if (recordingKey === ev.key) {
+      items.push({ label: 'Open note', icon: 'open', onselect: () => openNote(meeting.noteId) });
+    } else {
+      items.push({ label: 'Open note', icon: 'open', onselect: () => eventAction(ev, 'open') });
+      if (live(ev)) {
+        items.push({ separator: true });
+        if (meeting.recording) {
+          if (ev.hasLink) items.push({ label: 'Join meeting', icon: 'join', onselect: () => eventAction(ev, 'join') });
+          items.push(
+            ev.hasLink
+              ? { label: 'Join + Switch', icon: 'record', onselect: () => eventAction(ev, 'joinSwitch') }
+              : { label: 'Switch notes', icon: 'record', onselect: () => eventAction(ev, 'switch') }
+          );
+        } else if (ev.hasLink) {
+          items.push({ label: 'Join meeting', icon: 'join', onselect: () => eventAction(ev, 'join') });
+          items.push({ label: 'Start', icon: 'record', onselect: () => eventAction(ev, 'start') });
+          items.push({ label: 'Join + Start', icon: 'record', onselect: () => eventAction(ev, 'joinStart') });
+        } else {
+          items.push({ label: 'Start', icon: 'record', onselect: () => eventAction(ev, 'start') });
+        }
+      }
+    }
+    openContextMenu(e, items, { label: `Meeting ${ev.title}`, row: eventEls[ev.key] });
+  }
+
+  // A past meeting's note: Open, Generate summary (where its row offers it),
+  // Copy as Markdown, Delete… (asked first; a recording one stops first —
+  // meeting_delete, the notepad's way).
+  let pastEls = $state({});
+  function pastMenu(e, n) {
+    const title = n.title || 'Untitled meeting';
+    openContextMenu(
+      e,
+      [
+        { label: 'Open', icon: 'open', onselect: () => openNote(n.id) },
+        !n.hasPlan && !n.recording && n.hasTalk
+          ? { label: 'Generate summary', icon: 'sparkle', onselect: () => generate(n) }
+          : null,
+        { separator: true },
+        { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyMeeting(n.id) },
+        { separator: true },
+        {
+          label: 'Delete…',
+          icon: 'trash',
+          danger: true,
+          onselect: () =>
+            askConfirm({
+              title: `Delete “${title}”?`,
+              body: n.recording
+                ? 'The recording stops first. Its transcript, your notes and the summary go for good.'
+                : 'Its transcript, your notes and the summary go for good.',
+              run: () => deleteMeeting(n.id),
+              returnFocus: pastEls[n.id],
+            }),
+        },
+      ],
+      { label: `Meeting note ${title}`, row: pastEls[n.id] }
+    );
+  }
+  async function copyMeeting(id) {
+    try {
+      await copyText(noteMarkdown(await invoke('note_get', { id })), 'Copied as Markdown');
+    } catch (e) {
+      toast({ title: "Couldn't copy", description: String(e), variant: 'destructive' });
+    }
+  }
+  async function deleteMeeting(id) {
+    try {
+      await invoke('meeting_delete', { noteId: id });
+    } catch (e) {
+      toast({ title: "Couldn't delete the meeting", description: String(e), variant: 'destructive' });
+      return false;
+    }
+    await refreshPast();
+    return true;
+  }
+
   // Past meeting notes by day ("Today, 6 Oct"), within what's shown.
   const pastGroups = $derived.by(() => {
     const groups = [];
@@ -204,10 +291,19 @@
 {#snippet row(ev)}
   {@const isLive = live(ev)}
   {@const recordingThis = recordingKey === ev.key}
-  <div class="mrow" class:live={isLive} role="listitem">
+  <div
+    class="mrow"
+    class:live={isLive}
+    class:menuopen={menuOpenFor(eventEls[ev.key])}
+    role="listitem"
+    oncontextmenu={(e) => eventMenu(e, ev)}
+  >
     <button
       class="mopen"
+      bind:this={eventEls[ev.key]}
+      aria-haspopup="menu"
       onclick={() => eventAction(ev, 'open')}
+      onkeydown={(e) => menuKey(e, (k) => eventMenu(k, ev))}
       title={ev.start > now ? 'Open its note, ready for the meeting' : 'Open its note'}
     >
       <span class="mtime">
@@ -354,13 +450,24 @@
               {#each g.notes as n (n.id)}
                 <!-- The title opens the note (and the whole row, for the
                      pointer); "Generate summary" is a button of its own. -->
-                <div class="prow" role="listitem">
+                <div
+                  class="prow"
+                  class:menuopen={menuOpenFor(pastEls[n.id])}
+                  role="listitem"
+                  oncontextmenu={(e) => pastMenu(e, n)}
+                >
                   <span class="picon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h4" /></svg>
                   </span>
                   <span class="pmain">
                     <span class="ptitle">
-                      <button class="popen" onclick={() => openNote(n.id)}>{n.title || 'Untitled meeting'}</button>
+                      <button
+                        class="popen"
+                        bind:this={pastEls[n.id]}
+                        aria-haspopup="menu"
+                        onclick={() => openNote(n.id)}
+                        onkeydown={(e) => menuKey(e, (k) => pastMenu(k, n))}
+                      >{n.title || 'Untitled meeting'}</button>
                       {#if n.recording}<span class="recpill small"><span class="recdot" aria-hidden="true"></span>Recording</span>{/if}
                       {#if n.hasPlan}<span class="tag plan">Action plan</span>{/if}
                     </span>
@@ -372,6 +479,17 @@
                       {/if}
                     </span>
                   </span>
+                  <!-- Its menu without right-clicking (as in Notes). -->
+                  <button
+                    class="rowmore"
+                    title="More"
+                    aria-label={`More for ${n.title || 'Untitled meeting'}`}
+                    aria-haspopup="menu"
+                    data-more
+                    onclick={(e) => pastMenu(e, n)}
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
+                  </button>
                 </div>
               {/each}
             </div>
@@ -847,8 +965,49 @@
     border-radius: var(--yap-r);
     transition: background var(--yap-dur) ease;
   }
-  .prow:hover {
+  .prow:hover,
+  .prow.menuopen {
     background: var(--yap-s3);
+  }
+  /* The ⋯ on a past meeting (its menu without right-clicking), as in Notes:
+     shown on hover, on focus and while its menu is open. */
+  .rowmore {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    width: 26px;
+    height: 26px;
+    margin-left: auto;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    border: none;
+    border-radius: var(--yap-r-sm);
+    background: none;
+    color: var(--yap-muted);
+    cursor: pointer;
+    opacity: 0;
+  }
+  .rowmore:hover {
+    background: var(--yap-raised);
+    color: var(--yap-fg);
+  }
+  .rowmore:focus-visible {
+    opacity: 1;
+    outline: 1.5px solid var(--yap-primary-line);
+    outline-offset: -1px;
+  }
+  .rowmore svg {
+    width: 14px;
+    height: 14px;
+  }
+  .prow:hover .rowmore,
+  .prow:focus-within .rowmore,
+  .prow.menuopen .rowmore {
+    opacity: 1;
+  }
+  .mrow.menuopen {
+    border-color: var(--yap-border-hover);
   }
   .prow:has(.popen:focus-visible) {
     box-shadow: 0 0 0 3px var(--yap-primary-wash);

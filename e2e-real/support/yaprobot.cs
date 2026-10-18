@@ -27,12 +27,17 @@
 //                                 diagnosing a fit
 //   yaprobot yapwindow <pid>      the robot's own Yap's main window (the
 //                                 largest visible window of that process)
-//   yaprobot rightclick <hwnd> <pid> <x> <y>   a real right-click at CSS
-//                                 point (x, y) of that Yap window (in front,
-//                                 the point on it), then the windows of
+//   yaprobot rightclick <hwnd> <pid> <x> <y> [shift]   a real right-click
+//                                 at CSS point (x, y) of that Yap window (in
+//                                 front, the point on it; with `shift`, Shift
+//                                 held through it), then the windows of
 //                                 Yap's process tree (WebView2's included)
 //                                 that came up — a context menu — closed
 //                                 again with Esc; the pointer goes back
+//   yaprobot devtools <hwnd> <pid>   F12 in that Yap window (in front), then
+//                                 the windows of Yap's process tree that
+//                                 came up — DevTools — closed again
+//                                 (WM_CLOSE)
 //
 // Every command prints one JSON object. Nothing here reads or prints the
 // title or text of a window the test didn't open.
@@ -149,8 +154,10 @@ static class Program {
                 case "rightclick":
                     Print(RightClick(new IntPtr(long.Parse(args[1])), uint.Parse(args[2]),
                         double.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture),
-                        double.Parse(args[4], System.Globalization.CultureInfo.InvariantCulture)));
+                        double.Parse(args[4], System.Globalization.CultureInfo.InvariantCulture),
+                        args.Length > 5 && args[5] == "shift"));
                     return 0;
+                case "devtools": Print(DevTools(new IntPtr(long.Parse(args[1])), uint.Parse(args[2]))); return 0;
                 default: throw new ArgumentException("unknown command " + args[0]);
             }
         } catch (Exception e) {
@@ -355,7 +362,7 @@ static class Program {
         return Obj("hwnd", (long)best, "title", Native.Title(best));
     }
 
-    static Dictionary<string, object> RightClick(IntPtr h, uint pid, double x, double y) {
+    static Dictionary<string, object> RightClick(IntPtr h, uint pid, double x, double y, bool shift) {
         Native.SetProcessDpiAwarenessContext(new IntPtr(-4)); // per-monitor v2: physical pixels
         uint owner;
         Native.GetWindowThreadProcessId(h, out owner);
@@ -376,6 +383,12 @@ static class Program {
         if (Native.Root(Native.GetForegroundWindow()) != h) return Obj("error", "Yap's window lost the focus");
         Native.SetCursorPos(pt.X, pt.Y);
         Thread.Sleep(60);
+        // Shift down first (a developer's Shift+right-click), up once the
+        // menu had its time to come.
+        if (shift) {
+            Native.SendInput(1, new[] { Key(0x10, false) }, Marshal.SizeOf(typeof(Native.INPUT)));
+            Thread.Sleep(40);
+        }
         var click = new Native.INPUT[2];
         click[0].type = 0;
         click[0].u.mi = new Native.MOUSEINPUT { dwFlags = 0x0008 }; // right down
@@ -383,6 +396,7 @@ static class Program {
         click[1].u.mi = new Native.MOUSEINPUT { dwFlags = 0x0010 }; // right up
         Native.SendInput(2, click, Marshal.SizeOf(typeof(Native.INPUT)));
         Thread.Sleep(900);
+        if (shift) Native.SendInput(1, new[] { Key(0x10, true) }, Marshal.SizeOf(typeof(Native.INPUT)));
         var after = Shown(pids);
         var came = new List<object>();
         foreach (var kv in after) if (!before.ContainsKey(kv.Key)) {
@@ -400,6 +414,40 @@ static class Program {
         }
         Native.SetCursorPos(back.X, back.Y);
         return Obj("ok", true, "popups", came, "closed", closed, "x", pt.X, "y", pt.Y);
+    }
+
+    /// F12 in the robot's own Yap window (in front): what came up in Yap's
+    /// process tree (DevTools, in a debug build) — closed again.
+    static Dictionary<string, object> DevTools(IntPtr h, uint pid) {
+        uint owner;
+        Native.GetWindowThreadProcessId(h, out owner);
+        if (owner != pid) return Obj("error", "not the robot's Yap");
+        var focus = Focus(h);
+        if (!(bool)focus["ok"]) return Obj("error", "Yap's window didn't come to the front");
+        var pids = Tree(pid);
+        var before = Shown(pids);
+        if (Native.Root(Native.GetForegroundWindow()) != h) return Obj("error", "Yap's window lost the focus");
+        Native.SendInput(2, new[] { Key(0x7B, false), Key(0x7B, true) }, Marshal.SizeOf(typeof(Native.INPUT)));
+        var came = new List<object>();
+        var opened = new List<IntPtr>();
+        for (int i = 0; i < 40 && opened.Count == 0; i++) {
+            Thread.Sleep(100);
+            foreach (var kv in Shown(pids)) if (!before.ContainsKey(kv.Key)) {
+                Native.RECT r;
+                Native.GetWindowRect(new IntPtr(kv.Key), out r);
+                came.Add(Obj("cls", kv.Value, "w", r.Right - r.Left, "h", r.Bottom - r.Top));
+                opened.Add(new IntPtr(kv.Key));
+            }
+        }
+        foreach (var w in opened) Native.PostMessage(w, 0x0010, IntPtr.Zero, IntPtr.Zero);
+        bool closed = true;
+        for (int i = 0; i < 30; i++) {
+            Thread.Sleep(100);
+            closed = true;
+            foreach (var w in opened) if (Native.IsWindow(w) && Native.IsWindowVisible(w)) closed = false;
+            if (closed) break;
+        }
+        return Obj("ok", true, "popups", came, "closed", closed);
     }
 
     static Native.INPUT Key(ushort vk, bool up) {

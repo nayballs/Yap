@@ -435,6 +435,7 @@ pub fn run() {
             commands::chats_list,
             commands::chat_get,
             commands::chat_delete,
+            commands::chat_rename,
             commands::chat_send,
             ai_model::ai_model_status,
             ai_model::chat_set_model,
@@ -478,6 +479,8 @@ pub fn run() {
             updates::update_ack_updated,
             meeting_detect::meeting_detect_status,
             meeting_detect::meeting_detect_respond,
+            // Debug builds only (the e2e suite): not in a release build at all.
+            #[cfg(debug_assertions)]
             meeting_detect::meeting_detect_simulate,
             app_icons::meeting_app_icons,
             apps::apps_list,
@@ -505,6 +508,7 @@ pub fn run() {
             meeting_guard::meeting_checkin_respond,
             meeting_guard::meeting_checkin_status,
             commands::configure_meeting_hotkey,
+            #[cfg(debug_assertions)]
             capture::capture_affinity,
             calendar::calendar_status,
             calendar::calendar_sync,
@@ -523,7 +527,9 @@ pub fn run() {
             bar::bar_card_action,
             learn::word_suggestion_respond,
             alert::alert_action,
+            #[cfg(debug_assertions)]
             bar::bar_simulate,
+            #[cfg(debug_assertions)]
             bar::bar_debug,
             diarize::diarization_status,
             diarize::diarization_download,

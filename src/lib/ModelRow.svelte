@@ -4,6 +4,7 @@
   // with Download / Active / progress on the right and a hover-reveal delete.
   import { formatSize } from './models.js';
   import { ENGINE_PROVIDER, PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
+  import { openContextMenu, menuKey, menuOpenFor } from './ui/contextMenu.svelte.js';
 
   // status: downloadable | downloading | available | active | switching |
   // unavailable (listed, can't be installed yet: `model.note` says why).
@@ -16,16 +17,40 @@
   const icon = $derived(prov ? PROVIDER_ICONS[prov] : null);
   // Row click switches to an installed model; the Download button handles the rest.
   const rowClickable = $derived(status === 'available');
+  const canDelete = $derived(!!ondelete && (status === 'available' || (deleteActive && status === 'active')));
+
+  // Its right-click menu (ui/contextMenu.svelte.js, as everywhere): what its
+  // buttons do — Download, or Use (the row's click) — and Delete…, which
+  // asks first (the parent's dialog). Nothing while it downloads or switches.
+  let rowEl = $state(null);
+  function rowMenu(e) {
+    openContextMenu(
+      e,
+      [
+        status === 'downloadable' ? { label: 'Download', icon: 'download', onselect: () => onclick?.(model) } : null,
+        status === 'available' ? { label: 'Use', icon: 'use', onselect: () => onclick?.(model) } : null,
+        canDelete ? { separator: true } : null,
+        canDelete ? { label: 'Delete…', icon: 'trash', danger: true, onselect: () => ondelete(model) } : null,
+      ],
+      { label: model.name, row: rowEl }
+    );
+  }
 </script>
 
 <div
+  bind:this={rowEl}
   class="mrow {status}"
   class:clickable={rowClickable}
+  class:menuopen={menuOpenFor(rowEl)}
   role="button"
   tabindex="0"
   title={model.desc}
   onclick={() => rowClickable && onclick?.(model)}
-  onkeydown={(e) => e.key === 'Enter' && rowClickable && onclick?.(model)}
+  oncontextmenu={rowMenu}
+  onkeydown={(e) => {
+    if (e.key === 'Enter' && rowClickable) onclick?.(model);
+    else if (e.target === e.currentTarget) menuKey(e, rowMenu);
+  }}
 >
   <span class="dot" aria-hidden="true"></span>
 
@@ -64,7 +89,7 @@
     </button>
   {/if}
 
-  {#if ondelete && (status === 'available' || (deleteActive && status === 'active'))}
+  {#if canDelete}
     <button
       class="trash"
       title="Delete this model"
@@ -239,8 +264,16 @@
       background var(--yap-dur) ease;
   }
   .mrow:hover .trash,
+  .mrow.menuopen .trash,
   .trash:focus-visible {
     opacity: 1;
+  }
+  .mrow.menuopen {
+    border-color: var(--yap-border-hover);
+  }
+  .mrow:focus-visible {
+    outline: 1.5px solid var(--yap-primary-line);
+    outline-offset: -1px;
   }
   .trash:hover {
     color: var(--yap-danger);

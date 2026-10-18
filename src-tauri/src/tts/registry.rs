@@ -272,6 +272,8 @@ pub struct Source {
     pub dest: Dest,
 }
 
+// Only the debug-build stand-ins and the tests name a destination.
+#[cfg(any(debug_assertions, test))]
 fn dest_name(d: Dest) -> &'static str {
     match d {
         Dest::File(p) => p,

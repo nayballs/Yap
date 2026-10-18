@@ -1425,6 +1425,8 @@ pub async fn bar_card_action(app: AppHandle, id: String, action: String) -> Resu
 /// (`pointer`: a region id, or "away"), that an app is fullscreen
 /// (`fullscreen`: "none" | "borderless" | "exclusive"), that Esc was
 /// pressed, or put up a demo card (`card`: "call" | "update" | "info").
+/// Registered in debug builds only (lib.rs).
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 #[tauri::command]
 pub async fn bar_simulate(
     app: AppHandle,
@@ -1524,6 +1526,8 @@ fn demo_card(kind: &str) -> Card {
 
 /// Debug builds only: the bar window as Windows sees it — its real
 /// ex-styles, where it is, and what a click on the pill would reach.
+/// Registered in debug builds only (lib.rs).
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 #[tauri::command]
 pub fn bar_debug(app: AppHandle) -> Result<serde_json::Value, String> {
     if !cfg!(debug_assertions) {
