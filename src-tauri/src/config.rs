@@ -110,6 +110,19 @@ pub struct LlmScope {
     pub disable_thinking: bool,
 }
 
+/// A nickname for an app Yap can open (Settings → Voice Assistant → Opening
+/// apps): say `say` ("my editor") and Yap opens the app whose id is `app`
+/// (`apps.rs`: an entry of the Start menu's list). `name` is the app's name
+/// when the nickname was made, shown while the app isn't installed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppNickname {
+    pub say: String,
+    pub app: String,
+    #[serde(default)]
+    pub name: String,
+}
+
 /// A resolved cleanup plan for one dictation: the prompt body to use, plus the
 /// profile's LLM override when the matched profile carries one (`None` =
 /// use the global AI-cleanup endpoint). Produced by
@@ -424,6 +437,19 @@ pub struct YapConfig {
     /// lost (`assistant::card_on_bar`). On by default.
     #[serde(default = "default_true")]
     pub assistant_answer_card: bool,
+    /// "Let Yap open apps when you ask" (Settings → Voice Assistant → Opening
+    /// apps; `apps.rs`): "open Spotify" in Chat or to the Voice Assistant
+    /// opens an app from the Start menu's list of apps installed on this PC
+    /// — never a command, a file or a link. On by default: it's local and
+    /// only ever opens an app from that list.
+    #[serde(default = "default_true")]
+    pub open_apps: bool,
+    /// Apps Yap won't open ("Don't open this one"): their ids in that list.
+    #[serde(default)]
+    pub apps_blocked: Vec<String>,
+    /// "Say … → open …": nicknames for apps ([`AppNickname`]).
+    #[serde(default)]
+    pub app_nicknames: Vec<AppNickname>,
     /// The speech engine (`tts::ENGINES`): "kokoro" (the default: Kokoro's
     /// natural voices once downloaded, Windows voices until then) or
     /// "windows" (Windows' own voices, chosen).
@@ -716,6 +742,9 @@ impl Default for YapConfig {
             speak_when: default_speak_when(),
             talk_back_hands_free: true,
             assistant_answer_card: true,
+            open_apps: true,
+            apps_blocked: Vec::new(),
+            app_nicknames: Vec::new(),
             tts_engine: default_tts_engine(),
             tts_voice: default_tts_voice(),
             tts_windows_voice: String::new(),

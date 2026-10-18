@@ -12,6 +12,7 @@ mod ai_model;
 mod alert;
 mod app_icons;
 mod app_kind;
+mod apps;
 mod assistant;
 mod auth;
 mod bar;
@@ -479,6 +480,8 @@ pub fn run() {
             meeting_detect::meeting_detect_respond,
             meeting_detect::meeting_detect_simulate,
             app_icons::meeting_app_icons,
+            apps::apps_list,
+            apps::apps_icons,
             meeting_end::meeting_end,
             meeting_end::meeting_pause,
             meeting_end::meeting_summarise,
@@ -574,6 +577,8 @@ pub fn run() {
             commands::e2e_chat_dictation,
             #[cfg(debug_assertions)]
             assistant::e2e_assistant_ask,
+            #[cfg(debug_assertions)]
+            apps::e2e_opened_apps,
             // Robot mode only (realtest.rs): the real-app tests.
             #[cfg(debug_assertions)]
             realtest::commands::realtest_window,

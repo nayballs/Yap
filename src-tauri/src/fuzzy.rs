@@ -312,6 +312,18 @@ pub(crate) fn spelling_distance(a: &str, b: &str) -> (f64, usize) {
     (if soundex_eq(&ka, &kb) { score * 0.3 } else { score }, len)
 }
 
+/// How differently `a` and `b` are spelled, letters alone, without
+/// [`spelling_distance`]'s Soundex discount: normalised Levenshtein, 0.0 …
+/// 1.0. A cap on how far a near-miss may be (`apps.rs`: "spottify" is
+/// Spotify, "spotifire" isn't).
+pub(crate) fn plain_spelling_distance(a: &str, b: &str) -> f64 {
+    let (ka, kb) = (letters_key(a), letters_key(b));
+    if ka.is_empty() || kb.is_empty() {
+        return 1.0;
+    }
+    normalized_levenshtein(&ka, &kb)
+}
+
 /// How differently `a` and `b` sound, 0.0 … 1.0: normalised Levenshtein
 /// between their [`sound_key`]s, with the longer key's length. Catches
 /// mishearings across word boundaries that spelling can't — "cube and

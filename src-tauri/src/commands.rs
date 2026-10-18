@@ -849,7 +849,8 @@ pub(crate) struct ChatTurn {
     pub index: usize,
     pub reply: String,
     pub tools_used: Vec<String>,
-    pub model: crate::chats::ChatModel,
+    /// Who answered; `None` when Yap did itself (an app opened, `apps.rs`).
+    pub model: Option<crate::chats::ChatModel>,
 }
 
 impl ChatTurn {
@@ -868,6 +869,10 @@ impl ChatTurn {
 /// A note the tools create or change is announced as it happens, like any
 /// other note edit (`yap-note-changed` with origin "chat", then
 /// `yap-notes-changed`), so the notepad and the lists follow it live.
+///
+/// "Open Teams" and other plain requests to open an app are answered by Yap
+/// itself, before any model (`apps::plan_for`): with no AI set up, with a
+/// small local model, and without a model call at all.
 pub(crate) async fn chat_turn(
     app: &AppHandle,
     conversation_id: Option<u64>,
@@ -881,6 +886,9 @@ pub(crate) async fn chat_turn(
         return Err("Type a message first".to_string());
     }
     let cfg = config::load();
+    if let Some(plan) = crate::apps::plan_for(&text, &cfg).await {
+        return app_turn(conversation_id, &text, by_voice, asked, plan).await;
+    }
     crate::ai_model::wake_on_device(&cfg).await?;
     let (base_url, api_key, model, provider, persona, disable_thinking) =
         resolve_chat_endpoint(&cfg)?;
@@ -894,17 +902,7 @@ pub(crate) async fn chat_turn(
     .chat_model();
 
     // Conversation bookkeeping (create on first message, OpenWhispr-style).
-    let conv = match conversation_id.and_then(crate::chats::get) {
-        Some(c) => c,
-        None => {
-            let title: String = if text.chars().count() > 50 {
-                format!("{}...", text.chars().take(50).collect::<String>())
-            } else {
-                text.clone()
-            };
-            crate::chats::create(&title)
-        }
-    };
+    let conv = turn_conversation(conversation_id, &text);
     let history: Vec<(String, String)> = conv
         .messages
         .iter()
@@ -924,6 +922,10 @@ pub(crate) async fn chat_turn(
     if tools_supported {
         system.push_str("\n\nYou have access to tools. ");
         system.push_str(&crate::tools::TOOL_INSTRUCTIONS.join(" "));
+        if cfg.open_apps {
+            system.push(' ');
+            system.push_str(&crate::tools::APP_TOOL_INSTRUCTIONS.join(" "));
+        }
     }
     // Asked from the Meetings view: grounded in the latest meetings and the
     // meeting notes that match (calendar.rs).
@@ -957,6 +959,7 @@ pub(crate) async fn chat_turn(
             &model,
             &provider,
             disable_thinking,
+            cfg.open_apps,
             &notify,
         )
         .await?
@@ -976,7 +979,44 @@ pub(crate) async fn chat_turn(
         (reply, Vec::new())
     };
     let index = crate::chats::append(conv.id, "assistant", &reply, &tools_used, Some(answered_by.clone()), false)?;
-    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: answered_by })
+    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by) })
+}
+
+/// The conversation a turn goes to: `conversation_id`'s, or a new one named
+/// after the first message (first 50 chars, OpenWhispr's rule).
+fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chats::Conversation {
+    match conversation_id.and_then(crate::chats::get) {
+        Some(c) => c,
+        None => {
+            let title: String = if text.chars().count() > 50 {
+                format!("{}...", text.chars().take(50).collect::<String>())
+            } else {
+                text.to_string()
+            };
+            crate::chats::create(&title)
+        }
+    }
+}
+
+/// A turn Yap answers itself (`apps.rs`): the request saved like any
+/// question, the app opened (or why not) as the answer, with its chip. No
+/// model, so none is named.
+async fn app_turn(
+    conversation_id: Option<u64>,
+    text: &str,
+    by_voice: bool,
+    asked: impl FnOnce(u64, usize) + Send,
+    plan: crate::apps::Plan,
+) -> Result<ChatTurn, String> {
+    let conv = turn_conversation(conversation_id, text);
+    let user_index = crate::chats::append(conv.id, "user", text, &[], None, by_voice)?;
+    asked(conv.id, user_index);
+    let answer = tauri::async_runtime::spawn_blocking(move || crate::apps::carry_out(&plan))
+        .await
+        .map_err(|e| e.to_string())?;
+    let tools_used = vec![answer.chip];
+    let index = crate::chats::append(conv.id, "assistant", &answer.reply, &tools_used, None, false)?;
+    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply: answer.reply, tools_used, model: None })
 }
 
 /// Send one chat turn from the Chat view ([`chat_turn`]). Returns `{

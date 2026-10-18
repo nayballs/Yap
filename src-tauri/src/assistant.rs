@@ -32,7 +32,9 @@
 //!    Esc. Pressing the shortcut again asks a follow-up in the same
 //!    conversation.
 //!
-//! No AI model set up, or the model failed: an alert (`alert.rs`, through
+//! "Open Teams" needs no model: Yap opens the app itself and says "Opening
+//! Microsoft Teams." (`apps.rs`, through `chat_turn`). Otherwise, no AI
+//! model set up, or the model failed: an alert (`alert.rs`, through
 //! the notice policy) with Open settings (Language Models → Chat & Voice
 //! Assistant). No STT model or no mic: the dictation's own messages.
 //!
@@ -318,10 +320,14 @@ fn failed_alert(why: &str) -> crate::alert::Alert {
 
 async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     let cfg = crate::config::load();
-    if let Err(why) = crate::commands::resolve_chat_endpoint(&cfg) {
-        crate::alert::show_soon(&app, no_model_alert(&why));
-        give_up(&app, generation);
-        return;
+    // "Open Teams" needs no model: Yap opens it and says so (apps.rs).
+    let opens_an_app = crate::apps::plan_for(&question, &cfg).await.is_some();
+    if !opens_an_app {
+        if let Err(why) = crate::commands::resolve_chat_endpoint(&cfg) {
+            crate::alert::show_soon(&app, no_model_alert(&why));
+            give_up(&app, generation);
+            return;
+        }
     }
     let viewing = view();
     let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chats::get(id).is_some());
