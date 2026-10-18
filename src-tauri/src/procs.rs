@@ -103,6 +103,27 @@ pub fn family(pid: u32, since: u64) -> Vec<u32> {
     out
 }
 
+/// Tie a helper program Yap started (the on-device AI model's llamafile, the
+/// speaker engine, eSpeak) to this Yap, so it never outlives it: it goes in a
+/// job object that only Yap holds, set to end everything in it when it
+/// closes, and Windows closes it as Yap's process ends however it ends —
+/// Quit, a crash, End task, the updater's exit. (`shutdown_cleanup` stops
+/// them politely first on a normal quit; this is for every other way out.)
+/// Programs the helper starts are in the job too. Only helpers: an app Yap
+/// opens for you, a link's browser or an installer is never put in it.
+/// Best-effort: when Windows refuses (logged), the startup orphan sweep
+/// (`local_llm::kill_orphans`) is the fallback.
+#[cfg(windows)]
+pub fn end_with_yap(child: &std::process::Child) {
+    use std::os::windows::io::AsRawHandle;
+    let Some(job) = imp::yap_job() else { return };
+    if let Err(e) = imp::assign(job, child.as_raw_handle()) {
+        tracing::warn!("couldn't tie helper process {} to Yap: {e}", child.id());
+    }
+}
+#[cfg(not(windows))]
+pub fn end_with_yap(_child: &std::process::Child) {}
+
 #[cfg(windows)]
 mod imp {
     use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
@@ -202,11 +223,57 @@ mod imp {
             killed
         }
     }
+
+    use std::ffi::c_void;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    /// A new job that ends every process in it when its last handle closes.
+    pub fn kill_on_close_job() -> windows::core::Result<HANDLE> {
+        unsafe {
+            let job = CreateJobObjectW(None, windows::core::PCWSTR::null())?;
+            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if let Err(e) = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            ) {
+                let _ = CloseHandle(job);
+                return Err(e);
+            }
+            Ok(job)
+        }
+    }
+
+    /// Yap's own job for its helpers, made once and never closed (Windows
+    /// closes it with the process). The handle is kept as a number: HANDLE
+    /// isn't Sync.
+    pub fn yap_job() -> Option<HANDLE> {
+        static JOB: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+        let raw = *JOB.get_or_init(|| match kill_on_close_job() {
+            Ok(job) => Some(job.0 as usize),
+            Err(e) => {
+                tracing::warn!("couldn't make the job that ends Yap's helpers with it: {e}");
+                None
+            }
+        });
+        raw.map(|h| HANDLE(h as *mut c_void))
+    }
+
+    pub fn assign(job: HANDLE, process: std::os::windows::io::RawHandle) -> windows::core::Result<()> {
+        unsafe { AssignProcessToJobObject(job, HANDLE(process)) }
+    }
 }
 
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
 
     #[test]
     fn sees_this_process_and_its_parent() {
@@ -233,5 +300,107 @@ mod tests {
     #[test]
     fn no_orphans_of_a_name_nobody_runs() {
         assert!(orphaned("definitely-not-running-yap-test.exe").is_empty());
+    }
+
+    /// A long-running stand-in helper (ping, 30 s), no window, no output.
+    fn helper() -> std::process::Child {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("ping.exe")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .expect("ping starts")
+    }
+
+    fn ends_within(child: &mut std::process::Child, secs: u64) -> bool {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+        while std::time::Instant::now() < until {
+            if child.try_wait().ok().flatten().is_some() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        false
+    }
+
+    /// What happens to a helper when Yap's process ends (any way): its job's
+    /// last handle closes and Windows ends it. Shown with a job of its own,
+    /// so the test runner doesn't have to die to prove it.
+    #[test]
+    fn a_helper_ends_when_its_job_closes() {
+        use std::os::windows::io::AsRawHandle;
+        let job = imp::kill_on_close_job().expect("job");
+        let mut child = helper();
+        imp::assign(job, child.as_raw_handle()).expect("assigned");
+        assert!(!ends_within(&mut child, 0), "still running before the job closes");
+        unsafe {
+            let _ = CloseHandle(job);
+        }
+        assert!(ends_within(&mut child, 5), "the helper ended with its job");
+    }
+
+    #[test]
+    fn helpers_go_in_yaps_job() {
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::System::JobObjects::IsProcessInJob;
+        let mut child = helper();
+        end_with_yap(&child);
+        let job = imp::yap_job().expect("Yap's job");
+        let mut inside = windows::core::BOOL(0);
+        unsafe { IsProcessInJob(HANDLE(child.as_raw_handle()), Some(job), &mut inside) }.expect("asked");
+        assert!(inside.as_bool());
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    /// The stand-in Yap for the test below: run as its own process, it ties
+    /// a helper to itself, says the helper's pid and waits to be ended.
+    /// (A no-op in a normal test run.)
+    #[test]
+    fn stand_in_yap() {
+        if std::env::var_os("YAP_STAND_IN_YAP").is_none() {
+            return;
+        }
+        let mut child = helper();
+        end_with_yap(&child);
+        println!("helper-pid={}", child.id());
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        // (Ended before this, by the test.)
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    /// Yap ended the hard way (End task, a crash): its helper goes with it,
+    /// no clean-up code needed.
+    #[test]
+    fn a_helper_ends_when_yap_is_ended() {
+        use std::io::BufRead;
+        let mut yap = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["procs::tests::stand_in_yap", "--exact", "--nocapture", "--test-threads=1"])
+            .env("YAP_STAND_IN_YAP", "1")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("stand-in Yap starts");
+        let out = std::io::BufReader::new(yap.stdout.take().unwrap());
+        let pid: u32 = out
+            .lines()
+            .map_while(Result::ok)
+            .find_map(|l| l.split("helper-pid=").nth(1).and_then(|p| p.trim().parse().ok()))
+            .expect("the stand-in says its helper's pid");
+        assert!(imp::live_image_name(pid).is_some(), "the helper runs while Yap does");
+        yap.kill().expect("Yap ended (TerminateProcess, as End task)");
+        let _ = yap.wait();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while imp::live_image_name(pid).is_some() && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if imp::live_image_name(pid).is_some() {
+            kill(pid);
+            panic!("the helper outlived Yap");
+        }
     }
 }

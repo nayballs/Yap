@@ -104,7 +104,10 @@ fn spawn(files: &EngineFiles, every_ms: u64) -> Result<Child, String> {
         const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
         cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
     }
-    cmd.spawn().map_err(|e| format!("couldn't start the speaker engine: {e}"))
+    let child = cmd.spawn().map_err(|e| format!("couldn't start the speaker engine: {e}"))?;
+    // Ends with Yap, however Yap ends.
+    crate::procs::end_with_yap(&child);
+    Ok(child)
 }
 
 /// The child's stderr (its own and the runtime's progress lines) into the

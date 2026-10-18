@@ -259,6 +259,8 @@ pub async fn start() -> Result<String, String> {
     let child = cmd
         .spawn()
         .map_err(|e| format!("failed to launch llamafile: {}", e))?;
+    // The model never keeps running after Yap: a crash or End task ends it too.
+    crate::procs::end_with_yap(&child);
     *CHILD.lock().unwrap() = Some(child);
     PORT.store(port, Ordering::SeqCst);
     READY.store(false, Ordering::SeqCst);
