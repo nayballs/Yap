@@ -775,6 +775,18 @@ async fn post_chat_request(
         if let Some(why) = tool_call_rejection(status.as_u16(), &detail) {
             return Err(call.failed(format!("{TOOL_CALL_REJECTED}{why}")));
         }
+        // A model that takes tools on Chat Completions only with its
+        // reasoning off (OpenAI's GPT-6 family says so): the same request
+        // again with `reasoning_effort: "none"`, once.
+        if status.as_u16() == 400
+            && body.get("tools").is_some()
+            && body.get("reasoning_effort").is_none()
+            && detail.to_ascii_lowercase().contains("reasoning")
+        {
+            body["reasoning_effort"] = json!("none");
+            tracing::info!("{} takes tools from {} only with reasoning off; asking again so", model, provider);
+            continue;
+        }
         let detail: String = detail.chars().take(300).collect();
         return Err(call.failed(format!("HTTP {}: {}", status.as_u16(), detail)));
     };

@@ -64,8 +64,9 @@ pub const CONTEXT_TOKENS: u32 = 8192;
 /// The server's **host prompt cache**, MiB: **off**. llama.cpp's default
 /// (8 GB) saves every idle slot's prompt to RAM and clears the slot when
 /// another request starts, then copies it back for the next request that
-/// shares it. Over a model evaluation the Qwen3.5-4B server grew from 4.1
-/// to 6.7 GB with it, and the copy back is slow: a dictation's cleanup
+/// shares it. Over a model evaluation on the processor a 4B server
+/// (Qwen3-4B) peaked at 6.7 GB against llama.cpp's projected 4.1 GB with it
+/// (Qwen3.5-4B: 4.4 GB, 3.85 GB without), and the copy back is slow: a dictation's cleanup
 /// right after a Chat turn took **1.3–1.4 s instead of 0.13 s** on the 1.5B
 /// on an RTX 5070 Ti (0.7 s instead of 0.33 s on the 4B; 1.35 s instead of
 /// 0.85 s on a processor), every time (`yap.exe eval --cleanup`,

@@ -226,14 +226,19 @@ pub fn local_model_uses_tools(model: &str) -> bool {
     size >= LOCAL_TOOL_MIN_PARAMS_B
 }
 
-/// Cloud providers always support tools; local (self-hosted) and on-device
-/// models by [`local_model_uses_tools`].
+/// Cloud providers always support tools — unless the provider's own model
+/// list says this model can't (Groq's `supported_features`, OpenRouter's
+/// `supported_parameters`, `model_catalog.rs`); local (self-hosted) and
+/// on-device models by [`local_model_uses_tools`].
 pub fn supports_tools(provider: &str, model: &str) -> bool {
     if let Some(forced) = crate::eval::tools_forced() {
         return forced; // a model evaluation's --tools on|off
     }
     match provider {
-        "groq" | "anthropic" | "openai" | "gemini" | "openrouter" | "custom" => true,
+        "groq" | "anthropic" | "openai" | "gemini" | "openrouter" => {
+            crate::model_catalog::tools_for(provider, model) != Some(false)
+        }
+        "custom" => true,
         _ => local_model_uses_tools(model),
     }
 }

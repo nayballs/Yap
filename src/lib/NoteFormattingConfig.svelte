@@ -63,7 +63,7 @@
       </p>
     </div>
 
-    <ScopeProviderConfig {scope} {cfg} disabled={!enabled} />
+    <ScopeProviderConfig {scope} {cfg} disabled={!enabled} scopeKey="noteFormatting" />
 
     <div class="sep"></div>
 
