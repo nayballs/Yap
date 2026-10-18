@@ -29,14 +29,14 @@ Nathan's PC: `YAP_EVAL_TARGET_DIR=E:/yap-builds/evals`, `--out E:/yap-builds/eva
 | Option | |
 |---|---|
 | `--model <spec>` | Repeat to compare. `groq:<model>`, `openai:<model>`, `anthropic:<model>`, `openrouter:<model>`, `gemini:<model>`, `custom:<base_url>,<model>`, `local:<gguf>` (below). |
-| `--keys-from-yap` | Use the API keys saved in `%APPDATA%\yap\config.json` (read straight from the file, **read-only**; never through `config::load`, which may save). Else `GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `YAP_EVAL_CUSTOM_KEY`. |
+| `--keys-from-yap` | Use the API keys saved in `%APPDATA%\yap\config.json` (read straight from the file, **read-only**; never through `config::load`, which may save): the AI providers' and web search's (`webSearchKeys`: Exa, Tavily). Else `GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `YAP_EVAL_CUSTOM_KEY`, `EXA_API_KEY`, `TAVILY_API_KEY`. |
 | `--only a,b` / `--tag t` | Scenarios whose name contains `a` or `b` / that carry tag `t`. With `--raw`, `--only` picks requests by name. |
 | `--tools on\|off` | Treat the model as able (or not) to call tools, whatever `tools::supports_tools` says (its ≥ 4B rule for local models). Default: Yap's rule. |
 | `--tokens-per-minute <n>` | Pacing budget. Default **8,000 for Groq** (its free plan's limit), none otherwise. The pacing also reads Groq's `x-ratelimit-remaining-tokens` / `-reset-tokens` and waits for the window to refill, so a run doesn't spend minutes in 429s. Time held back is reported. |
 | `--max-total-tokens <n>` | Stop starting scenarios on a model past this many tokens (a free plan's daily cap: Groq's gpt-oss-20b allows 200k a day). |
 | `--timeout <secs>` | Per model call, instead of Yap's own (20 s for Chat). Leave it to measure what Yap does; raise it to measure what a slow model *could* do. |
 | `--repeat <n>` | Run each scenario n times (models answer differently at temperature 0.5). |
-| `--include-needs-web` | Also run scenarios marked `needs_web` (skipped until Yap has web search). |
+| `--no-web` | Skip the web scenarios (`needs_web` / `web`); live ones go on the internet (below). |
 | `--raw <file>` | Send hand-written requests (see below) instead of, or before, scenarios. |
 
 ### Local models
@@ -78,10 +78,18 @@ with the Chat persona Settings sets by default. Only the side effects are swappe
   `"apps": "this_pc"` reads this PC's Start menu instead (read-only, in a child process
   outside test mode: `yap.exe eval --dump-apps`).
 - **Clipboard**: the `copy_to_clipboard` tool is recorded, never run (`eval::intercept_tool`).
+- **Web search** (`web.rs`), only in web scenarios ("Look things up on the web" on), fresh
+  caches each: **live** by default (`eval::web_live`: the real Exa/Tavily with the run's key,
+  else the keyless Wikipedia + game-wiki lookup; `read_page` reads real pages with its usual
+  guards), or a **stand-in** (`"web": {"mode": "standin"}`): a local server
+  (`eval/standin.rs`) answers the search with the scenario's `results` and serves its `pages`
+  through `web.rs`' test-mode addresses (`YAP_EXA_URL`, `YAP_TAVILY_URL`,
+  `YAP_WEB_STANDIN`) — nothing goes on the internet; its requests are logged
+  (`web_standin`).
 - No window, tray, hook, audio or browser.
 
-The hooks in the app's code (`llm.rs`, `tools.rs`, `config.rs`, `notes.rs`, `portable.rs`)
-are no-ops outside a run, and compiled to nothing in release builds.
+The hooks in the app's code (`llm.rs`, `tools.rs`, `config.rs`, `notes.rs`, `portable.rs`,
+`web.rs`) are no-ops outside a run, and compiled to nothing in release builds.
 
 ## Where the logs go
 
@@ -109,7 +117,14 @@ isn't logged.
   "name": "apps-python-second-one",          // unique; --only matches on it
   "description": "…",
   "tags": ["apps", "follow-up"],
-  "needs_web": false,                         // true: skipped until Yap has web search
+  "needs_web": false,                         // true: "Look things up on the web" on (live)
+  "web": {                                    // optional (implies web on)
+    "mode": "standin",                        // "live" (default) or "standin"
+    "service": "exa",                         // or "tavily" (default: the one the run has a key for)
+    "key": false,                             // false: the keyless lookup even with a key
+    "results": [{ "title": "…", "url": "https://tips.example/x", "text": "…", "published": "2026-09-30" }],
+    "pages": { "https://tips.example/x": "<html>…</html>" }   // stand-in pages read_page gets
+  },
   "voice": false,                             // every turn asked by voice (Voice Assistant)
   "tools": "on",                              // optional: force tools on/off for this scenario
   "settings": {                               // optional
@@ -150,7 +165,8 @@ field is an error, so a typo can't silently skip a check):
 | `answer_matches`, `answer_not_matches` | A regex (case-insensitive). |
 | `max_words` | The answer's length. |
 | `opened`, `opened_any`, `opened_only`, `opened_none` | Apps "opened": all of, one of, nothing but, nothing. |
-| `no_false_claims` | The answer doesn't say an app was opened ("Opening Spotify", "I'll launch…", "Spotify has launched"), a note saved or changed, or text copied, when it wasn't. |
+| `no_false_claims` | The answer doesn't say an app was opened ("Opening Spotify", "I'll launch…", "Spotify has launched"), a note saved or changed, or text copied, when it wasn't; nor cites `[1]` with no web source behind it. Offers and questions ("let me know and I'll open it") aren't claims. |
+| `min_sources`, `sources_any` | The answer came with at least n web sources (Chat's Sources row); one of their addresses holds one of these. |
 | `clipboard_contains`, `clipboard_untouched` | What the clipboard tool was handed. |
 | `notes` | `[{ "title", "exists", "folder", "contains", "not_contains" }]`, as the notes are afterwards. |
 | `folders`, `notes_count` | The folders afterwards, exactly (no invented ones); how many notes. |

@@ -2401,7 +2401,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   settings in memory (`eval::config`, read by `config::load`; `save` a no-op —
   keys never reach a file), notes in memory (`notes::eval_reset`), test mode
   for apps (opens recorded), the clipboard tool recorded
-  (`eval::intercept_tool`). Logs per run in `<out>/<stamp>-<label>/`:
+  (`eval::intercept_tool`); web scenarios (`needs_web` / `web`) search live
+  (`eval::web_live` lets `web::Endpoints::current` use the real services in
+  test mode: the run's Exa/Tavily key, else the keyless wikis) or against a
+  stand-in server (`eval/standin.rs`, through `YAP_EXA_URL` /
+  `YAP_TAVILY_URL` / `YAP_WEB_STANDIN`). Logs per run in `<out>/<stamp>-<label>/`:
   `transcript.jsonl` (every request body incl. tool schemas, every response,
   429s/waits, tool calls + results, keys redacted), `summary.md`/`.json`.
   Paces Groq to its 8k tokens/min (and its rate-limit headers). `--raw` sends
