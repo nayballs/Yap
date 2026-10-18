@@ -8,16 +8,27 @@
 //! (`ICoreWebView2_11`) that keeps only the editing commands ([`keep`]):
 //! undo/redo, cut/copy/paste, paste as plain text, select all, emoji and the
 //! spelling items (suggestions, add to dictionary), with the separators
-//! between them that still separate something. Debug builds also keep
-//! Inspect (developers use it; not with `YAP_E2E_NO_INSPECT=1`, which the
-//! real-app robot test uses to see a release build's menus). Nothing left — a right-click on plain UI, a
-//! button, the bar — and the event is marked handled: no menu at all. A
-//! failure reading the menu shows none either (fail closed).
+//! between them that still separate something. Nothing left — a right-click
+//! on plain UI, a button, the bar — and the event is marked handled: no menu
+//! at all. A failure reading the menu shows none either (fail closed).
 //!
 //! So: plain UI → nothing; a text field → its edit menu (spelling
-//! suggestions first); selected text → Copy (+ Select all). Pages with menus
-//! of their own (the Notes view's folder and note rows, `ui/ContextMenu.svelte`)
-//! cancel the `contextmenu` event first, and WebView2 never asks.
+//! suggestions first); selected text → Copy (+ Select all). Items with
+//! actions of their own (Notes' folders and notes, Chat's conversations and
+//! messages, Home's dictations, Meetings, Dictionary rows, model rows…) open
+//! Yap's own menu (`ui/ContextMenu.svelte`, through `ui/contextMenu.svelte.js`)
+//! and cancel the `contextmenu` event first, so WebView2 never asks.
+//!
+//! **Inspect is for developers only:** a debug build keeps Inspect
+//! (`inspectElement`) when Shift is held as the menu is asked for — a
+//! Shift+right-click, anywhere (in a dev build the pages let a
+//! Shift+right-click through to here: `import.meta.env.DEV`). A plain
+//! right-click never shows it, in any build. Release builds (stable,
+//! nightly) compile the Shift check out — [`offers_inspect`] is `false`
+//! there whatever Shift says — and their webviews have DevTools off besides
+//! (wry's `devtools` attribute is false without debug assertions or tauri's
+//! `devtools` feature, which Yap doesn't enable): no Inspect, no F12 or
+//! Ctrl+Shift+I.
 //!
 //! Item names are WebView2's unlocalized `ICoreWebView2ContextMenuItem::Name`
 //! — "the English label of the menu item in lower camel case" ("saveAs",
@@ -30,8 +41,9 @@
 //! Test mode (`YAP_E2E=1`, not robot mode) never lets a native menu reach the
 //! screen: it records what the menu would have held and marks every event
 //! handled. The debug-only [`e2e_context_menus`] reports which webviews are
-//! hooked and each one's last menu (every item's name and kind, and whether
-//! it stayed), for the e2e suite and for checking the names on a new WebView2.
+//! hooked and each one's last menu (every item's name and kind, whether it
+//! stayed, and whether Shift offered Inspect), for the e2e suite and for
+//! checking the names on a new WebView2.
 
 // Elsewhere there's no WebView2 to hook: the filter and its report sit unused.
 #![cfg_attr(not(windows), allow(dead_code))]
@@ -85,13 +97,20 @@ const EDIT_ITEMS: &[&str] = &[
     "addToDictionary",
 ];
 
-/// Developer tools: kept in debug builds only ("Inspect" is
+/// Developer tools: kept only when [`offers_inspect`] says so ("Inspect" is
 /// `inspectElement`).
 const INSPECT_ITEMS: &[&str] = &["inspectElement", "inspect"];
 
 /// Whether an item stays: an editing command (or, with `inspect`, Inspect).
 pub fn allowed(name: &str, inspect: bool) -> bool {
     EDIT_ITEMS.contains(&name) || (inspect && INSPECT_ITEMS.contains(&name))
+}
+
+/// Whether a menu keeps Inspect: only in a debug build (`debug`), and only
+/// for a Shift+right-click (`shift`: held as WebView2 asks). A plain
+/// right-click never offers it, and a release build never does at all.
+pub const fn offers_inspect(debug: bool, shift: bool) -> bool {
+    debug && shift
 }
 
 /// Which items of a menu stay, as their indices in order: the [`allowed`]
@@ -118,11 +137,16 @@ pub fn keep(items: &[(&str, Kind)], inspect: bool) -> Vec<usize> {
     kept
 }
 
-/// Debug builds keep Inspect, unless test mode was started with
-/// `YAP_E2E_NO_INSPECT=1` (the robot's check of what a release build shows).
+/// This menu keeps Inspect: a debug build with Shift held right now.
+#[cfg(all(windows, debug_assertions))]
 fn keep_inspect() -> bool {
-    cfg!(debug_assertions)
-        && !(crate::e2e::active() && std::env::var("YAP_E2E_NO_INSPECT").is_ok_and(|v| v.trim() == "1"))
+    offers_inspect(true, win::shift_down())
+}
+
+/// A release build never reads Shift: no Inspect, compiled in.
+#[cfg(not(debug_assertions))]
+fn keep_inspect() -> bool {
+    offers_inspect(false, false)
 }
 
 /// Whether native menus stay off the screen entirely (plain test mode: a
@@ -160,6 +184,8 @@ struct Menu {
     /// What was right-clicked: "page", "image", "selectedText", "audio",
     /// "video".
     target: String,
+    /// Inspect was on offer (a debug build's Shift+right-click).
+    inspect: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -230,6 +256,20 @@ mod win {
 
     use super::{keep, note_hook, suppress_all, Item, Kind, Menu};
 
+    /// Debug builds: Shift is down as WebView2 asks for the menu (this
+    /// thread's key state, or the keyboard's right now: the menu is asked for
+    /// a moment after the click, with Shift still held).
+    #[cfg(debug_assertions)]
+    pub fn shift_down() -> bool {
+        #[link(name = "user32")]
+        extern "system" {
+            fn GetKeyState(vkey: i32) -> i16;
+            fn GetAsyncKeyState(vkey: i32) -> i16;
+        }
+        const VK_SHIFT: i32 = 0x10;
+        unsafe { GetKeyState(VK_SHIFT) < 0 || GetAsyncKeyState(VK_SHIFT) < 0 }
+    }
+
     thread_local! {
         /// The webviews hooked so far, by window label (WebView2 lives on the
         /// main thread, as does this). Holding each one keeps its identity
@@ -289,7 +329,8 @@ mod win {
             read.push((take_pwstr(name), Kind::from_raw(kind.0), text));
         }
         let names: Vec<(&str, Kind)> = read.iter().map(|(n, k, _)| (n.as_str(), *k)).collect();
-        let kept = keep(&names, super::keep_inspect());
+        let inspect = super::keep_inspect();
+        let kept = keep(&names, inspect);
         // Remove from the end, so the indices still to remove stay put.
         for i in (0..count).rev() {
             if !kept.contains(&(i as usize)) {
@@ -310,11 +351,13 @@ mod win {
             handled,
             editable,
             target,
+            inspect,
         };
         tracing::debug!(
             window = %label,
             items = ?menu.items.iter().map(|i| (i.name.as_str(), i.kept)).collect::<Vec<_>>(),
             handled,
+            inspect,
             "Context menu"
         );
         note_hook(label, |h| {
@@ -375,8 +418,53 @@ mod tests {
             ("inspectElement", Command),
         ];
         assert!(keep(&page, false).is_empty());
-        // A debug build keeps Inspect, and only that (no stray separator).
+        // A debug build's Shift+right-click keeps Inspect, and only that (no
+        // stray separator).
         assert_eq!(kept(&page, true), ["inspectElement"]);
+    }
+
+    #[test]
+    fn inspect_needs_a_debug_build_and_shift() {
+        let page = [
+            ("back", Command),
+            ("reload", Command),
+            ("other", Separator),
+            ("saveAs", Command),
+            ("other", Separator),
+            ("inspectElement", Command),
+        ];
+        // A plain right-click in a debug build: nothing.
+        assert!(!offers_inspect(true, false));
+        assert!(keep(&page, offers_inspect(true, false)).is_empty());
+        // A debug build's Shift+right-click: Inspect.
+        assert!(offers_inspect(true, true));
+        assert_eq!(kept(&page, offers_inspect(true, true)), ["inspectElement"]);
+        // A release build (stable, nightly): never, whatever Shift says.
+        for shift in [false, true] {
+            assert!(!offers_inspect(false, shift));
+            assert!(keep(&page, offers_inspect(false, shift)).is_empty());
+        }
+    }
+
+    #[test]
+    fn a_release_build_never_keeps_inspect() {
+        // Whatever WebView2 offers and whatever Shift says, a release build
+        // keeps no developer item: in a text field, the edit commands only.
+        let field = [
+            ("copy", Command),
+            ("paste", Command),
+            ("other", Separator),
+            ("inspectElement", Command),
+            ("inspect", Command),
+        ];
+        for shift in [false, true] {
+            let kept = kept(&field, offers_inspect(false, shift));
+            assert_eq!(kept, ["copy", "paste"]);
+        }
+        // This build's own answer, compiled in: a release build (`cargo test
+        // --release`) never offers it.
+        #[cfg(not(debug_assertions))]
+        assert!(!keep_inspect());
     }
 
     #[test]
@@ -417,7 +505,7 @@ mod tests {
                 "selectAll",
             ]
         );
-        // Debug: Inspect after one separator, the dropped submenus'
+        // Debug + Shift: Inspect after one separator, the dropped submenus'
         // separators folded into one.
         let debug = keep(&field, true);
         assert_eq!(&debug[debug.len() - 3..], [9, 14, 15]);

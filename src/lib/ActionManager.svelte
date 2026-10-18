@@ -3,8 +3,10 @@
   // a two-pane modal over the note Actions (named prompt fragments). Left:
   // action list ("Built-in" badge, hover-trash for custom, + to add). Right:
   // Name / Description / Prompt editor with Save/Update. Built-ins can be
-  // edited but not deleted.
+  // edited but not deleted. A row's right-click menu (ui/contextMenu.svelte.js,
+  // as in Notes): Edit, Delete… (asked first, as the trash button does).
   import { invoke } from '@tauri-apps/api/core';
+  import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
 
   let { open = $bindable(false), onchanged = null } = $props();
 
@@ -112,6 +114,37 @@
     }
   }
 
+  let rowEls = $state({});
+  function askRemove(a) {
+    askConfirm({
+      title: `Delete “${a.name}”?`,
+      body: 'The action goes for good. Notes it already wrote keep their text.',
+      run: () => remove(a.id),
+      returnFocus: rowEls[a.id],
+    });
+  }
+  function rowMenu(e, a) {
+    // A right-click picks it too, as a click does, unless that would lose an unsaved edit.
+    if (e.type === 'contextmenu' && !devInspect(e) && !dirty && selectedId !== a.id) selectAction(a);
+    openContextMenu(
+      e,
+      [
+        {
+          label: 'Edit',
+          icon: 'pencil',
+          onselect: () => {
+            selectAction(a);
+            setTimeout(() => nameEl?.focus(), 0);
+          },
+        },
+        { separator: true },
+        { label: 'Delete…', icon: 'trash', danger: true, disabled: a.builtin, onselect: () => askRemove(a) },
+        a.builtin ? { note: "Yap's own action: it can be edited, not deleted." } : null,
+      ],
+      { label: `Action ${a.name}`, row: rowEls[a.id] }
+    );
+  }
+
   function close() {
     open = false;
   }
@@ -139,12 +172,20 @@
         <div class="items">
           {#each actions as a (a.id)}
             <div
+              bind:this={rowEls[a.id]}
               class="item"
               class:active={selectedId === a.id && !creating}
+              class:menuopen={menuOpenFor(rowEls[a.id])}
               role="button"
               tabindex="0"
+              aria-haspopup="menu"
               onclick={() => selectAction(a)}
-              onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectAction(a)}
+              oncontextmenu={(e) => rowMenu(e, a)}
+              onkeydown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === 'Enter' || e.key === ' ') selectAction(a);
+                else menuKey(e, (k) => rowMenu(k, a));
+              }}
             >
               <svg class="spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /></svg>
               <span class="iname">{a.name}</span>
@@ -157,7 +198,7 @@
                   aria-label="Delete action"
                   onclick={(e) => {
                     e.stopPropagation();
-                    remove(a.id);
+                    askRemove(a);
                   }}
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
@@ -300,7 +341,8 @@
     border-radius: var(--yap-r);
     cursor: pointer;
   }
-  .item:hover {
+  .item:hover,
+  .item.menuopen:not(.active) {
     background: var(--yap-s2);
   }
   .item.active {
@@ -347,7 +389,8 @@
     opacity: 0;
     flex: 0 0 auto;
   }
-  .item:hover .del {
+  .item:hover .del,
+  .item.menuopen .del {
     opacity: 1;
   }
   .del:hover {

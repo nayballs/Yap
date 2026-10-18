@@ -11,7 +11,14 @@
   // "Friday." → "Monday.""), kept with the message in chats.json. v1
   // divergences (ROADMAP "AI Chat" escalating plan): no streaming (one
   // response per turn, "Thinking…" placeholder), no conversation
-  // search/archive/rename.
+  // search/archive.
+  //
+  // Right-click menus (ui/contextMenu.svelte.js, as in Notes): a conversation
+  // — also from its hover ⋯ and the ContextMenu key / Shift+F10 — has Rename
+  // (in place: Enter or leaving it saves, Esc cancels; chats.rs `rename`),
+  // Copy as Markdown (the whole conversation) and Delete… (asked first); a
+  // right-click opens it too. An answer has Copy / Copy as Markdown / Read
+  // aloud, a question Copy (itemMenus.js).
   //
   // The composer's model chip (ModelChip.svelte) says which model the next
   // message goes to and switches the Chat scope's; each answer keeps the
@@ -46,6 +53,8 @@
   import { modelLine, whereItRuns } from './aiModel.js';
   import { speech, initSpeech, readAloud as speakText, stopReading as stopSpeech } from './speech.svelte.js';
   import { formatHotkeySpec } from './hotkeys.js';
+  import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
+  import { copyText, messageItems, conversationMarkdown } from './itemMenus.js';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…".
@@ -235,15 +244,94 @@
     // A failed answer: Rust says so where it'll be seen (an alert, alert.rs).
   }
 
-  async function removeConversation(id, e) {
-    e?.stopPropagation();
+  async function removeConversation(id) {
     try {
       await invoke('chat_delete', { id });
       if (activeId === id) newChat();
-      refreshList();
-    } catch {
-      /* ignore */
+      await refreshList();
+      return true;
+    } catch (e) {
+      toast({ title: "Couldn't delete the conversation", description: String(e), variant: 'destructive' });
+      return false;
     }
+  }
+
+  // ---- Right-click menus (ui/contextMenu.svelte.js) ----
+
+  // The conversation rows, by id (the menu gives the focus back to its row).
+  let convEls = $state({});
+  // Rename in place, like Notes' folders: `{ id, value }`.
+  let renaming = $state(null);
+
+  function conversationMenu(e, c) {
+    // A right-click opens it too, as a click does (not while an answer comes).
+    if (e.type === 'contextmenu' && !devInspect(e) && !sending && activeId !== c.id) selectConversation(c.id);
+    openContextMenu(
+      e,
+      [
+        { label: 'Rename', icon: 'pencil', onselect: () => startRename(c) },
+        { separator: true },
+        { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyConversation(c.id) },
+        { separator: true },
+        { label: 'Delete…', icon: 'trash', danger: true, onselect: () => askDelete(c) },
+      ],
+      { label: `Conversation ${c.title || 'Untitled'}`, row: convEls[c.id] }
+    );
+  }
+
+  function startRename(c) {
+    renaming = { id: c.id, value: c.title || '' };
+  }
+  async function finishRename(save = true) {
+    const r = renaming;
+    if (!r) return;
+    renaming = null;
+    const before = conversations.find((c) => c.id === r.id)?.title || '';
+    const title = r.value.trim();
+    if (save && title && title !== before) {
+      try {
+        const stored = await invoke('chat_rename', { id: r.id, title });
+        conversations = conversations.map((c) => (c.id === r.id ? { ...c, title: stored } : c));
+      } catch (e) {
+        toast({ title: "Couldn't rename the conversation", description: String(e), variant: 'destructive' });
+      }
+    }
+    setTimeout(() => convEls[r.id]?.focus({ preventScroll: true }), 0);
+  }
+  function focusOnMount(el) {
+    el.focus();
+    el.select();
+  }
+
+  async function copyConversation(id) {
+    try {
+      const conv = await invoke('chat_get', { id });
+      await copyText(conversationMarkdown(conv), 'Copied as Markdown');
+    } catch (e) {
+      toast({ title: "Couldn't copy", description: String(e), variant: 'destructive' });
+    }
+  }
+
+  function askDelete(c) {
+    const count = c.messageCount || 0;
+    askConfirm({
+      title: `Delete “${c.title || 'Untitled'}”?`,
+      body:
+        count === 0
+          ? 'The conversation goes for good.'
+          : `Its ${count === 1 ? 'message goes' : `${count} messages go`} for good.`,
+      run: () => removeConversation(c.id),
+      returnFocus: convEls[c.id],
+    });
+  }
+
+  function messageMenu(e, m) {
+    const reading = !!m.id && speakingId === m.id;
+    openContextMenu(
+      e,
+      messageItems(m, { read: m.role === 'assistant' && m.id ? () => readAloud(m) : null, reading }),
+      { label: m.role === 'assistant' ? 'Answer' : 'Question', row: e.currentTarget }
+    );
   }
 
   function scrollThread() {
@@ -411,24 +499,55 @@
         {#each groups as g (g.label)}
           <div class="gcap">{g.label}</div>
           {#each g.items as c (c.id)}
-            <div
-              class="conv"
-              class:active={activeId === c.id}
-              role="button"
-              tabindex="0"
-              onclick={() => selectConversation(c.id)}
-              onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectConversation(c.id)}
-            >
-              <span class="ctitle">{c.title || 'Untitled'}</span>
-              <button
-                class="cdel"
-                title="Delete"
-                aria-label="Delete conversation"
-                onclick={(e) => removeConversation(c.id, e)}
+            {#if renaming?.id === c.id}
+              <!-- Rename in place (as Notes' folders): Enter or leaving it saves, Esc cancels. -->
+              <div class="conv renaming">
+                <input
+                  class="renameinput"
+                  aria-label={`Rename conversation ${c.title || 'Untitled'}`}
+                  maxlength="80"
+                  bind:value={renaming.value}
+                  use:focusOnMount
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') finishRename(true);
+                    if (e.key === 'Escape') {
+                      e.stopPropagation();
+                      finishRename(false);
+                    }
+                  }}
+                  onblur={() => finishRename(true)}
+                />
+              </div>
+            {:else}
+              <div
+                bind:this={convEls[c.id]}
+                class="conv"
+                class:active={activeId === c.id}
+                class:menuopen={menuOpenFor(convEls[c.id])}
+                role="button"
+                tabindex="0"
+                aria-haspopup="menu"
+                onclick={() => selectConversation(c.id)}
+                oncontextmenu={(e) => conversationMenu(e, c)}
+                onkeydown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === 'Enter' || e.key === ' ') selectConversation(c.id);
+                  else menuKey(e, (ev) => conversationMenu(ev, c));
+                }}
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
-              </button>
-            </div>
+                <span class="ctitle">{c.title || 'Untitled'}</span>
+                <button
+                  class="more"
+                  title="More"
+                  aria-label={`More for ${c.title || 'Untitled'}`}
+                  aria-haspopup="menu"
+                  data-more
+                  onclick={(e) => conversationMenu(e, c)}
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
+                </button>
+              </div>
+            {/if}
           {/each}
         {/each}
       </div>
@@ -466,7 +585,17 @@
             </div>
           {/if}
           {@const reading = m.role === 'assistant' && !!m.id && speakingId === m.id}
-          <div class="cbubble {m.role}" class:reading>
+          <!-- Focusable for its menu from the keyboard (the ContextMenu key, Shift+F10). -->
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+          <div
+            class="cbubble {m.role}"
+            class:reading
+            role="article"
+            tabindex="0"
+            aria-label={m.role === 'assistant' ? 'Answer' : 'Your question'}
+            oncontextmenu={(e) => messageMenu(e, m)}
+            onkeydown={(e) => e.target === e.currentTarget && menuKey(e, (ev) => messageMenu(ev, m))}
+          >
             {#if m.role === 'assistant'}
               <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown escapes all input -->
               <div class="cbody">{@html renderMarkdown(m.text)}</div>
@@ -652,29 +781,67 @@
   .conv.active .ctitle {
     font-weight: 600;
   }
-  .cdel {
+  .conv.menuopen {
+    background: var(--yap-s2);
+  }
+  .conv.active.menuopen {
+    background: var(--yap-primary-wash);
+  }
+  .conv:focus-visible {
+    outline: 1.5px solid var(--yap-primary-line);
+    outline-offset: -1px;
+  }
+  .conv.renaming {
+    padding: 3px 4px;
+    cursor: default;
+  }
+  .renameinput {
+    width: 100%;
+    min-width: 0;
+    height: 26px;
+    padding: 0 7px;
+    box-sizing: border-box;
+    border: 1px solid var(--yap-primary-line);
+    border-radius: var(--yap-r-sm);
+    background: var(--yap-s1);
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 12px;
+    outline: none;
+  }
+  /* The ⋯ on a row (its menu without right-clicking), as in Notes: shown on
+     hover, on focus and while its menu is open. */
+  .more {
     display: inline-flex;
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     align-items: center;
     justify-content: center;
     border: none;
     border-radius: var(--yap-r-sm);
     background: none;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
     cursor: pointer;
     opacity: 0;
     flex: 0 0 auto;
   }
-  .conv:hover .cdel {
+  .more:hover {
+    background: var(--yap-s3);
+    color: var(--yap-fg);
+  }
+  .more:focus-visible {
     opacity: 1;
+    outline: 1.5px solid var(--yap-primary-line);
+    outline-offset: -1px;
   }
-  .cdel:hover {
-    color: #ef4444;
+  .more svg {
+    width: 13px;
+    height: 13px;
   }
-  .cdel svg {
-    width: 11px;
-    height: 11px;
+  .conv:hover .more,
+  .conv:focus-within .more,
+  .conv.menuopen .more {
+    opacity: 1;
   }
 
   .thread {
@@ -758,6 +925,10 @@
     align-self: flex-start;
     background: var(--yap-s2);
     border: 1px solid var(--yap-border-subtle);
+  }
+  .cbubble:focus-visible {
+    outline: 1.5px solid var(--yap-primary-line);
+    outline-offset: 1px;
   }
   .cbody {
     margin: 0;

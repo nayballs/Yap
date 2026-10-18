@@ -18,6 +18,7 @@
   import Row from './ui/Row.svelte';
   import { account, displayName, initAccount, initials, PROVIDER_LABELS } from './account.svelte.js';
   import { openExternalLink } from './externalLinks.js';
+  import { openContextMenu, menuKey } from './ui/contextMenu.svelte.js';
 
   const RESEND_SECONDS = 30;
 
@@ -430,6 +431,18 @@
     loadDevices();
   }
 
+  // A signed-in device's menu: Sign out, as its button (none for this PC,
+  // which signs out under the profile).
+  function deviceMenu(e, device) {
+    if (device.current) return;
+    const row = e.currentTarget;
+    openContextMenu(
+      e,
+      [{ label: 'Sign out', icon: 'signout', disabled: !!deviceBusy, onselect: () => signOutDevice(device) }],
+      { label: device.label, row: e.type === 'keydown' ? e.target : row.querySelector('button') }
+    );
+  }
+
   async function signOutOthers() {
     deviceBusy = 'others';
     devicesError = '';
@@ -737,7 +750,13 @@
     <Group title="Where you're signed in">
       {#if devices}
         {#each devices as device (device.id)}
-          <div class="device">
+          <!-- Another device's right-click menu (ui/contextMenu.svelte.js): its Sign out. -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="device"
+            oncontextmenu={(e) => deviceMenu(e, device)}
+            onkeydown={(e) => menuKey(e, (k) => deviceMenu(k, device))}
+          >
             <div class="dinfo">
               <p class="dname">
                 <span class="dlabel">{device.label}</span>

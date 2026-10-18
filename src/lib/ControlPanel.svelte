@@ -36,6 +36,7 @@
   import ChatView from './ChatView.svelte';
   import { chatRequest } from './chatRequest.svelte.js';
   import IntegrationsView from './IntegrationsView.svelte';
+  import { menuOrDialogOpen } from './ui/contextMenu.svelte.js';
 
   let activeView = $state('home');
 
@@ -123,6 +124,8 @@
   }
 
   function onOverlayKeydown(e) {
+    // Esc closes a right-click menu or the confirm dialog first (ui/contextMenu.svelte.js).
+    if (e.key === 'Escape' && (e.defaultPrevented || menuOrDialogOpen())) return;
     if (e.key === 'Escape' && bellOpen) {
       bellOpen = false;
       e.stopPropagation();

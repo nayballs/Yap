@@ -5,6 +5,7 @@
   import Notepad from './lib/Notepad.svelte';
   import SplitPreview from './lib/SplitPreview.svelte';
   import Overlay from './lib/Overlay.svelte';
+  import ContextMenuHost from './lib/ui/ContextMenuHost.svelte';
 
   // The settings, onboarding, notepad and overlay windows (and the notepad's
   // on-demand split preview) all load the same SPA; pick the rendered view
@@ -46,4 +47,10 @@
   <SplitPreview />
 {:else}
   <Overlay />
+{/if}
+
+{#if isSettings || isOnboarding || isNotepad}
+  <!-- The window's one right-click menu and confirm dialog: every item with
+       actions opens them (ui/contextMenu.svelte.js). -->
+  <ContextMenuHost />
 {/if}

@@ -48,6 +48,8 @@
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
   import { openExternalLink } from './externalLinks.js';
   import { initMeetingCheckIns } from './meetingCheckIn.js';
+  import { openContextMenu, menuKey, menuOpenFor, menuOrDialogOpen } from './ui/contextMenu.svelte.js';
+  import { messageItems } from './itemMenus.js';
   import {
     summaries,
     initMeetingSummary,
@@ -401,6 +403,48 @@
       setTimeout(() => copiedLine === line.i && (copiedLine = null), 1200);
     }
   }
+  // A line's right-click menu (ui/contextMenu.svelte.js, as everywhere): what
+  // its hover buttons do — Copy line, and Who said this? (the speaker menu
+  // at the line, SpeakerMenu.svelte) — not for a line from the speakers.
+  let lineEls = $state({});
+  function lineMenu(e, item, line) {
+    openContextMenu(
+      e,
+      [
+        { label: 'Copy line', icon: 'copy', onselect: () => copyLine(line) },
+        !item.echo
+          ? {
+              label: 'Who said this?',
+              icon: 'person',
+              onselect: () => (speakerMenu = { key: `l${line.i}`, voice: item.speaker, lines: [line.i], start: 'lines' }),
+            }
+          : null,
+      ],
+      { label: 'Transcript line', row: lineEls[line.i] }
+    );
+  }
+
+  // An answer's right-click menu in the Ask sheet: Copy, Copy as Markdown,
+  // Read aloud (not while this meeting records, as its ▶), then the ratings.
+  function answerMenu(e, m) {
+    if (m.error) return;
+    const id = `notepad:${m.id}`;
+    const items = messageItems(
+      { role: 'assistant', text: m.text, plain: m.plain },
+      { read: recordingThis ? null : () => readAloud(m.text, id), reading: speech.speakingId === id }
+    );
+    items.push({ separator: true });
+    items.push({ label: 'Good answer', toggle: true, checked: feedback[m.id]?.rating === 'up', onselect: () => rate(m, 'up') });
+    items.push({ label: 'Bad answer', toggle: true, checked: feedback[m.id]?.rating === 'down', onselect: () => rate(m, 'down') });
+    // The focus comes back to the button the keys were pressed on, else the
+    // answer's copy button.
+    const row = e.type === 'keydown' ? e.target : e.currentTarget.querySelector('button[aria-label="Copy answer"]');
+    openContextMenu(e, items, { label: 'Answer', row });
+  }
+  function questionMenu(e, m) {
+    openContextMenu(e, messageItems({ role: 'user', text: m.text }), { label: 'Question', row: e.currentTarget });
+  }
+
   async function copyTranscript() {
     if (await copyToClipboard(transcriptText(note?.transcript, note?.speakers))) {
       // The button's ✓ says it (no toast on top).
@@ -743,6 +787,8 @@
 
   function onWindowKeydown(e) {
     if (e.key !== 'Escape') return;
+    // A right-click menu takes its own Esc (ui/contextMenu.svelte.js).
+    if (e.defaultPrevented || menuOrDialogOpen()) return;
     if (confirmOpen) confirmOpen = false;
     else if (menu) closeMenus();
     else if (searchOpen) closeSearch();
@@ -750,6 +796,8 @@
   }
   function onWindowPointerdown(e) {
     const t = e.target;
+    // A click in a right-click menu or its dialog belongs to them.
+    if (t.closest?.('[data-context-menu]') || t.closest?.('[role="alertdialog"]')) return;
     if (menu && !t.closest?.('.popwrap')) closeMenus();
     // A click above the sheet puts it away (not on a toast or the dialog).
     if (askOpen && !confirmOpen && !t.closest?.('.tray') && !t.closest?.('[role="status"]')) closeAsk();
@@ -1166,7 +1214,13 @@
                     {/if}
                     <div class="bubbles">
                       {#each item.lines as line, j (line.i)}
-                        <div class="row" class:menuopen={speakerMenu?.key === `l${line.i}`}>
+                        <!-- svelte-ignore a11y_no_static_element_interactions -->
+                        <div
+                          class="row"
+                          class:menuopen={speakerMenu?.key === `l${line.i}` || menuOpenFor(lineEls[line.i])}
+                          oncontextmenu={(e) => lineMenu(e, item, line)}
+                          onkeydown={(e) => menuKey(e, (k) => lineMenu(k, item, line))}
+                        >
                           <div class="bubble {bubbleShape(j, item.lines.length)}">
                             {#each highlightParts(line.text, searchQuery) as part, k (k)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}
                           </div>
@@ -1179,7 +1233,7 @@
                               {@render icon('person')}
                             </button>
                           {/if}
-                          <button class="linecopy" aria-label="Copy line" onclick={() => copyLine(line)}>
+                          <button class="linecopy" aria-label="Copy line" bind:this={lineEls[line.i]} onclick={() => copyLine(line)}>
                             {@render icon(copiedLine === line.i ? 'check' : 'copy')}
                           </button>
                           {#if speakerMenu?.key === `l${line.i}`}
@@ -1327,9 +1381,21 @@
               {/if}
               {#each askThread as m (m.id)}
                 {#if m.role === 'user'}
-                  <p class="mq">{m.text}</p>
+                  <!-- Focusable for its menu from the keyboard (the ContextMenu key, Shift+F10). -->
+                  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+                  <p
+                    class="mq"
+                    tabindex="0"
+                    oncontextmenu={(e) => questionMenu(e, m)}
+                    onkeydown={(e) => e.target === e.currentTarget && menuKey(e, (k) => questionMenu(k, m))}
+                  >{m.text}</p>
                 {:else}
-                  <div class="ma">
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <div
+                    class="ma"
+                    oncontextmenu={(e) => answerMenu(e, m)}
+                    onkeydown={(e) => menuKey(e, (k) => answerMenu(k, m))}
+                  >
                     {#if m.plain}
                       <!-- An email: shown exactly as it copies. -->
                       <div class="mabody plain">{m.text}</div>
@@ -2701,6 +2767,10 @@
     user-select: text;
     -webkit-user-select: text;
     animation: bubblein 0.1s ease-out both;
+  }
+  .mq:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--yap-paper-ring);
   }
   @keyframes bubblein {
     from {
