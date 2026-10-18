@@ -3,18 +3,22 @@
 //!
 //! Three parts:
 //!
-//! - **Engines** ([`Engine`] → [`Synth`]): text in, PCM out. One today,
-//!   **Windows voices** (WinRT `Windows.Media.SpeechSynthesis`, the OneCore
-//!   voices every Windows install has: David, Zira, Mark… plus any language
-//!   pack's). A more natural local engine slots in as a second [`Engine`]
-//!   with its own id (`config.tts_engine`); nothing else changes. Windows 11's
-//!   natural Narrator voices (Aria, Jenny, Guy…) are **Narrator-only**: the
-//!   app API doesn't list them.
+//! - **Engines** ([`Engine`] → [`Synth`]): text in, PCM out. **Kokoro**
+//!   (`tts/kokoro.rs`, the default: Kokoro-82M v1.0's natural voices on this
+//!   PC's CPU, a ~379 MB download — `tts/registry.rs` — its text read by
+//!   `tts/g2p.rs`), and **Windows voices** (WinRT
+//!   `Windows.Media.SpeechSynthesis`, the OneCore voices every Windows
+//!   install has: David, Zira, George…; no download), which speak until
+//!   Kokoro is installed, in a build without it, or when chosen. Windows
+//!   11's natural Narrator voices (Aria, Jenny, Guy…) are **Narrator-only**:
+//!   the app API doesn't list them.
 //! - **Text prep** ([`utterances`], pure): an answer's markdown as something
 //!   to say — marks out, a code block as "(code block)", a link as its text,
 //!   a bare URL as its domain, headings and bullets each their own sentence,
-//!   emoji out — then cut into sentences (abbreviations and initials kept
-//!   together, long ones cut at a comma).
+//!   emoji out — then numbers, money, dates, times, units and abbreviations
+//!   written as words (`tts/normalize.rs`, UK style), then cut into
+//!   sentences (abbreviations and initials kept together, long ones cut at a
+//!   comma).
 //! - **The speaker** ([`Speaker`]): one utterance at a time, queued by
 //!   sentence on a worker thread — the first sentence plays while the next is
 //!   made, so speech starts quickly — on the configured output device through
@@ -42,8 +46,18 @@ use std::time::{Duration, Instant};
 use regex::Regex;
 use serde::Serialize;
 
-/// The engine Yap uses when the config names none (or one this build lacks).
-pub const DEFAULT_ENGINE: &str = "windows";
+// The G2P only runs in builds with Kokoro's engine; it's tested in all.
+#[cfg_attr(not(feature = "engines"), allow(dead_code))]
+mod g2p;
+pub mod kokoro;
+mod normalize;
+pub mod registry;
+
+/// Windows' own voices' engine id.
+pub const WINDOWS: &str = "windows";
+/// The engine Yap speaks with when it can: Kokoro (Windows voices until
+/// it's installed, in a build without it, or when chosen).
+pub const DEFAULT_ENGINE: &str = kokoro::ID;
 /// The message id of Settings' ▶ Preview.
 pub const PREVIEW_ID: &str = "preview";
 /// Nothing longer is read in one go (a pasted book, a runaway answer).
@@ -68,6 +82,25 @@ pub struct Voice {
     pub language: String,
     /// "female" | "male" | "".
     pub gender: String,
+    /// How Settings groups it: "British English", "American English",
+    /// "Spanish"… (Windows voices: from their language).
+    pub accent: String,
+}
+
+/// "bella" → "Bella".
+pub(crate) fn normalize_name(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+}
+
+/// A Windows voice's accent from its language tag.
+fn accent_of(language: &str) -> String {
+    match language {
+        "en-GB" => "British English".into(),
+        "en-US" => "American English".into(),
+        l if l.starts_with("en-") => format!("English ({})", &l[3..]),
+        l => l.to_string(),
+    }
 }
 
 /// Mono or stereo audio, f32 in -1..1.
@@ -87,16 +120,21 @@ impl Pcm {
 
 /// A speech engine: the voices it has, and a synthesiser for one voice.
 pub trait Engine: Send + Sync {
-    /// The id `config.tts_engine` stores ("windows").
+    /// The id `config.tts_engine` stores ("kokoro", "windows"; `ENGINES`
+    /// names them).
     fn id(&self) -> &'static str;
-    /// What Settings calls it ("Windows voices").
-    fn name(&self) -> &'static str;
     fn voices(&self) -> Result<Vec<Voice>, String>;
     /// The voice speaking when the config names none (or one that's gone).
     fn default_voice(&self) -> Option<String>;
     /// A synthesiser for `voice` ("" = the default) at `rate` (1.0 = normal),
     /// made on the thread that will use it.
     fn open(&self, voice: &str, rate: f32) -> Result<Box<dyn Synth>, String>;
+    /// The sentences as this engine says them best (Kokoro joins tiny ones).
+    fn prepare(&self, sentences: Vec<String>) -> Vec<String> {
+        sentences
+    }
+    /// Cut a sentence being made short (a stop): Kokoro's run in flight.
+    fn cancel(&self) {}
 }
 
 /// Text → audio, one sentence at a time.
@@ -104,19 +142,38 @@ pub trait Synth {
     fn synthesize(&mut self, text: &str) -> Result<Pcm, String>;
 }
 
-/// The engine for `id`: the stand-ins in a test run, else Windows voices
-/// (the only one so far, also for an id this build doesn't know).
+/// The engine for `id`: Kokoro when that's asked for and it can speak
+/// (installed, and in this build), else Windows voices (test mode: their
+/// stand-in).
 pub fn engine(id: &str) -> Arc<dyn Engine> {
+    if id != WINDOWS && kokoro::available() {
+        return Arc::new(kokoro::Kokoro);
+    }
     if crate::e2e::active() {
         return Arc::new(StandIn);
     }
-    // One engine so far: an id this build doesn't know gets it too.
-    let _ = id;
     Arc::new(WindowsVoices)
 }
 
+/// The engine and voice speaking now, from the config: Kokoro with
+/// `tts_voice` (af_bella when unset), or Windows voices with
+/// `tts_windows_voice` ("" = Windows' default).
+pub fn chosen(cfg: &crate::config::YapConfig) -> (Arc<dyn Engine>, String) {
+    let e = engine(&cfg.tts_engine);
+    let voice = if e.id() == kokoro::ID {
+        if kokoro::is_voice(&cfg.tts_voice) {
+            cfg.tts_voice.clone()
+        } else {
+            kokoro::DEFAULT_VOICE.to_string()
+        }
+    } else {
+        cfg.tts_windows_voice.clone()
+    };
+    (e, voice)
+}
+
 /// The engines Settings lists: `(id, name)`.
-pub const ENGINES: &[(&str, &str)] = &[(DEFAULT_ENGINE, "Windows voices")];
+pub const ENGINES: &[(&str, &str)] = &[(kokoro::ID, kokoro::NAME), (WINDOWS, "Windows voices")];
 
 /// Windows' own voices (WinRT `SpeechSynthesizer`): the OneCore voices any
 /// app can use, not Narrator's natural ones.
@@ -124,10 +181,7 @@ pub struct WindowsVoices;
 
 impl Engine for WindowsVoices {
     fn id(&self) -> &'static str {
-        DEFAULT_ENGINE
-    }
-    fn name(&self) -> &'static str {
-        "Windows voices"
+        WINDOWS
     }
     fn voices(&self) -> Result<Vec<Voice>, String> {
         win::voices()
@@ -152,10 +206,12 @@ mod win {
     }
 
     fn info(v: &VoiceInformation) -> windows::core::Result<Voice> {
+        let language = v.Language()?.to_string();
         Ok(Voice {
             id: v.Id()?.to_string(),
             name: v.DisplayName()?.to_string(),
-            language: v.Language()?.to_string(),
+            accent: super::accent_of(&language),
+            language,
             gender: match v.Gender()? {
                 VoiceGender::Female => "female".into(),
                 VoiceGender::Male => "male".into(),
@@ -231,15 +287,24 @@ pub struct StandIn;
 
 impl Engine for StandIn {
     fn id(&self) -> &'static str {
-        DEFAULT_ENGINE
-    }
-    fn name(&self) -> &'static str {
-        "Windows voices"
+        WINDOWS
     }
     fn voices(&self) -> Result<Vec<Voice>, String> {
         Ok(vec![
-            Voice { id: "e2e-voice-1".into(), name: "Test Voice One".into(), language: "en-GB".into(), gender: "female".into() },
-            Voice { id: "e2e-voice-2".into(), name: "Test Voice Two".into(), language: "en-US".into(), gender: "male".into() },
+            Voice {
+                id: "e2e-voice-1".into(),
+                name: "Test Voice One".into(),
+                language: "en-GB".into(),
+                gender: "female".into(),
+                accent: "British English".into(),
+            },
+            Voice {
+                id: "e2e-voice-2".into(),
+                name: "Test Voice Two".into(),
+                language: "en-US".into(),
+                gender: "male".into(),
+                accent: "American English".into(),
+            },
         ])
     }
     fn default_voice(&self) -> Option<String> {
@@ -550,11 +615,12 @@ fn cut_long(s: &str) -> Vec<String> {
     out
 }
 
-/// What to say for an answer: its [`speakable_blocks`], each cut into
-/// [`sentences`]. Empty when there's nothing to say. Pure.
+/// What to say for an answer: its [`speakable_blocks`], each written for
+/// the ear (`normalize::for_speech`) and cut into [`sentences`]. Empty when
+/// there's nothing to say. Pure.
 pub fn utterances(md: &str) -> Vec<String> {
     let md: String = md.chars().take(MAX_CHARS).collect();
-    speakable_blocks(&md).iter().flat_map(|b| sentences(b)).collect()
+    speakable_blocks(&md).iter().flat_map(|b| sentences(&normalize::for_speech(b))).collect()
 }
 
 // ------------------------------------------------------- when to speak
@@ -680,6 +746,8 @@ struct Current {
     message_id: Option<String>,
     /// Set once the worker has opened the output.
     play: Option<Arc<dyn Playback>>,
+    /// To cut a sentence being made short on a stop.
+    engine: Arc<dyn Engine>,
 }
 
 type Emit = Box<dyn Fn(&TtsState) + Send + Sync>;
@@ -733,7 +801,8 @@ impl Speaker {
         }
         self.stop();
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        *self.current() = Some(Current { generation, message_id: job.message_id.clone(), play: None });
+        *self.current() =
+            Some(Current { generation, message_id: job.message_id.clone(), play: None, engine: Arc::clone(&job.engine) });
         (self.emit)(&TtsState { speaking: true, message_id: job.message_id.clone(), error: None });
         let me = Arc::clone(self);
         std::thread::Builder::new()
@@ -776,6 +845,8 @@ impl Speaker {
                     match synth.synthesize(sentence) {
                         Ok(pcm) if self.live(generation) => opened.play.append(pcm),
                         Ok(_) => break,
+                        // Stopped mid-sentence: not a failure.
+                        Err(_) if !self.live(generation) => break,
                         Err(e) => {
                             tracing::warn!("Spoken replies: {}", e);
                             error = Some(e);
@@ -822,6 +893,7 @@ impl Speaker {
         let Some(cur) = self.current().take() else {
             return false;
         };
+        cur.engine.cancel();
         if let Some(play) = &cur.play {
             if !play.done() {
                 self.heard_now();
@@ -844,7 +916,9 @@ impl Speaker {
 
 static SPEAKER: OnceLock<Arc<Speaker>> = OnceLock::new();
 
-/// Start the speaker (lib.rs setup): its state goes to every window.
+/// Start the speaker (lib.rs setup): its state goes to every window. A
+/// watcher unloads Kokoro once it's been idle for the speech model's unload
+/// time (10 minutes when that's "Never": it holds ~0.6 GB).
 pub fn init(app: &tauri::AppHandle) {
     let app = app.clone();
     let _ = SPEAKER.set(Speaker::new(
@@ -854,6 +928,22 @@ pub fn init(app: &tauri::AppHandle) {
         }),
         Box::new(|| crate::pipeline::dictation_state().1),
     ));
+    let _ = std::thread::Builder::new().name("tts-idle".into()).spawn(|| loop {
+        std::thread::sleep(Duration::from_secs(20));
+        kokoro::idle_unload(kokoro_idle(&crate::config::load().model_unload_timeout));
+    });
+}
+
+/// How long Kokoro stays loaded unused: the speech model's unload time, or
+/// 10 minutes when that's "never".
+fn kokoro_idle(setting: &str) -> Duration {
+    match setting {
+        "1min" => Duration::from_secs(60),
+        "5min" => Duration::from_secs(5 * 60),
+        "15min" => Duration::from_secs(15 * 60),
+        "30min" => Duration::from_secs(30 * 60),
+        _ => Duration::from_secs(10 * 60),
+    }
 }
 
 fn speaker() -> Option<&'static Arc<Speaker>> {
@@ -883,13 +973,14 @@ pub fn stop_for_dictation() -> bool {
 /// and output device. `message_id`: what the pages call it.
 pub fn speak(md: &str, message_id: Option<String>) -> Result<(), String> {
     let cfg = crate::config::load();
-    say(utterances(md), message_id, &cfg.tts_engine, &cfg.tts_voice, cfg.tts_rate, cfg.output_device)
+    let (engine, voice) = chosen(&cfg);
+    say(utterances(md), message_id, engine, &voice, cfg.tts_rate, cfg.output_device)
 }
 
 fn say(
     sentences: Vec<String>,
     message_id: Option<String>,
-    engine_id: &str,
+    engine: Arc<dyn Engine>,
     voice: &str,
     rate: f32,
     device: Option<String>,
@@ -899,56 +990,82 @@ fn say(
     }
     let speaker = speaker().ok_or("Spoken replies aren't ready yet")?;
     let rate = if rate.is_finite() && rate > 0.0 { rate.clamp(0.5, 2.0) } else { 1.0 };
+    let sentences = engine.prepare(sentences);
     #[cfg(debug_assertions)]
     if crate::e2e::active() && !sentences.is_empty() {
-        spoken().push(Spoken { message_id: message_id.clone(), text: sentences.join(" "), sentences: sentences.clone(), voice: voice.to_string(), rate });
+        spoken().push(Spoken {
+            message_id: message_id.clone(),
+            text: sentences.join(" "),
+            sentences: sentences.clone(),
+            engine: engine.id().to_string(),
+            voice: voice.to_string(),
+            rate,
+        });
     }
     let opener = if crate::e2e::active() { sim_opener() } else { rodio_opener(device) };
-    let job = Job { message_id, sentences, engine: engine(engine_id), voice: voice.to_string(), rate };
+    let job = Job { message_id, sentences, engine, voice: voice.to_string(), rate };
     speaker.speak(job, opener)
 }
 
 // ------------------------------------------------------------ commands
 
-/// Settings → Voice Agent: the engines and the voices of the configured one.
+/// One engine's voices, for Settings → Voice Agent.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VoiceList {
-    pub engine: String,
-    pub engine_name: String,
-    pub engines: Vec<serde_json::Value>,
+pub struct EngineVoices {
     pub voices: Vec<Voice>,
     pub default_voice: Option<String>,
     pub error: Option<String>,
 }
 
+/// Settings → Voice Agent: the engines, each one's voices, Kokoro's
+/// download, and which engine would speak now (`active`: Windows voices
+/// while Kokoro isn't installed or isn't in this build).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceList {
+    /// The configured engine.
+    pub engine: String,
+    /// The engine that would speak now.
+    pub active: String,
+    pub engines: Vec<serde_json::Value>,
+    pub kokoro: EngineVoices,
+    pub kokoro_status: registry::Status,
+    pub windows: EngineVoices,
+}
+
+fn windows_voices() -> EngineVoices {
+    let e: Arc<dyn Engine> = if crate::e2e::active() { Arc::new(StandIn) } else { Arc::new(WindowsVoices) };
+    let (voices, error) = match e.voices() {
+        Ok(v) if v.is_empty() => (v, Some("Windows has no voices installed (Settings → Time & language → Speech)".to_string())),
+        Ok(v) => (v, None),
+        Err(err) => (Vec::new(), Some(err)),
+    };
+    EngineVoices { voices, default_voice: e.default_voice(), error }
+}
+
 #[tauri::command]
 pub async fn tts_voices() -> VoiceList {
     let cfg = crate::config::load();
-    tauri::async_runtime::spawn_blocking(move || {
-        let e = engine(&cfg.tts_engine);
-        let (voices, error) = match e.voices() {
-            Ok(v) if v.is_empty() => (v, Some("Windows has no voices installed (Settings → Time & language → Speech)".to_string())),
-            Ok(v) => (v, None),
-            Err(err) => (Vec::new(), Some(err)),
-        };
-        VoiceList {
-            engine: e.id().to_string(),
-            engine_name: e.name().to_string(),
-            engines: ENGINES.iter().map(|(id, name)| serde_json::json!({ "id": id, "name": name })).collect(),
-            default_voice: e.default_voice(),
-            voices,
-            error,
-        }
+    let engines: Vec<serde_json::Value> =
+        ENGINES.iter().map(|(id, name)| serde_json::json!({ "id": id, "name": name })).collect();
+    let fallback_engines = engines.clone();
+    tauri::async_runtime::spawn_blocking(move || VoiceList {
+        engine: cfg.tts_engine.clone(),
+        active: chosen(&cfg).0.id().to_string(),
+        engines,
+        kokoro: EngineVoices { voices: kokoro::voices(), default_voice: Some(kokoro::DEFAULT_VOICE.into()), error: None },
+        kokoro_status: registry::status(&registry::root()),
+        windows: windows_voices(),
     })
     .await
     .unwrap_or_else(|e| VoiceList {
         engine: DEFAULT_ENGINE.into(),
-        engine_name: "Windows voices".into(),
-        engines: Vec::new(),
-        voices: Vec::new(),
-        default_voice: None,
-        error: Some(e.to_string()),
+        active: WINDOWS.into(),
+        engines: fallback_engines,
+        kokoro: EngineVoices { voices: kokoro::voices(), default_voice: Some(kokoro::DEFAULT_VOICE.into()), error: None },
+        kokoro_status: registry::status(&registry::root()),
+        windows: EngineVoices { voices: Vec::new(), default_voice: None, error: Some(e.to_string()) },
     })
 }
 
@@ -958,12 +1075,77 @@ pub fn tts_speak(text: String, message_id: Option<String>) -> Result<(), String>
     speak(&text, message_id)
 }
 
-/// Settings' ▶ Preview: a short sample in `voice` at `rate` (not saved yet).
+/// Settings' ▶ Preview: a short sample in `voice` of `engine` (the one
+/// shown, else the configured one) at `rate`, not saved yet.
 #[tauri::command]
-pub fn tts_preview(voice: String, rate: f32) -> Result<(), String> {
+pub fn tts_preview(voice: String, rate: f32, engine: Option<String>) -> Result<(), String> {
     let cfg = crate::config::load();
+    let wanted = engine.unwrap_or_else(|| cfg.tts_engine.clone());
+    let e = self::engine(&wanted);
+    if wanted == kokoro::ID && e.id() != kokoro::ID {
+        return Err(if kokoro::in_build() {
+            "Download Kokoro to hear its voices".to_string()
+        } else {
+            kokoro::NOT_IN_BUILD.to_string()
+        });
+    }
     let sample = "Hi, I'm the voice that reads Chat's answers. Ask me anything, and I'll say what I found.";
-    say(sentences(sample), Some(PREVIEW_ID.into()), &cfg.tts_engine, &voice, rate, cfg.output_device)
+    say(sentences(sample), Some(PREVIEW_ID.into()), e, &voice, rate, cfg.output_device)
+}
+
+static DOWNLOADING: Mutex<Option<registry::Progress>> = Mutex::new(None);
+
+/// Kokoro's download row: installed, its size, a download in progress.
+#[tauri::command]
+pub fn tts_kokoro_status() -> serde_json::Value {
+    serde_json::json!({
+        "status": registry::status(&registry::root()),
+        "downloading": DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner()).clone(),
+    })
+}
+
+/// Download Kokoro (and eSpeak NG): `tts-download-progress` while it goes,
+/// `tts-kokoro-changed` at the end, either way.
+#[tauri::command]
+pub async fn tts_kokoro_download(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Emitter;
+    if !kokoro::in_build() {
+        return Err(kokoro::NOT_IN_BUILD.to_string());
+    }
+    {
+        let mut d = DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner());
+        if d.is_some() {
+            return Err("Kokoro is already downloading".into());
+        }
+        *d = Some(registry::Progress { percent: 0, downloaded_bytes: 0, total_bytes: 0 });
+    }
+    let progress_app = app.clone();
+    let on_progress = move |p: registry::Progress| {
+        *DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner()) = Some(p.clone());
+        let _ = progress_app.emit("tts-download-progress", &p);
+    };
+    let result = registry::install(&registry::root(), &on_progress).await;
+    *DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    if let Err(e) = &result {
+        tracing::warn!("Kokoro: download failed: {e}");
+    }
+    let _ = app.emit("tts-kokoro-changed", ());
+    result
+}
+
+/// Delete Kokoro: what's being said stops, the model unloads.
+#[tauri::command]
+pub fn tts_kokoro_delete(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Emitter;
+    if DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner()).is_some() {
+        return Err("Wait for the download to finish first.".into());
+    }
+    stop();
+    // The model file can't go while it's loaded.
+    kokoro::unload(Duration::from_secs(2));
+    registry::delete(&registry::root())?;
+    let _ = app.emit("tts-kokoro-changed", ());
+    Ok(())
 }
 
 /// Stop speaking. `true` if something was being said.
@@ -1005,6 +1187,8 @@ pub struct Spoken {
     pub message_id: Option<String>,
     pub text: String,
     pub sentences: Vec<String>,
+    /// "kokoro" | "windows".
+    pub engine: String,
     pub voice: String,
     pub rate: f32,
 }
@@ -1189,9 +1373,6 @@ mod tests {
     impl Engine for Fake {
         fn id(&self) -> &'static str {
             "fake"
-        }
-        fn name(&self) -> &'static str {
-            "Fake"
         }
         fn voices(&self) -> Result<Vec<Voice>, String> {
             Ok(Vec::new())

@@ -65,9 +65,12 @@ competitive strategy, see `ROADMAP.md` in the **private** docs repo (below).
   pill window was retired 2026-07-09.
 - **Backend:** Rust (`src-tauri/src/`).
 - **Audio:** `cpal` (capture) + `rodio` (start/stop chime, spoken replies).
-- **Spoken replies:** WinRT `Windows.Media.SpeechSynthesis` (Windows' own
-  voices, `windows` crate) → PCM → rodio, sentence by sentence (`tts.rs`);
-  the engine layer takes a more natural local engine as a second engine.
+- **Spoken replies:** **Kokoro-82M v1.0** (the default once downloaded:
+  onnx-community's fp32 ONNX on Yap's own `ort`, CPU, `engines` builds;
+  misaki's lexicons + the eSpeak NG CLI, a separate program, for text →
+  phonemes) or WinRT `Windows.Media.SpeechSynthesis` (Windows' own voices,
+  `windows` crate) → PCM → rodio, sentence by sentence (`tts.rs`,
+  `tts/`).
 - **STT:** [`transcribe-rs`](https://crates.io/crates/transcribe-rs) — one crate that
   wraps **whisper.cpp** (Vulkan) *and* a family of **ONNX** models (Parakeet, Moonshine,
   SenseVoice, GigaAM, Canary, Cohere) via `ort`/ONNX Runtime (DirectML). Behind the
@@ -1408,8 +1411,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
   off), spoken replies (`tts.rs`): speak_replies (off), speak_when ("voice" |
   "always", voice), talk_back_hands_free (true; only while speak_replies is
-  on), tts_engine ("windows"), tts_voice ("" = Windows' default), tts_rate
-  (1.0, 0.5–2.0)). JSON
+  on), tts_engine ("kokoro" — Windows voices until it's downloaded — or
+  "windows"), tts_voice (Kokoro's, "af_bella"), tts_windows_voice ("" =
+  Windows' default), tts_rate (1.0, 0.5–2.0); config v2 moved a saved
+  Windows voice from tts_voice to tts_windows_voice and "windows" (never a
+  choice before) to "kokoro"). JSON
   load/save + `apply_dictionary` (corrections; skips snippets) +
   `apply_snippets` + `term_regex` (the whole-word matcher both use) +
   `dictionary_prompt` (the Whisper `initial_prompt` vocabulary, in the order
@@ -1825,22 +1831,39 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   output device, else the default) is shared with `tts.rs`.
 - **`tts.rs`** — **spoken replies** (Settings → Voice Agent, Chat's Voice
   replies toggle, ▶ on answers). **Engines** (`Engine` → `Synth`, text →
-  `Pcm`): one so far, **Windows voices** (`WindowsVoices`: WinRT
-  `SpeechSynthesizer`, `SynthesizeTextToStreamAsync` → WAV → `parse_wav`;
-  rate via `SpeakingRate`, minimal appended silence); `config.tts_engine`
-  picks one (`ENGINES`), an unknown id gets Windows voices, so a natural
-  local engine slots in as a second `Engine`. **Which voices apps see**:
-  only the OneCore voices (`HKLM\…\Speech_OneCore\Voices`, e.g. this PC's
-  en-GB George, Hazel, Susan — the default is George); not the old
-  SAPI-only desktop voices (Zira here) and not Windows 11's natural
-  Narrator voices (Aria, Jenny, Guy…), which are Narrator-only.
-  **Text prep** (pure, unit-tested): `speakable_blocks` (markdown → one
-  block per heading / list item / table row / paragraph, each ending like a
-  sentence; a fenced code block → "(code block)", links → their text, bare
-  URLs → their domain, `[x]`/☑ → "Done: …", emphasis, HTML, emoji and
-  arrows out, "→" read "to") and `sentences` (split after `.?!…` + space,
-  never after an abbreviation or an initial — `app_kind::is_abbreviation` —
-  over 220 chars cut at a comma); `utterances` = both. **The speaker**
+  `Pcm`; `prepare` (Kokoro joins sentences under 3 words to the next),
+  `cancel`): **Kokoro** (`tts/kokoro.rs`, below; the default) and
+  **Windows voices** (`WindowsVoices`: WinRT `SpeechSynthesizer`,
+  `SynthesizeTextToStreamAsync` → WAV → `parse_wav`; rate via
+  `SpeakingRate`, minimal appended silence). `chosen(cfg)`: Kokoro with
+  `tts_voice` when `tts_engine` isn't "windows" and Kokoro can speak
+  (installed, in this build), else Windows voices with `tts_windows_voice`
+  — so Windows voices speak until Kokoro is downloaded, and Kokoro takes
+  over by itself once it is unless Windows was chosen. **Which Windows
+  voices apps see**: only the OneCore voices
+  (`HKLM\…\Speech_OneCore\Voices`, e.g. this PC's en-GB George, Hazel,
+  Susan — the default is George); not the old SAPI-only desktop voices
+  (Zira here) and not Windows 11's natural Narrator voices (Aria, Jenny,
+  Guy…), which are Narrator-only. **Text prep** (pure, unit-tested):
+  `speakable_blocks` (markdown → one block per heading / list item / table
+  row / paragraph, each ending like a sentence; a fenced code block →
+  "(code block)", links → their text, bare URLs → their domain, `[x]`/☑ →
+  "Done: …", emphasis, HTML, emoji and arrows out, "→" read "to"), then
+  **`tts/normalize.rs`** (`for_speech`, every engine, UK style,
+  conservative — a clear pattern or nothing: £ $ € amounts incl. pence/cents
+  and k/m/bn ("twelve thousand four hundred pounds", "three dollars fifty"),
+  numbers with separators, decimals ("three point one four"), percentages,
+  ordinals, dates ("18 Oct" → "the eighteenth of October", "October 14th" →
+  "October the fourteenth", ISO and dd/mm/yyyy — month-first only when the
+  day can't be a month —, "Sat" before a date, years after "in"/"since"/a
+  month, "the 1990s"), times ("2:30 pm" → "two thirty p.m.", "14:00" →
+  "fourteen hundred"), ranges ("10-15" climbing only), units after a number
+  (km, kg, GB, °C, ms…), versions ("v2.1", "1.2.3"), "Q3" → "Q three", "4K",
+  e.g./i.e./etc./vs./approx./Dr/Mr/No./#/&/w/, emails ("… at example dot
+  com") and domains ("github dot com"), codes and long numbers digit by
+  digit) and `sentences` (split after `.?!…` + space, never after an
+  abbreviation or an initial — `app_kind::is_abbreviation` — over 220
+  chars cut at a comma); `utterances` = all three. **The speaker**
   (`Speaker`, unit-tested on a simulated clock): one utterance at a time on
   a worker thread — "speaking" at once, the output opened on the worker
   (rodio on `config.output_device`), each sentence made while the one before
@@ -1852,17 +1875,82 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   {speaking, messageId, error}` on every change. **When to speak** (pure):
   `auto_speak(speak_replies, speak_when, asked_by_voice, dictating,
   meeting)` (chat_send's `speak`), `sends_by_itself(speak_replies,
-  hands_free, said_enter)`. Commands `tts_voices`, `tts_speak {text,
-  messageId}`, `tts_preview {voice, rate}`, `tts_stop`, `tts_state`,
-  `voice_replies_set {on}` (Chat's toggle: saves like Settings, then
-  `yap-voice-replies {on}` for Settings' copy). ⚠ **No echo cancellation**:
-  Yap's voice from speakers can reach the mic; the barge-in stops it before
-  a dictation and drops the pre-roll, but a mic hearing the speakers (no
-  headset) during an answer is a later job. Test mode: stand-in voices,
-  silence on a simulated clock (`SimPlayback`), no device; what would have
-  been said goes to the debug-only `tts_e2e_spoken {clear?}`. An
-  `#[ignore]`d `windows_voices_on_this_pc` lists the voices and synthesises a
-  sentence to a WAV in a temp folder (never played).
+  hands_free, said_enter)`. Commands `tts_voices` (`{engine, active,
+  engines, kokoro: {voices, defaultVoice}, kokoroStatus, windows: {voices,
+  defaultVoice, error}}`), `tts_speak {text, messageId}`, `tts_preview
+  {voice, rate, engine?}` (Kokoro not installed → "Download Kokoro to hear
+  its voices"), `tts_stop`, `tts_state`, `tts_kokoro_status` /
+  `tts_kokoro_download` (`tts-download-progress {percent, downloadedBytes,
+  totalBytes}`, then `tts-kokoro-changed`) / `tts_kokoro_delete` (stops
+  speaking, unloads), `voice_replies_set {on}` (Chat's toggle: saves like
+  Settings, then `yap-voice-replies {on}` for Settings' copy). A
+  `tts-idle` thread unloads Kokoro after the speech model's unload time (10
+  min when that's "never"). ⚠ **No echo cancellation**: Yap's voice from
+  speakers can reach the mic; the barge-in stops it before a dictation and
+  drops the pre-roll, but a mic hearing the speakers (no headset) during an
+  answer is a later job. Test mode: stand-in Windows voices, Kokoro as
+  silence once installed from the suite's local server, a simulated clock
+  (`SimPlayback`), no device; what would have been said (with its `engine`)
+  goes to the debug-only `tts_e2e_spoken {clear?}`. An `#[ignore]`d
+  `windows_voices_on_this_pc` lists the voices and synthesises a sentence
+  to a WAV in a temp folder (never played).
+  - **`tts/kokoro.rs`** — **Kokoro-82M v1.0** (hexgrad, Apache-2.0), the
+    natural voice: onnx-community's **fp32** export (the fp16 one turns
+    longer British sentences into NaN — `checks::nan_probe`; int8 is 3.5–4×
+    slower on x86; DirectML can't run it) on Yap's own `ort` (pinned
+    `=2.0.0-rc.12`, the `engines` feature, so one ONNX Runtime), **CPU**,
+    `min(4, logical cores / 2)` intra-op threads that never spin, at
+    **24,000 Hz** (Voice Mirror's 22,050 played it ~8% slow and low).
+    Loaded lazily the first time it speaks (~0.6 s), kept warm, unloaded
+    when idle (`idle_unload`, never under an open synthesiser); every run
+    has its own `RunOptions`, so `cancel` (a stop, a new answer, a dictation
+    starting: `Speaker::stop` → `Engine::cancel`) ends a sentence being made
+    within ~10 ms. 54 voices (`VOICES`, `voices/<id>.bin`: 510×256 styles, the
+    row for the call's token count; grouped by accent and gender, af_bella
+    the default); the phonemes go through Kokoro's own symbol table
+    (`VOCAB`, `tokenize`), ≤ 510 tokens a call (`chunk`, cut at a space),
+    Kokoro's padding trimmed and a 180 ms pause added (`trim_and_pad`).
+    Test mode: silence once installed; a stub build outside test mode has
+    none (`in_build`, `NOT_IN_BUILD`) and Windows voices speak. `#[ignore]`d
+    `checks::kokoro_on_this_pc` (engines build; `YAP_TTS_MODELS`,
+    `YAP_TTS_SAMPLES`): speed at 1/2/4 threads, a cancel, and WAVs of the
+    research's answer and a names text with both G2P ways, raw and tidied
+    (measured 2026-10-18: §"Current status").
+  - **`tts/g2p.rs`** — text → Kokoro's phonemes, **dictionary first**: the
+    misaki lexicons Kokoro was trained on (US/GB, gold then silver), looked
+    up with misaki's `en.Lexicon` rules ported (no spaCy tagger: capitals,
+    `'s`/`-s`/`-ed`/`-ing` from the stem, short unknown all-caps words
+    spelled out, "the"/"to"/"a"/"an"/"in"/"am" by the next sound, hyphened
+    parts, leftover digits as words, US flaps as "T"); only words neither
+    lexicon has (names: "Priya", "Siobhan") go to **eSpeak NG as a separate
+    program** (`Espeak::ipa`: `espeak-ng.exe -q --ipa --tie=^ -b 1`, one line
+    in → one line out, `ESPEAK_DATA_PATH`, hidden window, 5 s limit; never
+    linked: GPL-3.0) in one call per sentence, its IPA mapped to misaki's
+    symbols (`espeak_english`, misaki's E2M, its dead GB "e^ə" rule fixed);
+    no eSpeak → spelled out. Kokoro's es/fr/hi/it/pt-BR voices read their
+    text all through eSpeak (`Phonemizer::Espeak`, misaki's `EspeakG2P`
+    map; punctuation kept by phonemizing between it); ja/zh voices read
+    English. `EspeakEnglish` (all of it through eSpeak, Voice Mirror's way)
+    only if a lexicon won't read, and for the comparison. Why dictionary
+    first: it's what Kokoro was trained on, and eSpeak runs only for the
+    odd name (both scored alike on Parakeet).
+  - **`tts/registry.rs`** — Kokoro's download into `<data>/models/tts/`
+    (debug: `YAP_TTS_MODELS`): `kokoro-v1.0/` (model.onnx 325.5 MB + 54
+    voices from **Hugging Face onnx-community/Kokoro-82M-v1.0-ONNX @
+    1939ad2a**, the misaki lexicons + LICENSE from **hexgrad/misaki @
+    fba12365**, NOTICE.txt) and `espeak-ng-1.52.0/` (eSpeak NG's own 1.52.0
+    **MSI**, unpacked with `msiexec /a` — an administrative install, files
+    only, nothing registered, no admin rights; only the exe, the DLL and the
+    data of the languages Kokoro reads kept, 2.2 MB — + `COPYING` (GPL-3.0)
+    from its repo at the tag + NOTICE.txt with the source link): ~379 MB
+    down, ~352 MB on disk, every file pinned by size + SHA-256 (the
+    diarization registry's `download`/`verify`, resumable), staged in
+    `<folder>.installing/` then renamed; a file already installed at its
+    hash is kept (hard link); a failure leaves no half folder. Test runs
+    only fetch from 127.0.0.1 (`YAP_TTS_SOURCES` stand-ins: `{package:
+    {dest: {url, sha256, size}}}`; a debug build takes a zip for the MSI).
+    `#[ignore]`d `real_download_from_the_pinned_sources`
+    (`YAP_TTS_DOWNLOAD_DIR`).
 - **`mute.rs`** — **other apps' sound while you dictate** (2026-10-17; it
   replaced the old endpoint mute, which silenced Yap's own start chime and
   any call): **"Silence other apps while you dictate"**
@@ -1942,8 +2030,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   edit of a pasted dictation as the correction watch would see it, or the
   field's text read by read for the watch's rules to run over — the watch
   thread itself never runs in a test run), no spoken reply played (`tts.rs`:
-  stand-in voices, silence on a simulated clock, no audio device; what would
-  have been said in `tts_e2e_spoken`), `e2e_chat_dictation {text}` (a
+  stand-in voices, Kokoro as silence once its stand-in files are installed
+  from the suite's local server — `YAP_TTS_SOURCES` —, a simulated clock, no
+  audio device; what would have been said in `tts_e2e_spoken`), `e2e_chat_dictation {text}` (a
   question dictated into the Chat view, no mic needed), `e2e_coaching_reset` (every
   push-to-talk hint due again), `e2e_notice_reset` / `e2e_focus` /
   `e2e_notice` (notice.rs: cooldowns and fatigue forgotten before every
@@ -2478,10 +2567,23 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   talking to Yap's AI: **Spoken replies** ("Speak replies" `speakReplies`;
   "When to speak" Segmented When I asked by voice / Always `speakWhen`;
   "Talk back hands-free" `talkBackHandsFree`, greyed while replies are off),
-  **Voice** (a Select of `tts_voices`' voices with Windows' default first +
-  **▶ Preview** / ■ Stop → `tts_preview` with the shown voice and speed;
-  Speed slider 0.5–2.0× `ttsRate`; the Engine line "Windows voices", more
-  natural voices coming) and **Wake word** (`#settings-wake-word`: the
+  switching "Speak replies" on while Kokoro isn't downloaded offers it
+  under the switch (`KokoroOffer.svelte`, "Download Kokoro (379 MB)" / Not
+  now; replies stay on, Windows voices meanwhile), **Voice**
+  (`VoiceSettings.svelte`: **Engine** Segmented Kokoro / Windows voices
+  `ttsEngine`, "Natural voices, made on this PC. Recommended"; Kokoro's
+  **download row** (`ModelRow`: Kokoro-82M · size · 54 voices ·
+  Recommended, Download → progress → Active, delete via `ui/ConfirmDialog`;
+  in a stub build "In the full Yap build"); the **voice picker** following
+  the engine — Kokoro's 54 in `<optgroup>`s British English / American
+  English / Other languages × Female / Male (`kokoroOptions` in
+  `kokoro.svelte.js`, "Bella (default)", `ttsVoice`), or Windows' with its
+  default first (`ttsWindowsVoice`) — **▶ Preview** / ■ Stop →
+  `tts_preview` with the shown engine, voice and speed (off until Kokoro's
+  downloaded); Speed slider 0.5–2.0× `ttsRate`; the credit line: Kokoro
+  Apache-2.0 from onnx-community, misaki Apache-2.0, eSpeak NG GPL-3.0 run
+  separately, licences and the source link saved with them;
+  `kokoro.svelte.js` is the download store) and **Wake word** (`#settings-wake-word`: the
   Voice Agent scope's enable switch, the agent name — `AgentNameField.svelte`,
   moved here from Language Models → Voice Agent, which now shows the name
   with a link back — and "Language Models → Voice Agent" for its model and
@@ -2971,6 +3073,16 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   SHA-256 verified). Yap has no central third-party notices page: the
   attribution is in Settings → Speech-to-Text → Speakers in meetings and in
   those files.
+- Kokoro (spoken replies' natural voice): `%APPDATA%/yap/models/tts/` —
+  `kokoro-v1.0/` (model.onnx + `voices/` from Hugging Face
+  onnx-community/Kokoro-82M-v1.0-ONNX @ 1939ad2a, Apache-2.0; `lexicon/`:
+  misaki's US/GB dictionaries + LICENSE from hexgrad/misaki @ fba12365,
+  Apache-2.0) and `espeak-ng-1.52.0/` (eSpeak NG's program, DLL and the data
+  of the languages Kokoro reads, from its 1.52.0 MSI; **GPL-3.0**, run as a
+  separate program, never linked; `COPYING` + the source link in
+  NOTICE.txt), each with a `NOTICE.txt` (`tts/registry.rs`; size + SHA-256
+  verified). Attribution: Settings → Voice Agent → Voice. Deleted from the
+  Kokoro row; ~352 MB.
 - Groq usage: `%APPDATA%/yap/groq_usage.json`.
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → History).
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
@@ -3043,7 +3155,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   calendar connected, the reminder card **right before** a meeting (15 s,
   `meeting_reminder`); spoken replies **off** (`speak_replies`; once on, only
   for questions asked by voice, `speak_when`, and a dictated question is sent
-  by itself, `talk_back_hands_free`) in Windows' default voice at 1×.
+  by itself, `talk_back_hands_free`) in **Kokoro's af_bella** at 1× once
+  Kokoro is downloaded (`tts_engine` "kokoro"), Windows' default voice
+  until then.
 
 ---
 
@@ -3061,7 +3175,17 @@ aloud in Windows' voices — the Voice replies toggle, ▶ on every answer,
 "only when I asked by voice", hands-free talk-back, barge-in; text prep, the
 queue and the decisions unit-tested, synthesis checked silently on this PC's
 voices, the whole loop e2e-tested in test mode; not yet heard on speakers
-by a person, and a natural local engine is to come), combo hotkeys, the audio pre-roll (anti first-word clipping), **live
+by a person) with **Kokoro** as the natural local voice and the default
+(2026-10-18: Kokoro-82M v1.0 fp32 on Yap's `ort`, CPU; measured on this PC
+— Ryzen 7 9800X3D, release build, 4 threads: ~0.6 s to load + 0.17 s for a
+lexicon, a 5.4 s sentence in 0.71 s, the research answer at RTF 0.12 (0.18
+at 2 threads, 0.31 at 1), its first 6 s piece ready in 0.75 s, a stop ends
+a sentence being made within ~10 ms; Parakeet round trip of the research
+answer after the text pass: 0 misread words for af_bella / bf_emma /
+bm_george (before it, "£12,400" lost its "pounds"); the download, the
+Settings rows and the fallback e2e-tested against a local server, the real
+download and msiexec unpack checked once; not yet heard on speakers by a
+person), combo hotkeys, the audio pre-roll (anti first-word clipping), **live
 streaming partials** (sliding-window, on by default, word-paced overlay reveal —
 validated live 2026-07-10), transcription history + stats, cleanup presets,
 **other apps silenced or paused while you dictate** (`mute.rs` + `media_pause.rs`,
@@ -3221,8 +3345,9 @@ Windows notifications, Focus Assist) not yet tried.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
-search/archive/rename; spoken replies have only Windows' own voices (a
-natural local engine is the next `tts::Engine`), wait for the whole answer
+search/archive/rename; spoken replies have no cloud voices, read Kokoro's
+Japanese and Mandarin voices' text as English, don't check a slow PC's
+speed before choosing Kokoro (the research's first-use RTF check), wait for the whole answer
 before the first sentence, don't listen again by themselves after an answer,
 and have no echo cancellation (a mic that hears the speakers during an
 answer is a later job); the AI Notepad has no rich markdown editor (plain textarea)

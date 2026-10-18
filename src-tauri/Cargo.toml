@@ -100,6 +100,10 @@ zip = { version = "4.6", default-features = false, features = ["deflate-flate2"]
 # Multi-engine STT (whisper.cpp + ONNX) via transcribe-rs. Optional so the
 # default build ships the STUB and `cargo check` stays fast.
 transcribe-rs = { version = "0.3", optional = true, default-features = false }
+# Kokoro, the natural voice of spoken replies (tts/kokoro.rs), runs on the
+# same ONNX Runtime transcribe-rs links (pinned to its exact version, so
+# Cargo unifies one ort-sys): no second runtime, no sidecar. CPU only.
+ort = { version = "=2.0.0-rc.12", optional = true }
 
 # Auto-update via GitHub Releases, driven from Rust (updates.rs: background
 # checks + download, install on request; relaunch is the installer's /R).
@@ -152,6 +156,7 @@ default = []
 # release/nightly builds use — one small installer, GPU on every GPU.
 engines = [
     "dep:transcribe-rs",
+    "dep:ort",
     "transcribe-rs/onnx",
     "transcribe-rs/whisper-cpp",
     "transcribe-rs/whisper-vulkan",

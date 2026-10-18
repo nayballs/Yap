@@ -21,7 +21,10 @@
   import PromptStudio from './PromptStudio.svelte';
   import VoiceAgentConfig from './VoiceAgentConfig.svelte';
   import AgentNameField from './AgentNameField.svelte';
-  import { speech, initSpeech } from './speech.svelte.js';
+  import { initSpeech } from './speech.svelte.js';
+  import VoiceSettings from './VoiceSettings.svelte';
+  import KokoroOffer from './KokoroOffer.svelte';
+  import { kokoro, startKokoro } from './kokoro.svelte.js';
   import NoteFormattingConfig from './NoteFormattingConfig.svelte';
   import ChatConfig from './ChatConfig.svelte';
   import StatusBar from './StatusBar.svelte';
@@ -560,8 +563,9 @@
     speakReplies: false,
     speakWhen: 'voice',
     talkBackHandsFree: true,
-    ttsEngine: 'windows',
-    ttsVoice: '',
+    ttsEngine: 'kokoro',
+    ttsVoice: 'af_bella',
+    ttsWindowsVoice: '',
     ttsRate: 1.0,
   };
 
@@ -891,51 +895,22 @@
   });
   // Voice Agent → Spoken replies (tts.rs). The Chat view's 🔊 saves "Speak
   // replies" in Rust: adopt it, or the next auto-save would undo it. The
-  // voices are read when the page opens; ▶ Preview speaks a sample in the
-  // voice and speed shown (not saved yet: auto-save does that).
-  let voiceList = $state(null); // { engine, engineName, engines, voices, defaultVoice, error }
+  // engine, Kokoro's download, the voice and ▶ Preview are VoiceSettings;
+  // switching replies on while Kokoro isn't downloaded offers it
+  // (KokoroOffer), Windows voices speaking meanwhile.
   initSpeech(['preview']);
+  startKokoro();
+  let offerKokoro = $state(false);
+  function setSpeakReplies(on) {
+    cfg.speakReplies = on;
+    offerKokoro = on && cfg.ttsEngine !== 'windows' && kokoro.inBuild && !kokoro.installed;
+  }
   onMount(() => {
     const un = listen('yap-voice-replies', (e) => {
       if (cfg && typeof e.payload?.on === 'boolean') cfg.speakReplies = e.payload.on;
     });
     return () => un.then((f) => f());
   });
-  $effect(() => {
-    if (section === 'voice' && !voiceList) {
-      invoke('tts_voices')
-        .then((v) => (voiceList = v))
-        .catch((e) => (voiceList = { voices: [], error: String(e), engineName: 'Windows voices' }));
-    }
-  });
-  const previewing = $derived(speech.speakingId === 'preview');
-  const voiceOptions = $derived.by(() => {
-    const voices = voiceList?.voices || [];
-    const def = voices.find((v) => v.id === voiceList?.defaultVoice);
-    const opts = [
-      { value: '', label: def ? `Windows default (${shortVoice(def)})` : 'Windows default' },
-      ...voices.map((v) => ({ value: v.id, label: `${shortVoice(v)} · ${v.language}` })),
-    ];
-    // A voice saved here that's gone from Windows still shows as itself.
-    if (cfg?.ttsVoice && !voices.some((v) => v.id === cfg.ttsVoice) && voiceList) {
-      opts.push({ value: cfg.ttsVoice, label: 'A voice that is no longer installed' });
-    }
-    return opts;
-  });
-  function shortVoice(v) {
-    return (v?.name || '').replace(/^Microsoft\s+/, '') || v?.id || '';
-  }
-  async function previewVoice() {
-    if (previewing) {
-      invoke('tts_stop').catch(() => {});
-      return;
-    }
-    try {
-      await invoke('tts_preview', { voice: cfg.ttsVoice || '', rate: Number(cfg.ttsRate) || 1 });
-    } catch (e) {
-      toast({ title: "Couldn't play the preview", description: String(e), variant: 'destructive' });
-    }
-  }
   const SPEAK_WHEN = [
     { value: 'voice', label: 'When I asked by voice' },
     { value: 'always', label: 'Always' },
@@ -1946,10 +1921,11 @@
           <Group title="Spoken replies">
             <Row>
               <Toggle
-                bind:checked={cfg.speakReplies}
+                bind:checked={() => cfg.speakReplies, setSpeakReplies}
                 label="Speak replies"
                 desc="Read Chat's answers aloud. Voice replies next to the model in Chat turns this on and off too"
               />
+              <KokoroOffer bind:open={offerKokoro} {cfg} />
             </Row>
             <Row label="When to speak" desc={SPEAK_WHEN_DESC[cfg.speakWhen] ?? SPEAK_WHEN_DESC.voice}>
               <Segmented bind:value={cfg.speakWhen} options={SPEAK_WHEN} label="When to speak" disabled={!cfg.speakReplies} />
@@ -1964,44 +1940,7 @@
             </Row>
           </Group>
           <Group title="Voice">
-            <Row label="Voice" desc={voiceList?.error ? voiceList.error : 'The voices Windows has installed for apps'}>
-              <div class="voicepick">
-                {#if voiceList}
-                  <Select bind:value={cfg.ttsVoice} options={voiceOptions} ariaLabel="Voice" disabled={!!voiceList.error} />
-                {:else}
-                  <span class="enginename">Reading the voices…</span>
-                {/if}
-                <button
-                  class="previewbtn"
-                  class:on={previewing}
-                  aria-label={previewing ? 'Stop the preview' : 'Preview the voice'}
-                  title={previewing ? 'Stop' : 'Preview'}
-                  disabled={!voiceList || !!voiceList.error}
-                  onclick={previewVoice}
-                >
-                  {#if previewing}
-                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
-                    Stop
-                  {:else}
-                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.9v14.2a1.2 1.2 0 0 0 1.8 1l11.6-7.1a1.2 1.2 0 0 0 0-2L8.8 3.9A1.2 1.2 0 0 0 7 4.9z" /></svg>
-                    Preview
-                  {/if}
-                </button>
-              </div>
-            </Row>
-            <Row>
-              <Slider
-                bind:value={cfg.ttsRate}
-                min={0.5}
-                max={2}
-                step={0.1}
-                label="Speed"
-                format={(v) => `${Number(v).toFixed(1)}×`}
-              />
-            </Row>
-            <Row label="Engine" desc="Windows' own voices, on this PC. More natural voices are coming">
-              <span class="enginename">{voiceList?.engineName || 'Windows voices'}</span>
-            </Row>
+            <VoiceSettings {cfg} />
           </Group>
           <div id="settings-wake-word">
             <Group title="Wake word">
@@ -3247,51 +3186,7 @@
     width: 100%;
   }
 
-  /* Voice Agent: the voice picker with its ▶ Preview, the engine, the name. */
-  .voicepick {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .voicepick :global(select) {
-    max-width: 260px;
-  }
-  .previewbtn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 32px;
-    padding: 0 12px 0 10px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r);
-    background: var(--yap-s1);
-    color: var(--yap-fg);
-    font: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .previewbtn:hover:not(:disabled) {
-    border-color: var(--yap-border-hover);
-  }
-  .previewbtn:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-  .previewbtn.on {
-    color: var(--yap-primary);
-    background: var(--yap-primary-wash);
-  }
-  .previewbtn svg {
-    width: 11px;
-    height: 11px;
-  }
-  .enginename {
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--yap-fg-80, var(--yap-fg));
-  }
+  /* Voice Agent: the agent's name (the voice is VoiceSettings). */
   .agentname {
     display: flex;
     flex-direction: column;
