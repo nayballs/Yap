@@ -35,6 +35,8 @@ mod runner;
 mod scenario;
 #[cfg(debug_assertions)]
 mod spike;
+#[cfg(debug_assertions)]
+mod standin;
 
 #[cfg(debug_assertions)]
 static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -99,6 +101,19 @@ pub fn timeout(timeout: Duration) -> Duration {
         }
     }
     timeout
+}
+
+/// Web search in this scenario goes to the real services and wikis (`web.rs`
+/// `Endpoints::current`), although a run is in test mode — a scenario with
+/// a stand-in web says no, and gets the stand-in instead.
+pub fn web_live() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            return record::web_live();
+        }
+    }
+    false
 }
 
 /// A tool call the run carries out itself instead of the app: the clipboard

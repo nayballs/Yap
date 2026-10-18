@@ -87,6 +87,15 @@ static REC: Mutex<Option<Recorder>> = Mutex::new(None);
 static CONFIG: Mutex<Option<crate::config::YapConfig>> = Mutex::new(None);
 static TOOLS: Mutex<Option<bool>> = Mutex::new(None);
 static TIMEOUT: Mutex<Option<Duration>> = Mutex::new(None);
+static WEB_LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_web_live(live: bool) {
+    WEB_LIVE.store(live, Ordering::SeqCst);
+}
+
+pub fn web_live() -> bool {
+    WEB_LIVE.load(Ordering::SeqCst)
+}
 
 pub fn set_timeout(t: Option<Duration>) {
     *TIMEOUT.lock().unwrap_or_else(|p| p.into_inner()) = t;

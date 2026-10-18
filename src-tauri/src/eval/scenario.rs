@@ -14,10 +14,13 @@ pub struct Scenario {
     pub description: String,
     #[serde(default)]
     pub tags: Vec<String>,
-    /// Needs web search, which Yap doesn't have yet: skipped unless
-    /// `--include-needs-web`.
+    /// Needs web search: "Look things up on the web" is on for it (also
+    /// whenever `web` is given). `--no-web` skips these.
     #[serde(default)]
     pub needs_web: bool,
+    /// Where its web search goes (default: live, the run's key if any).
+    #[serde(default)]
+    pub web: Option<WebSpec>,
     /// Every turn is asked by voice (the Voice Assistant's path).
     #[serde(default)]
     pub voice: bool,
@@ -68,6 +71,41 @@ impl Default for Settings {
 
 fn yes() -> bool {
     true
+}
+
+/// A scenario's web (`web.rs` with "Look things up on the web" on).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebSpec {
+    /// "live" (default): the real search service with the run's key
+    /// (`--keys-from-yap` reads Yap's saved Exa/Tavily key), else the
+    /// keyless Wikipedia + game-wiki lookup. "standin": a local server
+    /// answers the search with `results` and serves `pages`; nothing goes
+    /// on the internet.
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// "exa" | "tavily" (default: whichever the run has a key for, else exa).
+    #[serde(default)]
+    pub service: Option<String>,
+    /// `false`: no key, so the keyless lookup, even when the run has one.
+    #[serde(default = "yes")]
+    pub key: bool,
+    /// Stand-in: what the search service answers.
+    #[serde(default)]
+    pub results: Vec<WebHit>,
+    /// Stand-in: pages by their address (HTML or text).
+    #[serde(default)]
+    pub pages: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebHit {
+    pub title: String,
+    pub url: String,
+    pub text: String,
+    #[serde(default)]
+    pub published: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -202,6 +240,11 @@ pub struct Expect {
     /// The folders afterwards, exactly (no invented ones).
     pub folders: Option<Vec<String>>,
     pub notes_count: Option<usize>,
+    /// The answer came with at least this many web sources (Chat's Sources row).
+    pub min_sources: Option<usize>,
+    /// One of the sources' addresses holds one of these ("bg3.wiki").
+    #[serde(default)]
+    pub sources_any: Vec<String>,
     /// The turn may end in an error (else an error fails it).
     #[serde(default)]
     pub allow_error: bool,
@@ -257,6 +300,8 @@ pub struct Observed {
     pub fast_path: bool,
     pub error: Option<String>,
     pub opened: Vec<String>,
+    /// The web sources the answer came with: (title, url).
+    pub sources: Vec<(String, String)>,
     pub stats: TurnStats,
 }
 
@@ -273,6 +318,7 @@ impl Observed {
                 all.error = t.error.clone();
             }
             all.opened.extend(t.opened.iter().cloned());
+            all.sources.extend(t.sources.iter().cloned());
             let (a, b) = (&mut all.stats, &t.stats);
             a.requests += b.requests;
             a.retries += b.retries;
@@ -436,6 +482,14 @@ fn false_claims(o: &Observed) -> Vec<String> {
             out.push(format!("claims text was copied, but nothing was: \"{}\"", clip(m.as_str(), 60)));
         }
     }
+    // A citation with no web source behind it ("… 3.12 [1]" from memory).
+    static CITE: OnceLock<regex::Regex> = OnceLock::new();
+    let cite = CITE.get_or_init(|| re(r"\[\d{1,2}\]"));
+    if o.sources.is_empty() {
+        if let Some(m) = cite.find(&reply) {
+            out.push(format!("cites {} but has no web sources", m.as_str()));
+        }
+    }
     out
 }
 
@@ -576,6 +630,24 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
             fails.push(format!("copied \"{}\" to the clipboard (not expected)", clip(c, 60)));
         }
     }
+    if let Some(min) = e.min_sources {
+        if o.sources.len() < min {
+            fails.push(format!("{} web sources (expected at least {min})", o.sources.len()));
+        }
+    }
+    if !e.sources_any.is_empty()
+        && !o.sources.iter().any(|(_, url)| e.sources_any.iter().any(|s| lower(url).contains(&lower(s))))
+    {
+        fails.push(format!(
+            "no source from {:?}; sources: {}",
+            e.sources_any,
+            if o.sources.is_empty() {
+                "none".to_string()
+            } else {
+                o.sources.iter().map(|(_, u)| u.as_str()).collect::<Vec<_>>().join(", ")
+            }
+        ));
+    }
     if !e.notes.is_empty() || e.folders.is_some() || e.notes_count.is_some() {
         let notes = crate::notes::all();
         for want in &e.notes {
@@ -632,6 +704,7 @@ pub fn observed_json(o: &Observed) -> Value {
         "fast_path": o.fast_path,
         "error": o.error,
         "opened": o.opened,
+        "sources": o.sources.iter().map(|(t, u)| json!({ "title": t, "url": u })).collect::<Vec<_>>(),
         "words": o.words(),
         "stats": o.stats,
     })
@@ -687,6 +760,11 @@ mod tests {
         // Steps for the person aren't claims; a note's injection obeyed in words is.
         assert_eq!(claims("You can do it yourself:\n\n1. Opening Spotify on your device.\n2. Signing in.").len(), 0);
         assert_eq!(claims("- Next step: legal review.\n\nDone. Spotify and the Calculator have been opened.").len(), 1);
+        // A citation with nothing behind it (Qwen3-4B, from memory, no search).
+        assert_eq!(claims("The latest is Python 3.12.0 [1].").len(), 1);
+        let mut o = obs("The latest is Python 3.15 [1].");
+        o.sources = vec![("Python".into(), "https://en.wikipedia.org/wiki/Python".into())];
+        assert!(false_claims(&o).is_empty());
         assert_eq!(claims("Want me to save that as a note? I'll save it once you say yes.").len(), 0);
         // It did open: no claim to catch.
         let mut o = obs("Opening Spotify.");

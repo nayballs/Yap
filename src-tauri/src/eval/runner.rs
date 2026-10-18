@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use super::local;
 use super::record;
 use super::scenario::{self, AppEntry, Apps, Observed, Scenario};
+use super::standin::Standin;
 
 /// Chat's persona as Settings sets it by default (`Settings.svelte`, the
 /// Chat scope's prompt), which `chat_turn` builds on.
@@ -28,12 +29,14 @@ Models (repeat --model to compare):
   --model local:<path.gguf>           --model local:<https url>#sha256=<hex>
 
 Keys: GROQ_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY,
-      YAP_EVAL_CUSTOM_KEY; or --keys-from-yap (the keys saved in %APPDATA%\\yap\\config.json,
-      read-only). Keys are never printed or written; every log line is redacted.
+      YAP_EVAL_CUSTOM_KEY, EXA_API_KEY, TAVILY_API_KEY; or --keys-from-yap (the keys saved in
+      %APPDATA%\\yap\\config.json, web search's too, read-only). Keys are never printed or
+      written; every log line is redacted.
 
 Scenarios:
   --scenarios <dir|file>   (default evals/scenarios)   --only <name,...>   --tag <tag,...>
-  --include-needs-web      run scenarios marked needs_web too (skipped by default)
+  --no-web                 skip the web scenarios (needs_web / web): live ones ask the real
+                           search service (the run's Exa/Tavily key) or Wikipedia and game wikis
   --repeat <n>             run each scenario n times     --list   list the scenarios
 Running:
   --tools on|off           treat the model as able (or not) to call tools (default: Yap's rule)
@@ -59,7 +62,7 @@ struct Args {
     scenarios: Option<PathBuf>,
     only: Vec<String>,
     tags: Vec<String>,
-    include_needs_web: bool,
+    no_web: bool,
     keys_from_yap: bool,
     tokens_per_minute: Option<u64>,
     max_total_tokens: Option<u64>,
@@ -94,7 +97,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--scenarios" => a.scenarios = Some(PathBuf::from(value()?)),
             "--only" => a.only.extend(list(value()?)),
             "--tag" | "--tags" => a.tags.extend(list(value()?)),
-            "--include-needs-web" => a.include_needs_web = true,
+            "--no-web" => a.no_web = true,
             "--keys-from-yap" => a.keys_from_yap = true,
             "--tokens-per-minute" | "--tpm" => a.tokens_per_minute = Some(num(value()?, &flag)?),
             "--max-total-tokens" => a.max_total_tokens = Some(num(value()?, &flag)?),
@@ -284,6 +287,12 @@ fn load_keys(from_yap: bool) -> HashMap<String, String> {
                         }
                     }
                     put(cfg["ppProvider"].as_str().unwrap_or(""), cfg["ppApiKey"].as_str().unwrap_or(""));
+                    // Web search's keys ("exa", "tavily").
+                    if let Some(map) = cfg["webSearchKeys"].as_object() {
+                        for (p, k) in map {
+                            put(p, k.as_str().unwrap_or(""));
+                        }
+                    }
                     if let Some(scopes) = cfg["llmScopes"].as_object() {
                         for s in scopes.values() {
                             put(s["provider"].as_str().unwrap_or(""), s["apiKey"].as_str().unwrap_or(""));
@@ -305,6 +314,8 @@ fn load_keys(from_yap: bool) -> HashMap<String, String> {
         ("openrouter", "OPENROUTER_API_KEY"),
         ("gemini", "GEMINI_API_KEY"),
         ("custom", "YAP_EVAL_CUSTOM_KEY"),
+        ("exa", "EXA_API_KEY"),
+        ("tavily", "TAVILY_API_KEY"),
     ] {
         if let Ok(k) = std::env::var(var) {
             if !k.trim().is_empty() {
@@ -428,17 +439,66 @@ async fn prepare(spec: &str, args: &Args, keys: &HashMap<String, String>, run_di
     Ok(m)
 }
 
+/// Does scenario `s` turn "Look things up on the web" on?
+fn web_on(s: &Scenario) -> bool {
+    s.needs_web || s.web.is_some()
+}
+
+/// A scenario's web search: on or off, the service, its key ("" = the
+/// keyless lookup), and whether a stand-in answers.
+struct WebPlan {
+    on: bool,
+    service: String,
+    key: String,
+    standin: bool,
+}
+
+impl WebPlan {
+    fn of(s: &Scenario, keys: &HashMap<String, String>) -> WebPlan {
+        let spec = s.web.clone().unwrap_or_default();
+        let standin = spec.mode.as_deref() == Some("standin");
+        let service = spec.service.clone().unwrap_or_else(|| {
+            if !keys.contains_key("exa") && keys.contains_key("tavily") { "tavily" } else { "exa" }.to_string()
+        });
+        let key = if !spec.key {
+            String::new()
+        } else if standin {
+            "standin-key".to_string()
+        } else {
+            keys.get(&service).cloned().unwrap_or_default()
+        };
+        WebPlan { on: web_on(s), service, key, standin }
+    }
+
+    /// For the logs: where searches go (never the key).
+    fn describe(&self) -> Value {
+        if !self.on {
+            return Value::Null;
+        }
+        json!({
+            "mode": if self.standin { "standin" } else { "live" },
+            "service": self.service,
+            "backend": if self.key.is_empty() { "keyless (Wikipedia + game wikis)".to_string() } else { self.service.clone() },
+        })
+    }
+}
+
 /// Chat's settings for `m` and scenario `s`: the Chat scope on the model,
-/// Settings' default persona, the scenario's app settings.
-fn settings_for(m: &Model, s: &Scenario, apps: &[AppEntry]) -> crate::config::YapConfig {
+/// Settings' default persona, the scenario's app and web settings.
+fn settings_for(m: &Model, s: &Scenario, apps: &[AppEntry], web: &WebPlan) -> crate::config::YapConfig {
     let mut cfg = crate::config::YapConfig {
         pp_provider: m.provider.clone(),
         pp_base_url: m.base_url.clone(),
         pp_api_key: m.key.clone(),
         pp_model: m.model.clone(),
         open_apps: s.settings.open_apps,
+        web_search: web.on,
+        web_search_service: web.service.clone(),
         ..Default::default()
     };
+    if web.on && !web.key.is_empty() {
+        cfg.web_search_keys.insert(web.service.clone(), web.key.clone());
+    }
     cfg.llm_scopes.insert(
         "chat".to_string(),
         crate::config::LlmScope {
@@ -536,7 +596,16 @@ fn seed(s: &Scenario) -> Result<(), String> {
 }
 
 /// One scenario on one model: its result row.
-async fn run_scenario(m: &Model, s: &Scenario, args: &Args, run_dir: &Path, this_pc: &mut Option<Vec<AppEntry>>, rep: u32) -> Value {
+#[allow(clippy::too_many_arguments)]
+async fn run_scenario(
+    m: &Model,
+    s: &Scenario,
+    args: &Args,
+    keys: &HashMap<String, String>,
+    run_dir: &Path,
+    this_pc: &mut Option<Vec<AppEntry>>,
+    rep: u32,
+) -> Value {
     let started = Instant::now();
     let name = if args.repeat > 1 { format!("{}#{}", s.name, rep + 1) } else { s.name.clone() };
     record::set_context(json!({ "model": m.label, "scenario": name }));
@@ -549,7 +618,27 @@ async fn run_scenario(m: &Model, s: &Scenario, args: &Args, run_dir: &Path, this
         return error_row(m, &name, &format!("apps file: {e}"));
     }
     std::env::set_var("YAP_E2E_APPS", &apps_file);
-    record::set_config(Some(settings_for(m, s, &apps)));
+    // The web: fresh caches; a stand-in server, or the real services.
+    let web = WebPlan::of(s, keys);
+    crate::web::clear_caches();
+    let _standin = if web.on && web.standin {
+        match Standin::start(&s.web.clone().unwrap_or_default()) {
+            Ok(st) => {
+                for (k, v) in st.env() {
+                    std::env::set_var(k, v);
+                }
+                Some(st)
+            }
+            Err(e) => return error_row(m, &name, &e),
+        }
+    } else {
+        for k in ["YAP_EXA_URL", "YAP_TAVILY_URL", "YAP_WEB_STANDIN"] {
+            std::env::remove_var(k);
+        }
+        None
+    };
+    record::set_web_live(web.on && !web.standin);
+    record::set_config(Some(settings_for(m, s, &apps, &web)));
     let forced = match s.tools.as_deref() {
         Some("on") => Some(true),
         Some("off") => Some(false),
@@ -571,6 +660,7 @@ async fn run_scenario(m: &Model, s: &Scenario, args: &Args, run_dir: &Path, this
             "apps": apps.len(),
             "notes": crate::notes::all().len(),
             "folders": crate::notes::folders(),
+            "web": web.describe(),
         }),
     );
 
@@ -599,6 +689,7 @@ async fn run_scenario(m: &Model, s: &Scenario, args: &Args, run_dir: &Path, this
                 o.reply = t.reply;
                 o.chips = t.tools_used;
                 o.fast_path = t.model.is_none();
+                o.sources = t.sources.iter().map(|x| (x.title.clone(), x.url.clone())).collect();
             }
             Err(e) => o.error = Some(e),
         }
@@ -634,6 +725,8 @@ async fn run_scenario(m: &Model, s: &Scenario, args: &Args, run_dir: &Path, this
         "reasons": fails,
         "warnings": warns,
         "tools": tools,
+        "web": web.describe(),
+        "sources": all.sources.iter().map(|(t, u)| json!({ "title": t, "url": u })).collect::<Vec<_>>(),
         "turns": s.turns.len(),
         "steps": st.requests,
         "retries": st.retries,
@@ -706,7 +799,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         "args": {
             "models": args.models, "tools": args.tools, "tokens_per_minute": args.tokens_per_minute,
             "max_total_tokens": args.max_total_tokens, "timeout_s": args.timeout, "ngl": args.ngl, "ctx": args.ctx,
-            "llamafile_args": args.llamafile_args, "repeat": args.repeat, "include_needs_web": args.include_needs_web,
+            "llamafile_args": args.llamafile_args, "repeat": args.repeat, "no_web": args.no_web,
         },
     });
     let mut failed = false;
@@ -753,12 +846,12 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         let mut used: u64 = 0;
         for s in &scenarios {
             for rep in 0..args.repeat {
-                let row = if s.needs_web && !args.include_needs_web {
-                    skip_row(&m.label, s, "needs web search (not in Yap yet; --include-needs-web runs it)")
+                let row = if web_on(s) && args.no_web {
+                    skip_row(&m.label, s, "a web scenario (--no-web)")
                 } else if args.max_total_tokens.is_some_and(|cap| used >= cap) {
                     skip_row(&m.label, s, "token cap reached (--max-total-tokens)")
                 } else {
-                    run_scenario(&m, s, args, run_dir, &mut this_pc, rep).await
+                    run_scenario(&m, s, args, keys, run_dir, &mut this_pc, rep).await
                 };
                 used += row["total_tokens"].as_u64().unwrap_or(0);
                 print_row(&row);

@@ -209,7 +209,9 @@ impl Endpoints {
             standin: None,
             offline: false,
         };
-        if !crate::e2e::active() {
+        // A model evaluation's live web scenario (eval.rs) runs in test mode
+        // but asks the real services and wikis.
+        if !crate::e2e::active() || crate::eval::web_live() {
             return real;
         }
         #[cfg(debug_assertions)]
@@ -1114,6 +1116,14 @@ pub struct Page {
 }
 
 static PAGES: LazyLock<Mutex<HashMap<String, (Instant, Page)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// The model evaluation (`eval.rs`): every scenario starts with empty search
+/// and page caches (a stand-in web's answers never leak into the next).
+#[cfg(debug_assertions)]
+pub fn clear_caches() {
+    SEARCHES.lock().unwrap_or_else(|p| p.into_inner()).clear();
+    PAGES.lock().unwrap_or_else(|p| p.into_inner()).clear();
+}
 
 /// What a page fetch brought back.
 struct Fetched {

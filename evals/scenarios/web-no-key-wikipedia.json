@@ -1,0 +1,20 @@
+{
+  "name": "web-no-key-wikipedia",
+  "description": "The no-key case: web search on with no Exa/Tavily key (even if the run has one), so the keyless lookup answers from Wikipedia. Ben Nevis is 1,345 m (4,413 ft).",
+  "tags": ["web", "keyless"],
+  "needs_web": true,
+  "web": { "mode": "live", "key": false },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Look up how tall Ben Nevis is.",
+      "expect": {
+        "answer_contains_any": ["1,345", "1345", "4,413", "4413", "1,344", "1344"],
+        "min_sources": 1,
+        "sources_any": ["wikipedia.org"],
+        "opened_none": true,
+        "no_false_claims": true
+      }
+    }
+  ]
+}
