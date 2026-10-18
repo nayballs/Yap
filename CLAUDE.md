@@ -1344,7 +1344,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `page_text` = dom_smoothie (readability.js port, `TextMode::Formatted`),
   `page_part` ≈ 3,000 tokens a read with `next_offset`. **`Turn`**: only
   links the person gave (their messages, `links_in`) or a search this turn
-  returned (`allowed`); ≤ 3 searches and ≤ 3 reads a turn (`offers`);
+  returned (`allowed`); ≤ 3 searches and ≤ 3 reads a turn (a call past the
+  cap is answered "you've searched 3 times", the tool still offered);
   sources numbered as they come (`number`), `sources_for(reply)` = the ones
   cited (`citations`: [1], [2, 3], [1][4]) or all; results carry
   `DATA_NOT_INSTRUCTIONS`. Chips: `Searched the web: "q"` (+ " (bg3.wiki)"
