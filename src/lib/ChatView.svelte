@@ -258,9 +258,13 @@
         bind:this={inputEl}
         bind:value={input}
         placeholder="Type a message..."
-        disabled={sending}
-        onkeydown={(e) => e.key === 'Enter' && send()}
+        aria-busy={sending}
+        onkeydown={(e) => e.key === 'Enter' && !e.isComposing && send()}
       />
+      <!-- Not `disabled` while an answer comes: disabling the focused box
+           throws the caret out of it, and you'd have to click back in to
+           type the next message. `send()` ignores Enter until the answer is
+           in, so you can type ahead. -->
       <div class="composerrow">
         <button class="micbtn" title="Dictate your message" aria-label="Dictate your message" onclick={micChat}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>

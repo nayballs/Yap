@@ -1613,9 +1613,11 @@
           bind:this={askEl}
           bind:value={chatInput}
           placeholder="Ask anything…"
-          disabled={asking}
-          onkeydown={(e) => e.key === 'Enter' && askNote()}
+          aria-busy={asking}
+          onkeydown={(e) => e.key === 'Enter' && !e.isComposing && askNote()}
         />
+        <!-- Not `disabled` while asking: that would throw the caret out of
+             the box (askNote ignores Enter until the answer is in). -->
         <!-- While recording: the end-of-meeting moment. Otherwise the
              ActionPicker split button (OpenWhispr ActionPicker.tsx): left half
              runs the last-used action, the chevron opens the action menu. -->
