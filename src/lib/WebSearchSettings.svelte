@@ -3,9 +3,14 @@
   // Assistant look things up on the web when a question needs it, and show
   // where the answer came from.
   // - "Look things up on the web" (cfg.webSearch, off by default);
-  // - the service with a key: Exa (recommended) or Tavily
-  //   (cfg.webSearchService), each key kept in cfg.webSearchKeys like the
-  //   AI keys (masked; "Get a free key" opens the service's dashboard);
+  // - "Search with": the AI's own search (cfg.webSearchNative, the default
+  //   and recommended: a cloud model searches with its provider's built-in
+  //   search, web/native.rs), or Exa / Tavily for every model
+  //   (cfg.webSearchService). With the AI's own search, local and
+  //   self-hosted models use "Yap's search" (Exa or Tavily), and what each
+  //   provider charges for its search is listed;
+  // - each service's key kept in cfg.webSearchKeys like the AI keys
+  //   (masked; "Get a free key" opens the service's dashboard);
   // - "Wikipedia and reference wikis": always included — what Yap uses
   //   with no key, and when the service has no results;
   // - where the search words go, said plainly.
@@ -40,13 +45,51 @@
       placeholder: 'tvly-…',
     },
   };
+  const MODES = [
+    {
+      value: 'native',
+      title: "The AI's own search",
+      recommended: true,
+      desc: "Cloud models (Groq, Google Gemini, Anthropic, OpenAI, OpenRouter) search with their provider's built-in search, on the API key Chat already uses. Local and self-hosted models use Yap's search below.",
+    },
+    { value: 'exa', title: 'Exa', desc: `Every model searches with Exa. ${INFO.exa.free}` },
+    { value: 'tavily', title: 'Tavily', desc: `Every model searches with Tavily. ${INFO.tavily.free}` },
+  ];
+  // What each provider's own search costs, as published on 18 October 2026.
+  const COSTS = [
+    {
+      name: 'Groq',
+      cost: 'No charge on the free plan, but each searched answer uses about 4,000 of the 8,000 tokens a minute the plan allows. Paid plans: $5 per 1,000 searches and $1 per 1,000 pages opened.',
+    },
+    {
+      name: 'Google Gemini',
+      cost: 'Gemini 3 and newer need billing turned on: 5,000 searches a month free, then $14 per 1,000. On a free key, Yap uses its own search instead. Gemini 2.5 Flash and Flash-Lite, where still offered: 500 searched answers a day free. Google may use free-tier requests to improve its products.',
+    },
+    { name: 'Anthropic', cost: '$10 per 1,000 searches on your Anthropic bill, plus the tokens for the results.' },
+    { name: 'OpenAI', cost: '$10 per 1,000 searches on your OpenAI bill, plus the search results’ tokens at the model’s rate.' },
+    {
+      name: 'OpenRouter',
+      cost: 'The model provider’s own search price where it has one, otherwise $0.007 per search (Exa), from your OpenRouter credits.',
+    },
+  ];
 
+  const native = $derived(cfg.webSearchNative !== false);
   const service = $derived(INFO[cfg.webSearchService] ? cfg.webSearchService : 'exa');
+  const mode = $derived(native ? 'native' : service);
   const info = $derived(INFO[service]);
   const key = $derived((cfg.webSearchKeys ?? {})[service] ?? '');
   const masked = $derived(!key ? '' : key.length > 8 ? `${key.slice(0, 3)}…${key.slice(-4)}` : '••••••••');
   let editing = $state(false);
 
+  function setMode(v) {
+    if (v === 'native') {
+      cfg.webSearchNative = true;
+    } else {
+      cfg.webSearchNative = false;
+      cfg.webSearchService = v;
+    }
+    editing = false;
+  }
   function setService(v) {
     cfg.webSearchService = v;
     editing = false;
@@ -55,10 +98,17 @@
     cfg.webSearchKeys = { ...(cfg.webSearchKeys ?? {}), [service]: (v ?? '').trim() };
   }
 
-  const where = $derived(
+  const own = $derived(
     key
-      ? `Searches are sent to ${info.name} (${info.host}), and to Wikipedia or a reference wiki when ${info.name} has no results.`
-      : `No ${info.name} API key is set, so searches are sent to Wikipedia and reference wikis.`
+      ? `${info.name} (${info.host}), and to Wikipedia or a reference wiki when ${info.name} has no results`
+      : `Wikipedia and reference wikis, as no ${info.name} API key is set`
+  );
+  const where = $derived(
+    native
+      ? `With a cloud model, your search words go to that model’s provider, which runs the search on its own servers. With a local or self-hosted model, or when a provider’s search is unavailable, they go to ${own}.`
+      : key
+        ? `Searches are sent to ${own}.`
+        : `No ${info.name} API key is set, so searches are sent to Wikipedia and reference wikis.`
   );
 </script>
 
@@ -72,9 +122,59 @@
       />
     </Row>
 
-    <Row label="Search with" desc={info.free}>
-      <Segmented bind:value={() => service, setService} options={SERVICES} label="Search with" disabled={!cfg.webSearch} />
+    <Row>
+      <div class="modes" class:off={!cfg.webSearch} role="radiogroup" aria-label="Search with">
+        <span class="klabel">Search with</span>
+        {#each MODES as m (m.value)}
+          <button
+            type="button"
+            class="mode"
+            class:on={mode === m.value}
+            role="radio"
+            aria-checked={mode === m.value}
+            disabled={!cfg.webSearch}
+            onclick={() => setMode(m.value)}
+          >
+            <span class="radio" aria-hidden="true"></span>
+            <span class="mtext">
+              <span class="mtitle">
+                {m.title}
+                {#if m.recommended}<span class="badge">Recommended</span>{/if}
+              </span>
+              <span class="mdesc">{m.desc}</span>
+            </span>
+          </button>
+        {/each}
+      </div>
     </Row>
+
+    {#if native}
+      <Row>
+        <div class="costs" class:off={!cfg.webSearch}>
+          <span class="klabel">What each provider charges for its search</span>
+          <dl>
+            {#each COSTS as c (c.name)}
+              <div class="cost">
+                <dt>{c.name}</dt>
+                <dd>{c.cost}</dd>
+              </div>
+            {/each}
+          </dl>
+          <span class="asof">
+            Searches are billed to your own account with the provider, at the prices it published (as of 18 October 2026).
+          </span>
+        </div>
+      </Row>
+
+      <Row label="Yap's search" desc="Used by local and self-hosted models, and whenever a provider's own search is unavailable.">
+        <Segmented
+          bind:value={() => service, setService}
+          options={SERVICES}
+          label="Yap's search"
+          disabled={!cfg.webSearch}
+        />
+      </Row>
+    {/if}
 
     <Row>
       <div class="keyblock" class:off={!cfg.webSearch}>
@@ -84,6 +184,9 @@
             Get a free key →
           </a>
         </div>
+        {#if native}
+          <span class="kdesc">{info.free}</span>
+        {/if}
         {#if masked && !editing}
           <div class="keymask">
             <span class="keytext">
@@ -143,7 +246,9 @@
 
 <style>
   .keyblock,
-  .always {
+  .always,
+  .modes,
+  .costs {
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -151,6 +256,106 @@
   }
   .off {
     opacity: 0.55;
+  }
+  .mode {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+    font: inherit;
+    text-align: left;
+    color: var(--yap-fg);
+    cursor: pointer;
+    transition:
+      border-color var(--yap-dur) ease,
+      background var(--yap-dur) ease;
+  }
+  .mode:hover:not(:disabled) {
+    border-color: var(--yap-border-hover);
+  }
+  .mode.on {
+    border-color: var(--yap-primary-line);
+    background: var(--yap-primary-wash);
+  }
+  .mode:disabled {
+    cursor: default;
+  }
+  .mode:focus-visible {
+    outline: 2px solid var(--yap-primary);
+    outline-offset: 1px;
+  }
+  .radio {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    margin-top: 2px;
+    border: 1.5px solid var(--yap-muted-55);
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s2);
+  }
+  .mode.on .radio {
+    border-color: var(--yap-primary);
+    background: radial-gradient(circle, var(--yap-primary) 0 3.5px, var(--yap-s2) 4px);
+  }
+  .mtext {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .mtitle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .badge {
+    padding: 1px 7px;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-primary-tint);
+    color: var(--yap-primary);
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+  .mdesc,
+  .kdesc,
+  .asof {
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--yap-muted);
+  }
+  dl {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s1);
+  }
+  .cost {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 12px;
+    padding: 7px 12px;
+  }
+  .cost + .cost {
+    border-top: 1px solid var(--yap-border-subtle);
+  }
+  dt {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--yap-fg);
+  }
+  dd {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--yap-fg-80);
   }
   .keyhead {
     display: flex;

@@ -25,9 +25,13 @@
 //!   a time per host with a short gap, ≤ 3 requests per lookup, answers
 //!   cached for 10 minutes. Never a scrape of Google, Bing or DuckDuckGo.
 //!
-//! A provider's own search (Groq's `browser_search` on gpt-oss, OpenAI's,
-//! Anthropic's…) would be one more [`Backend`]: not built yet (see
-//! [`native_backend`]).
+//! **The AI's own search** (the default for cloud models,
+//! `config.web_search_native`): with a Groq, Gemini, Claude, OpenAI or
+//! OpenRouter chat model, a `web_search` is a short sub-call to that
+//! provider with only its search tool ([`native`]), its pages and short
+//! answer turned into the same numbered results. Local and self-hosted
+//! models — and a provider search that fails or finds nothing, said so in
+//! the chip — use Exa / Tavily / the keyless lookup above.
 //!
 //! **Reading a page** ([`read_page`]), on this PC: http(s) only, ports 80 and
 //! 443, no user name or password in the address, and never a loopback,
@@ -61,6 +65,8 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::chats::Source;
+
+pub mod native;
 
 /// The tools this module runs.
 pub const TOOL_NAMES: &[&str] = &["web_search", "read_page"];
@@ -133,21 +139,28 @@ pub struct Settings {
     /// Wikipedia's language edition ("en", "fr"…).
     pub lang: String,
     /// The chat model's provider's own search, when Yap uses it
-    /// ([`native_backend`]; none yet).
-    pub native: Option<Backend>,
+    /// ([`native::NativeSearch::for_chat`]).
+    pub native: Option<native::NativeSearch>,
 }
 
 impl Settings {
+    /// Yap's own search only (Exa / Tavily / the keyless lookup).
     pub fn from_config(cfg: &crate::config::YapConfig) -> Settings {
         let service = Service::parse(&cfg.web_search_service);
         let key = cfg.web_search_keys.get(service.id()).map(|k| k.trim().to_string()).unwrap_or_default();
         Settings { service, key, lang: wiki_language(&cfg.selected_language, system_language().as_deref()), native: None }
     }
 
-    /// For a chat with this model: its provider's own search, if Yap uses it.
-    pub fn with_chat_model(mut self, provider: &str, model: &str) -> Settings {
-        self.native = native_backend(provider, model);
-        self
+    /// For a chat with this model (its provider, endpoint and key, as
+    /// `commands::resolve_chat_endpoint` gives them): its provider's own
+    /// search when "The AI's own search" is chosen and Yap has one for it,
+    /// else Yap's own.
+    pub fn for_chat(cfg: &crate::config::YapConfig, provider: &str, model: &str, base_url: &str, api_key: &str) -> Settings {
+        let mut s = Settings::from_config(cfg);
+        if cfg.web_search_native {
+            s.native = native::NativeSearch::for_chat(provider, model, base_url, api_key);
+        }
+        s
     }
 }
 
@@ -276,45 +289,57 @@ pub struct Hit {
 }
 
 /// A search's results and where they came from.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Found {
     pub hits: Vec<Hit>,
-    /// "Exa", "Tavily", "Wikipedia", "bg3.wiki"…
+    /// "Exa", "Tavily", "Wikipedia", "bg3.wiki", "Groq"…
     pub from: String,
-    /// Why they came from somewhere else (the service failed).
+    /// Why they came from somewhere else (the provider's search or the
+    /// service failed, or found nothing).
     pub note: Option<String>,
+    /// The provider's own search answered ([`native`]).
+    pub native: Option<native::Provider>,
+    /// Its short answer, citing `hits[i]` with a [`native::MARK_OPEN`] mark.
+    pub summary: Option<String>,
 }
 
-/// A search backend. Provider-native search (Groq's built-in
-/// `browser_search` on gpt-oss, run as a sub-call that returns the same
-/// [`Hit`]s from `message.executed_tools[].search_results` /
-/// `browser_results`) is the planned third kind: [`native_backend`].
+/// A search backend: the chat provider's own search ([`native`]), Yap's
+/// keyed service, or the keyless lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Backend {
+    Native(native::Provider),
     Service(Service),
     Keyless,
 }
 
-/// The provider's own search for this chat model, if Yap uses it. None
-/// yet: Groq's `browser_search` is being tried on a real key first (does it
-/// mix with function tools in one request; what `executed_tools` holds; its
-/// tokens against the free plan's 8,000 a minute). When it's in, it's a
-/// `Backend::Native` that [`search`] runs as a short sub-call through
-/// `llm::post_chat_message` with `tools: [{"type": "browser_search"}]`.
-pub fn native_backend(_provider: &str, _model: &str) -> Option<Backend> {
-    None
+/// Yap's own backend: the keyed service, else the keyless lookup.
+fn own_backend(s: &Settings) -> Backend {
+    if s.key.is_empty() {
+        Backend::Keyless
+    } else {
+        Backend::Service(s.service)
+    }
 }
 
 /// The backend a search uses: the provider's own search when Yap uses it,
 /// else the keyed service, else the keyless lookup.
 pub fn backend(s: &Settings) -> Backend {
-    if let Some(native) = &s.native {
-        return native.clone();
+    match &s.native {
+        Some(n) => Backend::Native(n.provider),
+        None => own_backend(s),
     }
-    if s.key.is_empty() {
-        Backend::Keyless
+}
+
+/// The site a source shows: its host — or, for Google Search's redirect
+/// links (Gemini's grounding), the domain Google titles it with. Pure.
+pub fn source_site(title: &str, url: &str) -> String {
+    let site = site_of(url);
+    let t = title.trim().trim_start_matches("www.").to_ascii_lowercase();
+    let domain_like = !t.is_empty() && !t.contains(' ') && t.contains('.');
+    if site == "vertexaisearch.cloud.google.com" && domain_like {
+        t
     } else {
-        Backend::Service(s.service)
+        site
     }
 }
 
@@ -449,10 +474,16 @@ pub fn short(e: &str) -> String {
 
 /// A search's chip: `Searched the web: "query"`, with where the results
 /// came from when it wasn't the keyed service ("(bg3.wiki)"), and why
-/// (the service's error) or that nothing was found. Pure.
+/// (the provider's search or the service failed) or that nothing was found;
+/// `Searched the web with Groq: "query"` when the provider's own search
+/// answered. Pure.
 pub fn search_chip(query: &str, found: &Found, s: &Settings) -> String {
     let q = tidy(query, 60);
-    let keyed = matches!(backend(s), Backend::Service(_)) && found.note.is_none();
+    if let (Some(p), None) = (found.native, &found.note) {
+        let nothing = if found.hits.is_empty() { " · nothing found" } else { "" };
+        return format!("Searched the web with {}: \"{q}\"{nothing}", p.name());
+    }
+    let keyed = matches!(own_backend(s), Backend::Service(_)) && found.note.is_none();
     let via = if keyed { String::new() } else { format!(" ({})", found.from) };
     match (found.hits.len(), &found.note) {
         (0, _) => format!("Searched the web: \"{q}\"{via} · nothing found"),
@@ -952,7 +983,7 @@ async fn keyless(s: &Settings, ep: &Endpoints, query: &str, context: &str) -> Re
     let mut errors = Vec::new();
     if let Some(api) = named.or_else(|| game.map(|g| g.api.to_string())) {
         match wiki_lookup(ep, &api, query, game).await {
-            Ok(hits) if !hits.is_empty() => return Ok(Found { hits, from: site_of(&api), note: None }),
+            Ok(hits) if !hits.is_empty() => return Ok(Found { hits, from: site_of(&api), ..Default::default() }),
             Ok(_) => {}
             Err(e) => errors.push(e),
         }
@@ -964,14 +995,14 @@ async fn keyless(s: &Settings, ep: &Endpoints, query: &str, context: &str) -> Re
     for lang in langs {
         let api = format!("https://{lang}.wikipedia.org/w/api.php");
         match wiki_lookup(ep, &api, query, game).await {
-            Ok(hits) if !hits.is_empty() => return Ok(Found { hits, from: "Wikipedia".into(), note: None }),
+            Ok(hits) if !hits.is_empty() => return Ok(Found { hits, from: "Wikipedia".into(), ..Default::default() }),
             Ok(_) => {}
             Err(e) => errors.push(e),
         }
     }
     match errors.into_iter().next() {
         Some(e) => Err(e),
-        None => Ok(Found { hits: Vec::new(), from: "Wikipedia".into(), note: None }),
+        None => Ok(Found { from: "Wikipedia".into(), ..Default::default() }),
     }
 }
 
@@ -980,24 +1011,70 @@ async fn keyless(s: &Settings, ep: &Endpoints, query: &str, context: &str) -> Re
 static SEARCHES: LazyLock<Mutex<HashMap<String, (Instant, Found)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Search the web for `query` (`context`: the person's question, to spot a
-/// game the query leaves out): the keyed service, with the game's wiki's
-/// best article first when the question names a game Yap knows; the keyless
-/// lookup with no key, when the service fails (its error kept as the
-/// `note`), or when it found nothing ("Exa found nothing."). Answers are
-/// kept for 10 minutes.
+/// game the query leaves out): the chat provider's own search when Yap uses
+/// it ([`native`]) — and when that fails or finds nothing, Yap's own, with
+/// the reason as the `note`; Yap's own is the keyed service, with the
+/// game's wiki's best article first when the question names a game Yap
+/// knows; the keyless lookup with no key, when the service fails (its error
+/// kept as the `note`), or when it found nothing ("Exa found nothing.").
+/// Answers are kept for 10 minutes.
 pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) -> Result<Found, String> {
     let query = tidy(query, 300);
     if query.is_empty() {
         return Err("The search was empty.".into());
     }
-    let key = format!("{:?}|{}|{}|{}", backend(s), s.lang, query.to_lowercase(), game_for(context).map_or("", |g| g.game));
+    let model = s.native.as_ref().map_or("", |n| n.model.as_str());
+    let key = format!("{:?}|{model}|{}|{}|{}", backend(s), s.lang, query.to_lowercase(), game_for(context).map_or("", |g| g.game));
     if let Some((at, found)) = SEARCHES.lock().unwrap_or_else(|p| p.into_inner()).get(&key) {
         if at.elapsed() < CACHE_FOR {
             return Ok(found.clone());
         }
     }
-    let found = match backend(s) {
-        Backend::Keyless => keyless(s, ep, &query, context).await?,
+    let found = match &s.native {
+        Some(ns) => match native::search(ns, &query, context).await {
+            Ok(n) if !n.hits.is_empty() => Found {
+                hits: n.hits,
+                from: ns.provider.name().into(),
+                note: None,
+                native: Some(ns.provider),
+                summary: n.summary,
+            },
+            other => {
+                // Unsupported model, refused, rate-limited, unreachable or
+                // nothing found: Yap's own search, and the chip says why.
+                let why = match other {
+                    Err(e) => e,
+                    Ok(_) => format!("{} found nothing.", ns.provider.search_name()),
+                };
+                tracing::info!(provider = ns.provider.id(), "Web search: the provider's own search didn't answer; Yap's own search instead");
+                match own_search(s, ep, &query, context).await {
+                    Ok(mut f) => {
+                        // The provider's reason first (the chip's); the
+                        // service's own, if it failed too, after it.
+                        f.note = Some(match f.note.take() {
+                            Some(own) => format!("{why} {own}"),
+                            None => why,
+                        });
+                        f
+                    }
+                    Err(e) => return Err(format!("{why} {e}")),
+                }
+            }
+        },
+        None => own_search(s, ep, &query, context).await?,
+    };
+    if found.note.is_none() {
+        SEARCHES.lock().unwrap_or_else(|p| p.into_inner()).insert(key, (Instant::now(), found.clone()));
+    }
+    Ok(found)
+}
+
+/// Yap's own search: the keyed service (with the game's wiki first, and the
+/// keyless lookup when it fails or finds nothing), else the keyless lookup.
+async fn own_search(s: &Settings, ep: &Endpoints, query: &str, context: &str) -> Result<Found, String> {
+    let query = query.to_string();
+    Ok(match own_backend(s) {
+        Backend::Keyless | Backend::Native(_) => keyless(s, ep, &query, context).await?,
         Backend::Service(service) => match service_search(ep, service, &s.key, &query).await {
             Ok(mut hits) => {
                 // A game question: its wiki's best article leads.
@@ -1018,10 +1095,10 @@ pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
                             f.note = Some(format!("{} found nothing.", service.name()));
                             f
                         }
-                        _ => Found { hits, from: service.name().into(), note: None },
+                        _ => Found { hits, from: service.name().into(), ..Default::default() },
                     }
                 } else {
-                    Found { hits, from: service.name().into(), note: None }
+                    Found { hits, from: service.name().into(), ..Default::default() }
                 }
             }
             Err(e) => {
@@ -1035,11 +1112,7 @@ pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
                 }
             }
         },
-    };
-    if found.note.is_none() {
-        SEARCHES.lock().unwrap_or_else(|p| p.into_inner()).insert(key, (Instant::now(), found.clone()));
-    }
-    Ok(found)
+    })
 }
 
 // ---- reading a page -----------------------------------------------------------------
@@ -1156,6 +1229,7 @@ static PAGES: LazyLock<Mutex<HashMap<String, (Instant, Page)>>> = LazyLock::new(
 pub fn clear_caches() {
     SEARCHES.lock().unwrap_or_else(|p| p.into_inner()).clear();
     PAGES.lock().unwrap_or_else(|p| p.into_inner()).clear();
+    native::forget_unavailable();
 }
 
 /// What a page fetch brought back.
@@ -1359,6 +1433,9 @@ pub struct Turn {
     searches: usize,
     reads: usize,
     seen: bool,
+    /// Google Search grounded this turn (Gemini): its answer shows every
+    /// link it gave (≤ 5), as Google's terms ask ([`Turn::sources_for`]).
+    grounded: bool,
 }
 
 impl Turn {
@@ -1366,7 +1443,17 @@ impl Turn {
     /// links count as theirs).
     pub fn new(settings: Settings, endpoints: Endpoints, question: &str, earlier: &[&str]) -> Turn {
         let linked = std::iter::once(question).chain(earlier.iter().copied()).flat_map(links_in).map(|u| normal_url(&u)).collect();
-        Turn { settings, endpoints, question: question.to_string(), linked, sources: Vec::new(), searches: 0, reads: 0, seen: false }
+        Turn {
+            settings,
+            endpoints,
+            question: question.to_string(),
+            linked,
+            sources: Vec::new(),
+            searches: 0,
+            reads: 0,
+            seen: false,
+            grounded: false,
+        }
     }
 
     /// Web content is in the turn: the action tools are off for the rest of
@@ -1382,7 +1469,7 @@ impl Turn {
             return s.n;
         }
         let n = self.sources.len() + 1;
-        self.sources.push(Source { n, title: tidy(title, 120), url: url.to_string(), site: site_of(url) });
+        self.sources.push(Source { n, title: tidy(title, 120), url: url.to_string(), site: source_site(title, url) });
         n
     }
 
@@ -1422,12 +1509,17 @@ impl Turn {
                 if !found.hits.is_empty() {
                     self.seen = true;
                 }
+                if found.native == Some(native::Provider::Gemini) && !found.hits.is_empty() {
+                    self.grounded = true;
+                }
+                let mut numbers = Vec::new();
                 let results: Vec<Value> = found
                     .hits
                     .iter()
                     .map(|h| {
                         let n = self.number(&h.title, &h.url);
-                        let mut r = json!({ "n": n, "title": h.title, "site": site_of(&h.url), "url": h.url, "text": h.text });
+                        numbers.push(n);
+                        let mut r = json!({ "n": n, "title": h.title, "site": source_site(&h.title, &h.url), "url": h.url, "text": h.text });
                         if let Some(p) = &h.published {
                             r["published"] = json!(p);
                         }
@@ -1442,6 +1534,11 @@ impl Turn {
                     "note": DATA_NOT_INSTRUCTIONS,
                     "cite": "Cite a result by its number in square brackets, like [1].",
                 });
+                // The provider's own short answer, citing the same numbers.
+                if let Some(summary) = &found.summary {
+                    data["summary"] = json!(native::render_summary(summary, &numbers));
+                    data["cite"] = json!("Cite a result by its number in square brackets, like [1]. The summary is the search's own short answer: its numbers are the results'.");
+                }
                 if let Some(note) = &found.note {
                     data["service_error"] = json!(note);
                 }
@@ -1500,10 +1597,33 @@ impl Turn {
     }
 
     /// The sources to keep with the answer: those it cites (by number), or
-    /// every one when it cites none.
+    /// every one when it cites none. After Google Search grounded the turn
+    /// (Gemini), every link it gave, the cited first, five at most: Google's
+    /// terms let a grounded result feed a follow-up answer when that answer
+    /// shows its links (up to 5).
     pub fn sources_for(&self, reply: &str) -> Vec<Source> {
-        cited_sources(&self.sources, reply)
+        if !self.grounded {
+            return cited_sources(&self.sources, reply);
+        }
+        let cited = citations(reply);
+        let (mut first, rest): (Vec<Source>, Vec<Source>) = self.sources.iter().cloned().partition(|s| cited.contains(&s.n));
+        first.extend(rest);
+        first.truncate(MAX_RESULTS);
+        first.sort_by_key(|s| s.n);
+        first
     }
+}
+
+/// An answer's citations in gpt-oss's own style ("【1】", "【2†L4-L9】" —
+/// its browsing habit, seen in Yap's tool loop on Groq) written as Yap's
+/// "[1]", so they become pills; a marker without a number goes. Pure.
+pub fn bracket_citations(reply: &str) -> String {
+    static OSS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[ \t]?【(\d{1,2})?(?:†[^】]*)?】").expect("static regex"));
+    if !reply.contains('【') {
+        return reply.to_string();
+    }
+    OSS.replace_all(reply, |c: &regex::Captures| c.get(1).map_or(String::new(), |n| format!(" [{}]", n.as_str())))
+        .into_owned()
 }
 
 /// The citation numbers in an answer ("[1]", "[2, 3]", "[1][4]"). Pure.
@@ -1992,22 +2112,186 @@ mod tests {
     #[test]
     fn chips_say_what_was_searched_and_where() {
         let hit = Hit { title: "Gale".into(), url: "https://bg3.wiki/wiki/Gale".into(), published: None, text: "x".into() };
-        let wiki = Found { hits: vec![hit.clone()], from: "bg3.wiki".into(), note: None };
-        assert_eq!(search_chip("Gale bg3", &wiki, &settings("")), "Searched the web: \"Gale bg3\" (bg3.wiki)");
-        let exa = Found { hits: vec![hit.clone()], from: "Exa".into(), note: None };
-        assert_eq!(search_chip("Gale bg3", &exa, &settings("k")), "Searched the web: \"Gale bg3\"");
-        let fell_back = Found { hits: vec![hit.clone()], from: "Wikipedia".into(), note: Some("Exa says the API key is wrong. Check it.".into()) };
+        let found = |from: &str, note: Option<&str>| Found {
+            hits: vec![hit.clone()],
+            from: from.into(),
+            note: note.map(str::to_string),
+            ..Default::default()
+        };
+        assert_eq!(search_chip("Gale bg3", &found("bg3.wiki", None), &settings("")), "Searched the web: \"Gale bg3\" (bg3.wiki)");
+        assert_eq!(search_chip("Gale bg3", &found("Exa", None), &settings("k")), "Searched the web: \"Gale bg3\"");
         assert_eq!(
-            search_chip("Gale bg3", &fell_back, &settings("k")),
+            search_chip("Gale bg3", &found("Wikipedia", Some("Exa says the API key is wrong. Check it.")), &settings("k")),
             "Searched the web: \"Gale bg3\" (Wikipedia) · Exa says the API key is wrong"
         );
-        let nothing_on_exa = Found { hits: vec![hit.clone()], from: "Wikipedia".into(), note: Some("Exa found nothing.".into()) };
         assert_eq!(
-            search_chip("Gale bg3", &nothing_on_exa, &settings("k")),
+            search_chip("Gale bg3", &found("Wikipedia", Some("Exa found nothing.")), &settings("k")),
             "Searched the web: \"Gale bg3\" (Wikipedia) · Exa found nothing"
         );
-        let none = Found { hits: vec![], from: "Wikipedia".into(), note: None };
+        let none = Found { from: "Wikipedia".into(), ..Default::default() };
         assert_eq!(search_chip("zzz", &none, &settings("")), "Searched the web: \"zzz\" (Wikipedia) · nothing found");
+        // The provider's own search answered; or it didn't, and Exa did.
+        let groq = Found { native: Some(native::Provider::Groq), ..found("Groq", None) };
+        assert_eq!(search_chip("Gale bg3", &groq, &settings("k")), "Searched the web with Groq: \"Gale bg3\"");
+        let gemini = Found { native: Some(native::Provider::Gemini), ..found("Google", None) };
+        assert_eq!(search_chip("Gale bg3", &gemini, &settings("")), "Searched the web with Google: \"Gale bg3\"");
+        assert_eq!(
+            search_chip("Gale bg3", &found("Exa", Some("Groq's search is limiting how much Yap can search right now.")), &settings("k")),
+            "Searched the web: \"Gale bg3\" (Exa) · Groq's search is limiting how much Yap can search right now"
+        );
+    }
+
+    #[test]
+    fn gpt_oss_style_citations_become_yaps() {
+        // Seen in the eval harness on Groq gpt-oss-20b, 2026-10-18.
+        assert_eq!(bracket_citations("It is 1,345 metres (4,411 ft) tall【1】."), "It is 1,345 metres (4,411 ft) tall [1].");
+        assert_eq!(bracket_citations("Out on 9 Oct 【2†L4-L9】 and【†source】 more."), "Out on 9 Oct [2] and more.");
+        assert_eq!(bracket_citations("Plain [1]."), "Plain [1].");
+        assert_eq!(citations(&bracket_citations("a【1】 b【3†L1】")), [1, 3]);
+    }
+
+    #[test]
+    fn a_grounding_redirect_shows_its_site() {
+        let redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQabc";
+        assert_eq!(source_site("python.org", redirect), "python.org");
+        assert_eq!(source_site("Some page title", redirect), "vertexaisearch.cloud.google.com");
+        assert_eq!(source_site("anything", "https://www.bg3.wiki/wiki/Gale"), "bg3.wiki");
+    }
+
+    /// A local stand-in for a chat provider and for Exa: the provider's
+    /// answer to a search sub-call is `native` (status, body); every request
+    /// is kept with its headers.
+    /// A request: its path, its headers (lowercased names), its JSON body.
+    type Asked = (String, Vec<(String, String)>, Value);
+
+    struct Fake {
+        base: String,
+        requests: std::sync::Arc<std::sync::Mutex<Vec<Asked>>>,
+    }
+
+    fn fake(native: (u16, Value), exa: Value) -> Fake {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("a local port");
+        let port = server.server_addr().to_ip().expect("ip").port();
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = requests.clone();
+        std::thread::spawn(move || {
+            for mut req in server.incoming_requests() {
+                let mut body = String::new();
+                let _ = std::io::Read::read_to_string(req.as_reader(), &mut body);
+                let url = req.url().to_string();
+                let headers = req.headers().iter().map(|h| (h.field.to_string().to_ascii_lowercase(), h.value.to_string())).collect();
+                kept.lock().unwrap().push((url.clone(), headers, serde_json::from_str(&body).unwrap_or(Value::Null)));
+                let (status, reply) = if url.starts_with("/exa/search") { (200, exa.clone()) } else { native.clone() };
+                let header = tiny_http::Header::from_bytes("content-type", "application/json").unwrap();
+                let _ = req.respond(tiny_http::Response::from_string(reply.to_string()).with_status_code(status).with_header(header));
+            }
+        });
+        Fake { base: format!("http://127.0.0.1:{port}"), requests }
+    }
+
+    fn endpoints_of(f: &Fake) -> Endpoints {
+        Endpoints { exa: format!("{}/exa", f.base), tavily: String::new(), standin: Some(format!("{}/standin", f.base)), offline: false }
+    }
+
+    const EXA_ONE: &str = r#"{ "results": [{ "title": "Python 3.15 released", "url": "https://blog.example/py315", "highlights": ["Python 3.15.0 is out."] }] }"#;
+
+    #[tokio::test]
+    async fn a_web_search_runs_on_the_providers_own_search() {
+        let groq_answer = json!({
+            "choices": [{ "message": {
+                "role": "assistant",
+                "content": "Python 3.15.0 is the latest stable release.【1†L4-L6】",
+                "executed_tools": [
+                    { "index": 0, "name": "browser.search", "type": "browser_search", "output": "",
+                      "search_results": { "results": [{ "title": "Python 3.15.0", "url": "https://www.python.org/downloads/release/python-3150/", "content": "" }] } },
+                    { "index": 1, "name": "browser.open", "type": "browser_search", "output": "",
+                      "search_results": { "results": [{ "title": "www.python.org - viewing lines [0 - 9] of 9",
+                        "url": "https://www.python.org/downloads/release/python-3150/",
+                        "content": "L0: \nL1: URL: https://www.python.org/downloads/release/python-3150/\nL2: Python 3.15.0\nL4: # Python 3.15.0\nL6: Release date: Oct. 9, 2026" }] } }
+                ] } }],
+            "usage": { "total_tokens": 4000 }
+        });
+        let f = fake((200, groq_answer), serde_json::from_str(EXA_ONE).unwrap());
+        let s = Settings {
+            native: Some(native::NativeSearch::new(native::Provider::Groq, "openai/gpt-oss-20b", &format!("{}/v1", f.base), "gsk-fake")),
+            ..settings("exa-key")
+        };
+        let mut turn = Turn::new(s, endpoints_of(&f), "What's the latest Python?", &[]);
+        let r = turn.execute("web_search", &json!({ "query": "latest python release" })).await;
+        assert_eq!(r["displayText"], "Searched the web with Groq: \"latest python release\"");
+        assert_eq!(r["data"]["from"], "Groq");
+        assert_eq!(r["data"]["results"][0]["url"], "https://www.python.org/downloads/release/python-3150/");
+        assert_eq!(r["data"]["results"][0]["n"], 1);
+        assert!(r["data"]["results"][0]["text"].as_str().unwrap().contains("Release date: Oct. 9, 2026"));
+        assert_eq!(r["data"]["summary"], "Python 3.15.0 is the latest stable release.[1]");
+        assert_eq!(r["data"]["note"], DATA_NOT_INSTRUCTIONS);
+        assert!(turn.seen(), "web content is in the turn: the safety rule applies");
+        // One sub-call to the chat's own endpoint and key, with only Groq's
+        // search tool; Exa never asked.
+        let requests = f.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 1);
+        let (url, headers, body) = &requests[0];
+        assert_eq!(url, "/v1/chat/completions");
+        assert!(headers.iter().any(|(k, v)| k == "authorization" && v == "Bearer gsk-fake"));
+        assert_eq!(body["tools"], json!([{ "type": "browser_search" }]));
+        assert_eq!(body["tool_choice"], "required");
+        assert_eq!(body["model"], "openai/gpt-oss-20b");
+        // The answer's sources: the cited one.
+        assert_eq!(turn.sources_for("It's 3.15 [1].").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_provider_search_falls_back_to_yaps_own_and_says_why() {
+        let f = fake((429, json!({ "error": { "message": "Rate limit reached. Please try again in 9.5s." } })), serde_json::from_str(EXA_ONE).unwrap());
+        let s = Settings {
+            native: Some(native::NativeSearch::new(native::Provider::Groq, "openai/gpt-oss-20b", &format!("{}/v1", f.base), "gsk-fake")),
+            ..settings("exa-key")
+        };
+        let mut turn = Turn::new(s, endpoints_of(&f), "latest python?", &[]);
+        let r = turn.execute("web_search", &json!({ "query": "python release" })).await;
+        assert_eq!(r["displayText"], "Searched the web: \"python release\" (Exa) · Groq's search is limiting how much Yap can search right now");
+        assert_eq!(r["data"]["from"], "Exa");
+        assert_eq!(r["data"]["results"][0]["url"], "https://blog.example/py315");
+        assert!(r["data"]["summary"].is_null());
+        assert!(r["data"]["service_error"].as_str().unwrap().starts_with("Groq's search is limiting"));
+        let urls: Vec<String> = f.requests.lock().unwrap().iter().map(|(u, _, _)| u.clone()).collect();
+        assert_eq!(urls, ["/v1/chat/completions", "/exa/search"]);
+        // A failure isn't kept: the next search asks the provider again.
+        let _ = turn.execute("web_search", &json!({ "query": "python release" })).await;
+        assert_eq!(f.requests.lock().unwrap().iter().filter(|(u, _, _)| u.ends_with("/chat/completions")).count(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_google_grounded_answer_shows_every_link_it_gave() {
+        let chunks: Vec<Value> = (0..6)
+            .map(|i| json!({ "web": { "uri": format!("https://vertexaisearch.cloud.google.com/grounding-api-redirect/r{i}"), "title": format!("site{i}.example") } }))
+            .collect();
+        let gemini = json!({ "candidates": [{
+            "content": { "parts": [{ "text": "Ben Nevis is 1,345 m high." }] },
+            "groundingMetadata": {
+                "groundingChunks": chunks,
+                "groundingSupports": [{ "segment": { "text": "Ben Nevis is 1,345 m high." }, "groundingChunkIndices": [2] }]
+            } }] });
+        let f = fake((200, gemini), Value::Null);
+        let s = Settings {
+            native: Some(native::NativeSearch::new(native::Provider::Gemini, "gemini-2.5-flash", &format!("{}/v1beta/openai", f.base), "AIza-fake")),
+            ..settings("")
+        };
+        let mut turn = Turn::new(s, endpoints_of(&f), "How tall is Ben Nevis?", &[]);
+        let r = turn.execute("web_search", &json!({ "query": "Ben Nevis height" })).await;
+        assert_eq!(r["displayText"], "Searched the web with Google: \"Ben Nevis height\"");
+        assert_eq!(r["data"]["results"].as_array().unwrap().len(), 5, "five links at most");
+        assert_eq!(r["data"]["results"][0]["site"], "site2.example");
+        assert_eq!(r["data"]["summary"], "Ben Nevis is 1,345 m high.[1]");
+        let requests = f.requests.lock().unwrap().clone();
+        let (url, headers, body) = &requests[0];
+        assert_eq!(url, "/v1beta/models/gemini-2.5-flash:generateContent");
+        assert!(headers.iter().any(|(k, v)| k == "x-goog-api-key" && v == "AIza-fake"));
+        assert_eq!(body["tools"], json!([{ "google_search": {} }]));
+        // The answer cites one: its Sources row still lists all five links.
+        let shown = turn.sources_for("Ben Nevis is 1,345 m [1].");
+        assert_eq!(shown.len(), 5);
+        assert_eq!(shown[0].site, "site2.example");
     }
 
     #[test]

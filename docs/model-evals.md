@@ -104,9 +104,11 @@ with the Chat persona Settings sets by default. Only the side effects are swappe
   outside test mode: `yap.exe eval --dump-apps`).
 - **Clipboard**: the `copy_to_clipboard` tool is recorded, never run (`eval::intercept_tool`).
 - **Web search** (`web.rs`), only in web scenarios ("Look things up on the web" on), fresh
-  caches each: **live** by default (`eval::web_live`: the real Exa/Tavily with the run's key,
-  else the keyless Wikipedia + game-wiki lookup; `read_page` reads real pages with its usual
-  guards), or a **stand-in** (`"web": {"mode": "standin"}`): a local server
+  caches each: **live** by default (`eval::web_live`: a cloud model's **own search** —
+  "The AI's own search", `web/native.rs`, the app's default — else the real Exa/Tavily with
+  the run's key, else the keyless Wikipedia + game-wiki lookup; `read_page` reads real pages
+  with its usual guards; the provider's search sub-call is logged and paced like any call),
+  or a **stand-in** (`"web": {"mode": "standin"}`): a local server
   (`eval/standin.rs`) answers the search with the scenario's `results` and serves its `pages`
   through `web.rs`' test-mode addresses (`YAP_EXA_URL`, `YAP_TAVILY_URL`,
   `YAP_WEB_STANDIN`) — nothing goes on the internet; its requests are logged
@@ -147,6 +149,7 @@ isn't logged.
     "mode": "standin",                        // "live" (default) or "standin"
     "service": "exa",                         // or "tavily" (default: the one the run has a key for)
     "key": false,                             // false: the keyless lookup even with a key
+    "native": true,                           // the AI's own search (default: on, except standin / key: false)
     "results": [{ "title": "…", "url": "https://tips.example/x", "text": "…", "published": "2026-09-30" }],
     "pages": { "https://tips.example/x": "<html>…</html>" }   // stand-in pages read_page gets
   },
@@ -375,5 +378,6 @@ function tools** the request is accepted (HTTP 200), but gpt-oss-20b called `sea
 instead of searching and, handed "no notes found", answered from memory, wrongly ("the
 Druid's Grove"); a notes question in the same set-up rightly called `search_notes`. It
 didn't pick the built-in tool next to function tools. So Groq's search fits Yap as a
-**sub-call** (`web::native_backend`: `tools: [browser_search]`, `tool_choice: "required"`,
-the hits from `executed_tools`), not mixed into Chat's own request.
+**sub-call** (`web/native.rs`: `tools: [browser_search]`, `tool_choice: "required"`,
+the hits from `executed_tools`), not mixed into Chat's own request — built 2026-10-18 as
+"The AI's own search", with Gemini, Anthropic, OpenAI and OpenRouter beside it.

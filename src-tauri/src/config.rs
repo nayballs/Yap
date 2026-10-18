@@ -461,8 +461,17 @@ pub struct YapConfig {
     /// the search words leave the PC.
     #[serde(default)]
     pub web_search: bool,
-    /// The search service with a key: "exa" (the default, recommended) or
-    /// "tavily". Without its key, Yap uses Wikipedia and game wikis.
+    /// "The AI's own search" (the default, recommended): a cloud model
+    /// (Groq, Gemini, Claude, OpenAI, OpenRouter) searches with its
+    /// provider's own search (`web::native`), on the key Chat already uses;
+    /// local and self-hosted models — and any search the provider's can't
+    /// do — use `web_search_service`. Off: every model uses the service.
+    #[serde(default = "default_true")]
+    pub web_search_native: bool,
+    /// Yap's own search service with a key: "exa" (the default,
+    /// recommended) or "tavily" — for local models, and for every model
+    /// when `web_search_native` is off. Without its key, Yap uses Wikipedia
+    /// and game wikis.
     #[serde(default = "default_web_search_service")]
     pub web_search_service: String,
     /// Each service's key (service id → key), like `pp_api_keys`: stored
@@ -769,6 +778,7 @@ impl Default for YapConfig {
             apps_blocked: Vec::new(),
             app_nicknames: Vec::new(),
             web_search: false,
+            web_search_native: true,
             web_search_service: default_web_search_service(),
             web_search_keys: std::collections::HashMap::new(),
             tts_engine: default_tts_engine(),
