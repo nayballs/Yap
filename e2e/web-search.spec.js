@@ -258,6 +258,16 @@ test('a chat answer cites its web sources: pills, a Sources row, kept with the a
   await expect(lastAnswer(main)).toContainText('He joins you once you free him');
   await expect(chipsOfLast(main)).toHaveText(['Searched the web: "Gale bg3 companion" (bg3.wiki) · Exa says the API key is wrong']);
   await shot(main, '05-chat-wrong-key-falls-back-to-the-wiki');
+
+  // Exa finds nothing: Wikipedia answers instead, and the chip says so.
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'web_search', args: { query: 'Ben Nevis height' } }] },
+    { content: 'It is 1,345 metres tall [1].' },
+  ]);
+  await send(main, 'How tall is Ben Nevis?');
+  await expect(lastAnswer(main)).toContainText('1,345 metres');
+  await expect(chipsOfLast(main)).toHaveText(['Searched the web: "Ben Nevis height" (Wikipedia) · Exa found nothing']);
+  await expect(sourcesOfLast(main).getByRole('button')).toHaveText([/1\s*Ben Nevis\s*en\.wikipedia\.org/]);
 });
 
 test('a web page can never make Yap act: actions refused, made-up and local links not read', async ({
