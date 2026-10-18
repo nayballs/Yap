@@ -398,6 +398,10 @@ fn load_from_disk() -> Store {
 
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
+    // A model evaluation (`eval.rs`) keeps its notes in memory only.
+    if crate::eval::active() {
+        return;
+    }
     match serde_json::to_string(store) {
         Ok(json) => {
             let _ = std::fs::create_dir_all(crate::config::data_dir());
@@ -433,6 +437,13 @@ fn save_to_disk(_store: &Store) {}
 #[cfg(test)]
 fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     TEST_STORE.with(|s| f(&mut s.borrow_mut()))
+}
+
+/// The model evaluation (`eval.rs`): each scenario starts from a fresh store
+/// (the seeded folders and actions, no notes), in memory only.
+#[cfg(debug_assertions)]
+pub fn eval_reset() {
+    with_store(|s| *s = Store::default());
 }
 
 fn with_notes<R>(f: impl FnOnce(&mut Vec<Note>) -> R) -> R {

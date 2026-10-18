@@ -814,6 +814,11 @@ fn config_path() -> PathBuf {
 
 /// Load config from disk, falling back to defaults.
 pub fn load() -> YapConfig {
+    // A model evaluation (`eval.rs`) runs on its own settings, in memory (its
+    // API key never goes to disk).
+    if let Some(cfg) = crate::eval::config() {
+        return cfg;
+    }
     let mut cfg = match std::fs::read_to_string(config_path()) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
         Err(_) => YapConfig::default(),
@@ -938,6 +943,9 @@ pub(crate) fn quarantine_corrupt(path: &std::path::Path) {
 
 /// Persist config to disk (atomically).
 pub fn save(cfg: &YapConfig) -> Result<(), String> {
+    if crate::eval::active() {
+        return Ok(()); // a model evaluation's settings stay in memory
+    }
     std::fs::create_dir_all(data_dir()).map_err(|e| e.to_string())?;
     // Anything this build saves has been through `load`'s migrations already,
     // so stamp the current version even if the caller's copy lost the field —

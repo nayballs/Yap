@@ -28,6 +28,7 @@ mod diarize;
 mod dict_usage;
 mod e2e;
 mod elevated;
+mod eval;
 mod fuzzy;
 mod gesture;
 mod media;
@@ -145,6 +146,13 @@ pub fn run_mcp_server() -> i32 {
 /// the app itself starts.
 pub fn run_diarize_child() -> i32 {
     diarize::run_child()
+}
+
+/// `yap.exe eval …` (main.rs): the model evaluation harness (`eval.rs`,
+/// docs/model-evals.md). Debug builds only; a release build says so and
+/// exits. Returns the exit code (0 = every scenario passed).
+pub fn run_eval() -> i32 {
+    eval::run(std::env::args().skip(2).collect())
 }
 
 /// Reload handle for the global log filter — lets the Settings "Debug mode"

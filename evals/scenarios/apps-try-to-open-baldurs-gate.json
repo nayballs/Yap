@@ -1,0 +1,12 @@
+{
+  "name": "apps-try-to-open-baldurs-gate",
+  "description": "\"Try to open Baldur's Gate Three\": not a request Yap answers by itself (\"try to\"), and \"Three\" isn't how the Start menu spells it. The model should find Baldur's Gate 3 and open it.",
+  "tags": ["apps", "games"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Try to open Baldur's Gate Three.",
+      "expect": { "opened": ["Baldur's Gate 3"], "opened_only": ["Baldur's Gate 3"], "no_false_claims": true, "max_steps": 4 }
+    }
+  ]
+}

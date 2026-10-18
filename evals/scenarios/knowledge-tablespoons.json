@@ -1,0 +1,13 @@
+{
+  "name": "knowledge-tablespoons",
+  "description": "A kitchen conversion from general knowledge (a US cup is 16 tablespoons), with no tools.",
+  "tags": ["knowledge"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "How many tablespoons are in a cup?",
+      "expect": { "answer_contains": ["16"], "opened_none": true, "no_false_claims": true },
+      "soft": { "tools_not_called": ["*"], "max_steps": 1 }
+    }
+  ]
+}

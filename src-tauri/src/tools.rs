@@ -188,6 +188,9 @@ fn estimate_model_size_b(model_id: &str) -> f32 {
 /// Cloud providers always support tools; local (self-hosted) and on-device
 /// models only when the id names ≥ 4B params (their gating rule).
 pub fn supports_tools(provider: &str, model: &str) -> bool {
+    if let Some(forced) = crate::eval::tools_forced() {
+        return forced; // a model evaluation's --tools on|off
+    }
     match provider {
         "groq" | "anthropic" | "openai" | "gemini" | "openrouter" | "custom" => true,
         _ => estimate_model_size_b(model) >= LOCAL_TOOL_MIN_PARAMS_B,
@@ -1031,6 +1034,8 @@ pub async fn run_tool_loop(
             let web_seen = web.as_deref().is_some_and(crate::web::Turn::seen);
             let result = if let Some(refusal) = refused_after_web(name, web_seen) {
                 refusal
+            } else if let Some(r) = crate::eval::intercept_tool(name, &args) {
+                r // a model evaluation records what would leave Yap (the clipboard)
             } else if let (Some(turn), true) = (web.as_deref_mut(), crate::web::TOOL_NAMES.contains(&name)) {
                 turn.execute(name, &args).await
             } else if open_apps && crate::apps::TOOL_NAMES.contains(&name) {
@@ -1045,6 +1050,7 @@ pub async fn run_tool_loop(
                 execute(name, &args)
             };
             tracing::info!(tool = %name, success = %result["success"], "Chat tool call");
+            crate::eval::tool_called(name, &call_arguments(call), &result);
             if let Some(id) = changed_note(name, &result) {
                 on_change(id);
             }

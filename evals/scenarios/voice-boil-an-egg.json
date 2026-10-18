@@ -1,0 +1,14 @@
+{
+  "name": "voice-boil-an-egg",
+  "description": "Asked out loud (the Voice Assistant), the answer is read aloud: it should be short and spoken-style, without lists or headings.",
+  "tags": ["voice", "knowledge"],
+  "voice": true,
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "how long do i boil an egg for a runny yolk",
+      "expect": { "max_words": 45, "answer_contains_any": ["3", "4", "5", "6", "7", "three", "four", "five", "six", "seven"], "no_false_claims": true },
+      "soft": { "tools_not_called": ["*"], "answer_not_matches": "(^|\\n)\\s*([-*\\u2022]|#{1,6}|\\d+\\.)\\s" }
+    }
+  ]
+}

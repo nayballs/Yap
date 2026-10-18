@@ -36,17 +36,17 @@ pub const MODEL_DISPLAY: &str = "Qwen2.5 1.5B Instruct";
 pub const ENGINE_DISPLAY: &str = "Mozilla llamafile (llama.cpp)";
 
 /// Download source + pinned SHA-256 for the GGUF cleanup model (HuggingFace).
-const MODEL_URL: &str =
+pub(crate) const MODEL_URL: &str =
     "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf";
-const MODEL_SHA256: &str = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e";
+pub(crate) const MODEL_SHA256: &str = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e";
 
 /// Download source + pinned SHA-256 for the llamafile runtime (v0.10.3, full
 /// build — bundles the GPU backends so it works on a clean machine with no dev
 /// tools; CPU fallback guaranteed). It's an Actually-Portable-Executable that
 /// runs on Windows when saved with a `.exe` name.
-const RUNTIME_URL: &str =
+pub(crate) const RUNTIME_URL: &str =
     "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.10.3/llamafile-0.10.3";
-const RUNTIME_SHA256: &str = "e6d4041a82ca37cee15aab62e6826d7a61c6a3ea83bca68387958970df250883";
+pub(crate) const RUNTIME_SHA256: &str = "e6d4041a82ca37cee15aab62e6826d7a61c6a3ea83bca68387958970df250883";
 
 /// The llamafile runtime executable name on disk.
 #[cfg(windows)]
@@ -586,7 +586,7 @@ pub async fn install_curated(
 /// Stream `url` → `dest.partial`, emit progress, verify SHA-256, then rename into
 /// place. A verification failure deletes the partial and errors (safe: a corrupt
 /// download can never be used).
-async fn download_verified(
+pub(crate) async fn download_verified(
     url: &str,
     dest: &Path,
     expected_sha: &str,
