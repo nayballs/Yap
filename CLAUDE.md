@@ -430,7 +430,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   sidecar). Owns install (runtime + model download, SHA-256 verified, per-stage
   progress events), process lifecycle (spawn/health-wait/kill + orphan cleanup at
   startup — only sidecars whose parent Yap is gone, via `procs.rs`, so a dev build
-  never kills the installed app's), and `effective_endpoint()` which routes `llm.rs` to the sidecar when
+  never kills the installed app's; and **the model never outlives Yap**:
+  `procs::end_with_yap` puts the sidecar — like the speaker engine
+  (`yap.exe diarize`) and eSpeak — in a kill-on-close job object only Yap
+  holds, so Windows ends it however Yap ends: Quit, a crash, End task, the
+  updater's exit; never used for apps Yap opens, a link's browser or an
+  installer), and `effective_endpoint()` which routes `llm.rs` to the sidecar when
   provider = "ondevice" (falls back to the configured endpoint if it's down).
 - **`notes.rs`** — the AI Notepad's data layer (`notes.json`, camelCase). Stores:
   `content` (raw markdown, never overwritten by AI), `enhanced_content` (the
@@ -2945,8 +2950,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   "Look things up on the web" `webSearch`, off; "Search with" Exa
   (Recommended) / Tavily `webSearchService`, each key masked in
   `webSearchKeys` with "Get a free key →" (its dashboard via
-  `open_external`) and its free allowance; "Wikipedia and game wikis (no
-  key)", always included; where the search words go; the explain line
+  `open_external`) and its free allowance; "Wikipedia and reference wikis"
+  (no key needed), always included; where the search words go; the explain line
   adds a web example while it's on), **Spoken replies in Chat** ("Speak replies" `speakReplies`;
   "When to speak" Segmented When I asked by voice / Always `speakWhen`;
   "Talk back hands-free" `talkBackHandsFree`, greyed while replies are off),

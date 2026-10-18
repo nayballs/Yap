@@ -258,8 +258,8 @@ test('asked from another app with Yap closed: listening, thinking, speaking, a c
   fakeLlm,
   shot,
 }) => {
-  // Spoken replies off: the shortcut's answers are read aloud anyway.
-  await setConfig(yap, main, { speakReplies: false, speakWhen: 'voice' });
+  // Spoken replies on ("When I asked by voice"): the shortcut's answers are read aloud.
+  await setConfig(yap, main, { speakReplies: true, speakWhen: 'voice' });
   await freshChat(main);
   fakeLlm.scriptChat([{ content: 'The launch party is on Friday.' }]);
   await send(main, 'When is the launch party?');
@@ -478,8 +478,11 @@ test('no AI model: the assistant says so, with a way to Language Models', async 
     await expect(dialog.getByRole('tab', { name: 'Chat & Voice Assistant' })).toHaveAttribute('aria-selected', 'true');
     expect(await spoken(yap)).toEqual([]);
   } finally {
+    // Settings closed first: its auto-save must not write the switched-off
+    // model back after the restore (the next test would get "Pick an AI model").
+    await closeSettings(main).catch(() => {});
     await setConfig(yap, main, { llmScopes: { ...cfg.llmScopes, chat } });
-    await closeSettings(main);
+    await expect.poll(() => yap.readJson('config.json').llmScopes?.chat?.enabled).toBe(true);
   }
 });
 
@@ -994,6 +997,7 @@ test('"Show the answer on the Yap bar" off: just the voice, with ■ on the bar'
   await expect.poll(() => yap.readJson('config.json').assistantAnswerCard).toBe(false);
   await shot(main, '30-settings-answer-card-off');
   await closeSettings(main);
+  await setConfig(yap, main, { speakReplies: true });
   try {
     // Read aloud: the capsule says so, with ■, and no card.
     await inAnotherApp(yap);
@@ -1008,6 +1012,22 @@ test('"Show the answer on the Yap bar" off: just the voice, with ■ on the bar'
     await yap.invoke('assistant_stop');
 
   } finally {
-    await setConfig(yap, main, { assistantAnswerCard: true });
+    await setConfig(yap, main, { assistantAnswerCard: true, speakReplies: false });
   }
+});
+
+// Nathan (2026-10-18): "I turned off the voice yet heard the voice still".
+// Speak replies (Chat's Voice replies) is the one voice switch: off, the
+// shortcut's answer is shown on the bar and nothing is said.
+test('voice off: the assistant shortcut answers on the bar and says nothing', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, { speakReplies: false });
+  await inAnotherApp(yap);
+  fakeLlm.scriptChat([{ content: 'It is at ten.' }]);
+  await ask(yap, 'what time is it on');
+  const card = answerCard(yap);
+  await expect(card).toContainText('It is at ten.', { timeout: 10_000 });
+  await expect(capsule(yap)).toHaveCount(0);
+  await main.waitForTimeout(500);
+  expect(await spoken(yap)).toEqual([]);
+  await card.getByRole('button', { name: 'Close' }).click();
 });

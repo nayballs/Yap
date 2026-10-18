@@ -75,6 +75,22 @@
   let conversations = $state([]);
   let activeId = $state(null);
   let messages = $state([]); // { role, text, tools?, model?, voice?, id }
+
+  // The sources an answer's citations point at: its own, else — a follow-up
+  // that cites "[1]" from an earlier answer without searching again ("the
+  // top five in that list") — the latest earlier answer's in this chat, so
+  // its markers are pills too, never raw "[1][2]".
+  const CITES = /\[\d{1,2}(?:\s*,\s*\d{1,2})*\]/;
+  function citedSources(i) {
+    const own = messages[i]?.sources;
+    if (own?.length) return own;
+    if (!CITES.test(messages[i]?.text ?? '')) return null;
+    for (let k = i - 1; k >= 0; k--) {
+      const s = messages[k].role === 'assistant' ? messages[k].sources : null;
+      if (s?.length) return s;
+    }
+    return null;
+  }
   let input = $state('');
   let sending = $state(false);
   let inputEl = $state(null);
@@ -618,7 +634,7 @@
           >
             {#if m.role === 'assistant'}
               <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown escapes all input -->
-              <div class="cbody">{@html renderMarkdown(m.text, { sources: m.sources })}</div>
+              <div class="cbody">{@html renderMarkdown(m.text, { sources: citedSources(i) })}</div>
             {:else}
               <p class="cbody">
                 {#if m.voice}
