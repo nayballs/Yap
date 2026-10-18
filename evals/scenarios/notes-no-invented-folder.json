@@ -1,0 +1,19 @@
+{
+  "name": "notes-no-invented-folder",
+  "description": "A new note with no folder named and none that fits: it goes to Personal, and no \"Camping\" folder is invented.",
+  "tags": ["notes", "folders"],
+  "apps": "standard",
+  "seed": { "folders": ["Work", "Stories"] },
+  "turns": [
+    {
+      "user": "Make a note of my camping checklist: tent, stove, headlamp and water filter.",
+      "expect": {
+        "tools_called": [{ "name": "create_note", "args": { "content": { "contains": "headlamp" } } }],
+        "folders": ["Personal", "Meetings", "Work", "Stories"],
+        "notes_count": 1,
+        "no_false_claims": true
+      },
+      "soft": { "max_steps": 3 }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "apps-open-spotify",
+  "description": "A plain open request: Yap opens the app itself, before any model is asked (the fast path).",
+  "tags": ["apps", "fast-path"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "open spotify",
+      "expect": { "fast_path": true, "opened": ["Spotify"], "opened_only": ["Spotify"], "max_steps": 0 }
+    }
+  ]
+}

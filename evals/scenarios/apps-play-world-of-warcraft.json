@@ -1,0 +1,16 @@
+{
+  "name": "apps-play-world-of-warcraft",
+  "description": "\"play world of warcraft\": people say play, not open, for games. World of Warcraft (or its launcher, Battle.net) should open.",
+  "tags": ["apps", "games"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "play world of warcraft",
+      "expect": {
+        "opened_any": ["World of Warcraft", "Battle.net"],
+        "opened_only": ["World of Warcraft", "Battle.net"],
+        "no_false_claims": true
+      }
+    }
+  ]
+}

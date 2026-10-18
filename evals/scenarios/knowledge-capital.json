@@ -1,0 +1,13 @@
+{
+  "name": "knowledge-capital",
+  "description": "General knowledge: answered from what the model knows, with no tools.",
+  "tags": ["knowledge"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "What's the capital of Australia?",
+      "expect": { "answer_contains": ["Canberra"], "opened_none": true, "no_false_claims": true },
+      "soft": { "tools_not_called": ["*"], "max_steps": 1 }
+    }
+  ]
+}

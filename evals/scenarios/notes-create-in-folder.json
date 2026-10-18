@@ -1,0 +1,28 @@
+{
+  "name": "notes-create-in-folder",
+  "description": "Write a new note and file it in the folder that already exists for it (Stories), not a new or misspelt one.",
+  "tags": ["notes", "folders"],
+  "apps": "standard",
+  "seed": {
+    "folders": ["Stories", "Work"],
+    "notes": [
+      {
+        "title": "The lighthouse cat",
+        "folder": "Stories",
+        "content": "Every night the lighthouse cat climbed the 120 steps to watch the ships come home."
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "Write a two-sentence story about a dragon who's scared of heights and save it with my other stories.",
+      "expect": {
+        "tools_called": [{ "name": "create_note", "args": { "folder": { "matches": "^stories$" } } }],
+        "folders": ["Personal", "Meetings", "Stories", "Work"],
+        "notes_count": 2,
+        "no_false_claims": true
+      },
+      "soft": { "max_steps": 4 }
+    }
+  ]
+}

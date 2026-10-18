@@ -43,6 +43,15 @@ pub fn init() {
     });
 }
 
+/// The model evaluation (`yap.exe eval`, `eval.rs`; debug builds): use
+/// `dir` as the data dir, as portable mode would, so a run never reads or
+/// writes the installed app's. Must come before anything reads the data dir
+/// (`false`: too late, the dir is already decided).
+#[cfg(debug_assertions)]
+pub fn use_data_dir(dir: PathBuf) -> bool {
+    PORTABLE_DATA_DIR.set(Some(dir)).is_ok()
+}
+
 /// `true` when running in portable mode.
 pub fn is_portable() -> bool {
     PORTABLE_DATA_DIR.get().and_then(|v| v.as_ref()).is_some()

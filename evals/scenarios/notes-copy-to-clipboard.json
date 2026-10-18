@@ -1,0 +1,26 @@
+{
+  "name": "notes-copy-to-clipboard",
+  "description": "Find a fact in the notes and copy it with the clipboard tool (recorded by the harness, never really copied).",
+  "tags": ["notes", "clipboard"],
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Cabin trip",
+        "content": "Lake cabin, Fri 14 to Sun 16 Nov.\nAddress: 3 Pine Lane, Windermere.\nWi-Fi network: CabinGuest, password: MooseLake42\nThe key is under the blue plant pot by the back door."
+      },
+      { "title": "Home network", "content": "Home Wi-Fi password: Gr33nTea!77" }
+    ]
+  },
+  "turns": [
+    {
+      "user": "Copy the cabin wifi password to my clipboard.",
+      "expect": {
+        "tools_called": [{ "name": "copy_to_clipboard" }],
+        "clipboard_contains": "MooseLake42",
+        "opened_none": true,
+        "no_false_claims": true
+      }
+    }
+  ]
+}

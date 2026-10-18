@@ -11,7 +11,8 @@
     "test:app": "node e2e/build.mjs && playwright test -c e2e",
     "test:app:build": "node e2e/build.mjs",
     "test:real": "node e2e-real/build.mjs && playwright test -c e2e-real",
-    "test:real:build": "node e2e-real/build.mjs"
+    "test:real:build": "node e2e-real/build.mjs",
+    "eval": "node scripts/eval.mjs"
   },
   "dependencies": {
     "@fontsource-variable/eb-garamond": "^5.2.7",

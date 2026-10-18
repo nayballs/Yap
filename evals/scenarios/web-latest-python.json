@@ -1,0 +1,13 @@
+{
+  "name": "web-latest-python",
+  "description": "A current fact the model's training can't know (the latest Python release, October 2026: 3.14 or later). Skipped until Yap has web search.",
+  "tags": ["web", "current"],
+  "needs_web": true,
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "What's the latest stable version of Python?",
+      "expect": { "answer_matches": "3\\.1[4-9]", "opened_none": true, "no_false_claims": true }
+    }
+  ]
+}

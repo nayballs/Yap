@@ -1,0 +1,211 @@
+//! **Model evaluations** (`yap.exe eval …`, debug builds only; see
+//! `docs/model-evals.md`): put real models — Groq, OpenAI, Anthropic, a GGUF
+//! on Yap's own llamafile, any OpenAI-compatible server — through Chat's own
+//! code path (`commands::chat_turn`: the open-apps fast path, the tool loop,
+//! the plain chat + RAG fallback for models without tools) over the scenarios
+//! in `evals/scenarios/*.json`, and get everything back: every request (tool
+//! schemas included, keys redacted), every response, each tool call and its
+//! result, timings, tokens, rate-limit waits, and a pass/fail per scenario
+//! with the reasons.
+//!
+//! **Side effects stay inside the run.** The run has its own data dir
+//! (`portable::use_data_dir`, under the run's folder), its settings live in
+//! memory ([`config`]: an API key never reaches a file), notes are an
+//! in-memory store reset per scenario (`notes::eval_reset`), apps come from a
+//! stand-in list (or this PC's Start menu, read-only) and "opening" one only
+//! records it (test mode, `e2e::active`, as in the e2e suite), and the
+//! clipboard tool is recorded instead of run ([`intercept_tool`]). No window,
+//! audio, browser or launch.
+//!
+//! This file holds the hooks the app's own code calls (`llm.rs`, `tools.rs`,
+//! `config.rs`, `notes.rs`); each is a no-op unless a run is going, and always
+//! in release builds. The harness itself lives in `eval/` (debug builds).
+
+use std::time::Duration;
+
+use serde_json::Value;
+
+#[cfg(debug_assertions)]
+mod local;
+#[cfg(debug_assertions)]
+mod record;
+#[cfg(debug_assertions)]
+mod runner;
+#[cfg(debug_assertions)]
+mod scenario;
+#[cfg(debug_assertions)]
+mod spike;
+
+#[cfg(debug_assertions)]
+static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A model evaluation is running in this process (`yap.exe eval`).
+pub fn active() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        ACTIVE.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    #[cfg(not(debug_assertions))]
+    false
+}
+
+/// `yap.exe eval …`: run the harness with these arguments (after "eval").
+/// Returns the process's exit code.
+pub fn run(args: Vec<String>) -> i32 {
+    #[cfg(debug_assertions)]
+    {
+        runner::main(args)
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = args;
+        eprintln!("yap.exe eval is in debug builds only (see docs/model-evals.md).");
+        2
+    }
+}
+
+/// The settings a run is on (`config::load` returns them): `None` outside a
+/// run.
+pub fn config() -> Option<crate::config::YapConfig> {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            return record::config();
+        }
+    }
+    None
+}
+
+/// `--tools on|off` (or a scenario's own `tools`): whether Chat's model is
+/// treated as able to call tools, whatever `tools::supports_tools` would say.
+pub fn tools_forced() -> Option<bool> {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            return record::tools_forced();
+        }
+    }
+    None
+}
+
+/// `--timeout <secs>`: how long a model call may take in this run, instead
+/// of the caller's own `timeout` (a slow local model on a CPU would
+/// otherwise just time out, which a run can also measure by leaving it).
+pub fn timeout(timeout: Duration) -> Duration {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            return record::timeout().unwrap_or(timeout);
+        }
+    }
+    timeout
+}
+
+/// A tool call the run carries out itself instead of the app: the clipboard
+/// (recorded, never touched). `None`: the app runs it as usual.
+pub fn intercept_tool(name: &str, args: &Value) -> Option<Value> {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            return record::intercept_tool(name, args);
+        }
+    }
+    let _ = (name, args);
+    None
+}
+
+/// Every tool call of the chat's tool loop, with its result (the run logs
+/// it and scores it).
+pub fn tool_called(name: &str, args: &Value, result: &Value) {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            record::tool_called(name, args, result);
+        }
+    }
+    let _ = (name, args, result);
+}
+
+/// The rate-limit headers of a response (`x-ratelimit-*`, `retry-after*`),
+/// for the run's log and its pacing. `Null` outside a run.
+pub fn limit_headers(headers: &reqwest::header::HeaderMap) -> Value {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            return record::limit_headers(headers);
+        }
+    }
+    let _ = headers;
+    Value::Null
+}
+
+/// One model call (`llm::post_chat_request`), as a run sees it: paced to the
+/// run's tokens-per-minute budget before it goes, and every attempt, refusal,
+/// wait and answer logged. Outside a run every method does nothing.
+pub struct Call {
+    #[cfg(debug_assertions)]
+    inner: Option<record::CallLog>,
+}
+
+impl Call {
+    /// Before a call: wait for the run's pacing, then start its log.
+    pub async fn start(provider: &str, endpoint: &str, body: &Value) -> Call {
+        #[cfg(debug_assertions)]
+        {
+            if active() {
+                return Call { inner: Some(record::CallLog::start(provider, endpoint, body).await) };
+            }
+            Call { inner: None }
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            let _ = (provider, endpoint, body);
+            Call {}
+        }
+    }
+
+    /// An attempt goes out with `body`.
+    pub fn send(&self, body: &Value) {
+        #[cfg(debug_assertions)]
+        if let Some(c) = &self.inner {
+            c.send(body);
+        }
+        let _ = body;
+    }
+
+    /// The provider said no (HTTP `status`, its body `detail`).
+    pub fn refused(&self, status: u16, limits: &Value, detail: &str) {
+        #[cfg(debug_assertions)]
+        if let Some(c) = &self.inner {
+            c.refused(status, limits, detail);
+        }
+        let _ = (status, limits, detail);
+    }
+
+    /// A rate limit is being waited out before the next attempt.
+    pub fn waiting(&self, wait: Duration) {
+        #[cfg(debug_assertions)]
+        if let Some(c) = &self.inner {
+            c.waiting(wait);
+        }
+        let _ = wait;
+    }
+
+    /// The call failed with `error`, which is handed back as it was.
+    pub fn failed(&self, error: String) -> String {
+        #[cfg(debug_assertions)]
+        if let Some(c) = &self.inner {
+            c.failed(&error);
+        }
+        error
+    }
+
+    /// The answer came (the whole response body).
+    pub fn answered(&self, limits: &Value, body: &Value) {
+        #[cfg(debug_assertions)]
+        if let Some(c) = &self.inner {
+            c.answered(limits, body);
+        }
+        let _ = (limits, body);
+    }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "notes-meeting-decision",
+  "description": "A question about a recorded meeting, answered from its transcript: which venue was picked and for when.",
+  "tags": ["notes", "meetings"],
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Venue call with Dave",
+        "folder": "Meetings",
+        "meeting": true,
+        "participants": ["Dave Patel"],
+        "transcript": [
+          { "source": "you", "text": "So where are we on the venue for the launch party?", "ts": 4 },
+          { "source": "them", "text": "I looked at three places. The Hilltop Barn is twelve hundred pounds for the evening and fits eighty people.", "ts": 11 },
+          { "source": "them", "text": "The Old Mill is cheaper, but it only fits forty.", "ts": 24 },
+          { "source": "you", "text": "Eighty is what we need, so let's go with the Hilltop Barn.", "ts": 33 },
+          { "source": "them", "text": "Great. I'll book the Hilltop Barn for Friday the 21st and send the deposit this week.", "ts": 41 }
+        ]
+      },
+      { "title": "Groceries", "content": "milk, eggs, sourdough, coffee beans" }
+    ]
+  },
+  "turns": [
+    {
+      "user": "Which venue did Dave and I pick for the launch party, and when is it booked for?",
+      "expect": {
+        "answer_contains": ["Hilltop Barn"],
+        "answer_contains_any": ["21st", "21"],
+        "answer_not_contains": ["Old Mill is booked"],
+        "tools_not_called": ["edit_note", "update_note", "create_note", "open_app"],
+        "no_false_claims": true
+      },
+      "soft": { "max_steps": 3 }
+    }
+  ]
+}

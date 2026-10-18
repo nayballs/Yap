@@ -880,8 +880,11 @@ impl ChatTurn {
 /// "Open Teams" and other plain requests to open an app are answered by Yap
 /// itself, before any model (`apps::plan_for`): with no AI set up, with a
 /// small local model, and without a model call at all.
+///
+/// `app`: the windows told of note changes; `None` in a model evaluation
+/// (`eval.rs`), which runs this same turn with no windows.
 pub(crate) async fn chat_turn(
-    app: &AppHandle,
+    app: Option<&AppHandle>,
     conversation_id: Option<u64>,
     text: &str,
     scope: Option<&str>,
@@ -954,8 +957,10 @@ pub(crate) async fn chat_turn(
     let (reply, tools_used) = if tools_supported {
         let notify = |id: u64| {
             use tauri::Emitter;
-            note_changed(app, id, "chat");
-            let _ = app.emit("yap-notes-changed", ());
+            if let Some(app) = app {
+                note_changed(app, id, "chat");
+                let _ = app.emit("yap-notes-changed", ());
+            }
         };
         crate::tools::run_tool_loop(
             &system,
@@ -1041,7 +1046,7 @@ pub async fn chat_send(
     voice: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let by_voice = voice.unwrap_or(false);
-    let turn = chat_turn(&app, conversation_id, &text, scope.as_deref(), by_voice, |_, _| {}).await?;
+    let turn = chat_turn(Some(&app), conversation_id, &text, scope.as_deref(), by_voice, |_, _| {}).await?;
     // Read out by itself? (Asked at the answer: a dictation may have started
     // meanwhile, and the settings may have changed.)
     let now = config::load();

@@ -1,0 +1,89 @@
+{
+  "description": "Spike (web-search research doc, section 2.1): does Groq's built-in browser_search work on gpt-oss-20b with Yap's key, alone and mixed with Yap's own function tools? What do executed_tools and the citations look like, and how many tokens does one searched answer cost? Run: yap.exe eval --raw evals/raw/groq-browser-search.json --keys-from-yap",
+  "requests": [
+    {
+      "name": "a1 browser_search alone, tool_choice required",
+      "provider": "groq",
+      "body": {
+        "model": "openai/gpt-oss-20b",
+        "stream": false,
+        "messages": [{ "role": "user", "content": "Where do you find Gale in Baldur's Gate 3 act 1?" }],
+        "tools": [{ "type": "browser_search" }],
+        "tool_choice": "required",
+        "reasoning_effort": "low"
+      }
+    },
+    {
+      "name": "a2 browser_search alone, tool_choice auto, a current fact",
+      "provider": "groq",
+      "body": {
+        "model": "openai/gpt-oss-20b",
+        "stream": false,
+        "messages": [{ "role": "user", "content": "What's the latest stable version of Python?" }],
+        "tools": [{ "type": "browser_search" }],
+        "tool_choice": "auto",
+        "reasoning_effort": "low"
+      }
+    },
+    {
+      "name": "b1 browser_search + Yap's function tools and system prompt, a web question",
+      "provider": "groq",
+      "yap_system": true,
+      "yap_tools": true,
+      "body": {
+        "model": "openai/gpt-oss-20b",
+        "stream": false,
+        "temperature": 0.5,
+        "messages": [{ "role": "user", "content": "Where do you find Gale in Baldur's Gate 3 act 1?" }],
+        "tools": [{ "type": "browser_search" }],
+        "reasoning_effort": "low"
+      }
+    },
+    {
+      "name": "b2 browser_search + Yap's function tools and system prompt, a notes question",
+      "provider": "groq",
+      "yap_system": true,
+      "yap_tools": true,
+      "body": {
+        "model": "openai/gpt-oss-20b",
+        "stream": false,
+        "temperature": 0.5,
+        "messages": [{ "role": "user", "content": "What's the wifi password in my cabin trip note?" }],
+        "tools": [{ "type": "browser_search" }],
+        "reasoning_effort": "low"
+      }
+    },
+    {
+      "name": "b3 mixed, the web question's second step: search_notes found nothing",
+      "provider": "groq",
+      "yap_system": true,
+      "yap_tools": true,
+      "body": {
+        "model": "openai/gpt-oss-20b",
+        "stream": false,
+        "temperature": 0.5,
+        "messages": [
+          { "role": "user", "content": "Where do you find Gale in Baldur's Gate 3 act 1?" },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_spike_1",
+                "type": "function",
+                "function": { "name": "search_notes", "arguments": "{\"limit\":5,\"query\":\"Gale Baldur's Gate 3 act 1 location\"}" }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_spike_1",
+            "content": "{\"success\":true,\"data\":[],\"displayText\":\"No notes found for \\\"Gale Baldur's Gate 3 act 1 location\\\"\"}"
+          }
+        ],
+        "tools": [{ "type": "browser_search" }],
+        "reasoning_effort": "low"
+      }
+    }
+  ]
+}

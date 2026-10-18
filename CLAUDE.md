@@ -2246,6 +2246,26 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   never counts), media only if its title has the nonce (`media_permits`) —
   so a robot run never lowers or pauses the developer's own music. See
   [`docs/e2e-tests.md`](./docs/e2e-tests.md) "Real-app robot tests".
+- **`eval.rs`** (+ `eval/`) — **model evaluations**, `yap.exe eval …` (main.rs;
+  debug builds only): real models (Groq/OpenAI/Anthropic/OpenRouter/Gemini/
+  custom, or a GGUF on Yap's own llamafile started for the run — the installed
+  runtime and model read-only, else downloaded via `local_llm::download_verified`)
+  through **`commands::chat_turn`** itself (fast path, tool loop, plain chat +
+  RAG) over `evals/scenarios/*.json` (seed notes/folders, stand-in apps from
+  `evals/apps/` or this PC's Start menu read-only, multi-turn user messages,
+  checks on tool calls + arguments, apps "opened", notes afterwards, answer
+  text/length, false claims), scored pass/fail with reasons + soft metrics.
+  Side effects stay in the run: its own data dir (`portable::use_data_dir`),
+  settings in memory (`eval::config`, read by `config::load`; `save` a no-op —
+  keys never reach a file), notes in memory (`notes::eval_reset`), test mode
+  for apps (opens recorded), the clipboard tool recorded
+  (`eval::intercept_tool`). Logs per run in `<out>/<stamp>-<label>/`:
+  `transcript.jsonl` (every request body incl. tool schemas, every response,
+  429s/waits, tool calls + results, keys redacted), `summary.md`/`.json`.
+  Paces Groq to its 8k tokens/min (and its rate-limit headers). `--raw` sends
+  hand-written requests (the Groq `browser_search` spike). The hooks in
+  `llm.rs` (`eval::Call`), `tools.rs`, `config.rs`, `notes.rs` are no-ops
+  outside a run. See [`docs/model-evals.md`](./docs/model-evals.md).
 - **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
   `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
   **Debug mode** (Settings → Advanced → Debug Logging, OpenWhispr Developer-
@@ -3191,6 +3211,17 @@ only, not on CI): say so before running it while Nathan's at the PC; another app
 grabbing the focus mid-run makes Yap refuse (the harness retries a refused paste
 twice). Known gaps it found are "known gap: …" tests pinning today's result (see
 docs). Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md) "Real-app robot tests".
+
+### Model evaluations (`npm run eval`)
+How real models do on Yap's own Chat code, with every request and response
+logged: `npm run eval -- --model groq:openai/gpt-oss-20b --keys-from-yap`,
+`--model local:installed` (Yap's llamafile on the CPU), `--only`, `--tools on`,
+`--raw evals/raw/groq-browser-search.json`. Nothing launches, no window, the
+installed app's data and `%APPDATA%\yap` are never written (keys are read from
+its config.json read-only). Builds a debug stub into `$YAP_EVAL_TARGET_DIR`;
+runs land in `$YAP_EVAL_OUT` / `--out` (Nathan's PC: `E:/yap-builds/evals`,
+`E:/yap-builds/eval-runs`). Use it before changing a prompt, a tool or the
+default local model. Guide: [`docs/model-evals.md`](./docs/model-evals.md).
 
 ### The dev → nightly → stable workflow (agreed with Nathan, 2026-10-05)
 **Dev first, nightly for batches.** Every change goes through these steps in order:

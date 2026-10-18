@@ -93,6 +93,9 @@ fn estimate_model_size_b(model_id: &str) -> f32 {
 /// Cloud providers always support tools; local (self-hosted) and on-device
 /// models only when the id names ≥ 4B params (their gating rule).
 pub fn supports_tools(provider: &str, model: &str) -> bool {
+    if let Some(forced) = crate::eval::tools_forced() {
+        return forced; // a model evaluation's --tools on|off
+    }
     match provider {
         "groq" | "anthropic" | "openai" | "gemini" | "openrouter" | "custom" => true,
         _ => estimate_model_size_b(model) >= LOCAL_TOOL_MIN_PARAMS_B,
@@ -903,7 +906,9 @@ pub async fn run_tool_loop(
             let id = call["id"].as_str().unwrap_or("");
             let name = call["function"]["name"].as_str().unwrap_or("");
             let args = call_arguments(call);
-            let result = if open_apps && crate::apps::TOOL_NAMES.contains(&name) {
+            let result = if let Some(r) = crate::eval::intercept_tool(name, &args) {
+                r // a model evaluation records what would leave Yap (the clipboard)
+            } else if open_apps && crate::apps::TOOL_NAMES.contains(&name) {
                 // Off the async runtime: the index, the launch.
                 let (name, question) = (name.to_string(), question.to_string());
                 tauri::async_runtime::spawn_blocking(move || crate::apps::execute_tool(&name, &args, &question))
@@ -913,6 +918,7 @@ pub async fn run_tool_loop(
                 execute(name, &args)
             };
             tracing::info!(tool = %name, success = %result["success"], "Chat tool call");
+            crate::eval::tool_called(name, &call_arguments(call), &result);
             if let Some(id) = changed_note(name, &result) {
                 on_change(id);
             }

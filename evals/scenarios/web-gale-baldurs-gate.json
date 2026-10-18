@@ -1,0 +1,17 @@
+{
+  "name": "web-gale-baldurs-gate",
+  "description": "A game walkthrough question (where Gale is in Baldur's Gate 3, act 1): needs a web search to answer reliably. Skipped until Yap has web search.",
+  "tags": ["web", "games"],
+  "needs_web": true,
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Where do you find Gale in Baldur's Gate 3 act 1?",
+      "expect": {
+        "answer_contains_any": ["portal", "waypoint", "Roadside Cliffs", "crash", "nautiloid", "rune"],
+        "opened_none": true,
+        "no_false_claims": true
+      }
+    }
+  ]
+}
