@@ -2926,8 +2926,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   "Look things up on the web" `webSearch`, off; "Search with" Exa
   (Recommended) / Tavily `webSearchService`, each key masked in
   `webSearchKeys` with "Get a free key →" (its dashboard via
-  `open_external`) and its free allowance; "Wikipedia and game wikis (no
-  key)", always included; where the search words go; the explain line
+  `open_external`) and its free allowance; "Wikipedia and reference wikis"
+  (no key needed), always included; where the search words go; the explain line
   adds a web example while it's on), **Spoken replies in Chat** ("Speak replies" `speakReplies`;
   "When to speak" Segmented When I asked by voice / Always `speakWhen`;
   "Talk back hands-free" `talkBackHandsFree`, greyed while replies are off),

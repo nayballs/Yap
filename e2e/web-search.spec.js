@@ -78,6 +78,16 @@ async function setConfig(yap, main, patch) {
   const cfg = await yap.invoke('get_config');
   await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
   await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
+  // Settings saves its copy 400 ms after a change: one still due from the
+  // test before could land on top of this one for a moment ("Unknown tool:
+  // web_search"). Let it save, then check the change held.
+  await main.waitForTimeout(500);
+  // (Saved values may carry fields of their own: each patched value must be there.)
+  const holds = (now, want) =>
+    want && typeof want === 'object' && !Array.isArray(want)
+      ? !!now && typeof now === 'object' && Object.entries(want).every(([k, v]) => holds(now[k], v))
+      : JSON.stringify(now) === JSON.stringify(want);
+  await expect.poll(async () => holds(await yap.invoke('get_config'), patch)).toBe(true);
 }
 
 const chatScope = (fakeLlm, model = 'fake-chat', provider = 'custom') => ({
@@ -109,18 +119,18 @@ test('Settings: web search is off until turned on, Exa recommended, keys masked'
   await group.scrollIntoViewIfNeeded();
   const toggle = group.getByRole('button', { name: 'Look things up on the web' });
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-  await expect(group).toContainText('Wikipedia and game wikis (no key)');
-  await expect(group).toContainText('Always included');
+  await expect(group).toContainText('Wikipedia and reference wikis');
+  await expect(group).toContainText('Always available, no API key needed.');
   await expect(group.getByRole('tab', { name: 'Exa (Recommended)' })).toHaveAttribute('aria-selected', 'true');
   await shot(main, '01-settings-web-search-off');
 
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await expect(group).toContainText('$10 of free searches every month');
-  await expect(group).toContainText('With no Exa key, your search words go to Wikipedia and game wikis.');
+  await expect(group).toContainText('No Exa API key is set, so searches are sent to Wikipedia and reference wikis.');
   // The key: typed, then shown masked.
   await group.getByPlaceholder('Paste your Exa API key').fill(EXA_KEY);
-  await expect(group).toContainText('Your search words go to Exa (exa.ai)');
+  await expect(group).toContainText('Searches are sent to Exa (exa.ai)');
   await expectStore(yap, 'config.json', (c) => c.webSearch === true && c.webSearchKeys?.exa === EXA_KEY);
   await closeSettings(main);
   await openSettings(main, 'Voice Assistant');
@@ -227,6 +237,16 @@ test('a chat answer cites its web sources: pills, a Sources row, kept with the a
   await main.locator('.conv').filter({ hasText: 'Where can I find Gale in BG3?' }).click();
   await expect(sourcesOfLast(main).getByRole('button')).toHaveCount(2);
   await expect(lastAnswer(main).locator('a.md-cite')).toHaveCount(3);
+
+  // A follow-up citing that answer without searching again (Nathan's "the
+  // top five in that list"): its "[1]" is that answer's pill, not raw text,
+  // and it has no Sources row of its own.
+  fakeLlm.scriptChat([{ content: 'The best spot is the beach [1].' }]);
+  await send(main, 'Where exactly?');
+  await expect(lastAnswer(main)).toContainText('The best spot is the beach');
+  await expect(lastAnswer(main)).not.toContainText('[1]');
+  await expect(lastAnswer(main).locator('a.md-cite')).toHaveAttribute('href', GALE_URL);
+  await expect(thread(main).locator('.sources')).toHaveCount(1);
 
   // A wrong key: the wiki answers instead, and the chip says why.
   fakeWeb.failNext('exa', 401);

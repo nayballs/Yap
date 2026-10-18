@@ -6,8 +6,8 @@
   // - the service with a key: Exa (recommended) or Tavily
   //   (cfg.webSearchService), each key kept in cfg.webSearchKeys like the
   //   AI keys (masked; "Get a free key" opens the service's dashboard);
-  // - "Wikipedia and game wikis (no key)": always included — what Yap uses
-  //   with no key, and when the service can't answer;
+  // - "Wikipedia and reference wikis": always included — what Yap uses
+  //   with no key, and when the service has no results;
   // - where the search words go, said plainly.
   //
   //   cfg: Settings' config $state. Auto-save does the saving.
@@ -57,8 +57,8 @@
 
   const where = $derived(
     key
-      ? `Your search words go to ${info.name} (${info.host}), or to Wikipedia and game wikis when ${info.name} can't answer.`
-      : `With no ${info.name} key, your search words go to Wikipedia and game wikis.`
+      ? `Searches are sent to ${info.name} (${info.host}), and to Wikipedia or a reference wiki when ${info.name} has no results.`
+      : `No ${info.name} API key is set, so searches are sent to Wikipedia and reference wikis.`
   );
 </script>
 
@@ -122,10 +122,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
         </span>
         <span class="atext">
-          <span class="alabel">Wikipedia and game wikis (no key)</span>
+          <span class="alabel">Wikipedia and reference wikis</span>
           <span class="adesc">
-            Always included. Game questions go to the game's own wiki (bg3.wiki, wiki.gg, Fandom), other facts to
-            Wikipedia in your language. Used with no key, and whenever {info.name} can't answer.
+            Always available, no API key needed. General questions are answered from Wikipedia in your language, and
+            game questions from that game's wiki. Used when no API key is set, or when {info.name} has no results.
           </span>
         </span>
       </div>
@@ -133,9 +133,9 @@
 
     <Row>
       <p class="privacy">
-        {where} Pages Yap reads are opened from this PC. Nothing is searched unless a question needs it, and every search
-        shows in Chat. Once Yap has read the web in a turn, it won't open apps, change notes or copy anything until your next
-        message.
+        {where} Web pages are fetched directly from this PC. Yap only searches when a question calls for it, and every
+        search is listed in Chat. After reading the web, Yap won't open apps, edit notes or copy to the clipboard until your
+        next message.
       </p>
     </Row>
   </Group>
