@@ -1036,10 +1036,12 @@ fn markdown(summary: &Value, rows: &[Value], models: &[Value], totals: &[Value])
         ));
         if m["gguf"].is_string() {
             md.push_str(&format!(
-                " GGUF {} MB, loaded in {:.1} s, peak RAM {} MB, prompt {} tok/s, generation {} tok/s.",
+                " GGUF {} MB, loaded in {:.1} s; memory: llama.cpp projects {} MB (model + context), peak working set {} MB (its prompt cache reached {} MB); prompt {} tok/s, generation {} tok/s.",
                 m["gguf_mb"],
                 m["load_ms"].as_f64().unwrap_or(0.0) / 1000.0,
+                m["log_facts"]["projected_host_mib"],
                 m["peak_ram_mb"],
+                m["log_facts"]["prompt_cache_peak_mib"],
                 m["prompt_tokens_per_s"],
                 m["gen_tokens_per_s"],
             ));

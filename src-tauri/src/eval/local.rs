@@ -190,27 +190,35 @@ impl Server {
         None
     }
 
-    /// What the server's log says about the model: its buffers (MB) and
-    /// what ran where.
+    /// What the server's log says about memory and the CPU: llama.cpp's
+    /// projected host memory (the model + its context), the largest its
+    /// prompt cache grew (idle prompts kept in RAM, up to `--cache-ram`,
+    /// 8 GB by default), and its system line.
     pub fn log_facts(&self) -> Value {
         let text = std::fs::read_to_string(&self.log).unwrap_or_default();
-        let mut buffers = serde_json::Map::new();
+        let mut projected: Option<f64> = None;
+        let mut cache: f64 = 0.0;
         let mut system = String::new();
+        let number_before = |s: &str, unit: &str| -> Option<f64> {
+            let end = s.find(unit)?;
+            s[..end].trim().rsplit([' ', ',']).next()?.parse().ok()
+        };
         for line in text.lines() {
-            // "… CPU_Mapped model buffer size =  1059.66 MiB", "… KV buffer size = 224.00 MiB"
-            if let Some(i) = line.find("buffer size =") {
-                let name = line[..i].rsplit(':').next().unwrap_or("").trim().to_string();
-                let mb = line[i + "buffer size =".len()..].trim().trim_end_matches("MiB").trim().to_string();
-                if let Ok(v) = mb.parse::<f64>() {
-                    let e = buffers.entry(name).or_insert(json!(0.0));
-                    *e = json!(e.as_f64().unwrap_or(0.0) + v);
+            // "common_params_fit_impl: projected to use 4102 MiB of host memory"
+            if let Some(rest) = line.split("projected to use").nth(1) {
+                projected = projected.or_else(|| number_before(rest, "MiB"));
+            }
+            // "cache state: 9 prompts, 2730.745 MiB (limits: …)"
+            if let Some(rest) = line.split("cache state:").nth(1) {
+                if let Some(v) = number_before(rest, "MiB") {
+                    cache = cache.max(v);
                 }
             }
             if line.contains("system_info:") && system.is_empty() {
                 system = line.split("system_info:").nth(1).unwrap_or("").trim().chars().take(200).collect();
             }
         }
-        json!({ "buffers_mib": buffers, "system_info": system })
+        json!({ "projected_host_mib": projected, "prompt_cache_peak_mib": cache.round(), "system_info": system })
     }
 
     pub fn stop(&mut self) {
