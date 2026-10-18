@@ -1,7 +1,7 @@
 //! Who said what in a meeting: the note's **speaker map**, the names it puts
 //! on transcript lines (in the notepad, the Notes view, copies, exports, the
 //! MCP server and every AI prompt), and the line timings the voice
-//! separation will split lines at.
+//! separation splits lines at.
 //!
 //! **Voices.** A transcript line has a side (`source`: the mic "you", the
 //! call "them") and a voice (`TranscriptSegment::speaker`): "you", "them"
@@ -28,11 +28,18 @@
 //! not a room) names "Them" after that person, as a guess. Someone joining
 //! later makes it wrong, but no worse than "Them": it stays visibly a guess.
 //!
-//! **Line timing** (groundwork for the voice separation): a recorded line
-//! carries its place on the recording's clock (`start_ms`/`end_ms`) and,
-//! when the speech model gives them, its words' times ([`word_times`] lines
-//! them up with the corrected text). [`split_line`] cuts a line where the
-//! speaker changes, at its words, else in proportion to its text.
+//! **Line timing**: a recorded line carries its place on the recording's
+//! clock (`start_ms`/`end_ms`) and, when the speech model gives them, its
+//! words' times ([`word_times`] lines them up with the corrected text).
+//! [`split_line`] cuts a line where the speaker changes, at its words, else
+//! in proportion to its text.
+//!
+//! **The voice separation's labels** ([`labels`], beta): `diarize.rs` says
+//! who spoke when on the call side; its voices become "them-1", "them-2"…
+//! ("Speaker 1"…) on the "Them" lines as the labels settle, and in full
+//! when the recording stops, before the summary is written.
+
+pub mod labels;
 
 use std::collections::BTreeMap;
 
@@ -207,19 +214,23 @@ pub fn prompt_label(map: &Speakers, seg: &TranscriptSegment) -> String {
 }
 
 /// The voices of `note`, resolved: those its talk lines are in (in order of
-/// first appearance), then any other voice the map knows.
+/// first appearance), then any other voice the map knows — but not "Them"
+/// once the voice separation has told every call line apart (its name, a
+/// 1:1 guess, went to a voice: [`labels`]).
 pub fn voices(note: &Note) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    let mut add = |id: &str| {
+    for seg in note.transcript.iter().filter(|s| s.is_talk()) {
+        let id = voice_of(&note.speakers, seg);
         if !out.iter().any(|o| o == id) {
             out.push(id.to_string());
         }
-    };
-    for seg in note.transcript.iter().filter(|s| s.is_talk()) {
-        add(voice_of(&note.speakers, seg));
     }
+    let told_apart = !out.iter().any(|o| o == THEM) && out.iter().any(|o| o.starts_with(SEPARATED_PREFIX));
     for id in note.speakers.keys() {
-        add(resolve(&note.speakers, id));
+        let id = resolve(&note.speakers, id);
+        if !out.iter().any(|o| o == id) && !(told_apart && id == THEM) {
+            out.push(id.to_string());
+        }
     }
     out
 }
@@ -259,8 +270,17 @@ pub fn speakers_line(note: &Note) -> Option<String> {
     if !telling {
         return None;
     }
+    // A name once (a 1:1 guess on a voice and on the lines nobody told
+    // apart is one person).
+    let mut said: Vec<String> = Vec::new();
     let parts: Vec<String> = others
         .iter()
+        .filter(|id| {
+            let name = name_of(&note.speakers, id).0;
+            let fresh = !said.iter().any(|s| s.eq_ignore_ascii_case(&name));
+            said.push(name);
+            fresh
+        })
         .map(|id| {
             let s = note.speakers.get(id.as_str());
             let (name, guess) = name_of(&note.speakers, id);
@@ -613,7 +633,6 @@ pub fn line_timing(chunk_ms: u64, onset_ms: u64, end_ms: u64, words: &[(u64, u64
 
 /// One speaker's stretch on the recording's clock, as the voice separation
 /// reports it.
-#[allow(dead_code)] // the voice separation (step 3) builds these
 #[derive(Debug, Clone, PartialEq)]
 pub struct Turn {
     pub start_ms: u64,
@@ -624,10 +643,8 @@ pub struct Turn {
 
 /// A single word shorter than this between two of another speaker's is
 /// taken to be theirs (a blip in the separation, not a turn).
-#[allow(dead_code)]
 const BLIP_MS: u64 = 400;
 /// A word this far from every turn takes its neighbours' speaker.
-#[allow(dead_code)]
 const NEAR_MS: u64 = 1_500;
 
 /// Line `seg` split where its speaker changes, by `turns` (sorted or not;
@@ -638,8 +655,8 @@ const NEAR_MS: u64 = 1_500;
 /// without them, the line's text is spread over its place in proportion.
 /// Returned unchanged: a line the user assigned (`speaker_locked`), a
 /// marker or echo, a line with no place, or no turns. One run = the line
-/// relabelled. The voice separation (step 3) calls it as lines get labels.
-#[allow(dead_code)]
+/// relabelled. The voice separation calls it as lines get labels
+/// ([`labels`]).
 pub fn split_line(seg: &TranscriptSegment, turns: &[Turn]) -> Vec<TranscriptSegment> {
     let (Some(start), Some(end)) = (seg.start_ms, seg.end_ms) else {
         return vec![seg.clone()];

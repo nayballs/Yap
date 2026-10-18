@@ -103,7 +103,8 @@ competitive strategy, see `ROADMAP.md` in the **private** docs repo (below).
   OpenMDW-1.1) on NeMo-Speech.cpp 0.2.0 (Apache-2.0, ggml), run by `yap.exe
   diarize`, a child process that loads the runtime's C API DLLs from the data
   folder with `libloading` (`LoadLibraryExW`, DLL_LOAD_DIR | DEFAULT_DIRS);
-  `zip` unpacks NVIDIA's runtime release (`diarize.rs` + `diarize/`).
+  `zip` unpacks NVIDIA's runtime release (`diarize.rs` + `diarize/`); its
+  voices go on the "Them" lines as "Speaker 1, 2…" (`speakers/labels.rs`).
 - **Calendar:** Google Calendar (installed-app OAuth in the system browser, PKCE, a
   loopback listener, two read-only scopes) or any private iCal link, read straight from
   the PC (`calendar.rs` + `calendar/`); [`rrule`](https://crates.io/crates/rrule) expands
@@ -509,7 +510,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `fill_if_stalled`'s silence) also goes to the engine, so its clock is the
   session clock; the worker calls `Session::finish` after its last chunk and
   before the final `yap-meeting-state` (so the summary starts after the final
-  labels). Nothing else in the recorder changes; off, there is no tee.
+  labels). Off, there is no tee. **The labels on lines**
+  (`speakers::labels`): `start` registers the recording once its capture
+  runs (`labels::begin(note, Session::id)` — its lines are those from the
+  transcript's length then), `ingest` lets lines the latest labels cover get
+  theirs at once (`after_ingest`), and the worker, after `finish` (or, in a
+  test run with no engine, `diarize::finish_scripted`), calls `labels::end`
+  (an engine that never sent final labels: labelled as far as it went).
 - **`diarize.rs`** (+ `diarize/`) — **telling the voices on the call side
   apart** (beta, off by default; the spike: yap-private
   `docs/diarization-spike.md`). Engine: **Nemotron-3-Diarization** (q8_0 GGUF,
@@ -544,8 +551,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   latest. `Timeline {note_id, session, segments: [Segment {start_ms, end_ms,
   speaker, stream}], audio_ms, labelled_ms, done, restarts, gaps, error}`, ms
   on that recording's session clock ("Them" sample position / 16; a resumed
-  meeting is a new session, new numbers). Labels aren't put on transcript
-  lines yet. **Models** (`registry.rs`): Nemotron-3 (Recommended, the
+  meeting is a new session, new numbers; `Session::id` = its `session`).
+  `speakers::labels` (registered at setup) puts them on the "Them" lines;
+  the final handler runs before `finish` returns. **Models** (`registry.rs`): Nemotron-3 (Recommended, the
   default; HF `nvidia/Nemotron-3-Diarization` pinned to commit `f667ed73…`)
   + its runtime package (NVIDIA's v0.2.0 release zip: `bin/*.dll` minus the
   CLI/llama/nmt/tts, `share/licenses/` → `licenses/`), and the sherpa-onnx
@@ -559,8 +567,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (`diarization-download-progress {id, stage, percent, downloadedBytes,
   totalBytes}`, then `diarization-changed`) / `_delete`; debug-only
   `diarize_wav {path, speakers?}` (the real child on a file, a second at a
-  time; `speakers` caps voices afterwards — the engine takes no count) and
-  `diarization_timeline {noteId}`. Debug-only env: `YAP_DIARIZATION_MODELS`
+  time; `speakers` caps voices afterwards — the engine takes no count),
+  `diarization_timeline {noteId}` and `e2e_diarize_timeline {segments,
+  labelledMs, done, error?}` (test mode: a scripted timeline for the
+  recording now running, session `E2E_SESSION`; a `done` one is held until
+  the recording stops — `finish_scripted` — where the engine's final labels
+  come). Debug-only env: `YAP_DIARIZATION_MODELS`
   (another models folder), `YAP_DIARIZATION_SOURCES` (stand-in URLs + SHA-256s,
   JSON per package); a test run only fetches from loopback. Logs: counts and
   times, never audio. Measured (`tests/diarize_child.rs`, the spike's TTS
@@ -588,7 +600,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   path. **1:1 calls** (`calendar_guess`, from `notes::link_event`): exactly
   one other invitee (no you, rooms or declines) → "Them" named after them,
   source calendar. `known_people` (attendees + map names) is what owner
-  checks accept. **Groundwork for the voice separation**: `word_times(text,
+  checks accept. **Line timing**: `word_times(text,
   timed)` (LCS line-up of the model's words with the corrected text; a word
   the dictionary changed takes what it replaced), `line_timing`, and
   `split_line(seg, &[Turn {start_ms, end_ms, speaker}])` — a line split at
@@ -596,8 +608,40 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   else neighbours; one-word blips < 400 ms smoothed), in proportion without
   word times; a user-locked line, marker or unplaced line comes back
   unchanged. Lines' `start_ms`/`end_ms` are on the same session clock as
-  `diarize::Timeline` (sample position / 16, 0 at each recording's start),
-  so the wiring step can join its turns to lines. Unit-tested.
+  `diarize::Timeline` (sample position / 16, 0 at each recording's start).
+  **`speakers/labels.rs` — the engine's voices on lines**: a recording
+  (`begin(note, session)` from `meeting::start`: its lines = from the
+  transcript's length then) takes its session's timelines (`on_segments`;
+  in a test run with no engine, `E2E_SESSION`'s): each labels that
+  recording's "Them" lines that are talk, placed, settled (`end_ms ≤
+  labelled_ms`; all once `done` without an error), unlabelled and not
+  `speaker_locked` (never You/echo/markers/old lines) — `split_line` with
+  the turns near it, the parts replacing the line under `notes::modify`
+  (`notes::replace_line`: digests and breaks after it move along; a line
+  with no voice near stays "Them") — then emits `yap-note-changed` (origin
+  "speakers": the windows take only the lines and the map, never the
+  title/notes being typed) with `lineSpeakers` + `lineSplice {at, remove,
+  lines}` + `breaks` (windows splice, else refetch; `hasLine` drops a
+  segment event for a line they already have). `after_ingest` labels lines the latest
+  timeline already covers; `end` handles an engine that never sent its
+  final labels (as far as they went). **Voice ids**: engine voice `(stream,
+  speaker)` → "them-N", N numbered on from the note's highest "them-N" in
+  the order voices first get a line (`VoiceIds`; a restarted engine's
+  voices and a resumed meeting's are new numbers, never merged by
+  themselves). **The 1:1 rule** (`settle_them`, each pass, per recording):
+  "Them"'s name (a calendar guess, or the user's) goes to the recording's
+  voice when it found exactly one (a guess stays a guess); with several, a
+  guess goes to the voice with the most words (the first to qualify keeps
+  it while recording; moved at the end), never one with its own name or a
+  "Not" for it, and a user's name stays on "Them"; "Them" keeps its name for
+  unlabelled lines (`voices` leaves out a line-less "Them" once voices are
+  told apart; `speakers_line` says a name once). An error at the end →
+  `yap-meeting-speakers {noteId, message}` (the notepad: "Couldn't tell
+  speakers apart this time.") + an info log. Unit-tested; e2e with scripted
+  timelines; measured with the real engine + Parakeet on the spike's TTS
+  meetings (`diarization-real.spec.js`, 2026-10-18): 93.6–99.5% of words on
+  the right person, every call line labelled, a name ~15 s (≤ ~23 s) after
+  the words.
 - **`meeting_summary.rs`** — meeting summaries that keep up with long meetings
   (map-reduce, the map done while recording). Every ~10 min of new talk
   (2,000 est. tokens, or 10 min with ≥ 250) a background **digest** (key
@@ -641,7 +685,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
 - **`meeting_end.rs`** — the end of a meeting recording, wherever it was
   stopped from (notepad Stop, Notes view "End meeting & summarise", the Yap
   bar, call detection, an automatic stop). It follows the recorder through
-  `yap-meeting-state` (Rust listener; `meeting.rs` is untouched): a start
+  `yap-meeting-state` (Rust listener; `meeting.rs` is untouched; the final
+  one comes after the speaker engine's last labels are on the lines, so the
+  title and the action plan read the voices): a start
   opens the notepad (`notepad::on_meeting_started`); every stop (pause or end)
   marks its place (`notes::add_break` → `yap-meeting-breaks {noteId,
   breaks}`, the notepad's ⏸ divider); a stop is the **end** of
@@ -2652,7 +2698,11 @@ downloading): `cargo test --test diarize_child -- --ignored --nocapture`
 `audio/conv`: the real child on its WAVs, scored against their RTTMs) and
 `diarization-real.spec.js` (`YAP_E2E_DIARIZATION_MODELS` /
 `_AUDIO`: `diarize_wav`, and a meeting recorded from a 3-voice file with
-the engine labelling it). The real download once:
+the engine labelling it, its "Them" lines ending with one voice per person;
+`YAP_E2E_DIARIZATION_STT` = a Parakeet folder with an `engines` build as
+`YAP_E2E_EXE` scores the words put on the right person). The labels on
+lines without a model: `speaker-labels.spec.js` (scripted timelines,
+`e2e_diarize_timeline`). The real download once:
 `cargo test real_download -- --ignored --nocapture`
 (`YAP_DIARIZATION_DOWNLOAD_DIR`, ~112 MB).
 
@@ -3066,12 +3116,11 @@ Windows notifications, Focus Assist) not yet tried.
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
 search/archive/rename; the AI Notepad has no rich markdown editor (plain textarea)
-or folder "add existing note" picker; the speaker engine's labels
-(`diarize.rs`, beta) aren't put on transcript lines yet ("Them" is everyone
-else unless the user names or splits it, or a 1:1 invite names it as a
-guess; the speaker map, line times on the engine's clock and `split_line`
-are ready for that wiring; tasks are attributed from attendees, the speaker
-map and names said)
+or folder "add existing note" picker; meetings tell the call's voices apart
+only with the beta speaker engine on, and don't name them by themselves
+("Speaker 1"… until the user, a 1:1 invite or, later, the call app names
+them; voices of two recordings of one meeting aren't matched up; tasks are
+attributed from attendees, the speaker map and names said)
 and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](./docs/meetings.md) "Limits"), and a real call (live
 WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a

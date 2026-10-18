@@ -22,7 +22,15 @@
   import ActionManager from './ActionManager.svelte';
   import { noteRequest } from './meetingDetect.svelte.js';
   import { summaries, loadSummary, summarise } from './meetingSummary.svelte.js';
-  import { MEETING_HELPERS, meetingHelpers, noteMarkdown, transcriptItems, withLineSpeakers } from './notepadText.js';
+  import {
+    MEETING_HELPERS,
+    meetingHelpers,
+    noteMarkdown,
+    transcriptItems,
+    withLineSpeakers,
+    withLineSplice,
+    hasLine,
+  } from './notepadText.js';
   import SpeakerMenu from './SpeakerMenu.svelte';
   import { nextModel, modelLine, whereItRuns } from './aiModel.js';
   import ContextMenu from './ui/ContextMenu.svelte';
@@ -302,27 +310,40 @@
   // The meeting notepad (or the AI meeting title) changed this note.
   function onNoteChanged(p) {
     if (!p || p.origin === LABEL) return;
-    refreshList();
+    // The speaker engine's labels (every few seconds while a meeting
+    // records) change only the lines and the map: no list refresh, and
+    // nothing that's being typed is touched.
+    const labels = p.origin === 'speakers';
+    if (!labels) refreshList();
     if (selected?.id !== p.id) return;
-    if (!dirty.title) {
-      selected.title = p.title;
-      selected.titleAuto = p.titleAuto;
+    if (!labels) {
+      if (!dirty.title) {
+        selected.title = p.title;
+        selected.titleAuto = p.titleAuto;
+      }
+      if (!dirty.content) selected.content = p.content;
+      selected.participants = p.participants;
+      selected.folder = p.folder;
     }
-    if (!dirty.content) selected.content = p.content;
-    selected.participants = p.participants;
-    selected.folder = p.folder;
     if (p.speakers) selected.speakers = p.speakers;
-    // A speaker renamed or merged in the notepad: every line's voice.
-    if (p.lineSpeakers) {
-      const t = withLineSpeakers(selected.transcript, p.lineSpeakers);
-      if (t) selected.transcript = t;
-      else {
+    // The voice separation labelled lines (`lineSplice`, some split where
+    // the speaker changed), or a speaker was renamed or merged in the
+    // notepad (`lineSpeakers`): every line's voice.
+    if (p.lineSplice || p.lineSpeakers) {
+      const t = p.lineSplice
+        ? withLineSplice(selected.transcript, p)
+        : withLineSpeakers(selected.transcript, p.lineSpeakers);
+      if (t) {
+        selected.transcript = t;
+        if (p.breaks) selected.breaks = p.breaks;
+      } else {
         const id = selected.id;
         invoke('note_get', { id })
           .then((n) => {
             if (selected?.id === id) {
               selected.transcript = n.transcript;
               selected.speakers = n.speakers;
+              selected.breaks = n.breaks;
             }
           })
           .catch(() => {});
@@ -343,7 +364,7 @@
   function onMeetingSegment(seg) {
     if (!seg) return;
     // Live-append to the open note's transcript view.
-    if (selected && meeting.recording && meeting.noteId === selected.id) {
+    if (selected && meeting.recording && meeting.noteId === selected.id && !hasLine(selected.transcript, seg)) {
       selected.transcript = [...(selected.transcript || []), seg];
       selected.noteType = 'meeting';
     }

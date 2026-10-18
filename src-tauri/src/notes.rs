@@ -1018,21 +1018,69 @@ pub fn digested_upto(note: &Note) -> usize {
 
 /// Append a meeting digest. It must pick up exactly where the last one
 /// stopped and stay inside the transcript, so a late or repeated result can
-/// never leave a gap or cover the same stretch twice. Returns the new count.
-pub fn add_digest(id: u64, digest: MeetingDigest) -> Result<usize, String> {
+/// never leave a gap or cover the same stretch twice. `last`: the side and
+/// end (ms on the recording's clock) of the last line it covered, as the
+/// digest read it: lines the voice separation split meanwhile
+/// ([`replace_line`]) moved that line on, and the digest follows it. Returns
+/// the new count.
+pub fn add_digest(id: u64, digest: MeetingDigest, last: Option<(&str, u64)>) -> Result<usize, String> {
     with_store(|store| {
         let note = store
             .notes
             .iter_mut()
             .find(|n| n.id == id)
             .ok_or("Note not found")?;
-        let count = push_digest(note, digest)?;
+        let count = push_digest(note, digest, last)?;
         save_to_disk(store);
         Ok(count)
     })
 }
 
-fn push_digest(note: &mut Note, digest: MeetingDigest) -> Result<usize, String> {
+/// Where a digest that read up to `to_seg` (exclusive) ends now: just past
+/// its last line, found again by its side and end. A line split into parts
+/// ends where its last part does.
+fn relocate_end(transcript: &[TranscriptSegment], to_seg: usize, (source, end_ms): (&str, u64)) -> usize {
+    let is_it = |s: &TranscriptSegment| s.source == source && s.end_ms == Some(end_ms);
+    if to_seg > 0 && transcript.get(to_seg - 1).is_some_and(is_it) {
+        return to_seg;
+    }
+    (to_seg..transcript.len().min(to_seg + 64))
+        .find(|&j| is_it(&transcript[j]))
+        .map_or(to_seg, |j| j + 1)
+}
+
+/// Line `at` of `note`'s transcript is now `parts` (the voice separation
+/// split it where the speaker changed: `speakers::labels`). Digests and stop
+/// marks after it move along with the lines; a digest that covered it
+/// covers all its parts.
+pub fn replace_line(note: &mut Note, at: usize, parts: Vec<TranscriptSegment>) {
+    if parts.is_empty() || at >= note.transcript.len() {
+        return;
+    }
+    let extra = parts.len() - 1;
+    note.transcript.splice(at..at + 1, parts);
+    if extra == 0 {
+        return;
+    }
+    for d in &mut note.digests {
+        if d.from_seg > at {
+            d.from_seg += extra;
+        }
+        if d.to_seg > at {
+            d.to_seg += extra;
+        }
+    }
+    for b in &mut note.breaks {
+        if *b > at {
+            *b += extra;
+        }
+    }
+}
+
+fn push_digest(note: &mut Note, mut digest: MeetingDigest, last: Option<(&str, u64)>) -> Result<usize, String> {
+    if let Some(last) = last {
+        digest.to_seg = relocate_end(&note.transcript, digest.to_seg, last);
+    }
     if digest.from_seg != digested_upto(note)
         || digest.to_seg <= digest.from_seg
         || digest.to_seg > note.transcript.len()
@@ -1195,12 +1243,65 @@ mod tests {
             questions: vec![],
             raw: String::new(),
         };
-        assert_eq!(push_digest(&mut note, d(0, 4)), Ok(1));
-        assert!(push_digest(&mut note, d(0, 4)).is_err()); // the same stretch again
-        assert!(push_digest(&mut note, d(5, 8)).is_err()); // a gap
-        assert!(push_digest(&mut note, d(4, 11)).is_err()); // past the end
-        assert_eq!(push_digest(&mut note, d(4, 10)), Ok(2));
+        assert_eq!(push_digest(&mut note, d(0, 4), None), Ok(1));
+        assert!(push_digest(&mut note, d(0, 4), None).is_err()); // the same stretch again
+        assert!(push_digest(&mut note, d(5, 8), None).is_err()); // a gap
+        assert!(push_digest(&mut note, d(4, 11), None).is_err()); // past the end
+        assert_eq!(push_digest(&mut note, d(4, 10), None), Ok(2));
         assert_eq!(digested_upto(&note), 10);
+    }
+
+    #[test]
+    fn a_split_line_moves_digests_and_stop_marks_along() {
+        let mut note = store_with_note().notes.remove(0);
+        let line = |i: u64| TranscriptSegment {
+            source: "them".into(),
+            text: format!("line {i}"),
+            ts: i,
+            start_ms: Some(i * 1_000),
+            end_ms: Some(i * 1_000 + 900),
+            ..Default::default()
+        };
+        note.transcript = (0..6).map(line).collect();
+        let d = |from, to| MeetingDigest {
+            from_seg: from,
+            to_seg: to,
+            start_ts: 0,
+            end_ts: 0,
+            key_points: vec![],
+            decisions: vec![],
+            actions: vec![],
+            questions: vec![],
+            raw: String::new(),
+        };
+        push_digest(&mut note, d(0, 2), None).unwrap();
+        push_digest(&mut note, d(2, 4), None).unwrap();
+        note.breaks = vec![2, 6];
+        // Line 3 (the second digest's last) becomes three parts.
+        let parts = vec![line(3), line(3), TranscriptSegment { start_ms: Some(3_500), ..line(3) }];
+        replace_line(&mut note, 3, parts);
+        assert_eq!(note.transcript.len(), 8);
+        assert_eq!((note.digests[0].from_seg, note.digests[0].to_seg), (0, 2));
+        assert_eq!((note.digests[1].from_seg, note.digests[1].to_seg), (2, 6), "covers every part");
+        assert_eq!(note.breaks, [2, 8]);
+        // One part: relabelled in place, nothing moves.
+        replace_line(&mut note, 0, vec![line(0)]);
+        assert_eq!(note.transcript.len(), 8);
+        replace_line(&mut note, 99, vec![line(9)]);
+
+        // A digest read up to line 5 before line 4 was split in two: it
+        // follows its last line (side and end) to where it is now.
+        let mut note = store_with_note().notes.remove(0);
+        note.transcript = (0..6).map(line).collect();
+        replace_line(&mut note, 4, vec![TranscriptSegment { end_ms: Some(4_400), ..line(4) }, line(4)]);
+        assert_eq!(push_digest(&mut note, d(0, 6), Some(("them", 5_900))), Ok(1));
+        assert_eq!(note.digests[0].to_seg, 7);
+        // Its last line where it was: as read. Not found: as read.
+        let mut other = store_with_note().notes.remove(0);
+        other.transcript = (0..6).map(line).collect();
+        assert_eq!(relocate_end(&other.transcript, 3, ("them", 2_900)), 3);
+        assert_eq!(relocate_end(&other.transcript, 3, ("you", 2_900)), 3);
+        assert_eq!(relocate_end(&other.transcript, 2, ("them", 3_900)), 4);
     }
 
     #[test]

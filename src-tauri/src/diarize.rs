@@ -24,12 +24,12 @@
 //! [`Timeline`] goes to every [`on_segments`] handler (and [`timeline`]) and
 //! only then do the summary and the title start.
 //!
-//! **For the speaker map** (notes / meeting_summary, the other half of step
-//! 3): register with [`on_segments`]; it's called every few seconds while a
+//! **For the speaker map** (`speakers::labels`, which puts the voices on
+//! the "Them" lines): [`on_segments`] is called every few seconds while a
 //! recording runs (each time with the whole timeline so far, tail still
 //! moving) and once with `done: true`. Times are ms on that recording's
 //! session clock (the "Them" sample position / 16); a voice is `(stream,
-//! speaker)`.
+//! speaker)`; [`Session::id`] is the `Timeline::session` its timelines carry.
 //!
 //! Models and the runtime: `registry.rs` (download → size + SHA-256 →
 //! unpack into `<data>/models/diarization/`). Logs carry counts and times,
@@ -134,16 +134,14 @@ static RUNNING: AtomicUsize = AtomicUsize::new(0);
 
 /// Call `f` with every new timeline of a recording's call side: every few
 /// seconds while it records, and once more with `done: true` after it
-/// stopped, before the summary starts. On a diarization thread: keep it
-/// short (no network, no waiting on windows).
-#[allow(dead_code)] // the speaker map (notes / meeting_summary) registers here
+/// stopped, before the summary starts (the recording waits for `f`). On a
+/// diarization thread: keep it short (no network, no waiting on windows).
 pub fn on_segments(f: impl Fn(&Timeline) + Send + Sync + 'static) {
     HANDLERS.lock().unwrap_or_else(|p| p.into_inner()).push(Arc::new(f));
 }
 
 /// The latest timeline of note `note_id`'s most recent recording, live or
 /// done (`None` if it had none since Yap started).
-#[allow(dead_code)] // the speaker map; the e2e suite's `diarization_timeline`
 pub fn timeline(note_id: u64) -> Option<Timeline> {
     LATEST
         .lock()
@@ -245,6 +243,7 @@ impl State {
 /// its [`Tee`], finished with it.
 pub struct Session {
     note_id: u64,
+    id: u64,
     tx: Option<Sender<Feed>>,
     queued: Arc<AtomicUsize>,
     done_rx: Receiver<Timeline>,
@@ -308,12 +307,18 @@ impl Session {
             })?;
         Ok(Session {
             note_id,
+            id: session,
             tx: Some(tx),
             queued,
             done_rx,
             cancel,
             finished: false,
         })
+    }
+
+    /// The `Timeline::session` of this recording's timelines.
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     /// The hook for the recording's "Them" buffer.
@@ -667,6 +672,87 @@ pub async fn diarize_wav(path: String, speakers: Option<u8>) -> Result<WavResult
 #[tauri::command]
 pub fn diarization_timeline(note_id: u64) -> Option<Timeline> {
     timeline(note_id)
+}
+
+/// The `Timeline::session` of the e2e suite's scripted timelines.
+#[cfg(debug_assertions)]
+pub const E2E_SESSION: u64 = u64::MAX;
+
+/// One stretch of a scripted timeline.
+#[cfg(debug_assertions)]
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptedSegment {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub speaker: u8,
+    #[serde(default)]
+    pub stream: u32,
+}
+
+/// A scripted final timeline, published when its recording stops.
+#[cfg(debug_assertions)]
+static SCRIPTED_DONE: Mutex<Option<Timeline>> = Mutex::new(None);
+
+/// Test mode: a timeline for the recording now running, as the engine would
+/// report it (`speakers::labels` takes it for a recording with no engine),
+/// so the e2e suite tests the labels without a model. A live one goes to
+/// the [`on_segments`] handlers now; a `done` one when the recording stops,
+/// where the engine's final labels come (`meeting.rs` →
+/// [`finish_scripted`]). `error`: the engine stopped early.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_diarize_timeline(
+    segments: Vec<ScriptedSegment>,
+    labelled_ms: u64,
+    done: bool,
+    error: Option<String>,
+) -> Result<(), String> {
+    if !crate::e2e::active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let note_id = crate::meeting::recording_note().ok_or("No meeting is being recorded")?;
+    let mut segments: Vec<Segment> = segments
+        .into_iter()
+        .filter(|s| s.end_ms > s.start_ms)
+        .map(|s| Segment {
+            start_ms: s.start_ms,
+            end_ms: s.end_ms,
+            speaker: s.speaker,
+            stream: s.stream,
+        })
+        .collect();
+    segments.sort_by_key(|s| (s.start_ms, s.end_ms));
+    let audio_ms = segments.iter().map(|s| s.end_ms).max().unwrap_or(0).max(labelled_ms);
+    let tl = Timeline {
+        note_id,
+        session: E2E_SESSION,
+        segments,
+        audio_ms,
+        labelled_ms: if done && error.is_none() { audio_ms } else { labelled_ms },
+        done,
+        restarts: 0,
+        gaps: Vec::new(),
+        error,
+    };
+    if done {
+        *SCRIPTED_DONE.lock().unwrap_or_else(|p| p.into_inner()) = Some(tl);
+    } else {
+        publish(&tl);
+    }
+    Ok(())
+}
+
+/// Test mode: the recording of `note_id` stopped with no engine: the final
+/// timeline a test staged for it, where the engine's would come.
+#[cfg(debug_assertions)]
+pub fn finish_scripted(note_id: u64) {
+    let mut staged = SCRIPTED_DONE.lock().unwrap_or_else(|p| p.into_inner());
+    if staged.as_ref().is_some_and(|tl| tl.note_id == note_id) {
+        let tl = staged.take().expect("staged");
+        drop(staged);
+        publish(&tl);
+    }
 }
 
 #[cfg(debug_assertions)]
