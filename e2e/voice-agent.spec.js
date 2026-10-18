@@ -305,6 +305,23 @@ test('Talk back hands-free: a dictated question is sent by itself and its answer
   await setConfig(yap, main, { talkBackHandsFree: true });
 });
 
+test('a question dictated for the chat after you left it takes you back to Chat with it', async ({
+  yap,
+  main,
+  fakeLlm,
+}) => {
+  await setConfig(yap, main, { speakReplies: true, speakWhen: 'voice', talkBackHandsFree: true });
+  // The main fixture starts on Home: the chat's dictation ends there.
+  await expect(main.locator('.chat')).toHaveCount(0);
+  fakeLlm.scriptChat([{ content: 'Here you are again.' }]);
+  await yap.invoke('e2e_chat_dictation', { text: 'Did I leave the chat?' });
+  await expect(thread(main).locator('.cbubble.user').last()).toHaveText('Did I leave the chat?');
+  await expect(thread(main)).toContainText('Here you are again.');
+  await expect.poll(async () => (await spoken(yap)).map((s) => s.text)).toEqual(['Here you are again.']);
+  await yap.invoke('tts_stop');
+  await setConfig(yap, main, { speakReplies: false });
+});
+
 test("the Notes view's Ask bar answers have ▶ Read aloud too", async ({ yap, main, fakeLlm, shot }) => {
   await yap.invoke('note_create', { title: 'Voice plan', content: 'The launch is on Friday.' });
   await openView(main, 'Notes');
