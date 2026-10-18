@@ -23,6 +23,7 @@
   import AgentNameField from './AgentNameField.svelte';
   import { initSpeech } from './speech.svelte.js';
   import VoiceSettings from './VoiceSettings.svelte';
+  import OpenAppsSettings from './OpenAppsSettings.svelte';
   import KokoroOffer from './KokoroOffer.svelte';
   import { kokoro, startKokoro } from './kokoro.svelte.js';
   import NoteFormattingConfig from './NoteFormattingConfig.svelte';
@@ -568,6 +569,9 @@
     editHotkey: '',
     assistantHotkey: '',
     assistantAnswerCard: true,
+    openApps: true,
+    appsBlocked: [],
+    appNicknames: [],
     speakReplies: false,
     speakWhen: 'voice',
     talkBackHandsFree: true,
@@ -2055,6 +2059,7 @@
               {:else}
                 Set a shortcut below, press it in any app and ask <q>What's on my notes for the launch?</q>: Yap answers out loud, and the conversation is in Chat.
               {/if}
+              {#if cfg.openApps}Or say <q>Open Spotify</q>, and Yap opens it.{/if}
             </p>
             <p class="crossref">
               Want Yap to write something into the app you're in?
@@ -2092,6 +2097,8 @@
               </Row>
             </Group>
           </div>
+          <!-- "Open Teams": apps installed on this PC (apps.rs). -->
+          <OpenAppsSettings {cfg} />
           <Group title="Spoken replies in Chat">
             <Row>
               <Toggle

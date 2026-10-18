@@ -1161,7 +1161,65 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (an `update_note`'s title included) and tells the model the folders there
   are and to leave `folder` empty; chip `Couldn't create "Tent list": no
   folder called "Camping"`. (The MCP server's `create_note` still makes the
-  folder it's given.)
+  folder it's given.) Plus **`open_app(name)` / `list_apps(query?)`**
+  (`app_definitions` + `APP_TOOL_INSTRUCTIONS`, offered while
+  `open_apps` is on; run by `apps.rs` off the async runtime).
+- **`apps.rs`** — **opening apps when you ask** (2026-10-18; Settings →
+  Voice Assistant → Opening apps): "open Teams" in Chat or to the Voice
+  Assistant opens an app installed on this PC — only an entry of the
+  index, never a command line, arguments, a file, a folder or a link.
+  **Index** (`apps(refresh)`, in memory, rebuilt after `FRESH` = 5 min or
+  on Refresh; read-only, no network): the Start menu's "All apps" =
+  `shell:AppsFolder`'s children (`SHGetKnownFolderItem(FOLDERID_AppsFolder)`
+  → `BHID_EnumItems`, on an STA thread of its own): display name, parsing
+  name as the id (an AppUserModelID like `MSTeams_8wekyb3d8bbwe!MSTeams`,
+  or a known-folder path `{6D809377-…}\7-Zip\7zFM.exe`) and the item's ID
+  list; ~240 entries → ~190 apps in ~300 ms on Nathan's PC. Fallback: the
+  Start menu `.lnk`s (ProgramData + AppData) + App Paths. `tidy`: junk out
+  (`is_junk`: "Uninstall …"/`unins*.exe`, read-mes, help/`.chm`, docs,
+  licences, `http(s)://` and `.url` links, "… on the Web", `.msi`, folders;
+  a Store app keeps "Help" — Get Help; "Revo Uninstaller" stays), one entry
+  per name. **Opening** (`open`): a packaged app (`id` has `!`) by
+  `IApplicationActivationManager::ActivateApplication` (brings it forward,
+  gives its pid), else `ShellExecuteExW(SEE_MASK_IDLIST)` on the entry's
+  own ID list (what a Start menu click does: a shortcut's own target/args,
+  a game's `steam://`), then `bring_forward(pid)` (≤ 8 s, its main window);
+  logs the app's name only. **Matching** (`find`, pure): `keys(name)` — the
+  full name, without qualifiers ("(64-bit)", " - Insiders", versions),
+  without the maker (`VENDORS`: "Teams"), initials ("VS Code"), the last
+  word (not a `GENERIC` one) — vs the request (`FILLER` "the/app/please"
+  out, "my", a maker, `ALIASES`: calc, cmd, files, vscode, store…), exact,
+  a few of its words, or a near-miss (`fuzzy::spelling_distance` ≤ 0.2
+  and `plain_spelling_distance` ≤ 0.3: "spottify" yes, "spotifire" no);
+  nicknames first (`app_nicknames`); `CONFIDENT` 0.80, others within
+  `MARGIN` 0.03 → `Several` (four Pythons, two Teams: ask, never guess);
+  `apps_blocked` → `Blocked`; else `Nothing` + close names. **Fast path**
+  (`plan` / `plan_for`, before any model, in `commands::chat_turn` →
+  `app_turn` and `assistant::answer`): `open_request(text)` (pure: the
+  whole message is "[greeting/please/can you…] open|launch|start|run|fire
+  up… <app> [please/for me/now]", one sentence; `plain` = no joining words
+  "and/about/for/to…") → one app → opened, "Opening Microsoft Teams." +
+  chip `Opened Microsoft Teams` (no model call: works with no AI and the
+  1.5B local model); several → "I found 2 apps for “teams”: … Which
+  one?"; switched off → "You've asked Yap not to open …"; a plain name
+  not installed → "I couldn't find an app called …" (+ "Did you mean …?")
+  unless a tool-capable model is there; "Let Yap open apps" off → it says
+  so; "open my notes", "start the meeting" (`NOT_APPS`), "open the notes
+  about Teams" → the model. **Model tools** (`execute_tool`): `open_app`
+  acts only when the person's own message asks to open something
+  (`asked_to_open`: open/launch/start/run…), so a note saying "open X"
+  can't (chip `Didn't open "X": you didn't ask to open an app`). Spoken
+  "Opening …" follows the usual meeting rule (the Voice Assistant is off
+  during meetings; Chat's auto-speak stays quiet). Commands `apps_list
+  {refresh}`, `apps_icons {ids}` (`IShellItemImageFactory`, 32 px →
+  `app_icons::encode_png`, cached per run). Test mode: nothing launched
+  (recorded, debug-only `e2e_opened_apps {clear}`), index =
+  `YAP_E2E_APPS` (a JSON `[{id, name}]`, read each call), no icons; unit
+  tests never read `config.json` or this PC's apps (`run_tool`, a
+  thread-local stand-in index). `#[ignore]`d `this_pcs_apps` (read-only:
+  names, junk, sample matches, icons) and `opens_notepad_for_real` (opens
+  Notepad the app's way, closes only that pid's window; skipped while a
+  Notepad runs).
 - **`bridge.rs`** — the **local API bridge** (OpenWhispr `cliBridge.js` port,
   backs the Integrations view): a token-authenticated loopback HTTP server
   (`tiny_http`, `127.0.0.1`, OS-assigned port) exposing `/v1` REST routes over
@@ -1445,7 +1503,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   Windows' default), tts_rate (1.0, 0.5–2.0); config v2 moved a saved
   Windows voice from tts_voice to tts_windows_voice and "windows" (never a
   choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
-  = unbound, the default), Commands' edit_hotkey (the rewrite shortcut)
+  = unbound, the default), opening apps (`apps.rs`): open_apps (true) +
+  apps_blocked (app ids, "Don't open this one") + app_nicknames
+  (`AppNickname {say, app, name}`), Commands' edit_hotkey (the rewrite shortcut)
   + agent_name + the `voiceAgent` scope (field and key names unchanged by
   the 2026-10-18 rename, so no setting resets). JSON
   load/save + `apply_dictionary` (corrections; skips snippets) +
@@ -2019,7 +2079,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `Idle → Listening → Thinking → Speaking` in `yap-assistant {phase,
   conversationId, messageId}` (the bar). `listening` (from
   `capture_target`; bumps a generation, drops the last answer's card),
-  `heard(question)` (after the STT + dictionary) → `answer`: no Chat model
+  `heard(question)` (after the STT + dictionary) → `answer`: "Open Teams"
+  needs no model (`apps::plan_for`, below: opened, "Opening Microsoft
+  Teams." said); otherwise no Chat model
   (`commands::resolve_chat_endpoint` errs) → the `assistantNoModel` alert
   with **Open settings** (`alert::OPEN_AI_SETTINGS` → Language Models →
   Chat & Voice Assistant; a model that fails → `assistantFailed`, the
@@ -2133,7 +2195,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   audio device; what would have been said in `tts_e2e_spoken`), `e2e_chat_dictation {text}` (a
   question dictated into the Chat view, no mic needed), `e2e_assistant_ask
   {text, listenMs}` (a question to the Voice Assistant, as its shortcut
-  asks it, no mic needed), `e2e_coaching_reset` (every
+  asks it, no mic needed), no app ever launched (`apps.rs`: "open Teams"
+  is recorded for `e2e_opened_apps`, the index is the stand-in list
+  `YAP_E2E_APPS` names, no icons), `e2e_coaching_reset` (every
   push-to-talk hint due again), `e2e_notice_reset` / `e2e_focus` /
   `e2e_notice` (notice.rs: cooldowns and fatigue forgotten before every
   test, whether the main window counts as focused — by default while it's on
@@ -2699,7 +2763,14 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   set; **Assistant shortcut** (`#settings-assistant-shortcut`,
   `ui/HotkeyInput` `assistantHotkey`, clearable, "Set a shortcut", with a
   gentle "Set an assistant shortcut…" line while none is set; its line
-  follows the recording mode), **Spoken replies in Chat** ("Speak replies" `speakReplies`;
+  follows the recording mode), **Opening apps** (`OpenAppsSettings.svelte`,
+  `#settings-opening-apps`: "Let Yap open apps when you ask" `openApps`;
+  **Nicknames** — "Say … → App to open" with a type-ahead of the apps,
+  `appNicknames`, duplicates refused, ✕ to remove; **Apps Yap found** —
+  `apps_list`, a count, Refresh, a search box, two columns of the app's
+  own icon (`apps_icons`, else its letter) + a switch each, off = "Yap
+  won't open this one" `appsBlocked`; the first 40, then Show all),
+  **Spoken replies in Chat** ("Speak replies" `speakReplies`;
   "When to speak" Segmented When I asked by voice / Always `speakWhen`;
   "Talk back hands-free" `talkBackHandsFree`, greyed while replies are off),
   switching "Speak replies" on while Kokoro isn't downloaded offers it
@@ -3316,7 +3387,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   live transcription preview **on**
   (`streaming_partials`), AI cleanup **off**, the "press enter" voice command
   **on** (`voice_enter`), word suggestions from your corrections **on**
-  (`learn_words` — it only asks; nothing is added without a click), tips
+  (`learn_words` — it only asks; nothing is added without a click),
+  opening apps when asked **on** (`open_apps` — only apps in the Start
+  menu, `apps.rs`), tips
   **on** (`show_tips`; one notice at a time either way, `notice.rs`), call
   detection **on**
   (`meeting_detection` — it only asks; nothing records without a click) as
@@ -3354,7 +3427,12 @@ Assistant** (`assistant.rs`, 2026-10-18: its own shortcut, ask Chat out loud
 from any app and hear the answer, a bar capsule and card, follow-ups,
 barge-in, off (and Yap silent) during a meeting recording or a call; the rules unit-tested and the whole
 flow e2e-tested from a staged transcript with the main window hidden and
-in front — not yet asked with a real mic and heard on speakers), **spoken replies** (`tts.rs`, 2026-10-18: Chat's answers read
+in front — not yet asked with a real mic and heard on speakers), **opening
+apps when asked** (`apps.rs`, 2026-10-18: "open Teams" in Chat or out loud,
+from the Start menu's list, with no model needed; nicknames, apps switched
+off, the `open_app`/`list_apps` tools; matching and the request patterns
+unit-tested, this PC's real list indexed read-only, the flows e2e-tested
+against a stand-in list — never launching anything), **spoken replies** (`tts.rs`, 2026-10-18: Chat's answers read
 aloud in Windows' voices — the Voice replies toggle, ▶ on every answer,
 "only when I asked by voice", hands-free talk-back, barge-in; text prep, the
 queue and the decisions unit-tested, synthesis checked silently on this PC's
