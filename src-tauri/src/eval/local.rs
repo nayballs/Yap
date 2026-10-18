@@ -147,6 +147,8 @@ pub async fn start(
     }
     let started = Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start llamafile: {e}"))?;
+    // Ended with this process however it ends (a run stopped mid-way, End task).
+    crate::procs::end_with_yap(&child);
     let pid = child.id();
     let base_url = format!("http://127.0.0.1:{port}/v1");
     let client = reqwest::Client::builder().timeout(Duration::from_secs(3)).build().map_err(|e| e.to_string())?;
