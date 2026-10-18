@@ -85,7 +85,12 @@ competitive strategy, see `ROADMAP.md` in the **private** docs repo (below).
 - **Window state:** `tauri-plugin-window-state` persists the main window's size, position, and
   maximized state across launches (overlay, onboarding denylisted; VISIBLE flag excluded
   so the window never un-hides on start-hidden launches).
-- **External links:** `tauri-plugin-opener` (opens URLs in the default browser).
+- **External links:** `tauri-plugin-opener` (opens URLs in the default browser). Every
+  link in Yap's pages goes through `commands::open_external` (`lib/externalLinks.js`):
+  web and mail links only, and a test run records the link (`e2e_opened_urls`) instead
+  of opening a browser on the PC running it. Links inside rendered markdown (chat
+  answers, notes: `a.md-link` from `lib/markdown.js`) open the same way, through one
+  click handler in `main.js`, never navigating Yap's own window.
 - **No browser context menu:** `webview2-com` (the copy wry already builds on)
   hooks each webview's `ContextMenuRequested`, cutting WebView2's menu down to
   the editing commands (`context_menu.rs`).
@@ -2244,7 +2249,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   title + content saves send only the edited field with `origin: 'settings'`
   and follow `yap-note-changed` (the notepad's edits, the AI title; a made-up
   title shows muted); **Raw ↔ Enhanced dual-view + staleness dot** (safe renderer
-  in `lib/markdown.js`) with **Copy markdown / Copy text** (`markdownToText`:
+  in `lib/markdown.js`, shared with chat answers and the notepad: everything
+  HTML-escaped first; headings, lists, tasks, bold/italic, inline code, fenced
+  code blocks `pre.md-code`, `[text](url)` and bare links `a.md-link` — web and
+  mail only, styles in app.css) with **Copy markdown / Copy text** (`markdownToText`:
   ☐ tasks, plain headings); embedded per-note **"Ask anything…" bar** = Chat
   scope grounded in the note, with mic button for in-box dictation, and on a
   meeting note the **one-tap helper chips** over it (`meetingHelpers` from

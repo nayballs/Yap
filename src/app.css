@@ -259,3 +259,36 @@ body {
   --yap-shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.45);
   --yap-shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.5);
 }
+
+/* Rendered markdown (lib/markdown.js), wherever it shows — chat answers,
+   the Enhanced notes, the notepad's Ask sheet: fenced code and links.
+   Links open in the browser (main.js), never in Yap's own window. */
+pre.md-code {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: 8px;
+  background: var(--yap-s1);
+  overflow-x: auto;
+  white-space: pre;
+}
+/* (beats the views' own inline `code` chip styles) */
+pre.md-code code {
+  display: block;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+a.md-link {
+  color: var(--yap-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+a.md-link:hover {
+  color: var(--yap-primary-hover);
+}

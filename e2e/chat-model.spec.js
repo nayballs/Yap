@@ -241,3 +241,37 @@ test('Enter sends and the caret stays in the box for the next message', async ({
   await expect(box).toBeFocused();
   await expect(box).toHaveValue('');
 });
+
+// Chat answers show fenced code as a code block and links as links, and a
+// link opens in the browser (the opener plugin), never in Yap's window. Seen
+// in the Voice Agent screenshots (2026-10-18): ``` and [text](url) showed raw.
+test('an answer shows code blocks and links, and a link opens in the browser', async ({ yap, main, fakeLlm, shot }) => {
+  await setConfig(yap, main, {
+    ppApiKeys: { groq: TEST_KEY },
+    llmScopes: { ...(await yap.invoke('get_config')).llmScopes, chat: groqChat(fakeLlm, 'openai/gpt-oss-20b') },
+  });
+  await openView(main, 'Chat');
+  await main.getByRole('button', { name: 'New chat' }).click();
+  fakeLlm.scriptChat([
+    {
+      content:
+        'See [the plan](https://docs.example.com/plan?a=1&b=2) or https://example.org/app.\n\n```js\nconsole.log("<hi>");\n```\n\nNot a link: [x](javascript:alert(1))',
+    },
+  ]);
+  await send(main, 'Where is the plan?');
+  const answer = main.locator('.cbubble.assistant').last();
+  await expect(answer.locator('pre.md-code code')).toHaveText('console.log("<hi>");');
+  const link = answer.getByRole('link', { name: 'the plan' });
+  await expect(link).toHaveAttribute('href', 'https://docs.example.com/plan?a=1&b=2');
+  await expect(answer.getByRole('link', { name: 'https://example.org/app' })).toBeVisible();
+  await expect(answer).toContainText('[x](javascript:alert(1))');
+  await expect(answer.getByRole('link')).toHaveCount(2);
+  await shot(main, '05-answer-code-and-links');
+
+  // The click goes to Rust's open_external, which a test run records
+  // instead of opening a browser; Yap's window stays on the app.
+  const before = main.url();
+  await link.click();
+  await expect.poll(() => yap.invoke('e2e_opened_urls')).toContain('https://docs.example.com/plan?a=1&b=2');
+  expect(main.url()).toBe(before);
+});
