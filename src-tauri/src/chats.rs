@@ -35,6 +35,23 @@ pub struct ChatMessage {
     /// "Only when I asked by voice" reads its answer out (`tts::auto_speak`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub voice: bool,
+    /// The web pages an answer was written from (`web.rs`), numbered as it
+    /// cites them ("[1]"): the Sources row under it in Chat. Only written
+    /// when there are some.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<Source>,
+}
+
+/// One web source of an answer: its number in the answer's citations, the
+/// page's title, its address and site ("bg3.wiki").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Source {
+    pub n: usize,
+    pub title: String,
+    pub url: String,
+    #[serde(default)]
+    pub site: String,
 }
 
 /// Which model wrote an answer: the provider and the model id the call went
@@ -239,6 +256,19 @@ pub fn append(
     model: Option<ChatModel>,
     voice: bool,
 ) -> Result<usize, String> {
+    append_sourced(id, role, text, tools, model, voice, &[])
+}
+
+/// [`append`], with the web sources an answer was written from.
+pub fn append_sourced(
+    id: u64,
+    role: &str,
+    text: &str,
+    tools: &[String],
+    model: Option<ChatModel>,
+    voice: bool,
+    sources: &[Source],
+) -> Result<usize, String> {
     with_store(|s| {
         let conv = s
             .conversations
@@ -252,6 +282,7 @@ pub fn append(
             tools: tools.to_vec(),
             model,
             voice,
+            sources: sources.to_vec(),
         });
         conv.updated_ts = now_secs();
         let index = conv.messages.len() - 1;
@@ -279,6 +310,24 @@ mod tests {
         let t = clean_title(&"word ".repeat(40)).unwrap();
         assert!(t.chars().count() <= TITLE_MAX);
         assert!(!t.ends_with(' '));
+    }
+
+    #[test]
+    fn an_answer_keeps_its_web_sources() {
+        let c = create("Where's Gale?");
+        let src = Source { n: 1, title: "Gale".into(), url: "https://bg3.wiki/wiki/Gale".into(), site: "bg3.wiki".into() };
+        append(c.id, "user", "Where's Gale?", &[], None, false).unwrap();
+        append_sourced(c.id, "assistant", "On the beach [1].", &[], None, false, std::slice::from_ref(&src)).unwrap();
+        let conv = get(c.id).unwrap();
+        assert!(conv.messages[0].sources.is_empty());
+        assert_eq!(conv.messages[1].sources, [src]);
+        // Stored camelCase, and only when there are some.
+        let json = serde_json::to_value(&conv).unwrap();
+        assert!(json["messages"][0].get("sources").is_none());
+        assert_eq!(json["messages"][1]["sources"][0]["site"], "bg3.wiki");
+        // An older file without them still reads.
+        let old: ChatMessage = serde_json::from_str(r#"{"role":"assistant","text":"Hi","ts":1}"#).unwrap();
+        assert!(old.sources.is_empty());
     }
 
     #[test]

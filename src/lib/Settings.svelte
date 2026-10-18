@@ -24,6 +24,7 @@
   import { initSpeech } from './speech.svelte.js';
   import VoiceSettings from './VoiceSettings.svelte';
   import OpenAppsSettings from './OpenAppsSettings.svelte';
+  import WebSearchSettings from './WebSearchSettings.svelte';
   import KokoroOffer from './KokoroOffer.svelte';
   import { kokoro, startKokoro } from './kokoro.svelte.js';
   import NoteFormattingConfig from './NoteFormattingConfig.svelte';
@@ -572,6 +573,9 @@
     openApps: true,
     appsBlocked: [],
     appNicknames: [],
+    webSearch: false,
+    webSearchService: 'exa',
+    webSearchKeys: {},
     speakReplies: false,
     speakWhen: 'voice',
     talkBackHandsFree: true,
@@ -2060,6 +2064,7 @@
                 Set a shortcut below, press it in any app and ask <q>What's on my notes for the launch?</q>: Yap answers out loud, and the conversation is in Chat.
               {/if}
               {#if cfg.openApps}Or say <q>Open Spotify</q>, and Yap opens it.{/if}
+              {#if cfg.webSearch}Or ask <q>Where do I find Gale in Baldur's Gate 3?</q>, and Yap looks it up on the web.{/if}
             </p>
             <p class="crossref">
               Want Yap to write something into the app you're in?
@@ -2099,6 +2104,8 @@
           </div>
           <!-- "Open Teams": apps installed on this PC (apps.rs). -->
           <OpenAppsSettings {cfg} />
+          <!-- Looking things up on the web (web.rs), for Chat too. -->
+          <WebSearchSettings {cfg} />
           <Group title="Spoken replies in Chat">
             <Row>
               <Toggle

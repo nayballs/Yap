@@ -69,6 +69,7 @@ mod tray;
 mod tts;
 mod updates;
 mod usage;
+mod web;
 #[cfg(windows)]
 mod win_toast;
 

@@ -400,6 +400,10 @@ static STRIKE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"~~([^~]+)~~").unw
 static HTML: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^<>]*)?/?>").unwrap());
 static ARROW: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*(?:→|⟶|->|=>)\s*").unwrap());
 static SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
+/// A web answer's citation markers ("[1]", "[2, 3]", "[1][4]", gpt-oss's
+/// "【2†L6-L10】"): read as nothing.
+static CITE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s*(?:\[\d{1,2}(?:\s*[,–-]\s*\d{1,2})*\]|【[^】]{0,40}】)").unwrap());
 
 /// A URL as it's worth hearing: its domain ("https://www.github.com/a/b" →
 /// "github.com").
@@ -447,6 +451,7 @@ fn inline_text(line: &str) -> String {
         let tail = &c[0][url.len()..];
         format!("{}{}", domain(url), tail)
     });
+    let s = CITE.replace_all(&s, "");
     let s = CODE.replace_all(&s, "$1");
     let s = BOLD.replace_all(&s, |c: &regex::Captures| c.get(1).or(c.get(2)).map_or("", |m| m.as_str()).to_string());
     let s = ITALIC_STAR.replace_all(&s, "$1");
@@ -614,6 +619,14 @@ fn cut_long(s: &str) -> Vec<String> {
         out.push(rest.to_string());
     }
     out
+}
+
+/// The short answer: the first `n` sentences of an answer's first block,
+/// without markdown or citation markers — what the Voice Assistant says (and
+/// its card shows) when the details and sources are in Chat. Pure.
+pub fn brief(md: &str, n: usize) -> String {
+    let first = speakable_blocks(md).into_iter().find(|b| b.chars().any(char::is_alphanumeric)).unwrap_or_default();
+    sentences(&first).into_iter().take(n.max(1)).collect::<Vec<_>>().join(" ")
 }
 
 /// What to say for an answer: its [`speakable_blocks`], each written for
@@ -1313,6 +1326,21 @@ mod tests {
             vec!["Plan.", "It's Friday.", "Sam owns it.", "Ask Jo."]
         );
         assert_eq!(utterances("```\nonly code\n```"), vec!["(code block)"]);
+    }
+
+    #[test]
+    fn citation_markers_are_never_read_out() {
+        assert_eq!(
+            utterances("Gale is on the beach [1]. He joins you [2][3], or later [2, 4]. See 【2†L6-L10】 there."),
+            vec!["Gale is on the beach.", "He joins you, or later.", "See there."]
+        );
+        // A link's text and a list's number are kept.
+        assert_eq!(inline_text("[the wiki](https://bg3.wiki/wiki/Gale) says so [1]"), "the wiki says so");
+        // The short answer: the first sentences of the first block, no markers.
+        let md = "Gale is on the beach west of the crash site [1]. Pull him out of the portal [1]. He's a wizard [2].\n\n## More\n- He can be romanced [3].";
+        assert_eq!(brief(md, 2), "Gale is on the beach west of the crash site. Pull him out of the portal.");
+        assert_eq!(brief("- Only a list [1]", 2), "Only a list.");
+        assert_eq!(brief("", 2), "");
     }
 
     #[test]

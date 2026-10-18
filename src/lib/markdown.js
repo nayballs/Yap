@@ -23,9 +23,30 @@ function escapeHtml(s) {
 // (javascript:, file:, tauri:) stays plain text.
 const SAFE_URL = /^(https?:\/\/|mailto:)/i;
 
+// An answer written from the web (chats.rs `sources`, web.rs): its citation
+// markers ("[1]", "[2, 3]") become small pills that open their source, and
+// only links its sources gave stay clickable — any other address the model
+// wrote shows as plain text (no phishing link, nothing smuggled out in one).
+function webContext(sources) {
+  if (!Array.isArray(sources) || sources.length === 0) return null;
+  const strip = (u) => String(u || '').replace(/#.*$/, '').replace(/\/+$/, '');
+  const urls = new Set(sources.map((s) => escapeHtml(strip(s.url))));
+  return {
+    byN: new Map(sources.map((s) => [String(s.n), s])),
+    allows: (escapedUrl) => urls.has(strip(escapedUrl)),
+  };
+}
+
+function citePill(web, n) {
+  const s = web.byN.get(String(n).trim());
+  if (!s || !SAFE_URL.test(s.url)) return null;
+  const label = `${s.title || s.site}${s.site ? ` · ${s.site}` : ''}`;
+  return `<a class="md-link md-cite" href="${escapeHtml(s.url)}" title="${escapeHtml(label)}" aria-label="Source ${s.n}: ${escapeHtml(label)}">${s.n}</a>`;
+}
+
 // Inline transforms on an already-escaped line: code (kept apart, so nothing
-// inside it is touched), links, bold, italic.
-function inline(s) {
+// inside it is touched), links, citations (`web`), bold, italic.
+function inlineWith(s, web = null) {
   const codes = [];
   let t = s.replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
   const links = [];
@@ -33,15 +54,25 @@ function inline(s) {
   // [text](url): the url is already HTML-escaped (a `"` is `&quot;`), so it
   // can't break out of the attribute; a ")" ends it, and the only entity a
   // url may hold is `&amp;` (an escaped quote or bracket ends it too).
-  t = t.replace(/\[([^\]\n]+)\]\(((?:&amp;|[^\s&)])+)\)/g, (m, text, url) =>
-    SAFE_URL.test(url) ? keep(`<a class="md-link" href="${url}" title="${url}">${text}</a>`) : m
-  );
+  t = t.replace(/\[([^\]\n]+)\]\(((?:&amp;|[^\s&)])+)\)/g, (m, text, url) => {
+    if (!SAFE_URL.test(url)) return m;
+    if (web && !web.allows(url)) return text;
+    return keep(`<a class="md-link" href="${url}" title="${url}">${text}</a>`);
+  });
   // Bare web addresses; trailing punctuation ("…/app.") isn't part of them.
   t = t.replace(/\bhttps?:\/\/(?:&amp;|[^\s&])+/gi, (found) => {
     const tail = /[.,;:!?)]+$/.exec(found)?.[0] ?? '';
     const url = found.slice(0, found.length - tail.length);
+    if (web && !web.allows(url)) return keep(url) + tail;
     return keep(`<a class="md-link" href="${url}" title="${url}">${url}</a>`) + tail;
   });
+  // Citations: "[1]", "[2, 3]" (not a link's text: that's gone by now).
+  if (web) {
+    t = t.replace(/\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\]/g, (m, nums) => {
+      const pills = nums.split(',').map((n) => citePill(web, n));
+      return pills.every(Boolean) ? keep(`<span class="md-cites">${pills.join('')}</span>`) : m;
+    });
+  }
   t = t
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=$|[\s).,;:!?])/g, '$1<em>$2</em>');
@@ -69,7 +100,11 @@ export function markdownToText(md) {
     .trim();
 }
 
-export function renderMarkdown(md) {
+// `options.sources`: an answer's web sources ([{ n, title, url, site }]):
+// citations become pills, and only the sources' links stay links.
+export function renderMarkdown(md, options = {}) {
+  const web = webContext(options.sources);
+  const inline = (s) => inlineWith(s, web);
   const lines = escapeHtml(md || '').split(/\r?\n/);
   const out = [];
   let list = null; // 'ul' | 'ol' | null
