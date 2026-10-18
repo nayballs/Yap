@@ -5,6 +5,8 @@
     placeholder = '',
     disabled = false,
     oninput,
+    // The id of a <datalist> of suggestions (a server's model names).
+    list = undefined,
   } = $props();
 </script>
 
@@ -13,6 +15,7 @@
   {type}
   {placeholder}
   {disabled}
+  {list}
   bind:value
   oninput={() => oninput?.(value)}
 />

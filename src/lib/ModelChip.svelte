@@ -14,7 +14,8 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
-  import { modelName, providerName, modelIcon, whereItRuns, switchGroups } from './aiModel.js';
+  import { modelName, providerName, modelIcon, whereItRuns, switchGroups, noLongerOffered } from './aiModel.js';
+  import { loadCatalog } from './modelCatalog.svelte.js';
   import { toast } from './ui/toast.svelte.js';
 
   let { onopensettings = null } = $props();
@@ -30,14 +31,22 @@
   const icon = $derived(modelIcon(model));
   const groups = $derived(switchGroups(status));
   const canSwitch = $derived(groups.some((g) => g.items.some((i) => !i.fixed)));
+  // The provider's live list no longer has the chat model (modelCatalog.js).
+  const gone = $derived(noLongerOffered(model));
+  const GONE = $derived(gone ? `${providerName(model)} no longer offers ${modelName(model)}. Pick another model.` : '');
   const NO_TOOLS =
     "It's too small for Yap's note tools: answers come from a plain search of your notes, and it can't change them.";
+  const NO_TOOLS_SAID = "Its provider says it can't use Yap's note tools: answers come from a plain search of your notes.";
+  // A cloud model without note tools is one its provider said can't call them.
+  const noToolsLine = $derived(
+    model && ['groq', 'anthropic', 'openai', 'gemini', 'openrouter'].includes(model.provider) ? NO_TOOLS_SAID : NO_TOOLS
+  );
   const chipLabel = $derived(
     !status
       ? ''
       : !model
         ? 'No AI model. Set one up in Language Models'
-        : `Chat model: ${modelName(model)}, ${providerName(model)}.${status.tools ? '' : ` ${NO_TOOLS}`} Change model`
+        : `Chat model: ${modelName(model)}, ${providerName(model)}.${status.tools ? '' : ` ${noToolsLine}`}${gone ? ` ${GONE}` : ''} Change model`
   );
 
   export async function refresh() {
@@ -58,7 +67,8 @@
       open = false;
       return;
     }
-    await refresh();
+    // The providers' live lists too (a day-old one is checked behind it).
+    await Promise.all([refresh(), loadCatalog()]);
     if (!status?.ready && !canSwitch) {
       openSettings();
       return;
@@ -107,6 +117,7 @@
     // A switch here or in another window, the sidecar coming up, and any
     // save from Settings: read it again.
     const uns = [listen('yap-chat-model-changed', refresh), listen('yap-config-saved', refresh)];
+    loadCatalog();
     return () => uns.forEach((u) => u.then((f) => f()));
   });
 </script>
@@ -144,7 +155,7 @@
       aria-label={chipLabel}
       aria-haspopup={canSwitch || model ? 'dialog' : undefined}
       aria-expanded={open}
-      title={model ? `${whereItRuns(model, status.host)}${status.tools ? '' : `\n${NO_TOOLS}`}` : status.error || ''}
+      title={model ? `${whereItRuns(model, status.host)}${status.tools ? '' : `\n${noToolsLine}`}${gone ? `\n${GONE}` : ''}` : status.error || ''}
       onclick={onChip}
     >
       {#if model}
@@ -152,6 +163,7 @@
         <span class="cname">{modelName(model)}</span>
         <span class="cprov">· {providerName(model)}</span>
         {#if !status.tools}<span class="cnotools">· no note tools</span>{/if}
+        {#if gone}<span class="cnotools">· no longer offered</span>{/if}
         <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 15 6-6 6 6" /></svg>
       {:else}
         <span class="mark none" style="--s: 13px">{@render glyph('none')}</span>
@@ -171,7 +183,10 @@
             {#if status.tools}
               <p class="hnote">Looks up and changes your notes with Yap's note tools.</p>
             {:else}
-              <p class="hnote warn">{NO_TOOLS}</p>
+              <p class="hnote warn">{noToolsLine}</p>
+            {/if}
+            {#if gone}
+              <p class="hnote warn" role="alert">{GONE}</p>
             {/if}
             {#if !status.fromScope}
               <p class="hnote">The same model as Dictation Cleanup, until you pick one for Chat.</p>
@@ -212,6 +227,8 @@
                 </span>
                 {@render mark({ provider: it.provider, id: it.model, name: it.provider === 'ondevice' ? it.label : '', onThisPc: it.provider === 'ondevice' }, 13)}
                 <span class="oname">{it.label}</span>
+                {#if it.tag === 'new'}<span class="otag new">New</span>{/if}
+                {#if it.tag === 'gone'}<span class="otag">no longer offered</span>{/if}
                 {#if !it.tools}<span class="otag">no note tools</span>{/if}
               </button>
             {/each}
@@ -428,6 +445,15 @@
     font-size: 10.5px;
     font-weight: 400;
     color: var(--yap-warning);
+  }
+  .otag.new {
+    padding: 0 6px;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-primary-tint);
+    color: var(--yap-primary);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
   }
   .foot {
     margin: 4px 8px 6px;

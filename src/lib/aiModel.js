@@ -1,10 +1,11 @@
 // Naming the AI model a call goes to (ai_model.rs says which provider and
 // id; this file says it in words): the Chat view's model chip, the quiet
 // "GPT-OSS 20B · Groq" line under each answer, and the chip's switch list.
-// Short names come from ppModels.js's registry, icons from providerIcons.js.
+// Short names come from ppModels.js's registry (else the provider's own name
+// from its live list, modelCatalog.svelte.js), icons from providerIcons.js.
 import { invoke } from '@tauri-apps/api/core';
-import { PP_CLOUD_MODELS } from './ppModels.js';
 import { PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
+import { modelsFor, modelLabel } from './modelCatalog.svelte.js';
 
 /**
  * The model a scope's next call goes to ("chat": the Chat scope, as
@@ -33,14 +34,23 @@ const CLOUD_ORDER = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter'];
 
 /**
  * The model's short name: the on-device model's own, the registry's label
- * ("GPT-OSS 20B"), else the id as the endpoint knows it.
+ * ("GPT-OSS 20B"), the provider's own name for it, else the id as the
+ * endpoint knows it.
  * `m` = `{ provider, id, name?, onThisPc? }` (chats.rs `ChatModel`).
  */
 export function modelName(m) {
   if (!m) return '';
   if (m.name) return m.name;
-  const own = PP_CLOUD_MODELS[m.provider]?.models.find((x) => x.value === m.id);
-  return own?.label || m.id || 'Unknown model';
+  return modelLabel(m.provider, m.id) || 'Unknown model';
+}
+
+/**
+ * The saved model of a cloud provider that its live list no longer has
+ * (`{ value, label }`), or null: the chip says "no longer offered".
+ */
+export function noLongerOffered(m) {
+  if (!m || !CLOUD_ORDER.includes(m.provider)) return null;
+  return modelsFor(m.provider, m.id).missing;
 }
 
 /** "Groq", "On this PC" (the on-device model, or a server on localhost)… */
@@ -92,10 +102,12 @@ export function modelIcon(m) {
 }
 
 /**
- * The chip's switch: the registry's models of every provider with a key,
- * then the on-device model when it's installed; the current model ticked
- * (and listed first when it's none of those, a custom or self-hosted one).
- * Each item: `{ key, provider, model, label, tools, current }`.
+ * The chip's switch: the models of every provider with a key (Yap's list
+ * merged with the provider's live one, modelCatalog.js: "New" ones after
+ * the curated, the saved one kept when it's no longer offered), then the
+ * on-device model when it's installed; the current model ticked (and listed
+ * first when it's none of those, a custom or self-hosted one). Each item:
+ * `{ key, provider, model, label, tools, current, tag: 'new'|'gone'|null }`.
  */
 export function switchGroups(status) {
   const current = status?.ready ? status.model : null;
@@ -104,18 +116,28 @@ export function switchGroups(status) {
   const groups = [];
   for (const p of CLOUD_ORDER) {
     if (!status?.keyed?.includes(p)) continue;
-    const reg = PP_CLOUD_MODELS[p]?.models ?? [];
-    const items = reg.map((m) => ({
+    const merged = modelsFor(p, current?.provider === p ? current.id : '');
+    const items = merged.items.map((m) => ({
       key: `${p}:${m.value}`,
       provider: p,
       model: m.value,
       label: m.label,
-      tools: true,
+      // Cloud models use Yap's note tools unless the provider says it can't.
+      tools: m.tools !== false,
       current: isCurrent(p, m.value),
+      tag: m.missing ? 'gone' : m.tag,
     }));
-    // The current model of this provider, when the registry doesn't list it.
-    if (current?.provider === p && !reg.some((m) => m.value === current.id)) {
-      items.unshift({ key: `${p}:${current.id}`, provider: p, model: current.id, label: current.id, tools: true, current: true });
+    // The current model of this provider, when no list has it (a custom id).
+    if (current?.provider === p && !items.some((i) => i.model === current.id)) {
+      items.unshift({
+        key: `${p}:${current.id}`,
+        provider: p,
+        model: current.id,
+        label: modelName(current),
+        tools: status.tools,
+        current: true,
+        tag: null,
+      });
     }
     groups.push({ id: p, label: PROVIDER_LABELS[p], items });
   }

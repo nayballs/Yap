@@ -28,6 +28,15 @@
 // "geminiSearch": grounding chunks with Google's redirect links). Both find
 // Gale in Baldur's Gate 3. `failNext("groqSearch", 1, 429)` answers the
 // next one with an HTTP error, to see Yap fall back to its own search.
+//
+// It also lists models (src-tauri/src/model_catalog.rs): `GET <base>/models`
+// as a self-hosted OpenAI-compatible server (`serverModels`), and — through
+// `modelsStandin`, the debug-only YAP_MODELS_STANDIN — each cloud provider's
+// own list in that provider's shape (`listModels(provider, models)`: Groq's,
+// OpenAI's, OpenRouter's `{data}`, Anthropic's paged `{data, has_more}`,
+// Gemini's `{models}`). `failModels(provider, n)` answers the next `n` lists
+// with HTTP 500; `modelRequests` keeps `{ provider, host, path, url,
+// headers }` for every list asked for.
 import http from 'node:http';
 
 export const GALE_URL = 'https://bg3.wiki/wiki/Gale';
@@ -111,6 +120,23 @@ function geminiSearchReply(query) {
     ],
     usageMetadata: { promptTokenCount: 30, candidatesTokenCount: 25, totalTokenCount: 55 },
   };
+}
+
+/** A stand-in address's host → the provider it stands in for. */
+const LIST_HOSTS = {
+  'api.groq.com': 'groq',
+  'api.openai.com': 'openai',
+  'api.anthropic.com': 'anthropic',
+  'generativelanguage.googleapis.com': 'gemini',
+  'openrouter.ai': 'openrouter',
+};
+
+/** A provider's list, in its own shape. */
+function listBody(provider, models) {
+  if (provider === 'gemini') return { models };
+  if (provider === 'anthropic') return { data: models, has_more: false, first_id: models[0]?.id ?? null, last_id: models.at(-1)?.id ?? null };
+  if (provider === 'openrouter') return { data: models, links: { next: null } };
+  return { object: 'list', data: models };
 }
 
 /** Yap's own token estimate (meeting_summary::estimate_tokens). */
@@ -311,11 +337,42 @@ export async function startFakeLlm() {
   const delays = new Map();
   const chatScript = [];
   const replies = new Map();
+  const lists = new Map();
+  const listFailures = new Map();
+  const modelRequests = [];
+  let serverModels = [{ id: 'fake-chat' }, { id: 'llama3.1:8b' }, { id: 'qwen2.5-7b-instruct' }, { id: 'nomic-embed-text' }];
   let callIds = 0;
   const server = http.createServer((req, res) => {
     let raw = '';
     req.on('data', (c) => (raw += c));
     req.on('end', async () => {
+      const url = new URL(req.url, 'http://fake');
+      // A cloud provider's model list, through the stand-in.
+      if (req.method === 'GET' && url.pathname.startsWith('/models-standin/')) {
+        const [host, ...rest] = url.pathname.slice('/models-standin/'.length).split('/');
+        const provider = LIST_HOSTS[host];
+        modelRequests.push({ provider, host, path: `/${rest.join('/')}`, url: req.url, headers: req.headers });
+        const failing = listFailures.get(provider) ?? 0;
+        if (failing > 0) {
+          listFailures.set(provider, failing - 1);
+          res.writeHead(500, { 'content-type': 'text/plain' }).end('fake failure: no list today');
+          return;
+        }
+        if (!provider || !lists.has(provider)) {
+          res.writeHead(404).end();
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(listBody(provider, lists.get(provider))));
+        return;
+      }
+      // A self-hosted server's own list.
+      if (req.method === 'GET' && url.pathname.endsWith('/models')) {
+        modelRequests.push({ provider: 'server', host: 'fake', path: url.pathname, url: req.url, headers: req.headers });
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ object: 'list', data: serverModels.map((m) => ({ object: 'model', owned_by: 'fake', ...m })) }));
+        return;
+      }
       const gemini = req.url.endsWith(':generateContent');
       if (req.method !== 'POST' || !(req.url.endsWith('/chat/completions') || gemini)) {
         res.writeHead(404).end();
@@ -449,8 +506,15 @@ export async function startFakeLlm() {
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
   return {
-    base: `http://127.0.0.1:${server.address().port}/v1`,
+    base: `${origin}/v1`,
+    /** YAP_MODELS_STANDIN: every provider's model list through this server. */
+    modelsStandin: `${origin}/models-standin`,
+    modelRequests,
+    listModels: (provider, models) => lists.set(provider, models),
+    failModels: (provider, n = 1) => listFailures.set(provider, n),
+    setServerModels: (models) => (serverModels = models),
     requests,
     failNext: (kind, n = 1, status = 500) => failures.set(kind, { n, status }),
     delay: (kind, ms) => delays.set(kind, ms),
