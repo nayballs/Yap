@@ -451,12 +451,17 @@ struct WebPlan {
     service: String,
     key: String,
     standin: bool,
+    /// "The AI's own search" for a cloud model (web/native.rs).
+    native: bool,
 }
 
 impl WebPlan {
     fn of(s: &Scenario, keys: &HashMap<String, String>) -> WebPlan {
         let spec = s.web.clone().unwrap_or_default();
         let standin = spec.mode.as_deref() == Some("standin");
+        // The app's default (on), except where the scenario tests Yap's own
+        // search: a stand-in web, or `key: false`.
+        let native = spec.native.unwrap_or(!standin && s.web.as_ref().is_none_or(|w| w.key));
         let service = spec.service.clone().unwrap_or_else(|| {
             if !keys.contains_key("exa") && keys.contains_key("tavily") { "tavily" } else { "exa" }.to_string()
         });
@@ -467,7 +472,7 @@ impl WebPlan {
         } else {
             keys.get(&service).cloned().unwrap_or_default()
         };
-        WebPlan { on: web_on(s), service, key, standin }
+        WebPlan { on: web_on(s), service, key, standin, native }
     }
 
     /// For the logs: where searches go (never the key).
@@ -479,6 +484,7 @@ impl WebPlan {
             "mode": if self.standin { "standin" } else { "live" },
             "service": self.service,
             "backend": if self.key.is_empty() { "keyless (Wikipedia + game wikis)".to_string() } else { self.service.clone() },
+            "native": self.native,
         })
     }
 }
@@ -493,6 +499,7 @@ fn settings_for(m: &Model, s: &Scenario, apps: &[AppEntry], web: &WebPlan) -> cr
         pp_model: m.model.clone(),
         open_apps: s.settings.open_apps,
         web_search: web.on,
+        web_search_native: web.native,
         web_search_service: web.service.clone(),
         ..Default::default()
     };

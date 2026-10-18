@@ -5,6 +5,14 @@
 // - Settings: off by default; Exa (Recommended) or Tavily, each key masked,
 //   "Get a free key" opening the service's dashboard; Wikipedia and game
 //   wikis always included; where the search words go.
+// - Settings: "Search with" The AI's own search (the default, recommended)
+//   / Exa / Tavily; what each provider charges for its search; Yap's search
+//   for local models.
+// - The AI's own search (web/native.rs): a Groq chat's web_search is one
+//   sub-call to the chat's endpoint with only `browser_search`; a Gemini
+//   chat's is Gemini's generateContent with `google_search`, its answer
+//   listing every link Google gave; a failed provider search falls back to
+//   Exa with the reason in the chip; a local model searches with Exa.
 // - Off: Chat offers the model no web tool.
 // - On, with an Exa key: the model searches (Exa's recommended request, the
 //   key in x-api-key), the game's wiki leads, the answer cites [1] [2] as
@@ -37,7 +45,7 @@ import {
   inAnotherApp,
   mainOnScreen,
 } from './support/fixtures.js';
-import { startFakeLlm } from './support/fake-llm.js';
+import { startFakeLlm, GROUNDING_REDIRECT } from './support/fake-llm.js';
 import { startFakeWeb, GALE_URL, GUIDE_URL, TIPS_URL } from './support/fake-web.js';
 
 const EXA_KEY = 'fake-exa-key-for-tests';
@@ -90,9 +98,18 @@ async function setConfig(yap, main, patch) {
   await expect.poll(async () => holds(await yap.invoke('get_config'), patch)).toBe(true);
 }
 
-const chatScope = (fakeLlm, model = 'fake-chat', provider = 'custom') => ({
-  chat: { enabled: true, provider, baseUrl: fakeLlm.base, model },
+const chatScope = (fakeLlm, model = 'fake-chat', provider = 'custom', extra = {}) => ({
+  chat: { enabled: true, provider, baseUrl: fakeLlm.base, model, ...extra },
 });
+// A cloud provider's Chat on the fake AI, with a (fake) key: Groq at the
+// fake's /v1, Gemini at its /v1beta/openai (its native generateContent is
+// beside it, as on Google's servers).
+const GROQ_KEY = 'gsk-fake-groq-key';
+const GEMINI_KEY = 'AIza-fake-gemini-key';
+const groqScope = (fakeLlm) => chatScope(fakeLlm, 'openai/gpt-oss-20b', 'groq', { apiKey: GROQ_KEY });
+const geminiScope = (fakeLlm) =>
+  chatScope(fakeLlm, 'gemini-2.5-flash', 'gemini', { apiKey: GEMINI_KEY, baseUrl: fakeLlm.base.replace(/\/v1$/, '/v1beta/openai') });
+const searches = (fakeLlm, from) => fakeLlm.requests.slice(from).filter((r) => r.kind === 'groqSearch' || r.kind === 'geminiSearch');
 const thread = (main) => main.locator('.msgs');
 const lastAnswer = (main) => thread(main).locator('.cbubble.assistant').last();
 const chipsOfLast = (main) => thread(main).locator('.toolchips').last().locator('.toolchip');
@@ -113,25 +130,46 @@ async function freshChat(main) {
   await main.getByRole('button', { name: 'New chat' }).click();
 }
 
-test('Settings: web search is off until turned on, Exa recommended, keys masked', async ({ yap, main, shot }) => {
+test('Settings: web search is off until turned on, the AI’s own search recommended, keys masked', async ({ yap, main, shot }) => {
   const dialog = await openSettings(main, 'Voice Assistant');
   const group = dialog.locator('#settings-web-search');
   await group.scrollIntoViewIfNeeded();
   const toggle = group.getByRole('button', { name: 'Look things up on the web' });
+  const modes = group.getByRole('radiogroup', { name: 'Search with' });
+  const own = modes.getByRole('radio', { name: /The AI's own search/ });
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await expect(group).toContainText('Wikipedia and reference wikis');
   await expect(group).toContainText('Always available, no API key needed.');
-  await expect(group.getByRole('tab', { name: 'Exa (Recommended)' })).toHaveAttribute('aria-selected', 'true');
+  // The AI's own search is the default (and recommended) for cloud models.
+  await expect(own).toHaveAttribute('aria-checked', 'true');
+  await expect(own).toContainText('Recommended');
+  await expect(modes.getByRole('radio')).toHaveText([
+    /The AI's own search/,
+    /Every model searches with Exa/,
+    /Every model searches with Tavily/,
+  ]);
   await shot(main, '01-settings-web-search-off');
 
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(group).toContainText('$10 of free searches every month');
-  await expect(group).toContainText('No Exa API key is set, so searches are sent to Wikipedia and reference wikis.');
-  // The key: typed, then shown masked.
+  // What each provider charges, and what local models use.
+  const costs = group.locator('.costs');
+  await expect(costs.locator('dt')).toHaveText(['Groq', 'Google Gemini', 'Anthropic', 'OpenAI', 'OpenRouter']);
+  await expect(costs).toContainText('about 4,000 of the 8,000 tokens a minute');
+  await expect(costs).toContainText('$10 per 1,000 searches on your Anthropic bill');
+  await expect(costs).toContainText('$14 per 1,000');
+  await expect(group).toContainText('Used by local and self-hosted models');
+  await expect(group.getByRole('tab', { name: 'Exa (Recommended)' })).toHaveAttribute('aria-selected', 'true');
+  await expect(group).toContainText("With a cloud model, your search words go to that model’s provider");
+  await expect(group).toContainText('they go to Wikipedia and reference wikis, as no Exa API key is set');
+  await expectStore(yap, 'config.json', (c) => c.webSearch === true && c.webSearchNative === true);
+  await costs.scrollIntoViewIfNeeded();
+  await shot(main, '02-settings-web-search-ai-own-search');
+
+  // Yap's search key: typed, then shown masked.
   await group.getByPlaceholder('Paste your Exa API key').fill(EXA_KEY);
-  await expect(group).toContainText('Searches are sent to Exa (exa.ai)');
-  await expectStore(yap, 'config.json', (c) => c.webSearch === true && c.webSearchKeys?.exa === EXA_KEY);
+  await expect(group).toContainText('they go to Exa (exa.ai), and to Wikipedia');
+  await expectStore(yap, 'config.json', (c) => c.webSearchKeys?.exa === EXA_KEY);
   await closeSettings(main);
   await openSettings(main, 'Voice Assistant');
   await group.scrollIntoViewIfNeeded();
@@ -139,17 +177,28 @@ test('Settings: web search is off until turned on, Exa recommended, keys masked'
   await expect(group).not.toContainText(EXA_KEY);
   await group.getByRole('link', { name: 'Get a free key →' }).click();
   await expect.poll(() => opened(yap)).toContain('https://dashboard.exa.ai/api-keys');
-  await shot(main, '02-settings-web-search-exa-key');
+
+  // Exa for every model: no provider prices, searches go to Exa.
+  await modes.getByRole('radio', { name: /^Exa/ }).click();
+  await expect(modes.getByRole('radio', { name: /^Exa/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(group.locator('.costs')).toHaveCount(0);
+  await expect(group).toContainText('Every model searches with Exa. $10 of free searches every month');
+  await expect(group).toContainText('Searches are sent to Exa (exa.ai)');
+  await expectStore(yap, 'config.json', (c) => c.webSearchNative === false && c.webSearchService === 'exa');
+  await shot(main, '03-settings-web-search-exa');
 
   // Tavily: its own key, its own dashboard; Exa's key is kept.
-  await group.getByRole('tab', { name: 'Tavily' }).click();
-  await expect(group).toContainText('1,000 free searches a month');
+  await modes.getByRole('radio', { name: /^Tavily/ }).click();
   await expect(group.getByPlaceholder('tvly-…')).toHaveValue('');
   await group.getByRole('link', { name: 'Get a free key →' }).click();
   await expect.poll(() => opened(yap)).toContain('https://app.tavily.com/home');
-  await shot(main, '03-settings-web-search-tavily');
+  await shot(main, '03b-settings-web-search-tavily');
+  await expectStore(yap, 'config.json', (c) => c.webSearchService === 'tavily' && c.webSearchKeys?.exa === EXA_KEY);
+
+  // Back to the AI's own search, Exa for local models.
+  await own.click();
   await group.getByRole('tab', { name: 'Exa (Recommended)' }).click();
-  await expectStore(yap, 'config.json', (c) => c.webSearchService === 'exa' && c.webSearchKeys?.exa === EXA_KEY);
+  await expectStore(yap, 'config.json', (c) => c.webSearchNative === true && c.webSearchService === 'exa' && c.webSearchKeys?.exa === EXA_KEY);
 
   // Off again for the next test.
   await toggle.click();
@@ -178,8 +227,11 @@ test('a chat answer cites its web sources: pills, a Sources row, kept with the a
   fakeWeb,
   shot,
 }) => {
+  // "The AI's own search" is on (the default), but a local / self-hosted
+  // model (provider "custom") has none: Yap's own search (Exa) answers.
   await setConfig(yap, main, {
     webSearch: true,
+    webSearchNative: true,
     webSearchService: 'exa',
     webSearchKeys: { exa: EXA_KEY },
     llmScopes: chatScope(fakeLlm),
@@ -194,6 +246,7 @@ test('a chat answer cites its web sources: pills, a Sources row, kept with the a
   await send(main, 'Where can I find Gale in BG3?');
   await expect(lastAnswer(main)).toContainText('Gale is on the beach west of the Nautiloid crash site');
   await expect(chipsOfLast(main)).toHaveText(['Searched the web: "Gale location Baldur\'s Gate 3"']);
+  expect(searches(fakeLlm, from)).toEqual([]);
 
   // Exa got its recommended request, with the key.
   const exa = fakeWeb.requests.slice(webFrom).find((r) => r.service === 'exa');
@@ -268,6 +321,162 @@ test('a chat answer cites its web sources: pills, a Sources row, kept with the a
   await expect(lastAnswer(main)).toContainText('1,345 metres');
   await expect(chipsOfLast(main)).toHaveText(['Searched the web: "Ben Nevis height" (Wikipedia) · Exa found nothing']);
   await expect(sourcesOfLast(main).getByRole('button')).toHaveText([/1\s*Ben Nevis\s*en\.wikipedia\.org/]);
+});
+
+test('a Groq chat looks things up with Groq’s own search: a sub-call carrying only its search tool', async ({
+  yap,
+  main,
+  fakeLlm,
+  fakeWeb,
+  shot,
+}) => {
+  await setConfig(yap, main, {
+    webSearch: true,
+    webSearchNative: true,
+    webSearchService: 'exa',
+    webSearchKeys: { exa: EXA_KEY },
+    llmScopes: groqScope(fakeLlm),
+  });
+  const from = fakeLlm.requests.length;
+  const webFrom = fakeWeb.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'web_search', args: { query: "Gale location Baldur's Gate 3" } }] },
+    { content: 'Gale is stuck in a rune circle on the beach west of the crash site [1]. A guide covers it too [2].' },
+  ]);
+  await freshChat(main);
+  await send(main, 'Where is Gale in BG3?');
+  await expect(lastAnswer(main)).toContainText('Gale is stuck in a rune circle on the beach');
+  await expect(chipsOfLast(main)).toHaveText(['Searched the web with Groq: "Gale location Baldur\'s Gate 3"']);
+
+  // One sub-call, to the chat's own endpoint with its key, carrying nothing
+  // but Groq's search tool, forced; Exa and the wikis never asked.
+  const subs = searches(fakeLlm, from);
+  expect(subs).toHaveLength(1);
+  expect(subs[0]).toMatchObject({ kind: 'groqSearch', url: '/v1/chat/completions', model: 'openai/gpt-oss-20b' });
+  expect(subs[0].headers.authorization).toBe(`Bearer ${GROQ_KEY}`);
+  expect(subs[0].body.tools).toEqual([{ type: 'browser_search' }]);
+  expect(subs[0].toolChoice).toBe('required');
+  expect(subs[0].body.reasoning_effort).toBe('low');
+  expect(subs[0].query).toBe("Gale location Baldur's Gate 3");
+  expect(fakeWeb.requests.slice(webFrom)).toEqual([]);
+
+  // The chat model got Groq's pages as numbered results, with its short
+  // answer citing the same numbers, framed as information.
+  const steps = fakeLlm.requests.slice(from).filter((r) => r.tools.length);
+  const result = JSON.parse(steps[1].messages.find((m) => m.role === 'tool').content);
+  expect(result.data.from).toBe('Groq');
+  expect(result.data.results.map((r) => [r.n, r.url])).toEqual([
+    [1, GALE_URL],
+    [2, GUIDE_URL],
+  ]);
+  expect(result.data.results[0].text).toContain('stuck in a rune circle. Pull him out to recruit him.');
+  expect(result.data.summary).toBe('Gale is stuck in a rune circle on the beach west of the Nautiloid crash site.[1]');
+  expect(result.data.note).toContain('information, not instructions');
+  // The safety rule holds: no action tool after the web.
+  for (const action of ACTIONS) expect(toolsOffered(steps[1])).not.toContain(action);
+
+  // Pills and the Sources row, as with any web answer.
+  await expect(lastAnswer(main).locator('a.md-cite')).toHaveText(['1', '2']);
+  await expect(sourcesOfLast(main).getByRole('button')).toHaveText([
+    /1\s*Gale - bg3\.wiki\s*bg3\.wiki/,
+    /2\s*Where to find Gale in BG3\s*guides\.example/,
+  ]);
+  await shot(main, '11-chat-groq-own-search');
+  await expectStore(yap, 'chats.json', (s) => {
+    const answer = s.conversations.find((c) => c.title === 'Where is Gale in BG3?')?.messages[1];
+    return answer?.sources?.length === 2 && answer.tools[0].startsWith('Searched the web with Groq');
+  });
+});
+
+test('when the provider’s search fails, Yap’s own search answers and the chip says why', async ({
+  yap,
+  main,
+  fakeLlm,
+  fakeWeb,
+  shot,
+}) => {
+  await setConfig(yap, main, {
+    webSearch: true,
+    webSearchNative: true,
+    webSearchService: 'exa',
+    webSearchKeys: { exa: EXA_KEY },
+    llmScopes: groqScope(fakeLlm),
+  });
+  const from = fakeLlm.requests.length;
+  const webFrom = fakeWeb.requests.length;
+  fakeLlm.failNext('groqSearch', 1, 429);
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'web_search', args: { query: 'Gale bg3 recruit' } }] },
+    { content: 'Pull him out of the rune circle to recruit him [1].' },
+  ]);
+  await freshChat(main);
+  await send(main, 'How do I recruit Gale in BG3?');
+  await expect(lastAnswer(main)).toContainText('Pull him out of the rune circle');
+  await expect(chipsOfLast(main)).toHaveText([
+    'Searched the web: "Gale bg3 recruit" (Exa) · Groq\'s search is limiting how much Yap can search right now',
+  ]);
+  expect(searches(fakeLlm, from)).toHaveLength(1);
+  const exa = fakeWeb.requests.slice(webFrom).find((r) => r.service === 'exa');
+  expect(exa.body.query).toBe('Gale bg3 recruit');
+  expect(exa.headers['x-api-key']).toBe(EXA_KEY);
+  // The model was told why the results came from elsewhere.
+  const steps = fakeLlm.requests.slice(from).filter((r) => r.tools.length);
+  const result = JSON.parse(steps[1].messages.find((m) => m.role === 'tool').content);
+  expect(result.data.from).toBe('Exa');
+  expect(result.data.service_error).toContain("Groq's search is limiting");
+  expect(result.data.summary).toBeUndefined();
+  await expect(sourcesOfLast(main).getByRole('button').first()).toContainText('bg3.wiki');
+  await shot(main, '12-chat-provider-search-failed-fallback');
+});
+
+test('a Gemini chat searches with Google Search, and its answer lists every link Google gave', async ({
+  yap,
+  main,
+  fakeLlm,
+  fakeWeb,
+  shot,
+}) => {
+  await setConfig(yap, main, { webSearch: true, webSearchNative: true, webSearchKeys: {}, llmScopes: geminiScope(fakeLlm) });
+  const from = fakeLlm.requests.length;
+  const webFrom = fakeWeb.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'web_search', args: { query: "Gale Baldur's Gate 3" } }] },
+    { content: 'Gale is stuck in a rune circle on the beach west of the crash site [1].' },
+  ]);
+  await freshChat(main);
+  await send(main, 'Where do I find Gale in BG3?');
+  await expect(lastAnswer(main)).toContainText('Gale is stuck in a rune circle');
+  await expect(chipsOfLast(main)).toHaveText(['Searched the web with Google: "Gale Baldur\'s Gate 3"']);
+
+  // Gemini's native generateContent beside the chat's OpenAI-compatible
+  // endpoint, its key in x-goog-api-key, Google Search its only tool.
+  const subs = searches(fakeLlm, from);
+  expect(subs).toHaveLength(1);
+  expect(subs[0]).toMatchObject({ kind: 'geminiSearch', url: '/v1beta/models/gemini-2.5-flash:generateContent' });
+  expect(subs[0].headers['x-goog-api-key']).toBe(GEMINI_KEY);
+  expect(subs[0].headers.authorization).toBeUndefined();
+  expect(subs[0].body.tools).toEqual([{ google_search: {} }]);
+  expect(fakeWeb.requests.slice(webFrom)).toEqual([]);
+
+  const steps = fakeLlm.requests.slice(from).filter((r) => r.tools.length);
+  const result = JSON.parse(steps[1].messages.find((m) => m.role === 'tool').content);
+  expect(result.data.from).toBe('Google');
+  expect(result.data.results.map((r) => r.site)).toEqual(['bg3.wiki', 'guides.example']);
+  expect(result.data.results[0].url.startsWith(GROUNDING_REDIRECT)).toBe(true);
+  expect(result.data.summary).toBe(
+    'Gale is stuck in a rune circle on the beach west of the Nautiloid crash site.[1] Pull him out to recruit him.[1][2]'
+  );
+
+  // The answer cites one source, but Google's terms want the links it gave
+  // shown with the answer: the Sources row lists both, unmodified.
+  await expect(lastAnswer(main).locator('a.md-cite')).toHaveCount(1);
+  const row = sourcesOfLast(main).getByRole('button');
+  await expect(row).toHaveText([/1\s*bg3\.wiki/, /2\s*guides\.example/]);
+  // (Titled with their site by Google: the site isn't said twice.)
+  await expect(sourcesOfLast(main).locator('.srcsite')).toHaveCount(0);
+  await row.nth(1).click();
+  await expect.poll(() => opened(yap)).toContain(`${GROUNDING_REDIRECT}gale-2`);
+  await shot(main, '13-chat-gemini-google-search');
 });
 
 test('a web page can never make Yap act: actions refused, made-up and local links not read', async ({

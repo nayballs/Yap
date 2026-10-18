@@ -90,6 +90,12 @@ pub struct WebSpec {
     /// `false`: no key, so the keyless lookup, even when the run has one.
     #[serde(default = "yes")]
     pub key: bool,
+    /// "The AI's own search" (`config.web_search_native`, web/native.rs): a
+    /// cloud model searches with its provider's own search. Default: on for
+    /// a live scenario with a key (the app's default), off for a stand-in
+    /// web or `key: false` (those test Yap's own search).
+    #[serde(default)]
+    pub native: Option<bool>,
     /// Stand-in: what the search service answers.
     #[serde(default)]
     pub results: Vec<WebHit>,

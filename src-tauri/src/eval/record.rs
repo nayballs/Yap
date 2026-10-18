@@ -320,7 +320,12 @@ pub fn parse_reset(s: &str) -> Option<Duration> {
 /// (measured on Chat's requests to gpt-oss-20b: 10.4k characters → 2.06k
 /// prompt tokens), plus what the answer may take.
 fn estimate_tokens(body: &Value) -> u64 {
-    (body.to_string().len() as f64 / 4.8) as u64 + 400
+    // A provider's own web search (web/native.rs) reads pages server-side:
+    // Groq's browser_search took ~3.6–4.5k tokens a searched answer
+    // (the 2026-10-18 spike), whatever the small request.
+    let searches = body["tools"].as_array().is_some_and(|t| t.iter().any(|t| t["type"] == "browser_search"))
+        || body["plugins"].as_array().is_some_and(|p| p.iter().any(|p| p["id"] == "web"));
+    (body.to_string().len() as f64 / 4.8) as u64 + if searches { 4_000 } else { 400 }
 }
 
 /// How long to hold a call of `estimate` tokens back. Pure.

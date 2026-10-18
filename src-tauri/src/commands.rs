@@ -998,7 +998,7 @@ pub(crate) async fn chat_turn(
         // earlier ones), the sources found, the safety rule's flag.
         let mut web = web_on.then(|| {
             let earlier: Vec<&str> = history.iter().filter(|(r, _)| r == "user").map(|(_, t)| t.as_str()).collect();
-            let settings = crate::web::Settings::from_config(&cfg).with_chat_model(&provider, &model);
+            let settings = crate::web::Settings::for_chat(&cfg, &provider, &model, &base_url, &api_key);
             crate::web::Turn::new(settings, crate::web::Endpoints::current(), &text, &earlier)
         });
         let (reply, tools_used) = crate::tools::run_tool_loop(
@@ -1015,6 +1015,8 @@ pub(crate) async fn chat_turn(
             web.as_mut(),
         )
         .await?;
+        // gpt-oss sometimes cites as "【1】" (its own browsing style): Yap's [1].
+        let reply = if web.is_some() { crate::web::bracket_citations(&reply) } else { reply };
         let sources = web.map(|w| w.sources_for(&reply)).unwrap_or_default();
         (reply, tools_used, sources)
     } else {
@@ -1080,7 +1082,7 @@ async fn small_model_answer(
     let mut history = history.to_vec();
     if web_on && crate::web::needs_web(text) {
         let query = crate::web::search_query(text);
-        let settings = crate::web::Settings::from_config(cfg).with_chat_model(provider, model);
+        let settings = crate::web::Settings::for_chat(cfg, provider, model, base_url, api_key);
         match crate::web::search(&settings, &crate::web::Endpoints::current(), &query, text).await {
             Ok(found) if found.hits.iter().any(|h| !h.text.trim().is_empty()) => {
                 let (found_sources, block) = crate::web::grounded_sources(&found.hits, SMALL_WEB_TOKENS);
