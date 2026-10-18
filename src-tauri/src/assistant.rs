@@ -134,16 +134,19 @@ pub enum Reply {
     Show,
 }
 
-/// The assistant shortcut's answers are **always read aloud** — not as
-/// "Speak replies" / "When to speak" say (`tts::auto_speak`, the Chat
-/// view's rule) — except while a meeting records (the recorder would put
-/// Yap's voice in the notes) or when a dictation started while the answer
-/// was coming (`interrupted`: you've moved on). Pure.
-pub fn reply(meeting: bool, interrupted: bool) -> Reply {
-    if meeting || interrupted {
-        Reply::Show
-    } else {
+/// The assistant shortcut's answers are read aloud while **"Speak
+/// replies"** is on — the one voice switch (Chat's Voice replies too):
+/// with it off Yap never talks, and the answer is shown (Nathan,
+/// 2026-10-18: "I turned off the voice yet heard the voice still"). Not
+/// "When to speak" (that's for Chat's typed questions: the shortcut is
+/// always asked by voice). Never while a meeting records or a call is on,
+/// or when a dictation started while the answer was coming
+/// (`interrupted`: you've moved on). Pure.
+pub fn reply(voice_on: bool, meeting: bool, interrupted: bool) -> Reply {
+    if voice_on && !meeting && !interrupted {
         Reply::Speak
+    } else {
+        Reply::Show
     }
 }
 
@@ -409,7 +412,9 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     // not read aloud.
     let meeting = crate::tts::meeting_quiet().is_some();
     let interrupted = crate::pipeline::dictation_state().0 != since;
-    let mut how = reply(meeting, interrupted);
+    // Read now: the switch may have moved while the answer was coming.
+    let voice_on = crate::config::load().speak_replies;
+    let mut how = reply(voice_on, meeting, interrupted);
     // Set before speaking: the voice may end (and say so) before `speak`
     // returns.
     let ev = {
@@ -675,14 +680,16 @@ mod tests {
     }
 
     #[test]
-    fn the_shortcut_always_speaks_except_over_a_meeting_or_a_new_dictation() {
-        assert_eq!(reply(false, false), Reply::Speak);
-        assert_eq!(reply(true, false), Reply::Show);
-        assert_eq!(reply(false, true), Reply::Show);
-        assert_eq!(reply(true, true), Reply::Show);
-        // Unlike Chat's own rule: with spoken replies off (or "When I asked
-        // by voice" and a typed question), Chat stays quiet; the shortcut
-        // doesn't.
+    fn the_shortcut_speaks_only_while_the_voice_is_on() {
+        // Voice on: read aloud, except over a meeting or a new dictation.
+        assert_eq!(reply(true, false, false), Reply::Speak);
+        assert_eq!(reply(true, true, false), Reply::Show);
+        assert_eq!(reply(true, false, true), Reply::Show);
+        assert_eq!(reply(true, true, true), Reply::Show);
+        // Voice off ("Speak replies" / Chat's Voice replies): never.
+        assert_eq!(reply(false, false, false), Reply::Show);
+        assert_eq!(reply(false, true, false), Reply::Show);
+        // Chat's own rule keeps quiet with it off too.
         assert!(!crate::tts::auto_speak(false, "voice", true, false, false));
         assert!(!crate::tts::auto_speak(false, "always", true, false, false));
         // Both keep quiet over a meeting.

@@ -441,6 +441,8 @@ test('Settings → Voice Assistant → Opening apps: the switch, the apps found,
 });
 
 test('the Voice Assistant: "Open Teams" asked out loud opens it and says so, with no AI model', async ({ yap, main, shot }) => {
+  // Read aloud: Speak replies on (off, the answer is only on the bar).
+  await setConfig(yap, main, { speakReplies: true });
   await inAnotherApp(yap);
   await ask(yap, 'Open Teams.');
   await expect.poll(() => opened(yap)).toEqual(['Microsoft Teams']);
@@ -463,12 +465,14 @@ test('the Voice Assistant: "Open Teams" asked out loud opens it and says so, wit
   await expect(thread(main).locator('.cbubble.user').last()).toContainText('Open Teams.');
   await expect(thread(main).locator('.cbubble.user').last().getByLabel('Asked by voice')).toBeVisible();
   await expect(lastAnswer(main)).toHaveText('Opening Microsoft Teams.');
+  await setConfig(yap, main, { speakReplies: false });
 });
 
 test('the Voice Assistant: "Did you mean Spotify?" answered "Yes." out loud opens it, with no AI model', async ({
   yap,
   main,
 }) => {
+  await setConfig(yap, main, { speakReplies: true });
   await inAnotherApp(yap);
   await ask(yap, 'Open spotifire.');
   await expect.poll(async () => (await spoken(yap)).at(-1) ?? '').toMatch(/Did you mean Spotify\?$/);
@@ -486,10 +490,11 @@ test('the Voice Assistant: "Did you mean Spotify?" answered "Yes." out loud open
   await expect(yap.overlay.getByText('Pick an AI model for the Voice Assistant')).toHaveCount(0);
   await yap.invoke('tts_stop');
   await mainOnScreen(yap);
+  await setConfig(yap, main, { speakReplies: false });
 });
 
 test('switched off: Yap says opening apps is off, and opens nothing', async ({ yap, main, shot }) => {
-  await setConfig(yap, main, { openApps: false });
+  await setConfig(yap, main, { openApps: false, speakReplies: true });
   try {
     await freshChat(main);
     await send(main, 'open notepad');
@@ -511,6 +516,6 @@ test('switched off: Yap says opening apps is off, and opens nothing', async ({ y
     await expect(dialog.getByRole('button', { name: 'Let Yap open apps when you ask' })).toHaveAttribute('aria-pressed', 'false');
     await closeSettings(main);
   } finally {
-    await setConfig(yap, main, { openApps: true });
+    await setConfig(yap, main, { openApps: true, speakReplies: false });
   }
 });

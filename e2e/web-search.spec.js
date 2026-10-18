@@ -372,7 +372,7 @@ test('a model that can’t call tools answers from the web through Yap’s fixed
 });
 
 test('the Voice Assistant says a web answer short, with the sources in Chat', async ({ yap, main, fakeLlm, shot }) => {
-  await setConfig(yap, main, { webSearch: true, webSearchKeys: { exa: EXA_KEY }, llmScopes: chatScope(fakeLlm) });
+  await setConfig(yap, main, { webSearch: true, webSearchKeys: { exa: EXA_KEY }, llmScopes: chatScope(fakeLlm), speakReplies: true });
   await yap.invoke('assistant_stop');
   await yap.invoke('tts_stop');
   await yap.invoke('tts_e2e_spoken', { clear: true });
@@ -404,4 +404,5 @@ test('the Voice Assistant says a web answer short, with the sources in Chat', as
   await expect(lastAnswer(main)).toContainText('He is a wizard from Waterdeep');
   await expect(sourcesOfLast(main).getByRole('button')).toHaveCount(2);
   await shot(main, '10-chat-after-the-assistant');
+  await setConfig(yap, main, { speakReplies: false });
 });

@@ -2078,7 +2078,7 @@
                 desc={cfg.recordingMode === 'pushToTalk'
                   ? 'Hold it while you ask, or double-tap it to ask hands-free. It never types into the app you are in; press it while Yap speaks to cut in'
                   : 'Press it, ask, press it again. It never types into the app you are in; press it while Yap speaks to cut in'}
-                hint="Every answer is read aloud, whatever “When to speak” says. Off during meetings: while one records or a call is on, Yap doesn't listen or talk. Backspace clears."
+                hint="Its answers are read aloud while Speak replies is on (whatever “When to speak” says), else shown on the bar. Off during meetings: while one records or a call is on, Yap doesn't listen or talk. Backspace clears."
               >
                 <HotkeyInput
                   bind:value={cfg.assistantHotkey}
@@ -2111,7 +2111,7 @@
               <Toggle
                 bind:checked={() => cfg.speakReplies, setSpeakReplies}
                 label="Speak replies"
-                desc="Read Chat's answers aloud. Voice replies next to the model in Chat turns this on and off too"
+                desc="Yap reads its answers aloud: in Chat, and from the assistant shortcut. Off, Yap never talks. Voice replies next to the model in Chat is the same switch"
               />
               <KokoroOffer bind:open={offerKokoro} {cfg} />
             </Row>
