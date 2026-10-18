@@ -632,6 +632,25 @@ pub fn wiki_terms(query: &str, game: Option<&GameWiki>) -> String {
     words.into_iter().take(6).collect::<Vec<_>>().join(" ")
 }
 
+/// The article named exactly as the search, or as one of its words — the
+/// subject's own page — first: a wiki's search ranks pages that mention it
+/// a lot ahead of it (bg3.wiki for "Gale act 1": Gale/Banter, Act One/Camp
+/// Events, then Gale, whose text Yap then didn't read: only the top two are
+/// read). Pure.
+pub fn subject_first(pages: &mut Vec<WikiPage>, terms: &str) {
+    let whole = terms.trim().to_lowercase();
+    let words: Vec<String> = terms.split_whitespace().filter(|w| w.chars().count() >= 3).map(str::to_lowercase).collect();
+    let title = |p: &WikiPage| p.title.trim().to_lowercase();
+    let named = pages
+        .iter()
+        .position(|p| title(p) == whole)
+        .or_else(|| pages.iter().position(|p| title(p).chars().count() >= 3 && words.contains(&title(p))));
+    if let Some(i) = named.filter(|&i| i > 0) {
+        let page = pages.remove(i);
+        pages.insert(0, page);
+    }
+}
+
 /// Fewer words to try when a wiki found nothing: the capitalised ones (a
 /// name), else the longest. Pure.
 pub fn wiki_retry(terms: &str) -> Option<String> {
@@ -900,6 +919,7 @@ async fn wiki_lookup(ep: &Endpoints, api: &str, query: &str, game: Option<&GameW
         pages = parse_wiki_search(&wiki_get(ep, &wiki_search_url(api, &terms)?).await?)?;
         tries += 1;
     }
+    subject_first(&mut pages, &terms);
     let words = keywords(&format!("{query} {terms}"));
     let mut hits = Vec::new();
     for (i, page) in pages.iter().take(3).enumerate() {
@@ -1355,15 +1375,6 @@ impl Turn {
         self.seen
     }
 
-    /// The web tools still offered (each until its cap).
-    pub fn offers(&self, name: &str) -> bool {
-        match name {
-            "web_search" => self.searches < MAX_SEARCHES,
-            "read_page" => self.reads < MAX_READS,
-            _ => true,
-        }
-    }
-
     /// A source's number: the one it has, or the next.
     pub fn number(&mut self, title: &str, url: &str) -> usize {
         let key = normal_url(url);
@@ -1762,6 +1773,27 @@ mod tests {
         assert_eq!(wiki_language("auto", Some("nb-NO")), "no");
         assert_eq!(wiki_language("", None), "en");
         assert_eq!(wiki_language("auto", Some("x")), "en");
+    }
+
+    #[test]
+    fn the_subjects_own_article_is_read_first() {
+        let page = |title: &str| WikiPage { pageid: 1, title: title.into(), url: format!("https://bg3.wiki/wiki/{title}") };
+        let titles = |p: &[WikiPage]| p.iter().map(|x| x.title.clone()).collect::<Vec<_>>();
+        // bg3.wiki's order for "Gale act 1" (the model evaluations): Gale third.
+        let mut pages = vec![page("Gale/Banter"), page("Act One/Camp Events"), page("Gale")];
+        subject_first(&mut pages, "Gale act 1");
+        assert_eq!(titles(&pages), ["Gale", "Gale/Banter", "Act One/Camp Events"]);
+        // The whole search as a title; nothing named: the wiki's order.
+        let mut pages = vec![page("Lathander"), page("Blood of Lathander")];
+        subject_first(&mut pages, "Blood of Lathander");
+        assert_eq!(titles(&pages), ["Blood of Lathander", "Lathander"]);
+        let mut pages = vec![page("Tara"), page("The Wizard of Waterdeep")];
+        subject_first(&mut pages, "first encounter location");
+        assert_eq!(titles(&pages), ["Tara", "The Wizard of Waterdeep"]);
+        // A short word ("act", "1") never picks a page.
+        let mut pages = vec![page("Camp"), page("1")];
+        subject_first(&mut pages, "Gale 1");
+        assert_eq!(titles(&pages), ["Camp", "1"]);
     }
 
     // Recorded from bg3.wiki's api.php (generator=search + info, then parse).

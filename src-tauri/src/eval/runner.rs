@@ -54,6 +54,10 @@ Output:
 Raw requests:
   --raw <file.json>        send hand-written requests (e.g. evals/raw/groq-browser-search.json),
                            logged like the rest, summarised in spike.md
+Dictation cleanup:
+  --cleanup                instead of the scenarios: time llm::cleanup on each model over
+                           evals/cleanup/dictations.json, back to back and after a Chat turn;
+                           cleanup.md   --cleanup-rounds <n> (default 3)
 ";
 
 #[derive(Debug, Default)]
@@ -79,10 +83,12 @@ struct Args {
     repeat: u32,
     dump_apps: Option<PathBuf>,
     list: bool,
+    cleanup: bool,
+    cleanup_rounds: u32,
 }
 
 fn parse(argv: Vec<String>) -> Result<Args, String> {
-    let mut a = Args { ngl: 0, ctx: 8192, repeat: 1, ..Default::default() };
+    let mut a = Args { ngl: 0, ctx: 8192, repeat: 1, cleanup_rounds: 3, ..Default::default() };
     let mut it = argv.into_iter();
     while let Some(arg) = it.next() {
         let (flag, inline) = match arg.split_once('=') {
@@ -121,6 +127,8 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--repeat" => a.repeat = num(value()?, &flag)?.max(1) as u32,
             "--dump-apps" => a.dump_apps = Some(PathBuf::from(value()?)),
             "--list" => a.list = true,
+            "--cleanup" => a.cleanup = true,
+            "--cleanup-rounds" => a.cleanup_rounds = num(value()?, &flag)?.max(1) as u32,
             "--help" | "-h" => return Err(String::new()),
             other => return Err(format!("unknown option {other}")),
         }
@@ -144,7 +152,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         return dump_apps(p);
     }
     // Raw requests alone need no scenarios (and --only then names requests).
-    let scenarios = if args.models.is_empty() && !args.list {
+    let scenarios = if (args.models.is_empty() || args.cleanup) && !args.list {
         Vec::new()
     } else {
         match load_scenarios(&args) {
@@ -675,7 +683,10 @@ async fn run_scenario(
         record::write("turn_start", json!({ "user": turn.user, "voice": voice }));
         record::begin_turn();
         let t0 = Instant::now();
-        let result = crate::commands::chat_turn(None, conversation, &turn.user, None, voice, |_, _| {}).await;
+        // Asked out loud = the Voice Assistant's turn (its shorter history,
+        // its spoken-answer prompt).
+        let scope = voice.then_some("assistant");
+        let result = crate::commands::chat_turn(None, conversation, &turn.user, scope, voice, |_, _| {}).await;
         let stats = record::end_turn();
         let opened = crate::apps::e2e_opened_apps(Some(true))
             .unwrap_or_default()
@@ -822,6 +833,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         }
     }
 
+    let bench = if args.cleanup {
+        let path = scenarios_dir(args).join("..").join("cleanup").join("dictations.json");
+        match super::cleanup::load(&path) {
+            Ok(b) => Some(b),
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        None
+    };
+    let mut cleanups: Vec<(String, Value)> = Vec::new();
     let mut rows: Vec<Value> = Vec::new();
     let mut models_info: Vec<Value> = Vec::new();
     let mut this_pc: Option<Vec<AppEntry>> = None;
@@ -861,6 +885,15 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
                 rows.push(row);
             }
         }
+        let mut cleanup = Value::Null;
+        if let Some(b) = &bench {
+            record::set_context(json!({ "model": m.label, "scenario": "cleanup" }));
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            cleanup = super::cleanup::run(b, &ep, args.cleanup_rounds).await;
+            cleanups.push((m.label.clone(), cleanup.clone()));
+        }
         let mine: Vec<&Value> = rows.iter().filter(|r| r["model"] == json!(m.label)).collect();
         let sum = |k: &str| mine.iter().map(|r| r[k].as_f64().unwrap_or(0.0)).sum::<f64>();
         let mut info = json!({
@@ -873,6 +906,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "tokens_per_minute": tpm,
             "paced_ms": record::paced_ms() - paced_before,
             "wall_ms": model_started.elapsed().as_millis() as u64,
+            "cleanup": cleanup,
         });
         if sum("prompt_eval_ms") > 0.0 {
             info["prompt_tokens_per_s"] = json!((sum("prompt_eval_tokens") / sum("prompt_eval_ms") * 1000.0 * 10.0).round() / 10.0);
@@ -904,6 +938,10 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
     summary["totals"] = json!(totals);
     let text = record::redact(&serde_json::to_string_pretty(&summary).unwrap_or_default());
     let _ = std::fs::write(run_dir.join("summary.json"), text);
+    if !cleanups.is_empty() {
+        let md = record::redact(&super::cleanup::markdown(&cleanups));
+        let _ = std::fs::write(run_dir.join("cleanup.md"), &md);
+    }
     if !rows.is_empty() {
         let md = record::redact(&markdown(&summary, &rows, &models_info, &totals));
         let _ = std::fs::write(run_dir.join("summary.md"), &md);

@@ -959,6 +959,13 @@ pub(crate) async fn chat_turn(
             if by_voice {
                 system.push_str(" This question was asked out loud: start your answer with the answer itself, in one or two short sentences, then any details.");
             }
+            // A small model on this PC tends to answer a current question
+            // from memory, with made-up citations: Yap's own test for "this
+            // needs the web" (the fixed pipeline's, `web::needs_web`) tells
+            // it to search first. Cloud models search by themselves.
+            if crate::ai_model::runs_here(&provider, &base_url) && crate::web::needs_web(&text) {
+                system.push_str(" This question needs current information: call web_search before you answer it.");
+            }
         }
     } else {
         // No tools: it can't do anything on the PC, so it mustn't say so.
@@ -984,6 +991,15 @@ pub(crate) async fn chat_turn(
         system.push_str(&format!(
             "\n\nBelow are notes from the user's library that may be relevant. Reference them naturally if they help answer the question.\n\n{rag}"
         ));
+    }
+    // Asked out loud and read aloud whole — the Voice Assistant, or a
+    // question dictated into Chat with spoken replies on (a web answer is
+    // said short anyway, `assistant::spoken_answer`): a short spoken answer,
+    // last in the prompt where small models heed it.
+    let spoken = by_voice && (scope == Some("assistant") || cfg.speak_replies);
+    if spoken && !(tools_supported && web_on) {
+        system.push_str("\n\n");
+        system.push_str(crate::assistant::SPOKEN_ANSWER_NOTE);
     }
 
     let (reply, tools_used, sources) = if tools_supported {
@@ -1038,6 +1054,15 @@ pub(crate) async fn chat_turn(
         };
         (corrected.unwrap_or(reply), chips, sources)
     };
+    // "[1]" with nothing behind it (a model answering from memory): out. A
+    // follow-up may still cite the latest answer that had sources, as the
+    // Chat view draws it.
+    let sourced: Vec<usize> = if sources.is_empty() {
+        crate::chats::earlier_source_numbers(&conv.messages)
+    } else {
+        sources.iter().map(|s| s.n).collect()
+    };
+    let reply = crate::chats::strip_unsourced_citations(&reply, &sourced);
     let index = crate::chats::append_sourced(
         conv.id,
         "assistant",
@@ -1478,6 +1503,10 @@ pub async fn test_post_process(text: String) -> Result<String, String> {
 pub fn local_llm_status() -> serde_json::Value {
     let cfg = config::load();
     let on_disk = crate::local_llm::list_models();
+    // The graphics card picks the model recommended for this PC (gpu.rs).
+    let gpu = crate::gpu::this_pc();
+    let capable = crate::gpu::can_run_big_model(gpu.as_ref());
+    let recommended = crate::local_llm::recommended_id(capable);
     // The curated one-click download set, with per-model installed state.
     let curated: Vec<serde_json::Value> = crate::local_llm::CURATED_MODELS
         .iter()
@@ -1489,21 +1518,62 @@ pub fn local_llm_status() -> serde_json::Value {
                 "filename": m.filename,
                 "sizeMb": m.size_mb,
                 "url": m.url,
-                "recommended": m.recommended,
+                // "Recommended for this PC"; `isDefault`: the model an empty
+                // `ppLocalModel` means.
+                "recommended": m.id == recommended,
+                "isDefault": m.default,
+                "needsGpu": m.needs_gpu,
+                "tools": crate::tools::supports_tools(
+                    crate::local_llm::PROVIDER_ONDEVICE,
+                    &crate::local_llm::model_id(std::path::Path::new(m.filename)),
+                ),
                 "family": m.family,
                 "installed": on_disk.iter().any(|f| f == m.filename),
             })
         })
         .collect();
+    // Where the running model went, and whether that makes it slow.
+    let running = crate::local_llm::shown_running();
+    let placement = running.then(crate::local_llm::placement).flatten();
+    let serving = crate::local_llm::shown_model_file(&cfg);
+    let serving_mb = std::fs::metadata(crate::local_llm::llm_dir().join(&serving)).map(|m| m.len() / 1_048_576).unwrap_or(0);
+    let active_file = crate::local_llm::active_model_path(&cfg)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let upgrade = crate::local_llm::upgrade_offer(
+        capable,
+        crate::local_llm::in_use(&cfg),
+        &active_file,
+        cfg.local_llm_upgrade_dismissed,
+    )
+    .map(|m| {
+        serde_json::json!({
+            "id": m.id,
+            "display": m.display,
+            "sizeMb": m.size_mb,
+            "installed": on_disk.iter().any(|f| f == m.filename),
+        })
+    });
     serde_json::json!({
         "installed": crate::local_llm::is_installed(&cfg),
-        "running": crate::local_llm::is_running(),
+        "running": running,
         "modelFile": crate::local_llm::MODEL_FILENAME,
         "model": crate::local_llm::active_model_display(&cfg),
         "engine": crate::local_llm::ENGINE_DISPLAY,
         "activeModel": cfg.pp_local_model,
         "models": on_disk,
         "curated": curated,
+        "gpu": gpu,
+        "gpuCapable": capable,
+        "recommendedId": recommended,
+        "placement": placement.map(|p| serde_json::json!({
+            "kind": p.kind(),
+            "gpuLayers": p.gpu_layers,
+            "layers": p.layers,
+        })),
+        "slowOnThisPc": running && crate::local_llm::slow_on_this_pc(&serving, serving_mb, placement),
+        "upgrade": upgrade,
     })
 }
 

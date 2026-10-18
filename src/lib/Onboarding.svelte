@@ -151,7 +151,15 @@
 
   // Private vs cloud, superwhisper-style two-card choice.
   let cleanupMode = $state('local'); // 'local' | 'cloud'
-  let localPick = $state('qwen2.5-1.5b'); // curated id (the recommended default)
+  // Curated id: the model recommended for this PC (local_llm_status's
+  // `recommendedId`: Qwen3.5 4B where the graphics card can run it, else
+  // Qwen2.5 1.5B) until the person picks another.
+  let localPick = $state('qwen2.5-1.5b');
+  let localPicked = false;
+  // The recommended model first, then the rest in their order.
+  const localModels = $derived(
+    [...(llm.curated || [])].sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended))
+  );
 
   // Cloud (bring-your-own-key) fields. Base URLs/default models mirror the
   // Settings provider presets.
@@ -184,6 +192,7 @@
   async function refreshLlm() {
     try {
       llm = await invoke('local_llm_status');
+      if (!localPicked && llm.recommendedId) localPick = llm.recommendedId;
       cleanupEnabled = !!cfg?.postProcessEnabled;
       if (cleanupEnabled) {
         enabledSummary =
@@ -601,15 +610,18 @@
 
         {#if cleanupMode === 'local'}
           <div class="llm-list">
-            {#each llm.curated || [] as m (m.id)}
+            {#each localModels as m (m.id)}
               {@const b = brandForModel(m.id)}
-              <label class="llm-row" class:sel={localPick === m.id}>
-                <input type="radio" bind:group={localPick} value={m.id} name="llm" />
+              <label class="llm-row" class:sel={localPick === m.id} data-model={m.id}>
+                <input type="radio" bind:group={localPick} value={m.id} name="llm" onchange={() => (localPicked = true)} />
                 <span class="brand" style="background:{b.color}">
                   {#if b.icon}<img src={b.icon} alt="" />{:else}{b.letter}{/if}
                 </span>
                 <span class="llm-main">
-                  <span class="llm-name">{m.display}</span>
+                  <span class="llm-name">
+                    {m.display}
+                    {#if m.recommended}<span class="llm-badge">Recommended for this PC</span>{/if}
+                  </span>
                   <span class="llm-blurb">{m.blurb}</span>
                 </span>
                 <span class="llm-size">{m.installed ? '✓ installed' : fmtSize(m.sizeMb)}</span>
@@ -626,6 +638,13 @@
               Enable private AI cleanup
             {/if}
           </button>
+          <p class="fine llm-why" data-gpu={llm.gpuCapable ? 'yes' : 'no'}>
+            {#if llm.gpuCapable && llm.gpu}
+              Your {llm.gpu.name} runs Qwen3.5 4B quickly, and it can use Chat's tools: your notes, apps and the web.
+            {:else}
+              Qwen2.5 1.5B stays quick without a graphics card. Bigger models are slow on a processor.
+            {/if}
+          </p>
           <p class="fine">All of these run fully offline via llamafile. Prefer your own?
             Drop any GGUF into the models folder later (Settings → Language Models).</p>
         {:else}
@@ -1000,6 +1019,18 @@
   .llm-name {
     font-size: 13px;
     font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .llm-badge {
+    background: var(--yap-primary);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 5px;
+    padding: 1px 6px;
+    white-space: nowrap;
   }
   .llm-blurb {
     font-size: 11.5px;

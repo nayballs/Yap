@@ -34,15 +34,20 @@ Nathan's PC: `YAP_EVAL_TARGET_DIR=E:/yap-builds/evals`, `--out E:/yap-builds/eva
 | `--tools on\|off` | Treat the model as able (or not) to call tools, whatever `tools::supports_tools` says (its ≥ 4B rule for local models). Default: Yap's rule. |
 | `--tokens-per-minute <n>` | Pacing budget. Default **8,000 for Groq** (its free plan's limit), none otherwise. The pacing also reads Groq's `x-ratelimit-remaining-tokens` / `-reset-tokens` and waits for the window to refill, so a run doesn't spend minutes in 429s. Time held back is reported. |
 | `--max-total-tokens <n>` | Stop starting scenarios on a model past this many tokens (a free plan's daily cap: Groq's gpt-oss-20b allows 200k a day). |
-| `--timeout <secs>` | Per model call, instead of Yap's own (20 s for Chat). Leave it to measure what Yap does; raise it to measure what a slow model *could* do. |
+| `--timeout <secs>` | Per model call, instead of Yap's own (Chat: 20 s for a cloud model, 2 minutes for one on this PC since 18 Oct 2026, `llm::chat_timeout`). Leave it to measure what Yap does; raise it to measure what a slow model *could* do. |
+| `--cleanup`, `--cleanup-rounds <n>` | Time the dictation cleanup instead of the scenarios (below). |
 | `--repeat <n>` | Run each scenario n times (models answer differently at temperature 0.5). |
 | `--no-web` | Skip the web scenarios (`needs_web` / `web`); live ones go on the internet (below). |
 | `--raw <file>` | Send hand-written requests (see below) instead of, or before, scenarios. |
 
 ### Local models
 
-`--model local:<spec>` starts **Yap's own llamafile runtime** the way `local_llm.rs` does
-(`--server`, `-c 8192`) on a free localhost port for the run, and stops it after. `<spec>`:
+`--model local:<spec>` starts **Yap's own llamafile runtime** with the sidecar's own
+arguments (`local_llm::server_args`: `-c 8192`, `--reasoning off`, `--cache-ram 0`,
+`--ctx-checkpoints 4`, `-lv 4`) on a free localhost port for the run, and stops it after.
+`--llamafile-arg` adds arguments after those, and a later flag wins: `--llamafile-arg=--cache-ram
+--llamafile-arg=8192` measures llama.cpp's old prompt cache, `--reasoning auto` its thinking.
+`<spec>`:
 
 - `installed`: the on-device default, Qwen2.5-1.5B-Instruct;
 - a curated id from `local_llm::CURATED_MODELS` (`qwen2.5-3b`, `qwen2.5-7b`, `llama-3.2-3b`, …);
@@ -55,11 +60,31 @@ downloaded and SHA-256-verified with `local_llm::download_verified` into `--mode
 what a normal PC without a big GPU gets); `--ctx`, `--llamafile <path>` and repeatable
 `--llamafile-arg <arg>` adjust the server.
 
-The model id sent is the file's name (`qwen2.5-1.5b-instruct-q4_k_m`), so `supports_tools`
-reads its size as it would for a self-hosted local model. (The on-device provider always
-sends `qwen2.5-1.5b-instruct`, whatever GGUF is picked: see "Findings" below.) The summary
-gives each local model's load time, peak RAM (the server's peak working set), and prompt and
-generation speed (llama.cpp's own `timings`).
+The model id sent is the file's name (`qwen2.5-1.5b-instruct-q4_k_m`,
+`Qwen_Qwen3.5-4B-Q4_K_M`), as the on-device sidecar sends it since 18 Oct 2026
+(`local_llm::model_id`), so `supports_tools` reads the same family and size. The summary
+gives each local model's load time, peak RAM (the server's peak working set), what it took
+on the graphics card (`gpu_layers`/`layers`, `gpu_buffers_mib`, from the log), and prompt
+and generation speed (llama.cpp's own `timings`).
+
+A **voice** turn runs as the Voice Assistant's (`chat_turn` with scope "assistant": its
+shorter history and its spoken-answer prompt).
+
+### Dictation cleanup latency (`--cleanup`)
+
+```bash
+yap.exe eval --cleanup --model local:<1.5b.gguf> --model local:<4b.gguf> --ngl 999
+```
+
+Instead of the scenarios, each model cleans every dictation in
+`evals/cleanup/dictations.json` (twelve typical one-to-three sentence dictations, as
+speech-to-text writes them) through **`llm::cleanup`** itself (the guardrails, Settings'
+default body, the one-shots): the first call after loading, then `--cleanup-rounds` (3)
+rounds back to back, then each after a Chat-shaped request (persona + tool instructions +
+the tools, ~2k tokens, untimed), then four after a long one (~5.6k tokens). Per phase:
+mean / median / p90 / max wall time, llama.cpp's prompt tokens **processed** (the rest came
+from its cache) and tokens generated, and errors; and every output, to compare the cleanup
+itself. `cleanup.md` in the run folder; the numbers in `summary.json` (`models[].cleanup`).
 
 ## What a run does, and what it doesn't touch
 
@@ -180,9 +205,9 @@ regex}`, `{"note": "Launch plan"}` (that note's id), `{"empty": true}`, `{"absen
 Each run also records **soft metrics** per scenario: model calls, retries, tool calls,
 prompt / completion / cached / reasoning tokens, model time and wall time, rate-limit waits,
 pacing waits, words, (local) llama.cpp prompt and generation speed, the slowest single call,
-and how many calls took **longer than 20 s**, Chat's own timeout: run a slow local model with
-`--timeout 180` to see what it *can* do, and read "Calls > 20 s" for what Yap would do with
-it today (those calls would fail).
+and how many calls took **longer than 20 s**, a cloud model's timeout in Chat (and every
+model's before 18 Oct 2026: such calls failed then; a model on this PC now gets 2 minutes,
+and the Chat view says it's still working).
 
 Small models answer differently from run to run (Chat uses temperature 0.5): compare local
 models with `--repeat 2` or more; a cloud model's daily token cap may only allow one pass.

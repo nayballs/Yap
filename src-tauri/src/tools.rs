@@ -53,10 +53,20 @@
 //! is refused for the rest of that turn, so a web page can't make Yap do
 //! anything. The person's next message starts a clean turn.
 //!
-//! **Capability gating** (their `estimateModelSizeB` + `LOCAL_TOOL_MIN_PARAMS_B`):
-//! cloud providers always get tools; local/on-device models only when the
-//! model id names ≥ 4B params (`-([\d.]+)[bB]`) — the bundled Qwen2.5-1.5B
-//! can't reliably tool-call, so it falls back to plain chat + eager RAG.
+//! **Capability gating** (their `estimateModelSizeB` + `LOCAL_TOOL_MIN_PARAMS_B`,
+//! plus Yap's evidence by family, [`local_model_uses_tools`]): cloud
+//! providers always get tools; local/on-device models when the model id
+//! names ≥ 4B params (`-4B`, `:8b`) and isn't of a family the model
+//! evaluations saw fail with them (Llama 3.2 loops) — the bundled
+//! Qwen2.5-1.5B can't reliably tool-call, so it falls back to plain chat +
+//! eager RAG; Qwen3.5-4B (thinking off, as the sidecar runs it) gets them.
+//! The on-device model's id is its GGUF's name (`local_llm::model_id`).
+//!
+//! **A tool call the provider rejects** (Groq's HTTP 400 `tool_use_failed`
+//! when gpt-oss leaves out a required argument; llama.cpp's HTTP 500 when a
+//! small model writes its call as text; `llm::rejected_tool_call`) never
+//! ends the turn in an error: the model is told what was wrong and asked
+//! again once, then answers without tools.
 
 use serde_json::{json, Value};
 
@@ -176,24 +186,55 @@ pub fn web_definitions() -> Value {
     ])
 }
 
-/// Their `estimateModelSizeB` regex, verbatim: `-([\d.]+)[bB]` on the model id.
+/// Their `estimateModelSizeB` regex (`-([\d.]+)[bB]` on the model id),
+/// widened to Ollama's tags and GGUF names that use `:` or `_`
+/// ("qwen3.5:4b", "Qwen_Qwen3.5-4B-Q4_K_M"): the first size in the id, 0
+/// when it names none.
 fn estimate_model_size_b(model_id: &str) -> f32 {
-    let re = regex::Regex::new(r"-([\d.]+)[bB]").expect("static regex");
-    re.captures(model_id)
+    static SIZE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"[-_:]([\d.]+)[bB](?:[^a-zA-Z]|$)").expect("static regex"));
+    SIZE.captures(model_id)
         .and_then(|c| c.get(1))
         .and_then(|m| m.as_str().parse::<f32>().ok())
         .unwrap_or(0.0)
 }
 
+/// Local model families the model evaluations (docs/model-evals.md) saw
+/// fail with tools whatever their size: Llama 3.2 loops on them (337 calls
+/// for 48 scenarios, up to the 20-step cap), writes its calls as text and
+/// gets llama.cpp's HTTP 500 for it. Matched in the lower-cased id.
+const NO_TOOL_FAMILIES: &[&str] = &["llama-3.2", "llama3.2", "llama_3.2"];
+
+/// Local model families the evaluations saw use tools well, and from what
+/// size: Qwen3.5-4B with thinking off (the sidecar's `--reasoning off`)
+/// passed 92–94% over two GPU passes, edits, folders and prompt injections
+/// included.
+const TOOL_FAMILIES: &[(&str, f32)] = &[("qwen3.5", 4.0)];
+
+/// Can a local or on-device model (by its id, the GGUF's name for Yap's
+/// own) call Chat's tools? Its family first (the evidence), else ≥ 4B
+/// params (their rule). Pure.
+pub fn local_model_uses_tools(model: &str) -> bool {
+    let id = model.to_ascii_lowercase();
+    if NO_TOOL_FAMILIES.iter().any(|f| id.contains(f)) {
+        return false;
+    }
+    let size = estimate_model_size_b(model);
+    if let Some((_, from)) = TOOL_FAMILIES.iter().find(|(f, _)| id.contains(f)) {
+        return size >= *from;
+    }
+    size >= LOCAL_TOOL_MIN_PARAMS_B
+}
+
 /// Cloud providers always support tools; local (self-hosted) and on-device
-/// models only when the id names ≥ 4B params (their gating rule).
+/// models by [`local_model_uses_tools`].
 pub fn supports_tools(provider: &str, model: &str) -> bool {
     if let Some(forced) = crate::eval::tools_forced() {
         return forced; // a model evaluation's --tools on|off
     }
     match provider {
         "groq" | "anthropic" | "openai" | "gemini" | "openrouter" | "custom" => true,
-        _ => estimate_model_size_b(model) >= LOCAL_TOOL_MIN_PARAMS_B,
+        _ => local_model_uses_tools(model),
     }
 }
 
@@ -924,19 +965,31 @@ fn edit_note(args: &Value) -> Value {
 }
 
 /// The tools offered on a step: all of them, or — once web content is in
-/// the turn — none of the action tools, and each web tool until its cap.
+/// the turn — none of the action tools. A web tool past its cap stays
+/// offered (`web::Turn` answers "you've searched 3 times"): taking it away
+/// mid-turn made Groq refuse the model's next call to it with HTTP 400.
 fn offered_tools(tools: &Value, web: Option<&crate::web::Turn>) -> Value {
-    let Some(turn) = web else { return tools.clone() };
-    let base = if turn.seen() { without_actions(tools) } else { tools.clone() };
-    Value::Array(
-        base.as_array()
-            .into_iter()
-            .flatten()
-            .filter(|t| turn.offers(t["function"]["name"].as_str().unwrap_or("")))
-            .cloned()
-            .collect(),
+    match web {
+        Some(turn) if turn.seen() => without_actions(tools),
+        _ => tools.clone(),
+    }
+}
+
+/// How many times a turn asks again after the provider rejected the
+/// model's tool call, before it answers without tools.
+const REJECTED_CALL_RETRIES: u32 = 1;
+
+/// What the model is told when the provider rejected its tool call (`why`:
+/// the provider's reason, and what the model sent).
+fn rejected_call_note(why: &str) -> String {
+    format!(
+        "(A note from Yap, not the user.) Your last tool call didn't go through: {why}. Call the tool again with every required argument (a note_id comes from search_notes or the note's context), using only the tools you have; or, if you can't, answer the user without tools."
     )
 }
+
+/// Said before the last call when tools won't do (rejected again, or out
+/// of steps): an answer now, from what the conversation has.
+const ANSWER_NOW_NOTE: &str = "(A note from Yap, not the user.) Don't call any tool now: answer the user from what you have, and say plainly if something couldn't be done.";
 
 /// A tool call's arguments: OpenAI sends a JSON string; some servers send
 /// the object itself.
@@ -997,9 +1050,10 @@ pub async fn run_tool_loop(
     let previous: Option<String> =
         history.last().filter(|(role, _)| role == "assistant").map(|(_, text)| text.clone());
 
+    let mut rejected = 0u32;
     for _step in 0..MAX_TOOL_STEPS {
         let offered = offered_tools(&tools, web.as_deref());
-        let msg = crate::llm::post_chat_message(
+        let msg = match crate::llm::post_chat_message(
             base_url,
             api_key,
             model,
@@ -1008,7 +1062,27 @@ pub async fn run_tool_loop(
             Value::Array(messages.clone()),
             Some(&offered),
         )
-        .await?;
+        .await
+        {
+            Ok(msg) => msg,
+            // The provider refused the model's own tool call (a missing
+            // argument, a tool it doesn't have, a call written as text):
+            // tell it once and ask again, then answer without tools — never
+            // an error for the person.
+            Err(e) => match crate::llm::rejected_tool_call(&e) {
+                Some(why) if rejected < REJECTED_CALL_RETRIES => {
+                    rejected += 1;
+                    tracing::info!(provider, "Chat: the provider rejected the model's tool call; asking again");
+                    messages.push(json!({ "role": "user", "content": rejected_call_note(why) }));
+                    continue;
+                }
+                Some(_) => {
+                    tracing::info!(provider, "Chat: the model's tool call was rejected again; answering without tools");
+                    break;
+                }
+                None => return Err(e),
+            },
+        };
 
         let tool_calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
         if tool_calls.is_empty() {
@@ -1065,7 +1139,9 @@ pub async fn run_tool_loop(
         }
     }
 
-    // Out of steps: one final call WITHOUT tools to force a plain answer.
+    // Out of steps, or the tool calls kept being rejected: one final call
+    // WITHOUT tools to force a plain answer.
+    messages.push(json!({ "role": "user", "content": ANSWER_NOW_NOTE }));
     let msg = crate::llm::post_chat_message(
         base_url,
         api_key,
@@ -1077,8 +1153,9 @@ pub async fn run_tool_loop(
     )
     .await?;
     let content = msg["content"].as_str().unwrap_or("").trim().to_string();
+    let content = if disable_thinking { crate::llm::strip_thinking(&content) } else { content };
     if content.is_empty() {
-        return Err("Tool loop exceeded its step limit without an answer".to_string());
+        return Err("The model didn't manage an answer this time. Try asking again.".to_string());
     }
     Ok((content, tools_used))
 }
@@ -1096,6 +1173,30 @@ mod tests {
         assert!(supports_tools("local", "llama-3.1-8b-instant"));
         assert!(!supports_tools("ondevice", "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"));
         assert!(!supports_tools("local", "llama3.1")); // no size in id → 0 → gated
+    }
+
+    #[test]
+    fn local_tools_follow_the_evaluations_by_family() {
+        // The on-device ids are the GGUFs' names (`local_llm::model_id`).
+        assert!(supports_tools("ondevice", "Qwen_Qwen3.5-4B-Q4_K_M"));
+        assert!(!supports_tools("ondevice", "qwen2.5-1.5b-instruct-q4_k_m"));
+        assert!(!supports_tools("ondevice", "Qwen_Qwen3.5-2B-Q4_K_M"));
+        // Llama 3.2 loops on tools: never, whatever its size.
+        assert!(!supports_tools("ondevice", "Llama-3.2-3B-Instruct-Q4_K_M"));
+        assert!(!supports_tools("local", "llama3.2:11b-vision"));
+        assert!(!supports_tools("local", "Llama-3.2-11B-Vision-Instruct"));
+        // Others by size, Ollama's tags too.
+        assert!(supports_tools("local", "qwen3.5:4b"));
+        assert!(supports_tools("local", "llama3.1:8b"));
+        assert!(!supports_tools("local", "qwen2.5:1.5b"));
+        assert!(supports_tools("ondevice", "Qwen2.5-7B-Instruct-Q4_K_M"));
+        assert!(supports_tools("ondevice", "gemma-2-9b-it-Q4_K_M"));
+        assert!(!supports_tools("ondevice", "Phi-3.5-mini-instruct-Q4_K_M"));
+        // Not a size: a quant or a word with a b in it.
+        assert_eq!(estimate_model_size_b("model-q4_k_m-8bit"), 0.0);
+        assert_eq!(estimate_model_size_b("Qwen3-30B-A3B-Instruct"), 30.0);
+        // Cloud: always.
+        assert!(supports_tools("openrouter", "meta-llama/llama-3.2-3b-instruct"));
     }
 
     #[test]
@@ -1652,6 +1753,151 @@ mod tests {
         let offered = tool_names(&requests[0].1["tools"]);
         assert!(!offered.iter().any(|n| n == "web_search" || n == "read_page"));
         assert!(offered.iter().any(|n| n == "search_notes"));
+    }
+
+    /// A stand-in chat model that answers each request with a scripted
+    /// status and body (an HTTP 400 like Groq's, then an answer).
+    fn fake_model(steps: Vec<(u16, Value)>) -> FakeServer {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("a local port");
+        let port = server.server_addr().to_ip().expect("ip").port();
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = requests.clone();
+        std::thread::spawn(move || {
+            let mut steps = steps.into_iter();
+            for mut req in server.incoming_requests() {
+                let mut body = String::new();
+                let _ = req.as_reader().read_to_string(&mut body);
+                kept.lock().unwrap().push((req.url().to_string(), serde_json::from_str(&body).unwrap_or(Value::Null)));
+                let (status, reply) = match steps.next() {
+                    Some((200, message)) => (200, json!({ "choices": [{ "index": 0, "message": message }] })),
+                    Some(other) => other,
+                    None => (200, json!({ "choices": [{ "index": 0, "message": { "role": "assistant", "content": "OK" } }] })),
+                };
+                let header = tiny_http::Header::from_bytes("content-type", "application/json").unwrap();
+                let _ = req.respond(tiny_http::Response::from_string(reply.to_string()).with_status_code(status).with_header(header));
+            }
+        });
+        FakeServer { base: format!("http://127.0.0.1:{port}"), requests }
+    }
+
+    /// Groq's answer to gpt-oss's `edit_note` without its `note_id`.
+    fn groq_tool_use_failed() -> (u16, Value) {
+        (
+            400,
+            json!({ "error": {
+                "message": "Tool call validation failed: tool call validation failed: parameters for tool edit_note did not match schema: errors: [missing properties: 'note_id']",
+                "type": "invalid_request_error",
+                "code": "tool_use_failed",
+                "failed_generation": "{\"name\": \"edit_note\", \"arguments\": {\"field\":\"content\",\"old_text\":\"Friday\",\"new_text\":\"Monday\"}}"
+            } }),
+        )
+    }
+
+    async fn ask(fake: &FakeServer) -> Result<(String, Vec<String>), String> {
+        run_tool_loop(
+            "You are helpful.",
+            &[],
+            "Move the beta to Monday in my launch plan.",
+            &format!("{}/v1", fake.base),
+            "gsk-fake",
+            "openai/gpt-oss-20b",
+            "groq",
+            false,
+            false,
+            &|_| {},
+            None,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_rejected_tool_call_is_asked_again_never_an_error() {
+        let fake = fake_model(vec![
+            groq_tool_use_failed(),
+            (200, json!({ "role": "assistant", "content": "Which note do you mean?" })),
+        ]);
+        let (reply, chips) = ask(&fake).await.expect("an answer, not the 400");
+        assert_eq!((reply.as_str(), chips.len()), ("Which note do you mean?", 0));
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 2);
+        // The second request tells the model what was wrong, with tools still on.
+        let messages = requests[1].1["messages"].as_array().unwrap();
+        let note = messages.last().unwrap();
+        assert_eq!(note["role"], "user");
+        let text = note["content"].as_str().unwrap();
+        assert!(text.contains("missing properties: 'note_id'") && text.contains("you sent"), "{text}");
+        assert!(requests[1].1["tools"].is_array());
+    }
+
+    #[tokio::test]
+    async fn rejected_twice_it_answers_without_tools() {
+        // llama.cpp's 500 for a call written as text, then Groq's 400.
+        let fake = fake_model(vec![
+            (500, json!({ "error": { "code": 500, "message": "Failed to parse input at pos 47: {\"name\": \"copy_to_clipboard\", \"parameters\": {}}", "type": "server_error" } })),
+            groq_tool_use_failed(),
+            (200, json!({ "role": "assistant", "content": "I couldn't change the note: tell me which one." })),
+        ]);
+        let (reply, _) = ask(&fake).await.expect("an answer");
+        assert_eq!(reply, "I couldn't change the note: tell me which one.");
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[1].1["messages"].as_array().unwrap().last().unwrap()["content"]
+            .as_str()
+            .unwrap()
+            .contains("wasn't a proper tool call"));
+        // The last call: no tools, told to answer.
+        assert!(requests[2].1.get("tools").is_none());
+        assert_eq!(requests[2].1["messages"].as_array().unwrap().last().unwrap()["content"], ANSWER_NOW_NOTE);
+    }
+
+    #[tokio::test]
+    async fn any_other_error_is_still_an_error() {
+        let fake = fake_model(vec![(401, json!({ "error": { "message": "Invalid API Key", "code": "invalid_api_key" } }))]);
+        let e = ask(&fake).await.unwrap_err();
+        assert!(e.starts_with("HTTP 401"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn a_capped_web_tool_stays_offered() {
+        // Three searches, then a fourth the model still sees and is told no.
+        let exa = json!({ "results": [{ "title": "Gale", "url": "https://bg3.wiki/wiki/Gale", "highlights": ["On the beach."] }] });
+        let search = |q: &str| calls(&[("web_search", json!({ "query": q }))]);
+        let fake = fake_server(
+            vec![search("a"), search("b"), search("c"), search("d"), json!({ "role": "assistant", "content": "On the beach [1]." })],
+            exa,
+        );
+        let settings =
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None };
+        let endpoints = crate::web::Endpoints {
+            exa: format!("{}/exa", fake.base),
+            tavily: String::new(),
+            standin: Some(format!("{}/standin", fake.base)),
+            offline: false,
+        };
+        let mut turn = crate::web::Turn::new(settings, endpoints, "Where's Gale?", &[]);
+        let (reply, chips) = run_tool_loop(
+            "You are helpful.",
+            &[],
+            "Where's Gale?",
+            &format!("{}/v1", fake.base),
+            "",
+            "fake-chat",
+            "custom",
+            false,
+            false,
+            &|_| {},
+            Some(&mut turn),
+        )
+        .await
+        .expect("an answer");
+        assert_eq!(reply, "On the beach [1].");
+        assert_eq!(chips.last().unwrap(), "Didn't search for \"d\": 3 searches a turn");
+        let requests = fake.requests.lock().unwrap().clone();
+        let chat: Vec<&Value> = requests.iter().filter(|(u, _)| u.ends_with("/chat/completions")).map(|(_, b)| b).collect();
+        assert_eq!(chat.len(), 5);
+        for step in &chat {
+            assert!(tool_names(&step["tools"]).iter().any(|n| n == "web_search"), "web_search taken away");
+        }
     }
 
     /// The web tools' instructions and schemas, on top of a tool step's

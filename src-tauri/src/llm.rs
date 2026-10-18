@@ -18,6 +18,66 @@ use serde_json::{json, Value};
 /// this is generous; on timeout the caller keeps the raw transcript.
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// A Chat call's timeout (the tool loop's steps, the plain chat, a note's
+/// Ask bar): a cloud model's 20 s, or — a model on this PC — 2 minutes. On a
+/// PC without a graphics card for it, Qwen3.5-4B takes ~25 s a turn and its
+/// slowest calls ~50 s (model evaluations, docs/model-evals.md), which the
+/// 20 s cut off; the Chat view says it's still working meanwhile. Dictation
+/// cleanup keeps [`CLEANUP_TIMEOUT`] (the raw text is its fallback).
+pub(crate) const LOCAL_CHAT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// [`LOCAL_CHAT_TIMEOUT`] for a server on this PC (Yap's sidecar, Ollama, LM
+/// Studio: a loopback address), else [`CLEANUP_TIMEOUT`]. Pure.
+pub(crate) fn chat_timeout(base_url: &str) -> Duration {
+    let host = url::Url::parse(base_url).ok().and_then(|u| u.host_str().map(str::to_ascii_lowercase));
+    match host.as_deref() {
+        Some("localhost" | "127.0.0.1" | "[::1]" | "::1") => LOCAL_CHAT_TIMEOUT,
+        Some(h) if h.ends_with(".localhost") => LOCAL_CHAT_TIMEOUT,
+        _ => CLEANUP_TIMEOUT,
+    }
+}
+
+/// How a rejected tool call's error starts ([`rejected_tool_call`]).
+pub(crate) const TOOL_CALL_REJECTED: &str = "The model's tool call didn't go through: ";
+
+/// The provider refused a call because of the **model's own tool call**:
+/// Groq's HTTP 400 `tool_use_failed` (gpt-oss left out a required argument,
+/// or called a tool the request didn't have) or llama.cpp's HTTP 500 "Failed
+/// to parse input" (a small model wrote its call as text). The reason for
+/// the model, with what it sent; `None` for any other error. Pure.
+fn tool_call_rejection(status: u16, body: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(body).ok()?;
+    let err = &v["error"];
+    let message = err["message"].as_str().unwrap_or("").trim();
+    let cut = |s: &str| -> String {
+        let s = s.trim();
+        if s.chars().count() > 300 {
+            format!("{}…", s.chars().take(300).collect::<String>())
+        } else {
+            s.to_string()
+        }
+    };
+    if err["code"].as_str() == Some("tool_use_failed") {
+        let why = message.trim_start_matches("Tool call validation failed: ").trim_start_matches("tool call validation failed: ");
+        let sent = err["failed_generation"].as_str().unwrap_or("");
+        return Some(if sent.trim().is_empty() { cut(why) } else { format!("{} (you sent: {})", cut(why), cut(sent)) });
+    }
+    if status >= 500 && message.starts_with("Failed to parse input") {
+        let sent = message.split_once(": ").map(|(_, s)| s).unwrap_or("");
+        return Some(format!(
+            "it wasn't a proper tool call, so it couldn't be read (you wrote: {}). Make tool calls only as tool calls, never as text",
+            cut(sent)
+        ));
+    }
+    None
+}
+
+/// The reason in a [`TOOL_CALL_REJECTED`] error (what the tool loop tells
+/// the model when it asks again), else `None`.
+pub(crate) fn rejected_tool_call(error: &str) -> Option<&str> {
+    error.strip_prefix(TOOL_CALL_REJECTED)
+}
+
 /// Immutable guardrail prompt, always prepended to the user's editable cleanup
 /// "body" (tone/format). Split out FluidVoice-style so users can customise the
 /// behaviour (or pick a preset) WITHOUT being able to delete the rules that stop
@@ -365,16 +425,26 @@ pub async fn note_chat(
         messages.push(json!({ "role": role, "content": text }));
     }
     messages.push(json!({ "role": "user", "content": question }));
-    let out = post_chat(
+    // A model on this PC may take a while on a processor (`chat_timeout`).
+    let message = post_chat_request(
         base_url,
         api_key,
         model,
         provider,
         0.5,
         serde_json::Value::Array(messages),
+        None,
+        None,
+        chat_timeout(base_url),
         RATE_LIMIT_PATIENCE,
     )
     .await?;
+    let out = strip_wrapping(
+        message["content"]
+            .as_str()
+            .ok_or_else(|| "response missing choices[0].message.content".to_string())?
+            .trim(),
+    );
     let out = if disable_thinking {
         strip_thinking(&out)
     } else {
@@ -503,7 +573,7 @@ pub(crate) async fn post_chat_message(
         messages,
         tools,
         None,
-        CLEANUP_TIMEOUT,
+        chat_timeout(base_url),
         RATE_LIMIT_PATIENCE,
     )
     .await
@@ -701,6 +771,10 @@ async fn post_chat_request(
             tracing::info!("{} wants {}'s default temperature; asking again without one", provider, model);
             continue;
         }
+        // The model's own tool call refused: the tool loop asks it again.
+        if let Some(why) = tool_call_rejection(status.as_u16(), &detail) {
+            return Err(call.failed(format!("{TOOL_CALL_REJECTED}{why}")));
+        }
         let detail: String = detail.chars().take(300).collect();
         return Err(call.failed(format!("HTTP {}: {}", status.as_u16(), detail)));
     };
@@ -879,6 +953,36 @@ mod tests {
         assert!(s.starts_with(BASE_PROMPT));
         assert!(s.ends_with("Keep it casual."));
         assert!(s.contains("\n\nKeep it casual."));
+    }
+
+    #[test]
+    fn a_rejected_tool_call_is_told_apart_from_other_errors() {
+        // Groq's 400 (the model evaluations' transcript), as Groq orders it.
+        let groq = r#"{"error":{"message":"Tool call validation failed: tool call validation failed: attempted to call tool 'web_search' which was not in request.tools","type":"invalid_request_error","code":"tool_use_failed","failed_generation":"{\"name\": \"web_search\", \"arguments\": {\"query\":\"Gale camp\"}}"}}"#;
+        let why = tool_call_rejection(400, groq).expect("a rejected call");
+        assert!(why.starts_with("attempted to call tool 'web_search'"), "{why}");
+        assert!(why.contains("(you sent: {\"name\": \"web_search\""), "{why}");
+        // llama.cpp's 500 for a call written as text (Llama 3.2).
+        let llama = r#"{"error":{"code":500,"message":"Failed to parse input at pos 47: {\"name\": \"copy_to_clipboard\", \"parameters\": {}}","type":"server_error"}}"#;
+        assert!(tool_call_rejection(500, llama).unwrap().contains("wasn't a proper tool call"));
+        // Anything else stays what it was.
+        assert_eq!(tool_call_rejection(400, r#"{"error":{"message":"temperature is not supported","code":"invalid_value"}}"#), None);
+        assert_eq!(tool_call_rejection(500, "Internal Server Error"), None);
+        assert_eq!(tool_call_rejection(401, r#"{"error":{"message":"Invalid API Key"}}"#), None);
+        // The tool loop reads it back from the error.
+        let e = format!("{TOOL_CALL_REJECTED}{why}");
+        assert_eq!(rejected_tool_call(&e), Some(why.as_str()));
+        assert_eq!(rejected_tool_call("HTTP 400: nope"), None);
+    }
+
+    #[test]
+    fn a_model_on_this_pc_gets_longer_than_a_cloud_one() {
+        assert_eq!(chat_timeout("http://127.0.0.1:53064/v1"), LOCAL_CHAT_TIMEOUT);
+        assert_eq!(chat_timeout("http://localhost:11434/v1"), LOCAL_CHAT_TIMEOUT);
+        assert_eq!(chat_timeout("http://[::1]:1234/v1"), LOCAL_CHAT_TIMEOUT);
+        assert_eq!(chat_timeout("https://api.groq.com/openai/v1"), CLEANUP_TIMEOUT);
+        assert_eq!(chat_timeout("http://192.168.1.20:11434/v1"), CLEANUP_TIMEOUT);
+        assert_eq!(chat_timeout(""), CLEANUP_TIMEOUT);
     }
 
     #[test]

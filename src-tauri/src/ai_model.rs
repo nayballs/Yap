@@ -20,7 +20,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::chats::ChatModel;
 use crate::config::YapConfig;
-use crate::local_llm::{LOCAL_MODEL, PROVIDER_ONDEVICE};
+use crate::local_llm::PROVIDER_ONDEVICE;
 use crate::AppState;
 
 /// Cloud providers that need a key (and share one key across every scope).
@@ -68,10 +68,13 @@ pub fn standard_base_url(provider: &str) -> Option<&'static str> {
     })
 }
 
-/// Yap's on-device model on this PC: installed or not, and its name.
+/// Yap's on-device model on this PC: installed or not, its name, and the
+/// id calls send (its GGUF's name, `local_llm::model_id`), which says
+/// whether it gets Chat's tools.
 pub struct OnDevice {
     pub installed: bool,
     pub name: String,
+    pub id: String,
 }
 
 impl OnDevice {
@@ -79,8 +82,15 @@ impl OnDevice {
         OnDevice {
             installed: crate::local_llm::is_installed(cfg),
             name: crate::local_llm::active_model_display(cfg),
+            id: crate::local_llm::active_model_id(cfg),
         }
     }
+}
+
+/// Does a call to this endpoint run on this PC (Yap's own model, a
+/// self-hosted server on a loopback address)? Pure.
+pub fn runs_here(provider: &str, base_url: &str) -> bool {
+    provider == PROVIDER_ONDEVICE || is_loopback(base_url)
 }
 
 /// Where a call goes.
@@ -186,7 +196,7 @@ pub fn target(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Result<Tar
                     return Err(NOT_INSTALLED.to_string());
                 }
                 let url = crate::local_llm::base_url().unwrap_or_default();
-                (PROVIDER_ONDEVICE.to_string(), LOCAL_MODEL.to_string(), url)
+                (PROVIDER_ONDEVICE.to_string(), on_device.id.clone(), url)
             } else {
                 let (b, _key, m, p, _persona, _thinking) =
                     crate::commands::resolve_chat_endpoint(cfg)?;
@@ -284,7 +294,7 @@ pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
         keyed: keyed_providers(cfg),
         on_device: on_device.installed.then(|| OnDeviceChoice {
             name: on_device.name.clone(),
-            tools: crate::tools::supports_tools(PROVIDER_ONDEVICE, LOCAL_MODEL),
+            tools: crate::tools::supports_tools(PROVIDER_ONDEVICE, &on_device.id),
         }),
     }
 }
@@ -408,11 +418,13 @@ mod tests {
     const NONE: OnDevice = OnDevice {
         installed: false,
         name: String::new(),
+        id: String::new(),
     };
     fn installed() -> OnDevice {
         OnDevice {
             installed: true,
             name: "Qwen2.5 1.5B Instruct".into(),
+            id: "qwen2.5-1.5b-instruct-q4_k_m".into(),
         }
     }
     fn chat_scope(provider: &str, base_url: &str, model: &str, key: &str) -> LlmScope {
@@ -493,7 +505,15 @@ mod tests {
         let t = target(&c, Scope::Chat, &installed()).unwrap();
         assert_eq!(t.provider, "ondevice");
         assert_eq!(t.name, "Qwen2.5 1.5B Instruct");
+        assert_eq!(t.model, "qwen2.5-1.5b-instruct-q4_k_m");
         assert!(t.on_this_pc && !t.tools);
+        // The bigger model picked: named by its GGUF, so it gets the tools
+        // (it used to be sent as the 1.5B whatever ran).
+        let big = OnDevice { installed: true, name: "Qwen3.5 4B".into(), id: "Qwen_Qwen3.5-4B-Q4_K_M".into() };
+        let t = target(&c, Scope::Chat, &big).unwrap();
+        assert_eq!(t.model, "Qwen_Qwen3.5-4B-Q4_K_M");
+        assert!(t.tools);
+        assert!(status(&c, Scope::Chat, &big).on_device.unwrap().tools);
     }
 
     #[test]

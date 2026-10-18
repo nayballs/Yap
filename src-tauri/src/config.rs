@@ -385,6 +385,11 @@ pub struct YapConfig {
     /// drop any GGUF into the folder and pick it in Settings.
     #[serde(default)]
     pub pp_local_model: String,
+    /// The bigger on-device model offered once in Settings (Qwen3.5-4B on a
+    /// PC whose graphics card can run it, `local_llm::upgrade_offer`) was
+    /// turned down ("No thanks"), or taken: it isn't offered again.
+    #[serde(default)]
+    pub local_llm_upgrade_dismissed: bool,
     /// Smart-routing scope (FluidVoice's `PromptRoutingScope`):
     /// - "all_apps" (default): the global `pp_prompt` cleans everywhere, and
     ///   `app_routes` override it for matching apps.
@@ -750,6 +755,7 @@ impl Default for YapConfig {
             pp_preset: default_pp_preset(),
             pp_disable_thinking: false,
             pp_local_model: String::new(),
+            local_llm_upgrade_dismissed: false,
             routing_scope: default_routing_scope(),
             app_routes: Vec::new(),
             cleanup_profiles: Vec::new(),

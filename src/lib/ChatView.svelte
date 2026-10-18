@@ -122,6 +122,26 @@
   // rather than continuing the last one.
   let choseNew = false;
 
+  // A slow answer says it's still coming: a model on this PC's processor
+  // can take a minute (Rust gives it 2 minutes, llm::LOCAL_CHAT_TIMEOUT),
+  // which a bare "Thinking…" makes look hung.
+  const STILL_WORKING_S = 8;
+  let waitedS = $state(0);
+  let modelHere = $state(false);
+  $effect(() => {
+    const busy = sending || (assistantPending != null && assistantPending === activeId);
+    if (!busy) {
+      waitedS = 0;
+      return;
+    }
+    const started = Date.now();
+    invoke('ai_model_status', { scope: 'chat' })
+      .then((s) => (modelHere = !!s?.model?.onThisPc))
+      .catch(() => {});
+    const timer = setInterval(() => (waitedS = Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  });
+
   const chatId = (conv, i) => `chat:${conv}:${i}`;
   const voiceTitle = $derived(
     speakReplies
@@ -688,7 +708,18 @@
           {/if}
         {/each}
         {#if sending || (assistantPending != null && assistantPending === activeId)}
-          <div class="cbubble assistant"><p class="cbody thinking">Thinking…</p></div>
+          <div class="cbubble assistant">
+            <p class="cbody thinking">Thinking…</p>
+            {#if waitedS >= STILL_WORKING_S}
+              <p class="cwait" data-testid="chat-still-working" aria-live="polite">
+                {#if modelHere}
+                  Still working ({waitedS} s): the model runs on this PC, so this can take a minute.
+                {:else}
+                  Still working ({waitedS} s)…
+                {/if}
+              </p>
+            {/if}
+          </div>
         {/if}
       </div>
     {/if}
@@ -986,6 +1017,11 @@
   .cbody.thinking {
     color: var(--yap-muted-55);
     font-style: italic;
+  }
+  .cwait {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--yap-muted);
   }
   .toolchips {
     align-self: flex-start;

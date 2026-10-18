@@ -102,9 +102,11 @@ pub struct Server {
     pub args: Vec<String>,
 }
 
-/// Start `runtime` serving `model` as `local_llm::start` does (`--server`,
-/// `-c 8192`), but with `ngl` GPU layers (0 = CPU only), the run's folder as
-/// its working dir and log, and `extra` arguments. Waits for `/health`.
+/// Start `runtime` serving `model` with `local_llm::server_args` — as Yap's
+/// sidecar runs (thinking off, the caches capped, `-lv 4`) — but with `ngl`
+/// GPU layers (0 = CPU only), the run's folder as its working dir and log,
+/// and `extra` arguments after Yap's (a later flag wins: `--reasoning auto`,
+/// `--cache-ram 8192` measure the old way). Waits for `/health`.
 pub async fn start(
     runtime: &Path,
     model: &Path,
@@ -120,19 +122,7 @@ pub async fn start(
     let stem = model.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let log = workdir.join(format!("llamafile-{stem}.log"));
     let file = std::fs::File::create(&log).map_err(|e| e.to_string())?;
-    let mut args: Vec<String> = vec![
-        "--server".into(),
-        "--host".into(),
-        "127.0.0.1".into(),
-        "--port".into(),
-        port.to_string(),
-        "-m".into(),
-        model.to_string_lossy().into_owned(),
-        "-ngl".into(),
-        ngl.to_string(),
-        "-c".into(),
-        ctx.to_string(),
-    ];
+    let mut args = crate::local_llm::server_args(model, port, ngl, ctx);
     args.extend(extra.iter().cloned());
     let mut cmd = std::process::Command::new(runtime);
     cmd.args(&args)
@@ -200,6 +190,7 @@ impl Server {
         let text = std::fs::read_to_string(&self.log).unwrap_or_default();
         let mut projected: Option<f64> = None;
         let mut cache: f64 = 0.0;
+        let mut gpu_mib: f64 = 0.0;
         let mut system = String::new();
         let number_before = |s: &str, unit: &str| -> Option<f64> {
             let end = s.find(unit)?;
@@ -219,8 +210,23 @@ impl Server {
             if line.contains("system_info:") && system.is_empty() {
                 system = line.split("system_info:").nth(1).unwrap_or("").trim().chars().take(200).collect();
             }
+            // "load_tensors: CUDA0 model buffer size = 934.70 MiB" and the KV
+            // and compute buffers (`-lv 4`): what the model takes on the card.
+            if line.contains("buffer size =") && !line.contains("CPU") && !line.contains("_Host") {
+                if let Some(v) = line.split("buffer size =").nth(1).and_then(|r| number_before(r, "MiB")) {
+                    gpu_mib += v;
+                }
+            }
         }
-        json!({ "projected_host_mib": projected, "prompt_cache_peak_mib": cache.round(), "system_info": system })
+        let placement = crate::local_llm::placement_in_log(&text);
+        json!({
+            "projected_host_mib": projected,
+            "prompt_cache_peak_mib": cache.round(),
+            "system_info": system,
+            "gpu_layers": placement.map(|p| p.gpu_layers),
+            "layers": placement.map(|p| p.layers),
+            "gpu_buffers_mib": gpu_mib.round(),
+        })
     }
 
     pub fn stop(&mut self) {

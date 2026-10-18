@@ -22,12 +22,11 @@ use tauri::{AppHandle, Emitter};
 /// Provider id (in `YapConfig::pp_provider`) that selects the managed sidecar.
 pub const PROVIDER_ONDEVICE: &str = "ondevice";
 
-/// Model name advertised to the OpenAI-compatible endpoint. llamafile serves the
-/// single GGUF it was launched with and is lenient about this value.
-pub const LOCAL_MODEL: &str = "qwen2.5-1.5b-instruct";
-
-/// The GGUF the sidecar loads (downloaded on demand). Qwen2.5-1.5B-Instruct
-/// Q4_K_M — Apache-2.0, ~1.04 GB, strong instruction-following for its size.
+/// The GGUF the sidecar loads when no other is picked (`pp_local_model`
+/// empty). Qwen2.5-1.5B-Instruct Q4_K_M — Apache-2.0, ~1.04 GB, strong
+/// instruction-following for its size, about a second a Chat turn on a CPU.
+/// The model **recommended** for a PC is [`recommended_id`]'s: Qwen3.5-4B
+/// where the graphics card can run it.
 pub const MODEL_FILENAME: &str = "qwen2.5-1.5b-instruct-q4_k_m.gguf";
 
 /// Human-readable names surfaced in the Settings UI (via `local_llm_status`) so
@@ -57,9 +56,215 @@ pub const RUNTIME_FILENAME: &str = "llamafile";
 /// Cold model-load can take a while on first start; cap the health wait.
 const HEALTH_TIMEOUT_SECS: u64 = 120;
 
+/// The context the sidecar serves (shared by its slots): room for the
+/// structured cleanup prompt + one-shots (~2.1k tokens) plus a long
+/// dictation, and for a Chat turn's tools, notes and history.
+pub const CONTEXT_TOKENS: u32 = 8192;
+
+/// The server's **host prompt cache**, MiB: **off**. llama.cpp's default
+/// (8 GB) saves every idle slot's prompt to RAM and clears the slot when
+/// another request starts, then copies it back for the next request that
+/// shares it. Over a model evaluation the Qwen3.5-4B server grew from 4.1
+/// to 6.7 GB with it, and the copy back is slow: a dictation's cleanup
+/// right after a Chat turn took **1.3–1.4 s instead of 0.13 s** on the 1.5B
+/// on an RTX 5070 Ti (0.7 s instead of 0.33 s on the 4B; 1.35 s instead of
+/// 0.85 s on a processor), every time (`yap.exe eval --cleanup`,
+/// docs/model-evals.md). Off, each slot keeps its own cache in the shared
+/// context: the cleanup's prompt stays where it was, and when a long Chat
+/// turn needs the room llama.cpp clears an idle slot (the next cleanup reads
+/// its ~2k-token prompt again, ~0.2 s on a card). 0 = off.
+pub const CACHE_RAM_MIB: u32 = 0;
+
+/// Per-slot **context checkpoints** for hybrid models (Qwen3.5's recurrent
+/// layers can't be rolled back, so llama.cpp saves their state at points of
+/// the prompt: ~50 MB each for the 4B). Default 32 a slot (up to 1.6 GB a
+/// slot); the cleanup needs the one at its last message, a tool loop's next
+/// step the latest, so 4 a slot measured the same (cleanup 0.32–0.36 s).
+pub const CTX_CHECKPOINTS: u32 = 4;
+
+/// The llamafile server's arguments, for Yap's sidecar and for the model
+/// evaluations (`eval/local.rs`), so both run a model the same way.
+/// `ngl`: layers on the GPU (999 = all that fit; 0 = the processor).
+///
+/// - `--reasoning off`: no thinking, whatever the model. Qwen3.5 thinks by
+///   default and, so, loops and times out on Chat (and slows every dictation's
+///   cleanup); the cleanup, Chat and the meeting notes all want the answer
+///   only. llama.cpp renders the template with `enable_thinking` false.
+/// - `--cache-ram` / `--ctx-checkpoints`: [`CACHE_RAM_MIB`], [`CTX_CHECKPOINTS`].
+/// - `-lv 4`: the log names the layers that went to the GPU
+///   (`load_tensors: offloaded 33/33 layers to GPU`, [`placement_in_log`]);
+///   a request adds ~25 lines and never its text.
+pub fn server_args(model: &Path, port: u16, ngl: u32, ctx: u32) -> Vec<String> {
+    vec![
+        // `--server` = OpenAI-compatible HTTP API only (no browser UI, no
+        // --nobrowser flag needed — and that flag is invalid in llamafile 0.10.3).
+        "--server".into(),
+        "--host".into(),
+        "127.0.0.1".into(),
+        "--port".into(),
+        port.to_string(),
+        "-m".into(),
+        model.to_string_lossy().into_owned(),
+        "-ngl".into(),
+        ngl.to_string(),
+        "-c".into(),
+        ctx.to_string(),
+        "--reasoning".into(),
+        "off".into(),
+        "--cache-ram".into(),
+        CACHE_RAM_MIB.to_string(),
+        "--ctx-checkpoints".into(),
+        CTX_CHECKPOINTS.to_string(),
+        "-lv".into(),
+        "4".into(),
+    ]
+}
+
+/// Where a model's layers went, read from the server's log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Placement {
+    /// Layers on the graphics card, of `layers`.
+    pub gpu_layers: u32,
+    pub layers: u32,
+}
+
+impl Placement {
+    /// "gpu" (all of it), "partial", or "cpu" (none of it).
+    pub fn kind(&self) -> &'static str {
+        if self.layers > 0 && self.gpu_layers >= self.layers {
+            "gpu"
+        } else if self.gpu_layers > 0 {
+            "partial"
+        } else {
+            "cpu"
+        }
+    }
+}
+
+/// Where the model went once the log says it loaded (`server_main: model
+/// loaded`): its offload line, or — none, as when no layer went to a GPU —
+/// the processor. `None` while the log doesn't say yet. Pure.
+pub fn placement_after_load(log: &str) -> Option<Placement> {
+    placement_in_log(log).or_else(|| log.contains("model loaded").then_some(Placement { gpu_layers: 0, layers: 0 }))
+}
+
+/// llama.cpp's `load_tensors: offloaded 29/29 layers to GPU` in a server log
+/// (`-lv 4`), as a [`Placement`]; `None` when the log doesn't say (still
+/// loading, or no layer went to a GPU: then llama.cpp writes no such line,
+/// [`placement_after_load`]). Pure.
+pub fn placement_in_log(log: &str) -> Option<Placement> {
+    let line = log.lines().rev().find(|l| l.contains("offloaded") && l.contains("layers to GPU"))?;
+    let rest = line.split("offloaded").nth(1)?.trim_start();
+    let (done, of) = rest.split_once('/')?;
+    let of: String = of.chars().take_while(|c| c.is_ascii_digit()).collect();
+    Some(Placement { gpu_layers: done.trim().parse().ok()?, layers: of.parse().ok()? })
+}
+
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
 static PORT: AtomicU16 = AtomicU16::new(0);
 static READY: AtomicBool = AtomicBool::new(false);
+/// The running sidecar's model id (its GGUF's name) and where its layers
+/// went; set once it's ready.
+static SERVING: Mutex<Option<Serving>> = Mutex::new(None);
+
+#[derive(Debug, Clone)]
+struct Serving {
+    model_id: String,
+    placement: Option<Placement>,
+}
+
+/// The model id Yap sends for a GGUF: its file name without `.gguf`
+/// (`qwen2.5-1.5b-instruct-q4_k_m`, `Qwen_Qwen3.5-4B-Q4_K_M`). llamafile
+/// serves the one model it was started with whatever the request names, so
+/// the id is for Yap: `tools::supports_tools` reads the model's family and
+/// size in it (the chat's tools are for models that can use them), and the
+/// answers and usage are put down to the right model.
+pub fn model_id(path: &Path) -> String {
+    path.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| MODEL_FILENAME.trim_end_matches(".gguf").to_string())
+}
+
+/// The id of the model the sidecar serves (or will, once started): the
+/// running one's, else the configured one's ([`active_model_path`]).
+pub fn active_model_id(cfg: &crate::config::YapConfig) -> String {
+    serving_id().unwrap_or_else(|| model_id(&active_model_path(cfg)))
+}
+
+fn serving_id() -> Option<String> {
+    SERVING.lock().ok()?.as_ref().map(|s| s.model_id.clone())
+}
+
+/// Where the running sidecar's model went (GPU, partly, the processor);
+/// `None` while it isn't running or the log didn't say.
+pub fn placement() -> Option<Placement> {
+    #[cfg(debug_assertions)]
+    if let Some((_, p)) = e2e_serving() {
+        return Some(p);
+    }
+    SERVING.lock().ok()?.as_ref().and_then(|s| s.placement)
+}
+
+/// Is the sidecar running, as Settings shows it ([`is_running`], or the e2e
+/// suite's stand-in, [`e2e_local_llm_serving`])?
+pub fn shown_running() -> bool {
+    #[cfg(debug_assertions)]
+    if e2e_serving().is_some() {
+        return true;
+    }
+    is_running()
+}
+
+/// The model file the sidecar serves, as Settings shows it.
+pub fn shown_model_file(cfg: &crate::config::YapConfig) -> String {
+    #[cfg(debug_assertions)]
+    if let Some((file, _)) = e2e_serving() {
+        return file;
+    }
+    active_model_path(cfg)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// A model that wants a graphics card (or any GGUF bigger than 2 GB) whose
+/// layers stayed on the processor, all or some: slow, and Settings says so,
+/// pointing at the 1.5B. Pure.
+pub fn slow_on_this_pc(file: &str, file_mb: u64, placement: Option<Placement>) -> bool {
+    let big = match CURATED_MODELS.iter().find(|m| m.filename == file) {
+        Some(m) => m.needs_gpu || m.size_mb > 2_000,
+        None => file_mb > 2_000,
+    };
+    big && placement.is_some_and(|p| p.kind() != "gpu")
+}
+
+#[cfg(debug_assertions)]
+static E2E_SERVING: Mutex<Option<(String, Placement)>> = Mutex::new(None);
+
+#[cfg(debug_assertions)]
+fn e2e_serving() -> Option<(String, Placement)> {
+    if !crate::e2e::active() {
+        return None;
+    }
+    E2E_SERVING.lock().ok()?.clone()
+}
+
+/// Test mode only: Settings shows the sidecar as running `file` with
+/// `gpu_layers` of `layers` on the graphics card (no process: nothing is
+/// routed to it); `file` absent = as it really is. For the e2e suite's
+/// "Runs on the processor" line.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_local_llm_serving(file: Option<String>, gpu_layers: Option<u32>, layers: Option<u32>) -> Result<(), String> {
+    if !crate::e2e::active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    *E2E_SERVING.lock().unwrap_or_else(|p| p.into_inner()) = file.map(|f| {
+        (f, Placement { gpu_layers: gpu_layers.unwrap_or(0), layers: layers.unwrap_or(33) })
+    });
+    Ok(())
+}
 
 /// Where the sidecar's files live: `<data_dir>/llm/`. Users can drop their own
 /// GGUF models in here and pick one in Settings.
@@ -168,12 +373,10 @@ pub fn effective_endpoint_for(
 ) -> (String, String, String, String) {
     if provider == PROVIDER_ONDEVICE {
         if let Some(url) = self::base_url() {
-            return (
-                url,
-                String::new(),
-                LOCAL_MODEL.to_string(),
-                PROVIDER_ONDEVICE.to_string(),
-            );
+            // The GGUF it serves, by name: `supports_tools` reads the model's
+            // family and size in it (it used to say the 1.5B whatever ran).
+            let id = serving_id().unwrap_or_else(|| model_id(&model_path()));
+            return (url, String::new(), id, PROVIDER_ONDEVICE.to_string());
         }
     }
     (
@@ -233,20 +436,9 @@ pub async fn start() -> Result<String, String> {
     };
 
     let mut cmd = std::process::Command::new(&exe);
-    // `--server` = OpenAI-compatible HTTP API only (no browser UI, no --nobrowser
-    // flag needed — and that flag is invalid in llamafile 0.10.3).
-    cmd.arg("--server")
-        .arg("--host")
-        .arg("127.0.0.1")
-        .arg("--port")
-        .arg(port.to_string())
-        .arg("-m")
-        .arg(&model)
-        .arg("-ngl")
-        .arg("999") // offload all layers to GPU; auto-falls back to CPU
-        .arg("-c")
-        .arg("8192") // room for the structured system prompt + one-shots (~2.1k
-        // tokens) plus a long dictation and its cleaned output
+    // All layers on the GPU (999; llama.cpp fits what it can, the rest stays
+    // on the processor, `placement`), thinking off, the caches capped.
+    cmd.args(server_args(&model, port, 999, CONTEXT_TOKENS))
         .stdin(std::process::Stdio::null())
         .stdout(to_stdio(log.as_ref().and_then(|f| f.try_clone().ok())))
         .stderr(to_stdio(log.and_then(|f| f.try_clone().ok())));
@@ -280,8 +472,29 @@ pub async fn start() -> Result<String, String> {
         }
         if let Ok(resp) = client.get(&health).send().await {
             if resp.status().is_success() {
+                // Where its layers went: a big model on the processor is slow,
+                // and Settings says so. The log may lag a moment behind.
+                let mut placement = None;
+                for _ in 0..10 {
+                    let log = std::fs::read_to_string(llm_dir().join("llamafile.log")).unwrap_or_default();
+                    placement = placement_after_load(&log);
+                    if placement.is_some() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                }
+                if let Ok(mut s) = SERVING.lock() {
+                    *s = Some(Serving { model_id: model_id(&model), placement });
+                }
                 READY.store(true, Ordering::SeqCst);
-                tracing::info!(port, "On-device cleanup sidecar ready");
+                tracing::info!(
+                    port,
+                    model = %model_id(&model),
+                    on = placement.map(|p| p.kind()).unwrap_or("?"),
+                    gpu_layers = placement.map(|p| p.gpu_layers).unwrap_or(0),
+                    layers = placement.map(|p| p.layers).unwrap_or(0),
+                    "On-device cleanup sidecar ready"
+                );
                 return Ok(format!("http://127.0.0.1:{}/v1", port));
             }
         }
@@ -335,6 +548,9 @@ pub fn kill_orphans() {}
 pub fn stop() {
     READY.store(false, Ordering::SeqCst);
     PORT.store(0, Ordering::SeqCst);
+    if let Ok(mut s) = SERVING.lock() {
+        *s = None;
+    }
     if let Ok(mut guard) = CHILD.lock() {
         if let Some(mut child) = guard.take() {
             let _ = child.kill();
@@ -392,11 +608,50 @@ pub struct CuratedLlm {
     pub url: &'static str,
     pub sha256: &'static str,
     pub size_mb: u32,
-    /// Marked as the suggested default in the Settings model browser.
-    pub recommended: bool,
+    /// The bundled default: the model an empty `pp_local_model` means (the
+    /// 1.5B), recommended where the PC has no graphics card for a bigger one.
+    pub default: bool,
+    /// Recommended on a PC whose graphics card can hold it
+    /// (`gpu::can_run_big_model`): too slow on a processor.
+    pub needs_gpu: bool,
     /// Model family for the browser's provider tabs + brand icon
     /// ("qwen"|"llama"|"gemma"|"mistral"|"phi").
     pub family: &'static str,
+}
+
+/// The on-device model that runs Chat's tools well where the graphics card
+/// can hold it: Qwen3.5-4B, thinking off (`server_args`). Measured with the
+/// model evaluations (docs/model-evals.md): 92–94% of the scenarios over two
+/// passes on an RTX 5070 Ti at ~1.3 s a turn, where the 1.5B gets 79% and
+/// can't act on notes; on a processor, 25 s a turn.
+pub const GPU_MODEL_ID: &str = "qwen3.5-4b";
+/// The default's id in [`CURATED_MODELS`].
+pub const DEFAULT_MODEL_ID: &str = "qwen2.5-1.5b";
+
+/// The model recommended for this PC: [`GPU_MODEL_ID`] when its graphics
+/// card can run it, else the 1.5B default. Pure.
+pub fn recommended_id(gpu_capable: bool) -> &'static str {
+    if gpu_capable {
+        GPU_MODEL_ID
+    } else {
+        DEFAULT_MODEL_ID
+    }
+}
+
+/// The bigger model to offer someone on the default (once, in Settings,
+/// never downloaded by itself): on a PC that can run it, while the on-device
+/// model is in use, on the 1.5B, and the offer wasn't turned down. Pure.
+pub fn upgrade_offer(gpu_capable: bool, in_use: bool, active_file: &str, dismissed: bool) -> Option<&'static CuratedLlm> {
+    if !gpu_capable || !in_use || dismissed || active_file != MODEL_FILENAME {
+        return None;
+    }
+    curated_by_id(GPU_MODEL_ID)
+}
+
+/// Is the on-device model what Chat or the cleanup uses (globally — Chat
+/// inherits the cleanup's endpoint —, a profile, or a Language-Models scope)?
+pub fn in_use(cfg: &crate::config::YapConfig) -> bool {
+    ondevice_selected(cfg)
 }
 
 /// Grouped by family, smallest→largest within a family. SHA-256s are the
@@ -412,18 +667,20 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         url: "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
         sha256: "6eb923e7d26e9cea28811e1a8e852009b21242fb157b26149d3b188f3a8c8653",
         size_mb: 398,
-        recommended: false,
+        default: false,
+        needs_gpu: false,
         family: "qwen",
     },
     CuratedLlm {
         id: "qwen2.5-1.5b",
         display: MODEL_DISPLAY,
-        blurb: "Fast and accurate — the recommended default",
+        blurb: "Fast and light: quick even without a graphics card",
         filename: MODEL_FILENAME,
         url: MODEL_URL,
         sha256: MODEL_SHA256,
         size_mb: 1043,
-        recommended: true,
+        default: true,
+        needs_gpu: false,
         family: "qwen",
     },
     CuratedLlm {
@@ -434,7 +691,22 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         url: "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
         sha256: "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
         size_mb: 2105,
-        recommended: false,
+        default: false,
+        needs_gpu: false,
+        family: "qwen",
+    },
+    CuratedLlm {
+        id: GPU_MODEL_ID,
+        display: "Qwen3.5 4B",
+        blurb: "Uses Chat's tools well: your notes, apps and the web. Wants a graphics card",
+        filename: "Qwen_Qwen3.5-4B-Q4_K_M.gguf",
+        // bartowski's Q4_K_M of Qwen/Qwen3.5-4B (Apache-2.0, ungated); the
+        // SHA-256 is its LFS oid, and the file the evaluations ran.
+        url: "https://huggingface.co/bartowski/Qwen_Qwen3.5-4B-GGUF/resolve/main/Qwen_Qwen3.5-4B-Q4_K_M.gguf",
+        sha256: "13c16f426047e2de38cd075bdade4a7bcbc8c774384876f677740cda65f8a983",
+        size_mb: 2873,
+        default: false,
+        needs_gpu: true,
         family: "qwen",
     },
     CuratedLlm {
@@ -445,7 +717,8 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         url: "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         sha256: "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
         size_mb: 4683,
-        recommended: false,
+        default: false,
+        needs_gpu: false,
         family: "qwen",
     },
     // ── Meta Llama ───────────────────────────────────────────────────────
@@ -457,7 +730,8 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         url: "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
         sha256: "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
         size_mb: 808,
-        recommended: false,
+        default: false,
+        needs_gpu: false,
         family: "llama",
     },
     CuratedLlm {
@@ -468,7 +742,8 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         url: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
         sha256: "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
         size_mb: 2019,
-        recommended: false,
+        default: false,
+        needs_gpu: false,
         family: "llama",
     },
     CuratedLlm {
@@ -479,7 +754,8 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         url: "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
         sha256: "7b064f5842bf9532c91456deda288a1b672397a54fa729aa665952863033557c",
         size_mb: 4921,
-        recommended: false,
+        default: false,
+        needs_gpu: false,
         family: "llama",
     },
     // ── Gemma (Google) ───────────────────────────────────────────────────
@@ -491,7 +767,8 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         url: "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
         sha256: "e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787",
         size_mb: 1709,
-        recommended: false,
+        default: false,
+        needs_gpu: false,
         family: "gemma",
     },
     CuratedLlm {
@@ -502,7 +779,8 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         url: "https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q4_K_M.gguf",
         sha256: "13b2a7b4115bbd0900162edcebe476da1ba1fc24e718e8b40d32f6e300f56dfe",
         size_mb: 5761,
-        recommended: false,
+        default: false,
+        needs_gpu: false,
         family: "gemma",
     },
     // ── Mistral ──────────────────────────────────────────────────────────
@@ -514,7 +792,8 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         url: "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
         sha256: "1270d22c0fbb3d092fb725d4d96c457b7b687a5f5a715abe1e818da303e562b6",
         size_mb: 4373,
-        recommended: false,
+        default: false,
+        needs_gpu: false,
         family: "mistral",
     },
     // ── Phi (Microsoft) ──────────────────────────────────────────────────
@@ -526,7 +805,8 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         url: "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
         sha256: "e4165e3a71af97f1b4820da61079826d8752a2088e313af0c7d346796c38eff5",
         size_mb: 2393,
-        recommended: false,
+        default: false,
+        needs_gpu: false,
         family: "phi",
     },
 ];
@@ -674,5 +954,94 @@ fn compute_sha256(path: &Path) -> std::io::Result<String> {
         hasher.update(&buf[..n]);
     }
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_log_says_where_the_layers_went() {
+        let gpu = "0.00.461.604 I load_tensors: offloading 27 repeating layers to GPU\n0.00.461.605 I load_tensors: offloaded 29/29 layers to GPU\n";
+        let p = placement_in_log(gpu).unwrap();
+        assert_eq!((p.gpu_layers, p.layers, p.kind()), (29, 29, "gpu"));
+        let partial = placement_in_log("I load_tensors: offloaded 20/33 layers to GPU").unwrap();
+        assert_eq!(partial.kind(), "partial");
+        let cpu = placement_in_log("I load_tensors: offloaded 0/33 layers to GPU").unwrap();
+        assert_eq!(cpu.kind(), "cpu");
+        assert_eq!(placement_in_log("I srv server_main: model loaded"), None);
+        // No line once loaded: no layer went to a GPU (llama.cpp only writes
+        // it when some did); still loading: unknown.
+        assert_eq!(placement_after_load("I srv server_main: model loaded").map(|p| p.kind()), Some("cpu"));
+        assert_eq!(placement_after_load("I srv load_model: loading model"), None);
+        assert_eq!(placement_after_load(gpu).map(|p| p.kind()), Some("gpu"));
+    }
+
+    #[test]
+    fn a_big_model_on_the_processor_is_slow_and_the_small_one_never() {
+        let cpu = Some(Placement { gpu_layers: 0, layers: 33 });
+        let gpu = Some(Placement { gpu_layers: 33, layers: 33 });
+        let some = Some(Placement { gpu_layers: 12, layers: 33 });
+        assert!(slow_on_this_pc("Qwen_Qwen3.5-4B-Q4_K_M.gguf", 2873, cpu));
+        assert!(slow_on_this_pc("Qwen_Qwen3.5-4B-Q4_K_M.gguf", 2873, some));
+        assert!(!slow_on_this_pc("Qwen_Qwen3.5-4B-Q4_K_M.gguf", 2873, gpu));
+        assert!(!slow_on_this_pc(MODEL_FILENAME, 1065, cpu));
+        // A GGUF of the person's own: by its size.
+        assert!(slow_on_this_pc("my-8b.gguf", 4_700, cpu));
+        assert!(!slow_on_this_pc("tiny.gguf", 400, cpu));
+        assert!(!slow_on_this_pc("Qwen_Qwen3.5-4B-Q4_K_M.gguf", 2873, None));
+    }
+
+    #[test]
+    fn the_four_b_is_recommended_where_the_card_can_run_it() {
+        assert_eq!(recommended_id(true), GPU_MODEL_ID);
+        assert_eq!(recommended_id(false), DEFAULT_MODEL_ID);
+        let big = curated_by_id(GPU_MODEL_ID).unwrap();
+        assert!(big.needs_gpu && !big.default);
+        assert_eq!(big.sha256.len(), 64);
+        assert!(big.url.ends_with(big.filename));
+        // Exactly one default, and it's the bundled file.
+        let defaults: Vec<_> = CURATED_MODELS.iter().filter(|m| m.default).collect();
+        assert_eq!(defaults.len(), 1);
+        assert_eq!((defaults[0].id, defaults[0].filename), (DEFAULT_MODEL_ID, MODEL_FILENAME));
+        // Ids are unique.
+        let mut ids: Vec<_> = CURATED_MODELS.iter().map(|m| m.id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), CURATED_MODELS.len());
+    }
+
+    #[test]
+    fn the_upgrade_is_offered_once_to_the_default_on_a_capable_pc() {
+        assert_eq!(upgrade_offer(true, true, MODEL_FILENAME, false).map(|m| m.id), Some(GPU_MODEL_ID));
+        assert!(upgrade_offer(false, true, MODEL_FILENAME, false).is_none(), "no card for it");
+        assert!(upgrade_offer(true, false, MODEL_FILENAME, false).is_none(), "on-device not in use");
+        assert!(upgrade_offer(true, true, MODEL_FILENAME, true).is_none(), "turned down");
+        assert!(upgrade_offer(true, true, "Qwen_Qwen3.5-4B-Q4_K_M.gguf", false).is_none(), "already on it");
+        assert!(upgrade_offer(true, true, "my-own.gguf", false).is_none(), "a model of their own");
+    }
+
+    #[test]
+    fn the_server_runs_without_thinking_and_with_its_caches_capped() {
+        let args = server_args(Path::new("m.gguf"), 5000, 999, CONTEXT_TOKENS);
+        let after = |flag: &str| args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str());
+        assert_eq!(after("--reasoning"), Some("off"));
+        assert_eq!(after("--cache-ram"), Some("0"));
+        assert_eq!(after("--ctx-checkpoints"), Some("4"));
+        assert_eq!(after("-ngl"), Some("999"));
+        assert_eq!(after("-c"), Some("8192"));
+        assert_eq!(after("-lv"), Some("4"));
+        assert_eq!(after("--port"), Some("5000"));
+        assert!(args.iter().any(|a| a == "--server"));
+    }
+
+    #[test]
+    fn the_model_id_is_the_files_name() {
+        assert_eq!(model_id(Path::new("C:/x/llm/Qwen_Qwen3.5-4B-Q4_K_M.gguf")), "Qwen_Qwen3.5-4B-Q4_K_M");
+        assert_eq!(model_id(&model_path()), "qwen2.5-1.5b-instruct-q4_k_m");
+        // The default's id gets no tools; the 4B's does.
+        assert!(!crate::tools::supports_tools(PROVIDER_ONDEVICE, &model_id(&model_path())));
+        assert!(crate::tools::supports_tools(PROVIDER_ONDEVICE, "Qwen_Qwen3.5-4B-Q4_K_M"));
+    }
 }
 

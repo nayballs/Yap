@@ -31,6 +31,7 @@ mod elevated;
 mod eval;
 mod fuzzy;
 mod gesture;
+mod gpu;
 mod media;
 mod media_pause;
 mod meeting;
@@ -570,6 +571,8 @@ pub fn run() {
             context_menu::e2e_context_menus,
             #[cfg(debug_assertions)]
             coaching::e2e_coaching_reset,
+            #[cfg(debug_assertions)]
+            local_llm::e2e_local_llm_serving,
             #[cfg(debug_assertions)]
             notice::e2e_notice_reset,
             #[cfg(debug_assertions)]
