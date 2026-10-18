@@ -407,7 +407,7 @@ pub async fn rewrite(
     }
     let selection = selection.trim();
 
-    // Immutable guardrails + the Voice Agent scope's editable body (tone/behaviour),
+    // Immutable guardrails + the Commands scope's editable body (tone/behaviour),
     // same split as dictation cleanup — an empty body yields the guardrails alone.
     let base = {
         let body = body.trim();

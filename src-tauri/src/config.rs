@@ -61,10 +61,11 @@ pub struct CleanupProfile {
 }
 
 /// A per-mode LLM configuration for one of Yap's AI **scopes** — the OpenWhispr-
-/// style "Language Models" bubbles: Dictation Cleanup, Voice Agent, Note
-/// Formatting, Chat. Each scope carries its own provider/model/key/prompt so a
-/// heavy cloud model can drive Voice Agent while cleanup runs on the fast local
-/// sidecar, etc. (OpenWhispr's `INFERENCE_SCOPES`, one config per bubble.)
+/// style "Language Models" bubbles: Dictation Cleanup, Commands (key
+/// `voiceAgent`, its name before 2026-10-18), Note Formatting, Chat & Voice
+/// Assistant (key `chat`). Each scope carries its own provider/model/key/prompt
+/// so a heavy cloud model can drive Commands while cleanup runs on the fast
+/// local sidecar, etc. (OpenWhispr's `INFERENCE_SCOPES`, one config per bubble.)
 ///
 /// **Back-compat:** the Dictation Cleanup scope is NOT stored here — it stays in
 /// the top-level `pp_*` fields, which the whole cleanup pipeline already reads.
@@ -72,9 +73,10 @@ pub struct CleanupProfile {
 /// `"voiceAgent"|"noteFormatting"|"chat"`. A missing key = the scope's feature is
 /// off / unconfigured; an empty `provider` inherits the global cleanup endpoint;
 /// Note Formatting falls back to the Cleanup scope (OpenWhispr `fallbackScope`).
-/// The runtime for Voice Agent (edit mode) / Note Formatting / Chat is wired in
-/// later steps — this struct is the storage those hang off. See `ROADMAP.md`
-/// Phase 4 "Multi-mode Language Models".
+/// Commands run in `pipeline::run_agent` (the wake word and edit mode), Note
+/// Formatting in the notes' Actions engine, Chat in `commands::chat_turn`
+/// (the Chat view and the Voice Assistant). The keys never change: they are
+/// what config.json holds.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LlmScope {
@@ -150,12 +152,20 @@ pub struct YapConfig {
     /// Default kb:120 = F9.
     #[serde(default = "default_hotkey")]
     pub hotkey: String,
-    /// Optional second hotkey for **edit/rewrite mode**: capture the selected
-    /// text, then treat your spoken words as an instruction to rewrite it (or, if
-    /// nothing is selected, to write new text). Empty = unbound (opt-in). Same
-    /// "kb:VKEY"/"mouse:ID" format as `hotkey`.
+    /// Optional second hotkey for **edit/rewrite mode** (one of the
+    /// **Commands**, Settings → Commands): capture the selected text, then
+    /// treat your spoken words as an instruction to rewrite it (or, if
+    /// nothing is selected, to write new text). Empty = unbound (opt-in).
+    /// Same "kb:VKEY"/"mouse:ID" format as `hotkey`.
     #[serde(default)]
     pub edit_hotkey: String,
+    /// The **Voice Assistant** shortcut (Settings → Voice Assistant,
+    /// `assistant.rs`): from any app, ask Yap's Chat something out loud and
+    /// hear the answer; it never types into the app you're in. Empty =
+    /// unbound (the default). Same spec format as `hotkey`; it never shares
+    /// a key with the other three (`input_hook::clashes`).
+    #[serde(default)]
+    pub assistant_hotkey: String,
     /// Active model id from the STT registry (e.g. "parakeet-tdt-0.6b-v3",
     /// "small"). Field name kept as `model_size` for config back-compat.
     #[serde(default = "default_model_size")]
@@ -384,17 +394,16 @@ pub struct YapConfig {
     /// See [`LlmScope`] and `ROADMAP.md` Phase 4 "Multi-mode Language Models".
     #[serde(default)]
     pub llm_scopes: std::collections::HashMap<String, LlmScope>,
-    /// The **Voice Agent** wake word (OpenWhispr "Agent Name"): speak this name
-    /// during dictation to address the agent — it executes your spoken command
-    /// instead of transcribing it verbatim. Empty = no wake word set (the agent
-    /// then only runs via the edit/rewrite hotkey). Also added to the dictionary
-    /// so the STT spells it right. (Persisted by the Agent name field in
-    /// Settings → Voice Agent; its model and prompt are Language Models →
-    /// Voice Agent.)
+    /// The name **Commands** answer to (OpenWhispr "Agent Name"; was "the
+    /// Voice Agent's wake word"): say it during a dictation and the AI does
+    /// your spoken command instead of typing it. Empty = "Yap". Also added to
+    /// the dictionary so the STT spells it right. (The name field is in
+    /// Settings → Commands; the model and prompt are Language Models →
+    /// Commands, the `voiceAgent` scope — its key kept for old configs.)
     #[serde(default)]
     pub agent_name: String,
 
-    /// **Spoken replies** (Settings → Voice Agent, the Chat view's 🔊):
+    /// **Spoken replies** (Settings → Voice Assistant, the Chat view's 🔊):
     /// Chat's answers read aloud (`tts.rs`). Off by default.
     #[serde(default)]
     pub speak_replies: bool,
@@ -645,6 +654,7 @@ impl Default for YapConfig {
         Self {
             hotkey: default_hotkey(),
             edit_hotkey: String::new(),
+            assistant_hotkey: String::new(),
             model_size: default_model_size(),
             use_gpu: true,
             input_device: None,

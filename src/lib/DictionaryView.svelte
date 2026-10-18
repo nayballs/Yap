@@ -37,7 +37,7 @@
       dict = [];
     }
     loaded = true;
-    // Settings can also touch the dictionary (Voice Agent name save) — track it.
+    // Settings can also touch the dictionary (Commands' name save) — track it.
     const onExternal = (e) => {
       if (!Array.isArray(e.detail)) return;
       const incoming = JSON.stringify(e.detail);

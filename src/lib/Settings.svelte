@@ -32,7 +32,7 @@
   import { PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
   import { createExternalLinkHandler } from './externalLinks.js';
   import { toast } from './ui/toast.svelte.js';
-  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup, formatHotkeySpec, fillHotkey } from './hotkeys.js';
+  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup, formatHotkeySpec, fillHotkey, hotkeysClash } from './hotkeys.js';
   import HotkeyInput from './ui/HotkeyInput.svelte';
   import { modelStore } from './modelStore.svelte.js';
   import { attention, attentionCount } from './attention.svelte.js';
@@ -82,9 +82,12 @@
       label: 'App',
       items: [
         { id: 'general', label: 'General' },
-        // Talk to Yap's AI and hear it answer: spoken replies (tts.rs) and
-        // the wake word (agent_detect.rs), one place.
-        { id: 'voice', label: 'Voice Agent' },
+        // Two different things, side by side: Commands make the AI *do*
+        // something and type it where you are (the agent's name in a
+        // dictation, agent_detect.rs; the rewrite shortcut); the Voice
+        // Assistant answers a question out loud (assistant.rs, tts.rs).
+        { id: 'commands', label: 'Commands' },
+        { id: 'voice', label: 'Voice Assistant' },
       ],
     },
     {
@@ -157,30 +160,32 @@
   // The four OpenWhispr-style "Language Models" scopes (the bubbles). Dictation
   // Cleanup keeps the legacy `pp_*` fields + the rich inline UI below; the other
   // three each have a dedicated component ported from OpenWhispr's tab —
-  // <VoiceAgentConfig> (DictationAgentSettings.tsx), <NoteFormattingConfig>,
-  // <ChatConfig> — all sharing <ScopeProviderConfig> for the endpoint half and
-  // operating on `cfg.llmScopes[scope]`. Voice Agent runtime = edit mode; Note
-  // Formatting / Chat land with their Phase 7 surfaces. See ROADMAP Phase 4.
+  // <VoiceAgentConfig> (DictationAgentSettings.tsx; the Commands tab),
+  // <NoteFormattingConfig>, <ChatConfig> — all sharing <ScopeProviderConfig>
+  // for the endpoint half and operating on `cfg.llmScopes[scope]`. The scope
+  // keys never change (config.json holds them): `voiceAgent` is Commands (the
+  // agent's name in a dictation + the rewrite shortcut), `chat` is Chat and
+  // the Voice Assistant. See ROADMAP Phase 4.
   let llmScope = $state('cleanup');
   const LLM_SCOPE_KEYS = ['voiceAgent', 'noteFormatting', 'chat'];
   const SCOPE_TABS = [
     { value: 'cleanup', label: 'Dictation Cleanup' },
-    { value: 'voiceAgent', label: 'Voice Agent' },
+    { value: 'voiceAgent', label: 'Commands' },
     { value: 'noteFormatting', label: 'Note Formatting' },
-    { value: 'chat', label: 'Chat' },
+    { value: 'chat', label: 'Chat & Voice Assistant' },
   ];
   const SCOPE_SUBTITLE = {
     cleanup: 'Configure the model that cleans up your dictation.',
-    voiceAgent: 'The model that runs your spoken commands ("Hey {name}, …" or the edit / rewrite hotkey). Its name and spoken replies are on the Voice Agent page.',
+    voiceAgent: 'The model that carries out Commands: "Hey {name}, …" in a dictation, and the rewrite shortcut. Its name and shortcut are on the Commands page.',
     noteFormatting: 'Configure the model that formats dictation into notes. Coming soon.',
-    chat: 'Configure the model that answers in Chat and in the Ask bar on your notes.',
+    chat: 'The model that answers in Chat, in the Ask bar on your notes, and when you ask the Voice Assistant out loud.',
   };
   // Per-scope UI copy + seed config for the three non-cleanup bubbles.
   const SCOPE_DEFAULTS = {
     voiceAgent: {
-      enableLabel: 'Enable Voice Agent',
+      enableLabel: 'Enable Commands',
       enableDesc:
-        'Speak a command and have the AI carry it out — say "Hey {name}" during dictation, or use your edit / rewrite hotkey (set it in General → Activation)',
+        'Speak a command and have the AI carry it out where you are — say "Hey {name}" during dictation, or use the rewrite shortcut (Settings → Commands)',
       promptLabel: 'Agent prompt',
       promptHint: 'How the agent should interpret and act on your spoken commands',
       // OpenWhispr's dictation-agent default (`locales/en/prompts.json` fullPrompt),
@@ -202,7 +207,7 @@
     },
     chat: {
       enableLabel: 'Enable Chat',
-      enableDesc: 'A voice assistant that answers questions',
+      enableDesc: 'Chat, the Ask bar on your notes and the Voice Assistant answer with it',
       promptLabel: 'Chat prompt',
       promptHint: "The assistant's personality and behaviour",
       prompt:
@@ -560,6 +565,7 @@
     llmScopes: {},
     agentName: '',
     editHotkey: '',
+    assistantHotkey: '',
     speakReplies: false,
     speakWhen: 'voice',
     talkBackHandsFree: true,
@@ -681,16 +687,19 @@
   // combos, modifier-only chords). Settings pauses the LIVE global binding
   // while capturing (so pressing the current hotkey doesn't start a
   // recording) and re-applies the picked spec after — plus validates that the
-  // dictation, edit and meeting keys don't collide.
+  // dictation, rewrite, meeting and assistant keys never fire on one press
+  // (`hotkeysClash`, input_hook.rs `clashes`).
   const HOTKEY_CMD = {
     hotkey: 'configure_hotkey',
     editHotkey: 'configure_edit_hotkey',
     meetingHotkey: 'configure_meeting_hotkey',
+    assistantHotkey: 'configure_assistant_hotkey',
   };
   const HOTKEY_NAMES = {
-    hotkey: 'dictation key',
-    editHotkey: 'edit / rewrite key',
+    hotkey: 'dictation hotkey',
+    editHotkey: 'rewrite shortcut',
     meetingHotkey: 'meeting shortcut',
+    assistantHotkey: 'assistant shortcut',
   };
   function onHotkeyCapturing(target, on) {
     if (!cfg) return;
@@ -699,8 +708,11 @@
   }
   function validateHotkey(target, spec) {
     if (!spec) return null;
-    const clash = Object.keys(HOTKEY_NAMES).find((other) => other !== target && cfg?.[other] === spec);
-    return clash ? `Already used by the ${HOTKEY_NAMES[clash]}` : null;
+    const clash = Object.keys(HOTKEY_NAMES).find((other) => other !== target && hotkeysClash(cfg?.[other], spec));
+    if (!clash) return null;
+    return cfg[clash] === spec
+      ? `Already used by the ${HOTKEY_NAMES[clash]}`
+      : `Clashes with the ${HOTKEY_NAMES[clash]} (${formatHotkeySpec(cfg[clash])}): one press would start both`;
   }
 
   // In-window hotkey fallback: when OUR OWN window has focus, the global
@@ -709,15 +721,21 @@
   // pipeline directly — combo-aware via lib/hotkeys.js, matching the Rust
   // hook's semantics. Guarded while the shortcut recorder is capturing. The
   // meeting shortcut (Win+Alt+M) goes first: a combo is more specific than a
-  // bare dictation key. Down and up both go to `dictation_key`, the hook's
-  // own path: the recording mode (and push-to-talk's tap / double-tap) is
-  // Rust's to decide.
+  // bare dictation key; then the Voice Assistant's shortcut. Down and up go
+  // to `dictation_key` / `assistant_key`, the hook's own paths: the recording
+  // mode (and push-to-talk's tap / double-tap) is Rust's to decide.
   function onFallbackKeyDown(e) {
     if (recording || e.repeat) return;
     if (hotkeyMatchesKeydown(e, cfg?.meetingHotkey)) {
       e.preventDefault();
       e.stopPropagation();
       invoke('meeting_shortcut', { origin: 'settings' }).catch(() => {});
+      return;
+    }
+    if (hotkeyMatchesKeydown(e, cfg?.assistantHotkey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      invoke('assistant_key', { pressed: true }).catch(() => {});
       return;
     }
     if (!hotkeyMatchesKeydown(e, cfg?.hotkey)) return;
@@ -727,6 +745,11 @@
   }
   function onFallbackKeyUp(e) {
     if (recording) return;
+    if (hotkeyMatchesKeyup(e, cfg?.assistantHotkey)) {
+      e.preventDefault();
+      invoke('assistant_key', { pressed: false }).catch(() => {});
+      return;
+    }
     if (!hotkeyMatchesKeyup(e, cfg?.hotkey)) return;
     e.preventDefault();
     invoke('dictation_key', { pressed: false }).catch(() => {});
@@ -893,7 +916,7 @@
     });
     return () => un.then((f) => f());
   });
-  // Voice Agent → Spoken replies (tts.rs). The Chat view's 🔊 saves "Speak
+  // Voice Assistant → Spoken replies (tts.rs). The Chat view's 🔊 saves "Speak
   // replies" in Rust: adopt it, or the next auto-save would undo it. The
   // engine, Kokoro's download, the voice and ▶ Preview are VoiceSettings;
   // switching replies on while Kokoro isn't downloaded offers it
@@ -916,14 +939,18 @@
     { value: 'always', label: 'Always' },
   ];
   const SPEAK_WHEN_DESC = {
-    voice: 'Answers to questions you dictate are read aloud; typed ones stay quiet',
+    voice: 'In Chat, answers to questions you dictate are read aloud; typed ones stay quiet',
     always: 'Every answer in Chat is read aloud',
   };
   const wakeName = $derived((cfg?.agentName || '').trim() || 'Yap');
-  function openAgentModel() {
+  // Commands' model and prompt: Language Models → Commands. The Voice
+  // Assistant's: Language Models → Chat & Voice Assistant.
+  function openScope(scope) {
     section = 'cleanup';
-    llmScope = 'voiceAgent';
+    llmScope = scope;
   }
+  // The other shortcuts, named for the General page's pointer to them.
+  const shortcutName = (spec) => (spec ? formatHotkeySpec(spec) : 'not set');
 
   // The notepad's consent message, edited there (notepad.rs): the same.
   onMount(() => {
@@ -954,7 +981,7 @@
     return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
-  // Broadcast Settings-side dictionary edits (e.g. the Voice Agent name save)
+  // Broadcast Settings-side dictionary edits (e.g. the Commands name save)
   // to DictionaryView — skipping echoes of updates we just received from it.
   $effect(() => {
     const json = JSON.stringify(cfg?.dictionary ?? null);
@@ -1434,6 +1461,13 @@
       <circle cx="12" cy="16" r="2" />
       <circle cx="18" cy="8" r="2" />
     </svg>
+  {:else if id === 'commands'}
+    <!-- A wand: the AI does it. -->
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="m4 20 11-11" />
+      <path d="m13 7 4 4" />
+      <path d="M17 3v3M15.5 4.5h3M20 9v2M19 10h2M9 3v2M8 4h2" />
+    </svg>
   {:else if id === 'voice'}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M11 5 6 9H2v6h4l5 4z" />
@@ -1620,17 +1654,15 @@
                 ]}
               />
             </Row>
+            <!-- The rewrite and assistant shortcuts live with what they do. -->
             <Row
-              label="Edit / rewrite hotkey"
-              desc="Select text, hold this key, and speak an instruction to rewrite it in place"
-              hint="e.g. “make this a bulleted list”. Needs AI cleanup configured. Backspace clears."
+              label="More shortcuts"
+              desc={`Rewrite selected text: ${shortcutName(cfg.editHotkey)} · Ask the Voice Assistant: ${shortcutName(cfg.assistantHotkey)}`}
             >
-              <HotkeyInput
-                bind:value={cfg.editHotkey}
-                clearable
-                validate={(s) => validateHotkey('editHotkey', s)}
-                oncapturingchange={(on) => onHotkeyCapturing('editHotkey', on)}
-              />
+              <div class="morekeys">
+                <Button variant="secondary" size="sm" onclick={() => (section = 'commands')}>Commands</Button>
+                <Button variant="secondary" size="sm" onclick={() => (section = 'voice')}>Voice Assistant</Button>
+              </div>
             </Row>
           </Group>
 
@@ -1913,12 +1945,108 @@
             </Group>
           </div>
 
-        {:else if section === 'voice'}
+        {:else if section === 'commands'}
+          <!-- Commands (pipeline.rs run_agent; Wispr Flow's Command Mode and
+               its old "Hey Flow"): the AI does what you say and types the
+               result where you are. Not the Voice Assistant, which answers
+               out loud. -->
           <div class="page-h">
-            <h1>Voice Agent</h1>
-            <p>Talk to Yap's AI and hear it answer.</p>
+            <h1>Commands</h1>
+            <p>Tell Yap's AI what to write, and it types the result where you are.</p>
           </div>
-          <Group title="Spoken replies">
+          <div class="explain" role="note">
+            <p class="example">
+              Say <q>Hey {wakeName}, reply that I'll be late</q> in any app; Yap writes it and types it there.
+            </p>
+            <p class="crossref">
+              Want an answer you can hear instead?
+              <button class="xlink" onclick={() => (section = 'voice')}>Voice Assistant</button>
+            </p>
+          </div>
+          <div id="settings-wake-word">
+            <Group title="Say its name">
+              <Row>
+                <Toggle
+                  bind:checked={cfg.llmScopes.voiceAgent.enabled}
+                  label="Answer to its name in any dictation"
+                  desc={`Say "${wakeName}, …" while you dictate anywhere and the AI does what you ask instead of typing your words`}
+                />
+              </Row>
+              <Row>
+                {#snippet children()}
+                  <div class="agentname">
+                    <span class="anlabel">Agent name</span>
+                    <AgentNameField {cfg} />
+                  </div>
+                {/snippet}
+              </Row>
+            </Group>
+          </div>
+          <Group title="Rewrite selected text">
+            <Row
+              label="Rewrite shortcut"
+              desc="Select text in any app, press this, and say how to change it: Yap rewrites it in place. With nothing selected, it writes new text where your cursor is"
+              hint="e.g. “make this a bulleted list”, “more formal”. Backspace clears."
+            >
+              <HotkeyInput
+                bind:value={cfg.editHotkey}
+                clearable
+                validate={(s) => validateHotkey('editHotkey', s)}
+                oncapturingchange={(on) => onHotkeyCapturing('editHotkey', on)}
+              />
+            </Row>
+          </Group>
+          <Group title="Model and prompt">
+            <Row label="Which AI carries out Commands, and how" desc="Language Models → Commands. With “Answer to its name” off, the rewrite shortcut uses the Dictation Cleanup model">
+              <Button variant="secondary" size="sm" onclick={() => openScope('voiceAgent')}>Language Models → Commands</Button>
+            </Row>
+          </Group>
+
+        {:else if section === 'voice'}
+          <!-- The Voice Assistant (assistant.rs + tts.rs): ask Yap's Chat
+               out loud and hear the answer. Not Commands, which type. -->
+          <div class="page-h">
+            <h1>Voice Assistant</h1>
+            <p>Ask Yap something by voice and hear the answer, like a voice assistant.</p>
+          </div>
+          <div class="explain" role="note">
+            <p class="example">
+              {#if cfg.assistantHotkey}
+                Press {formatHotkeySpec(cfg.assistantHotkey)} in any app and ask <q>What's on my notes for the launch?</q>: Yap answers out loud, and the conversation is in Chat.
+              {:else}
+                Set a shortcut below, press it in any app and ask <q>What's on my notes for the launch?</q>: Yap answers out loud, and the conversation is in Chat.
+              {/if}
+            </p>
+            <p class="crossref">
+              Want Yap to write something into the app you're in?
+              <button class="xlink" onclick={() => (section = 'commands')}>Commands</button>
+            </p>
+          </div>
+          <div id="settings-assistant-shortcut">
+            <Group title="Assistant shortcut">
+              <Row
+                label="Assistant shortcut"
+                desc={cfg.recordingMode === 'pushToTalk'
+                  ? 'Hold it while you ask, or double-tap it to ask hands-free. It never types into the app you are in; press it while Yap speaks to cut in'
+                  : 'Press it, ask, press it again. It never types into the app you are in; press it while Yap speaks to cut in'}
+                hint="Every answer is read aloud, whatever “When to speak” says; never while a meeting records. Backspace clears."
+              >
+                <HotkeyInput
+                  bind:value={cfg.assistantHotkey}
+                  clearable
+                  placeholder="Set a shortcut"
+                  validate={(s) => validateHotkey('assistantHotkey', s)}
+                  oncapturingchange={(on) => onHotkeyCapturing('assistantHotkey', on)}
+                />
+              </Row>
+              {#if !cfg.assistantHotkey}
+                <Row>
+                  <p class="gentle">Set an assistant shortcut to ask Yap from any app, even while its window is closed.</p>
+                </Row>
+              {/if}
+            </Group>
+          </div>
+          <Group title="Spoken replies in Chat">
             <Row>
               <Toggle
                 bind:checked={() => cfg.speakReplies, setSpeakReplies}
@@ -1942,28 +2070,11 @@
           <Group title="Voice">
             <VoiceSettings {cfg} />
           </Group>
-          <div id="settings-wake-word">
-            <Group title="Wake word">
-              <Row>
-                <Toggle
-                  bind:checked={cfg.llmScopes.voiceAgent.enabled}
-                  label="Answer to its name in any dictation"
-                  desc={`Say "${wakeName}, …" while you dictate anywhere and the AI does what you ask instead of typing your words`}
-                />
-              </Row>
-              <Row>
-                {#snippet children()}
-                  <div class="agentname">
-                    <span class="anlabel">Agent name</span>
-                    <AgentNameField {cfg} />
-                  </div>
-                {/snippet}
-              </Row>
-              <Row label="Model and prompt" desc="Which AI runs the wake word's commands, and how">
-                <Button variant="secondary" size="sm" onclick={openAgentModel}>Language Models → Voice Agent</Button>
-              </Row>
-            </Group>
-          </div>
+          <Group title="Model">
+            <Row label="Which AI answers" desc="The same as Chat's: Language Models → Chat & Voice Assistant">
+              <Button variant="secondary" size="sm" onclick={() => openScope('chat')}>Language Models → Chat & Voice Assistant</Button>
+            </Row>
+          </Group>
 
         {:else if section === 'models'}
           <div class="page-h">
@@ -2024,7 +2135,7 @@
         {:else if section === 'cleanup'}
           <div class="page-h">
             <h1>Language Models</h1>
-            <p>{SCOPE_SUBTITLE[llmScope]}</p>
+            <p>{SCOPE_SUBTITLE[llmScope].replace('{name}', wakeName)}</p>
           </div>
           <div class="scope-tabs">
             <PillTabs value={llmScope} options={SCOPE_TABS} onchange={(v) => (llmScope = v)} renderIcon={scopeIcon} />
@@ -3075,7 +3186,7 @@
   .page-h {
     margin: 0 0 22px;
   }
-  /* Scope "bubbles" row (Dictation Cleanup / Voice Agent / Note Formatting / Chat). */
+  /* Scope "bubbles" row (Dictation Cleanup / Commands / Note Formatting / Chat & Voice Assistant). */
   .scope-tabs {
     margin: 0 0 20px;
   }
@@ -3186,7 +3297,70 @@
     width: 100%;
   }
 
-  /* Voice Agent: the agent's name (the voice is VoiceSettings). */
+  /* Commands / Voice Assistant: what the page does, in one example, and the
+     way to the other one (they're easy to mix up). */
+  .explain {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: -8px 0 22px;
+    padding: 12px 14px;
+    border: 1px solid var(--yap-border-subtle);
+    border-left: 3px solid var(--yap-primary-line);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s2);
+  }
+  .explain p {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .explain .example {
+    color: var(--yap-fg);
+  }
+  .explain q {
+    font-style: italic;
+  }
+  .explain .crossref {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    color: var(--yap-muted);
+  }
+  .xlink {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-primary);
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .xlink::after {
+    content: ' →';
+  }
+  .xlink:hover {
+    text-decoration: underline;
+  }
+  /* "Set an assistant shortcut…": a quiet nudge while none is set. */
+  .gentle {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: var(--yap-r);
+    background: var(--yap-primary-wash);
+    color: var(--yap-fg-80);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  /* General → Activation: the ways to the other shortcuts. */
+  .morekeys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* Commands: the agent's name. */
   .agentname {
     display: flex;
     flex-direction: column;

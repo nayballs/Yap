@@ -6,7 +6,10 @@ again — Yap transcribes **locally on the GPU**, optionally runs the text throu
 is focused. A chime marks start/stop, a correction dictionary fixes mis-heard jargon,
 and the **Yap bar** — a tiny pill above the taskbar on whichever screen you're using —
 shows a live waveform while you talk, opens into Dictate / Meeting notes on hover, and
-carries Yap's notices (call prompts) while its window isn't focused.
+carries Yap's notices (call prompts) while its window isn't focused. Two ways to
+talk to Yap's AI, kept apart: **Commands** (say its name in a dictation, or the
+rewrite shortcut: the AI writes and types for you) and the **Voice Assistant**
+(its own shortcut: ask out loud from any app and hear the answer).
 
 This file documents how Yap actually runs today. For *where it's going* and the
 competitive strategy, see `ROADMAP.md` in the **private** docs repo (below).
@@ -248,16 +251,29 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   captured `target_hwnd`) → the submit key when auto-submit or the voice command
   asked (once, `app_kind::submit_key`; a dictation of only "press enter" presses it only while the
   target window still has the focus). **The dictation signal** for a meeting
-  recording: `start_recording` (plain dictation, the edit hotkey, the wake-word
-  path) calls `dictation_began()` and the stop/cancel `dictation_ended()`, one
+  recording: `start_recording` (plain dictation, the edit hotkey, Commands by
+  name, the assistant shortcut) calls `dictation_began()` and the stop/cancel `dictation_ended()`, one
   atomic (`DICTATION`: dictations started << 1 | recording) that
   `meeting.rs` reads lock-free in its mic callback (`dictation_state()`) to
   keep dictations out of a meeting's "You" side. `PREROLL_SAMPLES` is shared
-  with it (the meeting blanks a dictation's pre-roll too). **Voice Agent wake word**
-  (`agent_detect.rs`, OpenWhispr `detectAgentName` port): a dictation addressing the
-  agent by name (`agent_name`, default "Yap"; fuzzy-matched) routes the whole
-  transcript through the Voice-Agent scope in write mode (`run_agent`, shared with
-  the edit hotkey) instead of cleanup — the agent prompt strips the name+command.
+  with it (the meeting blanks a dictation's pre-roll too). **Commands** (two
+  different things share no name any more, 2026-10-18: *Commands* type for
+  you, the *Voice Assistant* answers out loud): by name (`agent_detect.rs`,
+  OpenWhispr `detectAgentName` port) a dictation addressing the
+  agent (`agent_name`, default "Yap"; fuzzy-matched) routes the whole
+  transcript through the Commands scope (`llm_scopes["voiceAgent"]`, its key kept) in write mode (`run_agent`, shared with
+  the edit hotkey = the rewrite shortcut) instead of cleanup — the agent prompt strips the name+command.
+  **The Voice Assistant's shortcut** (`Pipeline::on_assistant_key`, the
+  hook's `assistant-key-*` or the in-page `assistant_key`): the same
+  `on_key` (toggle / push-to-talk gestures; no coaching hints for it) with
+  `ASSISTANT_ARMED` set for the press, so the recording it starts is the
+  assistant's (`destination(edit, assistant, chat_armed, chat_focused,
+  own_window)` → `Goes::Paste | ChatBox | Assistant`, pure, in
+  `capture_target`, which calls `assistant::listening` before "recording");
+  `run_stt` hands its transcript, after `apply_corrections` only, to
+  `assistant::heard` (`ask_assistant`): no cleanup, Command, paste or
+  history; nothing heard → "Yap didn't catch a question"; a cancel isn't
+  kept for Undo; every early end calls `assistant::nothing`.
   **Barge-in**: `start_recording` first calls `tts::stop_for_dictation()` —
   a spoken reply stops before anything records, and if Yap was audible in
   the last ~450 ms the pre-roll is left out (it would hold Yap's voice).
@@ -1347,7 +1363,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   themselves whether the window counts as focused, `e2e_focus`). **Rules per
   kind** (`rule`: a bar card's id / a notification's tag): priority (Prompt —
   call, calendar, meeting-limit, meeting-checkin — > Alert — micBlocked,
-  pasteBlocked, calls-fatigue — > Info > Tip — hint, word-suggestion), held
+  pasteBlocked, calls-fatigue, assistantNoModel, and the Voice Assistant's
+  answer `assistant` (never held, never stale) — > Info > Tip — hint, word-suggestion), held
   while dictating (+ `SETTLE_MS` 1.5 s, and while onboarding is on screen)
   or a meeting records, a cooldown for the same text (micBlocked and
   meeting-notice 10 min), how long it may wait unseen (tips 10 s, a word
@@ -1366,7 +1383,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
 - **`alert.rs`** — one-off notices the person must act on (`elevated.rs`'s
   "Your text is copied: press Ctrl+V", `mic_privacy.rs`'s "Windows is blocking
   microphone access…", call-prompt fatigue's "Stop asking about calls?" /
-  "Yap stopped asking about calls"): in one place (`notice::place`) — a
+  "Yap stopped asking about calls", the Voice Assistant's "Pick an AI model
+  for the Voice Assistant" with Open settings → Language Models → Chat &
+  Voice Assistant): in one place (`notice::place`) — a
   toast in the main window while it's focused (`yap-alert` →
   `lib/alerts.js`, kind `alert`), else a Yap bar card, else a Windows
   notification, else the window on screen; the same alert again within its
@@ -1420,7 +1439,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   "windows"), tts_voice (Kokoro's, "af_bella"), tts_windows_voice ("" =
   Windows' default), tts_rate (1.0, 0.5–2.0); config v2 moved a saved
   Windows voice from tts_voice to tts_windows_voice and "windows" (never a
-  choice before) to "kokoro"). JSON
+  choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
+  = unbound, the default), Commands' edit_hotkey (the rewrite shortcut)
+  + agent_name + the `voiceAgent` scope (field and key names unchanged by
+  the 2026-10-18 rename, so no setting resets). JSON
   load/save + `apply_dictionary` (corrections; skips snippets) +
   `apply_snippets` + `term_regex` (the whole-word matcher both use) +
   `dictionary_prompt` (the Whisper `initial_prompt` vocabulary, in the order
@@ -1610,9 +1632,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the quiet countdown and the check-ins, notices), `updates` ("Yap X is ready"), `calendar` (the reminder before a
   meeting, as a call card), `coaching` (push-to-talk tips), `learn` (a word
   to add to the dictionary), `alert` (a paste into an admin app, Windows'
-  microphone privacy). An Esc watch (a low-level keyboard
+  microphone privacy), `assistant` (the Voice Assistant's answer, style
+  "answer"; Esc stops its voice). The bar also follows `yap-assistant`
+  (`State.assistant`, in `Status.assistant`): the window shows while a
+  question is asked, answered or read aloud, bar on or off, and ■ on the
+  capsule is `bar_action "assistant-stop"`. An Esc watch (a low-level keyboard
   hook that only looks) runs only while an on-screen card offers Esc (the
-  auto-start countdown). Debug-only `bar_simulate` (pretend cursor on a
+  auto-start countdown, the assistant's answer). Debug-only `bar_simulate` (pretend cursor on a
   region, fake fullscreen kinds, Esc, demo cards) and `bar_debug` (the real
   ex-styles, WindowFromPoint on the pill, the thread's active window) for the
   e2e suite. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Light / Dark,
@@ -1637,9 +1663,17 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (press = key down w/ required modifiers held, release = key up OR required
   modifier up; chords fire on completion; suppressed keys are excluded from the
   GetAsyncKeyState self-heal — the hook eats them before the key-state table
-  updates). Three bindings: dictation, edit (`edit-key-*`) and the meeting
+  updates). Four bindings: dictation, edit (`edit-key-*`, Commands' rewrite
+  shortcut), the meeting
   shortcut (`meeting-key-*`, `configure_meeting`; only its press is used —
-  `meeting_guard`). A combo holding **Alt or Win** whose main key is swallowed
+  `meeting_guard`) and the Voice Assistant's (`assistant-key-*`,
+  `configure_assistant`; unbound by default; `configure_assistant_from`
+  leaves one that clashes unbound). **`clashes(a, b)`** (pure, unit-tested;
+  `hotkeysClash` in `lib/hotkeys.js` is the same rule, Settings refuses with
+  it): the same key however written, combos on one key nesting (Ctrl+Space
+  inside Ctrl+Shift+Space), a chord completing inside a combo or bigger
+  chord; a bare key and its combos don't (a bare key fires only with no
+  modifier held), unless it's a modifier itself. A combo holding **Alt or Win** whose main key is swallowed
   taps an unassigned **menu-mask key** (vkE8, AutoHotkey's `#MenuMaskKey`)
   while the modifiers are still down, sent by the forwarder thread
   (`needs_menu_mask`): otherwise releasing Alt opens the focused app's menu
@@ -1653,8 +1687,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   receives the hotkey (WebView2/Chromium front-runs the hook chain on focus) —
   so the Settings + onboarding pages catch the hotkey **in-page** (keydown and
   keyup → `dictation_key { pressed }`, the hook's own path into `on_key`, so
-  push-to-talk's gestures work there too; Settings also catches the meeting shortcut →
-  `meeting_shortcut`). Any new Yap window with focusable UI needs the
+  push-to-talk's gestures work there too; Settings and the notepad also catch the meeting shortcut →
+  `meeting_shortcut`, and the assistant shortcut → `assistant_key { pressed }`). Any new Yap window with focusable UI needs the
   same fallback.
 - **`text_injector.rs`** — clipboard paste (+ optional clipboard restore) and
   `press_submit` (Enter / Ctrl+Enter / Shift+Enter) via `SendInput`. **An app
@@ -1783,8 +1817,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   bracket/quote or at the field start; trailing space only before a letter/digit;
   none next to Chinese/Japanese (`is_cjk`; Hangul uses spaces). Replacing a
   selection: its first word's case (same safety rules, or the same word again), its
-  end punctuation, and any space it began/ended with. Edit mode and the Voice Agent
-  (wake word) paste the AI's text untouched, as before.
+  end punctuation, and any space it began/ended with. Edit mode and Commands
+  by name paste the AI's text untouched, as before.
 - **`app_kind.rs`** — **what kind of app a dictation goes into**, and what that
   changes about the paste (Wispr Flow's app categories + terminal/coding-CLI
   handling + chat full stops, by behaviour). `of_window(hwnd)` (at record start
@@ -1826,7 +1860,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   break in it); never "?", "!", "…", "...", an abbreviation's own full stop or a
   snippet saved ending with one. In a terminal with terminal mode on, the text
   around the cursor isn't read, edit mode never sends Ctrl+C
-  (`selection::capture_selection(target, false)`) and the rewrite / Voice Agent
+  (`selection::capture_selection(target, false)`) and the rewrite / Command
   reply goes through `terminal_text` too. An `#[ignore]`d `this_machines_windows`
   classifies the PC's real windows (`YAP_APP_KIND_TITLES=1` prints titles).
 - **`sound.rs`** — start/stop chimes (volume + output-device aware); each
@@ -1834,7 +1868,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   played (or at once when it can't): how `mute.rs` goes after the start
   chime and comes back after the stop chime. `open_output` (the configured
   output device, else the default) is shared with `tts.rs`.
-- **`tts.rs`** — **spoken replies** (Settings → Voice Agent, Chat's Voice
+- **`tts.rs`** — **spoken replies** (Settings → Voice Assistant, Chat's Voice
   replies toggle, ▶ on answers). **Engines** (`Engine` → `Synth`, text →
   `Pcm`; `prepare` (Kokoro joins sentences under 3 words to the next),
   `cancel`): **Kokoro** (`tts/kokoro.rs`, below; the default) and
@@ -1880,7 +1914,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   {speaking, messageId, error}` on every change. **When to speak** (pure):
   `auto_speak(speak_replies, speak_when, asked_by_voice, dictating,
   meeting)` (chat_send's `speak`), `sends_by_itself(speak_replies,
-  hands_free, said_enter)`. Commands `tts_voices` (`{engine, active,
+  hands_free, said_enter)` — the Voice Assistant's answers ignore both
+  (`assistant::reply`), and every state change is passed to
+  `assistant::on_tts_state` (its answer ended). Commands `tts_voices` (`{engine, active,
   engines, kokoro: {voices, defaultVoice}, kokoroStatus, windows: {voices,
   defaultVoice, error}}`), `tts_speak {text, messageId}`, `tts_preview
   {voice, rate, engine?}` (Kokoro not installed → "Download Kokoro to hear
@@ -1956,6 +1992,42 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
     {dest: {url, sha256, size}}}`; a debug build takes a zip for the MSI).
     `#[ignore]`d `real_download_from_the_pinned_sources`
     (`YAP_TTS_DOWNLOAD_DIR`).
+- **`assistant.rs`** — the **Voice Assistant** (2026-10-18; Settings →
+  Voice Assistant): ask Yap's Chat out loud from any app with its own
+  shortcut (`assistant_hotkey`, unbound by default) and hear the answer;
+  it never takes the focus or types. Not **Commands** (the agent's name in a
+  dictation, the rewrite shortcut: the AI types for you — Wispr's Command
+  Mode and old "Hey Flow"; Wispr has no spoken-answer assistant). Phases
+  `Idle → Listening → Thinking → Speaking` in `yap-assistant {phase,
+  conversationId, messageId}` (the bar). `listening` (from
+  `capture_target`; bumps a generation, drops the last answer's card),
+  `heard(question)` (after the STT + dictionary) → `answer`: no Chat model
+  (`commands::resolve_chat_endpoint` errs) → the `assistantNoModel` alert
+  with **Open settings** (`alert::OPEN_AI_SETTINGS` → Language Models →
+  Chat & Voice Assistant; a model that fails → `assistantFailed`, the
+  reason + "Your question is in Chat."); else **`choose_conversation(viewing,
+  open_exists, latest, now)`** (pure): the conversation open in the Chat
+  view (`chat_view_state {open, conversationId, newChat}`: ChatView
+  reports it), a new one if "New chat" was clicked there, else the last
+  updated if under `RECENT_SECS` (30 min) — so pressing again asks a
+  follow-up — else a new one; then `commands::chat_turn` (the Chat view's
+  own turn: RAG, tools, `voice: true`), `yap-assistant-turn {phase:
+  asked|answered|failed|open, conversationId, show}` for the main window
+  (`show` = the window was in front: ControlPanel brings Chat up on it).
+  **`reply(meeting, interrupted)`** (pure): always **spoken** (whatever
+  "Speak replies" / "When to speak" say), except while a meeting records
+  or when a dictation started meanwhile → shown only; a newer question or
+  ■ (the generation) → not said at all (it's in Chat). While the main
+  window isn't in front (`notice::place` = Bar) a card (`style:
+  "answer"`, id `assistant`: the question, the answer's markdown ≤ 1,200
+  chars, a note "Not read aloud while a meeting records", Open in Chat;
+  ✕ / Esc = `stop`), shown before the voice starts; it goes when the
+  voice ends (`on_tts_state`), or after `read_ms` when shown only. `stop`
+  (■ on the capsule = `bar_action "assistant-stop"`, `assistant_stop`).
+  The bar's capsule shows while `phase != Idle`, the bar on or off.
+  Debug-only `e2e_assistant_ask {text, listenMs}` (`Robot::ask_assistant`:
+  the press's own steps — barge-in, the target, "recording" for
+  `listenMs` — with `text` as the transcript).
 - **`mute.rs`** — **other apps' sound while you dictate** (2026-10-17; it
   replaced the old endpoint mute, which silenced Yap's own start chime and
   any call): **"Silence other apps while you dictate"**
@@ -2038,7 +2110,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   stand-in voices, Kokoro as silence once its stand-in files are installed
   from the suite's local server — `YAP_TTS_SOURCES` —, a simulated clock, no
   audio device; what would have been said in `tts_e2e_spoken`), `e2e_chat_dictation {text}` (a
-  question dictated into the Chat view, no mic needed), `e2e_coaching_reset` (every
+  question dictated into the Chat view, no mic needed), `e2e_assistant_ask
+  {text, listenMs}` (a question to the Voice Assistant, as its shortcut
+  asks it, no mic needed), `e2e_coaching_reset` (every
   push-to-talk hint due again), `e2e_notice_reset` / `e2e_focus` /
   `e2e_notice` (notice.rs: cooldowns and fatigue forgotten before every
   test, whether the main window counts as focused — by default while it's on
@@ -2113,7 +2187,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   = the question was dictated; returns the two messages' ids and `speak`,
   `tts::auto_speak`), `chat_dictate` / `chat_input_focus` (the Chat view's
   mic and box, pipeline.rs `to_chat`), debug-only `e2e_chat_dictation
-  {text}` (a dictated chat question without a mic),
+  {text}` (a dictated chat question without a mic), `chat_send`'s turn
+  itself is `chat_turn` (shared with the Voice Assistant),
+  `configure_assistant_hotkey` / `assistant_key` (the assistant shortcut,
+  live-applied / in-page), `chat_view_state` + `assistant_stop`
+  (assistant.rs),
   `meeting_start` (then `calendar::on_meeting_started`)/`meeting_stop`/
   `meeting_state`, `transcribe_file`/`cancel_file_transcription`/
   `audio_file_info`, `log_info`/`open_logs_folder`, `delete_history_entry`.
@@ -2290,8 +2368,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   that opens Chat with the question (scope `meetings`, through
   `chatRequest.svelte.js`), plus a **Past chats ↗** chip (opens Chat). **`HomeView.svelte`** = the Wispr-style
   Home: time-of-day greeting with the hotkey as **amber keycaps**, a dark
-  **rotating hero card** (4 tips — voice edit / AI cleanup / meeting notes /
-  per-app profiles — picked by day, dot nav, CTAs open the right Settings
+  **rotating hero card** (5 tips — Commands (voice edit) / AI cleanup / meeting notes /
+  per-app profiles / the Voice Assistant — picked by day, dot nav, CTAs open the right Settings
   section or view via `onnavigate`), the dictation feed (day-grouped flat rows
   w/ hover-revealed meta + copy/delete via `delete_history_entry`, live refresh
   on `yap-history-changed`, icon-expand search on Ctrl+K), and a right-rail stats
@@ -2396,7 +2474,16 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `yap-chat-dictation` (inserted at the caret, never pasted) and is sent at
   once when `send` says so; such questions are sent with `voice: true` (a
   small mic on the bubble). Esc, leaving Chat, another conversation, the
-  next question and any dictation starting stop the voice. No streaming or
+  next question and any dictation starting stop the voice. **The Voice
+  Assistant** (`assistant.rs`): the view reports what it shows
+  (`chat_view_state`: the conversation, or "New chat" clicked) and follows
+  `yap-assistant-turn` live — it switches to the question's conversation,
+  the question with its mic, "Thinking…" (`assistantPending`), the answer
+  (Rust reads it aloud); ControlPanel brings Chat up for one asked while the
+  window is in front (`show`) or "Open in Chat" (`chatRequest {assistant}`).
+  An empty chat says "Or press F8 in any app to ask out loud…", or offers
+  **Set an assistant shortcut** (→ Settings `voice#assistant-shortcut`).
+  No streaming or
   semantic vectors yet (ROADMAP step 3). **`IntegrationsView.svelte`** = the
   Integrations surface (OpenWhispr `IntegrationsView.tsx`, local-first cut):
   a **Calendar** card (`CalendarLinkCard.svelte`: Connect → the "Connect
@@ -2436,7 +2523,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   stop circle with its 8×8 square; hovered, it widens to show the timer.
   `bar/DictationCapsule.svelte` (the dictation overlay — waveform in Yap
   amber, live partials word-paced by `bar/dictation.svelte.js`, which listens
-  for the page's whole life; a small amber lock after the dot while push-to-
+  for the page's whole life; a question to the **Voice Assistant**
+  (`dictation.assistant`, `data-ask`) is its own variant: an amber edge and
+  a ✦ for the dot, "Ask Yap…" + waveform (or the words) while it listens,
+  "Thinking…", then three bars + "Speaking…", with a ■ (`assistant-stop`,
+  region "assistant") while it thinks or speaks; a small amber lock after the dot while push-to-
   talk's double-tap holds it hands-free; the dead-mic watchdog's "No sound
   from <device> — is it muted?" — or "Windows is blocking the microphone" — in
   the waveform's place, with a red edge; while it records a quiet ✕ on the
@@ -2571,8 +2662,23 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   readable against any desktop.
 - **`lib/Settings.svelte`** — the settings surface, now rendered **inside the
   ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / Connections / System):
-  **Voice Agent** (App, after General; id `voice`) — the one place for
-  talking to Yap's AI: **Spoken replies** ("Speak replies" `speakReplies`;
+  two pages for two different things (2026-10-18; both were "Voice
+  Agent"), each opening with one sentence and an example in a note
+  (`role="note"`) that links to the other: **Commands** (App, after
+  General; id `commands`): "Tell Yap's AI what to write, and it types the
+  result where you are" — *Say "Hey Jarvis, reply that I'll be late" in
+  any app; Yap writes it and types it there* (the agent's name, live); **Say
+  its name** (`#settings-wake-word`: the Commands scope's enable switch
+  `llmScopes.voiceAgent.enabled` "Answer to its name in any dictation", the
+  agent name — `AgentNameField.svelte`), **Rewrite selected text** (the
+  **Rewrite shortcut**, `editHotkey`, moved here from General →
+  Activation), **Model and prompt** → Language Models → Commands. **Voice
+  Assistant** (id `voice`): "Ask Yap something by voice and hear the
+  answer, like a voice assistant" — the example names the shortcut once
+  set; **Assistant shortcut** (`#settings-assistant-shortcut`,
+  `ui/HotkeyInput` `assistantHotkey`, clearable, "Set a shortcut", with a
+  gentle "Set an assistant shortcut…" line while none is set; its line
+  follows the recording mode), **Spoken replies in Chat** ("Speak replies" `speakReplies`;
   "When to speak" Segmented When I asked by voice / Always `speakWhen`;
   "Talk back hands-free" `talkBackHandsFree`, greyed while replies are off),
   switching "Speak replies" on while Kokoro isn't downloaded offers it
@@ -2591,13 +2697,21 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   downloaded); Speed slider 0.5–2.0× `ttsRate`; the credit line: Kokoro
   Apache-2.0 from onnx-community, misaki Apache-2.0, eSpeak NG GPL-3.0 run
   separately, licences and the source link saved with them;
-  `kokoro.svelte.js` is the download store) and **Wake word** (`#settings-wake-word`: the
-  Voice Agent scope's enable switch, the agent name — `AgentNameField.svelte`,
-  moved here from Language Models → Voice Agent, which now shows the name
-  with a link back — and "Language Models → Voice Agent" for its model and
-  prompt). `yap-voice-replies` (Chat's toggle) is adopted into the config copy.
+  `kokoro.svelte.js` is the download store) and **Model** → Language
+  Models → Chat & Voice Assistant. `yap-voice-replies` (Chat's toggle) is
+  adopted into the config copy. **Hotkeys**: the four (`HOTKEY_CMD` /
+  `HOTKEY_NAMES`: dictation hotkey, rewrite shortcut, meeting shortcut,
+  assistant shortcut) are refused when they'd fire on one press
+  (`hotkeysClash`: "Already used by the …", or "Clashes with the … (Win +
+  Alt + M): one press would start both"); the in-page fallback catches the
+  meeting, assistant and dictation keys, in that order. **Language Models**
+  tabs read Dictation Cleanup / **Commands** (`VoiceAgentConfig.svelte`,
+  scope `voiceAgent`, "Name and shortcut in Commands") / Note Formatting /
+  **Chat & Voice Assistant** (`ChatConfig.svelte`, scope `chat`, a line
+  linking to the Voice Assistant page).
   **General** (hotkey, recording mode — in push-to-talk its line says how
-  double-tap goes hands-free, mic, sound+volume, then "Silence other apps
+  double-tap goes hands-free, "More shortcuts" naming the rewrite and
+  assistant shortcuts with buttons to Commands / Voice Assistant, mic, sound+volume, then "Silence other apps
   while you dictate" (`quietOtherApps`) and "Pause music and videos while
   you dictate" (`pauseMedia`) where "Mute while recording" was; **Yap bar** group
   (`#settings-bar`, the bar menu's Settings → "general#bar"): Show the Yap bar
@@ -3089,7 +3203,7 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   of the languages Kokoro reads, from its 1.52.0 MSI; **GPL-3.0**, run as a
   separate program, never linked; `COPYING` + the source link in
   NOTICE.txt), each with a `NOTICE.txt` (`tts/registry.rs`; size + SHA-256
-  verified). Attribution: Settings → Voice Agent → Voice. Deleted from the
+  verified). Attribution: Settings → Voice Assistant → Voice. Deleted from the
   Kokoro row; ~352 MB.
 - Groq usage: `%APPDATA%/yap/groq_usage.json`.
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → History).
@@ -3177,8 +3291,13 @@ builds), and the dictation pipeline around it is complete: multi-engine STT
 (push-to-talk with double-tap hands-free and coaching tips, 2026-10-17), a dead-mic
 watchdog (reopen, then "No sound from <mic>"),
 language/translate, **AI cleanup** (BYO key or local sidecar) with per-app routing +
-named profiles + per-profile model choice, **edit/rewrite mode** + the **Voice Agent
-wake word**, **spoken replies** (`tts.rs`, 2026-10-18: Chat's answers read
+named profiles + per-profile model choice, **Commands** (the rewrite shortcut +
+the agent's name in a dictation; "Voice Agent" until 2026-10-18), the **Voice
+Assistant** (`assistant.rs`, 2026-10-18: its own shortcut, ask Chat out loud
+from any app and hear the answer, a bar capsule and card, follow-ups,
+barge-in, text only over a meeting; the rules unit-tested and the whole
+flow e2e-tested from a staged transcript with the main window hidden and
+in front — not yet asked with a real mic and heard on speakers), **spoken replies** (`tts.rs`, 2026-10-18: Chat's answers read
 aloud in Windows' voices — the Voice replies toggle, ▶ on every answer,
 "only when I asked by voice", hands-free talk-back, barge-in; text prep, the
 queue and the decisions unit-tested, synthesis checked silently on this PC's

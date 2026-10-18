@@ -186,6 +186,26 @@ pub fn configure_meeting_hotkey(spec: String) {
     let _ = crate::input_hook::configure_meeting(&spec);
 }
 
+/// Live-apply the Voice Assistant shortcut (the Settings recorder pauses it
+/// while choosing a key, as for the others).
+#[tauri::command]
+pub fn configure_assistant_hotkey(spec: String) {
+    let _ = crate::input_hook::configure_assistant(&spec);
+}
+
+/// The assistant shortcut went down (`pressed`) or up in one of Yap's own
+/// windows (their in-page fallback: the global hook never sees keys while a
+/// Yap webview has the focus). The hook's own path, so push-to-talk's hold
+/// and double-tap work there too.
+#[tauri::command]
+pub fn assistant_key(state: State<'_, AppState>, pressed: bool) {
+    if let Ok(guard) = state.pipeline.lock() {
+        if let Some(p) = guard.as_ref() {
+            p.on_assistant_key(pressed, None);
+        }
+    }
+}
+
 /// Toggle recording on/off (the bar's Dictate, a view's mic button).
 #[tauri::command]
 pub fn toggle_recording(state: State<'_, AppState>) {
@@ -821,27 +841,41 @@ pub fn chat_delete(id: u64) {
     crate::chats::delete(id);
 }
 
-/// Send one chat turn. Creates the conversation on first message (title =
+/// One chat turn, answered: what [`chat_turn`] returns.
+pub(crate) struct ChatTurn {
+    pub conversation_id: u64,
+    /// The question's and the answer's indexes in the conversation.
+    pub user_index: usize,
+    pub index: usize,
+    pub reply: String,
+    pub tools_used: Vec<String>,
+    pub model: crate::chats::ChatModel,
+}
+
+impl ChatTurn {
+    /// The answer's id, as the pages call it ("chat:<conversation>:<index>").
+    pub fn message_id(&self) -> String {
+        format!("chat:{}:{}", self.conversation_id, self.index)
+    }
+}
+
+/// One chat turn, for the Chat view (`chat_send`) and the Voice Assistant
+/// (`assistant.rs`). Creates the conversation on first message (title =
 /// first 50 chars, OpenWhispr's rule), persists both sides, and answers via
 /// the Chat scope with eager keyword-RAG over the notes library injected under
-/// their exact framing line. Returns `{ conversationId, reply, toolsUsed,
-/// model, messageId, userMessageId, speak }`: the two messages' ids
-/// ("chat:<conversation>:<index>", what the page calls them) and whether the
-/// answer is read out by itself (`tts::auto_speak`: spoken replies on, and
-/// "When to speak" says so — `voice`: the question was dictated, kept with
-/// it).
+/// their exact framing line. `asked` runs once the question is saved (the
+/// conversation's id and the question's index), before the model is called.
 /// A note the tools create or change is announced as it happens, like any
 /// other note edit (`yap-note-changed` with origin "chat", then
 /// `yap-notes-changed`), so the notepad and the lists follow it live.
-#[tauri::command]
-pub async fn chat_send(
-    app: AppHandle,
+pub(crate) async fn chat_turn(
+    app: &AppHandle,
     conversation_id: Option<u64>,
-    text: String,
-    scope: Option<String>,
-    voice: Option<bool>,
-) -> Result<serde_json::Value, String> {
-    let by_voice = voice.unwrap_or(false);
+    text: &str,
+    scope: Option<&str>,
+    by_voice: bool,
+    asked: impl FnOnce(u64, usize) + Send,
+) -> Result<ChatTurn, String> {
     let text = text.trim().to_string();
     if text.is_empty() {
         return Err("Type a message first".to_string());
@@ -880,6 +914,7 @@ pub async fn chat_send(
         .map(|m| (m.role.clone(), m.text.clone()))
         .collect();
     let user_index = crate::chats::append(conv.id, "user", &text, &[], None, by_voice)?;
+    asked(conv.id, user_index);
 
     // System prompt: persona (+ tool instructions when the model can
     // tool-call) + eager-RAG notes under their exact framing. OpenWhispr runs
@@ -892,7 +927,7 @@ pub async fn chat_send(
     }
     // Asked from the Meetings view: grounded in the latest meetings and the
     // meeting notes that match (calendar.rs).
-    if scope.as_deref() == Some("meetings") {
+    if scope == Some("meetings") {
         let meetings = crate::calendar::meetings_context(&text);
         if !meetings.is_empty() {
             system.push_str(&format!(
@@ -900,7 +935,7 @@ pub async fn chat_send(
             ));
         }
     }
-    let rag = if scope.as_deref() == Some("meetings") { String::new() } else { rag_context(&text) };
+    let rag = if scope == Some("meetings") { String::new() } else { rag_context(&text) };
     if !rag.is_empty() {
         system.push_str(&format!(
             "\n\nBelow are notes from the user's library that may be relevant. Reference them naturally if they help answer the question.\n\n{rag}"
@@ -910,7 +945,7 @@ pub async fn chat_send(
     let (reply, tools_used) = if tools_supported {
         let notify = |id: u64| {
             use tauri::Emitter;
-            note_changed(&app, id, "chat");
+            note_changed(app, id, "chat");
             let _ = app.emit("yap-notes-changed", ());
         };
         crate::tools::run_tool_loop(
@@ -941,6 +976,25 @@ pub async fn chat_send(
         (reply, Vec::new())
     };
     let index = crate::chats::append(conv.id, "assistant", &reply, &tools_used, Some(answered_by.clone()), false)?;
+    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: answered_by })
+}
+
+/// Send one chat turn from the Chat view ([`chat_turn`]). Returns `{
+/// conversationId, reply, toolsUsed, model, messageId, userMessageId, speak
+/// }`: the two messages' ids ("chat:<conversation>:<index>", what the page
+/// calls them) and whether the answer is read out by itself
+/// (`tts::auto_speak`: spoken replies on, and "When to speak" says so —
+/// `voice`: the question was dictated, kept with it).
+#[tauri::command]
+pub async fn chat_send(
+    app: AppHandle,
+    conversation_id: Option<u64>,
+    text: String,
+    scope: Option<String>,
+    voice: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let by_voice = voice.unwrap_or(false);
+    let turn = chat_turn(&app, conversation_id, &text, scope.as_deref(), by_voice, |_, _| {}).await?;
     // Read out by itself? (Asked at the answer: a dictation may have started
     // meanwhile, and the settings may have changed.)
     let now = config::load();
@@ -952,12 +1006,12 @@ pub async fn chat_send(
         crate::meeting::is_recording(),
     );
     Ok(serde_json::json!({
-        "conversationId": conv.id,
-        "reply": reply,
-        "toolsUsed": tools_used,
-        "model": answered_by,
-        "messageId": format!("chat:{}:{}", conv.id, index),
-        "userMessageId": format!("chat:{}:{}", conv.id, user_index),
+        "conversationId": turn.conversation_id,
+        "reply": turn.reply,
+        "toolsUsed": turn.tools_used,
+        "model": turn.model,
+        "messageId": turn.message_id(),
+        "userMessageId": format!("chat:{}:{}", turn.conversation_id, turn.user_index),
         "speak": speak,
     }))
 }
@@ -1006,6 +1060,7 @@ pub fn save_config(
     if let Err(e) = crate::input_hook::configure_meeting(&cfg.meeting_hotkey) {
         tracing::warn!("Failed to apply meeting hotkey: {}", e);
     }
+    crate::input_hook::configure_assistant_from(&cfg);
     // The tray is reconciled on every save (always-on since the pill retired) —
     // reconcile it live instead of waiting for the next app restart.
     crate::tray::ensure_tray(&app, &cfg);
@@ -1208,8 +1263,8 @@ pub fn get_base_prompt() -> String {
     crate::llm::BASE_PROMPT.to_string()
 }
 
-/// The immutable **edit/rewrite (Voice Agent)** guardrail prompt, exposed so the
-/// Voice Agent tab's Prompt Studio can show the full effective prompt (guardrails
+/// The immutable **edit/rewrite (Commands)** guardrail prompt, exposed so the
+/// Commands tab's Prompt Studio can show the full effective prompt (guardrails
 /// + the editable agent body) in its View tab. See `llm::EDIT_BASE_PROMPT`.
 #[tauri::command]
 pub fn get_edit_base_prompt() -> String {

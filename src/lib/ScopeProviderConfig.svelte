@@ -84,7 +84,7 @@
   }
   // Adopt the shared key on mount: a scope freshly pointed at a provider the
   // user already keyed elsewhere shouldn't sit on an empty key (the bug where
-  // Voice Agent hit Anthropic/Groq with no key while Cleanup had one).
+  // Commands hit Anthropic/Groq with no key while Cleanup had one).
   untrack(() => {
     if (cfg && SHARED_KEY_IDS.has(scope.provider)) {
       if (!scope.apiKey) scope.apiKey = sharedKey(scope.provider);

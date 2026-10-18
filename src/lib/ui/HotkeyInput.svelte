@@ -80,6 +80,9 @@
         return; // stay capturing so the user can try again
       }
     }
+    // A refused key's warning goes with the key that's taken.
+    warning = null;
+    clearTimeout(warnTimer);
     value = spec;
     stop();
   }

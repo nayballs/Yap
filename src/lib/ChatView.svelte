@@ -17,7 +17,7 @@
   // message goes to and switches the Chat scope's; each answer keeps the
   // model that wrote it (chats.rs `model`), shown quietly under it.
   //
-  // Spoken replies (tts.rs, Settings → Voice Agent): the 🔊 / 🔇 next to the
+  // Spoken replies (tts.rs, Settings → Voice Assistant): the 🔊 / 🔇 next to the
   // chip turns "Speak replies" on and off (voice_replies_set; Settings'
   // copy adopts it from `yap-voice-replies`); every answer has ▶ Read aloud
   // (■ Stop while it's read, "Speaking…" on it); with replies on, an answer
@@ -28,6 +28,14 @@
   // is sent at once when Rust says so ("Talk back hands-free", or "press
   // enter" said). Esc, leaving Chat, sending the next question and any
   // dictation starting (Rust's barge-in) stop the voice.
+  //
+  // The Voice Assistant (assistant.rs): a question asked out loud with its
+  // shortcut, from any app, lands in Chat — the conversation open here, else
+  // the last one if it's recent, else a new one — so this view tells Rust
+  // what it shows (`chat_view_state`) and follows the question live
+  // (`yap-assistant-turn`: the question, marked asked by voice, then
+  // "Thinking…", then the answer, which Rust reads aloud). With no shortcut
+  // set, the empty thread says how to set one.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy, tick, untrack } from 'svelte';
@@ -37,6 +45,7 @@
   import ModelChip from './ModelChip.svelte';
   import { modelLine, whereItRuns } from './aiModel.js';
   import { speech, initSpeech, readAloud as speakText, stopReading as stopSpeech } from './speech.svelte.js';
+  import { formatHotkeySpec } from './hotkeys.js';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…".
@@ -67,6 +76,15 @@
   let sendWhenFree = false;
   let alive = true;
 
+  // ---- The Voice Assistant
+  // Its shortcut ('' = none set: the empty thread offers to set one).
+  let assistantHotkey = $state('');
+  // The conversation whose spoken question is being answered ("Thinking…").
+  let assistantPending = $state(null);
+  // "New chat" was clicked: a spoken question starts a new conversation
+  // rather than continuing the last one.
+  let choseNew = false;
+
   const chatId = (conv, i) => `chat:${conv}:${i}`;
   const voiceTitle = $derived(
     speakReplies
@@ -81,6 +99,7 @@
       const c = await invoke('get_config');
       speakReplies = !!c?.speakReplies;
       speakWhen = c?.speakWhen || 'voice';
+      assistantHotkey = c?.assistantHotkey || '';
     } catch {
       /* keep */
     }
@@ -169,7 +188,51 @@
     input = '';
     byVoice = false;
     scope = null;
+    choseNew = true;
+    reportView();
     setTimeout(() => inputEl?.focus(), 0);
+  }
+
+  // What this view shows, for a question asked out loud (assistant.rs
+  // `choose_conversation`): the conversation open here, a new chat someone
+  // asked for, or — nothing chosen — no preference.
+  function reportView(open = true) {
+    invoke('chat_view_state', {
+      open,
+      conversationId: activeId,
+      newChat: activeId == null && choseNew,
+    }).catch(() => {});
+  }
+  $effect(() => {
+    void activeId;
+    untrack(() => {
+      if (alive) reportView();
+    });
+  });
+
+  // A question asked with the assistant shortcut (assistant.rs): this view
+  // switches to its conversation and shows it as it goes — the question at
+  // once, "Thinking…" while the answer comes, then the answer (read aloud by
+  // Rust). Never stops the voice: it's the answer being followed.
+  async function followAssistant(p) {
+    const id = p?.conversationId;
+    if (p?.phase === 'asked') assistantPending = id ?? null;
+    else if (p?.phase === 'answered' || p?.phase === 'failed') assistantPending = null;
+    if (id == null) return;
+    try {
+      const conv = await invoke('chat_get', { id });
+      if (!alive) return;
+      if (activeId !== id) {
+        activeId = id;
+        scope = null;
+      }
+      messages = (conv.messages || []).map((m, i) => ({ ...m, id: chatId(id, i) }));
+      refreshList();
+      scrollThread();
+    } catch {
+      /* deleted meanwhile */
+    }
+    // A failed answer: Rust says so where it'll be seen (an alert, alert.rs).
   }
 
   async function removeConversation(id, e) {
@@ -284,6 +347,9 @@
     setTimeout(() => inputEl?.focus(), 0);
     const uns = [
       listen('yap-chat-dictation', (e) => onChatDictation(e.payload)),
+      // A question asked with the assistant shortcut, live (and its card's
+      // "Open in Chat").
+      listen('yap-assistant-turn', (e) => followAssistant(e.payload)),
       listen('yap-voice-replies', (e) => {
         if (typeof e.payload?.on === 'boolean') speakReplies = e.payload.on;
       }),
@@ -298,6 +364,7 @@
     alive = false;
     stopReading();
     reportFocus(false);
+    reportView(false);
   });
 
   // A question handed over by another view (the Meetings view's Ask bar):
@@ -309,6 +376,12 @@
     untrack(() => {
       if (req.dictated) {
         onChatDictation(req);
+        return;
+      }
+      // A question asked out loud while Chat wasn't open (ControlPanel
+      // brought it up): its conversation, as it goes.
+      if (req.assistant) {
+        followAssistant(req.assistant);
         return;
       }
       newChat();
@@ -368,6 +441,15 @@
       <div class="empty">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8M8 13h5" /></svg>
         <p>Ask about your notes, transcripts, or anything else</p>
+        <!-- The Voice Assistant: the same chat, asked out loud from any app. -->
+        <p class="asknote">
+          {#if assistantHotkey}
+            Or press <kbd>{formatHotkeySpec(assistantHotkey)}</kbd> in any app to ask out loud and hear the answer.
+          {:else}
+            <button class="setkey" onclick={() => onopensettings?.('voice#assistant-shortcut')}>Set an assistant shortcut</button>
+            to ask out loud from any app and hear the answer.
+          {/if}
+        </p>
       </div>
     {:else}
       <div class="msgs" bind:this={threadEl}>
@@ -427,7 +509,7 @@
             </div>
           {/if}
         {/each}
-        {#if sending}
+        {#if sending || (assistantPending != null && assistantPending === activeId)}
           <div class="cbubble assistant"><p class="cbody thinking">Thinking…</p></div>
         {/if}
       </div>
@@ -458,7 +540,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
         </button>
         <ModelChip {onopensettings} />
-        <!-- Spoken replies on / off (Settings → Voice Agent → Speak replies). -->
+        <!-- Spoken replies on / off (Settings → Voice Assistant → Speak replies). -->
         <button
           class="voicebtn"
           class:on={speakReplies}
@@ -623,6 +705,34 @@
     max-width: 220px;
     font-size: 12px;
     line-height: 1.6;
+  }
+  /* The Voice Assistant's line: a gentle way to its shortcut. */
+  .empty .asknote {
+    max-width: 280px;
+    margin-top: 6px;
+    color: var(--yap-muted);
+  }
+  .asknote kbd {
+    padding: 1px 6px;
+    border: 1px solid var(--yap-key-border);
+    border-radius: var(--yap-r-sm);
+    background: var(--yap-key-bg);
+    color: var(--yap-key-fg);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .setkey {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-primary);
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .setkey:hover {
+    text-decoration: underline;
   }
   .msgs {
     flex: 1 1 auto;

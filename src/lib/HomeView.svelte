@@ -15,12 +15,15 @@
   let historyEnabled = $state(true);
   let hotkeyLabel = $state('F9');
   let editHotkeyLabel = $state('');
+  let assistantHotkeyLabel = $state('');
   let cleanupEnabled = $state(false);
   let copiedTs = $state(null);
 
   // Rotating hero tips: a different card each day (dots to browse). Each tip
-  // teaches one feature that already exists — the hero is onboarding forever.
-  const TIP_COUNT = 4;
+  // teaches one feature that already exists — the hero is onboarding forever:
+  // Commands (rewrite by voice), AI cleanup, meeting notes, per-app profiles,
+  // the Voice Assistant.
+  const TIP_COUNT = 5;
   let tipIndex = $state(Math.floor(Date.now() / 86_400_000) % TIP_COUNT);
   // Feed search (OpenWhispr Ctrl+K): plain client-side text filter. Wispr
   // style: just an icon until opened.
@@ -85,6 +88,7 @@
         cleanupEnabled = cfg?.postProcessEnabled === true;
         if (cfg?.hotkey) hotkeyLabel = formatHotkeySpec(cfg.hotkey);
         if (cfg?.editHotkey) editHotkeyLabel = formatHotkeySpec(cfg.editHotkey);
+        if (cfg?.assistantHotkey) assistantHotkeyLabel = formatHotkeySpec(cfg.assistantHotkey);
       })
       .catch(() => {});
     // History changed (a dictation or upload saved, an entry deleted, all
@@ -200,7 +204,7 @@
                 {#if editHotkeyLabel}
                   hold {@render keycaps(editHotkeyLabel)},
                 {:else}
-                  hold your edit key,
+                  hold your rewrite shortcut,
                 {/if}
                 and say the change — “make this a list”, “more formal”, “fix the grammar”.
               </p>
@@ -218,17 +222,26 @@
               <p>
                 Hit Record on a note and Yap transcribes you and the other side — then writes up decisions and action items.
               </p>
-            {:else}
+            {:else if tipIndex === 3}
               <h2>A different style for <em>every app</em></h2>
               <p>
                 Formal in email, casual in Slack, precise in your editor — per-app profiles switch the cleanup style automatically.
+              </p>
+            {:else}
+              <h2>Ask out loud, <em>hear the answer</em></h2>
+              <p>
+                {#if assistantHotkeyLabel}
+                  Press {@render keycaps(assistantHotkeyLabel)} in any app and ask about your notes or anything else — Yap answers out loud, without leaving what you're doing.
+                {:else}
+                  Give the Voice Assistant a shortcut, then ask from any app — Yap answers out loud, and the conversation waits in Chat.
+                {/if}
               </p>
             {/if}
           </div>
           <div class="heroside">
             {#if tipIndex === 0}
-              <button class="herocta" onclick={() => onopensettings?.('cleanup')}>
-                {editHotkeyLabel ? 'Tune the voice agent' : 'Set up voice editing'}
+              <button class="herocta" onclick={() => onopensettings?.('commands')}>
+                {editHotkeyLabel ? 'Tune Commands' : 'Set up Commands'}
               </button>
             {:else if tipIndex === 1}
               <button class="herocta" onclick={() => onopensettings?.('cleanup')}>
@@ -236,8 +249,12 @@
               </button>
             {:else if tipIndex === 2}
               <button class="herocta" onclick={() => onnavigate?.('notes')}>Open Notes</button>
-            {:else}
+            {:else if tipIndex === 3}
               <button class="herocta" onclick={() => onopensettings?.('cleanup')}>Set up profiles</button>
+            {:else}
+              <button class="herocta" onclick={() => onopensettings?.('voice')}>
+                {assistantHotkeyLabel ? 'Voice Assistant settings' : 'Set an assistant shortcut'}
+              </button>
             {/if}
             <div class="herodots" role="tablist" aria-label="Tips">
               {#each Array(TIP_COUNT) as _, i}

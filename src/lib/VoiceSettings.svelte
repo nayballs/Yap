@@ -1,5 +1,5 @@
 <script>
-  // Settings → Voice Agent → Voice: the engine (Kokoro, the natural voices
+  // Settings → Voice Assistant → Voice: the engine (Kokoro, the natural voices
   // on this PC, recommended; or Windows' own voices), Kokoro's download row
   // (Download / Active / delete, like the speech models'), the voice picker
   // that follows the engine (Kokoro's 54 voices grouped by accent and

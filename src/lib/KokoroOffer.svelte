@@ -1,6 +1,6 @@
 <script>
   // Turning on "Speak replies" while Kokoro isn't downloaded: the offer to
-  // download it (Settings → Voice Agent). Speak replies stays on either way;
+  // download it (Settings → Voice Assistant). Speak replies stays on either way;
   // Windows voices speak until Kokoro is in.
   import Button from './ui/Button.svelte';
   import { kokoro, downloadKokoro, formatMb } from './kokoro.svelte.js';

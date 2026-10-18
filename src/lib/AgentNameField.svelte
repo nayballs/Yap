@@ -1,8 +1,8 @@
 <script>
-  // The Voice Agent's name — the wake word ("Yap, …" in a dictation runs it
-  // as a command; agent_detect.rs). Settings → Voice Agent. Moved out of
-  // Language Models → Voice Agent (OpenWhispr's DictationAgentSettings "Agent
-  // Name"), which now points here.
+  // The name Commands answer to ("Yap, …" in a dictation runs it as a
+  // command; agent_detect.rs). Settings → Commands. Not on Language Models →
+  // Commands (OpenWhispr's DictationAgentSettings "Agent Name"), which points
+  // here.
   //
   //   cfg: the Settings config $state (cfg.agentName + cfg.dictionary).
   import Input from './ui/Input.svelte';

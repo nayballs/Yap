@@ -32,6 +32,10 @@ export const dictation = $state({
   micSilentFull: '',
   // How long a cancelled dictation can be undone (`yap-dictation-cancelled`).
   undoMs: 10_000,
+  // A question to the Voice Assistant (assistant.rs, `yap-assistant`):
+  // 'idle' | 'listening' | 'thinking' | 'speaking'. Not idle, the capsule is
+  // the assistant's ("Ask Yap…", "Thinking…", "Speaking…" with ■).
+  assistant: 'idle',
 });
 
 // ---- Live partial transcript (streaming preview) ----
@@ -103,6 +107,11 @@ export function initDictation() {
     if (state === 'idle' || state === 'needs-model' || state === 'error' || state === 'recording' || state === 'cancelled') {
       clearPartial();
     }
+  });
+  // Said before the assistant's recording starts (pipeline.rs), so its
+  // first frame is already the assistant's.
+  listen('yap-assistant', (e) => {
+    dictation.assistant = e.payload?.phase || 'idle';
   });
   listen('yap-dictation-cancelled', (e) => {
     if (e.payload?.undoMs > 0) dictation.undoMs = e.payload.undoMs;

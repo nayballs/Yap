@@ -1,4 +1,5 @@
-//! Wake-word detection for the Voice Agent — a faithful port of OpenWhispr's
+//! Name detection for **Commands** (Settings → Commands; called "the Voice
+//! Agent's wake word" until 2026-10-18) — a faithful port of OpenWhispr's
 //! `src/config/agentDetection.ts` (`detectAgentName`). After a normal dictation,
 //! the pipeline asks: does the transcript address the agent by name? Three
 //! layers, so STT mis-hearings still wake the agent:

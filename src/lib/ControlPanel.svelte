@@ -176,6 +176,18 @@
       settingsOpen = false;
       activeView = 'chat';
     }).then((u) => uns.push(u));
+    // A question asked with the Voice Assistant's shortcut (assistant.rs)
+    // while this window is the one in front, or its card's "Open in Chat":
+    // Chat comes up on it (ChatView follows it from there; while it's open it
+    // gets the events itself).
+    listen('yap-assistant-turn', (e) => {
+      const p = e.payload;
+      if (!p?.show || p.conversationId == null) return;
+      settingsOpen = false;
+      if (activeView === 'chat') return;
+      chatRequest.pending = { assistant: p };
+      activeView = 'chat';
+    }).then((u) => uns.push(u));
     // A meeting with only a few words ended: "Started by mistake?", when Rust
     // picked this window to ask (the meeting notepad asks when it's open).
     listen('yap-meeting-ended', (e) => {

@@ -110,10 +110,14 @@ pub struct Card {
     /// "" — a notice: the glyph, title, body, then its buttons; or "call" —
     /// Wispr's "Meeting detected" card: one row with the call app's mark,
     /// the title over a `status` line, and a light split button (`primary`,
-    /// with `secondary` and `link` in its ^ menu); the ✕ sits on its corner.
+    /// with `secondary` and `link` in its ^ menu); the ✕ sits on its corner;
+    /// or "answer" — the Voice Assistant's (`assistant.rs`): the question
+    /// as a quiet line, the answer's markdown in a scrolling body, a
+    /// `status` note under it.
     pub style: &'static str,
     /// The glyph by the title: "call" | "update" | "notes" | "timer" |
-    /// "screen" | "error" | "tip" | "dictionary" | "mic" | "clipboard" | "".
+    /// "screen" | "error" | "tip" | "dictionary" | "mic" | "clipboard" |
+    /// "assistant" | "".
     /// On a call card, "calendar" stands in for a missing app mark (a
     /// calendar meeting with no call app).
     pub icon: &'static str,
@@ -224,6 +228,9 @@ struct Visibility {
     /// `bar_enabled`.
     enabled: bool,
     dictation: Dictation,
+    /// A question to the Voice Assistant is being asked, answered or read
+    /// aloud (`assistant.rs`): its capsule shows, as a dictation's does.
+    assistant: bool,
     /// A meeting is recording.
     meeting: bool,
     /// "Hide the bar for 1 hour" is running.
@@ -237,12 +244,13 @@ struct Visibility {
 
 /// Whether the window is on screen: always while a dictation records,
 /// transcribes or just failed (it's the hot-mic indicator, with the bar off
-/// too, as the overlay always was); with the bar on, also while a meeting
+/// too, as the overlay always was) and while the Voice Assistant is asked or
+/// answers (its ■ stops the voice); with the bar on, also while a meeting
 /// records, and otherwise unless hidden for an hour or over a fullscreen app
 /// — though a card still shows over a borderless one (Wispr's call card
 /// appears over a game), just not the idle pill.
 fn shows(v: Visibility) -> bool {
-    if v.dictation != Dictation::Idle {
+    if v.dictation != Dictation::Idle || v.assistant {
         return true;
     }
     if !v.enabled {
@@ -277,9 +285,10 @@ fn seen_now(v: Visibility) -> bool {
 
 /// Whether the window should take clicks: only while it shows, and only
 /// while the cursor is on a region the page reported — with the bar on, or
-/// while a dictation shows (its ✕ / ✓ and Undo work with the bar off too).
+/// while a dictation or the assistant shows (its ✕ / ✓, Undo and ■ work
+/// with the bar off too).
 fn clickable(v: Visibility, shown: bool, on_region: bool) -> bool {
-    (v.enabled || v.dictation != Dictation::Idle) && shown && on_region
+    (v.enabled || v.dictation != Dictation::Idle || v.assistant) && shown && on_region
 }
 
 /// A monitor change waiting out [`FOLLOW_AFTER_MS`].
@@ -339,6 +348,8 @@ struct State {
     /// "Hide the bar for 1 hour" until (unix ms), 0 = not hidden.
     hidden_until: u64,
     dictation: Dictation,
+    /// Where a question to the Voice Assistant is (`yap-assistant`).
+    assistant: crate::assistant::Phase,
     meeting: bool,
     /// What's fullscreen on the bar's monitor (whatever the setting).
     fullscreen: Fullscreen,
@@ -387,6 +398,7 @@ impl Default for State {
             meeting_hotkey: None,
             hidden_until: 0,
             dictation: Dictation::Idle,
+            assistant: crate::assistant::Phase::Idle,
             meeting: false,
             fullscreen: Fullscreen::None,
             shown: false,
@@ -419,10 +431,16 @@ impl State {
         }
     }
 
+    /// A dictation or a question to the assistant has the capsule.
+    fn busy(&self) -> bool {
+        self.dictation != Dictation::Idle || self.assistant != crate::assistant::Phase::Idle
+    }
+
     fn visibility(&self, now: u64) -> Visibility {
         Visibility {
             enabled: self.enabled,
             dictation: self.dictation,
+            assistant: self.assistant != crate::assistant::Phase::Idle,
             meeting: self.meeting,
             hidden: self.hidden_until > now,
             fullscreen: self.fullscreen(),
@@ -529,6 +547,9 @@ pub struct Status {
     meeting: serde_json::Value,
     /// A live call ◉ would record ("Record this Teams call").
     call: Option<String>,
+    /// Where a question to the Voice Assistant is: "idle" | "listening" |
+    /// "thinking" | "speaking" (the capsule's assistant variant).
+    assistant: crate::assistant::Phase,
     /// The card on screen (none or one: `notice.rs` shows them one at a
     /// time)…
     cards: Vec<Card>,
@@ -555,6 +576,7 @@ pub fn status() -> Status {
         meeting_hotkey: s.meeting_hotkey.clone(),
         meeting,
         call,
+        assistant: s.assistant,
         cards: s.front_card().cloned().into_iter().collect(),
         waiting: s
             .cards
@@ -659,7 +681,7 @@ fn poller(app: AppHandle, rx: mpsc::Receiver<()>) {
     loop {
         let timeout = {
             let s = lock();
-            let watching = s.enabled || s.dictation != Dictation::Idle;
+            let watching = s.enabled || s.busy();
             if !watching {
                 IDLE_TICK
             } else if s.interactive || s.near {
@@ -705,13 +727,17 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
     use overlay::win;
     let (placed, frozen, edge, replace, autohide_due) = {
         let s = lock();
-        let watching = s.enabled || s.dictation != Dictation::Idle;
+        let watching = s.enabled || s.busy();
         if !watching {
             return;
         }
         (
             s.placed,
-            s.dictation == Dictation::Recording || s.dictation == Dictation::Processing,
+            // A dictation, or a question to the assistant until its answer
+            // has been said: the bar stays where it started.
+            s.dictation == Dictation::Recording
+                || s.dictation == Dictation::Processing
+                || s.assistant != crate::assistant::Phase::Idle,
             s.edge,
             s.replace,
             now.saturating_sub(s.autohide_at) >= AUTOHIDE_EVERY_MS,
@@ -944,6 +970,20 @@ pub fn init(app: &AppHandle) {
     });
     let h = app.clone();
     app.listen("yap-meeting-detect", move |_| emit(&h));
+    // A question to the Voice Assistant (assistant.rs): the capsule shows
+    // while it's asked, answered and read aloud.
+    let h = app.clone();
+    app.listen("yap-assistant", move |event| {
+        let phase = serde_json::from_str::<serde_json::Value>(event.payload())
+            .ok()
+            .and_then(|v| serde_json::from_value::<crate::assistant::Phase>(v["phase"].clone()).ok())
+            .unwrap_or_default();
+        lock().assistant = phase;
+        repick(&h);
+        apply(&h);
+        emit(&h);
+        wake();
+    });
     tracing::info!(enabled = cfg.bar_enabled, "bar: started");
 }
 
@@ -1280,6 +1320,9 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
             let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
             guard.as_ref().ok_or("pipeline not started")?.undo()?;
         }
+        // ■ on the assistant's capsule: stop the answer (its voice, or one
+        // still coming; it's in Chat either way).
+        "assistant-stop" => crate::assistant::stop(app),
         // ■ on the recording pill: end the meeting, which writes the action
         // plan in Rust (or asks "Started by mistake?").
         "stop-meeting" => crate::meeting_end::end(app, Some(overlay::LABEL))?,
@@ -1862,6 +1905,27 @@ mod tests {
             assert!(clickable(Visibility { dictation: d, ..off }, true, true));
             assert!(!clickable(Visibility { dictation: d, ..off }, true, false));
         }
+        // …and so does the assistant's ■ while it thinks or speaks.
+        assert!(clickable(Visibility { assistant: true, ..off }, true, true));
+        assert!(!clickable(Visibility { assistant: true, ..off }, true, false));
+    }
+
+    #[test]
+    fn the_assistants_capsule_shows_wherever_a_dictations_would() {
+        // Thinking or speaking (no dictation any more): on screen, bar on or
+        // off, hidden for an hour or over a fullscreen app.
+        let off = Visibility { enabled: false, ..vis() };
+        for v in [
+            vis(),
+            off,
+            Visibility { hidden: true, ..vis() },
+            Visibility { fullscreen: Fullscreen::Exclusive, ..vis() },
+        ] {
+            assert!(shows(Visibility { assistant: true, ..v }));
+        }
+        // Its phases from the page's event.
+        let phase: crate::assistant::Phase = serde_json::from_value(serde_json::json!("speaking")).unwrap();
+        assert_eq!(phase, crate::assistant::Phase::Speaking);
     }
 
     #[test]

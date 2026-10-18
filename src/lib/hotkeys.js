@@ -73,6 +73,47 @@ export function parseHotkeySpec(spec) {
   return { kind: 'none' };
 }
 
+// The modifier family of a side-specific (or generic) modifier VK, else null.
+const VK_FAMILY = {
+  16: 'shift', 160: 'shift', 161: 'shift',
+  17: 'ctrl', 162: 'ctrl', 163: 'ctrl',
+  18: 'alt', 164: 'alt', 165: 'alt',
+  91: 'win', 92: 'win',
+};
+const ALIASES = { control: 'ctrl', option: 'alt', super: 'win', meta: 'win', cmd: 'win', command: 'win' };
+const modSet = (mods) => new Set(mods.map((m) => ALIASES[m] || m));
+const within = (a, b) => [...a].every((m) => b.has(m));
+
+/// Whether two specs would fire on one press, so both would start: the same
+/// rule as input_hook.rs `clashes`. The same key, button or chord however
+/// it's written; a bare key fires only with no modifier held (F9 and Ctrl+F9
+/// are two keys) unless it's a modifier itself (Right Alt); combos on one key
+/// nest (Ctrl+Space fires inside Ctrl+Shift+Space); a chord completes inside
+/// a combo or a bigger chord holding its modifiers (Ctrl+Alt in Ctrl+Alt+K).
+export function hotkeysClash(a, b) {
+  const p = parseHotkeySpec((a || '').trim());
+  const q = parseHotkeySpec((b || '').trim());
+  if (p.kind === 'none' || q.kind === 'none') return false;
+  if (p.kind === 'mouse' || q.kind === 'mouse') return p.kind === q.kind && p.button === q.button;
+  if (p.kind === 'kb' && q.kind === 'kb') {
+    if (p.vk !== q.vk) return false;
+    const m = modSet(p.mods);
+    const n = modSet(q.mods);
+    if (!m.size || !n.size) return m.size === n.size || !!VK_FAMILY[p.vk];
+    return within(m, n) || within(n, m);
+  }
+  if (p.kind === 'mods' && q.kind === 'mods') {
+    const m = modSet(p.mods);
+    const n = modSet(q.mods);
+    return within(m, n) || within(n, m);
+  }
+  const [chord, key] = p.kind === 'mods' ? [p, q] : [q, p];
+  const c = modSet(chord.mods);
+  const m = modSet(key.mods);
+  if (!m.size) return !!VK_FAMILY[key.vk] && c.has(VK_FAMILY[key.vk]);
+  return within(c, m);
+}
+
 export function vkeyName(v) {
   if (v >= 112 && v <= 135) return `F${v - 111}`;
   if ((v >= 48 && v <= 57) || (v >= 65 && v <= 90)) return String.fromCharCode(v);
