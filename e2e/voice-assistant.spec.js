@@ -478,8 +478,11 @@ test('no AI model: the assistant says so, with a way to Language Models', async 
     await expect(dialog.getByRole('tab', { name: 'Chat & Voice Assistant' })).toHaveAttribute('aria-selected', 'true');
     expect(await spoken(yap)).toEqual([]);
   } finally {
+    // Settings closed first: its auto-save must not write the switched-off
+    // model back after the restore (the next test would get "Pick an AI model").
+    await closeSettings(main).catch(() => {});
     await setConfig(yap, main, { llmScopes: { ...cfg.llmScopes, chat } });
-    await closeSettings(main);
+    await expect.poll(() => yap.readJson('config.json').llmScopes?.chat?.enabled).toBe(true);
   }
 });
 
