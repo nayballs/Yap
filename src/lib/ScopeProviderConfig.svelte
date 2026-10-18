@@ -6,11 +6,13 @@
   // endpoint the same way. The enable toggle + prompt live in the parent.
   import ModeSelector from './ui/ModeSelector.svelte';
   import PillTabs from './ui/PillTabs.svelte';
-  import SelectList from './ui/SelectList.svelte';
+  import ModelPicker from './ModelPicker.svelte';
+  import EndpointModels from './EndpointModels.svelte';
   import Input from './ui/Input.svelte';
   import Toggle from './ui/Toggle.svelte';
   import Row from './ui/Row.svelte';
   import { PP_CLOUD_MODELS, modelThinks } from './ppModels.js';
+  import { modelsFor, defaultModel, providerOffers } from './modelCatalog.svelte.js';
   import { PROVIDER_ICONS } from './providerIcons.js';
   import { createExternalLinkHandler } from './externalLinks.js';
   import { untrack } from 'svelte';
@@ -19,7 +21,10 @@
   // API key per provider across every scope (OpenWhispr keeps openai_api_key
   // etc. global — only "custom" endpoints have a per-scope key), stored in
   // cfg.ppApiKeys. Optional for back-compat: without it keys stay per-scope.
-  let { scope, cfg = null, disabled = false } = $props();
+  // `scopeKey` = its key in cfg.llmScopes ("chat", "noteFormatting",
+  // "voiceAgent"): which saved key a self-hosted server's model list is
+  // asked with.
+  let { scope, cfg = null, disabled = false, scopeKey = '' } = $props();
 
   // Mode labels/descriptions ported from OpenWhispr's per-scope mode copy
   // (locales/en `dictationAgent.modes` etc.). Yap supports three of OpenWhispr's
@@ -110,23 +115,13 @@
     if (BASE_URLS[p]) scope.baseUrl = BASE_URLS[p];
     scope.apiKey = SHARED_KEY_IDS.has(p) ? sharedKey(p) : scope.apiKeys?.[p] || '';
     keyEditing = false;
-    const reg = PP_CLOUD_MODELS[p];
-    if (reg && !reg.models.some((m) => m.value === scope.model)) {
-      scope.model = reg.models[0]?.value || '';
+    // The provider's first model it still offers (modelCatalog.js) when the
+    // saved one isn't its.
+    if (PP_CLOUD_MODELS[p] && !providerOffers(p, scope.model)) {
+      scope.model = defaultModel(p);
     }
   }
 
-  const cloudModelOptions = $derived.by(() => {
-    const reg = PP_CLOUD_MODELS[cloudProvider];
-    if (!reg) return [];
-    const icon = PROVIDER_ICONS[cloudProvider];
-    const mono = cloudProvider === 'anthropic' || cloudProvider === 'openai';
-    const opts = reg.models.map((m) => ({ value: m.value, label: m.label, desc: m.desc, icon, mono }));
-    if (scope.model && !opts.some((o) => o.value === scope.model)) {
-      opts.push({ value: scope.model, label: scope.model, desc: 'Custom model id', icon, mono });
-    }
-    return opts;
-  });
   const maskedKey = $derived(
     !scope.apiKey
       ? ''
@@ -138,7 +133,10 @@
   // custom/self-hosted endpoint where the model is unknown).
   const showThinking = $derived(
     mode === 'selfhosted' ||
-      (mode === 'cloud' && (cloudProvider === 'custom' || modelThinks(scope.model)))
+      (mode === 'cloud' &&
+        (cloudProvider === 'custom' ||
+          modelThinks(scope.model) ||
+          modelsFor(cloudProvider, scope.model).items.some((i) => i.value === scope.model && i.thinks)))
   );
 </script>
 
@@ -174,9 +172,10 @@
           </Row>
           <Row label="Model" desc={MODEL_HINTS.custom}>
             {#snippet children()}
-              <div class="pp-field"><Input bind:value={scope.model} {disabled} placeholder="model-id" /></div>
+              <div class="pp-field"><Input bind:value={scope.model} {disabled} placeholder="model-id" list="scope-custom-models-{scopeKey}" /></div>
             {/snippet}
           </Row>
+          <EndpointModels id="scope-custom-models-{scopeKey}" provider="custom" scope={scopeKey} baseUrl={scope.baseUrl} model={scope.model} />
         </div>
       {:else}
         <div class="keyhead">
@@ -205,7 +204,7 @@
         {/if}
 
         <h4 class="selhead">Select Model</h4>
-        <SelectList bind:value={scope.model} options={cloudModelOptions} {disabled} />
+        <ModelPicker provider={cloudProvider} bind:value={scope.model} {disabled} />
       {/if}
     </div>
   {:else if mode === 'selfhosted'}
@@ -218,9 +217,10 @@
         </Row>
         <Row label="Model" desc={MODEL_HINTS.local}>
           {#snippet children()}
-            <div class="pp-field"><Input bind:value={scope.model} {disabled} placeholder="llama3.1" /></div>
+            <div class="pp-field"><Input bind:value={scope.model} {disabled} placeholder="llama3.1" list="scope-local-models-{scopeKey}" /></div>
           {/snippet}
         </Row>
+        <EndpointModels id="scope-local-models-{scopeKey}" provider="local" scope={scopeKey} baseUrl={scope.baseUrl} model={scope.model} />
         <Row label="API key" desc="Optional — most local servers don't need one">
           {#snippet children()}
             <div class="pp-field"><Input type="password" bind:value={scope.apiKey} oninput={stashApiKey} {disabled} placeholder="" /></div>

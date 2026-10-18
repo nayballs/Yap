@@ -92,7 +92,7 @@ test('the chip names the chat model, switches it, and every answer keeps its own
   await expect(pop).toContainText('Groq · Runs on this PC (127.0.0.1:');
   await expect(pop).toContainText("Looks up and changes your notes with Yap's note tools.");
   const radios = pop.getByRole('radio');
-  await expect(radios).toHaveText(['GPT-OSS 20B', 'GPT-OSS 120B']);
+  await expect(radios).toHaveText(['GPT-OSS 20B', 'GPT-OSS 120B', 'Qwen3.8 27B']);
   await expect(pop.getByRole('radio', { name: 'GPT-OSS 20B' })).toHaveAttribute('aria-checked', 'true');
   await shot(main, '02-popover');
 
@@ -172,7 +172,7 @@ test('a small local model says it has no note tools, and answers from notes sear
   await expect(pop).toContainText('Runs on this PC');
   await expect(pop).toContainText("too small for Yap's note tools");
   // The current model first (it's none of the switch's), then Groq's.
-  await expect(pop.getByRole('radio')).toHaveText(['qwen2.5-1.5b-instruct no note tools', 'GPT-OSS 20B', 'GPT-OSS 120B']);
+  await expect(pop.getByRole('radio')).toHaveText(['qwen2.5-1.5b-instruct no note tools', 'GPT-OSS 20B', 'GPT-OSS 120B', 'Qwen3.8 27B']);
   await shot(main, '06-popover-no-note-tools');
   await main.keyboard.press('Escape');
   await expect(pop).toBeHidden();

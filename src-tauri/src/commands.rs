@@ -1237,6 +1237,8 @@ pub fn save_config(
     // Words taken out of the dictionary (from any surface) are never
     // suggested again (learn.rs; its own store, not config.json).
     crate::learn::on_dictionary_saved(&prev.dictionary, &cfg.dictionary);
+    // A provider key set or changed: check that provider's model list now.
+    crate::model_catalog::on_config_saved(&app, &prev, &cfg);
     if cfg.debug_logging != prev_debug {
         crate::set_debug_logging(cfg.debug_logging);
     }

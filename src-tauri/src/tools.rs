@@ -185,14 +185,19 @@ fn estimate_model_size_b(model_id: &str) -> f32 {
         .unwrap_or(0.0)
 }
 
-/// Cloud providers always support tools; local (self-hosted) and on-device
-/// models only when the id names ≥ 4B params (their gating rule).
+/// Cloud providers always support tools — unless the provider's own model
+/// list says this model can't (Groq's `supported_features`, OpenRouter's
+/// `supported_parameters`, `model_catalog.rs`); local (self-hosted) and
+/// on-device models only when the id names ≥ 4B params (their gating rule).
 pub fn supports_tools(provider: &str, model: &str) -> bool {
     if let Some(forced) = crate::eval::tools_forced() {
         return forced; // a model evaluation's --tools on|off
     }
     match provider {
-        "groq" | "anthropic" | "openai" | "gemini" | "openrouter" | "custom" => true,
+        "groq" | "anthropic" | "openai" | "gemini" | "openrouter" => {
+            crate::model_catalog::tools_for(provider, model) != Some(false)
+        }
+        "custom" => true,
         _ => estimate_model_size_b(model) >= LOCAL_TOOL_MIN_PARAMS_B,
     }
 }

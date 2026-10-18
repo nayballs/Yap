@@ -853,6 +853,12 @@ const RETIRED_GROQ_MODELS: [(&str, &str); 7] = [
     ("groq/compound-mini", "openai/gpt-oss-20b"),
 ];
 
+/// Is `model` one Groq retired (and Yap migrates away from)? The live model
+/// list (`model_catalog.rs`) never offers one.
+pub fn is_retired_groq_model(model: &str) -> bool {
+    RETIRED_GROQ_MODELS.iter().any(|(old, _)| *old == model)
+}
+
 /// Swap a retired Groq model id for its replacement; other providers and ids
 /// are left alone (a self-hosted server may legitimately use the same name).
 fn migrate_groq_model(provider: &str, model: &mut String) {
