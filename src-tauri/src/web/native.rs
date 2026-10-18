@@ -386,7 +386,8 @@ impl Collect {
         order.truncate(MAX_RESULTS);
         let new_index: HashMap<usize, usize> = order.iter().enumerate().map(|(new, &old)| (old, new)).collect();
         let hits = order.iter().map(|&i| self.hits[i].clone()).collect();
-        let summary = summary.map(|s| clean_summary(&renumber_marks(&s, &new_index))).filter(|s| !s.is_empty());
+        // Asked for ≤ 120 words; kept to ~1,500 characters whatever it says.
+        let summary = summary.map(|s| tidy(&clean_summary(&renumber_marks(&s, &new_index)), 1_500)).filter(|s| !s.is_empty());
         Native { hits, summary }
     }
 }
@@ -441,6 +442,8 @@ pub fn render_summary(summary: &str, numbers: &[usize]) -> String {
     let out = MARK.replace_all(summary, |c: &regex::Captures| {
         c[1].parse::<usize>().ok().and_then(|i| numbers.get(i)).map_or(String::new(), |n| format!("[{n}]"))
     });
+    // A mark cut in two by the length cap goes.
+    let out = out.replace([MARK_OPEN, MARK_CLOSE], "");
     // "[1][1]" (two marks for one source) → "[1]".
     static RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:\[\d+\])+").expect("static regex"));
     static ONE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\d+\]").expect("static regex"));

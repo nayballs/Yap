@@ -3967,7 +3967,18 @@ a fixed search-then-answer pipeline. Unit-tested (recorded Exa/Tavily/wiki
 JSON, the URL guard, the safety rule through the real loop), e2e-tested
 against a local fake web (`web-search.spec.js`), and the keyless lookup
 checked once for real (Wikipedia, bg3.wiki); not yet tried with a real Exa
-or Tavily key, and Groq's own `browser_search` isn't used yet.
+or Tavily key. **The AI's own search** (`web/native.rs`, 2026-10-18): cloud
+models search with their provider's own search as a sub-call, local ones
+with Yap's. Parsers unit-tested on each provider's documented shape (Groq's
+recorded), the Groq and Gemini paths and the fallback e2e-tested against
+the fake AI; for real, through the eval harness on Nathan's keys: Groq
+gpt-oss-20b passed all 4 web scenarios (its search sub-call 3.9–4.8k
+tokens, ~2.4 s; a searched answer ~8k tokens over 3 calls, so the free
+plan's 8,000 a minute makes the next answer wait), Gemini 3.5 Flash on a
+free key has no Google Search grounding ("check your plan and billing")
+and fell back to bg3.wiki correctly; Gemini 2.5 Flash/Flash-Lite are
+closed to new keys. Anthropic, OpenAI and OpenRouter searches untried
+with real keys; Gemini grounding untried on a billed key.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), no calendar tools and no conversation
