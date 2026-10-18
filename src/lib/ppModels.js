@@ -18,8 +18,11 @@ export const PP_CLOUD_MODELS = {
     keyUrl: 'https://console.anthropic.com/settings/keys',
     models: [
       { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', desc: 'Fast with near-frontier intelligence' },
+      { value: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', desc: 'Newest Haiku: fastest and lowest-cost Claude' },
+      { value: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', desc: 'Newest Sonnet: balanced speed and intelligence' },
+      { value: 'claude-opus-5-5', label: 'Claude Opus 5.5', desc: 'Newest Opus: the most capable Claude' },
       { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', desc: 'Balanced performance' },
-      { value: 'claude-opus-4-8', label: 'Claude Opus 4.8', desc: 'Most capable Claude model, 1M context' },
+      { value: 'claude-opus-4-8', label: 'Claude Opus 4.8', desc: 'Previous Opus generation, 1M context' },
       { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', desc: 'Previous Sonnet generation' },
       { value: 'claude-opus-4-7', label: 'Claude Opus 4.7', desc: 'Powerful Opus model, 1M context' },
       { value: 'claude-opus-4-6', label: 'Claude Opus 4.6', desc: 'Previous Opus generation, 1M context' },
