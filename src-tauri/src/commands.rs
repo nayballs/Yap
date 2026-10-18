@@ -1077,7 +1077,7 @@ async fn small_model_answer(
         let query = crate::web::search_query(text);
         let settings = crate::web::Settings::from_config(cfg).with_chat_model(provider, model);
         match crate::web::search(&settings, &crate::web::Endpoints::current(), &query, text).await {
-            Ok(found) if !found.hits.is_empty() => {
+            Ok(found) if found.hits.iter().any(|h| !h.text.trim().is_empty()) => {
                 let (found_sources, block) = crate::web::grounded_sources(&found.hits, SMALL_WEB_TOKENS);
                 system = crate::web::grounded_prompt(persona, &block, &crate::web::today(), by_voice);
                 // Still only text: it can't open or change anything (apps.rs).

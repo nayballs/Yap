@@ -117,7 +117,7 @@
     </Row>
 
     <Row>
-      <div class="always" class:off={!cfg.webSearch} role="note">
+      <div class="always" class:off={!cfg.webSearch}>
         <span class="tick" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
         </span>

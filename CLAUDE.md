@@ -1091,7 +1091,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   id, name?, onThisPc?}`, only when known; older answers have none). A
   question that was dictated carries `voice: true` ("Only when I asked by
   voice" reads its answer out); `append` returns the message's index, which
-  the pages use as its id (`chat:<conversation>:<index>`).
+  the pages use as its id (`chat:<conversation>:<index>`). A web answer keeps
+  its sources (`ChatMessage.sources` = `Source {n, title, url, site}`,
+  numbered as it cites them; `append_sourced`; only written when there are
+  some).
 - **`ai_model.rs`** — which model a scope's next call goes to, resolved the
   calls' way (`Scope::Chat` → `commands::resolve_chat_endpoint`;
   `Scope::Notes` → `meeting_summary::resolve_endpoint`): `ai_model_status
@@ -1167,7 +1170,72 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   answer just before the question for its consent check). Every step
   re-sends the instructions + schemas, so they're kept short
   (`a_tool_step_stays_light`: ≤ 2,250 est. tokens; 2,879 before the
-  2026-10-18 trim, ~2,180 after).
+  2026-10-18 trim, ~2,180 after). Plus **`web_search(query)` /
+  `read_page(url, offset?)`** (`web_definitions` + `WEB_TOOL_INSTRUCTIONS`,
+  ~470 tokens more, `the_web_tools_stay_light`; offered while "Look things
+  up on the web" is on; run by `web.rs`'s per-turn `web::Turn`, passed as
+  `run_tool_loop`'s last argument). **The safety rule**
+  (`refused_after_web`, `ACTION_TOOLS` = open_app, create_note,
+  update_note, edit_note, copy_to_clipboard): once web content is in a turn
+  (`Turn::seen`), those are no longer offered (`without_actions`) and a call
+  to one is refused with a reason for the model (chip `Didn't open an app:
+  not after reading the web`); the person's next message is a clean turn.
+  Unit-tested through the real loop against a local fake model + Exa
+  (`a_web_page_can_never_make_the_chat_act`).
+- **`web.rs`** — **looking things up on the web** (2026-10-18; Settings →
+  Voice Assistant → Web search, `web_search` off by default; design in
+  yap-private `docs/web-search-research.md` §7). **Backends** (`search`):
+  **Exa** (`POST https://api.exa.ai/search`, `x-api-key`, its guide's
+  recommended `{query, type: "auto", contents: {highlights: true}}` +
+  `numResults: 5`) or **Tavily** (`POST https://api.tavily.com/search`,
+  Bearer, `{query, max_results: 5}`), keys in `web_search_keys` (service →
+  key, like `pp_api_keys`, never logged); with no key — or when the service
+  fails (its error kept as `note`, said in the chip: 401/403 wrong key, Exa
+  402 / Tavily 432 out of free searches, 433, 429, offline) — the **keyless
+  lookup**: the game's own MediaWiki (`GAME_WIKIS`: bg3.wiki, warcraft.wiki.gg,
+  minecraft.wiki, Fandom wikis…; any `*.wiki.gg` / `*.fandom.com` named in
+  the question) else Wikipedia in the person's language (`wiki_language`:
+  the speech language, else Windows', else English; English again when it
+  finds nothing), through `api.php` (`generator=search` + `inprop=url`, then
+  TextExtracts on Wikipedia, `action=parse` HTML elsewhere → `fragment_text`
+  with dom_query, infoboxes/navboxes/footnotes out → `best_passages` by
+  keyword); `wiki_terms` drops the game's names and question words ("Where
+  do I find Gale in Baldur's Gate 3?" → "Gale"), `wiki_retry` tries fewer.
+  A keyed game question gets the wiki's best article first too. Descriptive
+  User-Agent (`USER_AGENT`, contact URL), one request at a time per host
+  250 ms apart, ≤ 5 results, ~700 chars each, 10-minute cache. Never a
+  key-less scrape of Google/Bing/DuckDuckGo. **`read_page`**: `check_url`
+  (http(s), ports 80/443, no user:pass, not `localhost`/`.local`/… or a
+  local IP — `is_public`: loopback, private, link-local, CGNAT, ULA,
+  mapped/NAT64/6to4 carrying one, documentation, reserved), the host
+  resolved and every address checked (`resolve_public`), the connection
+  pinned to them (`resolve_to_addrs`, no proxy, no cookies), redirects
+  followed by hand (≤ 5, each checked), 10 s, 3 MB, HTML/plain text only;
+  `page_text` = dom_smoothie (readability.js port, `TextMode::Formatted`),
+  `page_part` ≈ 3,000 tokens a read with `next_offset`. **`Turn`**: only
+  links the person gave (their messages, `links_in`) or a search this turn
+  returned (`allowed`); ≤ 3 searches and ≤ 3 reads a turn (`offers`);
+  sources numbered as they come (`number`), `sources_for(reply)` = the ones
+  cited (`citations`: [1], [2, 3], [1][4]) or all; results carry
+  `DATA_NOT_INSTRUCTIONS`. Chips: `Searched the web: "q"` (+ " (bg3.wiki)"
+  when keyless, + the service's error), `Read bg3.wiki/wiki/Gale`, `Didn't
+  read evil.example/…: not a link from you or the search`. **Models that
+  can't call tools** (`commands::small_model_answer`): the fixed pipeline —
+  `needs_web` (conservative: "look up", "search the web", "google",
+  "latest", "news", "price of", "where do I find", a known game; never
+  "my notes"/"my meeting"), `search_query` (the ask stripped),
+  `grounded_sources` (≤ 3 sources, ≤ 1,500 tokens) + `grounded_prompt`
+  (answer only from them, cite, < 80 words) with the history fitted
+  (`fit_history`, ≤ 2,000) for an 8k model; no search → `no_search_line`,
+  and an answer that `claims_browsing` anyway gets "*Yap didn't search the
+  web for this answer.*". Chips `Searched the web…` + `Answered from 1 web
+  page`. **Provider-native search** (Groq's `browser_search` on gpt-oss):
+  not built — the seam is `native_backend(provider, model)` (None) →
+  `Settings::with_chat_model` → `backend`. Not for the Meetings view's Ask
+  bar. Test mode never goes online: debug-only `YAP_EXA_URL`,
+  `YAP_TAVILY_URL`, `YAP_WEB_STANDIN` (every other site as
+  `<standin>/<host><path>`), else an error. `#[ignore]`d
+  `real_keyless_lookup` (read-only, no key: Wikipedia + bg3.wiki).
 - **`apps.rs`** — **opening apps when you ask** (2026-10-18; Settings →
   Voice Assistant → Opening apps): "open Teams" in Chat or to the Voice
   Assistant opens an app installed on this PC — only an entry of the
@@ -1567,7 +1635,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
   = unbound, the default), opening apps (`apps.rs`): open_apps (true) +
   apps_blocked (app ids, "Don't open this one") + app_nicknames
-  (`AppNickname {say, app, name}`), Commands' edit_hotkey (the rewrite shortcut)
+  (`AppNickname {say, app, name}`), the web (`web.rs`): web_search (false) +
+  web_search_service ("exa" | "tavily") + web_search_keys (service → key),
+  Commands' edit_hotkey (the rewrite shortcut)
   + agent_name + the `voiceAgent` scope (field and key names unchanged by
   the 2026-10-18 rename, so no setting resets). JSON
   load/save + `apply_dictionary` (corrections; skips snippets) +
@@ -2017,7 +2087,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `speakable_blocks` (markdown → one block per heading / list item / table
   row / paragraph, each ending like a sentence; a fenced code block →
   "(code block)", links → their text, bare URLs → their domain, `[x]`/☑ →
-  "Done: …", emphasis, HTML, emoji and arrows out, "→" read "to"), then
+  "Done: …", emphasis, HTML, emoji and arrows out, "→" read "to", a web
+  answer's `[1]` / `[2, 3]` / gpt-oss `【…】` markers never read), then
   **`tts/normalize.rs`** (`for_speech`, every engine, UK style,
   conservative — a clear pattern or nothing: £ $ € amounts incl. pence/cents
   and k/m/bn ("twelve thousand four hundred pounds", "three dollars fifty"),
@@ -2169,7 +2240,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (`assistant_answer_card`, on) decides it for a spoken answer; one not
   read aloud always shows (`card_on_bar`, pure), also when the voice
   fails —, shown before the voice starts; it goes when the
-  voice ends (`on_tts_state`), or after `read_ms` when shown only. `stop`
+  voice ends (`on_tts_state`), or after `read_ms` when shown only. **A web
+  answer** (`turn.sources`, `web.rs`) is said short (`spoken_answer`:
+  `tts::brief` — its first two sentences, no `[n]` — then "The details and
+  sources are in Chat."), its card shows that and "2 sources in Chat"; the
+  model is told a spoken question wants the answer first. `stop`
   (■ on the capsule = `bar_action "assistant-stop"`, `assistant_stop`).
   The bar's capsule shows while `phase != Idle`, the bar on or off.
   Debug-only `e2e_assistant_ask {text, listenMs}` (`Robot::ask_assistant`:
@@ -2261,7 +2336,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   {text, listenMs}` (a question to the Voice Assistant, as its shortcut
   asks it, no mic needed), no app ever launched (`apps.rs`: "open Teams"
   is recorded for `e2e_opened_apps`, the index is the stand-in list
-  `YAP_E2E_APPS` names, no icons), `e2e_coaching_reset` (every
+  `YAP_E2E_APPS` names, no icons), never the internet for the web
+  (`web.rs`: the debug-only `YAP_EXA_URL` / `YAP_TAVILY_URL` /
+  `YAP_WEB_STANDIN` point at `e2e/support/fake-web.js`; unset, a search or a
+  page read fails), `e2e_coaching_reset` (every
   push-to-talk hint due again), `e2e_notice_reset` / `e2e_focus` /
   `e2e_notice` (notice.rs: cooldowns and fatigue forgotten before every
   test, whether the main window counts as focused — by default while it's on
@@ -2598,7 +2676,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   plain RAG chat; tool-activity chips render in the thread above the answer
   and are kept with it in chats.json; a question from
   the Meetings view's Ask bar arrives through `chatRequest` and is sent with
-  `scope: 'meetings'`). The composer (message on top; mic, **model chip**,
+  `scope: 'meetings'`). **A web answer** (`web.rs`): its `[1]` citations are
+  small pills that open their source (`renderMarkdown(md, {sources})` in
+  `markdown.js`, where only the sources' links stay links — any other
+  address the model wrote is plain text), a **Sources** row under it
+  (number, title, site; `openExternalLink`), kept in chats.json; web chips
+  carry a globe, a refused action (the safety rule) a shield. The composer (message on top; mic, **model chip**,
   Send under it — `ModelChip.svelte`, names in `aiModel.js` from
   `ppModels.js` + `providerIcons.js`) shows the model the next message goes
   to ("GPT-OSS 20B · Groq", "· no note tools" for a local model under 4B,
@@ -2834,7 +2917,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `apps_list`, a count, Refresh, a search box, two columns of the app's
   own icon (`apps_icons`, else its letter) + a switch each, off = "Yap
   won't open this one" `appsBlocked`; the first 40, then Show all),
-  **Spoken replies in Chat** ("Speak replies" `speakReplies`;
+  **Web search** (`WebSearchSettings.svelte`, `#settings-web-search`:
+  "Look things up on the web" `webSearch`, off; "Search with" Exa
+  (Recommended) / Tavily `webSearchService`, each key masked in
+  `webSearchKeys` with "Get a free key →" (its dashboard via
+  `open_external`) and its free allowance; "Wikipedia and game wikis (no
+  key)", always included; where the search words go; the explain line
+  adds a web example while it's on), **Spoken replies in Chat** ("Speak replies" `speakReplies`;
   "When to speak" Segmented When I asked by voice / Always `speakWhen`;
   "Talk back hands-free" `talkBackHandsFree`, greyed while replies are off),
   switching "Speak replies" on while Kokoro isn't downloaded offers it
@@ -3451,7 +3540,8 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   live transcription preview **on**
   (`streaming_partials`), AI cleanup **off**, the "press enter" voice command
   **on** (`voice_enter`), word suggestions from your corrections **on**
-  (`learn_words` — it only asks; nothing is added without a click),
+  (`learn_words` — it only asks; nothing is added without a click), looking
+  things up on the web **off** (`web_search`; Exa is the service once on),
   opening apps when asked **on** (`open_apps` — only apps in the Start
   menu, `apps.rs`), tips
   **on** (`show_tips`; one notice at a time either way, `notice.rs`), call
@@ -3676,8 +3766,20 @@ Unit-tested and e2e-tested (`notices.spec.js` + the updated specs); real
 use (a call while the window sits on a second monitor, the bar off with
 Windows notifications, Focus Assist) not yet tried.
 
+**Looking things up on the web** (`web.rs`, 2026-10-18, off by default):
+Chat and the Voice Assistant search (Exa or Tavily with the person's free
+key, else Wikipedia and game wikis with none), read pages on the PC behind
+an SSRF guard, cite `[1]` with a Sources row, and never act (apps, note
+writes, clipboard) once web content is in a turn; small local models get
+a fixed search-then-answer pipeline. Unit-tested (recorded Exa/Tavily/wiki
+JSON, the URL guard, the safety rule through the real loop), e2e-tested
+against a local fake web (`web-search.spec.js`), and the keyless lookup
+checked once for real (Wikipedia, bg3.wiki); not yet tried with a real Exa
+or Tavily key, and Groq's own `browser_search` isn't used yet.
+
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
-search (keyword-RAG only), and no `web_search`/calendar tools or conversation
+search (keyword-RAG only), no provider-native web search (Groq's
+`browser_search`, OpenAI's, Anthropic's), no calendar tools and no conversation
 search/archive; spoken replies have no cloud voices, read Kokoro's
 Japanese and Mandarin voices' text as English, don't check a slow PC's
 speed before choosing Kokoro (the research's first-use RTF check), wait for the whole answer
