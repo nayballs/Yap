@@ -2217,6 +2217,14 @@ mod native {
 
 // ---- the meeting notepad's "Split the screen when joining" (notepad.rs) ----
 
+/// A call is on now: a call app on the mic past its start debounce, until it
+/// ends — any app in `APPS`, asked about or not, recorded or not. The Voice
+/// Assistant and spoken replies stay quiet then (`tts::meeting_quiet`).
+/// False when call detection is off (nothing is tracked).
+pub fn call_live() -> bool {
+    !lock().calls.is_empty()
+}
+
 /// The latest live call's app id and the exe names (lowercase) whose windows
 /// show it — the app's own, or the browser a meeting tab is in.
 pub fn call_window_exes() -> Option<(&'static str, Vec<String>)> {

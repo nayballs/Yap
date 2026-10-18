@@ -980,6 +980,20 @@ pub fn speak(md: &str, message_id: Option<String>) -> Result<(), String> {
     say(utterances(md), message_id, engine, &voice, cfg.tts_rate, cfg.output_device)
 }
 
+/// Why Yap mustn't talk now, if it mustn't: a meeting records (the notes
+/// would hear Yap) or a call is on (the people on it could, and a voice over
+/// a meeting is too much — Nathan, 2026-10-18). Spoken replies, ▶ and the
+/// Voice Assistant (`assistant::off_for_meeting`) all keep quiet then.
+pub fn meeting_quiet() -> Option<&'static str> {
+    if crate::meeting::is_recording() {
+        Some("Yap doesn't talk while it records a meeting")
+    } else if crate::meeting_detect::call_live() {
+        Some("Yap doesn't talk during a call")
+    } else {
+        None
+    }
+}
+
 fn say(
     sentences: Vec<String>,
     message_id: Option<String>,
@@ -988,8 +1002,8 @@ fn say(
     rate: f32,
     device: Option<String>,
 ) -> Result<(), String> {
-    if crate::meeting::is_recording() {
-        return Err("Yap doesn't read aloud while it records a meeting: the notes would hear it".into());
+    if let Some(why) = meeting_quiet() {
+        return Err(why.into());
     }
     let speaker = speaker().ok_or("Spoken replies aren't ready yet")?;
     let rate = if rate.is_finite() && rate > 0.0 { rate.clamp(0.5, 2.0) } else { 1.0 };

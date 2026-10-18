@@ -61,6 +61,8 @@ pub const CARD: &str = "assistant";
 pub const NO_MODEL: &str = "assistantNoModel";
 /// The "couldn't answer" alert's kind.
 pub const FAILED: &str = "assistantFailed";
+/// The "off during meetings" note's kind.
+pub const MEETING_OFF: &str = "assistantMeetingOff";
 /// The longest answer the bar card shows (the rest is in Chat).
 const CARD_CHARS: usize = 1_200;
 
@@ -135,6 +137,14 @@ pub fn reply(meeting: bool, interrupted: bool) -> Reply {
     } else {
         Reply::Speak
     }
+}
+
+/// Does the answer get its card on the Yap bar? As the person chose
+/// ("Show the answer on the Yap bar", `assistant_answer_card`) while it's
+/// read aloud; always when it isn't (`spoken` false: a meeting, a
+/// dictation started, the voice failed), or the answer would be lost. Pure.
+pub fn card_on_bar(show_answer_card: bool, spoken: bool) -> bool {
+    show_answer_card || !spoken
 }
 
 /// How long a shown-only answer's card stays: about 15 characters a second
@@ -248,6 +258,30 @@ fn current(generation: u64) -> bool {
     lock().generation == generation
 }
 
+/// The Voice Assistant is **off during meetings**: while a meeting records
+/// or a call is on (`tts::meeting_quiet`), its shortcut doesn't listen and
+/// Yap doesn't talk — a voice over a meeting is too much (Nathan,
+/// 2026-10-18). A short note on the bar (or in the window) says so. `true`:
+/// off now, nothing started.
+pub fn off_for_meeting(app: &AppHandle) -> bool {
+    if crate::tts::meeting_quiet().is_none() {
+        return false;
+    }
+    tracing::info!("Voice Assistant: off during a meeting or a call");
+    crate::alert::show_soon(
+        app,
+        crate::alert::Alert {
+            kind: MEETING_OFF,
+            icon: "assistant",
+            title: "The Voice Assistant is off during meetings".into(),
+            body: "While a meeting records or a call is on, Yap doesn't listen or talk. It's back once it's over.".into(),
+            action: None,
+            timeout_ms: 5_000,
+        },
+    );
+    true
+}
+
 /// The end of a question that went no further, if it's still the latest.
 fn give_up(app: &AppHandle, generation: u64) {
     if current(generation) {
@@ -339,7 +373,9 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             "show": focused,
         }),
     );
-    let meeting = crate::meeting::is_recording();
+    // A meeting or a call that started while the answer was coming: shown,
+    // not read aloud.
+    let meeting = crate::tts::meeting_quiet().is_some();
     let interrupted = crate::pipeline::dictation_state().0 != since;
     let mut how = reply(meeting, interrupted);
     // Set before speaking: the voice may end (and say so) before `speak`
@@ -362,14 +398,17 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     };
     emit(&app, ev);
     let note = if meeting {
-        Some("Not read aloud while a meeting records")
+        Some("Not read aloud during a meeting")
     } else if interrupted {
         Some("Not read aloud: you started dictating")
     } else {
         None
     };
-    // The card first (the voice may be short), then the voice.
-    let carded = crate::notice::place(&app, false) == crate::notice::Place::Bar
+    // The card first (the voice may be short), then the voice. With "Show
+    // the answer on the Yap bar" off, a spoken answer has no card.
+    let on_bar = crate::notice::place(&app, false) == crate::notice::Place::Bar;
+    let mut carded = on_bar
+        && card_on_bar(cfg.assistant_answer_card, how == Reply::Speak)
         && show_card(&app, &question, &turn.reply, how == Reply::Speak, note);
     if how == Reply::Speak {
         if let Err(e) = crate::tts::speak(&turn.reply, Some(message_id.clone())) {
@@ -388,12 +427,17 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             if let Some(ev) = ev {
                 emit(&app, ev);
             }
+            let why = format!("Couldn't read it aloud: {e}");
             if carded {
                 let ms = read_ms(&turn.reply);
                 crate::bar::update_card(&app, CARD, |c| {
                     c.timeout_ms = Some(ms);
-                    c.status = Some(format!("Couldn't read it aloud: {e}"));
+                    c.status = Some(why);
                 });
+            } else if on_bar {
+                // The card was left out for the voice, and there's no voice:
+                // show the answer after all.
+                carded = show_card(&app, &question, &turn.reply, false, Some(why.as_str()));
             }
         }
     }
@@ -577,6 +621,17 @@ mod tests {
         assert_eq!(choose_conversation(Viewing::Closed, false, None, NOW), Choice::New);
         // A clock that went backwards still counts as recent.
         assert_eq!(choose_conversation(Viewing::Closed, false, Some((9, NOW + 5)), NOW), Choice::Continue(9));
+    }
+
+    #[test]
+    fn the_answer_card_is_a_choice_only_while_the_answer_is_spoken() {
+        // Read aloud: as the person chose.
+        assert!(card_on_bar(true, true));
+        assert!(!card_on_bar(false, true));
+        // Not read aloud (a meeting, a dictation started, the voice failed):
+        // always shown, or the answer would be lost.
+        assert!(card_on_bar(true, false));
+        assert!(card_on_bar(false, false));
     }
 
     #[test]

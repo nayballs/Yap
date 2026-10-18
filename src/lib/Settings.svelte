@@ -566,6 +566,7 @@
     agentName: '',
     editHotkey: '',
     assistantHotkey: '',
+    assistantAnswerCard: true,
     speakReplies: false,
     speakWhen: 'voice',
     talkBackHandsFree: true,
@@ -2029,7 +2030,7 @@
                 desc={cfg.recordingMode === 'pushToTalk'
                   ? 'Hold it while you ask, or double-tap it to ask hands-free. It never types into the app you are in; press it while Yap speaks to cut in'
                   : 'Press it, ask, press it again. It never types into the app you are in; press it while Yap speaks to cut in'}
-                hint="Every answer is read aloud, whatever “When to speak” says; never while a meeting records. Backspace clears."
+                hint="Every answer is read aloud, whatever “When to speak” says. Off during meetings: while one records or a call is on, Yap doesn't listen or talk. Backspace clears."
               >
                 <HotkeyInput
                   bind:value={cfg.assistantHotkey}
@@ -2044,6 +2045,13 @@
                   <p class="gentle">Set an assistant shortcut to ask Yap from any app, even while its window is closed.</p>
                 </Row>
               {/if}
+              <Row>
+                <Toggle
+                  bind:checked={cfg.assistantAnswerCard}
+                  label="Show the answer on the Yap bar"
+                  desc="While Yap reads the answer out, your question and its answer show above the bar. Off: just the voice, with ■ on the bar to stop it. An answer Yap couldn't read aloud still shows"
+                />
+              </Row>
             </Group>
           </div>
           <Group title="Spoken replies in Chat">

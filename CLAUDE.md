@@ -1997,7 +1997,17 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   shortcut (`assistant_hotkey`, unbound by default) and hear the answer;
   it never takes the focus or types. Not **Commands** (the agent's name in a
   dictation, the rewrite shortcut: the AI types for you — Wispr's Command
-  Mode and old "Hey Flow"; Wispr has no spoken-answer assistant). Phases
+  Mode and old "Hey Flow"; Wispr has no spoken-answer assistant). **Off
+  during meetings** (Nathan: Bella talking over a meeting "would be too
+  much"): while a meeting records or a call is on (`tts::meeting_quiet` =
+  `meeting::is_recording` || `meeting_detect::call_live`), a press doesn't
+  listen — `off_for_meeting` shows "The Voice Assistant is off during
+  meetings" (alert `assistantMeetingOff`, over the meeting, every press) —
+  and nothing in Yap talks: `tts::say` refuses, Chat's auto-speak stays
+  quiet. The question is transcribed with the correction dictionary (exact
+  + near-miss, as a dictation), never the AI cleanup pass (the Chat model
+  reads it as asked; cleanup would add delay), snippets or the voice
+  command. Phases
   `Idle → Listening → Thinking → Speaking` in `yap-assistant {phase,
   conversationId, messageId}` (the bar). `listening` (from
   `capture_target`; bumps a generation, drops the last answer's card),
@@ -2015,13 +2025,16 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   asked|answered|failed|open, conversationId, show}` for the main window
   (`show` = the window was in front: ControlPanel brings Chat up on it).
   **`reply(meeting, interrupted)`** (pure): always **spoken** (whatever
-  "Speak replies" / "When to speak" say), except while a meeting records
-  or when a dictation started meanwhile → shown only; a newer question or
-  ■ (the generation) → not said at all (it's in Chat). While the main
-  window isn't in front (`notice::place` = Bar) a card (`style:
-  "answer"`, id `assistant`: the question, the answer's markdown ≤ 1,200
-  chars, a note "Not read aloud while a meeting records", Open in Chat;
-  ✕ / Esc = `stop`), shown before the voice starts; it goes when the
+  "Speak replies" / "When to speak" say), except when a meeting or call
+  started while the answer was coming, or a dictation did → shown only; a
+  newer question or ■ (the generation) → not said at all (it's in Chat).
+  While the main window isn't in front (`notice::place` = Bar) a card
+  (`style: "answer"`, id `assistant`: the question, the answer's markdown
+  ≤ 1,200 chars, a note "Not read aloud during a meeting", Open in Chat;
+  ✕ / Esc = `stop`) — **"Show the answer on the Yap bar"**
+  (`assistant_answer_card`, on) decides it for a spoken answer; one not
+  read aloud always shows (`card_on_bar`, pure), also when the voice
+  fails —, shown before the voice starts; it goes when the
   voice ends (`on_tts_state`), or after `read_ms` when shown only. `stop`
   (■ on the capsule = `bar_action "assistant-stop"`, `assistant_stop`).
   The bar's capsule shows while `phase != Idle`, the bar on or off.
@@ -3295,7 +3308,7 @@ named profiles + per-profile model choice, **Commands** (the rewrite shortcut +
 the agent's name in a dictation; "Voice Agent" until 2026-10-18), the **Voice
 Assistant** (`assistant.rs`, 2026-10-18: its own shortcut, ask Chat out loud
 from any app and hear the answer, a bar capsule and card, follow-ups,
-barge-in, text only over a meeting; the rules unit-tested and the whole
+barge-in, off (and Yap silent) during a meeting recording or a call; the rules unit-tested and the whole
 flow e2e-tested from a staged transcript with the main window hidden and
 in front — not yet asked with a real mic and heard on speakers), **spoken replies** (`tts.rs`, 2026-10-18: Chat's answers read
 aloud in Windows' voices — the Voice replies toggle, ▶ on every answer,

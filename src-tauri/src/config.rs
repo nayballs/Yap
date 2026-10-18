@@ -416,6 +416,14 @@ pub struct YapConfig {
     /// `speak_replies` is on (`tts::sends_by_itself`). On by default.
     #[serde(default = "default_true")]
     pub talk_back_hands_free: bool,
+    /// "Show the answer on the Yap bar" (Settings → Voice Assistant): while
+    /// the assistant shortcut's answer is read aloud, the question and the
+    /// answer show in a card above the bar. Off: just the voice (■ stays on
+    /// the capsule). An answer that isn't read aloud (a meeting recording, a
+    /// dictation started, the voice failed) shows anyway, or it would be
+    /// lost (`assistant::card_on_bar`). On by default.
+    #[serde(default = "default_true")]
+    pub assistant_answer_card: bool,
     /// The speech engine (`tts::ENGINES`): "kokoro" (the default: Kokoro's
     /// natural voices once downloaded, Windows voices until then) or
     /// "windows" (Windows' own voices, chosen).
@@ -707,6 +715,7 @@ impl Default for YapConfig {
             speak_replies: false,
             speak_when: default_speak_when(),
             talk_back_hands_free: true,
+            assistant_answer_card: true,
             tts_engine: default_tts_engine(),
             tts_voice: default_tts_voice(),
             tts_windows_voice: String::new(),

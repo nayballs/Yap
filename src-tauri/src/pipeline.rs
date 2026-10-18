@@ -2116,6 +2116,14 @@ impl Pipeline {
     /// speaking stops the voice first (`start_recording`'s barge-in); a
     /// press while any recording runs stops it, as the other keys do.
     pub fn on_assistant_key(&self, pressed: bool, at: Option<u64>) {
+        // Off during meetings and calls: a press doesn't start listening (a
+        // press while something records still stops it, below).
+        if pressed
+            && !self.shared.recording.load(Ordering::SeqCst)
+            && crate::assistant::off_for_meeting(&self.shared.app)
+        {
+            return;
+        }
         if pressed {
             self.ensure_mic();
         }
@@ -2301,6 +2309,10 @@ impl Robot {
     /// it) — then `text` as the transcript, from the dictionary on.
     pub(crate) async fn ask_assistant(&self, text: String, listen_ms: u64) -> Result<(), String> {
         let shared = &self.0;
+        // As the shortcut: off during meetings and calls.
+        if !shared.recording.load(Ordering::SeqCst) && crate::assistant::off_for_meeting(&shared.app) {
+            return Err("The Voice Assistant is off during meetings".into());
+        }
         if shared.recording.load(Ordering::SeqCst) || shared.processing.swap(true, Ordering::SeqCst) {
             return Err(Self::BUSY.into());
         }

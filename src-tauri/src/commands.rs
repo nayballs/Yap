@@ -1003,7 +1003,8 @@ pub async fn chat_send(
         &now.speak_when,
         by_voice,
         crate::pipeline::dictation_state().1,
-        crate::meeting::is_recording(),
+        // A meeting recording or a call: quiet (`tts::meeting_quiet`).
+        crate::tts::meeting_quiet().is_some(),
     );
     Ok(serde_json::json!({
         "conversationId": turn.conversation_id,

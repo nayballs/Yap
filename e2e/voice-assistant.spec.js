@@ -402,27 +402,61 @@ test('■ stops the answer, and a press while Yap speaks cuts it off to listen (
   await setConfig(yap, main, { assistantHotkey: '' });
 });
 
-test('during a meeting: the answer is shown on the bar, never spoken', async ({ yap, main, fakeLlm, shot }) => {
+// Nathan (2026-10-18): "We do not want this feature enabled during meetings,
+// we don't want Bella to talk … this would be too much". While a meeting
+// records or a call is on, the shortcut doesn't listen and Yap doesn't talk.
+const offCard = (yap) =>
+  yap.overlay.getByRole('status').filter({ hasText: 'The Voice Assistant is off during meetings' });
+
+test('during a meeting: the Voice Assistant is off — no listening, no answer, no voice', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
   await inAnotherApp(yap);
+  const chatsBefore = yap.readJson('chats.json')?.conversations?.length ?? 0;
   const note = await yap.invoke('note_create', { title: 'Standup', folder: 'Meetings' });
   await yap.invoke('meeting_start', { noteId: note.id });
   await expect.poll(async () => (await yap.invoke('meeting_state')).recording).toBe(true);
   try {
-    fakeLlm.scriptChat([{ content: 'The budget review is at three.' }]);
-    await ask(yap, 'when is the budget review');
-    const card = answerCard(yap);
-    await expect(card).toContainText('The budget review is at three.', { timeout: 10_000 });
-    await expect(card).toContainText('Not read aloud while a meeting records');
-    // Nothing to stop: the meeting's pill is back under the card.
+    await expect(ask(yap, 'when is the budget review')).rejects.toThrow(/off during meetings/);
+    await expect(offCard(yap)).toBeVisible({ timeout: 10_000 });
     await expect(capsule(yap)).toHaveCount(0);
     await expect(yap.overlay.getByLabel('Recording meeting notes')).toBeVisible();
-    await shot(yap.overlay, '26-meeting-answer-shown-only');
-    await main.waitForTimeout(500);
+    await shot(yap.overlay, '26-assistant-off-during-a-meeting');
+    // Nothing asked, nothing said, and ▶ is refused too.
+    expect(yap.readJson('chats.json')?.conversations?.length ?? 0).toBe(chatsBefore);
+    await expect(yap.invoke('tts_speak', { text: 'Hello', messageId: 'chat:test' })).rejects.toThrow(/records a meeting/);
     expect(await spoken(yap)).toEqual([]);
-    await card.getByRole('button', { name: 'Close' }).click();
-    await expect(card).toHaveCount(0);
   } finally {
     await yap.invoke('meeting_delete', { noteId: note.id });
+  }
+});
+
+test('on a call (not recording): the Voice Assistant is off and spoken replies stay quiet', async ({
+  yap,
+  main,
+  fakeLlm,
+}) => {
+  await yap.invoke('meeting_detect_simulate', { appId: 'teams', active: true });
+  try {
+    await inAnotherApp(yap);
+    await expect(ask(yap, 'what is next')).rejects.toThrow(/off during meetings/);
+    await expect(offCard(yap)).toBeVisible({ timeout: 10_000 });
+    await expect(yap.invoke('tts_speak', { text: 'Hello', messageId: 'chat:test' })).rejects.toThrow(/during a call/);
+    // Chat's own spoken replies ("Always") don't read a typed answer either.
+    await setConfig(yap, main, { speakReplies: true, speakWhen: 'always' });
+    await mainOnScreen(yap);
+    await freshChat(main);
+    fakeLlm.scriptChat([{ content: 'Quietly answered.' }]);
+    await send(main, 'are you there');
+    await expect(thread(main)).toContainText('Quietly answered.');
+    await main.waitForTimeout(500);
+    expect(await spoken(yap)).toEqual([]);
+  } finally {
+    await yap.invoke('meeting_detect_simulate', { appId: 'teams', active: false });
+    await setConfig(yap, main, { speakReplies: false, speakWhen: 'voice' });
   }
 });
 
@@ -938,5 +972,42 @@ test('a test run never downloads Kokoro from the internet', async ({ yap, kokoro
     expect((await yap.invoke('tts_kokoro_status')).status.installed).toBe(false);
   } finally {
     kokoro.setModelUrl(null);
+  }
+});
+
+// Nathan (2026-10-18): "this bubble I do like it, but we need a setting that
+// can turn that off". Settings → Voice Assistant → "Show the answer on the
+// Yap bar": off, a spoken answer has no card (■ stays on the capsule). (An
+// answer that isn't read aloud still shows: assistant::card_on_bar, unit-tested.)
+test('"Show the answer on the Yap bar" off: just the voice, with ■ on the bar', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  const dialog = await openSettings(main, 'Voice Assistant');
+  const toggle = dialog.getByRole('button', { name: 'Show the answer on the Yap bar' });
+  await toggle.scrollIntoViewIfNeeded();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(() => yap.readJson('config.json').assistantAnswerCard).toBe(false);
+  await shot(main, '30-settings-answer-card-off');
+  await closeSettings(main);
+  try {
+    // Read aloud: the capsule says so, with ■, and no card.
+    await inAnotherApp(yap);
+    fakeLlm.scriptChat([{ content: 'It is at ten.' }]);
+    await ask(yap, 'what time is it on');
+    const cap = capsule(yap);
+    await expect(cap).toHaveAttribute('data-ask', 'speaking', { timeout: 10_000 });
+    await expect(cap.getByRole('button', { name: 'Stop speaking' })).toBeVisible();
+    await expect.poll(async () => (await spoken(yap)).map((s) => s.text)).toEqual(['It is at ten.']);
+    await expect(answerCard(yap)).toHaveCount(0);
+    await shot(yap.overlay, '31-assistant-voice-only');
+    await yap.invoke('assistant_stop');
+
+  } finally {
+    await setConfig(yap, main, { assistantAnswerCard: true });
   }
 });
