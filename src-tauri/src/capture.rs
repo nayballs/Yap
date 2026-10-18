@@ -176,6 +176,8 @@ pub fn init(app: &AppHandle) {
 /// (`{ hidden, windows: { overlay: 17, notepad: null, … } }`: 0 none, 1
 /// monitor only, 17 excluded from capture, null no such window), for the
 /// e2e suite. `hidden`: whether the meeting windows should be hidden now.
+/// Registered in debug builds only (lib.rs).
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 #[tauri::command]
 pub fn capture_affinity(app: AppHandle) -> Result<serde_json::Value, String> {
     if !cfg!(debug_assertions) {

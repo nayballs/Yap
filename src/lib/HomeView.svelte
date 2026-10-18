@@ -7,6 +7,8 @@
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
   import { formatHotkeySpec } from './hotkeys.js';
+  import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
+  import { copyText } from './itemMenus.js';
 
   let { onopensettings = null, onnavigate = null } = $props();
 
@@ -162,7 +164,42 @@
     } catch {
       /* ignore */
     }
-    refresh();
+    await refresh();
+    return true;
+  }
+
+  // ---- Right-click menus (ui/contextMenu.svelte.js, as in Notes): Copy,
+  // Copy raw transcript (the words before cleanup and the dictionary, when
+  // they differ), Delete… — also from the row's hover buttons' place via the
+  // ContextMenu key / Shift+F10 on the focused row. ----
+  const rowKey = (e) => `${e.ts}:${e.text}`;
+  let rowEls = $state({});
+
+  /** The trash button and the menu's Delete… both ask first. */
+  function askRemove(e) {
+    const preview = e.text.length > 60 ? `${e.text.slice(0, 57).trimEnd()}…` : e.text;
+    askConfirm({
+      title: 'Delete this dictation?',
+      body: `“${preview}” leaves your history and stats. The text you dictated stays where Yap typed it.`,
+      run: () => remove(e),
+      returnFocus: rowEls[rowKey(e)],
+    });
+  }
+
+  function rowMenu(ev, e) {
+    const raw = (e.raw || '').trim();
+    openContextMenu(
+      ev,
+      [
+        { label: 'Copy', icon: 'copy', onselect: () => copyText(e.text) },
+        raw && raw !== e.text.trim()
+          ? { label: 'Copy raw transcript', icon: 'copy', onselect: () => copyText(raw, 'Copied the raw transcript') }
+          : null,
+        { separator: true },
+        { label: 'Delete…', icon: 'trash', danger: true, onselect: () => askRemove(e) },
+      ],
+      { label: 'Dictation', row: rowEls[rowKey(e)] }
+    );
   }
 
   function fmtTimeSaved(min) {
@@ -321,7 +358,18 @@
             <div class="daycap">{g.label}</div>
             <div class="daylist">
               {#each g.items as e (e.ts + e.text)}
-                <div class="item">
+                <!-- Focusable for its menu from the keyboard (the ContextMenu key, Shift+F10). -->
+                <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+                <div
+                  class="item"
+                  class:menuopen={menuOpenFor(rowEls[rowKey(e)])}
+                  bind:this={rowEls[rowKey(e)]}
+                  role="article"
+                  tabindex="0"
+                  aria-label={`Dictation at ${timeOf(e.ts)}`}
+                  oncontextmenu={(ev) => rowMenu(ev, e)}
+                  onkeydown={(ev) => ev.target === ev.currentTarget && menuKey(ev, (k) => rowMenu(k, e))}
+                >
                   <span class="time">{timeOf(e.ts)}</span>
                   <div class="body">
                     <p class="text">{e.text}</p>
@@ -339,7 +387,7 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
                       {/if}
                     </button>
-                    <button class="act danger" title="Delete" aria-label="Delete" onclick={() => remove(e)}>
+                    <button class="act danger" title="Delete" aria-label="Delete" onclick={() => askRemove(e)}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
                     </button>
                   </div>
@@ -651,8 +699,17 @@
   .daylist .item:last-child {
     border-bottom: none;
   }
-  .item:hover {
+  .item:hover,
+  .item.menuopen {
     background: var(--yap-s3);
+  }
+  .item:focus-visible {
+    outline: 1.5px solid var(--yap-primary-line);
+    outline-offset: -1px;
+  }
+  .item.menuopen .meta,
+  .item.menuopen .actions {
+    opacity: 1;
   }
   .time {
     flex: 0 0 56px;

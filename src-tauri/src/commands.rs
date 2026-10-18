@@ -841,6 +841,13 @@ pub fn chat_delete(id: u64) {
     crate::chats::delete(id);
 }
 
+/// Rename a conversation (the Chat sidebar's Rename, in place): the title as
+/// stored (one line, trimmed, ≤ 80 characters). Its place in the list stays.
+#[tauri::command]
+pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
+    crate::chats::rename(id, &title)
+}
+
 /// One chat turn, answered: what [`chat_turn`] returns.
 pub(crate) struct ChatTurn {
     pub conversation_id: u64,

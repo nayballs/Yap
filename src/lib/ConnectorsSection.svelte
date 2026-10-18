@@ -1,7 +1,8 @@
 <script>
   // Settings → Connectors (Wispr Flow's Connectors page, local-first): one
   // rounded card per calendar source, each with its Connect button and, once
-  // connected, a row per calendar with a ⋯ menu (Sync now / Disconnect).
+  // connected, a row per calendar with a ⋯ menu (Sync now / Disconnect…; a
+  // right-click opens it too: ui/contextMenu.svelte.js).
   // - Google Calendar: one click (calendar.rs → calendar/google.rs: the
   //   system browser, PKCE, two read-only scopes).
   // - Outlook Calendar: Yap has no Microsoft app, so Connect walks through
@@ -15,6 +16,7 @@
   import { calendar } from './calendar.svelte.js';
   import { toast } from './ui/toast.svelte.js';
   import CalendarMark from './CalendarMark.svelte';
+  import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
   import claudeLogo from '../assets/providers/claude.svg';
   import openaiLogo from '../assets/providers/openai.svg';
   import geminiLogo from '../assets/providers/gemini.svg';
@@ -24,8 +26,9 @@
   let link = $state('');
   let adding = $state(false);
   let formError = $state('');
-  // The connection whose ⋯ menu is open.
-  let menu = $state(null);
+  // Each connection's row: its ⋯ and a right-click open the app's menu
+  // (ui/contextMenu.svelte.js, as in Notes).
+  let dotsEls = $state({});
   let googleExplain = $state(false);
   let now = $state(Date.now() / 1000);
 
@@ -77,7 +80,6 @@
   }
 
   async function syncNow() {
-    menu = null;
     try {
       await invoke('calendar_sync');
     } catch (e) {
@@ -86,13 +88,39 @@
   }
 
   async function disconnect(c) {
-    menu = null;
     try {
       // Its row goes: that says it (no toast on top).
       await invoke('calendar_disconnect', { id: c.id });
+      return true;
     } catch (e) {
       toast({ title: "Couldn't disconnect", description: String(e), variant: 'destructive' });
+      return false;
     }
+  }
+
+  function askDisconnect(c) {
+    askConfirm({
+      title: `Disconnect ${c.label}?`,
+      body: `Its meetings leave Yap, and Yap forgets its ${c.kind === 'google' ? 'sign-in' : 'link'}. You can connect it again at any time.`,
+      confirmLabel: 'Disconnect',
+      busyLabel: 'Disconnecting…',
+      run: () => disconnect(c),
+      returnFocus: dotsEls[c.id],
+    });
+  }
+
+  /** A connection's menu: Connect again (when Google needs it), Sync now, Disconnect…. */
+  function connMenu(e, c) {
+    openContextMenu(
+      e,
+      [
+        c.kind === 'google' && c.reconnect ? { label: 'Connect again', icon: 'sync', onselect: connectGoogle } : null,
+        { label: 'Sync now', icon: 'sync', disabled: calendar.syncing, onselect: syncNow },
+        { separator: true },
+        { label: 'Disconnect…', icon: 'unlink', danger: true, onselect: () => askDisconnect(c) },
+      ],
+      { label: `${c.label} options`, row: dotsEls[c.id] }
+    );
   }
 
   function ago(ts) {
@@ -114,15 +142,16 @@
     window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: 'mcp' }));
   }
 
-  function onWindowClick(e) {
-    if (menu && !e.target.closest?.('.cmenu-wrap')) menu = null;
-  }
 </script>
 
-<svelte:window onclick={onWindowClick} />
-
 {#snippet connRow(c)}
-  <div class="crow">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="crow"
+    class:menuopen={menuOpenFor(dotsEls[c.id])}
+    oncontextmenu={(e) => connMenu(e, c)}
+    onkeydown={(e) => menuKey(e, (k) => connMenu(k, c))}
+  >
     <span class="cdot" class:bad={!!c.error} aria-hidden="true"></span>
     <div class="crow-text">
       <div class="clabel">{c.label}</div>
@@ -131,23 +160,17 @@
     {#if c.kind === 'google' && c.reconnect}
       <button class="cbtn" onclick={connectGoogle}>Connect again</button>
     {/if}
-    <div class="cmenu-wrap">
-      <button
-        class="dots"
-        aria-label={`More options for ${c.label}`}
-        aria-haspopup="menu"
-        aria-expanded={menu === c.id}
-        onclick={() => (menu = menu === c.id ? null : c.id)}
-      >
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
-      </button>
-      {#if menu === c.id}
-        <div class="cmenu" role="menu" aria-label={`${c.label} options`}>
-          <button role="menuitem" onclick={syncNow} disabled={calendar.syncing}>Sync now</button>
-          <button role="menuitem" class="danger" onclick={() => disconnect(c)}>Disconnect</button>
-        </div>
-      {/if}
-    </div>
+    <button
+      class="dots"
+      bind:this={dotsEls[c.id]}
+      aria-label={`More options for ${c.label}`}
+      aria-haspopup="menu"
+      aria-expanded={menuOpenFor(dotsEls[c.id])}
+      data-more
+      onclick={(e) => connMenu(e, c)}
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+    </button>
   </div>
 {/snippet}
 
@@ -402,11 +425,8 @@
   .csub.err {
     color: var(--yap-danger);
   }
-  .cmenu-wrap {
-    position: relative;
-    flex: 0 0 auto;
-  }
   .dots {
+    flex: 0 0 auto;
     display: inline-flex;
     width: 30px;
     height: 30px;
@@ -427,36 +447,8 @@
     width: 16px;
     height: 16px;
   }
-  .cmenu {
-    position: absolute;
-    top: calc(100% + 4px);
-    right: 0;
-    z-index: 20;
-    min-width: 150px;
-    padding: 5px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: 10px;
-    background: var(--yap-s2);
-    box-shadow: var(--yap-shadow-menu);
-  }
-  .cmenu button {
-    display: block;
-    width: 100%;
-    padding: 7px 10px;
-    border: none;
-    border-radius: 7px;
-    background: none;
-    color: var(--yap-fg);
-    font: inherit;
-    font-size: 13px;
-    text-align: left;
-    cursor: pointer;
-  }
-  .cmenu button:hover:not(:disabled) {
-    background: var(--yap-s3);
-  }
-  .cmenu button.danger {
-    color: var(--yap-danger);
+  .crow.menuopen {
+    border-color: var(--yap-border-hover);
   }
 
   .lform {

@@ -590,21 +590,29 @@ test('Google Calendar in one click (a local fake of Google), read-only, then dis
   await expect(row(main, 'Roadmap review')).toContainText('Alex Chen');
   await shot(main, '20-meetings-with-google');
 
-  // Disconnect, from the ⋯ menu: Google's access is revoked, its meetings go.
+  // Disconnect, from the ⋯ menu (the app's right-click menu, under the
+  // button), after asking: Google's access is revoked, its meetings go.
   await ensureFeed(yap, feed);
   const settings = await openSettings(main, 'Connectors');
   const google_ = settings.getByRole('group', { name: 'Google Calendar' });
   await google_.getByRole('button', { name: 'More options for tester@example.com' }).click();
+  const connMenu = main.getByRole('menu', { name: 'tester@example.com options' });
+  await expect(connMenu.getByRole('menuitem')).toHaveText(['Sync now', 'Disconnect…']);
   await shot(main, '21-connection-menu');
-  await google_.getByRole('menuitem', { name: 'Disconnect' }).click();
+  await connMenu.getByRole('menuitem', { name: 'Disconnect…' }).click();
+  const ask = main.getByRole('alertdialog', { name: 'Disconnect tester@example.com?' });
+  await expect(ask).toContainText('You can connect it again at any time.');
+  await ask.getByRole('button', { name: 'Disconnect' }).click();
   await expect(google_.getByText('tester@example.com')).toHaveCount(0);
   expect(google.revoked).toHaveLength(1);
   expect((await status(yap)).events.map((e) => e.title)).not.toContain('Roadmap review');
 
-  // The link too: nothing left, and the secrets are gone.
+  // The link too (a right-click on its row is the same menu): nothing
+  // left, and the secrets are gone.
   const other = settings.getByRole('group', { name: 'Other calendar' });
-  await other.getByRole('button', { name: 'More options for nathan@example.com' }).click();
-  await other.getByRole('menuitem', { name: 'Disconnect' }).click();
+  await other.getByText('nathan@example.com', { exact: true }).click({ button: 'right' });
+  await main.getByRole('menu', { name: 'nathan@example.com options' }).getByRole('menuitem', { name: 'Disconnect…' }).click();
+  await main.getByRole('alertdialog', { name: 'Disconnect nathan@example.com?' }).getByRole('button', { name: 'Disconnect' }).click();
   await expect.poll(() => status(yap).then((s) => s.connections.length)).toBe(0);
   expect((await status(yap)).events).toEqual([]);
   expect(Object.keys(yap.readJson('calendar-secrets.e2e.json'))).toEqual([]);

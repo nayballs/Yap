@@ -5,7 +5,9 @@
 //! The chat engine itself lives in `commands::chat_send` (eager keyword-RAG
 //! over the notes store + the Chat scope's endpoint).
 
+#[cfg(not(test))]
 use std::path::PathBuf;
+#[cfg(not(test))]
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -72,6 +74,7 @@ struct Store {
     conversations: Vec<Conversation>,
 }
 
+#[cfg(not(test))]
 static STATE: Mutex<Option<Store>> = Mutex::new(None);
 
 fn now_secs() -> u64 {
@@ -81,10 +84,12 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+#[cfg(not(test))]
 fn chats_path() -> PathBuf {
     crate::config::data_dir().join("chats.json")
 }
 
+#[cfg(not(test))]
 fn load_from_disk() -> Store {
     let path = chats_path();
     match std::fs::read_to_string(&path) {
@@ -100,6 +105,7 @@ fn load_from_disk() -> Store {
     }
 }
 
+#[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     match serde_json::to_string(store) {
         Ok(json) => {
@@ -112,6 +118,7 @@ fn save_to_disk(store: &Store) {
     }
 }
 
+#[cfg(not(test))]
 fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     let mut guard = match STATE.lock() {
         Ok(g) => g,
@@ -119,6 +126,53 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     };
     let store = guard.get_or_insert_with(load_from_disk);
     f(store)
+}
+
+// Unit tests never read or write the real chats.json: each test thread gets
+// a store of its own, in memory, that starts empty (as notes.rs does).
+#[cfg(test)]
+thread_local! {
+    static TEST_STORE: std::cell::RefCell<Store> = std::cell::RefCell::new(Store::default());
+}
+
+#[cfg(test)]
+fn save_to_disk(_store: &Store) {}
+
+#[cfg(test)]
+fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
+    TEST_STORE.with(|s| f(&mut s.borrow_mut()))
+}
+
+/// The longest title a rename keeps (a first message's title is its first
+/// 50 characters).
+pub const TITLE_MAX: usize = 80;
+
+/// A title as a rename stores it: one line, runs of whitespace as one
+/// space, trimmed, at most [`TITLE_MAX`] characters. Empty → an error.
+pub fn clean_title(title: &str) -> Result<String, String> {
+    let one_line = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.is_empty() {
+        return Err("A conversation needs a name".to_string());
+    }
+    Ok(one_line.chars().take(TITLE_MAX).collect::<String>().trim_end().to_string())
+}
+
+/// Rename a conversation (the Chat sidebar's Rename). Its place in the list
+/// stays: `updated_ts` is the last message's. Returns the stored title.
+pub fn rename(id: u64, title: &str) -> Result<String, String> {
+    let title = clean_title(title)?;
+    with_store(|s| {
+        let conv = s
+            .conversations
+            .iter_mut()
+            .find(|c| c.id == id)
+            .ok_or("Conversation not found")?;
+        if conv.title != title {
+            conv.title = title.clone();
+            save_to_disk(s);
+        }
+        Ok(title)
+    })
 }
 
 /// Conversation summaries, newest-updated first:
@@ -211,4 +265,39 @@ pub fn delete(id: u64) {
         s.conversations.retain(|c| c.id != id);
         save_to_disk(s);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_title_is_one_trimmed_line() {
+        assert_eq!(clean_title("  Trip   plans \n for May ").unwrap(), "Trip plans for May");
+        assert!(clean_title("").is_err());
+        assert!(clean_title(" \n\t ").is_err());
+        let t = clean_title(&"word ".repeat(40)).unwrap();
+        assert!(t.chars().count() <= TITLE_MAX);
+        assert!(!t.ends_with(' '));
+    }
+
+    #[test]
+    fn rename_keeps_the_conversation_in_its_place() {
+        let a = create("First question...");
+        let b = create("Second question...");
+        append(a.id, "user", "Hello", &[], None, false).unwrap();
+        let before = get(a.id).unwrap().updated_ts;
+        assert_eq!(rename(a.id, "  Launch plan ").unwrap(), "Launch plan");
+        let renamed = get(a.id).unwrap();
+        assert_eq!(renamed.title, "Launch plan");
+        assert_eq!(renamed.updated_ts, before);
+        assert_eq!(renamed.messages.len(), 1);
+        assert_eq!(get(b.id).unwrap().title, "Second question...");
+        // An empty name changes nothing; a missing conversation says so.
+        assert!(rename(a.id, "   ").is_err());
+        assert_eq!(get(a.id).unwrap().title, "Launch plan");
+        assert_eq!(rename(9999, "Nope").unwrap_err(), "Conversation not found");
+        // The list shows the new name.
+        assert!(list().as_array().unwrap().iter().any(|c| c["title"] == "Launch plan"));
+    }
 }

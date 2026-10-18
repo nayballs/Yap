@@ -16,6 +16,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, tick } from 'svelte';
   import Toggle from './ui/Toggle.svelte';
+  import { openContextMenu, menuKey, askConfirm } from './ui/contextMenu.svelte.js';
 
   let dict = $state([]);
   let fuzzy = $state(true);
@@ -103,8 +104,80 @@
     await tick();
     document.querySelector(snippet ? '.snip-row:last-of-type input' : '.dict-row:last-of-type input')?.focus();
   }
-  function removeEntry(i) {
-    dict = dict.filter((_, j) => j !== i);
+  function removeEntry(entry) {
+    dict = dict.filter((x) => x !== entry);
+  }
+
+  // ---- Right-click menus (ui/contextMenu.svelte.js, as in Notes): a row's
+  // Edit, the ≈ near-miss switch (corrections) and Delete…, which asks
+  // first, as the row's × does — an empty row just goes. A right-click in
+  // one of its boxes is the box's own edit menu. ----
+  const firstInput = (entry) => rowEls.get(entry)?.querySelector('input');
+  // Each entry's row (the rows are keyed by place, so a row's entry can change).
+  const rowEls = new Map();
+  function rowRef(el, entry) {
+    let current = entry;
+    rowEls.set(current, el);
+    const forget = () => rowEls.get(current) === el && rowEls.delete(current);
+    return {
+      update(next) {
+        forget();
+        current = next;
+        rowEls.set(current, el);
+      },
+      destroy: forget,
+    };
+  }
+
+  function askRemove(entry) {
+    const from = (entry.from || '').trim();
+    const to = (entry.to || '').trim();
+    if (!from && !to) {
+      removeEntry(entry);
+      return;
+    }
+    const firstLine = to.split('\n')[0];
+    askConfirm({
+      title: entry.snippet ? `Delete the snippet “${from || firstLine}”?` : `Delete “${to || from}”?`,
+      body: entry.snippet
+        ? from
+          ? `Saying “${from}” stops typing its text.`
+          : 'The snippet goes for good.'
+        : from && to
+          ? `Yap stops changing “${from}” to “${to}”.`
+          : 'The correction goes for good.',
+      run: () => removeEntry(entry),
+      returnFocus: firstInput(entry),
+    });
+  }
+
+  function rowMenu(e, entry) {
+    const items = [
+      {
+        label: 'Edit',
+        icon: 'pencil',
+        onselect: () => {
+          const input = firstInput(entry);
+          input?.focus();
+          input?.select();
+        },
+      },
+    ];
+    if (!entry.snippet) {
+      items.push({
+        label: 'Catch near-misses',
+        icon: 'approx',
+        toggle: true,
+        checked: entry.fuzzy ?? true,
+        onselect: () => (entry.fuzzy = !(entry.fuzzy ?? true)),
+      });
+    }
+    items.push({ separator: true });
+    items.push({ label: 'Delete…', icon: 'trash', danger: true, onselect: () => askRemove(entry) });
+    openContextMenu(e, items, {
+      label: entry.snippet ? 'Snippet' : 'Correction',
+      row: e.type === 'keydown' && e.target?.focus ? e.target : firstInput(entry),
+    });
   }
   // Grow the text box with its text (2–8 lines).
   function snippetRows(text) {
@@ -138,7 +211,13 @@
           <div class="rows">
             {#each dict as entry, i (i)}
               {#if !entry.snippet}
-                <div class="dict-row">
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                  class="dict-row"
+                  use:rowRef={entry}
+                  oncontextmenu={(e) => rowMenu(e, entry)}
+                  onkeydown={(e) => menuKey(e, (k) => rowMenu(k, entry))}
+                >
                   <input placeholder="Power to Keep" aria-label="Heard" bind:value={entry.from} />
                   <span class="arrow">→</span>
                   <input placeholder="Parakeet" aria-label="Replace with" bind:value={entry.to} />
@@ -152,7 +231,7 @@
                     aria-label="Toggle near-miss matching for this correction"
                     onclick={() => (entry.fuzzy = !(entry.fuzzy ?? true))}
                   >≈</button>
-                  <button class="rm" title="Remove" aria-label="Remove" onclick={() => removeEntry(i)}>×</button>
+                  <button class="rm" title="Remove" aria-label="Remove" onclick={() => askRemove(entry)}>×</button>
                 </div>
               {/if}
             {/each}
@@ -199,7 +278,13 @@
           <div class="rows">
             {#each dict as entry, i (i)}
               {#if entry.snippet}
-                <div class="snip-row">
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                  class="snip-row"
+                  use:rowRef={entry}
+                  oncontextmenu={(e) => rowMenu(e, entry)}
+                  onkeydown={(e) => menuKey(e, (k) => rowMenu(k, entry))}
+                >
                   <div class="say">
                     <svg viewBox="0 0 16 16" aria-hidden="true">
                       <rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5" />
@@ -214,7 +299,7 @@
                     rows={snippetRows(entry.to)}
                     bind:value={entry.to}
                   ></textarea>
-                  <button class="rm" title="Remove" aria-label="Remove snippet" onclick={() => removeEntry(i)}>×</button>
+                  <button class="rm" title="Remove" aria-label="Remove snippet" onclick={() => askRemove(entry)}>×</button>
                 </div>
               {/if}
             {/each}

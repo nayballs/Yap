@@ -167,7 +167,11 @@ test('dictionary: a snippet is added, kept, edited and removed', async ({ yap, m
   ]);
   await closeSettings(main);
 
+  // × asks first (as the row's right-click Delete… does).
   await snippets.getByRole('button', { name: 'Remove snippet' }).last().click();
+  const ask = main.getByRole('alertdialog', { name: 'Delete the snippet “my sign-off”?' });
+  await expect(ask).toContainText('Saying “my sign-off” stops typing its text.');
+  await ask.getByRole('button', { name: 'Delete' }).click();
   await expectStore(yap, 'config.json', (c) => !c.dictionary.some((e) => e.from === 'my sign-off'));
   await expect(snippets.getByText(/No snippets yet/)).toBeVisible();
 });

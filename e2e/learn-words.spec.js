@@ -160,6 +160,7 @@ test('a word you remove from the dictionary is never suggested again', async ({ 
   const corrections = main.getByRole('region', { name: 'Corrections' });
   await expect(corrections.getByRole('textbox', { name: 'Replace with' }).last()).toHaveValue('Supabase');
   await corrections.getByRole('button', { name: 'Remove', exact: true }).last().click();
+  await main.getByRole('alertdialog', { name: 'Delete “Supabase”?' }).getByRole('button', { name: 'Delete' }).click();
   await expectStore(yap, 'config.json', (c) => !c.dictionary.some((e) => e.to === 'Supabase'));
   await expectStore(yap, 'word_suggestions.json', (r) => r.removed?.includes('supabase'));
   const kept = yap.readConfig().dictionary;

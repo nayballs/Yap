@@ -1729,7 +1729,9 @@ pub async fn meeting_detect_respond(
 /// Debug builds only: pretend call app `app_id` ("teams", "zoom", …) took
 /// (`active`) or let go of the mic, skipping the debounce — the e2e suite's
 /// stand-in for a real call. `fade_ms` makes that call's start prompt fade
-/// from the window that soon instead of after 30 s.
+/// from the window that soon instead of after 30 s. Registered in debug
+/// builds only (lib.rs).
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 #[tauri::command]
 pub async fn meeting_detect_simulate(
     app: AppHandle,

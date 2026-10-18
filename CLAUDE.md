@@ -99,7 +99,9 @@ competitive strategy, see `ROADMAP.md` in the **private** docs repo (below).
   click handler in `main.js`, never navigating Yap's own window.
 - **No browser context menu:** `webview2-com` (the copy wry already builds on)
   hooks each webview's `ContextMenuRequested`, cutting WebView2's menu down to
-  the editing commands (`context_menu.rs`).
+  the editing commands (`context_menu.rs`; debug builds: Shift+right-click
+  for Inspect). Items with actions get Yap's own menu, the same everywhere
+  (`ui/contextMenu.svelte.js`).
 - **Dialogs:** `tauri-plugin-dialog` (file open/save dialogs for note export and upload).
 - **Accounts (optional):** `cloud/` is the sign-in server — [Better Auth](https://better-auth.com)
   on a Cloudflare Worker + D1 at `auth.contextmirror.com` (see `cloud/README.md`). Yap's side
@@ -1078,8 +1080,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `transcribe_file` command.
 - **`chats.rs`** — the AI Chat surface's conversation store (`chats.json`): a
   `Conversation` (title, messages, timestamps) with `list`/`get`/`create`/
-  `append`/`delete`; `chat_send` (commands.rs) creates a conversation on the
-  first message using a first-50-chars title rule. An answer keeps its tool
+  `append`/`delete`/`rename` (`chat_rename`: one trimmed line ≤ 80 chars,
+  `updated_ts` untouched so the list order stays; unit tests use an
+  in-memory store per thread, never `chats.json`); `chat_send` (commands.rs)
+  creates a conversation on the first message using a first-50-chars title
+  rule. An answer keeps its tool
   chips (`ChatMessage.tools`, only written when there are some), so a
   conversation opened later still shows what the AI looked up and changed,
   and the model that wrote it (`ChatMessage.model` = `ChatModel {provider,
@@ -1654,7 +1659,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
 - **`context_menu.rs`** — no browser context menu in Yap's windows: each
   webview's `ContextMenuRequested` (WebView2, via `webview2-com`) keeps only
   the editing commands, or shows nothing (pure `keep`, unit-tested on the
-  menus WebView2 really offered). See "Window config" below.
+  menus WebView2 really offered). Inspect: debug builds only, and only for a
+  Shift+right-click (`offers_inspect(debug, shift)`; Shift read with
+  `GetKeyState`/`GetAsyncKeyState`, compiled out of release). See "Window
+  config" below.
 - **`input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
   `kb:ctrl+shift+VKEY` (modifier combo; `win` is a modifier too, e.g. the
   meeting shortcut `kb:alt+win+77` = Win+Alt+M), `kb:165` (single right-side modifier, e.g.
@@ -2195,7 +2203,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `note_delete` refuses the note a meeting is recording into — that's
   `meeting_delete` — and tells every window, `yap-note-deleted`) +
   `note_enhance`/`note_ask`/`note_export`,
-  chats CRUD + `chat_send` (RAG + tool loop; `scope: "meetings"` = the
+  chats CRUD (incl. `chat_rename`) + `chat_send` (RAG + tool loop; `scope: "meetings"` = the
   Meetings view's Ask bar, grounded in `calendar::meetings_context`; `voice`
   = the question was dictated; returns the two messages' ids and `speak`,
   `tts::auto_speak`), `chat_dictate` / `chat_input_focus` (the Chat view's
@@ -2872,10 +2880,39 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   **ContextMenu** (at the pointer or under a ⋯ (`alignEnd`), clamped to the
   window; ↑/↓/Home/End/Enter, → into a submenu, ← / Esc back; Esc, Tab, a
   click outside, a resize or a scroll close it and the focus goes back to the
-  row; `{ label, icon, onselect, disabled, danger, checked, items }`,
-  separators and a quiet `note`; it cancels `contextmenu` on itself) and
-  **ConfirmDialog** (the notepad's Wispr-style confirm for the main window:
-  Cancel focused, Esc/scrim cancel, Tab kept inside, the focus returned).
+  row; `{ label, icon, onselect, disabled, danger, checked, toggle, items }`,
+  separators and a quiet `note`; it cancels `contextmenu` on itself; a
+  scroll in its first 250 ms — the right-clicked row scrolling into view —
+  doesn't close it) and **ConfirmDialog** (the notepad's Wispr-style confirm
+  for the main window: Cancel focused, Esc/scrim cancel, Tab kept inside,
+  the focus returned). **Right-click is app-wide and the same everywhere**
+  (`ui/contextMenu.svelte.js`): one menu + one confirm per window
+  (`ui/ContextMenuHost.svelte`, mounted by App.svelte in the main window,
+  onboarding and the notepad); `openContextMenu(e, items, {label, row})`
+  from a right-click (at the pointer), a row's hover ⋯ (`data-more`: under
+  it) or the keyboard (`menuKey`: the ContextMenu key, Shift+F10); nothing
+  to offer → the event is left alone (WebView2's filter shows nothing); a
+  right-click in a text field or on selected text is the native edit menu's;
+  `askConfirm({title, body, run, returnFocus})` for every delete; Esc
+  handlers elsewhere wait for them (`menuOrDialogOpen`). One order: the main
+  action, Copy-type ones, the destructive one last in red behind the
+  confirm; a right-click also selects the row where a click does (unless
+  that loses unsaved work). Where: Notes' folders and notes (+ its Ask
+  thread and transcript lines), Chat's conversations (Rename in place,
+  Copy as Markdown, Delete…; the hover ⋯ replaced the trash) and messages
+  (Copy / Copy as Markdown / Read aloud; a question: Copy — `itemMenus.js`),
+  Home's dictations (Copy, Copy raw transcript, Delete…; the trash asks
+  too), Meetings' past notes (Open, Generate summary, Copy as Markdown,
+  Delete… via `meeting_delete`; a hover ⋯) and calendar meetings (Open note
+  + their row buttons), Dictionary rows (Edit, ≈ Catch near-misses,
+  Delete…; × asks too unless the row is empty), model rows (`ModelRow`:
+  speech, speaker, Kokoro — Download / Use / Delete…) and the local LLM
+  cards (Download / Use / Delete…, now asked first), Connectors' calendars
+  (their ⋯ = this menu: Sync now, Disconnect… asked first), Account's other
+  devices (Sign out), the Actions manager's rows (Edit, Delete…), the
+  notepad's transcript lines (Copy line, Who said this?) and Ask answers
+  (Copy, Copy as Markdown, Read aloud, Good / Bad answer) and questions
+  (Copy). `e2e/right-click.spec.js`.
 
 ### Window config (`src-tauri/tauri.conf.json`)
 - **settings**: 1200×800 (min 860×600), titled "Yap" (it hosts the ControlPanel — see above),
@@ -2916,15 +2953,22 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   pure `keep` keeps undo, redo, cut, copy, paste, paste as plain text
   (`pasteAndMatchStyle`), select all, emoji and the spelling items
   (`spellcheck` — WebView2 says that, the reference says `spellCheck`; both
-  kept), with only the separators that still separate something, plus
-  Inspect (`inspectElement`) in debug builds; nothing left → handled, no menu;
-  a failure reading it → no menu (fail closed). Plain UI: nothing; a text
-  field: its edit menu; Yap's own menus (Notes) cancel `contextmenu` first.
+  kept), with only the separators that still separate something; nothing
+  left → handled, no menu; a failure reading it → no menu (fail closed).
+  Plain UI: nothing; a text field: its edit menu; items with actions: Yap's
+  own menu (`ui/contextMenu.svelte.js`, which cancels `contextmenu` first).
+  **Debug builds: Shift+right-click for Inspect** (`inspectElement` kept
+  only then — `offers_inspect(debug, shift)`, anywhere: in a dev build
+  (`import.meta.env.DEV`) the pages let a Shift+right-click through even on
+  items). A plain right-click never shows Inspect. Release builds (stable,
+  nightly) compile the Shift read out and have DevTools off besides (no
+  tauri `devtools` feature: wry's `devtools` is false without debug
+  assertions), so no Inspect, F12 or Ctrl+Shift+I there; F12 / Ctrl+Shift+I
+  still open DevTools in debug builds (`context-menu.real.js` checks F12).
   The names are the ones this PC's runtime reported (Oct 2026). Debug-only
   `e2e_context_menus` = each webview's hook + last menu (names, kinds,
-  kept, handled, editable, target; labels in debug builds only); test mode
-  marks every menu handled, `YAP_E2E_NO_INSPECT=1` drops Inspect (the
-  robot's release-build check, `e2e-real/context-menu.real.js`).
+  kept, handled, editable, target, inspect; labels in debug builds only);
+  test mode marks every menu handled.
 - `plugins.deep-link.desktop.schemes = ["com.contextmirror.yap"]` — the NSIS
   template registers it for normal installs (portable skips it) and
   single-instance forwards a second launch's link to the running app. Routes
@@ -3485,7 +3529,7 @@ Windows notifications, Focus Assist) not yet tried.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
-search/archive/rename; spoken replies have no cloud voices, read Kokoro's
+search/archive; spoken replies have no cloud voices, read Kokoro's
 Japanese and Mandarin voices' text as English, don't check a slow PC's
 speed before choosing Kokoro (the research's first-use RTF check), wait for the whole answer
 before the first sentence, don't listen again by themselves after an answer,
