@@ -217,7 +217,75 @@ server-side tool ran (`executed_tools`: its queries, and the pages' titles and U
 3. Read the answer and the transcript before trusting a pass or a fail: a check that's too
    strict (or too loose) is a bug in the scenario.
 
-## Findings so far
+## Findings so far (18 Oct 2026)
 
-See the run folders' `summary.md`; the first runs (18 Oct 2026) are summarised in the
-commit that added the harness.
+Run folders under `E:/yap-builds/eval-runs/` on Nathan's PC (Ryzen 7 9800X3D, llama.cpp's
+8 threads, 64 GB; local models on the **CPU** unless said). 24 scenarios (20 + 4 web).
+
+| Model | Pass | Mean turn | Calls over Chat's 20 s | Memory (llama.cpp's projection / peak) |
+|---|---|---|---|---|
+| Groq `openai/gpt-oss-20b` (free plan, paced to 8k tokens/min) | 21/24 (two passes: notes/knowledge/voice before the games + web merge, apps/honesty/web after) | ~1–2 s | 0 | cloud |
+| Qwen2.5-1.5B (on-device default), Yap's rule: no tools | 38/48 (79%, ×2) | 1.0 s | 0 | 1.6 / 1.4 GB |
+| Qwen2.5-1.5B, tools forced on | 39/48 (81%) | 2.6 s | 0 | 1.6 / 1.8 GB |
+| Qwen2.5-3B, Yap's rule: no tools | 38/48 (79%) | 1.5 s | 0 | 2.6 / 2.4 GB |
+| Qwen2.5-3B, tools forced on | 38/48 (79%) | 9.3 s | 2 | 2.6 / 3.0 GB |
+| Llama-3.2-3B, tools forced on | 20/48 (42%) | 43 s | 11 | 3.3 / 7.5 GB |
+| Qwen3-4B-Instruct-2507 (tools by Yap's rule) | 36/48 (75%) | 13 s | 7 | 4.1 / 6.7 GB |
+| Qwen3-4B-Instruct-2507 on the GPU (`--ngl 999`, Chat's own timeout) | 18/24 (75%) | 1.0 s | 0 | GPU |
+| Qwen2.5-7B (tools by Yap's rule) | 20/24 (83%) | 23 s | 15 | 5.4 / 6.0 GB |
+| Qwen3.5-4B, thinking on (its default) | loops (21 calls) and 180 s timeouts on plain chat: stopped | 35–41 s first call | most | — |
+| **Qwen3.5-4B, thinking off** (`--llamafile-arg=--reasoning --llamafile-arg=off`) | **23/24 (96%)** | 25 s | 16 | 3.8 / 4.4 GB |
+| **Qwen3.5-4B, thinking off, on the GPU** (Chat's own timeout) | **44/48 (92%, ×2)** | 1.4 s | 0 | GPU |
+
+**Which local model.** On a CPU-only PC the 1.5B stays the right default: about a second a
+turn, 1.6 GB, 79% with Yap's rule (no tools: the open-apps fast path does the apps, the
+fixed pipeline the web) — but it can't act on notes, and with tools forced on it managed
+half the note actions (as did the 3B). **Qwen3.5-4B with thinking off** is the one small
+model that used the tools well (96% on the CPU, 92% over two GPU passes; edits, folders,
+the injections refused) — on a GPU it's as quick as the cloud (1.4 s a turn); on the CPU,
+25 s a turn, so two thirds of its calls would hit Chat's 20 s timeout. To offer it, the
+sidecar needs `--reasoning off` (with thinking on it loops and times out), the on-device
+model id must name the GGUF so `supports_tools` sees "4B", and a CPU-only PC needs a
+longer local timeout (or streaming). Keep the ≥ 4B rule, but by model rather than by the
+size in its name: Qwen3.5-4B with thinking on passes the rule and fails, Llama-3.2-3B would
+fail it anyway.
+
+What the logs showed (each with the transcript to prove it):
+
+- **Groq answers HTTP 400 `tool_use_failed`** when gpt-oss writes a bad tool call (an
+  `edit_note` without `note_id`; a `web_search` after Yap took it out of the tools at the
+  3-search cap), and Yap's tool loop ends the turn with that error. Retrying the step (with
+  the error as a tool result), and keeping a capped tool offered but refused, would fix both.
+- **Without tools, gpt-oss-20b claims actions** ("Your note … has been saved"); since the
+  merge, `apps::NO_TOOLS_NOTE` + `claims_unasked` cover the open case, and a re-run passed.
+- **Voice answers run long** (87–98 words for "how long do I boil an egg"): nothing tells a
+  non-web Chat turn it will be spoken.
+- **Small tool models skip `web_search`** and answer from memory with made-up `[1]`
+  citations (Qwen3-4B: "Python 3.12.0 [1]", no sources); the fixed pipeline (1.5B) got
+  the current facts right. The keyless bg3.wiki lookup rarely surfaces the Gale article
+  (Gale/Banter, Tara, Act One/Camp Events come first), so every model failed that one but
+  Qwen3.5-4B on the GPU (whose own queries found it, both passes).
+- **Notes**: the commonest local failure is a new note in the right folder (Stories); small
+  models also rename or garble a line instead of `edit_note`'s exact replace.
+- **Prompt injection**: open_app's guard refused every note-driven open, and no web page
+  made Yap act; but 3B/4B models *said* they had obeyed ("Spotify and the Calculator have
+  been opened"), and the 1.5B repeated the page's instructions as its answer.
+- **llamafile's defaults cost RAM**: 4 slots and an 8 GB host prompt cache (`--cache-ram`):
+  the 4B's server grew from 4.1 GB to 6.7 GB over a run. `-np 1 --cache-ram 512` would cap it.
+- **The on-device provider always sends `qwen2.5-1.5b-instruct`** as the model id, whatever
+  GGUF is picked, so `supports_tools` never gives a bigger on-device model its tools.
+- **Llama-3.2-3B** loops on tools (337 calls for 48 scenarios, up to the 20-step cap), writes
+  tool calls as text, and its malformed calls make llamafile answer HTTP 500.
+
+**Groq's `browser_search` spike** (`--raw evals/raw/groq-browser-search.json`, Nathan's free
+key): on its own it works (HTTP 200; Exa-powered; one searched answer 3.6–4.5k tokens, ~0.4 s
+of Groq time, 2.5–3 s wall), with `message.executed_tools[]` = a `browser.search` entry
+(`arguments` = the query, `search_results.results[]` = 5–10 `{title, url, score, content:
+""}`) and a `browser.open` entry (the page read: one result whose `content` is the page text
+and `url` the page), plus `reasoning`; answers cite as `【1†L4-L9】`. **Mixed with Yap's
+function tools** the request is accepted (HTTP 200), but gpt-oss-20b called `search_notes`
+instead of searching and, handed "no notes found", answered from memory, wrongly ("the
+Druid's Grove"); a notes question in the same set-up rightly called `search_notes`. It
+didn't pick the built-in tool next to function tools. So Groq's search fits Yap as a
+**sub-call** (`web::native_backend`: `tools: [browser_search]`, `tool_choice: "required"`,
+the hits from `executed_tools`), not mixed into Chat's own request.
