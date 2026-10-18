@@ -1196,7 +1196,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   Bearer, `{query, max_results: 5}`), keys in `web_search_keys` (service →
   key, like `pp_api_keys`, never logged); with no key — or when the service
   fails (its error kept as `note`, said in the chip: 401/403 wrong key, Exa
-  402 / Tavily 432 out of free searches, 433, 429, offline) — the **keyless
+  402 / Tavily 432 out of free searches, 433, 429, offline), or when it
+  found nothing ("Exa found nothing." as the note) — the **keyless
   lookup**: the game's own MediaWiki (`GAME_WIKIS`: bg3.wiki, warcraft.wiki.gg,
   minecraft.wiki, Fandom wikis…; any `*.wiki.gg` / `*.fandom.com` named in
   the question) else Wikipedia in the person's language (`wiki_language`:
