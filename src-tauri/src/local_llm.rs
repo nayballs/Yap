@@ -699,7 +699,7 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
     CuratedLlm {
         id: GPU_MODEL_ID,
         display: "Qwen3.5 4B",
-        blurb: "Uses Chat's tools well: your notes, apps and the web. Wants a graphics card",
+        blurb: "Uses Chat's tools well. Wants a graphics card",
         filename: "Qwen_Qwen3.5-4B-Q4_K_M.gguf",
         // bartowski's Q4_K_M of Qwen/Qwen3.5-4B (Apache-2.0, ungated); the
         // SHA-256 is its LFS oid, and the file the evaluations ran.
