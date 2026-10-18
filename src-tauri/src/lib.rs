@@ -52,6 +52,7 @@ mod mcp;
 mod mcp_clients;
 mod mic_privacy;
 mod mic_watch;
+mod model_catalog;
 mod mute;
 mod overlay;
 mod partials;
@@ -440,6 +441,9 @@ pub fn run() {
             commands::chat_send,
             ai_model::ai_model_status,
             ai_model::chat_set_model,
+            model_catalog::model_catalog,
+            model_catalog::model_catalog_refresh,
+            model_catalog::llm_models,
             commands::chat_dictate,
             commands::chat_input_focus,
             commands::configure_assistant_hotkey,
@@ -907,6 +911,10 @@ pub fn run() {
             // relaunch after "Restart to update" can reopen the main window
             // once the hidden webviews are initialized.
             updates::init(&handle);
+
+            // The AI providers' live model lists (only providers with a
+            // saved key; each at most once a day).
+            model_catalog::init(&handle);
 
             // Call detection: offer to take notes when a call starts (reads
             // Windows' per-app microphone record; local only).

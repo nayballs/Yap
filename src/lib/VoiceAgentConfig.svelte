@@ -75,7 +75,7 @@
 
   <!-- 2. Provider / model config (dimmed + disabled when Commands are off) -->
   <div class="providercfg" class:off={!enabled}>
-    <ScopeProviderConfig {scope} {cfg} disabled={!enabled} />
+    <ScopeProviderConfig {scope} {cfg} disabled={!enabled} scopeKey="voiceAgent" />
   </div>
 
   <!-- 3. Commands — the name and the rewrite shortcut live in Settings →

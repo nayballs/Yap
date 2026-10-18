@@ -421,7 +421,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   wait (the raw text is the fallback). A limit that outlasts that is said
   plainly (`rate_limited_error`: "Groq is limiting how much Yap can ask for
   right now (its free plan allows 8,000 tokens a minute). Try again in 11
-  s."), not as a raw `HTTP 429` body.
+  s."), not as a raw `HTTP 429` body. A 400 about the temperature is asked
+  again without one; a 400 about reasoning on a call with tools (OpenAI's
+  GPT-6 take tools on Chat Completions only with reasoning off) again with
+  `reasoning_effort: "none"`, once each.
 - **`local_llm.rs`** — the on-device AI cleanup sidecar: runs **Mozilla llamafile**
   (llama.cpp, single-file OpenAI-compatible server) as a hidden child process on a
   free localhost port, serving **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) by default
@@ -1114,6 +1117,59 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (`local_llm::ensure_started`) or says it isn't installed, never a silent
   fallback to the endpoint underneath. `save_config` emits
   `yap-config-saved`, which the chip re-reads on. Unit-tested.
+- **`model_catalog.rs`** — **the AI providers' live model lists**
+  (2026-10-18), so a model Google or Groq releases tomorrow shows up in
+  Yap's pickers without a Yap update and a retired one stops being offered.
+  Asks **the provider itself, with the key already saved** (`key_for`: the
+  scope's own, `provider_api_key`'s shared one, else any scope's or cleanup
+  profile's; only providers with a key, `keyed`; never a catalog of Yap's
+  or a third party's): Groq `GET /openai/v1/models`, OpenAI `GET /v1/models`
+  (Bearer), Anthropic `GET /v1/models` (`x-api-key` + `anthropic-version`,
+  paged by `after_id`), Gemini's native `GET /v1beta/models` (the key in
+  `x-goog-api-key`, never the URL; paged by `pageToken`), OpenRouter
+  `GET /api/v1/models`; 15 s, off the main thread. **Keeps chat models
+  only**, per provider and unit-tested on fixtures trimmed from the real
+  lists (`parse_groq` … `parse_openrouter`, `chat_capable`): no embedding,
+  speech/TTS/transcription, image/video/music, moderation/guard, realtime/
+  live/native-audio, search-preview, computer-use, deep-research or Codex
+  models; Gemini needs `generateContent` (no `-latest` aliases, `-exp`,
+  custom-tools variant), Groq and OpenRouter text out (Groq: active, not a
+  model `config::is_retired_groq_model`), OpenAI GPT / o-series without the
+  Responses-only `-pro` and `-latest` aliases, Anthropic not `retired`
+  (`deprecated` marked); dated snapshots fold into the alias the list has
+  (`fold_snapshots`: `gpt-4.1-2025-04-14` → `gpt-4.1`'s `aliases`), one
+  without it keeps a `base` (`claude-haiku-4-5-20251001` →
+  `claude-haiku-4-5`) so a curated alias still matches. **Names**: the
+  provider's (`clean_name`: "OpenAI: " / "Qwen/" cut), else `derive_name`
+  ("GPT-5.5", "GPT-OSS 20B", "Llama 4 Scout 17B 16E Instruct"). Per model:
+  id, name, desc (first sentence), created, context, `tools` / `thinks` when
+  the provider says (Groq's `supported_features`, OpenRouter's
+  `supported_parameters`, Gemini's `thinking`), `firstSeen`. **Cache**
+  `<data>/model_catalog.json` (per provider: the last good list +
+  `fetchedAt`, the last attempt's `checkedAt` + `error` in words — "the API
+  key wasn't accepted" —, never a key; atomic, quarantined when corrupt).
+  **When**: a list is fresh for a day (`FRESH_FOR`), a failed check tried
+  again after an hour; `init` checks what's due 40 s after launch, then
+  hourly (not in a test run); `on_config_saved` (from `save_config`) checks
+  a provider at once when its key was set or changed; `model_catalog` (the
+  pickers) returns the cached lists and checks a due one behind them; one
+  check per provider at a time; every change is `yap-model-catalog`
+  (snapshot `{providers, now, rev}`, keyed providers only; `rev` taken under
+  the store lock so a late command reply never wins over a newer event).
+  A failed last check = `ok: false` (the page shows the curated list).
+  `tools_for(provider, model)` feeds `tools::supports_tools`: a cloud model
+  its provider says can't call tools gets no note tools ("· no note tools").
+  **Self-hosted / custom servers** (`llm_models {provider: local|custom,
+  scope, baseUrl}`): `GET {base}/models` with the scope's key (OpenWhispr's
+  OpenAICompatiblePanel reading: `data` or `models`, `id` or `name`), kept a
+  minute in memory. Commands `model_catalog`, `model_catalog_refresh
+  {provider}` (Settings' Check now), `llm_models {provider, scope?, baseUrl?,
+  force?}`. Logs: provider + counts. Test mode never contacts a provider:
+  debug-only `YAP_MODELS_STANDIN` (`<standin>/<host><path>?<query>`,
+  `e2e/support/fake-llm.js`); none set = nothing fetched; a self-hosted
+  server only on 127.0.0.1. `#[ignore]`d `real_saved_lists`
+  (`YAP_MODEL_LISTS=<dir>`) runs the parsers over saved real lists, never
+  fetching.
 - **`tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
@@ -1153,7 +1209,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   notepad and the lists follow live. Chips say what happened: `Found
   "beta" on 2 lines in "Launch plan"`, `Edited "Launch plan": "Friday." →
   "Monday."`, `Couldn't edit "Launch plan": the text is in 2 places`. Gated
-  by `supports_tools` — cloud providers always qualify, local models need
+  by `supports_tools` — cloud providers always qualify (unless the
+  provider's own model list says that model can't call tools,
+  `model_catalog::tools_for`), local models need
   ≥4B params (`LOCAL_TOOL_MIN_PARAMS_B`) — so smaller local models fall back
   to plain keyword-RAG chat instead. Unit-tested end to end against
   `notes.rs`' **in-memory test store** (under `cfg(test)` every test thread
@@ -1652,7 +1710,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `resolve_cleanup` (per-app plan: body + endpoint).
   `data_dir()` is portable-aware. `load()` also migrates saved Groq picks (cleanup,
   LLM scopes, profiles) off models Groq retired in 2026 (`RETIRED_GROQ_MODELS` —
-  default is now `openai/gpt-oss-20b`); extend that table when Groq retires more.
+  default is now `openai/gpt-oss-20b`); extend that table when Groq retires more
+  (`is_retired_groq_model` keeps them out of Groq's live model list too).
   Those fixes are idempotent; changes that must run only ONCE go in
   `migrate_once`, keyed by `config_version` (`CONFIG_VERSION`; a missing field =
   0, a pre-versioning file). `load()` saves straight after one runs, and `save()`
@@ -2344,7 +2403,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `YAP_E2E_APPS` names, no icons), never the internet for the web
   (`web.rs`: the debug-only `YAP_EXA_URL` / `YAP_TAVILY_URL` /
   `YAP_WEB_STANDIN` point at `e2e/support/fake-web.js`; unset, a search or a
-  page read fails), `e2e_coaching_reset` (every
+  page read fails), no AI provider's model list (`model_catalog.rs`: the
+  debug-only `YAP_MODELS_STANDIN` points at `e2e/support/fake-llm.js`; unset,
+  the curated lists), `e2e_coaching_reset` (every
   push-to-talk hint due again), `e2e_notice_reset` / `e2e_focus` /
   `e2e_notice` (notice.rs: cooldowns and fatigue forgotten before every
   test, whether the main window counts as focused — by default while it's on
@@ -2692,8 +2753,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   to ("GPT-OSS 20B · Groq", "· no note tools" for a local model under 4B,
   "No AI model" → Settings → Language Models → Chat via `cleanup#chat`);
   its popover says where it runs, switches the Chat scope between the
-  keyed providers' registry models and the on-device model
-  (`chat_set_model`), and links to Language model settings. Each answer
+  keyed providers' models — Yap's list merged with each provider's live one
+  (`modelCatalog.js`): "New" after the curated ones, a dropped one hidden —
+  and the on-device model (`chat_set_model`), and links to Language model
+  settings. A chat model its provider no longer offers says so on the chip
+  ("· no longer offered") and in the popover ("Groq no longer offers GPT-OSS
+  120B. Pick another model."), still ticked. Each answer
   shows its model quietly under it, as do the Notes view's Ask bar and the
   notepad's Ask sheet (`nextModel(scope)` fetched beside the call; none for
   Yap's own "Nothing new" / "too little"). **Spoken replies** (`tts.rs`):
@@ -3017,7 +3082,19 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   Apache-2.0)), **Language Models** (OpenWhispr-style: enable toggle → mode
   selector Cloud Providers/Local/Self-Hosted → provider pill tabs (Groq/Anthropic/
   OpenAI/OpenRouter/Custom, brand icons) → API Key (masked + "Get your API key"
-  link) → Select Model registry rows (`ppModels.js` + `ui/SelectList.svelte`);
+  link) → Select Model rows (`ModelPicker.svelte`: `ppModels.js`'s curated
+  list merged with the provider's live one by `modelCatalog.js` — curated it
+  still lists, then "New" (released after `CURATED_AT`, by the provider's
+  date or, for Gemini's dateless list, not in the registry's `seen`; 120
+  days), the rest behind "Show N more" with a filter past 12, the saved
+  model it no longer lists kept with "No longer offered" and a line saying
+  so, "Groq's current models, checked 2 h ago · Check now" or "Couldn't
+  check…: … Showing Yap's list. · Try again"; no key, offline or a failed
+  check = exactly the curated list; switching provider picks its first model
+  it still offers; `ui/SelectList.svelte` draws the tags); a self-hosted or
+  custom endpoint's Model field suggests its server's `/models`
+  (`EndpointModels.svelte`, a `<datalist>` + "3 models on this server"), as
+  do the cleanup profiles' model fields;
   UI-only `ppMode`/`cloudProvider` state resolves to the unchanged `ppProvider`
   contract. Below it, **Prompt Studio** (`PromptStudio.svelte`, OpenWhispr port):
   View (full effective prompt via `get_base_prompt`) / Customize (preset +
@@ -3496,6 +3573,10 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
   participants, meeting transcripts).
 - Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chats.rs`).
+- Model lists: `%APPDATA%/yap/model_catalog.json` — each keyed AI provider's
+  chat models as it last listed them (id, name, created, context, tools,
+  first seen), when, and why the last check failed (`model_catalog.rs`).
+  Never a key. Safe to delete (the curated lists show until the next check).
 - Updates: `%APPDATA%/yap/updates.json` — which update was announced (and when),
   the last check time, and the restart marker (`updates.rs`).
 - Calendar: `%APPDATA%/yap/calendar.json` — connected calendars (name, kind,

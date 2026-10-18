@@ -14,7 +14,6 @@
   import ModeSelector from './ui/ModeSelector.svelte';
   import Segmented from './ui/Segmented.svelte';
   import PillTabs from './ui/PillTabs.svelte';
-  import SelectList from './ui/SelectList.svelte';
   import ModelManager from './ModelManager.svelte';
   import SpeakerModels from './SpeakerModels.svelte';
   import SpeakersToggle from './SpeakersToggle.svelte';
@@ -31,7 +30,10 @@
   import ChatConfig from './ChatConfig.svelte';
   import StatusBar from './StatusBar.svelte';
   import { PP_CLOUD_MODELS, modelThinks } from './ppModels.js';
-  import { PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
+  import { PROVIDER_ICONS } from './providerIcons.js';
+  import ModelPicker from './ModelPicker.svelte';
+  import EndpointModels from './EndpointModels.svelte';
+  import { modelsFor, defaultModel, providerOffers, loadCatalog } from './modelCatalog.svelte.js';
   import { createExternalLinkHandler } from './externalLinks.js';
   import { toast } from './ui/toast.svelte.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup, formatHotkeySpec, fillHotkey, hotkeysClash } from './hotkeys.js';
@@ -349,8 +351,12 @@
   });
 
   // Populate the per-app routing picker (from history) when AI Cleanup opens.
+  // …and the providers' live model lists (a day-old one is checked behind).
   $effect(() => {
-    if (section === 'cleanup' && loaded) loadRecentApps();
+    if (section === 'cleanup' && loaded) {
+      loadRecentApps();
+      loadCatalog();
+    }
   });
 
   function fmtMinutes(min) {
@@ -1049,27 +1055,17 @@
     cfg.ppProvider = p;
     cfg.ppApiKey = cfg.ppApiKeys[p] || '';
     onProviderChange(p);
-    const reg = PP_CLOUD_MODELS[p];
-    if (reg && !reg.models.some((m) => m.value === cfg.ppModel)) {
-      cfg.ppModel = reg.models[0].value;
+    // The provider's first model it still offers (Yap's list merged with the
+    // provider's own, modelCatalog.js) when the saved one isn't its.
+    if (PP_CLOUD_MODELS[p] && !providerOffers(p, cfg.ppModel)) {
+      cfg.ppModel = defaultModel(p);
     }
     keyEditing = false;
   }
-  // Rows for the "Select Model" list: the provider's registry, all carrying the
-  // provider's brand icon (OpenWhispr does the same). An unknown persisted
-  // model id is appended as a visible "Custom model id" row instead of being
+  // The "Select Model" rows are ModelPicker's: the provider's registry merged
+  // with its live list, all carrying the provider's brand icon (OpenWhispr
+  // does the same); an unknown saved id stays visible instead of being
   // silently deselected.
-  const cloudModelOptions = $derived.by(() => {
-    const reg = PP_CLOUD_MODELS[cloudProvider];
-    if (!reg) return [];
-    const icon = PROVIDER_ICONS[cloudProvider];
-    const mono = MONOCHROME_PROVIDERS.has(cloudProvider);
-    const opts = reg.models.map((m) => ({ ...m, icon, mono }));
-    if (cfg?.ppModel && !opts.some((o) => o.value === cfg.ppModel)) {
-      opts.push({ value: cfg.ppModel, label: cfg.ppModel, desc: 'Custom model id', icon, mono });
-    }
-    return opts;
-  });
   const maskedKey = $derived(
     !cfg?.ppApiKey
       ? ''
@@ -1083,7 +1079,10 @@
   // don't reason, so it stays hidden there.
   const cleanupShowThinking = $derived(
     ppMode === 'selfhosted' ||
-      (ppMode === 'cloud' && (cloudProvider === 'custom' || modelThinks(cfg?.ppModel)))
+      (ppMode === 'cloud' &&
+        (cloudProvider === 'custom' ||
+          modelThinks(cfg?.ppModel) ||
+          modelsFor(cloudProvider, cfg?.ppModel).items.some((i) => i.value === cfg?.ppModel && i.thinks)))
   );
 
   // ---- On-device cleanup sidecar (llamafile) ----
@@ -2254,10 +2253,11 @@
                   <Row label="Model" desc={PP_MODEL_HINTS.custom}>
                     {#snippet children()}
                       <div class="pp-field">
-                        <Input bind:value={cfg.ppModel} disabled={!cfg.postProcessEnabled} placeholder="model-id" />
+                        <Input bind:value={cfg.ppModel} disabled={!cfg.postProcessEnabled} placeholder="model-id" list="pp-custom-models" />
                       </div>
                     {/snippet}
                   </Row>
+                  <EndpointModels id="pp-custom-models" provider="custom" scope="cleanup" baseUrl={cfg.ppBaseUrl} model={cfg.ppModel} />
                 </div>
               {:else}
                 <div class="keyhead">
@@ -2293,11 +2293,7 @@
                 {/if}
 
                 <h4 class="selhead">Select Model</h4>
-                <SelectList
-                  bind:value={cfg.ppModel}
-                  options={cloudModelOptions}
-                  disabled={!cfg.postProcessEnabled}
-                />
+                <ModelPicker provider={cloudProvider} bind:value={cfg.ppModel} disabled={!cfg.postProcessEnabled} />
               {/if}
             </div>
           {:else if ppMode === 'selfhosted'}
@@ -2313,10 +2309,11 @@
                 <Row label="Model" desc={PP_MODEL_HINTS.local}>
                   {#snippet children()}
                     <div class="pp-field">
-                      <Input bind:value={cfg.ppModel} disabled={!cfg.postProcessEnabled} placeholder="llama3.1" />
+                      <Input bind:value={cfg.ppModel} disabled={!cfg.postProcessEnabled} placeholder="llama3.1" list="pp-local-models" />
                     </div>
                   {/snippet}
                 </Row>
+                <EndpointModels id="pp-local-models" provider="local" scope="cleanup" baseUrl={cfg.ppBaseUrl} model={cfg.ppModel} />
                 <Row label="API key" desc="Optional — most local servers don't need one">
                   {#snippet children()}
                     <div class="pp-field">
@@ -2483,8 +2480,29 @@
                             </select>
                             {#if prof.provider && prof.provider !== 'ondevice'}
                               <input class="route-input prof-inp" placeholder="Base URL (https://…/v1)" bind:value={prof.baseUrl} />
-                              <input class="route-input prof-inp" placeholder="Model (e.g. openai/gpt-oss-20b)" bind:value={prof.model} />
+                              <input
+                                class="route-input prof-inp"
+                                placeholder="Model (e.g. openai/gpt-oss-20b)"
+                                list="prof-models-{prof.id}"
+                                bind:value={prof.model}
+                              />
                               <input class="route-input prof-inp" type="password" placeholder="API key" bind:value={prof.apiKey} />
+                              {#if PP_CLOUD_MODELS[prof.provider]}
+                                <!-- The provider's models as Yap knows them now (its live list merged in). -->
+                                <datalist id="prof-models-{prof.id}">
+                                  {#each [...modelsFor(prof.provider, prof.model).items, ...modelsFor(prof.provider, prof.model).more] as m (m.value)}
+                                    <option value={m.value}>{m.label}</option>
+                                  {/each}
+                                </datalist>
+                              {:else if prof.provider === 'local' || prof.provider === 'custom'}
+                                <EndpointModels
+                                  id="prof-models-{prof.id}"
+                                  provider={prof.provider}
+                                  scope="profile:{prof.id}"
+                                  baseUrl={prof.baseUrl}
+                                  model={prof.model}
+                                />
+                              {/if}
                             {:else if prof.provider === 'ondevice'}
                               <span class="prof-note">Runs on the built-in local model — private, no key needed.</span>
                             {/if}
