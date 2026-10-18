@@ -163,6 +163,7 @@ test('Settings: web search is off until turned on, the AI’s own search recomme
   await expect(group).toContainText("With a cloud model, your search words go to that model’s provider");
   await expect(group).toContainText('they go to Wikipedia and reference wikis, as no Exa API key is set');
   await expectStore(yap, 'config.json', (c) => c.webSearch === true && c.webSearchNative === true);
+  await costs.scrollIntoViewIfNeeded();
   await shot(main, '02-settings-web-search-ai-own-search');
 
   // Yap's search key: typed, then shown masked.
