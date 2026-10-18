@@ -447,7 +447,7 @@ pub fn asked_to_open(question: &str) -> bool {
         "can", "could", "would", "will", "go", "lets", "let's", "me", "quickly", "kindly",
     ];
     let lower = question.to_lowercase().replace('\u{2019}', "'");
-    lower.split(|c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '\n' | '(' | ')')).any(|clause| {
+    lower.split(['.', ',', ';', ':', '!', '?', '\n', '(', ')']).any(|clause| {
         let words: Vec<&str> =
             clause.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|w| !w.is_empty()).collect();
         (0..words.len()).any(|i| {
