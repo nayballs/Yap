@@ -388,10 +388,35 @@ pub struct YapConfig {
     /// during dictation to address the agent — it executes your spoken command
     /// instead of transcribing it verbatim. Empty = no wake word set (the agent
     /// then only runs via the edit/rewrite hotkey). Also added to the dictionary
-    /// so the STT spells it right. See the Voice Agent bubble in Settings.
-    /// (Persisted by the Voice Agent tab's Agent Name field.)
+    /// so the STT spells it right. (Persisted by the Agent name field in
+    /// Settings → Voice Agent; its model and prompt are Language Models →
+    /// Voice Agent.)
     #[serde(default)]
     pub agent_name: String,
+
+    /// **Spoken replies** (Settings → Voice Agent, the Chat view's 🔊):
+    /// Chat's answers read aloud (`tts.rs`). Off by default.
+    #[serde(default)]
+    pub speak_replies: bool,
+    /// "When to speak": "voice" (only an answer to a question you dictated,
+    /// the default) or "always" (every Chat answer).
+    #[serde(default = "default_speak_when")]
+    pub speak_when: String,
+    /// "Talk back hands-free": a question dictated into the chat box is sent
+    /// when the dictation ends (no Enter). Part of spoken replies: only while
+    /// `speak_replies` is on (`tts::sends_by_itself`). On by default.
+    #[serde(default = "default_true")]
+    pub talk_back_hands_free: bool,
+    /// The speech engine (`tts::ENGINES`): "windows" (Windows' own voices),
+    /// the only one so far.
+    #[serde(default = "default_tts_engine")]
+    pub tts_engine: String,
+    /// The engine's voice id; empty = Windows' default voice.
+    #[serde(default)]
+    pub tts_voice: String,
+    /// Speaking speed, 1.0 = normal (0.5–2.0).
+    #[serde(default = "default_tts_rate")]
+    pub tts_rate: f32,
 
     /// Show live partial transcripts in the overlay while you speak. On by
     /// default (2026-07-10, after live validation): the worker transcribes a
@@ -595,6 +620,15 @@ fn default_meeting_hotkey() -> String {
 fn default_meeting_reminder() -> String {
     "15s".into()
 }
+fn default_speak_when() -> String {
+    "voice".into()
+}
+fn default_tts_engine() -> String {
+    crate::tts::DEFAULT_ENGINE.into()
+}
+fn default_tts_rate() -> f32 {
+    1.0
+}
 fn default_diarization_model() -> String {
     crate::diarize::DEFAULT_MODEL.into()
 }
@@ -653,6 +687,12 @@ impl Default for YapConfig {
             cleanup_profiles: Vec::new(),
             llm_scopes: std::collections::HashMap::new(),
             agent_name: String::new(),
+            speak_replies: false,
+            speak_when: default_speak_when(),
+            talk_back_hands_free: true,
+            tts_engine: default_tts_engine(),
+            tts_voice: String::new(),
+            tts_rate: default_tts_rate(),
             streaming_partials: true,
             history_enabled: true,
             bridge_enabled: true,

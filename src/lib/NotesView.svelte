@@ -33,6 +33,7 @@
   } from './notepadText.js';
   import SpeakerMenu from './SpeakerMenu.svelte';
   import { nextModel, modelLine, whereItRuns } from './aiModel.js';
+  import { speech, initSpeech, readAloud, stopReading } from './speech.svelte.js';
   import ContextMenu from './ui/ContextMenu.svelte';
   import ConfirmDialog from './ui/ConfirmDialog.svelte';
 
@@ -439,6 +440,7 @@
       error = null;
       chatThread = []; // the embedded chat is pinned to one note
       chatInput = '';
+      stopReading('notes:');
     } catch (e) {
       error = String(e);
     }
@@ -869,6 +871,10 @@
   let chatThread = $state([]);
   let chatInput = $state('');
   let asking = $state(false);
+  // Each answer's id for ▶ Read aloud (speech.svelte.js / tts.rs).
+  initSpeech(['notes:']);
+  let turnSeq = 0;
+  const turnId = () => `notes:${selected?.id ?? 0}:${++turnSeq}`;
 
   async function askNote() {
     const q = chatInput.trim();
@@ -883,7 +889,7 @@
         invoke('note_ask', { id: selected.id, question: q, history }),
         nextModel('chat'),
       ]);
-      chatThread = [...chatThread, { role: 'assistant', text: answer, model }];
+      chatThread = [...chatThread, { role: 'assistant', text: answer, model, id: turnId() }];
     } catch (e) {
       chatThread = chatThread.slice(0, -1);
       chatInput = q; // give the question back
@@ -914,7 +920,7 @@
       // "Too little to go on" comes from Yap, not a model.
       chatThread = [
         ...chatThread,
-        { role: 'assistant', text: r.answer, plain: !!r.plain, copy: true, model: r.tooLittle ? null : model },
+        { role: 'assistant', text: r.answer, plain: !!r.plain, copy: true, model: r.tooLittle ? null : model, id: turnId() },
       ];
     } catch (e) {
       if (selected?.id !== id) return;
@@ -1000,6 +1006,8 @@
     return () => {
       flushSave();
       stopElapsed();
+      // Leaving Notes: an answer being read stops.
+      stopReading('notes:');
       unlisteners.forEach((u) => u && u());
     };
   });
@@ -1580,8 +1588,30 @@
                 <button class="ccopy" onclick={() => copyTurn(turn, i)}>{copiedTurn === i ? 'Copied' : 'Copy'}</button>
               {/if}
             </div>
-            {#if turn.role === 'assistant' && turn.model}
-              <div class="byline" title={whereItRuns(turn.model)}>{modelLine(turn.model)}</div>
+            {#if turn.role === 'assistant'}
+              {@const reading = !!turn.id && speech.speakingId === turn.id}
+              <div class="turnfoot">
+                {#if turn.id}
+                  <button
+                    class="readbtn"
+                    class:on={reading}
+                    aria-label={reading ? 'Stop reading' : 'Read aloud'}
+                    title={reading ? 'Stop reading' : 'Read aloud'}
+                    onclick={() => readAloud(turn.text, turn.id)}
+                  >
+                    {#if reading}
+                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
+                    {:else}
+                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.9v14.2a1.2 1.2 0 0 0 1.8 1l11.6-7.1a1.2 1.2 0 0 0 0-2L8.8 3.9A1.2 1.2 0 0 0 7 4.9z" /></svg>
+                    {/if}
+                  </button>
+                {/if}
+                {#if reading}
+                  <span class="speaking" role="status">Speaking…</span>
+                {:else if turn.model}
+                  <span class="byline" title={whereItRuns(turn.model)}>{modelLine(turn.model)}</span>
+                {/if}
+              </div>
             {/if}
           {/each}
           {#if asking}
@@ -2460,9 +2490,46 @@
     white-space: pre-wrap;
   }
   /* the model that answered */
-  .byline {
+  /* Under an answer: ▶ Read aloud (tts.rs), then who answered. */
+  .turnfoot {
     align-self: flex-start;
-    margin: -3px 0 2px 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 20px;
+    margin: -3px 0 2px 2px;
+  }
+  .readbtn {
+    display: inline-flex;
+    width: 22px;
+    height: 22px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s1);
+    color: var(--yap-muted);
+    cursor: pointer;
+  }
+  .readbtn:hover {
+    color: var(--yap-fg);
+    border-color: var(--yap-border-hover);
+  }
+  .readbtn.on {
+    color: var(--yap-primary);
+    border-color: color-mix(in srgb, var(--yap-primary) 45%, var(--yap-border-subtle));
+    background: var(--yap-primary-wash);
+  }
+  .readbtn svg {
+    width: 10px;
+    height: 10px;
+  }
+  .speaking {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--yap-primary);
+  }
+  .byline {
     font-size: 10.5px;
     color: var(--yap-muted-55);
   }

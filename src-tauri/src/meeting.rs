@@ -1410,6 +1410,9 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
             return Err("A meeting is already being recorded".to_string());
         }
     }
+    // A spoken reply stops before the call is heard (tts.rs; and nothing
+    // is read aloud while this records).
+    crate::tts::stop();
 
     let mic_buf = Captured::mic();
     let sys_buf = Captured::call();

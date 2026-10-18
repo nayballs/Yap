@@ -64,6 +64,7 @@ mod speakers;
 mod stt;
 mod text_injector;
 mod tray;
+mod tts;
 mod updates;
 mod usage;
 #[cfg(windows)]
@@ -122,6 +123,7 @@ pub(crate) fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
 /// Windows the installer step force-exits Yap (`std::process::exit`) without
 /// ever reaching the Exit handler (see `updates::build_updater`).
 pub(crate) fn shutdown_cleanup() {
+    tts::stop();
     local_llm::stop();
     bridge::stop();
     mute::restore_all();
@@ -433,6 +435,14 @@ pub fn run() {
             commands::chat_send,
             ai_model::ai_model_status,
             ai_model::chat_set_model,
+            commands::chat_dictate,
+            commands::chat_input_focus,
+            tts::tts_voices,
+            tts::tts_speak,
+            tts::tts_preview,
+            tts::tts_stop,
+            tts::tts_state,
+            tts::voice_replies_set,
             commands::bridge_status,
             mcp_clients::mcp_clients_status,
             mcp_clients::mcp_client_add,
@@ -547,6 +557,10 @@ pub fn run() {
             meeting_guard::e2e_meeting_checkins,
             #[cfg(debug_assertions)]
             calendar::calendar_e2e_opened,
+            #[cfg(debug_assertions)]
+            tts::tts_e2e_spoken,
+            #[cfg(debug_assertions)]
+            commands::e2e_chat_dictation,
             // Robot mode only (realtest.rs): the real-app tests.
             #[cfg(debug_assertions)]
             realtest::commands::realtest_window,
@@ -586,6 +600,8 @@ pub fn run() {
             // Register the app handle so the usage tracker can emit live
             // `groq-usage` updates after each AI-cleanup call.
             usage::set_app_handle(handle.clone());
+            // Spoken replies (tts.rs): its state goes to every window.
+            tts::init(&handle);
 
             // Global input hook + dictation hotkey. (Not in e2e test runs: a
             // test instance must never see, or swallow, the developer's keys.)

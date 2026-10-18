@@ -34,6 +34,7 @@
   import UploadView from './UploadView.svelte';
   import NotesView from './NotesView.svelte';
   import ChatView from './ChatView.svelte';
+  import { chatRequest } from './chatRequest.svelte.js';
   import IntegrationsView from './IntegrationsView.svelte';
 
   let activeView = $state('home');
@@ -165,6 +166,16 @@
     // A deep link asked for a Settings section (auth.rs: "Open Yap" on the
     // account service's /security page → "account").
     listen('yap-open-settings', (e) => openSettings(String(e.payload || '') || null)).then((u) => uns.push(u));
+    // A question dictated for the Chat view (pipeline.rs `deliver_to_chat`)
+    // that arrives after you left Chat: back to Chat with it (ChatView takes
+    // it from there; while it's open it gets the event itself).
+    listen('yap-chat-dictation', (e) => {
+      const p = e.payload;
+      if (activeView === 'chat' || !p?.text?.trim()) return;
+      chatRequest.pending = { text: p.text, send: !!p.send, dictated: true };
+      settingsOpen = false;
+      activeView = 'chat';
+    }).then((u) => uns.push(u));
     // A meeting with only a few words ended: "Started by mistake?", when Rust
     // picked this window to ask (the meeting notepad asks when it's open).
     listen('yap-meeting-ended', (e) => {

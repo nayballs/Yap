@@ -44,6 +44,7 @@
   import { toast } from './ui/toast.svelte.js';
   import { renderMarkdown } from './markdown.js';
   import { nextModel, modelLine, whereItRuns } from './aiModel.js';
+  import { speech, initSpeech, readAloud } from './speech.svelte.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
   import { openExternalLink } from './externalLinks.js';
   import { initMeetingCheckIns } from './meetingCheckIn.js';
@@ -564,6 +565,8 @@
   // 👍 / 👎 on an answer: kept on this PC only, never sent anywhere.
   const FEEDBACK_KEY = 'yapNotepadFeedback';
   let feedback = $state(readFeedback());
+  // ▶ on an answer reads it aloud (speech.svelte.js, tts.rs).
+  initSpeech(['notepad:']);
   function readFeedback() {
     try {
       return JSON.parse(localStorage.getItem(FEEDBACK_KEY) || '{}') || {};
@@ -855,6 +858,8 @@
 {#snippet icon(name)}
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     {#if name === 'back'}<path d="M15 18l-6-6 6-6" />
+    {:else if name === 'play'}<path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke-width="1.5" />
+    {:else if name === 'stop'}<rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" stroke="none" />
     {:else if name === 'more'}<circle cx="5" cy="12" r="1.3" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.3" fill="currentColor" stroke="none" />
     {:else if name === 'split'}<rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M12 4.5v15" />
     {:else if name === 'share'}<path d="M12 15V3.5" /><path d="M7.5 8L12 3.5 16.5 8" /><path d="M5 12.5v5.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5.5" />
@@ -1328,6 +1333,11 @@
                         <button class="fb" class:on={feedback[m.id]?.rating === 'up'} aria-label="Good answer" aria-pressed={feedback[m.id]?.rating === 'up'} onclick={() => rate(m, 'up')}>{@render icon('up')}</button>
                         <button class="fb" class:on={feedback[m.id]?.rating === 'down'} aria-label="Bad answer" aria-pressed={feedback[m.id]?.rating === 'down'} onclick={() => rate(m, 'down')}>{@render icon('down')}</button>
                         <button class="fb" aria-label="Copy answer" onclick={() => copyAnswer(m)}>{@render icon(copiedAnswer === m.id ? 'check' : 'copy')}</button>
+                        <!-- ▶ Read aloud (tts.rs): not while this meeting records — the notes would hear it. -->
+                        {#if !recordingThis}
+                          {@const reading = speech.speakingId === `notepad:${m.id}`}
+                          <button class="fb" class:on={reading} aria-label={reading ? 'Stop reading' : 'Read aloud'} aria-pressed={reading} onclick={() => readAloud(m.text, `notepad:${m.id}`)}>{@render icon(reading ? 'stop' : 'play')}</button>
+                        {/if}
                         {#if m.model}
                           <span class="mamodel" title={whereItRuns(m.model)}>{modelLine(m.model)}</span>
                         {/if}

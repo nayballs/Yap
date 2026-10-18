@@ -583,7 +583,7 @@ const ABBREVIATIONS: &[&str] = &[
 
 /// The word just before a full stop at byte `dot` of `s` (back to the
 /// last space).
-fn word_before(s: &str, dot: usize) -> &str {
+pub(crate) fn word_before(s: &str, dot: usize) -> &str {
     let head = &s[..dot];
     let start = head.rfind(char::is_whitespace).map(|i| i + 1).unwrap_or(0);
     head[start..].trim_start_matches(['(', '"', '\'', '“', '‘'])
@@ -598,7 +598,7 @@ fn dotted_abbreviation(word: &str) -> bool {
 }
 
 /// A word whose full stop belongs to it ("etc.", "a.m.", "Dr.").
-fn is_abbreviation(word: &str) -> bool {
+pub(crate) fn is_abbreviation(word: &str) -> bool {
     dotted_abbreviation(word) || ABBREVIATIONS.contains(&word.to_lowercase().as_str())
 }
 
