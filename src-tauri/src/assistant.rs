@@ -37,7 +37,9 @@
 //!    "3 sources in Chat".
 //!
 //! "Open Teams" needs no model: Yap opens the app itself and says "Opening
-//! Microsoft Teams." (`apps.rs`, through `chat_turn`). Otherwise, no AI
+//! Microsoft Teams." (`apps.rs`, through `chat_turn`), and so does "Yes."
+//! to its "Did you mean Baldur's Gate 3?". A spoken question sends the
+//! model a shorter history (scope "assistant"). Otherwise, no AI
 //! model set up, or the model failed: an alert (`alert.rs`, through
 //! the notice policy) with Open settings (Language Models → Chat & Voice
 //! Assistant). No STT model or no mic: the dictation's own messages.
@@ -343,8 +345,16 @@ fn failed_alert(why: &str) -> crate::alert::Alert {
 
 async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     let cfg = crate::config::load();
-    // "Open Teams" needs no model: Yap opens it and says so (apps.rs).
-    let opens_an_app = crate::apps::plan_for(&question, &cfg).await.is_some();
+    let viewing = view();
+    let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chats::get(id).is_some());
+    let choice = choose_conversation(viewing, open_exists, crate::chats::latest(), now_secs());
+    let conversation_id = match choice {
+        Choice::Continue(id) => Some(id),
+        Choice::New => None,
+    };
+    // "Open Teams" needs no model, nor a "yes" to Yap's "Did you mean …?":
+    // Yap opens it and says so (apps.rs).
+    let opens_an_app = crate::apps::plan_for(&question, &cfg, conversation_id).await.is_some();
     if !opens_an_app {
         if let Err(why) = crate::commands::resolve_chat_endpoint(&cfg) {
             crate::alert::show_soon(&app, no_model_alert(&why));
@@ -352,20 +362,13 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             return;
         }
     }
-    let viewing = view();
-    let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chats::get(id).is_some());
-    let choice = choose_conversation(viewing, open_exists, crate::chats::latest(), now_secs());
     tracing::info!(?viewing, ?choice, "Voice Assistant: asking Chat");
-    let conversation_id = match choice {
-        Choice::Continue(id) => Some(id),
-        Choice::New => None,
-    };
     // The person is looking at Yap's main window: Chat comes up there with
     // the question (and no card on the bar).
     let (_, focused) = crate::notice::window_view(&app);
     let asked_app = app.clone();
     let asked_text = question.clone();
-    let turn = crate::commands::chat_turn(&app, conversation_id, &question, None, true, move |conv, index| {
+    let turn = crate::commands::chat_turn(&app, conversation_id, &question, Some("assistant"), true, move |conv, index| {
         lock().conversation = Some(conv);
         let _ = asked_app.emit(
             TURN,
