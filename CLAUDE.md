@@ -1161,9 +1161,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (an `update_note`'s title included) and tells the model the folders there
   are and to leave `folder` empty; chip `Couldn't create "Tent list": no
   folder called "Camping"`. (The MCP server's `create_note` still makes the
-  folder it's given.) Plus **`open_app(name)` / `list_apps(query?)`**
+  folder it's given.) Plus **`open_app(name)` / `list_apps(query)`**
   (`app_definitions` + `APP_TOOL_INSTRUCTIONS`, offered while
-  `open_apps` is on; run by `apps.rs` off the async runtime).
+  `open_apps` is on; run by `apps.rs` off the async runtime, with the
+  answer just before the question for its consent check). Every step
+  re-sends the instructions + schemas, so they're kept short
+  (`a_tool_step_stays_light`: ≤ 2,250 est. tokens; 2,879 before the
+  2026-10-18 trim, ~2,180 after).
 - **`apps.rs`** — **opening apps when you ask** (2026-10-18; Settings →
   Voice Assistant → Opening apps): "open Teams" in Chat or to the Voice
   Assistant opens an app installed on this PC — only an entry of the
@@ -1173,53 +1177,111 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `shell:AppsFolder`'s children (`SHGetKnownFolderItem(FOLDERID_AppsFolder)`
   → `BHID_EnumItems`, on an STA thread of its own): display name, parsing
   name as the id (an AppUserModelID like `MSTeams_8wekyb3d8bbwe!MSTeams`,
-  or a known-folder path `{6D809377-…}\7-Zip\7zFM.exe`) and the item's ID
-  list; ~240 entries → ~190 apps in ~300 ms on Nathan's PC. Fallback: the
-  Start menu `.lnk`s (ProgramData + AppData) + App Paths. `tidy`: junk out
-  (`is_junk`: "Uninstall …"/`unins*.exe`, read-mes, help/`.chm`, docs,
-  licences, `http(s)://` and `.url` links, "… on the Web", `.msi`, folders;
-  a Store app keeps "Help" — Get Help; "Revo Uninstaller" stays), one entry
-  per name. **Opening** (`open`): a packaged app (`id` has `!`) by
+  or a known-folder path `{6D809377-…}\7-Zip\7zFM.exe`), the item's ID
+  list and, for a desktop app, **the Start menu shortcut behind it**
+  (`System.AppUserModel.BestShortcut`, an ID list → a `.lnk`/`.url` path
+  in one of the Start menu's Programs folders) plus its target and
+  arguments (`System.Link.*`, read for the launcher label, never passed);
+  ~240 entries → ~190 apps in ~300 ms on Nathan's PC (204 of 205 desktop
+  entries have a shortcut). Fallback: the Start menu `.lnk`s (ProgramData
+  + AppData; a `.url` only with a game store's link) + App Paths. `tidy`:
+  junk out (`junk` → `is_junk`: "Uninstall …"/`unins*.exe`, read-mes,
+  help/`.chm`, docs, licences, `http(s)://` and `.url` links, "… on the
+  Web", `.msi`, folders; a Store app keeps "Help" — Get Help; "Revo
+  Uninstaller" stays; a **game store link** — `steam://`,
+  `com.epicgames.launcher://`, `battlenet://`, `uplay://`, EA, GOG,
+  Amazon (`LAUNCHER_LINKS`) — is an app whatever file holds it; a shortcut
+  to a web page is junk), one entry per name. **Opening** (`open`): a
+  packaged app (`id` has `!`) by
   `IApplicationActivationManager::ActivateApplication` (brings it forward,
-  gives its pid), else `ShellExecuteExW(SEE_MASK_IDLIST)` on the entry's
-  own ID list (what a Start menu click does: a shortcut's own target/args,
-  a game's `steam://`), then `bring_forward(pid)` (≤ 8 s, its main window);
-  logs the app's name only. **Matching** (`find`, pure): `keys(name)` — the
+  gives its pid); a desktop app by **its shortcut file** with
+  `ShellExecuteExW`'s default verb, as a Start menu click (its arguments,
+  working folder, run-as apply); only without one by the entry's ID list
+  (`SEE_MASK_IDLIST`). ⚠ Opened by its ID list, World of Warcraft said
+  "Opened" and showed nothing (2026-10-18): its launcher needs the
+  shortcut's `--productcode=wow`, which nothing documents the ID list to
+  carry (not confirmed by a launch; the shortcut file is the documented
+  way). Then
+  `bring_forward(pid, since)` (≤ 8 s: the started process's main window,
+  or that of a process it started since the launch — `procs::family`, a
+  launcher handing over; a Battle.net already running isn't one, and may
+  stay behind the window in front). Logs the app's name and how it opened ("its
+  Start menu shortcut" / "app activation" / "its app-list entry"), never a
+  path. A launch Windows refuses → "Windows couldn't start X: …", never
+  "Opening…". `launcher(target, args)`: "Steam" for `steam://`, "Battle.net"
+  for `… Launcher.exe --productcode=…` → "Opening World of Warcraft (in
+  Battle.net)." **Matching** (`find`, pure): `keys(name)` — the
   full name, without qualifiers ("(64-bit)", " - Insiders", versions),
-  without the maker (`VENDORS`: "Teams"), initials ("VS Code"), the last
-  word (not a `GENERIC` one) — vs the request (`FILLER` "the/app/please"
-  out, "my", a maker, `ALIASES`: calc, cmd, files, vscode, store…), exact,
+  without the maker (`VENDORS`: "Teams"), initials ("VS Code", "WoW"), the
+  last word (not a `GENERIC` one), each also with **numbers as digits**
+  (`numerals`: one–twenty, II–X: "three" = "3" = "III") — vs the request
+  (`FILLER` "the/app/please" out, apostrophes dropped, "my", a maker,
+  `ALIASES`: calc, cmd, files, vscode, store…, numbers as digits), exact,
   a few of its words, or a near-miss (`fuzzy::spelling_distance` ≤ 0.2
   and `plain_spelling_distance` ≤ 0.3: "spottify" yes, "spotifire" no);
   nicknames first (`app_nicknames`); `CONFIDENT` 0.80, others within
   `MARGIN` 0.03 → `Several` (four Pythons, two Teams: ask, never guess);
-  `apps_blocked` → `Blocked`; else `Nothing` + close names. **Fast path**
-  (`plan` / `plan_for`, before any model, in `commands::chat_turn` →
+  `apps_blocked` → `Blocked`; else **by sound** (`sound_of`:
+  `fuzzy::sound_distance` ≤ 0.1 over ≥ 5 sounds, spelled ≤ 0.45 apart —
+  "bolders gait" → Baldur's Gate 3) when exactly one app sounds so and no
+  other scores ≥ 0.6 or sounds within 0.25; else `Nothing` + close names
+  (sound-alikes first). **Fast path** (`plan_with` / `plan_for(text, cfg,
+  conversation)`, before any model, in `commands::chat_turn` →
   `app_turn` and `assistant::answer`): `open_request(text)` (pure: the
-  whole message is "[greeting/please/can you…] open|launch|start|run|fire
-  up… <app> [please/for me/now]", one sentence; `plain` = no joining words
-  "and/about/for/to…") → one app → opened, "Opening Microsoft Teams." +
-  chip `Opened Microsoft Teams` (no model call: works with no AI and the
-  1.5B local model); several → "I found 2 apps for “teams”: … Which
-  one?"; switched off → "You've asked Yap not to open …"; a plain name
-  not installed → "I couldn't find an app called …" (+ "Did you mean …?")
-  unless a tool-capable model is there; "Let Yap open apps" off → it says
-  so; "open my notes", "start the meeting" (`NOT_APPS`), "open the notes
-  about Teams" → the model. **Model tools** (`execute_tool`): `open_app`
+  whole message is "[greeting/please/can you/try to/yes…] open|launch|
+  start|play|run|fire up|boot up|load up… <app> [please/for me/now/
+  again]", one sentence; `plain` = no joining words "and/about/for/to…";
+  `play` — a phrase naming no app is the model's, "play the next song")
+  → one app → opened, "Opening Microsoft Teams." + chip `Opened Microsoft
+  Teams` (no model call: works with no AI and the 1.5B local model);
+  several → "I found 2 apps for “teams”: … Which one?"; switched off →
+  "You've asked Yap not to open …"; a plain name not installed → "I
+  couldn't find an app called …" (+ "Did you mean …?") unless a
+  tool-capable model is there; "Let Yap open apps" off → it says so; "open
+  my notes", "start the meeting" (`NOT_APPS`), "open the notes about Teams"
+  → the model. **Yap's own questions, answered** (a per-conversation
+  memory, `recall` / `remember` / `moved_on`, in memory only): its
+  question's apps (`OFFER_FOR` 5 min, gone when a message goes to the
+  model) and the app it last opened or suggested (`LAST_FOR` 30 min) —
+  `follow_up` (pure): after "Did you mean X?" a "yes" (`is_affirmative`:
+  yes/yeah/sure/please/do it/go ahead/open it/that one/"Yes, I do.") opens
+  X; after "Which one?" "the second one" / "2" / "the last one" / "3.13" /
+  "the classic one" / a name opens that one (a "yes" → "Which one: A or
+  B?"); "no"/"never mind"/"neither" → "Okay, I won't open anything." (no
+  chip); "open it (again)" → the last app (none: the model's). **Model
+  tools** (`execute_tool(name, args, question, previous)`): `open_app`
   acts only when the person's own message asks to open something
-  (`asked_to_open`: open/launch/start/run…), so a note saying "open X"
-  can't (chip `Didn't open "X": you didn't ask to open an app`). Spoken
-  "Opening …" follows the usual meeting rule (the Voice Assistant is off
-  during meetings; Chat's auto-speak stays quiet). Commands `apps_list
-  {refresh}`, `apps_icons {ids}` (`IShellItemImageFactory`, 32 px →
+  (`asked_to_open`: open/launch/start/run/play…) or is a plain yes to the
+  answer just before, which asked a question naming that app
+  (`consented`: "Would you like me to open Baldur's Gate 3?" → "Yes."; not
+  "Are you struggling?"), so a note saying "open X" can't (chip `Didn't
+  open "X": you didn't ask to open an app`). `list_apps` takes a query
+  and gives ≤ 15 names (`LIST_MAX`; no query: the count, 15, "pass a
+  query" — 840 → 135 est. tokens on Nathan's PC). **A model without
+  tools** gets `NO_TOOLS_NOTE` (+ `NO_TOOLS_OPEN`: say "open" and the
+  name), and an answer that claims an open the person asked for
+  (`claims_unasked`: "Opening …", "I'm trying to open …", "I've
+  launched …") becomes `correct_claim`'s "I can't open apps myself. Say
+  “open Baldur's Gate 3” and Yap will." (a long answer keeps its text).
+  Spoken "Opening …" follows the usual meeting rule (the Voice Assistant
+  is off during meetings; Chat's auto-speak stays quiet; TTS reads
+  "Battle.net" as "Battle dot net"). Commands `apps_list {refresh}`,
+  `apps_icons {ids}` (`IShellItemImageFactory`, 32 px →
   `app_icons::encode_png`, cached per run). Test mode: nothing launched
   (recorded, debug-only `e2e_opened_apps {clear}`), index =
-  `YAP_E2E_APPS` (a JSON `[{id, name}]`, read each call), no icons; unit
-  tests never read `config.json` or this PC's apps (`run_tool`, a
-  thread-local stand-in index). `#[ignore]`d `this_pcs_apps` (read-only:
-  names, junk, sample matches, icons) and `opens_notepad_for_real` (opens
-  Notepad the app's way, closes only that pid's window; skipped while a
-  Notepad runs).
+  `YAP_E2E_APPS` (a JSON `[{id, name, target?, args?}]`, read each call),
+  no icons; unit tests never read `config.json` or this PC's apps
+  (`run_tool`, a thread-local stand-in index; `games()` = Nathan's WoW /
+  Classic / Battle.net / Baldur's Gate 3 / Steam entries). `#[ignore]`d
+  `this_pcs_apps` (read-only: names, junk, the games' shortcuts and
+  launchers, sample matches, `list_apps`' size, icons),
+  `opens_notepad_for_real` (opens Notepad the app's way, closes only that
+  pid's window; skipped while a Notepad runs) and
+  `opens_shortcuts_for_real` (in its own temp folder, never the Start
+  menu: a `.url` to `ms-settings:about` — or `calculator:` while Settings
+  is open — closes only the new window; a `.lnk` to cmd.exe whose
+  arguments write a file into its working folder; a `.lnk` to Notepad with
+  a file, skipped while a Notepad runs).
 - **`bridge.rs`** — the **local API bridge** (OpenWhispr `cliBridge.js` port,
   backs the Integrations view): a token-authenticated loopback HTTP server
   (`tiny_http`, `127.0.0.1`, OS-assigned port) exposing `/v1` REST routes over
@@ -2079,9 +2141,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `Idle → Listening → Thinking → Speaking` in `yap-assistant {phase,
   conversationId, messageId}` (the bar). `listening` (from
   `capture_target`; bumps a generation, drops the last answer's card),
-  `heard(question)` (after the STT + dictionary) → `answer`: "Open Teams"
-  needs no model (`apps::plan_for`, below: opened, "Opening Microsoft
-  Teams." said); otherwise no Chat model
+  `heard(question)` (after the STT + dictionary) → `answer`: the
+  conversation chosen first, then "Open Teams" — or "Yes." to Yap's "Did
+  you mean …?" — needs no model (`apps::plan_for`, below: opened,
+  "Opening Microsoft Teams." said); the turn goes through `chat_turn` with
+  scope "assistant" (8 history messages, not 19); otherwise no Chat model
   (`commands::resolve_chat_endpoint` errs) → the `assistantNoModel` alert
   with **Open settings** (`alert::OPEN_AI_SETTINGS` → Language Models →
   Chat & Voice Assistant; a model that fails → `assistantFailed`, the
@@ -3432,7 +3496,14 @@ apps when asked** (`apps.rs`, 2026-10-18: "open Teams" in Chat or out loud,
 from the Start menu's list, with no model needed; nicknames, apps switched
 off, the `open_app`/`list_apps` tools; matching and the request patterns
 unit-tested, this PC's real list indexed read-only, the flows e2e-tested
-against a stand-in list — never launching anything), **spoken replies** (`tts.rs`, 2026-10-18: Chat's answers read
+against a stand-in list — never launching anything; same day, games: a
+desktop app opens through its Start menu shortcut (World of Warcraft's
+launcher had lost its `--productcode`), numbers and sound-alikes ("boulders
+gate three"), "play X", "open it again", Yap answering "yes" / "the second
+one" to its own questions, a yes to the model's offer as consent, lighter
+tool steps for Groq's rate limit, no "Opening…" from a model that can't —
+checked with real shortcut launches in a temp folder, not yet with a real
+game), **spoken replies** (`tts.rs`, 2026-10-18: Chat's answers read
 aloud in Windows' voices — the Voice replies toggle, ▶ on every answer,
 "only when I asked by voice", hands-free talk-back, barge-in; text prep, the
 queue and the decisions unit-tested, synthesis checked silently on this PC's

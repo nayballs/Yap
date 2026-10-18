@@ -71,6 +71,38 @@ pub fn lineage(pid: u32) -> Vec<(u32, u64)> {
     out
 }
 
+/// Now, as a FILETIME (100 ns since 1601), to compare with [`created`].
+#[cfg(windows)]
+pub fn now_filetime() -> u64 {
+    const UNIX_EPOCH_AS_FILETIME: u64 = 116_444_736_000_000_000;
+    let since_1970 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    UNIX_EPOCH_AS_FILETIME + (since_1970.as_nanos() / 100) as u64
+}
+
+/// `pid` and the live processes it started, and those they started… —
+/// only ones that started at `since` (a FILETIME) or later, so a process
+/// whose parent's id was reused never counts. One snapshot, at most 32.
+/// An app whose launcher hands over to another process (World of Warcraft's
+/// launcher → Battle.net) is found by its family.
+#[cfg(windows)]
+pub fn family(pid: u32, since: u64) -> Vec<u32> {
+    let procs = imp::snapshot();
+    let mut out = vec![pid];
+    let mut i = 0;
+    while i < out.len() && out.len() < 32 {
+        let parent = out[i];
+        for p in procs.iter().filter(|p| p.parent == parent && p.pid != parent && p.pid != 0) {
+            if !out.contains(&p.pid) && imp::created(p.pid).is_some_and(|t| t >= since) {
+                out.push(p.pid);
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
 #[cfg(windows)]
 mod imp {
     use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
