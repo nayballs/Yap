@@ -1,0 +1,17 @@
+{
+  "description": "Typical one-to-three sentence dictations as speech-to-text writes them (lower case, fillers, a self-correction, spoken punctuation), for `yap.exe eval --cleanup`: the cleanup's latency and output on each model.",
+  "dictations": [
+    "um so i was thinking we could move the stand up to ten thirty tomorrow if that works for everyone",
+    "can you send me the slides from yesterday's meeting i need them for the client call at three",
+    "hey just checking in on the invoice uh it was due last friday and we haven't seen it yet",
+    "the build is failing on main because the clippy lint um the one about needless borrows got stricter",
+    "remind me to pick up milk and eggs on the way home and also call mum",
+    "so the thing is the parakeet model is faster on the cpu than direct ml at least on my machine",
+    "thanks for the update i'll take a look tonight and get back to you by tomorrow morning",
+    "we should probably uh we should probably push the release to next week the installer still has that bug",
+    "what time does the train to manchester leave on saturday",
+    "dear sarah new line thank you for the lovely dinner last night comma it was great to catch up",
+    "i think the problem is in the uh the audio callback it's resampling twice wait no it's downmixing twice",
+    "lets meet at the coffee place on king street around two"
+  ]
+}

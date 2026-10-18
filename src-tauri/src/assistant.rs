@@ -165,6 +165,14 @@ pub fn card_on_bar(show_answer_card: bool, spoken: bool) -> bool {
 /// Otherwise the whole answer, both ways. Pure.
 pub fn spoken_answer(reply: &str, sources: usize) -> (String, String) {
     if sources == 0 {
+        // Told to answer in a sentence or two (`SPOKEN_ANSWER_NOTE`); one
+        // that runs long anyway is said short too, the rest in Chat.
+        if reply.split_whitespace().count() > SPOKEN_MAX_WORDS {
+            let brief = crate::tts::brief(reply, 2);
+            if !brief.is_empty() && brief.split_whitespace().count() < reply.split_whitespace().count() {
+                return (format!("{brief} {REST_IN_CHAT}"), brief);
+            }
+        }
         return (reply.to_string(), reply.to_string());
     }
     let brief = crate::tts::brief(reply, 2);
@@ -176,6 +184,18 @@ pub fn spoken_answer(reply: &str, sources: usize) -> (String, String) {
 
 /// Said after a web answer's short version.
 pub const DETAILS_IN_CHAT: &str = "The details and sources are in Chat.";
+
+/// Said after the short version of a long answer.
+pub const REST_IN_CHAT: &str = "The rest is in Chat.";
+
+/// An answer longer than this is said short ([`spoken_answer`]).
+pub const SPOKEN_MAX_WORDS: usize = 60;
+
+/// The end of Chat's system prompt for a question asked out loud whose
+/// answer is read aloud whole (`commands::chat_turn`): without it, "how long
+/// do I boil an egg" got 55–98 words with lists from every local model and
+/// gpt-oss (the model evaluations' voice scenarios).
+pub const SPOKEN_ANSWER_NOTE: &str = "This question was asked out loud and your answer will be read aloud: answer in one or two short sentences (under 40 words) of plain speech, with no lists, headings or markdown, and no offer of more help.";
 
 /// How long a shown-only answer's card stays: about 15 characters a second
 /// of reading, 8 s to a minute.
@@ -708,6 +728,20 @@ mod tests {
         assert_eq!(shown, "Gale is on the beach west of the Nautiloid crash site. Pull him out of the portal to recruit him.");
         // Not from the web: all of it, as before.
         assert_eq!(spoken_answer("Your notes say Friday.", 0), ("Your notes say Friday.".into(), "Your notes say Friday.".into()));
+    }
+
+    #[test]
+    fn a_long_answer_is_said_short_with_the_rest_in_chat() {
+        // Qwen3.5-4B's 87-word egg answer (the model evaluations).
+        let reply = "I don't have a specific note on this, but for a runny yolk: - Start with a cold egg in a pot of cold water - Bring to a boil (about 5-7 minutes) - Once boiling, reduce to a simmer and cook for **6-7 minutes total** - Remove from water and let sit in ice water for 1-2 minutes to stop cooking. The exact time can vary slightly based on egg size and water temperature, so 6-7 minutes is a good starting point.";
+        assert!(reply.split_whitespace().count() > SPOKEN_MAX_WORDS);
+        let (said, shown) = spoken_answer(reply, 0);
+        assert!(said.ends_with(REST_IN_CHAT), "{said}");
+        assert!(said.split_whitespace().count() < reply.split_whitespace().count(), "{said}");
+        assert!(!shown.is_empty() && reply.starts_with(&shown[..10]), "{shown}");
+        // A short one is said whole.
+        let short = "Boil it for six to seven minutes, then cool it in cold water.";
+        assert_eq!(spoken_answer(short, 0).0, short);
     }
 
     #[test]

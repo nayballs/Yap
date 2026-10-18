@@ -350,12 +350,15 @@
     if (section === 'history') loadHistory();
   });
 
-  // Populate the per-app routing picker (from history) when AI Cleanup opens.
-  // …and the providers' live model lists (a day-old one is checked behind).
+  // Populate the per-app routing picker (from history) when AI Cleanup opens,
+  // …and the providers' live model lists (a day-old one is checked behind),
+  // and read the on-device model's state afresh (where its layers went, the
+  // bigger model on offer).
   $effect(() => {
     if (section === 'cleanup' && loaded) {
       loadRecentApps();
       loadCatalog();
+      refreshLocalLlm();
     }
   });
 
@@ -1196,7 +1199,7 @@
     localProgress = { stage: '', percent: 0 };
     try {
       const filename = await invoke('local_llm_install', { model: m.id });
-      cfg.ppLocalModel = m.recommended ? '' : filename; // '' keeps default semantics
+      cfg.ppLocalModel = m.isDefault ? '' : filename; // '' keeps default semantics
       await persist();
       if (localLlm.running) await invoke('local_llm_stop');
       await invoke('local_llm_start');
@@ -1212,8 +1215,30 @@
   // Switch the active local model to an already-downloaded curated one.
   async function activateCurated(m) {
     if (localSwitching) return;
-    cfg.ppLocalModel = m.recommended ? '' : m.filename;
+    cfg.ppLocalModel = m.isDefault ? '' : m.filename;
     await onLocalModelChange();
+  }
+
+  // The bigger model offered once (local_llm::upgrade_offer: a graphics
+  // card that can run it, the 1.5B in use): taken or turned down, it isn't
+  // offered again. Never downloaded without this click.
+  async function takeUpgrade(m) {
+    if (m.installed) {
+      cfg.localLlmUpgradeDismissed = true;
+      await activateCurated(m);
+      return;
+    }
+    await downloadCurated(m);
+    if (!localError) {
+      cfg.localLlmUpgradeDismissed = true;
+      await persist();
+      await refreshLocalLlm();
+    }
+  }
+  async function dismissUpgrade() {
+    cfg.localLlmUpgradeDismissed = true;
+    await persist();
+    await refreshLocalLlm();
   }
 
   // The trash button and the card's right-click Delete… ask first, as the
@@ -2331,6 +2356,39 @@
                   <span class="lb-title">On-device models</span>
                   <span class="lb-sub">Downloaded once, then run fully offline on your PC via Mozilla llamafile — no key, no cloud.</span>
                 </div>
+                {#if localLlm.slowOnThisPc}
+                  {@const small = (localLlm.curated || []).find((c) => c.isDefault)}
+                  <div class="lb-note slow" role="status" data-testid="local-slow">
+                    <span>
+                      {#if localLlm.placement?.kind === 'partial'}
+                        Runs partly on the processor on this PC ({localLlm.placement.gpuLayers} of {localLlm.placement.layers} layers on the graphics card): answers will be slow — {small?.display || 'Qwen2.5 1.5B'} is quicker.
+                      {:else}
+                        Runs on the processor on this PC: answers will be slow — {small?.display || 'Qwen2.5 1.5B'} is quicker.
+                      {/if}
+                    </span>
+                    {#if small}
+                      {#if small.installed}
+                        <button class="lb-use" onclick={() => activateCurated(small)} disabled={!cfg.postProcessEnabled || localSwitching}>Use {small.display}</button>
+                      {:else}
+                        <button class="lb-use" onclick={() => downloadCurated(small)} disabled={!cfg.postProcessEnabled || !!downloadingId}>Download {small.display}</button>
+                      {/if}
+                    {/if}
+                  </div>
+                {:else if localLlm.upgrade}
+                  {@const up = (localLlm.curated || []).find((c) => c.id === localLlm.upgrade.id)}
+                  <div class="lb-note" data-testid="local-upgrade">
+                    <span>
+                      {#if localLlm.gpu?.name}Your {localLlm.gpu.name} can run{:else}This PC can run{/if}
+                      {localLlm.upgrade.display}: better answers in Chat, and it can use Chat's tools on your notes, apps and the web. {localLlm.upgrade.installed ? 'Already downloaded.' : `A ${fmtLlmSize(localLlm.upgrade.sizeMb)} download.`}
+                    </span>
+                    {#if up}
+                      <button class="lb-use" onclick={() => takeUpgrade(up)} disabled={!cfg.postProcessEnabled || !!downloadingId || localSwitching}>
+                        {up.installed ? `Use ${up.display}` : `Download ${up.display}`}
+                      </button>
+                    {/if}
+                    <button class="lb-later" onclick={dismissUpgrade}>No thanks</button>
+                  </div>
+                {/if}
                 {#if localFamilies.length > 1}
                   <div class="lb-families">
                     <PillTabs value={localFamily} options={localFamilies} onchange={(v) => (localFamily = v)} renderIcon={familyTabIcon} />
@@ -2362,7 +2420,7 @@
                         <div class="lb-top">
                           <span class="lb-name">{m.display}</span>
                           <span class="lb-size">{fmtLlmSize(m.sizeMb)}</span>
-                          {#if m.recommended}<span class="lb-badge">Recommended</span>{/if}
+                          {#if m.recommended}<span class="lb-badge">Recommended for this PC</span>{/if}
                           {#if m.url}<a class="lb-learn" href={hfRepo(m.url)} onclick={createExternalLinkHandler(hfRepo(m.url))} target="_blank" rel="noreferrer">Learn more ↗</a>{/if}
                         </div>
                         <span class="lb-blurb">{m.blurb}</span>
@@ -3987,6 +4045,37 @@
   .lb-busy {
     font-size: 11.5px;
     color: var(--yap-muted);
+  }
+  /* A quiet line under the heading: the bigger model offered once, or a
+     big model left on the processor. */
+  .lb-note {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--yap-fg);
+    background: var(--yap-primary-wash);
+    border-radius: var(--yap-r-md, 8px);
+    padding: 8px 10px;
+  }
+  .lb-note span {
+    flex: 1 1 260px;
+  }
+  .lb-note.slow {
+    background: var(--yap-raised);
+  }
+  .lb-later {
+    border: 0;
+    background: none;
+    color: var(--yap-muted);
+    font-size: 11.5px;
+    cursor: pointer;
+    padding: 2px 4px;
+  }
+  .lb-later:hover {
+    color: var(--yap-fg);
   }
   .lb-byo {
     margin: 2px 0 0;

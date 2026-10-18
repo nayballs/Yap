@@ -34,15 +34,20 @@ Nathan's PC: `YAP_EVAL_TARGET_DIR=E:/yap-builds/evals`, `--out E:/yap-builds/eva
 | `--tools on\|off` | Treat the model as able (or not) to call tools, whatever `tools::supports_tools` says (its ≥ 4B rule for local models). Default: Yap's rule. |
 | `--tokens-per-minute <n>` | Pacing budget. Default **8,000 for Groq** (its free plan's limit), none otherwise. The pacing also reads Groq's `x-ratelimit-remaining-tokens` / `-reset-tokens` and waits for the window to refill, so a run doesn't spend minutes in 429s. Time held back is reported. |
 | `--max-total-tokens <n>` | Stop starting scenarios on a model past this many tokens (a free plan's daily cap: Groq's gpt-oss-20b allows 200k a day). |
-| `--timeout <secs>` | Per model call, instead of Yap's own (20 s for Chat). Leave it to measure what Yap does; raise it to measure what a slow model *could* do. |
+| `--timeout <secs>` | Per model call, instead of Yap's own (Chat: 20 s for a cloud model, 2 minutes for one on this PC since 18 Oct 2026, `llm::chat_timeout`). Leave it to measure what Yap does; raise it to measure what a slow model *could* do. |
+| `--cleanup`, `--cleanup-rounds <n>` | Time the dictation cleanup instead of the scenarios (below). |
 | `--repeat <n>` | Run each scenario n times (models answer differently at temperature 0.5). |
 | `--no-web` | Skip the web scenarios (`needs_web` / `web`); live ones go on the internet (below). |
 | `--raw <file>` | Send hand-written requests (see below) instead of, or before, scenarios. |
 
 ### Local models
 
-`--model local:<spec>` starts **Yap's own llamafile runtime** the way `local_llm.rs` does
-(`--server`, `-c 8192`) on a free localhost port for the run, and stops it after. `<spec>`:
+`--model local:<spec>` starts **Yap's own llamafile runtime** with the sidecar's own
+arguments (`local_llm::server_args`: `-c 8192`, `--reasoning off`, `--cache-ram 0`,
+`--ctx-checkpoints 4`, `-lv 4`) on a free localhost port for the run, and stops it after.
+`--llamafile-arg` adds arguments after those, and a later flag wins: `--llamafile-arg=--cache-ram
+--llamafile-arg=8192` measures llama.cpp's old prompt cache, `--reasoning auto` its thinking.
+`<spec>`:
 
 - `installed`: the on-device default, Qwen2.5-1.5B-Instruct;
 - a curated id from `local_llm::CURATED_MODELS` (`qwen2.5-3b`, `qwen2.5-7b`, `llama-3.2-3b`, …);
@@ -55,11 +60,31 @@ downloaded and SHA-256-verified with `local_llm::download_verified` into `--mode
 what a normal PC without a big GPU gets); `--ctx`, `--llamafile <path>` and repeatable
 `--llamafile-arg <arg>` adjust the server.
 
-The model id sent is the file's name (`qwen2.5-1.5b-instruct-q4_k_m`), so `supports_tools`
-reads its size as it would for a self-hosted local model. (The on-device provider always
-sends `qwen2.5-1.5b-instruct`, whatever GGUF is picked: see "Findings" below.) The summary
-gives each local model's load time, peak RAM (the server's peak working set), and prompt and
-generation speed (llama.cpp's own `timings`).
+The model id sent is the file's name (`qwen2.5-1.5b-instruct-q4_k_m`,
+`Qwen_Qwen3.5-4B-Q4_K_M`), as the on-device sidecar sends it since 18 Oct 2026
+(`local_llm::model_id`), so `supports_tools` reads the same family and size. The summary
+gives each local model's load time, peak RAM (the server's peak working set), what it took
+on the graphics card (`gpu_layers`/`layers`, `gpu_buffers_mib`, from the log), and prompt
+and generation speed (llama.cpp's own `timings`).
+
+A **voice** turn runs as the Voice Assistant's (`chat_turn` with scope "assistant": its
+shorter history and its spoken-answer prompt).
+
+### Dictation cleanup latency (`--cleanup`)
+
+```bash
+yap.exe eval --cleanup --model local:<1.5b.gguf> --model local:<4b.gguf> --ngl 999
+```
+
+Instead of the scenarios, each model cleans every dictation in
+`evals/cleanup/dictations.json` (twelve typical one-to-three sentence dictations, as
+speech-to-text writes them) through **`llm::cleanup`** itself (the guardrails, Settings'
+default body, the one-shots): the first call after loading, then `--cleanup-rounds` (3)
+rounds back to back, then each after a Chat-shaped request (persona + tool instructions +
+the tools, ~2k tokens, untimed), then four after a long one (~5.6k tokens). Per phase:
+mean / median / p90 / max wall time, llama.cpp's prompt tokens **processed** (the rest came
+from its cache) and tokens generated, and errors; and every output, to compare the cleanup
+itself. `cleanup.md` in the run folder; the numbers in `summary.json` (`models[].cleanup`).
 
 ## What a run does, and what it doesn't touch
 
@@ -183,9 +208,9 @@ regex}`, `{"note": "Launch plan"}` (that note's id), `{"empty": true}`, `{"absen
 Each run also records **soft metrics** per scenario: model calls, retries, tool calls,
 prompt / completion / cached / reasoning tokens, model time and wall time, rate-limit waits,
 pacing waits, words, (local) llama.cpp prompt and generation speed, the slowest single call,
-and how many calls took **longer than 20 s**, Chat's own timeout: run a slow local model with
-`--timeout 180` to see what it *can* do, and read "Calls > 20 s" for what Yap would do with
-it today (those calls would fail).
+and how many calls took **longer than 20 s**, a cloud model's timeout in Chat (and every
+model's before 18 Oct 2026: such calls failed then; a model on this PC now gets 2 minutes,
+and the Chat view says it's still working).
 
 Small models answer differently from run to run (Chat uses temperature 0.5): compare local
 models with `--repeat 2` or more; a cloud model's daily token cap may only allow one pass.
@@ -279,6 +304,69 @@ What the logs showed (each with the transcript to prove it):
   GGUF is picked, so `supports_tools` never gives a bigger on-device model its tools.
 - **Llama-3.2-3B** loops on tools (337 calls for 48 scenarios, up to the 20-step cap), writes
   tool calls as text, and its malformed calls make llamafile answer HTTP 500.
+
+### After the fixes (18–19 Oct 2026)
+
+Decision (Nathan): **Qwen3.5-4B, thinking off, on the graphics card** is the on-device model
+where the card can run it (`gpu.rs`: ≥ 5.5 GiB of its own memory), Qwen2.5-1.5B elsewhere
+(and the default an empty pick means). Same PC, same 24 scenarios × 2, the sidecar's own
+arguments (`server_args`), Chat's own timeouts; "before" = the build at `1384802` with
+`--reasoning off` passed by hand:
+
+| Model (RTX 5070 Ti) | Before | After | Mean turn | Peak RAM (server) |
+|---|---|---|---|---|
+| Qwen3.5-4B, thinking off | 45/48 (93.8%) | **47/48 (97.9%)** | 1.2 s → 1.2 s | 4,317 → 3,725 MB (prompt cache 416 → 0 MB) |
+| Qwen2.5-1.5B (no tools) | 38/48 (79.2%) | **39/48 (81.3%)** | 0.2 s → 0.2 s | 1,453 → 1,359 MB |
+| Qwen3.5-4B on the **processor** (×1) | 23/24 with `--timeout 180`; 16 of 43 calls over the 20 s Chat gave it then | **24/24 with Yap's own timeout** (2 minutes for a model on this PC; 20 of 40 calls took over 20 s) | 24.6 s → 24.8 s | 4,392 → 3,850 MB (prompt cache 340 → 0 MB) |
+
+What changed it: voice answers ("how long do I boil an egg": 55–87 words with lists → 12–17
+words, `assistant::SPOKEN_ANSWER_NOTE`); the Gale walkthrough on bg3.wiki (both models failed
+it 1–2 times in 2 → 6/6 over three passes each: the wiki ranked "Gale" third, after
+Gale/Banter and Act One/Camp Events, and only the top two are read — `web::subject_first`
+puts the subject's own article first). The 4B's one failure left is wording
+(apps-not-installed: "doesn't appear to be installed"); the 1.5B's are the note actions it
+has no tools for, and one wrong fact (8 tablespoons in a cup).
+
+**Dictation cleanup latency** (`--cleanup`, `llm::cleanup` wall time per dictation, ms;
+three rounds of the twelve, then each after a Chat turn):
+
+| Model, where | Back to back (mean / p90) | After a Chat turn | After a long Chat turn | First after loading |
+|---|---|---|---|---|
+| 1.5B, GPU, llama.cpp's prompt cache on (before) | 129 / 158 | **1,278** / 1,427 | 787 / 1,385 | 290 |
+| 1.5B, GPU, `--cache-ram 0` (after) | 134 / 164 | **139** / 166 | 165 / 171 | 310 |
+| 4B, GPU, prompt cache on (before) | 337 / 395 | **711** / 781 | 693 / 776 | 739 |
+| 4B, GPU, `--cache-ram 0` (after) | 344 / 406 | **341** / 405 | 355 / 374 | 732 |
+| 1.5B, CPU (after) | 807 / 937 | 1,086 / 1,287 | 1,889 / 1,989 | 6,952 |
+| 4B, CPU (after) | 7,527 / 7,233 (one timed out) | 6,804 / 8,003 | 6,537 / 7,647 | 20,002 (timed out: raw text) |
+
+- **The prompt cache cost every dictation after a Chat turn ~1.2 s** on the card, whatever
+  the model: with it on, llama.cpp saves the idle cleanup slot to RAM and clears it when the
+  Chat request starts, then copies it back for the next cleanup (`prompt cache update took
+  1179 ms` in the log, for a 57 MB state). Off, each slot keeps its cache in the shared 8k
+  context; when a long Chat turn needs the room llama.cpp clears an idle slot itself, and no
+  Chat turn failed (0 of 16, up to 6.5k-token prompts; checked by hand to 7.9k).
+- **The 4B is slower at cleanup than the 1.5B: ~0.34 s against ~0.13 s a dictation on the
+  card**, about 0.2 s more on top of the speech-to-text. Two reasons: it generates at ~97
+  tokens/s against ~180, and, being a hybrid model (recurrent layers that can't be rolled
+  back), it reads the cleanup's last message again each time (~390 tokens: the restated
+  instruction + the transcript) where the 1.5B reads only the new ~24. Its cleanup is a little
+  better (it kept "Parakeet", "DirectML" and "needless borrows" where the 1.5B wrote
+  "parakeet", "direct ML" and "unnecessary borrows", and it kept the corrected half of a
+  self-correction the 1.5B dropped). Keeping the 1.5B for cleanup and the 4B for Chat would
+  need two sidecars (~1.4 GB more on the card); not built.
+- **On a processor the 4B can't do cleanup**: 6.5–7.5 s a dictation, the first after loading
+  timed out at 20 s (the raw text pasted). That is why it's only recommended with a card, and
+  why Settings says when it ended up on the processor.
+
+Other fixes, each unit-tested (and the UI parts e2e-tested): the on-device model is named by
+its GGUF, so the 4B gets its tools (`tools::local_model_uses_tools`: Llama 3.2 never,
+Qwen3.5 from 4B, else ≥ 4B); a rejected tool call (Groq's 400 `tool_use_failed`, llama.cpp's
+500 "Failed to parse input") is asked again once, then answered without tools, and a capped
+web tool stays offered (four live Groq scenarios afterwards, notes-edit-partial and
+web-gale × 2, passed without a 400, 21k tokens; the recovery itself is tested against
+Groq's recorded 400 bodies); citations with no source behind them are taken out of the saved
+answer; a local tool model is told to search when `web::needs_web` says the question needs
+it; Chat gives a model on this PC 2 minutes a call.
 
 **Groq's `browser_search` spike** (`--raw evals/raw/groq-browser-search.json`, Nathan's free
 key): on its own it works (HTTP 200; Exa-powered; one searched answer 3.6–4.5k tokens, ~0.4 s

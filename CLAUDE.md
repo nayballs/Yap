@@ -410,7 +410,16 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `ChatOptions` (temperature, `max_tokens` — sent for local servers only —
   and timeout), `note_chat` (embedded per-note chat + Chat-surface turns), and
   `post_chat_message` (the tool-loop variant that returns the whole assistant
-  message, incl. `tool_calls`, instead of just the text). **Rate limits**
+  message, incl. `tool_calls`, instead of just the text). **Chat's timeout**
+  (`chat_timeout`: `note_chat`, `post_chat_message`): 20 s for a cloud model,
+  **2 minutes for a server on this PC** (`LOCAL_CHAT_TIMEOUT`, a loopback
+  address: Yap's sidecar, Ollama, LM Studio) — Qwen3.5-4B on a processor
+  takes ~25 s a turn, its slowest calls ~50 s; the Chat view says "Still
+  working (12 s): the model runs on this PC…" after 8 s. Dictation cleanup and
+  edit mode keep 20 s and never wait (the raw text is the fallback). A
+  rejected tool call's error starts `TOOL_CALL_REJECTED`
+  (`tool_call_rejection`: Groq's `tool_use_failed`, llama.cpp's "Failed to
+  parse input"), which the tool loop recovers from. **Rate limits**
   (HTTP 429 — Groq's free plan allows 8,000 tokens a minute, and one
   tool-using chat answer can ask for more): calls someone is happy to wait for
   (`chat` — meeting summaries/digests/assist —, `note_chat`,
@@ -427,10 +436,38 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `reasoning_effort: "none"`, once each.
 - **`local_llm.rs`** — the on-device AI cleanup sidecar: runs **Mozilla llamafile**
   (llama.cpp, single-file OpenAI-compatible server) as a hidden child process on a
-  free localhost port, serving **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) by default
-  — or **any user GGUF** dropped into `<data>/llm/` and picked via `pp_local_model`
+  free localhost port, serving **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) when no
+  other is picked (`pp_local_model` empty = `MODEL_FILENAME`) — or a curated
+  one (`CURATED_MODELS`, incl. **Qwen3.5-4B**, bartowski's Q4_K_M, SHA-pinned)
+  or **any user GGUF** dropped into `<data>/llm/` and picked via `pp_local_model`
   (Settings shows a model picker + "Open models folder"; switching restarts the
-  sidecar). Owns install (runtime + model download, SHA-256 verified, per-stage
+  sidecar). **Recommended for this PC** (`recommended_id`, from `gpu.rs`):
+  Qwen3.5-4B where the graphics card can run it (2026-10-18, the model
+  evaluations: 94–98% of the scenarios at ~1.2 s a turn on an RTX 5070 Ti, with
+  Chat's tools; the 1.5B 79–81% without them), else the 1.5B; existing installs
+  keep their model and are offered the 4B **once** (`upgrade_offer`: capable
+  card, on-device in use, on the 1.5B, not turned down —
+  `config.local_llm_upgrade_dismissed`), never downloaded by itself. The
+  curated entry's `default` = the bundled file, `needs_gpu` = only recommended
+  with a card. **One server set-up** for the sidecar and the evaluations
+  (`server_args`): `-ngl 999 -c 8192`, **`--reasoning off`** (no thinking for
+  any model: Qwen3.5 loops and times out with it on), **`--cache-ram 0`**
+  (llama.cpp's host prompt cache off: with it on, a dictation's cleanup right
+  after a Chat turn took 1.3–1.4 s instead of 0.13 s on the 1.5B — the slow
+  copy back of the saved prompt — and a 4B server peaked at 6.7 GB on the
+  processor; Qwen3.5-4B's peak is now 3.85 GB there, 3.7 GB on the card),
+  `--ctx-checkpoints 4` (Qwen3.5's recurrent-state checkpoints, ~50 MB each),
+  `-lv 4` (the log names the layers that went to the GPU). **Model id** = the
+  GGUF's name (`model_id`, `active_model_id`: `Qwen_Qwen3.5-4B-Q4_K_M`),
+  what `effective_endpoint` sends and `tools::supports_tools` reads (it used to
+  be `qwen2.5-1.5b-instruct` whatever ran, so a bigger model never got its
+  tools). **Where it runs** (`placement`, from the log's `load_tensors:
+  offloaded N/M layers to GPU`, read once ready; no line once loaded = the
+  processor): a big model left on the processor (`slow_on_this_pc`) makes
+  Settings say "Runs on the processor on this PC: answers will be slow — Qwen2.5
+  1.5B is quicker" (+ Use / Download it). Debug-only `e2e_local_llm_serving`
+  stages a running model's placement for the e2e suite (display only). Owns
+  install (runtime + model download, SHA-256 verified, per-stage
   progress events), process lifecycle (spawn/health-wait/kill + orphan cleanup at
   startup — only sidecars whose parent Yap is gone, via `procs.rs`, so a dev build
   never kills the installed app's; and **the model never outlives Yap**:
@@ -440,6 +477,17 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   updater's exit; never used for apps Yap opens, a link's browser or an
   installer), and `effective_endpoint()` which routes `llm.rs` to the sidecar when
   provider = "ondevice" (falls back to the configured endpoint if it's down).
+- **`gpu.rs`** — the graphics card, for the on-device model recommended for
+  this PC: DXGI (`CreateDXGIFactory1` → `EnumAdapters1` → `GetDesc1`, software
+  adapters and Microsoft's Basic Render Driver left out), the card with the most
+  memory of its own, cached; **`can_run_big_model`** = ≥ `BIG_MODEL_VRAM_MIB`
+  (5.5 GiB, so "6 GB" cards count) of dedicated video memory — the 4B takes
+  ~3.7 GiB on the card (model 2,863 MiB + 8k context's KV 256 + recurrent state
+  201 + compute 495, read from the sidecar's log), beside Yap's speech model
+  (~1–1.6 GB) and Windows (~0.5–1 GB); integrated graphics report little of
+  their own (this PC's Ryzen Radeon: 2 GiB). Debug-only `YAP_E2E_GPU`
+  ("none" | "<name>,<MiB>") stands in for the card in test mode. `#[ignore]`d
+  `this_machine` prints this PC's cards.
 - **`notes.rs`** — the AI Notepad's data layer (`notes.json`, camelCase). Stores:
   `content` (raw markdown, never overwritten by AI), `enhanced_content` (the
   Enhanced tab), `enhanced_at_hash` (OpenWhispr's `len+first-50` staleness
@@ -1102,7 +1150,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the pages use as its id (`chat:<conversation>:<index>`). A web answer keeps
   its sources (`ChatMessage.sources` = `Source {n, title, url, site}`,
   numbered as it cites them; `append_sourced`; only written when there are
-  some).
+  some). **A citation with no source behind it** is taken out before the
+  answer is saved (`strip_unsourced_citations`, in `chat_turn`: a small model
+  answering from memory wrote "Python 3.12.0 [1]" with no search): kept are
+  the numbers of this turn's sources, else of the latest earlier answer that
+  had some (`earlier_source_numbers`, what ChatView's `citedSources` draws a
+  follow-up's "[1]" against); code, a link's text and "[0]" are left alone.
 - **`ai_model.rs`** — which model a scope's next call goes to, resolved the
   calls' way (`Scope::Chat` → `commands::resolve_chat_endpoint`;
   `Scope::Notes` → `meeting_summary::resolve_endpoint`): `ai_model_status
@@ -1211,9 +1264,21 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   "Monday."`, `Couldn't edit "Launch plan": the text is in 2 places`. Gated
   by `supports_tools` — cloud providers always qualify (unless the
   provider's own model list says that model can't call tools,
-  `model_catalog::tools_for`), local models need
-  ≥4B params (`LOCAL_TOOL_MIN_PARAMS_B`) — so smaller local models fall back
-  to plain keyword-RAG chat instead. Unit-tested end to end against
+  `model_catalog::tools_for`), local models by
+  `local_model_uses_tools`: a family the model evaluations saw fail never
+  (`NO_TOOL_FAMILIES`: Llama 3.2, which loops), one they saw succeed from its
+  size (`TOOL_FAMILIES`: Qwen3.5 ≥ 4B, thinking off), else ≥4B params
+  (`LOCAL_TOOL_MIN_PARAMS_B`; the size read from `-4B`, `_4B`, `:8b`) — so
+  smaller local models fall back to plain keyword-RAG chat instead. **A tool
+  call the provider rejects** (Groq's HTTP 400 `tool_use_failed`: gpt-oss
+  left out `note_id`, or called a tool not in the request; llama.cpp's 500
+  "Failed to parse input" for a call written as text — `llm::rejected_tool_call`)
+  never ends the turn in an error: the model is told what was wrong (a
+  user-role note from Yap, with what it sent) and asked again once
+  (`REJECTED_CALL_RETRIES`), then answers without tools (`ANSWER_NOW_NOTE`, as
+  when out of steps). A web tool past its per-turn cap stays offered (`web::
+  Turn` answers "you've searched 3 times"): taking it away made Groq 400 the
+  next call to it. Unit-tested end to end against
   `notes.rs`' **in-memory test store** (under `cfg(test)` every test thread
   gets its own empty store and nothing reads or writes `notes.json`), and
   in `e2e/chat-tools.spec.js` against the scripted fake AI. **Folders are
@@ -1279,7 +1344,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `page_text` = dom_smoothie (readability.js port, `TextMode::Formatted`),
   `page_part` ≈ 3,000 tokens a read with `next_offset`. **`Turn`**: only
   links the person gave (their messages, `links_in`) or a search this turn
-  returned (`allowed`); ≤ 3 searches and ≤ 3 reads a turn (`offers`);
+  returned (`allowed`); ≤ 3 searches and ≤ 3 reads a turn (a call past the
+  cap is answered "you've searched 3 times", the tool still offered);
   sources numbered as they come (`number`), `sources_for(reply)` = the ones
   cited (`citations`: [1], [2, 3], [1][4]) or all; results carry
   `DATA_NOT_INSTRUCTIONS`. Chips: `Searched the web: "q"` (+ " (bg3.wiki)"
@@ -1717,7 +1783,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   restore_clipboard, show_tray_icon, autostart, model_unload_timeout, selected_language,
   translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
   Notes/Slack/Code/Custom), the editable `pp_prompt` body, `pp_api_keys` (per-provider
-  key store — the UI swaps the active `pp_api_key` from it on provider switch), `cleanup_profiles` (each
+  key store — the UI swaps the active `pp_api_key` from it on provider switch),
+  `pp_local_model` (the on-device GGUF; empty = the 1.5B) + `local_llm_upgrade_dismissed`
+  (the 4B offered once, `local_llm::upgrade_offer`), `cleanup_profiles` (each
   with an optional per-profile LLM override: provider/base_url/model/api_key — empty
   provider = inherit global) + `app_routes` smart routing, streaming_partials,
   history_enabled, update_checks_enabled, dictionary_fuzzy, learn_words
@@ -2361,7 +2429,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   answer** (`turn.sources`, `web.rs`) is said short (`spoken_answer`:
   `tts::brief` — its first two sentences, no `[n]` — then "The details and
   sources are in Chat."), its card shows that and "2 sources in Chat"; the
-  model is told a spoken question wants the answer first. `stop`
+  model is told a spoken question wants the answer first. **Any other
+  spoken answer** is asked for short (`SPOKEN_ANSWER_NOTE`, last in Chat's
+  system prompt for the Voice Assistant, or a question dictated into Chat
+  with spoken replies on: "one or two short sentences (under 40 words) of
+  plain speech…" — the model evaluations' egg answer was 55–98 words with
+  lists before, 12–17 after), and one longer than `SPOKEN_MAX_WORDS` (60)
+  anyway is said short too, "The rest is in Chat." `stop`
   (■ on the capsule = `bar_action "assistant-stop"`, `assistant_stop`).
   The bar's capsule shows while `phase != Idle`, the bar on or off.
   Debug-only `e2e_assistant_ask {text, listenMs}` (`Robot::ask_assistant`:
@@ -2531,7 +2605,14 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `transcript.jsonl` (every request body incl. tool schemas, every response,
   429s/waits, tool calls + results, keys redacted), `summary.md`/`.json`.
   Paces Groq to its 8k tokens/min (and its rate-limit headers). `--raw` sends
-  hand-written requests (the Groq `browser_search` spike). The hooks in
+  hand-written requests (the Groq `browser_search` spike). A local model's
+  llamafile runs with the sidecar's own `local_llm::server_args` (thinking off,
+  caches capped; `--llamafile-arg` after them overrides) and sends its GGUF's
+  name as the model id, as the sidecar does; a voice turn is the Voice
+  Assistant's (scope "assistant"). **`--cleanup`** (`eval/cleanup.rs`)
+  times `llm::cleanup` itself over `evals/cleanup/dictations.json` — back to
+  back, after a Chat turn, after a long one — with llama.cpp's prompt tokens
+  processed, and keeps every output (`cleanup.md`). The hooks in
   `llm.rs` (`eval::Call`), `tools.rs`, `config.rs`, `notes.rs` are no-ops
   outside a run. See [`docs/model-evals.md`](./docs/model-evals.md).
 - **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
@@ -3190,7 +3271,15 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (`EndpointModels.svelte`, a `<datalist>` + "3 models on this server"), as
   do the cleanup profiles' model fields;
   UI-only `ppMode`/`cloudProvider` state resolves to the unchanged `ppProvider`
-  contract. Below it, **Prompt Studio** (`PromptStudio.svelte`, OpenWhispr port):
+  contract. Local = the on-device model browser (family tabs, Download / Use /
+  delete): **"Recommended for this PC"** on `local_llm_status`'s pick (Qwen3.5
+  4B with a capable card, else the 1.5B; `isDefault` = the model an empty
+  `ppLocalModel` means), and under its heading one quiet line at most — the
+  4B offered once (`upgrade`: "Your NVIDIA GeForce RTX 5070 Ti can run Qwen3.5
+  4B…" Download / No thanks → `localLlmUpgradeDismissed`), or, a big model
+  left on the processor (`slowOnThisPc`, `placement`), "Runs on the processor
+  on this PC: answers will be slow — Qwen2.5 1.5B Instruct is quicker." + Use
+  it (read afresh whenever the section opens). Below it, **Prompt Studio** (`PromptStudio.svelte`, OpenWhispr port):
   View (full effective prompt via `get_base_prompt`) / Customize (preset +
   body + Save/Reset) / Test tabs. Plus usage meter + profiles w/ per-profile
   model override + per-app rules), **History** (stats
@@ -3274,8 +3363,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `unavailable` = a listed model's note instead of Download, `deleteActive`).
 - **`lib/Onboarding.svelte`** — first-run **guided setup** (5 steps): model picker →
   mic check (live level meter via `set_mic_test` idle-amp mode + live device switch)
-  → one-click **local AI cleanup** install → tray pointer → "try it here" live
-  dictation test with a change-shortcut recorder.
+  → one-click **local AI cleanup** install (the model recommended for this PC
+  first and picked: Qwen3.5 4B with a graphics card that can run it, "Your
+  <card> runs Qwen3.5 4B quickly…", else Qwen2.5 1.5B) → tray pointer → "try
+  it here" live dictation test with a change-shortcut recorder.
 - **`lib/ui/`** — primitives: Toggle, Select, Slider, Group, Row, Button, Input, Textarea,
   **ContextMenu** (at the pointer or under a ⋯ (`alignEnd`), clamped to the
   window; ↑/↓/Home/End/Enter, → into a submenu, ← / Esc back; Esc, Tab, a
@@ -3524,8 +3615,9 @@ docs). Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md) "Real-app robot tests".
 ### Model evaluations (`npm run eval`)
 How real models do on Yap's own Chat code, with every request and response
 logged: `npm run eval -- --model groq:openai/gpt-oss-20b --keys-from-yap`,
-`--model local:installed` (Yap's llamafile on the CPU), `--only`, `--tools on`,
-`--raw evals/raw/groq-browser-search.json`. Nothing launches, no window, the
+`--model local:installed` (Yap's llamafile on the CPU; `--ngl 999` on the GPU),
+`--only`, `--tools on`, `--raw evals/raw/groq-browser-search.json`, and
+`--cleanup` (dictation cleanup latency per model). Nothing launches, no window, the
 installed app's data and `%APPDATA%\yap` are never written (keys are read from
 its config.json read-only). Builds a debug stub into `$YAP_EVAL_TARGET_DIR`;
 runs land in `$YAP_EVAL_OUT` / `--out` (Nathan's PC: `E:/yap-builds/evals`,
@@ -3729,7 +3821,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   while recording/transcribing (no off switch — it's the hot-mic indicator),
   without ✕ / ✓ (`bar_dictation_buttons` "off": Cancel is in the tray),
   live transcription preview **on**
-  (`streaming_partials`), AI cleanup **off**, the "press enter" voice command
+  (`streaming_partials`), AI cleanup **off** (turned on locally, the model
+  recommended for this PC: Qwen3.5 4B on a graphics card with ≥ 5.5 GiB of its
+  own, else Qwen2.5 1.5B), the "press enter" voice command
   **on** (`voice_enter`), word suggestions from your corrections **on**
   (`learn_words` — it only asks; nothing is added without a click), looking
   things up on the web **off** (`web_search`; once on, cloud models use
@@ -3766,7 +3860,10 @@ builds), and the dictation pipeline around it is complete: multi-engine STT
 (Whisper/Vulkan + ONNX/DirectML), the 14-model registry + manager, recording modes
 (push-to-talk with double-tap hands-free and coaching tips, 2026-10-17), a dead-mic
 watchdog (reopen, then "No sound from <mic>"),
-language/translate, **AI cleanup** (BYO key or local sidecar) with per-app routing +
+language/translate, **AI cleanup** (BYO key or local sidecar — Qwen3.5 4B on a capable
+graphics card, else Qwen2.5 1.5B, 2026-10-18, chosen and measured with the model
+evaluations; cleanup ~0.34 s a dictation on the 4B, ~0.13 s on the 1.5B, on an RTX
+5070 Ti) with per-app routing +
 named profiles + per-profile model choice, **Commands** (the rewrite shortcut +
 the agent's name in a dictation; "Voice Agent" until 2026-10-18), the **Voice
 Assistant** (`assistant.rs`, 2026-10-18: its own shortcut, ask Chat out loud

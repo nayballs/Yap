@@ -298,6 +298,89 @@ pub fn delete(id: u64) {
     });
 }
 
+/// The source numbers an answer may cite without searching again: the
+/// latest earlier answer's in `messages` that had any (what the Chat view
+/// draws a follow-up's "[1]" against, `citedSources` in ChatView.svelte).
+/// Pure.
+pub fn earlier_source_numbers(messages: &[ChatMessage]) -> Vec<usize> {
+    messages
+        .iter()
+        .rev()
+        .find(|m| m.role == "assistant" && !m.sources.is_empty())
+        .map(|m| m.sources.iter().map(|s| s.n).collect())
+        .unwrap_or_default()
+}
+
+/// An answer's **citation markers with no source behind them** taken out:
+/// a small model that answered from memory ("Python 3.12.0 [1].", no
+/// search) would otherwise show a citation that points nowhere. `sourced`:
+/// the numbers that do point somewhere (this turn's sources, else an
+/// earlier answer's, [`earlier_source_numbers`]); a marker keeps those of
+/// its numbers ("[1, 4]" with only 1 → "[1]") and goes when none is left,
+/// with the space before it. Code (`…`, fenced blocks), markdown links'
+/// text ("[1](https://…)") and "[0]" are left alone. Pure.
+pub fn strip_unsourced_citations(reply: &str, sourced: &[usize]) -> String {
+    static CITE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\[(\d{1,2}(?:\s*[,–-]\s*\d{1,2})*)\]").expect("static regex")
+    });
+    // Byte ranges of code: fenced blocks, then inline spans outside them.
+    let mut code: Vec<(usize, usize)> = Vec::new();
+    let mut at = 0;
+    while let Some(start) = reply[at..].find("```").map(|i| at + i) {
+        let end = reply[start + 3..].find("```").map(|i| start + 3 + i + 3).unwrap_or(reply.len());
+        code.push((start, end));
+        at = end;
+        if at >= reply.len() {
+            break;
+        }
+    }
+    let mut inline: Vec<(usize, usize)> = Vec::new();
+    let mut open: Option<usize> = None;
+    for (i, c) in reply.char_indices() {
+        if c == '`' && !code.iter().any(|&(s, e)| i >= s && i < e) {
+            match open.take() {
+                Some(s) => inline.push((s, i + 1)),
+                None => open = Some(i),
+            }
+        }
+    }
+    code.extend(inline);
+    let in_code = |i: usize| code.iter().any(|&(s, e)| i >= s && i < e);
+
+    let mut out = String::with_capacity(reply.len());
+    let mut last = 0;
+    for m in CITE.captures_iter(reply) {
+        let whole = m.get(0).expect("match");
+        if in_code(whole.start()) || reply[whole.end()..].starts_with('(') {
+            continue;
+        }
+        let inner = &m[1];
+        let nums: Vec<usize> = inner.split([',', '–', '-']).filter_map(|n| n.trim().parse().ok()).collect();
+        let range = inner.contains(['–', '-']) && nums.len() == 2 && nums[0] < nums[1] && nums[1] - nums[0] <= 10;
+        let nums: Vec<usize> = if range { (nums[0]..=nums[1]).collect() } else { nums };
+        if nums.iter().all(|&n| n == 0) {
+            continue; // "[0]": an index, not a citation
+        }
+        let kept: Vec<usize> = nums.iter().copied().filter(|n| sourced.contains(n)).collect();
+        if kept.len() == nums.len() {
+            continue;
+        }
+        let mut before = &reply[last..whole.start()];
+        if kept.is_empty() {
+            // "3.12.0 [1]." → "3.12.0."
+            before = before.trim_end_matches([' ', '\u{a0}']);
+            out.push_str(before);
+        } else {
+            out.push_str(before);
+            let list: Vec<String> = kept.iter().map(|n| n.to_string()).collect();
+            out.push_str(&format!("[{}]", list.join(", ")));
+        }
+        last = whole.end();
+    }
+    out.push_str(&reply[last..]);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,6 +411,45 @@ mod tests {
         // An older file without them still reads.
         let old: ChatMessage = serde_json::from_str(r#"{"role":"assistant","text":"Hi","ts":1}"#).unwrap();
         assert!(old.sources.is_empty());
+    }
+
+    #[test]
+    fn a_citation_with_no_source_behind_it_is_taken_out() {
+        // Qwen3-4B from memory, no search (the model evaluations).
+        assert_eq!(strip_unsourced_citations("The latest is Python 3.12.0 [1].", &[]), "The latest is Python 3.12.0.");
+        assert_eq!(strip_unsourced_citations("It's 1,345 m[1][2] tall.", &[]), "It's 1,345 m tall.");
+        assert_eq!(strip_unsourced_citations("Tall [1] and [2, 3] old.", &[]), "Tall and old.");
+        // Sources there: kept, and only the numbers that point somewhere.
+        assert_eq!(strip_unsourced_citations("Tall [1] and old [2].", &[1, 2]), "Tall [1] and old [2].");
+        assert_eq!(strip_unsourced_citations("Tall [1, 4] and old [5].", &[1, 2]), "Tall [1] and old.");
+        assert_eq!(strip_unsourced_citations("See [1–3].", &[2]), "See [2].");
+        // Not citations: code, a link's text, an index.
+        let code = "Use `xs[1]` or\n```\nys[2] = 3\n```\nand [1](https://a.example) or a[0].";
+        assert_eq!(strip_unsourced_citations(code, &[]), code);
+        assert_eq!(strip_unsourced_citations("No markers here.", &[]), "No markers here.");
+    }
+
+    #[test]
+    fn a_follow_up_may_cite_the_latest_answer_that_had_sources() {
+        let src = |n| Source { n, title: format!("S{n}"), url: format!("https://s{n}.example"), site: String::new() };
+        let msg = |role: &str, sources: Vec<Source>| ChatMessage {
+            role: role.into(),
+            text: "x".into(),
+            ts: 0,
+            tools: vec![],
+            model: None,
+            voice: false,
+            sources,
+        };
+        let messages = vec![
+            msg("user", vec![]),
+            msg("assistant", vec![src(1), src(2), src(3)]),
+            msg("user", vec![]),
+            msg("assistant", vec![]),
+            msg("user", vec![]),
+        ];
+        assert_eq!(earlier_source_numbers(&messages), [1, 2, 3]);
+        assert!(earlier_source_numbers(&messages[..1]).is_empty());
     }
 
     #[test]
