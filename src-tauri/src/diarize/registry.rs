@@ -525,7 +525,7 @@ pub async fn install(root: &Path, id: &str, on_progress: &(dyn Fn(Progress) + Se
 }
 
 /// Stream `src` to `partial`, resuming what an earlier try left.
-async fn download(src: &Source, partial: &Path, report: &(dyn Fn(u64) + Sync)) -> Result<(), String> {
+pub(crate) async fn download(src: &Source, partial: &Path, report: &(dyn Fn(u64) + Sync)) -> Result<(), String> {
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
 
@@ -579,7 +579,7 @@ async fn download(src: &Source, partial: &Path, report: &(dyn Fn(u64) + Sync)) -
 }
 
 /// Size and SHA-256, or the partial goes.
-async fn verify(partial: &Path, src: &Source) -> Result<(), String> {
+pub(crate) async fn verify(partial: &Path, src: &Source) -> Result<(), String> {
     let path = partial.to_path_buf();
     let expected = src.sha256.clone();
     let size = src.size;
@@ -591,7 +591,7 @@ async fn verify(partial: &Path, src: &Source) -> Result<(), String> {
     .map_err(|e| format!("checksum task: {e}"))?;
     if !ok {
         let _ = tokio::fs::remove_file(partial).await;
-        tracing::warn!(url = %host(&src.url), "Diarization: download failed its SHA-256 check");
+        tracing::warn!(url = %host(&src.url), "Model download failed its SHA-256 check");
         return Err("The download was corrupt (its checksum didn't match). Try again.".to_string());
     }
     Ok(())

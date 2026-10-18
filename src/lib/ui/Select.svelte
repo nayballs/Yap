@@ -10,6 +10,18 @@
     // Accessible name when the visible label sits elsewhere (a Row's label).
     ariaLabel = '',
   } = $props();
+
+  // Options with a `group` go under an <optgroup> of that name (runs of the
+  // same group, in order); the rest stand alone.
+  const blocks = $derived.by(() => {
+    const out = [];
+    for (const o of options) {
+      const last = out[out.length - 1];
+      if (o.group && last?.group === o.group) last.options.push(o);
+      else out.push({ group: o.group || '', options: [o] });
+    }
+    return out;
+  });
 </script>
 
 <div class="select-row">
@@ -21,8 +33,18 @@
   {/if}
   <div class="select-wrap" class:disabled>
     <select bind:value {disabled} aria-label={ariaLabel || label || undefined} onchange={() => onchange?.(value)}>
-      {#each options as o (o.value)}
-        <option value={o.value}>{o.label}</option>
+      {#each blocks as b, i (i)}
+        {#if b.group}
+          <optgroup label={b.group}>
+            {#each b.options as o (o.value)}
+              <option value={o.value}>{o.label}</option>
+            {/each}
+          </optgroup>
+        {:else}
+          {#each b.options as o (o.value)}
+            <option value={o.value}>{o.label}</option>
+          {/each}
+        {/if}
       {/each}
     </select>
     <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none"

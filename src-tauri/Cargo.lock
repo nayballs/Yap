@@ -6950,6 +6950,7 @@ dependencies = [
  "keyring-core",
  "libloading 0.8.9",
  "once_cell",
+ "ort",
  "png 0.18.1",
  "qrcode",
  "regex",

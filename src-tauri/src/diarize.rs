@@ -37,7 +37,7 @@
 
 mod child;
 pub mod protocol;
-mod registry;
+pub(crate) mod registry;
 mod timeline;
 
 use std::io::{BufRead, BufReader, BufWriter, Write};

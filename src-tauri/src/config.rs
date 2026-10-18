@@ -407,13 +407,17 @@ pub struct YapConfig {
     /// `speak_replies` is on (`tts::sends_by_itself`). On by default.
     #[serde(default = "default_true")]
     pub talk_back_hands_free: bool,
-    /// The speech engine (`tts::ENGINES`): "windows" (Windows' own voices),
-    /// the only one so far.
+    /// The speech engine (`tts::ENGINES`): "kokoro" (the default: Kokoro's
+    /// natural voices once downloaded, Windows voices until then) or
+    /// "windows" (Windows' own voices, chosen).
     #[serde(default = "default_tts_engine")]
     pub tts_engine: String,
-    /// The engine's voice id; empty = Windows' default voice.
-    #[serde(default)]
+    /// Kokoro's voice (`tts::kokoro::VOICES`); af_bella by default.
+    #[serde(default = "default_tts_voice")]
     pub tts_voice: String,
+    /// The Windows voice's id; empty = Windows' default voice.
+    #[serde(default)]
+    pub tts_windows_voice: String,
     /// Speaking speed, 1.0 = normal (0.5–2.0).
     #[serde(default = "default_tts_rate")]
     pub tts_rate: f32,
@@ -626,6 +630,9 @@ fn default_speak_when() -> String {
 fn default_tts_engine() -> String {
     crate::tts::DEFAULT_ENGINE.into()
 }
+fn default_tts_voice() -> String {
+    crate::tts::kokoro::DEFAULT_VOICE.into()
+}
 fn default_tts_rate() -> f32 {
     1.0
 }
@@ -691,7 +698,8 @@ impl Default for YapConfig {
             speak_when: default_speak_when(),
             talk_back_hands_free: true,
             tts_engine: default_tts_engine(),
-            tts_voice: String::new(),
+            tts_voice: default_tts_voice(),
+            tts_windows_voice: String::new(),
             tts_rate: default_tts_rate(),
             streaming_partials: true,
             history_enabled: true,
@@ -797,7 +805,7 @@ fn migrate_retired_groq_models(cfg: &mut YapConfig) {
 
 /// Current config schema version (see [`YapConfig::config_version`]). Bump it
 /// together with a new step in [`migrate_once`].
-const CONFIG_VERSION: u32 = 1;
+const CONFIG_VERSION: u32 = 2;
 
 /// One-time migrations, keyed by `config_version`. Returns whether anything
 /// ran; [`load`] then saves the result so no step ever runs twice.
@@ -811,6 +819,21 @@ fn migrate_once(cfg: &mut YapConfig) -> bool {
         // saved `false` without the user choosing it. Turn it back on once;
         // anyone who switches it off again keeps it off.
         cfg.streaming_partials = true;
+    }
+    if cfg.config_version < 2 {
+        // v2 (2026-10-18): Kokoro became the voice. Until then Windows voices
+        // were the only engine (so "windows" was never a choice) and
+        // `tts_voice` held a Windows voice's id: it moves to
+        // `tts_windows_voice`, and Kokoro speaks in af_bella once installed.
+        if cfg.tts_engine == crate::tts::WINDOWS {
+            cfg.tts_engine = crate::tts::DEFAULT_ENGINE.into();
+        }
+        if !crate::tts::kokoro::is_voice(&cfg.tts_voice) {
+            if cfg.tts_windows_voice.is_empty() {
+                cfg.tts_windows_voice = std::mem::take(&mut cfg.tts_voice);
+            }
+            cfg.tts_voice = default_tts_voice();
+        }
     }
     cfg.config_version = CONFIG_VERSION;
     true
@@ -1363,5 +1386,29 @@ mod tests {
 
         // Fresh installs start current: nothing to migrate.
         assert!(!migrate_once(&mut YapConfig::default()));
+    }
+
+    #[test]
+    fn kokoro_becomes_the_voice_and_a_windows_voice_is_kept() {
+        // Saved by the first Voice Agent build: Windows voices, one picked.
+        let mut cfg: YapConfig =
+            serde_json::from_str(r#"{"configVersion":1,"ttsEngine":"windows","ttsVoice":"HKEY\\Voices\\MSTTS_V110_enGB_GeorgeM"}"#)
+                .unwrap();
+        assert!(migrate_once(&mut cfg));
+        assert_eq!(cfg.tts_engine, "kokoro");
+        assert_eq!(cfg.tts_voice, "af_bella");
+        assert_eq!(cfg.tts_windows_voice, "HKEY\\Voices\\MSTTS_V110_enGB_GeorgeM");
+        // Windows' default ("") stays the default.
+        let mut cfg: YapConfig = serde_json::from_str(r#"{"configVersion":1,"ttsEngine":"windows","ttsVoice":""}"#).unwrap();
+        assert!(migrate_once(&mut cfg));
+        assert_eq!((cfg.tts_engine.as_str(), cfg.tts_voice.as_str(), cfg.tts_windows_voice.as_str()), ("kokoro", "af_bella", ""));
+        // Windows chosen after that sticks.
+        cfg.tts_engine = "windows".into();
+        let mut reloaded: YapConfig = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert!(!migrate_once(&mut reloaded));
+        assert_eq!(reloaded.tts_engine, "windows");
+        // A fresh install: Kokoro, af_bella.
+        let fresh = YapConfig::default();
+        assert_eq!((fresh.tts_engine.as_str(), fresh.tts_voice.as_str()), ("kokoro", "af_bella"));
     }
 }

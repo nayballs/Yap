@@ -13,8 +13,19 @@
 // question is staged with the debug-only `e2e_chat_dictation` (the
 // dictation's own steps from cleanup on, as the chat's mic starts one: no
 // microphone needed). The "Groq" here is a local fake (support/fake-llm.js).
+//
+// Kokoro (tts/kokoro.rs) is the default engine: the engine row, its download
+// row and the "Download Kokoro" offer when replies go on, the 54 voices
+// grouped by accent and gender (af_bella the default), Windows voices
+// speaking until it's installed. Its download comes from a local server
+// (support/kokoro.js, the debug-only YAP_TTS_SOURCES): never the internet.
+// Once installed, test mode's Kokoro is silence too.
+import fs from 'node:fs';
+import path from 'node:path';
 import { test as base, expect, openView, openSettings, closeSettings, settingsDialog, expectStore } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
+import { startFakeKokoro } from './support/kokoro.js';
+import { RUNS } from './support/yap.js';
 
 const TEST_KEY = 'e2e-fake-key';
 
@@ -27,10 +38,19 @@ const test = base.extend({
     },
     { scope: 'worker' },
   ],
+  kokoro: [
+    async ({}, use) => {
+      const fake = await startFakeKokoro(path.join(RUNS, 'kokoro-sources'));
+      await use(fake);
+      await fake.close();
+    },
+    { scope: 'worker' },
+  ],
   yapOptions: [
-    async ({ fakeLlm }, use) => {
+    async ({ fakeLlm, kokoro }, use) => {
       await use({
         name: 'voice-agent',
+        env: kokoro.env,
         config: {
           ppApiKeys: { groq: TEST_KEY },
           llmScopes: {
@@ -80,8 +100,16 @@ test.beforeEach(async ({ yap }) => {
   await yap.invoke('tts_e2e_spoken', { clear: true });
 });
 
-test('Settings → Voice Agent: spoken replies, the voice and its preview, the wake word', async ({ yap, main, shot }) => {
-  await setConfig(yap, main, { speakReplies: false, speakWhen: 'voice', talkBackHandsFree: true, ttsVoice: '', ttsRate: 1 });
+test('Settings → Voice Agent: spoken replies, the engine, the voice and its preview, the wake word', async ({ yap, main, shot }) => {
+  await setConfig(yap, main, {
+    speakReplies: false,
+    speakWhen: 'voice',
+    talkBackHandsFree: true,
+    ttsEngine: 'kokoro',
+    ttsVoice: 'af_bella',
+    ttsWindowsVoice: '',
+    ttsRate: 1,
+  });
   const dialog = await openSettings(main, 'Voice Agent');
   await expect(dialog.getByRole('heading', { level: 1, name: 'Voice Agent' })).toBeVisible();
 
@@ -92,36 +120,77 @@ test('Settings → Voice Agent: spoken replies, the voice and its preview, the w
   await expect(handsFree).toBeDisabled();
   await expect(dialog.getByRole('tab', { name: 'When I asked by voice' })).toBeDisabled();
 
-  // The voices Windows gives apps (test mode: two stand-ins), the default named.
+  // The engine: Kokoro, recommended, a download away.
+  const engine = dialog.getByRole('tablist', { name: 'Engine' });
+  await expect(engine.getByRole('tab', { name: 'Kokoro' })).toHaveAttribute('aria-selected', 'true');
+  await expect(dialog.getByText('Natural voices, made on this PC. Recommended')).toBeVisible();
+  const krow = dialog.getByRole('group', { name: 'Kokoro' });
+  await expect(krow.locator('.mrow')).toContainText('Kokoro-82M');
+  await expect(krow.locator('.mrow')).toContainText('Recommended');
+  await expect(krow.locator('.mrow')).toContainText('54 voices');
+  await expect(krow.getByRole('button', { name: 'Download', exact: true })).toBeVisible();
+  await expect(krow).toContainText('Until then, Windows voices speak');
+
+  // Kokoro's 54 voices, grouped by accent and gender; Bella the default.
   const voice = dialog.getByRole('combobox', { name: 'Voice' });
-  await expect(voice.locator('option')).toHaveText([
-    'Windows default (Test Voice One)',
-    'Test Voice One · en-GB',
-    'Test Voice Two · en-US',
+  await expect(voice).toHaveValue('af_bella');
+  await expect(voice.locator('option:checked')).toHaveText('Bella (default)');
+  await expect(voice.locator('option')).toHaveCount(54);
+  expect(await voice.locator('optgroup').evaluateAll((gs) => gs.map((g) => g.label))).toEqual([
+    'British English · Female',
+    'British English · Male',
+    'American English · Female',
+    'American English · Male',
+    'Other languages · Female',
+    'Other languages · Male',
   ]);
-  await expect(dialog.getByText('Windows voices', { exact: true })).toBeVisible();
-  await expect(dialog.getByText("Windows' own voices, on this PC. More natural voices are coming")).toBeVisible();
+  await expect(voice.locator('optgroup[label="British English · Female"] option')).toHaveText(['Alice', 'Emma', 'Isabella', 'Lily']);
+  await expect(voice.locator('optgroup[label="British English · Male"] option')).toHaveText(['Daniel', 'Fable', 'George', 'Lewis']);
+  await expect(voice.locator('optgroup[label="Other languages · Male"] option').first()).toHaveText('Alex · Brazilian Portuguese');
+  // Not heard until it's downloaded; where it comes from, and its licences.
+  await expect(dialog.getByRole('button', { name: 'Preview the voice' })).toBeDisabled();
+  await expect(dialog.locator('.credit')).toContainText('Apache-2.0');
+  await expect(dialog.locator('.credit')).toContainText('eSpeak NG');
+  await expect(dialog.locator('.credit')).toContainText('GPL-3.0');
   // One Voice Agent: the wake word lives here too.
   const wake = dialog.getByRole('group', { name: 'Wake word' });
   await expect(wake.getByRole('button', { name: 'Answer to its name in any dictation' })).toBeVisible();
   await expect(wake.getByPlaceholder('e.g. Jarvis, Nova, Atlas...')).toBeVisible();
   await shot(main, '01-settings-voice-agent');
 
-  // On, then a voice and a speed: saved.
+  // Windows voices: no download, the voices Windows gives apps (test mode:
+  // two stand-ins), the default named.
+  await engine.getByRole('tab', { name: 'Windows voices' }).click();
+  await expectStore(yap, 'config.json', (c) => c.ttsEngine === 'windows');
+  await expect(krow).toHaveCount(0);
+  await expect(dialog.getByText("Windows' own voices: no download, but more robotic")).toBeVisible();
+  await expect(voice.locator('option')).toHaveText([
+    'Windows default (Test Voice One)',
+    'Test Voice One · en-GB',
+    'Test Voice Two · en-US',
+  ]);
+
+  // On, then a voice and a speed: saved (Kokoro's voice kept for later).
   await speak.click();
   await expectStore(yap, 'config.json', (c) => c.speakReplies === true);
+  // Windows chosen: no Kokoro offer.
+  await expect(dialog.getByRole('group', { name: 'Download Kokoro' })).toHaveCount(0);
   await expect(handsFree).toBeEnabled();
   await expect(handsFree).toHaveAttribute('aria-pressed', 'true');
   await voice.selectOption({ label: 'Test Voice Two · en-US' });
   await dialog.locator('input[type="range"]').fill('1.5');
   await expect(dialog.getByText('1.5×')).toBeVisible();
-  await expectStore(yap, 'config.json', (c) => c.ttsVoice === 'e2e-voice-2' && c.ttsRate === 1.5);
+  await expectStore(
+    yap,
+    'config.json',
+    (c) => c.ttsWindowsVoice === 'e2e-voice-2' && c.ttsRate === 1.5 && c.ttsVoice === 'af_bella'
+  );
 
   // ▶ Preview: a sample in that voice at that speed; ■ stops it.
   await dialog.getByRole('button', { name: 'Preview the voice' }).click();
   await expect(dialog.getByRole('button', { name: 'Stop the preview' })).toBeVisible();
   const [preview] = await spoken(yap);
-  expect(preview).toMatchObject({ messageId: 'preview', voice: 'e2e-voice-2', rate: 1.5 });
+  expect(preview).toMatchObject({ messageId: 'preview', engine: 'windows', voice: 'e2e-voice-2', rate: 1.5 });
   expect(preview.sentences.length).toBeGreaterThan(1);
   await shot(main, '02-preview-playing');
   await dialog.getByRole('button', { name: 'Stop the preview' }).click();
@@ -141,7 +210,7 @@ test('Settings → Voice Agent: spoken replies, the voice and its preview, the w
   await speak.click();
   await expectStore(yap, 'config.json', (c) => c.speakReplies === false);
   await closeSettings(main);
-  await setConfig(yap, main, { ttsVoice: '', ttsRate: 1 });
+  await setConfig(yap, main, { ttsEngine: 'kokoro', ttsWindowsVoice: '', ttsRate: 1 });
 });
 
 test("Chat's Voice replies toggle is Settings' Speak replies, and survives auto-save", async ({ yap, main, shot }) => {
@@ -197,7 +266,7 @@ test('▶ reads an answer aloud — markdown out, code as "(code block)" — and
   await expect(thread(main).getByRole('status').filter({ hasText: 'Speaking…' })).toBeVisible();
   const [said] = await spoken(yap);
   expect(said.text).toBe(
-    'Launch plan. The launch is on Friday, see the doc or github.com. (code block) Ask Sam about the venue. Done: Book the room.'
+    'Launch plan. The launch is on Friday, see the doc or github dot com. (code block) Ask Sam about the venue. Done: Book the room.'
   );
   expect(said.messageId).toMatch(/^chat:\d+:1$/);
   await shot(main, '05-answer-speaking');
@@ -372,5 +441,133 @@ test('a dictation starting stops the voice at once (barge-in)', async ({ yap, ma
       /listening to a dictation/
     );
     await yap.invoke('cancel_recording');
+  }
+});
+
+const kokoroDir = (yap, ...parts) => path.join(yap.dataDir, 'models', 'tts', ...parts);
+
+test("Kokoro isn't installed: Windows voices read the replies, numbers written out for the ear", async ({ yap, main }) => {
+  await setConfig(yap, main, { speakReplies: false, ttsEngine: 'kokoro', ttsVoice: 'bf_emma', ttsWindowsVoice: 'e2e-voice-2', ttsRate: 1 });
+  const list = await yap.invoke('tts_voices');
+  expect(list.engine).toBe('kokoro');
+  expect(list.active).toBe('windows');
+  expect(list.kokoroStatus).toMatchObject({ inBuild: true, installed: false });
+  expect(list.kokoro.voices).toHaveLength(54);
+  expect(list.kokoro.defaultVoice).toBe('af_bella');
+  await yap.invoke('tts_speak', { text: 'Sure! It came to £12,400 on 18 Oct, about 45% over.', messageId: 'chat:900:1' });
+  const [said] = await spoken(yap);
+  // The Windows voice chosen there, not Kokoro's.
+  expect(said).toMatchObject({ engine: 'windows', voice: 'e2e-voice-2' });
+  expect(said.text).toBe(
+    'Sure! It came to twelve thousand four hundred pounds on the eighteenth of October, about forty-five percent over.'
+  );
+  await yap.invoke('tts_stop');
+  // Kokoro's ▶ needs it downloaded.
+  const err = await yap.invoke('tts_preview', { voice: 'bf_emma', rate: 1, engine: 'kokoro' }).catch((e) => String(e));
+  expect(err).toContain('Download Kokoro to hear its voices');
+  await setConfig(yap, main, { ttsVoice: 'af_bella', ttsWindowsVoice: '' });
+});
+
+test('switching replies on offers Kokoro; it downloads, becomes the voice, and deletes back to Windows voices', async ({
+  yap,
+  main,
+  kokoro,
+  shot,
+}) => {
+  await setConfig(yap, main, { speakReplies: false, ttsEngine: 'kokoro', ttsVoice: 'bf_emma', ttsWindowsVoice: '', ttsRate: 1 });
+  const dialog = await openSettings(main, 'Voice Agent');
+  const speak = dialog.getByRole('button', { name: 'Speak replies' });
+
+  // Replies on without Kokoro: the offer, and replies stay on (Windows
+  // voices meanwhile).
+  await speak.click();
+  const offer = dialog.getByRole('group', { name: 'Download Kokoro' });
+  await expect(offer).toBeVisible();
+  await expect(offer).toContainText('Until then Yap speaks with Windows voices');
+  await expectStore(yap, 'config.json', (c) => c.speakReplies === true);
+  await shot(main, '09-kokoro-offer');
+  // "Not now" puts it away and changes nothing.
+  await offer.getByRole('button', { name: 'Not now' }).click();
+  await expect(offer).toHaveCount(0);
+  expect(yap.readJson('config.json').speakReplies).toBe(true);
+
+  // Off and on again: the offer, then the download.
+  await speak.click();
+  await speak.click();
+  await expect(offer).toBeVisible();
+  await offer.getByRole('button', { name: /^Download Kokoro \(\d+ MB\)$/ }).click();
+  await expect(offer.getByText(/Downloading… \d+%/)).toBeVisible();
+  const krow = dialog.getByRole('group', { name: 'Kokoro' });
+  await expect(krow.locator('.mrow')).toContainText(/\d+%/);
+  await shot(main, '10-kokoro-downloading');
+  await expect(krow.locator('.mrow')).toContainText('Active', { timeout: 20_000 });
+  await expect(offer).toHaveCount(0);
+  await expect(krow).not.toContainText('Windows voices speak');
+
+  // On disk: the model, every voice, the dictionaries, eSpeak NG (only the
+  // data Kokoro reads) with its GPL licence, a NOTICE in each; nothing
+  // half-done left behind.
+  expect(fs.statSync(kokoroDir(yap, 'kokoro-v1.0', 'model.onnx')).size).toBe(kokoro.modelBytes);
+  expect(fs.readdirSync(kokoroDir(yap, 'kokoro-v1.0', 'voices'))).toHaveLength(54);
+  expect(fs.existsSync(kokoroDir(yap, 'kokoro-v1.0', 'lexicon', 'gb_gold.json'))).toBe(true);
+  expect(fs.readFileSync(kokoroDir(yap, 'kokoro-v1.0', 'NOTICE.txt'), 'utf8')).toContain('Apache');
+  expect(fs.readFileSync(kokoroDir(yap, 'espeak-ng-1.52.0', 'COPYING'), 'utf8')).toContain('GNU GENERAL PUBLIC LICENSE');
+  expect(fs.readFileSync(kokoroDir(yap, 'espeak-ng-1.52.0', 'NOTICE.txt'), 'utf8')).toContain(
+    'Source code: https://github.com/espeak-ng/espeak-ng'
+  );
+  expect(fs.existsSync(kokoroDir(yap, 'espeak-ng-1.52.0', 'espeak-ng.exe'))).toBe(true);
+  expect(fs.existsSync(kokoroDir(yap, 'espeak-ng-1.52.0', 'espeak-ng-data', 'en_dict'))).toBe(true);
+  expect(fs.existsSync(kokoroDir(yap, 'espeak-ng-1.52.0', 'espeak-ng-data', 'ru_dict'))).toBe(false);
+  expect(fs.readdirSync(kokoroDir(yap)).filter((f) => /partial|installing|unpacked/.test(f))).toEqual([]);
+  const list = await yap.invoke('tts_voices');
+  expect(list.active).toBe('kokoro');
+  expect(list.kokoroStatus).toMatchObject({ installed: true, espeak: true, downloadBytes: 0 });
+
+  // Now Kokoro speaks: ▶ in the chosen voice, then another voice picked.
+  const voice = dialog.getByRole('combobox', { name: 'Voice' });
+  await expect(voice).toHaveValue('bf_emma');
+  await dialog.getByRole('button', { name: 'Preview the voice' }).click();
+  await expect(dialog.getByRole('button', { name: 'Stop the preview' })).toBeVisible();
+  let [said] = await spoken(yap);
+  expect(said).toMatchObject({ messageId: 'preview', engine: 'kokoro', voice: 'bf_emma' });
+  await dialog.getByRole('button', { name: 'Stop the preview' }).click();
+  await voice.selectOption({ label: 'George' });
+  await expectStore(yap, 'config.json', (c) => c.ttsVoice === 'bm_george');
+  await shot(main, '11-kokoro-active');
+  // A reply: Kokoro, a sentence too short to say alone joined to the next.
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  await yap.invoke('tts_speak', { text: 'Sure! The launch is on Friday, at 2:30 pm.', messageId: 'chat:901:1' });
+  [said] = await spoken(yap);
+  expect(said).toMatchObject({ engine: 'kokoro', voice: 'bm_george' });
+  expect(said.sentences).toEqual(['Sure! The launch is on Friday, at two thirty p.m.']);
+  await yap.invoke('tts_stop');
+
+  // Delete asks in Yap's own dialog; then Windows voices again.
+  await krow.locator('.mrow').hover();
+  await krow.getByRole('button', { name: 'Delete model', exact: true }).click();
+  const confirm = main.getByRole('alertdialog', { name: 'Delete Kokoro?' });
+  await expect(confirm).toContainText('Spoken replies switch to Windows voices');
+  await shot(main, '12-kokoro-delete-confirm');
+  await confirm.getByRole('button', { name: 'Delete' }).click();
+  await expect(krow.getByRole('button', { name: 'Download', exact: true })).toBeVisible();
+  expect(fs.existsSync(kokoroDir(yap, 'kokoro-v1.0'))).toBe(false);
+  expect(fs.existsSync(kokoroDir(yap, 'espeak-ng-1.52.0'))).toBe(false);
+  expect((await yap.invoke('tts_voices')).active).toBe('windows');
+  // The choice is still Kokoro: it speaks again once it's back.
+  expect(yap.readJson('config.json').ttsEngine).toBe('kokoro');
+  await closeSettings(main);
+  await setConfig(yap, main, { speakReplies: false, ttsVoice: 'af_bella' });
+});
+
+test('a test run never downloads Kokoro from the internet', async ({ yap, kokoro }) => {
+  kokoro.setModelUrl(
+    'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/onnx/model.onnx'
+  );
+  try {
+    const err = await yap.invoke('tts_kokoro_download').catch((e) => String(e));
+    expect(err).toContain('Test runs never download from the internet');
+    expect((await yap.invoke('tts_kokoro_status')).status.installed).toBe(false);
+  } finally {
+    kokoro.setModelUrl(null);
   }
 });
