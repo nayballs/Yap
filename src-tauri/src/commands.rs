@@ -196,6 +196,42 @@ pub fn toggle_recording(state: State<'_, AppState>) {
     }
 }
 
+/// The Chat view's mic: a dictation whose text goes into the chat box (the
+/// page gets `yap-chat-dictation`, nothing is pasted), or stop the one
+/// recording.
+#[tauri::command]
+pub fn chat_dictate(state: State<'_, AppState>) {
+    if let Ok(guard) = state.pipeline.lock() {
+        if let Some(p) = guard.as_ref() {
+            p.toggle_for_chat();
+        }
+    }
+}
+
+/// The Chat view's box got (`true`) or lost the focus: a dictation started
+/// while it has it (the hotkey in Yap's window, the bar's Dictate) is a
+/// question for the chat.
+#[tauri::command]
+pub fn chat_input_focus(focused: bool) {
+    crate::pipeline::set_chat_focus(focused);
+}
+
+/// Debug-only, test mode: `text` as if the chat's mic had just heard it —
+/// the dictation's own steps from cleanup on, into the Chat view
+/// (`yap-chat-dictation`). Stands in for a microphone.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn e2e_chat_dictation(state: State<'_, AppState>, text: String) -> Result<crate::pipeline::Delivered, String> {
+    if !crate::e2e::active() {
+        return Err("e2e_chat_dictation is for test runs".into());
+    }
+    let robot = {
+        let guard = state.pipeline.lock().map_err(|_| "the pipeline lock is poisoned")?;
+        guard.as_ref().ok_or("no pipeline")?.robot()
+    };
+    robot.dictate_to_chat(text).await
+}
+
 /// The dictation hotkey went down (`pressed`) or up in one of Yap's own
 /// windows — their in-page fallback, since the global hook never sees keys
 /// while a Yap webview has the focus. Same path as the hook's events, so
@@ -788,7 +824,12 @@ pub fn chat_delete(id: u64) {
 /// Send one chat turn. Creates the conversation on first message (title =
 /// first 50 chars, OpenWhispr's rule), persists both sides, and answers via
 /// the Chat scope with eager keyword-RAG over the notes library injected under
-/// their exact framing line. Returns `{ conversationId, reply, toolsUsed }`.
+/// their exact framing line. Returns `{ conversationId, reply, toolsUsed,
+/// model, messageId, userMessageId, speak }`: the two messages' ids
+/// ("chat:<conversation>:<index>", what the page calls them) and whether the
+/// answer is read out by itself (`tts::auto_speak`: spoken replies on, and
+/// "When to speak" says so — `voice`: the question was dictated, kept with
+/// it).
 /// A note the tools create or change is announced as it happens, like any
 /// other note edit (`yap-note-changed` with origin "chat", then
 /// `yap-notes-changed`), so the notepad and the lists follow it live.
@@ -798,7 +839,9 @@ pub async fn chat_send(
     conversation_id: Option<u64>,
     text: String,
     scope: Option<String>,
+    voice: Option<bool>,
 ) -> Result<serde_json::Value, String> {
+    let by_voice = voice.unwrap_or(false);
     let text = text.trim().to_string();
     if text.is_empty() {
         return Err("Type a message first".to_string());
@@ -836,7 +879,7 @@ pub async fn chat_send(
         .rev()
         .map(|m| (m.role.clone(), m.text.clone()))
         .collect();
-    crate::chats::append(conv.id, "user", &text, &[], None)?;
+    let user_index = crate::chats::append(conv.id, "user", &text, &[], None, by_voice)?;
 
     // System prompt: persona (+ tool instructions when the model can
     // tool-call) + eager-RAG notes under their exact framing. OpenWhispr runs
@@ -897,12 +940,25 @@ pub async fn chat_send(
         .await?;
         (reply, Vec::new())
     };
-    crate::chats::append(conv.id, "assistant", &reply, &tools_used, Some(answered_by.clone()))?;
+    let index = crate::chats::append(conv.id, "assistant", &reply, &tools_used, Some(answered_by.clone()), false)?;
+    // Read out by itself? (Asked at the answer: a dictation may have started
+    // meanwhile, and the settings may have changed.)
+    let now = config::load();
+    let speak = crate::tts::auto_speak(
+        now.speak_replies,
+        &now.speak_when,
+        by_voice,
+        crate::pipeline::dictation_state().1,
+        crate::meeting::is_recording(),
+    );
     Ok(serde_json::json!({
         "conversationId": conv.id,
         "reply": reply,
         "toolsUsed": tools_used,
         "model": answered_by,
+        "messageId": format!("chat:{}:{}", conv.id, index),
+        "userMessageId": format!("chat:{}:{}", conv.id, user_index),
+        "speak": speak,
     }))
 }
 

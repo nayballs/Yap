@@ -29,6 +29,10 @@ pub struct ChatMessage {
     /// known: the person's own messages and older answers have none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<ChatModel>,
+    /// The person's question came by voice (dictated into the chat box):
+    /// "Only when I asked by voice" reads its answer out (`tts::auto_speak`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub voice: bool,
 }
 
 /// Which model wrote an answer: the provider and the model id the call went
@@ -160,14 +164,16 @@ pub fn create(title: &str) -> Conversation {
 }
 
 /// Add a message; `tools` = an answer's tool chips (empty for the user's),
-/// `model` = the model that wrote it (`None` for the user's).
+/// `model` = the model that wrote it (`None` for the user's), `voice` = a
+/// question that was dictated. Returns its index in the conversation.
 pub fn append(
     id: u64,
     role: &str,
     text: &str,
     tools: &[String],
     model: Option<ChatModel>,
-) -> Result<(), String> {
+    voice: bool,
+) -> Result<usize, String> {
     with_store(|s| {
         let conv = s
             .conversations
@@ -180,10 +186,12 @@ pub fn append(
             ts: now_secs(),
             tools: tools.to_vec(),
             model,
+            voice,
         });
         conv.updated_ts = now_secs();
+        let index = conv.messages.len() - 1;
         save_to_disk(s);
-        Ok(())
+        Ok(index)
     })
 }
 

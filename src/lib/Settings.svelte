@@ -20,6 +20,8 @@
   import SpeakersToggle from './SpeakersToggle.svelte';
   import PromptStudio from './PromptStudio.svelte';
   import VoiceAgentConfig from './VoiceAgentConfig.svelte';
+  import AgentNameField from './AgentNameField.svelte';
+  import { speech, initSpeech } from './speech.svelte.js';
   import NoteFormattingConfig from './NoteFormattingConfig.svelte';
   import ChatConfig from './ChatConfig.svelte';
   import StatusBar from './StatusBar.svelte';
@@ -73,7 +75,15 @@
   // Sidebar nav, grouped OpenWhispr-style under small caps labels. Section ids
   // are unchanged — only the presentation is grouped.
   const NAV_GROUPS = [
-    { label: 'App', items: [{ id: 'general', label: 'General' }] },
+    {
+      label: 'App',
+      items: [
+        { id: 'general', label: 'General' },
+        // Talk to Yap's AI and hear it answer: spoken replies (tts.rs) and
+        // the wake word (agent_detect.rs), one place.
+        { id: 'voice', label: 'Voice Agent' },
+      ],
+    },
     {
       label: 'AI models',
       items: [
@@ -158,7 +168,7 @@
   ];
   const SCOPE_SUBTITLE = {
     cleanup: 'Configure the model that cleans up your dictation.',
-    voiceAgent: 'Configure the model that runs your spoken commands ("Hey {name}, …" or the edit / rewrite hotkey).',
+    voiceAgent: 'The model that runs your spoken commands ("Hey {name}, …" or the edit / rewrite hotkey). Its name and spoken replies are on the Voice Agent page.',
     noteFormatting: 'Configure the model that formats dictation into notes. Coming soon.',
     chat: 'Configure the model that answers in Chat and in the Ask bar on your notes.',
   };
@@ -547,6 +557,12 @@
     llmScopes: {},
     agentName: '',
     editHotkey: '',
+    speakReplies: false,
+    speakWhen: 'voice',
+    talkBackHandsFree: true,
+    ttsEngine: 'windows',
+    ttsVoice: '',
+    ttsRate: 1.0,
   };
 
   // Real running version — read from Tauri, not hardcoded (was stuck at '0.1.0').
@@ -873,6 +889,67 @@
     });
     return () => un.then((f) => f());
   });
+  // Voice Agent → Spoken replies (tts.rs). The Chat view's 🔊 saves "Speak
+  // replies" in Rust: adopt it, or the next auto-save would undo it. The
+  // voices are read when the page opens; ▶ Preview speaks a sample in the
+  // voice and speed shown (not saved yet: auto-save does that).
+  let voiceList = $state(null); // { engine, engineName, engines, voices, defaultVoice, error }
+  initSpeech(['preview']);
+  onMount(() => {
+    const un = listen('yap-voice-replies', (e) => {
+      if (cfg && typeof e.payload?.on === 'boolean') cfg.speakReplies = e.payload.on;
+    });
+    return () => un.then((f) => f());
+  });
+  $effect(() => {
+    if (section === 'voice' && !voiceList) {
+      invoke('tts_voices')
+        .then((v) => (voiceList = v))
+        .catch((e) => (voiceList = { voices: [], error: String(e), engineName: 'Windows voices' }));
+    }
+  });
+  const previewing = $derived(speech.speakingId === 'preview');
+  const voiceOptions = $derived.by(() => {
+    const voices = voiceList?.voices || [];
+    const def = voices.find((v) => v.id === voiceList?.defaultVoice);
+    const opts = [
+      { value: '', label: def ? `Windows default (${shortVoice(def)})` : 'Windows default' },
+      ...voices.map((v) => ({ value: v.id, label: `${shortVoice(v)} · ${v.language}` })),
+    ];
+    // A voice saved here that's gone from Windows still shows as itself.
+    if (cfg?.ttsVoice && !voices.some((v) => v.id === cfg.ttsVoice) && voiceList) {
+      opts.push({ value: cfg.ttsVoice, label: 'A voice that is no longer installed' });
+    }
+    return opts;
+  });
+  function shortVoice(v) {
+    return (v?.name || '').replace(/^Microsoft\s+/, '') || v?.id || '';
+  }
+  async function previewVoice() {
+    if (previewing) {
+      invoke('tts_stop').catch(() => {});
+      return;
+    }
+    try {
+      await invoke('tts_preview', { voice: cfg.ttsVoice || '', rate: Number(cfg.ttsRate) || 1 });
+    } catch (e) {
+      toast({ title: "Couldn't play the preview", description: String(e), variant: 'destructive' });
+    }
+  }
+  const SPEAK_WHEN = [
+    { value: 'voice', label: 'When I asked by voice' },
+    { value: 'always', label: 'Always' },
+  ];
+  const SPEAK_WHEN_DESC = {
+    voice: 'Answers to questions you dictate are read aloud; typed ones stay quiet',
+    always: 'Every answer in Chat is read aloud',
+  };
+  const wakeName = $derived((cfg?.agentName || '').trim() || 'Yap');
+  function openAgentModel() {
+    section = 'cleanup';
+    llmScope = 'voiceAgent';
+  }
+
   // The notepad's consent message, edited there (notepad.rs): the same.
   onMount(() => {
     const un = listen('yap-consent-message-changed', (e) => {
@@ -1293,6 +1370,7 @@
       inputDevice: cfg.inputDevice || null,
       outputDevice: cfg.outputDevice || null,
       audioFeedbackVolume: Number(cfg.audioFeedbackVolume),
+      ttsRate: Number(cfg.ttsRate) || 1,
       dictionary: cfg.dictionary
         .map((e) => ({
           from: (e.from || '').trim(),
@@ -1380,6 +1458,12 @@
       <circle cx="6" cy="10" r="2" />
       <circle cx="12" cy="16" r="2" />
       <circle cx="18" cy="8" r="2" />
+    </svg>
+  {:else if id === 'voice'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M11 5 6 9H2v6h4l5 4z" />
+      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+      <path d="M18.4 5.6a9 9 0 0 1 0 12.8" />
     </svg>
   {:else if id === 'models'}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1850,6 +1934,94 @@
               </Row>
               <Row>
                 <p class="consent">Recording a call? Let people know you're taking notes.</p>
+              </Row>
+            </Group>
+          </div>
+
+        {:else if section === 'voice'}
+          <div class="page-h">
+            <h1>Voice Agent</h1>
+            <p>Talk to Yap's AI and hear it answer.</p>
+          </div>
+          <Group title="Spoken replies">
+            <Row>
+              <Toggle
+                bind:checked={cfg.speakReplies}
+                label="Speak replies"
+                desc="Read Chat's answers aloud. Voice replies next to the model in Chat turns this on and off too"
+              />
+            </Row>
+            <Row label="When to speak" desc={SPEAK_WHEN_DESC[cfg.speakWhen] ?? SPEAK_WHEN_DESC.voice}>
+              <Segmented bind:value={cfg.speakWhen} options={SPEAK_WHEN} label="When to speak" disabled={!cfg.speakReplies} />
+            </Row>
+            <Row>
+              <Toggle
+                bind:checked={cfg.talkBackHandsFree}
+                label="Talk back hands-free"
+                desc={fillHotkey("A question you dictate into Chat is sent as soon as you stop, and the answer is read out. Press the mic or {key} to ask the next one: it cuts Yap off mid-answer", cfg.hotkey)}
+                disabled={!cfg.speakReplies}
+              />
+            </Row>
+          </Group>
+          <Group title="Voice">
+            <Row label="Voice" desc={voiceList?.error ? voiceList.error : 'The voices Windows has installed for apps'}>
+              <div class="voicepick">
+                {#if voiceList}
+                  <Select bind:value={cfg.ttsVoice} options={voiceOptions} ariaLabel="Voice" disabled={!!voiceList.error} />
+                {:else}
+                  <span class="enginename">Reading the voices…</span>
+                {/if}
+                <button
+                  class="previewbtn"
+                  class:on={previewing}
+                  aria-label={previewing ? 'Stop the preview' : 'Preview the voice'}
+                  title={previewing ? 'Stop' : 'Preview'}
+                  disabled={!voiceList || !!voiceList.error}
+                  onclick={previewVoice}
+                >
+                  {#if previewing}
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
+                    Stop
+                  {:else}
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.9v14.2a1.2 1.2 0 0 0 1.8 1l11.6-7.1a1.2 1.2 0 0 0 0-2L8.8 3.9A1.2 1.2 0 0 0 7 4.9z" /></svg>
+                    Preview
+                  {/if}
+                </button>
+              </div>
+            </Row>
+            <Row>
+              <Slider
+                bind:value={cfg.ttsRate}
+                min={0.5}
+                max={2}
+                step={0.1}
+                label="Speed"
+                format={(v) => `${Number(v).toFixed(1)}×`}
+              />
+            </Row>
+            <Row label="Engine" desc="Windows' own voices, on this PC. More natural voices are coming">
+              <span class="enginename">{voiceList?.engineName || 'Windows voices'}</span>
+            </Row>
+          </Group>
+          <div id="settings-wake-word">
+            <Group title="Wake word">
+              <Row>
+                <Toggle
+                  bind:checked={cfg.llmScopes.voiceAgent.enabled}
+                  label="Answer to its name in any dictation"
+                  desc={`Say "${wakeName}, …" while you dictate anywhere and the AI does what you ask instead of typing your words`}
+                />
+              </Row>
+              <Row>
+                {#snippet children()}
+                  <div class="agentname">
+                    <span class="anlabel">Agent name</span>
+                    <AgentNameField {cfg} />
+                  </div>
+                {/snippet}
+              </Row>
+              <Row label="Model and prompt" desc="Which AI runs the wake word's commands, and how">
+                <Button variant="secondary" size="sm" onclick={openAgentModel}>Language Models → Voice Agent</Button>
               </Row>
             </Group>
           </div>
@@ -3073,6 +3245,62 @@
 
   .mm-wrap {
     width: 100%;
+  }
+
+  /* Voice Agent: the voice picker with its ▶ Preview, the engine, the name. */
+  .voicepick {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .voicepick :global(select) {
+    max-width: 260px;
+  }
+  .previewbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px 0 10px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s1);
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .previewbtn:hover:not(:disabled) {
+    border-color: var(--yap-border-hover);
+  }
+  .previewbtn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .previewbtn.on {
+    color: var(--yap-primary);
+    background: var(--yap-primary-wash);
+  }
+  .previewbtn svg {
+    width: 11px;
+    height: 11px;
+  }
+  .enginename {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--yap-fg-80, var(--yap-fg));
+  }
+  .agentname {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .anlabel {
+    color: var(--yap-fg);
+    font-size: 13px;
+    font-weight: 650;
   }
 
   /* dictionary moved to the ControlPanel sidebar (styles live in

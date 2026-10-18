@@ -66,6 +66,31 @@ pub(crate) fn dictation_ended() {
     DICTATION.fetch_and(!1, Ordering::SeqCst);
 }
 
+/// The Chat view's mic asked for the next dictation (`commands::chat_dictate`;
+/// taken by the recording it starts, cleared right after).
+static CHAT_ARMED: AtomicBool = AtomicBool::new(false);
+/// The Chat view's box has the focus, in a focused window
+/// (`commands::chat_input_focus`).
+static CHAT_FOCUSED: AtomicBool = AtomicBool::new(false);
+
+/// The next dictation goes to the chat box (its mic button), or not any more.
+pub(crate) fn arm_chat_dictation(on: bool) {
+    CHAT_ARMED.store(on, Ordering::SeqCst);
+}
+
+/// The chat box got or lost the focus.
+pub(crate) fn set_chat_focus(focused: bool) {
+    CHAT_FOCUSED.store(focused, Ordering::SeqCst);
+}
+
+/// Whether a dictation starting now is a question for the Chat view: its mic
+/// asked for it, or the box has the focus while one of Yap's own windows is
+/// in front (`own_window`: the foreground window is Yap's — a hotkey there,
+/// the bar's Dictate). Never in edit mode. Pure.
+pub(crate) fn chat_target(edit: bool, armed: bool, focused: bool, own_window: bool) -> bool {
+    !edit && (armed || (focused && own_window))
+}
+
 /// Run the correction dictionary over a transcript, the same way for a
 /// dictation, a meeting segment and an Upload: exact replacements
 /// (`config::apply_dictionary`), then the fuzzy near-miss pass (`fuzzy.rs`)
@@ -333,6 +358,10 @@ struct Shared {
     /// words are an instruction to rewrite `selection`) rather than dictation.
     /// Set at record-start, read in `run_stt`.
     edit_mode: AtomicBool,
+    /// The current dictation is a question for the **Chat** view's box
+    /// ([`chat_target`], decided at record start): its text goes to the page
+    /// (`yap-chat-dictation`) instead of a paste, never to the wake word.
+    to_chat: AtomicBool,
     /// Text selected in the target app, captured at edit-mode record-start. Empty
     /// (`None`) → "write mode" (generate new text from the instruction alone).
     selection: Mutex<Option<String>>,
@@ -625,6 +654,11 @@ impl Shared {
     }
 
     fn start_recording(self: &Arc<Self>, edit: bool) {
+        // Barge-in: a dictation starting (the hotkey, the chat's mic, the
+        // bar) silences Yap's spoken reply at once, before anything records
+        // — Yap's own voice must never be the next question. If it was
+        // audible just now, the pre-roll (which would hold it) is left out.
+        let heard_yap = crate::tts::stop_for_dictation();
         // A previous transcription is still running — ignore the start so we don't
         // spawn an overlapping `run_stt` (which would rebuild a duplicate model).
         // Processing is normally sub-second on a GPU, so this rarely bites.
@@ -651,12 +685,16 @@ impl Shared {
             return;
         }
         // Seed the buffer with the pre-roll ring (the ~300 ms before the keypress)
-        // so a word already in flight isn't clipped.
-        let pre: Vec<f32> = self
-            .preroll
-            .lock()
-            .map(|p| p.iter().copied().collect())
-            .unwrap_or_default();
+        // so a word already in flight isn't clipped — unless Yap was speaking
+        // in it.
+        let pre: Vec<f32> = if heard_yap {
+            Vec::new()
+        } else {
+            self.preroll
+                .lock()
+                .map(|p| p.iter().copied().collect())
+                .unwrap_or_default()
+        };
         if let Ok(mut buf) = self.buffer.lock() {
             buf.clear();
             buf.extend_from_slice(&pre);
@@ -725,6 +763,14 @@ impl Shared {
         // (or anything else) can steal focus. Restored at paste time.
         let hwnd = crate::text_injector::current_foreground().unwrap_or(0);
         self.target_hwnd.store(hwnd, Ordering::Relaxed);
+        // A question for the Chat view (its mic, or the hotkey while its box
+        // has the focus): the page gets the text, nothing is pasted.
+        let armed = CHAT_ARMED.swap(false, Ordering::SeqCst);
+        let to_chat = chat_target(edit, armed, CHAT_FOCUSED.load(Ordering::SeqCst), hwnd == 0);
+        self.to_chat.store(to_chat, Ordering::SeqCst);
+        if to_chat {
+            tracing::info!("Dictation: a question for the Chat view");
+        }
         // And what kind of app it is (a terminal, a chat app…): its process,
         // class and title only, for fitting the paste.
         let kind = crate::app_kind::of_window((hwnd != 0).then_some(hwnd));
@@ -1502,6 +1548,12 @@ impl Shared {
             .read()
             .map(|c| finish_dictation(cleaned.trim(), &raw, &c))
             .unwrap_or_else(|_| (config::apply_dictionary(cleaned.trim(), &dict), false));
+        // A question for the Chat view: its page puts the text in the box
+        // (and sends it, hands-free or after "press enter"); nothing is
+        // pasted, no key pressed.
+        if self.to_chat.swap(false, Ordering::SeqCst) {
+            return self.deliver_to_chat(raw, corrected, voice_enter);
+        }
         // A terminal or a chat app (`app_kind.rs`), as the
         // settings have it: how the text is fitted and which
         // key, if any, follows the paste.
@@ -1633,6 +1685,46 @@ impl Shared {
         report
     }
 
+    /// A dictated question for the Chat view (`to_chat`): `yap-chat-dictation
+    /// {text, send}` — the page inserts `text` at its caret and, when `send`
+    /// ("Talk back hands-free", or "press enter" said at the end;
+    /// `tts::sends_by_itself`), sends it as asked by voice. Kept in history
+    /// like any dictation.
+    fn deliver_to_chat(&self, raw: String, text: String, said_enter: bool) -> Delivered {
+        let text = text.trim().to_string();
+        let send = self
+            .config
+            .read()
+            .map(|c| crate::tts::sends_by_itself(c.speak_replies, c.talk_back_hands_free, said_enter))
+            .unwrap_or(said_enter);
+        tracing::info!(len = text.len(), send, "Dictation: into the Chat view's box");
+        let _ = self.app.emit("yap-chat-dictation", serde_json::json!({ "text": text, "send": send }));
+        if !text.is_empty() {
+            let _ = self.app.emit("yap-transcript", text.clone());
+            let (history_enabled, model) = self
+                .config
+                .read()
+                .map(|c| (c.history_enabled, c.model_size.clone()))
+                .unwrap_or((false, String::new()));
+            if history_enabled {
+                crate::history::record(&raw, &text, &model, "yap.exe");
+                let _ = self.app.emit("yap-history-changed", ());
+            }
+        }
+        let report = Delivered {
+            text,
+            raw,
+            kind: "the Chat view".into(),
+            submit: send.then(|| "enter".to_string()),
+            ..Delivered::default()
+        };
+        #[cfg(debug_assertions)]
+        if let Ok(mut last) = LAST_DELIVERED.lock() {
+            *last = Some(report.clone());
+        }
+        report
+    }
+
     async fn run_stt(self: Arc<Self>, audio: Vec<f32>) {
         if audio.is_empty() {
             let _ = self.app.emit("yap-state", "idle");
@@ -1739,7 +1831,9 @@ impl Shared {
                     // through the Voice-Agent scope in write mode instead of
                     // cleanup — the agent prompt strips the name + command from
                     // the output. Agent unreachable / no match → normal cleanup.
-                    Ok(text) if self.wake_word_hit(text.trim()) => {
+                    // (Not a question for the Chat view: that already goes to
+                    // the AI, name or no name.)
+                    Ok(text) if !self.to_chat.load(Ordering::SeqCst) && self.wake_word_hit(text.trim()) => {
                         tracing::info!("Wake word detected — routing dictation to the Voice Agent");
                         self.run_agent(text.trim().to_string(), String::new()).await;
                         return;
@@ -1819,6 +1913,7 @@ impl Pipeline {
             target_hwnd: AtomicIsize::new(0),
             target_kind: Mutex::new(AppKind::Other),
             edit_mode: AtomicBool::new(false),
+            to_chat: AtomicBool::new(false),
             selection: Mutex::new(None),
             processing: AtomicBool::new(false),
             upload_cancel: AtomicBool::new(false),
@@ -1878,6 +1973,16 @@ impl Pipeline {
     pub fn toggle(&self) {
         self.ensure_mic();
         self.shared.toggle(false);
+    }
+
+    /// The Chat view's mic: start a dictation whose text goes to the chat
+    /// box (or stop the one recording).
+    pub fn toggle_for_chat(&self) {
+        let starting = !self.shared.recording.load(Ordering::SeqCst);
+        arm_chat_dictation(starting);
+        self.toggle();
+        // Taken by the recording if it started; never left for another one.
+        arm_chat_dictation(false);
     }
 
     /// Route a **dictation** hotkey press/release through the recording mode.
@@ -2057,6 +2162,16 @@ impl Robot {
         shared.processing.store(false, Ordering::SeqCst);
         let _ = shared.app.emit("yap-state", "idle");
         Ok(report)
+    }
+
+    /// [`Robot::dictate_text`] as the Chat view's mic would start it: into
+    /// the chat box (`yap-chat-dictation`), never pasted. (Test mode's
+    /// `commands::e2e_chat_dictation`.)
+    pub(crate) async fn dictate_to_chat(&self, text: String) -> Result<Delivered, String> {
+        arm_chat_dictation(true);
+        let out = self.dictate_text(text).await;
+        arm_chat_dictation(false);
+        out
     }
 
     /// `samples` (16 kHz mono) played into the dictation in real time, in
@@ -2445,6 +2560,20 @@ mod tests {
             fuzzy,
             snippet: false,
         }
+    }
+
+    #[test]
+    fn which_dictations_are_questions_for_the_chat() {
+        // The chat's mic: wherever the focus is.
+        assert!(chat_target(false, true, false, false));
+        // The hotkey (or the bar) while the chat box has the focus in Yap's window.
+        assert!(chat_target(false, false, true, true));
+        // The box was focused, but another app is in front (a stale focus, the global hook).
+        assert!(!chat_target(false, false, true, false));
+        // Yap in front, the box not focused (Notes, Settings…).
+        assert!(!chat_target(false, false, false, true));
+        // Edit mode rewrites a selection, never a chat question.
+        assert!(!chat_target(true, true, true, true));
     }
 
     #[test]

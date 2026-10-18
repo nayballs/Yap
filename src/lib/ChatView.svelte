@@ -16,13 +16,27 @@
   // The composer's model chip (ModelChip.svelte) says which model the next
   // message goes to and switches the Chat scope's; each answer keeps the
   // model that wrote it (chats.rs `model`), shown quietly under it.
+  //
+  // Spoken replies (tts.rs, Settings → Voice Agent): the 🔊 / 🔇 next to the
+  // chip turns "Speak replies" on and off (voice_replies_set; Settings'
+  // copy adopts it from `yap-voice-replies`); every answer has ▶ Read aloud
+  // (■ Stop while it's read, "Speaking…" on it); with replies on, an answer
+  // is read by itself as "When to speak" says (chat_send's `speak`: always,
+  // or only for a question that came by voice — kept per message, `voice`).
+  // A question dictated into the box (the mic, or the hotkey while the box
+  // has the focus) arrives as `yap-chat-dictation`, never as a paste, and
+  // is sent at once when Rust says so ("Talk back hands-free", or "press
+  // enter" said). Esc, leaving Chat, sending the next question and any
+  // dictation starting (Rust's barge-in) stop the voice.
   import { invoke } from '@tauri-apps/api/core';
-  import { onMount, untrack } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
+  import { onMount, onDestroy, tick, untrack } from 'svelte';
   import { renderMarkdown } from './markdown.js';
   import { toast } from './ui/toast.svelte.js';
   import { chatRequest } from './chatRequest.svelte.js';
   import ModelChip from './ModelChip.svelte';
   import { modelLine, whereItRuns } from './aiModel.js';
+  import { speech, initSpeech, readAloud as speakText, stopReading as stopSpeech } from './speech.svelte.js';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…".
@@ -30,7 +44,7 @@
 
   let conversations = $state([]);
   let activeId = $state(null);
-  let messages = $state([]); // { role, text, tools?, model? }
+  let messages = $state([]); // { role, text, tools?, model?, voice?, id }
   let input = $state('');
   let sending = $state(false);
   let inputEl = $state(null);
@@ -38,6 +52,93 @@
   // 'meetings' when the Meetings view's Ask bar started this chat: answers
   // are grounded in your meeting notes (calendar::meetings_context).
   let scope = $state(null);
+
+  // ---- Spoken replies
+  let speakReplies = $state(false);
+  let speakWhen = $state('voice');
+  // The message being read aloud ("chat:<conversation>:<index>"), if any.
+  initSpeech(['chat:']);
+  const speakingId = $derived(speech.speakingId);
+  // What's in the box came (at least partly) by voice: the question is
+  // "asked by voice" (chat_send `voice`).
+  let byVoice = false;
+  // A hands-free question arrived while an answer was still coming: sent
+  // once it's in.
+  let sendWhenFree = false;
+  let alive = true;
+
+  const chatId = (conv, i) => `chat:${conv}:${i}`;
+  const voiceTitle = $derived(
+    speakReplies
+      ? speakWhen === 'always'
+        ? 'Voice replies on: every answer is read aloud'
+        : 'Voice replies on: answers to questions you ask by voice are read aloud'
+      : 'Voice replies off'
+  );
+
+  async function loadVoiceSettings() {
+    try {
+      const c = await invoke('get_config');
+      speakReplies = !!c?.speakReplies;
+      speakWhen = c?.speakWhen || 'voice';
+    } catch {
+      /* keep */
+    }
+  }
+
+  async function toggleVoiceReplies() {
+    const on = !speakReplies;
+    speakReplies = on;
+    try {
+      await invoke('voice_replies_set', { on });
+    } catch (e) {
+      speakReplies = !on;
+      toast({ title: "Couldn't change voice replies", description: String(e), variant: 'destructive' });
+    }
+  }
+
+  function readAloud(m) {
+    if (m.id) speakText(m.text, m.id);
+  }
+
+  function stopReading() {
+    stopSpeech('chat:');
+  }
+
+  // A dictated question (pipeline.rs `deliver_to_chat`): into the box at
+  // the caret, then sent when Rust says so.
+  async function onChatDictation(p) {
+    const text = (p?.text || '').trim();
+    if (text) {
+      insertAtCaret(text);
+      byVoice = true;
+    }
+    if (p?.send && input.trim()) {
+      if (sending) sendWhenFree = true;
+      else send();
+    } else {
+      await tick();
+      inputEl?.focus();
+    }
+  }
+
+  function insertAtCaret(text) {
+    const el = inputEl;
+    const focused = el && document.activeElement === el;
+    const start = focused ? (el.selectionStart ?? input.length) : input.length;
+    const end = focused ? (el.selectionEnd ?? start) : input.length;
+    const before = input.slice(0, start);
+    const after = input.slice(end);
+    const lead = before && !/\s$/.test(before) ? ' ' : '';
+    const trail = after && !/^[\s.,;:!?)]/.test(after) ? ' ' : '';
+    input = before + lead + text + trail + after;
+    const caret = (before + lead + text).length;
+    tick().then(() => {
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+  }
 
   async function refreshList() {
     try {
@@ -51,9 +152,10 @@
     if (id === activeId) return;
     try {
       const conv = await invoke('chat_get', { id });
+      stopReading();
       activeId = id;
       scope = null;
-      messages = conv.messages || [];
+      messages = (conv.messages || []).map((m, i) => ({ ...m, id: chatId(id, i) }));
       scrollThread();
     } catch (e) {
       toast({ title: "Couldn't open conversation", description: String(e), variant: 'destructive' });
@@ -61,9 +163,11 @@
   }
 
   function newChat() {
+    stopReading();
     activeId = null;
     messages = [];
     input = '';
+    byVoice = false;
     scope = null;
     setTimeout(() => inputEl?.focus(), 0);
   }
@@ -88,40 +192,67 @@
   async function send() {
     const text = input.trim();
     if (!text || sending) return;
+    const voice = byVoice;
     input = '';
-    messages = [...messages, { role: 'user', text }];
+    byVoice = false;
+    // The next question: the last answer stops talking.
+    stopReading();
+    messages = [...messages, { role: 'user', text, voice, id: null }];
     sending = true;
     scrollThread();
     try {
-      const res = await invoke('chat_send', { conversationId: activeId, text, scope });
+      const res = await invoke('chat_send', { conversationId: activeId, text, scope, voice });
+      if (!alive) return;
       activeId = res.conversationId;
-      messages = [
-        ...messages,
-        { role: 'assistant', text: res.reply, tools: res.toolsUsed || [], model: res.model ?? null },
-      ];
+      const asked = messages[messages.length - 1];
+      const answer = {
+        role: 'assistant',
+        text: res.reply,
+        tools: res.toolsUsed || [],
+        model: res.model ?? null,
+        id: res.messageId ?? null,
+      };
+      messages = [...messages.slice(0, -1), { ...asked, id: res.userMessageId ?? null }, answer];
       refreshList();
       scrollThread();
+      // Read out by itself ("When to speak", decided in Rust).
+      if (res.speak && answer.id) speakText(answer.text, answer.id);
     } catch (e) {
+      if (!alive) return;
       messages = messages.slice(0, -1);
       input = text; // give the message back
+      byVoice = voice;
       toast({ title: "Couldn't send", description: String(e), variant: 'destructive' });
     } finally {
       sending = false;
+      if (alive && sendWhenFree) {
+        sendWhenFree = false;
+        send();
+      }
     }
   }
 
-  // The mic: focus the input and start dictation — Yap types wherever the
-  // caret is, so the chat box IS the dictation target.
+  // The mic: a dictation into the chat box (chat_dictate: the text comes
+  // back as `yap-chat-dictation`, at the caret). Again: stop and send it in.
   function micChat() {
     inputEl?.focus();
-    invoke('toggle_recording').catch(() => {});
+    invoke('chat_dictate').catch(() => {});
   }
 
   function onKeydown(e) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
       e.preventDefault();
       newChat();
+    } else if (e.key === 'Escape' && speakingId?.startsWith('chat:')) {
+      e.preventDefault();
+      stopReading();
     }
+  }
+
+  // Rust decides whether a dictation is for the chat: the box with the
+  // focus is one way (the hotkey in Yap's window, the bar's Dictate).
+  function reportFocus(focused) {
+    invoke('chat_input_focus', { focused }).catch(() => {});
   }
 
   // Group conversations OpenWhispr-style: Today / Yesterday / Previous 7 Days / Older.
@@ -149,7 +280,24 @@
 
   onMount(() => {
     refreshList();
+    loadVoiceSettings();
     setTimeout(() => inputEl?.focus(), 0);
+    const uns = [
+      listen('yap-chat-dictation', (e) => onChatDictation(e.payload)),
+      listen('yap-voice-replies', (e) => {
+        if (typeof e.payload?.on === 'boolean') speakReplies = e.payload.on;
+      }),
+      // Settings changed "Speak replies" or "When to speak".
+      listen('yap-config-saved', loadVoiceSettings),
+    ];
+    return () => uns.forEach((u) => u.then((f) => f()));
+  });
+
+  // Leaving Chat: its voice stops, and its box no longer has the focus.
+  onDestroy(() => {
+    alive = false;
+    stopReading();
+    reportFocus(false);
   });
 
   // A question handed over by another view (the Meetings view's Ask bar):
@@ -159,6 +307,10 @@
     if (!req) return;
     chatRequest.pending = null;
     untrack(() => {
+      if (req.dictated) {
+        onChatDictation(req);
+        return;
+      }
       newChat();
       scope = req.scope ?? null;
       input = req.text;
@@ -231,17 +383,48 @@
               {/each}
             </div>
           {/if}
-          <div class="cbubble {m.role}">
+          {@const reading = m.role === 'assistant' && !!m.id && speakingId === m.id}
+          <div class="cbubble {m.role}" class:reading>
             {#if m.role === 'assistant'}
               <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown escapes all input -->
               <div class="cbody">{@html renderMarkdown(m.text)}</div>
             {:else}
-              <p class="cbody">{m.text}</p>
+              <p class="cbody">
+                {#if m.voice}
+                  <span class="viavoice" title="Asked by voice" aria-label="Asked by voice">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
+                  </span>
+                {/if}{m.text}
+              </p>
             {/if}
           </div>
-          {#if m.role === 'assistant' && m.model}
-            <!-- The model that wrote it (older answers don't say). -->
-            <div class="byline" title={whereItRuns(m.model)}>{modelLine(m.model)}</div>
+          {#if m.role === 'assistant'}
+            <div class="msgfoot">
+              {#if m.id}
+                <button
+                  class="readbtn"
+                  class:on={reading}
+                  aria-label={reading ? 'Stop reading' : 'Read aloud'}
+                  title={reading ? 'Stop reading (Esc)' : 'Read aloud'}
+                  onclick={() => readAloud(m)}
+                >
+                  {#if reading}
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
+                  {:else}
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.9v14.2a1.2 1.2 0 0 0 1.8 1l11.6-7.1a1.2 1.2 0 0 0 0-2L8.8 3.9A1.2 1.2 0 0 0 7 4.9z" /></svg>
+                  {/if}
+                </button>
+              {/if}
+              {#if reading}
+                <span class="speaking" role="status">
+                  <span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>
+                  Speaking…
+                </span>
+              {:else if m.model}
+                <!-- The model that wrote it (older answers don't say). -->
+                <span class="byline" title={whereItRuns(m.model)}>{modelLine(m.model)}</span>
+              {/if}
+            </div>
           {/if}
         {/each}
         {#if sending}
@@ -260,6 +443,11 @@
         placeholder="Type a message..."
         aria-busy={sending}
         onkeydown={(e) => e.key === 'Enter' && !e.isComposing && send()}
+        oninput={() => {
+          if (!input.trim()) byVoice = false;
+        }}
+        onfocus={() => reportFocus(true)}
+        onblur={() => reportFocus(false)}
       />
       <!-- Not `disabled` while an answer comes: disabling the focused box
            throws the caret out of it, and you'd have to click back in to
@@ -270,6 +458,22 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
         </button>
         <ModelChip {onopensettings} />
+        <!-- Spoken replies on / off (Settings → Voice Agent → Speak replies). -->
+        <button
+          class="voicebtn"
+          class:on={speakReplies}
+          aria-pressed={speakReplies}
+          aria-label="Voice replies"
+          title={voiceTitle}
+          onclick={toggleVoiceReplies}
+        >
+          {#if speakReplies}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" fill="currentColor" fill-opacity="0.15" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.4 5.6a9 9 0 0 1 0 12.8" /></svg>
+          {:else}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="m22 9-6 6M16 9l6 6" /></svg>
+          {/if}
+          <span class="vlabel">Voice replies</span>
+        </button>
         <span class="spacer"></span>
         <button class="sendbtn" disabled={sending || !input.trim()} onclick={send} aria-label="Send">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" /></svg>
@@ -498,11 +702,148 @@
     padding: 1px 5px;
   }
 
-  .byline {
+  .cbubble.reading {
+    border-color: color-mix(in srgb, var(--yap-primary) 45%, var(--yap-border-subtle));
+  }
+  .viavoice {
+    display: inline-flex;
+    vertical-align: -1px;
+    margin-right: 5px;
+    color: var(--yap-primary);
+  }
+  .viavoice svg {
+    width: 11px;
+    height: 11px;
+  }
+  /* Under an answer: ▶ Read aloud / ■ Stop, then the model or "Speaking…". */
+  .msgfoot {
     align-self: flex-start;
-    margin: -4px 0 2px 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 20px;
+    margin: -4px 0 2px 2px;
+  }
+  .readbtn {
+    display: inline-flex;
+    width: 22px;
+    height: 22px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s1);
+    color: var(--yap-muted);
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+  .readbtn:hover {
+    color: var(--yap-fg);
+    border-color: var(--yap-border-hover);
+  }
+  .readbtn:focus-visible {
+    outline: 2px solid var(--yap-primary-line);
+    outline-offset: 1px;
+  }
+  .readbtn.on {
+    color: var(--yap-primary);
+    border-color: color-mix(in srgb, var(--yap-primary) 45%, var(--yap-border-subtle));
+    background: var(--yap-primary-wash);
+  }
+  .readbtn svg {
+    width: 10px;
+    height: 10px;
+  }
+  .speaking {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--yap-primary);
+  }
+  .bars {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 10px;
+  }
+  .bars i {
+    width: 2px;
+    height: 100%;
+    border-radius: 1px;
+    background: currentColor;
+    animation: talk 0.9s ease-in-out infinite;
+  }
+  .bars i:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .bars i:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+  @keyframes talk {
+    0%,
+    100% {
+      transform: scaleY(0.35);
+    }
+    50% {
+      transform: scaleY(1);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bars i {
+      animation: none;
+      transform: scaleY(0.7);
+    }
+  }
+  .byline {
     font-size: 10.5px;
     color: var(--yap-muted-55);
+  }
+
+  .voicebtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 26px;
+    padding: 0 9px 0 7px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s1);
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 11.5px;
+    white-space: nowrap;
+    cursor: pointer;
+    flex: 0 0 auto;
+    transition:
+      border-color var(--yap-dur),
+      background var(--yap-dur),
+      color var(--yap-dur);
+  }
+  .voicebtn:hover {
+    color: var(--yap-fg);
+    border-color: var(--yap-border-hover);
+  }
+  .voicebtn:focus-visible {
+    outline: 2px solid var(--yap-primary-line);
+    outline-offset: 1px;
+  }
+  .voicebtn.on {
+    color: var(--yap-fg);
+    border-color: color-mix(in srgb, var(--yap-primary) 45%, var(--yap-border-subtle));
+    background: var(--yap-primary-wash);
+  }
+  .voicebtn.on svg {
+    color: var(--yap-primary);
+  }
+  .voicebtn svg {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+  }
+  .vlabel {
+    font-weight: 600;
   }
 
   .inputbar {

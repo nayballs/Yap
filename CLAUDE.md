@@ -64,7 +64,10 @@ competitive strategy, see `ROADMAP.md` in the **private** docs repo (below).
   it draws; with the bar off, the transcribing overlay as before). The old
   pill window was retired 2026-07-09.
 - **Backend:** Rust (`src-tauri/src/`).
-- **Audio:** `cpal` (capture) + `rodio` (start/stop chime).
+- **Audio:** `cpal` (capture) + `rodio` (start/stop chime, spoken replies).
+- **Spoken replies:** WinRT `Windows.Media.SpeechSynthesis` (Windows' own
+  voices, `windows` crate) → PCM → rodio, sentence by sentence (`tts.rs`);
+  the engine layer takes a more natural local engine as a second engine.
 - **STT:** [`transcribe-rs`](https://crates.io/crates/transcribe-rs) — one crate that
   wraps **whisper.cpp** (Vulkan) *and* a family of **ONNX** models (Parakeet, Moonshine,
   SenseVoice, GigaAM, Canary, Cohere) via `ort`/ONNX Runtime (DirectML). Behind the
@@ -246,7 +249,19 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (`agent_detect.rs`, OpenWhispr `detectAgentName` port): a dictation addressing the
   agent by name (`agent_name`, default "Yap"; fuzzy-matched) routes the whole
   transcript through the Voice-Agent scope in write mode (`run_agent`, shared with
-  the edit hotkey) instead of cleanup — the agent prompt strips the name+command. A `processing` guard blocks
+  the edit hotkey) instead of cleanup — the agent prompt strips the name+command.
+  **Barge-in**: `start_recording` first calls `tts::stop_for_dictation()` —
+  a spoken reply stops before anything records, and if Yap was audible in
+  the last ~450 ms the pre-roll is left out (it would hold Yap's voice).
+  **Questions for the Chat view** (`to_chat`, decided in `capture_target` by
+  the pure `chat_target(edit, armed, focused, own_window)`): the chat's mic
+  (`chat_dictate` → `toggle_for_chat`, which arms `CHAT_ARMED` for the
+  recording it starts) or a dictation while the chat box has the focus
+  (`chat_input_focus` → `CHAT_FOCUSED`) and one of Yap's windows is in front;
+  never edit mode. Such a dictation skips the wake word and the paste:
+  `deliver_to_chat` emits `yap-chat-dictation {text, send}` (`send` =
+  `tts::sends_by_itself`: "Talk back hands-free" or "press enter" said) and
+  keeps it in history. A `processing` guard blocks
   starting a new recording while one is still transcribing (no overlapping `run_stt`
   / duplicate model load), and the buffer is capped at 15 min so a stuck key can't
   OOM. With `streaming_partials` on, `stream_partials` (a per-session worker)
@@ -1044,7 +1059,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   chips (`ChatMessage.tools`, only written when there are some), so a
   conversation opened later still shows what the AI looked up and changed,
   and the model that wrote it (`ChatMessage.model` = `ChatModel {provider,
-  id, name?, onThisPc?}`, only when known; older answers have none).
+  id, name?, onThisPc?}`, only when known; older answers have none). A
+  question that was dictated carries `voice: true` ("Only when I asked by
+  voice" reads its answer out); `append` returns the message's index, which
+  the pages use as its id (`chat:<conversation>:<index>`).
 - **`ai_model.rs`** — which model a scope's next call goes to, resolved the
   calls' way (`Scope::Chat` → `commands::resolve_chat_endpoint`;
   `Scope::Notes` → `meeting_summary::resolve_endpoint`): `ai_model_status
@@ -1388,7 +1406,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
   bar_hide_fullscreen (true) + bar_theme ("light" | "dark", light) +
   bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
-  off)). JSON
+  off), spoken replies (`tts.rs`): speak_replies (off), speak_when ("voice" |
+  "always", voice), talk_back_hands_free (true; only while speak_replies is
+  on), tts_engine ("windows"), tts_voice ("" = Windows' default), tts_rate
+  (1.0, 0.5–2.0)). JSON
   load/save + `apply_dictionary` (corrections; skips snippets) +
   `apply_snippets` + `term_regex` (the whole-word matcher both use) +
   `dictionary_prompt` (the Whisper `initial_prompt` vocabulary, in the order
@@ -1800,7 +1821,48 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
 - **`sound.rs`** — start/stop chimes (volume + output-device aware); each
   takes an optional `Played` callback, run on the chime's thread once it has
   played (or at once when it can't): how `mute.rs` goes after the start
-  chime and comes back after the stop chime.
+  chime and comes back after the stop chime. `open_output` (the configured
+  output device, else the default) is shared with `tts.rs`.
+- **`tts.rs`** — **spoken replies** (Settings → Voice Agent, Chat's Voice
+  replies toggle, ▶ on answers). **Engines** (`Engine` → `Synth`, text →
+  `Pcm`): one so far, **Windows voices** (`WindowsVoices`: WinRT
+  `SpeechSynthesizer`, `SynthesizeTextToStreamAsync` → WAV → `parse_wav`;
+  rate via `SpeakingRate`, minimal appended silence); `config.tts_engine`
+  picks one (`ENGINES`), an unknown id gets Windows voices, so a natural
+  local engine slots in as a second `Engine`. **Which voices apps see**:
+  only the OneCore voices (`HKLM\…\Speech_OneCore\Voices`, e.g. this PC's
+  en-GB George, Hazel, Susan — the default is George); not the old
+  SAPI-only desktop voices (Zira here) and not Windows 11's natural
+  Narrator voices (Aria, Jenny, Guy…), which are Narrator-only.
+  **Text prep** (pure, unit-tested): `speakable_blocks` (markdown → one
+  block per heading / list item / table row / paragraph, each ending like a
+  sentence; a fenced code block → "(code block)", links → their text, bare
+  URLs → their domain, `[x]`/☑ → "Done: …", emphasis, HTML, emoji and
+  arrows out, "→" read "to") and `sentences` (split after `.?!…` + space,
+  never after an abbreviation or an initial — `app_kind::is_abbreviation` —
+  over 220 chars cut at a comma); `utterances` = both. **The speaker**
+  (`Speaker`, unit-tested on a simulated clock): one utterance at a time on
+  a worker thread — "speaking" at once, the output opened on the worker
+  (rodio on `config.output_device`), each sentence made while the one before
+  plays; `stop()` empties the sink and drops the queue at once; a new
+  utterance replaces the old; it checks before every sentence and while one
+  plays that no dictation records (`pipeline::dictation_state`), refuses to
+  start over one, and refuses while a meeting records (the loopback would
+  put Yap in "Them"; `meeting::start` stops it). `yap-tts-state
+  {speaking, messageId, error}` on every change. **When to speak** (pure):
+  `auto_speak(speak_replies, speak_when, asked_by_voice, dictating,
+  meeting)` (chat_send's `speak`), `sends_by_itself(speak_replies,
+  hands_free, said_enter)`. Commands `tts_voices`, `tts_speak {text,
+  messageId}`, `tts_preview {voice, rate}`, `tts_stop`, `tts_state`,
+  `voice_replies_set {on}` (Chat's toggle: saves like Settings, then
+  `yap-voice-replies {on}` for Settings' copy). ⚠ **No echo cancellation**:
+  Yap's voice from speakers can reach the mic; the barge-in stops it before
+  a dictation and drops the pre-roll, but a mic hearing the speakers (no
+  headset) during an answer is a later job. Test mode: stand-in voices,
+  silence on a simulated clock (`SimPlayback`), no device; what would have
+  been said goes to the debug-only `tts_e2e_spoken {clear?}`. An
+  `#[ignore]`d `windows_voices_on_this_pc` lists the voices and synthesises a
+  sentence to a WAV in a temp folder (never played).
 - **`mute.rs`** — **other apps' sound while you dictate** (2026-10-17; it
   replaced the old endpoint mute, which silenced Yap's own start chime and
   any call): **"Silence other apps while you dictate"**
@@ -1879,7 +1941,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   watchdog's case, its stream really reopened), `e2e_learn_correction` (an
   edit of a pasted dictation as the correction watch would see it, or the
   field's text read by read for the watch's rules to run over — the watch
-  thread itself never runs in a test run), `e2e_coaching_reset` (every
+  thread itself never runs in a test run), no spoken reply played (`tts.rs`:
+  stand-in voices, silence on a simulated clock, no audio device; what would
+  have been said in `tts_e2e_spoken`), `e2e_chat_dictation {text}` (a
+  question dictated into the Chat view, no mic needed), `e2e_coaching_reset` (every
   push-to-talk hint due again), `e2e_notice_reset` / `e2e_focus` /
   `e2e_notice` (notice.rs: cooldowns and fatigue forgotten before every
   test, whether the main window counts as focused — by default while it's on
@@ -1950,7 +2015,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `meeting_delete` — and tells every window, `yap-note-deleted`) +
   `note_enhance`/`note_ask`/`note_export`,
   chats CRUD + `chat_send` (RAG + tool loop; `scope: "meetings"` = the
-  Meetings view's Ask bar, grounded in `calendar::meetings_context`),
+  Meetings view's Ask bar, grounded in `calendar::meetings_context`; `voice`
+  = the question was dictated; returns the two messages' ids and `speak`,
+  `tts::auto_speak`), `chat_dictate` / `chat_input_focus` (the Chat view's
+  mic and box, pipeline.rs `to_chat`), debug-only `e2e_chat_dictation
+  {text}` (a dictated chat question without a mic),
   `meeting_start` (then `calendar::on_meeting_started`)/`meeting_stop`/
   `meeting_state`, `transcribe_file`/`cancel_file_transcription`/
   `audio_file_info`, `log_info`/`open_logs_folder`, `delete_history_entry`.
@@ -2215,7 +2284,22 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (`chat_set_model`), and links to Language model settings. Each answer
   shows its model quietly under it, as do the Notes view's Ask bar and the
   notepad's Ask sheet (`nextModel(scope)` fetched beside the call; none for
-  Yap's own "Nothing new" / "too little"). No streaming or
+  Yap's own "Nothing new" / "too little"). **Spoken replies** (`tts.rs`):
+  **Voice replies** (🔊 / 🔇 pill beside the model chip, `aria-pressed`) is
+  Settings' "Speak replies" (`voice_replies_set`; Settings adopts
+  `yap-voice-replies`, the toggle re-reads on `yap-config-saved`); every
+  answer has **▶ Read aloud** under it (■ Stop reading + "Speaking…" with
+  three bars while it's read; also on the Notes view's Ask bar answers and
+  the notepad's Ask sheet, not while that meeting records), via the shared
+  `speech.svelte.js` store (`speakingId` from `yap-tts-state`; each window
+  toasts failures for its own ids: `chat:` / `notes:` / `preview` /
+  `notepad:`). With replies on, chat_send's `speak` reads an answer out by
+  itself. The **mic** is `chat_dictate`, and the box reports its focus
+  (`chat_input_focus`), so a question dictated into it arrives as
+  `yap-chat-dictation` (inserted at the caret, never pasted) and is sent at
+  once when `send` says so; such questions are sent with `voice: true` (a
+  small mic on the bubble). Esc, leaving Chat, another conversation, the
+  next question and any dictation starting stop the voice. No streaming or
   semantic vectors yet (ROADMAP step 3). **`IntegrationsView.svelte`** = the
   Integrations surface (OpenWhispr `IntegrationsView.tsx`, local-first cut):
   a **Calendar** card (`CalendarLinkCard.svelte`: Connect → the "Connect
@@ -2390,6 +2474,18 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   readable against any desktop.
 - **`lib/Settings.svelte`** — the settings surface, now rendered **inside the
   ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / Connections / System):
+  **Voice Agent** (App, after General; id `voice`) — the one place for
+  talking to Yap's AI: **Spoken replies** ("Speak replies" `speakReplies`;
+  "When to speak" Segmented When I asked by voice / Always `speakWhen`;
+  "Talk back hands-free" `talkBackHandsFree`, greyed while replies are off),
+  **Voice** (a Select of `tts_voices`' voices with Windows' default first +
+  **▶ Preview** / ■ Stop → `tts_preview` with the shown voice and speed;
+  Speed slider 0.5–2.0× `ttsRate`; the Engine line "Windows voices", more
+  natural voices coming) and **Wake word** (`#settings-wake-word`: the
+  Voice Agent scope's enable switch, the agent name — `AgentNameField.svelte`,
+  moved here from Language Models → Voice Agent, which now shows the name
+  with a link back — and "Language Models → Voice Agent" for its model and
+  prompt). `yap-voice-replies` (Chat's toggle) is adopted into the config copy.
   **General** (hotkey, recording mode — in push-to-talk its line says how
   double-tap goes hands-free, mic, sound+volume, then "Silence other apps
   while you dictate" (`quietOtherApps`) and "Pause music and videos while
@@ -2945,7 +3041,9 @@ installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
   its live transcript (`meeting_live_transcript`), but **not** splitting the
   screen (`meeting_split_screen` off: it moves another app's window); with a
   calendar connected, the reminder card **right before** a meeting (15 s,
-  `meeting_reminder`).
+  `meeting_reminder`); spoken replies **off** (`speak_replies`; once on, only
+  for questions asked by voice, `speak_when`, and a dictated question is sent
+  by itself, `talk_back_hands_free`) in Windows' default voice at 1×.
 
 ---
 
@@ -2958,7 +3056,12 @@ builds), and the dictation pipeline around it is complete: multi-engine STT
 watchdog (reopen, then "No sound from <mic>"),
 language/translate, **AI cleanup** (BYO key or local sidecar) with per-app routing +
 named profiles + per-profile model choice, **edit/rewrite mode** + the **Voice Agent
-wake word**, combo hotkeys, the audio pre-roll (anti first-word clipping), **live
+wake word**, **spoken replies** (`tts.rs`, 2026-10-18: Chat's answers read
+aloud in Windows' voices — the Voice replies toggle, ▶ on every answer,
+"only when I asked by voice", hands-free talk-back, barge-in; text prep, the
+queue and the decisions unit-tested, synthesis checked silently on this PC's
+voices, the whole loop e2e-tested in test mode; not yet heard on speakers
+by a person, and a natural local engine is to come), combo hotkeys, the audio pre-roll (anti first-word clipping), **live
 streaming partials** (sliding-window, on by default, word-paced overlay reveal —
 validated live 2026-07-10), transcription history + stats, cleanup presets,
 **other apps silenced or paused while you dictate** (`mute.rs` + `media_pause.rs`,
@@ -3118,7 +3221,11 @@ Windows notifications, Focus Assist) not yet tried.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), and no `web_search`/calendar tools or conversation
-search/archive/rename; the AI Notepad has no rich markdown editor (plain textarea)
+search/archive/rename; spoken replies have only Windows' own voices (a
+natural local engine is the next `tts::Engine`), wait for the whole answer
+before the first sentence, don't listen again by themselves after an answer,
+and have no echo cancellation (a mic that hears the speakers during an
+answer is a later job); the AI Notepad has no rich markdown editor (plain textarea)
 or folder "add existing note" picker; meetings tell the call's voices apart
 only with the beta speaker engine on, and don't name them by themselves
 ("Speaker 1"… until the user, a 1:1 invite or, later, the call app names

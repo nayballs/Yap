@@ -66,7 +66,7 @@ fn render_cue(notes: &[f32], peak: f32) -> Vec<f32> {
 /// Open an output stream on the named device, falling back to the system
 /// default when no name is given or the device can't be found. Uses rodio's
 /// re-exported cpal so the device type matches `OutputStream::try_from_device`.
-fn open_output(device: Option<&str>) -> Option<(rodio::OutputStream, rodio::OutputStreamHandle)> {
+pub(crate) fn open_output(device: Option<&str>) -> Option<(rodio::OutputStream, rodio::OutputStreamHandle)> {
     use rodio::cpal::traits::{DeviceTrait, HostTrait};
 
     if let Some(name) = device {

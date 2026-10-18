@@ -3,7 +3,8 @@
   // dictate *instructions* to an AI assistant by prefixing them with a wake word
   // ("Hey <agentName>, …") — the agent executes the command (compose / reformat /
   // answer) instead of transcribing it verbatim. Section order mirrors OpenWhispr:
-  //   enable toggle → provider/model config → Voice Agent (name) → How it works →
+  //   enable toggle → provider/model config → Voice Agent (its name: a link to
+  //   Settings → Voice Agent, where the name and spoken replies live) → How it works →
   //   Examples → Agent prompt.
   //
   //   scope: the reactive { enabled, provider, baseUrl, model, apiKey, apiKeys,
@@ -12,9 +13,8 @@
   import ScopeProviderConfig from './ScopeProviderConfig.svelte';
   import PromptStudio from './PromptStudio.svelte';
   import Toggle from './ui/Toggle.svelte';
-  import Input from './ui/Input.svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { onMount, untrack } from 'svelte';
+  import { onMount } from 'svelte';
 
   let { cfg, scope, defaultPrompt = '' } = $props();
 
@@ -41,40 +41,16 @@
 
   const enabled = $derived(scope.enabled);
 
-  // Local editor state for the name field, seeded once from the saved name.
-  let agentInput = $state(untrack(() => (cfg.agentName || '').trim()));
-  let saved = $state(false);
-
   const examples = $derived([
     `Hey ${displayName}, write a formal email about the budget`,
     `Hey ${displayName}, make this more professional`,
     `Hey ${displayName}, convert this to bullet points`,
   ]);
 
-  function saveAgentName() {
-    const trimmed = agentInput.trim();
-    if (!trimmed) return;
-    const prev = (cfg.agentName || '').trim();
-
-    cfg.agentName = trimmed;
-    agentInput = trimmed;
-
-    // Keep the agent's name in the correction dictionary so STT spells it right.
-    // Yap's dictionary is a from→to map (config.rs DictionaryEntry); we store the
-    // name as a self-mapping entry ({ from: name, to: name }) — a known term the
-    // pipeline preserves. Drop the previous name's entry when it's being renamed.
-    if (!Array.isArray(cfg.dictionary)) cfg.dictionary = [];
-    let dict = cfg.dictionary;
-    // (Snippets share the list; a snippet's phrase is never the name's entry.)
-    if (prev && prev.toLowerCase() !== trimmed.toLowerCase()) {
-      dict = dict.filter((e) => e?.snippet || (e?.from || '').trim().toLowerCase() !== prev.toLowerCase());
-    }
-    const has = dict.some((e) => !e?.snippet && (e?.from || '').trim().toLowerCase() === trimmed.toLowerCase());
-    if (!has) dict = [{ from: trimmed, to: trimmed }, ...dict];
-    cfg.dictionary = dict;
-
-    saved = true;
-    setTimeout(() => (saved = false), 2500);
+  // The name (the wake word) and spoken replies live in Settings → Voice
+  // Agent; this tab is the agent's model and prompt.
+  function openVoiceAgent() {
+    window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: 'voice' }));
   }
 </script>
 
@@ -100,28 +76,20 @@
     <ScopeProviderConfig {scope} {cfg} disabled={!enabled} />
   </div>
 
-  <!-- 3. Voice Agent — name your assistant -->
+  <!-- 3. Voice Agent — its name (the wake word) and spoken replies live in
+       Settings → Voice Agent; this tab is its model and prompt. -->
   <section class="hairline">
     {@render sectionHeader(
       'Voice Agent',
-      'Name your AI assistant so you can address it directly during dictation'
+      'The model above runs it. Its name, and whether Chat answers out loud, are on the Voice Agent page'
     )}
 
-    <p class="fieldlabel">Agent Name</p>
-    <div class="panelcard">
-      <div class="namefield">
-        <div class="nameinput">
-          <Input bind:value={agentInput} placeholder="e.g. Jarvis, Nova, Atlas..." />
-        </div>
-        <button class="save" onclick={saveAgentName} disabled={!agentInput.trim()}>Save</button>
-      </div>
-      <p class="helper">Pick something short and natural to say aloud</p>
-      {#if saved}
-        <p class="savednote">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6" /></svg>
-          Agent named "{displayName}" — say "Hey {displayName}" followed by your instructions.
-        </p>
-      {/if}
+    <div class="panelcard linkcard">
+      <p class="body">Agent name: <strong>{displayName}</strong></p>
+      <button class="golink" onclick={openVoiceAgent}>
+        Name and voice in Voice Agent
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+      </button>
     </div>
   </section>
 
@@ -214,79 +182,43 @@
     line-height: 1.5;
   }
 
-  .fieldlabel {
-    margin: 0;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--yap-fg);
-  }
-
   .panelcard {
     border: 1px solid var(--yap-border-subtle);
     border-radius: var(--yap-r-lg);
     background: var(--yap-s2);
     padding: 14px 16px;
   }
-
-  .namefield {
+  .linkcard {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
+    gap: 12px;
   }
-  .nameinput {
-    flex: 1;
-    min-width: 0;
-  }
-  /* centered monospace name entry, OpenWhispr-style */
-  .nameinput :global(input) {
-    text-align: center;
+  .linkcard strong {
+    color: var(--yap-fg);
     font-family: ui-monospace, Consolas, monospace;
-    font-size: 13.5px;
   }
-  .save {
+  .golink {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     flex: 0 0 auto;
-    height: 34px;
-    padding: 0 16px;
-    border: none;
+    padding: 6px 10px;
+    border: 1px solid var(--yap-border-subtle);
     border-radius: var(--yap-r);
-    background: var(--yap-ink, var(--yap-primary));
-    color: var(--yap-ink-fg, var(--yap-primary-fg));
+    background: var(--yap-s1);
+    color: var(--yap-fg);
     font: inherit;
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    transition:
-      background var(--yap-dur) ease,
-      transform var(--yap-dur) ease;
   }
-  .save:hover:not(:disabled) {
-    background: var(--yap-ink-hover, var(--yap-primary-hover));
+  .golink:hover {
+    border-color: var(--yap-border-hover);
   }
-  .save:active:not(:disabled) {
-    transform: scale(0.985);
-  }
-  .save:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-
-  .helper {
-    margin: 10px 0 0;
-    font-size: 11px;
-    color: var(--yap-muted-55);
-  }
-  .savednote {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 8px 0 0;
-    font-size: 11.5px;
-    color: var(--yap-success);
-  }
-  .savednote svg {
-    width: 13px;
-    height: 13px;
-    flex: 0 0 auto;
+  .golink svg {
+    width: 12px;
+    height: 12px;
   }
 
   .body {
