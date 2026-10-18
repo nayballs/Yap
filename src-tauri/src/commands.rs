@@ -291,21 +291,27 @@ pub(crate) fn note_changed(app: &AppHandle, id: u64, origin: &str) {
 pub(crate) fn note_changed_with(app: &AppHandle, id: u64, origin: &str, line_speakers: Option<Vec<serde_json::Value>>) {
     use tauri::Emitter;
     if let Some(n) = crate::notes::get(id) {
-        let mut payload = serde_json::json!({
-            "id": n.id,
-            "title": n.title,
-            "titleAuto": n.title_auto,
-            "content": n.content,
-            "folder": n.folder,
-            "participants": n.participants,
-            "speakers": n.speakers,
-            "origin": origin,
-        });
+        let mut payload = note_changed_payload(&n, origin);
         if let Some(lines) = line_speakers {
             payload["lineSpeakers"] = serde_json::Value::Array(lines);
         }
         let _ = app.emit("yap-note-changed", payload);
     }
+}
+
+/// `yap-note-changed`'s payload for note `n`: its editable fields and
+/// speaker map, and who changed it (`origin`).
+pub(crate) fn note_changed_payload(n: &crate::notes::Note, origin: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": n.id,
+        "title": n.title,
+        "titleAuto": n.title_auto,
+        "content": n.content,
+        "folder": n.folder,
+        "participants": n.participants,
+        "speakers": n.speakers,
+        "origin": origin,
+    })
 }
 
 /// Export a note as a markdown file at `path` (the editor's download button):

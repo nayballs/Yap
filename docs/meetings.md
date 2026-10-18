@@ -179,8 +179,9 @@ call) gets the "Them" warning once too; its wording says "If".
 
 Every transcript line has a side (`source`: the mic "you", the call "them")
 and a voice (`speaker`). Until voices are told apart, the call is one voice,
-"them"; once the speaker engine's labels (`diarize.rs`, beta) are put on
-lines — the next step — they'll be "them-1", "them-2"…
+"them"; with "Tell speakers apart in meetings" on (beta, `diarize.rs`), the
+speaker engine's voices go on the "Them" lines as "them-1", "them-2"…
+("Speaker 1", "Speaker 2"; see **The speaker engine's labels** below).
 A line nobody relabelled stores no `speaker` (its side is its voice), so
 every older note reads as You and Them, unchanged.
 
@@ -222,7 +223,63 @@ guesses: shown as **"Priya?"**, in italics, and told to the AI as a guess.
   `diarize::Timeline`: the "Them" sample position / 16) and, with Parakeet, Whisper or
   SenseVoice, its words' times (`words`, ms from `startMs`, one per word of
   the corrected text). `speakers::split_line` cuts a line where the speaker
-  changes, at its words (in proportion without them); it isn't called yet.
+  changes, at its words (in proportion without them).
+
+### The speaker engine's labels
+
+`speakers/labels.rs` puts the engine's timeline (`diarize::Timeline`: who
+spoke when on the call side, ms on the recording's clock) on the lines:
+
+- **When.** Each timeline the engine reports (every ~5 s of audio while it
+  records; labels settle ~10 s, at most ~21 s, behind the talk) labels the
+  lines whose audio it has settled (`endMs ≤ labelledMs`); new lines the
+  latest labels already cover get theirs as they arrive. The final timeline
+  comes when the recording stops, before it says it stopped: it labels the
+  rest, so the AI title, the last digests and the action plan read the
+  voices. Rolling digests written while recording keep "Them" (a digest
+  that read a line before it was split follows it: `notes::add_digest`).
+  The notepad's live transcript fills in names ~15 s behind the talk;
+  every window follows `yap-note-changed` with `lineSplice` (the stretch
+  that changed) and `lineSpeakers`.
+- **Which lines.** That recording's "Them" lines (from where the transcript
+  stood when it started) that have a place on its clock, no voice yet, and
+  aren't the user's (`speakerLocked`: never moved). Never "You", echo, "You
+  dictated here" markers or lines from before line times. A line splits
+  where the speaker changes, at its words (Parakeet, Whisper, SenseVoice),
+  else in proportion to its text; each part keeps its words and place, and
+  digests and stop marks after it move along. A line with no voice heard
+  near it stays "Them".
+- **Voice ids.** The engine's voices (`(stream, speaker)`: an engine
+  started again after a crash counts from 1 again) become "them-N",
+  numbered on from the note's highest in the order they first get a line.
+  A resumed meeting (a new recording, new engine numbers) carries on at
+  "Speaker 4", and is never merged with the first recording's voices by
+  itself: the user merges them if they're the same people. The engine says
+  which lines are one voice; names stay the speaker map's (the engine's
+  labels rank as a voice: below the user and the call app).
+- **"Them"'s name and the voices** (the 1:1 rule). Per recording: **one
+  voice** found — it is "Them", and takes "Them"'s name (a 1:1 calendar
+  guess stays a guess, "Priya?"; a name the user gave "Them" stays theirs).
+  **Several** — a guess goes to one of them, never all: the voice that said
+  the most words (while recording, the first to qualify keeps it; at the
+  end it moves to whoever said the most), never a voice with a name of its
+  own or one told "Not Priya". A name the user gave "Them" stays on "Them"
+  only. "Them" keeps its name for the lines nobody could label, and the AI
+  is told a name once.
+- **No labels.** The switch off, no model, or the engine failing: the lines
+  stay You and Them. If the engine stopped early (or never sent its final
+  labels), the lines it labelled keep their voices, the rest say "Them",
+  the log says so, and the notepad shows "Couldn't tell speakers apart this
+  time." (or "…for the whole meeting") under the transcript.
+- **Measured** (2026-10-18, `diarization-real.spec.js` with an `engines`
+  build and Parakeet V3, the spike's TTS meetings played as the call at
+  2–5×): words on the right person 99.4–99.5% (3 voices, clean), 96.2%
+  (2 voices, overlap + noise + Opus), 93.6% (4 voices, two made from one,
+  overlap + noise) — the spike's 83–100% for splitting at word times; every
+  "Them" line labelled, one voice per person. A line's name shows up a
+  median ~15 s of audio after its last word (at most ~23 s): the engine's
+  30 s preset settles its labels in steps of up to ~20 s. The errors are
+  words at a change of speaker ("…so finance isn't surprised / later.").
 
 ## Summaries that keep up with long meetings
 
@@ -842,8 +899,29 @@ KeyTips) and Win the Start menu.
   (joined, swapped, Whisper phrases, none), line timing, and `split_line`
   (at words, in proportion, blips, far words, the user's lines unchanged);
   names in every AI input with the "Speakers besides You" line, the owner
-  checks accepting the map's names, and the MCP page.
+  checks accepting the map's names, and the MCP page. The engine's labels
+  (`cargo test --lib -- labels a_split_line`): voice ids numbered on from
+  the note's highest (a restarted engine, a resumed meeting), only the
+  recording's settled, unlabelled, unlocked call lines (not You, echo,
+  markers, unplaced lines or an earlier recording's), lines filling in as
+  labels settle and splitting at the change, lines with no voice near and
+  the user's staying put, a failed engine labelling only what it settled,
+  later lines of a renamed or merged voice following, the 1:1 rule (one
+  voice takes the guess, "Not Priya" sticks, several: the most talkative
+  one, moved at the end; a user's name for "Them" on one voice only), and
+  digests and stop marks moving with a split line (and a digest following
+  its last line).
 - **e2e** (`npm run test:app`), with no audio device and no real AI:
+  - `e2e/speaker-labels.spec.js`: placed lines (with word times) fed to the
+    recorder and the engine's timelines scripted (`e2e_diarize_timeline`; a
+    `done` one held until the stop): names filling in in the notepad and the
+    Notes view as labels settle, a line split at "Thanks" between two voices
+    (stored with its words and place), a renamed voice's later lines
+    following; the final labels landing before the action plan (its input
+    has "Speaker 1", "Speaker 2" and the user's "Sam", whose line stayed
+    put); an engine that failed leaving You/Them with "Couldn't tell
+    speakers apart this time."; a 1:1 invite's guess going to the one voice,
+    and not to a second one who joins.
   - `e2e/speakers.spec.js`: lines fed with voices (`speaker: "them-1"`):
     rename everywhere, merge (a later line of the merged voice follows), just
     this line, in the notepad and the Notes view (each following the other),
@@ -952,10 +1030,13 @@ KeyTips) and Win the Start menu.
 - **Who's who on the call.** Everyone remote is "Them" unless named (by the
   user, or as a guess from a 1:1 invite). Tasks are attributed from the
   attendee list, the speaker map and names said out loud ("Bob, can you…");
-  a remote "I'll do it" from an unnamed "Them" is Unassigned. Telling the
-  voices apart on lines (the speaker engine's labels, `diarize.rs`) is the
-  next step; the speaker
-  map, line times and `split_line` are ready for it.
+  a remote "I'll do it" from an unnamed "Them" is Unassigned. With the
+  speaker engine on (beta), voices are told apart ("Speaker 1", "Speaker
+  2"…) but not named: naming comes from the user, a 1:1 invite or, later,
+  the call app's active speaker. Voices from two recordings of one meeting
+  (a pause) aren't matched up automatically, and a line's name comes ~15 s
+  after its words (the CPU preset; a GPU's 1 s preset is step 4), so the
+  newest lines say "Them" for a moment.
 - **Speakers.** Echo is caught only in chunks that are entirely the call
   coming through the speakers; a chunk where the user also spoke keeps the
   repeated words. Finer-grained removal (gating mic frames by the loopback

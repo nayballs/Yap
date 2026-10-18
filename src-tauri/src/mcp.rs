@@ -90,12 +90,19 @@ fn who_is_who(n: &Note) -> String {
     let mut out = "'You' is the person using Yap; 'Them' is everyone else on the call, not told apart.".to_string();
     use crate::speakers::{display, voice_of, voices, THEM, YOU};
     let named_them = n.speakers.get(THEM).is_some_and(|s| !s.name.trim().is_empty());
-    let others: Vec<String> = voices(n)
+    let mut others: Vec<String> = Vec::new();
+    for id in voices(n)
         .into_iter()
         .filter(|id| id != YOU && (id != THEM || named_them))
         .filter(|id| n.transcript.iter().any(|s| s.is_talk() && voice_of(&n.speakers, s) == id))
-        .map(|id| display(&n.speakers, &id))
-        .collect();
+    {
+        // A name once (a 1:1 guess on a voice and on the lines nobody told
+        // apart is one person).
+        let name = display(&n.speakers, &id);
+        if !others.iter().any(|o| o.eq_ignore_ascii_case(&name)) {
+            others.push(name);
+        }
+    }
     if !others.is_empty() {
         out = format!(
             "'You' is the person using Yap. Other lines are labelled with who spoke: {} (a name ending in '?' is Yap's guess from the calendar invite; 'Speaker 2' and so on are voices told apart but not named; 'Them' is anyone else on the call).",

@@ -510,6 +510,8 @@ pub fn run() {
             diarize::diarize_wav,
             #[cfg(debug_assertions)]
             diarize::diarization_timeline,
+            #[cfg(debug_assertions)]
+            diarize::e2e_diarize_timeline,
             // Test mode only (e2e.rs); not in release builds at all.
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_feed,
@@ -820,6 +822,8 @@ pub fn run() {
             // written in Rust): both follow the recorder's events.
             notepad::init(&handle);
             meeting_end::init(&handle);
+            // The speaker engine's voices onto meeting lines (beta).
+            speakers::labels::init(&handle);
 
             // First run: if no model is downloaded yet, greet the user with the
             // onboarding model picker instead of a silent "needs-model" pill.

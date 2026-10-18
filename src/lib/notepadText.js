@@ -49,14 +49,54 @@ const who = speakerLabel;
 
 /**
  * The voices of a note, resolved (speakers.rs `voices`): those its lines are
- * in, in order, then any other the map knows.
+ * in, in order, then any other the map knows — but not "Them" once the
+ * voice separation told every call line apart (a 1:1 guess it had went to
+ * a voice).
  */
 export function noteVoices(note) {
   const out = [];
   const add = (id) => !out.includes(id) && out.push(id);
   for (const s of note?.transcript || []) if (!s.echo && !s.dictated) add(speakerId(note.speakers, s));
-  for (const id of Object.keys(note?.speakers || {})) add(speakerId(note.speakers, { speaker: id }));
+  const toldApart = !out.includes('them') && out.some((id) => id.startsWith('them-'));
+  for (const id of Object.keys(note?.speakers || {})) {
+    const v = speakerId(note.speakers, { speaker: id });
+    if (!(toldApart && v === 'them')) add(v);
+  }
   return out;
+}
+
+/**
+ * The same line, arriving twice (`yap-meeting-segment` after a fetch that
+ * already had it, or after the voice separation split it: its first part
+ * keeps the line's side, date and place).
+ */
+export function hasLine(transcript, seg) {
+  if (!seg || seg.startMs == null || !Array.isArray(transcript)) return false;
+  for (let i = transcript.length - 1, n = 0; i >= 0 && n < 64; i -= 1, n += 1) {
+    const s = transcript[i];
+    if (s.source === seg.source && s.ts === seg.ts && s.startMs === seg.startMs) return true;
+  }
+  return false;
+}
+
+/**
+ * A transcript after the voice separation labelled lines (`yap-note-changed`
+ * from speakers/labels.rs: `lineSplice` `{ at, remove, lines }` — lines
+ * split where the speaker changed, so the ones after moved — and
+ * `lineSpeakers` for every line after it), or `null` when this copy isn't
+ * the one it changed (a line arrived meanwhile: fetch the note).
+ */
+export function withLineSplice(transcript, change) {
+  const splice = change?.lineSplice;
+  if (!splice || !Array.isArray(transcript) || !Array.isArray(change.lineSpeakers)) return null;
+  const { at, remove, lines } = splice;
+  if (!Array.isArray(lines) || at < 0 || at + remove > transcript.length) return null;
+  if (transcript.length - remove + lines.length !== change.lineSpeakers.length) return null;
+  const first = transcript[at];
+  if (remove > 0 && (first?.source !== lines[0]?.source || first?.ts !== lines[0]?.ts || first?.startMs !== lines[0]?.startMs)) {
+    return null;
+  }
+  return withLineSpeakers([...transcript.slice(0, at), ...lines, ...transcript.slice(at + remove)], change.lineSpeakers);
 }
 
 /**

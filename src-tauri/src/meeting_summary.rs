@@ -1319,8 +1319,17 @@ async fn digest_window(
     })
 }
 
-fn store_digest(app: &AppHandle, note_id: u64, digest: MeetingDigest) -> Result<(), String> {
-    let count = crate::notes::add_digest(note_id, digest.clone())?;
+/// The side and end of `note`'s line `to - 1`: where a digest reading up to
+/// `to` stops, found again after the voice separation split lines before it
+/// (`notes::add_digest`).
+fn digest_end(note: &Note, to: usize) -> Option<(String, u64)> {
+    let last = note.transcript.get(to.checked_sub(1)?)?;
+    Some((last.source.clone(), last.end_ms?))
+}
+
+fn store_digest(app: &AppHandle, note_id: u64, digest: MeetingDigest, last: Option<(String, u64)>) -> Result<(), String> {
+    let last = last.as_ref().map(|(s, e)| (s.as_str(), *e));
+    let count = crate::notes::add_digest(note_id, digest.clone(), last)?;
     tracing::info!(
         note_id,
         part = count,
@@ -1406,7 +1415,7 @@ async fn live_digests(app: &AppHandle, note_id: u64) {
         };
         match digest_window(app, &note, from, to, &ep, local).await {
             Ok(digest) => {
-                if let Err(e) = store_digest(app, note_id, digest) {
+                if let Err(e) = store_digest(app, note_id, digest, digest_end(&note, to)) {
                     tracing::warn!("Meeting digest not stored: {}", e);
                     return;
                 }
@@ -1458,7 +1467,7 @@ pub async fn prepare_final(app: &AppHandle, note_id: u64, ep: &Endpoint) -> Resu
             }
             Err(DigestError::Yielded) => return Err("Summary interrupted".to_string()),
         };
-        store_digest(app, note_id, digest)?;
+        store_digest(app, note_id, digest, digest_end(&note, to))?;
         done += 1;
     }
 }

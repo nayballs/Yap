@@ -70,6 +70,8 @@
     MEETING_HELPERS,
     meetingHelpers,
     withLineSpeakers,
+    withLineSplice,
+    hasLine,
   } from './notepadText.js';
 
   /** This window's label: the `origin` of its saves and stops. */
@@ -171,15 +173,27 @@
   // Another window (or the AI title) changed the note.
   function onNoteChanged(p) {
     if (!note || p?.id !== note.id || p.origin === LABEL) return;
-    if (!dirty.title) {
-      note.title = p.title;
-      note.titleAuto = p.titleAuto;
+    // The speaker engine's labels change only the lines and the map: never
+    // touch what's being typed for them (they come every few seconds).
+    if (p.origin !== 'speakers') {
+      if (!dirty.title) {
+        note.title = p.title;
+        note.titleAuto = p.titleAuto;
+      }
+      if (!dirty.content) note.content = p.content;
+      note.participants = p.participants;
     }
-    if (!dirty.content) note.content = p.content;
-    note.participants = p.participants;
     if (p.speakers) note.speakers = p.speakers;
-    // A speaker renamed or merged in another window: every line's voice.
-    if (p.lineSpeakers) {
+    if (p.lineSplice) {
+      // The voice separation labelled lines, splitting some where the
+      // speaker changed: the stretch that changed.
+      const t = withLineSplice(note.transcript, p);
+      if (t) {
+        note.transcript = t;
+        if (p.breaks) note.breaks = p.breaks;
+      } else reload();
+    } else if (p.lineSpeakers) {
+      // A speaker renamed or merged in another window: every line's voice.
       const t = withLineSpeakers(note.transcript, p.lineSpeakers);
       if (t) note.transcript = t;
       else reload();
@@ -225,6 +239,7 @@
     if (meeting.recording) {
       startElapsed(meeting.elapsedSecs || 0);
       if (!was) refreshConfig(); // "Show live transcript" may have changed
+      if (speakersNote?.noteId === meeting.noteId) speakersNote = null;
     } else {
       stopElapsed();
       stopping = false;
@@ -234,8 +249,15 @@
   }
 
   function onSegment(seg) {
-    if (!seg || !recordingThis) return;
+    if (!seg || !recordingThis || hasLine(note.transcript, seg)) return;
     note.transcript = [...(note.transcript || []), seg];
+  }
+
+  // The speaker engine stopped early (speakers/labels.rs): said quietly
+  // under the transcript, for this note, until it records again.
+  let speakersNote = $state(null);
+  function onSpeakers(p) {
+    if (p?.noteId != null && p.message) speakersNote = { noteId: p.noteId, message: p.message };
   }
 
   function onDigest(p) {
@@ -799,6 +821,7 @@
     on('yap-meeting-breaks', onBreaks);
     on('yap-meeting-summary', onSummary);
     on('yap-note-changed', onNoteChanged);
+    on('yap-meeting-speakers', onSpeakers);
     on('yap-note-deleted', (p) => p?.id === note?.id && (note = null));
     on('yap-notes-changed', () => note && reload());
     // "Started by mistake?", when Rust picked this window to ask.
@@ -1180,6 +1203,9 @@
                 <button class="echonote" onclick={() => (showEcho = !showEcho)}>
                   {showEcho ? 'Hide' : 'Show'} {echoCount} {echoCount === 1 ? 'line' : 'lines'} your mic picked up from the speakers
                 </button>
+              {/if}
+              {#if speakersNote && speakersNote.noteId === note.id && !searchQuery}
+                <p class="spknote" role="note" aria-live="polite">{speakersNote.message}</p>
               {/if}
             </div>
           {/if}
@@ -2170,6 +2196,13 @@
   .echonote:hover {
     color: var(--yap-paper-ink);
     text-decoration: underline;
+  }
+  /* The speaker engine stopped early: quiet, under the last line. */
+  .spknote {
+    align-self: center;
+    margin: 0;
+    font-size: 12px;
+    color: var(--yap-paper-muted);
   }
   .tempty {
     margin: 72px auto 0;

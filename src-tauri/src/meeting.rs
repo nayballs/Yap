@@ -1386,6 +1386,8 @@ pub(crate) fn ingest(
     for seg in &segments {
         let _ = app.emit("yap-meeting-segment", serde_json::json!(seg));
     }
+    // Lines the speaker labels already cover get their voices now.
+    crate::speakers::labels::after_ingest(app, note_id);
     crate::meeting_summary::kick(app, note_id);
     Ok(())
 }
@@ -1432,6 +1434,9 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
     #[cfg(not(debug_assertions))]
     let capture = spawn_device_capture(bufs.0, bufs.1, flags.0, flags.1);
     capture?;
+    // This recording's lines (from here on) get the engine's voices
+    // (speakers::labels).
+    crate::speakers::labels::begin(note_id, diarizer.as_ref().map(|d| d.id()));
 
     let started_ms = now_ms();
     let session = Session {
@@ -1543,13 +1548,21 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
             }
         }
         // The final speaker labels, before the recording says it ended (the
-        // summary starts on that): normally well under a second.
-        if let Some(d) = diarizer {
-            if let Ok(mut buf) = them.buf.lock() {
-                buf.tee = None;
+        // summary starts on that): normally well under a second. Their
+        // handler (speakers::labels) puts the voices on the last lines.
+        match diarizer {
+            Some(d) => {
+                if let Ok(mut buf) = them.buf.lock() {
+                    buf.tee = None;
+                }
+                let _ = tauri::async_runtime::spawn_blocking(move || d.finish()).await;
             }
-            let _ = tauri::async_runtime::spawn_blocking(move || d.finish()).await;
+            #[cfg(debug_assertions)]
+            None => crate::diarize::finish_scripted(note_id),
+            #[cfg(not(debug_assertions))]
+            None => {}
         }
+        crate::speakers::labels::end(&app, note_id);
 
         ACTIVE_NOTE.store(0, Ordering::SeqCst);
         {
