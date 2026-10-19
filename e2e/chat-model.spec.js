@@ -2,11 +2,12 @@
 // ai_model.rs): it names the model the next message goes to, resolved the
 // way chat_send resolves it; says "no note tools" for a local model under
 // 4B (whose answers come from a plain search of the notes); says "No AI
-// model" and opens Language Models when nothing is set up; and its popover
-// switches the Chat scope's model, which Settings' always-mounted config
-// copy adopts so its auto-save keeps it. Each answer shows the model that
-// wrote it. The "Groq" here is a local fake (support/fake-llm.js) behind a
-// test key: nothing leaves the PC.
+// model" when nothing is set up, and opens the picker on the provider to
+// connect; and its picker (ChatModelPicker.svelte, more in
+// chat-model-picker.spec.js) switches the Chat scope's model, which
+// Settings' always-mounted config copy adopts so its auto-save keeps it.
+// Each answer shows the model that wrote it. The "Groq" here is a local fake
+// (support/fake-llm.js) behind a test key: nothing leaves the PC.
 import { test as base, expect, openView, openSettings, closeSettings, settingsDialog, expectStore } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 
@@ -55,7 +56,8 @@ async function setConfig(yap, main, patch) {
 }
 
 const chip = (main) => main.locator('.modelchip .chip');
-const popover = (main) => main.getByRole('dialog', { name: 'Chat model' });
+const popover = (main) => main.getByRole('dialog', { name: 'Switch the Chat model' });
+const models = (main) => popover(main).locator('.pane .mrow');
 
 async function send(main, text) {
   await main.getByPlaceholder('Type a message...').fill(text);
@@ -84,20 +86,20 @@ test('the chip names the chat model, switches it, and every answer keeps its own
   await expect(thread).toContainText('Your launch is on Friday.');
   await expect(thread.locator('.byline')).toHaveText(['GPT-OSS 20B · Groq']);
 
-  // The popover: what it is, where it runs, the switch.
+  // Where it runs comes from the endpoint: this "Groq" is the local fake.
+  await expect(chip(main)).toHaveAttribute('title', /^Runs on this PC \(127\.0\.0\.1:/);
+
+  // The picker, on Groq: its models (Yap's list: no live one in this run).
   await chip(main).click();
   const pop = popover(main);
   await expect(pop).toBeVisible();
-  // Where it runs comes from the endpoint: this "Groq" is the local fake.
-  await expect(pop).toContainText('Groq · Runs on this PC (127.0.0.1:');
-  await expect(pop).toContainText("Looks up and changes your notes with Yap's note tools.");
-  const radios = pop.getByRole('radio');
-  await expect(radios).toHaveText(['GPT-OSS 20B', 'GPT-OSS 120B', 'Qwen3.8 27B']);
-  await expect(pop.getByRole('radio', { name: 'GPT-OSS 20B' })).toHaveAttribute('aria-checked', 'true');
+  await expect(pop.getByRole('tab', { name: /^Groq/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(models(main).locator('.nm')).toHaveText(['GPT-OSS 20B', 'GPT-OSS 120B', 'Qwen3.8 27B']);
+  await expect(pop.getByRole('button', { name: /^GPT-OSS 20B/ })).toHaveAttribute('aria-pressed', 'true');
   await shot(main, '02-popover');
 
   // Switch: the Chat scope only, dictation cleanup untouched.
-  await pop.getByRole('radio', { name: 'GPT-OSS 120B' }).click();
+  await pop.getByRole('button', { name: /^GPT-OSS 120B/ }).click();
   await expect(pop).toBeHidden();
   await expect(chip(main)).toHaveText('GPT-OSS 120B · Groq');
   await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.model === 'openai/gpt-oss-120b');
@@ -167,12 +169,17 @@ test('a small local model says it has no note tools, and answers from notes sear
   await expect(chip(main).locator('.mark')).toHaveAttribute('data-icon', 'qwen');
   await shot(main, '05-chip-no-note-tools');
 
+  await expect(chip(main)).toHaveAttribute('title', /too small for Yap's note tools/);
   await chip(main).click();
   const pop = popover(main);
-  await expect(pop).toContainText('Runs on this PC');
-  await expect(pop).toContainText("too small for Yap's note tools");
-  // The current model first (it's none of the switch's), then Groq's.
-  await expect(pop.getByRole('radio')).toHaveText(['qwen2.5-1.5b-instruct no note tools', 'GPT-OSS 20B', 'GPT-OSS 120B', 'Qwen3.8 27B']);
+  // A server on this PC: the picker opens on On this PC, the server's models
+  // under it, the current one first (its list doesn't have it).
+  await expect(pop.getByRole('tab', { name: /^On this PC/ })).toHaveAttribute('aria-selected', 'true');
+  const server = pop.getByRole('group', { name: `Self-hosted · ${new URL(fakeLlm.base).host}` });
+  await expect(server.locator('.nm')).toHaveText(['qwen2.5-1.5b-instruct', 'fake-chat', 'llama3.1:8b', 'qwen2.5-7b-instruct']);
+  const current = server.getByRole('button', { name: /^qwen2\.5-1\.5b-instruct/ });
+  await expect(current).toHaveAttribute('aria-pressed', 'true');
+  await expect(current.locator('.tag.warn')).toHaveText('no note tools');
   await shot(main, '06-popover-no-note-tools');
   await main.keyboard.press('Escape');
   await expect(pop).toBeHidden();
@@ -190,7 +197,7 @@ test('a small local model says it has no note tools, and answers from notes sear
   await expect(thread.locator('.byline')).toHaveText(['qwen2.5-1.5b-instruct · On this PC']);
 });
 
-test('with no AI model set up the chip says so and opens Language Models', async ({ yap, main, shot }) => {
+test('with no AI model set up the chip says so, and the picker opens on the provider to connect', async ({ yap, main, shot }) => {
   const cfg = await yap.invoke('get_config');
   await setConfig(yap, main, {
     ppProvider: 'groq',
@@ -202,7 +209,15 @@ test('with no AI model set up the chip says so and opens Language Models', async
   await expect(chip(main)).toHaveText('No AI model');
   await shot(main, '07-chip-no-ai-model');
 
+  // Connecting one is right there: Groq (cleanup's provider), its key field.
   await chip(main).click();
+  const pop = popover(main);
+  await expect(pop.getByRole('tab', { name: /^Groq/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(pop.locator('.connect')).toContainText('Connect Groq');
+  await expect(pop.getByLabel('Groq API key')).toBeFocused();
+
+  // And Settings is one click away: Language Models → Chat.
+  await pop.getByRole('button', { name: 'Language model settings…' }).click();
   const dialog = settingsDialog(main);
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('heading', { name: 'Language Models' })).toBeVisible();

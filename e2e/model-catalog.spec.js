@@ -117,7 +117,9 @@ async function setConfig(yap, main, patch) {
 }
 
 const chip = (main) => main.locator('.modelchip .chip');
-const popover = (main) => main.getByRole('dialog', { name: 'Chat model' });
+const popover = (main) => main.getByRole('dialog', { name: 'Switch the Chat model' });
+/** A model row in the Chat picker's pane (a button), by the start of its name. */
+const chatRow = (pop, name) => pop.locator('.pane').getByRole('button', { name: new RegExp(`^${name}`) });
 const picker = (dialog, provider) => dialog.locator(`.picker[data-provider="${provider}"]`);
 /** The rows a picker shows before "Show more". */
 const rows = (p) => p.locator('.list').first().locator('.srow');
@@ -134,9 +136,13 @@ test('the Chat picker shows a model Groq added as New and hides one it dropped',
   await chip(main).click();
   const pop = popover(main);
   await expect(pop).toBeVisible();
-  // Curated first (GPT-OSS 120B gone), then what Groq added since.
-  await expect(pop.getByRole('radio')).toHaveText(['GPT-OSS 20B', 'Qwen3.8 27B', 'Brainy 9 New']);
-  await expect(pop.getByRole('radio', { name: /Brainy 9/ }).locator('.otag.new')).toHaveText('New');
+  // Curated first (GPT-OSS 120B gone), then what Groq added since; the
+  // older one it lists behind "Show 1 more", as in Settings.
+  await expect(pop.locator('.pane .mrow .nm')).toHaveText(['GPT-OSS 20B', 'Qwen3.8 27B', 'Brainy 9']);
+  await expect(chatRow(pop, 'Brainy 9').locator('.tag.new')).toHaveText('New');
+  await expect(pop.locator('.phead')).toContainText('Connected · checked just now');
+  await pop.getByRole('button', { name: 'Show 1 more Groq model' }).click();
+  await expect(pop.locator('.pane .mrow .nm')).toHaveText(['GPT-OSS 20B', 'Qwen3.8 27B', 'Brainy 9', 'ALLaM-2-7b']);
   await shot(main, '01-chat-picker-new-model');
 
   // Groq was asked with the saved key, through the stand-in.
@@ -150,7 +156,7 @@ test('the Chat picker shows a model Groq added as New and hides one it dropped',
   expect(JSON.stringify(cached)).not.toContain(TEST_KEY);
 
   // The new model can be picked, and the next answer comes from it.
-  await pop.getByRole('radio', { name: /Brainy 9/ }).click();
+  await chatRow(pop, 'Brainy 9').click();
   await expect(chip(main)).toHaveText('Brainy 9 · Groq');
   await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.model === 'acme/brainy-9');
   await main.getByRole('button', { name: 'New chat' }).click();
@@ -193,9 +199,9 @@ test('a saved model the provider no longer offers says so, and stays selectable'
   await chip(main).click();
   const pop = popover(main);
   await expect(pop.getByRole('alert')).toHaveText('Groq no longer offers GPT-OSS 120B. Pick another model.');
-  const gone = pop.getByRole('radio', { name: /GPT-OSS 120B/ });
-  await expect(gone).toHaveAttribute('aria-checked', 'true');
-  await expect(gone).toContainText('no longer offered');
+  const gone = chatRow(pop, 'GPT-OSS 120B');
+  await expect(gone).toHaveAttribute('aria-pressed', 'true');
+  await expect(gone.locator('.tag.gone')).toHaveText('No longer offered');
   await shot(main, '03-chip-no-longer-offered');
   await main.keyboard.press('Escape');
   await expect(pop).toBeHidden();

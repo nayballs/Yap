@@ -468,7 +468,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   1.5B is quicker" (+ Use / Download it). Debug-only `e2e_local_llm_serving`
   stages a running model's placement for the e2e suite (display only). Owns
   install (runtime + model download, SHA-256 verified, per-stage
-  progress events), process lifecycle (spawn/health-wait/kill + orphan cleanup at
+  progress events naming the curated `model`, which the Chat model picker
+  draws in that model's row; a test run downloads only from 127.0.0.1 — the
+  debug-only `YAP_LLM_SOURCES` stand-ins, `{"runtime"|"<curated id>": {url,
+  sha256}}` — and refuses anything else), process lifecycle (spawn/health-wait/kill + orphan cleanup at
   startup — only sidecars whose parent Yap is gone, via `procs.rs`, so a dev build
   never kills the installed app's; and **the model never outlives Yap**:
   `procs::end_with_yap` puts the sidecar — like the speaker engine
@@ -1160,12 +1163,28 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   calls' way (`Scope::Chat` → `commands::resolve_chat_endpoint`;
   `Scope::Notes` → `meeting_summary::resolve_endpoint`): `ai_model_status
   {scope}` → `{ready, error, model, host, tools (supports_tools), fromScope,
-  keyed, onDevice}` for the Chat view's model chip and the Ask bars' model
-  lines; `chat_set_model {provider, model}` = the chip's switch (Chat scope
-  only, switched on; a keyed provider or the installed on-device model;
-  same provider keeps its URL + key, a new one gets its standard URL + the
-  shared key), saved through `save_config`, then `yap-chat-model-changed
-  {scope}` (Settings adopts it). `wake_on_device` (in `chat_send` and
+  provider (the one the scope is set to, ready or not), keyed, maskedKeys
+  (each keyed provider's key as "gsk…AbCd", `mask_key` — never the key),
+  servers, onDevice}` for the Chat view's model chip + picker and the Ask
+  bars' model lines; `chat_set_model {provider, model, baseUrl?, file?}` =
+  the picker's switch (Chat scope only, switched on; a keyed provider, the
+  installed on-device model, or a self-hosted / custom server Settings has
+  the address of — `servers(cfg)`: the Chat scope's, cleanup's, any other
+  scope's or cleanup profile's local/custom endpoint, one per address, its
+  key taken from where it's set up (`model_catalog::endpoint_key`), never
+  an address the page makes up; same provider keeps its URL + key, a new
+  one gets its standard URL + the shared key; `file` picks one of the
+  on-device GGUFs → `pp_local_model` (`set_local_model`, "" = the bundled
+  1.5B) — the one sidecar serves it for every feature, so one serving
+  another GGUF stops and starts again on it), saved through `save_config`,
+  then `yap-chat-model-changed {scope, ppLocalModel?}` (Settings adopts
+  both). `chat_provider_key {provider, key}` = the picker's "Connect
+  Claude": `set_provider_key` saves it where Settings does (`pp_api_keys`,
+  cleanup's `pp_api_key` when cleanup is on it, the Chat scope's key when
+  Chat is), through `save_config`, whose `model_catalog::on_config_saved`
+  checks that provider's list at once; the page tells Settings' copy with
+  the window event `yap-provider-key-saved` (not broadcast to every
+  window). `wake_on_device` (in `chat_send` and
   `note_ask`): a chat on the on-device model starts the sidecar
   (`local_llm::ensure_started`) or says it isn't installed, never a silent
   fallback to the endpoint underneath. `save_config` emits
@@ -2522,7 +2541,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   thread itself never runs in a test run), no spoken reply played (`tts.rs`:
   stand-in voices, Kokoro as silence once its stand-in files are installed
   from the suite's local server — `YAP_TTS_SOURCES` —, a simulated clock, no
-  audio device; what would have been said in `tts_e2e_spoken`), `e2e_chat_dictation {text}` (a
+  audio device; what would have been said in `tts_e2e_spoken`), no on-device
+  model downloaded but the suite's small fakes from 127.0.0.1
+  (`YAP_LLM_SOURCES`, `e2e/support/local-llm.js`), `e2e_chat_dictation {text}` (a
   question dictated into the Chat view, no mic needed), `e2e_assistant_ask
   {text, listenMs}` (a question to the Voice Assistant, as its shortcut
   asks it, no mic needed), no app ever launched (`apps.rs`: "open Teams"
@@ -2911,15 +2932,57 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   carry a globe, a refused action (the safety rule) a shield. The composer (message on top; mic, **model chip**,
   Send under it — `ModelChip.svelte`, names in `aiModel.js` from
   `ppModels.js` + `providerIcons.js`) shows the model the next message goes
-  to ("GPT-OSS 20B · Groq", "· no note tools" for a local model under 4B,
-  "No AI model" → Settings → Language Models → Chat via `cleanup#chat`);
-  its popover says where it runs, switches the Chat scope between the
-  keyed providers' models — Yap's list merged with each provider's live one
-  (`modelCatalog.js`): "New" after the curated ones, a dropped one hidden —
-  and the on-device model (`chat_set_model`), and links to Language model
-  settings. A chat model its provider no longer offers says so on the chip
-  ("· no longer offered") and in the popover ("Groq no longer offers GPT-OSS
-  120B. Pick another model."), still ticked. Each answer
+  to — the provider's mark (`ProviderMark.svelte`), "GPT-OSS 20B · Groq" /
+  "Qwen3.5 4B · On this PC", "· no note tools" for a local model under 4B,
+  where it runs in its tooltip, "No AI model" when nothing is set up. The
+  chip opens **the Chat model picker** (`ChatModelPicker.svelte`, data in
+  `chatModels.svelte.js`; Nathan's "Concept A, provider rail",
+  2026-10-19): a popover above the composer (`data-model-picker-above`;
+  560 px, its rail a strip across the top below 520) — **search** across
+  the top ("Search models and providers", Ctrl+K, typing anywhere searches,
+  Enter picks the first result) over every provider's models, connected or
+  not, and this PC's; a **rail** (`tablist`): Recent (the last 3 Chat models
+  used, this webview's localStorage `yapChatRecentModels`), Groq / Gemini /
+  Claude (Anthropic) / OpenAI / OpenRouter with their marks and a dot
+  (green = a key, hollow = not set up), Custom when a server elsewhere is
+  set up, and **On this PC**; it opens on the current model's provider (or
+  the one the scope is set to). The **pane**: the provider's mark on a
+  tile, its name, a status line from the live lists ("Connected · checked
+  2 h ago", "Couldn't check: …", "Not set up"), the key masked + Change
+  key; the rows are exactly Settings' list (`modelCatalog.js`'s merge:
+  curated, then "New", the rest behind "Show N more"), each a button
+  (`aria-pressed`) with a ✓ for the current one, the model family's mark
+  (GPT-OSS → openai-oss.svg, Qwen, Gemma… `familyIcon`), a one-line
+  description and ≤ 2 tags (New, Recommended for this PC, In use, no note
+  tools, No longer offered — with "Groq no longer offers GPT-OSS 120B. Pick
+  another model." above). A provider **without a key** shows "Connect
+  Claude" in place (paste a key · Save key · Get a key ↗ via
+  `openExternalLink`; `chat_provider_key`), its curated models greyed with
+  "Add key" until then (a click on one goes to the key field); once saved
+  its live list is fetched at once and its models are pickable. **On this
+  PC** ("Private: nothing leaves this PC" + where it runs: "Runs on your
+  graphics card (NVIDIA …)" from `gpu.rs` / the sidecar's placement, or
+  the processor): Settings' processor warning with "Use Qwen2.5 1.5B
+  Instruct"; a note when cleanup uses the on-device model too
+  (`local_llm_status.sharedOnDevice`: picking another switches it there as
+  well); **Installed** (Yap's curated GGUFs on disk and the person's own,
+  `local_llm_status.own`; In use / pick to use), self-hosted servers on this
+  PC (`llm_models`: their `/models`, "3 models on this server"), and
+  **Download** (the rest, "Recommended for this PC" first): a Download
+  button with the size runs `local_llm_install` right in the row with a
+  progress bar from `local-llm-download-progress` (which now names the
+  curated `model`; one at a time, it carries on when the picker closes, no
+  cancel — the install path has none), then the row is installed and
+  pickable; "Open models folder". The footer: "Changes the model for Chat
+  only. Dictation cleanup stays as it is." (or that Chat uses cleanup's
+  model until one is picked) + **Language model settings…**
+  (`cleanup#chat`). Keyboard: ↑/↓ through the rail (switching as it goes)
+  or the rows (roving tab stops), ←/→ or Tab between them, Enter picks, Esc
+  closes and gives the focus back to the chip; amber focus rings; the
+  window's in-page hotkey fallbacks run first (capture phase). Monochrome
+  marks (OpenAI, Anthropic, xAI, OpenRouter — Simple Icons' CC0 glyph) are
+  CSS masks in `currentColor`, Claude's in its brand colour. Settings →
+  Language Models keeps its own pickers. Each answer
   shows its model quietly under it, as do the Notes view's Ask bar and the
   notepad's Ask sheet (`nextModel(scope)` fetched beside the call; none for
   Yap's own "Nothing new" / "too little"). **Spoken replies** (`tts.rs`):

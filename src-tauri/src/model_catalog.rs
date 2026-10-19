@@ -1255,7 +1255,7 @@ async fn local_models(base: &str, key: &str, force: bool) -> Result<Vec<CatalogM
 }
 
 /// The base URL and key a scope's self-hosted / custom endpoint uses.
-fn endpoint_key(cfg: &YapConfig, scope: Option<&str>, provider: &str) -> String {
+pub(crate) fn endpoint_key(cfg: &YapConfig, scope: Option<&str>, provider: &str) -> String {
     match scope {
         None | Some("cleanup") => {
             if cfg.pp_provider == provider {
@@ -1348,15 +1348,24 @@ pub async fn llm_models(
     let key = endpoint_key(&cfg, scope.as_deref(), &provider);
     let now = now_secs();
     Ok(match local_models(&base, &key, force).await {
-        Ok(models) => ListView {
-            provider,
-            ok: true,
-            fetched_at: now,
-            checked_at: now,
-            error: None,
-            checking: false,
-            models,
-        },
+        Ok(mut models) => {
+            // Whether Chat would offer each Yap's note tools (a local model
+            // under 4B: no), for the Chat picker's "no note tools".
+            for m in &mut models {
+                if m.tools.is_none() {
+                    m.tools = Some(crate::tools::supports_tools(&provider, &m.id));
+                }
+            }
+            ListView {
+                provider,
+                ok: true,
+                fetched_at: now,
+                checked_at: now,
+                error: None,
+                checking: false,
+                models,
+            }
+        }
         Err(e) => ListView {
             provider,
             ok: false,

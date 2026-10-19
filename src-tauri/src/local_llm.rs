@@ -197,6 +197,12 @@ fn serving_id() -> Option<String> {
     SERVING.lock().ok()?.as_ref().map(|s| s.model_id.clone())
 }
 
+/// The id of the model the running sidecar serves, `None` while it isn't
+/// up (the Chat picker restarts it on another GGUF).
+pub fn serving_model_id() -> Option<String> {
+    serving_id()
+}
+
 /// Where the running sidecar's model went (GPU, partly, the processor);
 /// `None` while it isn't running or the log didn't say.
 pub fn placement() -> Option<Placement> {
@@ -303,11 +309,16 @@ pub fn active_model_path(cfg: &crate::config::YapConfig) -> PathBuf {
 }
 
 /// Human-readable name of the active model: the friendly name for the bundled
-/// default, else the custom GGUF's filename without extension.
+/// default or a curated model ("Qwen3.5 4B"), else the custom GGUF's
+/// filename without extension.
 pub fn active_model_display(cfg: &crate::config::YapConfig) -> String {
     let path = active_model_path(cfg);
     if path == model_path() {
         return MODEL_DISPLAY.to_string();
+    }
+    let file = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    if let Some(m) = CURATED_MODELS.iter().find(|m| m.filename == file) {
+        return m.display.to_string();
     }
     path.file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -592,9 +603,38 @@ pub async fn autostart_if_configured(cfg: &crate::config::YapConfig) {
 struct DownloadProgress {
     /// "runtime" (the llamafile engine) or "model" (the GGUF).
     stage: &'static str,
+    /// The curated id the download is for ("" for the bundled default's
+    /// install): the Chat picker shows the bar in that model's row.
+    model: String,
     percent: u8,
     downloaded_mb: f64,
     total_mb: f64,
+}
+
+/// Where a download comes from: `url` + `sha256` as pinned, or in a debug
+/// build a stand-in from the JSON file `YAP_LLM_SOURCES` (`{"runtime" |
+/// "<curated id>": {"url", "sha256"}}`): how the e2e suite downloads small
+/// fakes from a local server (`e2e/support/local-llm.js`).
+fn source(key: &str, url: &str, sha256: &str) -> (String, String) {
+    #[cfg(debug_assertions)]
+    if let Some(path) = std::env::var_os("YAP_LLM_SOURCES").filter(|v| !v.is_empty()) {
+        let stand_ins = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+        if let Some(s) = stand_ins.as_ref().and_then(|v| v.get(key)) {
+            if let (Some(u), Some(h)) = (s["url"].as_str(), s["sha256"].as_str()) {
+                return (u.to_string(), h.to_ascii_lowercase());
+            }
+        }
+    }
+    let _ = key;
+    (url.to_string(), sha256.to_string())
+}
+
+/// A test run downloads only from its own servers (127.0.0.1), never a
+/// real model from the internet. Pure.
+fn allowed_in_test_run(url: &str) -> bool {
+    url::Url::parse(url).is_ok_and(|u| u.host_str() == Some("127.0.0.1"))
 }
 
 /// A curated, SHA-pinned local cleanup model offered in onboarding/Settings.
@@ -817,13 +857,15 @@ pub fn curated_by_id(id: &str) -> Option<&'static CuratedLlm> {
 }
 
 /// Ensure the llamafile runtime is on disk (SHA-verified download if missing).
-async fn ensure_runtime(app: Option<&AppHandle>) -> Result<(), String> {
+/// `model`: the curated id the install is for (its progress names it).
+async fn ensure_runtime(model: &str, app: Option<&AppHandle>) -> Result<(), String> {
     tokio::fs::create_dir_all(llm_dir())
         .await
         .map_err(|e| format!("failed to create llm dir: {}", e))?;
 
     if !runtime_path().is_file() {
-        download_verified(RUNTIME_URL, &runtime_path(), RUNTIME_SHA256, "runtime", app).await?;
+        let (url, sha) = source("runtime", RUNTIME_URL, RUNTIME_SHA256);
+        download_for(&url, &runtime_path(), &sha, "runtime", model, app).await?;
         // On Unix the runtime needs the executable bit (Windows infers from .exe).
         #[cfg(unix)]
         {
@@ -842,9 +884,10 @@ async fn ensure_runtime(app: Option<&AppHandle>) -> Result<(), String> {
 /// SHA-verified, into `<data_dir>/llm/`. Idempotent — already-present files are
 /// skipped. Emits `local-llm-download-progress` so the UI can show a bar per stage.
 pub async fn install(app: Option<&AppHandle>) -> Result<(), String> {
-    ensure_runtime(app).await?;
+    ensure_runtime("", app).await?;
     if !model_path().is_file() {
-        download_verified(MODEL_URL, &model_path(), MODEL_SHA256, "model", app).await?;
+        let (url, sha) = source(DEFAULT_MODEL_ID, MODEL_URL, MODEL_SHA256);
+        download_for(&url, &model_path(), &sha, "model", "", app).await?;
     }
     Ok(())
 }
@@ -856,10 +899,11 @@ pub async fn install_curated(
     app: Option<&AppHandle>,
 ) -> Result<&'static CuratedLlm, String> {
     let m = curated_by_id(id).ok_or_else(|| format!("unknown cleanup model id: {}", id))?;
-    ensure_runtime(app).await?;
+    ensure_runtime(m.id, app).await?;
     let dest = llm_dir().join(m.filename);
     if !dest.is_file() {
-        download_verified(m.url, &dest, m.sha256, "model", app).await?;
+        let (url, sha) = source(m.id, m.url, m.sha256);
+        download_for(&url, &dest, &sha, "model", m.id, app).await?;
     }
     Ok(m)
 }
@@ -874,9 +918,24 @@ pub(crate) async fn download_verified(
     stage: &'static str,
     app: Option<&AppHandle>,
 ) -> Result<(), String> {
+    download_for(url, dest, expected_sha, stage, "", app).await
+}
+
+/// [`download_verified`], its progress naming the curated model `model`.
+async fn download_for(
+    url: &str,
+    dest: &Path,
+    expected_sha: &str,
+    stage: &'static str,
+    model: &str,
+    app: Option<&AppHandle>,
+) -> Result<(), String> {
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
 
+    if crate::e2e::active() && !allowed_in_test_run(url) {
+        return Err("Test runs never download models from the internet".to_string());
+    }
     let partial = dest.with_extension("partial");
     tracing::info!(url, dest = %dest.display(), stage, "Downloading on-device cleanup asset");
 
@@ -909,6 +968,7 @@ pub(crate) async fn download_verified(
                     "local-llm-download-progress",
                     DownloadProgress {
                         stage,
+                        model: model.to_string(),
                         percent: pct,
                         downloaded_mb: downloaded as f64 / 1_048_576.0,
                         total_mb: total as f64 / 1_048_576.0,
@@ -1020,6 +1080,20 @@ mod tests {
         assert!(upgrade_offer(true, true, MODEL_FILENAME, true).is_none(), "turned down");
         assert!(upgrade_offer(true, true, "Qwen_Qwen3.5-4B-Q4_K_M.gguf", false).is_none(), "already on it");
         assert!(upgrade_offer(true, true, "my-own.gguf", false).is_none(), "a model of their own");
+    }
+
+    #[test]
+    fn a_test_run_downloads_only_from_its_own_servers() {
+        assert!(allowed_in_test_run("http://127.0.0.1:5123/llm/qwen3.5-4b.gguf"));
+        assert!(!allowed_in_test_run(MODEL_URL));
+        assert!(!allowed_in_test_run(RUNTIME_URL));
+        assert!(!allowed_in_test_run("http://localhost:5123/llm/x.gguf"));
+        assert!(!allowed_in_test_run("not a web address"));
+        // Without stand-ins: the pinned source.
+        assert_eq!(
+            source("no-such-id", MODEL_URL, MODEL_SHA256),
+            (MODEL_URL.to_string(), MODEL_SHA256.to_string())
+        );
     }
 
     #[test]
