@@ -665,7 +665,7 @@ fn place(app: &AppHandle, screen: Screen, edge: Edge, moved_monitor: bool) {
 
 /// The cursor: the real one, or test mode's pretend one.
 fn cursor() -> Option<(i32, i32)> {
-    if crate::e2e::active() {
+    if crate::e2e::active() && !crate::e2e::real_cursor() {
         return lock().sim_cursor;
     }
     #[cfg(windows)]
@@ -859,7 +859,10 @@ fn hover(app: &AppHandle, cursor: Option<(i32, i32)>) {
         .and_then(|h| overlay::win::window_rect(h.0).map(|r| (r, overlay::win::window_scale(h.0))));
     #[cfg(not(windows))]
     let geometry: Option<(Rect, f64)> = None;
-    let Some((rect, scale)) = geometry else { return };
+    let Some((rect, scale)) = geometry else {
+        tracing::debug!("bar: hover: no window geometry");
+        return;
+    };
     let (toggle, pointer, became_interactive) = {
         let mut s = lock();
         s.near = cursor.is_some_and(|(x, y)| rect.inflate(NEAR_PX).contains(x, y));
@@ -868,6 +871,9 @@ fn hover(app: &AppHandle, cursor: Option<(i32, i32)>) {
             .and_then(|c| overlay::region_at(&s.regions, c, (rect.left, rect.top), scale, slack))
             .map(|r| r.id.clone());
         let want = clickable(s.visibility(now_ms()), s.shown, hit.is_some());
+        if hit.is_some() != s.pointer.is_some() || want != s.interactive {
+            tracing::debug!(?cursor, ?rect, scale, ?hit, want, shown = s.shown, regions = s.regions.len(), "bar: hover");
+        }
         let toggle = (want != s.interactive).then_some(want);
         s.interactive = want;
         let region = if want { hit } else { None };
@@ -1254,6 +1260,10 @@ fn sync_escape() {
 /// handler gets `action` (none for an empty one). Blocking handlers are
 /// fine: this runs off the main thread.
 fn card_action(app: &AppHandle, id: &str, action: &str) {
+    // Every answer a card gets (a button, its ✕, Esc, its timer running
+    // out): when a card "won't close", the log shows whether the click
+    // ever reached Yap.
+    tracing::info!(card = %id, action = if action.is_empty() { "(none)" } else { action }, "bar: card answered");
     let handler = lock().remove_card(id).flatten();
     if !repick(app) {
         after_cards_changed(app);

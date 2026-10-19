@@ -50,6 +50,19 @@ pub fn active() -> bool {
     false
 }
 
+/// The Yap bar follows the REAL cursor in this test run
+/// (`YAP_E2E_REAL_CURSOR=1`): for checking that a real mouse click reaches
+/// it (the bar's hit-testing, `bar.rs`). Without it a test run's bar only
+/// sees the cursor `bar_simulate` pretends. Always `false` in release builds.
+pub fn real_cursor() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        active() && std::env::var("YAP_E2E_REAL_CURSOR").is_ok_and(|v| v.trim() == "1")
+    }
+    #[cfg(not(debug_assertions))]
+    false
+}
+
 /// Stand-ins for installed call apps' icons (`YAP_E2E_APP_ICONS`: a folder
 /// of `<app id>.png`), since test mode reads no installed apps
 /// (`app_icons.rs`). `None` without it, and always in release builds.

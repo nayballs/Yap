@@ -2042,7 +2042,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   auto-start countdown, the assistant's answer). Debug-only `bar_simulate` (pretend cursor on a
   region, fake fullscreen kinds, Esc, demo cards) and `bar_debug` (the real
   ex-styles, WindowFromPoint on the pill, the thread's active window) for the
-  e2e suite. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Light / Dark,
+  e2e suite; a test run's bar only sees `bar_simulate`'s cursor unless it's
+  started with `YAP_E2E_REAL_CURSOR=1` (debug-only, `e2e::real_cursor`: the
+  real one, for checking a real click reaches it — never while Nathan's
+  using the mouse). Every card answer (button, ✕, Esc, its timer) is logged
+  as "bar: card answered" with the card and action; the hover check logs at
+  debug when it changes. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Light / Dark,
   `bar_dictation_buttons`; `overlay_position` puts it at the top). Bar off = the old behaviour: the
   overlay only while dictating, notices as Windows notifications — but a
   showing dictation's ✕ / ✓ and Undo still take clicks (`clickable`).
