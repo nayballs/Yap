@@ -1545,6 +1545,30 @@ pub fn local_llm_status() -> serde_json::Value {
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
+    // GGUFs of the person's own in the folder (not Yap's curated set), for
+    // the Chat picker's "On this PC".
+    let own: Vec<serde_json::Value> = on_disk
+        .iter()
+        .filter(|f| !crate::local_llm::CURATED_MODELS.iter().any(|m| m.filename == f.as_str()))
+        .map(|f| {
+            let id = crate::local_llm::model_id(std::path::Path::new(f));
+            let mb = std::fs::metadata(crate::local_llm::llm_dir().join(f)).map(|m| m.len() / 1_048_576).unwrap_or(0);
+            serde_json::json!({
+                "file": f,
+                "name": id,
+                "sizeMb": mb,
+                "tools": crate::tools::supports_tools(crate::local_llm::PROVIDER_ONDEVICE, &id),
+            })
+        })
+        .collect();
+    // Another feature than Chat on the on-device model (cleanup, a profile,
+    // a scope): it shares the one sidecar, so switching it switches theirs.
+    let shared_on_device = (cfg.post_process_enabled && cfg.pp_provider == crate::local_llm::PROVIDER_ONDEVICE)
+        || cfg.cleanup_profiles.iter().any(|p| p.provider == crate::local_llm::PROVIDER_ONDEVICE)
+        || cfg
+            .llm_scopes
+            .iter()
+            .any(|(k, s)| k != "chat" && s.enabled && s.provider == crate::local_llm::PROVIDER_ONDEVICE);
     let upgrade = crate::local_llm::upgrade_offer(
         capable,
         crate::local_llm::in_use(&cfg),
@@ -1566,7 +1590,10 @@ pub fn local_llm_status() -> serde_json::Value {
         "model": crate::local_llm::active_model_display(&cfg),
         "engine": crate::local_llm::ENGINE_DISPLAY,
         "activeModel": cfg.pp_local_model,
+        "activeFile": active_file,
         "models": on_disk,
+        "own": own,
+        "sharedOnDevice": shared_on_device,
         "curated": curated,
         "gpu": gpu,
         "gpuCapable": capable,

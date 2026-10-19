@@ -450,6 +450,7 @@ pub fn run() {
             commands::chat_send,
             ai_model::ai_model_status,
             ai_model::chat_set_model,
+            ai_model::chat_provider_key,
             model_catalog::model_catalog,
             model_catalog::model_catalog_refresh,
             model_catalog::llm_models,

@@ -726,8 +726,8 @@
     {/if}
 
     <!-- Composer: the message on top; the mic, the model it goes to and
-         Send under it. -->
-    <div class="inputbar">
+         Send under it. The model picker opens above it. -->
+    <div class="inputbar" data-model-picker-above>
       <input
         class="msginput"
         bind:this={inputEl}

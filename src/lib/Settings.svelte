@@ -858,14 +858,32 @@
       if (e.detail.llmScopes) chatScopeRev += 1;
     }
   }
+  // The Chat model picker connected a provider (ai_model.rs
+  // `set_provider_key` saved it): the key where this copy keeps it too —
+  // the shared store, cleanup's own when cleanup is on that provider, the
+  // Chat scope's — or this copy's next auto-save would drop it.
+  function onProviderKeySaved(e) {
+    const { provider: p, key } = e.detail || {};
+    if (!cfg || !p || !key) return;
+    cfg.ppApiKeys = { ...(cfg.ppApiKeys || {}), [p]: key };
+    if (cfg.ppProvider === p) cfg.ppApiKey = key;
+    const chat = cfg.llmScopes?.chat;
+    if (chat && (chat.provider === p || (chat.apiKeys && p in chat.apiKeys))) {
+      if (chat.provider === p) chat.apiKey = key;
+      if (chat.apiKeys && p in chat.apiKeys) chat.apiKeys = { ...chat.apiKeys, [p]: key };
+      chatScopeRev += 1;
+    }
+  }
   $effect(() => {
     window.addEventListener('yap-settings-goto', onSettingsGoto);
     window.addEventListener('yap-dictionary-changed', onDictChanged);
     window.addEventListener('yap-config-patched', onConfigPatched);
+    window.addEventListener('yap-provider-key-saved', onProviderKeySaved);
     return () => {
       window.removeEventListener('yap-settings-goto', onSettingsGoto);
       window.removeEventListener('yap-dictionary-changed', onDictChanged);
       window.removeEventListener('yap-config-patched', onConfigPatched);
+      window.removeEventListener('yap-provider-key-saved', onProviderKeySaved);
     };
   });
   // General → Meetings → "Ask about calls in": each app's effective choice
@@ -919,6 +937,12 @@
   let chatScopeRev = $state(0);
   onMount(() => {
     const un = listen('yap-chat-model-changed', (e) => {
+      // The picker chose another of the on-device models: the one for
+      // every feature (the sidecar serves one).
+      if (cfg && typeof e.payload?.ppLocalModel === 'string') {
+        cfg.ppLocalModel = e.payload.ppLocalModel;
+        refreshLocalLlm();
+      }
       const s = e.payload?.scope;
       if (!cfg || !s || typeof s !== 'object') return;
       if (!cfg.llmScopes || typeof cfg.llmScopes !== 'object') cfg.llmScopes = {};

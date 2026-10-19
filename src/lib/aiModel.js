@@ -1,10 +1,10 @@
 // Naming the AI model a call goes to (ai_model.rs says which provider and
-// id; this file says it in words): the Chat view's model chip, the quiet
-// "GPT-OSS 20B · Groq" line under each answer, and the chip's switch list.
+// id; this file says it in words): the Chat view's model chip and its
+// picker, and the quiet "GPT-OSS 20B · Groq" line under each answer.
 // Short names come from ppModels.js's registry (else the provider's own name
 // from its live list, modelCatalog.svelte.js), icons from providerIcons.js.
 import { invoke } from '@tauri-apps/api/core';
-import { PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
+import { PROVIDER_ICONS } from './providerIcons.js';
 import { modelsFor, modelLabel } from './modelCatalog.svelte.js';
 
 /**
@@ -29,7 +29,7 @@ export const PROVIDER_LABELS = {
   custom: 'Custom',
 };
 
-/** Cloud providers, in Settings' order (the switch lists them so). */
+/** Cloud providers, in Settings' order. */
 const CLOUD_ORDER = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter'];
 
 /**
@@ -79,100 +79,41 @@ export function whereItRuns(m, host = '') {
   return host ? `Runs on ${host}` : 'Runs on your own server';
 }
 
-/** Brand icons for a model family, when the provider has none of its own. */
+/** A model family's mark, by its name or id (the most specific first). */
 const FAMILY_ICONS = [
-  [/qwen/i, 'qwen'],
+  [/gpt[-_ ]?oss/i, 'openai-oss'],
+  [/qwen|qwq/i, 'qwen'],
+  [/gemma/i, 'gemma'],
+  [/gemini/i, 'gemini'],
   [/llama/i, 'llama'],
-  [/mistral|mixtral/i, 'mistral'],
-  [/gemma|gemini/i, 'gemini'],
+  [/mistral|mixtral|magistral|ministral|devstral|codestral/i, 'mistral'],
   [/claude/i, 'claude'],
-  [/gpt|openai/i, 'openai'],
+  [/grok/i, 'xai'],
+  [/\bgpt|openai/i, 'openai'],
 ];
 
-/** `{ id, src, mono }` for the provider's icon (or the model family's), or null. */
-export function modelIcon(m) {
-  if (!m) return null;
-  let id = PROVIDER_ICONS[m.provider] ? m.provider : null;
-  // OpenRouter routes to many families; name none of them by its logo.
-  if (!id && m.provider !== 'openrouter') {
-    const hay = `${m.name || ''} ${m.id || ''}`;
-    id = FAMILY_ICONS.find(([re]) => re.test(hay))?.[1] ?? null;
-  }
-  return id ? { id, src: PROVIDER_ICONS[id], mono: MONOCHROME_PROVIDERS.has(id) } : null;
+/**
+ * The icon id of a model's family from its name or id ("GPT-OSS 20B" →
+ * "openai-oss", "Gemma 4 31B" → "gemma", "Qwen3.5 4B" → "qwen"), or null:
+ * the picker's rows show the model's own mark, the rail and the chip the
+ * provider's.
+ */
+export function familyIcon(...texts) {
+  const hay = texts.filter(Boolean).join(' ');
+  return FAMILY_ICONS.find(([re]) => re.test(hay))?.[1] ?? null;
+}
+
+/** A cloud provider's mark (Anthropic's is Claude's, as the picker's rail shows it). */
+export function providerIcon(provider) {
+  if (provider === 'anthropic') return 'claude';
+  return PROVIDER_ICONS[provider] ? provider : null;
 }
 
 /**
- * The chip's switch: the models of every provider with a key (Yap's list
- * merged with the provider's live one, modelCatalog.js: "New" ones after
- * the curated, the saved one kept when it's no longer offered), then the
- * on-device model when it's installed; the current model ticked (and listed
- * first when it's none of those, a custom or self-hosted one). Each item:
- * `{ key, provider, model, label, tools, current, tag: 'new'|'gone'|null }`.
+ * The chip's icon id: the provider's mark, else (the on-device model, a
+ * self-hosted server) the model family's, else null (Yap's own glyph).
  */
-export function switchGroups(status) {
-  const current = status?.ready ? status.model : null;
-  const isCurrent = (provider, model) =>
-    !!current && current.provider === provider && (provider === 'ondevice' || current.id === model);
-  const groups = [];
-  for (const p of CLOUD_ORDER) {
-    if (!status?.keyed?.includes(p)) continue;
-    const merged = modelsFor(p, current?.provider === p ? current.id : '');
-    const items = merged.items.map((m) => ({
-      key: `${p}:${m.value}`,
-      provider: p,
-      model: m.value,
-      label: m.label,
-      // Cloud models use Yap's note tools unless the provider says it can't.
-      tools: m.tools !== false,
-      current: isCurrent(p, m.value),
-      tag: m.missing ? 'gone' : m.tag,
-    }));
-    // The current model of this provider, when no list has it (a custom id).
-    if (current?.provider === p && !items.some((i) => i.model === current.id)) {
-      items.unshift({
-        key: `${p}:${current.id}`,
-        provider: p,
-        model: current.id,
-        label: modelName(current),
-        tools: status.tools,
-        current: true,
-        tag: null,
-      });
-    }
-    groups.push({ id: p, label: PROVIDER_LABELS[p], items });
-  }
-  if (status?.onDevice) {
-    groups.push({
-      id: 'ondevice',
-      label: 'On this PC',
-      items: [
-        {
-          key: 'ondevice',
-          provider: 'ondevice',
-          model: '',
-          label: status.onDevice.name,
-          tools: status.onDevice.tools,
-          current: isCurrent('ondevice', ''),
-        },
-      ],
-    });
-  }
-  if (current && !groups.some((g) => g.items.some((i) => i.current))) {
-    groups.unshift({
-      id: 'current',
-      label: providerName(current),
-      items: [
-        {
-          key: `current:${current.provider}:${current.id}`,
-          provider: current.provider,
-          model: current.id,
-          label: modelName(current),
-          tools: status.tools,
-          current: true,
-          fixed: true,
-        },
-      ],
-    });
-  }
-  return groups;
+export function modelIcon(m) {
+  if (!m) return null;
+  return providerIcon(m.provider) ?? familyIcon(m.name, m.id);
 }
