@@ -253,8 +253,8 @@ migration; never edit an applied one.
 
 ## Deploying
 
-Live at `https://auth.contextmirror.com` (Cloudflare account
-"Nayballs@googlemail.com's Account"): Worker `yap-auth` on its custom domain
+Live at `https://auth.contextmirror.com` (the project owner's Cloudflare
+account): Worker `yap-auth` on its custom domain
 only, D1 `yap-auth` (WEUR). Client ids are public and live in `wrangler.toml`
 `[vars]`; the secrets are set with `npx wrangler secret put <NAME>`:
 `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`,
