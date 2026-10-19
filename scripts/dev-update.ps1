@@ -42,6 +42,7 @@ try {
 
     $before = (git rev-parse HEAD)
     $lockBefore = (git rev-parse HEAD:package-lock.json)
+    $pkgBefore = (git rev-parse HEAD:package.json)
     Say 'Checking GitHub for the latest version...'
     git fetch --quiet origin main
     if ($LASTEXITCODE -ne 0) { Say "Couldn't reach GitHub: running the version already here." Yellow; exit 0 }
@@ -56,9 +57,13 @@ try {
         git log --oneline --no-merges "$before..$after" | Select-Object -First 12 | ForEach-Object { Say "  $_" }
     }
 
-    # New or changed JavaScript dependencies: install them before Vite starts.
+    # New or changed JavaScript dependencies, or an install that's missing
+    # its tools (the Tauri command gone from node_modules\.bin, 2026-10-19):
+    # install them before Vite starts.
     $lockAfter = (git rev-parse HEAD:package-lock.json)
-    if (($lockAfter -ne $lockBefore) -or -not (Test-Path 'node_modules')) {
+    $pkgAfter = (git rev-parse HEAD:package.json)
+    $toolsMissing = -not (Test-Path 'node_modules\.bin\tauri.cmd') -or -not (Test-Path 'node_modules\.bin\vite.cmd')
+    if (($lockAfter -ne $lockBefore) -or ($pkgAfter -ne $pkgBefore) -or $toolsMissing) {
         Say 'Installing updated dependencies (npm install)...'
         npm install --no-audit --no-fund
     }
