@@ -7,7 +7,8 @@
 // Lists the feat/fix/perf commits in <since-ref>..HEAD (no merges), or the
 // last 25 commits when <since-ref> is missing or not an ancestor of HEAD.
 // Skips what doesn't ship in the app: the account server (cloud), the
-// website, CI, docs and test tooling. Prints markdown (lib/markdown.js
+// website, CI, docs, test tooling, the model evals and the dev build's own
+// tooling. Prints markdown (lib/markdown.js
 // renders it).
 import { execFileSync } from 'node:child_process';
 
@@ -24,7 +25,7 @@ if (since) {
   }
 }
 
-const SKIP_SCOPES = new Set(['cloud', 'website', 'ci', 'docs', 'deps', 'e2e', 'test', 'tests', 'lint']);
+const SKIP_SCOPES = new Set(['cloud', 'website', 'ci', 'docs', 'deps', 'e2e', 'test', 'tests', 'lint', 'eval', 'evals', 'real', 'robot', 'dev']);
 const groups = { feat: [], fix: [] };
 const seen = new Set();
 for (const subject of git('log', '--no-merges', '--format=%s', ...range).split('\n')) {
@@ -32,6 +33,8 @@ for (const subject of git('log', '--no-merges', '--format=%s', ...range).split('
   if (!m) continue;
   const scopes = (m[2] || '').toLowerCase().split(/[\s,/]+/);
   if (scopes.some((s) => SKIP_SCOPES.has(s))) continue;
+  // A lint fix ("… (clippy)") changes nothing anyone can see.
+  if (/\bclippy\b/i.test(m[3])) continue;
   const text = m[3].trim().replace(/\.$/, '');
   const line = text.charAt(0).toUpperCase() + text.slice(1);
   if (seen.has(line)) continue;
