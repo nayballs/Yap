@@ -304,6 +304,110 @@
     }
   }
 
+  // ---- Several at once (Nathan, 2026-10-19: "shift click some chats and
+  // delete them all together", as Claude Code's sessions list) ----
+  // Click opens a conversation; Shift+click selects the range from the last
+  // one clicked, Ctrl+click adds or takes out one (File Explorer's rules).
+  // A selection shows a "3 selected · Delete" bar; Delete deletes it, Esc
+  // clears it, Ctrl+A in the list selects every one. "Delete all chats…"
+  // is in the list's ⋯ menu, asked first like every delete.
+  let picked = $state([]);
+  let anchor = $state(null);
+  const ordered = $derived(groups.flatMap((g) => g.items));
+
+  function clickConversation(e, c) {
+    if (e.shiftKey) {
+      const ids = ordered.map((x) => x.id);
+      const from = anchor ?? activeId ?? c.id;
+      const a = ids.indexOf(from);
+      const b = ids.indexOf(c.id);
+      const range = a < 0 ? [c.id] : ids.slice(Math.min(a, b), Math.max(a, b) + 1);
+      picked = e.ctrlKey || e.metaKey ? [...new Set([...picked, ...range])] : range;
+      if (anchor == null) anchor = from;
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      // The open conversation counts as picked when a selection starts.
+      const base = picked.length ? picked : activeId != null && activeId !== c.id ? [activeId] : [];
+      picked = base.includes(c.id) ? base.filter((id) => id !== c.id) : [...base, c.id];
+      anchor = c.id;
+      return;
+    }
+    picked = [];
+    anchor = c.id;
+    selectConversation(c.id);
+  }
+
+  function clearPicked() {
+    picked = [];
+    anchor = null;
+  }
+
+  // `all`: "Delete all chats…" (every conversation the list shows).
+  function askDeleteMany(ids, { all = false } = {}) {
+    const convs = conversations.filter((c) => ids.includes(c.id));
+    if (!convs.length) return;
+    if (convs.length === 1 && !all) return askDelete(convs[0]);
+    const count = convs.reduce((n, c) => n + (c.messageCount || 0), 0);
+    askConfirm({
+      title: all
+        ? convs.length === 1
+          ? 'Delete your only chat?'
+          : `Delete all ${convs.length} chats?`
+        : `Delete ${convs.length} chats?`,
+      body: `${count === 1 ? 'Their 1 message goes' : `Their ${count} messages go`} for good. Your notes and meetings stay.`,
+      run: () => removeConversations(convs.map((c) => c.id)),
+    });
+  }
+
+  async function removeConversations(ids) {
+    try {
+      const gone = await invoke('chat_delete_many', { ids });
+      if (ids.includes(activeId)) newChat();
+      clearPicked();
+      await refreshList();
+      toast({ title: gone === 1 ? 'Chat deleted' : `${gone} chats deleted`, variant: 'success' });
+      return true;
+    } catch (e) {
+      toast({ title: "Couldn't delete the chats", description: String(e), variant: 'destructive' });
+      return false;
+    }
+  }
+
+  // The list's own keys: Delete, Esc and Ctrl+A (Enter and the menu keys
+  // stay with each row).
+  function listKeydown(e) {
+    if (renaming || e.target.closest?.('input, textarea')) return;
+    if (e.key === 'Delete' && (picked.length || e.target.dataset?.conv)) {
+      e.preventDefault();
+      askDeleteMany(picked.length ? picked : [Number(e.target.dataset.conv)]);
+    } else if (e.key === 'Escape' && picked.length) {
+      e.preventDefault();
+      e.stopPropagation();
+      clearPicked();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      picked = ordered.map((c) => c.id);
+    }
+  }
+
+  function listMenu(e) {
+    openContextMenu(
+      e,
+      [
+        { label: 'Select all', icon: 'check', onselect: () => (picked = ordered.map((c) => c.id)) },
+        { separator: true },
+        {
+          label: 'Delete all chats…',
+          icon: 'trash',
+          danger: true,
+          onselect: () => askDeleteMany(ordered.map((c) => c.id), { all: true }),
+        },
+      ],
+      { label: 'Chats' }
+    );
+  }
+
   // ---- Right-click menus (ui/contextMenu.svelte.js) ----
 
   // The conversation rows, by id (the menu gives the focus back to its row).
@@ -312,6 +416,20 @@
   let renaming = $state(null);
 
   function conversationMenu(e, c) {
+    // On a row of a selection: the selection's menu.
+    if (picked.length > 1 && picked.includes(c.id)) {
+      openContextMenu(
+        e,
+        [
+          { label: `Delete ${picked.length} chats…`, icon: 'trash', danger: true, onselect: () => askDeleteMany(picked) },
+          { separator: true },
+          { label: 'Clear selection', onselect: clearPicked },
+        ],
+        { label: `${picked.length} selected chats`, row: convEls[c.id] }
+      );
+      return;
+    }
+    clearPicked();
     // A right-click opens it too, as a click does (not while an answer comes).
     if (e.type === 'contextmenu' && !devInspect(e) && !sending && activeId !== c.id) selectConversation(c.id);
     openContextMenu(
@@ -440,6 +558,10 @@
   }
 
   function onKeydown(e) {
+    if (e.key === 'Escape' && picked.length && !e.defaultPrevented) {
+      clearPicked();
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
       e.preventDefault();
       newChat();
@@ -533,13 +655,27 @@
 
 <div class="chat">
   <!-- Conversation sidebar -->
-  <aside class="convs">
-    <div class="tools">
-      <button class="tool" onclick={newChat}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4z" /></svg>
-        New chat
-      </button>
-    </div>
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <aside class="convs" onkeydown={listKeydown}>
+    {#if picked.length}
+      <div class="tools selbar" role="toolbar" aria-label="Selected chats">
+        <span class="selcount" title="Shift+click selects a range, Ctrl+click adds or takes out one">{picked.length} selected</span>
+        <button class="selbtn danger" onclick={() => askDeleteMany(picked)}>Delete</button>
+        <button class="selbtn" onclick={clearPicked}>Cancel</button>
+      </div>
+    {:else}
+      <div class="tools">
+        <button class="tool" onclick={newChat}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4z" /></svg>
+          New chat
+        </button>
+        {#if conversations.length}
+          <button class="listmore" title="More" aria-label="More for chats" aria-haspopup="menu" onclick={listMenu}>
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
+          </button>
+        {/if}
+      </div>
+    {/if}
 
     {#if conversations.length === 0}
       <p class="convempty">Start your first conversation</p>
@@ -572,11 +708,14 @@
                 bind:this={convEls[c.id]}
                 class="conv"
                 class:active={activeId === c.id}
+                class:picked={picked.includes(c.id)}
                 class:menuopen={menuOpenFor(convEls[c.id])}
                 role="button"
                 tabindex="0"
                 aria-haspopup="menu"
-                onclick={() => selectConversation(c.id)}
+                data-conv={c.id}
+                onmousedown={(e) => e.shiftKey && e.preventDefault()}
+                onclick={(e) => clickConversation(e, c)}
                 oncontextmenu={(e) => conversationMenu(e, c)}
                 onkeydown={(e) => {
                   if (e.target !== e.currentTarget) return;
@@ -584,7 +723,10 @@
                   else menuKey(e, (ev) => conversationMenu(ev, c));
                 }}
               >
-                <span class="ctitle">{c.title || 'Untitled'}</span>
+                {#if picked.includes(c.id)}
+                  <span class="pickmark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg></span>
+                {/if}
+                <span class="ctitle">{c.title || 'Untitled'}{#if picked.includes(c.id)}<span class="sr-only">, selected</span>{/if}</span>
                 <button
                   class="more"
                   title="More"
@@ -792,11 +934,89 @@
   }
   .tools {
     padding: 12px 8px 4px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .listmore {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: var(--yap-r);
+    background: none;
+    color: var(--yap-muted);
+    cursor: pointer;
+  }
+  .listmore:hover {
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+  }
+  .listmore svg {
+    width: 14px;
+    height: 14px;
+  }
+  .selbar {
+    gap: 6px;
+    padding: 12px 10px 4px;
+  }
+  .selcount {
+    flex: 1 1 auto;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--yap-fg);
+  }
+  .selbtn {
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .selbtn:hover {
+    border-color: var(--yap-border-hover);
+  }
+  .selbtn.danger {
+    color: var(--yap-danger);
+  }
+  .conv.picked,
+  .conv.picked:hover,
+  .conv.picked.active {
+    background: var(--yap-primary-tint);
+  }
+  .pickmark {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    display: grid;
+    place-items: center;
+    background: var(--yap-primary);
+    color: var(--yap-primary-fg);
+  }
+  .pickmark svg {
+    width: 10px;
+    height: 10px;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
   .tool {
     display: flex;
     align-items: center;
     gap: 9px;
+    flex: 1 1 auto;
     width: 100%;
     height: 30px;
     padding: 0 10px;

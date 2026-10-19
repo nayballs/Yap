@@ -292,10 +292,22 @@ pub fn append_sourced(
 }
 
 pub fn delete(id: u64) {
+    delete_many(&[id]);
+}
+
+/// Delete several conversations in one write (the Chat list's multi-select
+/// and "Delete all chats…"). Returns how many were there to delete; ids
+/// already gone are skipped.
+pub fn delete_many(ids: &[u64]) -> usize {
     with_store(|s| {
-        s.conversations.retain(|c| c.id != id);
-        save_to_disk(s);
-    });
+        let before = s.conversations.len();
+        s.conversations.retain(|c| !ids.contains(&c.id));
+        let gone = before - s.conversations.len();
+        if gone > 0 {
+            save_to_disk(s);
+        }
+        gone
+    })
 }
 
 /// The source numbers an answer may cite without searching again: the
@@ -450,6 +462,19 @@ mod tests {
         ];
         assert_eq!(earlier_source_numbers(&messages), [1, 2, 3]);
         assert!(earlier_source_numbers(&messages[..1]).is_empty());
+    }
+
+    #[test]
+    fn several_conversations_go_in_one_delete() {
+        let ids: Vec<u64> = ["One", "Two", "Three", "Four"].iter().map(|t| create(t).id).collect();
+        // Two of them, plus an id that's already gone.
+        assert_eq!(delete_many(&[ids[0], ids[2], 999]), 2);
+        let left: Vec<u64> = with_store(|s| s.conversations.iter().map(|c| c.id).collect());
+        assert_eq!(left, vec![ids[1], ids[3]]);
+        assert_eq!(delete_many(&[]), 0);
+        // "Delete all chats…": every id the list showed.
+        assert_eq!(delete_many(&left), 2);
+        assert!(with_store(|s| s.conversations.is_empty()));
     }
 
     #[test]

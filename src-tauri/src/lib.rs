@@ -446,6 +446,7 @@ pub fn run() {
             commands::chats_list,
             commands::chat_get,
             commands::chat_delete,
+            commands::chat_delete_many,
             commands::chat_rename,
             commands::chat_send,
             ai_model::ai_model_status,

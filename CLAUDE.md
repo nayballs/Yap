@@ -2913,7 +2913,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   card linking to Settings → Language Models); the Home feed has **Ctrl+K
   search**. **`ChatView.svelte`** = the
   AI Chat surface (OpenWhispr `chat/ChatView.tsx` port): conversation sidebar
-  (Today/Yesterday/Previous 7 Days/Older grouping, Ctrl+N, hover-delete) +
+  (Today/Yesterday/Previous 7 Days/Older grouping, Ctrl+N, hover-delete;
+  **several at once**: Shift+click a range, Ctrl+click one, Ctrl+A in the
+  list → a "3 selected · Delete · Cancel" bar, Delete key / Esc; the list's
+  ⋯ menu has Select all and "Delete all chats…", every delete asked first;
+  `chat_delete_many` = one write, `chats::delete_many`) +
   thread; `chat_send` answers via the Chat scope with **eager keyword-RAG**
   over the notes library (top-5 `<note>` snippets; `chats.rs` persists
   conversations to `chats.json`) **plus the tool-calling agent loop**

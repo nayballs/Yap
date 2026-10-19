@@ -843,6 +843,17 @@ pub fn chat_delete(id: u64) {
     crate::apps::moved_on(Some(id));
 }
 
+/// Several conversations at once (the Chat list's selection, "Delete all
+/// chats…"): one write. Returns how many were deleted.
+#[tauri::command]
+pub fn chat_delete_many(ids: Vec<u64>) -> usize {
+    let gone = crate::chats::delete_many(&ids);
+    for id in ids {
+        crate::apps::moved_on(Some(id));
+    }
+    gone
+}
+
 /// Rename a conversation (the Chat sidebar's Rename, in place): the title as
 /// stored (one line, trimmed, ≤ 80 characters). Its place in the list stays.
 #[tauri::command]
