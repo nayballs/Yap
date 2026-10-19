@@ -647,9 +647,11 @@
 
   <div class="foot">
     <span>
-      {status?.ready && !status.fromScope
-        ? "Chat uses Dictation Cleanup's model until you pick one here. Cleanup stays as it is."
-        : 'Changes the model for Chat only. Dictation cleanup stays as it is.'}
+      {sel === 'pc' && !q
+        ? 'Yap runs one model on this PC: picking one here also changes it for dictation cleanup when cleanup runs on this PC.'
+        : status?.ready && !status.fromScope
+          ? "Chat uses Dictation Cleanup's model until you pick one here. Cleanup stays as it is."
+          : 'Changes the model for Chat only. Dictation cleanup stays as it is.'}
     </span>
     <button class="footlink" onclick={openSettings}>Language model settings…</button>
   </div>

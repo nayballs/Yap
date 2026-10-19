@@ -318,6 +318,8 @@ test('On this PC: the recommended model downloads in its row, then Chat uses it'
   await expect(head).toContainText('On this PC');
   await expect(head).toContainText('Private: nothing leaves this PC');
   await expect(head).toContainText(`Runs on your graphics card (${CARD})`);
+  // One model runs on this PC, for Chat and on-device cleanup alike.
+  await expect(pop.locator('.foot')).toContainText('also changes it for dictation cleanup when cleanup runs on this PC');
 
   const installed = pane(main).getByRole('group', { name: 'Installed' });
   await expect(installed.locator('.nm')).toHaveText(['Qwen2.5 1.5B Instruct']);
