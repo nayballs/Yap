@@ -646,13 +646,15 @@
   </div>
 
   <div class="foot">
-    <span>
-      {sel === 'pc' && !q
-        ? 'Yap runs one model on this PC: picking one here also changes it for dictation cleanup when cleanup runs on this PC.'
-        : status?.ready && !status.fromScope
+    <!-- On this PC the pane says it when it applies (the on-device model is
+         shared with dictation cleanup), so the footer doesn't repeat it. -->
+    {#if sel !== 'pc' || q}
+      <span>
+        {status?.ready && !status.fromScope
           ? "Chat uses Dictation Cleanup's model until you pick one here. Cleanup stays as it is."
           : 'Changes the model for Chat only. Dictation cleanup stays as it is.'}
-    </span>
+      </span>
+    {/if}
     <button class="footlink" onclick={openSettings}>Language model settings…</button>
   </div>
 </div>

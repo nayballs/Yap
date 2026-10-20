@@ -2944,9 +2944,9 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   carry a globe, a refused action (the safety rule) a shield. The composer (2026-10-20, after Claude
   Code's: one row — **+** (a "Chat options" popover: the Voice replies switch,
   the voice volume slider, Voice settings…), the message box (aria-label
-  "Message"), the mic, and Send only once there's text; under it, quiet,
-  "Read aloud · 50%" while voice replies are on and the **model chip** (its
-  `quiet` look) — `ModelChip.svelte`, names in `aiModel.js` from
+  "Message"), the mic, and Send only once there's text; an amber dot on the +
+  while voice replies are on; under the box on the left, quiet, the **model
+  chip** (its `quiet` look; never inside +: always in view) — `ModelChip.svelte`, names in `aiModel.js` from
   `ppModels.js` + `providerIcons.js`) shows the model the next message goes
   to — the provider's mark (`ProviderMark.svelte`), "GPT-OSS 20B · Groq" /
   "Qwen3.5 4B · On this PC", "· no note tools" for a local model under 4B,

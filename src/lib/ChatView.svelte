@@ -101,7 +101,8 @@
 
   // ---- Spoken replies
   let speakReplies = $state(false);
-  // The composer's + (Nathan, 2026-10-20, after Claude Code's): Voice
+  // The composer's + (Nathan, 2026-10-20, after Claude Code's; the model
+  // stays out of it, quiet under the box on the left, always in view): Voice
   // replies and the voice's volume ("so loud, even at 1% on the volume
   // mixer") — moving it changes what's being said at once; letting go keeps
   // it (tts_volume_set), and Settings follows.
@@ -909,10 +910,12 @@
             aria-label="Chat options"
             aria-haspopup="dialog"
             aria-expanded={plusOpen}
-            title="Voice replies and volume"
+            title={speakReplies ? `Voice replies on · ${Math.round(voiceVolume * 100)}%` : 'Voice replies and volume'}
             onclick={() => (plusOpen = !plusOpen)}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            <!-- Voice replies are on: a small amber dot, the switch is inside. -->
+            {#if speakReplies}<span class="plusdot" aria-hidden="true"></span>{/if}
           </button>
           {#if plusOpen}
             <div class="pluspop" role="dialog" aria-label="Chat options">
@@ -984,13 +987,6 @@
         {/if}
       </div>
       <div class="composerfoot">
-        {#if speakReplies}
-          <button class="voicestate" title={voiceTitle} onclick={() => (plusOpen = true)}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /></svg>
-            Read aloud · {Math.round(voiceVolume * 100)}%
-          </button>
-        {/if}
-        <span class="spacer"></span>
         <ModelChip {onopensettings} quiet />
       </div>
     </div>
@@ -1612,6 +1608,7 @@
     flex: 0 0 auto;
   }
   .plusbtn {
+    position: relative;
     width: 30px;
     height: 30px;
     display: grid;
@@ -1633,8 +1630,7 @@
   }
   .plusbtn:focus-visible,
   .optrow:focus-visible,
-  .optlink:focus-visible,
-  .voicestate:focus-visible {
+  .optlink:focus-visible {
     outline: 2px solid var(--yap-primary-line);
     outline-offset: 1px;
   }
@@ -1745,29 +1741,15 @@
     min-height: 26px;
     padding: 0 4px;
   }
-  .voicestate {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 24px;
-    padding: 0 8px 0 6px;
-    border: none;
-    border-radius: 999px;
-    background: none;
-    color: var(--yap-muted);
-    font: inherit;
-    font-size: 11.5px;
-    font-variant-numeric: tabular-nums;
-    cursor: pointer;
-  }
-  .voicestate svg {
-    width: 13px;
-    height: 13px;
-    color: var(--yap-primary);
-  }
-  .voicestate:hover {
-    background: var(--yap-s3);
-    color: var(--yap-fg);
+  .plusdot {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--yap-primary);
+    box-shadow: 0 0 0 2px var(--yap-s2);
   }
   .spacer {
     flex: 1 1 auto;
