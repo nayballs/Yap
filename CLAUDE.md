@@ -2941,8 +2941,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `markdown.js`, where only the sources' links stay links — any other
   address the model wrote is plain text), a **Sources** row under it
   (number, title, site; `openExternalLink`), kept in chats.json; web chips
-  carry a globe, a refused action (the safety rule) a shield. The composer (message on top; mic, **model chip**,
-  Send under it — `ModelChip.svelte`, names in `aiModel.js` from
+  carry a globe, a refused action (the safety rule) a shield. The composer (2026-10-20, after Claude
+  Code's: one row — **+** (a "Chat options" popover: the Voice replies switch,
+  the voice volume slider, Voice settings…), the message box (aria-label
+  "Message"), the mic, and Send only once there's text; under it, quiet,
+  "Read aloud · 50%" while voice replies are on and the **model chip** (its
+  `quiet` look) — `ModelChip.svelte`, names in `aiModel.js` from
   `ppModels.js` + `providerIcons.js`) shows the model the next message goes
   to — the provider's mark (`ProviderMark.svelte`), "GPT-OSS 20B · Groq" /
   "Qwen3.5 4B · On this PC", "· no note tools" for a local model under 4B,
@@ -3260,7 +3264,7 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   default first (`ttsWindowsVoice`) — **▶ Preview** / ■ Stop →
   `tts_preview` with the shown engine, voice and speed (off until Kokoro's
   downloaded); Speed slider 0.5–2.0× `ttsRate`; Volume slider `ttsVolume`
-  (also a "Voice volume" popover next to Chat's Voice replies); the credit line: Kokoro
+  (also in Chat's + menu, beside the Voice replies switch); the credit line: Kokoro
   Apache-2.0 from onnx-community, misaki Apache-2.0, eSpeak NG GPL-3.0 run
   separately, licences and the source link saved with them;
   `kokoro.svelte.js` is the download store) and **Model** → Language
