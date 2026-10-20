@@ -19,6 +19,7 @@ import { PP_CLOUD_MODELS } from './ppModels.js';
 import { catalog, modelsFor } from './modelCatalog.svelte.js';
 import { ago } from './modelCatalog.js';
 import { familyIcon, providerIcon, modelName } from './aiModel.js';
+import { contextInfo, fmtTokens } from './localContext.js';
 
 /** The rail's cloud providers, in its order. `short` names the rail entry. */
 export const CLOUD_PROVIDERS = [
@@ -72,6 +73,21 @@ export async function refreshLocal() {
     /* not in Tauri */
   }
 }
+
+// A context change (local_llm.rs `restart_when_idle`): read again when the
+// restart waits, and when it's done.
+let contextListener = null;
+export function followLocalChanges() {
+  if (!contextListener) {
+    contextListener = listen('yap-local-llm-changed', () => {
+      if (local.status) refreshLocal();
+    }).catch(() => null);
+  }
+  return contextListener;
+}
+
+/** "Up to 256K · Blurb": first, so a one-line row never cuts it off. */
+const withMax = (desc, max) => [max ? `Up to ${fmtTokens(max)}` : '', desc].filter(Boolean).join(' · ');
 
 /**
  * Download a curated on-device model (and the llamafile engine if it's
@@ -154,7 +170,8 @@ export function localRows(status) {
       file: m.filename,
       curatedId: m.id,
       name: m.display,
-      desc: m.blurb,
+      desc: withMax(m.blurb, m.maxContext),
+      maxContext: m.maxContext ?? null,
       where: 'On this PC',
       icon: familyIcon(m.display, m.family),
       glyph: 'chip',
@@ -180,7 +197,8 @@ export function localRows(status) {
       model: '',
       file: o.file,
       name: o.name,
-      desc: `Your own model · ${fmtSize(o.sizeMb)}`,
+      desc: withMax(`Your own model · ${fmtSize(o.sizeMb)}`, o.maxContext),
+      maxContext: o.maxContext ?? null,
       where: 'On this PC',
       icon: familyIcon(o.name),
       glyph: 'chip',
@@ -205,10 +223,26 @@ export async function loadServer(s, force = false) {
   serverLists[s.baseUrl] = { ok: false, models: [], error: '', ...prev, loading: true };
   try {
     const v = await invoke('llm_models', { provider: s.provider, scope: s.scope, baseUrl: s.baseUrl, force });
-    serverLists[s.baseUrl] = { loading: false, ok: !!v?.ok, models: v?.models ?? [], error: v?.ok ? '' : v?.error || '' };
+    serverLists[s.baseUrl] = {
+      loading: false,
+      ok: !!v?.ok,
+      models: v?.models ?? [],
+      contexts: v?.contexts ?? [],
+      error: v?.ok ? '' : v?.error || '',
+    };
   } catch (e) {
-    serverLists[s.baseUrl] = { loading: false, ok: false, models: [], error: String(e) };
+    serverLists[s.baseUrl] = { loading: false, ok: false, models: [], contexts: [], error: String(e) };
   }
+}
+
+/**
+ * What a self-hosted server says of a model's context, read-only: "8K
+ * context, set in Ollama", "Up to 128K"; '' when it doesn't say.
+ */
+export function serverContextLine(c) {
+  if (!c) return '';
+  if (c.set) return `${fmtTokens(c.set)} context, set in ${c.app}`;
+  return c.max ? `Up to ${fmtTokens(c.max)}` : '';
 }
 
 /** "3 models on this server", "Asking the server…", or why it couldn't. */
@@ -230,6 +264,7 @@ export function serverRows(s, status) {
       models.unshift({ id, name: id, tools: id === cur ? !!status.tools : null });
     }
   }
+  const ctxLine = (id) => serverContextLine((l?.contexts || []).find((c) => c.id === id));
   return models.map((m) => ({
     key: `${s.provider}:${s.baseUrl}:${m.id}`,
     kind: 'server',
@@ -237,7 +272,8 @@ export function serverRows(s, status) {
     model: m.id,
     baseUrl: s.baseUrl,
     name: m.name,
-    desc: m.id === s.model ? `Set up in Settings · ${s.host}` : s.host,
+    // The context first: a one-line row cuts its end off.
+    desc: [ctxLine(m.id), m.id === s.model ? `Set up in Settings · ${s.host}` : s.host].filter(Boolean).join(' · '),
     where: s.onThisPc ? 'On this PC' : s.host,
     icon: familyIcon(m.name, m.id),
     glyph: 'server',
@@ -256,13 +292,21 @@ export function cloudRows(p, status) {
   const cur = connected && status?.ready && status.model?.provider === p ? status.model.id : '';
   const merged = modelsFor(p, cur);
   const short = cloudInfo(p)?.short || p;
+  // The context the provider's live list gives ("1M context"), as info:
+  // only from the list Yap already has, never a call of its own.
+  const live = catalog.providers[p]?.models ?? [];
+  const ctxOf = (id) => live.find((m) => m.id === id || m.aliases?.includes(id) || m.base === id)?.context ?? null;
+  const descOf = (i) => {
+    const info = contextInfo(ctxOf(i.value));
+    return !info || /context/i.test(i.desc || '') ? i.desc : [i.desc, info].filter(Boolean).join(' · ');
+  };
   const row = (i) => ({
     key: `${p}:${i.value}`,
     kind: 'cloud',
     provider: p,
     model: i.value,
     name: i.label,
-    desc: i.desc,
+    desc: descOf(i),
     where: short,
     icon: familyIcon(i.label, i.value) ?? providerIcon(p),
     current: !!cur && i.value === cur,

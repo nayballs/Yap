@@ -176,6 +176,9 @@ test('the chip opens a provider rail on its provider, with the rows Settings sho
   await expect(rows.nth(0).locator('.mark')).toHaveAttribute('data-icon', 'openai-oss');
   await expect(rows.nth(2).locator('.mark')).toHaveAttribute('data-icon', 'qwen');
   await expect(rows.nth(3).locator('.mark')).toHaveAttribute('data-icon', 'groq');
+  // The context Groq's own list gives (131,072 tokens), as info.
+  await expect(rows.nth(0).locator('.ds')).toHaveText(/ · 128K context$/);
+  await expect(rows.nth(3).locator('.ds')).toHaveText('128K context');
   await expect(pop).toContainText('Changes the model for Chat only. Dictation cleanup stays as it is.');
   await shot(main, '01-picker-groq');
 
@@ -431,7 +434,12 @@ test('the keyboard: arrows through the rail and the models, Ctrl+K, Enter, Esc',
   await backToGroq(yap, main, fakeLlm);
 });
 
-test("a self-hosted server's models show under On this PC, and Chat can use one", async ({ yap, main, fakeLlm }) => {
+test("a self-hosted server's models show under On this PC, and Chat can use one", async ({ yap, main, fakeLlm, shot }) => {
+  // It's an Ollama: it says the context each model runs with (read-only).
+  fakeLlm.serveOllama({
+    loaded: { 'llama3.1:8b': 8192 },
+    show: { 'llama3.1:8b': { max: 131072 }, 'qwen2.5-7b-instruct': { max: 32768, numCtx: 16384 }, 'fake-chat': { max: 4096 } },
+  });
   await setConfig(yap, main, { ppProvider: 'local', ppBaseUrl: fakeLlm.base, ppModel: 'fake-chat', ppApiKey: '' });
   try {
     const pop = await openPicker(main);
@@ -441,6 +449,14 @@ test("a self-hosted server's models show under On this PC, and Chat can use one"
     await expect(server.locator('.gh')).toContainText('3 models on this server');
     await expect(server.locator('.nm')).toHaveText(['fake-chat', 'llama3.1:8b', 'qwen2.5-7b-instruct']);
     await expect(server.locator('.mrow').first()).toContainText('Set up in Settings');
+    // The loaded model's context, num_ctx from its Modelfile, else its maximum.
+    await expect(server.locator('.mrow .ds')).toHaveText([
+      `Up to 4K · Set up in Settings · ${host}`,
+      `8K context, set in Ollama · ${host}`,
+      `16K context, set in Ollama · ${host}`,
+    ]);
+    await server.scrollIntoViewIfNeeded();
+    await shot(main, '06-picker-self-hosted-context');
     await server.getByRole('button', { name: /^llama3\.1:8b/ }).click();
     await expect(pop).toBeHidden();
     await expect(chip(main)).toHaveText('llama3.1:8b · On this PC');
@@ -456,6 +472,7 @@ test("a self-hosted server's models show under On this PC, and Chat can use one"
     await expect(main.locator('.msgs')).toContainText('Hello from the server.');
     expect(fakeLlm.requests.at(-1).model).toBe('llama3.1:8b');
   } finally {
+    fakeLlm.serveOllama(null);
     await setConfig(yap, main, { ppProvider: 'groq', ppBaseUrl: fakeLlm.base, ppModel: 'openai/gpt-oss-20b', ppApiKey: TEST_KEY });
     await backToGroq(yap, main, fakeLlm);
   }

@@ -390,6 +390,14 @@ pub struct YapConfig {
     /// turned down ("No thanks"), or taken: it isn't offered again.
     #[serde(default)]
     pub local_llm_upgrade_dismissed: bool,
+    /// The on-device model's **context**, in tokens: how much text the
+    /// sidecar reads at once (`-c`), shared by Chat, the cleanup and the
+    /// meeting notes. 0 (or missing) = the default, 8,192
+    /// (`local_llm::DEFAULT_CONTEXT`); clamped to what the model was trained
+    /// for and a floor (`local_llm::effective_context`). Changing it restarts
+    /// the sidecar, never mid-dictation (`local_llm::restart_when_idle`).
+    #[serde(default)]
+    pub local_context: u32,
     /// Smart-routing scope (FluidVoice's `PromptRoutingScope`):
     /// - "all_apps" (default): the global `pp_prompt` cleans everywhere, and
     ///   `app_routes` override it for matching apps.
@@ -772,6 +780,7 @@ impl Default for YapConfig {
             pp_disable_thinking: false,
             pp_local_model: String::new(),
             local_llm_upgrade_dismissed: false,
+            local_context: 0,
             routing_scope: default_routing_scope(),
             app_routes: Vec::new(),
             cleanup_profiles: Vec::new(),

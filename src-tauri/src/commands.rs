@@ -550,8 +550,10 @@ pub(crate) async fn run_enhance(
     // (OpenWhispr PersonalNotesView "assemble input"), long ones digested.
     let is_meeting = note.note_type == "meeting" && !note.transcript.is_empty();
     let (content, attendees, digest_actions) = if is_meeting {
-        let note = crate::meeting_summary::prepare_final(app, id, &ep).await?;
-        let input = crate::meeting_summary::compose_meeting_input(&note);
+        // A bigger on-device context reads more of the meeting raw.
+        let budget = crate::meeting_summary::FinalBudget::for_endpoint(&ep);
+        let note = crate::meeting_summary::prepare_final(app, id, &ep, budget).await?;
+        let input = crate::meeting_summary::compose_meeting_input_within(&note, budget);
         // The owner checks know the speaker map's names too.
         (input.text, crate::speakers::known_people(&note), input.digest_actions)
     } else if note.participants.is_empty() {
@@ -717,8 +719,10 @@ pub async fn note_ask(
     }
     if !note.transcript.is_empty() {
         const ASK_TRANSCRIPT_TOKENS: usize = 3_000;
+        // A bigger on-device context reads more of it raw (×1–4).
+        let budget = ASK_TRANSCRIPT_TOKENS * crate::local_llm::budget_factor_for(&provider, &base_url);
         context.push('\n');
-        context.push_str(&crate::meeting_summary::ask_context(&note, ASK_TRANSCRIPT_TOKENS));
+        context.push_str(&crate::meeting_summary::ask_context(&note, budget));
     }
     if !note.enhanced_content.trim().is_empty() {
         context.push_str(&format!("\nEnhanced notes:\n{}\n", note.enhanced_content.trim()));
@@ -1545,6 +1549,9 @@ pub fn local_llm_status() -> serde_json::Value {
                 ),
                 "family": m.family,
                 "installed": on_disk.iter().any(|f| f == m.filename),
+                // What it was trained for ("up to 256K"): the file's own
+                // header once it's here, else the curated figure.
+                "maxContext": crate::local_llm::trained_context(&crate::local_llm::llm_dir().join(m.filename)),
             })
         })
         .collect();
@@ -1570,6 +1577,7 @@ pub fn local_llm_status() -> serde_json::Value {
                 "name": id,
                 "sizeMb": mb,
                 "tools": crate::tools::supports_tools(crate::local_llm::PROVIDER_ONDEVICE, &id),
+                "maxContext": crate::local_llm::trained_context(&crate::local_llm::llm_dir().join(f)),
             })
         })
         .collect();
@@ -1617,6 +1625,9 @@ pub fn local_llm_status() -> serde_json::Value {
         })),
         "slowOnThisPc": running && crate::local_llm::slow_on_this_pc(&serving, serving_mb, placement),
         "upgrade": upgrade,
+        // The active model's context: the setting, its maximum, the
+        // choices with what each takes (local_llm::context_view).
+        "context": crate::local_llm::context_view(&cfg),
     })
 }
 

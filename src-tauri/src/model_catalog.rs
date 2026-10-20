@@ -162,6 +162,26 @@ pub struct ListView {
     pub checking: bool,
     /// The list (only when `ok`).
     pub models: Vec<CatalogModel>,
+    /// A self-hosted server's word on its models' context (Ollama, LM
+    /// Studio), when it says: shown read-only, "set in Ollama".
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub contexts: Vec<ServerContext>,
+}
+
+/// What a self-hosted server says about one model's context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerContext {
+    pub id: String,
+    /// What the model was trained for (Ollama's
+    /// `model_info.<arch>.context_length`, LM Studio's
+    /// `max_context_length`).
+    pub max: Option<u64>,
+    /// What the server runs it with (Ollama's `num_ctx`, or a loaded
+    /// model's `context_length`; LM Studio's `loaded_context_length`).
+    pub set: Option<u64>,
+    /// "Ollama" or "LM Studio": where it's set.
+    pub app: &'static str,
 }
 
 /// Every keyed provider's list, for the pickers.
@@ -1109,6 +1129,7 @@ fn view(provider: &str, list: Option<&ProviderList>) -> ListView {
         } else {
             Vec::new()
         },
+        contexts: Vec::new(),
     }
 }
 
@@ -1210,14 +1231,20 @@ pub fn on_config_saved(app: &AppHandle, prev: &YapConfig, cfg: &YapConfig) {
 
 // ------------------------------------------------- self-hosted servers
 
-/// Base URL → (when it was asked, its models).
-type ServerLists = HashMap<String, (u64, Vec<CatalogModel>)>;
+/// Base URL → (when it was asked, its models, what it says of their
+/// context).
+type ServerLists = HashMap<String, (u64, Vec<CatalogModel>, Vec<ServerContext>)>;
 
 /// Self-hosted servers' lists, in memory only.
 static LOCAL: Mutex<Option<ServerLists>> = Mutex::new(None);
 
-/// A self-hosted / custom server's models (`GET {base}/models`).
-async fn local_models(base: &str, key: &str, force: bool) -> Result<Vec<CatalogModel>, String> {
+/// A self-hosted / custom server's models (`GET {base}/models`), and what
+/// it says of their context ([`server_contexts`]).
+async fn local_models(
+    base: &str,
+    key: &str,
+    force: bool,
+) -> Result<(Vec<CatalogModel>, Vec<ServerContext>), String> {
     let base = base.trim().trim_end_matches('/');
     let url = Url::parse(&format!("{base}/models"))
         .map_err(|_| "that isn't a web address".to_string())?;
@@ -1234,24 +1261,141 @@ async fn local_models(base: &str, key: &str, force: bool) -> Result<Vec<CatalogM
         let cached = LOCAL.lock().ok().and_then(|g| {
             g.as_ref()
                 .and_then(|m| m.get(base).cloned())
-                .filter(|(at, _)| now.saturating_sub(*at) < LOCAL_FRESH_FOR)
+                .filter(|(at, _, _)| now.saturating_sub(*at) < LOCAL_FRESH_FOR)
         });
-        if let Some((_, models)) = cached {
-            return Ok(models);
+        if let Some((_, models, contexts)) = cached {
+            return Ok((models, contexts));
         }
     }
-    let v = get_json(&client()?, url, &[], Some(key), "the server").await?;
+    let client = client()?;
+    let v = get_json(&client, url, &[], Some(key), "the server").await?;
     let (listed, models) = parse_compatible(&v);
+    let contexts = server_contexts(base, key, &models).await;
     tracing::info!(
-        "Model list from a self-hosted server: {} listed, {} kept",
+        "Model list from a self-hosted server: {} listed, {} kept, {} with a context",
         listed,
-        models.len()
+        models.len(),
+        contexts.len()
     );
     if let Ok(mut g) = LOCAL.lock() {
         g.get_or_insert_with(HashMap::new)
-            .insert(base.to_string(), (now, models.clone()));
+            .insert(base.to_string(), (now, models.clone(), contexts.clone()));
     }
-    Ok(models)
+    Ok((models, contexts))
+}
+
+/// The server's own address under its OpenAI-compatible `/v1`. Pure.
+fn server_root(base: &str) -> &str {
+    let b = base.trim().trim_end_matches('/');
+    b.strip_suffix("/v1").unwrap_or(b)
+}
+
+/// LM Studio's `GET /api/v0/models`: each model's `max_context_length`,
+/// and a loaded one's `loaded_context_length`. Pure.
+pub fn parse_lmstudio(v: &Value) -> Vec<ServerContext> {
+    v["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| {
+            let id = m["id"].as_str()?.trim();
+            let max = positive(&m["max_context_length"]);
+            let set = positive(&m["loaded_context_length"]);
+            (!id.is_empty() && (max.is_some() || set.is_some())).then(|| ServerContext {
+                id: id.to_string(),
+                max,
+                set,
+                app: "LM Studio",
+            })
+        })
+        .collect()
+}
+
+/// Ollama's `GET /api/ps`: the loaded models' `context_length`, by name.
+/// `None` when it isn't Ollama's answer. Pure.
+pub fn parse_ollama_ps(v: &Value) -> Option<HashMap<String, u64>> {
+    let list = v["models"].as_array()?;
+    Some(
+        list.iter()
+            .filter_map(|m| {
+                let name = m["name"].as_str().or_else(|| m["model"].as_str())?;
+                Some((name.to_string(), positive(&m["context_length"])?))
+            })
+            .collect(),
+    )
+}
+
+/// Ollama's `POST /api/show`: `(max, num_ctx)` — the trained context
+/// (`model_info.<arch>.context_length`) and a `num_ctx` its Modelfile sets.
+/// Pure.
+pub fn parse_ollama_show(v: &Value) -> (Option<u64>, Option<u64>) {
+    let max = v["model_info"].as_object().and_then(|info| {
+        info.iter()
+            .filter(|(k, _)| k.ends_with(".context_length"))
+            .find_map(|(_, v)| positive(v))
+    });
+    let num_ctx = v["parameters"].as_str().and_then(|p| {
+        p.lines().find_map(|l| {
+            let mut w = l.split_whitespace();
+            (w.next() == Some("num_ctx")).then(|| w.next()?.parse().ok()).flatten()
+        })
+    });
+    (max, num_ctx.filter(|&n: &u64| n > 0))
+}
+
+/// The most models one server is asked about (Ollama: one `/api/show` each).
+const SERVER_CONTEXT_MODELS: usize = 16;
+const SERVER_CONTEXT_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// What a self-hosted server says about its models' context, read-only and
+/// best-effort (any failure: nothing): LM Studio's `/api/v0/models`, else
+/// Ollama's `/api/ps` (loaded models) and `/api/show` per model (≤ 16).
+/// A server that's neither says nothing, and nothing is shown.
+async fn server_contexts(base: &str, key: &str, models: &[CatalogModel]) -> Vec<ServerContext> {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(SERVER_CONTEXT_TIMEOUT)
+        .connect_timeout(SERVER_CONTEXT_TIMEOUT)
+        .build()
+    else {
+        return Vec::new();
+    };
+    let root = server_root(base);
+    let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).take(SERVER_CONTEXT_MODELS).collect();
+    if let Ok(url) = Url::parse(&format!("{root}/api/v0/models")) {
+        if let Ok(v) = get_json(&client, url, &[], Some(key), "the server").await {
+            let found = parse_lmstudio(&v);
+            if !found.is_empty() {
+                return found.into_iter().filter(|c| ids.contains(&c.id.as_str())).collect();
+            }
+        }
+    }
+    let Ok(url) = Url::parse(&format!("{root}/api/ps")) else {
+        return Vec::new();
+    };
+    let Some(loaded) = get_json(&client, url, &[], None, "the server").await.ok().and_then(|v| parse_ollama_ps(&v)) else {
+        return Vec::new();
+    };
+    let show = format!("{root}/api/show");
+    let asks = ids.iter().map(|id| {
+        let (client, show) = (client.clone(), show.clone());
+        async move {
+            let resp = client.post(&show).json(&serde_json::json!({ "model": id })).send().await.ok()?;
+            if !resp.status().is_success() {
+                return None;
+            }
+            let v: Value = resp.json().await.ok()?;
+            Some(parse_ollama_show(&v))
+        }
+    });
+    let shown = futures_util::future::join_all(asks).await;
+    ids.iter()
+        .zip(shown)
+        .filter_map(|(id, s)| {
+            let (max, num_ctx) = s.unwrap_or((None, None));
+            let set = loaded.get(*id).copied().or(num_ctx);
+            (max.is_some() || set.is_some()).then(|| ServerContext { id: id.to_string(), max, set, app: "Ollama" })
+        })
+        .collect()
 }
 
 /// The base URL and key a scope's self-hosted / custom endpoint uses.
@@ -1348,7 +1492,7 @@ pub async fn llm_models(
     let key = endpoint_key(&cfg, scope.as_deref(), &provider);
     let now = now_secs();
     Ok(match local_models(&base, &key, force).await {
-        Ok(mut models) => {
+        Ok((mut models, contexts)) => {
             // Whether Chat would offer each Yap's note tools (a local model
             // under 4B: no), for the Chat picker's "no note tools".
             for m in &mut models {
@@ -1364,6 +1508,7 @@ pub async fn llm_models(
                 error: None,
                 checking: false,
                 models,
+                contexts,
             }
         }
         Err(e) => ListView {
@@ -1374,6 +1519,7 @@ pub async fn llm_models(
             error: Some(e),
             checking: false,
             models: Vec::new(),
+            contexts: Vec::new(),
         },
     })
 }
@@ -1885,5 +2031,37 @@ mod tests {
         if let Some(v) = read("openrouter.json") {
             show("openrouter", parse_openrouter(&[v]));
         }
+    }
+
+    #[test]
+    fn self_hosted_servers_say_their_models_context() {
+        assert_eq!(server_root("http://localhost:11434/v1"), "http://localhost:11434");
+        assert_eq!(server_root("http://127.0.0.1:1234/v1/"), "http://127.0.0.1:1234");
+        assert_eq!(server_root("http://box:8080"), "http://box:8080");
+        // LM Studio's REST list (trimmed from 0.3.x): the maximum, and the
+        // loaded model's context.
+        let lms = json!({"object": "list", "data": [
+            {"id": "qwen2.5-7b-instruct", "object": "model", "type": "llm", "state": "loaded",
+             "max_context_length": 32768, "loaded_context_length": 4096},
+            {"id": "llama-3.2-3b-instruct", "type": "llm", "state": "not-loaded", "max_context_length": 131072},
+            {"id": "text-embedding-nomic", "type": "embeddings"}
+        ]});
+        let c = parse_lmstudio(&lms);
+        assert_eq!(c.len(), 2);
+        assert_eq!((c[0].max, c[0].set, c[0].app), (Some(32_768), Some(4_096), "LM Studio"));
+        assert_eq!((c[1].max, c[1].set), (Some(131_072), None));
+        // An OpenAI-style list (any other server) says nothing.
+        assert!(parse_lmstudio(&json!({"data": [{"id": "fake-chat", "object": "model"}]})).is_empty());
+        // Ollama: the loaded models' context, the trained one and num_ctx.
+        let ps = json!({"models": [{"name": "llama3.1:8b", "model": "llama3.1:8b", "size_vram": 6_000_000_000u64, "context_length": 8192}]});
+        assert_eq!(parse_ollama_ps(&ps).unwrap().get("llama3.1:8b"), Some(&8_192));
+        assert!(parse_ollama_ps(&json!({"error": "not found"})).is_none());
+        let show = json!({
+            "parameters": "stop                           \"<|eot_id|>\"\nnum_ctx                        16384",
+            "model_info": {"general.architecture": "llama", "llama.context_length": 131072, "llama.block_count": 32}
+        });
+        assert_eq!(parse_ollama_show(&show), (Some(131_072), Some(16_384)));
+        assert_eq!(parse_ollama_show(&json!({"model_info": {"qwen2.context_length": 32768}})), (Some(32_768), None));
+        assert_eq!(parse_ollama_show(&json!({})), (None, None));
     }
 }

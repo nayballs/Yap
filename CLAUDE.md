@@ -450,14 +450,50 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `config.local_llm_upgrade_dismissed`), never downloaded by itself. The
   curated entry's `default` = the bundled file, `needs_gpu` = only recommended
   with a card. **One server set-up** for the sidecar and the evaluations
-  (`server_args`): `-ngl 999 -c 8192`, **`--reasoning off`** (no thinking for
+  (`server_args`): `-ngl 999 -c <context>`, **`--reasoning off`** (no thinking for
   any model: Qwen3.5 loops and times out with it on), **`--cache-ram 0`**
   (llama.cpp's host prompt cache off: with it on, a dictation's cleanup right
   after a Chat turn took 1.3–1.4 s instead of 0.13 s on the 1.5B — the slow
   copy back of the saved prompt — and a 4B server peaked at 6.7 GB on the
   processor; Qwen3.5-4B's peak is now 3.85 GB there, 3.7 GB on the card),
   `--ctx-checkpoints 4` (Qwen3.5's recurrent-state checkpoints, ~50 MB each),
-  `-lv 4` (the log names the layers that went to the GPU). **Model id** = the
+  `-lv 4` (the log names the layers that went to the GPU). **The context**
+  (2026-10-20, Nathan's ask: "show what context length it's set at, and let
+  me set my own"): `config.local_context` (tokens; 0 = `DEFAULT_CONTEXT`
+  8,192, today's behaviour) — one setting for the one sidecar, so Chat,
+  dictation cleanup and the meeting notes share it. `effective_context`
+  clamps it to `MIN_CONTEXT` 2,048..`MAX_CONTEXT` 1M and to what the model
+  was trained for (`trained_context`: its GGUF header's `context_length`,
+  `gguf.rs`, else `CuratedLlm::max_context`; a stale file falls back);
+  `context_for(cfg)` is what `start()` passes as `-c`. `context_choices`:
+  4K/8K/16K/32K/64K/128K/256K up to the model's maximum (and that maximum
+  when it falls between; an unknown one stops at 32K). `context_view(cfg)`
+  (`local_llm_status().context`): `{tokens, configured, default, max,
+  serving, pending, onCard, roomMib, usedMib, options: [{tokens,
+  estimateMib, over}]}` — each choice's memory from `gguf::estimate`, `over`
+  = more than `card_room` (the card's own memory − 2 GiB for Windows, the
+  apps on screen and Yap's speech model; never llama.cpp's "MiB free",
+  which on WDDM ignores every other process), `usedMib` what the running
+  server's log says (`log_facts`: the non-host `… buffer size` lines,
+  `n_ctx`). **`local_llm_set_context {tokens}`** (the pickers): saved
+  through `save_config` (0 for the default), `yap-local-context-changed
+  {localContext}` (Settings' copy adopts it, or its wholesale auto-save
+  would put the old one back), and a running sidecar on another context
+  is restarted by **`restart_when_idle`**: never while a dictation records
+  or is being transcribed/cleaned up (`pipeline_busy`: `dictation_state` +
+  `Pipeline::is_busy`; pure `restart_step` Wait/Settle/Go, a 1.5 s settle
+  after one), a newer change supersedes an older one (generation), one
+  restart at a time, then `yap-local-llm-changed {pending, error}` (the
+  pickers re-read) + `yap-chat-model-changed {scope: null}` (the chips).
+  `start()` itself is one at a time now (`STARTING`: a second caller finds
+  it up instead of spawning another llamafile). `budget_factor(context)` /
+  `budget_factor_for(provider, base_url)`: whole 8K multiples, 1–4, only
+  when the call really goes to the running sidecar — what the meeting
+  notes' final call and the Notes view's Ask grow by (`meeting_summary.rs`
+  `FinalBudget`, `commands::note_ask`). Debug-only
+  `e2e_local_llm_serving {…, ctx, usedMib}` (the stand-in "restarts" on a
+  change, `e2e_local_llm_restarts`) and `e2e_local_llm_busy {busy}` (a
+  dictation as the guard sees one, no mic). **Model id** = the
   GGUF's name (`model_id`, `active_model_id`: `Qwen_Qwen3.5-4B-Q4_K_M`),
   what `effective_endpoint` sends and `tools::supports_tools` reads (it used to
   be `qwen2.5-1.5b-instruct` whatever ran, so a bigger model never got its
@@ -480,6 +516,28 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   updater's exit; never used for apps Yap opens, a link's browser or an
   installer), and `effective_endpoint()` which routes `llm.rs` to the sidecar when
   provider = "ondevice" (falls back to the configured endpoint if it's down).
+- **`gguf.rs`** — a GGUF model's header, **read-only** (2026-10-20): magic,
+  version 2/3, the metadata (a few scalars kept, everything else skipped by
+  seeking — the tokenizer's ~250 k strings too: ~20 ms for the 4B's 10 MB
+  header in a debug build) and the tensor list (where the data starts, the
+  token embedding's size, whether there's an `output.weight` of its own),
+  never the weights; absurd counts/lengths are errors, never a hang or a
+  huge allocation. `Shape`: `context_length` (n_ctx_train), block count,
+  heads, KV heads (one or per layer), key/value length,
+  `full_attention_interval` (Qwen3.5: attention every 4th layer),
+  `nextn_predict_layers`, the `ssm.*` sizes, the vocabulary. `model_file`
+  caches per file (size + mtime). **`estimate(shape, file, ctx, on_card)`**,
+  calibrated against llamafile's log on the RTX 5070 Ti — model on the card
+  = the tensors' data less the token embedding (kept on the processor)
+  unless the output shares it (no `output.weight`: copied to the card);
+  KV = attention layers × KV heads × (k + v) × 2 bytes per token (one
+  unified cache for 4 slots); recurrent state per slot (f32 conv + state,
+  × 4 slots); compute = vocab × 512 × 4 + 2 KiB per token of context.
+  Within 1% of the log (64K: 2% high): Qwen3.5-4B 3,821 / 4,637 MiB estimated vs 3,815 /
+  4,641 at 8K / 32K, Qwen2.5-1.5B 1,472 / 2,192 vs 1,480 / 2,186
+  (docs/model-evals.md "Context length"). Unit-tested on synthetic headers
+  (`tests::Writer`, the two models' real shapes); `#[ignore]`d
+  `this_pcs_models` reads `%APPDATA%\yap\llm` read-only.
 - **`gpu.rs`** — the graphics card, for the on-device model recommended for
   this PC: DXGI (`CreateDXGIFactory1` → `EnumAdapters1` → `GetDesc1`, software
   adapters and Microsoft's Basic Render Driver left out), the card with the most
@@ -743,7 +801,12 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   the right person, every call line labelled, a name ~15 s (≤ ~23 s) after
   the words.
 - **`meeting_summary.rs`** — meeting summaries that keep up with long meetings
-  (map-reduce, the map done while recording). Every ~10 min of new talk
+  (map-reduce, the map done while recording). A bigger on-device context
+  lets the final call read more (`FinalBudget::for_endpoint`: the single
+  pass and the final input × `local_llm::budget_factor_for`, 1–4 — 14,000 /
+  18,000 at 32K — only on the running sidecar; `prepare_final` and
+  `compose_meeting_input_within` take it; the live digests and the helpers
+  keep the 8K budgets). Every ~10 min of new talk
   (2,000 est. tokens, or 10 min with ≥ 250) a background **digest** (key
   points, decisions, action items `Owner: task (due: …)`, open questions;
   `llm::MEETING_DIGEST_PROMPT` + a one-shot; ≤ 2,600 tokens of transcript + the
@@ -1165,7 +1228,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   {scope}` → `{ready, error, model, host, tools (supports_tools), fromScope,
   provider (the one the scope is set to, ready or not), keyed, maskedKeys
   (each keyed provider's key as "gsk…AbCd", `mask_key` — never the key),
-  servers, onDevice}` for the Chat view's model chip + picker and the Ask
+  servers, onDevice, context (the on-device model's, when the call goes to
+  it: the chip's tooltip "Context: 8K tokens")}` for the Chat view's model chip + picker and the Ask
   bars' model lines; `chat_set_model {provider, model, baseUrl?, file?}` =
   the picker's switch (Chat scope only, switched on; a keyed provider, the
   installed on-device model, or a self-hosted / custom server Settings has
@@ -1234,7 +1298,14 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   **Self-hosted / custom servers** (`llm_models {provider: local|custom,
   scope, baseUrl}`): `GET {base}/models` with the scope's key (OpenWhispr's
   OpenAICompatiblePanel reading: `data` or `models`, `id` or `name`), kept a
-  minute in memory. Commands `model_catalog`, `model_catalog_refresh
+  minute in memory, plus what the server says of each model's **context**
+  (`server_contexts`, read-only, best-effort, 3 s each: LM Studio's `GET
+  /api/v0/models` `max_context_length` / `loaded_context_length`, else
+  Ollama's `GET /api/ps` (a loaded model's `context_length`) and `POST
+  /api/show` per model, ≤ 16 (`model_info.<arch>.context_length`, a
+  Modelfile's `num_ctx`); `ListView.contexts [{id, max, set, app}]`; a
+  server that's neither says nothing). The picker shows it first in the row
+  ("8K context, set in Ollama · localhost:11434", "Up to 128K · …"). Commands `model_catalog`, `model_catalog_refresh
   {provider}` (Settings' Check now), `llm_models {provider, scope?, baseUrl?,
   force?}`. Logs: provider + counts. Test mode never contacts a provider:
   debug-only `YAP_MODELS_STANDIN` (`<standin>/<host><path>?<query>`,
@@ -1804,7 +1875,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   Notes/Slack/Code/Custom), the editable `pp_prompt` body, `pp_api_keys` (per-provider
   key store — the UI swaps the active `pp_api_key` from it on provider switch),
   `pp_local_model` (the on-device GGUF; empty = the 1.5B) + `local_llm_upgrade_dismissed`
-  (the 4B offered once, `local_llm::upgrade_offer`), `cleanup_profiles` (each
+  (the 4B offered once, `local_llm::upgrade_offer`) + `local_context` (the
+  on-device model's context in tokens; 0 = 8,192; `local_llm::effective_context`), `cleanup_profiles` (each
   with an optional per-profile LLM override: provider/base_url/model/api_key — empty
   provider = inherit global) + `app_routes` smart routing, streaming_partials,
   history_enabled, update_checks_enabled, dictionary_fuzzy, learn_words
@@ -2950,7 +3022,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `ppModels.js` + `providerIcons.js`) shows the model the next message goes
   to — the provider's mark (`ProviderMark.svelte`), "GPT-OSS 20B · Groq" /
   "Qwen3.5 4B · On this PC", "· no note tools" for a local model under 4B,
-  where it runs in its tooltip, "No AI model" when nothing is set up. The
+  where it runs in its tooltip (and, on the on-device model, "Context: 8K
+  tokens": `ai_model_status.context`), "No AI model" when nothing is set up. The
   chip opens **the Chat model picker** (`ChatModelPicker.svelte`, data in
   `chatModels.svelte.js`; Nathan's "Concept A, provider rail",
   2026-10-19): a popover above the composer (`data-model-picker-above`;
@@ -2978,12 +3051,26 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   its live list is fetched at once and its models are pickable. **On this
   PC** ("Private: nothing leaves this PC" + where it runs: "Runs on your
   graphics card (NVIDIA …)" from `gpu.rs` / the sidecar's placement, or
-  the processor): Settings' processor warning with "Use Qwen2.5 1.5B
+  the processor), then the on-device model's **context**
+  (`LocalContext.svelte` `compact`, shared with Settings; words in
+  `localContext.js`): "Context [8K tokens · ≈ 3.7 GB ▾]" — every choice up
+  to the model's maximum with what it takes (`local_llm_status().context`,
+  `gguf::estimate`), "· may not fit" and a warning line ("More than fits on
+  your graphics card (about 13.6 GB to spare): part of it would run on the
+  processor, slowly.") past the card's room, "Uses 3.7 GB on the graphics
+  card" once the running model's log measured it, the one-line note
+  ("Longer context: longer chats and meeting notes fit, more graphics
+  memory, a little slower. This model goes up to 256K."), and "Restarting
+  the model with the new context…" while `local_llm_set_context`'s restart
+  waits for a dictation (`yap-local-llm-changed` re-reads,
+  `followLocalChanges`); Settings' processor warning with "Use Qwen2.5 1.5B
   Instruct"; a note when cleanup uses the on-device model too
   (`local_llm_status.sharedOnDevice`: picking another switches it there as
   well); **Installed** (Yap's curated GGUFs on disk and the person's own,
-  `local_llm_status.own`; In use / pick to use), self-hosted servers on this
-  PC (`llm_models`: their `/models`, "3 models on this server"), and
+  `local_llm_status.own`; In use / pick to use; each row starts with its
+  maximum, "Up to 256K · …", `maxContext`), self-hosted servers on this
+  PC (`llm_models`: their `/models`, "3 models on this server", and the
+  context Ollama / LM Studio say: "8K context, set in Ollama · …"), and
   **Download** (the rest, "Recommended for this PC" first): a Download
   button with the size runs `local_llm_install` right in the row with a
   progress bar from `local-llm-download-progress` (which now names the
@@ -3352,7 +3439,11 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   do the cleanup profiles' model fields;
   UI-only `ppMode`/`cloudProvider` state resolves to the unchanged `ppProvider`
   contract. Local = the on-device model browser (family tabs, Download / Use /
-  delete): **"Recommended for this PC"** on `local_llm_status`'s pick (Qwen3.5
+  delete; each card's size line ends with its maximum, "2.8 GB · up to
+  256K"; above the cards the same **Context** control as the Chat picker's,
+  `LocalContext.svelte`, adding "Shared by Chat, dictation cleanup and
+  meeting notes."; Settings adopts `yap-local-context-changed` and re-reads
+  on `yap-local-llm-changed`): **"Recommended for this PC"** on `local_llm_status`'s pick (Qwen3.5
   4B with a capable card, else the 1.5B; `isDefault` = the model an empty
   `ppLocalModel` means), and under its heading one quiet line at most — the
   4B offered once (`upgrade`: "Your NVIDIA GeForce RTX 5070 Ti can run Qwen3.5

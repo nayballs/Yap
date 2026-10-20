@@ -31,6 +31,7 @@ mod elevated;
 mod eval;
 mod fuzzy;
 mod gesture;
+mod gguf;
 mod gpu;
 mod media;
 mod media_pause;
@@ -411,6 +412,7 @@ pub fn run() {
             commands::local_llm_stop,
             commands::local_llm_install,
             commands::local_llm_delete,
+            local_llm::local_llm_set_context,
             commands::open_llm_folder,
             commands::get_groq_usage,
             commands::get_history,
@@ -580,6 +582,10 @@ pub fn run() {
             coaching::e2e_coaching_reset,
             #[cfg(debug_assertions)]
             local_llm::e2e_local_llm_serving,
+            #[cfg(debug_assertions)]
+            local_llm::e2e_local_llm_restarts,
+            #[cfg(debug_assertions)]
+            local_llm::e2e_local_llm_busy,
             #[cfg(debug_assertions)]
             notice::e2e_notice_reset,
             #[cfg(debug_assertions)]
