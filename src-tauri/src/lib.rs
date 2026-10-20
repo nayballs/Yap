@@ -467,6 +467,7 @@ pub fn run() {
             tts::tts_stop,
             tts::tts_state,
             tts::voice_replies_set,
+            tts::tts_volume_set,
             tts::tts_kokoro_status,
             tts::tts_kokoro_download,
             tts::tts_kokoro_delete,

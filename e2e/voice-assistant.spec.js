@@ -584,7 +584,7 @@ test('Settings → Voice Assistant: spoken replies, the engine, the voice and it
   await expect(handsFree).toBeEnabled();
   await expect(handsFree).toHaveAttribute('aria-pressed', 'true');
   await voice.selectOption({ label: 'Test Voice Two · en-US' });
-  await dialog.locator('input[type="range"]').fill('1.5');
+  await dialog.getByRole('slider', { name: 'Speed' }).fill('1.5');
   await expect(dialog.getByText('1.5×')).toBeVisible();
   await expectStore(
     yap,
@@ -1030,4 +1030,48 @@ test('voice off: the assistant shortcut answers on the bar and says nothing', as
   await main.waitForTimeout(500);
   expect(await spoken(yap)).toEqual([]);
   await card.getByRole('button', { name: 'Close' }).click();
+});
+
+// Nathan (2026-10-20): "the voice that gets spoken back is so loud, even at
+// 1% on the volume mixer". Yap's own volume for it (tts.rs `gain`, squared):
+// Settings → Voice Assistant → Volume, and the slider next to Voice replies
+// in Chat; either one moves the other.
+test('the voice has its own volume, in Settings and next to Voice replies', async ({ yap, main, shot }) => {
+  const dialog = await openSettings(main, 'Voice Assistant');
+  const volume = dialog.getByRole('slider', { name: 'Volume' });
+  await volume.scrollIntoViewIfNeeded();
+  await expect(volume).toHaveValue('0.5');
+  await volume.fill('0.3');
+  await expect(dialog.getByText('30%')).toBeVisible();
+  await expectStore(yap, 'config.json', (c) => c.ttsVolume === 0.3);
+  // What's said plays at it.
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  // (Windows voices: Kokoro isn't installed at this point of the run.)
+  await yap.invoke('tts_preview', { voice: '', rate: 1, engine: 'windows' });
+  await expect.poll(async () => (await spoken(yap))[0]?.volume).toBeCloseTo(0.3);
+  await yap.invoke('tts_stop');
+  await closeSettings(main);
+
+  // Chat: the slider next to Voice replies.
+  await openView(main, 'Chat');
+  const button = main.getByRole('button', { name: 'Voice volume' });
+  await expect(button).toContainText('30%');
+  await button.click();
+  const pop = main.getByRole('dialog', { name: 'Voice volume' });
+  const chatSlider = pop.getByRole('slider', { name: 'Voice volume' });
+  await expect(chatSlider).toHaveValue('30');
+  await chatSlider.fill('15');
+  await expect(pop).toContainText('15%');
+  await expectStore(yap, 'config.json', (c) => Math.abs(c.ttsVolume - 0.15) < 1e-6);
+  await shot(main, '40-chat-voice-volume');
+  await main.keyboard.press('Escape');
+  await expect(pop).toHaveCount(0);
+  await expect(button).toContainText('15%');
+
+  // Settings' copy followed (its auto-save can't put 30% back).
+  const again = await openSettings(main, 'Voice Assistant');
+  await expect(again.getByRole('slider', { name: 'Volume' })).toHaveValue('0.15');
+  await closeSettings(main);
+  await expect.poll(() => yap.readJson('config.json').ttsVolume).toBeCloseTo(0.15);
+  await setConfig(yap, main, { ttsVolume: 0.5 });
 });

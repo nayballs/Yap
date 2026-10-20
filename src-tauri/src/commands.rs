@@ -1290,6 +1290,7 @@ pub fn save_config(
         tracing::warn!("Failed to apply meeting hotkey: {}", e);
     }
     crate::input_hook::configure_assistant_from(&cfg);
+    crate::tts::set_volume(cfg.tts_volume);
     // The tray is reconciled on every save (always-on since the pill retired) —
     // reconcile it live instead of waiting for the next app restart.
     crate::tray::ensure_tray(&app, &cfg);

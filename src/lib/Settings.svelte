@@ -593,6 +593,7 @@
     ttsVoice: 'af_bella',
     ttsWindowsVoice: '',
     ttsRate: 1.0,
+    ttsVolume: 0.5,
   };
 
   // Real running version — read from Tauri, not hardcoded (was stuck at '0.1.0').
@@ -976,7 +977,14 @@
     const un = listen('yap-voice-replies', (e) => {
       if (cfg && typeof e.payload?.on === 'boolean') cfg.speakReplies = e.payload.on;
     });
-    return () => un.then((f) => f());
+    // The Chat view's volume slider (tts_volume_set).
+    const unVolume = listen('yap-voice-volume', (e) => {
+      if (cfg && Number.isFinite(e.payload?.volume)) cfg.ttsVolume = e.payload.volume;
+    });
+    return () => {
+      un.then((f) => f());
+      unVolume.then((f) => f());
+    };
   });
   const SPEAK_WHEN = [
     { value: 'voice', label: 'When I asked by voice' },
@@ -1469,6 +1477,7 @@
       outputDevice: cfg.outputDevice || null,
       audioFeedbackVolume: Number(cfg.audioFeedbackVolume),
       ttsRate: Number(cfg.ttsRate) || 1,
+      ttsVolume: Number.isFinite(Number(cfg.ttsVolume)) ? Number(cfg.ttsVolume) : 0.5,
       dictionary: cfg.dictionary
         .map((e) => ({
           from: (e.from || '').trim(),

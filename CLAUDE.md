@@ -1832,7 +1832,10 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   "always", voice), talk_back_hands_free (true; only while speak_replies is
   on), tts_engine ("kokoro" — Windows voices until it's downloaded — or
   "windows"), tts_voice (Kokoro's, "af_bella"), tts_windows_voice ("" =
-  Windows' default), tts_rate (1.0, 0.5–2.0); config v2 moved a saved
+  Windows' default), tts_rate (1.0, 0.5–2.0), tts_volume (0.5: Yap's own
+  gain on the voice, squared — `tts::gain`, half = −12 dB, 10 % = −40 dB —
+  under the Windows mixer, live mid-sentence via the rodio sink's volume;
+  `tts_volume_set {volume, save?}` → `yap-voice-volume`); config v2 moved a saved
   Windows voice from tts_voice to tts_windows_voice and "windows" (never a
   choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
   = unbound, the default), opening apps (`apps.rs`): open_apps (true) +
@@ -3256,7 +3259,8 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   `kokoro.svelte.js`, "Bella (default)", `ttsVoice`), or Windows' with its
   default first (`ttsWindowsVoice`) — **▶ Preview** / ■ Stop →
   `tts_preview` with the shown engine, voice and speed (off until Kokoro's
-  downloaded); Speed slider 0.5–2.0× `ttsRate`; the credit line: Kokoro
+  downloaded); Speed slider 0.5–2.0× `ttsRate`; Volume slider `ttsVolume`
+  (also a "Voice volume" popover next to Chat's Voice replies); the credit line: Kokoro
   Apache-2.0 from onnx-community, misaki Apache-2.0, eSpeak NG GPL-3.0 run
   separately, licences and the source link saved with them;
   `kokoro.svelte.js` is the download store) and **Model** → Language

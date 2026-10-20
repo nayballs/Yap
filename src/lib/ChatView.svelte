@@ -101,6 +101,12 @@
 
   // ---- Spoken replies
   let speakReplies = $state(false);
+  // The voice's volume, next to Voice replies (Nathan, 2026-10-20: "so
+  // loud, even at 1% on the volume mixer"): moving it changes what's being
+  // said at once; letting go keeps it (tts_volume_set), and Settings follows.
+  let voiceVolume = $state(0.5);
+  let volOpen = $state(false);
+  let volEl = $state(null);
   let speakWhen = $state('voice');
   // The message being read aloud ("chat:<conversation>:<index>"), if any.
   initSpeech(['chat:']);
@@ -155,6 +161,7 @@
     try {
       const c = await invoke('get_config');
       speakReplies = !!c?.speakReplies;
+      voiceVolume = Number.isFinite(Number(c?.ttsVolume)) ? Number(c.ttsVolume) : 0.5;
       speakWhen = c?.speakWhen || 'voice';
       assistantHotkey = c?.assistantHotkey || '';
     } catch {
@@ -171,6 +178,21 @@
       speakReplies = !on;
       toast({ title: "Couldn't change voice replies", description: String(e), variant: 'destructive' });
     }
+  }
+
+  function moveVolume(v) {
+    voiceVolume = v;
+    invoke('tts_volume_set', { volume: v }).catch(() => {});
+  }
+  async function keepVolume() {
+    try {
+      await invoke('tts_volume_set', { volume: voiceVolume, save: true });
+    } catch (e) {
+      toast({ title: "Couldn't save the voice volume", description: String(e), variant: 'destructive' });
+    }
+  }
+  function volumeOutside(e) {
+    if (volOpen && volEl && !volEl.contains(e.target)) volOpen = false;
   }
 
   function readAloud(m) {
@@ -558,6 +580,10 @@
   }
 
   function onKeydown(e) {
+    if (e.key === 'Escape' && volOpen) {
+      volOpen = false;
+      return;
+    }
     if (e.key === 'Escape' && picked.length && !e.defaultPrevented) {
       clearPicked();
       return;
@@ -612,6 +638,9 @@
       listen('yap-voice-replies', (e) => {
         if (typeof e.payload?.on === 'boolean') speakReplies = e.payload.on;
       }),
+      listen('yap-voice-volume', (e) => {
+        if (Number.isFinite(e.payload?.volume)) voiceVolume = e.payload.volume;
+      }),
       // Settings changed "Speak replies" or "When to speak".
       listen('yap-config-saved', loadVoiceSettings),
     ];
@@ -651,7 +680,7 @@
   });
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onpointerdown={volumeOutside} />
 
 <div class="chat">
   <!-- Conversation sidebar -->
@@ -908,6 +937,36 @@
           {/if}
           <span class="vlabel">Voice replies</span>
         </button>
+        <div class="volwrap" bind:this={volEl}>
+          <button
+            class="volbtn"
+            aria-label="Voice volume"
+            aria-expanded={volOpen}
+            title={`Voice volume: ${Math.round(voiceVolume * 100)}%`}
+            onclick={() => (volOpen = !volOpen)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" /></svg>
+            {Math.round(voiceVolume * 100)}%
+          </button>
+          {#if volOpen}
+            <div class="volpop" role="dialog" aria-label="Voice volume">
+              <label class="vollabel" for="chat-voice-volume">Voice volume</label>
+              <div class="volrow">
+                <input
+                  id="chat-voice-volume"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="5"
+                  value={Math.round(voiceVolume * 100)}
+                  oninput={(e) => moveVolume(Number(e.currentTarget.value) / 100)}
+                  onchange={keepVolume}
+                />
+                <span class="volval">{Math.round(voiceVolume * 100)}%</span>
+              </div>
+            </div>
+          {/if}
+        </div>
         <span class="spacer"></span>
         <button class="sendbtn" disabled={sending || !input.trim()} onclick={send} aria-label="Send">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" /></svg>
@@ -1500,6 +1559,74 @@
       border-color var(--yap-dur),
       background var(--yap-dur),
       color var(--yap-dur);
+  }
+  .volwrap {
+    position: relative;
+    flex: 0 0 auto;
+  }
+  .volbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 8px 0 7px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s1);
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
+  .volbtn svg {
+    width: 12px;
+    height: 12px;
+  }
+  .volbtn:hover,
+  .volbtn[aria-expanded='true'] {
+    color: var(--yap-fg);
+    border-color: var(--yap-border-hover);
+  }
+  .volbtn:focus-visible {
+    outline: 2px solid var(--yap-primary-line);
+    outline-offset: 1px;
+  }
+  .volpop {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 8px);
+    z-index: 20;
+    width: 220px;
+    padding: 10px 12px 12px;
+    border: 1px solid var(--yap-border);
+    border-radius: 12px;
+    background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-menu);
+  }
+  .vollabel {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--yap-fg);
+  }
+  .volrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .volrow input {
+    flex: 1 1 auto;
+    min-width: 0;
+    accent-color: var(--yap-primary);
+  }
+  .volval {
+    width: 34px;
+    text-align: right;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--yap-muted);
   }
   .voicebtn:hover {
     color: var(--yap-fg);

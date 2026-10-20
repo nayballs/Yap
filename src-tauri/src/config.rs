@@ -492,6 +492,10 @@ pub struct YapConfig {
     /// Speaking speed, 1.0 = normal (0.5–2.0).
     #[serde(default = "default_tts_rate")]
     pub tts_rate: f32,
+    /// Spoken replies' volume, Yap's own (0.0–1.0, on a curve: `tts::gain`),
+    /// under the Windows mixer's. Half by default.
+    #[serde(default = "default_tts_volume")]
+    pub tts_volume: f32,
 
     /// Show live partial transcripts in the overlay while you speak. On by
     /// default (2026-07-10, after live validation): the worker transcribes a
@@ -710,6 +714,9 @@ fn default_tts_voice() -> String {
 fn default_tts_rate() -> f32 {
     1.0
 }
+fn default_tts_volume() -> f32 {
+    0.5
+}
 fn default_diarization_model() -> String {
     crate::diarize::DEFAULT_MODEL.into()
 }
@@ -785,6 +792,7 @@ impl Default for YapConfig {
             tts_voice: default_tts_voice(),
             tts_windows_voice: String::new(),
             tts_rate: default_tts_rate(),
+            tts_volume: default_tts_volume(),
             streaming_partials: true,
             history_enabled: true,
             bridge_enabled: true,

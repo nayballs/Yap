@@ -36,6 +36,7 @@
     {max}
     {step}
     {disabled}
+    aria-label={label || undefined}
     bind:value
     oninput={handle}
   />

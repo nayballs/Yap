@@ -206,6 +206,20 @@
   <Slider bind:value={cfg.ttsRate} min={0.5} max={2} step={0.1} label="Speed" format={(v) => `${Number(v).toFixed(1)}×`} />
 </Row>
 
+<!-- Yap's own volume for the voice (tts.rs `gain`), under the Windows
+     mixer's: moving it changes what's being said at once; auto-save keeps it. -->
+<Row>
+  <Slider
+    bind:value={cfg.ttsVolume}
+    min={0}
+    max={1}
+    step={0.05}
+    label="Volume"
+    format={(v) => `${Math.round(Number(v) * 100)}%`}
+    oninput={(v) => invoke('tts_volume_set', { volume: Number(v) }).catch(() => {})}
+  />
+</Row>
+
 {#if engine === 'kokoro'}
   <Row>
     <p class="credit">

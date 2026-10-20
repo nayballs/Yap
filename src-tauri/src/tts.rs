@@ -40,7 +40,7 @@
 //! everything that would have been said kept for the debug-only
 //! [`tts_e2e_spoken`].
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -692,7 +692,41 @@ pub struct Opened {
 /// Opens the output, on the worker's thread.
 pub type Opener = Box<dyn FnOnce() -> Result<Opened, String> + Send>;
 
-struct RodioPlayback(rodio::Sink);
+// ---- The voice's volume (Nathan, 2026-10-20: "so loud, even at 1% on the
+// volume mixer"). Yap scales its own voice, so it's quiet enough whatever
+// the Windows mixer says; a change applies at once, mid-sentence too.
+
+/// The volume the voice plays at (0.0–1.0, `config.tts_volume`), as f32 bits.
+static VOLUME: AtomicU32 = AtomicU32::new(0x3F00_0000); // 0.5
+/// The sink playing now, to change its volume while it speaks.
+static LIVE_SINK: Mutex<Option<std::sync::Weak<rodio::Sink>>> = Mutex::new(None);
+
+/// A volume setting as the gain the samples get: squared, so the low end is
+/// really quiet — half is a quarter of the voice's full loudness (−12 dB),
+/// 10 % a hundredth (−40 dB), 100 % the voice as it comes. Pure.
+pub fn gain(volume: f32) -> f32 {
+    let v = if volume.is_finite() { volume.clamp(0.0, 1.0) } else { 0.5 };
+    v * v
+}
+
+/// The volume setting now (0.0–1.0).
+pub fn volume() -> f32 {
+    f32::from_bits(VOLUME.load(Ordering::Relaxed))
+}
+
+/// Set the voice's volume (0.0–1.0): the sentence playing now included.
+/// From every config save (`commands::save_config`), startup, and the
+/// Chat view's slider while it moves (`tts_volume_set`).
+pub fn set_volume(volume: f32) {
+    let v = if volume.is_finite() { volume.clamp(0.0, 1.0) } else { 0.5 };
+    VOLUME.store(v.to_bits(), Ordering::Relaxed);
+    let sink = LIVE_SINK.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(std::sync::Weak::upgrade);
+    if let Some(sink) = sink {
+        sink.set_volume(gain(v));
+    }
+}
+
+struct RodioPlayback(Arc<rodio::Sink>);
 
 impl Playback for RodioPlayback {
     fn append(&self, pcm: Pcm) {
@@ -712,7 +746,9 @@ fn rodio_opener(device: Option<String>) -> Opener {
     Box::new(move || {
         let (stream, handle) =
             crate::sound::open_output(device.as_deref()).ok_or("No sound output device to speak on")?;
-        let sink = rodio::Sink::try_new(&handle).map_err(|e| format!("Couldn't play the voice: {e}"))?;
+        let sink = Arc::new(rodio::Sink::try_new(&handle).map_err(|e| format!("Couldn't play the voice: {e}"))?);
+        sink.set_volume(gain(volume()));
+        *LIVE_SINK.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::downgrade(&sink));
         Ok(Opened { play: Arc::new(RodioPlayback(sink)), keep: Some(Box::new(stream)) })
     })
 }
@@ -934,6 +970,7 @@ static SPEAKER: OnceLock<Arc<Speaker>> = OnceLock::new();
 /// watcher unloads Kokoro once it's been idle for the speech model's unload
 /// time (10 minutes when that's "Never": it holds ~0.6 GB).
 pub fn init(app: &tauri::AppHandle) {
+    set_volume(crate::config::load().tts_volume);
     let app = app.clone();
     let _ = SPEAKER.set(Speaker::new(
         Box::new(move |s| {
@@ -1030,6 +1067,7 @@ fn say(
             engine: engine.id().to_string(),
             voice: voice.to_string(),
             rate,
+            volume: volume(),
         });
     }
     let opener = if crate::e2e::active() { sim_opener() } else { rodio_opener(device) };
@@ -1189,6 +1227,29 @@ pub fn tts_state() -> TtsState {
     speaker().map(|s| s.state()).unwrap_or_default()
 }
 
+/// The voice's volume from a slider (the Chat view's; Settings' while it
+/// moves): applied at once, the sentence being said included. `save` also
+/// keeps it (config.json) and tells Settings' copy (`yap-voice-volume`), so
+/// its auto-save can't put the old one back. Returns the volume set.
+#[tauri::command]
+pub fn tts_volume_set(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::AppState>,
+    volume: f32,
+    save: Option<bool>,
+) -> Result<f32, String> {
+    use tauri::Emitter;
+    set_volume(volume);
+    let v = self::volume();
+    if save.unwrap_or(false) {
+        let mut cfg = crate::config::load();
+        cfg.tts_volume = v;
+        crate::commands::save_config(app.clone(), state, cfg)?;
+        let _ = app.emit("yap-voice-volume", serde_json::json!({ "volume": v }));
+    }
+    Ok(v)
+}
+
 /// The Chat view's 🔊 / 🔇: "Speak replies" on or off, saved the way
 /// Settings saves, then `yap-voice-replies {on}` so Settings' copy adopts it
 /// (its next auto-save keeps it). Off stops what's being said.
@@ -1221,6 +1282,8 @@ pub struct Spoken {
     pub engine: String,
     pub voice: String,
     pub rate: f32,
+    /// The volume setting it played at (0.0–1.0).
+    pub volume: f32,
 }
 
 #[cfg(debug_assertions)]
@@ -1493,6 +1556,18 @@ mod tests {
         assert_eq!(r.events(), vec![ev(true, "a"), ev(false, "a")]);
         // It was audible a moment ago.
         assert!(r.speaker.recently_audible());
+    }
+
+    #[test]
+    fn the_volume_curve_is_quiet_at_the_low_end() {
+        assert_eq!(gain(1.0), 1.0);
+        assert_eq!(gain(0.5), 0.25);
+        assert!((gain(0.1) - 0.01).abs() < 1e-6);
+        assert_eq!(gain(0.0), 0.0);
+        // Out of range or not a number: clamped, else the default half.
+        assert_eq!(gain(3.0), 1.0);
+        assert_eq!(gain(-1.0), 0.0);
+        assert_eq!(gain(f32::NAN), 0.25);
     }
 
     #[test]
