@@ -18,6 +18,7 @@
 //   instead of failing silently (and nothing breaks if the list was wrong).
 // - No key, offline, a failed fetch, a test run: exactly the curated list.
 import { PP_CLOUD_MODELS, CURATED_AT, modelThinks } from './ppModels.js';
+import { contextInfo } from './localContext.js';
 
 const DAY = 24 * 60 * 60;
 /** How long a model keeps its "New" tag. */
@@ -45,12 +46,8 @@ function isNew(provider, m, now) {
   return !!at && at >= CURATED_AT_SECS && now - at < NEW_FOR_DAYS * DAY;
 }
 
-/** A context size in words: "131K context", "1M context". */
-function contextLine(n) {
-  if (!n) return '';
-  if (n >= 1_000_000) return `${Math.round(n / 100_000) / 10}M context`.replace('.0M', 'M');
-  return `${Math.round(n / 1000)}K context`;
-}
+/** A context size in words: "128K context" (131,072), "200K context", "1M context". */
+const contextLine = contextInfo;
 
 /**
  * The merged list for `provider`. `entry` = the provider's snapshot from

@@ -36,7 +36,11 @@
 // OpenAI's, OpenRouter's `{data}`, Anthropic's paged `{data, has_more}`,
 // Gemini's `{models}`). `failModels(provider, n)` answers the next `n` lists
 // with HTTP 500; `modelRequests` keeps `{ provider, host, path, url,
-// headers }` for every list asked for.
+// headers }` for every list asked for. `serveOllama({ loaded, show })` makes
+// the server answer Ollama's own `GET /api/ps` (`loaded`: model → the
+// context it's loaded with) and `POST /api/show` (`show`: model → `{ max,
+// numCtx }`), which Yap reads for the context a self-hosted model runs
+// with; `serveOllama(null)` stops.
 import http from 'node:http';
 
 export const GALE_URL = 'https://bg3.wiki/wiki/Gale';
@@ -342,6 +346,7 @@ export async function startFakeLlm() {
   const modelRequests = [];
   let serverModels = [{ id: 'fake-chat' }, { id: 'llama3.1:8b' }, { id: 'qwen2.5-7b-instruct' }, { id: 'nomic-embed-text' }];
   let callIds = 0;
+  let ollama = null;
   const server = http.createServer((req, res) => {
     let raw = '';
     req.on('data', (c) => (raw += c));
@@ -364,6 +369,32 @@ export async function startFakeLlm() {
         }
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify(listBody(provider, lists.get(provider))));
+        return;
+      }
+      // A self-hosted Ollama's own API, when a test turned it on.
+      if (ollama && req.method === 'GET' && url.pathname === '/api/ps') {
+        const models = Object.entries(ollama.loaded || {}).map(([name, ctx]) => ({ name, model: name, context_length: ctx }));
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ models }));
+        return;
+      }
+      if (ollama && req.method === 'POST' && url.pathname === '/api/show') {
+        let model = '';
+        try {
+          model = JSON.parse(raw || '{}').model || '';
+        } catch {
+          /* not JSON */
+        }
+        const m = ollama.show?.[model];
+        if (!m) {
+          res.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ error: `model '${model}' not found` }));
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            parameters: m.numCtx ? `stop "<|eot_id|>"\nnum_ctx ${m.numCtx}` : 'stop "<|eot_id|>"',
+            model_info: { 'general.architecture': 'llama', 'llama.context_length': m.max },
+          })
+        );
         return;
       }
       // A self-hosted server's own list.
@@ -515,6 +546,7 @@ export async function startFakeLlm() {
     listModels: (provider, models) => lists.set(provider, models),
     failModels: (provider, n = 1) => listFailures.set(provider, n),
     setServerModels: (models) => (serverModels = models),
+    serveOllama: (o) => (ollama = o),
     requests,
     failNext: (kind, n = 1, status = 500) => failures.set(kind, { n, status }),
     delay: (kind, ms) => delays.set(kind, ms),

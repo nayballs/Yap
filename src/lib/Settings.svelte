@@ -33,6 +33,8 @@
   import { PROVIDER_ICONS } from './providerIcons.js';
   import ModelPicker from './ModelPicker.svelte';
   import EndpointModels from './EndpointModels.svelte';
+  import LocalContext from './LocalContext.svelte';
+  import { upTo } from './localContext.js';
   import { modelsFor, defaultModel, providerOffers, loadCatalog } from './modelCatalog.svelte.js';
   import { createExternalLinkHandler } from './externalLinks.js';
   import { toast } from './ui/toast.svelte.js';
@@ -930,6 +932,19 @@
       if (cfg && Array.isArray(entries)) cfg.dictionary = entries.map((x) => ({ ...x }));
     });
     return () => un.then((f) => f());
+  });
+  // The on-device model's context was set (here or in the Chat model
+  // picker: local_llm_set_context saved it): adopt it, or the next
+  // auto-save would put the old one back; and read the model's state again
+  // as its restart waits and ends.
+  onMount(() => {
+    const uns = [
+      listen('yap-local-context-changed', (e) => {
+        if (cfg && typeof e.payload?.localContext === 'number') cfg.localContext = e.payload.localContext;
+      }),
+      listen('yap-local-llm-changed', () => refreshLocalLlm()),
+    ];
+    return () => uns.forEach((u) => u.then((f) => f()));
   });
   // The Chat view's model chip switched the Chat scope's model (ai_model.rs
   // chat_set_model saved it): adopt its endpoint, or the next auto-save
@@ -2422,6 +2437,13 @@
                     <button class="lb-later" onclick={dismissUpgrade}>No thanks</button>
                   </div>
                 {/if}
+                {#if localLlm.installed}
+                  <!-- How much the on-device model reads at once: one setting
+                       for Chat, cleanup and meeting notes (one sidecar). -->
+                  <div class="lb-context">
+                    <LocalContext status={localLlm} disabled={!cfg.postProcessEnabled} onchange={(v) => (localLlm = { ...localLlm, context: v })} />
+                  </div>
+                {/if}
                 {#if localFamilies.length > 1}
                   <div class="lb-families">
                     <PillTabs value={localFamily} options={localFamilies} onchange={(v) => (localFamily = v)} renderIcon={familyTabIcon} />
@@ -2452,7 +2474,7 @@
                       <div class="lb-info">
                         <div class="lb-top">
                           <span class="lb-name">{m.display}</span>
-                          <span class="lb-size">{fmtLlmSize(m.sizeMb)}</span>
+                          <span class="lb-size">{[fmtLlmSize(m.sizeMb), upTo(m.maxContext)].filter(Boolean).join(' · ')}</span>
                           {#if m.recommended}<span class="lb-badge">Recommended for this PC</span>{/if}
                           {#if m.url}<a class="lb-learn" href={hfRepo(m.url)} onclick={createExternalLinkHandler(hfRepo(m.url))} target="_blank" rel="noreferrer">Learn more ↗</a>{/if}
                         </div>
@@ -3955,6 +3977,9 @@
     font-size: 11px;
     color: var(--yap-muted-55);
     font-variant-numeric: tabular-nums;
+  }
+  .lb-context {
+    margin: 2px 0 10px;
   }
   .lb-badge {
     font-size: 9.5px;

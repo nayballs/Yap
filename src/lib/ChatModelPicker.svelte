@@ -19,6 +19,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, tick } from 'svelte';
   import ProviderMark from './ProviderMark.svelte';
+  import LocalContext from './LocalContext.svelte';
   import { providerIcon, PROVIDER_LABELS } from './aiModel.js';
   import { loadCatalog } from './modelCatalog.svelte.js';
   import { openExternalLink } from './externalLinks.js';
@@ -31,6 +32,7 @@
     fmtSize,
     local,
     refreshLocal,
+    followLocalChanges,
     downloadLocal,
     progressLine,
     whereLocal,
@@ -188,7 +190,7 @@
   }
 
   function onListKey(e) {
-    if (e.target.matches?.('input, textarea')) return;
+    if (e.target.matches?.('input, textarea, select')) return;
     // ← back to the rail (in the narrow strip, ↑ from the first model).
     if (e.key === 'ArrowLeft' && !narrow) {
       e.preventDefault();
@@ -234,7 +236,7 @@
       return;
     }
     // Typing anywhere but a field searches.
-    if (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.target.matches?.('input, textarea')) {
+    if (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.target.matches?.('input, textarea, select')) {
       e.preventDefault();
       q += e.key;
       searchEl?.focus();
@@ -320,6 +322,7 @@
   onMount(() => {
     place();
     for (const s of servers) loadServer(s);
+    followLocalChanges();
     window.addEventListener('resize', place);
     tick().then(() => {
       fixTabStops();
@@ -611,6 +614,10 @@
               {/if}
             {/if}
           </div>
+        {/if}
+        {#if local.status?.installed}
+          <!-- The on-device model's context (one sidecar for every feature). -->
+          <LocalContext status={local.status} compact onchange={(v) => (local.status = { ...local.status, context: v })} />
         {/if}
         {#if local.status?.sharedOnDevice}
           <p class="note">Dictation cleanup uses the on-device model too: picking another one here switches it there as well.</p>

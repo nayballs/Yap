@@ -381,3 +381,54 @@ didn't pick the built-in tool next to function tools. So Groq's search fits Yap 
 **sub-call** (`web/native.rs`: `tools: [browser_search]`, `tool_choice: "required"`,
 the hits from `executed_tools`), not mixed into Chat's own request — built 2026-10-18 as
 "The AI's own search", with Gemini, Anthropic, OpenAI and OpenRouter beside it.
+
+## Context length (20 Oct 2026)
+
+The on-device model's context is a setting now (`config.local_context`, the Chat model
+picker's On this PC pane and Settings → Language Models → Local; `local_llm.rs`), and the
+pickers show what each choice takes from the GGUF's own header (`gguf.rs` `estimate`). The
+estimate was calibrated against llamafile's log with `--cleanup --ctx <n> --ngl 999` on the
+RTX 5070 Ti (llamafile 0.10.3, 4 slots, unified KV, flash attention on), using the installed
+models read-only:
+
+| Model, context | Model on the card | KV | Recurrent | Compute (card + host) | On the card: log / estimate |
+|---|---|---|---|---|---|
+| Qwen3.5-4B, 8K | 2,863 | 256 | 201 | 495 + 26 | **3,815 / 3,821** |
+| Qwen3.5-4B, 32K | 2,863 | 1,024 | 201 | 554 + 74 | **4,641 / 4,637** |
+| Qwen3.5-4B, 64K | 2,863 | 2,048 | 201 | 495 + 138 | **5,607 / 5,725** |
+| Qwen2.5-1.5B, 8K | 935 | 224 | 0 | 322 + 22 | **1,480 / 1,472** |
+| Qwen2.5-1.5B, 32K | 935 | 896 | 0 | 355 + 70 | **2,186 / 2,192** |
+
+(MiB.) What the numbers say:
+
+- **The KV cache is the part that grows**: per attention layer, K + V = KV heads × (key +
+  value length) × 2 bytes a token, one cache for the four slots — Qwen3.5-4B has attention in
+  8 of its 32 layers (the rest recurrent), so 32 KiB a token (1 GiB at 32K, 8 GiB at 256K);
+  the 1.5B 28 KiB. Qwen3.5's recurrent state (201 MiB for four slots) doesn't grow.
+- **The model on the card** is the tensors' data less the token embedding, which llama.cpp
+  keeps on the processor — unless the output shares it (Qwen3.5-4B has no `output.weight`:
+  the 497 MiB embedding is copied to the card too). The tensor list in the header says which.
+- **Compute** is one 512-token batch's logits (vocabulary × 512 × 4 bytes: 485 MiB for
+  Qwen3.5's 248k-token vocabulary) plus what grows with the context (the attention mask,
+  ~2 KiB a token, partly on the host: at 64K the card's buffer was back at 495 MiB and the
+  host's at 138). The estimate counts the growth on the card, so it errs high by ≤ 2%.
+- **Not llama.cpp's "MiB free"**: on Windows (WDDM) CUDA reported 15,037 of 16,275 MiB free
+  with the installed Yap's 4B already on the card, so the warning compares with the card's own
+  memory less 2 GiB (Windows, the apps on screen, Yap's speech model).
+
+**Cleanup latency doesn't change with the context** (`llm::cleanup`, ms, mean / p90; the
+first after loading):
+
+| Model, context | Back to back | After a Chat turn | After a long Chat turn | First |
+|---|---|---|---|---|
+| Qwen3.5-4B, 8K | 306 / 354 | 307 / 354 | 347 / 369 | 686 |
+| Qwen3.5-4B, 32K | 306 / 363 | 306 / 360 | 345 / 366 | 683 |
+| Qwen3.5-4B, 64K | 308 / 362 | 324 / 383 | 347 / 381 | 696 |
+| Qwen2.5-1.5B, 8K | 117 / 137 | 121 / 147 | 148 / 161 | 298 |
+| Qwen2.5-1.5B, 32K | 122 / 138 | 121 / 146 | 140 / 153 | 284 |
+
+A longer context costs memory, not speed, until it's used: a long prompt still takes its
+prompt-processing time. What uses it: the meeting notes' final call and the Notes view's Ask
+read 2× / 4× more of the meeting raw at 16K / 32K (`local_llm::budget_factor`,
+`meeting_summary::FinalBudget`); the live digests and the notepad's helpers keep the 8K
+budgets.

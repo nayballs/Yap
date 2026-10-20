@@ -23,6 +23,13 @@
 //! A meeting whose transcript + notes fit in 3,500 keeps the single pass
 //! over the raw transcript (nothing lost to digesting).
 //!
+//! A bigger on-device context (Settings' "Context", `local_context`) lets
+//! the final call read more ([`FinalBudget`]): the single pass and the
+//! final input grow by whole multiples of 8K (`local_llm::budget_factor`,
+//! ≤ 4×: 14,000 / 18,000 at 32K), the reply's room staying as at 8K. Only
+//! when the call really goes to the running sidecar; the live digests,
+//! the helpers and every other endpoint keep the 8K budgets.
+//!
 //! Never slows dictation: on a local model (llamafile serves one request at a
 //! time) a digest waits until no dictation is recording or processing, and an
 //! in-flight one is dropped the moment one starts — closing the connection,
@@ -202,10 +209,42 @@ fn people_lines(note: &Note) -> String {
     out
 }
 
-/// Whether the whole raw transcript (and typed notes) fit one pass.
+/// [`fits_single_pass_within`] the 8K budget (the tests' shorthand).
+#[cfg(test)]
 pub fn fits_single_pass(note: &Note) -> bool {
+    fits_single_pass_within(note, SINGLE_PASS_TOKENS)
+}
+
+/// Whether the whole raw transcript (and typed notes) fit one pass of
+/// `budget` tokens ([`FinalBudget::single_pass`]).
+pub fn fits_single_pass_within(note: &Note, budget: usize) -> bool {
     estimate_tokens(&transcript_lines(&note.speakers, &note.transcript)) + estimate_tokens(note.content.trim())
-        <= SINGLE_PASS_TOKENS
+        <= budget
+}
+
+/// The final call's budgets: the single pass and the input, at 8K
+/// ([`SINGLE_PASS_TOKENS`], [`FINAL_INPUT_TOKENS`]) or grown with a bigger
+/// on-device context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FinalBudget {
+    pub single_pass: usize,
+    pub input: usize,
+}
+
+impl FinalBudget {
+    #[cfg(test)]
+    pub const DEFAULT: FinalBudget = FinalBudget { single_pass: SINGLE_PASS_TOKENS, input: FINAL_INPUT_TOKENS };
+
+    /// The 8K budgets × `factor` (1–4). Pure.
+    pub fn scaled(factor: usize) -> Self {
+        let f = factor.clamp(1, crate::local_llm::MAX_BUDGET_FACTOR);
+        FinalBudget { single_pass: SINGLE_PASS_TOKENS * f, input: FINAL_INPUT_TOKENS * f }
+    }
+
+    /// For a call to `ep`: grown only on the running on-device model.
+    pub fn for_endpoint(ep: &Endpoint) -> Self {
+        Self::scaled(crate::local_llm::budget_factor_for(&ep.provider, &ep.base_url))
+    }
 }
 
 // ---- Planning: which stretch to digest next ----
@@ -780,11 +819,18 @@ pub struct MeetingInput {
     pub digest_actions: Vec<DigestAction>,
 }
 
-/// Assemble a meeting note for the final call: the raw transcript when it
-/// all fits ([`fits_single_pass`]), else the digests plus the raw tail — at
-/// most [`FINAL_INPUT_TOKENS`] either way (callers run [`prepare_final`]
-/// first so the tail is already short; a tail that isn't keeps its end).
+/// [`compose_meeting_input_within`] the 8K budgets (the tests' shorthand).
+#[cfg(test)]
 pub fn compose_meeting_input(note: &Note) -> MeetingInput {
+    compose_meeting_input_within(note, FinalBudget::DEFAULT)
+}
+
+/// Assemble a meeting note for the final call: the raw transcript when it
+/// all fits `budget.single_pass` ([`fits_single_pass_within`]), else the
+/// digests plus the raw tail — at most `budget.input` either way (callers
+/// run [`prepare_final`] first so the tail is already short; a tail that
+/// isn't keeps its end).
+pub fn compose_meeting_input_within(note: &Note, budget: FinalBudget) -> MeetingInput {
     let mut text = people_lines(note);
     // The calendar invite's agenda (calendar.rs), when the meeting had one.
     if let Some(invite) = crate::calendar::invite_context(note) {
@@ -792,7 +838,7 @@ pub fn compose_meeting_input(note: &Note) -> MeetingInput {
     }
     let typed = note.content.trim();
     let digest_actions = digest_actions(&note.digests);
-    if fits_single_pass(note) {
+    if fits_single_pass_within(note, budget.single_pass) {
         if !typed.is_empty() {
             text.push_str(&format!("\n## Notes typed during the meeting\n{typed}\n"));
         }
@@ -829,9 +875,9 @@ pub fn compose_meeting_input(note: &Note) -> MeetingInput {
         );
         let used =
             estimate_tokens(&text) + estimate_tokens(&header) + estimate_tokens(&tail_lines) + 30;
-        let budget = FINAL_INPUT_TOKENS.saturating_sub(used);
+        let room = budget.input.saturating_sub(used);
         text.push_str(&header);
-        text.push_str(&render_digests(&note.digests, t0, budget));
+        text.push_str(&render_digests(&note.digests, t0, room));
     }
     if let Some(first) = tail.iter().find(|s| s.is_talk()) {
         text.push_str(&format!(
@@ -1439,12 +1485,17 @@ async fn live_digests(app: &AppHandle, note_id: u64) {
 /// take raw (a backlog, or a note recorded before digests existed), with
 /// `yap-meeting-summary-progress` events. Waits for an in-flight live digest
 /// rather than duplicating it. Returns the up-to-date note.
-pub async fn prepare_final(app: &AppHandle, note_id: u64, ep: &Endpoint) -> Result<Note, String> {
+pub async fn prepare_final(
+    app: &AppHandle,
+    note_id: u64,
+    ep: &Endpoint,
+    budget: FinalBudget,
+) -> Result<Note, String> {
     let _turn = DIGEST_TURN.lock().await;
     let mut done = 0;
     loop {
         let note = crate::notes::get(note_id).ok_or("Note not found")?;
-        if fits_single_pass(&note) {
+        if fits_single_pass_within(&note, budget.single_pass) {
             return Ok(note);
         }
         let upto = crate::notes::digested_upto(&note);
@@ -2259,6 +2310,27 @@ mod tests {
             assert!(!input.text.contains(&note.transcript[0].text));
             assert_eq!(input.digest_actions.len(), note.digests.len());
         }
+    }
+
+    #[test]
+    fn a_bigger_on_device_context_reads_more_of_the_meeting_raw() {
+        // ~9,000 tokens of talk: digested at 8K, one raw pass at 32K.
+        let note = note_with(talk(150, 30, 10));
+        let tokens = estimate_tokens(&transcript_lines(&note.speakers, &note.transcript));
+        assert!(tokens > SINGLE_PASS_TOKENS * 2 && tokens < SINGLE_PASS_TOKENS * 4, "{tokens}");
+        assert!(!fits_single_pass(&note));
+        assert!(!fits_single_pass_within(&note, FinalBudget::scaled(2).single_pass));
+        let big = FinalBudget::scaled(4);
+        assert!(fits_single_pass_within(&note, big.single_pass));
+        let input = compose_meeting_input_within(&note, big);
+        assert!(input.text.contains("## Meeting Transcript"));
+        assert!(input.text.contains(&note.transcript[0].text), "the opening, raw");
+        // Within the 32K window with the prompt and the reply's room.
+        assert!(estimate_tokens(&input.text) + 3_600 <= 32_768);
+        // Never more than 4×, never less than the 8K budgets.
+        assert_eq!(FinalBudget::scaled(9), big);
+        assert_eq!(FinalBudget::scaled(0), FinalBudget::DEFAULT);
+        assert_eq!((big.single_pass, big.input), (14_000, 18_000));
     }
 
     #[test]

@@ -86,6 +86,8 @@ pub struct OnDevice {
     pub installed: bool,
     pub name: String,
     pub id: String,
+    /// The context it works with (tokens; `local_llm::context_now`).
+    pub context: u32,
 }
 
 impl OnDevice {
@@ -94,6 +96,7 @@ impl OnDevice {
             installed: crate::local_llm::is_installed(cfg),
             name: crate::local_llm::active_model_display(cfg),
             id: crate::local_llm::active_model_id(cfg),
+            context: crate::local_llm::context_now(cfg),
         }
     }
 }
@@ -415,6 +418,9 @@ pub struct Status {
     /// Self-hosted and custom servers Settings has an address for.
     pub servers: Vec<Server>,
     pub on_device: Option<OnDeviceChoice>,
+    /// The on-device model's context (tokens), when the call goes to it:
+    /// the chip's tooltip says it.
+    pub context: Option<u32>,
 }
 
 pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
@@ -428,6 +434,10 @@ pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
         ),
         Err(e) => (false, Some(e), None, String::new(), false),
     };
+    let context = model
+        .as_ref()
+        .filter(|m| m.provider == PROVIDER_ONDEVICE && on_device.context > 0)
+        .map(|_| on_device.context);
     Status {
         scope: scope.key(),
         ready,
@@ -447,6 +457,7 @@ pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
             name: on_device.name.clone(),
             tools: crate::tools::supports_tools(PROVIDER_ONDEVICE, &on_device.id),
         }),
+        context,
     }
 }
 
@@ -629,12 +640,14 @@ mod tests {
         installed: false,
         name: String::new(),
         id: String::new(),
+        context: 0,
     };
     fn installed() -> OnDevice {
         OnDevice {
             installed: true,
             name: "Qwen2.5 1.5B Instruct".into(),
             id: "qwen2.5-1.5b-instruct-q4_k_m".into(),
+            context: 8_192,
         }
     }
     fn chat_scope(provider: &str, base_url: &str, model: &str, key: &str) -> LlmScope {
@@ -719,11 +732,15 @@ mod tests {
         assert!(t.on_this_pc && !t.tools);
         // The bigger model picked: named by its GGUF, so it gets the tools
         // (it used to be sent as the 1.5B whatever ran).
-        let big = OnDevice { installed: true, name: "Qwen3.5 4B".into(), id: "Qwen_Qwen3.5-4B-Q4_K_M".into() };
+        let big = OnDevice { installed: true, name: "Qwen3.5 4B".into(), id: "Qwen_Qwen3.5-4B-Q4_K_M".into(), context: 32_768 };
         let t = target(&c, Scope::Chat, &big).unwrap();
         assert_eq!(t.model, "Qwen_Qwen3.5-4B-Q4_K_M");
         assert!(t.tools);
-        assert!(status(&c, Scope::Chat, &big).on_device.unwrap().tools);
+        let st = status(&c, Scope::Chat, &big);
+        assert!(st.on_device.unwrap().tools);
+        // The chip's tooltip names its context.
+        assert_eq!(st.context, Some(32_768));
+        assert_eq!(status(&cfg(), Scope::Chat, &big).context, None, "a cloud model: none of Yap's to say");
     }
 
     #[test]
