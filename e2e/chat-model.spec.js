@@ -60,7 +60,7 @@ const popover = (main) => main.getByRole('dialog', { name: 'Switch the Chat mode
 const models = (main) => popover(main).locator('.pane .mrow');
 
 async function send(main, text) {
-  await main.getByPlaceholder('Type a message...').fill(text);
+  await main.getByRole('textbox', { name: 'Message' }).fill(text);
   await main.getByRole('button', { name: 'Send' }).click();
 }
 
@@ -236,7 +236,7 @@ test('Enter sends and the caret stays in the box for the next message', async ({
   });
   await openView(main, 'Chat');
   await main.getByRole('button', { name: 'New chat' }).click();
-  const box = main.getByPlaceholder('Type a message...');
+  const box = main.getByRole('textbox', { name: 'Message' });
   const thread = main.locator('.msgs');
   await box.click();
 

@@ -450,7 +450,7 @@ test("a self-hosted server's models show under On this PC, and Chat can use one"
     // The next answer comes from it.
     fakeLlm.reply('other', () => 'Hello from the server.');
     await main.getByRole('button', { name: 'New chat' }).click();
-    await main.getByPlaceholder('Type a message...').fill('Who answers?');
+    await main.getByRole('textbox', { name: 'Message' }).fill('Who answers?');
     await main.getByRole('button', { name: 'Send' }).click();
     await expect(main.locator('.msgs')).toContainText('Hello from the server.');
     expect(fakeLlm.requests.at(-1).model).toBe('llama3.1:8b');

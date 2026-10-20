@@ -27,7 +27,7 @@ test('launches into Home, isolated in portable mode', async ({ yap, main, shot }
 const VIEWS = [
   ['Home', (main) => main.getByRole('heading', { level: 1, name: /start yapping/ })],
   ['Insights', (main) => main.getByRole('heading', { level: 1, name: 'Insights' })],
-  ['Chat', (main) => main.getByPlaceholder('Type a message...')],
+  ['Chat', (main) => main.getByRole('textbox', { name: 'Message' })],
   ['Notes', (main) => main.getByRole('button', { name: 'Search notes' })],
   ['Meetings', (main) => main.getByRole('heading', { level: 1, name: 'Meetings' })],
   ['Upload', (main) => main.getByRole('heading', { level: 1, name: 'Upload' })],

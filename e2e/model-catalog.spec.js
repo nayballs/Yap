@@ -161,7 +161,7 @@ test('the Chat picker shows a model Groq added as New and hides one it dropped',
   await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.model === 'acme/brainy-9');
   await main.getByRole('button', { name: 'New chat' }).click();
   fakeLlm.scriptChat([{ content: 'Hello from Brainy.' }]);
-  await main.getByPlaceholder('Type a message...').fill('Who are you?');
+  await main.getByRole('textbox', { name: 'Message' }).fill('Who are you?');
   await main.getByRole('button', { name: 'Send' }).click();
   await expect(main.locator('.msgs')).toContainText('Hello from Brainy.');
   await expect(main.locator('.msgs .byline')).toHaveText(['Brainy 9 · Groq']);

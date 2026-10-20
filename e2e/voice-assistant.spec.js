@@ -105,9 +105,14 @@ async function setConfig(yap, main, patch) {
 
 const spoken = (yap) => yap.invoke('tts_e2e_spoken');
 const speaking = async (yap) => (await yap.invoke('tts_state')).speaking;
-const box = (main) => main.getByPlaceholder('Type a message...');
+const box = (main) => main.getByRole('textbox', { name: 'Message' });
 const thread = (main) => main.locator('.msgs');
-const voiceToggle = (main) => main.getByRole('button', { name: 'Voice replies' });
+// Voice replies sits in the composer's + menu: open it first.
+async function voiceToggle(main) {
+  const toggle = main.getByRole('button', { name: 'Voice replies', exact: true });
+  if (!(await toggle.isVisible())) await main.getByRole('button', { name: 'Chat options' }).click();
+  return toggle;
+}
 
 async function send(main, text) {
   await box(main).fill(text);
@@ -622,11 +627,11 @@ test('Settings → Voice Assistant: spoken replies, the engine, the voice and it
 test("Chat's Voice replies toggle is Settings' Speak replies, and survives auto-save", async ({ yap, main, shot }) => {
   await setConfig(yap, main, { speakReplies: false, speakWhen: 'voice' });
   await openView(main, 'Chat');
-  await expect(voiceToggle(main)).toHaveAttribute('aria-pressed', 'false');
-  await expect(voiceToggle(main)).toHaveAttribute('title', 'Voice replies off');
-  await voiceToggle(main).click();
-  await expect(voiceToggle(main)).toHaveAttribute('aria-pressed', 'true');
-  await expect(voiceToggle(main)).toHaveAttribute('title', /questions you ask by voice/);
+  await expect(await voiceToggle(main)).toHaveAttribute('aria-pressed', 'false');
+  await expect(await voiceToggle(main)).toHaveAttribute('title', 'Voice replies off');
+  await (await voiceToggle(main)).click();
+  await expect(await voiceToggle(main)).toHaveAttribute('aria-pressed', 'true');
+  await expect(await voiceToggle(main)).toHaveAttribute('title', /questions you ask by voice/);
   await expectStore(yap, 'config.json', (c) => c.speakReplies === true);
   await shot(main, '04-chat-voice-on');
 
@@ -641,7 +646,7 @@ test("Chat's Voice replies toggle is Settings' Speak replies, and survives auto-
   await dialog.getByRole('button', { name: 'Speak replies' }).click();
   await expectStore(yap, 'config.json', (c) => c.speakReplies === false);
   await closeSettings(main);
-  await expect(voiceToggle(main)).toHaveAttribute('aria-pressed', 'false');
+  await expect(await voiceToggle(main)).toHaveAttribute('aria-pressed', 'false');
   await setConfig(yap, main, { speakWhen: 'voice' });
 });
 
@@ -1054,10 +1059,9 @@ test('the voice has its own volume, in Settings and next to Voice replies', asyn
 
   // Chat: the slider next to Voice replies.
   await openView(main, 'Chat');
-  const button = main.getByRole('button', { name: 'Voice volume' });
-  await expect(button).toContainText('30%');
+  const button = main.getByRole('button', { name: 'Chat options' });
   await button.click();
-  const pop = main.getByRole('dialog', { name: 'Voice volume' });
+  const pop = main.getByRole('dialog', { name: 'Chat options' });
   const chatSlider = pop.getByRole('slider', { name: 'Voice volume' });
   await expect(chatSlider).toHaveValue('30');
   await chatSlider.fill('15');
@@ -1066,7 +1070,6 @@ test('the voice has its own volume, in Settings and next to Voice replies', asyn
   await shot(main, '40-chat-voice-volume');
   await main.keyboard.press('Escape');
   await expect(pop).toHaveCount(0);
-  await expect(button).toContainText('15%');
 
   // Settings' copy followed (its auto-save can't put 30% back).
   const again = await openSettings(main, 'Voice Assistant');

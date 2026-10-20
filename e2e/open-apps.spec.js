@@ -107,7 +107,7 @@ const ask = (yap, text) => yap.invoke('e2e_assistant_ask', { text, listenMs: 0 }
 const answerCard = (yap) => yap.overlay.getByRole('status').filter({ has: yap.overlay.locator('.asked') });
 
 async function send(main, text) {
-  await main.getByPlaceholder('Type a message...').fill(text);
+  await main.getByRole('textbox', { name: 'Message' }).fill(text);
   await main.getByRole('button', { name: 'Send' }).click();
 }
 

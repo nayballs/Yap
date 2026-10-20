@@ -101,12 +101,13 @@
 
   // ---- Spoken replies
   let speakReplies = $state(false);
-  // The voice's volume, next to Voice replies (Nathan, 2026-10-20: "so
-  // loud, even at 1% on the volume mixer"): moving it changes what's being
-  // said at once; letting go keeps it (tts_volume_set), and Settings follows.
+  // The composer's + (Nathan, 2026-10-20, after Claude Code's): Voice
+  // replies and the voice's volume ("so loud, even at 1% on the volume
+  // mixer") — moving it changes what's being said at once; letting go keeps
+  // it (tts_volume_set), and Settings follows.
   let voiceVolume = $state(0.5);
-  let volOpen = $state(false);
-  let volEl = $state(null);
+  let plusOpen = $state(false);
+  let plusEl = $state(null);
   let speakWhen = $state('voice');
   // The message being read aloud ("chat:<conversation>:<index>"), if any.
   initSpeech(['chat:']);
@@ -191,8 +192,8 @@
       toast({ title: "Couldn't save the voice volume", description: String(e), variant: 'destructive' });
     }
   }
-  function volumeOutside(e) {
-    if (volOpen && volEl && !volEl.contains(e.target)) volOpen = false;
+  function plusOutside(e) {
+    if (plusOpen && plusEl && !plusEl.contains(e.target)) plusOpen = false;
   }
 
   function readAloud(m) {
@@ -580,8 +581,8 @@
   }
 
   function onKeydown(e) {
-    if (e.key === 'Escape' && volOpen) {
-      volOpen = false;
+    if (e.key === 'Escape' && plusOpen) {
+      plusOpen = false;
       return;
     }
     if (e.key === 'Escape' && picked.length && !e.defaultPrevented) {
@@ -680,7 +681,7 @@
   });
 </script>
 
-<svelte:window onkeydown={onKeydown} onpointerdown={volumeOutside} />
+<svelte:window onkeydown={onKeydown} onpointerdown={plusOutside} />
 
 <div class="chat">
   <!-- Conversation sidebar -->
@@ -896,81 +897,101 @@
       </div>
     {/if}
 
-    <!-- Composer: the message on top; the mic, the model it goes to and
-         Send under it. The model picker opens above it. -->
-    <div class="inputbar" data-model-picker-above>
-      <input
-        class="msginput"
-        bind:this={inputEl}
-        bind:value={input}
-        placeholder="Type a message..."
-        aria-busy={sending}
-        onkeydown={(e) => e.key === 'Enter' && !e.isComposing && send()}
-        oninput={() => {
-          if (!input.trim()) byVoice = false;
-        }}
-        onfocus={() => reportFocus(true)}
-        onblur={() => reportFocus(false)}
-      />
-      <!-- Not `disabled` while an answer comes: disabling the focused box
-           throws the caret out of it, and you'd have to click back in to
-           type the next message. `send()` ignores Enter until the answer is
-           in, so you can type ahead. -->
-      <div class="composerrow">
-        <button class="micbtn" title="Dictate your message" aria-label="Dictate your message" onclick={micChat}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
-        </button>
-        <ModelChip {onopensettings} />
-        <!-- Spoken replies on / off (Settings → Voice Assistant → Speak replies). -->
-        <button
-          class="voicebtn"
-          class:on={speakReplies}
-          aria-pressed={speakReplies}
-          aria-label="Voice replies"
-          title={voiceTitle}
-          onclick={toggleVoiceReplies}
-        >
-          {#if speakReplies}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" fill="currentColor" fill-opacity="0.15" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.4 5.6a9 9 0 0 1 0 12.8" /></svg>
-          {:else}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="m22 9-6 6M16 9l6 6" /></svg>
-          {/if}
-          <span class="vlabel">Voice replies</span>
-        </button>
-        <div class="volwrap" bind:this={volEl}>
+    <!-- Composer (after Claude Code's): + (voice replies and their volume),
+         the message, the mic, and Send once there's something to send;
+         under it, quiet, whether answers are read aloud and the model the
+         message goes to. The model picker opens above it all. -->
+    <div class="composer" data-model-picker-above>
+      <div class="inputbar">
+        <div class="pluswrap" bind:this={plusEl}>
           <button
-            class="volbtn"
-            aria-label="Voice volume"
-            aria-expanded={volOpen}
-            title={`Voice volume: ${Math.round(voiceVolume * 100)}%`}
-            onclick={() => (volOpen = !volOpen)}
+            class="plusbtn"
+            aria-label="Chat options"
+            aria-haspopup="dialog"
+            aria-expanded={plusOpen}
+            title="Voice replies and volume"
+            onclick={() => (plusOpen = !plusOpen)}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" /></svg>
-            {Math.round(voiceVolume * 100)}%
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
           </button>
-          {#if volOpen}
-            <div class="volpop" role="dialog" aria-label="Voice volume">
-              <label class="vollabel" for="chat-voice-volume">Voice volume</label>
-              <div class="volrow">
-                <input
-                  id="chat-voice-volume"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="5"
-                  value={Math.round(voiceVolume * 100)}
-                  oninput={(e) => moveVolume(Number(e.currentTarget.value) / 100)}
-                  onchange={keepVolume}
-                />
-                <span class="volval">{Math.round(voiceVolume * 100)}%</span>
+          {#if plusOpen}
+            <div class="pluspop" role="dialog" aria-label="Chat options">
+              <!-- Spoken replies on / off (Settings → Voice Assistant → Speak replies). -->
+              <button class="optrow" aria-pressed={speakReplies} aria-label="Voice replies" title={voiceTitle} onclick={toggleVoiceReplies}>
+                {#if speakReplies}
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" fill="currentColor" fill-opacity="0.15" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.4 5.6a9 9 0 0 1 0 12.8" /></svg>
+                {:else}
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="m22 9-6 6M16 9l6 6" /></svg>
+                {/if}
+                <span class="opttext">
+                  <span class="optname">Voice replies</span>
+                  <span class="optdesc">{speakReplies ? (speakWhen === 'always' ? 'Every answer is read aloud' : 'Answers to spoken questions are read aloud') : 'Answers stay quiet'}</span>
+                </span>
+                <span class="switch" class:on={speakReplies} aria-hidden="true"><span></span></span>
+              </button>
+              <div class="optvol">
+                <label class="vollabel" for="chat-voice-volume">Voice volume</label>
+                <div class="volrow">
+                  <input
+                    id="chat-voice-volume"
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="5"
+                    value={Math.round(voiceVolume * 100)}
+                    oninput={(e) => moveVolume(Number(e.currentTarget.value) / 100)}
+                    onchange={keepVolume}
+                  />
+                  <span class="volval">{Math.round(voiceVolume * 100)}%</span>
+                </div>
               </div>
+              <div class="optsep"></div>
+              <button
+                class="optlink"
+                onclick={() => {
+                  plusOpen = false;
+                  onopensettings?.('voice');
+                }}>Voice settings…</button
+              >
             </div>
           {/if}
         </div>
-        <span class="spacer"></span>
-        <button class="sendbtn" disabled={sending || !input.trim()} onclick={send} aria-label="Send">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" /></svg>
+        <input
+          class="msginput"
+          bind:this={inputEl}
+          bind:value={input}
+          placeholder="Ask about your notes, or anything else"
+          aria-label="Message"
+          aria-busy={sending}
+          onkeydown={(e) => e.key === 'Enter' && !e.isComposing && send()}
+          oninput={() => {
+            if (!input.trim()) byVoice = false;
+          }}
+          onfocus={() => reportFocus(true)}
+          onblur={() => reportFocus(false)}
+        />
+        <!-- Not `disabled` while an answer comes: disabling the focused box
+             throws the caret out of it, and you'd have to click back in to
+             type the next message. `send()` ignores Enter until the answer is
+             in, so you can type ahead. -->
+        <button class="micbtn" title="Dictate your message" aria-label="Dictate your message" onclick={micChat}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
         </button>
+        {#if input.trim()}
+          <button class="sendbtn" disabled={sending} onclick={send} aria-label="Send" title="Send (Enter)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10 4 15l5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>
+          </button>
+        {/if}
+      </div>
+      <div class="composerfoot">
+        {#if speakReplies}
+          <button class="voicestate" title={voiceTitle} onclick={() => (plusOpen = true)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /></svg>
+            Read aloud · {Math.round(voiceVolume * 100)}%
+          </button>
+        {/if}
+        <span class="spacer"></span>
+        <ModelChip {onopensettings} quiet />
       </div>
     </div>
   </section>
@@ -1540,70 +1561,6 @@
     color: var(--yap-muted-55);
   }
 
-  .voicebtn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 26px;
-    padding: 0 9px 0 7px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-full);
-    background: var(--yap-s1);
-    color: var(--yap-muted);
-    font: inherit;
-    font-size: 11.5px;
-    white-space: nowrap;
-    cursor: pointer;
-    flex: 0 0 auto;
-    transition:
-      border-color var(--yap-dur),
-      background var(--yap-dur),
-      color var(--yap-dur);
-  }
-  .volwrap {
-    position: relative;
-    flex: 0 0 auto;
-  }
-  .volbtn {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    height: 26px;
-    padding: 0 8px 0 7px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-full);
-    background: var(--yap-s1);
-    color: var(--yap-muted);
-    font: inherit;
-    font-size: 11.5px;
-    font-variant-numeric: tabular-nums;
-    cursor: pointer;
-  }
-  .volbtn svg {
-    width: 12px;
-    height: 12px;
-  }
-  .volbtn:hover,
-  .volbtn[aria-expanded='true'] {
-    color: var(--yap-fg);
-    border-color: var(--yap-border-hover);
-  }
-  .volbtn:focus-visible {
-    outline: 2px solid var(--yap-primary-line);
-    outline-offset: 1px;
-  }
-  .volpop {
-    position: absolute;
-    left: 0;
-    bottom: calc(100% + 8px);
-    z-index: 20;
-    width: 220px;
-    padding: 10px 12px 12px;
-    border: 1px solid var(--yap-border);
-    border-radius: 12px;
-    background: var(--yap-s2);
-    box-shadow: var(--yap-shadow-menu);
-  }
   .vollabel {
     display: block;
     margin-bottom: 6px;
@@ -1628,85 +1585,229 @@
     font-variant-numeric: tabular-nums;
     color: var(--yap-muted);
   }
-  .voicebtn:hover {
-    color: var(--yap-fg);
-    border-color: var(--yap-border-hover);
-  }
-  .voicebtn:focus-visible {
-    outline: 2px solid var(--yap-primary-line);
-    outline-offset: 1px;
-  }
-  .voicebtn.on {
-    color: var(--yap-fg);
-    border-color: color-mix(in srgb, var(--yap-primary) 45%, var(--yap-border-subtle));
-    background: var(--yap-primary-wash);
-  }
-  .voicebtn.on svg {
-    color: var(--yap-primary);
-  }
-  .voicebtn svg {
-    width: 14px;
-    height: 14px;
-    flex: 0 0 auto;
-  }
-  .vlabel {
-    font-weight: 600;
-  }
 
-  .inputbar {
+  .composer {
     flex: 0 0 auto;
+    margin-top: 10px;
     display: flex;
     flex-direction: column;
+    gap: 4px;
+  }
+  .inputbar {
+    display: flex;
+    align-items: center;
     gap: 6px;
-    margin-top: 10px;
-    padding: 8px;
+    min-height: 48px;
+    padding: 6px 8px 6px 6px;
     border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-lg);
+    border-radius: 14px;
     background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-sm);
   }
   .inputbar:focus-within {
     border-color: var(--yap-border-hover);
   }
-  .composerrow {
+  .pluswrap {
+    position: relative;
+    flex: 0 0 auto;
+  }
+  .plusbtn {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 9px;
+    background: none;
+    color: var(--yap-muted);
+    cursor: pointer;
+  }
+  .plusbtn svg {
+    width: 16px;
+    height: 16px;
+  }
+  .plusbtn:hover,
+  .plusbtn[aria-expanded='true'] {
+    background: var(--yap-s3);
+    color: var(--yap-fg);
+  }
+  .plusbtn:focus-visible,
+  .optrow:focus-visible,
+  .optlink:focus-visible,
+  .voicestate:focus-visible {
+    outline: 2px solid var(--yap-primary-line);
+    outline-offset: 1px;
+  }
+  .pluspop {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 10px);
+    z-index: 20;
+    width: 280px;
+    padding: 6px;
+    border: 1px solid var(--yap-border);
+    border-radius: 12px;
+    background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-menu);
+  }
+  .optrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .optrow:hover {
+    background: var(--yap-s3);
+  }
+  .optrow > svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    color: var(--yap-muted);
+  }
+  .optrow[aria-pressed='true'] > svg {
+    color: var(--yap-primary);
+  }
+  .opttext {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .optname {
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .optdesc {
+    font-size: 11.5px;
+    color: var(--yap-muted);
+  }
+  .switch {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 16px;
+    padding: 2px;
+    border-radius: 999px;
+    background: var(--yap-raised);
+    transition: background var(--yap-dur);
+  }
+  .switch span {
+    display: block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-sm);
+    transition: transform var(--yap-dur);
+  }
+  .switch.on {
+    background: var(--yap-primary);
+  }
+  .switch.on span {
+    transform: translateX(12px);
+  }
+  .optvol {
+    padding: 6px 8px 8px 34px;
+  }
+  .optsep {
+    height: 1px;
+    margin: 2px 6px;
+    background: var(--yap-border-subtle);
+  }
+  .optlink {
+    width: 100%;
+    padding: 7px 8px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .optlink:hover {
+    background: var(--yap-s3);
+    color: var(--yap-fg);
+  }
+  .composerfoot {
     display: flex;
     align-items: center;
     gap: 8px;
-    min-width: 0;
+    min-height: 26px;
+    padding: 0 4px;
+  }
+  .voicestate {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 8px 0 6px;
+    border: none;
+    border-radius: 999px;
+    background: none;
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
+  .voicestate svg {
+    width: 13px;
+    height: 13px;
+    color: var(--yap-primary);
+  }
+  .voicestate:hover {
+    background: var(--yap-s3);
+    color: var(--yap-fg);
   }
   .spacer {
     flex: 1 1 auto;
   }
   .micbtn {
     display: inline-flex;
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r);
-    background: var(--yap-s1);
+    border: none;
+    border-radius: 9px;
+    background: none;
     color: var(--yap-muted);
     cursor: pointer;
     flex: 0 0 auto;
   }
   .micbtn:hover {
     color: var(--yap-fg);
-    border-color: var(--yap-border-hover);
+    background: var(--yap-s3);
+  }
+  .micbtn:focus-visible,
+  .sendbtn:focus-visible {
+    outline: 2px solid var(--yap-primary-line);
+    outline-offset: 1px;
   }
   .micbtn svg {
-    width: 13px;
-    height: 13px;
+    width: 15px;
+    height: 15px;
   }
   .msginput {
     flex: 1 1 auto;
     min-width: 0;
-    height: 30px;
-    padding: 0 6px;
+    height: 32px;
+    padding: 0 4px;
     border: none;
     background: transparent;
     color: var(--yap-fg);
     font: inherit;
-    font-size: 12.5px;
+    font-size: 13.5px;
   }
   .msginput:focus {
     outline: none;
@@ -1716,8 +1817,8 @@
   }
   .sendbtn {
     display: inline-flex;
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
     align-items: center;
     justify-content: center;
     border: none;
@@ -1735,7 +1836,7 @@
     cursor: default;
   }
   .sendbtn svg {
-    width: 13px;
-    height: 13px;
+    width: 15px;
+    height: 15px;
   }
 </style>

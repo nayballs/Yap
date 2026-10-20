@@ -77,7 +77,7 @@ test('the chat edits one place in a note, and is told when its text is in two', 
   ]);
 
   await openView(main, 'Chat');
-  await main.getByPlaceholder('Type a message...').fill(QUESTION);
+  await main.getByRole('textbox', { name: 'Message' }).fill(QUESTION);
   await main.getByRole('button', { name: 'Send' }).click();
   const thread = main.locator('.msgs');
   await expect(thread).toContainText('Done: the beta now ships on Monday.');
@@ -146,7 +146,7 @@ test('the chat never invents a folder: an unknown one is refused, none means Per
     { content: 'Saved it to **Personal**.' },
   ]);
   await openView(main, 'Chat');
-  await main.getByPlaceholder('Type a message...').fill(ASK);
+  await main.getByRole('textbox', { name: 'Message' }).fill(ASK);
   await main.getByRole('button', { name: 'Send' }).click();
   const thread = main.locator('.msgs');
   await expect(thread).toContainText('Saved it to Personal.');

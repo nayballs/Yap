@@ -23,7 +23,9 @@
   import { loadCatalog } from './modelCatalog.svelte.js';
   import { refreshLocal, local, pushRecent } from './chatModels.svelte.js';
 
-  let { onopensettings = null } = $props();
+  // `quiet`: no pill, just the words (under the Chat composer, as Claude
+  // Code shows its model).
+  let { onopensettings = null, quiet = false } = $props();
 
   let status = $state(null);
   let open = $state(false);
@@ -112,6 +114,7 @@
   {#if status}
     <button
       class="chip"
+      class:quiet
       class:none={!model}
       bind:this={chipEl}
       aria-label={chipLabel}
@@ -174,6 +177,20 @@
   .chip:hover,
   .chip[aria-expanded='true'] {
     border-color: var(--yap-border-hover);
+    background: var(--yap-s3);
+  }
+  .chip.quiet {
+    border-color: transparent;
+    background: none;
+    color: var(--yap-muted);
+  }
+  .chip.quiet .cname {
+    font-weight: 500;
+    color: var(--yap-fg-80);
+  }
+  .chip.quiet:hover,
+  .chip.quiet[aria-expanded='true'] {
+    border-color: transparent;
     background: var(--yap-s3);
   }
   .chip:focus-visible {

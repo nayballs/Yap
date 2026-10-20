@@ -38,7 +38,7 @@ test('a slow answer from a model on this PC comes, and says it is still working'
   fakeLlm.delay('other', 23_000);
   try {
     await openView(main, 'Chat');
-    await main.getByPlaceholder('Type a message...').fill("What's the capital of Australia?");
+    await main.getByRole('textbox', { name: 'Message' }).fill("What's the capital of Australia?");
     await main.getByRole('button', { name: 'Send' }).click();
     const waiting = main.getByTestId('chat-still-working');
     await expect(waiting).toContainText('the model runs on this PC, so this can take a minute', { timeout: 15_000 });
