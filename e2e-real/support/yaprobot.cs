@@ -159,6 +159,9 @@ static class Program {
                         args.Length > 5 && args[5] == "shift"));
                     return 0;
                 case "devtools": Print(DevTools(new IntPtr(long.Parse(args[1])), uint.Parse(args[2]))); return 0;
+                case "barclick":
+                    Print(BarClick(uint.Parse(args[1]), int.Parse(args[2]), int.Parse(args[3]), int.Parse(args[4])));
+                    return 0;
                 default: throw new ArgumentException("unknown command " + args[0]);
             }
         } catch (Exception e) {
@@ -415,6 +418,41 @@ static class Program {
         }
         Native.SetCursorPos(back.X, back.Y);
         return Obj("ok", true, "popups", came, "closed", closed, "x", pt.X, "y", pt.Y);
+    }
+
+    /// A real left click on the robot's own Yap bar, a click-through window
+    /// (bar.rs): the pointer goes to (x, y) in physical px and rests
+    /// `hoverMs` so the bar's poller can make that spot clickable; the click
+    /// goes out only when Windows puts a window of `pid` under the pointer,
+    /// else nothing is clicked and the process that is there is named. The
+    /// app in front is read before and after (the bar must never take the
+    /// focus). The pointer goes back where it was.
+    static Dictionary<string, object> BarClick(uint pid, int x, int y, int hoverMs) {
+        Native.SetProcessDpiAwarenessContext(new IntPtr(-4)); // per-monitor v2: physical pixels
+        Native.POINT back;
+        Native.GetCursorPos(out back);
+        IntPtr fgBefore = Native.Root(Native.GetForegroundWindow());
+        Native.SetCursorPos(x, y);
+        Thread.Sleep(hoverMs);
+        var pt = new Native.POINT();
+        pt.X = x;
+        pt.Y = y;
+        uint underPid;
+        Native.GetWindowThreadProcessId(Native.Root(Native.WindowFromPoint(pt)), out underPid);
+        if (underPid != pid) {
+            Native.SetCursorPos(back.X, back.Y);
+            return Obj("ok", false, "underPid", (long)underPid, "reason", "the spot isn't on the robot's Yap: a click would go to another app");
+        }
+        var click = new Native.INPUT[2];
+        click[0].type = 0;
+        click[0].u.mi = new Native.MOUSEINPUT { dwFlags = 0x0002 }; // left down
+        click[1].type = 0;
+        click[1].u.mi = new Native.MOUSEINPUT { dwFlags = 0x0004 }; // left up
+        Native.SendInput(2, click, Marshal.SizeOf(typeof(Native.INPUT)));
+        Thread.Sleep(400);
+        IntPtr fgAfter = Native.Root(Native.GetForegroundWindow());
+        Native.SetCursorPos(back.X, back.Y);
+        return Obj("ok", true, "underPid", (long)underPid, "fgBefore", (long)fgBefore, "fgAfter", (long)fgAfter);
     }
 
     /// F12 in the robot's own Yap window (in front): what came up in Yap's

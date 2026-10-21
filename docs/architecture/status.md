@@ -80,8 +80,10 @@ always-there surface: a pill above the taskbar on the cursor's monitor,
 clickable only where it draws, never focused, hidden over fullscreen apps,
 with Dictate / Meeting notes on hover and Yap's notices as cards (call prompts
 as Wispr's "Meeting detected" card) — e2e-tested with real-window checks of
-its ex-styles and hit-testing; real mouse clicks, multi-monitor moves, DPI
-mixes and games still want a hands-on pass.
+its ex-styles and hit-testing, and real mouse clicks on its cards (✕, buttons,
+a call card's ^ menu, a click as a card appears) robot-tested in
+`e2e-real/bar.real.js` (2026-10-21); multi-monitor moves, DPI mixes and games
+still want a hands-on pass.
 On top of that, the main window is now a full **ControlPanel** (Home dictation feed
 w/ Ctrl+K search, Chat, Notes, Upload, Dictionary, Settings as an always-mounted
 modal, app-wide toasts): local audio-**file** transcription (Upload — `media.rs`
