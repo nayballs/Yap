@@ -133,7 +133,8 @@ any GPU, nothing extra to install for end users.
 
 ## Docs & roadmap
 
-- [`CLAUDE.md`](./CLAUDE.md) — architecture deep-dive (modules, pipeline, feature flags).
+- [`docs/architecture/`](./docs/architecture/README.md) — architecture deep-dive, one file per area (dictation, meetings, chat, the Yap bar…).
+- [`CLAUDE.md`](./CLAUDE.md) — the short version: module index, build, test and release workflow.
 
 Yap is pre-1.0 and moving fast. The download above is the **stable** channel: tagged
 releases with notes, and installed copies update themselves. For every change as it
