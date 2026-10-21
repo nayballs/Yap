@@ -44,8 +44,28 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   no-activate, cloaked, untitled or a shell window), classifying it
   (`app_kind::of_window`) and re-reading the cursor's context there
   (`selection::read_context`, not in a terminal). Test mode returns the text without pasting
-  ("e2e: not pasting the last transcript"). No hotkey for it yet. (Verify-after-paste
-  over UIA is still a follow-up.) `#[ignore]`d `private_clipboard_round_trip` runs
+  ("e2e: not pasting the last transcript"). No hotkey for it yet. **The paste
+  keys** (`simulate_paste(target, key)`; `inject_text`'s `kind` is the window's
+  kind as read, before the settings): Ctrl+V as always (virtual keys only), or a
+  terminal's own (`app_kind::Host::paste_key`: Shift+Insert, Ctrl+Shift+V) sent
+  as a keyboard sends them — each key's scan code in the target thread's layout
+  (`MapVirtualKeyExW`), Insert flagged extended (not the keypad's 0), so winit
+  apps (Alacritty, Rio) match their bindings and mintty/PuTTY see the real
+  Insert. **Did it land?** (verify-after-paste): before the keys,
+  `selection::PasteCheck::before` takes a **Win32 edit control** with the focus
+  in the target's process (a WinForms box, EDIT, RichEdit — not a password box,
+  not read-only, not in a terminal) and its text length + selection; after
+  them `wait_for_paste` reads it every 40 ms: a change → landed; a read that
+  fails (no answer in 200 ms, the focus moved) → nothing more; the same for
+  `PASTE_LANDS_MS` (1 s) → the text is typed (`type_unicode`), once, only while
+  that control still has the focus (and robot mode's foreground re-check), logged
+  "The paste didn't reach the field", `Delivery::Typed` (the dictation goes on
+  as pasted: submit key, correction watch). Only edit controls: a web or code
+  editor takes a paste through a hidden input it empties again (Google Docs,
+  Ace, xterm.js), so "unchanged" means nothing there; length + selection, not
+  the text — any paste changes one (a selection replaced by the same words
+  moves the caret). The clipboard restore still waits its 500 ms from the
+  keys. `#[ignore]`d `private_clipboard_round_trip` runs
   the real clipboard code on a private window station (never the person's clipboard).
 - **`elevated.rs`** — apps running as administrator: Windows (UIPI) drops keys
   sent to a higher integrity level, and `SendInput` doesn't say so. The target's
@@ -112,11 +132,19 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   process's element than the target window's, a password box, read-only text, or in
   a test run. The paste
   never waits: still reading → no context. Kept in memory for that dictation only;
-  logged as lengths, never text. `#[ignore]`d `reads_real_text_fields` reads hidden
+  logged as lengths, never text. **`focused_element(pid)`** (for `app_kind`):
+  the focused element's ClassName and Name in one round trip (a UIA cache
+  request, 100 ms timeout), only if it's in `pid`. **`PasteCheck`** (for
+  `text_injector`'s verify-after-paste): the focused control of the target's
+  thread (`GetGUIThreadInfo`), same process, an `edit_class` control without
+  `ES_PASSWORD`/`ES_READONLY`; its state = `WM_GETTEXTLENGTH` + `EM_GETSEL`
+  (`SendMessageTimeoutW`, 200 ms, `SMTO_ABORTIFHUNG`), never its text;
+  `paste_verdict` (pure, unit-tested) says landed / didn't / unknown.
+  `#[ignore]`d `reads_real_text_fields` reads hidden
   EDIT and RichEdit controls end to end, through TextPattern and through the
   ValuePattern + `EM_GETSEL` path (mid-text, a selection, over a line break),
-  and from a child window inside the field (read through it; not through a
-  read-only one).
+  the paste check's state before and after an `EM_REPLACESEL`, and from a
+  child window inside the field (read through it; not through a read-only one).
 - **`smart_insert.rs`** — `fit_to_context(text, &FieldContext, names)`, pure and
   unit-tested (conservative: a wrong fix is worse than the old capital). Mid-sentence
   (before ends in a letter/digit/`,`/`;`/spaced dash — not `.?!`, `:`, a new line or
@@ -141,14 +169,36 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   (`GetWindowTextW`, which never messages another process's window) — no UIA;
   logs the process + `describe()` at `debug`, never the title; a test run reads
   nothing (`Other`). Pure `classify(exe, class, title)` → **`Terminal { coding_cli,
-  windows_terminal }`** (Windows Terminal — `CASCADIA_HOSTING_WINDOW_CLASS` —,
-  conhost's `ConsoleWindowClass` whatever process it reports, cmd, PowerShell/
-  pwsh, WezTerm, Alacritty, mintty/Git Bash, Tabby, Hyper, ConEmu, PuTTY/KiTTY,
-  Warp…) | **`Messaging`** (Slack, Discord, WhatsApp, Telegram, Signal, Teams,
-  Element, Mattermost…; or a browser whose title shows WhatsApp Web, Slack,
-  Discord, Messenger, Microsoft Teams, Telegram, Google Chat/Messages — unread
-  counts and Edge's "and 2 more pages" stripped) | **`Other`** (incl. Claude
-  desktop, VS Code — its integrated terminal can't be told apart yet).
+  host }`** (`terminal_host`, by class first, whatever process it reports, then
+  process: `WindowsTerminal` — `CASCADIA_HOSTING_WINDOW_CLASS` —, `Console` —
+  conhost's `ConsoleWindowClass`, cmd, PowerShell/pwsh, and terminals Yap knows
+  by name only (Warp, Extraterm…) —, `Mintty` (Git Bash, MSYS2, Cygwin), `Putty`
+  (PuTTY, KiTTY), `MobaXterm`, `Alacritty`, `WezTerm`, `Tabby`, `Hyper`, `Rio`,
+  `ConEmu` (Cmder), `Editor`) | **`Messaging`** (Slack, Discord, WhatsApp,
+  Telegram, Signal, Teams, Element, Mattermost…; or a browser whose title shows
+  WhatsApp Web, Slack, Discord, Messenger, Microsoft Teams, Telegram, Google
+  Chat/Messages — unread counts and Edge's "and 2 more pages" stripped) |
+  **`Other`** (incl. Claude desktop). **An editor's integrated terminal**: in
+  VS Code and the editors built on it (`EDITOR_EXES`: Code, Code - Insiders,
+  VSCodium, Cursor, Windsurf, Positron, Trae, Kiro, Antigravity, Azure Data
+  Studio) the window is the editor's whatever has the focus, so `of_window`
+  asks `selection::focused_element` (one UIA round trip, 100 ms) and
+  `editor_terminal(class, name)` (pure) makes it a terminal (`Host::Editor`)
+  when the focus is xterm.js's input — class `xterm-helper-textarea` — with
+  the coding CLI from VS Code's label "Terminal 1, <title>" (first line; the
+  number and title survive translation: "ターミナル 1、claude"). One line, no
+  Enter of Yap's own, no cursor read, no Ctrl+C in edit mode; never
+  `keeps_lines`. Robot mode can name stand-in editors
+  (`realtest::stand_in_editors`, `YAP_REALTEST_EDITORS`). **The paste keys**
+  (`AppKind::paste_key`, asked of the kind as read — "Safer pasting" off still
+  needs them; `Host::paste_key`, each from the terminal's own defaults):
+  Shift+Insert in mintty (`ClipShortcuts`; Ctrl+Shift+V needs
+  `CtrlShiftShortcuts`, off), PuTTY/KiTTY and MobaXterm; Ctrl+Shift+V in
+  Alacritty (its `Paste`; Shift+Insert is `PasteSelection`), WezTerm
+  (`PasteFrom "Clipboard"`; Shift+Insert is the primary selection), Tabby,
+  Hyper (`editor:paste`) and Rio; Ctrl+V in Windows Terminal, a console
+  ("Enable Ctrl key shortcuts"), ConEmu/Cmder (Shift+Ins pastes only the
+  first line there), VS Code's terminal and anything unknown.
   **Coding CLIs** from the terminal's title, as they set it on Windows (2026):
   Claude Code "✳ <session>" idle / "◐"/"◑" working / "Claude Code" / "claude";
   Gemini CLI "◇  Ready (…)", "✦  …", "✋  …", "⏲  …", "Gemini CLI (…)"; Qwen Code;
@@ -161,8 +211,8 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   space, control characters out, trimmed; unless `keep_lines` one line
   (`join_lines`: bullets "- • * –" dropped and items joined "; " — "Fix these:
   the login bug; the search" —, a header without punctuation gets ": ", numbers
-  kept, other lines joined with a space). `Terminal::keeps_lines` = Windows
-  Terminal + Claude Code or Codex (bracketed paste / Codex's paste-burst check);
+  kept, other lines joined with a space). `Terminal::keeps_lines` = `Host::WindowsTerminal`
+  + Claude Code or Codex (bracketed paste / Codex's paste-burst check);
   every other CLI and host is joined until known safe. **`submit_key(kind,
   auto_submit, voice_enter, key)`**: in a terminal "enter", and only for the
   voice command or auto-submit in a detected coding CLI (never auto-submit at a

@@ -180,6 +180,18 @@ control (`EM_GETSEL`); the fuzzy pass swallowed a short word before a term
 empty text box's text as its label or U+FFFC (a web chat message kept its full
 stop and got a trailing space) and their ranges ran past the box into the page
 — reads now stay in the field and an empty one reads as empty.
+**Pasting everywhere** (2026-10-21): each terminal gets its own paste keys
+(Shift+Insert in Git Bash's mintty, PuTTY/KiTTY, MobaXterm; Ctrl+Shift+V in
+Alacritty, WezTerm, Tabby, Hyper, Rio; Ctrl+V where it pastes), VS Code's
+integrated terminal (and Cursor's, Windsurf's…) counts as a terminal when
+it has the focus (xterm.js's input, over UI Automation), and a paste a
+Win32 text box never got is typed instead, once (verify-after-paste: its
+length and selection before and after). The mapping, the label parsing and
+the verdict unit-tested, the edit-control reads by the `--ignored` hidden-
+window test; robot specs written (`gitbash.real.js` against the real Git
+Bash, `editor-terminal.real.js` against an Edge stand-in for VS Code's
+terminal, the pad's "nopaste" box) — VS Code itself isn't installed here,
+and Alacritty, WezTerm, PuTTY & co. are untried.
 **Dictation extras** (2026-10-17): a paste into an app running as
 administrator is spotted (its integrity level) and left on the clipboard
 with "Your text is copied: press Ctrl+V" (`elevated.rs`, `alert.rs`); text
@@ -251,9 +263,9 @@ the calendar has no one-click Outlook (Microsoft Graph) and no pre-meeting
 brief;
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see `ROADMAP.md` Phase 1);
-multi-phrase dictionary entries; verify-after-paste (UIA `ValuePattern`);
-terminals that don't paste on Ctrl+V (mintty/Git Bash, Alacritty, WezTerm,
-PuTTY want Shift+Insert or Ctrl+Shift+V) and an IDE's integrated terminal (VS
-Code's counts as the editor);
+multi-phrase dictionary entries; verify-after-paste beyond Win32 edit
+controls (a web or code editor's hidden input can't say whether a paste
+landed); a JetBrains IDE's or Visual Studio's terminal, and a browser's
+(vscode.dev, Codespaces), still count as the editor;
 Authenticode signing (blocked on SignPath approval); audio-history export; and
 non-Windows (Linux/macOS) polish. See `ROADMAP.md`.

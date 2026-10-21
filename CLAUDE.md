@@ -115,11 +115,11 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `history.rs` — local dictation history and the stats dashboard.
 
 **Pasting** — [pasting.md](./docs/architecture/pasting.md)
-- `text_injector.rs` — private, verified clipboard paste, submit key, re-focus, Paste last transcript.
+- `text_injector.rs` — private, verified clipboard paste with each app's paste keys, a lost paste typed, submit key, re-focus, Paste last transcript.
 - `elevated.rs` — apps running as administrator: the text is left on the clipboard.
-- `selection.rs` — UI Automation reads: text around the cursor, edit-mode selection, post-paste watch.
+- `selection.rs` — UI Automation reads: text around the cursor, edit-mode selection, post-paste watch; did a paste land.
 - `smart_insert.rs` — fits a dictation to the text around the cursor (case, spaces, full stop).
-- `app_kind.rs` — terminal / coding CLI / chat app / other, and what each changes.
+- `app_kind.rs` — terminal (which one, its paste keys; an editor's terminal) / coding CLI / chat app / other, and what each changes.
 
 **Dictionary** — [dictionary.md](./docs/architecture/dictionary.md)
 - `fuzzy.rs` — near-miss correction (Levenshtein + Soundex), prompt-echo guard, sound distances.
@@ -373,7 +373,7 @@ replies off. Every setting, file and default: [config-and-data.md](./docs/archit
 - **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro), web search, opening apps.
 - **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly.
 - Much is unit-, e2e- and robot-tested but not yet tried in real use (a real call, real AI apps, answers heard on speakers…).
-- **Not yet done**: Chat streaming and semantic search, a rich notes editor, naming voices by themselves, one-click Outlook, a streaming STT model, verify-after-paste, terminals that won't paste on Ctrl+V, Authenticode signing, non-Windows.
+- **Not yet done**: Chat streaming and semantic search, a rich notes editor, naming voices by themselves, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.
 
 What was tested how, and every gap: [status.md](./docs/architecture/status.md).
 
