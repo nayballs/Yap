@@ -16,7 +16,8 @@
         "min_sources": 1,
         "answer_matches": "£\\s?\\d",
         "no_false_claims": true,
-        "opened_none": true
+        "opened_none": true,
+        "prices_keep_their_sign": true
       },
       "soft": {
         "tools_called": [

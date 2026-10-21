@@ -297,6 +297,13 @@ pub struct Expect {
     /// before the model's first step isn't a fix.
     #[serde(default)]
     pub no_post_fixes: bool,
+    /// No price in the answer has had its currency sign swapped: "£8" where
+    /// this turn's web results say "$8" and never "£8" (Qwen3.5-4B, told
+    /// "Give prices in £", 2026-10-21). An estimate said as one ("about
+    /// £6.50", "~£6.50") is allowed, and 0 is 0 in any currency. Nothing
+    /// searched this turn: not checked.
+    #[serde(default)]
+    pub prices_keep_their_sign: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -558,6 +565,41 @@ fn false_claims(o: &Observed) -> Vec<String> {
     out
 }
 
+/// The first price in `reply` (£, € or $ and an amount, not 0) with its
+/// currency sign swapped: no page gives it with that sign, but one gives
+/// the same amount with another — "£8" when the page said "$8". A price
+/// from nowhere (the model's memory) isn't this check's business; an
+/// estimate said as one ("about £6.50", "~£6.50", "≈ £6.50") passes. Pure.
+pub fn price_swapped(reply: &str, pages: &[String]) -> Option<String> {
+    use std::sync::OnceLock;
+    static PRICE: OnceLock<regex::Regex> = OnceLock::new();
+    let price = PRICE.get_or_init(|| {
+        regex::Regex::new(r"(?i)(~|≈|about|around|roughly|approx\.?|approximately|equivalent)?\s*([£€$])\s?(\d[\d,]*(?:\.\d+)?)").expect("static regex")
+    });
+    let norm = |n: &str| {
+        let n = n.replace(',', "");
+        let n = n.strip_suffix(".00").unwrap_or(&n).to_string();
+        n.strip_suffix(".0").unwrap_or(&n).to_string()
+    };
+    // Every price the pages give, as "£8" (JSON escapes "$" as itself, "£" as itself).
+    let given: Vec<String> = pages
+        .iter()
+        .flat_map(|p| price.captures_iter(p).map(|c| format!("{}{}", &c[2], norm(&c[3]))).collect::<Vec<_>>())
+        .collect();
+    price.captures_iter(reply).find_map(|c| {
+        let amount = norm(&c[3]);
+        let said_as_estimate = c.get(1).is_some();
+        let p = format!("{}{amount}", &c[2]);
+        let other = ["£", "€", "$"].iter().filter(|s| **s != &c[2]).map(|s| format!("{s}{amount}")).find(|o| given.contains(o));
+        match other {
+            Some(o) if amount.parse::<f64>().is_ok_and(|v| v > 0.0) && !said_as_estimate && !given.contains(&p) => {
+                Some(format!("{p} (the page says {o})"))
+            }
+            _ => None,
+        }
+    })
+}
+
 /// The first sentence of `reply` that says it searched or looked something
 /// up on the web ("I searched…", "I did look it up", "According to my
 /// search", "Yap searched the web…") — not a denial ("I didn't search", "I
@@ -726,6 +768,18 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
     if e.no_post_fixes && !fixes.is_empty() {
         fails.push(format!("Yap had to fix the answer: {}", fixes.join(", ")));
     }
+    if e.prices_keep_their_sign {
+        let pages: Vec<String> = calls
+            .iter()
+            .filter(|c| crate::web::TOOL_NAMES.contains(&c.name.as_str()) && c.success)
+            .map(|c| c.result.to_string())
+            .collect();
+        if !pages.is_empty() {
+            if let Some(price) = price_swapped(&o.reply, &pages) {
+                fails.push(format!("swaps a price's currency: {price}"));
+            }
+        }
+    }
     if let Some(want) = &e.clipboard_contains {
         match &o.stats.clipboard {
             Some(c) if lower(c).contains(&lower(want)) => {}
@@ -826,6 +880,19 @@ mod tests {
 
     fn obs(reply: &str) -> Observed {
         Observed { reply: reply.to_string(), ..Default::default() }
+    }
+
+    #[test]
+    fn prices_keep_their_currency_sign() {
+        let pages = [r#"{"results":[{"text":"Plus: $8/month or $80/year. Premium $30.00 a month. Free $0."}]}"#.to_string()];
+        assert_eq!(price_swapped("Plus is $8 a month (US price), Premium $30.", &pages), None);
+        // A sign swapped: x.ai's "$8" as "£8" (Qwen3.5-4B, 2026-10-21).
+        assert_eq!(price_swapped("**Plus** - £8/month (£80/year)", &pages).as_deref(), Some("£8 (the page says $8)"));
+        // Free is free whatever the sign; an estimate said as one passes;
+        // a price no page has isn't a swap.
+        assert_eq!(price_swapped("Free (£0), Plus $8 (about £6.50, ~£6)", &pages), None);
+        assert_eq!(price_swapped("Plus costs £9.", &pages), None);
+        assert_eq!(price_swapped("It's £12.99 a month.", &["Spotify Premium: £12.99 per month".to_string()]), None);
     }
 
     #[test]

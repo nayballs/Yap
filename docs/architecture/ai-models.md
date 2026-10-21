@@ -29,10 +29,14 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   view's Ask bars (`commands::chat_turn`, `small_model_answer`'s web
   pipeline, `note_ask`), local and cloud: "About the user: they're in the
   United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK
-  time (UTC+01:00). Give prices in £ (GBP), times in UK time and metric units;
-  a price a source gives only in another currency stays as it is, labelled,
-  like "$8 a month (US price)". Their name is Nathan. They told Yap: "…"" (the
-  example is "£8 a month (UK price)" for a US user) — only
+  time (UTC+01:00). Give times in UK time and metric units. Prices: in £ (GBP)
+  when you have them in £; never change a price's currency sign — a price in
+  another currency stays as it is, labelled, like "$15 a month (US price)".
+  Their name is Nathan. They told Yap: "…"" (the example is "£15 a month (UK
+  price)" for a US user, and no real plan's price: with "$8 a month" as the
+  example and "Give prices in £", Qwen3.5-4B wrote x.ai's
+  "$8/month" as "£8/month" 2 times in 3 — the model evaluations,
+  model-evals.md) — only
   the parts known; with nothing known, just the date and time (its clock
   changes every minute, so it goes last and the rest of the prompt stays
   cacheable). `about_name` (≤ 60 characters) and `about_me` (≤ 300, one

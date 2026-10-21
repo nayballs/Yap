@@ -107,7 +107,7 @@ test('About you: the region from Windows, changed and put back, the name and not
   await group.getByRole('button', { name: 'See what the AI is told' }).click();
   const told = group.getByLabel('What the AI is told');
   await expect(told).toContainText("About the user: they're in the United Kingdom (British English); it's ");
-  await expect(told).toContainText('Give prices in £ (GBP), times in UK time and metric units');
+  await expect(told).toContainText('Give times in UK time and metric units. Prices: in £ (GBP) when you have them in £');
   await expect(told).toContainText('Their name is Nathan.');
   await expect(told).toContainText("They told Yap: \"I'm in Manchester, I play PC games, I work day shifts\"");
   await expect(group.getByText('never sent to Yap', { exact: false })).toBeVisible();
@@ -156,7 +156,9 @@ test("Chat: the model is told about the user, and Exa searches the user's countr
   // The block, last in the prompt.
   const block = system.slice(system.lastIndexOf('About the user: '));
   expect(block).toMatch(/^About the user: they're in the United Kingdom \(British English\); it's \w+day \d{1,2} \w+ \d{4}, \d\d:\d\d UK time \(UTC\+0[01]:00\)\./);
-  expect(block).toContain('Give prices in £ (GBP), times in UK time and metric units; a price a source gives only in another currency stays as it is, labelled, like "$8 a month (US price)".');
+  expect(block).toContain(
+    `Give times in UK time and metric units. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like "$15 a month (US price)".`
+  );
   expect(block).toContain('Their name is Nathan.');
   expect(block).toContain('They told Yap: "I work day shifts"');
   // The web tools' line on times names the user's.
@@ -167,4 +169,15 @@ test("Chat: the model is told about the user, and Exa searches the user's countr
   expect(exa.length).toBeGreaterThan(0);
   expect(exa[0].body.userLocation).toBe('GB');
   expect(exa[0].body.query).toBe('Grok subscription price UK');
+
+  // Prices in $ without saying whose: Yap says so under the answer.
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'web_search', args: { query: 'Grok Premium price' } }] },
+    { content: 'Grok Premium is $30/month [1].' },
+  ]);
+  await main.getByRole('textbox', { name: 'Message' }).fill('How much is Grok Premium?');
+  await main.getByRole('button', { name: 'Send' }).click();
+  const answer = main.locator('.msgs .cbubble.assistant').last();
+  await expect(answer).toContainText('Grok Premium is $30/month');
+  await expect(answer.locator('em')).toHaveText('Prices in $ are as the sources give them (most likely US dollars), not in £.');
 });

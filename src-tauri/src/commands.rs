@@ -1104,10 +1104,17 @@ pub(crate) async fn chat_turn(
     // Every model's answer, checked before it's shown: no sources list or
     // "Yap searched…" note of its own, no search claimed that didn't
     // happen, no "[1]" with nothing (or another question's pages) behind it.
-    let (reply, fixed) = crate::chats::checked_answer(&reply, &text, looked, &conv.messages, &sources);
+    let (mut reply, fixed) = crate::chats::checked_answer(&reply, &text, looked, &conv.messages, &sources);
     for f in fixed {
         tracing::info!(fix = f, "Chat: Yap fixed the model's answer");
         crate::eval::post_fix(f);
+    }
+    // Prices in $ without saying whose, for someone who pays in £ (About
+    // you): Yap says so under the answer.
+    if let Some(note) = crate::about_you::foreign_price_note(&reply, &profile.region) {
+        tracing::info!("Chat: Yap noted the answer's prices are in dollars");
+        crate::eval::post_fix("foreign_price_note");
+        reply = format!("{}\n\n{note}", reply.trim_end());
     }
     let index = crate::chats::append_sourced(
         conv.id,

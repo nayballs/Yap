@@ -650,9 +650,10 @@ fn language_in_prompt(r: &Region) -> Option<String> {
 /// moment it describes. Pure.
 ///
 /// "About the user: they're in the United Kingdom (British English); it's
-/// Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give prices in £
-/// (GBP), times in UK time and metric units; a price a source gives only in
-/// another currency stays as it is, labelled, like "$8 a month (US price)".
+/// Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK
+/// time and metric units. Prices: in £ (GBP) when you have them in £; never
+/// change a price's currency sign — a price in another currency stays as it
+/// is, labelled, like "$15 a month (US price)".
 /// Their name is Nathan. They told Yap: "I play PC games.""
 pub fn prompt_block(p: &Profile, now: DateTime<Utc>) -> String {
     let r = &p.region;
@@ -684,11 +685,6 @@ pub fn prompt_block(p: &Profile, now: DateTime<Utc>) -> String {
         (None, None) => format!("{when}."),
     });
     let mut give: Vec<String> = Vec::new();
-    match (&r.symbol, &r.currency) {
-        (Some(s), Some(c)) if s != c => give.push(format!("prices in {s} ({c})")),
-        (_, Some(c)) => give.push(format!("prices in {c}")),
-        _ => {}
-    }
     if let Some(l) = &r.time_zone_label {
         give.push(format!("times in {l}"));
     }
@@ -696,19 +692,22 @@ pub fn prompt_block(p: &Profile, now: DateTime<Utc>) -> String {
         give.push(if m { "metric units" } else { "US units (miles, pounds, °F)" }.to_string());
     }
     if !give.is_empty() {
-        let list = match give.len() {
-            1 => give[0].clone(),
-            n => format!("{} and {}", give[..n - 1].join(", "), give[n - 1]),
+        out.push_str(&format!(" Give {}.", give.join(" and ")));
+    }
+    // Prices: theirs when known — never a sign swapped. Told "Give prices
+    // in £", Qwen3.5-4B wrote x.ai's US "$8/month" as "£8/month" 2 times in
+    // 3; told only to label a foreign price, it still listed bare "$8/month"
+    // 1 time in 3 (2026-10-21). An example in another currency than theirs.
+    if let Some(c) = &r.currency {
+        let money = match &r.symbol {
+            Some(s) if s != c => format!("{s} ({c})"),
+            _ => c.clone(),
         };
-        out.push_str(&format!(" Give {list}"));
-        // A foreign price, labelled: with only the instruction, Qwen3.5-4B
-        // still listed Grok's US plans as bare "$8/month" 1 time in 3; an
-        // example in another currency than theirs.
-        if let Some(c) = &r.currency {
-            let example = if c == "USD" { "£8 a month (UK price)" } else { "$8 a month (US price)" };
-            out.push_str(&format!("; a price a source gives only in another currency stays as it is, labelled, like \"{example}\""));
-        }
-        out.push('.');
+        let theirs = r.symbol.clone().filter(|s| s != c).unwrap_or_else(|| c.clone());
+        let example = if c == "USD" { "£15 a month (UK price)" } else { "$15 a month (US price)" };
+        out.push_str(&format!(
+            " Prices: in {money} when you have them in {theirs}; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"{example}\"."
+        ));
     }
     if !p.name.is_empty() {
         out.push_str(&format!(" Their name is {}.", p.name));
@@ -717,6 +716,28 @@ pub fn prompt_block(p: &Profile, now: DateTime<Utc>) -> String {
         out.push_str(&format!(" They told Yap: \"{}\"", p.about.replace('"', "'")));
     }
     out
+}
+
+/// Yap's note under an answer that gives prices in $ without saying whose
+/// dollars, for someone whose money isn't the dollar: "*Prices in $ are as
+/// the sources give them (most likely US dollars), not in £.*" — told to
+/// label a foreign price, Qwen3.5-4B still listed Grok's US plans as bare
+/// "$8/month" about 1 time in 4 (the model evaluations, 2026-10-21). `None`
+/// when the answer has no $ price, already says which dollars ("US$8", "USD",
+/// "US price", "American"…), or the person pays in a dollar. Pure.
+pub fn foreign_price_note(reply: &str, r: &Region) -> Option<String> {
+    static DOLLARS: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"(?:^|[^A-Za-z])\$\s?\d").expect("static regex"));
+    static SAID: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b(?:US|U\.S\.?|USD|CAD|AUD|NZD|HKD|SGD|dollars?|American|United States|America)\b|[A-Z]{1,3}\$")
+            .expect("static regex")
+    });
+    let (code, symbol) = (r.currency.as_deref()?, r.symbol.as_deref().unwrap_or(""));
+    if code == "USD" || symbol.contains('$') || !DOLLARS.is_match(reply) || SAID.is_match(reply) {
+        return None;
+    }
+    let theirs = if symbol.is_empty() { code } else { symbol };
+    Some(format!("*Prices in $ are as the sources give them (most likely US dollars), not in {theirs}.*"))
 }
 
 /// [`prompt_block`] for now, as Settings has it.
@@ -820,7 +841,7 @@ mod tests {
         let p = Profile { region: r, name: "Nathan".into(), about: "I'm in Manchester, I play PC games, I work day shifts".into() };
         assert_eq!(
             prompt_block(&p, at()),
-            "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give prices in £ (GBP), times in UK time and metric units; a price a source gives only in another currency stays as it is, labelled, like \"$8 a month (US price)\". Their name is Nathan. They told Yap: \"I'm in Manchester, I play PC games, I work day shifts\""
+            "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK time and metric units. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Their name is Nathan. They told Yap: \"I'm in Manchester, I play PC games, I work day shifts\""
         );
     }
 
@@ -866,7 +887,7 @@ mod tests {
         let p = Profile { region: r, ..Default::default() };
         let line = prompt_block(&p, at());
         assert!(line.starts_with("About the user: they're in France (French); it's "), "{line}");
-        assert!(line.contains("Give prices in € (EUR) and metric units;"), "{line}");
+        assert!(line.contains("Give metric units. Prices: in € (EUR) when you have them in €; never change"), "{line}");
         // "the" where English says it.
         assert_eq!(in_sentence(country("NL").unwrap()), "the Netherlands");
         assert_eq!(in_sentence(country("DE").unwrap()), "Germany");
@@ -927,6 +948,26 @@ mod tests {
         for t in TAVILY_COUNTRIES {
             assert!(COUNTRIES.iter().any(|c| tavily_country(c.code) == Some(*t)), "{t}");
         }
+    }
+
+    #[test]
+    fn bare_dollar_prices_get_a_note_for_someone_who_pays_in_pounds() {
+        let gb = resolve(&uk(), &Overrides::default());
+        let bare = "Here are the current Grok subscription prices:\n\n- **Plus**: $8/month\n- **Premium**: $30/month";
+        assert_eq!(
+            foreign_price_note(bare, &gb).as_deref(),
+            Some("*Prices in $ are as the sources give them (most likely US dollars), not in £.*")
+        );
+        // Already said whose dollars, or no $ price at all: nothing.
+        for said in ["Plus is $8/month (US price).", "Plus: US$8", "Plus costs 8 USD", "These are US prices: Plus $8.", "Plus is £8.", "It's free."] {
+            assert_eq!(foreign_price_note(said, &gb), None, "{said}");
+        }
+        // Someone who pays in dollars, or whose money Yap doesn't know.
+        let us = resolve(&parse_stand_in("en-US"), &Overrides::default());
+        let ca = resolve(&parse_stand_in("en-CA"), &Overrides::default());
+        assert_eq!(foreign_price_note(bare, &us), None);
+        assert_eq!(foreign_price_note(bare, &ca), None);
+        assert_eq!(foreign_price_note(bare, &Region::default()), None);
     }
 
     #[test]
