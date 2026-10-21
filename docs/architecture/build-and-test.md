@@ -180,7 +180,9 @@ until it's fixed (none open now). Guide: [`docs/e2e-tests.md`](../e2e-tests.md) 
   `YAP_WEB_STANDIN` point at `e2e/support/fake-web.js`; unset, a search or a
   page read fails; a provider's own search goes to the chat's configured
   endpoint, the fake AI in the suite, which answers Groq's
-  `browser_search` and Gemini's `generateContent` shapes), no AI
+  `browser_search` and Gemini's `generateContent` shapes), never the PC's
+  own region settings (`about_you.rs`: the debug-only `YAP_E2E_LOCALE` — a
+  tag or JSON — stands in for Windows; unset, nothing is detected), no AI
   provider's model list (`model_catalog.rs`: the debug-only
   `YAP_MODELS_STANDIN` points at `e2e/support/fake-llm.js`; unset, the
   curated lists), `e2e_coaching_reset` (every

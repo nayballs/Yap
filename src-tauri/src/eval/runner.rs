@@ -43,6 +43,9 @@ Running:
   --tokens-per-minute <n>  pacing budget (default 8000 for Groq, its free plan; none otherwise)
   --max-total-tokens <n>   stop starting scenarios for a model past this many tokens
   --timeout <secs>         per model call (default: Yap's own, 20 s for Chat)
+  --locale <tag|json>      the user's region, as Windows would say it (About you, about_you.rs):
+                           \"en-GB\" (currency and units from its region), or JSON {locale, country,
+                           currency, symbol, metric, timeZone}; default none (no region in prompts)
 Local models (Yap's llamafile, like local_llm.rs, on a free port, stopped after):
   --ngl <n>                GPU layers (default 0: CPU only)   --ctx <n> (default 8192, as Yap)
   --llamafile <path>       the runtime (default: the installed one, else downloaded)
@@ -85,6 +88,7 @@ struct Args {
     list: bool,
     cleanup: bool,
     cleanup_rounds: u32,
+    locale: Option<String>,
 }
 
 fn parse(argv: Vec<String>) -> Result<Args, String> {
@@ -129,6 +133,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--list" => a.list = true,
             "--cleanup" => a.cleanup = true,
             "--cleanup-rounds" => a.cleanup_rounds = num(value()?, &flag)?.max(1) as u32,
+            "--locale" => a.locale = Some(value()?),
             "--help" | "-h" => return Err(String::new()),
             other => return Err(format!("unknown option {other}")),
         }
@@ -210,6 +215,11 @@ pub fn main(argv: Vec<String>) -> i32 {
     // Test mode (as the e2e suite): apps are stand-ins and an "open" is only
     // recorded; nothing launches, pastes or notifies.
     std::env::set_var("YAP_E2E", "1");
+    // Test mode never reads Windows' region (about_you.rs): `--locale`
+    // stands in for it ("en-GB", or the JSON `YAP_E2E_LOCALE` takes).
+    if let Some(l) = &args.locale {
+        std::env::set_var("YAP_E2E_LOCALE", l);
+    }
     if !crate::e2e::active() {
         eprintln!("Test mode didn't switch on; refusing to run (an app could really open).");
         return 2;
@@ -822,6 +832,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "timeout_s": args.timeout,
             "ngl": args.ngl,
             "ctx": args.ctx,
+            "locale": std::env::var("YAP_E2E_LOCALE").ok(),
             "commit": git_commit(),
         }),
     );

@@ -160,7 +160,7 @@ pub fn web_definitions() -> Value {
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": { "type": "string", "description": "A few words, e.g. \"Gale location Baldur's Gate 3\"" }
+                        "query": { "type": "string", "description": "A few words for what the user's latest message asks, e.g. \"Gale location Baldur's Gate 3\"" }
                     },
                     "required": ["query"],
                     "additionalProperties": false
@@ -1034,6 +1034,61 @@ pub enum FirstStep {
 /// The id of a search Yap runs for the model.
 const YAP_SEARCH_ID: &str = "yap-search-1";
 
+/// `web_search` as the only tool of a step that must search
+/// ([`FirstStep::MustSearch`]): its description says what to search for —
+/// the latest message, not words from earlier ones. Left to the whole
+/// conversation, Qwen3.5-4B searched "Grok subscriptions check account" for
+/// "Can you look up Groc subscriptions for me, please?" — "check" from the
+/// question before (Nathan's chat, 2026-10-21: "…check billing", and an
+/// answer on checking a bill). Pure.
+pub fn forced_search_definition() -> Value {
+    let mut def = web_definitions()[0].clone();
+    def["function"]["description"] = json!(
+        "Search the web for what the user's latest message asks. The query: a few words from that message (names spelled right), plus a year or place when it matters; leave out words from earlier messages unless the latest one points back to them (\"it\", \"that one\")."
+    );
+    def
+}
+
+/// What a `search_notes` that found nothing tells the model while web
+/// search is on, for a question that isn't about the person's own notes
+/// (`web::about_own_stuff`): Nathan's "Can you check the Grok subscriptions
+/// please, for me?" got two empty notes searches and "I don't see any notes
+/// about Grok subscriptions" (Qwen3.5-4B, 2026-10-21).
+pub const NOTHING_IN_NOTES_HINT: &str =
+    "No notes match. If the question isn't about the user's own notes, search the web for it next (web_search) instead of saying there are no notes.";
+
+/// After a notes search that found nothing (web search on, a question not
+/// about the person's notes): what Yap does ([`run_tool_loop`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmptyNotes {
+    /// The result says to search the web next ([`NOTHING_IN_NOTES_HINT`]).
+    Hint,
+    /// The hint — and for a model on this PC, Yap searches the web for it
+    /// right after, as for `FirstStep::MustSearch`.
+    HintAndSearch,
+    /// Nothing (the model evaluations' "before").
+    Nothing,
+}
+
+/// [`EmptyNotes`] for this turn: the hint, and Yap's search for a model on
+/// this PC (a model evaluation may compare: `YAP_EVAL_EMPTY_NOTES` = hint |
+/// search | none).
+fn empty_notes_rule(local: bool) -> EmptyNotes {
+    if crate::eval::active() {
+        match std::env::var("YAP_EVAL_EMPTY_NOTES").as_deref() {
+            Ok("hint") => return EmptyNotes::Hint,
+            Ok("search") => return if local { EmptyNotes::HintAndSearch } else { EmptyNotes::Hint },
+            Ok("none") => return EmptyNotes::Nothing,
+            _ => {}
+        }
+    }
+    if local {
+        EmptyNotes::HintAndSearch
+    } else {
+        EmptyNotes::Hint
+    }
+}
+
 /// Yap's own search for the model, handed over as the `web_search` call the
 /// model would have made: its chip, its result in the messages (numbered
 /// sources, the safety rule's flag and the 3-search cap all as for a call
@@ -1116,11 +1171,32 @@ pub async fn run_tool_loop(
         search_for_the_model(turn, query, &mut messages, &mut tools_used).await;
     }
     let mut must_search = first == FirstStep::MustSearch && web.is_some();
+    // A notes search that finds nothing, for a question that isn't about the
+    // person's notes, leads to the web (once a turn).
+    let empty_notes = if web.is_some() && !crate::web::about_own_stuff(question) {
+        empty_notes_rule(crate::ai_model::runs_here(provider, base_url))
+    } else {
+        EmptyNotes::Nothing
+    };
+    let mut led_to_web = false;
+    // What was said before this question (the messages, earlier searches'
+    // queries and results): what a forced search's query mustn't carry over
+    // (`web::fresh_query`).
+    let earlier: Vec<String> = history
+        .iter()
+        .flat_map(|m| {
+            let mut texts: Vec<String> = m["content"].as_str().map(str::to_string).into_iter().collect();
+            texts.extend(m["tool_calls"].as_array().into_iter().flatten().filter_map(|c| c["function"]["arguments"].as_str().map(str::to_string)));
+            texts
+        })
+        .collect();
+    let earlier: Vec<&str> = earlier.iter().map(String::as_str).collect();
 
     let mut rejected = 0u32;
     for _step in 0..MAX_TOOL_STEPS {
+        let forced = must_search;
         let offered = if must_search {
-            Value::Array(web_definitions().as_array().into_iter().flatten().filter(|t| t["function"]["name"] == "web_search").cloned().collect())
+            json!([forced_search_definition()])
         } else {
             offered_tools(&tools, web.as_deref())
         };
@@ -1187,12 +1263,35 @@ pub async fn run_tool_loop(
         // Append the assistant turn (with its tool_calls), execute each call,
         // and feed the results back.
         messages.push(msg.clone());
+        // This step only searched the notes, and found nothing.
+        let mut notes_found_nothing = true;
         for call in &tool_calls {
             let id = call["id"].as_str().unwrap_or("");
             let name = call["function"]["name"].as_str().unwrap_or("");
-            let args = call_arguments(call);
+            let mut args = call_arguments(call);
+            // The forced first search: for this question, not words carried
+            // over from earlier ones.
+            if forced && name == "web_search" {
+                if let Some(q) = args["query"].as_str() {
+                    let fresh = crate::web::fresh_query(q, question, &earlier);
+                    if fresh != q {
+                        tracing::info!(words_before = q.split_whitespace().count(), words_after = fresh.split_whitespace().count(), "Chat: earlier words left out of the forced search");
+                        crate::eval::post_fix("fresh_query");
+                        args["query"] = json!(fresh);
+                        // The call as it ran, in the conversation too.
+                        if let Some(c) = messages
+                            .last_mut()
+                            .and_then(|m| m["tool_calls"].as_array_mut())
+                            .and_then(|calls| calls.iter_mut().find(|c| c["id"].as_str() == Some(id)))
+                        {
+                            c["function"]["arguments"] = json!(args.to_string());
+                        }
+                    }
+                }
+            }
+            let ran_with = args.clone();
             let web_seen = web.as_deref().is_some_and(crate::web::Turn::seen);
-            let result = if let Some(refusal) = refused_after_web(name, web_seen) {
+            let mut result = if let Some(refusal) = refused_after_web(name, web_seen) {
                 refusal
             } else if let Some(r) = crate::eval::intercept_tool(name, &args) {
                 r // a model evaluation records what would leave Yap (the clipboard)
@@ -1209,8 +1308,14 @@ pub async fn run_tool_loop(
             } else {
                 execute(name, &args)
             };
+            let empty = name == "search_notes" && result["data"].as_array().is_some_and(Vec::is_empty);
+            notes_found_nothing &= empty;
+            let looked = web.as_deref().is_some_and(crate::web::Turn::looked);
+            if empty && empty_notes != EmptyNotes::Nothing && !looked {
+                result["hint"] = json!(NOTHING_IN_NOTES_HINT);
+            }
             tracing::info!(tool = %name, success = %result["success"], "Chat tool call");
-            crate::eval::tool_called(name, &call_arguments(call), &result);
+            crate::eval::tool_called(name, &ran_with, &result);
             if let Some(id) = changed_note(name, &result) {
                 on_change(id);
             }
@@ -1222,6 +1327,16 @@ pub async fn run_tool_loop(
                 "tool_call_id": id,
                 "content": result.to_string(),
             }));
+        }
+        // Nothing in the notes for a question the web may answer: a model on
+        // this PC gets Yap's search for it straight away (the question as
+        // the query), as when it must search first.
+        if notes_found_nothing && empty_notes == EmptyNotes::HintAndSearch && !led_to_web {
+            if let Some(turn) = web.as_deref_mut().filter(|t| !t.looked()) {
+                led_to_web = true;
+                tracing::info!(provider, "Chat: nothing in the notes; Yap searches the web for the model");
+                search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used).await;
+            }
         }
     }
 
@@ -1750,7 +1865,7 @@ mod tests {
             exa,
         );
         let settings =
-            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None };
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None };
         let endpoints = crate::web::Endpoints {
             exa: format!("{}/exa", fake.base),
             tavily: String::new(),
@@ -1815,7 +1930,7 @@ mod tests {
         }
         // Exa got its recommended request, with the key.
         let (_, exa_body) = requests.iter().find(|(u, _)| u.starts_with("/exa/search")).expect("Exa asked");
-        assert_eq!(exa_body, &crate::web::exa_body("calculator tips"));
+        assert_eq!(exa_body, &crate::web::exa_body("calculator tips", None));
     }
 
     #[tokio::test]
@@ -1957,7 +2072,7 @@ mod tests {
             exa,
         );
         let settings =
-            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None };
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None };
         let endpoints = crate::web::Endpoints {
             exa: format!("{}/exa", fake.base),
             tavily: String::new(),
@@ -1989,6 +2104,69 @@ mod tests {
         for step in &chat {
             assert!(tool_names(&step["tools"]).iter().any(|n| n == "web_search"), "web_search taken away");
         }
+    }
+
+    /// Nathan's "Can you check the Grok subscriptions please, for me?"
+    /// (2026-10-21): Qwen3.5-4B searched his notes twice, found nothing and
+    /// stopped. With web search on, an empty notes search says to search the
+    /// web next, and for a model on this PC Yap searches it straight away.
+    #[tokio::test]
+    async fn nothing_in_the_notes_leads_to_the_web() {
+        let exa = json!({ "results": [{ "title": "Grok plans", "url": "https://x.ai/grok", "highlights": ["SuperGrok is £24 a month in the UK."] }] });
+        let notes_twice = calls(&[("search_notes", json!({ "query": "Grok plans" })), ("search_notes", json!({ "query": "Grok" }))]);
+        let run = |fake: &FakeServer, question: &'static str| {
+            let settings =
+                crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: Some("GB".into()) };
+            let endpoints = crate::web::Endpoints { exa: format!("{}/exa", fake.base), tavily: String::new(), standin: None, offline: false };
+            let base = format!("{}/v1", fake.base);
+            async move {
+                let mut turn = crate::web::Turn::new(settings, endpoints, question, &[]);
+                let out = run_tool_loop("You are helpful.", &[], question, &base, "", "fake-chat", "custom", false, false, &|_| {}, Some(&mut turn), FirstStep::Model)
+                    .await
+                    .expect("an answer");
+                (out, turn.sources.len())
+            }
+        };
+        let fake = fake_server(vec![notes_twice.clone(), json!({ "role": "assistant", "content": "SuperGrok is £24 a month [1]." })], exa.clone());
+        let ((reply, chips), sources) = run(&fake, "What are Grok's plans like?").await;
+        assert_eq!(reply, "SuperGrok is £24 a month [1].");
+        assert_eq!(chips, ["No notes found for \"Grok plans\"", "No notes found for \"Grok\"", "Searched the web: \"What are Grok's plans like\""]);
+        assert_eq!(sources, 1);
+        let requests = fake.requests.lock().unwrap().clone();
+        // Exa was asked for the user's country.
+        let exa_asked = requests.iter().find(|(u, _)| u.starts_with("/exa/search")).expect("Exa asked");
+        assert_eq!(exa_asked.1["userLocation"], "GB");
+        // The second model call: the empty notes results with the hint, then Yap's search as a call.
+        let chat: Vec<&Value> = requests.iter().filter(|(u, _)| u.ends_with("/chat/completions")).map(|(_, b)| b).collect();
+        assert_eq!(chat.len(), 2);
+        let messages = chat[1]["messages"].as_array().unwrap();
+        let tool_results: Vec<Value> =
+            messages.iter().filter(|m| m["role"] == "tool").map(|m| serde_json::from_str(m["content"].as_str().unwrap()).unwrap()).collect();
+        assert_eq!(tool_results[0]["hint"], NOTHING_IN_NOTES_HINT);
+        assert_eq!(tool_results[1]["hint"], NOTHING_IN_NOTES_HINT);
+        assert_eq!(messages[messages.len() - 2]["tool_calls"][0]["function"]["name"], "web_search");
+        assert_eq!(tool_results[2]["data"]["results"][0]["url"], "https://x.ai/grok");
+
+        // A question about their own notes: no hint, no web search.
+        let fake = fake_server(vec![notes_twice.clone(), json!({ "role": "assistant", "content": "Nothing in your notes about Grok." })], exa.clone());
+        let ((_, chips), sources) = run(&fake, "What did I note about Grok?").await;
+        assert_eq!((chips.len(), sources), (2, 0));
+        let requests = fake.requests.lock().unwrap().clone();
+        assert!(!requests.iter().any(|(u, _)| u.starts_with("/exa/")));
+        let last = &requests.iter().rev().find(|(u, _)| u.ends_with("/chat/completions")).unwrap().1;
+        assert!(!last.to_string().contains("search the web for it next"));
+    }
+
+    /// The forced first search's tool says to search the latest message
+    /// only: "Grok subscriptions check account" carried "check" from the
+    /// question before (Nathan's chat).
+    #[test]
+    fn the_forced_search_names_the_latest_message() {
+        let def = forced_search_definition();
+        assert_eq!(def["function"]["name"], "web_search");
+        assert_eq!(def["function"]["parameters"], web_definitions()[0]["function"]["parameters"]);
+        let d = def["function"]["description"].as_str().unwrap();
+        assert!(d.contains("latest message") && d.contains("leave out words from earlier messages"), "{d}");
     }
 
     /// The web tools' instructions and schemas, on top of a tool step's

@@ -39,7 +39,7 @@ mod google;
 mod ics;
 mod links;
 mod model;
-mod tz;
+pub(crate) mod tz;
 mod vault;
 
 use std::collections::{BTreeMap, HashMap, HashSet};

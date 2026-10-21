@@ -1,0 +1,32 @@
+{
+  "name": "web-price-local-currency",
+  "description": "A price question that doesn't say where (\"How much does Spotify Premium cost a month?\"): with the user's region known (--locale en-GB), the answer gives the UK price in £, or says a figure is in US $. Before 2026-10-21 nothing told the model where the user was. Live (Exa with the run's key).",
+  "tags": [
+    "web",
+    "prices",
+    "locale",
+    "live"
+  ],
+  "needs_web": true,
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "How much does Spotify Premium cost a month?",
+      "expect": {
+        "min_sources": 1,
+        "answer_matches": "£\\s?\\d",
+        "no_false_claims": true,
+        "opened_none": true,
+        "prices_keep_their_sign": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "answer_not_matches": "(?:^|[^S])\\$\\s?\\d"
+      }
+    }
+  ]
+}

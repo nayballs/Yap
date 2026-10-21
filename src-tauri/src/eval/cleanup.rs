@@ -30,6 +30,26 @@ use super::record;
 #[derive(Debug, serde::Deserialize)]
 pub struct Bench {
     pub dictations: Vec<String>,
+    /// Dictations with words English spells two ways, as speech-to-text
+    /// writes them (American): does cleanup follow "Use my region's
+    /// spelling" (`about_you::cleanup_spelling`, the run's `--locale`)?
+    #[serde(default)]
+    pub spelling: Vec<SpellingCase>,
+}
+
+/// One spelling dictation and its words, each way.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SpellingCase {
+    pub text: String,
+    pub british: Vec<String>,
+    pub american: Vec<String>,
+}
+
+/// How many of `words` an output has (case-blind, whole words). Pure.
+fn count_words(output: &str, words: &[String]) -> usize {
+    let lower = output.to_lowercase();
+    let tokens: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|t| !t.is_empty()).collect();
+    words.iter().filter(|w| tokens.contains(&w.to_lowercase().as_str())).count()
 }
 
 pub fn load(path: &Path) -> Result<Bench, String> {
@@ -55,10 +75,13 @@ struct Shot {
 }
 
 async fn clean(phase: &'static str, text: &str, ep: &Endpoint<'_>) -> Shot {
-    let body = crate::config::YapConfig::default().pp_prompt;
+    let cfg = crate::config::YapConfig::default();
+    // "Use my region's spelling" (on by default) for the run's locale
+    // (`--locale`; none = no spelling line, as before 2026-10-21).
+    let spelling = crate::about_you::cleanup_spelling(&cfg);
     record::begin_turn();
     let t0 = Instant::now();
-    let out = crate::llm::cleanup(text, ep.base_url, ep.key, ep.model, ep.provider, &body, &[], false).await;
+    let out = crate::llm::cleanup(text, ep.base_url, ep.key, ep.model, ep.provider, &cfg.pp_prompt, spelling.as_deref(), &[], false).await;
     let ms = t0.elapsed().as_millis() as u64;
     let st = record::end_turn();
     let (output, error) = match out {
@@ -152,7 +175,32 @@ pub async fn run(bench: &Bench, ep: &Endpoint<'_>, rounds: u32) -> Value {
         shots.push(s);
     }
     println!("  Chat turns that failed: {chat_failed} of {}, long ones {long_failed} of 4", bench.dictations.len());
-    let phases: Vec<Value> = ["first", "back to back", "after a Chat turn", "after a long Chat turn"]
+    // The spelling dictations, `rounds` times each: which way the words
+    // come out.
+    let mut spelling_outputs: Vec<Value> = Vec::new();
+    let (mut british, mut american, mut words) = (0usize, 0usize, 0usize);
+    for _ in 0..rounds.max(1) {
+        for case in &bench.spelling {
+            let s = clean("spelling", &case.text, ep).await;
+            let (b, a) = (count_words(&s.output, &case.british), count_words(&s.output, &case.american));
+            british += b;
+            american += a;
+            words += case.british.len();
+            spelling_outputs.push(json!({ "input": s.input, "output": s.output, "error": s.error, "ms": s.ms, "british": b, "american": a, "of": case.british.len() }));
+            shots.push(s);
+        }
+    }
+    let spelling = json!({
+        "line": crate::about_you::cleanup_spelling(&crate::config::YapConfig::default()),
+        "british": british,
+        "american": american,
+        "words": words,
+        "outputs": spelling_outputs,
+    });
+    if words > 0 {
+        println!("  spelling: {british} of {words} words British, {american} American");
+    }
+    let phases: Vec<Value> = ["first", "back to back", "after a Chat turn", "after a long Chat turn", "spelling"]
         .iter()
         .map(|p| stats(p, &shots.iter().filter(|s| s.phase == *p).collect::<Vec<_>>()))
         .collect();
@@ -181,6 +229,7 @@ pub async fn run(bench: &Bench, ep: &Endpoint<'_>, rounds: u32) -> Value {
         "chat_failed": chat_failed,
         "long_chat_failed": long_failed,
         "outputs": outputs,
+        "spelling": spelling,
         "shots": shots,
     })
 }
@@ -235,6 +284,27 @@ pub fn markdown(models: &[(String, Value)]) -> String {
                 format!("(error: {})", o["error"].as_str().unwrap_or("none"))
             });
             md.push_str(&format!("- \"{}\" → \"{}\" ({} ms)\n", o["input"].as_str().unwrap_or(""), out.replace('\n', " / "), o["ms"]));
+        }
+        let sp = &r["spelling"];
+        if sp["words"].as_u64().unwrap_or(0) > 0 {
+            md.push_str(&format!(
+                "\n**Spelling** ({}): {} of {} words British, {} American.\n\n",
+                sp["line"].as_str().unwrap_or("no spelling line"),
+                sp["british"],
+                sp["words"],
+                sp["american"]
+            ));
+            for o in sp["outputs"].as_array().into_iter().flatten() {
+                md.push_str(&format!(
+                    "- \"{}\" → \"{}\" ({} of {} British, {} American; {} ms)\n",
+                    o["input"].as_str().unwrap_or(""),
+                    o["output"].as_str().unwrap_or("").replace('\n', " / "),
+                    o["british"],
+                    o["of"],
+                    o["american"],
+                    o["ms"]
+                ));
+            }
         }
     }
     md

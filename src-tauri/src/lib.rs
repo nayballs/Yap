@@ -7,6 +7,7 @@
 //! The dictation engine (input hook, STT, text injection) is ported verbatim
 //! from Voice Mirror; everything else here is the slim glue.
 
+mod about_you;
 mod agent_detect;
 mod ai_model;
 mod alert;
@@ -383,6 +384,7 @@ pub fn run() {
             commands::toggle_recording,
             commands::dictation_key,
             commands::get_config,
+            about_you::about_you_status,
             commands::save_config,
             commands::download_model,
             commands::download_model_size,

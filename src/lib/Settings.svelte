@@ -24,6 +24,7 @@
   import VoiceSettings from './VoiceSettings.svelte';
   import OpenAppsSettings from './OpenAppsSettings.svelte';
   import WebSearchSettings from './WebSearchSettings.svelte';
+  import AboutYouSettings from './AboutYouSettings.svelte';
   import KokoroOffer from './KokoroOffer.svelte';
   import { kokoro, startKokoro } from './kokoro.svelte.js';
   import NoteFormattingConfig from './NoteFormattingConfig.svelte';
@@ -596,6 +597,15 @@
     ttsWindowsVoice: '',
     ttsRate: 1.0,
     ttsVolume: 0.5,
+    // About you (AboutYouSettings.svelte, about_you.rs): empty = follow Windows.
+    aboutName: '',
+    aboutMe: '',
+    regionCountry: '',
+    regionLanguage: '',
+    regionCurrency: '',
+    regionUnits: '',
+    regionTimeZone: '',
+    regionSpelling: true,
   };
 
   // Real running version — read from Tauri, not hardcoded (was stuck at '0.1.0').
@@ -1746,7 +1756,7 @@
         {#if section === 'general'}
           <div class="page-h">
             <h1>General</h1>
-            <p>Hotkey, audio devices, and how Yap looks on screen.</p>
+            <p>Hotkey, what the AI knows about you, audio devices, and how Yap looks on screen.</p>
           </div>
           <Group title="Activation">
             <Row
@@ -1785,6 +1795,9 @@
               </div>
             </Row>
           </Group>
+
+          <!-- What the AI models are told about you (about_you.rs). -->
+          <AboutYouSettings {cfg} />
 
           <Group title="Audio">
             <Row label="Microphone" desc="Applies instantly">

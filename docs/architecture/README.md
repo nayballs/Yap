@@ -12,7 +12,7 @@ its one line in CLAUDE.md's module index).
 - [dictation.md](./dictation.md) — the pipeline order, `pipeline.rs`, push-to-talk gestures and coaching, the input hook, the mic (dead-mic watchdog, Windows' privacy switches), STT, Upload's decoding, chimes, other apps' sound while dictating, history.
 - [pasting.md](./pasting.md) — the paste and the submit key, apps running as administrator, UI Automation reads of the field, smart spacing, the kind of app (terminals, coding CLIs, chat apps).
 - [dictionary.md](./dictionary.md) — near-miss (fuzzy) correction, the vocabulary's order, learning words from corrections, the Dictionary view.
-- [ai-models.md](./ai-models.md) — the LLM client and its prompts, the on-device model (llamafile, GGUF headers, the graphics card, context length), which model a call goes to, the providers' live model lists, Groq usage, the model evaluations.
+- [ai-models.md](./ai-models.md) — what every model is told about the person (About you), the LLM client and its prompts, the on-device model (llamafile, GGUF headers, the graphics card, context length), which model a call goes to, the providers' live model lists, Groq usage, the model evaluations.
 - [chat-and-assistant.md](./chat-and-assistant.md) — chats, the tool loop and its note tools, the Voice Assistant, the Chat view and its model picker.
 - [web-and-apps.md](./web-and-apps.md) — web search (Yap's own and the cloud models' own), reading pages, opening apps.
 - [spoken-replies.md](./spoken-replies.md) — reading answers aloud: Kokoro, Windows' voices, text prepared for speech, the speaker.

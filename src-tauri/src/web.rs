@@ -141,14 +141,28 @@ pub struct Settings {
     /// The chat model's provider's own search, when Yap uses it
     /// ([`native::NativeSearch::for_chat`]).
     pub native: Option<native::NativeSearch>,
+    /// The person's country (ISO 3166-1 alpha-2, "GB"; Settings → General →
+    /// About you, `about_you.rs`): searches are aimed at it — Exa's
+    /// `userLocation`, Tavily's `country`, the providers' own searches.
+    pub country: Option<String>,
 }
 
 impl Settings {
-    /// Yap's own search only (Exa / Tavily / the keyless lookup).
-    pub fn from_config(cfg: &crate::config::YapConfig) -> Settings {
+    /// Yap's own search only (Exa / Tavily / the keyless lookup), aimed at
+    /// the person's region (About you).
+    fn in_region(cfg: &crate::config::YapConfig, region: &crate::about_you::Region) -> Settings {
         let service = Service::parse(&cfg.web_search_service);
         let key = cfg.web_search_keys.get(service.id()).map(|k| k.trim().to_string()).unwrap_or_default();
-        Settings { service, key, lang: wiki_language(&cfg.selected_language, system_language().as_deref()), native: None }
+        // Wikipedia's edition: the speech language, else the language
+        // About you names (Windows' unless changed there).
+        let system = region.language.clone().or_else(system_language);
+        Settings {
+            service,
+            key,
+            lang: wiki_language(&cfg.selected_language, system.as_deref()),
+            native: None,
+            country: region.country.clone(),
+        }
     }
 
     /// For a chat with this model (its provider, endpoint and key, as
@@ -156,9 +170,11 @@ impl Settings {
     /// search when "The AI's own search" is chosen and Yap has one for it,
     /// else Yap's own.
     pub fn for_chat(cfg: &crate::config::YapConfig, provider: &str, model: &str, base_url: &str, api_key: &str) -> Settings {
-        let mut s = Settings::from_config(cfg);
+        let region = crate::about_you::profile(cfg).region;
+        let mut s = Settings::in_region(cfg, &region);
         if cfg.web_search_native {
-            s.native = native::NativeSearch::for_chat(provider, model, base_url, api_key);
+            s.native = native::NativeSearch::for_chat(provider, model, base_url, api_key)
+                .map(|n| n.in_region(region.country.as_deref(), region.time_zone.as_deref()));
         }
         s
     }
@@ -372,14 +388,20 @@ fn date_only(s: &str) -> Option<String> {
 
 /// Exa's recommended search request (its integration guide): the query,
 /// `type: "auto"` and highlights — plus `numResults: 5`, Yap's result
-/// budget. Pure.
-pub fn exa_body(query: &str) -> Value {
-    json!({
+/// budget, and `userLocation`, the person's country ("The end user's
+/// location, as a two-letter ISO 3166-1 country code", exa.ai/docs/reference/
+/// search as read on 21 Oct 2026; About you). Pure.
+pub fn exa_body(query: &str, country: Option<&str>) -> Value {
+    let mut body = json!({
         "query": query,
         "type": "auto",
         "numResults": MAX_RESULTS,
         "contents": { "highlights": true },
-    })
+    });
+    if let Some(c) = country.and_then(crate::about_you::country) {
+        body["userLocation"] = json!(c.code);
+    }
+    body
 }
 
 /// Exa's results (`results[]: {title, url, publishedDate, highlights[]}`).
@@ -403,9 +425,15 @@ pub fn parse_exa(v: &Value) -> Vec<Hit> {
 
 /// Tavily's search request (docs.tavily.com/documentation/api-reference/
 /// endpoint/search): the query and Yap's result budget; `search_depth`
-/// stays "basic" (one credit), no answer, no raw content. Pure.
-pub fn tavily_body(query: &str) -> Value {
-    json!({ "query": query, "max_results": MAX_RESULTS })
+/// stays "basic" (one credit), no answer, no raw content; `country` (its
+/// lower-case English name, "Boost search results from a specific country",
+/// general topic only — the default) when it has one for the person's. Pure.
+pub fn tavily_body(query: &str, country: Option<&str>) -> Value {
+    let mut body = json!({ "query": query, "max_results": MAX_RESULTS });
+    if let Some(name) = country.and_then(crate::about_you::tavily_country) {
+        body["country"] = json!(name);
+    }
+    body
 }
 
 /// Tavily's results (`results[]: {title, url, content, score,
@@ -520,16 +548,16 @@ static API: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .unwrap_or_default()
 });
 
-async fn service_search(ep: &Endpoints, service: Service, key: &str, query: &str) -> Result<Vec<Hit>, String> {
+async fn service_search(ep: &Endpoints, service: Service, key: &str, query: &str, country: Option<&str>) -> Result<Vec<Hit>, String> {
     let base = ep.service_base(service)?;
     let (url, req) = match service {
         Service::Exa => {
             let url = format!("{base}/search");
-            (url.clone(), API.post(url).header("x-api-key", key).json(&exa_body(query)))
+            (url.clone(), API.post(url).header("x-api-key", key).json(&exa_body(query, country)))
         }
         Service::Tavily => {
             let url = format!("{base}/search");
-            (url.clone(), API.post(url).bearer_auth(key).json(&tavily_body(query)))
+            (url.clone(), API.post(url).bearer_auth(key).json(&tavily_body(query, country)))
         }
     };
     let host = site_of(&url);
@@ -1024,7 +1052,14 @@ pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
         return Err("The search was empty.".into());
     }
     let model = s.native.as_ref().map_or("", |n| n.model.as_str());
-    let key = format!("{:?}|{model}|{}|{}|{}", backend(s), s.lang, query.to_lowercase(), game_for(context).map_or("", |g| g.game));
+    let key = format!(
+        "{:?}|{model}|{}|{}|{}|{}",
+        backend(s),
+        s.lang,
+        s.country.as_deref().unwrap_or(""),
+        query.to_lowercase(),
+        game_for(context).map_or("", |g| g.game)
+    );
     if let Some((at, found)) = SEARCHES.lock().unwrap_or_else(|p| p.into_inner()).get(&key) {
         if at.elapsed() < CACHE_FOR {
             return Ok(found.clone());
@@ -1075,7 +1110,7 @@ async fn own_search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
     let query = query.to_string();
     Ok(match own_backend(s) {
         Backend::Keyless | Backend::Native(_) => keyless(s, ep, &query, context).await?,
-        Backend::Service(service) => match service_search(ep, service, &s.key, &query).await {
+        Backend::Service(service) => match service_search(ep, service, &s.key, &query, s.country.as_deref()).await {
             Ok(mut hits) => {
                 // A game question: its wiki's best article leads.
                 if let Some(g) = game_for(&query).or_else(|| game_for(context)) {
@@ -1683,7 +1718,38 @@ pub fn cited_sources(sources: &[Source], reply: &str) -> Vec<Source> {
 const OWN_STUFF: &[&str] = &[
     "my note", "my notes", "my meeting", "my meetings", "the meeting", "the transcript", "my transcript",
     "my calendar", "my dictation", "in my notes", "notes about", "note about", "meeting notes",
+    "did i write", "i wrote", "did i save", "i saved", "did i say", "did we decide", "we decided", "did we agree",
+    "we agreed", "we discussed", "my list", "my shopping list", "my to-do", "my todo", "my budget",
 ];
+
+/// Is the question about the person's own notes, meetings or lists ("what
+/// did I note about…", "in my notes", "what did we decide…")? Then the web
+/// has nothing to add: never searched for it, and an empty notes search
+/// isn't followed by a web search. Pure.
+pub fn about_own_stuff(question: &str) -> bool {
+    static NOTE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bnot(?:e|es|ed)\b").expect("static regex"));
+    let lower = format!(" {} ", question.to_lowercase().replace('’', "'"));
+    OWN_STUFF.iter().any(|p| lower.contains(p)) || NOTE.is_match(&lower.replace("patch notes", "").replace("release notes", ""))
+}
+
+/// Asking what something costs, whether it's on offer or in stock: today's
+/// price is on the web, never in a model's training — and the person's own
+/// currency matters (Nathan's "Can you check the Grok subscriptions please,
+/// for me?" got two notes searches and no answer, 2026-10-21). Pure.
+pub fn asks_about_prices(question: &str) -> bool {
+    static WORDS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?i)\b(?:prices?|pricing|priced|costs?|costing|subscriptions?|subscribe|memberships?|fees|cheapest|cheaper|deals|best deal|good deal|discounts?|on offer|on sale|in stock|out of stock|sold out|in the sales|tariffs?|how much money)\b",
+        )
+        .expect("static regex")
+    });
+    // "How much is a PS5?", "how much does it cost?" — not "how much is 15% of 80?".
+    static HOW_MUCH: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\bhow\s+much\s+(?:is|are|was|were|does|would|will|for|to)\b").expect("static regex"));
+    static MATHS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\bhow\s+much\s+(?:is|are)\s+[\d(.,£$€]+\s*(?:%|percent|\+|-|\*|x|times|plus|minus|divided|of)").expect("static regex"));
+    WORDS.is_match(question) || (HOW_MUCH.is_match(question) && !MATHS.is_match(question))
+}
 
 /// Phrases that ask for the web.
 const ASKS_FOR_WEB: &[&str] = &[
@@ -1720,14 +1786,12 @@ pub fn needs_web_in(question: &str, this_year: i32) -> bool {
         )
         .expect("static regex")
     });
-    static NOTE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bnotes?\b").expect("static regex"));
     static YEAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(20\d\d)\b").expect("static regex"));
     let lower = format!(" {} ", question.to_lowercase().replace('’', "'"));
-    let about_a_note = NOTE.is_match(&lower.replace("patch notes", "").replace("release notes", ""));
-    if OWN_STUFF.iter().any(|p| lower.contains(p)) || about_a_note || about_the_answer(question) || ACTS.is_match(question) {
+    if about_own_stuff(question) || about_the_answer(question) || ACTS.is_match(question) {
         return false;
     }
-    if game_for(question).is_some() {
+    if game_for(question).is_some() || asks_about_prices(question) {
         return true;
     }
     // A year from last year on: what a model's training can't know yet.
@@ -1764,20 +1828,90 @@ pub fn refers_back(question: &str) -> bool {
 }
 
 /// The search for a question: without "can you look up", "search the web
-/// for", "please"… ("Can you look up the latest Rust release?" → "the
-/// latest Rust release"). Pure.
+/// for", "please", "for me"… ("Can you look up the latest Rust release?" →
+/// "the latest Rust release"), sentence by sentence, a sentence of nothing
+/// else left out ("Can you look up please, for me? Can you look up Groc
+/// subscriptions for me, please?" → "Groc subscriptions": Nathan's, dictated,
+/// 2026-10-21). Pure.
 pub fn search_query(question: &str) -> String {
     static ASK: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            r"(?i)^\s*(?:hey\s+\w+[,!]?\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|please\s+)?(?:(?:quickly\s+)?(?:look\s+up|look\s+(?:it|this|that)\s+up|search\s+(?:the\s+(?:web|internet)\s+|online\s+)?(?:for\s+)?|google|find\s+out|check)\s*(?:online\s+|on\s+the\s+web\s+)?(?:for\s+)?)",
+            r"(?i)^\s*(?:hey\s+\w+[,!]?\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|please\s+)?(?:(?:quickly\s+)?(?:look\s+up|look\s+(?:it|this|that)\s+up|search\s+(?:the\s+(?:web|internet)\s+|online\s+)?(?:for\s+)?|web\s+search|google|find\s+out|check)\s*(?:online\s+|on\s+the\s+web\s+)?(?:for\s+)?)",
         )
         .expect("static regex")
     });
-    let q = ASK.replace(question.trim(), "");
-    let q = q.trim().trim_end_matches(['?', '.', '!']).trim();
-    let q = q.strip_suffix(" please").unwrap_or(q).trim_end_matches(',').trim();
-    let q = if q.is_empty() { question.trim() } else { q };
-    tidy(q, 200)
+    static FILLER: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i),?\s*\b(?:please|pls|for me|for us|thanks|thank you|if you can|if possible|real quick)\b,?").expect("static regex")
+    });
+    let parts: Vec<String> = question
+        .split_inclusive(['?', '!'])
+        .map(|s| {
+            let q = ASK.replace(s.trim(), "");
+            let q = FILLER.replace_all(&q, " ");
+            let q = q.split_whitespace().collect::<Vec<_>>().join(" ");
+            q.trim().trim_end_matches(['?', '.', '!', ',']).trim().to_string()
+        })
+        .filter(|q| q.chars().any(char::is_alphanumeric))
+        .collect();
+    let q = parts.join(" ");
+    let q = if q.trim().is_empty() { question.trim().to_string() } else { q };
+    tidy(&q, 200)
+}
+
+/// A forced first search's query without the words the model carried over
+/// from earlier in the conversation: Qwen3.5-4B searched "Grok subscription
+/// management check account billing" for "Can you look up Groc
+/// subscriptions for me, please?" — every word after "subscription" from
+/// the turn before ("check", its search, its answer about billing), and the
+/// answer was about checking a bill (Nathan's chat, 2026-10-21; told in the
+/// tool's description to leave them out, it still did 1 time in 3). A word
+/// stays when the question has it (or a near-miss of it: "Groc" → the
+/// model's "Grok"), when nothing earlier had it (the model's own "price",
+/// "UK", "match", a year), or when it's a number. Nothing changes when the
+/// question points back at earlier messages ("it", "that one", "those") or
+/// shares fewer than two words with the query (too little to stand alone:
+/// "and in the UK?"), nor when too little would be left. Pure.
+pub fn fresh_query(query: &str, question: &str, earlier: &[&str]) -> String {
+    fn words(s: &str) -> Vec<String> {
+        s.to_lowercase()
+            .replace('’', "'")
+            .split(|c: char| !(c.is_alphanumeric() || c == '\''))
+            .map(|w| w.trim_matches('\'').trim_end_matches("'s").to_string())
+            .filter(|w| !w.is_empty())
+            .collect()
+    }
+    fn same(a: &str, b: &str) -> bool {
+        let stem = |w: &str| if w.chars().count() > 3 { w.trim_end_matches('s').to_string() } else { w.to_string() };
+        a == b
+            || stem(a) == stem(b)
+            || (a.chars().count() >= 4 && b.chars().count() >= 4 && crate::fuzzy::plain_spelling_distance(a, b) <= 0.25)
+    }
+    static BACK: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(?:it|its|that|this|they|them|those|these|one|ones|he|she|him|her|his|their|there)\b").expect("static regex")
+    });
+    if earlier.is_empty() || refers_back(question) || BACK.is_match(question) {
+        return query.to_string();
+    }
+    let asked = words(question);
+    let content: Vec<&String> = asked.iter().filter(|w| w.chars().count() >= 3 && !QUERY_STOP.contains(&w.as_str())).collect();
+    let q = words(query);
+    let shared = content.iter().filter(|a| q.iter().any(|w| same(w, a))).count();
+    if shared < 2 {
+        return query.to_string();
+    }
+    let before: Vec<String> = earlier.iter().flat_map(|t| words(t)).collect();
+    let kept: Vec<&str> = query
+        .split_whitespace()
+        .filter(|raw| {
+            let w = words(raw);
+            let Some(w) = w.first() else { return true };
+            w.chars().all(|c| c.is_ascii_digit()) || asked.iter().any(|a| same(w, a)) || !before.iter().any(|b| same(w, b))
+        })
+        .collect();
+    if kept.len() < 2 || kept.len() == query.split_whitespace().count() {
+        return query.to_string();
+    }
+    kept.join(" ")
 }
 
 /// The fixed pipeline's sources and their passages for the prompt: ≤ 3
@@ -1931,17 +2065,14 @@ pub fn today() -> String {
     chrono::Local::now().format("%A %-d %B %Y").to_string()
 }
 
-/// The user's local time and its offset from UTC, for answers that give a
-/// time: pages often give one in another zone (an American site's "3:00 PM
-/// ET" is 8 pm in the UK; Nathan's Arsenal answer, 2026-10-21, called it
-/// "3:00 PM UK time").
-pub fn time_note() -> String {
-    let now = chrono::Local::now();
-    format!(
-        "The user's local time is {} (UTC{}): when a page gives a time in another time zone (ET, PT, CET, UTC…), convert it to the user's time and say which zone you mean.",
-        now.format("%H:%M"),
-        now.format("%:z")
-    )
+/// For answers that give a time: pages often give one in another zone (an
+/// American site's "3:00 PM ET" is 8 pm in the UK; Nathan's Arsenal answer,
+/// 2026-10-21, called it "3:00 PM UK time"). The user's own time and its
+/// offset from UTC are in the About you block (`about_you::prompt_block`),
+/// last in the prompt; `zone`: its name there ("UK time"). Pure.
+pub fn time_note(zone: Option<&str>) -> String {
+    let theirs = zone.map_or_else(|| "the user's time".to_string(), |z| format!("the user's time ({z})"));
+    format!("When a page gives a time in another time zone (ET, PT, CET, UTC…), convert it to {theirs} and say which zone you mean.")
 }
 
 #[cfg(test)]
@@ -1949,7 +2080,7 @@ mod tests {
     use super::*;
 
     fn settings(key: &str) -> Settings {
-        Settings { service: Service::Exa, key: key.into(), lang: "en".into(), native: None }
+        Settings { service: Service::Exa, key: key.into(), lang: "en".into(), native: None, country: None }
     }
 
     fn offline() -> Endpoints {
@@ -1976,8 +2107,15 @@ mod tests {
 
     #[test]
     fn exa_requests_and_results_map_as_its_guide_says() {
-        let body = exa_body("where is gale bg3");
+        let body = exa_body("where is gale bg3", None);
         assert_eq!(body, json!({ "query": "where is gale bg3", "type": "auto", "numResults": 5, "contents": { "highlights": true } }));
+        // The user's country (About you), as Exa's userLocation: an ISO code.
+        let body = exa_body("grok subscription price", Some("gb"));
+        assert_eq!(
+            body,
+            json!({ "query": "grok subscription price", "type": "auto", "numResults": 5, "contents": { "highlights": true }, "userLocation": "GB" })
+        );
+        assert!(exa_body("q", Some("ZZ")).get("userLocation").is_none(), "not a country: left out");
         let hits = parse_exa(&serde_json::from_str(EXA).unwrap());
         assert_eq!(hits.len(), 2, "the local address and the result with no url are dropped");
         assert_eq!(hits[0].title, "Gale - bg3.wiki");
@@ -2004,7 +2142,13 @@ mod tests {
 
     #[test]
     fn tavily_requests_and_results_map_as_its_docs_say() {
-        assert_eq!(tavily_body("latest rust release"), json!({ "query": "latest rust release", "max_results": 5 }));
+        assert_eq!(tavily_body("latest rust release", None), json!({ "query": "latest rust release", "max_results": 5 }));
+        // The user's country, as Tavily names it; one it doesn't list, left out.
+        assert_eq!(
+            tavily_body("spotify premium price", Some("GB")),
+            json!({ "query": "spotify premium price", "max_results": 5, "country": "united kingdom" })
+        );
+        assert_eq!(tavily_body("q", Some("HK")), json!({ "query": "q", "max_results": 5 }));
         let hits = parse_tavily(&serde_json::from_str(TAVILY).unwrap());
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].title, "Announcing Rust 1.99.0");
@@ -2282,10 +2426,75 @@ mod tests {
             assert!(!needs_web_in(no, 2026), "{no}");
         }
         assert!(needs_web_in("What are the latest patch notes for Baldur's Gate 3?", 2026));
+        // Prices, plans, deals and stock (Nathan's Grok chat, 2026-10-21).
+        for yes in [
+            "Can you check the Grok subscriptions please, for me?",
+            "Can you web search Grok's subscription and how much it costs for me?",
+            "How much is a Nintendo Switch 2 in the UK?",
+            "How much does Spotify Premium cost a month?",
+            "What's the cheapest flight to Lisbon?",
+            "Are there any deals on the Steam Deck?",
+            "Is the PS5 Pro in stock anywhere?",
+            "What's the price of a Netflix subscription?",
+            "how much is £50 in dollars",
+        ] {
+            assert!(needs_web_in(yes, 2026), "{yes}");
+        }
+        for no in [
+            // About their own notes, meetings and lists.
+            "What did I note about the Grok subscription?",
+            "In my notes, how much did the plumber cost?",
+            "What did we decide about the price in the meeting?",
+            "What did I write about subscriptions?",
+            "How much is left in my budget?",
+            // Sums, not prices.
+            "How much is 15% of 80?",
+            "how much is 3 times 7",
+            "How much water should I drink a day?",
+        ] {
+            assert!(!needs_web_in(no, 2026), "{no}");
+        }
+        assert!(about_own_stuff("what did I note about the trip?") && about_own_stuff("Anything in my notes about Grok?"));
+        assert!(!about_own_stuff("Can you check the Grok subscriptions please, for me?"));
+        assert!(!about_own_stuff("What are the latest patch notes for Hades 2?"), "patch notes are the web's");
         assert_eq!(search_query("Can you look up the latest Rust release?"), "the latest Rust release");
         assert_eq!(search_query("search the web for cheap flights to Lisbon please"), "cheap flights to Lisbon");
         assert_eq!(search_query("Google the opening hours of the Louvre."), "the opening hours of the Louvre");
         assert_eq!(search_query("Where do I find Gale in Baldur's Gate 3?"), "Where do I find Gale in Baldur's Gate 3");
+        // Nathan's, dictated (2026-10-21): the asking and the please left out.
+        assert_eq!(search_query("Can you check the Grok subscriptions please, for me?"), "the Grok subscriptions");
+        assert_eq!(search_query("Can you look up please, for me? Can you look up Groc subscriptions for me, please?"), "Groc subscriptions");
+        assert_eq!(
+            search_query("Can you web search Grok's subscription and how much it costs for me?"),
+            "Grok's subscription and how much it costs"
+        );
+        // Nothing else in it: the question as it is.
+        assert_eq!(search_query("Please?"), "Please?");
+    }
+
+    #[test]
+    fn a_forced_search_leaves_out_words_from_earlier_turns() {
+        // Nathan's chat (2026-10-21): turn 1 searched "check" and answered
+        // about billing; turn 2's own search carried them over.
+        let earlier = [
+            "Can you check the Grok subscriptions please, for me?",
+            r#"{"query":"Grok subscription management X platform account settings billing"}"#,
+            "To check your Grok subscription, go to grok.com/dashboard/billing while logged in to your account.",
+        ];
+        let q2 = "Can you look up please, for me? Can you look up Groc subscriptions for me, please?";
+        assert_eq!(fresh_query("Grok subscription management check account billing", q2, &earlier), "Grok subscription");
+        // The model's own words that nothing earlier had stay, and numbers.
+        assert_eq!(fresh_query("Grok subscriptions price UK 2026 check", q2, &earlier), "Grok subscriptions price UK 2026");
+        // Nothing earlier: as written ("Arsenal… tonight 21 October 2026 time").
+        let arsenal = "Arsenal Football Club match tonight 21 October 2026 time";
+        assert_eq!(fresh_query(arsenal, "When are Arsenal playing tonight?", &[]), arsenal);
+        // A follow-up pointing back, or one too short to stand alone: as written.
+        let rpg = ["What are the best RPG games coming out in 2026?", "1. Starfall Requiem (12 March)"];
+        assert_eq!(fresh_query("Starfall Requiem price", "How much is the first one?", &rpg), "Starfall Requiem price");
+        assert_eq!(fresh_query("Starfall Requiem price UK", "And how much is it in the UK?", &rpg), "Starfall Requiem price UK");
+        assert_eq!(fresh_query("Grok subscription price UK", "and in pounds?", &earlier), "Grok subscription price UK");
+        // Nothing to leave out.
+        assert_eq!(fresh_query("Grok subscriptions", q2, &earlier), "Grok subscriptions");
     }
 
     #[test]

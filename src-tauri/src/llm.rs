@@ -162,11 +162,57 @@ fn dictionary_suffix(dictionary: &[crate::config::DictionaryEntry]) -> String {
     )
 }
 
+/// The cleanup's system prompt: the guardrails + the editable body, then —
+/// in Yap's own layer, never the person's preset text — the spelling line
+/// ("Use my region's spelling", `about_you::cleanup_spelling`: British
+/// "colour" for en-GB, American "color" for en-US) and the custom dictionary.
+/// Pure.
+pub fn cleanup_system_prompt(body: &str, spelling: Option<&str>, dictionary: &[crate::config::DictionaryEntry]) -> String {
+    let spelling = spelling.map(|s| format!("\n\n{}", s.trim())).unwrap_or_default();
+    format!("{}{spelling}{}", build_system_prompt(body), dictionary_suffix(dictionary))
+}
+
+/// The dictation's own message for cleanup, with the spelling line after
+/// the restated instruction, just before the transcript (`spelling` in it,
+/// [`SpellingAt`]). Pure.
+pub fn cleanup_message(wrapped: &str, spelling: Option<&str>) -> String {
+    match spelling {
+        Some(s) => wrapped.replacen("\n\nTranscript:\n", &format!(" {}\n\nTranscript:\n", s.trim()), 1),
+        None => wrapped.to_string(),
+    }
+}
+
+/// Where cleanup's spelling line goes: the system prompt, the dictation's
+/// own message (after the restated instruction), or both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpellingAt {
+    System,
+    Message,
+    Both,
+}
+
+/// Where the spelling line goes: **both** — in the system prompt alone,
+/// Qwen3.5-4B changed only the words like its examples (21 of 48 British,
+/// the model evaluations of 2026-10-21) and Qwen2.5-1.5B none. A model
+/// evaluation may compare (`YAP_EVAL_SPELLING_AT` = system | message |
+/// both).
+fn spelling_at() -> SpellingAt {
+    if crate::eval::active() {
+        match std::env::var("YAP_EVAL_SPELLING_AT").as_deref() {
+            Ok("system") => return SpellingAt::System,
+            Ok("message") => return SpellingAt::Message,
+            _ => {}
+        }
+    }
+    SpellingAt::Both
+}
+
 /// Clean `text` through an OpenAI-compatible chat endpoint.
 ///
 /// Returns the cleaned text on success, or an `Err` message on any failure
 /// (network, non-200, parse, empty response). The caller is expected to fall
-/// back to the raw transcript on `Err`.
+/// back to the raw transcript on `Err`. `spelling`: keep the person's variety
+/// of English ([`cleanup_system_prompt`]).
 #[allow(clippy::too_many_arguments)]
 pub async fn cleanup(
     text: &str,
@@ -175,6 +221,7 @@ pub async fn cleanup(
     model: &str,
     provider: &str,
     body: &str,
+    spelling: Option<&str>,
     dictionary: &[crate::config::DictionaryEntry],
     disable_thinking: bool,
 ) -> Result<String, String> {
@@ -182,7 +229,10 @@ pub async fn cleanup(
     // plus the custom dictionary as spelling/correction bias (OpenWhispr's
     // `dictionarySuffix`) so the model uses the right spellings up front instead
     // of the post-pass find/replace being the only defense.
-    let system_prompt = format!("{}{}", build_system_prompt(body), dictionary_suffix(dictionary));
+    let at = spelling_at();
+    let in_system = spelling.filter(|_| at != SpellingAt::Message);
+    let in_message = spelling.filter(|_| at != SpellingAt::System);
+    let system_prompt = cleanup_system_prompt(body, in_system, dictionary);
 
     // Frame the transcript as DATA, not a chat turn: a restated instruction +
     // delimiters in the user message, plus a one-shot example that cleans a
@@ -232,7 +282,7 @@ NEVER respond with commentary, status, or meta-remarks such as \"Nothing to clea
         { "role": "assistant", "content": example2_out },
         { "role": "user", "content": example3_in },
         { "role": "assistant", "content": example3_out },
-        { "role": "user", "content": wrap(text) },
+        { "role": "user", "content": cleanup_message(&wrap(text), in_message) },
     ]);
 
     // Never waits out a rate limit: the dictation would wait with it, and the
@@ -971,6 +1021,24 @@ mod tests {
             rate_limited_error("custom", None),
             "The AI provider is limiting how much Yap can ask for right now. Try again in a minute."
         );
+    }
+
+    #[test]
+    fn the_spelling_line_goes_in_yaps_own_layer() {
+        let line = "When the transcript is in English, spell it the British way (honour, recognise), without changing any words.";
+        // The system prompt: after the guardrails and the body, before the
+        // dictionary; never inside the person's body.
+        let s = cleanup_system_prompt("Keep it casual.", Some(line), &[]);
+        assert_eq!(s, format!("{BASE_PROMPT}\n\nKeep it casual.\n\n{line}"));
+        assert_eq!(cleanup_system_prompt("Keep it casual.", None, &[]), format!("{BASE_PROMPT}\n\nKeep it casual."));
+        // The dictation's own message: after the restated instruction, just
+        // before the transcript.
+        let wrapped = "Clean up this dictation.\n\nTranscript:\n\"\"\"\nthe color\n\"\"\"";
+        assert_eq!(
+            cleanup_message(wrapped, Some(line)),
+            format!("Clean up this dictation. {line}\n\nTranscript:\n\"\"\"\nthe color\n\"\"\"")
+        );
+        assert_eq!(cleanup_message(wrapped, None), wrapped);
     }
 
     #[test]

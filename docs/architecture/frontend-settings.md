@@ -83,7 +83,23 @@
   linking to the Voice Assistant page).
   **General** (hotkey, recording mode — in push-to-talk its line says how
   double-tap goes hands-free, "More shortcuts" naming the rewrite and
-  assistant shortcuts with buttons to Commands / Voice Assistant, mic, sound+volume, then "Silence other apps
+  assistant shortcuts with buttons to Commands / Voice Assistant; then
+  **About you** (`AboutYouSettings.svelte`, `#settings-about-you`,
+  `about_you.rs`, 2026-10-21): "Region and language" as one line from
+  `about_you_status` ("United Kingdom · English (UK) · £ GBP · metric · UK
+  time") with **Change** → Country / Language / Currency / Units / Time zone
+  Selects (first option "Windows: United Kingdom" or "Automatic: £ GBP" —
+  what a picked country brings —, the zones from `Intl.supportedValuesOf`
+  grouped by region; `regionCountry` … `regionTimeZone`, empty = Windows'),
+  "Windows says: … · Use Windows' settings" once something's picked; "What
+  should Yap call you?" (`aboutName`, ≤ 60) and "Anything the AI should know
+  about you" (`aboutMe`, a 300-character textarea with a count); "Use my
+  region's spelling" (`regionSpelling`: "AI cleanup writes British English:
+  honour, recognise, paralyse, metre…"); "See what the AI is told" (the
+  block, as it reads now) and the privacy line ("Kept on this PC. Yap sends
+  it to the AI model you use, with each question: a cloud provider … sees
+  it, a model on this PC keeps it here. It's never sent to Yap."); the
+  status re-reads as the fields change, before the auto-save), mic, sound+volume, then "Silence other apps
   while you dictate" (`quietOtherApps`) and "Pause music and videos while
   you dictate" (`pauseMedia`) where "Mute while recording" was; **Yap bar** group
   (`#settings-bar`, the bar menu's Settings → "general#bar"): Show the Yap bar

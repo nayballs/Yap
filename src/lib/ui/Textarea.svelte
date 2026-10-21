@@ -3,6 +3,8 @@
     value = $bindable(''),
     placeholder = '',
     rows = 4,
+    maxlength = undefined,
+    ariaLabel = undefined,
     disabled = false,
     oninput,
   } = $props();
@@ -12,6 +14,8 @@
   class="textarea"
   {placeholder}
   {rows}
+  {maxlength}
+  aria-label={ariaLabel}
   {disabled}
   bind:value
   oninput={() => oninput?.(value)}

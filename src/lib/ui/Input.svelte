@@ -7,6 +7,9 @@
     oninput,
     // The id of a <datalist> of suggestions (a server's model names).
     list = undefined,
+    maxlength = undefined,
+    // Accessible name when the visible label sits elsewhere.
+    ariaLabel = undefined,
   } = $props();
 </script>
 
@@ -16,6 +19,8 @@
   {placeholder}
   {disabled}
   {list}
+  {maxlength}
+  aria-label={ariaLabel}
   bind:value
   oninput={() => oninput?.(value)}
 />

@@ -1593,6 +1593,9 @@ impl Shared {
         let cleaned = match (&pp_body, pp_enabled && !pp_base_url.is_empty() && !raw.is_empty())
         {
             (Some(body), true) => {
+                // "Use my region's spelling" (About you): British "colour"
+                // for en-GB, American "color" for en-US.
+                let spelling = self.config.read().ok().and_then(|c| crate::about_you::cleanup_spelling(&c));
                 match crate::llm::cleanup(
                     &raw,
                     &pp_base_url,
@@ -1600,6 +1603,7 @@ impl Shared {
                     &pp_model,
                     &pp_provider,
                     body,
+                    spelling.as_deref(),
                     &dict,
                     pp_disable_thinking,
                 )
