@@ -649,7 +649,8 @@ export async function startMintty({ nonce, cwd }) {
   };
   let win;
   try {
-    win = await waitForWindow(nonce, (w) => !before.has(w.hwnd) && w.cls === 'mintty' && w.title === title, {
+    // (mintty pads its window title with spaces.)
+    win = await waitForWindow(nonce, (w) => !before.has(w.hwnd) && w.cls === 'mintty' && w.title.trimEnd() === title, {
       what: 'Git Bash (mintty) window',
     });
     // Ready once `cat` has the log open (the terminal is raw by then).

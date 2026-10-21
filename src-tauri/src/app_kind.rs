@@ -332,15 +332,21 @@ const XTERM_INPUT_CLASS: &str = "xterm-helper-textarea";
 /// The focused element of an editor's window (`class`: its UI Automation
 /// ClassName, `name`: its Name) is an integrated terminal's input: that
 /// terminal, with the coding CLI its title shows. VS Code labels the input
-/// "Terminal 1, <title>" (then lines of screen-reader help; the words are
+/// "Terminal 1, <title>" then lines of screen-reader help (the words are
 /// translated, the number and the title aren't); the title is the
 /// process's name or what the program set ("claude", "✳ Fix the build").
+/// Chromium folds the label's line breaks into spaces, so the help often
+/// follows the title on one line: a title the whole line doesn't name is
+/// tried by its first word ("claude Run the command: …").
 pub fn editor_terminal(class: &str, name: &str) -> Option<Terminal> {
     if !class.split_whitespace().any(|c| c == XTERM_INPUT_CLASS) {
         return None;
     }
+    let cli = terminal_title(name).and_then(|title| {
+        coding_cli(title).or_else(|| title.split_whitespace().next().filter(|w| *w != title).and_then(coding_cli))
+    });
     Some(Terminal {
-        coding_cli: terminal_title(name).and_then(coding_cli),
+        coding_cli: cli,
         host: Host::Editor,
     })
 }
@@ -1027,6 +1033,16 @@ mod tests {
         // Translated labels: the number and the title stay.
         assert_eq!(t("ターミナル 1、claude"), claude);
         assert_eq!(t("Терминал 2, claude"), claude);
+        // As Chromium gives the label (found by the robot, 2026-10-21): its
+        // line breaks folded into spaces, the help on the title's line.
+        let flat = |title: &str| t(&format!("Terminal 1, {title}{}", help.replace('\n', " ")));
+        assert_eq!(flat("claude"), claude);
+        assert_eq!(flat("✳ Fix the login bug"), claude);
+        assert_eq!(flat("codex").unwrap().coding_cli, Some(CodingCli::Codex));
+        assert_eq!(flat("Claude Code"), claude);
+        assert_eq!(flat("pwsh").unwrap().coding_cli, None);
+        assert_eq!(flat("C:\\Projects\\claude").unwrap().coding_cli, None);
+        assert_eq!(flat("claude-notes").unwrap().coding_cli, None);
         // A shell sitting in a folder named after a CLI: just a shell.
         assert_eq!(t("Terminal 1, C:\\Projects\\claude").unwrap().coding_cli, None);
         // The class may carry others beside it.
