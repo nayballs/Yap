@@ -512,6 +512,10 @@ pub fn speakable_blocks(md: &str) -> Vec<String> {
             flush(&mut paragraph, &mut out);
             let cells: Vec<String> =
                 line.trim().trim_matches('|').split('|').map(inline_text).filter(|c| !c.is_empty()).collect();
+            // The |---|:---:| line under the header says nothing.
+            if cells.iter().all(|c| c.chars().all(|ch| matches!(ch, '-' | ':' | ' '))) {
+                continue;
+            }
             if !cells.is_empty() {
                 out.push(end_sentence(cells.join(", ")));
             }
@@ -1556,6 +1560,20 @@ mod tests {
         assert_eq!(r.events(), vec![ev(true, "a"), ev(false, "a")]);
         // It was audible a moment ago.
         assert!(r.speaker.recently_audible());
+    }
+
+    #[test]
+    fn a_table_is_read_row_by_row_without_its_rule_line() {
+        let blocks = speakable_blocks("Plans:
+
+| Plan | Price |
+|:---|---:|
+| Plus | $8 |
+| Premium | $30 |");
+        let said = blocks.join(" ");
+        assert!(said.contains("Plan, Price"), "{said}");
+        assert!(said.contains("Premium"), "{said}");
+        assert!(!said.contains("---") && !said.contains(":-"), "{said}");
     }
 
     #[test]

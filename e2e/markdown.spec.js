@@ -37,3 +37,21 @@ test('lines and lists indented under an item belong to it', () => {
   expect(tasks).toContain('<li class="task"><input type="checkbox" disabled /> ship it');
   expect(tasks).toContain('<li class="task"><input type="checkbox" disabled checked /> test it</li></ul>\n<h3>Next</h3>');
 });
+
+// Groq's gpt-oss writes tables; Chat showed the raw pipes (2026-10-21).
+test('a table becomes a table, aligned as its rule line says', () => {
+  const md =
+    'Here are the plans:\n\n| Plan | Price | Usage |\n|:-----|------:|:-----:|\n| Plus | $8 | 1x |\n| **Premium** | $30 | 4x |\n\nPick one.';
+  const html = renderMarkdown(md);
+  expect(html).toContain('<div class="md-table"><table><thead><tr><th>Plan</th><th class="r">Price</th><th class="c">Usage</th></tr></thead>');
+  expect(html).toContain('<tr><td>Plus</td><td class="r">$8</td><td class="c">1x</td></tr>');
+  expect(html).toContain('<td><strong>Premium</strong></td>');
+  expect(html).toMatch(/<\/table><\/div>\n<p>Pick one\.<\/p>$/);
+  // Without outer pipes, and a short row filled in.
+  const bare = renderMarkdown('Name | Score\n--- | ---\nAda | 3\nBo |\nAfter');
+  expect(bare).toContain('<tr><td>Ada</td><td>3</td></tr><tr><td>Bo</td><td></td></tr></tbody>');
+  // A line without a pipe ends the table.
+  expect(bare).toMatch(/<\/table><\/div>\n<p>After<\/p>$/);
+  // A lone pipe in a sentence is just text.
+  expect(renderMarkdown('cats | dogs')).toBe('<p>cats | dogs</p>');
+});

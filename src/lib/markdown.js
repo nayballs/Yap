@@ -101,6 +101,21 @@ export function markdownToText(md) {
 }
 
 // A line's indent, a tab counting as four spaces.
+// GitHub's tables: a header row, a rule line (|---|:---:|---:|), then rows.
+// Models (Groq's gpt-oss especially) write them; until 2026-10-21 Chat
+// showed the raw pipes.
+const TABLE_RULE = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/;
+/** A table line's cells: outer pipes dropped, split on unescaped pipes. */
+function tableCells(line) {
+  const inner = line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '');
+  return inner.split(/(?<!\\)\|/).map((c) => c.trim().replaceAll('\\|', '|'));
+}
+function tableAlign(rule) {
+  if (/^:-+:$/.test(rule)) return ' class="c"';
+  if (/^-+:$/.test(rule)) return ' class="r"';
+  return '';
+}
+
 const indentOf = (line) => {
   let n = 0;
   for (const c of line) {
@@ -162,7 +177,8 @@ export function renderMarkdown(md, options = {}) {
 
   let fence = null; // the lines of an open ``` block, or null
 
-  for (const raw of lines) {
+  for (let at = 0; at < lines.length; at++) {
+    const raw = lines[at];
     const line = raw.trimEnd();
     const trimmed = line.trim();
 
@@ -189,6 +205,33 @@ export function renderMarkdown(md, options = {}) {
     }
 
     const indent = indentOf(line);
+
+    // A table: this line's cells over a rule line with as many.
+    if (trimmed.includes('|') && at + 1 < lines.length && TABLE_RULE.test(lines[at + 1].trim())) {
+      const head = tableCells(trimmed);
+      const rule = tableCells(lines[at + 1].trim());
+      if (head.length >= 2 && rule.length === head.length) {
+        closeLists();
+        blank = false;
+        const aligns = rule.map(tableAlign);
+        const rows = [];
+        at += 2;
+        while (at < lines.length && lines[at].trim().includes('|')) {
+          rows.push(tableCells(lines[at]));
+          at++;
+        }
+        at--; // the loop's own step
+        const cell = (tag, i, text) => `<${tag}${aligns[i]}>${inline(text ?? '')}</${tag}>`;
+        out.push(
+          '<div class="md-table"><table><thead><tr>' +
+            head.map((h, i) => cell('th', i, h)).join('') +
+            '</tr></thead><tbody>' +
+            rows.map((r) => `<tr>${head.map((_, i) => cell('td', i, r[i])).join('')}</tr>`).join('') +
+            '</tbody></table></div>'
+        );
+        continue;
+      }
+    }
 
     const heading = /^(#{1,4})\s+(.*)$/.exec(trimmed);
     if (heading) {

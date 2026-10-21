@@ -263,6 +263,37 @@ body {
 /* Rendered markdown (lib/markdown.js), wherever it shows — chat answers,
    the Enhanced notes, the notepad's Ask sheet: fenced code and links.
    Links open in the browser (main.js), never in Yap's own window. */
+/* GitHub-style tables in answers (markdown.js): scroll sideways when wide. */
+.md-table {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 6px 0;
+}
+.md-table table {
+  border-collapse: collapse;
+  font-size: 0.95em;
+  font-variant-numeric: tabular-nums;
+}
+.md-table th,
+.md-table td {
+  padding: 5px 12px 5px 0;
+  border-bottom: 1px solid var(--yap-border-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+.md-table th {
+  font-weight: 600;
+  border-bottom-color: var(--yap-border);
+}
+.md-table tr:last-child td {
+  border-bottom: none;
+}
+.md-table .c {
+  text-align: center;
+}
+.md-table .r {
+  text-align: right;
+}
 pre.md-code {
   margin: 6px 0;
   padding: 8px 10px;

@@ -290,3 +290,22 @@ test('an answer shows code blocks and links, and a link opens in the browser', a
   await expect.poll(() => yap.invoke('e2e_opened_urls')).toContain('https://docs.example.com/plan?a=1&b=2');
   expect(main.url()).toBe(before);
 });
+
+// Groq's gpt-oss answers with tables; Chat showed the raw pipes (2026-10-21).
+test('an answer with a table shows a table', async ({ main, fakeLlm, shot }) => {
+  await openView(main, 'Chat');
+  await main.getByRole('button', { name: 'New chat' }).click();
+  fakeLlm.scriptChat([
+    {
+      content:
+        'Here are the plans:\n\n| Plan | Price | Usage |\n|:---|---:|:---:|\n| Plus | $8 | 1x |\n| Premium | $30 | 4x |\n| Super | $100 | 15x |\n\nAnnual billing is ten months for twelve.',
+    },
+  ]);
+  await send(main, 'Compare the plans');
+  const answer = main.locator('.cbubble.assistant').last();
+  const table = answer.getByRole('table');
+  await expect(table.getByRole('columnheader')).toHaveText(['Plan', 'Price', 'Usage']);
+  await expect(table.getByRole('row')).toHaveCount(4);
+  await expect(answer).not.toContainText('|');
+  await shot(main, '06-answer-table');
+});

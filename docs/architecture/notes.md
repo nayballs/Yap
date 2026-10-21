@@ -100,7 +100,8 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   list (models write "1. …\n\n2. …", which showed "1." on every item until
   2026-10-21), lines and lists indented under an item belong to it, an
   ordered list starting at 3 gets `start="3"`; `e2e/markdown.spec.js` —,
-  tasks, bold/italic, inline code, fenced
+  tasks, bold/italic, inline code, GitHub-style tables (`.md-table`, the
+  rule line's :--: alignment; speech reads them row by row), fenced
   code blocks `pre.md-code`, `[text](url)` and bare links `a.md-link` — web and
   mail only, styles in app.css) with **Copy markdown / Copy text** (`markdownToText`:
   ☐ tasks, plain headings); embedded per-note **"Ask anything…" bar** = Chat
