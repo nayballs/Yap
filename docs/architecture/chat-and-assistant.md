@@ -41,7 +41,11 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   question that needs the web (`web::needs_web` and not `web::refers_back`:
   Nathan's "best RPG games coming out in 2026" cited [1][4][5] that drew as
   the indie games' sources) nor after a search that found nothing; code, a
-  link's text and "[0]" are left alone. **History**: never a note in an
+  link's text and "[0]" are left alone. Then, for someone who doesn't pay in
+  dollars (About you), **bare dollar prices** — "$8/month" with nothing
+  saying whose dollars — get "*Prices in $ are as the sources give them
+  (most likely US dollars), not in £.*" (`about_you::foreign_price_note`, in
+  `chat_turn`; 2026-10-21). **History**: never a note in an
   answer's text (2026-10-21, the day it went in: Qwen3.5-4B copied "(Yap
   searched the web for this answer. Its sources: …)" word for word, with made-up
   sources, into an answer that searched nothing, then said it had looked it

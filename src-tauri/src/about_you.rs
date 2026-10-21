@@ -304,9 +304,9 @@ impl Spelling {
     /// A few words in that spelling, for the prompt and Settings.
     pub fn examples(self) -> &'static str {
         match self {
-            Spelling::British => "colour, organise, centre, travelled",
-            Spelling::American => "color, organize, center, traveled",
-            Spelling::Canadian => "colour, organize, centre, travelled",
+            Spelling::British => "honour, recognise, paralyse, metre, cancelled, catalogue, defence",
+            Spelling::American => "honor, recognize, paralyze, meter, canceled, catalog, defense",
+            Spelling::Canadian => "honour, recognize, paralyze, metre, cancelled, catalogue, defence",
         }
     }
 }
@@ -915,7 +915,7 @@ mod tests {
         let r = resolve(&uk(), &Overrides::default());
         assert_eq!(
             spelling_line(true, &r).as_deref(),
-            Some("When the transcript is in English, spell it the British way (colour, organise, centre, travelled), without changing any words.")
+            Some("When the transcript is in English, spell it the British way (honour, recognise, paralyse, metre, cancelled, catalogue, defence), without changing any words.")
         );
         assert_eq!(spelling_line(false, &r), None);
         assert_eq!(spelling_line(true, &Region::default()), None);

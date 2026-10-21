@@ -57,10 +57,15 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   output-only, never answer the transcript) that's always prepended via
   `build_system_prompt()` to the user's editable **body** (tone/format = a preset or
   custom text), then — in Yap's own layer, never the preset text —
-  **the spelling line** ("Use my region's spelling", `cleanup_system_prompt`:
-  `about_you::cleanup_spelling`, "When the transcript is in English, spell it
-  the British way (colour, organise, centre, travelled), without changing any
-  words.") and the custom dictionary. Records token/request usage (best-effort). Also carries
+  **the spelling line** ("Use my region's spelling",
+  `about_you::cleanup_spelling`: "When the transcript is in English, spell
+  it the British way (honour, recognise, paralyse, metre, cancelled,
+  catalogue, defence), without changing any words." — American or Canadian
+  examples by region; in the system prompt, `cleanup_system_prompt`, **and**
+  after the dictation's restated instruction, `cleanup_message`,
+  `SpellingAt::Both`: in the system prompt alone Qwen3.5-4B changed only
+  words like its examples and the 1.5B none, docs/model-evals.md) and the
+  custom dictionary. Records token/request usage (best-effort). Also carries
   `EDIT_BASE_PROMPT` (edit/rewrite mode's guardrails), `NOTE_BASE_PROMPT` +
   `MEETING_NOTE_BASE_PROMPT` + `NOTE_DEFAULT_FRAGMENT` (note enhancement's
   guardrails/action fragment), `ACTION_PLAN_BASE_PROMPT` +

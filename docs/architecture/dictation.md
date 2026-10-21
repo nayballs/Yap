@@ -24,9 +24,11 @@ best-effort — any error/timeout falls back to the raw transcript, so dictation
 never blocks. It keeps the person's **English spelling** ("Use my region's
 spelling", on, Settings → General → About you; 2026-10-21): an en-GB user's
 "color" comes out "colour", an en-US user's "colour" "color" — one line in
-Yap's own layer of the cleanup prompt (`llm::cleanup_system_prompt`,
-`about_you::cleanup_spelling`), never in the editable preset; another
-language gets no line. The dictionary runs Handy's split (ported from its source):
+Yap's own layer of the cleanup prompt (the system prompt's end and the
+dictation's restated instruction: `llm::cleanup_system_prompt`,
+`cleanup_message`, `about_you::cleanup_spelling`), never in the editable
+preset; another language gets no line. How well it's followed depends on
+the model (the 4B mostly; the 1.5B hardly — docs/model-evals.md). The dictionary runs Handy's split (ported from its source):
 **Whisper models** get the correct spellings as the decoder's `initial_prompt`
 (ASR biasing, threaded through `SttEngine::transcribe` at every call site —
 dictation/partials/upload/meeting — the words used most lately first,

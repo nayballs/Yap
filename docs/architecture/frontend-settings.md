@@ -95,7 +95,7 @@
   should Yap call you?" (`aboutName`, ≤ 60) and "Anything the AI should know
   about you" (`aboutMe`, a 300-character textarea with a count); "Use my
   region's spelling" (`regionSpelling`: "AI cleanup writes British English:
-  colour, organise, centre, travelled"); "See what the AI is told" (the
+  honour, recognise, paralyse, metre…"); "See what the AI is told" (the
   block, as it reads now) and the privacy line ("Kept on this PC. Yap sends
   it to the AI model you use, with each question: a cloud provider … sees
   it, a model on this PC keeps it here. It's never sent to Yap."); the

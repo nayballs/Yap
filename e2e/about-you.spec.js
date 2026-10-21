@@ -62,7 +62,7 @@ test('About you: the region from Windows, changed and put back, the name and not
   const group = aboutGroup(dialog);
   await expect(group).toBeVisible();
   await expect(group.getByText(SUMMARY)).toBeVisible();
-  await expect(group.getByText("AI cleanup writes British English: colour, organise, centre, travelled")).toBeVisible();
+  await expect(group.getByText("AI cleanup writes British English: honour, recognise, paralyse, metre, cancelled, catalogue, defence")).toBeVisible();
   await group.scrollIntoViewIfNeeded();
   await shot(main, '01-about-you');
 

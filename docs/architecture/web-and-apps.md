@@ -74,7 +74,9 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   question before, 2026-10-21 —, `tool_choice: "required"`, which llamafile honours — its own query, with
   the conversation in mind: "Arsenal Football Club match tonight 21 October
   2026 time"); a server that refuses or answers in words anyway gets **Yap's
-  search instead** (`search_query(question)`, handed over as the call the
+  search instead** (`search_query(question)`: the asking — "can you check /
+  look up / web search", "please", "for me" — left out sentence by sentence,
+  a sentence of nothing else dropped; handed over as the call the
   model would have made: chip, sources, safety rule, 3-search cap). Left to
   decide, Qwen3.5-4B answered Nathan's "best RPG games coming out in 2026"
   from memory (2026-10-21). Cloud models decide for themselves. **Nothing
