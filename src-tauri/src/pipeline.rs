@@ -283,6 +283,12 @@ pub(crate) struct Delivered {
     /// The app runs as administrator: nothing was pasted, the text was
     /// left on the clipboard (`elevated.rs`).
     pub left_on_clipboard: bool,
+    /// The keys that pasted it ("Ctrl+V", "Shift+Insert", "Ctrl+Shift+V":
+    /// `AppKind::paste_key`).
+    pub paste: String,
+    /// The paste didn't reach the field (a Win32 edit control stayed as it
+    /// was), so the text was typed into it instead.
+    pub typed: bool,
 }
 
 /// How long a cancelled dictation's audio is kept for **Undo** ("Dictation
@@ -507,10 +513,17 @@ impl Shared {
         self.config.read().ok().and_then(|c| c.output_device.clone())
     }
 
+    /// The kind of app this recording goes into, as read at record start —
+    /// what the paste keys follow (`AppKind::paste_key`: a terminal's are
+    /// its own whatever the settings say).
+    fn read_kind(&self) -> AppKind {
+        self.target_kind.lock().map(|k| *k).unwrap_or_default()
+    }
+
     /// The kind of app this recording goes into (read at record start), as
     /// the settings have Yap treat it (`AppKind::with_settings`).
     fn paste_kind(&self) -> AppKind {
-        let kind = self.target_kind.lock().map(|k| *k).unwrap_or_default();
+        let kind = self.read_kind();
         self.config
             .read()
             .map(|c| kind.with_settings(c.terminal_mode, c.chat_no_full_stop))
@@ -1307,8 +1320,9 @@ impl Shared {
                 tracing::info!(text = %out, "Rewrite");
                 let _ = self.app.emit("yap-transcript", out.clone());
                 let strict = self.undoing.load(Ordering::SeqCst);
-                match crate::text_injector::inject_text(&out, restore_clipboard, target, strict).await {
-                    Ok(crate::text_injector::Delivery::Pasted) => {}
+                let read = self.read_kind();
+                match crate::text_injector::inject_text(&out, restore_clipboard, target, strict, read).await {
+                    Ok(crate::text_injector::Delivery::Pasted | crate::text_injector::Delivery::Typed) => {}
                     // An app running as administrator: on the clipboard.
                     Ok(crate::text_injector::Delivery::LeftOnClipboard) => {
                         crate::alert::show_soon(&self.app, crate::elevated::alert());
@@ -1631,10 +1645,14 @@ impl Shared {
         } else if auto_submit && submit.is_none() {
             tracing::info!("Auto-submit: not pressing Enter at a terminal's prompt");
         }
+        // The paste keys follow the window as read, whatever the settings
+        // (Git Bash takes Shift+Insert with "Safer pasting" off too).
+        let read = self.read_kind();
         let mut report = Delivered {
             raw: raw.clone(),
             kind: kind.describe(),
             submit: submit.clone(),
+            paste: read.paste_key().name().to_string(),
             ..Delivered::default()
         };
         if !corrected.is_empty() {
@@ -1655,6 +1673,7 @@ impl Shared {
                 restore_clipboard,
                 target,
                 self.undoing.load(Ordering::SeqCst),
+                read,
             )
             .await
             {
@@ -1675,7 +1694,9 @@ impl Shared {
                     report.error = Some("the dictation's window is gone".into());
                     crate::alert::show_soon(&self.app, undo_window_gone());
                 }
-                Ok(crate::text_injector::Delivery::Pasted) => {
+                Ok(delivery @ (crate::text_injector::Delivery::Pasted | crate::text_injector::Delivery::Typed)) => {
+                    // The paste didn't land and the text was typed instead.
+                    report.typed = delivery == crate::text_injector::Delivery::Typed;
                     // Once, whether auto-submit, the voice
                     // command or both asked for it.
                     if let Some(key) = &submit {

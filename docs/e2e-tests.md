@@ -228,7 +228,8 @@ test('chat: the empty state offers a new chat', async ({ yap, main, shot }) => {
 The suite above never lets Yap touch another app: nothing is pasted, no key
 is pressed, no other window is read. The **robot suite** (`e2e-real/`) does
 exactly that, safely: a **robot-mode** Yap pastes into real windows the
-harness opens itself — a WinForms test pad, Windows Terminal, Edge, Notepad —
+harness opens itself — a WinForms test pad, Windows Terminal, Git Bash's
+mintty, Edge, Notepad —
 and every spec asserts **what actually landed there** (the field's text, the
 terminal's buffer, what a stand-in coding CLI received). It's how Claude
 tests paste, smart spacing, snippets, "press enter", the clipboard, terminal
@@ -278,7 +279,7 @@ the field around the cursor (UI Automation) and look at a window's title
   to another process never counts;
 - or a window whose title contains `YAP_REALTEST_NONCE`, a random value of
   at least 12 characters made for each run and put in the title of every
-  other window the harness opens (Windows Terminal, Edge, Notepad).
+  other window the harness opens (Windows Terminal, mintty, Edge, Notepad).
 
 Anything else — your windows, Yap's own — is **refused**: nothing is sent,
 "Robot mode refused to paste: …" goes to the log and to Yap's window as an
@@ -323,6 +324,8 @@ the DevTools window it opens (a debug build) is closed again. Windows Terminal w
 your own terminal's process, which is why they're known by title and closed
 one by one (confirming its "close all tabs?" for that window only). Each Edge
 window gets a throwaway profile (none of your tabs, sign-ins or extensions).
+mintty is a process of the harness's own (`--nodaemon`, closing never asks),
+ended with what it ran when the test ends.
 Notepad is skipped while Notepad is open: Windows 11 would open the test
 file as a tab in your window. The clipboard is snapshotted when a robot
 starts (in Yap's memory, never printed) and put back when it stops; the
@@ -337,10 +340,12 @@ No microphone or hotkey: debug-only commands drive the real pipeline.
   text around its cursor read as at a recording's start, then cleanup, the
   dictionary, "press enter", snippets, fitting to the kind of app and the
   cursor, the paste, the submit key, history. Returns what went to the paste:
-  `{ text, raw, kind, submit, error, leftOnClipboard }` (`kind` as
+  `{ text, raw, kind, submit, error, leftOnClipboard, paste, typed }` (`kind` as
   `AppKind::describe` says it: "terminal (Claude Code in Windows Terminal)",
   "chat app"…; `leftOnClipboard`: the target counted as an app running as
-  administrator, so nothing was pasted).
+  administrator, so nothing was pasted; `paste`: the keys — "Ctrl+V",
+  "Shift+Insert", "Ctrl+Shift+V"; `typed`: the paste never reached the text
+  box, so the text was typed instead).
 - `realtest_dictate_wav { path, hwnd }` — a WAV played into the dictation
   **in real time, in the mic's place** (the real mic's audio is dropped
   meanwhile), between a real `start_recording` and the stop the hotkey would
@@ -361,10 +366,12 @@ No microphone or hotkey: debug-only commands drive the real pipeline.
 
 | Spec | Target | Tests |
 |------|--------|-------|
-| `testpad.real.js` | the test pad (WinForms: text box, rich text box, password box) | the guard (the pad allowed by its process, Yap's own window refused, a second pad Yap wasn't given refused for a dictation and for Paste last transcript, its field neither read nor changed, the refusal toast) · smart spacing fitted to the text before the cursor (mid-sentence lower case and space, a new sentence, after a space, a name keeping its capital, the rich text box) · mid-text in a text box with no TextPattern, the caret asked of the control ("I want | please" → "I want the blue one please", a selection replaced, the rich text box over a line break) · a password box pasted into but never read · snippets (a multi-line sign-off with its full stop dropped, said alone, a one-line link mid-sentence keeping the sentence's) · "press enter" (the text then Enter; only the command: just Enter) · Paste last transcript, fitted where it lands · the clipboard (your text back after the paste, the dictation not left there, the four keep-it-out-of-history formats present at the pad's Ctrl+V and on what came back; an image back byte for byte) · AI cleanup through the fake model, and "press enter" it dropped still sending |
+| `testpad.real.js` | the test pad (WinForms: text box, rich text box, password box, a box that ignores Ctrl+V) | the guard (the pad allowed by its process, Yap's own window refused, a second pad Yap wasn't given refused for a dictation and for Paste last transcript, its field neither read nor changed, the refusal toast) · smart spacing fitted to the text before the cursor (mid-sentence lower case and space, a new sentence, after a space, a name keeping its capital, the rich text box) · mid-text in a text box with no TextPattern, the caret asked of the control ("I want | please" → "I want the blue one please", a selection replaced, the rich text box over a line break) · a password box pasted into but never read · verify-after-paste: a paste the "nopaste" box (shortcuts off) never gets is typed instead, once; a box that takes it is never typed into as well · snippets (a multi-line sign-off with its full stop dropped, said alone, a one-line link mid-sentence keeping the sentence's) · "press enter" (the text then Enter; only the command: just Enter) · Paste last transcript, fitted where it lands · the clipboard (your text back after the paste, the dictation not left there, the four keep-it-out-of-history formats present at the pad's Ctrl+V and on what came back; an image back byte for byte) · AI cleanup through the fake model, and "press enter" it dropped still sending |
 | `browser.real.js` | Edge app windows | a web page's text box: mid-text (lower case, spaces, no full stop before what follows), after a sentence, replacing a selected word · only the box is read, never the page around it (page text on the box's line: empty, at the box's start, at its end) · a chat app (a page titled "WhatsApp - …"): a short message without its full stop, a question with its mark, three sentences with theirs, the setting off · an empty message box reads as empty, no full stop and no space after it (a textarea labelled "Type a message"; one labelled by a `<label>`; a contenteditable, as WhatsApp Web's and Gmail's are, and a draft there followed) |
 | `dictation-extras.real.js` | the test pad, an Edge page | an app running as administrator, a stand-in (`e2e_paste_elevated`: a real elevated window needs a UAC prompt): no Ctrl+V reaches the pad, its text unchanged, the dictation on the clipboard (privately), "Your text is copied: press Ctrl+V" in Yap's window; "Paste last transcript" the same; the next dictation pastes as usual · a WAV dictation cancelled (the bar's ✕), nothing pasted, then Undo: transcribed and pasted into the pad · Undo with the Edge page in front: it lands in the pad, where the dictation started, and the page stays empty · Undo after the dictation's window (an Edge page) closed: nothing reaches the pad in front, the text is on the clipboard and Yap says it couldn't get back to that window |
 | `terminal.real.js` | Windows Terminal | a PowerShell prompt: a list dictated as one line ("List the files: the logs; the notes.") and nothing run · "press enter" running a harmless `Echo` (its output read back) · a stand-in for Claude Code (Claude Code's idle title "✳ …", bracketed paste, runs nothing, logs what arrives): the line breaks kept in one bracketed paste, nothing sent; "press enter" sending it · auto-submit: Enter in the coding CLI, never at the shell prompt · "Safer pasting into terminals" off: just another app |
+| `gitbash.real.js` | Git Bash's mintty (skipped without Git for Windows), running a raw reader that logs every byte (`stty raw`; runs nothing) | pasted with Shift+Insert (Ctrl+V would arrive as ^V): a list as one line, nothing sent · "press enter": the text then Enter · "Safer pasting into terminals" off: fitted as any app, still Shift+Insert |
+| `editor-terminal.real.js` | an Edge page standing in for VS Code's integrated terminal (xterm.js's input: class `xterm-helper-textarea`, labelled "Terminal 1, <title>"; this spec's Yap counts Edge as an editor, `YAP_REALTEST_EDITORS=msedge`), and the editor's input beside it | the terminal: one line, no space after it, Ctrl+V, nothing sent · "press enter" sends Enter; auto-submit never at a shell, Enter in Claude Code ("Terminal 1, claude") · the editor beside it: an ordinary app |
 | `audio.real.js` | the test pad | a spoken WAV through a real recording to the paste (the stub's transcript) · a dead mic (7 s of digital silence): reopened at ~3 s, "No sound from … — check it isn't muted or unplugged" in the log and as a toast at ~5 s, nothing transcribed or pasted |
 | `other-apps.real.js` | the test pad playing a near-silent tone on a loop, an Edge page playing one with the nonce in its media title | "Silence other apps while you dictate": the pad's audio session goes to 0 after the start chime (the recording started first) and comes back to exactly its level after the stop chime, `yaprobot.exe` the only session quieted · "Pause music and videos while you dictate": the page's player pauses during a WAV dictation and plays again after, Windows' media controls saying playing → paused → playing, its volume untouched · your own sessions and media never reported or changed (the guard above) |
 | `stt.real.js` | the test pad, an `engines` build | Parakeet V3 hears "The quick brown fox jumps over the lazy dog" (Windows TTS) and it lands in the field |
@@ -401,7 +408,15 @@ Also seen, not pinned: now and then (a few in a hundred on Nathan's PC, not
 on demand) a Ctrl+V reaches the test pad's WinForms box and nothing is
 pasted — the pad says so on stderr ("Ctrl+V reached the box but nothing was
 pasted"); a bare Ctrl+V from the harness did the same, so it looks like the
-box's own clipboard read losing a race, not Yap.
+box's own clipboard read losing a race, not Yap. Since 2026-10-21 Yap
+checks a paste into a Win32 text box landed and types the text when it
+didn't (`selection::PasteCheck`), so such a run passes; the log says "The
+paste didn't reach the field".
+
+The robot runs in VS Code's terminal through a stand-in (an Edge page with
+xterm.js's input, `startEditorTerminal`): `YAP_REALTEST_EDITORS` (robot
+mode only, comma-separated process names) adds editors to `app_kind`'s
+list for that spec's Yap. A real VS Code isn't driven.
 
 ### Results
 
@@ -428,8 +443,9 @@ test('a snippet in the test pad', async ({ robot }) => {
 ```
 
 `robot` is one robot-mode Yap plus the test pad per spec file (`robotOptions`
-changes how Yap starts: `config`, `exe`, `prepare`); `robot.shell()`,
-`robot.claudeCode()`, `robot.editor()`, `robot.chat()` and `robot.notepad()`
+changes how Yap starts: `config`, `env`, `exe`, `prepare`); `robot.shell()`,
+`robot.claudeCode()`, `robot.mintty()`, `robot.editor()`,
+`robot.editorTerminal()`, `robot.chat()` and `robot.notepad()`
 open the other targets, which close when the test ends. `robot.dictate(target,
 text)` / `robot.dictateWav(target, file)` bring the target to the front and
 dictate; `robot.logMark()` / `robot.logSince(mark)` read Yap's log. Assert

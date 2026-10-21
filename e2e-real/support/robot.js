@@ -26,7 +26,9 @@ import {
   startFakeClaudeCode,
   startChatPage,
   startEditorPage,
+  startEditorTerminal,
   startMediaPage,
+  startMintty,
   startNotepad,
 } from './targets.js';
 
@@ -154,6 +156,22 @@ export class Robot {
     return this.track(
       await startEditorPage({ nonce: this.nonce, dir: path.join(this.dir, `editor-${this.targets.length}`), note, beside }),
     );
+  }
+
+  /**
+   * A stand-in for VS Code's integrated terminal (xterm.js's input, labelled
+   * "Terminal 1, <terminalTitle>") in an Edge app window; the spec's Yap
+   * must count Edge as an editor (`robotOptions.env.YAP_REALTEST_EDITORS`).
+   */
+  async editorTerminal(terminalTitle) {
+    return this.track(
+      await startEditorTerminal({ nonce: this.nonce, dir: path.join(this.dir, `vscode-${this.targets.length}`), terminalTitle }),
+    );
+  }
+
+  /** Git Bash's mintty running a reader that logs what arrives (runs nothing). */
+  async mintty() {
+    return this.track(await startMintty({ nonce: this.nonce, cwd: path.join(this.dir, `mintty-${this.targets.length}`) }));
   }
 
   /** An Edge app window playing `wav` on a loop, its title (with the nonce) in Windows' media controls. */

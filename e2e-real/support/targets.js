@@ -344,17 +344,20 @@ export function edgeExe() {
  * paragraph above the box; `beside`: `[before, after]`, page text on the
  * box's own line, either side of it (an inline box); `editable`: the box is
  * a contenteditable (a paragraph, as WhatsApp Web's and Gmail's are), not a
- * textarea.
+ * textarea; `body`: the page's own markup instead (with an element
+ * `#box` to focus). `evaluate(fn, arg)` runs `fn` in the page.
  */
-export async function startPage({ nonce, dir, title, note = '', beside = null, editable = false, attrs = 'aria-label="Message"' }) {
+export async function startPage({ nonce, dir, title, note = '', beside = null, editable = false, attrs = 'aria-label="Message"', body = null }) {
   const exe = edgeExe();
   if (!exe) throw new Error('Microsoft Edge not found');
   fs.mkdirSync(dir, { recursive: true });
   const page = path.join(dir, 'page.html');
   const before = new Set(findWindows(nonce).map((w) => w.hwnd));
-  const box = editable
-    ? `<div id="box" contenteditable="true" role="textbox" aria-multiline="true" ${attrs}><p><br></p></div>`
-    : `<textarea id="box" ${attrs} autofocus></textarea>`;
+  const box =
+    body ??
+    (editable
+      ? `<div id="box" contenteditable="true" role="textbox" aria-multiline="true" ${attrs}><p><br></p></div>`
+      : `<textarea id="box" ${attrs} autofocus></textarea>`);
   fs.writeFileSync(
     page,
     `<!doctype html><meta charset="utf-8"><title>${title}</title>
@@ -409,6 +412,7 @@ ${beside ? `<div class="beside"><span>${beside[0]}</span> ${box} <span>${beside[
     hwnd: win.hwnd,
     pid: win.pid,
     focus: () => focus(win.hwnd),
+    evaluate: (fn, arg) => tab.evaluate(fn, arg),
     /**
      * The box's text (a contenteditable's as it reads: no final line break,
      * the no-break spaces editing puts in as spaces).
@@ -548,6 +552,123 @@ export function startEditorPage({ nonce, dir, note, beside }) {
  */
 export function startChatPage({ nonce, dir, note, editable, attrs = 'aria-label="Type a message"' }) {
   return startPage({ nonce, dir, title: `WhatsApp - ${nonce}`, note, editable, attrs });
+}
+
+/**
+ * A stand-in for VS Code's integrated terminal, in an Edge app window that
+ * the robot's Yap counts as an editor (`YAP_REALTEST_EDITORS=msedge`, so
+ * `app_kind` looks at what has the focus): xterm.js's input — a hidden
+ * textarea of class "xterm-helper-textarea", labelled as VS Code labels it
+ * ("Terminal 1, <terminalTitle>" and its help lines) — taking a paste and
+ * Enter as xterm.js does and showing what arrived (`received()`: it runs
+ * nothing). Beside it a textarea standing in for the editor itself
+ * (Monaco's input): `focusEditor()` / `focusTerminal()`.
+ */
+export async function startEditorTerminal({ nonce, dir, terminalTitle = 'pwsh' }) {
+  const help =
+    'Run the command: Toggle Screen Reader Accessibility Mode for an optimized screen reader experience&#10;Use Alt+F1 for terminal accessibility help';
+  const xtermInput =
+    'position:absolute;opacity:0;left:-9999em;top:0;width:0;height:0;z-index:-5;white-space:nowrap;overflow:hidden;resize:none';
+  const body = `<p>Yap robot: a stand-in for VS Code's terminal. It runs nothing; it shows what arrives.</p>
+<textarea id="editor" class="inputarea monaco-mouse-cursor-text" aria-label="Editor content;Press Alt+F1 for Accessibility Options." style="height:50px"></textarea>
+<div class="xterm" style="position:relative"><pre id="screen" style="background:#1e1e1e;color:#ddd;min-height:80px;padding:6px">$ </pre>
+<textarea id="box" class="xterm-helper-textarea" aria-label="Terminal 1, ${terminalTitle}&#10;${help}" aria-multiline="false" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" tabindex="0" style="${xtermInput}"></textarea></div>
+<script>
+window.received = [];
+const input = document.getElementById('box');
+const screen = document.getElementById('screen');
+const show = (s) => { window.received.push(s); screen.textContent += s.replace(/\\r/g, '⏎\\n$ '); };
+input.addEventListener('paste', (e) => { e.preventDefault(); show(e.clipboardData.getData('text/plain')); });
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); show('\\r'); } });
+input.addEventListener('input', () => { if (input.value) { show(input.value); input.value = ''; } });
+</script>`;
+  const page = await startPage({ nonce, dir, title: `Yap robot editor terminal - ${nonce}`, body });
+  return {
+    ...page,
+    received: () => page.evaluate(() => window.received.join('')),
+    focusEditor: () => page.evaluate(() => document.getElementById('editor').focus()),
+    focusTerminal: () => page.evaluate(() => document.getElementById('box').focus()),
+    editorText: () => page.evaluate(() => document.getElementById('editor').value),
+  };
+}
+
+// ---- Git Bash (mintty) ----
+
+/**
+ * Git for Windows' mintty (`YAP_REAL_MINTTY` to name another), or null:
+ * next to the `git` on PATH (…\Git\cmd\git.exe → …\Git\usr\bin), else the
+ * usual install folders.
+ */
+export function minttyExe() {
+  if (process.env.YAP_REAL_MINTTY) return fs.existsSync(process.env.YAP_REAL_MINTTY) ? process.env.YAP_REAL_MINTTY : null;
+  const candidates = [];
+  try {
+    const out = execFileSync('where.exe', ['git'], { encoding: 'utf8', windowsHide: true });
+    for (const git of out.split(/\r?\n/).filter(Boolean)) {
+      candidates.push(path.join(path.dirname(path.dirname(git.trim())), 'usr', 'bin', 'mintty.exe'));
+    }
+  } catch {
+    /* no git on PATH */
+  }
+  for (const base of [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], path.join(process.env.LOCALAPPDATA || '', 'Programs')]) {
+    if (base) candidates.push(path.join(base, 'Git', 'usr', 'bin', 'mintty.exe'));
+  }
+  return candidates.find((p) => fs.existsSync(p)) ?? null;
+}
+
+/**
+ * Git Bash's terminal, mintty, titled with the nonce, running a reader
+ * that runs nothing: bash puts the terminal in raw mode (no line editing,
+ * no echo; Ctrl+C is a byte like any other) and `cat` writes every byte
+ * that arrives to a log in `cwd` (`received()`). mintty's own settings
+ * file may be yours: its two settings that matter are set on the command
+ * line (Shift+Insert pastes — `ClipShortcuts`, its default —, and closing
+ * never asks). `close()` closes the window, then ends what's left of it.
+ */
+export async function startMintty({ nonce, cwd }) {
+  const exe = minttyExe();
+  if (!exe) throw new Error('Git Bash (mintty) not found');
+  fs.mkdirSync(cwd, { recursive: true });
+  const log = path.join(cwd, 'received.log');
+  fs.rmSync(log, { force: true });
+  const title = `Yap robot Git Bash ${nonce}`;
+  const before = new Set(findWindows(nonce).map((w) => w.hwnd));
+  // A relative log name: bash starts in mintty's folder, `cwd` (no quoting
+  // of a Windows path through mintty's command line).
+  const script = '/usr/bin/stty raw -echo && exec /usr/bin/cat > received.log';
+  const child = spawn(
+    exe,
+    ['--nodaemon', '-t', title, '-o', 'ConfirmExit=no', '-o', 'ClipShortcuts=yes', '-e', '/usr/bin/bash', '--noprofile', '--norc', '-c', script],
+    { cwd, stdio: 'ignore', detached: true, windowsHide: false },
+  );
+  child.unref();
+  const cleanup = async (hwnd) => {
+    if (hwnd && findWindows(nonce).some((w) => w.hwnd === hwnd)) helper('close', hwnd, nonce);
+    await sleep(300);
+    killTree(child.pid);
+  };
+  let win;
+  try {
+    // (mintty pads its window title with spaces.)
+    win = await waitForWindow(nonce, (w) => !before.has(w.hwnd) && w.cls === 'mintty' && w.title.trimEnd() === title, {
+      what: 'Git Bash (mintty) window',
+    });
+    // Ready once `cat` has the log open (the terminal is raw by then).
+    const deadline = Date.now() + 15_000;
+    while (!fs.existsSync(log) && Date.now() < deadline) await sleep(100);
+    if (!fs.existsSync(log)) throw new Error("Git Bash's reader never started");
+  } catch (e) {
+    await cleanup(win?.hwnd);
+    throw e;
+  }
+  return {
+    hwnd: win.hwnd,
+    title,
+    focus: () => focus(win.hwnd),
+    /** Every byte that has arrived, as text. */
+    received: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : ''),
+    close: () => cleanup(win.hwnd),
+  };
 }
 
 // ---- Notepad ----

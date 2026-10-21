@@ -36,6 +36,12 @@
 //!    word Yap typed gets corrected. Same rules: that window's process only,
 //!    never a password box or a read-only field, never in a test run,
 //!    time-boxed calls, in memory only.
+//! 4. **Did the paste land?** ([`PasteCheck`], for `text_injector`): a Win32
+//!    edit control's text length and selection just before the paste and
+//!    after it (Win32 messages, not UI Automation; never its text).
+//!
+//! Also [`focused_element`]: what has the focus (its class and name), for
+//! `app_kind` to tell an editor's integrated terminal from the editor.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -51,6 +57,13 @@ const CONTEXT_TIMEOUT_MS: u32 = 200;
 const SELECTION_TIMEOUT_MS: u32 = 2_000;
 /// The same for the post-paste watch's reads (a thread of its own).
 const WATCH_TIMEOUT_MS: u32 = 300;
+/// The same for the look at what has the focus at record start
+/// ([`focused_element`]: is it an editor's terminal?), which the recording
+/// waits for: one round trip, cut short.
+const PROBE_TIMEOUT_MS: u32 = 100;
+/// The same for the check that a paste landed ([`PasteCheck`]), which the
+/// paste waits for.
+const CHECK_TIMEOUT_MS: u32 = 200;
 
 /// A field whose whole text is longer than this holds real text: a label or
 /// a placeholder standing in for an empty field is never this long.
@@ -377,6 +390,118 @@ impl WatchedField {
     }
 }
 
+/// The focused element's UI Automation class and name, if it's in process
+/// `pid` — for `app_kind` to tell an editor's integrated terminal (xterm.js's
+/// input) from the editor. One round trip, cut short (`PROBE_TIMEOUT_MS`);
+/// `None` when it can't say. The caller checks `realtest::permits` first.
+pub fn focused_element(pid: u32) -> Option<(String, String)> {
+    #[cfg(windows)]
+    {
+        uia::focused_element(pid)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+// ---- Did the paste land? ----
+
+/// A Win32 edit control's text length and selection (its own units): what
+/// any paste changes — the text grows, or a selection is replaced and the
+/// caret moves to the end of what came in. Nothing of the text itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EditState {
+    pub len: usize,
+    pub sel: (usize, usize),
+}
+
+/// What became of a paste ([`PasteCheck`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Landed {
+    /// The field changed.
+    Yes,
+    /// The field stayed exactly as it was for the whole wait.
+    No,
+    /// A read failed (the app didn't answer in time, the focus moved…):
+    /// no telling, so nothing more is done.
+    Unknown,
+}
+
+/// One read after the paste (`now`; `None`: it failed) against the field as
+/// it was just before (`before`): changed → it landed; a failed read →
+/// unknown; the same once the wait is over (`waited_out`) → it didn't;
+/// the same before then → `None`, read again.
+pub fn paste_verdict(before: EditState, now: Option<EditState>, waited_out: bool) -> Option<Landed> {
+    match now {
+        None => Some(Landed::Unknown),
+        Some(now) if now != before => Some(Landed::Yes),
+        Some(_) if waited_out => Some(Landed::No),
+        Some(_) => None,
+    }
+}
+
+/// A paste about to go into a **Win32 edit control** (a WinForms text box,
+/// a classic EDIT or a RichEdit: their text is all there is, nothing stands
+/// in for it), and how the control stood just before — to check afterwards
+/// that the paste landed (`text_injector`: else it types the text, once).
+/// Only these controls: a web editor or a code editor takes a paste through
+/// a hidden input it empties again (Google Docs, Ace, xterm.js…), so an
+/// unchanged field there says nothing. Only the control with the focus in
+/// the target window's own process, never a password box or a read-only
+/// one; its length and selection are read, never its text.
+pub struct PasteCheck {
+    target: isize,
+    control: isize,
+    before: EditState,
+}
+
+impl PasteCheck {
+    /// The edit control with the focus in `target_hwnd` now, and its state.
+    /// `None` for anything else (or in a test run; robot mode: only a
+    /// window the test opened).
+    pub fn before(target_hwnd: Option<isize>) -> Option<PasteCheck> {
+        let target = target_hwnd?;
+        if !crate::realtest::permits(Some(target)) {
+            return None;
+        }
+        #[cfg(windows)]
+        {
+            let control = uia::focused_edit(target)?;
+            let before = uia::edit_state(control)?;
+            Some(PasteCheck { target, control, before })
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+
+    /// The control now ([`paste_verdict`]): `None` while it's too early to
+    /// tell. A control that lost the focus is a failed read.
+    pub fn verdict(&self, waited_out: bool) -> Option<Landed> {
+        #[cfg(windows)]
+        let now = self.still_focused().then(|| uia::edit_state(self.control)).flatten();
+        #[cfg(not(windows))]
+        let now = None;
+        paste_verdict(self.before, now, waited_out)
+    }
+
+    /// The control still has the focus in its window (typing goes there).
+    pub fn still_focused(&self) -> bool {
+        #[cfg(windows)]
+        {
+            uia::focused_edit(self.target) == Some(self.control)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (self.target, self.control);
+            false
+        }
+    }
+}
+
 /// A selection longer than this is read as its start and its end (all
 /// that fitting needs: the first word, the last mark, the spaces).
 const SELECTION_CHARS: usize = 400;
@@ -461,9 +586,10 @@ mod uia {
         CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement,
         IUIAutomationLegacyIAccessiblePattern, IUIAutomationTextPattern, IUIAutomationTextPattern2,
         IUIAutomationTextRange, IUIAutomationValuePattern, TextPatternRangeEndpoint_End,
-        TextPatternRangeEndpoint_Start, TextUnit_Character, UIA_ComboBoxControlTypeId,
+        TextPatternRangeEndpoint_Start, TextUnit_Character, UIA_ClassNamePropertyId, UIA_ComboBoxControlTypeId,
         UIA_DocumentControlTypeId, UIA_EditControlTypeId, UIA_IsReadOnlyAttributeId,
-        UIA_LegacyIAccessiblePatternId, UIA_TextPattern2Id, UIA_TextPatternId, UIA_ValuePatternId,
+        UIA_LegacyIAccessiblePatternId, UIA_NamePropertyId, UIA_ProcessIdPropertyId, UIA_TextPattern2Id,
+        UIA_TextPatternId, UIA_ValuePatternId,
     };
 
     use super::{FieldWindow, Offers, SELECTION_CHARS, SELECTION_ENDS};
@@ -541,6 +667,26 @@ mod uia {
             } else {
                 Some(trimmed.to_string())
             }
+        }
+    }
+
+    /// The focused element's class and name, if it's in process `pid`: one
+    /// round trip (a cache request), at most [`super::PROBE_TIMEOUT_MS`].
+    pub fn focused_element(pid: u32) -> Option<(String, String)> {
+        let _com = Com::init()?;
+        let automation = automation(super::PROBE_TIMEOUT_MS)?;
+        unsafe {
+            let cache = automation.CreateCacheRequest().ok()?;
+            for property in [UIA_ProcessIdPropertyId, UIA_ClassNamePropertyId, UIA_NamePropertyId] {
+                cache.AddProperty(property).ok()?;
+            }
+            let element = automation.GetFocusedElementBuildCache(&cache).ok()?;
+            if element.CachedProcessId().ok()? as u32 != pid {
+                return None;
+            }
+            let class = element.CachedClassName().map(|b| b.to_string()).unwrap_or_default();
+            let name = element.CachedName().map(|b| b.to_string()).unwrap_or_default();
+            Some((class, name))
         }
     }
 
@@ -947,15 +1093,7 @@ mod uia {
     /// (the answer comes back packed in the result, so nothing is written
     /// into the other process), at most `timeout_ms`, never to a hung app.
     unsafe fn edit_selection(hwnd: HWND, timeout_ms: u32) -> Option<EditSelection> {
-        if hwnd.is_invalid() {
-            return None;
-        }
-        let mut buf = [0u16; 256];
-        let n = GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32).max(0) as usize;
-        let rich = super::edit_class(&String::from_utf16_lossy(&buf[..n])).or_else(|| {
-            let n = RealGetWindowClassW(hwnd, buf.as_mut_ptr(), buf.len() as u32) as usize;
-            super::edit_class(&String::from_utf16_lossy(&buf[..n.min(buf.len())]))
-        })?;
+        let rich = edit_kind(hwnd)?;
         let mut result = 0usize;
         let sent = SendMessageTimeoutW(
             hwnd,
@@ -977,6 +1115,79 @@ mod uia {
         }
         let (start, end) = ((packed & 0xFFFF) as usize, (packed >> 16) as usize);
         Some((start.min(end), start.max(end), rich))
+    }
+
+    /// `hwnd` is a Win32 edit control ([`super::edit_class`], by its class
+    /// or its base class): `Some(true)` for a RichEdit.
+    unsafe fn edit_kind(hwnd: HWND) -> Option<bool> {
+        if hwnd.is_invalid() {
+            return None;
+        }
+        let mut buf = [0u16; 256];
+        let n = GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32).max(0) as usize;
+        super::edit_class(&String::from_utf16_lossy(&buf[..n])).or_else(|| {
+            let n = RealGetWindowClassW(hwnd, buf.as_mut_ptr(), buf.len() as u32) as usize;
+            super::edit_class(&String::from_utf16_lossy(&buf[..n.min(buf.len())]))
+        })
+    }
+
+    const WM_GETTEXTLENGTH: u32 = 0x000E;
+    const ES_PASSWORD: i32 = 0x0020;
+    const ES_READONLY: i32 = 0x0800;
+
+    /// The control with the keyboard focus in `target`'s (a top-level
+    /// window's) thread, if it's a Win32 edit control of the same process
+    /// that takes text: not a password box, not read-only (by its styles).
+    pub fn focused_edit(target: isize) -> Option<isize> {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetGUIThreadInfo, GetWindowLongW, GetWindowThreadProcessId, GUITHREADINFO, GWL_STYLE,
+        };
+        unsafe {
+            let top = HWND(target as *mut core::ffi::c_void);
+            let mut pid = 0u32;
+            let thread = GetWindowThreadProcessId(top, Some(&mut pid));
+            if thread == 0 {
+                return None;
+            }
+            let mut info: GUITHREADINFO = std::mem::zeroed();
+            info.cbSize = std::mem::size_of::<GUITHREADINFO>() as u32;
+            GetGUIThreadInfo(thread, &mut info).ok()?;
+            let focus = info.hwndFocus;
+            if focus.is_invalid() {
+                return None;
+            }
+            let mut focus_pid = 0u32;
+            GetWindowThreadProcessId(focus, Some(&mut focus_pid));
+            if focus_pid != pid {
+                return None;
+            }
+            edit_kind(focus)?;
+            if GetWindowLongW(focus, GWL_STYLE) & (ES_PASSWORD | ES_READONLY) != 0 {
+                return None;
+            }
+            Some(focus.0 as isize)
+        }
+    }
+
+    /// An edit control's text length and selection now, each asked within
+    /// [`super::CHECK_TIMEOUT_MS`] (never of a hung app). `None` when it
+    /// doesn't answer, or its selection is past what EM_GETSEL can carry.
+    pub fn edit_state(control: isize) -> Option<super::EditState> {
+        let hwnd = HWND(control as *mut core::ffi::c_void);
+        unsafe {
+            let (start, end, _) = edit_selection(hwnd, super::CHECK_TIMEOUT_MS)?;
+            let mut len = 0usize;
+            let sent = SendMessageTimeoutW(
+                hwnd,
+                WM_GETTEXTLENGTH,
+                0,
+                0,
+                SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT,
+                super::CHECK_TIMEOUT_MS,
+                &mut len,
+            );
+            (sent != 0).then_some(super::EditState { len, sel: (start, end) })
+        }
     }
 
     /// The field a dictation was pasted into, for the post-paste watch.
@@ -1153,6 +1364,46 @@ fn read_focused_context(_pid: Option<u32>) -> Option<FieldContext> {
     None
 }
 
+/// Whether a paste reached a Win32 edit control, from its length and
+/// selection before and after.
+#[cfg(test)]
+mod paste_check_tests {
+    use super::*;
+
+    fn at(len: usize, start: usize, end: usize) -> EditState {
+        EditState { len, sel: (start, end) }
+    }
+
+    #[test]
+    fn a_paste_that_landed_changed_the_field() {
+        // Typed at the caret: longer, the caret after it.
+        assert_eq!(paste_verdict(at(10, 4, 4), Some(at(25, 19, 19)), false), Some(Landed::Yes));
+        // A selection replaced by text as long as it: same length, the caret moved.
+        assert_eq!(paste_verdict(at(10, 2, 7), Some(at(10, 7, 7)), false), Some(Landed::Yes));
+        // …and a selection replaced by the very same words: the selection is gone.
+        assert_eq!(paste_verdict(at(5, 0, 5), Some(at(5, 5, 5)), true), Some(Landed::Yes));
+        // An empty field.
+        assert_eq!(paste_verdict(at(0, 0, 0), Some(at(9, 9, 9)), false), Some(Landed::Yes));
+    }
+
+    #[test]
+    fn a_field_unchanged_for_the_whole_wait_didnt_get_it() {
+        // Too early to say: read again.
+        assert_eq!(paste_verdict(at(10, 4, 4), Some(at(10, 4, 4)), false), None);
+        // The wait is over and nothing moved: it never arrived.
+        assert_eq!(paste_verdict(at(10, 4, 4), Some(at(10, 4, 4)), true), Some(Landed::No));
+        assert_eq!(paste_verdict(at(0, 0, 0), Some(at(0, 0, 0)), true), Some(Landed::No));
+    }
+
+    #[test]
+    fn a_read_that_fails_decides_nothing() {
+        // The app didn't answer in time, or the control lost the focus:
+        // never typed on a guess, whenever it happens.
+        assert_eq!(paste_verdict(at(10, 4, 4), None, false), Some(Landed::Unknown));
+        assert_eq!(paste_verdict(at(10, 4, 4), None, true), Some(Landed::Unknown));
+    }
+}
+
 /// What a field's text over UI Automation says about whether it's empty
 /// (Chromium's empty boxes, rich editors' placeholders).
 #[cfg(test)]
@@ -1312,6 +1563,7 @@ mod tests {
     use std::ffi::c_void;
     use std::sync::mpsc;
 
+    use super::{paste_verdict, EditState, Landed};
     use crate::smart_insert::FieldContext;
 
     #[repr(C)]
@@ -1368,6 +1620,7 @@ mod tests {
     const WS_EX_TOOLWINDOW: u32 = 0x0000_0080;
     const WS_EX_NOACTIVATE: u32 = 0x0800_0000;
     const EM_SETSEL: u32 = 0x00B1;
+    const EM_REPLACESEL: u32 = 0x00C2;
     const WM_QUIT: u32 = 0x0012;
 
     fn wide(s: &str) -> Vec<u16> {
@@ -1512,6 +1765,15 @@ mod tests {
             (("Hello ".into(), "world".into(), ". we went home".into()), (text.into(), 6)),
             "{class}: the value, a selection"
         );
+        // The paste check's read (its length and selection, never its
+        // text), before and after "a paste" replaces the selection.
+        let before = super::uia::edit_state(field.hwnd).expect("the paste check's read");
+        assert_eq!(before, EditState { len: text.len(), sel: (6, 11) }, "{class}: the paste check");
+        let pasted = wide("there");
+        unsafe { SendMessageW(field.hwnd as _, EM_REPLACESEL, 1, pasted.as_ptr() as isize) };
+        let after = super::uia::edit_state(field.hwnd).expect("the paste check's read, after");
+        assert_eq!(after, EditState { len: text.len(), sel: (11, 11) }, "{class}: the paste check, after");
+        assert_eq!(paste_verdict(before, Some(after), false), Some(Landed::Yes), "{class}: it landed");
         drop(field);
 
         // Over a line break: a plain EDIT counts "\r\n" as two, a RichEdit
