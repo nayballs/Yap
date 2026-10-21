@@ -106,7 +106,7 @@
     </div>
   {/if}
   {#if answer}
-    <!-- The question, then the answer (renderMarkdown escapes all input). -->
+    <!-- The question, then the answer (renderMarkdown passes no raw HTML and sanitises its output). -->
     <div class="asked">“{title}”</div>
     <!-- eslint-disable-next-line svelte/no-at-html-tags -->
     {#if body}<div class="body answer">{@html renderMarkdown(body)}</div>{/if}

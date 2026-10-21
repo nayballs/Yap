@@ -19,12 +19,15 @@
     "@fontsource-variable/figtree": "^5.2.10",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.1",
-    "@tauri-apps/plugin-opener": "^2.5.4"
+    "@tauri-apps/plugin-opener": "^2.5.4",
+    "dompurify": "3.4.17",
+    "markdown-it": "15.0.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@sveltejs/vite-plugin-svelte": "^5",
     "@tauri-apps/cli": "^2",
+    "jsdom": "26.1.0",
     "svelte": "^5",
     "vite": "^6"
   }

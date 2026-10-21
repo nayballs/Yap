@@ -1424,7 +1424,7 @@
 
       {#if tab === 'enhanced' && selected.enhancedContent}
         <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown
-             escapes ALL input before transforming (lib/markdown.js) -->
+             passes no raw HTML and sanitises its output (lib/markdown.js) -->
         <div class="rendered">{@html renderMarkdown(selected.enhancedContent)}</div>
       {:else}
         <textarea
@@ -1609,7 +1609,7 @@
                 <!-- An email: shown exactly as it copies. -->
                 <div class="cbody plain">{turn.text}</div>
               {:else if turn.role === 'assistant'}
-                <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown escapes all input -->
+                <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
                 <div class="cbody">{@html renderMarkdown(turn.text)}</div>
               {:else}
                 <p class="cbody">{turn.text}</p>
@@ -3026,6 +3026,10 @@
   .rendered :global(li.task) {
     list-style: none;
     margin-left: -18px;
+  }
+  /* A list under a task: indented under its text, past the checkbox. */
+  .rendered :global(li.task > :is(ul, ol)) {
+    margin-left: 18px;
   }
   .rendered :global(code) {
     font-family: ui-monospace, Consolas, monospace;

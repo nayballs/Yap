@@ -261,8 +261,38 @@ body {
 }
 
 /* Rendered markdown (lib/markdown.js), wherever it shows — chat answers,
-   the Enhanced notes, the notepad's Ask sheet: fenced code and links.
-   Links open in the browser (main.js), never in Yap's own window. */
+   the Enhanced notes, the notepad's Ask sheet: fenced code, links, tables,
+   quotes and rules (each view sets its own paragraph, list and heading
+   spacing). Links open in the browser (main.js), never in Yap's own window.
+   Quotes and rules take the text's own colour, so they suit light views,
+   the dark toasts and the bar alike. */
+.md-quote {
+  margin: 6px 0;
+  padding: 0 0 0 10px;
+  border-left: 3px solid color-mix(in srgb, currentColor 22%, transparent);
+  color: color-mix(in srgb, currentColor 78%, transparent);
+}
+.md-quote > :first-child {
+  margin-top: 0;
+}
+.md-quote > :last-child {
+  margin-bottom: 0;
+}
+hr.md-rule {
+  height: 0;
+  margin: 10px 0;
+  border: none;
+  border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+}
+/* A list item with several paragraphs (markdown.js renders the usual one
+   paragraph per item without a <p>): no extra space above its first or
+   below its last, whatever the view's own paragraph margins. */
+li.md-loose > p:first-child {
+  margin-top: 0 !important;
+}
+li.md-loose > p:last-child {
+  margin-bottom: 0 !important;
+}
 /* GitHub-style tables in answers (markdown.js): scroll sideways when wide. */
 .md-table {
   max-width: 100%;
