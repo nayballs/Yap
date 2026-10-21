@@ -58,7 +58,7 @@
           }
         ],
         "min_sources": 1,
-        "answer_matches": "£|\\bGBP\\b|\\bUSD\\b|US ?\\$|US dollars|\\(US\\)|in (US )?dollars|American (price|pricing)|US (price|pricing)",
+        "answer_matches": "£|\\bGBP\\b|\\bUSD\\b|\\bU\\.?S\\.?\\b|US dollars|United States|American|in (US )?dollars",
         "no_false_claims": true,
         "opened_none": true
       },

@@ -30,8 +30,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   pipeline, `note_ask`), local and cloud: "About the user: they're in the
   United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK
   time (UTC+01:00). Give prices in £ (GBP), times in UK time and metric units;
-  if a source gives a price only in another currency, say which currency and
-  give that figure as it is. Their name is Nathan. They told Yap: "…"" — only
+  a price a source gives only in another currency stays as it is, labelled,
+  like "$8 a month (US price)". Their name is Nathan. They told Yap: "…"" (the
+  example is "£8 a month (UK price)" for a US user) — only
   the parts known; with nothing known, just the date and time (its clock
   changes every minute, so it goes last and the rest of the prompt stays
   cacheable). `about_name` (≤ 60 characters) and `about_me` (≤ 300, one

@@ -1828,20 +1828,34 @@ pub fn refers_back(question: &str) -> bool {
 }
 
 /// The search for a question: without "can you look up", "search the web
-/// for", "please"… ("Can you look up the latest Rust release?" → "the
-/// latest Rust release"). Pure.
+/// for", "please", "for me"… ("Can you look up the latest Rust release?" →
+/// "the latest Rust release"), sentence by sentence, a sentence of nothing
+/// else left out ("Can you look up please, for me? Can you look up Groc
+/// subscriptions for me, please?" → "Groc subscriptions": Nathan's, dictated,
+/// 2026-10-21). Pure.
 pub fn search_query(question: &str) -> String {
     static ASK: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            r"(?i)^\s*(?:hey\s+\w+[,!]?\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|please\s+)?(?:(?:quickly\s+)?(?:look\s+up|look\s+(?:it|this|that)\s+up|search\s+(?:the\s+(?:web|internet)\s+|online\s+)?(?:for\s+)?|google|find\s+out|check)\s*(?:online\s+|on\s+the\s+web\s+)?(?:for\s+)?)",
+            r"(?i)^\s*(?:hey\s+\w+[,!]?\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|please\s+)?(?:(?:quickly\s+)?(?:look\s+up|look\s+(?:it|this|that)\s+up|search\s+(?:the\s+(?:web|internet)\s+|online\s+)?(?:for\s+)?|web\s+search|google|find\s+out|check)\s*(?:online\s+|on\s+the\s+web\s+)?(?:for\s+)?)",
         )
         .expect("static regex")
     });
-    let q = ASK.replace(question.trim(), "");
-    let q = q.trim().trim_end_matches(['?', '.', '!']).trim();
-    let q = q.strip_suffix(" please").unwrap_or(q).trim_end_matches(',').trim();
-    let q = if q.is_empty() { question.trim() } else { q };
-    tidy(q, 200)
+    static FILLER: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i),?\s*\b(?:please|pls|for me|for us|thanks|thank you|if you can|if possible|real quick)\b,?").expect("static regex")
+    });
+    let parts: Vec<String> = question
+        .split_inclusive(['?', '!'])
+        .map(|s| {
+            let q = ASK.replace(s.trim(), "");
+            let q = FILLER.replace_all(&q, " ");
+            let q = q.split_whitespace().collect::<Vec<_>>().join(" ");
+            q.trim().trim_end_matches(['?', '.', '!', ',']).trim().to_string()
+        })
+        .filter(|q| q.chars().any(char::is_alphanumeric))
+        .collect();
+    let q = parts.join(" ");
+    let q = if q.trim().is_empty() { question.trim().to_string() } else { q };
+    tidy(&q, 200)
 }
 
 /// A forced first search's query without the words the model carried over
@@ -2447,6 +2461,15 @@ mod tests {
         assert_eq!(search_query("search the web for cheap flights to Lisbon please"), "cheap flights to Lisbon");
         assert_eq!(search_query("Google the opening hours of the Louvre."), "the opening hours of the Louvre");
         assert_eq!(search_query("Where do I find Gale in Baldur's Gate 3?"), "Where do I find Gale in Baldur's Gate 3");
+        // Nathan's, dictated (2026-10-21): the asking and the please left out.
+        assert_eq!(search_query("Can you check the Grok subscriptions please, for me?"), "the Grok subscriptions");
+        assert_eq!(search_query("Can you look up please, for me? Can you look up Groc subscriptions for me, please?"), "Groc subscriptions");
+        assert_eq!(
+            search_query("Can you web search Grok's subscription and how much it costs for me?"),
+            "Grok's subscription and how much it costs"
+        );
+        // Nothing else in it: the question as it is.
+        assert_eq!(search_query("Please?"), "Please?");
     }
 
     #[test]

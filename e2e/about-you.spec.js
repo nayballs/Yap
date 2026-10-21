@@ -156,7 +156,7 @@ test("Chat: the model is told about the user, and Exa searches the user's countr
   // The block, last in the prompt.
   const block = system.slice(system.lastIndexOf('About the user: '));
   expect(block).toMatch(/^About the user: they're in the United Kingdom \(British English\); it's \w+day \d{1,2} \w+ \d{4}, \d\d:\d\d UK time \(UTC\+0[01]:00\)\./);
-  expect(block).toContain('Give prices in £ (GBP), times in UK time and metric units; if a source gives a price only in another currency, say which currency and give that figure as it is.');
+  expect(block).toContain('Give prices in £ (GBP), times in UK time and metric units; a price a source gives only in another currency stays as it is, labelled, like "$8 a month (US price)".');
   expect(block).toContain('Their name is Nathan.');
   expect(block).toContain('They told Yap: "I work day shifts"');
   // The web tools' line on times names the user's.

@@ -650,9 +650,9 @@ fn language_in_prompt(r: &Region) -> Option<String> {
 /// moment it describes. Pure.
 ///
 /// "About the user: they're in the United Kingdom (British English); it's
-/// Tuesday 21 October 2026, 21:40 UK time (UTC+01:00). Give prices in £
-/// (GBP), times in UK time and metric units; if a source gives a price only
-/// in another currency, say which currency and give that figure as it is.
+/// Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give prices in £
+/// (GBP), times in UK time and metric units; a price a source gives only in
+/// another currency stays as it is, labelled, like "$8 a month (US price)".
 /// Their name is Nathan. They told Yap: "I play PC games.""
 pub fn prompt_block(p: &Profile, now: DateTime<Utc>) -> String {
     let r = &p.region;
@@ -701,8 +701,12 @@ pub fn prompt_block(p: &Profile, now: DateTime<Utc>) -> String {
             n => format!("{} and {}", give[..n - 1].join(", "), give[n - 1]),
         };
         out.push_str(&format!(" Give {list}"));
-        if r.currency.is_some() {
-            out.push_str("; if a source gives a price only in another currency, say which currency and give that figure as it is");
+        // A foreign price, labelled: with only the instruction, Qwen3.5-4B
+        // still listed Grok's US plans as bare "$8/month" 1 time in 3; an
+        // example in another currency than theirs.
+        if let Some(c) = &r.currency {
+            let example = if c == "USD" { "£8 a month (UK price)" } else { "$8 a month (US price)" };
+            out.push_str(&format!("; a price a source gives only in another currency stays as it is, labelled, like \"{example}\""));
         }
         out.push('.');
     }
@@ -816,7 +820,7 @@ mod tests {
         let p = Profile { region: r, name: "Nathan".into(), about: "I'm in Manchester, I play PC games, I work day shifts".into() };
         assert_eq!(
             prompt_block(&p, at()),
-            "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give prices in £ (GBP), times in UK time and metric units; if a source gives a price only in another currency, say which currency and give that figure as it is. Their name is Nathan. They told Yap: \"I'm in Manchester, I play PC games, I work day shifts\""
+            "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give prices in £ (GBP), times in UK time and metric units; a price a source gives only in another currency stays as it is, labelled, like \"$8 a month (US price)\". Their name is Nathan. They told Yap: \"I'm in Manchester, I play PC games, I work day shifts\""
         );
     }
 
