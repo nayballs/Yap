@@ -59,6 +59,11 @@ function inlineWith(s, web = null) {
     if (web && !web.allows(url)) return text;
     return keep(`<a class="md-link" href="${url}" title="${url}">${text}</a>`);
   });
+  // <https://…> (markdown's autolink, escaped by now): the link without its
+  // angle brackets.
+  t = t.replace(/&lt;(https?:\/\/(?:&amp;|[^\s&])+)&gt;/gi, (m, url) =>
+    web && !web.allows(url) ? keep(url) : keep(`<a class="md-link" href="${url}" title="${url}">${url}</a>`)
+  );
   // Bare web addresses; trailing punctuation ("…/app.") isn't part of them.
   t = t.replace(/\bhttps?:\/\/(?:&amp;|[^\s&])+/gi, (found) => {
     const tail = /[.,;:!?)]+$/.exec(found)?.[0] ?? '';

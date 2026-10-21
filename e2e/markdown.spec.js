@@ -55,3 +55,11 @@ test('a table becomes a table, aligned as its rule line says', () => {
   // A lone pipe in a sentence is just text.
   expect(renderMarkdown('cats | dogs')).toBe('<p>cats | dogs</p>');
 });
+
+// gpt-oss writes "<https://x.ai/pricing>"; Chat showed the angle brackets (2026-10-21).
+test('an autolink in angle brackets is just the link', () => {
+  const html = renderMarkdown('Sign up at <https://x.ai/pricing>.');
+  expect(html).toBe('<p>Sign up at <a class="md-link" href="https://x.ai/pricing" title="https://x.ai/pricing">https://x.ai/pricing</a>.</p>');
+  // Other angle brackets stay text.
+  expect(renderMarkdown('a <b> c')).toBe('<p>a &lt;b&gt; c</p>');
+});
