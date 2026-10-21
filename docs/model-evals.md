@@ -513,3 +513,94 @@ each, about 90k of the free plan's daily tokens for the four runs): it searched 
 question by itself every time (cloud models aren't made to); before 1/2 and 2/2, after 2/2 with
 the replayed history and 2/2 with the line — too few runs to choose between them, so the local
 results decided. It writes markdown **tables**, which Chat's renderer shows as raw pipes.
+
+## About you: the user's region (21 Oct 2026)
+
+Nathan's chat on Qwen3.5-4B (on the card, web search on, Exa): "Can you check the Grok
+subscriptions please, for me?" got two notes searches and "I don't see any notes"; "Can you look
+up Groc subscriptions for me, please?" searched "Grok subscriptions check billing" and explained
+how to check a bill; "…how much it costs" gave the plans in US $ with nothing saying he's in the
+UK. Settings → General → **About you** (`about_you.rs`) now tells every model where the user is
+(Windows' region: en-GB, United Kingdom, £ GBP, metric, UK time), and the routing changed:
+price words make a question need the web, an empty notes search leads to the web, a forced
+search's query keeps to the current question (`web::fresh_query`), Exa gets `userLocation`.
+
+New scenarios: `web-grok-subscriptions` (his chat, live), `web-price-local-currency` ("How much
+does Spotify Premium cost a month?", no place said), `web-price-in-the-uk`,
+`web-empty-notes-then-web` and `web-own-notes-stay-local`; the `--locale` option; the
+`prices_keep_their_sign` check; the cleanup bench's `spelling` dictations. **A harness bug found
+on the way**: a scenario with `needs_web` and no `web` object ran *keyless* (Wikipedia) even with
+an Exa key — `WebSpec`'s derived `Default` had `key: false` —, so the live scenarios of "Honest
+web answers" above ran on Wikipedia; they run with the run's key now. The "before" numbers below
+were taken with `"web": {"service": "exa"}` added, so both sides used Exa.
+
+Qwen3.5-4B, RTX 5070 Ti, 32K context, ×3, "after" with `--locale` = Nathan's region. (The card
+was busy with other work for part of the evening: some turns took 60–130 s; pass and fail are
+unaffected, and latencies are only compared between runs made back to back.) The totals are the
+last full run's; the Grok turns count the three runs since the query fix, the price rows every
+run since the region reached the prompt.
+
+| Scenario | Before | After |
+|---|---|---|
+| `web-grok-subscriptions` (all three turns pass) | 0/3 | 2/3 (the third: Yap's note, below) |
+| — turn 1 searches the web | 0/3 (notes ×2, "I don't see any notes") | 9/9 |
+| — turn 2's query without earlier words | 1/3 ("…check account", "…check status") | 9/9 ("Grok subscription(s) [2026]") |
+| — turn 3 in £, or the $ prices said to be US | 0/3 | 7/9 by the model, the rest noted by Yap |
+| `web-price-local-currency` (£ in the answer) | 0/3 ("$12.99/month in the U.S.") | 12/12 (£12.99) |
+| `web-price-in-the-uk` | 3/3 | 12/12 |
+| `web-empty-notes-then-web`, `web-own-notes-stay-local` | 6/6 | 6/6 |
+| The nine older web scenarios | 27/27 | 27/27 |
+| **All 14 web scenarios** | **36/42 (86%)** | **41/42 (98%)** |
+
+What each change did:
+
+- **Prices need the web** (`web::asks_about_prices`): Nathan's first question now gets the forced
+  first search, which found the plans every time.
+- **An empty notes search leads to the web** (`tools::EmptyNotes`): measured on his exact first
+  question with the forced search switched off (`YAP_EVAL_FIRST=model`, ×3): nothing, 0/3
+  searched the web; the hint in the result alone, 1/3; the hint + Yap's search for a model on
+  this PC, 3/3 — so that ships (cloud models get the hint).
+- **The forced search keeps to the current question**: told so in the tool's description, the
+  model still searched "Grok subscription management check account billing" 1 time in 3 (turn 1
+  now searched "Grok subscriptions check account", and turn 2 copied it). `web::fresh_query`
+  drops the words that came from earlier messages (not the question's, not the model's own, not
+  numbers; nothing when the question points back or is too short to stand alone): 9/9 clean, the
+  answers about the plans, not a bill.
+- **Prices**: told "Give prices in £ (GBP)" with the example "$8 a month (US price)", the model
+  wrote x.ai's "$8/month" as "**£8**/month" in 2 of 3 second turns — worse than dollars. The block
+  now says "Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a
+  price in another currency stays as it is, labelled, like "$15 a month (US price)"", and
+  `prices_keep_their_sign` checks it: no swap in the 9 price turns since. Labelling the dollars
+  still slips about 1 time in 4 (a table of bare "$30"), so Yap adds "*Prices in $ are as the
+  sources give them (most likely US dollars), not in £.*" under such an answer
+  (`about_you::foreign_price_note`).
+
+**Groq `openai/gpt-oss-20b`** (×1 each, `web-grok-subscriptions` + `web-price-local-currency`,
+~120k of the day's tokens for before and after): before, the Grok chat checked the notes, then
+searched "Grok subscription status check" and answered with a billing page, and turn 3 was a
+table of bare $; Spotify was "$12.99 per month in the United States". After: turn 1 searched the
+web for "Grok subscriptions" (the hint), turn 3 gave a GBP table, Spotify "£12.99 a month"; turn
+2 answered from the plans it had already found without searching again (the scenario wants a
+search). gpt-oss also added "rough UK equivalents" of its own — conversions the block asks it not
+to make.
+
+**Dictation cleanup keeps the user's spelling** ("Use my region's spelling", on): `--cleanup`
+with six dictations of words English spells two ways (organize, theater, traveled, gray,
+jewelry, mold…, as speech-to-text writes them), ×3 = 48 words; the line's examples are never the
+words tested:
+
+| Qwen3.5-4B, where the line goes | British | Back to back (mean / p90) | After a Chat turn | Prompt tokens processed |
+|---|---|---|---|---|
+| No line (no locale) | 0/48 | 315 / 382 ms | 320 ms | 393 |
+| System prompt only | 10/48 | 315 / 367 ms | 334 ms | 393 |
+| The dictation's own message only | 39/48 | 331 / 384 ms | 308 ms | 427 |
+| **Both (ships)** | **45/48** | 329 / 400 ms | 324 ms | 427 |
+| Both, `--locale en-US` | 0/48 (48 American) | 326 / 384 ms | 335 ms | 426 |
+
+In the system prompt alone the 4B changed only words like its examples (with "colour, organise,
+centre, travelled" as the examples it scored 21/48 — mostly those very words); after the
+dictation's restated instruction as well, 45/48 ("traveled" stayed once a round). The cost: 34
+more prompt tokens re-read per dictation (the 4B's recurrent layers re-read the last message),
+about +14 ms, inside the run-to-run noise; the other outputs changed only by the usual sampling
+noise. **Qwen2.5-1.5B ignores the line wherever it goes: 0/48** (121–145 ms, unchanged), so on a
+PC without a capable card cleanup stays American-spelt.
