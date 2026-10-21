@@ -6,12 +6,56 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
 
 ## Modules
 
+- **`about_you.rs`** — **what every model is told about the person**
+  (2026-10-21, Settings → General → About you; Nathan: "It keeps finding
+  things in dollars… a better way to give the model better context on the
+  user"). **Region and language from Windows** (`detected`): the regional
+  format (`GetUserDefaultLocaleName`, "en-GB"), the home location
+  (`GetUserDefaultGeoName`, else `GetUserGeoID` → `GEO_ISO2`), the currency
+  (`GetLocaleInfoEx` `LOCALE_SINTLSYMBOL` "GBP" + `LOCALE_SCURRENCY` "£", the
+  user's own changes included), `LOCALE_IMEASURE` (metric / US) and the time
+  zone (`GetDynamicTimeZoneInformation`'s key name → IANA through
+  `calendar/tz.rs`' CLDR table). Settings' changes (`config.region_country /
+  _language / _currency / _units / _time_zone`, empty = Windows') go on top
+  (`resolve`, pure): a picked country brings its own currency (the
+  `COUNTRIES` table: ISO code, English name, ISO 4217) and units (`IMPERIAL`:
+  US and its territories, Liberia, Myanmar) unless those are picked too; the
+  language and the clock stay Windows' until picked. `summary`: "United
+  Kingdom · English (UK) · £ GBP · metric · UK time"; `Spelling` British /
+  American / Canadian from an English language tag's region (else an
+  English-speaking country; none for another language). **The block**
+  (`prompt_block(profile, now)`, pure, unit-tested), last in the system
+  prompt of Chat, the Voice Assistant, the Meetings view's and the Notes
+  view's Ask bars (`commands::chat_turn`, `small_model_answer`'s web
+  pipeline, `note_ask`), local and cloud: "About the user: they're in the
+  United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK
+  time (UTC+01:00). Give prices in £ (GBP), times in UK time and metric units;
+  if a source gives a price only in another currency, say which currency and
+  give that figure as it is. Their name is Nathan. They told Yap: "…"" — only
+  the parts known; with nothing known, just the date and time (its clock
+  changes every minute, so it goes last and the rest of the prompt stays
+  cacheable). `about_name` (≤ 60 characters) and `about_me` (≤ 300, one
+  line). **Search** is aimed at the country (`web::Settings.country`: Exa's
+  `userLocation`, Tavily's `country` via `tavily_country`, the providers'
+  own searches — web-and-apps.md); **cleanup** keeps the spelling
+  (`cleanup_spelling`, `region_spelling`, on). `about_you_status {overrides?}`
+  (Settings): Windows' region, "Automatic" for the picked country, the
+  result, its summary, the block as it reads now, the spelling line, the
+  pickers' lists. **Test mode** never reads Windows' settings: debug-only
+  `YAP_E2E_LOCALE` (a tag, or JSON `{locale, country, currency, symbol,
+  metric, timeZone}`) stands in, unset = nothing (the eval's `--locale`).
+  Kept in config.json, sent only to the model the person uses; accounts
+  don't sync it (they could, later: accounts.md).
 - **`llm.rs`** — the AI cleanup client (OpenAI-compatible). Frames the transcript as
   data (delimiters + one-shot) so small models *clean* it instead of *answering* it.
   The system prompt is split FluidVoice-style: an immutable `BASE_PROMPT` (guardrails:
   output-only, never answer the transcript) that's always prepended via
   `build_system_prompt()` to the user's editable **body** (tone/format = a preset or
-  custom text). Records token/request usage (best-effort). Also carries
+  custom text), then — in Yap's own layer, never the preset text —
+  **the spelling line** ("Use my region's spelling", `cleanup_system_prompt`:
+  `about_you::cleanup_spelling`, "When the transcript is in English, spell it
+  the British way (colour, organise, centre, travelled), without changing any
+  words.") and the custom dictionary. Records token/request usage (best-effort). Also carries
   `EDIT_BASE_PROMPT` (edit/rewrite mode's guardrails), `NOTE_BASE_PROMPT` +
   `MEETING_NOTE_BASE_PROMPT` + `NOTE_DEFAULT_FRAGMENT` (note enhancement's
   guardrails/action fragment), `ACTION_PLAN_BASE_PROMPT` +
@@ -290,7 +334,13 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   Assistant's (scope "assistant"). **`--cleanup`** (`eval/cleanup.rs`)
   times `llm::cleanup` itself over `evals/cleanup/dictations.json` — back to
   back, after a Chat turn, after a long one — with llama.cpp's prompt tokens
-  processed, and keeps every output (`cleanup.md`). The hooks in
+  processed, and keeps every output (`cleanup.md`), then the `spelling`
+  dictations (words English spells two ways, as speech-to-text writes them):
+  how many come out British or American under the run's locale.
+  **`--locale`** stands in for Windows' region (`YAP_E2E_LOCALE`, About you):
+  without it no region reaches the prompts. A scenario with `needs_web` and
+  no `web` object runs live with the run's key (until 2026-10-21 a derived
+  `Default` left them keyless: Wikipedia). The hooks in
   `llm.rs` (`eval::Call`), `tools.rs`, `config.rs`, `notes.rs` are no-ops
   outside a run. See [`docs/model-evals.md`](../model-evals.md).
 

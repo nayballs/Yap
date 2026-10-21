@@ -624,6 +624,38 @@ pub struct YapConfig {
     #[serde(default = "default_meeting_reminder")]
     pub meeting_reminder: String,
 
+    // ---- About you (Settings → General; `about_you.rs`) ----
+    // Told to the AI model the person uses, with each question; kept here,
+    // never sent to Yap's account service. Empty region fields follow
+    // Windows' own settings.
+    /// "What should Yap call you?" (optional).
+    #[serde(default)]
+    pub about_name: String,
+    /// "Anything the AI should know about you" (optional, ≤ 300 characters).
+    #[serde(default)]
+    pub about_me: String,
+    /// The country, ISO 3166-1 alpha-2 ("GB"); empty = Windows' home location.
+    #[serde(default)]
+    pub region_country: String,
+    /// The regional format ("en-GB"); empty = Windows'.
+    #[serde(default)]
+    pub region_language: String,
+    /// The currency, ISO 4217 ("GBP"); empty = Windows' (or the picked
+    /// country's).
+    #[serde(default)]
+    pub region_currency: String,
+    /// "metric" | "imperial"; empty = Windows' (or the picked country's).
+    #[serde(default)]
+    pub region_units: String,
+    /// The time zone, IANA ("Europe/London"); empty = Windows'.
+    #[serde(default)]
+    pub region_time_zone: String,
+    /// "Use my region's spelling": dictation cleanup keeps the person's
+    /// variety of English (British "colour", American "color"). On by
+    /// default.
+    #[serde(default = "default_true")]
+    pub region_spelling: bool,
+
     /// Schema version, for the one-time migrations in `migrate_once` (the
     /// kind that must never run twice, unlike `load`'s idempotent fixes). A
     /// config saved before versioning has no field (0); `Default` and every
@@ -822,6 +854,14 @@ impl Default for YapConfig {
             meeting_end_when_quiet: true,
             meeting_hotkey: default_meeting_hotkey(),
             meeting_reminder: default_meeting_reminder(),
+            about_name: String::new(),
+            about_me: String::new(),
+            region_country: String::new(),
+            region_language: String::new(),
+            region_currency: String::new(),
+            region_units: String::new(),
+            region_time_zone: String::new(),
+            region_spelling: true,
             config_version: CONFIG_VERSION,
         }
     }

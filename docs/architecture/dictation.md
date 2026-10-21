@@ -21,7 +21,12 @@ typed and it offers to add it to the dictionary)**
 `text_injector::prepare_dictation` the fitting; `app_kind::submit_key` the
 key). Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation
-never blocks. The dictionary runs Handy's split (ported from its source):
+never blocks. It keeps the person's **English spelling** ("Use my region's
+spelling", on, Settings → General → About you; 2026-10-21): an en-GB user's
+"color" comes out "colour", an en-US user's "colour" "color" — one line in
+Yap's own layer of the cleanup prompt (`llm::cleanup_system_prompt`,
+`about_you::cleanup_spelling`), never in the editable preset; another
+language gets no line. The dictionary runs Handy's split (ported from its source):
 **Whisper models** get the correct spellings as the decoder's `initial_prompt`
 (ASR biasing, threaded through `SttEngine::transcribe` at every call site —
 dictation/partials/upload/meeting — the words used most lately first,

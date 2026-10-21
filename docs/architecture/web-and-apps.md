@@ -10,8 +10,11 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   a cloud model's **own search** (`web/native.rs`, below) by default, else
   Yap's own (`own_search`): **Exa** (`POST https://api.exa.ai/search`, `x-api-key`, its guide's
   recommended `{query, type: "auto", contents: {highlights: true}}` +
-  `numResults: 5`) or **Tavily** (`POST https://api.tavily.com/search`,
-  Bearer, `{query, max_results: 5}`), keys in `web_search_keys` (service →
+  `numResults: 5`, + `userLocation`: the person's country, ISO "GB", from
+  About you — `about_you.rs`, `Settings.country`; 2026-10-21) or **Tavily** (`POST https://api.tavily.com/search`,
+  Bearer, `{query, max_results: 5}`, + `country`: Tavily's lower-case name,
+  "united kingdom", when it lists the person's — `about_you::tavily_country`),
+  the search cache keyed by the country too; keys in `web_search_keys` (service →
   key, like `pp_api_keys`, never logged); with no key — or when the service
   fails (its error kept as `note`, said in the chip: 401/403 wrong key, Exa
   402 / Tavily 432 out of free searches, 433, 429, offline), or when it
@@ -19,7 +22,7 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   lookup**: the game's own MediaWiki (`GAME_WIKIS`: bg3.wiki, warcraft.wiki.gg,
   minecraft.wiki, Fandom wikis…; any `*.wiki.gg` / `*.fandom.com` named in
   the question) else Wikipedia in the person's language (`wiki_language`:
-  the speech language, else Windows', else English; English again when it
+  the speech language, else About you's — Windows' unless changed —, else English; English again when it
   finds nothing), through `api.php` (`generator=search` + `inprop=url`, then
   TextExtracts on Wikipedia, `action=parse` HTML elsewhere → `fragment_text`
   with dom_query, infoboxes/navboxes/footnotes out → `best_passages` by
@@ -49,8 +52,14 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   need the web?** (`needs_web`, conservative): the person asks for it ("look
   up", "search the web", "google"), wants something current ("latest",
   "news", "price of", "coming out", "upcoming", "out yet", "who won", a year
-  from last year on — "best indie games 2026"; 2026-10-21), or names a known
-  game; never "my notes"/"my meeting"/a note, a request to do something
+  from last year on — "best indie games 2026"; 2026-10-21), asks about
+  **prices** (`asks_about_prices`: price, cost, subscription, fees,
+  cheapest, deals, discount, on sale, in stock, sold out, "how much is /
+  does / for…" — not "how much is 15% of 80"; Nathan's "Can you check the
+  Grok subscriptions please, for me?", 2026-10-21), or names a known
+  game; never a question about their own things (`about_own_stuff`: "my
+  notes", "the meeting", "what did I note / write / say…", "we decided",
+  "my list / budget", a note), a request to do something
   ("write…", "add…", "open…", "play…": a search would switch the actions off
   for the turn), nor a question about how the answer before it was made
   (`about_the_answer`: "did you look that up or guess?", "where did you get
@@ -58,14 +67,24 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   earlier answer ("the top five in that list", "which of those…", "the
   second one"). **A model on this PC with tools** (`ai_model::runs_here`), a
   question that `needs_web`: its first step **must be a web search**
-  (`tools::FirstStep::MustSearch`: only `web_search` offered,
-  `tool_choice: "required"`, which llamafile honours — its own query, with
+  (`tools::FirstStep::MustSearch`: only `web_search` offered —
+  `forced_search_definition`, whose description says to search what the
+  latest message asks and leave out earlier messages' words unless it points
+  back at them: "Grok subscriptions check account" carried "check" from the
+  question before, 2026-10-21 —, `tool_choice: "required"`, which llamafile honours — its own query, with
   the conversation in mind: "Arsenal Football Club match tonight 21 October
   2026 time"); a server that refuses or answers in words anyway gets **Yap's
   search instead** (`search_query(question)`, handed over as the call the
   model would have made: chip, sources, safety rule, 3-search cap). Left to
   decide, Qwen3.5-4B answered Nathan's "best RPG games coming out in 2026"
-  from memory (2026-10-21). Cloud models decide for themselves. **Models
+  from memory (2026-10-21). Cloud models decide for themselves. **Nothing
+  in the notes** (`tools::EmptyNotes`, web search on, a question not about
+  the person's own things): a `search_notes` that found nothing carries
+  `NOTHING_IN_NOTES_HINT` ("search the web for it next (web_search) instead
+  of saying there are no notes"), and for a model on this PC a step of
+  nothing but empty notes searches is followed by Yap's search for it (once
+  a turn) — Qwen3.5-4B searched Nathan's notes twice for "Grok
+  subscriptions" and stopped. **Models
   that can't call tools** (`commands::small_model_answer`): the fixed
   pipeline — `needs_web`, `search_query` (the ask stripped),
   `grounded_sources` (≤ 3 sources, ≤ 1,500 tokens) + `grounded_prompt`
@@ -77,7 +96,11 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   list the model wrote; what follows the list stays), `claims_browsing`
   (sentence by sentence; not a denial, an offer — "I can do a quick web
   search" —, a question, or "I searched your notes") → `NOT_SEARCHED_NOTE` /
-  `NOT_SEARCHED_THAT_NOTE`. Chips `Searched the web…` + `Answered from 1 web
+  `NOT_SEARCHED_THAT_NOTE`. **Times**: the web tools' line says to convert a
+  page's time zone to the user's (`time_note(zone)`: "…convert it to the
+  user's time (UK time)…"); the date, the user's time and its UTC offset are
+  in the About you block, last in the prompt (`about_you::prompt_block`).
+  Chips `Searched the web…` + `Answered from 1 web
   page`. **The AI's own search** (`web/native.rs`, 2026-10-18, Nathan's
   call: "let the cloud models use their own search tools, and only give
   local models Yap's"; `web_search_native`, on by default): a cloud chat
@@ -85,7 +108,11 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   `NativeSearch::for_chat`) keeps the ONE tool loop and calls Yap's own
   `web_search`; running it is a short **sub-call** to the same provider,
   on the chat's endpoint and key, with nothing but its search tool
-  (`NativeSearch::body`, pure): **Groq** chat completions +
+  (`NativeSearch::body`, pure; aimed at the person's country —
+  `in_region`: its prompt ends "The user is in the United Kingdom: prefer
+  pages and prices for there (in GBP).", and OpenAI's and Anthropic's search
+  tools get `user_location {type: "approximate", country, timezone}`, as
+  their docs said on 2026-10-21): **Groq** chat completions +
   `tools: [{type: "browser_search"}]`, `tool_choice: "required"`,
   `reasoning_effort: "low"`, `max_completion_tokens` 1,024, on gpt-oss
   (another Groq model searches with `openai/gpt-oss-20b`); **Gemini**

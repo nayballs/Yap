@@ -127,6 +127,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `learn.rs` — "Suggest words from your corrections": the 60 s field watch and the offer.
 
 **AI models** — [ai-models.md](./docs/architecture/ai-models.md)
+- `about_you.rs` — About you: the region from Windows (or picked), name and note → the block every model's prompt ends with, search country, cleanup spelling.
 - `llm.rs` — OpenAI-compatible client, immutable base prompts, chat/tool calls, rate-limit waits.
 - `local_llm.rs` — on-device llamafile sidecar: models, recommendation, server args, context, restarts.
 - `gguf.rs` — read-only GGUF headers and memory estimates per context length.
@@ -216,7 +217,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
 - `Overlay.svelte` + `bar/` — the Yap bar's page ([yap-bar.md](./docs/architecture/yap-bar.md)).
-- `Settings.svelte` — Settings, always mounted in the modal ([frontend-settings.md](./docs/architecture/frontend-settings.md)).
+- `Settings.svelte` — Settings, always mounted in the modal ([frontend-settings.md](./docs/architecture/frontend-settings.md)); `AboutYouSettings.svelte` its General → About you.
 - `AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
 - `ModelManager` / `ModelRow`, `Onboarding`, `lib/ui/` — speech models, first run, primitives, right-click menus.
 - Window config (`tauri.conf.json`) — [app-shell.md](./docs/architecture/app-shell.md#window-config-src-tauritauriconfjson).

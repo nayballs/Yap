@@ -53,9 +53,13 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   kept", Qwen3.5-4B said it couldn't list "the top five in that list" —, or
   to read one of those pages, which `read_page` allows); any other model gets
   one system-prompt line naming the questions Yap searched the web to answer
-  (`web_history_note`). A web answer's system prompt carries the user's local
-  time and UTC offset (`web::time_note`) so a page's "3:00 PM ET" is
-  converted, not mislabelled.
+  (`web_history_note`). **Every** system prompt ends with the **About you
+  block** (`about_you::prompt_block`, ai-models.md: where the person is and
+  their English, the date and their time with its UTC offset, prices in
+  their currency — or a foreign price said as such —, times, units, their
+  name and note), and a web answer's tool lines say to convert a page's time
+  zone to theirs (`web::time_note`), so a page's "3:00 PM ET" is converted,
+  not mislabelled, and "$8/month" isn't passed off as the UK price.
 - **`tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
@@ -139,10 +143,17 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   OpenAI messages (`chats::history_messages`: earlier web answers' searches
   replayed) and a **`FirstStep`**: `Model` (it decides), `MustSearch` (a
   model on this PC asked something that needs the web — only `web_search`
-  offered, `tool_choice: "required"`; no call made, or the server refuses →
+  offered — `forced_search_definition`: "the user's latest message", not
+  earlier messages' words —, `tool_choice: "required"`; no call made, or the server refuses →
   Yap's own search for it, `search_for_the_model`) or `YapSearches(query)`
   (Yap searches before the first step; the model evaluations' comparison,
-  `YAP_EVAL_FIRST`). **The safety rule**
+  `YAP_EVAL_FIRST`). **Nothing in the notes** (`EmptyNotes`, 2026-10-21):
+  with the web on and a question not about the person's own things
+  (`web::about_own_stuff`), an empty `search_notes` result carries
+  `NOTHING_IN_NOTES_HINT` (search the web next), and for a model on this PC
+  a step of only empty notes searches is followed by Yap's search
+  (`search_for_the_model`, once a turn; `YAP_EVAL_EMPTY_NOTES` = hint |
+  search | none compares). **The safety rule**
   (`refused_after_web`, `ACTION_TOOLS` = open_app, create_note,
   update_note, edit_note, copy_to_clipboard): once web content is in a turn
   (`Turn::seen`), those are no longer offered (`without_actions`) and a call

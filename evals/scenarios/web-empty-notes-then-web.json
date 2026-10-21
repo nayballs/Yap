@@ -1,0 +1,37 @@
+{
+  "name": "web-empty-notes-then-web",
+  "description": "Nathan's first Grok question with \"plans\" for \"subscriptions\", so web::needs_web doesn't spot it (no \"look up\", no price words) and a local model takes it to the notes first: when the notes have nothing and the question isn't about them, the web comes next (the search_notes result says so, and for a model on this PC Yap searches it) instead of \"I don't see any notes about…\" — Nathan's Grok chat, turn 1, 2026-10-21. Live (Exa with the run's key).",
+  "tags": [
+    "web",
+    "routing",
+    "live"
+  ],
+  "needs_web": true,
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Dentist",
+        "content": "Dentist on Tuesday 4 November at 9:15, Dr Patel, King Street."
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "Can you check the Grok plans please, for me?",
+      "expect": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "min_sources": 1,
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "answer_not_matches": "(?i)don't see any notes|no notes (about|on|for)|couldn't find any notes"
+      }
+    }
+  ]
+}

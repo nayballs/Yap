@@ -728,9 +728,10 @@ pub async fn note_ask(
         context.push_str(&format!("\nEnhanced notes:\n{}\n", note.enhanced_content.trim()));
     }
     let system = format!(
-        "{}\n\nThe user is asking about the following note. Ground your answers in it; if the answer isn't in the note, say so briefly.\n\n<note>\n{}\n</note>",
+        "{}\n\nThe user is asking about the following note. Ground your answers in it; if the answer isn't in the note, say so briefly.\n\n<note>\n{}\n</note>\n\n{}",
         persona.trim(),
-        context.trim()
+        context.trim(),
+        crate::about_you::prompt_line(&cfg)
     );
 
     crate::llm::note_chat(
@@ -959,6 +960,11 @@ pub(crate) async fn chat_turn(
     // prompt (`chats::web_history_note`). Never a note in an answer's text:
     // a model copies it into answers that searched nothing.
     let (replay, history_note) = web_history_mode(tools_supported && web_on);
+    // About you (about_you.rs): where the person is, their clock, money and
+    // units, name and note — last in the prompt, below.
+    let profile = crate::about_you::profile(&cfg);
+    let about = crate::about_you::prompt_block(&profile, chrono::Utc::now());
+    let zone = profile.region.time_zone_label.clone();
     let mut system = persona.trim().to_string();
     if tools_supported {
         system.push_str("\n\nYou have access to tools. ");
@@ -970,7 +976,8 @@ pub(crate) async fn chat_turn(
         if web_on {
             system.push(' ');
             system.push_str(&crate::tools::WEB_TOOL_INSTRUCTIONS.join(" "));
-            system.push_str(&format!(" Today is {}. {}", crate::web::today(), crate::web::time_note()));
+            system.push(' ');
+            system.push_str(&crate::web::time_note(zone.as_deref()));
             if by_voice {
                 system.push_str(" This question was asked out loud: start your answer with the answer itself, in one or two short sentences, then any details.");
             }
@@ -1015,6 +1022,10 @@ pub(crate) async fn chat_turn(
             "\n\nBelow are notes from the user's library that may be relevant. Reference them naturally if they help answer the question.\n\n{rag}"
         ));
     }
+    // Last but for the spoken note: small models heed the end of the prompt,
+    // and the clock in it changes every minute (the rest stays cacheable).
+    system.push_str("\n\n");
+    system.push_str(&about);
     // Asked out loud and read aloud whole — the Voice Assistant, or a
     // question dictated into Chat with spoken replies on (a web answer is
     // said short anyway, `assistant::spoken_answer`): a short spoken answer,
@@ -1074,7 +1085,7 @@ pub(crate) async fn chat_turn(
         // Yap's fixed web pipeline when the question needs the web.
         let endpoint = (base_url.as_str(), api_key.as_str(), model.as_str(), provider.as_str(), disable_thinking);
         let (reply, chips, sources, looked) =
-            small_model_answer(&cfg, &persona, &system, &history, &text, endpoint, web_on, by_voice).await?;
+            small_model_answer(&cfg, &persona, &system, &about, &history, &text, endpoint, web_on, by_voice).await?;
         // "Opening Baldur's Gate 3." from a model that can't open anything:
         // said as it is instead (apps.rs).
         let corrected = if crate::apps::claims_unasked(&reply, &text) {
@@ -1123,12 +1134,14 @@ const SMALL_HISTORY_TOKENS: usize = 2_000;
 /// model to answer only from them and cite them. It never lets the model
 /// claim a search that didn't happen: it's told so (and `chat_turn`'s
 /// checks flag an answer that claims one anyway). Also returns whether a
-/// search ran.
+/// search ran. `about`: the About you block (`about_you::prompt_block`),
+/// already last in `system`, kept last in the web pipeline's own prompt.
 #[allow(clippy::too_many_arguments)]
 async fn small_model_answer(
     cfg: &YapConfig,
     persona: &str,
     system: &str,
+    about: &str,
     history: &[(String, String)],
     text: &str,
     (base_url, api_key, model, provider, disable_thinking): (&str, &str, &str, &str, bool),
@@ -1148,10 +1161,13 @@ async fn small_model_answer(
                 let (found_sources, block) = crate::web::grounded_sources(&found.hits, SMALL_WEB_TOKENS);
                 system = crate::web::grounded_prompt(persona, &block, &crate::web::today(), by_voice);
                 system.push(' ');
-                system.push_str(&crate::web::time_note());
+                let zone = crate::about_you::profile(cfg).region.time_zone_label;
+                system.push_str(&crate::web::time_note(zone.as_deref()));
                 // Still only text: it can't open or change anything (apps.rs).
                 system.push_str("\n\n");
                 system.push_str(crate::apps::NO_TOOLS_NOTE);
+                system.push_str("\n\n");
+                system.push_str(about);
                 history = crate::web::fit_history(&history, SMALL_HISTORY_TOKENS);
                 chips.push(crate::web::search_chip(&query, &found, &settings));
                 chips.push(match found_sources.len() {
@@ -1567,7 +1583,9 @@ pub async fn test_post_process(text: String) -> Result<String, String> {
     let cfg = config::load();
     // Route through the on-device sidecar when it's the selected provider + up.
     let (base_url, api_key, model, provider) = crate::local_llm::effective_endpoint(&cfg);
-    crate::llm::cleanup(&text, &base_url, &api_key, &model, &provider, &cfg.pp_prompt, &cfg.dictionary, cfg.pp_disable_thinking).await
+    let spelling = crate::about_you::cleanup_spelling(&cfg);
+    crate::llm::cleanup(&text, &base_url, &api_key, &model, &provider, &cfg.pp_prompt, spelling.as_deref(), &cfg.dictionary, cfg.pp_disable_thinking)
+        .await
 }
 
 /// Status of the on-device cleanup sidecar: whether the runtime + model are

@@ -1,0 +1,70 @@
+{
+  "name": "web-grok-subscriptions",
+  "description": "Nathan's chat of 2026-10-21 on Qwen3.5-4B, replayed live (Exa with the run's key, real pages). 1: \"Can you check the Grok subscriptions please, for me?\" — the model searched his notes twice (\"No notes found for 'Grok subscriptions'\", \"…'Grok'\") and stopped: web::needs_web didn't fire. 2: \"Can you look up Groc subscriptions…\" — it searched \"Grok subscriptions check billing\" (stale words from turn 1) and explained how to check a bill. 3: \"…how much it costs\" — the right plans, but in US $ with nothing saying he's in the UK. Run with the UK locale (--locale en-GB) to see the prices in £, or labelled as US $.",
+  "tags": [
+    "web",
+    "prices",
+    "locale",
+    "live"
+  ],
+  "needs_web": true,
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Can you check the Grok subscriptions please, for me?",
+      "expect": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "min_sources": 1,
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "answer_matches": "SuperGrok|Premium|xAI|\\bX\\b",
+        "answer_not_matches": "(?i)no notes|couldn't find any notes|don't have any notes"
+      }
+    },
+    {
+      "user": "Can you look up please, for me? Can you look up Groc subscriptions for me, please?",
+      "expect": {
+        "tools_called": [
+          {
+            "name": "web_search",
+            "args": {
+              "query": {
+                "not_contains": "billing"
+              }
+            }
+          }
+        ],
+        "min_sources": 1,
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "answer_matches": "SuperGrok|Premium|xAI",
+        "answer_not_matches": "(?i)check (your|the) bill|billing (page|history|section)"
+      }
+    },
+    {
+      "user": "Can you web search Grok's subscription and how much it costs for me?",
+      "expect": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "min_sources": 1,
+        "answer_matches": "£|\\bGBP\\b|\\bUSD\\b|US ?\\$|US dollars|\\(US\\)|in (US )?dollars|American (price|pricing)|US (price|pricing)",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "answer_matches": "£"
+      }
+    }
+  ]
+}

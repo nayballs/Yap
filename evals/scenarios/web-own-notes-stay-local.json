@@ -1,0 +1,45 @@
+{
+  "name": "web-own-notes-stay-local",
+  "description": "With web search on, questions about the person's own notes stay in the notes: one the notes answer, and one they don't (\"What did I note about my car insurance?\" finds nothing — and that's the answer, not a web search). The other side of web-empty-notes-then-web (2026-10-21).",
+  "tags": [
+    "web",
+    "routing",
+    "notes"
+  ],
+  "needs_web": true,
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Dentist",
+        "content": "Dentist on Tuesday 4 November at 9:15, Dr Patel, King Street. Check-up costs £27.50."
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "What did I note about the dentist?",
+      "expect": {
+        "tools_not_called": [
+          "web_search"
+        ],
+        "answer_contains_any": [
+          "9:15",
+          "Patel",
+          "4 November"
+        ],
+        "opened_none": true
+      }
+    },
+    {
+      "user": "What did I note about my car insurance?",
+      "expect": {
+        "tools_not_called": [
+          "web_search"
+        ],
+        "no_false_claims": true,
+        "opened_none": true
+      }
+    }
+  ]
+}

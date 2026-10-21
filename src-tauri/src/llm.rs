@@ -162,11 +162,22 @@ fn dictionary_suffix(dictionary: &[crate::config::DictionaryEntry]) -> String {
     )
 }
 
+/// The cleanup's system prompt: the guardrails + the editable body, then —
+/// in Yap's own layer, never the person's preset text — the spelling line
+/// ("Use my region's spelling", `about_you::cleanup_spelling`: British
+/// "colour" for en-GB, American "color" for en-US) and the custom dictionary.
+/// Pure.
+pub fn cleanup_system_prompt(body: &str, spelling: Option<&str>, dictionary: &[crate::config::DictionaryEntry]) -> String {
+    let spelling = spelling.map(|s| format!("\n\n{}", s.trim())).unwrap_or_default();
+    format!("{}{spelling}{}", build_system_prompt(body), dictionary_suffix(dictionary))
+}
+
 /// Clean `text` through an OpenAI-compatible chat endpoint.
 ///
 /// Returns the cleaned text on success, or an `Err` message on any failure
 /// (network, non-200, parse, empty response). The caller is expected to fall
-/// back to the raw transcript on `Err`.
+/// back to the raw transcript on `Err`. `spelling`: keep the person's variety
+/// of English ([`cleanup_system_prompt`]).
 #[allow(clippy::too_many_arguments)]
 pub async fn cleanup(
     text: &str,
@@ -175,6 +186,7 @@ pub async fn cleanup(
     model: &str,
     provider: &str,
     body: &str,
+    spelling: Option<&str>,
     dictionary: &[crate::config::DictionaryEntry],
     disable_thinking: bool,
 ) -> Result<String, String> {
@@ -182,7 +194,7 @@ pub async fn cleanup(
     // plus the custom dictionary as spelling/correction bias (OpenWhispr's
     // `dictionarySuffix`) so the model uses the right spellings up front instead
     // of the post-pass find/replace being the only defense.
-    let system_prompt = format!("{}{}", build_system_prompt(body), dictionary_suffix(dictionary));
+    let system_prompt = cleanup_system_prompt(body, spelling, dictionary);
 
     // Frame the transcript as DATA, not a chat turn: a restated instruction +
     // delimiters in the user message, plus a one-shot example that cleans a

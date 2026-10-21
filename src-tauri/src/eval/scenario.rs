@@ -74,7 +74,7 @@ fn yes() -> bool {
 }
 
 /// A scenario's web (`web.rs` with "Look things up on the web" on).
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WebSpec {
     /// "live" (default): the real search service with the run's key
@@ -107,6 +107,24 @@ pub struct WebSpec {
     /// Stand-in: pages by their address (HTML or text).
     #[serde(default)]
     pub pages: std::collections::BTreeMap<String, String>,
+}
+
+/// A scenario with `needs_web` and no `web`: live, with the run's key (as
+/// `key`'s serde default says). The derived `Default` had `key: false`, so
+/// until 2026-10-21 such scenarios ran keyless (Wikipedia) even with an Exa
+/// key in the run.
+impl Default for WebSpec {
+    fn default() -> Self {
+        WebSpec {
+            mode: None,
+            service: None,
+            key: true,
+            native: None,
+            results: Vec::new(),
+            searches: Vec::new(),
+            pages: std::collections::BTreeMap::new(),
+        }
+    }
 }
 
 /// A stand-in web's answer to the searches that hold one of `when`.
@@ -492,8 +510,14 @@ fn false_claims(o: &Observed) -> Vec<String> {
     };
     let first_claim = |patterns: &[regex::Regex]| patterns.iter().find_map(|r| r.find_iter(&reply).find(|m| !offer(m)));
     if o.opened.is_empty() {
-        // "Starting in Act 1…", "Opening at 9…": a preposition after it isn't an app.
-        const NOT_AN_APP: &[&str] = &["in", "at", "from", "with", "on", "by", "to", "point", "out", "off", "over", "of", "hours", "times"];
+        // "Starting in Act 1…", "Opening at 9…": a preposition after it isn't
+        // an app, nor a date ("launching March 2026", a game's release:
+        // web-nathans-chat, 2026-10-21).
+        const NOT_AN_APP: &[&str] = &[
+            "in", "at", "from", "with", "on", "by", "to", "point", "out", "off", "over", "of", "hours", "times", "soon", "later",
+            "early", "late", "next", "this", "january", "february", "march", "april", "may", "june", "july", "august",
+            "september", "october", "november", "december",
+        ];
         let claim = open.iter().find_map(|r| {
             r.captures_iter(&reply)
                 .filter(|c| c.get(4).is_none_or(|w| !NOT_AN_APP.contains(&w.as_str().to_lowercase().as_str())))
@@ -695,8 +719,10 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
             }
         }
     }
-    // (A search Yap ran first isn't a fix of the answer.)
-    let fixes: Vec<&str> = o.stats.post_fixes.iter().map(String::as_str).filter(|f| *f != "yap_search").collect();
+    // (A search Yap ran first, or a query it freed of earlier words, isn't a
+    // fix of the answer.)
+    let fixes: Vec<&str> =
+        o.stats.post_fixes.iter().map(String::as_str).filter(|f| !matches!(*f, "yap_search" | "fresh_query")).collect();
     if e.no_post_fixes && !fixes.is_empty() {
         fails.push(format!("Yap had to fix the answer: {}", fixes.join(", ")));
     }

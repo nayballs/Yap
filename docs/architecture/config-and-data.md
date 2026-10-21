@@ -61,6 +61,12 @@
   (`AppNickname {say, app, name}`), the web (`web.rs`): web_search (false) +
   web_search_native (true: cloud models use their provider's own search) +
   web_search_service ("exa" | "tavily") + web_search_keys (service → key),
+  About you (`about_you.rs`, Settings → General): about_name + about_me (≤
+  300 characters; told to the AI model with each question, never to Yap) +
+  region_country (ISO) / region_language (a tag) / region_currency (ISO
+  4217) / region_units ("metric" | "imperial") / region_time_zone (IANA) —
+  all empty = follow Windows — + region_spelling ("Use my region's
+  spelling", on),
   Commands' edit_hotkey (the rewrite shortcut)
   + agent_name + the `voiceAgent` scope (field and key names unchanged by
   the 2026-10-18 rename, so no setting resets). JSON
@@ -164,7 +170,9 @@
   recommended for this PC: Qwen3.5 4B on a graphics card with ≥ 5.5 GiB of its
   own, else Qwen2.5 1.5B), the "press enter" voice command
   **on** (`voice_enter`), word suggestions from your corrections **on**
-  (`learn_words` — it only asks; nothing is added without a click), looking
+  (`learn_words` — it only asks; nothing is added without a click), the
+  region the AI models are told **following Windows** (About you, every
+  `region_*` empty) with cleanup keeping its spelling (`region_spelling`), looking
   things up on the web **off** (`web_search`; once on, cloud models use
   their provider's own search — `web_search_native` — and local ones Exa),
   opening apps when asked **on** (`open_apps` — only apps in the Start

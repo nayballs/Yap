@@ -1,0 +1,38 @@
+{
+  "name": "web-price-in-the-uk",
+  "description": "\"How much is X in the UK?\": the price in £ from UK sources (a British shop or a UK edition), not US $. Live (Exa with the run's key; since 2026-10-21 Exa's userLocation is the user's country). Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "prices",
+    "locale",
+    "live"
+  ],
+  "needs_web": true,
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "How much is a Nintendo Switch 2 in the UK?",
+      "expect": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "min_sources": 1,
+        "answer_matches": "£\\s?\\d",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "sources_any": [
+          ".co.uk",
+          ".uk/",
+          "/en-gb",
+          "/uk/",
+          "uk."
+        ],
+        "answer_not_matches": "\\$\\s?\\d"
+      }
+    }
+  ]
+}

@@ -38,6 +38,7 @@ Nathan's PC: `YAP_EVAL_TARGET_DIR=E:/yap-builds/evals`, `--out E:/yap-builds/eva
 | `--cleanup`, `--cleanup-rounds <n>` | Time the dictation cleanup instead of the scenarios (below). |
 | `--repeat <n>` | Run each scenario n times (models answer differently at temperature 0.5). |
 | `--no-web` | Skip the web scenarios (`needs_web` / `web`); live ones go on the internet (below). |
+| `--locale <tag\|json>` | The user's region, as Windows would give it (About you, `about_you.rs`; test mode never reads the PC's own): `en-GB` (currency and units from its region) or JSON `{"locale":"en-GB","country":"GB","currency":"GBP","symbol":"£","metric":true,"timeZone":"GMT Standard Time"}`. Default: none — no region in the prompts, no spelling line in cleanup. |
 | `--raw <file>` | Send hand-written requests (see below) instead of, or before, scenarios. |
 
 ### Local models
@@ -90,7 +91,11 @@ rounds back to back, then each after a Chat-shaped request (persona + tool instr
 the tools, ~2k tokens, untimed), then four after a long one (~5.6k tokens). Per phase:
 mean / median / p90 / max wall time, llama.cpp's prompt tokens **processed** (the rest came
 from its cache) and tokens generated, and errors; and every output, to compare the cleanup
-itself. `cleanup.md` in the run folder; the numbers in `summary.json` (`models[].cleanup`).
+itself. Then the file's `spelling` dictations (words English spells two ways — organize/
+organise, color/colour… — as speech-to-text writes them), `--cleanup-rounds` times each:
+how many words come out British and how many American, under the run's `--locale` ("Use my
+region's spelling", on by default; no locale = no spelling line). `cleanup.md` in the run
+folder; the numbers in `summary.json` (`models[].cleanup`).
 
 ## What a run does, and what it doesn't touch
 
@@ -150,7 +155,7 @@ isn't logged.
   "name": "apps-python-second-one",          // unique; --only matches on it
   "description": "…",
   "tags": ["apps", "follow-up"],
-  "needs_web": false,                         // true: "Look things up on the web" on (live)
+  "needs_web": false,                         // true: "Look things up on the web" on (live, the run's key)
   "web": {                                    // optional (implies web on)
     "mode": "standin",                        // "live" (default) or "standin"
     "service": "exa",                         // or "tavily" (default: the one the run has a key for)
