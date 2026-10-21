@@ -28,6 +28,11 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   the numbers of this turn's sources, else of the latest earlier answer that
   had some (`earlier_source_numbers`, what ChatView's `citedSources` draws a
   follow-up's "[1]" against); code, a link's text and "[0]" are left alone.
+  **History**: an earlier answer written from the web goes to the model with
+  a note that Yap searched for it and its sources (`chats::history_text`),
+  so a follow-up never says it "didn't actually search" (2026-10-21); a web
+  answer's system prompt carries the user's local time and UTC offset
+  (`web::time_note`) so a page's "3:00 PM ET" is converted, not mislabelled.
 - **`tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,

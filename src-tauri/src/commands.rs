@@ -947,7 +947,7 @@ pub(crate) async fn chat_turn(
         .rev()
         .take(keep)
         .rev()
-        .map(|m| (m.role.clone(), m.text.clone()))
+        .map(|m| (m.role.clone(), crate::chats::history_text(m)))
         .collect();
     let user_index = crate::chats::append(conv.id, "user", &text, &[], None, by_voice)?;
     asked(conv.id, user_index);
@@ -970,7 +970,7 @@ pub(crate) async fn chat_turn(
         if web_on {
             system.push(' ');
             system.push_str(&crate::tools::WEB_TOOL_INSTRUCTIONS.join(" "));
-            system.push_str(&format!(" Today is {}.", crate::web::today()));
+            system.push_str(&format!(" Today is {}. {}", crate::web::today(), crate::web::time_note()));
             if by_voice {
                 system.push_str(" This question was asked out loud: start your answer with the answer itself, in one or two short sentences, then any details.");
             }
@@ -1127,6 +1127,8 @@ async fn small_model_answer(
             Ok(found) if found.hits.iter().any(|h| !h.text.trim().is_empty()) => {
                 let (found_sources, block) = crate::web::grounded_sources(&found.hits, SMALL_WEB_TOKENS);
                 system = crate::web::grounded_prompt(persona, &block, &crate::web::today(), by_voice);
+                system.push(' ');
+                system.push_str(&crate::web::time_note());
                 // Still only text: it can't open or change anything (apps.rs).
                 system.push_str("\n\n");
                 system.push_str(crate::apps::NO_TOOLS_NOTE);

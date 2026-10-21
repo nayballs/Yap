@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
     /// "user" | "assistant"
@@ -310,6 +310,30 @@ pub fn delete_many(ids: &[u64]) -> usize {
     })
 }
 
+/// An earlier message as the model sees it in the history: its text, and —
+/// for an answer written from the web — a note that Yap searched for it and
+/// where from. Without it a follow-up only sees the words and decides it
+/// answered from memory ("I did not actually search…", Nathan 2026-10-21).
+/// Pure.
+pub fn history_text(m: &ChatMessage) -> String {
+    if m.role != "assistant" || m.sources.is_empty() {
+        return m.text.clone();
+    }
+    let list = m
+        .sources
+        .iter()
+        .take(5)
+        .map(|s| {
+            let title: String = s.title.chars().take(70).collect();
+            if s.site.is_empty() { format!("[{}] {}", s.n, title) } else { format!("[{}] {} ({})", s.n, title, s.site) }
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!("{}
+
+(Yap searched the web for this answer. Its sources: {list}.)", m.text)
+}
+
 /// The source numbers an answer may cite without searching again: the
 /// latest earlier answer's in `messages` that had any (what the Chat view
 /// draws a follow-up's "[1]" against, `citedSources` in ChatView.svelte).
@@ -462,6 +486,22 @@ mod tests {
         ];
         assert_eq!(earlier_source_numbers(&messages), [1, 2, 3]);
         assert!(earlier_source_numbers(&messages[..1]).is_empty());
+    }
+
+    #[test]
+    fn an_answer_from_the_web_says_so_in_the_history() {
+        let mut m = ChatMessage { role: "assistant".into(), text: "Arsenal play Bayern tonight [1].".into(), ..Default::default() };
+        assert_eq!(history_text(&m), "Arsenal play Bayern tonight [1].");
+        m.sources = vec![Source { n: 1, title: "Bayern vs. Arsenal".into(), url: "https://espn.com/x".into(), site: "espn.com".into() }];
+        assert_eq!(
+            history_text(&m),
+            "Arsenal play Bayern tonight [1].
+
+(Yap searched the web for this answer. Its sources: [1] Bayern vs. Arsenal (espn.com).)"
+        );
+        // A question stays as asked.
+        let q = ChatMessage { role: "user".into(), text: "When is it?".into(), sources: m.sources.clone(), ..Default::default() };
+        assert_eq!(history_text(&q), "When is it?");
     }
 
     #[test]

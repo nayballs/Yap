@@ -1778,6 +1778,19 @@ pub fn today() -> String {
     chrono::Local::now().format("%A %-d %B %Y").to_string()
 }
 
+/// The user's local time and its offset from UTC, for answers that give a
+/// time: pages often give one in another zone (an American site's "3:00 PM
+/// ET" is 8 pm in the UK; Nathan's Arsenal answer, 2026-10-21, called it
+/// "3:00 PM UK time").
+pub fn time_note() -> String {
+    let now = chrono::Local::now();
+    format!(
+        "The user's local time is {} (UTC{}): when a page gives a time in another time zone (ET, PT, CET, UTC…), convert it to the user's time and say which zone you mean.",
+        now.format("%H:%M"),
+        now.format("%:z")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

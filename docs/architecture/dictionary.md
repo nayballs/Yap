@@ -9,7 +9,10 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
 - **`fuzzy.rs`** — fuzzy dictionary correction (Handy `audio_toolkit/text.rs` port):
   1–3-word n-grams vs the dictionary's `from`/`to` spellings, normalized Levenshtein
   + Soundex phonetic boost (the `natural` crate's nonstandard variant, replicated
-  exactly), threshold 0.18, ≥3-char terms, case/punctuation preserved; shortest-first
+  exactly), threshold 0.18, ≥3-char terms, case/punctuation preserved; a single
+  everyday word (`learn::is_frequent`) is never a near-miss, only its exact
+  spelling ("could" stays "could" with "cloud → Claude" in the dictionary,
+  "motion" never becomes "Notion"; 2026-10-21); shortest-first
   n-gram choice (deliberate fix over Handy's word-swallowing longest-first greedy),
   and never a run whose first word adds nothing (`first_word_adds_nothing`: the
   later words make the same term as closely alone), so the word or list marker

@@ -258,6 +258,13 @@ pub fn apply_fuzzy(text: &str, dict: &[DictionaryEntry]) -> String {
             }
             let run = &words[i..i + n];
             if let Some((replacement, dist)) = find_best_match(&build_ngram(run), &candidates) {
+                // An everyday word is never a near-miss of a term, only its
+                // exact spelling: "could" isn't "cloud" → "Claude" (Nathan,
+                // 2026-10-21: "was there anything that Claude be changed"),
+                // "motion" isn't "Notion" (learn.rs' everyday words).
+                if n == 1 && dist > 0 && crate::learn::is_frequent(&build_ngram(run)) {
+                    continue;
+                }
                 if chosen.is_none_or(|(_, _, best)| dist < best)
                     && !first_word_adds_nothing(run, replacement, dist, &candidates)
                 {
@@ -464,6 +471,20 @@ mod tests {
         // the word AFTER the match must survive (Handy's longest-first
         // greedy swallowed it)
         assert!(result.contains("che permette"), "{result}");
+    }
+
+    #[test]
+    fn an_everyday_word_is_never_a_near_miss() {
+        // Nathan's dictionary: "cloud" → "claude" (Parakeet hears Claude as cloud).
+        let dict = vec![entry("cloud", "claude"), entry("", "Notion")];
+        assert_eq!(
+            apply_fuzzy("was there anything that could be changed", &dict),
+            "was there anything that could be changed"
+        );
+        assert_eq!(apply_fuzzy("put a motion forward", &dict), "put a motion forward");
+        // A real near-miss that isn't an everyday word still snaps.
+        assert_eq!(apply_fuzzy("ask clawd about it", &dict), "ask claude about it");
+        assert_eq!(apply_fuzzy("my notio page", &dict), "my Notion page");
     }
 
     #[test]
