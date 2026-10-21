@@ -1,0 +1,120 @@
+# The dictionary
+
+The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's order, and learning words from your corrections, plus the Dictionary view. The exact pass, snippets and "press enter" are in [dictation.md](./dictation.md) (the pipeline order); see also [`docs/fuzzy-dictionary.md`](../fuzzy-dictionary.md).
+
+[Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
+
+## Modules
+
+- **`fuzzy.rs`** — fuzzy dictionary correction (Handy `audio_toolkit/text.rs` port):
+  1–3-word n-grams vs the dictionary's `from`/`to` spellings, normalized Levenshtein
+  + Soundex phonetic boost (the `natural` crate's nonstandard variant, replicated
+  exactly), threshold 0.18, ≥3-char terms, case/punctuation preserved; shortest-first
+  n-gram choice (deliberate fix over Handy's word-swallowing longest-first greedy),
+  and never a run whose first word adds nothing (`first_word_adds_nothing`: the
+  later words make the same term as closely alone), so the word or list marker
+  before a term survives ("to Kubernetes", "1. kubernetes"; found by the real-app
+  robot, 2026-10-17). Max 3 words per n-gram, so "Chat G P T" (4) leaves a "T".
+  Runs after `apply_dictionary` for ONNX models (`dictionary_fuzzy`, default on);
+  snippets are never candidates.
+  Also `is_prompt_echo` (OpenWhispr `dictionaryEchoFilter` port) used by `stt.rs`
+  against Whisper hallucinating the dictionary prompt on silence, and, for
+  `learn.rs`, `spelling_distance` (Handy's score on the letters alone, no
+  length gate) and `sound_distance` over `sound_key` (a Soundex/Metaphone-
+  style consonant key: alike sounds merged, silent letters and vowels
+  dropped — "cube and eighties" ≈ "Kubernetes", "kpnts"/"kprnts").
+- **`dict_usage.rs`** — how much each dictionary word is used, for the Whisper
+  prompt's order (Wispr Flow ranks its vocabulary the same way):
+  `<data>/dictionary_usage.json`, word (lowercased `to`) → `{uses, lastUsed}`
+  (unix secs) — its own store, never config.json (Settings' wholesale saves
+  would put old counts back); cached in memory, atomic write, corrupt file
+  quarantined. `record(dict, text)` (from `apply_corrections`: dictations,
+  meeting lines, Upload) counts every dictionary word in the corrected text —
+  a correction that fired, or a word the recognizer (with the prompt) spelled
+  right by itself; a no-op in unit tests. `rank` (pure) / `ranked`: used in
+  the last day, then 14 days, then the rest; within each most uses first; then
+  the order added. The meeting prompt ranks the dictionary but keeps the
+  attendees ahead of it. Best-effort everywhere.
+- **`learn.rs`** — **"Suggest words from your corrections"**
+  (`config.learn_words`, default on; Wispr Flow's dictionary auto-learn as
+  measured from its shipped code — `references/wispr-flow/rea-teardown/
+  05-dictionary-learning.md` — and OpenWhispr's `correctionLearner.js`
+  alignment, but local and asked, never assumed). **The watch**
+  (`after_paste`, from `run_stt` after a paste with no submit key, not into
+  a terminal (`app_kind`: its text is the program's output too); never in a
+  test run; the rules are `Watch`, pure): a thread holds the focused field
+  (`selection::WatchedField`: the target window's process, not a password
+  box, not read-only) and reads it **whole** (≤ 15,000 chars, the caret in
+  it), finds the pasted text right after the paste (the occurrence at the
+  caret) and remembers ~24 chars either side of it (`Anchors`, with an
+  8-char fallback when those were edited), then every 700 ms (reads ≥ 400 ms
+  apart) for **60 s** finds the span between them again — **focused or
+  not** (no end on a focus/app change: a fix often follows a glance
+  elsewhere). Each read's span within the **drift gate** (`within_drift`:
+  char Levenshtein, lowercased, ≤ `0.4/(len/30+1)+0.2` of the paste's
+  length) becomes the **last good edit**. It ends (`End`, named in the
+  debug log: `time_up`, `next_dictation` (`pipeline::dictation_state`),
+  `field_emptied` (a chat message sent), `region_emptied` (the dictation
+  deleted), `region_gone` (its neighbours deleted), `anchor_mismatch`,
+  `enter_pressed` (a line break added right after it), `unreadable` (3
+  failed reads in a row), `too_long`) and, **whatever the end**, the last
+  good edit is judged — "fix a word, press Enter" still counts (a fix and
+  the Enter in one read too). In memory only; logs carry lengths, counts
+  and the end's name. **The candidates** (`suggestions`, pure,
+  unit-tested): pasted vs edited
+  words aligned by LCS (case- and edge-punctuation-blind); the gaps between
+  matches are the changes. Kept: 1–4 words → 1–4 words (spelled-out letters
+  count as one) whose new text looks like a term — a capital inside a word,
+  an acronym, digits, a word that isn't an everyday one (the built-in
+  `FREQUENT` list with simple stemming, then **Windows' spell checker**,
+  `ISpellChecker` for the user's locale + English, read-only), a capital
+  mid-sentence, or several words heard as one non-everyday word ("power to
+  keep" → "Parakeet") — and that spells or sounds like what Yap typed
+  (`fuzzy::spelling_distance`/`sound_distance` ≤ 0.5, ≤ 0.3 for keys of ≤ 3);
+  plus a case change that makes a term of a non-everyday word ("github" →
+  "GitHub"). Skipped: insertions/deletions, punctuation, a new word ending
+  in a contraction/possessive (`'s 't 'll 've 're 'd 'm` or a bare `'`;
+  "O'Brien" is fine), a single everyday
+  word heard ("motion" → "Notion" would rewrite every "motion"), only
+  function words, terms (or triggers) already in the dictionary, and edits
+  rewriting most of the dictation. One per spelling (case-blind), terms
+  with a capital first, ≤ 3. **The prompt** (`offer`): "Add
+  “Kubernetes” to your dictionary? Yap heard “cube and eighties”." — Add /
+  Not now / "Don't suggest this"; in one place (`notice::place`): a toast
+  (`yap-word-suggestion`, `wordSuggestions.js`, kind `tip`) while the main
+  window is focused, else a Yap bar card (`word-suggestion`, icon
+  `dictionary`; ✕ = Not now, 30 s fade = no answer; it waits out a
+  dictation, up to a minute), else the window's toast if it's on screen;
+  neither → nothing (never a Windows notification). Add
+  (`word_suggestion_respond`) appends `{from: heard, to: term, fuzzy: true}`,
+  saves config.json, updates the pipeline's live config and emits
+  `yap-dictionary-learned {entries, added}`, which Settings adopts (and
+  passes to DictionaryView as `yap-dictionary-external`). Not now twice (✕
+  counts) or "Don't suggest this" retires the pair; one prompt per 3 min.
+  **A word you remove** from the dictionary is never suggested again,
+  however it's heard (Wispr's implicit blocklist): `commands::save_config`
+  (every surface's save) hands the old and new dictionaries to
+  `on_dictionary_saved`, and a correction whose trigger and spelling are
+  both gone (an edit of one isn't a removal; snippets don't count) goes
+  into the store's `removed` terms. Answers in
+  `<data>/word_suggestions.json` (not config.json: Settings' wholesale
+  saves). Debug-only `e2e_learn_correction {pasted, edited?, before?,
+  reads?, fresh?}` stages an edit for the e2e suite (skips the 3-min gap):
+  the edited span, or `reads` — the field's whole text read by read (`null`
+  = a failed read) — which the real `Watch` runs over (`staged_watch`).
+
+## The Dictionary view
+
+- **`DictionaryView.svelte`** =
+  the dictionary (promoted out of Settings → Advanced; syncs with
+  Settings' cfg copy via `yap-dictionary-changed`/`-external` events) in two
+  sections over the one list: **Corrections** (heard → replace with, the ≈
+  near-miss button, "Catch near-misses", and "Suggest words from your
+  corrections" — `learnWords`, `learn.rs`; it rides along in the
+  `yap-dictionary-changed` detail with `entries` and `fuzzy` so Settings'
+  copy keeps it) and **Snippets** ("You say" pill →
+  "Yap types" growing text box, line breaks kept; nothing seeded). Settings'
+  `buildClean` keeps each entry's `snippet` flag — drop it and an auto-save
+  turns snippets into corrections. Settings → Advanced → Output has "Say
+  “press enter” to send" (`voiceEnter`) under Auto-submit; the key picker
+  shows when either is on.
