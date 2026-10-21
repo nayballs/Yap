@@ -476,6 +476,7 @@ export async function startFakeLlm() {
         system,
         user,
         tools: offered,
+        toolChoice: body.tool_choice ?? null,
         messages,
       });
       const wait = delays.get(kind) ?? 0;

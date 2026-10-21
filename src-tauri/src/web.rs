@@ -1456,10 +1456,25 @@ impl Turn {
         }
     }
 
+    /// `read_page` may also open the sources of earlier answers in the
+    /// conversation (found by an earlier search; their searches are replayed
+    /// to the model with their addresses, `chats::history_messages`): "tell
+    /// me more about the first one".
+    pub fn with_earlier_sources<'a>(mut self, urls: impl IntoIterator<Item = &'a str>) -> Turn {
+        self.linked.extend(urls.into_iter().map(normal_url));
+        self
+    }
+
     /// Web content is in the turn: the action tools are off for the rest of
     /// it (`tools::refused_after_web`).
     pub fn seen(&self) -> bool {
         self.seen
+    }
+
+    /// A search or a page read ran in this turn, whatever it found: an
+    /// answer saying it searched isn't making it up.
+    pub fn looked(&self) -> bool {
+        self.searches > 0 || self.reads > 0
     }
 
     /// A source's number: the one it has, or the next.
@@ -1677,22 +1692,75 @@ const ASKS_FOR_WEB: &[&str] = &[
     "latest", "news", "today's", "this week's", "right now", "currently", "current price", "price of",
     "release date", "patch notes", "walkthrough", "where do i find", "where can i find", "how do i get to",
     "where is the", "where's the",
+    // Something new or still to come (Nathan's "best RPG games coming out in 2026", 2026-10-21).
+    "coming out", "come out", "comes out", "upcoming", "out yet", "new releases", "just released", "this year's",
+    "next year's", "who won", "who is winning", "who's winning", "weather", "forecast", "exchange rate", "stock price",
 ];
 
-/// Should Yap search the web for this question (a model that can't call
-/// tools)? Conservative: the person asks for it ("look up", "search the
-/// web", "google"), wants something current ("latest", "news", "price of"),
-/// or asks about a game Yap knows a wiki for — never a question about their
-/// own notes or meetings. Pure.
+/// Should Yap search the web for this question? Conservative: the person
+/// asks for it ("look up", "search the web", "google"), wants something
+/// current ("latest", "news", "price of", "coming out", a year from last
+/// year on: "best indie games 2026"), or asks about a game Yap knows a wiki
+/// for — never a question about their own notes or meetings, a request to
+/// do something ("write…", "add…", "open…"), nor one about how an earlier
+/// answer was made ("did you look that up?", [`about_the_answer`]). The
+/// fixed pipeline's test for a model that can't call tools, and when a model
+/// on this PC is handed a search before it answers. Pure.
 pub fn needs_web(question: &str) -> bool {
+    needs_web_in(question, chrono::Datelike::year(&chrono::Local::now()))
+}
+
+/// [`needs_web`], in year `this_year`. Pure.
+pub fn needs_web_in(question: &str, this_year: i32) -> bool {
+    // Asked to do something (a search would switch the actions off for the
+    // turn, tools.rs' safety rule), or about a note.
+    static ACTS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?i)^\W*(?:(?:hey|hi|ok|okay)\s+\w+[,!]?\s+)?(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(?:create|make|write|draft|save|add|edit|update|change|rename|move|delete|remove|open|launch|start|run|play|copy|remind|summari[sz]e|translate|rewrite|tidy|fix|tick|compose|reply)\b",
+        )
+        .expect("static regex")
+    });
+    static NOTE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bnotes?\b").expect("static regex"));
+    static YEAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(20\d\d)\b").expect("static regex"));
     let lower = format!(" {} ", question.to_lowercase().replace('’', "'"));
-    if OWN_STUFF.iter().any(|p| lower.contains(p)) {
+    let about_a_note = NOTE.is_match(&lower.replace("patch notes", "").replace("release notes", ""));
+    if OWN_STUFF.iter().any(|p| lower.contains(p)) || about_a_note || about_the_answer(question) || ACTS.is_match(question) {
         return false;
     }
     if game_for(question).is_some() {
         return true;
     }
-    ASKS_FOR_WEB.iter().any(|p| has_phrase(&lower, p))
+    // A year from last year on: what a model's training can't know yet.
+    let recent = YEAR.captures_iter(question).any(|c| c[1].parse::<i32>().is_ok_and(|y| y >= this_year - 1));
+    recent || ASKS_FOR_WEB.iter().any(|p| has_phrase(&lower, p))
+}
+
+/// Does the question ask how an earlier answer was made — "Did you look
+/// that up or did you just guess?", "Where did you get that?", "Are you
+/// sure?" — rather than ask something new? Then it's about the answer
+/// before it: no search for it, and a claim of a search is checked against
+/// that answer ([`claims_browsing`]). Pure.
+pub fn about_the_answer(question: &str) -> bool {
+    static ABOUT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?i)\b(?:did|have|had|were)\s+you\s+(?:actually\s+|really\s+|just\s+|even\s+)?(?:look|search|google|brows|check|guess|make\s+(?:that|this|it|them)\s+up|invent|verify|use\s+the\s+(?:web|internet))|\bwhere\s+did\s+you\s+(?:get|find|read|see|learn)\b|\bwhere\s+do\s+you\s+get\s+(?:that|this|it|those|these|your)\b|\bwhat(?:'s|’s|\s+is|\s+are|\s+were|\s+was)\s+(?:your|the|its|their)\s+sources?\b|\bhow\s+do\s+you\s+know\b|\bare\s+you\s+sure\b|\bis\s+(?:that|this|it)\s+(?:right|true|correct|accurate|real)\b|\bjust\s+guess(?:ing)?\b",
+        )
+        .expect("static regex")
+    });
+    ABOUT.is_match(question)
+}
+
+/// Does the question point back at an earlier answer ("the top five in that
+/// list", "which of those…", "the second one")? A follow-up like that may
+/// cite the earlier answer's sources without searching again. Pure.
+pub fn refers_back(question: &str) -> bool {
+    static BACK: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?i)\b(?:that|this|those|these|the\s+same|the\s+above|your)\s+(?:list|lists|one|ones|game|games|answer|answers|result|results|article|articles|source|sources|link|links|page|pages|item|items|option|options|picks?|suggestions?|recommendations?)\b|\b(?:those|these|them)\b|\bthe\s+(?:first|second|third|fourth|fifth|last)\s+(?:one|ones|game|games|item|items|pick|picks|option|options|two|three|four|five)\b|\bthe\s+top\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b|\b(?:above|you\s+(?:said|mentioned|listed|just\s+said))\b",
+        )
+        .expect("static regex")
+    });
+    BACK.is_match(question)
 }
 
 /// The search for a question: without "can you look up", "search the web
@@ -1759,19 +1827,104 @@ pub fn no_search_line(why: Option<&str>) -> String {
 }
 
 /// Does an answer claim it looked something up on the web? (A small model
-/// sometimes says so when nothing was searched.) Pure.
+/// sometimes says so when nothing was searched: "I did look it up on the
+/// web", Qwen3.5-4B, 2026-10-21.) A sentence that denies it ("I didn't
+/// search", "I can't browse") isn't a claim. Pure.
 pub fn claims_browsing(reply: &str) -> bool {
     static CLAIM: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            r"(?i)\b(?:i\s+(?:just\s+|quickly\s+)?(?:searched|googled|browsed|looked\s+(?:it|this|that)?\s*up|checked\s+(?:online|the\s+web|the\s+internet))|(?:according\s+to|based\s+on)\s+(?:my|a)\s+(?:web\s+|online\s+|quick\s+)?search|my\s+(?:web\s+|online\s+)search)",
+            r"(?i)\b(?:i\s+(?:(?:just|quickly|actually|also|then|really|indeed)\s+)*(?:searched|googled|browsed|looked\s+(?:it|this|that|them|those|these)?\s*up|checked\s+(?:online|the\s+web|the\s+internet))|i\s+(?:(?:actually|really|indeed)\s+)?(?:did|have|had)\s+(?:(?:just|actually|also|in\s+fact|really)\s+)?(?:search|google|browse|look\s+(?:it|this|that|them|those|these)?\s*up|check\s+(?:online|the\s+web|the\s+internet))|i\s+(?:(?:just|also|then|actually)\s+)?used\s+(?:the\s+)?`?web_search|`?web_search`?\s+tool|(?:according\s+to|based\s+on)\s+(?:my|a)\s+(?:web\s+|online\s+|quick\s+)?search|my\s+(?:web\s+|online\s+)search|from\s+(?:a|my|the)\s+(?:quick\s+)?(?:web|online|internet|google)\s+search|(?:a|my)\s+quick\s+(?:web\s+|online\s+)?search|results\s+i\s+(?:fetched|found|got|pulled)|i\s+(?:just\s+)?found\s+(?:it|this|that|them)\s+online)",
         )
         .expect("static regex")
     });
-    CLAIM.is_match(reply)
+    // Denials, and offers ("I can do a quick web search if you like").
+    static DENIAL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)n't\b|\bnot\b|\bnever\b|\bcannot\b|\bwithout\b|\bi\s+(?:can|could|will)\b|\bi'll\b|\blet\s+me\b|\bwant\s+me\b|\bwould\s+you\b|\bif\s+you\b|\bshall\s+i\b")
+            .expect("static regex")
+    });
+    // "I searched your notes": not the web (unless it says so).
+    static OWN: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(?:notes?|meetings?|transcripts?|library|folders?|calendar|files?)\b").expect("static regex")
+    });
+    static WEB: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\b(?:web|online|internet|google)\b").expect("static regex"));
+    reply.replace(['\u{2019}', '\u{2018}'], "'").split_inclusive(['.', '!', '?', '\n']).any(|s| {
+        CLAIM.is_match(s) && !DENIAL.is_match(s) && !s.trim_end().ends_with('?') && (!OWN.is_match(s) || WEB.is_match(s))
+    })
 }
 
+/// The line for a model that can't call tools when web search is on but the
+/// question didn't need it: no search ran for this one.
+pub const NOT_SEARCHED_LINE: &str = "Yap didn't search the web for this question: answer from your own knowledge, and never say you searched, browsed or looked anything up online.";
+
 /// Appended to an answer that claims a search that didn't happen.
-pub const NOT_SEARCHED_NOTE: &str = "*Yap didn't search the web for this answer.*";
+pub const NOT_SEARCHED_NOTE: &str =
+    "*Yap didn't search the web for this answer: it comes from the AI model's own knowledge, which may be out of date.*";
+
+/// Appended when an answer to "did you look that up?" claims a search the
+/// answer it's about didn't have ([`about_the_answer`]).
+pub const NOT_SEARCHED_THAT_NOTE: &str =
+    "*Yap didn't search the web for that answer: it came from the AI model's own knowledge, which may be out of date.*";
+
+/// An answer without what a model may write in Yap's own voice: the "(Yap
+/// searched the web for this answer. Its sources: …)" note (Qwen3.5-4B
+/// copied it from the history, 2026-10-21, with sources it made up) and a
+/// list of sources at its end ("Sources:" then "[1] …" lines) — Yap shows an
+/// answer's real sources under it. `None` when there was nothing to take
+/// out. Pure.
+pub fn strip_sources_note(reply: &str) -> Option<String> {
+    // "(Yap searched the web … (espn.com) …)", nested brackets and all; or the
+    // same words outside brackets, to the end of the line.
+    static NOTE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?im)[ \t]*\(\s*yap\s+searched\s+the\s+web(?:[^()]|\([^()]*\))*\)\.?|[ \t]*\byap\s+searched\s+the\s+web\b.*$")
+            .expect("static regex")
+    });
+    // A heading or line naming the sources ("Sources:", "**References**"),
+    // perhaps with the first of them on it.
+    static HEAD: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^\s*(?:#{1,4}\s*)?(?:\*\*|__|\*)?\s*(?:sources?|references?|citations?)(?:\s+used)?\s*(?:\*\*|__|\*)?\s*:?\s*(?:\*\*|__|\*)?\s*(.*)$")
+            .expect("static regex")
+    });
+    // One of them: "[1] Title", "1. Title — site", "- [2] …", "- Title (site.com)".
+    static ITEM: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^\s*(?:[-*•]\s*)?(?:\[\d{1,2}\]|\d{1,2}[.)])\s*\S|^\s*[-*•]\s+.*(?:https?://|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b)")
+            .expect("static regex")
+    });
+    let noted = NOTE.replace_all(reply, "").into_owned();
+    // A list of sources: its heading and the sources under it (blank lines
+    // between them allowed) go; what follows ("Would you like more…?") stays.
+    let lines: Vec<&str> = noted.lines().collect();
+    let mut kept: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let inline = HEAD.captures(lines[i]).and_then(|c| c.get(1)).map(|m| m.as_str().trim());
+        let Some(inline) = inline.filter(|t| t.is_empty() || t.starts_with('[') || ITEM.is_match(t) || t.contains("http")) else {
+            kept.push(lines[i]);
+            i += 1;
+            continue;
+        };
+        // The sources under the heading.
+        let (mut end, mut j) = (i + 1, i + 1);
+        while j < lines.len() && (lines[j].trim().is_empty() || ITEM.is_match(lines[j])) {
+            if !lines[j].trim().is_empty() {
+                end = j + 1;
+            }
+            j += 1;
+        }
+        if end == i + 1 && inline.is_empty() {
+            kept.push(lines[i]); // a heading with nothing under it: not a list
+            i += 1;
+            continue;
+        }
+        // The blank line before the list goes with it.
+        while kept.last().is_some_and(|l| l.trim().is_empty()) {
+            kept.pop();
+        }
+        i = end;
+    }
+    let out = kept.join("\n").trim_end().to_string();
+    (out != reply.trim_end()).then_some(out)
+}
 
 /// Today's date as the prompts say it ("Saturday 18 October 2026").
 pub fn today() -> String {
@@ -2013,6 +2166,12 @@ mod tests {
         assert!(turn.allowed("https://eldenring.fandom.com/wiki/Ranni"));
         assert_eq!(turn.sources[0].site, "eldenring.fandom.com");
         assert!(!turn.seen());
+        // An earlier answer's sources (an earlier search found them) count too.
+        let turn = Turn::new(settings(""), offline(), "Tell me more about the first one", &[])
+            .with_earlier_sources(["https://indiegames.example/best-2026"]);
+        assert!(turn.allowed("https://indiegames.example/best-2026/"));
+        assert!(!turn.allowed("https://indiegames.example/other"));
+        assert!(!turn.looked());
     }
 
     #[tokio::test]
@@ -2092,10 +2251,118 @@ mod tests {
         ] {
             assert!(!needs_web(no), "{no}");
         }
+        // Something new or still to come (Nathan's chat, 2026-10-21), a
+        // year from last year on.
+        for yes in [
+            "What are some of the best RPG games coming out in 2026",
+            "best indie games 2026",
+            "Any upcoming Zelda games?",
+            "Who won the match last night?",
+            "Is Hades 3 out yet?",
+            "What were the best films of 2025?",
+        ] {
+            assert!(needs_web_in(yes, 2026), "{yes}");
+        }
+        for no in [
+            // How an earlier answer was made: about it, not a new search.
+            "Did you look up that information or did you just guess?",
+            "Did you look that up?",
+            "Where did you get that from?",
+            // Asked to do something, or about a note.
+            "Write a haiku about 2026",
+            "Add my 2026 goals to a note",
+            "Open the latest Spotify playlist",
+            "Play the latest Taylor Swift song",
+            "In 2026 I want to learn piano, put that in my notes",
+            // An old year.
+            "What's a classic RPG from 1997?",
+            "Which classic RPG from the 1990s would you recommend to me?",
+            "Can you tell me the top five in that list?",
+        ] {
+            assert!(!needs_web_in(no, 2026), "{no}");
+        }
+        assert!(needs_web_in("What are the latest patch notes for Baldur's Gate 3?", 2026));
         assert_eq!(search_query("Can you look up the latest Rust release?"), "the latest Rust release");
         assert_eq!(search_query("search the web for cheap flights to Lisbon please"), "cheap flights to Lisbon");
         assert_eq!(search_query("Google the opening hours of the Louvre."), "the opening hours of the Louvre");
         assert_eq!(search_query("Where do I find Gale in Baldur's Gate 3?"), "Where do I find Gale in Baldur's Gate 3");
+    }
+
+    #[test]
+    fn questions_about_an_answer_and_ones_pointing_back_are_told_apart() {
+        for about in [
+            "Did you look up that information or did you just guess?",
+            "did you actually search for that",
+            "Where did you get that?",
+            "Where do you get that from?",
+            "What are your sources?",
+            "How do you know?",
+            "Are you sure?",
+            "Is that right?",
+            "Did you make that up?",
+        ] {
+            assert!(about_the_answer(about), "{about}");
+        }
+        // "Where do you find Gale…?" asks where one finds him (the Gale
+        // scenario of the model evaluations, 2026-10-21).
+        for not in [
+            "What are some RPGs coming out in 2026",
+            "Did they win?",
+            "Where do I find Gale?",
+            "Where do you find Gale in Baldur's Gate 3 act 1?",
+            "Make up a story",
+        ] {
+            assert!(!about_the_answer(not), "{not}");
+        }
+        for back in [
+            "Can you tell me the top five in that list?",
+            "Which of those would suit someone who likes cozy games?",
+            "Tell me more about the second one",
+            "What did you say about the first game?",
+            "Is the last one out on Switch?",
+        ] {
+            assert!(refers_back(back), "{back}");
+        }
+        for not in ["What are some of the best RPG games coming out in 2026", "best indie games 2026", "When is the next Zelda?"] {
+            assert!(!refers_back(not), "{not}");
+        }
+    }
+
+    #[test]
+    fn a_sources_note_or_list_the_model_wrote_is_taken_out() {
+        // Qwen3.5-4B's copy of the history note (Nathan's chat, 2026-10-21).
+        let made_up = "Here are some RPGs:\n\n1. **Black Myth: Wukong** [1]\n2. **Dragon's Dogma 2** [5]\n\nWould you like more details?\n\n(Yap searched the web for this answer. Its sources: [1] Black Myth: Wukong - Wikipedia; Starfield: Bound by Honor - Microsoft Store; [5] Dragon's Dogma 2 - IGN.)";
+        assert_eq!(
+            strip_sources_note(made_up).unwrap(),
+            "Here are some RPGs:\n\n1. **Black Myth: Wukong** [1]\n2. **Dragon's Dogma 2** [5]\n\nWould you like more details?"
+        );
+        // Nested brackets inside the note, and the note on its own line.
+        assert_eq!(strip_sources_note("8 pm [1]. (Yap searched the web for this answer. Its sources: [1] Bayern vs. Arsenal (espn.com).)").unwrap(), "8 pm [1].");
+        assert_eq!(strip_sources_note("8 pm.\nYap searched the web for this answer.").unwrap(), "8 pm.");
+        // A list of sources at the end, in its usual shapes.
+        for list in [
+            "Hollow Lantern leads [1].\n\nSources:\n[1] The best indie games of 2026 — indiegames.example\n[2] GOTY contenders — gamecritic.example",
+            "Hollow Lantern leads [1].\n\n**Sources:**\n- [1] The best indie games of 2026\n- [2] GOTY contenders",
+            "Hollow Lantern leads [1].\n\n### References\n1. The best indie games of 2026 (indiegames.example)",
+            "Hollow Lantern leads [1].\n\nSources: [1] The best indie games of 2026; [2] GOTY contenders",
+            "Hollow Lantern leads [1].\n\nSources:\n- The best indie games of 2026 (indiegames.example)",
+        ] {
+            assert_eq!(strip_sources_note(list).as_deref(), Some("Hollow Lantern leads [1]."), "{list}");
+        }
+        // Qwen3.5-4B's, with its closing question after it (2026-10-21 runs).
+        assert_eq!(
+            strip_sources_note("Top picks [1][2].\n\nSources:\n1. indiegames.example - \"The best indie games of 2026 so far\"\n\n2. gamecritic.example - \"Contenders\"\n\nWould you like more details?").as_deref(),
+            Some("Top picks [1][2].\n\nWould you like more details?")
+        );
+        // Not a list of sources: left as it is.
+        for keep in [
+            "Good sources of protein: beans, lentils and tofu.",
+            "Sources:\n\nThe page says Alt+2 opens scientific mode, and history keeps your sums.",
+            "Hollow Lantern leads [1].",
+            "Source: Wikipedia",
+        ] {
+            assert_eq!(strip_sources_note(keep), None, "{keep}");
+        }
     }
 
     #[test]
@@ -2324,6 +2591,21 @@ mod tests {
         assert!(claims_browsing("I just looked it up: 42."));
         assert!(!claims_browsing("You could search the web for that."));
         assert!(!claims_browsing("Gale is on the beach."));
+        // Qwen3.5-4B, Nathan's chat (2026-10-21): no search that turn.
+        assert!(claims_browsing("I did look it up on the web. I searched for \"best RPG games coming out 2026\"."));
+        assert!(claims_browsing("Yes, I have searched online for it."));
+        // Denials, offers, and the person's notes aren't claims about the web.
+        assert!(!claims_browsing("I didn't look that up: it came from my own knowledge."));
+        assert!(!claims_browsing("No, I did not search the web for that one."));
+        assert!(!claims_browsing("Should I look it up?"));
+        assert!(!claims_browsing("I searched your notes and found the launch plan."));
+        assert!(claims_browsing("I searched your notes and the web."));
+        // gpt-oss-20b on Groq, asked about an answer from memory (2026-10-21).
+        assert!(claims_browsing("I pulled that recommendation from a quick web search. The sites are in the results I fetched."));
+        // Qwen3.5-4B, the same question (2026-10-21 runs).
+        assert!(claims_browsing("I actually did look up that information."));
+        assert!(claims_browsing("Earlier in our conversation, I used the `web_search` tool to search for it."));
+        assert!(!claims_browsing("If you like, I can do a quick web search for reviews."));
         assert!(no_search_line(None).contains("never say you searched"));
         assert!(no_search_line(Some("Exa says the API key is wrong")).contains("couldn't (Exa says the API key is wrong)"));
     }

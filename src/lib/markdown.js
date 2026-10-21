@@ -100,27 +100,64 @@ export function markdownToText(md) {
     .trim();
 }
 
+// A line's indent, a tab counting as four spaces.
+const indentOf = (line) => {
+  let n = 0;
+  for (const c of line) {
+    if (c === ' ') n += 1;
+    else if (c === '\t') n += 4;
+    else break;
+  }
+  return n;
+};
+
 // `options.sources`: an answer's web sources ([{ n, title, url, site }]):
 // citations become pills, and only the sources' links stay links.
+//
+// Lists: a blank line between two items of one list doesn't end it (models
+// often write "1. …\n\n2. …", which showed "1." on every item); a line
+// indented under an item belongs to it; an item indented under another
+// starts a list inside it; and an ordered list starting at 3 says so
+// (`start="3"`), so its numbers are the ones written.
 export function renderMarkdown(md, options = {}) {
   const web = webContext(options.sources);
   const inline = (s) => inlineWith(s, web);
   const lines = escapeHtml(md || '').split(/\r?\n/);
   const out = [];
-  let list = null; // 'ul' | 'ol' | null
-
-  const closeList = () => {
-    if (list) {
-      out.push(`</${list}>`);
-      list = null;
-    }
+  // The open lists, outermost first: { kind: 'ul' | 'ol', indent }. The
+  // innermost one's last <li> is still open (its </li> comes later), so a
+  // continuation line or a nested list can go inside it.
+  const lists = [];
+  let blank = false; // a blank line since the last item
+  // Onto the last line out (an open item's end, a line under it).
+  const append = (s) => {
+    out[out.length - 1] += s;
   };
-  const openList = (kind) => {
-    if (list !== kind) {
-      closeList();
-      out.push(`<${kind}>`);
-      list = kind;
+
+  const closeTop = () => {
+    const top = lists.pop();
+    append(`</li></${top.kind}>`);
+  };
+  const closeLists = () => {
+    while (lists.length) closeTop();
+  };
+  const item = (kind, indent, html, cls = '', start = 1) => {
+    // Leave the lists this item isn't in.
+    while (lists.length && indent < lists.at(-1).indent - 1) closeTop();
+    const top = lists.at(-1);
+    if (top && indent <= top.indent + 1) {
+      if (top.kind !== kind) {
+        closeTop(); // another kind of list at the same level
+        return item(kind, indent, html, cls, start);
+      }
+      append('</li>'); // the next item of the same list
+    } else {
+      // A new list: at the top, or inside the open item (indented under it).
+      out.push(kind === 'ol' && start !== 1 ? `<ol start="${start}">` : `<${kind}>`);
+      lists.push({ kind, indent });
     }
+    out.push(`<li${cls}>${html}`);
+    blank = false;
   };
 
   let fence = null; // the lines of an open ``` block, or null
@@ -140,19 +177,22 @@ export function renderMarkdown(md, options = {}) {
       continue;
     }
     if (/^```/.test(trimmed)) {
-      closeList();
+      closeLists();
       fence = [];
       continue;
     }
 
+    // A blank line: a list may go on after it (the next item decides).
     if (!trimmed) {
-      closeList();
+      blank = true;
       continue;
     }
 
+    const indent = indentOf(line);
+
     const heading = /^(#{1,4})\s+(.*)$/.exec(trimmed);
     if (heading) {
-      closeList();
+      closeLists();
       const level = Math.min(heading[1].length + 1, 5); // # → h2 … #### → h5
       out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
       continue;
@@ -160,33 +200,37 @@ export function renderMarkdown(md, options = {}) {
 
     const task = /^[-*]\s+\[([ xX])\]\s+(.*)$/.exec(trimmed);
     if (task) {
-      openList('ul');
       const checked = task[1].toLowerCase() === 'x' ? ' checked' : '';
-      out.push(
-        `<li class="task"><input type="checkbox" disabled${checked} /> ${inline(task[2])}</li>`
-      );
+      item('ul', indent, `<input type="checkbox" disabled${checked} /> ${inline(task[2])}`, ' class="task"');
       continue;
     }
 
-    const bullet = /^[-*]\s+(.*)$/.exec(trimmed);
+    const bullet = /^[-*•]\s+(.*)$/.exec(trimmed);
     if (bullet) {
-      openList('ul');
-      out.push(`<li>${inline(bullet[1])}</li>`);
+      item('ul', indent, inline(bullet[1]));
       continue;
     }
 
-    const numbered = /^\d+[.)]\s+(.*)$/.exec(trimmed);
+    const numbered = /^(\d{1,9})[.)]\s+(.*)$/.exec(trimmed);
     if (numbered) {
-      openList('ol');
-      out.push(`<li>${inline(numbered[1])}</li>`);
+      item('ol', indent, inline(numbered[2]), '', Number(numbered[1]));
       continue;
     }
 
-    closeList();
+    // A line indented under an item is part of it ("1. **Game**\n   A
+    // turn-based RPG…"), after a blank line too.
+    if (lists.length && indent >= 2) {
+      append(`${blank ? '<br><br>' : '<br>'}${inline(trimmed)}`);
+      blank = false;
+      continue;
+    }
+
+    closeLists();
+    blank = false;
     out.push(`<p>${inline(trimmed)}</p>`);
   }
   // An answer cut off mid-block still shows its code.
   if (fence) out.push(`<pre class="md-code"><code>${fence.join('\n')}</code></pre>`);
-  closeList();
+  closeLists();
   return out.join('\n');
 }

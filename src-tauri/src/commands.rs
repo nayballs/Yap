@@ -941,14 +941,8 @@ pub(crate) async fn chat_turn(
     // The last 19 (+ the new user turn ≈ their slice(-20)); a spoken
     // question, the last 8: every tool step sends them again.
     let keep = if scope == Some("assistant") { 8 } else { 19 };
-    let history: Vec<(String, String)> = conv
-        .messages
-        .iter()
-        .rev()
-        .take(keep)
-        .rev()
-        .map(|m| (m.role.clone(), crate::chats::history_text(m)))
-        .collect();
+    let earlier = &conv.messages[conv.messages.len().saturating_sub(keep)..];
+    let history: Vec<(String, String)> = earlier.iter().map(|m| (m.role.clone(), m.text.clone())).collect();
     let user_index = crate::chats::append(conv.id, "user", &text, &[], None, by_voice)?;
     asked(conv.id, user_index);
 
@@ -959,6 +953,12 @@ pub(crate) async fn chat_turn(
     // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
     // bar: that's about the meetings.
     let web_on = cfg.web_search && scope != Some("meetings");
+    // Which earlier answers came from a search: a tool-calling model with
+    // the web gets each one's search replayed as the call it was
+    // (`chats::history_messages`); any other model, a line in the system
+    // prompt (`chats::web_history_note`). Never a note in an answer's text:
+    // a model copies it into answers that searched nothing.
+    let (replay, history_note) = web_history_mode(tools_supported && web_on);
     let mut system = persona.trim().to_string();
     if tools_supported {
         system.push_str("\n\nYou have access to tools. ");
@@ -974,13 +974,6 @@ pub(crate) async fn chat_turn(
             if by_voice {
                 system.push_str(" This question was asked out loud: start your answer with the answer itself, in one or two short sentences, then any details.");
             }
-            // A small model on this PC tends to answer a current question
-            // from memory, with made-up citations: Yap's own test for "this
-            // needs the web" (the fixed pipeline's, `web::needs_web`) tells
-            // it to search first. Cloud models search by themselves.
-            if crate::ai_model::runs_here(&provider, &base_url) && crate::web::needs_web(&text) {
-                system.push_str(" This question needs current information: call web_search before you answer it.");
-            }
         }
     } else {
         // No tools: it can't do anything on the PC, so it mustn't say so.
@@ -991,6 +984,21 @@ pub(crate) async fn chat_turn(
             system.push_str(crate::apps::NO_TOOLS_OPEN);
         }
     }
+    if history_note && !replay {
+        if let Some(note) = crate::chats::web_history_note(earlier) {
+            system.push_str("\n\n");
+            system.push_str(&note);
+        }
+    }
+    // A model on this PC asked something that needs the web: its first step
+    // must be a search (left to decide, Qwen3.5-4B answered "the best RPG
+    // games coming out in 2026" from memory, Nathan's chat, 2026-10-21).
+    // Cloud models decide for themselves.
+    let first = if tools_supported && web_on && crate::ai_model::runs_here(&provider, &base_url) && crate::web::needs_web(&text) {
+        first_search(&text)
+    } else {
+        crate::tools::FirstStep::Model
+    };
     // Asked from the Meetings view: grounded in the latest meetings and the
     // meeting notes that match (calendar.rs).
     if scope == Some("meetings") {
@@ -1017,7 +1025,7 @@ pub(crate) async fn chat_turn(
         system.push_str(crate::assistant::SPOKEN_ANSWER_NOTE);
     }
 
-    let (reply, tools_used, sources) = if tools_supported {
+    let (reply, tools_used, sources, looked) = if tools_supported {
         let notify = |id: u64| {
             use tauri::Emitter;
             if let Some(app) = app {
@@ -1031,10 +1039,19 @@ pub(crate) async fn chat_turn(
             let earlier: Vec<&str> = history.iter().filter(|(r, _)| r == "user").map(|(_, t)| t.as_str()).collect();
             let settings = crate::web::Settings::for_chat(&cfg, &provider, &model, &base_url, &api_key);
             crate::web::Turn::new(settings, crate::web::Endpoints::current(), &text, &earlier)
+                .with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())))
         });
+        let messages: Vec<serde_json::Value> = if replay {
+            crate::chats::history_messages(earlier)
+        } else {
+            history
+                .iter()
+                .map(|(r, t)| serde_json::json!({ "role": if r == "assistant" { "assistant" } else { "user" }, "content": t }))
+                .collect()
+        };
         let (reply, tools_used) = crate::tools::run_tool_loop(
             &system,
-            &history,
+            &messages,
             &text,
             &base_url,
             &api_key,
@@ -1044,17 +1061,19 @@ pub(crate) async fn chat_turn(
             cfg.open_apps,
             &notify,
             web.as_mut(),
+            first,
         )
         .await?;
         // gpt-oss sometimes cites as "【1】" (its own browsing style): Yap's [1].
         let reply = if web.is_some() { crate::web::bracket_citations(&reply) } else { reply };
+        let looked = web.as_ref().is_some_and(crate::web::Turn::looked);
         let sources = web.map(|w| w.sources_for(&reply)).unwrap_or_default();
-        (reply, tools_used, sources)
+        (reply, tools_used, sources, looked)
     } else {
         // Small/local models: plain chat + eager RAG (their fallback), or
         // Yap's fixed web pipeline when the question needs the web.
         let endpoint = (base_url.as_str(), api_key.as_str(), model.as_str(), provider.as_str(), disable_thinking);
-        let (reply, chips, sources) =
+        let (reply, chips, sources, looked) =
             small_model_answer(&cfg, &persona, &system, &history, &text, endpoint, web_on, by_voice).await?;
         // "Opening Baldur's Gate 3." from a model that can't open anything:
         // said as it is instead (apps.rs).
@@ -1069,17 +1088,16 @@ pub(crate) async fn chat_turn(
         } else {
             None
         };
-        (corrected.unwrap_or(reply), chips, sources)
+        (corrected.unwrap_or(reply), chips, sources, looked)
     };
-    // "[1]" with nothing behind it (a model answering from memory): out. A
-    // follow-up may still cite the latest answer that had sources, as the
-    // Chat view draws it.
-    let sourced: Vec<usize> = if sources.is_empty() {
-        crate::chats::earlier_source_numbers(&conv.messages)
-    } else {
-        sources.iter().map(|s| s.n).collect()
-    };
-    let reply = crate::chats::strip_unsourced_citations(&reply, &sourced);
+    // Every model's answer, checked before it's shown: no sources list or
+    // "Yap searched…" note of its own, no search claimed that didn't
+    // happen, no "[1]" with nothing (or another question's pages) behind it.
+    let (reply, fixed) = crate::chats::checked_answer(&reply, &text, looked, &conv.messages, &sources);
+    for f in fixed {
+        tracing::info!(fix = f, "Chat: Yap fixed the model's answer");
+        crate::eval::post_fix(f);
+    }
     let index = crate::chats::append_sourced(
         conv.id,
         "assistant",
@@ -1103,8 +1121,9 @@ const SMALL_HISTORY_TOKENS: usize = 2_000;
 /// pipeline**: it searches (the keyed service, else Wikipedia and game
 /// wikis), puts the best few passages in the prompt, numbered, and asks the
 /// model to answer only from them and cite them. It never lets the model
-/// claim a search that didn't happen: it's told so, and an answer that
-/// claims one anyway says Yap didn't search.
+/// claim a search that didn't happen: it's told so (and `chat_turn`'s
+/// checks flag an answer that claims one anyway). Also returns whether a
+/// search ran.
 #[allow(clippy::too_many_arguments)]
 async fn small_model_answer(
     cfg: &YapConfig,
@@ -1115,12 +1134,13 @@ async fn small_model_answer(
     (base_url, api_key, model, provider, disable_thinking): (&str, &str, &str, &str, bool),
     web_on: bool,
     by_voice: bool,
-) -> Result<(String, Vec<String>, Vec<crate::chats::Source>), String> {
+) -> Result<(String, Vec<String>, Vec<crate::chats::Source>, bool), String> {
     let mut chips = Vec::new();
     let mut sources = Vec::new();
     let mut system = system.to_string();
     let mut history = history.to_vec();
-    if web_on && crate::web::needs_web(text) {
+    let looked = web_on && crate::web::needs_web(text);
+    if looked {
         let query = crate::web::search_query(text);
         let settings = crate::web::Settings::for_chat(cfg, provider, model, base_url, api_key);
         match crate::web::search(&settings, &crate::web::Endpoints::current(), &query, text).await {
@@ -1150,16 +1170,47 @@ async fn small_model_answer(
                 system.push_str(&format!("\n\n{}", crate::web::no_search_line(Some(&e))));
             }
         }
+    } else if web_on {
+        system.push_str(&format!("\n\n{}", crate::web::NOT_SEARCHED_LINE));
     } else {
         system.push_str(&format!("\n\n{}", crate::web::no_search_line(None)));
     }
-    let mut reply =
+    let reply =
         crate::llm::note_chat(&system, &history, text, base_url, api_key, model, provider, disable_thinking).await?;
-    if sources.is_empty() && crate::web::claims_browsing(&reply) {
-        reply.push_str("\n\n");
-        reply.push_str(crate::web::NOT_SEARCHED_NOTE);
+    Ok((reply, chips, sources, looked))
+}
+
+/// How earlier web answers reach the model: `(replay, note)` — their
+/// searches replayed as tool calls (a tool-calling model with the web on),
+/// else the system prompt's line. A model evaluation may pick another way
+/// (`YAP_EVAL_WEB_HISTORY` = replay | note | none) to compare them.
+fn web_history_mode(tool_model_with_web: bool) -> (bool, bool) {
+    if crate::eval::active() {
+        match std::env::var("YAP_EVAL_WEB_HISTORY").as_deref() {
+            Ok("note") => return (false, true),
+            Ok("none") => return (false, false),
+            Ok("replay") => return (tool_model_with_web, true),
+            _ => {}
+        }
     }
-    Ok((reply, chips, sources))
+    (tool_model_with_web, true)
+}
+
+/// The first step for a model on this PC when the question needs the web:
+/// it must search (`tools::FirstStep::MustSearch`: its own query, written
+/// with the conversation in mind — "Arsenal match tonight 21 October 2026"
+/// where the question as a query found nothing useful; Yap searches for it
+/// when the server won't make it). A model evaluation may compare
+/// (`YAP_EVAL_FIRST` = must | yap | model).
+fn first_search(question: &str) -> crate::tools::FirstStep {
+    if crate::eval::active() {
+        match std::env::var("YAP_EVAL_FIRST").as_deref() {
+            Ok("yap") => return crate::tools::FirstStep::YapSearches(crate::web::search_query(question)),
+            Ok("model") => return crate::tools::FirstStep::Model,
+            _ => {}
+        }
+    }
+    crate::tools::FirstStep::MustSearch
 }
 
 /// The conversation a turn goes to: `conversation_id`'s, or a new one named

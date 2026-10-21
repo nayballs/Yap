@@ -5,7 +5,8 @@
 // `https://host/path` is asked of `<standin>/host/path`).
 //
 // - Exa (`POST /exa/search`) and Tavily (`POST /tavily/search`) answer by
-//   the query: Gale in Baldur's Gate 3, or a "calculator tricks" page whose
+//   the query: Gale in Baldur's Gate 3, RPGs coming out in 2026 (Exa), or a
+//   "calculator tricks" page whose
 //   text tries to make Yap act. `failNext(service, status)` answers the
 //   next search with an HTTP error (401 a wrong key, 402 no credit…).
 // - bg3.wiki's api.php: a search for "Gale" finds the Gale article; its
@@ -81,9 +82,25 @@ const PAGES = {
   'bg3.wiki/wiki/Gale': `<!doctype html><html><head><title>Gale - bg3.wiki</title></head><body><main>${GALE_HTML}</main></body></html>`,
 };
 
+// RPGs coming out in 2026 (made up: no model knows them).
+export const RPG_URL = 'https://rpgsite.example/anticipated-2026';
+const EXA_RPG = {
+  requestId: 'fake-exa-3',
+  results: [
+    {
+      id: RPG_URL,
+      title: 'The most anticipated RPGs of 2026',
+      url: RPG_URL,
+      publishedDate: '2026-10-02T00:00:00.000Z',
+      highlights: ['Coming in 2026: Starfall Requiem (12 March), a sci-fi party RPG, and Ashen Crown II (4 June).'],
+    },
+  ],
+};
+
 function exaFor(query) {
   if (/calculator/i.test(query)) return EXA_TIPS;
   if (/gale/i.test(query)) return EXA_GALE;
+  if (/rpg|ashen crown/i.test(query)) return EXA_RPG;
   return { requestId: 'fake-exa-0', results: [] };
 }
 

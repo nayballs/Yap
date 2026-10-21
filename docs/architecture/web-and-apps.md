@@ -37,23 +37,47 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   followed by hand (≤ 5, each checked), 10 s, 3 MB, HTML/plain text only;
   `page_text` = dom_smoothie (readability.js port, `TextMode::Formatted`),
   `page_part` ≈ 3,000 tokens a read with `next_offset`. **`Turn`**: only
-  links the person gave (their messages, `links_in`) or a search this turn
-  returned (`allowed`); ≤ 3 searches and ≤ 3 reads a turn (a call past the
+  links the person gave (their messages, `links_in`), a search this turn
+  returned (`allowed`) or an earlier answer's sources (an earlier search
+  found them; `with_earlier_sources`: "tell me more about the first one"); ≤ 3 searches and ≤ 3 reads a turn (a call past the
   cap is answered "you've searched 3 times", the tool still offered);
   sources numbered as they come (`number`), `sources_for(reply)` = the ones
   cited (`citations`: [1], [2, 3], [1][4]) or all; results carry
   `DATA_NOT_INSTRUCTIONS`. Chips: `Searched the web: "q"` (+ " (bg3.wiki)"
   when keyless, + the service's error), `Read bg3.wiki/wiki/Gale`, `Didn't
-  read evil.example/…: not a link from you or the search`. **Models that
-  can't call tools** (`commands::small_model_answer`): the fixed pipeline —
-  `needs_web` (conservative: "look up", "search the web", "google",
-  "latest", "news", "price of", "where do I find", a known game; never
-  "my notes"/"my meeting"), `search_query` (the ask stripped),
+  read evil.example/…: not a link from you or the search`. **Does a question
+  need the web?** (`needs_web`, conservative): the person asks for it ("look
+  up", "search the web", "google"), wants something current ("latest",
+  "news", "price of", "coming out", "upcoming", "out yet", "who won", a year
+  from last year on — "best indie games 2026"; 2026-10-21), or names a known
+  game; never "my notes"/"my meeting"/a note, a request to do something
+  ("write…", "add…", "open…", "play…": a search would switch the actions off
+  for the turn), nor a question about how the answer before it was made
+  (`about_the_answer`: "did you look that up or guess?", "where did you get
+  that?", "are you sure?"). `refers_back` spots a follow-up pointing at an
+  earlier answer ("the top five in that list", "which of those…", "the
+  second one"). **A model on this PC with tools** (`ai_model::runs_here`), a
+  question that `needs_web`: its first step **must be a web search**
+  (`tools::FirstStep::MustSearch`: only `web_search` offered,
+  `tool_choice: "required"`, which llamafile honours — its own query, with
+  the conversation in mind: "Arsenal Football Club match tonight 21 October
+  2026 time"); a server that refuses or answers in words anyway gets **Yap's
+  search instead** (`search_query(question)`, handed over as the call the
+  model would have made: chip, sources, safety rule, 3-search cap). Left to
+  decide, Qwen3.5-4B answered Nathan's "best RPG games coming out in 2026"
+  from memory (2026-10-21). Cloud models decide for themselves. **Models
+  that can't call tools** (`commands::small_model_answer`): the fixed
+  pipeline — `needs_web`, `search_query` (the ask stripped),
   `grounded_sources` (≤ 3 sources, ≤ 1,500 tokens) + `grounded_prompt`
   (answer only from them, cite, < 80 words) with the history fitted
-  (`fit_history`, ≤ 2,000) for an 8k model; no search → `no_search_line`,
-  and an answer that `claims_browsing` anyway gets "*Yap didn't search the
-  web for this answer.*". Chips `Searched the web…` + `Answered from 1 web
+  (`fit_history`, ≤ 2,000) for an 8k model; no search → `NOT_SEARCHED_LINE`
+  (web on) or `no_search_line` (off). **Every model's answer** then goes
+  through `chats::checked_answer` (chat-and-assistant.md):
+  `strip_sources_note` (a "(Yap searched the web…)" note or a "Sources:"
+  list the model wrote; what follows the list stays), `claims_browsing`
+  (sentence by sentence; not a denial, an offer — "I can do a quick web
+  search" —, a question, or "I searched your notes") → `NOT_SEARCHED_NOTE` /
+  `NOT_SEARCHED_THAT_NOTE`. Chips `Searched the web…` + `Answered from 1 web
   page`. **The AI's own search** (`web/native.rs`, 2026-10-18, Nathan's
   call: "let the cloud models use their own search tools, and only give
   local models Yap's"; `web_search_native`, on by default): a cloud chat
