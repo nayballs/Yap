@@ -826,7 +826,7 @@
             onkeydown={(e) => e.target === e.currentTarget && menuKey(e, (ev) => messageMenu(ev, m))}
           >
             {#if m.role === 'assistant'}
-              <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown escapes all input -->
+              <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
               <div class="cbody">{@html renderMarkdown(m.text, { sources: citedSources(i) })}</div>
             {:else}
               <p class="cbody">

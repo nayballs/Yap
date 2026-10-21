@@ -346,6 +346,81 @@ test('a chat answer cites its web sources: pills, a Sources row, kept with the a
   await expect(sourcesOfLast(main).getByRole('button')).toHaveText([/1\s*Ben Nevis\s*en\.wikipedia\.org/]);
 });
 
+// Answers as models write them (markdown.js = markdown-it + DOMPurify since
+// 2026-10-21): headings, a numbered list with blank lines between items and
+// a list inside one, a quote, a table with a citation in a cell, code — and
+// a link the sources didn't give, which shows as text.
+test('a web answer renders like a chat app: a table, nested lists, code and citations', async ({ yap, main, fakeLlm, shot }) => {
+  await setConfig(yap, main, {
+    webSearch: true,
+    webSearchNative: true,
+    webSearchService: 'exa',
+    webSearchKeys: { exa: EXA_KEY },
+    llmScopes: chatScope(fakeLlm),
+  });
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'web_search', args: { query: "Gale location Baldur's Gate 3" } }] },
+    {
+      content: [
+        'Gale is one of the first companions you can meet [1].',
+        '',
+        '## How to recruit him',
+        '',
+        '1. **Leave the Nautiloid** and head west along the beach [1].',
+        '',
+        '2. Find the glowing rune circle:',
+        '   - he is stuck in it, calling for help [1, 2]',
+        '   - pull him out with an Action, ~~no check~~ no roll needed',
+        '',
+        '3. Say yes when he asks to join.',
+        '',
+        '> Tip: do it before the long rest, or he waits at camp [2].',
+        '',
+        '| Where | Act | Cited |',
+        '|:---|:---:|---:|',
+        '| Beach west of the crash | 1 | [1] |',
+        '| Rune circle near the `waypoint` | 1 | [2] |',
+        '',
+        'To check from the console:',
+        '',
+        '```',
+        'GetFlag("ORI_Gale_State_Recruited")',
+        '```',
+        '',
+        'Map with every spot: https://maps.example/bg3 — or ask me for the next companion.',
+      ].join('\n'),
+    },
+  ]);
+  await freshChat(main);
+  await send(main, 'How do I recruit Gale?');
+  const answer = lastAnswer(main);
+  await expect(answer).toContainText('Gale is one of the first companions you can meet');
+
+  await expect(answer.getByRole('heading', { name: 'How to recruit him' })).toBeVisible();
+  // One numbered list, items tight, the bullets inside its second item.
+  await expect(answer.locator('.cbody > ol > li')).toHaveCount(3);
+  await expect(answer.locator('.cbody > ol > li p')).toHaveCount(0);
+  await expect(answer.locator('.cbody > ol > li').nth(1).locator('ul > li')).toHaveCount(2);
+  await expect(answer.locator('s')).toHaveText('no check');
+  await expect(answer.locator('blockquote.md-quote')).toContainText('Tip: do it before the long rest');
+  const table = answer.getByRole('table');
+  await expect(table.getByRole('columnheader')).toHaveText(['Where', 'Act', 'Cited']);
+  await expect(table.getByRole('row')).toHaveCount(3);
+  await expect(table.locator('td code')).toHaveText('waypoint');
+  await expect(table.locator('td.r a.md-cite')).toHaveText(['1', '2']);
+  await expect(answer.locator('pre.md-code code')).toHaveText('GetFlag("ORI_Gale_State_Recruited")');
+  // Pills: [1] [1, 2] [2] in the text and the two in the table.
+  await expect(answer.locator('a.md-cite')).toHaveText(['1', '1', '1', '2', '2', '1', '2']);
+  await expect(answer.locator('a.md-cite').first()).toHaveAttribute('href', GALE_URL);
+  // An address the sources didn't give is text, not a link.
+  await expect(answer).toContainText('https://maps.example/bg3');
+  await expect(answer.locator('.cbody a:not(.md-cite)')).toHaveCount(0);
+  await expect(answer).not.toContainText('|');
+  await expect(answer).not.toContainText('```');
+  await answer.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await shot(main, '16-chat-rich-web-answer');
+});
+
 test('a Groq chat looks things up with Groq’s own search: a sub-call carrying only its search tool', async ({
   yap,
   main,
