@@ -48,6 +48,11 @@ pub struct TurnStats {
     pub tool_calls: Vec<ToolCall>,
     /// The text the clipboard tool was asked to copy (recorded, never copied).
     pub clipboard: Option<String>,
+    /// What Yap had to fix in the model's answer before showing it (a
+    /// citation with no source, a sources list it made up, a search it
+    /// claimed: `commands::chat_turn`'s post-checks), and searches Yap ran
+    /// for the model ("yap_search"). Empty: the model's answer stood as it was.
+    pub post_fixes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -274,6 +279,13 @@ pub fn tool_called(name: &str, args: &Value, result: &Value) {
         r.turn.tool_calls.push(call);
     }
     write("tool_call", json!({ "name": name, "args": args, "result": result }));
+}
+
+pub fn post_fix(what: &str) {
+    if let Some(r) = rec().as_mut() {
+        r.turn.post_fixes.push(what.to_string());
+    }
+    write("post_fix", json!({ "what": what }));
 }
 
 pub fn limit_headers(headers: &reqwest::header::HeaderMap) -> Value {

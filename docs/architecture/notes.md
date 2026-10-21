@@ -96,7 +96,11 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   and follow `yap-note-changed` (the notepad's edits, the AI title; a made-up
   title shows muted); **Raw ↔ Enhanced dual-view + staleness dot** (safe renderer
   in `lib/markdown.js`, shared with chat answers and the notepad: everything
-  HTML-escaped first; headings, lists, tasks, bold/italic, inline code, fenced
+  HTML-escaped first; headings, lists — a blank line between items keeps one
+  list (models write "1. …\n\n2. …", which showed "1." on every item until
+  2026-10-21), lines and lists indented under an item belong to it, an
+  ordered list starting at 3 gets `start="3"`; `e2e/markdown.spec.js` —,
+  tasks, bold/italic, inline code, fenced
   code blocks `pre.md-code`, `[text](url)` and bare links `a.md-link` — web and
   mail only, styles in app.css) with **Copy markdown / Copy text** (`markdownToText`:
   ☐ tasks, plain headings); embedded per-note **"Ask anything…" bar** = Chat

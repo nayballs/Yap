@@ -25,8 +25,17 @@
 //   offered, a link the model made up isn't read, nor a local address.
 // - A model that can't call tools (a 1.5B local one): Yap's fixed pipeline
 //   searches the keyless way (bg3.wiki's api.php) and the model answers from
-//   the numbered passages; a question that needs no web isn't searched, and
-//   an answer claiming a search anyway says Yap didn't search.
+//   the numbered passages; a question that needs no web isn't searched (the
+//   model is told which earlier answer was), and an answer claiming a search
+//   anyway says Yap didn't search — "that answer" when asked "did you look
+//   that up?".
+// - A model on this PC with tools, asked something that needs the web: its
+//   first step must be a web search (tool_choice "required"); a server that
+//   won't make it gets Yap's search instead. An earlier web answer's search
+//   is replayed in the history as the call it was (never a note in its text);
+//   a sources note the model writes itself and a citation with nothing
+//   behind it go; a claimed search is flagged. Lists with blank lines
+//   between the items stay one list.
 // - The Voice Assistant: a web answer said short — one or two sentences, no
 //   [n] — then "The details and sources are in Chat.", its card showing the
 //   short answer and the sources' count.
@@ -46,7 +55,7 @@ import {
   mainOnScreen,
 } from './support/fixtures.js';
 import { startFakeLlm, GROUNDING_REDIRECT } from './support/fake-llm.js';
-import { startFakeWeb, GALE_URL, GUIDE_URL, TIPS_URL } from './support/fake-web.js';
+import { startFakeWeb, GALE_URL, GUIDE_URL, TIPS_URL, RPG_URL } from './support/fake-web.js';
 
 const EXA_KEY = 'fake-exa-key-for-tests';
 
@@ -294,12 +303,26 @@ test('a chat answer cites its web sources: pills, a Sources row, kept with the a
   // A follow-up citing that answer without searching again (Nathan's "the
   // top five in that list"): its "[1]" is that answer's pill, not raw text,
   // and it has no Sources row of its own.
+  const followUp = fakeLlm.requests.length;
   fakeLlm.scriptChat([{ content: 'The best spot is the beach [1].' }]);
   await send(main, 'Where exactly?');
   await expect(lastAnswer(main)).toContainText('The best spot is the beach');
   await expect(lastAnswer(main)).not.toContainText('[1]');
   await expect(lastAnswer(main).locator('a.md-cite')).toHaveAttribute('href', GALE_URL);
   await expect(thread(main).locator('.sources')).toHaveCount(1);
+  // The model knew that answer came from a search: its search, replayed in
+  // the history as the call it was — never a note in the answer's text
+  // (one there was copied into answers that searched nothing).
+  const history = fakeLlm.requests[followUp].messages;
+  const replayed = history.find((m) => m.role === 'assistant' && m.tool_calls?.length);
+  expect(replayed.tool_calls[0].function.name).toBe('web_search');
+  expect(JSON.parse(replayed.tool_calls[0].function.arguments)).toEqual({ query: "Gale location Baldur's Gate 3" });
+  const replayedResult = JSON.parse(history.find((m) => m.role === 'tool').content);
+  expect(replayedResult.data.results.map((r) => [r.n, r.site])).toEqual([
+    [1, 'bg3.wiki'],
+    [2, 'guides.example'],
+  ]);
+  expect(JSON.stringify(history)).not.toContain('Yap searched the web');
 
   // A wrong key: the wiki answers instead, and the chip says why.
   fakeWeb.failNext('exa', 401);
@@ -596,18 +619,101 @@ test('a model that can’t call tools answers from the web through Yap’s fixed
   expect(call.system).toContain('Gale is found on the beach west of the Nautiloid crash site');
   expect(call.system).not.toContain('UID');
 
-  // A question that needs no web: no search, and the model is told it can't
-  // browse. An answer that claims a search anyway says Yap didn't search.
+  // A question that needs no web: no search, and the model is told so — and
+  // which earlier answer came from one (it gets the history as plain text).
+  // An answer that claims a search anyway says Yap didn't search.
   fakeLlm.reply('other', () => 'I searched the web and found this: leaves fall, the year turns, tea cools.');
   const webBefore = fakeWeb.requests.length;
   await send(main, 'Write a haiku about autumn');
-  await expect(lastAnswer(main)).toContainText("Yap didn't search the web for this answer.");
-  await expect(lastAnswer(main).locator('em')).toHaveText("Yap didn't search the web for this answer.");
+  const notSearched = "Yap didn't search the web for this answer: it comes from the AI model's own knowledge, which may be out of date.";
+  await expect(lastAnswer(main).locator('em')).toHaveText(notSearched);
   expect(fakeWeb.requests.length).toBe(webBefore);
-  expect(fakeLlm.requests.at(-1).system).toContain("You can't search or browse the web in this chat");
+  const system = fakeLlm.requests.at(-1).system;
+  expect(system).toContain("Yap didn't search the web for this question");
+  expect(system).toContain('Earlier in this chat, Yap searched the web to answer: "Where do I find Gale in Baldur’s Gate 3?"');
   await expect(thread(main).locator('.toolchips')).toHaveCount(1);
   await shot(main, '08-small-model-no-search-claimed');
+
+  // "Did you look that up?" about that answer (from memory): the claim is
+  // flagged about *that* answer; no search runs for the question.
+  fakeLlm.reply('other', () => 'Yes, I did look it up on the web.');
+  await send(main, 'Did you look that up or did you just guess?');
+  await expect(lastAnswer(main).locator('em')).toHaveText(
+    "Yap didn't search the web for that answer: it came from the AI model's own knowledge, which may be out of date."
+  );
+  expect(fakeWeb.requests.length).toBe(webBefore);
   fakeLlm.reply('other', () => 'OK');
+});
+
+test('a model on this PC: it must search first, and Yap checks what the answer claims', async ({ yap, main, fakeLlm, fakeWeb, shot }) => {
+  // A local model (the fake runs on this PC) with tools.
+  await setConfig(yap, main, { webSearch: true, webSearchKeys: { exa: EXA_KEY }, llmScopes: chatScope(fakeLlm) });
+  const from = fakeLlm.requests.length;
+  const webFrom = fakeWeb.requests.length;
+  // A question that needs the web (Nathan's, 2026-10-21): Qwen3.5-4B left to
+  // decide answered it from memory. Its first step must be a web search
+  // (only web_search offered, tool_choice "required"), its own query.
+  // (Its list has blank lines between the items, as models write them: one
+  // list, numbered 1, 2, 3 — not "1." on every item.)
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'web_search', args: { query: 'best RPG games 2026' } }] },
+    { content: 'Here are some:\n\n1. **Starfall Requiem** (12 March) [1]\n\n2. **Ashen Crown II** (4 June) [1]\n\n3. **Verdant Oath** (December)' },
+  ]);
+  await freshChat(main);
+  await send(main, 'What are some of the best RPG games coming out in 2026');
+  await expect(lastAnswer(main)).toContainText('Starfall Requiem');
+  await expect(lastAnswer(main).locator('ol')).toHaveCount(1);
+  await expect(lastAnswer(main).locator('ol > li')).toHaveText([/Starfall Requiem/, /Ashen Crown II/, /Verdant Oath/]);
+  await expect(chipsOfLast(main)).toHaveText(['Searched the web: "best RPG games 2026"']);
+  const steps = fakeLlm.requests.slice(from).filter((r) => r.tools.length);
+  expect(steps[0].tools).toEqual(['web_search']);
+  expect(steps[0].toolChoice).toBe('required');
+  expect(steps[1].toolChoice).toBeNull();
+  const result = JSON.parse(steps[1].messages.at(-1).content);
+  expect(result.data.results.map((r) => [r.n, r.url])).toEqual([[1, RPG_URL]]);
+  // As after any search: no action tool offered, the pill, the Sources row.
+  for (const action of ACTIONS) expect(toolsOffered(steps[1])).not.toContain(action);
+  await expect(lastAnswer(main).locator('a.md-cite')).toHaveCount(2);
+  await expect(lastAnswer(main).locator('a.md-cite').first()).toHaveAttribute('href', RPG_URL);
+  await expect(sourcesOfLast(main).getByRole('button')).toHaveText([/1\s*The most anticipated RPGs of 2026\s*rpgsite\.example/]);
+  await shot(main, '14-local-model-searches-first');
+
+  // A server that won't be made to call a tool (it answers in words
+  // anyway): Yap searches for the model, the question as the query.
+  const before = fakeLlm.requests.length;
+  fakeLlm.scriptChat([{ content: 'From memory: Black Myth: Wukong.' }, { content: 'Ashen Crown II comes out on 4 June [1].' }]);
+  await send(main, 'When is Ashen Crown II coming out?');
+  await expect(lastAnswer(main)).toContainText('Ashen Crown II comes out on 4 June');
+  await expect(lastAnswer(main)).not.toContainText('From memory');
+  await expect(lastAnswer(main).locator('a.md-cite')).toHaveAttribute('href', RPG_URL);
+  await expect(chipsOfLast(main)).toHaveText(['Searched the web: "When is Ashen Crown II coming out"']);
+  const words = fakeLlm.requests.slice(before).filter((r) => r.tools.length);
+  expect(words[0].toolChoice).toBe('required');
+  expect(words[1].messages.at(-2).tool_calls[0].function.name).toBe('web_search');
+
+  // An answer from memory that writes Yap's own note and a source number
+  // nothing stands behind: both go.
+  fakeLlm.scriptChat([
+    {
+      content:
+        "Black Myth: Wukong and Dragon's Dogma 2 [5].\n\n(Yap searched the web for this answer. Its sources: [1] Black Myth: Wukong - Wikipedia; [5] Dragon's Dogma 2 - IGN.)",
+    },
+  ]);
+  const webBefore = fakeWeb.requests.length;
+  await send(main, 'Which ones are made in Japan?');
+  await expect(lastAnswer(main)).toHaveText("Black Myth: Wukong and Dragon's Dogma 2.");
+  expect(fakeWeb.requests.length).toBe(webBefore);
+  await expect(thread(main).locator('.sources')).toHaveCount(2);
+
+  // "Did you look that up?" about it: no search for the question, and the
+  // claim says that answer wasn't searched.
+  fakeLlm.scriptChat([{ content: 'I did look it up on the web.' }]);
+  await send(main, 'Did you look up that information or did you just guess?');
+  await expect(lastAnswer(main).locator('em')).toHaveText(
+    "Yap didn't search the web for that answer: it came from the AI model's own knowledge, which may be out of date."
+  );
+  expect(fakeWeb.requests.length).toBe(webBefore);
+  await shot(main, '15-local-model-claimed-search-flagged');
 });
 
 test('the Voice Assistant says a web answer short, with the sources in Chat', async ({ yap, main, fakeLlm, shot }) => {
@@ -619,6 +725,7 @@ test('the Voice Assistant says a web answer short, with the sources in Chat', as
   // which the Chat view follows live.
   await freshChat(main);
   await inAnotherApp(yap);
+  // (A game question to a model on this PC: its first step must be a search.)
   fakeLlm.scriptChat([
     { tools: [{ name: 'web_search', args: { query: "Gale location Baldur's Gate 3" } }] },
     {

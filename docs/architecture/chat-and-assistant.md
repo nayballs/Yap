@@ -22,17 +22,40 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   the pages use as its id (`chat:<conversation>:<index>`). A web answer keeps
   its sources (`ChatMessage.sources` = `Source {n, title, url, site}`,
   numbered as it cites them; `append_sourced`; only written when there are
-  some). **A citation with no source behind it** is taken out before the
-  answer is saved (`strip_unsourced_citations`, in `chat_turn`: a small model
+  some). **Every answer is checked before it's shown and saved**
+  (`checked_answer`, in `chat_turn`, every model; each fix logged and, in a
+  model evaluation, counted — `eval::post_fix`): a sources list or "(Yap
+  searched the web for this answer…)" note the model wrote itself goes
+  (`web::strip_sources_note`: Yap shows the real sources); a search it claims
+  when none ran this turn ("I did look it up on the web",
+  `web::claims_browsing`) gets "*Yap didn't search the web for this answer: it
+  comes from the AI model's own knowledge, which may be out of date.*" — or
+  "for that answer…" when the question asks how the answer before it was made
+  (`web::about_the_answer`: "did you look that up or guess?"), in which case
+  that answer's own search makes the claim true; and **a citation with no
+  source behind it** goes (`strip_unsourced_citations`: a small model
   answering from memory wrote "Python 3.12.0 [1]" with no search): kept are
-  the numbers of this turn's sources, else of the latest earlier answer that
-  had some (`earlier_source_numbers`, what ChatView's `citedSources` draws a
-  follow-up's "[1]" against); code, a link's text and "[0]" are left alone.
-  **History**: an earlier answer written from the web goes to the model with
-  a note that Yap searched for it and its sources (`chats::history_text`),
-  so a follow-up never says it "didn't actually search" (2026-10-21); a web
-  answer's system prompt carries the user's local time and UTC offset
-  (`web::time_note`) so a page's "3:00 PM ET" is converted, not mislabelled.
+  the numbers of this turn's sources, else — for a follow-up — of the latest
+  earlier answer that had some (`earlier_source_numbers`, what ChatView's
+  `citedSources` draws a follow-up's "[1]" against), but not for a new
+  question that needs the web (`web::needs_web` and not `web::refers_back`:
+  Nathan's "best RPG games coming out in 2026" cited [1][4][5] that drew as
+  the indie games' sources) nor after a search that found nothing; code, a
+  link's text and "[0]" are left alone. **History**: never a note in an
+  answer's text (2026-10-21, the day it went in: Qwen3.5-4B copied "(Yap
+  searched the web for this answer. Its sources: …)" word for word, with made-up
+  sources, into an answer that searched nothing, then said it had looked it
+  up). A tool-calling model with the web on gets each earlier web answer's
+  search **replayed** before it (`history_messages`: the `web_search` call
+  with its query — read back from the chip, `searched_queries` — and a short
+  result: the numbered titles, sites and addresses, no page text, and a note
+  to answer follow-ups from the answer after it — told "the text isn't
+  kept", Qwen3.5-4B said it couldn't list "the top five in that list" —, or
+  to read one of those pages, which `read_page` allows); any other model gets
+  one system-prompt line naming the questions Yap searched the web to answer
+  (`web_history_note`). A web answer's system prompt carries the user's local
+  time and UTC offset (`web::time_note`) so a page's "3:00 PM ET" is
+  converted, not mislabelled.
 - **`tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
@@ -112,7 +135,14 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `read_page(url, offset?)`** (`web_definitions` + `WEB_TOOL_INSTRUCTIONS`,
   ~470 tokens more, `the_web_tools_stay_light`; offered while "Look things
   up on the web" is on; run by `web.rs`'s per-turn `web::Turn`, passed as
-  `run_tool_loop`'s last argument). **The safety rule**
+  `run_tool_loop`'s `web` argument). `run_tool_loop` takes the history as
+  OpenAI messages (`chats::history_messages`: earlier web answers' searches
+  replayed) and a **`FirstStep`**: `Model` (it decides), `MustSearch` (a
+  model on this PC asked something that needs the web — only `web_search`
+  offered, `tool_choice: "required"`; no call made, or the server refuses →
+  Yap's own search for it, `search_for_the_model`) or `YapSearches(query)`
+  (Yap searches before the first step; the model evaluations' comparison,
+  `YAP_EVAL_FIRST`). **The safety rule**
   (`refused_after_web`, `ACTION_TOOLS` = open_app, create_note,
   update_note, edit_note, copy_to_clipboard): once web content is in a turn
   (`Turn::seen`), those are no longer offered (`without_actions`) and a call

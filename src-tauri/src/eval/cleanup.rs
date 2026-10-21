@@ -91,7 +91,7 @@ async fn chat_between(question: &str, ep: &Endpoint<'_>) -> bool {
     }
     let messages = json!([{ "role": "system", "content": system }, { "role": "user", "content": question }]);
     record::begin_turn();
-    let ok = crate::llm::post_chat_message(ep.base_url, ep.key, ep.model, ep.provider, 0.5, messages, Some(&tools)).await.is_ok();
+    let ok = crate::llm::post_chat_message(ep.base_url, ep.key, ep.model, ep.provider, 0.5, messages, Some(&tools), None).await.is_ok();
     let _ = record::end_turn();
     ok
 }

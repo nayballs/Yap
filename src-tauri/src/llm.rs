@@ -69,6 +69,11 @@ fn tool_call_rejection(status: u16, body: &str) -> Option<String> {
             cut(sent)
         ));
     }
+    // llama.cpp's 500 for a call whose arguments aren't JSON (Qwen3.5-4B cut
+    // one off mid-string, the model evaluations of 2026-10-21).
+    if status >= 500 && message.starts_with("Failed to parse tool call arguments") {
+        return Some("its arguments weren't complete JSON. Call the tool again with short, valid JSON arguments".to_string());
+    }
     None
 }
 
@@ -388,6 +393,7 @@ pub(crate) async fn chat(
         opts.max_tokens,
         opts.timeout,
         RATE_LIMIT_PATIENCE,
+        serde_json::Map::new(),
     )
     .await?;
     let content = message["content"]
@@ -437,6 +443,7 @@ pub async fn note_chat(
         None,
         chat_timeout(base_url),
         RATE_LIMIT_PATIENCE,
+        serde_json::Map::new(),
     )
     .await?;
     let out = strip_wrapping(
@@ -538,6 +545,7 @@ async fn post_chat(
         None,
         CLEANUP_TIMEOUT,
         rate_limit_patience,
+        serde_json::Map::new(),
     )
     .await?;
     let content = message["content"]
@@ -554,7 +562,9 @@ async fn post_chat(
 /// chat tool loop can inspect `tool_calls`). `tools` is an optional OpenAI
 /// `tools` array attached to the request. Waits out a rate limit (up to
 /// [`RATE_LIMIT_PATIENCE`]): a tool-using answer makes several calls, which
-/// is just what runs into a free plan's tokens-per-minute cap.
+/// is just what runs into a free plan's tokens-per-minute cap. `tool_choice`:
+/// OpenAI's `tool_choice` ("required": the model must call one of `tools`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn post_chat_message(
     base_url: &str,
     api_key: &str,
@@ -563,7 +573,12 @@ pub(crate) async fn post_chat_message(
     temperature: f32,
     messages: Value,
     tools: Option<&Value>,
+    tool_choice: Option<&str>,
 ) -> Result<Value, String> {
+    let mut extra = serde_json::Map::new();
+    if let (Some(choice), Some(_)) = (tool_choice, tools) {
+        extra.insert("tool_choice".into(), json!(choice));
+    }
     post_chat_request(
         base_url,
         api_key,
@@ -575,6 +590,7 @@ pub(crate) async fn post_chat_message(
         None,
         chat_timeout(base_url),
         RATE_LIMIT_PATIENCE,
+        extra,
     )
     .await
 }
@@ -685,6 +701,7 @@ async fn post_chat_request(
     max_tokens: Option<u32>,
     timeout: Duration,
     rate_limit_patience: Duration,
+    extra: serde_json::Map<String, Value>,
 ) -> Result<Value, String> {
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let mut body = json!({
@@ -692,6 +709,9 @@ async fn post_chat_request(
         "stream": false,
         "messages": messages,
     });
+    for (k, v) in extra {
+        body[k] = v;
+    }
     if takes_temperature(model) {
         body["temperature"] = json!(temperature);
     }
@@ -977,6 +997,9 @@ mod tests {
         // llama.cpp's 500 for a call written as text (Llama 3.2).
         let llama = r#"{"error":{"code":500,"message":"Failed to parse input at pos 47: {\"name\": \"copy_to_clipboard\", \"parameters\": {}}","type":"server_error"}}"#;
         assert!(tool_call_rejection(500, llama).unwrap().contains("wasn't a proper tool call"));
+        // …and for arguments cut off mid-string (Qwen3.5-4B).
+        let cut_off = r#"{"error":{"code":500,"message":"Failed to parse tool call arguments as JSON: [json.exception.parse_error.101] parse error at line 1, column 85: syntax error while parsing object - unexpected end of input; expected '}'","type":"server_error"}}"#;
+        assert!(tool_call_rejection(500, cut_off).unwrap().contains("weren't complete JSON"));
         // Anything else stays what it was.
         assert_eq!(tool_call_rejection(400, r#"{"error":{"message":"temperature is not supported","code":"invalid_value"}}"#), None);
         assert_eq!(tool_call_rejection(500, "Internal Server Error"), None);

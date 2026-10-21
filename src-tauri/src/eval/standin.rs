@@ -1,8 +1,9 @@
 //! A scenario's stand-in web (`"web": {"mode": "standin"}`): a local server
 //! for `web.rs`'s test-mode addresses — `YAP_EXA_URL` (`POST /exa/search`),
 //! `YAP_TAVILY_URL` (`POST /tavily/search`) and `YAP_WEB_STANDIN` (a page
-//! `https://host/path` is `GET /web/host/path`) — answering every search
-//! with the scenario's `results` and serving its `pages`. Nothing goes on
+//! `https://host/path` is `GET /web/host/path`) — answering a search with
+//! the scenario's `results` (or the `searches` set whose words the query
+//! holds) and serving its `pages`. Nothing goes on
 //! the internet; every request is logged (`web_standin`). Stopped on drop.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,7 +12,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::scenario::WebSpec;
+use super::scenario::{WebHit, WebSpec};
 
 pub struct Standin {
     stop: Arc<AtomicBool>,
@@ -34,17 +35,30 @@ impl Standin {
         let server = tiny_http::Server::http("127.0.0.1:0").map_err(|e| format!("stand-in web: {e}"))?;
         let port = server.server_addr().to_ip().map(|a| a.port()).ok_or("stand-in web: no port")?;
         let base = format!("http://127.0.0.1:{port}");
-        let exa = json!({
-            "requestId": "eval-standin",
-            "results": spec.results.iter().map(|h| json!({
-                "id": h.url, "title": h.title, "url": h.url, "publishedDate": h.published, "highlights": [h.text],
-            })).collect::<Vec<_>>(),
-        });
-        let tavily = json!({
-            "results": spec.results.iter().map(|h| json!({
-                "title": h.title, "url": h.url, "content": h.text, "score": 0.9, "published_date": h.published,
-            })).collect::<Vec<_>>(),
-        });
+        let exa = |hits: &[WebHit]| {
+            json!({
+                "requestId": "eval-standin",
+                "results": hits.iter().map(|h| json!({
+                    "id": h.url, "title": h.title, "url": h.url, "publishedDate": h.published, "highlights": [h.text],
+                })).collect::<Vec<_>>(),
+            })
+        };
+        let tavily = |hits: &[WebHit]| {
+            json!({
+                "results": hits.iter().map(|h| json!({
+                    "title": h.title, "url": h.url, "content": h.text, "score": 0.9, "published_date": h.published,
+                })).collect::<Vec<_>>(),
+            })
+        };
+        // The search's answer: the first set whose words the query holds,
+        // else the scenario's `results`.
+        let sets: Vec<(Vec<String>, Vec<WebHit>)> =
+            spec.searches.iter().map(|s| (s.when.iter().map(|w| w.to_lowercase()).collect(), s.results.clone())).collect();
+        let fallback = spec.results.clone();
+        let answer = move |body: &str| -> Vec<WebHit> {
+            let query = serde_json::from_str::<Value>(body).ok().and_then(|v| v["query"].as_str().map(str::to_lowercase)).unwrap_or_default();
+            sets.iter().find(|(when, _)| when.iter().any(|w| query.contains(w))).map_or_else(|| fallback.clone(), |(_, hits)| hits.clone())
+        };
         let pages: Vec<(String, String)> = spec.pages.iter().map(|(u, body)| (page_key(u), body.clone())).collect();
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
@@ -56,9 +70,9 @@ impl Standin {
                 let mut body = String::new();
                 let _ = req.as_reader().read_to_string(&mut body);
                 let (status, kind, text) = if path.starts_with("/exa/search") {
-                    (200, "application/json", exa.to_string())
+                    (200, "application/json", exa(&answer(&body)).to_string())
                 } else if path.starts_with("/tavily/search") {
-                    (200, "application/json", tavily.to_string())
+                    (200, "application/json", tavily(&answer(&body)).to_string())
                 } else if let Some(rest) = path.strip_prefix("/web/") {
                     let key = page_key(&format!("https://{rest}"));
                     match pages.iter().find(|(k, _)| *k == key) {

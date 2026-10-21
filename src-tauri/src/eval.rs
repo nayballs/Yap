@@ -143,6 +143,20 @@ pub fn tool_called(name: &str, args: &Value, result: &Value) {
     let _ = (name, args, result);
 }
 
+/// Yap changed the model's answer before showing it, or searched for it
+/// (`commands::chat_turn`'s post-checks: "stripped_citations",
+/// "stripped_sources_note", "not_searched_note", "yap_search"): logged, and a
+/// scenario's `no_post_fixes` warns about it.
+pub fn post_fix(what: &str) {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            record::post_fix(what);
+        }
+    }
+    let _ = what;
+}
+
 /// The rate-limit headers of a response (`x-ratelimit-*`, `retry-after*`),
 /// for the run's log and its pacing. `Null` outside a run.
 pub fn limit_headers(headers: &reqwest::header::HeaderMap) -> Value {

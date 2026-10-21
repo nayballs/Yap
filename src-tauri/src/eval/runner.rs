@@ -684,6 +684,8 @@ async fn run_scenario(
     let mut fails: Vec<String> = Vec::new();
     let mut warns: Vec<String> = Vec::new();
     let mut turns: Vec<Value> = Vec::new();
+    let mut earlier_numbers: Vec<usize> = Vec::new();
+    let mut previous_numbers: Vec<usize> = Vec::new();
     for (i, turn) in s.turns.iter().enumerate() {
         record::set_context(json!({ "model": m.label, "scenario": name, "turn": i + 1 }));
         let voice = turn.voice.unwrap_or(s.voice);
@@ -701,6 +703,13 @@ async fn run_scenario(
             .filter_map(|v| v["name"].as_str().map(str::to_string))
             .collect();
         let mut o = Observed { stats, opened, ..Default::default() };
+        // What a follow-up's "[1]" points at — for "where did you get that?",
+        // only the answer it asks about — and whether the answer before it
+        // searched (a "did you look that up?" asks about that one).
+        o.earlier_sources =
+            if crate::web::about_the_answer(&turn.user) { previous_numbers.clone() } else { earlier_numbers.clone() };
+        o.earlier_searched =
+            seen.last().is_some_and(|p| p.stats.tool_calls.iter().any(|c| crate::web::TOOL_NAMES.contains(&c.name.as_str())));
         match result {
             Ok(t) => {
                 conversation = Some(t.conversation_id);
@@ -708,8 +717,15 @@ async fn run_scenario(
                 o.chips = t.tools_used;
                 o.fast_path = t.model.is_none();
                 o.sources = t.sources.iter().map(|x| (x.title.clone(), x.url.clone())).collect();
+                previous_numbers = t.sources.iter().map(|x| x.n).collect();
+                if !t.sources.is_empty() {
+                    earlier_numbers = previous_numbers.clone();
+                }
             }
-            Err(e) => o.error = Some(e),
+            Err(e) => {
+                o.error = Some(e);
+                previous_numbers.clear();
+            }
         }
         let ms = t0.elapsed().as_millis() as u64;
         let f = scenario::check(&turn.expect, &o);

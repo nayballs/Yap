@@ -137,8 +137,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `eval.rs` (+ `eval/`) — model evaluations (`yap.exe eval`) through the real Chat code.
 
 **Chat and the Voice Assistant** — [chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)
-- `chats.rs` — conversations (`chats.json`), tool chips, sources, unsourced citations stripped.
-- `tools.rs` / `note_text.rs` — the tool loop: note tools (safe partial edits), apps, web, safety rule.
+- `chats.rs` — conversations (`chats.json`), tool chips, sources; the history a model gets (earlier searches replayed) and the checks on every answer (made-up sources, claimed searches, unsourced citations).
+- `tools.rs` / `note_text.rs` — the tool loop: note tools (safe partial edits), apps, web (a local model must search first), safety rule.
 - `assistant.rs` — the Voice Assistant: ask Chat out loud from any app; off during meetings.
 
 **Web search and apps** — [web-and-apps.md](./docs/architecture/web-and-apps.md)
