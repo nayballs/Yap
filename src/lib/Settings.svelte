@@ -3068,7 +3068,7 @@
                   {#if updates.notes && ['ready', 'available', 'downloading'].includes(updates.status)}
                     <div class="upd-notes">
                       <div class="upd-notes-h">What’s new in {updates.version}</div>
-                      <!-- renderMarkdown escapes all input first — no raw HTML gets through. -->
+                      <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/markdown.js). -->
                       <div class="upd-notes-b">{@html renderMarkdown(updates.notes)}</div>
                     </div>
                   {/if}

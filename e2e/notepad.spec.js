@@ -995,6 +995,82 @@ test('Stop writes the summary in steps; a failure says so above the bar and Retr
   await shot(pad, '29-summary-done');
 });
 
+// A summary as a model may write it (markdown.js = markdown-it + DOMPurify
+// since 2026-10-21): tasks with a list inside one, a numbered list with
+// blank lines between its items, a quote, a table with code in a cell,
+// strikethrough — in the notepad's Summary and the Notes view's Enhanced tab.
+const RICH_PLAN = [
+  'The team agreed the Q3 budget is fine overall; only the venue deposit moved.',
+  '',
+  '## Action plan',
+  '',
+  '### Alice',
+  '- [ ] Send the revised budget to finance (due: Friday)',
+  '- [ ] Flag the moved deposit in the totals',
+  '',
+  '### You',
+  '- [x] Go through the budget line by line',
+  '- [ ] Pick up catering once the venue confirms:',
+  '  - the headcount for both days',
+  '  - dietary needs',
+  '',
+  '## Decisions',
+  '1. Keep the offsite budget as it is.',
+  '',
+  '2. Report the deposit in **this** quarter.',
+  '',
+  '> Travel is up 12%, mostly flights for the offsite.',
+  '',
+  '| Line | Change | Note |',
+  '|:---|---:|:---|',
+  '| Travel | +12% | flights |',
+  '| Venue deposit | moved | `Q3`, not `Q4` |',
+  '',
+  '## Open questions',
+  '- Who owns catering? ~~Alice~~ Nobody yet.',
+].join('\n');
+
+test('a summary with tasks, lists, a quote and a table renders in the notepad and in Notes', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  const pad = yap.notepad;
+  await newMeetingNote(main, 'Budget review', ['Priya']);
+  await main.getByRole('button', { name: 'Record' }).click();
+  await expect.poll(() => visible(yap, 'notepad')).toBe(true);
+  await say(yap, ...BUDGET_TALK);
+  fakeLlm.reply('actionPlan', () => RICH_PLAN);
+  try {
+    await stopButton(pad).click();
+    await tab(yap, 'Summary').click();
+    const views = [
+      pad.getByRole('region', { name: 'Summary' }).locator('.rendered'),
+      main.locator('.rendered'), // the Notes view opens its Enhanced tab on the plan
+    ];
+    for (const plan of views) {
+      await expect(plan.getByRole('heading', { name: 'Action plan' })).toBeVisible({ timeout: 15_000 });
+      await expect(plan.getByRole('heading', { name: 'Alice', exact: true })).toBeVisible();
+      await expect(plan.locator('li.task input[type="checkbox"][disabled]')).toHaveCount(4);
+      await expect(plan.locator('li.task input:checked')).toHaveCount(1);
+      await expect(plan.locator('li.task ul > li')).toHaveText(['the headcount for both days', 'dietary needs']);
+      await expect(plan.locator('ol > li')).toHaveText(['Keep the offsite budget as it is.', 'Report the deposit in this quarter.']);
+      await expect(plan.locator('blockquote.md-quote')).toHaveText('Travel is up 12%, mostly flights for the offsite.');
+      await expect(plan.getByRole('table').getByRole('row')).toHaveCount(3);
+      await expect(plan.locator('td.r')).toHaveText(['+12%', 'moved']);
+      await expect(plan.locator('td code')).toHaveText(['Q3', 'Q4']);
+      await expect(plan.locator('s')).toHaveText('Alice');
+    }
+    await shot(pad, '46-summary-rich-markdown');
+    // The Enhanced pane scrolls: show its lists, quote and table.
+    await views[1].getByRole('table').evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    await shot(main, '47-notes-enhanced-rich-markdown');
+  } finally {
+    fakeLlm.reply('actionPlan', undefined);
+  }
+});
+
 test('a stop Yap makes itself writes the plan in the notepad, without bringing up Notes', async ({
   yap,
   main,

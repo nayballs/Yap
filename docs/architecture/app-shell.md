@@ -13,6 +13,10 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   **Yap bar**, `bar.rs`: an always-there pill, click-through except over what
   it draws; with the bar off, the transcribing overlay as before). The old
   pill window was retired 2026-07-09.
+- **Markdown:** [`markdown-it`](https://github.com/markdown-it/markdown-it) 15.0.3
+  (MIT) parses answers and notes, [`DOMPurify`](https://github.com/cure53/DOMPurify)
+  3.4.17 (MPL-2.0 or Apache-2.0) sanitises the HTML; both pinned exact, used only by
+  `lib/markdown.js` ([notes.md](./notes.md#the-markdown-renderer)).
 - **Backend:** Rust (`src-tauri/src/`).
 - **Audio:** `cpal` (capture) + `rodio` (start/stop chime, spoken replies).
 - **Spoken replies:** **Kokoro-82M v1.0** (the default once downloaded:
