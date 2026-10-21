@@ -170,7 +170,8 @@ device list. Known quirk: Better Auth links accounts by exact email, so
 `…@gmail.com` and `…@googlemail.com` (same Gmail inbox) are separate accounts.
 **Real-app robot tests** (`npm run test:real`, `realtest.rs` + `e2e-real/`,
 2026-10-17): paste, smart spacing, snippets, "press enter", Paste last transcript,
-the clipboard, terminals (PowerShell, a Claude Code stand-in), chat apps, the mic
+the clipboard, terminals (PowerShell, a Claude Code stand-in; Git Bash and a
+VS Code terminal stand-in since 2026-10-21), chat apps, the mic
 path, the dead-mic watchdog, learning words from corrections and real Parakeet
 STT, all checked against real windows by Claude. The three gaps its first run
 found are fixed (2026-10-17): a WinForms text box gives UI Automation no caret,
@@ -188,10 +189,12 @@ it has the focus (xterm.js's input, over UI Automation), and a paste a
 Win32 text box never got is typed instead, once (verify-after-paste: its
 length and selection before and after). The mapping, the label parsing and
 the verdict unit-tested, the edit-control reads by the `--ignored` hidden-
-window test; robot specs written (`gitbash.real.js` against the real Git
-Bash, `editor-terminal.real.js` against an Edge stand-in for VS Code's
-terminal, the pad's "nopaste" box) — VS Code itself isn't installed here,
-and Alacritty, WezTerm, PuTTY & co. are untried.
+window test, and robot-tested: Shift+Insert into the real Git Bash
+(`gitbash.real.js`), an Edge stand-in for VS Code's terminal
+(`editor-terminal.real.js`: it showed Chromium folds the label's line
+breaks, now handled), the pad's "nopaste" box typed into once, and no
+other paste in the full run typed twice. VS Code itself isn't installed
+here, and Alacritty, WezTerm, PuTTY & co. are untried.
 **Dictation extras** (2026-10-17): a paste into an app running as
 administrator is spotted (its integrity level) and left on the clipboard
 with "Your text is copied: press Ctrl+V" (`elevated.rs`, `alert.rs`); text

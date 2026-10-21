@@ -186,7 +186,9 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   `editor_terminal(class, name)` (pure) makes it a terminal (`Host::Editor`)
   when the focus is xterm.js's input — class `xterm-helper-textarea` — with
   the coding CLI from VS Code's label "Terminal 1, <title>" (first line; the
-  number and title survive translation: "ターミナル 1、claude"). One line, no
+  number and title survive translation: "ターミナル 1、claude"; Chromium folds
+  the label's line breaks, so the help text often follows the title on its
+  line — a title the whole line doesn't name is tried by its first word). One line, no
   Enter of Yap's own, no cursor read, no Ctrl+C in edit mode; never
   `keeps_lines`. Robot mode can name stand-in editors
   (`realtest::stand_in_editors`, `YAP_REALTEST_EDITORS`). **The paste keys**
