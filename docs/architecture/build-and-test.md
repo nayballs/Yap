@@ -103,7 +103,9 @@ page = a chat app), Notepad (skipped while Notepad is open) — and the specs
 (`e2e-real/*.real.js`) assert what actually landed: smart spacing, snippets,
 "press enter", Paste last transcript, the clipboard (yours back, private while
 pasted), AI cleanup via the fake model, terminal one-line mode / coding-CLI line
-breaks / auto-submit, chat full stops, the mic path from a TTS WAV
+breaks / auto-submit, Git Bash's mintty pasted with Shift+Insert, VS Code's
+terminal (an Edge stand-in for xterm.js's input; `YAP_REALTEST_EDITORS`), a
+lost paste typed instead (the pad's "nopaste" box), chat full stops, the mic path from a TTS WAV
 (`realtest_dictate_wav`) incl. the dead-mic watchdog, the **correction-learning
 flow** (the real watch over UI Automation, a word fixed in the field, Enter, the
 suggestion toast, Add → `config.json`), **other apps' sound** (the test pad
@@ -125,8 +127,8 @@ the nonce; media titled with the nonce): your own music is never touched.
 ⚠ **It takes the keyboard focus for ~2 min** (runs locally
 only, not on CI): say so before running it while Nathan's at the PC; another app
 grabbing the focus mid-run makes Yap refuse (the harness retries a refused paste
-twice). Known gaps it found are "known gap: …" tests pinning today's result (see
-docs). Guide: [`docs/e2e-tests.md`](../e2e-tests.md) "Real-app robot tests".
+twice). A gap it finds becomes a "known gap: …" test pinning today's result
+until it's fixed (none open now). Guide: [`docs/e2e-tests.md`](../e2e-tests.md) "Real-app robot tests".
 
 ## Test mode and robot mode
 
@@ -209,11 +211,13 @@ docs). Guide: [`docs/e2e-tests.md`](../e2e-tests.md) "Real-app robot tests".
   is re-checked right before every `SendInput` (the paste, typing, the submit
   key) and again as it returns + 10 ms later (`check_after`: "the keys may have
   gone to another window (process N)", which the suite fails on). Edit mode's
-  Ctrl+C stays off. Debug-only
+  Ctrl+C stays off. `YAP_REALTEST_EDITORS` (robot mode only:
+  `stand_in_editors`) names processes `app_kind` treats as editors with an
+  integrated terminal, so an Edge page can stand in for VS Code's. Debug-only
   commands: `realtest_dictate_text { text, hwnd }` (`pipeline::Robot::dictate_text`:
   `capture_target` → `selection::wait_for_context` → `deliver`, the same code a
   spoken dictation runs after its STT; returns `Delivered { text, raw, kind,
-  submit, error, leftOnClipboard }`), `realtest_dictate_wav { path, hwnd,
+  submit, error, leftOnClipboard, paste, typed }`), `realtest_dictate_wav { path, hwnd,
   cancel? }` (`dictate_audio`: the
   WAV fed through `take_audio` in real time between a real `start_recording` and
   `stop_and_transcribe` — or, with `cancel`, the bar's ✕, kept for Undo —, the

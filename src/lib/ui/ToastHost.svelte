@@ -127,7 +127,7 @@
           </div>
         {/if}
         {#if t.expand?.markdown && expanded.includes(t.id)}
-          <!-- renderMarkdown escapes all input first — no raw HTML gets through. -->
+          <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/markdown.js). -->
           <div class="notes">{@html renderMarkdown(t.expand.markdown)}</div>
         {/if}
         {#if t.action?.label || t.secondary?.label || t.expand?.markdown}

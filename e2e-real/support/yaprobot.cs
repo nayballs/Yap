@@ -4,8 +4,9 @@
 // interpolation, no `?.`), by support/targets.js.
 //
 //   yaprobot testpad <label>      the test pad, "Yap robot test pad <label>":
-//                                 a multi-line text box, a rich text box and
-//                                 a password box. Driven over stdin/stdout,
+//                                 a multi-line text box, a rich text box, a
+//                                 password box and a box that ignores Ctrl+V
+//                                 ("nopaste"). Driven over stdin/stdout,
 //                                 one JSON object per line; quits when its
 //                                 stdin closes. It can also play a WAV on a
 //                                 loop (`play` / `stop`): sound of the
@@ -488,6 +489,7 @@ class TestPad : Form {
     readonly PadBox box;
     readonly PadRich rich;
     readonly PadBox password;
+    readonly PadBox nopaste;
     readonly List<object> pastes = new List<object>();
     System.Media.SoundPlayer player;
 
@@ -520,13 +522,18 @@ class TestPad : Form {
         Text = "Yap robot test pad " + label;
         StartPosition = FormStartPosition.Manual;
         Location = new System.Drawing.Point(60, 60);
-        ClientSize = new System.Drawing.Size(560, 430);
+        ClientSize = new System.Drawing.Size(560, 424);
         box = new PadBox { Name = "box", Multiline = true, AcceptsReturn = true, ScrollBars = ScrollBars.Vertical,
             Location = new System.Drawing.Point(10, 10), Size = new System.Drawing.Size(540, 160) };
         rich = new PadRich { Name = "rich", Location = new System.Drawing.Point(10, 180), Size = new System.Drawing.Size(540, 160) };
         password = new PadBox { Name = "password", UseSystemPasswordChar = true,
             Location = new System.Drawing.Point(10, 350), Size = new System.Drawing.Size(540, 24) };
-        foreach (Control c in new Control[] { box, rich, password }) {
+        // A text box that ignores Ctrl+V (its keyboard shortcuts off), as if
+        // every paste into it were lost: typing still works. For Yap's check
+        // that a paste landed (it types the text instead).
+        nopaste = new PadBox { Name = "nopaste", ShortcutsEnabled = false,
+            Location = new System.Drawing.Point(10, 390), Size = new System.Drawing.Size(540, 24) };
+        foreach (Control c in new Control[] { box, rich, password, nopaste }) {
             c.Font = new System.Drawing.Font("Segoe UI", 11f);
             Controls.Add(c);
         }
@@ -587,6 +594,7 @@ class TestPad : Form {
             case "box": return box;
             case "rich": return rich;
             case "password": return password;
+            case "nopaste": return nopaste;
             default: throw new ArgumentException("no field " + name);
         }
     }

@@ -94,16 +94,10 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   the **Action plan** button run the same Rust job via `meeting_summarise`);
   title + content saves send only the edited field with `origin: 'settings'`
   and follow `yap-note-changed` (the notepad's edits, the AI title; a made-up
-  title shows muted); **Raw ↔ Enhanced dual-view + staleness dot** (safe renderer
-  in `lib/markdown.js`, shared with chat answers and the notepad: everything
-  HTML-escaped first; headings, lists — a blank line between items keeps one
-  list (models write "1. …\n\n2. …", which showed "1." on every item until
-  2026-10-21), lines and lists indented under an item belong to it, an
-  ordered list starting at 3 gets `start="3"`; `e2e/markdown.spec.js` —,
-  tasks, bold/italic, inline code, GitHub-style tables (`.md-table`, the
-  rule line's :--: alignment; speech reads them row by row), fenced
-  code blocks `pre.md-code`, `[text](url)` and bare links `a.md-link` — web and
-  mail only, styles in app.css) with **Copy markdown / Copy text** (`markdownToText`:
+  title shows muted); **Raw ↔ Enhanced dual-view + staleness dot** (the safe
+  renderer in `lib/markdown.js`, shared with chat answers, the notepad, the
+  Voice Assistant's card and update notes — see "The markdown renderer"
+  below) with **Copy markdown / Copy text** (`markdownToText`:
   ☐ tasks, plain headings); embedded per-note **"Ask anything…" bar** = Chat
   scope grounded in the note, with mic button for in-box dictation, and on a
   meeting note the **one-tap helper chips** over it (`meetingHelpers` from
@@ -121,3 +115,58 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   — part 3 of 12" line, and, without an AI model, a "Your meeting is saved…"
   card linking to Settings → Language Models); the Home feed has **Ctrl+K
   search**.
+
+## The markdown renderer
+
+- **`lib/markdown.js`** — `renderMarkdown(md, {sources})` → safe HTML for the
+  Enhanced notes, chat answers (Chat and a note's Ask bar), the notepad's
+  Summary and Ask sheet, the Voice Assistant's bar card, and update notes
+  (toast, Settings → About). Since 2026-10-21 the parser is **markdown-it**
+  15.0.3 (MIT: CommonMark + GitHub's tables and `~~strikethrough~~`, bare
+  links via linkify-it) and its HTML goes through **DOMPurify** 3.4.17
+  (MPL-2.0 or Apache-2.0); both pinned exact in package.json. Until then it
+  was a hand-written parser, and each way a model wrote markdown broke it in
+  turn (blank lines between list items, tables, `<https://…>` links).
+  **Safety, twice over**: markdown-it never passes HTML through (`html:
+  false`: a model's `<img onerror=…>` or `<script>` shows as text), only
+  `http(s)://` and `mailto:` become links (`validateLink`; `javascript:`,
+  `data:`, `file:`, relative and `ftp:` stay text), images aren't rendered
+  (a model's `![x](url)` would make Yap fetch it), and DOMPurify then keeps
+  only the tags, attributes and classes the renderer makes (`PURIFY`,
+  `CLASSES`; an `href` only on `a` and only web/mail, `start` only on `ol`,
+  the one `input` a disabled checkbox; no `style`, no handlers, no `data-`
+  or other `aria-` attributes). DOMPurify needs a DOM: in a test outside a
+  page (`e2e/markdown.spec.js`) jsdom stands in, and without one it throws
+  rather than return unsanitised HTML. **Yap's own rules** (markdown-it
+  rules in the file): links are `a.md-link` with the address as their
+  `title`, opened in the browser by main.js's click handler
+  (`open_external`); **a web answer** (`options.sources`, chats.rs): "[1]" /
+  "[2, 3]" become `span.md-cites > a.md-link.md-cite` pills titled with the
+  source (not a link's own text or inline code; an unknown number stays
+  text), and only the sources' own links stay links (compared after
+  markdown-it's normalising, a trailing slash or `#part` aside) — any other
+  address shows as text; headings shift down a level (`#` → h2 … `####` and
+  below → h5: the notes' and notepad's CSS styles them so); `- [ ]` / `- [x]`
+  in a bullet list → `li.task` with a disabled checkbox; tables in
+  `div.md-table` (scrolls sideways) with the rule line's `:--:` / `--:` as
+  classes `c` / `r`, ending at a line without a pipe (GitHub's spec would
+  make the next sentence a row); fenced and indented code → `pre.md-code >
+  code` (no highlighting), a fence an answer cut off still shows;
+  `blockquote.md-quote` and `hr.md-rule`; single line breaks kept
+  (`breaks: true`); "• " lines are bullets; a change of bullet mark ("- " then
+  "* ") doesn't end a list; an ordered list keeps its start (`start="3"`).
+  **Lists stay tight**: models write "1. …\n\n2. …", a CommonMark "loose"
+  list whose items would each be a spaced-out paragraph (and until
+  2026-10-21 showed "1." on every item): an item holding one paragraph
+  renders without its `<p>`, one with several is `li.md-loose`, whose first
+  and last `<p>` app.css trims. Styles for `.md-table`, `pre.md-code`,
+  `a.md-link`, `.md-quote`, `.md-rule` live in app.css (quotes and rules in
+  the text's own colour, for light views, dark toasts and the bar alike);
+  each view sets its own paragraph, list and heading spacing, and Chat its
+  pills. `markdownToText` (Copy text) is line-based: ☐ / ☑ tasks, • bullets,
+  plain headings, no bold or code marks. Tests: `e2e/markdown.spec.js`
+  (Node + jsdom: lists, tables, links, raw HTML, hostile input against the
+  allowlist, citations), plus the rendered views in chat-model, web-search
+  (`16-chat-rich-web-answer`), notepad (`46-summary-rich-markdown`,
+  `47-notes-enhanced-rich-markdown`) and meeting-summary specs. Bundle cost:
+  ~134 kB minified / ~54 kB gzipped on the main chunk.

@@ -1,6 +1,7 @@
 // The robot in the test pad (a WinForms window the harness opens: a text
-// box, a rich text box, a password box): the guard, smart spacing,
-// snippets, "press enter", Paste last transcript, the clipboard, AI cleanup.
+// box, a rich text box, a password box, a box that ignores Ctrl+V): the
+// guard, smart spacing, a lost paste typed instead, snippets, "press enter",
+// Paste last transcript, the clipboard, AI cleanup.
 // What's asserted is what actually landed in the pad's fields.
 import crypto from 'node:crypto';
 import { test, expect, lf } from './support/robot.js';
@@ -107,6 +108,32 @@ test('a password box is pasted into but never read', async ({ robot }) => {
   const log = robot.logSince(mark);
   expect(log).toContain("Couldn't read the text around the cursor");
   expect(log).not.toContain('Read the text around the cursor');
+});
+
+// Verify-after-paste: a paste into a Win32 edit control that never shows up
+// (a busy clipboard, an app ignoring Ctrl+V — now and then the pad's own box
+// lost one) is typed instead, once. The "nopaste" box has its keyboard
+// shortcuts off: Ctrl+V does nothing there, typing works.
+test('a paste that never lands in a text box is typed instead, once', async ({ robot }) => {
+  const { pad } = robot;
+  await pad.set('nopaste', '');
+  const mark = robot.logMark();
+  const r = await robot.dictate(pad, 'Ship it tomorrow.');
+  expect(r.paste).toBe('Ctrl+V');
+  expect(r.typed).toBe(true);
+  await expect.poll(() => pad.text('nopaste')).toBe('Ship it tomorrow.');
+  expect(robot.logSince(mark)).toContain("The paste didn't reach the field");
+  // Still once a moment later: typed a single time.
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  expect(await pad.text('nopaste')).toBe('Ship it tomorrow.');
+
+  // A box that takes the paste: pasted, never typed as well.
+  await pad.set('box', '');
+  const r2 = await robot.dictate(pad, 'Hello there.');
+  expect(r2.typed).toBe(false);
+  await expect.poll(() => pad.text('box')).toBe('Hello there.');
+  await new Promise((resolve) => setTimeout(resolve, 1_200));
+  expect(await pad.text('box')).toBe('Hello there.');
 });
 
 test('snippets: a sign-off on its lines, its full stop dropped; a link mid-sentence keeps the sentence\'s', async ({ robot }) => {

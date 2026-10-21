@@ -1,84 +1,321 @@
-// Minimal, safe markdown → HTML renderer for the Enhanced notes tab, chat
-// answers, the notepad's Ask sheet and update notes.
+// Safe markdown → HTML for the Enhanced notes tab, chat answers, the
+// notepad's Ask sheet and summary, the Voice Assistant's card and update
+// notes.
 //
-// Deliberately tiny: the note-enhancement base prompt (llm::NOTE_BASE_PROMPT)
-// forbids tables / horizontal rules / block quotes, so the output space is
-// headings, paragraphs, bold/italic/code, bullet + numbered lists, and task
-// checkboxes; chat answers add fenced code blocks and links (web and mail
-// only, opened in the browser by main.js). All input is HTML-escaped FIRST, so
-// model output can never inject markup (no raw-HTML passthrough by design).
-// If notes ever need a full editor, this is the piece Milkdown/CodeMirror
-// replaces (see ROADMAP "AI Notepad").
-
-function escapeHtml(s) {
-  return s
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
-}
+// Parsing is markdown-it (CommonMark + GitHub's tables and strikethrough,
+// bare links via linkify-it); the HTML it makes then goes through DOMPurify
+// with a tight allowlist. Until 2026-10-21 this was a hand-written parser,
+// and each new way a model wrote markdown broke it in turn (blank lines
+// between list items, tables, <https://…> links).
+//
+// Safety, twice over: markdown-it never passes HTML through (`html: false`:
+// a model's `<img onerror=…>` or `<script>` shows as text), only web and
+// mail links become links (`validateLink`), images aren't rendered (no
+// remote fetches), and DOMPurify then keeps only the tags, attributes and
+// classes this file makes — no `style`, no event handlers, no other URLs.
+//
+// Yap's own rules on top (plugins below):
+// - links are `a.md-link` with the address as their `title`, opened in the
+//   browser by main.js's click handler (`open_external`);
+// - a web answer (`options.sources`): its "[1]" / "[2, 3]" citations become
+//   pills that open their source (not a link's own text; unknown numbers
+//   stay text), and only the sources' own links stay links;
+// - headings shift down a level (# → h2 … #### and below → h5): the notes'
+//   and notepad's CSS styles them that way;
+// - `- [ ]` / `- [x]` tasks are `li.task` with a disabled checkbox;
+// - tables are wrapped in `div.md-table` (scrolls sideways when wide), with
+//   the rule line's alignment as classes `c` / `r`, and end at a line
+//   without a pipe;
+// - fenced and indented code is `pre.md-code > code`; a fence an answer cut
+//   off still shows;
+// - a list item holding one paragraph renders tight even when the items
+//   have blank lines between them (models write "1. …\n\n2. …"); one with
+//   several is `li.md-loose`; a change of bullet mark doesn't end a list;
+// - single line breaks are kept (`breaks: true`), and "• " lines are bullets.
+import MarkdownIt from 'markdown-it';
+import DOMPurify from 'dompurify';
 
 // A link Yap may open (in the default browser: main.js routes clicks on
 // `a.md-link` to the opener plugin). Only web and mail links; anything else
-// (javascript:, file:, tauri:) stays plain text.
+// (javascript:, file:, tauri:, relative) stays plain text.
 const SAFE_URL = /^(https?:\/\/|mailto:)/i;
 
-// An answer written from the web (chats.rs `sources`, web.rs): its citation
-// markers ("[1]", "[2, 3]") become small pills that open their source, and
-// only links its sources gave stay clickable — any other address the model
-// wrote shows as plain text (no phishing link, nothing smuggled out in one).
+const md = new MarkdownIt('default', {
+  html: false,
+  linkify: true,
+  breaks: true,
+  typographer: false,
+});
+md.validateLink = (url) => SAFE_URL.test(url.trim());
+// No images: a model's ![x](https://…) would make Yap fetch the address.
+md.disable('image');
+// Bare links: http(s) and mail addresses only (linkify-it's defaults also
+// take ftp: and //; "example.com" alone isn't linked).
+md.linkify.add('ftp:', null).add('//', null);
+
+const escapeHtml = md.utils.escapeHtml;
+
+// --- Parsing --------------------------------------------------------------
+
+// A table ends at a line without a pipe (GitHub's spec would make "Pick
+// one." under a table one more row). Runs only as the table's terminator.
+md.block.ruler.before(
+  'table',
+  'yap_table_end',
+  (state, line, _end, silent) => {
+    if (!silent || state.parentType !== 'table') return false;
+    return !state.src.slice(state.bMarks[line] + state.tShift[line], state.eMarks[line]).includes('|');
+  },
+  { alt: ['blockquote'] }
+);
+
+// Block markup: headings a level down, classes for quotes and rules.
+md.core.ruler.push('yap_blocks', (state) => {
+  for (const t of state.tokens) {
+    if (t.type === 'heading_open' || t.type === 'heading_close') {
+      t.tag = `h${Math.min(Number(t.tag.slice(1)) + 1, 5)}`;
+    } else if (t.type === 'blockquote_open') {
+      t.attrSet('class', 'md-quote');
+    } else if (t.type === 'hr') {
+      t.attrSet('class', 'md-rule');
+    }
+  }
+});
+
+// A change of bullet mark ("- a" then "* b", or "1." then "2)") goes on
+// with the same list: CommonMark starts a new one, which models never mean.
+md.core.ruler.push('yap_merge_lists', (state) => {
+  const tokens = state.tokens;
+  for (let i = tokens.length - 2; i >= 0; i--) {
+    const [a, b] = [tokens[i].type, tokens[i + 1].type];
+    if ((a === 'bullet_list_close' && b === 'bullet_list_open') || (a === 'ordered_list_close' && b === 'ordered_list_open')) {
+      tokens.splice(i, 2);
+    }
+  }
+});
+
+// A list item with one paragraph renders tight (no <p>), as in a tight
+// list: models put blank lines between items, which makes a "loose" list
+// whose every item would otherwise be a spaced-out paragraph. An item with
+// several paragraphs keeps them.
+md.core.ruler.push('yap_tight_items', (state) => {
+  const tokens = state.tokens;
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].type !== 'list_item_open') continue;
+    const level = tokens[i].level;
+    const paragraphs = [];
+    for (let j = i + 1; j < tokens.length; j++) {
+      const t = tokens[j];
+      if (t.type === 'list_item_close' && t.level === level) break;
+      if (t.type === 'paragraph_open' && t.level === level + 1) paragraphs.push(j);
+    }
+    if (paragraphs.length === 1) {
+      tokens[paragraphs[0]].hidden = true;
+      tokens[paragraphs[0] + 2].hidden = true;
+    } else if (paragraphs.length > 1) {
+      tokens[i].attrJoin('class', 'md-loose'); // app.css trims its first and last <p>
+    }
+  }
+});
+
+// Tasks: a bullet item starting "[ ] " or "[x] " gets a disabled checkbox.
+md.core.ruler.push('yap_tasks', (state) => {
+  const tokens = state.tokens;
+  const lists = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.type === 'bullet_list_open' || t.type === 'ordered_list_open') lists.push(t.type);
+    else if (t.type === 'bullet_list_close' || t.type === 'ordered_list_close') lists.pop();
+    else if (t.type === 'list_item_open' && lists.at(-1) === 'bullet_list_open') {
+      const inline = tokens[i + 1]?.type === 'paragraph_open' ? tokens[i + 2] : null;
+      const first = inline?.children?.[0];
+      const m = first?.type === 'text' ? /^\[([ xX])\][ \t]+/.exec(first.content) : null;
+      if (!m) continue;
+      first.content = first.content.slice(m[0].length);
+      const box = new state.Token('yap_task', '', 0);
+      box.meta = { checked: m[1] !== ' ' };
+      inline.children.unshift(box);
+      t.attrJoin('class', 'task');
+    }
+  }
+});
+
+// An answer written from the web (chats.rs `sources`, web.rs): only links
+// its sources gave stay links — any other address the model wrote shows as
+// text (no phishing link, nothing smuggled out in one) — and its citation
+// markers ("[1]", "[2, 3]") become pills that open their source.
 function webContext(sources) {
   if (!Array.isArray(sources) || sources.length === 0) return null;
   const strip = (u) => String(u || '').replace(/#.*$/, '').replace(/\/+$/, '');
-  const urls = new Set(sources.map((s) => escapeHtml(strip(s.url))));
+  const urls = new Set(sources.map((s) => strip(md.normalizeLink(String(s.url || '')))));
   return {
     byN: new Map(sources.map((s) => [String(s.n), s])),
-    allows: (escapedUrl) => urls.has(strip(escapedUrl)),
+    allows: (href) => urls.has(strip(href)),
   };
 }
 
-function citePill(web, n) {
-  const s = web.byN.get(String(n).trim());
-  if (!s || !SAFE_URL.test(s.url)) return null;
-  const label = `${s.title || s.site}${s.site ? ` · ${s.site}` : ''}`;
-  return `<a class="md-link md-cite" href="${escapeHtml(s.url)}" title="${escapeHtml(label)}" aria-label="Source ${s.n}: ${escapeHtml(label)}">${s.n}</a>`;
+const CITATION = /\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\]/g;
+
+md.core.ruler.push('yap_web', (state) => {
+  const web = state.env?.web;
+  if (!web) return;
+  for (const block of state.tokens) {
+    if (block.type !== 'inline' || !block.children) continue;
+    const out = [];
+    const open = []; // per open link: kept?
+    for (const t of block.children) {
+      if (t.type === 'link_open') {
+        const keep = web.allows(t.attrGet('href'));
+        open.push(keep);
+        if (keep) out.push(t);
+        continue;
+      }
+      if (t.type === 'link_close') {
+        if (open.pop()) out.push(t);
+        continue;
+      }
+      // Citations, outside links only.
+      if (t.type !== 'text' || open.some(Boolean)) {
+        out.push(t);
+        continue;
+      }
+      let at = 0;
+      for (const m of t.content.matchAll(CITATION)) {
+        const cited = m[1].split(',').map((n) => web.byN.get(n.trim()));
+        if (!cited.every((s) => s && SAFE_URL.test(String(s.url)))) continue;
+        if (m.index > at) out.push(textToken(state, t.content.slice(at, m.index)));
+        const pills = new state.Token('yap_cite', '', 0);
+        pills.meta = { sources: cited };
+        out.push(pills);
+        at = m.index + m[0].length;
+      }
+      if (at === 0) out.push(t);
+      else if (at < t.content.length) out.push(textToken(state, t.content.slice(at)));
+    }
+    block.children = out;
+  }
+});
+
+function textToken(state, content) {
+  const t = new state.Token('text', '', 0);
+  t.content = content;
+  return t;
 }
 
-// Inline transforms on an already-escaped line: code (kept apart, so nothing
-// inside it is touched), links, citations (`web`), bold, italic.
-function inlineWith(s, web = null) {
-  const codes = [];
-  let t = s.replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
-  const links = [];
-  const keep = (html) => `\u0001${links.push(html) - 1}\u0001`;
-  // [text](url): the url is already HTML-escaped (a `"` is `&quot;`), so it
-  // can't break out of the attribute; a ")" ends it, and the only entity a
-  // url may hold is `&amp;` (an escaped quote or bracket ends it too).
-  t = t.replace(/\[([^\]\n]+)\]\(((?:&amp;|[^\s&)])+)\)/g, (m, text, url) => {
-    if (!SAFE_URL.test(url)) return m;
-    if (web && !web.allows(url)) return text;
-    return keep(`<a class="md-link" href="${url}" title="${url}">${text}</a>`);
+// --- Rendering ------------------------------------------------------------
+
+const rules = md.renderer.rules;
+
+rules.link_open = (tokens, idx) => {
+  const href = escapeHtml(tokens[idx].attrGet('href') || '');
+  return `<a class="md-link" href="${href}" title="${href}">`;
+};
+
+rules.yap_cite = (tokens, idx) => {
+  const pills = tokens[idx].meta.sources.map((s) => {
+    const label = escapeHtml(`${s.title || s.site}${s.site ? ` · ${s.site}` : ''}`);
+    const n = escapeHtml(String(s.n));
+    return `<a class="md-link md-cite" href="${escapeHtml(s.url)}" title="${label}" aria-label="Source ${n}: ${label}">${n}</a>`;
   });
-  // Bare web addresses; trailing punctuation ("…/app.") isn't part of them.
-  t = t.replace(/\bhttps?:\/\/(?:&amp;|[^\s&])+/gi, (found) => {
-    const tail = /[.,;:!?)]+$/.exec(found)?.[0] ?? '';
-    const url = found.slice(0, found.length - tail.length);
-    if (web && !web.allows(url)) return keep(url) + tail;
-    return keep(`<a class="md-link" href="${url}" title="${url}">${url}</a>`) + tail;
+  return `<span class="md-cites">${pills.join('')}</span>`;
+};
+
+rules.yap_task = (tokens, idx) => `<input type="checkbox" disabled${tokens[idx].meta.checked ? ' checked' : ''}> `;
+
+// Code: monospace, kept verbatim (escaped), no highlighting.
+rules.fence = rules.code_block = (tokens, idx) =>
+  `<pre class="md-code"><code>${escapeHtml(tokens[idx].content.replace(/\n$/, ''))}</code></pre>\n`;
+
+// Tables: in a sideways-scrolling wrapper, alignment as classes, compact.
+const ALIGN = { center: ' class="c"', right: ' class="r"' };
+const cell = (tag) => (tokens, idx) => {
+  const align = /text-align:(\w+)/.exec(tokens[idx].attrGet('style') || '')?.[1];
+  return `<${tag}${ALIGN[align] ?? ''}>`;
+};
+rules.table_open = () => '<div class="md-table"><table>';
+rules.table_close = () => '</table></div>\n';
+rules.th_open = cell('th');
+rules.td_open = cell('td');
+for (const tag of ['thead', 'tbody', 'tr', 'th', 'td']) {
+  rules[`${tag}_close`] = () => `</${tag}>`;
+  if (!rules[`${tag}_open`]) rules[`${tag}_open`] = () => `<${tag}>`;
+}
+
+// --- Sanitising -----------------------------------------------------------
+
+// Exactly what the rules above make, nothing else.
+const PURIFY = {
+  ALLOWED_TAGS: [
+    'p', 'br', 'strong', 'em', 's', 'code', 'pre', 'a', 'span', 'input',
+    'ul', 'ol', 'li', 'h2', 'h3', 'h4', 'h5', 'blockquote', 'hr',
+    'div', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
+  ],
+  ALLOWED_ATTR: ['class', 'href', 'title', 'aria-label', 'start', 'type', 'checked', 'disabled'],
+  // (DOMPurify's own URI check stays: it tests every attribute's value, so a
+  // web-and-mail-only pattern here would drop start="3"; `href` is held to
+  // SAFE_URL in the hook below.)
+  ALLOW_DATA_ATTR: false,
+  ALLOW_ARIA_ATTR: false,
+};
+const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'task', 'c', 'r']);
+// Which element may carry which of the narrower attributes.
+const ONLY_ON = { href: 'A', 'aria-label': 'A', start: 'OL', type: 'INPUT', checked: 'INPUT', disabled: 'INPUT' };
+
+let purifier = null;
+function purify() {
+  if (purifier) return purifier;
+  const p = DOMPurify(globalThis.window);
+  // Every Yap window has a DOM; without one (a test outside a page) nothing
+  // is rendered unsanitised.
+  if (!p.isSupported) throw new Error('renderMarkdown needs a DOM to sanitise its HTML');
+  p.addHook('afterSanitizeAttributes', (node) => {
+    for (const name of node.getAttributeNames()) {
+      if (ONLY_ON[name] && ONLY_ON[name] !== node.nodeName) node.removeAttribute(name);
+    }
+    if (node.hasAttribute('href') && !SAFE_URL.test(node.getAttribute('href'))) node.removeAttribute('href');
+    if (node.hasAttribute('class')) {
+      const kept = node.getAttribute('class').split(/\s+/).filter((c) => CLASSES.has(c));
+      if (kept.length) node.setAttribute('class', kept.join(' '));
+      else node.removeAttribute('class');
+    }
+    // The only input is a task's checkbox, never one you can tick.
+    if (node.nodeName === 'INPUT') {
+      node.setAttribute('type', 'checkbox');
+      node.setAttribute('disabled', '');
+    }
   });
-  // Citations: "[1]", "[2, 3]" (not a link's text: that's gone by now).
-  if (web) {
-    t = t.replace(/\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\]/g, (m, nums) => {
-      const pills = nums.split(',').map((n) => citePill(web, n));
-      return pills.every(Boolean) ? keep(`<span class="md-cites">${pills.join('')}</span>`) : m;
-    });
-  }
-  t = t
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=$|[\s).,;:!?])/g, '$1<em>$2</em>');
-  return t
-    .replace(/\u0001(\d+)\u0001/g, (_, i) => links[+i])
-    .replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`);
+  purifier = p;
+  return p;
+}
+
+/**
+ * Markdown → safe HTML.
+ * `options.sources`: an answer's web sources ([{ n, title, url, site }]):
+ * citations become pills, and only the sources' links stay links.
+ */
+export function renderMarkdown(text, options = {}) {
+  const env = { web: webContext(options.sources) };
+  const html = md.render(bulletsToDashes(text || ''), env);
+  return purify().sanitize(html, PURIFY).trim();
+}
+
+// "• item" lines (small models write them) as markdown bullets, outside code
+// fences.
+function bulletsToDashes(src) {
+  if (!src.includes('•')) return src;
+  let fence = null;
+  return src
+    .split('\n')
+    .map((line) => {
+      const f = /^\s*(`{3,}|~{3,})/.exec(line);
+      if (f) {
+        if (!fence) fence = f[1][0];
+        else if (f[1][0] === fence) fence = null;
+        return line;
+      }
+      return fence ? line : line.replace(/^(\s*)•(?=[ \t])/, '$1-');
+    })
+    .join('\n');
 }
 
 // The same markdown as plain text, for pasting where markdown shows raw
@@ -98,182 +335,4 @@ export function markdownToText(md) {
     )
     .join('\n')
     .trim();
-}
-
-// A line's indent, a tab counting as four spaces.
-// GitHub's tables: a header row, a rule line (|---|:---:|---:|), then rows.
-// Models (Groq's gpt-oss especially) write them; until 2026-10-21 Chat
-// showed the raw pipes.
-const TABLE_RULE = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/;
-/** A table line's cells: outer pipes dropped, split on unescaped pipes. */
-function tableCells(line) {
-  const inner = line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '');
-  return inner.split(/(?<!\\)\|/).map((c) => c.trim().replaceAll('\\|', '|'));
-}
-function tableAlign(rule) {
-  if (/^:-+:$/.test(rule)) return ' class="c"';
-  if (/^-+:$/.test(rule)) return ' class="r"';
-  return '';
-}
-
-const indentOf = (line) => {
-  let n = 0;
-  for (const c of line) {
-    if (c === ' ') n += 1;
-    else if (c === '\t') n += 4;
-    else break;
-  }
-  return n;
-};
-
-// `options.sources`: an answer's web sources ([{ n, title, url, site }]):
-// citations become pills, and only the sources' links stay links.
-//
-// Lists: a blank line between two items of one list doesn't end it (models
-// often write "1. …\n\n2. …", which showed "1." on every item); a line
-// indented under an item belongs to it; an item indented under another
-// starts a list inside it; and an ordered list starting at 3 says so
-// (`start="3"`), so its numbers are the ones written.
-export function renderMarkdown(md, options = {}) {
-  const web = webContext(options.sources);
-  const inline = (s) => inlineWith(s, web);
-  const lines = escapeHtml(md || '').split(/\r?\n/);
-  const out = [];
-  // The open lists, outermost first: { kind: 'ul' | 'ol', indent }. The
-  // innermost one's last <li> is still open (its </li> comes later), so a
-  // continuation line or a nested list can go inside it.
-  const lists = [];
-  let blank = false; // a blank line since the last item
-  // Onto the last line out (an open item's end, a line under it).
-  const append = (s) => {
-    out[out.length - 1] += s;
-  };
-
-  const closeTop = () => {
-    const top = lists.pop();
-    append(`</li></${top.kind}>`);
-  };
-  const closeLists = () => {
-    while (lists.length) closeTop();
-  };
-  const item = (kind, indent, html, cls = '', start = 1) => {
-    // Leave the lists this item isn't in.
-    while (lists.length && indent < lists.at(-1).indent - 1) closeTop();
-    const top = lists.at(-1);
-    if (top && indent <= top.indent + 1) {
-      if (top.kind !== kind) {
-        closeTop(); // another kind of list at the same level
-        return item(kind, indent, html, cls, start);
-      }
-      append('</li>'); // the next item of the same list
-    } else {
-      // A new list: at the top, or inside the open item (indented under it).
-      out.push(kind === 'ol' && start !== 1 ? `<ol start="${start}">` : `<${kind}>`);
-      lists.push({ kind, indent });
-    }
-    out.push(`<li${cls}>${html}`);
-    blank = false;
-  };
-
-  let fence = null; // the lines of an open ``` block, or null
-
-  for (let at = 0; at < lines.length; at++) {
-    const raw = lines[at];
-    const line = raw.trimEnd();
-    const trimmed = line.trim();
-
-    // A fenced code block: kept verbatim (already escaped), monospace.
-    if (fence) {
-      if (/^```/.test(trimmed)) {
-        out.push(`<pre class="md-code"><code>${fence.join('\n')}</code></pre>`);
-        fence = null;
-      } else {
-        fence.push(raw);
-      }
-      continue;
-    }
-    if (/^```/.test(trimmed)) {
-      closeLists();
-      fence = [];
-      continue;
-    }
-
-    // A blank line: a list may go on after it (the next item decides).
-    if (!trimmed) {
-      blank = true;
-      continue;
-    }
-
-    const indent = indentOf(line);
-
-    // A table: this line's cells over a rule line with as many.
-    if (trimmed.includes('|') && at + 1 < lines.length && TABLE_RULE.test(lines[at + 1].trim())) {
-      const head = tableCells(trimmed);
-      const rule = tableCells(lines[at + 1].trim());
-      if (head.length >= 2 && rule.length === head.length) {
-        closeLists();
-        blank = false;
-        const aligns = rule.map(tableAlign);
-        const rows = [];
-        at += 2;
-        while (at < lines.length && lines[at].trim().includes('|')) {
-          rows.push(tableCells(lines[at]));
-          at++;
-        }
-        at--; // the loop's own step
-        const cell = (tag, i, text) => `<${tag}${aligns[i]}>${inline(text ?? '')}</${tag}>`;
-        out.push(
-          '<div class="md-table"><table><thead><tr>' +
-            head.map((h, i) => cell('th', i, h)).join('') +
-            '</tr></thead><tbody>' +
-            rows.map((r) => `<tr>${head.map((_, i) => cell('td', i, r[i])).join('')}</tr>`).join('') +
-            '</tbody></table></div>'
-        );
-        continue;
-      }
-    }
-
-    const heading = /^(#{1,4})\s+(.*)$/.exec(trimmed);
-    if (heading) {
-      closeLists();
-      const level = Math.min(heading[1].length + 1, 5); // # → h2 … #### → h5
-      out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
-      continue;
-    }
-
-    const task = /^[-*]\s+\[([ xX])\]\s+(.*)$/.exec(trimmed);
-    if (task) {
-      const checked = task[1].toLowerCase() === 'x' ? ' checked' : '';
-      item('ul', indent, `<input type="checkbox" disabled${checked} /> ${inline(task[2])}`, ' class="task"');
-      continue;
-    }
-
-    const bullet = /^[-*•]\s+(.*)$/.exec(trimmed);
-    if (bullet) {
-      item('ul', indent, inline(bullet[1]));
-      continue;
-    }
-
-    const numbered = /^(\d{1,9})[.)]\s+(.*)$/.exec(trimmed);
-    if (numbered) {
-      item('ol', indent, inline(numbered[2]), '', Number(numbered[1]));
-      continue;
-    }
-
-    // A line indented under an item is part of it ("1. **Game**\n   A
-    // turn-based RPG…"), after a blank line too.
-    if (lists.length && indent >= 2) {
-      append(`${blank ? '<br><br>' : '<br>'}${inline(trimmed)}`);
-      blank = false;
-      continue;
-    }
-
-    closeLists();
-    blank = false;
-    out.push(`<p>${inline(trimmed)}</p>`);
-  }
-  // An answer cut off mid-block still shows its code.
-  if (fence) out.push(`<pre class="md-code"><code>${fence.join('\n')}</code></pre>`);
-  closeLists();
-  return out.join('\n');
 }

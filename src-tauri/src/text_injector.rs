@@ -3,6 +3,16 @@
 //! Used by the dictation feature to inject transcribed text into
 //! whatever application/field is currently focused.
 //!
+//! - **The paste keys**: Ctrl+V, or a terminal's own (Shift+Insert in Git
+//!   Bash's mintty, Ctrl+Shift+V in Alacritty…: `app_kind::Host::paste_key`),
+//!   sent with their scan codes as a keyboard would.
+//! - **Did it land?** Into a Win32 edit control (a WinForms text box, a
+//!   classic EDIT or RichEdit) the paste is checked
+//!   (`selection::PasteCheck`: the control's length and selection, before
+//!   and after): one that stayed exactly as it was for a second gets the
+//!   text typed instead, once ([`Delivery::Typed`]). Never in a terminal, a
+//!   password box or a read-only field, and nowhere else (a web or code
+//!   editor's hidden input says nothing either way).
 //! - **Private clipboard writes** (`clip`): the dictation goes onto the
 //!   clipboard with Windows' "keep this out" formats —
 //!   `ExcludeClipboardContentFromMonitorProcessing`,
@@ -81,13 +91,18 @@ mod platform {
     }
 
     const INPUT_KEYBOARD: u32 = 1;
+    const KEYEVENTF_EXTENDEDKEY: u32 = 0x0001;
     const KEYEVENTF_KEYUP: u32 = 0x0002;
     const KEYEVENTF_UNICODE: u32 = 0x0004;
     const VK_SHIFT: u16 = 0x10;
     const VK_CONTROL: u16 = 0x11;
+    const VK_INSERT: u16 = 0x2D;
     const VK_C: u16 = 0x43;
     const VK_V: u16 = 0x56;
     const VK_RETURN: u16 = 0x0D;
+    /// MapVirtualKeyEx: a virtual key → its scan code, 0xE0__ for an
+    /// extended key (Vista and later).
+    const MAPVK_VK_TO_VSC_EX: u32 = 4;
     const GWL_EXSTYLE: i32 = -20;
     const WS_EX_TOOLWINDOW: i32 = 0x0000_0080;
     const WS_EX_NOACTIVATE: i32 = 0x0800_0000;
@@ -113,6 +128,8 @@ mod platform {
             size: *mut u32,
         ) -> i32;
         fn CloseHandle(h: HANDLE) -> i32;
+        fn GetKeyboardLayout(thread: u32) -> HANDLE;
+        fn MapVirtualKeyExW(code: u32, map_type: u32, layout: HANDLE) -> u32;
     }
 
     // Declared as notepad.rs / overlay.rs declare them
@@ -353,15 +370,66 @@ mod platform {
         }
     }
 
-    /// Simulate Ctrl+V keystroke via SendInput (into `target`: robot mode
-    /// checks it's still in front right after).
-    pub fn simulate_paste(target: Option<isize>) {
-        let inputs = [
-            make_key(VK_CONTROL, false),
-            make_key(VK_V, false),
-            make_key(VK_V, true),
-            make_key(VK_CONTROL, true),
-        ];
+    /// A key as a keyboard sends it: the virtual key **and** its scan code
+    /// in `layout` (the target's keyboard layout), flagged extended where
+    /// the key is (Insert: the one by Home, not the keypad's 0). Apps that
+    /// read the physical key from the scan code — winit's (Alacritty, Rio)
+    /// match their bindings that way, mintty and PuTTY tell Insert from the
+    /// keypad by the extended flag — see the key a person would press.
+    fn make_key_scanned(vk: u16, up: bool, layout: HANDLE) -> INPUT {
+        let scan = unsafe { MapVirtualKeyExW(u32::from(vk), MAPVK_VK_TO_VSC_EX, layout) };
+        let extended = vk == VK_INSERT || matches!(scan & 0xFF00, 0xE000 | 0xE100);
+        let mut flags = if up { KEYEVENTF_KEYUP } else { 0 };
+        if extended {
+            flags |= KEYEVENTF_EXTENDEDKEY;
+        }
+        INPUT {
+            type_: INPUT_KEYBOARD,
+            union: INPUT_UNION {
+                ki: KEYBDINPUT {
+                    w_vk: vk,
+                    w_scan: (scan & 0xFF) as u16,
+                    dw_flags: flags,
+                    time: 0,
+                    dw_extra_info: 0,
+                },
+            },
+        }
+    }
+
+    /// Simulate the paste keys via SendInput (into `target`: robot mode
+    /// checks it's still in front right after): Ctrl+V, or what the
+    /// terminal there binds (`app_kind::Host::paste_key`).
+    pub fn simulate_paste(target: Option<isize>, key: crate::app_kind::PasteKey) {
+        use crate::app_kind::PasteKey;
+        let inputs: Vec<INPUT> = match key {
+            // As it always was (no scan codes): every app it's been tried in pastes.
+            PasteKey::CtrlV => vec![
+                make_key(VK_CONTROL, false),
+                make_key(VK_V, false),
+                make_key(VK_V, true),
+                make_key(VK_CONTROL, true),
+            ],
+            PasteKey::ShiftInsert | PasteKey::CtrlShiftV => {
+                let thread = target
+                    .map(|h| unsafe { GetWindowThreadProcessId(h as HWND, std::ptr::null_mut()) })
+                    .unwrap_or(0);
+                let layout = unsafe { GetKeyboardLayout(thread) };
+                let k = |vk, up| make_key_scanned(vk, up, layout);
+                if key == PasteKey::ShiftInsert {
+                    vec![k(VK_SHIFT, false), k(VK_INSERT, false), k(VK_INSERT, true), k(VK_SHIFT, true)]
+                } else {
+                    vec![
+                        k(VK_CONTROL, false),
+                        k(VK_SHIFT, false),
+                        k(VK_V, false),
+                        k(VK_V, true),
+                        k(VK_SHIFT, true),
+                        k(VK_CONTROL, true),
+                    ]
+                }
+            }
+        };
 
         let sent = unsafe {
             SendInput(
@@ -376,7 +444,8 @@ mod platform {
             sent,
             expected = inputs.len(),
             cb_size = mem::size_of::<INPUT>(),
-            "SendInput Ctrl+V"
+            "SendInput {}",
+            key.name()
         );
 
         // Brief delay to let the target app process the paste
@@ -917,6 +986,10 @@ pub(crate) fn syncs_clipboard(app: Option<&str>) -> bool {
 pub enum Delivery {
     /// Pasted (or typed) into it.
     Pasted,
+    /// The paste didn't land — a Win32 edit control stayed exactly as it
+    /// was (`selection::PasteCheck`) — so the text was typed into it
+    /// instead, once.
+    Typed,
     /// The app runs as administrator, so Windows would drop Yap's keys
     /// (`elevated.rs`): none were sent, and the text is on the clipboard
     /// for the person to paste. The caller says so (`elevated::alert`).
@@ -1223,8 +1296,10 @@ fn paste_last_blocking(app: &tauri::AppHandle) -> Result<String, String> {
             std::thread::sleep(std::time::Duration::from_millis(60));
         }
         // A terminal or a chat app gets it as a dictation would; a
-        // terminal's screen isn't read.
-        let kind = app_kind::of_window(target).with_settings(cfg.terminal_mode, cfg.chat_no_full_stop);
+        // terminal's screen isn't read. (The paste keys are the window's
+        // whatever the settings say: `raw`.)
+        let raw = app_kind::of_window(target);
+        let kind = raw.with_settings(cfg.terminal_mode, cfg.chat_no_full_stop);
         let ctx = if cfg.smart_spacing && target.is_some() && !kind.is_terminal() {
             crate::selection::read_context(target)
         } else {
@@ -1232,7 +1307,7 @@ fn paste_last_blocking(app: &tauri::AppHandle) -> Result<String, String> {
         };
         let out = fit_for_paste(&text, ctx.as_ref(), cfg.append_trailing_space, &cfg.dictionary, kind);
         info!(len = out.len(), found_window = target.is_some(), fitted = ctx.is_some(), "Pasting the last transcript");
-        if inject_text_sync(&out, cfg.restore_clipboard, target, false)? == Delivery::LeftOnClipboard {
+        if inject_text_sync(&out, cfg.restore_clipboard, target, false, raw)? == Delivery::LeftOnClipboard {
             crate::alert::show(app, crate::elevated::alert());
         }
         Ok(out)
@@ -1274,12 +1349,16 @@ pub fn paste_last_from_tray(app: &tauri::AppHandle) {
 /// `strict` (an Undo, seconds after the dictation): the paste goes back to
 /// `target_hwnd` or nowhere — a window that's gone or won't come to the
 /// front leaves the text on the clipboard ([`Delivery::WindowGone`]) rather
-/// than pasting into whatever has the focus now.
+/// than pasting into whatever has the focus now. `kind`: the kind of app
+/// the window is, as read (before the settings): which keys paste there
+/// (`AppKind::paste_key`; Shift+Insert in Git Bash…), and — anything but a
+/// terminal — whether to check a Win32 edit control got the paste.
 pub async fn inject_text(
     text: &str,
     restore_clipboard: bool,
     target_hwnd: Option<isize>,
     strict: bool,
+    kind: AppKind,
 ) -> Result<Delivery, String> {
     // An Undo whose window has closed since: never into another one.
     if strict && target_hwnd.is_some_and(|h| !window_exists(h)) {
@@ -1311,9 +1390,32 @@ pub async fn inject_text(
     }
     let text = text.to_string();
 
-    tokio::task::spawn_blocking(move || inject_text_sync(&text, restore_clipboard, target_hwnd, strict))
+    tokio::task::spawn_blocking(move || inject_text_sync(&text, restore_clipboard, target_hwnd, strict, kind))
         .await
         .map_err(|e| format!("Inject task panicked: {}", e))?
+}
+
+/// How long a paste into a Win32 edit control has to show up before Yap
+/// takes it that it never will (`selection::PasteCheck`). Such a control
+/// takes a paste in a few milliseconds; an app too busy to say within
+/// this gets no second try (a read that times out decides nothing).
+const PASTE_LANDS_MS: u64 = 1_000;
+/// How often the control is read meanwhile.
+const PASTE_CHECK_EVERY_MS: u64 = 40;
+
+/// Wait for the paste `check` was taken before to show in its control:
+/// the first read that sees a change says it landed, one that fails says
+/// nothing more, and a control unchanged for [`PASTE_LANDS_MS`] since the
+/// keys went out (`pasted_at`) didn't get it.
+fn wait_for_paste(check: &crate::selection::PasteCheck, pasted_at: std::time::Instant) -> crate::selection::Landed {
+    let wait = std::time::Duration::from_millis(PASTE_LANDS_MS);
+    loop {
+        let waited_out = pasted_at.elapsed() >= wait;
+        if let Some(verdict) = check.verdict(waited_out) {
+            return verdict;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(PASTE_CHECK_EVERY_MS));
+    }
 }
 
 /// Whether `hwnd` is still a window (`true` off Windows: nothing to check).
@@ -1334,15 +1436,17 @@ fn inject_text_sync(
     restore_clipboard: bool,
     target_hwnd: Option<isize>,
     strict: bool,
+    kind: AppKind,
 ) -> Result<Delivery, String> {
-    info!(len = text.len(), "Injecting text via clipboard paste");
+    let key = kind.paste_key();
+    info!(len = text.len(), keys = key.name(), "Injecting text via clipboard paste");
 
     // Small delay to let focus settle after voice recording stops.
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (restore_clipboard, target_hwnd, strict);
+        let _ = (restore_clipboard, target_hwnd, strict, key);
         warn!("Text injection is only supported on Windows");
         Err("Text injection is only supported on Windows".into())
     }
@@ -1398,6 +1502,15 @@ fn inject_text_sync(
         // Small delay to ensure clipboard is ready.
         std::thread::sleep(std::time::Duration::from_millis(30));
 
+        // A Win32 edit control (a WinForms text box, a classic EDIT or
+        // RichEdit), as it stands before the keys: to check the paste lands
+        // there (never a terminal's).
+        let check = if kind.is_terminal() {
+            None
+        } else {
+            crate::selection::PasteCheck::before(target_hwnd)
+        };
+
         // Robot mode: the window in front must still be the test's, and the
         // one this paste is for — checked right before the keys go out.
         if let Err(why) = crate::realtest::recheck_foreground(target_hwnd, "paste") {
@@ -1407,8 +1520,41 @@ fn inject_text_sync(
             return Err(why);
         }
 
-        // Simulate Ctrl+V.
-        platform::simulate_paste(target_hwnd);
+        // Ctrl+V, or the terminal's own paste keys.
+        platform::simulate_paste(target_hwnd, key);
+        let pasted_at = std::time::Instant::now();
+
+        // Did it land? A control that stayed exactly as it was for a second
+        // didn't get it (a paste lost to a busy clipboard, an app that
+        // ignores Ctrl+V): the text is typed into it instead — once, only
+        // while it still has the focus.
+        let mut delivery = Delivery::Pasted;
+        if let Some(check) = &check {
+            match wait_for_paste(check, pasted_at) {
+                crate::selection::Landed::Yes => debug!("The paste reached the field"),
+                crate::selection::Landed::Unknown => debug!("Couldn't tell whether the paste reached the field"),
+                crate::selection::Landed::No => {
+                    let checked = if check.still_focused() {
+                        crate::realtest::recheck_foreground(target_hwnd, "type the text")
+                    } else {
+                        Err("the field lost the focus".to_string())
+                    };
+                    match checked {
+                        Ok(()) => {
+                            warn!(
+                                len = text.len(),
+                                "The paste didn't reach the field (it hadn't changed after {} ms): typing the text instead",
+                                PASTE_LANDS_MS
+                            );
+                            platform::type_unicode(text);
+                            crate::realtest::check_after(target_hwnd, "typing");
+                            delivery = Delivery::Typed;
+                        }
+                        Err(why) => warn!("The paste didn't reach the field, and it can't be typed there: {why}"),
+                    }
+                }
+            }
+        }
 
         // Restore previous clipboard (delayed to ensure paste completes). Webview/
         // Electron apps process Ctrl+V asynchronously (browser→renderer IPC) and can
@@ -1416,11 +1562,12 @@ fn inject_text_sync(
         // makes the paste land empty or with the OLD contents. 500 ms is still
         // imperceptible (it runs after the text has visually appeared in fast apps).
         if let Some(prev) = previous {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            let wait = std::time::Duration::from_millis(500).saturating_sub(pasted_at.elapsed());
+            std::thread::sleep(wait);
             clip::restore(prev, private);
         }
 
-        Ok(Delivery::Pasted)
+        Ok(delivery)
     }
 }
 
@@ -1487,7 +1634,7 @@ mod tests {
     fn terminal(cli: Option<app_kind::CodingCli>) -> AppKind {
         AppKind::Terminal(app_kind::Terminal {
             coding_cli: cli,
-            windows_terminal: true,
+            host: app_kind::Host::WindowsTerminal,
         })
     }
 

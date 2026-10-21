@@ -1295,7 +1295,7 @@
             {/if}
 
             {#if hasSummary && !writing}
-              <!-- renderMarkdown escapes all input first (lib/markdown.js). -->
+              <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/markdown.js). -->
               <div class="rendered">{@html renderMarkdown(note.enhancedContent)}</div>
             {:else if !writing && job?.state !== 'needsAi'}
               <p class="sumempty">
@@ -1400,7 +1400,7 @@
                       <!-- An email: shown exactly as it copies. -->
                       <div class="mabody plain">{m.text}</div>
                     {:else}
-                      <!-- renderMarkdown escapes all input first. -->
+                      <!-- renderMarkdown passes no raw HTML and sanitises its output. -->
                       <div class="mabody" class:err={m.error}>{@html renderMarkdown(m.text)}</div>
                     {/if}
                     {#if !m.error}
@@ -2420,6 +2420,10 @@
   .rendered :global(li.task) {
     list-style: none;
     margin-left: -18px;
+  }
+  /* A list under a task: indented under its text, past the checkbox. */
+  .rendered :global(li.task > :is(ul, ol)) {
+    margin-left: 18px;
   }
   .sofar {
     margin-top: 8px;

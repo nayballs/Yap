@@ -81,6 +81,33 @@ pub fn gate(hwnd: Option<isize>, what: &str) -> Gate {
     }
 }
 
+/// Robot mode: process names (lower case, without ".exe") that `app_kind`
+/// treats as editors with an integrated terminal besides VS Code and co.
+/// (`YAP_REALTEST_EDITORS`, comma-separated), so a page of the test's own
+/// in Edge can stand in for VS Code's terminal. Empty in a normal run and
+/// in release builds.
+pub fn stand_in_editors() -> &'static [String] {
+    #[cfg(debug_assertions)]
+    {
+        static EDITORS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+        EDITORS.get_or_init(|| {
+            if !on() {
+                return Vec::new();
+            }
+            std::env::var("YAP_REALTEST_EDITORS")
+                .unwrap_or_default()
+                .split(',')
+                .map(|e| e.trim().to_lowercase().trim_end_matches(".exe").to_string())
+                .filter(|e| !e.is_empty())
+                .collect()
+        })
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        &[]
+    }
+}
+
 /// [`gate`], quietly, for reads (the text around the cursor, the window's
 /// title): a normal run, or robot mode and a window the test opened.
 pub fn permits(hwnd: Option<isize>) -> bool {

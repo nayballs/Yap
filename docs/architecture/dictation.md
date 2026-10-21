@@ -11,7 +11,9 @@ fuzzy near-miss pass) → the "press enter" voice command → snippets → fit t
 kind of app (`app_kind.rs`: a terminal gets one line and no trailing space; a
 chat app's short message loses its full stop) and to the text around the
 cursor (smart spacing; where the field couldn't be read, append-space as
-before) → inject (an app running as administrator takes no keys from Yap:
+before) → inject (Ctrl+V, or the terminal's own paste keys — Shift+Insert in
+Git Bash, Ctrl+Shift+V in Alacritty…; a paste a Win32 text box never got is
+typed instead, once; an app running as administrator takes no keys from Yap:
 the text is left on the clipboard and the person told, `elevated.rs`) →
 submit key (auto-submit or the voice command, once; in a
 terminal Enter, only for the voice command or a coding CLI's auto-submit) —
@@ -80,10 +82,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   and Upload; then the "press enter" command, then snippets) →
   `text_injector::prepare_dictation` (fitted to the kind of app,
   `target_kind` — `app_kind::of_window`, read in `start_recording` beside
-  `target_hwnd` — and to the text around the cursor, which `start_recording`
+  `target_hwnd`, with one UI Automation question in an editor (is the focus
+  its integrated terminal?) — and to the text around the cursor, which `start_recording`
   started reading in the background via `selection::begin_dictation` — not
   for edit mode, nor a terminal with terminal mode on) → inject (into the
-  captured `target_hwnd`) → the submit key when auto-submit or the voice command
+  captured `target_hwnd`, with the keys `target_kind` as read pastes with —
+  `read_kind`, before the settings; `Delivered.paste`/`.typed` tell the robot)
+  → the submit key when auto-submit or the voice command
   asked (once, `app_kind::submit_key`; a dictation of only "press enter" presses it only while the
   target window still has the focus). **The dictation signal** for a meeting
   recording: `start_recording` (plain dictation, the edit hotkey, Commands by

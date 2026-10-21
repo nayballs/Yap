@@ -248,9 +248,12 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   plain RAG chat; tool-activity chips render in the thread above the answer
   and are kept with it in chats.json; a question from
   the Meetings view's Ask bar arrives through `chatRequest` and is sent with
-  `scope: 'meetings'`). **A web answer** (`web.rs`): its `[1]` citations are
-  small pills that open their source (`renderMarkdown(md, {sources})` in
-  `markdown.js`, where only the sources' links stay links — any other
+  `scope: 'meetings'`). Answers render as markdown — headings, lists,
+  tables, code, quotes, links — through `renderMarkdown` (`markdown.js`:
+  markdown-it + DOMPurify, never the model's own HTML; see
+  [notes.md](./notes.md#the-markdown-renderer)). **A web answer** (`web.rs`): its `[1]` citations are
+  small pills that open their source (`renderMarkdown(md, {sources})`,
+  even inside a table cell, where only the sources' links stay links — any other
   address the model wrote is plain text), a **Sources** row under it
   (number, title, site; `openExternalLink`), kept in chats.json; web chips
   carry a globe, a refused action (the safety rule) a shield. The composer (2026-10-20, after Claude

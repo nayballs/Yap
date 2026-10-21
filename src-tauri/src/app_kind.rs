@@ -3,13 +3,21 @@
 //! about the paste.
 //!
 //! [`of_window`] looks at the target window once, at record start, beside
-//! `target_hwnd`: its process name, window class and title (no UI
-//! Automation; cheap). Only the process name and the kind are ever logged,
-//! never the title. The rest of this module is pure and unit-tested;
-//! `text_injector::prepare_dictation` applies it as the last step before the
-//! paste (after AI cleanup, the dictionary, the "press enter" command and
-//! snippets).
+//! `target_hwnd`: its process name, window class and title (cheap). Only in
+//! an editor with an integrated terminal (VS Code, Cursor…) does it also ask
+//! UI Automation one question — is the focus xterm.js's input? — since
+//! there the window is the editor's whatever has the focus
+//! ([`editor_terminal`]). Only the process name and the kind are ever
+//! logged, never the title. The rest of this module is pure and
+//! unit-tested; `text_injector::prepare_dictation` applies it as the last
+//! step before the paste (after AI cleanup, the dictionary, the "press
+//! enter" command and snippets).
 //!
+//! - **The paste keys** ([`AppKind::paste_key`], whatever the settings):
+//!   Ctrl+V, but in a terminal what it binds — Shift+Insert in mintty (Git
+//!   Bash), PuTTY/KiTTY and MobaXterm, Ctrl+Shift+V in Alacritty, WezTerm,
+//!   Tabby, Hyper and Rio ([`Host::paste_key`]), where Ctrl+V would reach
+//!   the shell as a ^V.
 //! - **Terminals** (`config.terminal_mode`, "Safer pasting into terminals"):
 //!   pasting several lines into a shell can run each one as a command, so
 //!   the dictation becomes one line ([`terminal_text`]: line breaks joined,
@@ -44,9 +52,98 @@ pub enum AppKind {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Terminal {
     pub coding_cli: Option<CodingCli>,
-    /// The window is Windows Terminal's (which wraps a paste in bracketed
-    /// paste for an app that asks for it).
-    pub windows_terminal: bool,
+    /// Which terminal it is: what pastes there ([`Host::paste_key`]), and
+    /// whether a paste reaches the program as one block (Windows Terminal
+    /// wraps it in bracketed paste for an app that asks for it).
+    pub host: Host,
+}
+
+/// The terminal program a dictation goes into.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Host {
+    /// Windows Terminal.
+    WindowsTerminal,
+    /// A classic console window (conhost), or a terminal Yap knows by name
+    /// but not its keys (Warp, Extraterm…): Ctrl+V.
+    #[default]
+    Console,
+    /// mintty: Git Bash, MSYS2, Cygwin, WSLtty.
+    Mintty,
+    /// PuTTY and KiTTY.
+    Putty,
+    MobaXterm,
+    Alacritty,
+    WezTerm,
+    Tabby,
+    Hyper,
+    Rio,
+    /// ConEmu and Cmder.
+    ConEmu,
+    /// An editor's integrated terminal (VS Code, Cursor, Windsurf…): the
+    /// focused element is xterm.js's input ([`editor_terminal`]).
+    Editor,
+}
+
+impl Host {
+    /// For the debug log ("terminal (mintty)").
+    fn name(self) -> &'static str {
+        match self {
+            Host::WindowsTerminal => "Windows Terminal",
+            Host::Console => "a console",
+            Host::Mintty => "mintty",
+            Host::Putty => "PuTTY",
+            Host::MobaXterm => "MobaXterm",
+            Host::Alacritty => "Alacritty",
+            Host::WezTerm => "WezTerm",
+            Host::Tabby => "Tabby",
+            Host::Hyper => "Hyper",
+            Host::Rio => "Rio",
+            Host::ConEmu => "ConEmu",
+            Host::Editor => "an editor's terminal",
+        }
+    }
+
+    /// The keys that paste in this terminal by default. Ctrl+V reaches the
+    /// program as a ^V in most of them (bash's "insert the next key as is"),
+    /// so each gets the paste its own defaults bind (2026):
+    ///
+    /// - **Shift+Insert**: mintty (`ClipShortcuts`, on; its Ctrl+Shift+V
+    ///   needs `CtrlShiftShortcuts`, off), PuTTY/KiTTY (Shift+Ins, as a
+    ///   right-click), MobaXterm ("Paste inside terminal").
+    /// - **Ctrl+Shift+V**: Alacritty (its `Paste`; Shift+Insert is
+    ///   `PasteSelection`), WezTerm (`PasteFrom "Clipboard"`; Shift+Insert is
+    ///   the primary selection), Tabby, Hyper (`editor:paste`), Rio.
+    /// - **Ctrl+V**: Windows Terminal (its default `paste` bindings include
+    ///   it), a console window ("Enable Ctrl key shortcuts", on since Windows
+    ///   10), ConEmu/Cmder (Ctrl+V pastes it all; Shift+Ins only the first
+    ///   line), VS Code's terminal (`workbench.action.terminal.paste`), and
+    ///   any terminal whose keys Yap doesn't know — as before.
+    pub fn paste_key(self) -> PasteKey {
+        match self {
+            Host::Mintty | Host::Putty | Host::MobaXterm => PasteKey::ShiftInsert,
+            Host::Alacritty | Host::WezTerm | Host::Tabby | Host::Hyper | Host::Rio => PasteKey::CtrlShiftV,
+            Host::WindowsTerminal | Host::Console | Host::ConEmu | Host::Editor => PasteKey::CtrlV,
+        }
+    }
+}
+
+/// The keys Yap presses to paste.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PasteKey {
+    #[default]
+    CtrlV,
+    ShiftInsert,
+    CtrlShiftV,
+}
+
+impl PasteKey {
+    pub fn name(self) -> &'static str {
+        match self {
+            PasteKey::CtrlV => "Ctrl+V",
+            PasteKey::ShiftInsert => "Shift+Insert",
+            PasteKey::CtrlShiftV => "Ctrl+Shift+V",
+        }
+    }
 }
 
 /// The AI coding tools Yap recognises in a terminal's title.
@@ -93,7 +190,7 @@ impl Terminal {
     /// paste, in Windows Terminal (which passes it on as bracketed paste).
     /// Everywhere else the lines are joined.
     pub fn keeps_lines(&self) -> bool {
-        self.windows_terminal && self.coding_cli.is_some_and(CodingCli::takes_pasted_lines)
+        self.host == Host::WindowsTerminal && self.coding_cli.is_some_and(CodingCli::takes_pasted_lines)
     }
 }
 
@@ -113,11 +210,22 @@ impl AppKind {
         }
     }
 
+    /// The keys that paste into this app: Ctrl+V, but in a terminal what
+    /// that terminal binds ([`Host::paste_key`]). Asked of the kind as read,
+    /// before the settings: with "Safer pasting into terminals" off a
+    /// terminal is fitted like any app, but Ctrl+V still wouldn't paste.
+    pub fn paste_key(self) -> PasteKey {
+        match self {
+            AppKind::Terminal(t) => t.host.paste_key(),
+            _ => PasteKey::CtrlV,
+        }
+    }
+
     /// For the debug log (no titles, no text).
     pub fn describe(self) -> String {
         match self {
             AppKind::Terminal(t) => {
-                let host = if t.windows_terminal { "Windows Terminal" } else { "a console" };
+                let host = t.host.name();
                 match t.coding_cli {
                     Some(cli) => format!("terminal ({} in {host})", cli.name()),
                     None => format!("terminal ({host})"),
@@ -163,17 +271,95 @@ const TERMINAL_EXES: &[&str] = &[
     "bash",
 ];
 
-/// Window classes of terminals, whatever process owns them (a classic
-/// console window can report the program running in it, e.g. claude.exe).
-const TERMINAL_CLASSES: &[&str] = &[
-    "ConsoleWindowClass",
-    "CASCADIA_HOSTING_WINDOW_CLASS",
-    "mintty",
-    "PuTTY",
-    "KiTTY",
-    "VirtualConsoleClass",
-    "org.wezfurlong.wezterm",
+/// Which terminal a window is: by its class, whatever process owns it (a
+/// classic console window can report the program running in it, e.g.
+/// claude.exe), else by its process name (`stem`: lower case, no ".exe").
+/// `None`: not a terminal.
+fn terminal_host(stem: &str, class: &str) -> Option<Host> {
+    let by_class = match class {
+        "CASCADIA_HOSTING_WINDOW_CLASS" => Some(Host::WindowsTerminal),
+        "ConsoleWindowClass" => Some(Host::Console),
+        "mintty" => Some(Host::Mintty),
+        "PuTTY" | "KiTTY" => Some(Host::Putty),
+        "VirtualConsoleClass" => Some(Host::ConEmu),
+        "org.wezfurlong.wezterm" => Some(Host::WezTerm),
+        _ => None,
+    };
+    if by_class.is_some() {
+        return by_class;
+    }
+    Some(match stem {
+        "windowsterminal" | "wt" => Host::WindowsTerminal,
+        "mintty" | "git-bash" => Host::Mintty,
+        "putty" | "kitty" => Host::Putty,
+        "mobaxterm" => Host::MobaXterm,
+        "alacritty" => Host::Alacritty,
+        "wezterm" | "wezterm-gui" => Host::WezTerm,
+        "tabby" => Host::Tabby,
+        "hyper" => Host::Hyper,
+        "rio" => Host::Rio,
+        "conemu" | "conemu64" | "cmder" => Host::ConEmu,
+        s if TERMINAL_EXES.contains(&s) => Host::Console,
+        _ => return None,
+    })
+}
+
+/// Editors with an integrated terminal (xterm.js), by process name (lower
+/// case, without ".exe"): VS Code and the editors built on it. Their window
+/// is the editor's whatever has the focus; whether a dictation goes into the
+/// terminal is read from the focused element ([`editor_terminal`]).
+const EDITOR_EXES: &[&str] = &[
+    "code",
+    "code - insiders",
+    "code - oss",
+    "vscodium",
+    "codium",
+    "cursor",
+    "windsurf",
+    "positron",
+    "trae",
+    "kiro",
+    "antigravity",
+    "azuredatastudio",
 ];
+
+/// xterm.js's input element: a hidden textarea with this class, which holds
+/// the keyboard focus while its terminal does (xterm.js
+/// `CoreBrowserTerminal`; Chromium gives an element's HTML class as its UI
+/// Automation ClassName).
+const XTERM_INPUT_CLASS: &str = "xterm-helper-textarea";
+
+/// The focused element of an editor's window (`class`: its UI Automation
+/// ClassName, `name`: its Name) is an integrated terminal's input: that
+/// terminal, with the coding CLI its title shows. VS Code labels the input
+/// "Terminal 1, <title>" then lines of screen-reader help (the words are
+/// translated, the number and the title aren't); the title is the
+/// process's name or what the program set ("claude", "✳ Fix the build").
+/// Chromium folds the label's line breaks into spaces, so the help often
+/// follows the title on one line: a title the whole line doesn't name is
+/// tried by its first word ("claude Run the command: …").
+pub fn editor_terminal(class: &str, name: &str) -> Option<Terminal> {
+    if !class.split_whitespace().any(|c| c == XTERM_INPUT_CLASS) {
+        return None;
+    }
+    let cli = terminal_title(name).and_then(|title| {
+        coding_cli(title).or_else(|| title.split_whitespace().next().filter(|w| *w != title).and_then(coding_cli))
+    });
+    Some(Terminal {
+        coding_cli: cli,
+        host: Host::Editor,
+    })
+}
+
+/// The title in an integrated terminal's label: what follows "Terminal
+/// <n>" and its separator ("," "、" "，" ":") on the label's first line.
+fn terminal_title(label: &str) -> Option<&str> {
+    let line = label.lines().next()?.trim();
+    let digits = line.find(|c: char| c.is_ascii_digit())?;
+    let after = line[digits..].trim_start_matches(|c: char| c.is_ascii_digit());
+    let title = after.trim_start_matches([',', '、', '，', ':', '：', ' ']).trim();
+    (!title.is_empty() && after.len() != title.len()).then_some(title)
+}
 
 /// Chat apps, by process name (lower case, without ".exe").
 const CHAT_EXES: &[&str] = &[
@@ -250,11 +436,10 @@ fn exe_stem(exe: &str) -> String {
 /// "WindowsTerminal.exe"), window class and title.
 pub fn classify(exe: Option<&str>, class: &str, title: &str) -> AppKind {
     let stem = exe_stem(exe.unwrap_or(""));
-    let windows_terminal = stem == "windowsterminal" || class == "CASCADIA_HOSTING_WINDOW_CLASS";
-    if windows_terminal || TERMINAL_CLASSES.contains(&class) || TERMINAL_EXES.contains(&stem.as_str()) {
+    if let Some(host) = terminal_host(&stem, class) {
         return AppKind::Terminal(Terminal {
             coding_cli: coding_cli(title),
-            windows_terminal,
+            host,
         });
     }
     if CHAT_EXES.contains(&stem.as_str()) {
@@ -406,9 +591,19 @@ fn page_name(seg: &str) -> &str {
     s
 }
 
+/// An editor with an integrated terminal, by its process name (`stem`:
+/// lower case, no ".exe"). Robot mode adds the test's stand-ins
+/// (`realtest::stand_in_editors`).
+fn is_editor(stem: &str) -> bool {
+    EDITOR_EXES.contains(&stem) || crate::realtest::stand_in_editors().iter().any(|e| e == stem)
+}
+
 /// What kind of app the window `hwnd` is (`None`: one of Yap's own, or none
 /// → `Other`). Reads its process name, class and title; logs the process
-/// name and the kind at `debug`, never the title. A test run reads nothing
+/// name and the kind at `debug`, never the title. In an editor with an
+/// integrated terminal (VS Code…) it also asks UI Automation what has the
+/// focus — the terminal's input or not ([`editor_terminal`]; one
+/// time-boxed call, its class and name only). A test run reads nothing
 /// (it would be whatever the developer has in front); robot mode, only a
 /// window the test opened (`realtest::permits`).
 pub fn of_window(hwnd: Option<isize>) -> AppKind {
@@ -421,7 +616,13 @@ pub fn of_window(hwnd: Option<isize>) -> AppKind {
     #[cfg(windows)]
     {
         let exe = crate::text_injector::app_name_for(Some(hwnd));
-        let kind = classify(exe.as_deref(), &win::class(hwnd), &win::title(hwnd));
+        let mut kind = classify(exe.as_deref(), &win::class(hwnd), &win::title(hwnd));
+        if kind == AppKind::Other && is_editor(&exe_stem(exe.as_deref().unwrap_or(""))) {
+            let focused = crate::text_injector::window_process(hwnd).and_then(crate::selection::focused_element);
+            if let Some(t) = focused.and_then(|(class, name)| editor_terminal(&class, &name)) {
+                kind = AppKind::Terminal(t);
+            }
+        }
         tracing::debug!(app = exe.as_deref().unwrap_or("?"), kind = %kind.describe(), "The dictation's app");
         kind
     }
@@ -687,10 +888,11 @@ mod tests {
     use super::*;
 
     fn term(cli: Option<CodingCli>, wt: bool) -> AppKind {
-        AppKind::Terminal(Terminal {
-            coding_cli: cli,
-            windows_terminal: wt,
-        })
+        on(cli, if wt { Host::WindowsTerminal } else { Host::Console })
+    }
+
+    fn on(cli: Option<CodingCli>, host: Host) -> AppKind {
+        AppKind::Terminal(Terminal { coding_cli: cli, host })
     }
 
     #[test]
@@ -701,17 +903,24 @@ mod tests {
         assert_eq!(classify(Some("cmd.exe"), "ConsoleWindowClass", "Command Prompt"), term(None, false));
         assert_eq!(classify(Some("powershell.exe"), "ConsoleWindowClass", "Windows PowerShell"), term(None, false));
         assert_eq!(classify(Some("pwsh.exe"), "", "PowerShell 7"), term(None, false));
-        assert_eq!(classify(Some("mintty.exe"), "mintty", "MINGW64:/c/Users/sam"), term(None, false));
-        assert_eq!(classify(Some("wezterm-gui.exe"), "org.wezfurlong.wezterm", "pwsh"), term(None, false));
-        assert_eq!(classify(Some("alacritty.exe"), "Window Class", "Alacritty"), term(None, false));
-        assert_eq!(classify(Some("Tabby.exe"), "Chrome_WidgetWin_1", "PowerShell"), term(None, false));
-        assert_eq!(classify(Some("Hyper.exe"), "Chrome_WidgetWin_1", "pwsh"), term(None, false));
-        assert_eq!(classify(Some("putty.exe"), "PuTTY", "sam@box: ~"), term(None, false));
+        assert_eq!(classify(Some("mintty.exe"), "mintty", "MINGW64:/c/Users/sam"), on(None, Host::Mintty));
+        assert_eq!(classify(Some("wezterm-gui.exe"), "org.wezfurlong.wezterm", "pwsh"), on(None, Host::WezTerm));
+        assert_eq!(classify(Some("alacritty.exe"), "Window Class", "Alacritty"), on(None, Host::Alacritty));
+        assert_eq!(classify(Some("Tabby.exe"), "Chrome_WidgetWin_1", "PowerShell"), on(None, Host::Tabby));
+        assert_eq!(classify(Some("Hyper.exe"), "Chrome_WidgetWin_1", "pwsh"), on(None, Host::Hyper));
+        assert_eq!(classify(Some("putty.exe"), "PuTTY", "sam@box: ~"), on(None, Host::Putty));
+        assert_eq!(classify(Some("kitty.exe"), "KiTTY", "sam@box: ~"), on(None, Host::Putty));
+        assert_eq!(classify(Some("MobaXterm.exe"), "TMobaXtermForm", "sam@box"), on(None, Host::MobaXterm));
+        assert_eq!(classify(Some("rio.exe"), "Window Class", "pwsh"), on(None, Host::Rio));
+        assert_eq!(classify(Some("ConEmu64.exe"), "VirtualConsoleClass", "cmd"), on(None, Host::ConEmu));
+        assert_eq!(classify(Some("warp.exe"), "Window Class", "Warp"), term(None, false));
         // A classic console window can report the program running in it.
         assert_eq!(
             classify(Some("claude.exe"), "ConsoleWindowClass", "✳ Claude Code"),
             term(Some(CodingCli::ClaudeCode), false)
         );
+        // mintty's class wins whatever the process says (a shortcut's own name).
+        assert_eq!(classify(Some("git-bash.exe"), "mintty", "MINGW64:~"), on(None, Host::Mintty));
         // …but claude.exe outside a console is Claude's desktop app.
         assert_eq!(classify(Some("claude.exe"), "Chrome_WidgetWin_1", "Claude"), AppKind::Other);
         assert_eq!(classify(Some("Code.exe"), "Chrome_WidgetWin_1", "main.rs - Yap - Visual Studio Code"), AppKind::Other);
@@ -761,13 +970,101 @@ mod tests {
 
     #[test]
     fn only_claude_code_and_codex_in_windows_terminal_keep_their_lines() {
-        let t = |cli, wt| Terminal { coding_cli: cli, windows_terminal: wt };
-        assert!(t(Some(CodingCli::ClaudeCode), true).keeps_lines());
-        assert!(t(Some(CodingCli::Codex), true).keeps_lines());
-        assert!(!t(Some(CodingCli::ClaudeCode), false).keeps_lines());
-        assert!(!t(Some(CodingCli::GeminiCli), true).keeps_lines());
-        assert!(!t(Some(CodingCli::Aider), true).keeps_lines());
-        assert!(!t(None, true).keeps_lines());
+        let t = |cli, host| Terminal { coding_cli: cli, host };
+        assert!(t(Some(CodingCli::ClaudeCode), Host::WindowsTerminal).keeps_lines());
+        assert!(t(Some(CodingCli::Codex), Host::WindowsTerminal).keeps_lines());
+        assert!(!t(Some(CodingCli::ClaudeCode), Host::Console).keeps_lines());
+        assert!(!t(Some(CodingCli::ClaudeCode), Host::Editor).keeps_lines());
+        assert!(!t(Some(CodingCli::ClaudeCode), Host::Mintty).keeps_lines());
+        assert!(!t(Some(CodingCli::GeminiCli), Host::WindowsTerminal).keeps_lines());
+        assert!(!t(Some(CodingCli::Aider), Host::WindowsTerminal).keeps_lines());
+        assert!(!t(None, Host::WindowsTerminal).keeps_lines());
+    }
+
+    #[test]
+    fn each_terminal_pastes_with_its_own_keys() {
+        let key = |exe: &str, class: &str| classify(Some(exe), class, "").paste_key();
+        // Shift+Insert: Ctrl+V would reach the shell as ^V.
+        assert_eq!(key("mintty.exe", "mintty"), PasteKey::ShiftInsert); // Git Bash, MSYS2, Cygwin
+        assert_eq!(key("putty.exe", "PuTTY"), PasteKey::ShiftInsert);
+        assert_eq!(key("kitty.exe", "KiTTY"), PasteKey::ShiftInsert);
+        assert_eq!(key("MobaXterm.exe", "TMobaXtermForm"), PasteKey::ShiftInsert);
+        // Ctrl+Shift+V: their clipboard paste (Shift+Insert is the primary selection).
+        assert_eq!(key("alacritty.exe", "Window Class"), PasteKey::CtrlShiftV);
+        assert_eq!(key("wezterm-gui.exe", "org.wezfurlong.wezterm"), PasteKey::CtrlShiftV);
+        assert_eq!(key("Tabby.exe", "Chrome_WidgetWin_1"), PasteKey::CtrlShiftV);
+        assert_eq!(key("Hyper.exe", "Chrome_WidgetWin_1"), PasteKey::CtrlShiftV);
+        assert_eq!(key("rio.exe", "Window Class"), PasteKey::CtrlShiftV);
+        // Ctrl+V where it pastes, and wherever Yap doesn't know better.
+        assert_eq!(key("WindowsTerminal.exe", "CASCADIA_HOSTING_WINDOW_CLASS"), PasteKey::CtrlV);
+        assert_eq!(key("cmd.exe", "ConsoleWindowClass"), PasteKey::CtrlV);
+        assert_eq!(key("claude.exe", "ConsoleWindowClass"), PasteKey::CtrlV);
+        assert_eq!(key("ConEmu64.exe", "VirtualConsoleClass"), PasteKey::CtrlV);
+        assert_eq!(key("warp.exe", "Window Class"), PasteKey::CtrlV);
+        assert_eq!(on(None, Host::Editor).paste_key(), PasteKey::CtrlV);
+        // Every other app.
+        assert_eq!(key("notepad.exe", "Notepad"), PasteKey::CtrlV);
+        assert_eq!(key("slack.exe", "Chrome_WidgetWin_1"), PasteKey::CtrlV);
+        assert_eq!(AppKind::Other.paste_key(), PasteKey::CtrlV);
+        // The settings don't change the keys: "Safer pasting" off, mintty still wants Shift+Insert.
+        assert_eq!(on(None, Host::Mintty).with_settings(false, true), AppKind::Other);
+        assert_eq!(on(None, Host::Mintty).paste_key().name(), "Shift+Insert");
+    }
+
+    /// What VS Code's integrated terminal reports over UI Automation, from
+    /// its source: xterm.js's textarea (class `xterm-helper-textarea`)
+    /// labelled `"Terminal {0}, {1}"` (`terminalTextBoxAriaLabelNumberAndTitle`)
+    /// or `"Terminal {0}"`, then the screen-reader help lines.
+    #[test]
+    fn an_editors_integrated_terminal_by_its_focused_input() {
+        let help = "\nRun the command: Toggle Screen Reader Accessibility Mode for an optimized screen reader experience\nUse Alt+F1 for terminal accessibility help";
+        let input = "xterm-helper-textarea";
+        let t = |name: &str| editor_terminal(input, name);
+        assert_eq!(t(&format!("Terminal 1, pwsh{help}")), Some(Terminal { coding_cli: None, host: Host::Editor }));
+        assert_eq!(t("Terminal 1"), Some(Terminal { coding_cli: None, host: Host::Editor }));
+        assert_eq!(t(""), Some(Terminal { coding_cli: None, host: Host::Editor }));
+        // A coding CLI in it, by the title it set or its process name.
+        let claude = Some(Terminal { coding_cli: Some(CodingCli::ClaudeCode), host: Host::Editor });
+        assert_eq!(t(&format!("Terminal 2, claude{help}")), claude);
+        assert_eq!(t(&format!("Terminal 3, ✳ Fix the login bug{help}")), claude);
+        assert_eq!(t("Terminal 12, ◐ Fix the login bug"), claude);
+        assert_eq!(t("Terminal 1, codex").unwrap().coding_cli, Some(CodingCli::Codex));
+        assert_eq!(t("Terminal 1, ◇  Ready (Yap)").unwrap().coding_cli, Some(CodingCli::GeminiCli));
+        // Translated labels: the number and the title stay.
+        assert_eq!(t("ターミナル 1、claude"), claude);
+        assert_eq!(t("Терминал 2, claude"), claude);
+        // As Chromium gives the label (found by the robot, 2026-10-21): its
+        // line breaks folded into spaces, the help on the title's line.
+        let flat = |title: &str| t(&format!("Terminal 1, {title}{}", help.replace('\n', " ")));
+        assert_eq!(flat("claude"), claude);
+        assert_eq!(flat("✳ Fix the login bug"), claude);
+        assert_eq!(flat("codex").unwrap().coding_cli, Some(CodingCli::Codex));
+        assert_eq!(flat("Claude Code"), claude);
+        assert_eq!(flat("pwsh").unwrap().coding_cli, None);
+        assert_eq!(flat("C:\\Projects\\claude").unwrap().coding_cli, None);
+        assert_eq!(flat("claude-notes").unwrap().coding_cli, None);
+        // A shell sitting in a folder named after a CLI: just a shell.
+        assert_eq!(t("Terminal 1, C:\\Projects\\claude").unwrap().coding_cli, None);
+        // The class may carry others beside it.
+        assert!(editor_terminal("xterm-helper-textarea focused", "Terminal 1").is_some());
+        // The editor itself (Monaco's input, or its EditContext), a chat box: not a terminal.
+        assert_eq!(editor_terminal("inputarea monaco-mouse-cursor-text", "Editor content;Press Alt+F1 for Accessibility Options."), None);
+        assert_eq!(editor_terminal("native-edit-context", "The editor is not accessible at this time."), None);
+        assert_eq!(editor_terminal("", "Terminal 1, pwsh"), None);
+        assert_eq!(editor_terminal("xterm-helper-textarea-ish", "Terminal 1, pwsh"), None);
+        assert_eq!(on(None, Host::Editor).describe(), "terminal (an editor's terminal)");
+        assert_eq!(on(Some(CodingCli::ClaudeCode), Host::Editor).describe(), "terminal (Claude Code in an editor's terminal)");
+    }
+
+    #[test]
+    fn editors_with_an_integrated_terminal() {
+        for exe in ["Code.exe", "Code - Insiders.exe", "VSCodium.exe", "Cursor.exe", "Windsurf.exe"] {
+            assert!(is_editor(&exe_stem(exe)), "{exe}");
+        }
+        assert!(!is_editor(&exe_stem("msedge.exe")));
+        assert!(!is_editor(&exe_stem("notepad.exe")));
+        // The editor's window is "other" until its focused element says otherwise.
+        assert_eq!(classify(Some("Code.exe"), "Chrome_WidgetWin_1", "main.rs - Yap - Visual Studio Code"), AppKind::Other);
     }
 
     #[test]

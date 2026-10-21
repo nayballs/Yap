@@ -30,6 +30,8 @@ test('a PowerShell prompt gets a dictation as one line, and nothing runs', async
   await prompt(sh);
   const r = await robot.dictate(sh, 'List the files:\n- the logs\n- the notes.');
   expect(r.kind).toBe('terminal (Windows Terminal)');
+  // Windows Terminal's own paste bindings include Ctrl+V.
+  expect(r.paste).toBe('Ctrl+V');
   expect(r.text).toBe('List the files: the logs; the notes.');
   expect(r.submit).toBeNull();
   await expect.poll(() => lines(sh).at(-1)).toBe('PS> List the files: the logs; the notes.');
