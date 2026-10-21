@@ -45,6 +45,15 @@ pub struct TurnStats {
     pub prompt_eval_ms: f64,
     pub gen_tokens: u64,
     pub gen_ms: f64,
+    /// Speculative decoding (llama.cpp's `timings.draft_n` /
+    /// `draft_n_accepted`): tokens drafted, and how many the model kept.
+    pub draft_tokens: u64,
+    pub draft_accepted: u64,
+    /// The turn's last answered call (the one that wrote the answer): its
+    /// wall time, and llama.cpp's time to its first token (prompt + one
+    /// token's generation) — what a streamed answer would have shown first.
+    pub final_call_ms: u64,
+    pub final_first_token_ms: f64,
     pub tool_calls: Vec<ToolCall>,
     /// The text the clipboard tool was asked to copy (recorded, never copied).
     pub clipboard: Option<String>,
@@ -93,6 +102,63 @@ static CONFIG: Mutex<Option<crate::config::YapConfig>> = Mutex::new(None);
 static TOOLS: Mutex<Option<bool>> = Mutex::new(None);
 static TIMEOUT: Mutex<Option<Duration>> = Mutex::new(None);
 static WEB_LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Fields laid over every request body: the run's (`--temperature`, `--set`)
+/// and, on top, the bench phase's own (`id_slot`).
+static RUN_BODY: Mutex<Option<serde_json::Map<String, Value>>> = Mutex::new(None);
+static PHASE_BODY: Mutex<Option<serde_json::Map<String, Value>>> = Mutex::new(None);
+
+/// The run's own request fields (`--temperature`, `--set key=json`).
+pub fn set_run_body(fields: serde_json::Map<String, Value>) {
+    *RUN_BODY.lock().unwrap_or_else(|p| p.into_inner()) = (!fields.is_empty()).then_some(fields);
+}
+
+/// A bench phase's request fields (cleared with an empty map).
+pub fn set_phase_body(fields: serde_json::Map<String, Value>) {
+    *PHASE_BODY.lock().unwrap_or_else(|p| p.into_inner()) = (!fields.is_empty()).then_some(fields);
+}
+
+/// Lay the run's and the phase's fields over `body`; a `null` removes one.
+pub fn adjust_body(body: &mut Value) {
+    let run = RUN_BODY.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    let phase = PHASE_BODY.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    overlay(body, run.iter().chain(phase.iter()));
+    let rewrite = *PHASE_REWRITE.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(f) = rewrite {
+        f(body);
+    }
+}
+
+/// A bench phase's rewrite of the request (the cleanup bench's
+/// `--cleanup-layout`: the same prompt laid out another way).
+static PHASE_REWRITE: Mutex<Option<fn(&mut Value)>> = Mutex::new(None);
+
+pub fn set_phase_rewrite(f: Option<fn(&mut Value)>) {
+    *PHASE_REWRITE.lock().unwrap_or_else(|p| p.into_inner()) = f;
+}
+
+/// llama.cpp's time to an answer's first token: the prompt's processing and
+/// one token's generation (0 when the server gives no timings). Pure.
+pub fn first_token_ms(timings: &Value) -> f64 {
+    let prompt = timings["prompt_ms"].as_f64().unwrap_or(0.0);
+    let (n, gen) = (timings["predicted_n"].as_f64().unwrap_or(0.0), timings["predicted_ms"].as_f64().unwrap_or(0.0));
+    if prompt <= 0.0 && gen <= 0.0 {
+        return 0.0;
+    }
+    prompt + if n > 0.0 { gen / n } else { 0.0 }
+}
+
+fn overlay<'a>(body: &mut Value, layers: impl Iterator<Item = &'a serde_json::Map<String, Value>>) {
+    let Some(obj) = body.as_object_mut() else { return };
+    for layer in layers {
+        for (k, v) in layer {
+            if v.is_null() {
+                obj.remove(k);
+            } else {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+    }
+}
 
 pub fn set_web_live(live: bool) {
     WEB_LIVE.store(live, Ordering::SeqCst);
@@ -511,6 +577,10 @@ impl CallLog {
             t.prompt_eval_ms += timings["prompt_ms"].as_f64().unwrap_or(0.0);
             t.gen_tokens += timings["predicted_n"].as_u64().unwrap_or(0);
             t.gen_ms += timings["predicted_ms"].as_f64().unwrap_or(0.0);
+            t.draft_tokens += timings["draft_n"].as_u64().unwrap_or(0);
+            t.draft_accepted += timings["draft_n_accepted"].as_u64().unwrap_or(0);
+            t.final_call_ms = ms;
+            t.final_first_token_ms = first_token_ms(timings);
             r.window.push_back((now, total.max(1)));
             while r.window.len() > 200 {
                 r.window.pop_front();
@@ -544,6 +614,24 @@ mod tests {
         assert_eq!(out.matches("[REDACTED]").count(), 2);
         assert_eq!(redact_with("sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUV", &[]), "[REDACTED]");
         assert_eq!(redact_with("nothing secret here", &[]), "nothing secret here");
+    }
+
+    #[test]
+    fn body_overrides_lay_over_the_request() {
+        let mut body = json!({ "model": "m", "temperature": 0.5, "stream": false });
+        let run: serde_json::Map<String, Value> = serde_json::from_value(json!({ "temperature": 0.0, "seed": 7 })).unwrap();
+        let phase: serde_json::Map<String, Value> =
+            serde_json::from_value(json!({ "id_slot": 0, "seed": null })).unwrap();
+        overlay(&mut body, [&run, &phase].into_iter());
+        assert_eq!(body, json!({ "model": "m", "temperature": 0.0, "stream": false, "id_slot": 0 }));
+    }
+
+    #[test]
+    fn first_token_time_from_llama_timings() {
+        let t = json!({ "prompt_n": 900, "prompt_ms": 180.0, "predicted_n": 40, "predicted_ms": 400.0 });
+        assert!((first_token_ms(&t) - 190.0).abs() < 1e-9);
+        assert_eq!(first_token_ms(&json!({})), 0.0);
+        assert_eq!(first_token_ms(&Value::Null), 0.0);
     }
 
     #[test]

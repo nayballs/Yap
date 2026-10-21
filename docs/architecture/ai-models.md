@@ -290,9 +290,18 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   Assistant's (scope "assistant"). **`--cleanup`** (`eval/cleanup.rs`)
   times `llm::cleanup` itself over `evals/cleanup/dictations.json` — back to
   back, after a Chat turn, after a long one — with llama.cpp's prompt tokens
-  processed, and keeps every output (`cleanup.md`). The hooks in
-  `llm.rs` (`eval::Call`), `tools.rs`, `config.rs`, `notes.rs` are no-ops
-  outside a run. See [`docs/model-evals.md`](../model-evals.md).
+  processed, and keeps every output (`cleanup.md`); `--cleanup-layout`
+  tries the same prompt laid out another way. **`--bench`**
+  (`eval/serving.rs`): `stream` (time to the first token, streamed vs
+  not, and streamed tool calls), `layout` (a Chat turn's prompt re-read
+  with the time + notes in the system prompt vs the last user message),
+  `loop` (a tool step after one that offered other tools), `embed` (an
+  embedding model's speed and recall vs Chat's keyword search);
+  `--temperature` / `--set` lay fields over every request
+  (`eval::adjust_body`, in `llm::post_chat_request`). The hooks in
+  `llm.rs` (`eval::Call`, `eval::adjust_body`), `tools.rs`, `config.rs`,
+  `notes.rs` are no-ops outside a run. See
+  [`docs/model-evals.md`](../model-evals.md).
 
 ## Model evaluations (`npm run eval`)
 How real models do on Yap's own Chat code, with every request and response

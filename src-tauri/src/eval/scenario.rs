@@ -374,6 +374,8 @@ impl Observed {
             a.prompt_eval_ms += b.prompt_eval_ms;
             a.gen_tokens += b.gen_tokens;
             a.gen_ms += b.gen_ms;
+            a.draft_tokens += b.draft_tokens;
+            a.draft_accepted += b.draft_accepted;
             a.tool_calls.extend(b.tool_calls.iter().cloned());
             a.post_fixes.extend(b.post_fixes.iter().cloned());
             if b.clipboard.is_some() {

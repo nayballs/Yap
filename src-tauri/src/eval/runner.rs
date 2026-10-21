@@ -58,6 +58,24 @@ Dictation cleanup:
   --cleanup                instead of the scenarios: time llm::cleanup on each model over
                            evals/cleanup/dictations.json, back to back and after a Chat turn;
                            cleanup.md   --cleanup-rounds <n> (default 3)
+  --cleanup-slot <n>       send the cleanup to llama.cpp slot n (`id_slot`), and with
+  --chat-slot <n>          the Chat turns between them to slot n (measures pinned slots)
+  --cleanup-layout <l>     the same cleanup prompt laid out another way: split (the restated
+                           instruction its own user message) | system (in the system prompt)
+Serving benches (local servers; instead of the scenarios; serving.md):
+  --bench stream           time to the first token, streamed vs not, on Chat-shaped requests
+                           (a short answer, a long one, a web answer, a tool call)
+  --bench layout           a 4-turn Chat with the time + notes in the system prompt (today)
+                           vs in the last user message: prompt tokens re-processed per turn
+  --bench loop             a web answer's second step after a first that offered other tools
+                           (today's: the action tools dropped, web_search only) or the same
+  --bench embed            an --embedding server: throughput, query latency, and recall over
+                           evals/retrieval/notes.json vs Chat's keyword search
+  --bench-rounds <n>       rounds per request (default 3)
+  --bench-history <n>      layout: n earlier question/answer pairs (~450 tokens each) first
+Requests:
+  --temperature <t>        every request's temperature (0: greedy, to compare outputs)
+  --set <key>=<json>       a field laid over every request body (repeatable; null removes)
 ";
 
 #[derive(Debug, Default)]
@@ -85,10 +103,18 @@ struct Args {
     list: bool,
     cleanup: bool,
     cleanup_rounds: u32,
+    cleanup_slot: Option<u64>,
+    chat_slot: Option<u64>,
+    cleanup_layout: Option<&'static str>,
+    bench: Option<String>,
+    bench_rounds: u32,
+    bench_history: usize,
+    temperature: Option<f64>,
+    set: Vec<(String, Value)>,
 }
 
 fn parse(argv: Vec<String>) -> Result<Args, String> {
-    let mut a = Args { ngl: 0, ctx: 8192, repeat: 1, cleanup_rounds: 3, ..Default::default() };
+    let mut a = Args { ngl: 0, ctx: 8192, repeat: 1, cleanup_rounds: 3, bench_rounds: 3, ..Default::default() };
     let mut it = argv.into_iter();
     while let Some(arg) = it.next() {
         let (flag, inline) = match arg.split_once('=') {
@@ -129,6 +155,37 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--list" => a.list = true,
             "--cleanup" => a.cleanup = true,
             "--cleanup-rounds" => a.cleanup_rounds = num(value()?, &flag)?.max(1) as u32,
+            "--cleanup-slot" => a.cleanup_slot = Some(num(value()?, &flag)?),
+            "--chat-slot" => a.chat_slot = Some(num(value()?, &flag)?),
+            "--cleanup-layout" => {
+                let l = value()?;
+                a.cleanup_layout = Some(
+                    super::cleanup::LAYOUTS
+                        .iter()
+                        .copied()
+                        .find(|x| *x == l)
+                        .ok_or_else(|| format!("--cleanup-layout {}, not {l}", super::cleanup::LAYOUTS.join("|")))?,
+                );
+            }
+            "--bench" => {
+                let b = value()?;
+                if !super::serving::BENCHES.contains(&b.as_str()) {
+                    return Err(format!("--bench {}, not {b}", super::serving::BENCHES.join("|")));
+                }
+                a.bench = Some(b);
+            }
+            "--bench-rounds" => a.bench_rounds = num(value()?, &flag)?.max(1) as u32,
+            "--bench-history" => a.bench_history = num(value()?, &flag)? as usize,
+            "--temperature" => {
+                let v = value()?;
+                a.temperature = Some(v.trim().parse::<f64>().map_err(|_| format!("--temperature: not a number: {v}"))?);
+            }
+            "--set" => {
+                let v = value()?;
+                let (k, j) = v.split_once('=').ok_or_else(|| format!("--set key=json, not {v}"))?;
+                let j: Value = serde_json::from_str(j.trim()).unwrap_or_else(|_| json!(j.trim()));
+                a.set.push((k.trim().to_string(), j));
+            }
             "--help" | "-h" => return Err(String::new()),
             other => return Err(format!("unknown option {other}")),
         }
@@ -152,7 +209,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         return dump_apps(p);
     }
     // Raw requests alone need no scenarios (and --only then names requests).
-    let scenarios = if (args.models.is_empty() || args.cleanup) && !args.list {
+    let scenarios = if (args.models.is_empty() || args.cleanup || args.bench.is_some()) && !args.list {
         Vec::new()
     } else {
         match load_scenarios(&args) {
@@ -223,11 +280,24 @@ pub fn main(argv: Vec<String>) -> i32 {
         return 2;
     }
     record::set_timeout(args.timeout.map(Duration::from_secs));
+    record::set_run_body(run_body(&args));
     println!("Run folder: {}", run_dir.display());
     let code = tauri::async_runtime::block_on(run_all(&args, &run_dir, &keys, scenarios));
     record::close();
     println!("\nRun folder: {}", run_dir.display());
     code
+}
+
+/// The fields `--temperature` and `--set` lay over every request body.
+fn run_body(args: &Args) -> serde_json::Map<String, Value> {
+    let mut m = serde_json::Map::new();
+    if let Some(t) = args.temperature {
+        m.insert("temperature".into(), json!(t));
+    }
+    for (k, v) in &args.set {
+        m.insert(k.clone(), v.clone());
+    }
+    m
 }
 
 /// `--dump-apps <path>` (the harness runs itself with it, outside test
@@ -734,6 +804,11 @@ async fn run_scenario(
         let mut j = scenario::observed_json(&o);
         j["user"] = json!(turn.user);
         j["ms"] = json!(ms);
+        // What a streamed answer would have shown first: everything before
+        // the answering call, then its prompt and first token (local models).
+        if o.stats.final_first_token_ms > 0.0 {
+            j["ttft_est_ms"] = json!(ttft_estimate(ms, o.stats.final_call_ms, o.stats.final_first_token_ms));
+        }
         j["fails"] = json!(f);
         j["warnings"] = json!(w);
         record::write("turn_end", j.clone());
@@ -783,6 +858,10 @@ async fn run_scenario(
         "prompt_eval_ms": st.prompt_eval_ms,
         "gen_tokens": st.gen_tokens,
         "gen_ms": st.gen_ms,
+        "draft_tokens": st.draft_tokens,
+        "draft_accepted": st.draft_accepted,
+        "ttft_est_ms": turns.iter().filter_map(|t| t["ttft_est_ms"].as_u64()).sum::<u64>(),
+        "ttft_turns": turns.iter().filter(|t| t["ttft_est_ms"].is_u64()).count(),
         "words": all.words(),
         "replies": seen.iter().map(|o| o.reply.clone()).collect::<Vec<_>>(),
         "errors": seen.iter().filter_map(|o| o.error.clone()).collect::<Vec<_>>(),
@@ -790,6 +869,13 @@ async fn run_scenario(
     });
     record::write("scenario_end", row.clone());
     row
+}
+
+/// A turn's time to its answer's first words, had the answer been streamed:
+/// the turn's wall time less the answering call's, plus that call's prompt
+/// and first token (llama.cpp's timings). Pure.
+fn ttft_estimate(turn_ms: u64, final_call_ms: u64, first_token_ms: f64) -> u64 {
+    turn_ms.saturating_sub(final_call_ms) + first_token_ms.round() as u64
 }
 
 fn error_row(m: &Model, scenario: &str, error: &str) -> Value {
@@ -869,6 +955,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         None
     };
     let mut cleanups: Vec<(String, Value)> = Vec::new();
+    let mut benches: Vec<(String, Value)> = Vec::new();
     let mut rows: Vec<Value> = Vec::new();
     let mut models_info: Vec<Value> = Vec::new();
     let mut this_pc: Option<Vec<AppEntry>> = None;
@@ -914,8 +1001,18 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             record::set_config(Some(crate::config::YapConfig::default()));
             record::set_tools_forced(None);
             let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
-            cleanup = super::cleanup::run(b, &ep, args.cleanup_rounds).await;
+            let setup = super::cleanup::Setup { cleanup: args.cleanup_slot, chat: args.chat_slot, layout: args.cleanup_layout };
+            cleanup = super::cleanup::run(b, &ep, args.cleanup_rounds, setup).await;
             cleanups.push((m.label.clone(), cleanup.clone()));
+        }
+        let mut bench_result = Value::Null;
+        if let Some(kind) = &args.bench {
+            record::set_context(json!({ "model": m.label, "scenario": format!("bench-{kind}") }));
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            bench_result = super::serving::run(kind, &ep, args.bench_rounds, args.bench_history).await;
+            benches.push((m.label.clone(), bench_result.clone()));
         }
         let mine: Vec<&Value> = rows.iter().filter(|r| r["model"] == json!(m.label)).collect();
         let sum = |k: &str| mine.iter().map(|r| r[k].as_f64().unwrap_or(0.0)).sum::<f64>();
@@ -930,7 +1027,12 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "paced_ms": record::paced_ms() - paced_before,
             "wall_ms": model_started.elapsed().as_millis() as u64,
             "cleanup": cleanup,
+            "bench": bench_result,
         });
+        let (drafted, kept) = (sum("draft_tokens"), sum("draft_accepted"));
+        if drafted > 0.0 {
+            info["draft_acceptance"] = json!((kept / drafted * 1000.0).round() / 1000.0);
+        }
         if sum("prompt_eval_ms") > 0.0 {
             info["prompt_tokens_per_s"] = json!((sum("prompt_eval_tokens") / sum("prompt_eval_ms") * 1000.0 * 10.0).round() / 10.0);
         }
@@ -964,6 +1066,11 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
     if !cleanups.is_empty() {
         let md = record::redact(&super::cleanup::markdown(&cleanups));
         let _ = std::fs::write(run_dir.join("cleanup.md"), &md);
+    }
+    if !benches.is_empty() {
+        let md = record::redact(&super::serving::markdown(&benches));
+        let _ = std::fs::write(run_dir.join("serving.md"), &md);
+        println!("\n{md}");
     }
     if !rows.is_empty() {
         let md = record::redact(&markdown(&summary, &rows, &models_info, &totals));
@@ -1032,9 +1139,24 @@ fn totals(rows: &[Value]) -> Vec<Value> {
                 "pacing_wait_ms": sum("pacing_wait_ms"),
                 "slowest_call_ms": ran.iter().map(|r| r["slowest_call_ms"].as_u64().unwrap_or(0)).max().unwrap_or(0),
                 "calls_over_20s": sum("calls_over_20s"),
+                "mean_ttft_est_s": if sum("ttft_turns") > 0 {
+                    json!((sum("ttft_est_ms") as f64 / sum("ttft_turns") as f64 / 100.0).round() / 10.0)
+                } else {
+                    Value::Null
+                },
+                "draft_tokens": sum("draft_tokens"),
+                "draft_accepted": sum("draft_accepted"),
             })
         })
         .collect()
+}
+
+/// Speculative decoding's acceptance, "73% of 1.2k" ("—" without drafts).
+fn acceptance(drafted: u64, accepted: u64) -> String {
+    if drafted == 0 {
+        return "—".to_string();
+    }
+    format!("{:.0}% of {}", accepted as f64 / drafted as f64 * 100.0, thousands(drafted))
 }
 
 fn thousands(n: u64) -> String {
@@ -1049,11 +1171,11 @@ fn thousands(n: u64) -> String {
 
 fn table_only(totals: &[Value]) -> String {
     let mut md = String::from(
-        "| Model | Passed | Failed | Errors | Skipped | Pass rate | Model calls | Tool calls | Tokens | Mean turn (s, excl. pacing) | Slowest call (s) | Calls > 20 s | 429s |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
+        "| Model | Passed | Failed | Errors | Skipped | Pass rate | Model calls | Tool calls | Tokens | Mean turn (s, excl. pacing) | First words if streamed (s, est.) | Drafts accepted | Slowest call (s) | Calls > 20 s | 429s |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
     );
     for t in totals {
         md.push_str(&format!(
-            "| {} | {} | {} | {} | {} | {}% | {} | {} | {} | {} | {:.1} | {} | {} |\n",
+            "| {} | {} | {} | {} | {} | {}% | {} | {} | {} | {} | {} | {} | {:.1} | {} | {} |\n",
             t["model"].as_str().unwrap_or(""),
             t["passed"],
             t["failed"],
@@ -1064,6 +1186,8 @@ fn table_only(totals: &[Value]) -> String {
             t["tool_calls"],
             thousands(t["total_tokens"].as_u64().unwrap_or(0)),
             t["mean_turn_s"],
+            t["mean_ttft_est_s"].as_f64().map_or("—".to_string(), |v| format!("{v}")),
+            acceptance(t["draft_tokens"].as_u64().unwrap_or(0), t["draft_accepted"].as_u64().unwrap_or(0)),
             t["slowest_call_ms"].as_f64().unwrap_or(0.0) / 1000.0,
             t["calls_over_20s"],
             t["rate_limited"],
@@ -1216,6 +1340,20 @@ mod tests {
         assert_eq!(a.tokens_per_minute, Some(7000));
         assert_eq!(a.ctx, 8192);
         assert!(parse(vec!["--bogus".into()]).is_err());
+        let b = parse(
+            ["--bench", "stream", "--temperature", "0", "--set", "id_slot=2", "--set=cache_prompt=false", "--cleanup-slot", "0"]
+                .map(String::from)
+                .to_vec(),
+        )
+        .unwrap();
+        assert_eq!(b.bench.as_deref(), Some("stream"));
+        assert_eq!(b.cleanup_slot, Some(0));
+        let body = run_body(&b);
+        assert_eq!(Value::Object(body), json!({ "temperature": 0.0, "id_slot": 2, "cache_prompt": false }));
+        assert!(parse(["--bench", "nope"].map(String::from).to_vec()).is_err());
+        assert_eq!(ttft_estimate(5_000, 2_000, 350.4), 3_350);
+        assert_eq!(acceptance(0, 0), "—");
+        assert_eq!(acceptance(200, 150), "75% of 200");
         assert!(parse(vec!["--model".into()]).is_err());
     }
 

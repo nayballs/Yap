@@ -721,6 +721,9 @@ async fn post_chat_request(
     if let Some(n) = max_tokens {
         body["max_tokens"] = json!(n);
     }
+    // A model evaluation's request overrides (`--temperature`, `--set`, a
+    // bench's `id_slot`); otherwise a no-op.
+    crate::eval::adjust_body(&mut body);
 
     let client = reqwest::Client::builder()
         .timeout(crate::eval::timeout(timeout))

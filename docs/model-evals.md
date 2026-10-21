@@ -36,6 +36,11 @@ Nathan's PC: `YAP_EVAL_TARGET_DIR=E:/yap-builds/evals`, `--out E:/yap-builds/eva
 | `--max-total-tokens <n>` | Stop starting scenarios on a model past this many tokens (a free plan's daily cap: Groq's gpt-oss-20b allows 200k a day). |
 | `--timeout <secs>` | Per model call, instead of Yap's own (Chat: 20 s for a cloud model, 2 minutes for one on this PC since 18 Oct 2026, `llm::chat_timeout`). Leave it to measure what Yap does; raise it to measure what a slow model *could* do. |
 | `--cleanup`, `--cleanup-rounds <n>` | Time the dictation cleanup instead of the scenarios (below). |
+| `--cleanup-slot <n>`, `--chat-slot <n>` | Send the cleanup (and the Chat turns between) to llama.cpp slot n (`id_slot`). |
+| `--cleanup-layout split\|system` | The same cleanup prompt laid out another way (below). |
+| `--bench stream\|layout\|loop\|embed`, `--bench-rounds <n>` | Serving benches instead of the scenarios (below; `serving.md`). |
+| `--temperature <t>` | Every request's temperature (0: greedy, to check that a server change keeps the same outputs). |
+| `--set <key>=<json>` | A field laid over every request body (repeatable; `null` removes one), e.g. `--set cache_prompt=false`. |
 | `--repeat <n>` | Run each scenario n times (models answer differently at temperature 0.5). |
 | `--no-web` | Skip the web scenarios (`needs_web` / `web`); live ones go on the internet (below). |
 | `--raw <file>` | Send hand-written requests (see below) instead of, or before, scenarios. |
@@ -89,8 +94,44 @@ default body, the one-shots): the first call after loading, then `--cleanup-roun
 rounds back to back, then each after a Chat-shaped request (persona + tool instructions +
 the tools, ~2k tokens, untimed), then four after a long one (~5.6k tokens). Per phase:
 mean / median / p90 / max wall time, llama.cpp's prompt tokens **processed** (the rest came
-from its cache) and tokens generated, and errors; and every output, to compare the cleanup
-itself. `cleanup.md` in the run folder; the numbers in `summary.json` (`models[].cleanup`).
+from its cache) and tokens generated, its prompt and generation time, generation speed,
+speculative decoding's share of drafted tokens kept (`timings.draft_n` /
+`draft_n_accepted`), and errors; and every output, to compare the cleanup itself.
+`cleanup.md` in the run folder; the numbers in `summary.json` (`models[].cleanup`, every
+back-to-back output in `all_outputs`: at `--temperature 0` two runs — a draft model or not —
+should write the same text). `--cleanup-layout split` sends the restated instruction as a user
+message of its own before the transcript, `system` moves it to the end of the system prompt
+(a hybrid model like Qwen3.5 re-uses its cache only up to a checkpoint before the last user
+message, so today it reads the ~370-token instruction again for every dictation).
+
+### Serving benches (`--bench`)
+
+How the server is used rather than what the model says (`eval/serving.rs`; `serving.md` in the
+run folder, `models[].bench` in `summary.json`; every request in `transcript.jsonl` as
+`bench_request` / `bench_response`):
+
+- **`stream`**: Chat-shaped requests (Chat's persona, instructions and every tool schema; a short
+  answer, a long one, a web answer's last step with ~2.5k tokens of results, a question that
+  should start with a tool call), each cold, sent whole and streamed (SSE): the whole answer's
+  time vs the first words', the first tool-call delta's, and whether streamed tool calls
+  reassemble into valid JSON.
+- **`layout`**: a four-turn Chat twice — the time and the notes found for each question in the
+  system prompt (`chat_turn` today) and in the last user message — with the prompt tokens each
+  turn had to process again.
+- **`loop`**: a web answer's second step after a first step that offered the same tools, or
+  others (today's: the action tools dropped once web content is in, `web_search` alone when
+  the model must search): the second step's prompt tokens processed again. Also says whether
+  the server accepts a named `tool_choice`.
+- **`embed`**: an embedding model on a `--embedding` server (`--llamafile-arg=--embedding`):
+  dimensions, throughput over 64 note-sized chunks, one query's latency, and recall@1/3/5 over
+  `evals/retrieval/notes.json` (24 notes, 25 questions mostly worded differently from the note)
+  against Chat's keyword search (`tools::search_notes`, what its RAG uses). Query/document
+  prefixes follow the model's card, by file name.
+
+Every scenario run also estimates **the time to an answer's first words had it been streamed**
+(local models: the turn's time less the answering call's, plus that call's prompt and first
+token from llama.cpp's timings), per turn (`ttft_est_ms`) and per model ("First words if
+streamed" in `summary.md`).
 
 ## What a run does, and what it doesn't touch
 
