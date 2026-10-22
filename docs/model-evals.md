@@ -39,6 +39,7 @@ builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--ou
 | `--cleanup-slot <n>`, `--chat-slot <n>` | Send the cleanup (and the Chat turns between) to llama.cpp slot n (`id_slot`). |
 | `--cleanup-layout combined\|system` | The same cleanup prompt laid out another way (below). |
 | `--cleanup-quick`, `--cleanup-limit <n>` | Only the back-to-back rounds (no first call, Chat turns or spelling), of the first n dictations: a cloud model's tokens. |
+| `--brief` | Write the pre-meeting brief of each meeting in `evals/briefs/*.json` instead of the scenarios (below; `--only` picks them, `--repeat` repeats them). |
 | `--mtp on\|off`, `--no-warm-up` | A local model's MTP drafting (default: as Yap's sidecar decides on this PC, never with `--ngl 0`) and its warm-up request. |
 | `--clock-step <min>` | Each turn of a scenario, the clock Chat tells the model moves on this much (a real chat's turns are minutes apart). |
 | `--bench stream\|layout\|loop\|embed`, `--bench-rounds <n>` | Serving benches instead of the scenarios (below; `serving.md`). |
@@ -116,6 +117,35 @@ as `llm::cleanup` did until 22 Oct 2026 (it sends them as two since, to a hybrid
 Qwen3.5 re-uses its cache only up to a checkpoint before the last user message, so it read the
 ~370-token instruction again for every dictation); `system` moves the instruction to the end
 of the system prompt.
+
+### Pre-meeting briefs (`--brief`)
+
+```bash
+yap.exe eval --brief --repeat 3 --model local:<4b.gguf> --ngl 999 --llamafile <llamafile.exe>
+```
+
+Each file in `evals/briefs/` is one meeting about to start — its title,
+series, attendees and invite — with the earlier meeting notes (days ago,
+participants, an action plan, digests, typed notes or a transcript) and
+memory items around it, and what its brief must be (`expect`: `first`, the
+notes it must and mustn't cite, open items it must and mustn't list, who
+may own them, words it must have and `not_contains`: invented names,
+dates, items, another person's notes). The run goes through the brief's own
+code (`calendar/brief.rs`: `gather`, `messages`, `write` — one call, the
+prompt as the app sends it — then `check_summary` and `assemble`), with the
+model forced to write "In short" whatever its size (the app leaves a small
+on-device model out, `brief::writes_summary`). Scored twice: **the reply as
+written** — lines that claim something, and how many of those cite nothing
+real, stray from their sources (a name, date, number or deadline they don't
+have, mostly other words, an agenda the invite doesn't have), give a task
+to someone else, say an open task was done or an open question settled, and
+whether it said a scenario's never-say words — and **the brief as shown**
+(pass/fail: every line cited but "First meeting…", ≤ 150 words, the right
+first meeting, notes cited or not, open items and their owners, the
+never-say words). `brief.md` in the run folder (a table per model, then each
+brief as shown and the reply as written), the numbers in `summary.json`
+(`models[].brief`). `eval::brief`'s unit test checks every scenario's plain
+brief (no model) already passes.
 
 ### Serving benches (`--bench`)
 
@@ -1166,3 +1196,85 @@ What's left: a cloud model is only told to search again (gpt-oss didn't, above);
 second search is for models on this PC. A person who pays in a dollar (Canada, Australia…)
 gets the country in the query but no second search, since a page's bare "$" can't be told
 apart. Conversions stay the model's: "about £6" said as an estimate passes, as before.
+
+## Pre-meeting briefs (22 Oct 2026)
+
+The ask: before a calendar meeting, a short brief — last time with these people, their open
+items, what memory knows, the agenda — every line cited, nothing invented, under ~150 words
+(`calendar/brief.rs`, [architecture](./architecture/calendar.md#pre-meeting-briefs)). Yap
+assembles all of it but "In short" itself, from the notes' action plans (no model can invent an
+owner, a task or a date there); the meeting's model writes two or three bullets from numbered
+sources, and Yap checks each before it's shown.
+
+**The scenarios** (`evals/briefs/`, 13): a recurring 1:1 (two of its series, a task done since,
+the same task twice), a new attendee (one known, one new; someone in the last meeting who isn't
+coming), a project meeting (the project and a person in memory), a meeting with no history, two
+Priyas (only Priya Patel's notes and memory may show), a retro of the same series with
+different people and only rolling digests, an owner trap (three people's tasks side by side, a
+deadline, an unassigned one), a long history (the 150-word fit), a plan-less 1:1 with only a
+transcript of promises, then two added for the third run (a client check-in with dates, a
+Meeting Notes–format summary) and two held out until the final runs and never tuned on (a
+hiring debrief, a vendor follow-up with one plan and one transcript). Fixtures are fictional.
+
+**Runs** (Qwen3.5-4B Q4_K_M on the GPU, `--ngl 999`; Qwen2.5-1.5B, the on-device default, on
+the processor; RTX 5070 Ti, Ryzen 7 9800X3D; ×3 from the second run; run folders
+`E:/yap-builds/eval-runs/20261022-16*-brief-*`). "Lines" are the lines the model wrote that
+claim something; the next columns are how many of those Yap's checks dropped; "kept" made the
+brief. "Pass" is the brief as shown meeting every expectation.
+
+| Run | Model | Pass | Lines | Uncited | Off sources | Wrong owner | Done / settled | Kept | Mean / slowest |
+|---|---|---|---|---|---|---|---|---|---|
+| first (9 ×1) | 4B GPU | 9/9 | 22 | 0 | 0 | 0 | — | 22 | 0.4 / 0.6 s |
+| first (9 ×1) | 1.5B CPU | 9/9 | 24 | 0 | 3 | 1 | — | 17 | 3.5 / 7.2 s |
+| second (9 ×3) | 4B GPU | 27/27 | 51 | 0 | 2 | 0 | 0 | 49 | 0.4 / 1.1 s |
+| second (9 ×3) | 1.5B CPU | 27/27 | 60 | 4 | 10 | 3 | 9 | 33 | 5.6 / 22 s |
+| third (11 ×3) | 4B GPU | 33/33 | 65 | 2 | 8 | 2 | 0 | 53 | 0.4 / 0.6 s |
+| third (11 ×3) | 1.5B CPU | 33/33 | 86 | 6 | 14 | 5 | 7 | 42 | 4.8 / 19 s |
+| **final (13 ×3)** | **4B GPU** | **39/39** | **77** | **1** | **8** | **1** | **4** | **63** | **0.6 / 1.6 s** |
+| final (13 ×3) | 1.5B CPU | 39/39 | 81 | 3 | 15 | 7 | 11 | 45 | 12.3 / 180 s ¹ |
+
+¹ The processor was shared with other builds in that run; the 1.5B's earlier runs took
+4–8 s a brief on average.
+
+"Pass" alone hides what the checks couldn't see, so every kept line was also read by hand:
+
+- **Qwen3.5-4B**: in the final run, **no wrong line kept** in 63 (in the run before, one: "the
+  first quote is already over budget", a guess from "the heavier paper might push the price
+  up"). Its bullets say what the open items don't — decisions, open questions, how the agenda
+  connects ("Whether a take-home task is needed for the final round remains an open
+  question"). The prompt is ~1,000 tokens with the sources (≤ 1,019 here), the reply ≤ 220.
+- **Qwen2.5-1.5B**: about half its lines were dropped by the checks in every run (open tasks
+  told as done — "You sent Priya the revised pricing table", "The travel budget was confirmed"
+  —, tasks moved between people — "The onboarding checklist is due from Daniel, and the
+  regional launch timeline is due from you" —, an open question told as decided — "The annual
+  plan should get a discount" —, someone's promise as yours), and **4–5 of the 45 kept were
+  still wrong** in a way word checks can't see (the cheaper venue swapped, "you asked for the
+  second quote" when Daniel said he'd chase it, the press list "needs to be updated" when it
+  needs legal's review). So **a model on this PC under ~4B writes no "In short"**
+  (`SUMMARY_MIN_PARAMS_B`): its brief is the plain one, which is right by construction.
+
+What it took, run by run:
+
+- **First prompt and checks** (cite, grounded names/numbers/dates, owners): both models passed,
+  but the 4B's bullets repeated the open items Yap already lists, and the 1.5B told two open
+  tasks as done (kept). → The prompt says tasks are still to do and what Yap lists below ("don't
+  repeat them"); the worked example shows a decision and an open question; a **done** check
+  (the task's verb in the past, "already").
+- **Second**: the 1.5B's kept lines still had swapped owners across clauses, an open question as
+  a decision and a promise from a transcript as done. → Checks clause by clause; **open
+  questions** from the plans and digests; in a plan-less 1:1, **what each side said they'd do**
+  ("I'll send both quotes") for the owner and done checks; a deadline phrase its sources don't
+  have ("before the next meeting"); a clause mostly not in its sources.
+- **Third** (+2 new scenarios): a task told as done under the invite's citation, "the annual
+  plan is on the agenda" (it wasn't). → Tasks and questions checked against every earlier
+  meeting, not only the cited one; **agenda claims** must be in the invite (and Yap adds the
+  invite to a bullet's citation when it is).
+- **Final** (+2 held out): no new kind of error on the 4B. A sentence's capitalised first word
+  ("Whether…") was being taken for a name and good bullets dropped: it's checked only when it
+  isn't an everyday word (or is a name-word like "Mark"). One scenario's never-say phrase
+  matched a correct "whether a take-home task is needed" and was fixed (scenario, not code).
+
+**Left out**: cloud models (no cloud spend); the 2B / 0.8B (the gate covers them by size).
+Word-level checks can't catch two true facts swapped within a sentence; the 4B didn't do that
+here, the 1.5B did. Open items are the notes' unticked ones: a task done since but never
+ticked still shows.

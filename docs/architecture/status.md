@@ -292,8 +292,11 @@ and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](../meetings.md) "Limits"), and a real call (live
 WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a
 hotkey dictation mid-call) still wants one hands-on pass;
-the calendar has no one-click Outlook (Microsoft Graph) and no pre-meeting
-brief;
+the calendar has no one-click Outlook (Microsoft Graph); the pre-meeting
+brief (2026-10-22: unit-, e2e- and model-evaluated, not yet seen before a
+real meeting) checks the AI's lines word by word, so a mix-up of two things
+its notes both say can pass (no "In short" from a small on-device model for
+that reason);
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see `ROADMAP.md` Phase 1);
 multi-phrase dictionary entries; verify-after-paste beyond Win32 edit

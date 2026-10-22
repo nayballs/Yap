@@ -2,7 +2,9 @@
 
 Yap reads your own calendar straight from your PC to list your meetings
 (the **Meetings** view), remind you just before each one (**Join & take
-notes**), and give a meeting note the meeting's name, attendees and invite.
+notes**), prepare a **brief** of what to know going in (last time with these
+people, their open items, the agenda — every line linked to its note), and
+give a meeting note the meeting's name, attendees and invite.
 It's Wispr Flow's calendar, local-first: there is no Yap server in between.
 Yap talks to Google, or fetches your calendar's private iCal link, itself;
 the tokens and links live in Windows Credential Manager, and meetings stay
@@ -10,7 +12,8 @@ on the PC.
 
 | Piece | Code |
 |---|---|
-| Connections, sync, the reminder card, notes, the nudge, the Ask bar's context | `src-tauri/src/calendar.rs` |
+| Connections, sync, the reminder card, notes, the nudge, the Ask bar's context, when briefs are made and kept | `src-tauri/src/calendar.rs` |
+| Pre-meeting briefs: what goes in, the AI's part and its checks | `src-tauri/src/calendar/brief.rs` (+ `llm::MEETING_BRIEF_PROMPT`) |
 | Google: OAuth for installed apps, the Calendar API | `src-tauri/src/calendar/google.rs` |
 | iCalendar parsing, recurrence | `src-tauri/src/calendar/ics.rs` |
 | Time zones (IANA, Windows names, a feed's own VTIMEZONEs) | `src-tauri/src/calendar/tz.rs` |
@@ -18,7 +21,7 @@ on the PC.
 | Join links | `src-tauri/src/calendar/links.rs` |
 | Credential Manager | `src-tauri/src/calendar/vault.rs` |
 | A note's meeting (`Note::event`, `link_event`) | `src-tauri/src/notes.rs` |
-| UI | `src/lib/MeetingsView.svelte`, `src/lib/ConnectCalendarDialog.svelte`, `src/lib/ConnectorsSection.svelte`, `src/lib/calendar.svelte.js`, `src/lib/CalendarLinkCard.svelte`, `src/lib/CalendarMark.svelte` |
+| UI | `src/lib/MeetingsView.svelte`, `src/lib/ConnectCalendarDialog.svelte`, `src/lib/ConnectorsSection.svelte`, `src/lib/calendar.svelte.js`, `src/lib/CalendarLinkCard.svelte`, `src/lib/CalendarMark.svelte`, `src/lib/BriefView.svelte`, `src/lib/brief.js` |
 
 ## Connecting a calendar
 
@@ -237,6 +240,84 @@ the card is a Windows notification with the same buttons instead. Answering
 any copy answers them all; a card shown while the window was focused moves
 onto the bar when the window loses focus, and off a bar that goes away.
 
+### The brief before a meeting
+
+**Settings → Meetings → Prepare a brief before meetings** (`meeting_brief`,
+on), after Granola's "Briefs" (May 2026) but kept on this PC. From 15
+minutes before a calendar meeting (`BRIEF_AHEAD`; the Meetings view asks
+for one at any time), Yap puts together what to know going in
+(`calendar/brief.rs`), at most 150 words:
+
+- **Last time**: the latest notes (up to three) from earlier meetings with
+  someone coming (by name: "Priya Shah" is never "Priya Patel"; a lone
+  "Priya" counts while only one Priya is coming) or from the same recurring
+  series (the event's UID, or Google's recurring event id), each with its
+  date. Someone coming who was in none of them: "First meeting with Siobhan
+  Byrne"; nobody known at all, **"First meeting with these people"**.
+- **Open items**: unticked tasks in those notes' action plans (or, with no
+  plan, their rolling digests) owned by You or by someone coming — never
+  Unassigned ones, ticked ones, or those of people who aren't coming; the
+  newest meeting's copy of a task once. Up to four, with the deadline as it
+  was said.
+- **From memory**: what Yap remembers (`memory.rs`) about the people
+  coming, and the projects the invite or the title names.
+- **On the invite**: the start of its agenda, as the calendar cleaned it.
+- **In short** (with an AI model): two or three bullets the meeting's model
+  (Note Formatting, else cleanup's) writes from those numbered sources
+  under an immutable prompt (`llm::MEETING_BRIEF_PROMPT`: only what's in
+  the sources; never invent names, owners, tasks, decisions, dates or
+  numbers; a task stays still to do and with its owner; "Nothing to add."
+  when there's too little), with one worked example whose people appear in
+  no real brief. **Yap checks every bullet before it's shown**
+  (`brief::check_summary`) and leaves out one that: cites no source or one
+  that doesn't exist; has a name, number, date or deadline ("before the next
+  meeting") its cited sources don't (a sentence's first word only when it
+  isn't an everyday one), or, clause by clause, mostly words they don't;
+  says something's on the agenda the invite doesn't have (and adds the
+  invite to a bullet that leaves it out); gives a task to someone other
+  than its owner (clause by clause: "the checklist is due from Daniel, and
+  the timeline is due from you" is two claims); says an open task was done
+  ("sent", "already"…, or something its source only says someone *will*
+  do); tells an open question as settled. "The user" becomes "you", and
+  bullets run together on one line are taken apart. A model on this PC
+  under ~4B parameters (`SUMMARY_MIN_PARAMS_B`: the on-device 1.5B) writes
+  none: in the evaluations it got half its bullets wrong and a few subtle
+  ones past the checks ([`model-evals.md`](./model-evals.md), "Pre-meeting
+  briefs"). A cloud model, a custom endpoint or a 4B+ local one writes it.
+
+Everything but "In short" is Yap's own, so with no AI model (or a small
+one, or the on-device model stopped) the brief is the same minus that part,
+with a quiet line saying why. The model's call is bounded for an 8k local
+context (≤ ~600 tokens of each earlier meeting — its action plan, else its
+digests, else its notes and transcript —, ~1k tokens in all, a 220-token
+reply cap), waits out and steps aside for any dictation, and holds the
+on-device model meanwhile (`meeting_summary::chat_beside_dictation`); one
+brief's summary is written at a time. Briefs are kept in `calendar.json`
+(`briefs`, by event key, two days after their meeting, at most 40) with a
+**fingerprint** of what they were made from (the meeting, each note's and
+memory item's id and edit time, the model): a change in the notes or memory
+(`yap-notes-changed`, `yap-note-changed`, `yap-memory-changed`) or the
+settings makes the due ones again at the scheduler's next turn. A summary
+that fails is tried again after 2 minutes (at once when asked for).
+
+**Where it shows**: on the reminder card — the in-app toast's **Brief** fold
+(`expand.brief`), and on the Yap bar one slim line under the call card's row,
+"Brief · Last met Thu 16 Oct · 3 open items ⌄", that unfolds it in the card
+(at most 260 px, scrolling; `bar::Card.brief`); in the Meetings view, a
+**Brief** button on every meeting still to come that unfolds it under the
+row (`calendar_brief`; made now if need be, its summary following by
+`yap-meeting-brief`); and in the meeting's notepad (`calendar_brief_for_note`)
+at the top of **Summary** as "Brief before the meeting", open until the
+action plan is written, then folded above it, with — while the meeting
+records — one line over My thoughts ("Brief · Last met … · 3 open items",
+dismissible) that opens it. The Summary tab, not My thoughts: My thoughts
+is the person's own words (and the action plan's input), Summary is where
+Yap's writing lives, and it's otherwise empty while a meeting records. Every
+line's source numbers are small pills; one opens its note in the main
+window's Notes (`calendar_brief_open`; memory: Settings → Memory; the
+invite: the meeting's own note), from any window — the bar card then
+follows you into the main window.
+
 ### Into meeting notes
 
 However a recording starts during a meeting (the card, the Meetings view,
@@ -369,6 +450,25 @@ them at run time).
   Credential Manager, and records the links Yap would open
   (`calendar_e2e_opened`) instead of opening a browser. Screenshots:
   `test-results/app/screenshots/calendar/` and `…/calendar-nudge/`.
+  `e2e/brief.spec.js` (seeded notes and memory, the fake AI scripted to
+  write two good lines and one about someone no note mentions): the
+  reminder card's Brief fold (In short without the invented line, last
+  week's 1:1 and not someone else's meeting, You's and Priya's open items
+  with their deadline, memory, the agenda, a pill opening its note, what
+  the model was sent), the bar card's folded line and the brief unfolded,
+  the Meetings view's Brief (and a first meeting with no model call), the
+  notepad's line over My thoughts and the brief on Summary, and the
+  setting (off takes the Brief buttons away). Screenshots:
+  `…/screenshots/brief/`.
+- **Brief unit tests** (`cargo test --lib brief`): who counts as the same
+  person, series from keys, tasks and questions from plans and digests,
+  gathering (newest first, the same task once, someone else's meeting
+  out), first meetings and newcomers, the 150-word fit, citations, and each
+  check against lines the models really wrote in the evaluations; and
+  `eval::brief`: every scenario's plain brief already passes its
+  expectations.
+- **Evaluations** (`yap.exe eval --brief`, `evals/briefs/*.json`): see
+  [`model-evals.md`](./model-evals.md), "Pre-meeting briefs".
 
 ## Limits and follow-ups
 
@@ -378,7 +478,13 @@ them at run time).
   tenants require admin consent. Until then, the published calendar: it
   shows attendees only with "Can view all details", Outlook refreshes it on
   its own schedule (it can lag), and some organisations turn publishing off.
-- **A brief before the meeting** (Wispr's "Meeting prep") isn't built.
+- **The brief's checks are word-level**: a bullet that mixes up two things
+  its sources both say (which venue was cheaper, the order of two steps) or
+  pins one task's deadline on another can still pass them — the reason a
+  small on-device model writes no "In short". Open items are the ones still
+  unticked in the notes: a task done since but never ticked shows as open.
+  Tasks people only said they'd do in a meeting with no action plan aren't
+  listed (the checks use them).
 - Google calendars you don't own (a shared team calendar) aren't read, by
   the choice of scope.
 - Who "you" are in an iCal feed is a guess (see above): when Yap can't tell,

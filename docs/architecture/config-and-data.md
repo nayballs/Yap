@@ -42,7 +42,8 @@
   meeting_max_minutes (120; 0 = no limit), meeting_call_end ("ask"|"stop"),
   meeting_end_when_quiet ("End notes when the meeting goes quiet", true),
   meeting_hotkey (`kb:alt+win+77`), meeting_reminder (the calendar's card:
-  "15s" | "1min" | "2min" | "never"), bridge_enabled, mcp_allow_writes (AI apps
+  "15s" | "1min" | "2min" | "never"), meeting_brief ("Prepare a brief before
+  meetings", true; `calendar/brief.rs`), bridge_enabled, mcp_allow_writes (AI apps
   may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
   bar_hide_fullscreen (true) + bar_theme ("light" | "dark", light) +
   bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
@@ -138,7 +139,9 @@
   the last check time, and the restart marker (`updates.rs`).
 - Calendar: `%APPDATA%/yap/calendar.json` — connected calendars (name, kind,
   last sync, error), meetings from 12 h ago to 7 days ahead, answered reminders,
-  the nudge (`calendar.rs`). Never a token or a link: those are Credential
+  the nudge, and meetings' pre-meeting briefs (`briefs`, by event key, until
+  2 days after the meeting, ≤ 40: their lines, sources — note and memory ids,
+  titles, dates — and a fingerprint) (`calendar.rs`). Never a token or a link: those are Credential
   Manager generic credentials `yap-calendar-<1-8>.com.yap.dictation` (Local
   persistence; portable adds a data-dir hash), deleted on Disconnect and, for
   an installed copy, by the uninstaller's "Delete the application data".
@@ -214,7 +217,8 @@
   its live transcript (`meeting_live_transcript`), but **not** splitting the
   screen (`meeting_split_screen` off: it moves another app's window); with a
   calendar connected, the reminder card **right before** a meeting (15 s,
-  `meeting_reminder`); spoken replies **off** (`speak_replies`; once on, only
+  `meeting_reminder`) and a **brief** of what to know going in
+  (`meeting_brief`, on); spoken replies **off** (`speak_replies`; once on, only
   for questions asked by voice, `speak_when`, and a dictated question is sent
   by itself, `talk_back_hands_free`) in **Kokoro's af_bella** at 1× once
   Kokoro is downloaded (`tts_engine` "kokoro"), Windows' default voice

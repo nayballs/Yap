@@ -238,7 +238,16 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   out of the notes**" divider (mic glyph) for a `dictated` marker; echo
   behind "Show N lines…"; "Yap is listening" / "No transcript yet" / "Live
   transcript is off" states (layout: `notepadText.js` `transcriptItems`,
-  `bubbleShape`, `highlightParts`). **Summary** (the Rust job: "• Turning 12
+  `bubbleShape`, `highlightParts`). **The meeting's brief**
+  (`calendar_brief_for_note`, followed by `yap-meeting-brief`; the
+  calendar's pre-meeting brief, [calendar.md](./calendar.md#pre-meeting-briefs)):
+  at the top of Summary as "Brief before the meeting" (`BriefView`), open
+  until the action plan is written, then folded above it with its teaser;
+  while the meeting records, one dismissible line over My thoughts —
+  "Brief · Last met Thu 16 Oct · 3 open items" — that opens it. On Summary
+  rather than in My thoughts: My thoughts is the person's own words (and
+  the action plan's input), Summary is Yap's, and empty while recording.
+  **Summary** (the Rust job: "• Turning 12
   minutes of talk into an action plan… · Step 2 of 3", "Catching up on the
   meeting: part 3 of 12…", the rendered plan, the AI-setup card, the digests
   so far while recording). **Bottom** (over the content, a 150 px fade):
@@ -289,6 +298,9 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   Show more; time, name, Conflict / Maybe tags, service, attendees, "In 1
   min", Note ready; from 10 min before: Join meeting / Start / Join +
   Start, or Switch notes while another records, or ● Recording · Open note;
+  with "Prepare a brief before meetings" on, a **Brief** button on every
+  meeting still to come that unfolds its pre-meeting brief under the row,
+  made now if need be (`loadBrief` → `calendar_brief`; its summary follows);
   opening a meeting makes or opens its note via `calendar_event`); with no
   calendar, one grey card (calendar icon, "No meetings found", ink Connect
   calendar → the dialog); **Past meeting notes** by day ("TODAY, 6 OCT",
