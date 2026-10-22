@@ -54,9 +54,10 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   "news", "price of", "coming out", "upcoming", "out yet", "who won", a year
   from last year on — "best indie games 2026"; 2026-10-21), asks about
   **prices** (`asks_about_prices`: price, cost, subscription, fees,
-  cheapest, deals, discount, on sale, in stock, sold out, "how much is /
-  does / for…" — not "how much is 15% of 80"; Nathan's "Can you check the
-  Grok subscriptions please, for me?", 2026-10-21), or names a known
+  cheapest, deals, discount, on sale, in stock, sold out, buy, buying,
+  purchase, "how much is / does / for…" — not "how much is 15% of 80";
+  Nathan's "Can you check the Grok subscriptions please, for me?",
+  2026-10-21; "…I am thinking of buying it", 2026-10-22), or names a known
   game; never a question about their own things (`about_own_stuff`: "my
   notes", "the meeting", "what did I note / write / say…", "we decided",
   "my list / budget", a note), a request to do something
@@ -90,9 +91,41 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   of saying there are no notes"), and for a model on this PC a step of
   nothing but empty notes searches is followed by Yap's search for it (once
   a turn) — Qwen3.5-4B searched Nathan's notes twice for "Grok
-  subscriptions" and stopped. **Models
+  subscriptions" and stopped. **Prices where the person is** (2026-10-22,
+  someone outside the US — About you's region, `about_you::LocalPrices`;
+  Nathan's "Can you lookup the Grok subscription price for me I am thinking
+  of buying it" from a UK PC searched "Grok subscription price 2026": Exa,
+  with `userLocation` GB, found x.ai's US page, a US price list and a guide
+  in $, and the answer gave the US tiers and offered to "help finding the
+  UK pricing"): **a price question's search names the country**
+  (`local_query`: "Grok subscription price 2026" → "… UK", every search of
+  the turn, the model's — its call rewritten in the conversation too,
+  `local_query` post-fix — and Yap's own; not when the query already says
+  where or in what money, "… US price", "… GBP"); **results with only
+  another country's prices** (`Turn::local_note`, on the pages' text, for a
+  money that can be told apart — not a dollar) lead to **one more search
+  for theirs** (`local_retry_query`: "… UK £"; Yap runs it straight away
+  for a model on this PC, `Turn::take_local_retry`, a cloud model's result
+  says `local_prices`: "None of these results gives a UK price (in £).
+  Search once more for the UK price, like "…", before you answer."), then
+  "These results give UK prices (in £): answer with those…" or "No UK
+  prices (in £) here either. Start your answer with one short line saying
+  you couldn't find UK prices, then give the prices you found as they are,
+  saying which country they're for. Don't offer to look further."; the
+  tool models' web line says the same (`price_note`); and an answer's
+  offer to look for local prices after a search goes
+  (`about_you::strip_price_offer`, in `chat_turn`, post-fix `price_offer`).
+  Never a price passed off as theirs: Yap never converts or relabels one
+  (the About you block's rule), and an answer's "£8" that this turn's web
+  text (`Turn::texts`: results and page parts) gave only as "$8" gets its
+  page's sign back (`about_you::restore_price_signs`, post-fix
+  `price_sign`; not 0, not an estimate said as one — "about £6", which the
+  evals' `prices_keep_their_sign` lets pass too). **Models
   that can't call tools** (`commands::small_model_answer`): the fixed
-  pipeline — `needs_web`, `search_query` (the ask stripped),
+  pipeline — `needs_web`, `search_query` (the ask stripped; a price
+  question's aimed at the country, and searched once more for local prices,
+  `local_prices_again`, their pages first or the "couldn't find" line in
+  the prompt),
   `grounded_sources` (≤ 3 sources, ≤ 1,500 tokens) + `grounded_prompt`
   (answer only from them, cite, < 80 words) with the history fitted
   (`fit_history`, ≤ 2,000) for an 8k model; no search → `NOT_SEARCHED_LINE`
@@ -123,7 +156,8 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   on the chat's endpoint and key, with nothing but its search tool
   (`NativeSearch::body`, pure; aimed at the person's country —
   `in_region`: its prompt ends "The user is in the United Kingdom: prefer
-  pages and prices for there (in GBP).", and OpenAI's and Anthropic's search
+  pages and prices for there (in GBP), and say which country any other
+  price is for.", and OpenAI's and Anthropic's search
   tools get `user_location {type: "approximate", country, timezone}`, as
   their docs said on 2026-10-21): **Groq** chat completions +
   `tools: [{type: "browser_search"}]`, `tool_choice: "required"`,

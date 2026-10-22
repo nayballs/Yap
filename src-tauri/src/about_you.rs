@@ -3,16 +3,24 @@
 //! and who they are — Nathan's ask: "It keeps finding things in dollars…"
 //! (his Grok question on Qwen3.5-4B answered in US $ from a UK PC).
 //!
-//! - **Region and language, from Windows** ([`detected`]): the regional
-//!   format (`GetUserDefaultLocaleName`, "en-GB"), the home location
-//!   (`GetUserDefaultGeoName`, else `GetUserGeoID` → `GEO_ISO2`: "GB"), the
-//!   currency (`LOCALE_SINTLSYMBOL` "GBP", `LOCALE_SCURRENCY` "£"), the
-//!   measurement system (`LOCALE_IMEASURE`: metric or US) and the time zone
-//!   (`GetDynamicTimeZoneInformation`'s key name, "GMT Standard Time" →
-//!   "Europe/London" through `calendar/tz.rs`' CLDR table). Each can be
-//!   changed in Settings (`config.region_*`, empty = follow Windows); a
-//!   country picked there brings its own currency and units unless those
-//!   are picked too ([`resolve`]).
+//! - **The region: one country** (2026-10-22, Nathan: "all of that should
+//!   be covered in the region selector only"). Settings → About you →
+//!   **Region** is "Automatic: United Kingdom (from Windows)" — Windows'
+//!   home location ([`detected`]: `GetUserDefaultGeoName`, else
+//!   `GetUserGeoID` → `GEO_ISO2`: "GB") — or a country picked from the list
+//!   (`config.region_country`, empty = Automatic). **Everything else
+//!   follows the country** ([`resolve`]): its currency (the [`COUNTRIES`]
+//!   table; Windows' own currency settings while its regional format is for
+//!   that country — `LOCALE_SINTLSYMBOL` "GBP", `LOCALE_SCURRENCY` "£"), its
+//!   units (km, or miles in the UK, or US units; `LOCALE_IMEASURE` likewise),
+//!   the language searches and the prompt use (Windows' language,
+//!   `GetUserDefaultLocaleName`'s "en", with the country's variety: en-GB)
+//!   and its English spelling (British, American or Canadian). The **time
+//!   zone is always the PC's own** (`GetDynamicTimeZoneInformation`'s key
+//!   name, "GMT Standard Time" → "Europe/London" through `calendar/tz.rs`'
+//!   CLDR table), never a setting. Settings shows what follows from it in
+//!   one line ([`summary`]: "Prices in £ · miles and °C · British spelling ·
+//!   UK time").
 //! - **What to call them** (`about_name`) and **anything the AI should
 //!   know** (`about_me`, ≤ [`ABOUT_MAX`] characters).
 //!
@@ -23,9 +31,11 @@
 //! stays the same from turn to turn; whole ([`prompt_block`]) in a prompt
 //! made for one question (a small model's web answer) — web searches are
 //! aimed at the country (Exa's
-//! `userLocation`, Tavily's `country`, the providers' own searches — see
-//! `web.rs`), and dictation cleanup keeps the person's English spelling
-//! ([`cleanup_spelling`], "Use my region's spelling").
+//! `userLocation`, Tavily's `country`, the providers' own searches, and a
+//! price question's query names it: "… price UK" — see `web.rs`), and
+//! dictation cleanup keeps the person's English spelling
+//! ([`cleanup_spelling`]; its one switch, "Write in my region's spelling",
+//! is in Language Models → Dictation cleanup).
 //!
 //! Kept on this PC (config.json) and sent only to the AI model the person
 //! uses, with each question — never to Yap's account service: a signed-out
@@ -178,17 +188,12 @@ const LANGUAGES: &[(&str, &str)] = &[
     ("zh", "Chinese"), ("zu", "Zulu"),
 ];
 
-/// The regional formats the Settings language picker offers (any other tag
-/// Windows reports still works, shown by its own name).
-pub const LANGUAGE_CHOICES: &[&str] = &[
-    "en-GB", "en-US", "en-AU", "en-CA", "en-IE", "en-IN", "en-NZ", "en-ZA", "en-SG", "fr-FR", "fr-CA", "fr-BE", "fr-CH",
-    "de-DE", "de-AT", "de-CH", "es-ES", "es-MX", "es-US", "it-IT", "pt-PT", "pt-BR", "nl-NL", "nl-BE", "pl-PL", "sv-SE",
-    "da-DK", "nb-NO", "fi-FI", "cs-CZ", "hu-HU", "ro-RO", "el-GR", "tr-TR", "uk-UA", "ru-RU", "he-IL", "ar-SA", "hi-IN",
-    "ja-JP", "ko-KR", "zh-CN", "zh-TW", "th-TH", "vi-VN", "id-ID",
-];
-
 /// Countries that measure in US customary units (miles, pounds, °F).
 const IMPERIAL: &[&str] = &["US", "LR", "MM", "PR", "GU", "VI", "AS", "MP", "UM"];
+
+/// Metric, but distances and speeds in miles: the UK and the Crown
+/// Dependencies.
+const MILES: &[&str] = &["GB", "IM", "JE", "GG"];
 
 /// Where English is spelled the American way, and the Canadian way; any
 /// other region of an English-speaking user spells it the British way.
@@ -277,16 +282,6 @@ pub fn split_tag(tag: &str) -> (String, Option<String>) {
 pub fn language_name(code: &str) -> Option<&'static str> {
     let code = code.trim().to_ascii_lowercase();
     LANGUAGES.iter().find(|(c, _)| *c == code).map(|(_, n)| *n)
-}
-
-/// A tag as Settings shows it: "English (UK)", "French (Canada)". Pure.
-pub fn tag_name(tag: &str) -> String {
-    let (lang, region) = split_tag(tag);
-    let name = language_name(&lang).map(str::to_string).unwrap_or_else(|| tag.trim().to_string());
-    match region {
-        Some(r) => format!("{name} ({})", short_name(&r)),
-        None => name,
-    }
 }
 
 /// How English is spelled where the person is.
@@ -480,44 +475,66 @@ fn windows_detected() -> Detected {
     Detected::default()
 }
 
-// ---- what the person changed, and the result ---------------------------------------------
+// ---- the region: the country, and what follows from it ------------------------------------
 
-/// Settings' changes (`config.region_*`; empty = follow Windows).
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Overrides {
-    pub country: String,
-    pub language: String,
-    pub currency: String,
-    /// "metric" | "imperial" | "".
-    pub units: String,
-    /// IANA.
-    pub time_zone: String,
+/// How the person measures things.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Units {
+    /// Kilometres, kilograms, °C.
+    Metric,
+    /// Metric, but distances and speeds in miles (the UK).
+    MetricMiles,
+    /// US customary units: miles, pounds, °F.
+    Us,
 }
 
-impl Overrides {
-    pub fn from_config(cfg: &crate::config::YapConfig) -> Overrides {
-        Overrides {
-            country: cfg.region_country.clone(),
-            language: cfg.region_language.clone(),
-            currency: cfg.region_currency.clone(),
-            units: cfg.region_units.clone(),
-            time_zone: cfg.region_time_zone.clone(),
+impl Units {
+    fn of(country: &str, metric: Option<bool>) -> Option<Units> {
+        match metric {
+            Some(false) => Some(Units::Us),
+            Some(true) if MILES.contains(&country) => Some(Units::MetricMiles),
+            Some(true) => Some(Units::Metric),
+            None => None,
+        }
+    }
+
+    /// Settings' summary: "km and °C", "miles and °C", "miles and °F".
+    pub fn short(self) -> &'static str {
+        match self {
+            Units::Metric => "km and °C",
+            Units::MetricMiles => "miles and °C",
+            Units::Us => "miles and °F",
+        }
+    }
+
+    /// The prompt's: "metric units", "metric units, but miles for distances
+    /// and speeds", "US units (miles, pounds, °F)".
+    fn in_prompt(self) -> &'static str {
+        match self {
+            Units::Metric => "metric units",
+            Units::MetricMiles => "metric units, but miles for distances and speeds",
+            Units::Us => "US units (miles, pounds, °F)",
         }
     }
 }
 
-/// Where the person is, what they speak, their money, units and clock: the
-/// result of Windows' settings and Settings' changes.
+/// Where the person is and what follows from it: their money, units,
+/// language and spelling — and the PC's clock.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Region {
     pub country: Option<String>,
     pub country_name: Option<String>,
+    /// Follows Windows' home location (Settings' "Automatic").
+    pub automatic: bool,
+    /// Windows' language with the country's variety ("en-GB").
     pub language: Option<String>,
-    pub language_name: Option<String>,
     pub currency: Option<String>,
     pub symbol: Option<String>,
     pub metric: Option<bool>,
+    pub units: Option<Units>,
+    /// The PC's own time zone (IANA), never a setting.
     pub time_zone: Option<String>,
     pub time_zone_label: Option<String>,
     /// How English is spelled there (`None`: not an English speaker, or
@@ -525,77 +542,91 @@ pub struct Region {
     pub spelling: Option<Spelling>,
 }
 
-/// Windows' settings with Settings' changes on top. A country picked in
-/// Settings brings its own currency and units (unless those are picked
-/// too); the language and the time zone follow Windows until picked. Pure.
-pub fn resolve(d: &Detected, o: &Overrides) -> Region {
-    let picked_country = country(&o.country).map(|c| c.code.to_string());
-    let language = Some(o.language.trim()).filter(|l| !l.is_empty()).map(str::to_string).or_else(|| d.locale.clone());
-    let lang_region = language.as_deref().and_then(|l| split_tag(l).1);
-    let country_code = picked_country
-        .clone()
-        .or_else(|| d.country.clone().filter(|c| country(c).is_some()))
-        .or_else(|| lang_region.clone().filter(|c| country(c).is_some()));
-    let follows_windows = picked_country.is_none() || picked_country == d.country;
-
-    let (currency_code, symbol) = match currency(&o.currency) {
-        Some(c) => (Some(c.code.to_string()), Some(c.symbol.to_string())),
-        None if !o.currency.trim().is_empty() && o.currency.trim().len() == 3 => {
-            let code = o.currency.trim().to_ascii_uppercase();
-            (Some(code.clone()), Some(code))
-        }
-        None if follows_windows && d.currency.is_some() => (d.currency.clone(), d.symbol.clone().or_else(|| d.currency.clone())),
-        None => {
-            let code = country_code.as_deref().and_then(country).map(|c| c.currency).filter(|c| !c.is_empty());
-            (code.map(str::to_string), code.map(|c| currency(c).map_or(c, |k| k.symbol).to_string()))
-        }
+/// **The region**: the country Settings picked (`picked`, ISO; empty or
+/// unknown = Windows' home location, else the region of Windows' regional
+/// format), and everything that follows from it — its currency and units
+/// (Windows' own settings while Windows' regional format is for that
+/// country, so a person's own changes to them stay; else the [`COUNTRIES`]
+/// table's), Windows' language with the country's variety ("en" + "GB" →
+/// "en-GB") and so its English spelling. The time zone is always the PC's.
+/// Pure.
+pub fn resolve(d: &Detected, picked: &str) -> Region {
+    let picked = country(picked).map(|c| c.code.to_string());
+    let (windows_lang, format_region) = d.locale.as_deref().map(split_tag).unwrap_or_default();
+    let windows_country = d.country.clone().filter(|c| country(c).is_some());
+    let automatic = picked.is_none() || picked == windows_country;
+    let country_code = picked
+        .or_else(|| windows_country.clone())
+        .or_else(|| format_region.clone().filter(|c| country(c).is_some()));
+    // Windows' currency and measurement are its regional format's: theirs
+    // only while that format is for this country (en-GB for the UK).
+    let windows_formats_here = country_code.is_some() && (format_region == country_code || (format_region.is_none() && automatic));
+    let (currency_code, symbol) = if windows_formats_here && d.currency.is_some() {
+        (d.currency.clone(), d.symbol.clone().or_else(|| d.currency.clone()))
+    } else {
+        let code = country_code.as_deref().and_then(country).map(|c| c.currency).filter(|c| !c.is_empty());
+        (code.map(str::to_string), code.map(|c| currency(c).map_or(c, |k| k.symbol).to_string()))
     };
-    let metric = match o.units.trim() {
-        "metric" => Some(true),
-        "imperial" | "us" => Some(false),
-        _ if follows_windows && d.metric.is_some() => d.metric,
-        _ => country_code.as_deref().map(|c| !IMPERIAL.contains(&c)),
+    let metric = if windows_formats_here && d.metric.is_some() {
+        d.metric
+    } else {
+        country_code.as_deref().map(|c| !IMPERIAL.contains(&c))
     };
-    let time_zone = Some(o.time_zone.trim())
-        .filter(|z| z.parse::<chrono_tz::Tz>().is_ok())
-        .map(str::to_string)
-        .or_else(|| d.time_zone.clone());
-    let spelling = match language.as_deref().map(split_tag) {
-        Some((lang, region)) if lang == "en" => region.or_else(|| country_code.clone()).map(|r| spelling_for_region(&r)),
-        Some((lang, _)) if !lang.is_empty() => None,
-        _ => country_code.as_deref().filter(|c| ENGLISH_SPEAKING.contains(c)).map(spelling_for_region),
+    let language = match (windows_lang.is_empty(), country_code.as_deref()) {
+        (false, Some(c)) => Some(format!("{windows_lang}-{c}")),
+        (false, None) => d.locale.clone(),
+        (true, Some(c)) if ENGLISH_SPEAKING.contains(&c) => Some(format!("en-{c}")),
+        (true, _) => None,
+    };
+    let spelling = match (language.as_deref().map(split_tag), country_code.as_deref()) {
+        (Some((lang, _)), Some(c)) if lang == "en" => Some(spelling_for_region(c)),
+        (Some((lang, Some(r))), None) if lang == "en" => Some(spelling_for_region(&r)),
+        _ => None,
     };
     Region {
         country_name: country_code.as_deref().and_then(country).map(|c| c.name.to_string()),
+        units: country_code.as_deref().and_then(|c| Units::of(c, metric)),
         country: country_code,
-        language_name: language.as_deref().map(tag_name),
+        automatic,
         language,
         currency: currency_code,
         symbol,
         metric,
-        time_zone_label: time_zone.as_deref().map(zone_label),
-        time_zone,
+        time_zone_label: d.time_zone.as_deref().map(zone_label),
+        time_zone: d.time_zone.clone(),
         spelling,
     }
 }
 
-/// The region as Settings shows it: "United Kingdom · English (UK) · £ GBP ·
-/// metric · UK time". Pure.
+/// The money as Settings' summary names it: "£" for the pound, euro and
+/// dollar, a shared sign with its code ("$ (AUD)", "kr (SEK)"), else the
+/// sign or the code ("CHF", "₹"). Pure.
+fn money_short(r: &Region) -> Option<String> {
+    let code = r.currency.as_deref()?;
+    let symbol = r.symbol.as_deref().filter(|s| !s.is_empty() && *s != code);
+    Some(match symbol {
+        Some(s) if ["GBP", "EUR", "USD"].contains(&code) => s.to_string(),
+        Some(s) if CURRENCIES.iter().filter(|c| c.symbol == s).count() > 1 || s.chars().any(|c| c.is_ascii_alphabetic()) => {
+            format!("{s} ({code})")
+        }
+        Some(s) => s.to_string(),
+        None => code.to_string(),
+    })
+}
+
+/// What follows from the region, as Settings shows it under the picker:
+/// "Prices in £ · miles and °C · British spelling · UK time" — only the
+/// parts known. Pure.
 pub fn summary(r: &Region) -> String {
     let mut parts: Vec<String> = Vec::new();
-    if let Some(n) = &r.country_name {
-        parts.push(n.clone());
+    if let Some(m) = money_short(r) {
+        parts.push(format!("Prices in {m}"));
     }
-    if let Some(l) = &r.language_name {
-        parts.push(l.clone());
+    if let Some(u) = r.units {
+        parts.push(u.short().to_string());
     }
-    match (&r.symbol, &r.currency) {
-        (Some(s), Some(c)) if s != c => parts.push(format!("{s} {c}")),
-        (_, Some(c)) => parts.push(c.clone()),
-        _ => {}
-    }
-    if let Some(m) = r.metric {
-        parts.push(if m { "metric" } else { "US units" }.into());
+    if let Some(s) = r.spelling {
+        parts.push(format!("{} spelling", s.name()));
     }
     if let Some(z) = &r.time_zone_label {
         parts.push(z.clone());
@@ -616,7 +647,7 @@ pub struct Profile {
 /// The person's profile, as Settings has it now.
 pub fn profile(cfg: &crate::config::YapConfig) -> Profile {
     Profile {
-        region: resolve(&detected(), &Overrides::from_config(cfg)),
+        region: resolve(&detected(), &cfg.region_country),
         name: one_line(&cfg.about_name, NAME_MAX),
         about: one_line(&cfg.about_me, ABOUT_MAX),
     }
@@ -740,8 +771,8 @@ fn how_to_answer(p: &Profile) -> String {
     if let Some(l) = &r.time_zone_label {
         give.push(format!("times in {l}"));
     }
-    if let Some(m) = r.metric {
-        give.push(if m { "metric units" } else { "US units (miles, pounds, °F)" }.to_string());
+    if let Some(u) = r.units {
+        give.push(u.in_prompt().to_string());
     }
     if !give.is_empty() {
         out.push_str(&format!(" Give {}.", give.join(" and ")));
@@ -792,7 +823,296 @@ pub fn foreign_price_note(reply: &str, r: &Region) -> Option<String> {
     Some(format!("*Prices in $ are as the sources give them (most likely US dollars), not in {theirs}.*"))
 }
 
-/// Dictation cleanup's spelling line ("Use my region's spelling", on by
+/// **Prices where the person is** (2026-10-22): Nathan asked for Grok's
+/// price from a UK PC; Yap searched "Grok subscription price 2026" (Exa's
+/// `userLocation` was GB) and found only x.ai's US page and US price lists,
+/// and the answer gave the US tiers and offered to "help finding the UK
+/// pricing". With this, a price question's search names the country
+/// (`web::local_query`), results with only another country's prices lead to
+/// one more search for the local price, and then to one plain line saying
+/// there are none (`web::Turn`), never an offer to look further
+/// ([`strip_price_offer`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalPrices {
+    /// The country, ISO ("GB").
+    pub country: String,
+    /// How a search and a sentence name it: "UK", "Germany".
+    pub place: String,
+    /// Its money: "GBP", "£" (the code when it has no sign of its own).
+    pub currency: String,
+    pub symbol: String,
+    /// Whether a page's price can be told apart as theirs: not for someone
+    /// who pays in a dollar (a page's bare "$" may be theirs or the US's).
+    pub tells_apart: bool,
+}
+
+impl LocalPrices {
+    /// For someone whose country Yap knows, outside the US (where a page's
+    /// price already is theirs). Pure.
+    pub fn for_region(r: &Region) -> Option<LocalPrices> {
+        let code = r.country.as_deref()?;
+        if ["US", "PR", "GU", "VI", "AS", "MP", "UM"].contains(&code) {
+            return None;
+        }
+        let currency = r.currency.clone().unwrap_or_default();
+        let symbol = r.symbol.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| currency.clone());
+        Some(LocalPrices {
+            country: code.to_string(),
+            place: short_name(code),
+            tells_apart: !currency.is_empty() && !symbol.contains('$') && !DOLLARS.contains(&currency.as_str()),
+            currency,
+            symbol,
+        })
+    }
+
+    /// The sign a search for a price in their money adds: "£", "€", else
+    /// the code ("SEK": "kr" alone finds anything). Pure.
+    pub fn search_sign(&self) -> &str {
+        if self.symbol.chars().any(|c| c.is_alphabetic()) || self.symbol.is_empty() {
+            &self.currency
+        } else {
+            &self.symbol
+        }
+    }
+
+    /// The sign the prompts write prices in: "£", or "SEK".
+    pub fn sign(&self) -> &str {
+        if self.symbol.is_empty() {
+            &self.currency
+        } else {
+            &self.symbol
+        }
+    }
+
+    /// Does `text` give a price in their money ("£12.99", "12,99 €", "GBP
+    /// 12", "12 pounds")? Pure.
+    pub fn local_in(&self, text: &str) -> bool {
+        if self.currency.is_empty() {
+            return false;
+        }
+        let mut alts = vec![format!(r"\b{}\s?\d", regex::escape(&self.currency)), format!(r"\d\s?{}\b", regex::escape(&self.currency))];
+        if !self.symbol.is_empty() && self.symbol != self.currency {
+            let s = regex::escape(&self.symbol);
+            let edge = if self.symbol.chars().any(char::is_alphabetic) { r"\b" } else { "" };
+            alts.push(format!(r"{edge}{s}\s?\d"));
+            alts.push(format!(r"\d\s?{s}{edge}"));
+        }
+        match self.currency.as_str() {
+            "GBP" => alts.push(r"\d\s?(?:pounds|pence)\b".into()),
+            "EUR" => alts.push(r"\d\s?euros?\b".into()),
+            _ => {}
+        }
+        regex::Regex::new(&format!("(?i){}", alts.join("|"))).is_ok_and(|re| re.is_match(text))
+    }
+
+    /// Does `text` give a price in another money — "$8", "US$8", "€9.99",
+    /// "8 USD" — than theirs? Pure.
+    pub fn foreign_in(&self, text: &str) -> bool {
+        static SIGN: std::sync::LazyLock<regex::Regex> =
+            std::sync::LazyLock::new(|| regex::Regex::new(r"([$€£¥₹₩₽₺])\s?\d|\d\s?([€£₹])").expect("static regex"));
+        static CODE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"\b(USD|EUR|GBP|CAD|AUD|NZD|JPY|CNY|INR|CHF|SEK|NOK|DKK|PLN)\s?\d|\d\s?(USD|EUR|GBP|CAD|AUD|NZD|JPY|CNY|INR|CHF|SEK|NOK|DKK|PLN)\b")
+                .expect("static regex")
+        });
+        SIGN.captures_iter(text).any(|c| c.get(1).or(c.get(2)).is_some_and(|m| m.as_str() != self.symbol))
+            || CODE.captures_iter(text).any(|c| c.get(1).or(c.get(2)).is_some_and(|m| m.as_str() != self.currency))
+    }
+
+    /// Does a search already say where, or in what money ("Grok price UK",
+    /// "Netflix US price", "Spotify GBP")? Then Yap leaves it as the model
+    /// wrote it. Pure.
+    pub fn query_names_a_place(&self, query: &str) -> bool {
+        let q = format!(" {} ", query.to_lowercase().replace(['.', ',', '?', '!', '(', ')', '"', '\''], " "));
+        let has = |w: &str| q.contains(&format!(" {} ", w.to_lowercase()));
+        let own: &[&str] = match self.country.as_str() {
+            "GB" => &["uk", "u k", "britain", "british", "england", "scotland", "wales", "northern ireland"],
+            "IE" => &["irish"],
+            "AU" => &["australian", "aussie"],
+            "CA" => &["canadian"],
+            "NZ" => &["nz"],
+            _ => &[],
+        };
+        const ELSEWHERE: &[&str] =
+            &["usa", "u s", "u s a", "america", "american", "eu", "europe", "european", "worldwide", "global", "international", "uae"];
+        // Country names that are everyday words too ("turkey", "jersey").
+        const NOT_A_PLACE: &[&str] = &["Chad", "Jordan", "Georgia", "Turkey", "Jersey", "Guernsey", "Chile", "Guinea", "Mali", "Niger"];
+        let us = query.split(|c: char| !c.is_alphanumeric()).any(|w| w == "US");
+        us || own.iter().chain(ELSEWHERE).any(|w| has(w))
+            || COUNTRIES.iter().any(|c| !NOT_A_PLACE.contains(&c.name) && has(c.name))
+            || has(&self.place)
+            || query.contains(['£', '$', '€', '¥', '₹'])
+            || CURRENCIES.iter().any(|c| query.split(|ch: char| !ch.is_alphanumeric()).any(|w| w == c.code))
+    }
+
+    /// The words that name their money in an answer: "£", "gbp", "pounds".
+    fn money_words(&self) -> Vec<String> {
+        let mut w = vec![self.symbol.to_lowercase(), self.currency.to_lowercase()];
+        match self.currency.as_str() {
+            "GBP" => w.extend(["pounds", "sterling"].map(String::from)),
+            "EUR" => w.push("euros".into()),
+            _ => {}
+        }
+        w.retain(|s| !s.is_empty());
+        w
+    }
+}
+
+/// Dollar currencies (a page's bare "$" may be one of them).
+const DOLLARS: &[&str] = &[
+    "USD", "CAD", "AUD", "NZD", "HKD", "SGD", "TWD", "XCD", "BBD", "BSD", "BZD", "BMD", "KYD", "JMD", "TTD", "GYD", "SRD",
+    "LRD", "NAD", "FJD", "SBD", "BND",
+];
+
+/// An answer's offer to look for prices where the person is — "Let me know
+/// if you need help finding the UK pricing…", "Would you like me to look up
+/// UK prices?" — taken out after a search, when Yap could have looked (and
+/// did: a price question searches for the local price, and once more when
+/// the first results had none): Nathan's Grok answer ended so, 2026-10-22.
+/// A sentence that offers (let me know, would you like, I can…), to look
+/// (find, look, search, check, help…), for a price, where they are (the
+/// UK, £, local, your country…) goes — never one that says something
+/// wasn't found ("I couldn't find UK prices") — and a paragraph left empty
+/// goes too. `None` when there's no such offer. Pure.
+pub fn strip_price_offer(reply: &str, local: &LocalPrices) -> Option<String> {
+    static OFFER: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b(?:let me know|would you like|do you want|want me to|i can\b|i could\b|i['’]d be happy|i['’]m happy|happy to|shall i|should i|feel free to ask|just ask)")
+            .expect("static regex")
+    });
+    static ACT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b(?:find|finding|look|looking|search|searching|check|checking|get|help|dig|track|pull)").expect("static regex")
+    });
+    static PRICE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"(?i)pric|\bcost|\brates?\b|\bplans?\b|\bdeals?\b|tariff").expect("static regex"));
+    static NOT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b(?:couldn['’]t|could not|can['’]t|cannot|didn['’]t|did not|unable|wasn['’]t|weren['’]t|isn['’]t|aren['’]t|no)\b").expect("static regex")
+    });
+    let mut local_words: Vec<String> = local.money_words();
+    local_words.extend([local.place.to_lowercase(), "local".into(), "your country".into(), "your region".into(), "your currency".into(), "your area".into()]);
+    if local.country == "GB" {
+        local_words.push("british".into());
+    }
+    let is_offer = |s: &str| {
+        let lower = s.to_lowercase();
+        OFFER.is_match(s)
+            && ACT.is_match(s)
+            && PRICE.is_match(s)
+            && !NOT.is_match(s)
+            && local_words.iter().any(|w| {
+                // A word, not part of one ("uk" in "ukulele"); a sign anywhere.
+                if w.chars().any(char::is_alphanumeric) {
+                    lower.split(|c: char| !c.is_alphanumeric()).any(|x| x == w.as_str()) || (w.contains(' ') && lower.contains(w.as_str()))
+                } else {
+                    lower.contains(w.as_str())
+                }
+            })
+    };
+    let mut changed = false;
+    let paragraphs: Vec<String> = reply
+        .split("\n\n")
+        .filter_map(|para| {
+            // Sentence by sentence (a full stop before a digit is a price's
+            // decimal point, not an end): the rest of the paragraph stays.
+            let mut sentences: Vec<String> = Vec::new();
+            let mut current = String::new();
+            let mut chars = para.chars().peekable();
+            while let Some(c) = chars.next() {
+                current.push(c);
+                let next_is_digit = chars.peek().is_some_and(char::is_ascii_digit);
+                if matches!(c, '.' | '!' | '?' | '\n') && !next_is_digit {
+                    sentences.push(std::mem::take(&mut current));
+                }
+            }
+            if !current.is_empty() {
+                sentences.push(current);
+            }
+            let before = sentences.len();
+            sentences.retain(|s| !is_offer(s));
+            if sentences.len() == before {
+                return Some(para.to_string());
+            }
+            changed = true;
+            let kept = sentences.concat().trim().to_string();
+            kept.chars().any(char::is_alphanumeric).then_some(kept)
+        })
+        .collect();
+    changed.then(|| paragraphs.join("\n\n").trim_end().to_string())
+}
+
+/// **A price never passed off as theirs**: an answer's price in the
+/// person's money ("£8") that the web gave this turn only in another
+/// ("$8", never "£8") gets its page's sign back ("$8") — Qwen3.5-4B, told
+/// about the UK, wrote x.ai's "$8/month" as "£8/month" about 1 time in 3 in
+/// a chat whose earlier turns found UK pages (the model evaluations,
+/// 2026-10-21/22). Not 0 (free is free), not an estimate said as one
+/// ("about £6", "~£6", "≈ £6"), and only the £, € and $ signs. `pages`: the
+/// web text the model was given (`web::Turn::texts`). Returns the answer
+/// and the prices put back ("$8"); `None` when nothing changes. Pure.
+pub fn restore_price_signs(reply: &str, pages: &[String], local: &LocalPrices) -> Option<(String, Vec<String>)> {
+    static PRICE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)(~|≈|\babout|\baround|\broughly|\bapprox\.?|\bapproximately|\bequivalent(?:\s+to)?|\best\.?)?(\s*)([£€$])(\s?)(\d[\d,]*(?:\.\d+)?)")
+            .expect("static regex")
+    });
+    if !["£", "€"].contains(&local.symbol.as_str()) {
+        return None;
+    }
+    let norm = |n: &str| {
+        let n = n.replace(',', "");
+        let n = n.strip_suffix(".00").unwrap_or(&n).to_string();
+        n.strip_suffix(".0").unwrap_or(&n).to_string()
+    };
+    let given: Vec<(String, String)> =
+        pages.iter().flat_map(|p| PRICE.captures_iter(p).map(|c| (c[3].to_string(), norm(&c[5]))).collect::<Vec<_>>()).collect();
+    let mut out = String::with_capacity(reply.len());
+    let mut last = 0;
+    let mut restored = Vec::new();
+    for c in PRICE.captures_iter(reply) {
+        let sign = c.get(3).expect("group 3");
+        let amount = norm(&c[5]);
+        let estimate = c.get(1).is_some();
+        if sign.as_str() != local.symbol || estimate || amount.parse::<f64>().map_or(true, |v| v <= 0.0) {
+            continue;
+        }
+        if given.iter().any(|(s, a)| *s == local.symbol && *a == amount) {
+            continue;
+        }
+        // The page's sign: the dollar first (the usual one), else another.
+        let Some(theirs) = ["$", "€", "£"].into_iter().filter(|s| *s != local.symbol).find(|s| given.iter().any(|(gs, a)| gs == s && *a == amount)) else {
+            continue;
+        };
+        out.push_str(&reply[last..sign.start()]);
+        out.push_str(theirs);
+        last = sign.end();
+        let price = format!("{theirs}{}", &c[5]);
+        if !restored.contains(&price) {
+            restored.push(price);
+        }
+    }
+    (last > 0).then(|| {
+        out.push_str(&reply[last..]);
+        (out, restored)
+    })
+}
+
+/// Yap's note under an answer whose prices it gave back their page's sign
+/// ([`restore_price_signs`]): "*$8 and $80 are as their pages give them, in
+/// dollars: not UK prices.*" Pure.
+pub fn restored_price_note(restored: &[String], local: &LocalPrices) -> String {
+    let money = |p: &str| match p.chars().next() {
+        Some('$') => "dollars",
+        Some('€') => "euros",
+        _ => "pounds",
+    };
+    let list = match restored {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    };
+    let (is, gives) = if restored.len() == 1 { ("is", "its page gives it") } else { ("are", "their pages give them") };
+    let currency = restored.first().map_or("dollars", |p| money(p));
+    format!("*{list} {is} as {gives}, in {currency}: not {} prices.*", local.place)
+}
+
+/// Dictation cleanup's spelling line ("Write in my region's spelling", on by
 /// default): keep the person's variety of English. `None` when it's off or
 /// the variety isn't known. Pure over the region.
 pub fn spelling_line(on: bool, r: &Region) -> Option<String> {
@@ -814,48 +1134,38 @@ pub fn cleanup_spelling(cfg: &crate::config::YapConfig) -> Option<String> {
 
 // ---- Settings ------------------------------------------------------------------------------
 
-/// `about_you_status {overrides?}`: what Windows says, the result of
-/// Settings' changes (the ones passed, else the saved ones), its summary and
-/// the prompt block as it reads now, and the pickers' choices.
+/// `about_you_status {overrides?}` (About you, and the cleanup's spelling
+/// switch): the region as Windows has it (Settings' "Automatic"), the
+/// region with the country picked (`regionCountry` passed, else the saved
+/// one), what follows from it in one line, the prompt block as it reads
+/// now (with `aboutName`, `aboutMe`), the spelling, and the countries.
 #[tauri::command]
 pub fn about_you_status(overrides: Option<serde_json::Value>) -> serde_json::Value {
     let cfg = crate::config::load();
-    let mut o = Overrides::from_config(&cfg);
-    let (mut name, mut about, mut spelling_on) = (cfg.about_name.clone(), cfg.about_me.clone(), cfg.region_spelling);
+    let (mut picked, mut name, mut about, mut spelling_on) =
+        (cfg.region_country.clone(), cfg.about_name.clone(), cfg.about_me.clone(), cfg.region_spelling);
     if let Some(v) = overrides {
         let s = |k: &str| v[k].as_str().map(str::to_string);
-        o = Overrides {
-            country: s("regionCountry").unwrap_or(o.country),
-            language: s("regionLanguage").unwrap_or(o.language),
-            currency: s("regionCurrency").unwrap_or(o.currency),
-            units: s("regionUnits").unwrap_or(o.units),
-            time_zone: s("regionTimeZone").unwrap_or(o.time_zone),
-        };
+        picked = s("regionCountry").unwrap_or(picked);
         name = s("aboutName").unwrap_or(name);
         about = s("aboutMe").unwrap_or(about);
         spelling_on = v["regionSpelling"].as_bool().unwrap_or(spelling_on);
     }
     let d = detected();
-    let windows = resolve(&d, &Overrides::default());
-    // What "Automatic" means for the currency and units with the country
-    // picked now (Windows', or the picked country's own).
-    let auto = resolve(&d, &Overrides { currency: String::new(), units: String::new(), ..o.clone() });
-    let region = resolve(&d, &o);
+    let windows = resolve(&d, "");
+    let region = resolve(&d, &picked);
     let profile = Profile { region: region.clone(), name: one_line(&name, NAME_MAX), about: one_line(&about, ABOUT_MAX) };
     serde_json::json!({
         "windows": windows,
-        "windowsSummary": summary(&windows),
-        "auto": auto,
         "region": region,
         "summary": summary(&region),
         "prompt": prompt_block(&profile, Utc::now()),
-        "spellingLine": spelling_line(spelling_on, &region),
+        "spelling": region.spelling.map(Spelling::name),
         "spellingExamples": region.spelling.map(Spelling::examples),
+        "spellingLine": spelling_line(spelling_on, &region),
         "aboutMax": ABOUT_MAX,
         "nameMax": NAME_MAX,
         "countries": COUNTRIES.iter().map(|c| serde_json::json!({ "code": c.code, "name": c.name })).collect::<Vec<_>>(),
-        "currencies": CURRENCIES.iter().map(|c| serde_json::json!({ "code": c.code, "symbol": c.symbol, "name": c.name })).collect::<Vec<_>>(),
-        "languages": LANGUAGE_CHOICES.iter().map(|t| serde_json::json!({ "tag": t, "name": tag_name(t) })).collect::<Vec<_>>(),
     })
 }
 
@@ -880,27 +1190,29 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 10, 21, 20, 40, 0).unwrap()
     }
 
+    const UK_BLOCK: &str = "About the user: they're in the United Kingdom (British English). Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\".";
+
     #[test]
     fn nathans_pc_reads_as_the_uk() {
-        let r = resolve(&uk(), &Overrides::default());
-        assert_eq!(summary(&r), "United Kingdom · English (UK) · £ GBP · metric · UK time");
+        let r = resolve(&uk(), "");
+        assert!(r.automatic);
+        assert_eq!(r.country_name.as_deref(), Some("United Kingdom"));
+        assert_eq!(summary(&r), "Prices in £ · miles and °C · British spelling · UK time");
         assert_eq!(r.spelling, Some(Spelling::British));
+        assert_eq!(r.language.as_deref(), Some("en-GB"));
         let p = Profile { region: r, name: "Nathan".into(), about: "I'm in Manchester, I play PC games, I work day shifts".into() };
         assert_eq!(
             prompt_block(&p, at()),
-            "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK time and metric units. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Their name is Nathan. They told Yap: \"I'm in Manchester, I play PC games, I work day shifts\""
+            "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Their name is Nathan. They told Yap: \"I'm in Manchester, I play PC games, I work day shifts\""
         );
     }
 
     #[test]
     fn chat_gets_the_block_without_the_clock_and_the_clock_on_its_own() {
-        let p = Profile { region: resolve(&uk(), &Overrides::default()), name: "Nathan".into(), about: String::new() };
+        let p = Profile { region: resolve(&uk(), ""), name: "Nathan".into(), about: String::new() };
         // The same every minute (Chat's system prompt stays cacheable)…
         let block = profile_block(&p);
-        assert_eq!(
-            block,
-            "About the user: they're in the United Kingdom (British English). Give times in UK time and metric units. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Their name is Nathan."
-        );
+        assert_eq!(block, format!("{UK_BLOCK} Their name is Nathan."));
         assert!(!block.contains("2026") && !block.contains("21:40"));
         // …and the moment in the question's context.
         assert_eq!(clock_line(&p, at()), "It's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00).");
@@ -915,27 +1227,58 @@ mod tests {
     }
 
     #[test]
-    fn a_country_picked_in_settings_brings_its_currency_and_units() {
-        let o = Overrides { country: "us".into(), ..Default::default() };
-        let r = resolve(&uk(), &o);
+    fn everything_follows_the_country_picked() {
+        // The US picked on a UK PC: its money, units, spelling and variety of
+        // English; the clock stays the PC's.
+        let r = resolve(&uk(), "us");
+        assert!(!r.automatic);
         assert_eq!(r.country.as_deref(), Some("US"));
         assert_eq!((r.currency.as_deref(), r.symbol.as_deref()), (Some("USD"), Some("$")));
-        assert_eq!(r.metric, Some(false));
-        // The language and the clock still follow Windows.
-        assert_eq!(r.language.as_deref(), Some("en-GB"));
-        assert_eq!(r.time_zone_label.as_deref(), Some("UK time"));
-        assert_eq!(summary(&r), "United States · English (UK) · $ USD · US units · UK time");
-        // Picked too: they win.
-        let o = Overrides { country: "US".into(), currency: "EUR".into(), units: "metric".into(), time_zone: "America/New_York".into(), language: "en-US".into() };
-        let r = resolve(&uk(), &o);
-        assert_eq!(summary(&r), "United States · English (US) · € EUR · metric · New York time");
+        assert_eq!((r.metric, r.units), (Some(false), Some(Units::Us)));
+        assert_eq!(r.language.as_deref(), Some("en-US"));
         assert_eq!(r.spelling, Some(Spelling::American));
-        // The same country as Windows: Windows' own currency settings stay.
-        let r = resolve(&Detected { symbol: Some("GBP£".into()), ..uk() }, &Overrides { country: "GB".into(), ..Default::default() });
+        assert_eq!(r.time_zone_label.as_deref(), Some("UK time"));
+        assert_eq!(summary(&r), "Prices in $ · miles and °F · American spelling · UK time");
+        // Germany for an English speaker: euros, km, British spelling (an
+        // English speaker outside the Americas), still English.
+        let r = resolve(&uk(), "DE");
+        assert_eq!(summary(&r), "Prices in € · km and °C · British spelling · UK time");
+        assert_eq!(r.language.as_deref(), Some("en-DE"));
+        // Canada and Australia: their own dollars, said with the code.
+        assert_eq!(summary(&resolve(&uk(), "CA")), "Prices in $ (CAD) · km and °C · Canadian spelling · UK time");
+        assert_eq!(summary(&resolve(&uk(), "AU")), "Prices in $ (AUD) · km and °C · British spelling · UK time");
+        // Windows' own country picked: the same as Automatic, Windows' own
+        // currency settings kept.
+        let mine = Detected { symbol: Some("GBP£".into()), ..uk() };
+        let r = resolve(&mine, "GB");
+        assert!(r.automatic);
         assert_eq!(r.symbol.as_deref(), Some("GBP£"));
-        // Junk is ignored.
-        let r = resolve(&uk(), &Overrides { country: "ZZ".into(), time_zone: "Mars/Olympus".into(), ..Default::default() });
-        assert_eq!(summary(&r), "United Kingdom · English (UK) · £ GBP · metric · UK time");
+        // Junk is Automatic.
+        assert_eq!(resolve(&uk(), "ZZ"), resolve(&uk(), ""));
+    }
+
+    #[test]
+    fn the_home_location_wins_over_the_regional_format() {
+        // A UK PC set up with the US format (Windows' currency then says $):
+        // the country is the UK, and so are the money, units and spelling.
+        let d = Detected {
+            locale: Some("en-US".into()),
+            currency: Some("USD".into()),
+            symbol: Some("$".into()),
+            metric: Some(false),
+            ..uk()
+        };
+        let r = resolve(&d, "");
+        assert_eq!(summary(&r), "Prices in £ · miles and °C · British spelling · UK time");
+        assert_eq!(r.language.as_deref(), Some("en-GB"));
+        // No home location: the format's region.
+        let d = Detected { country: None, ..uk() };
+        assert_eq!(resolve(&d, "").country.as_deref(), Some("GB"));
+        // A French speaker in the UK: French, no English spelling assumed.
+        let d = Detected { locale: Some("fr-FR".into()), ..uk() };
+        let r = resolve(&d, "");
+        assert_eq!((r.language.as_deref(), r.spelling), (Some("fr-GB"), None));
+        assert_eq!(summary(&r), "Prices in £ · miles and °C · UK time");
     }
 
     #[test]
@@ -950,8 +1293,8 @@ mod tests {
     #[test]
     fn other_countries_read_right() {
         let fr = parse_stand_in("fr-FR");
-        let r = resolve(&fr, &Overrides::default());
-        assert_eq!(summary(&r), "France · French (France) · € EUR · metric");
+        let r = resolve(&fr, "");
+        assert_eq!(summary(&r), "Prices in € · km and °C");
         assert_eq!(r.spelling, None, "a French speaker's English isn't assumed British or American");
         let p = Profile { region: r, ..Default::default() };
         let line = prompt_block(&p, at());
@@ -962,11 +1305,15 @@ mod tests {
         assert_eq!(in_sentence(country("DE").unwrap()), "Germany");
         assert_eq!(in_sentence(country("KY").unwrap()), "the Cayman Islands");
         // Canada spells its own way; Australia the British way.
-        assert_eq!(resolve(&parse_stand_in("en-CA"), &Overrides::default()).spelling, Some(Spelling::Canadian));
-        assert_eq!(resolve(&parse_stand_in("en-AU"), &Overrides::default()).spelling, Some(Spelling::British));
-        let us = resolve(&parse_stand_in("en-US"), &Overrides::default());
+        assert_eq!(resolve(&parse_stand_in("en-CA"), "").spelling, Some(Spelling::Canadian));
+        assert_eq!(resolve(&parse_stand_in("en-AU"), "").spelling, Some(Spelling::British));
+        let us = resolve(&parse_stand_in("en-US"), "");
         assert_eq!(us.spelling, Some(Spelling::American));
-        assert_eq!(summary(&us), "United States · English (US) · $ USD · US units");
+        assert_eq!(summary(&us), "Prices in $ · miles and °F · American spelling");
+        // Shared signs and letter signs carry the code.
+        assert_eq!(summary(&resolve(&parse_stand_in("sv-SE"), "")), "Prices in kr (SEK) · km and °C");
+        assert_eq!(summary(&resolve(&parse_stand_in("ja-JP"), "")), "Prices in ¥ (JPY) · km and °C");
+        assert_eq!(summary(&resolve(&parse_stand_in("hi-IN"), "")), "Prices in ₹ · km and °C");
     }
 
     #[test]
@@ -981,13 +1328,15 @@ mod tests {
 
     #[test]
     fn spelling_follows_the_region_and_the_setting() {
-        let r = resolve(&uk(), &Overrides::default());
+        let r = resolve(&uk(), "");
         assert_eq!(
             spelling_line(true, &r).as_deref(),
             Some("When the transcript is in English, spell it the British way (honour, recognise, paralyse, metre, cancelled, catalogue, defence), without changing any words.")
         );
         assert_eq!(spelling_line(false, &r), None);
         assert_eq!(spelling_line(true, &Region::default()), None);
+        // The US picked: American.
+        assert!(spelling_line(true, &resolve(&uk(), "US")).unwrap().contains("the American way (honor"));
     }
 
     #[test]
@@ -996,9 +1345,6 @@ mod tests {
         assert_eq!(tavily_country("cz"), Some("czech republic"));
         assert_eq!(tavily_country("CD"), Some("congo"));
         assert_eq!(tavily_country("HK"), None, "not one of Tavily's");
-        assert_eq!(tag_name("en-GB"), "English (UK)");
-        assert_eq!(tag_name("pt-BR"), "Portuguese (Brazil)");
-        assert_eq!(tag_name("zh-Hans-CN"), "Chinese (China)");
         assert_eq!(zone_label("America/New_York"), "New York time");
         assert_eq!(zone_label("Etc/GMT+5"), "GMT+5");
         // Every table entry is well-formed and unique.
@@ -1010,9 +1356,6 @@ mod tests {
             assert!(c.code.len() == 2 && c.code.chars().all(|ch| ch.is_ascii_uppercase()), "{c:?}");
             assert!(c.currency.is_empty() || c.currency.len() == 3, "{c:?}");
         }
-        for t in LANGUAGE_CHOICES {
-            assert!(!tag_name(t).contains('-'), "{t} has no language name");
-        }
         // Every Tavily name is one of the countries'.
         for t in TAVILY_COUNTRIES {
             assert!(COUNTRIES.iter().any(|c| tavily_country(c.code) == Some(*t)), "{t}");
@@ -1021,7 +1364,7 @@ mod tests {
 
     #[test]
     fn bare_dollar_prices_get_a_note_for_someone_who_pays_in_pounds() {
-        let gb = resolve(&uk(), &Overrides::default());
+        let gb = resolve(&uk(), "");
         let bare = "Here are the current Grok subscription prices:\n\n- **Plus**: $8/month\n- **Premium**: $30/month";
         assert_eq!(
             foreign_price_note(bare, &gb).as_deref(),
@@ -1032,11 +1375,101 @@ mod tests {
             assert_eq!(foreign_price_note(said, &gb), None, "{said}");
         }
         // Someone who pays in dollars, or whose money Yap doesn't know.
-        let us = resolve(&parse_stand_in("en-US"), &Overrides::default());
-        let ca = resolve(&parse_stand_in("en-CA"), &Overrides::default());
+        let us = resolve(&parse_stand_in("en-US"), "");
+        let ca = resolve(&parse_stand_in("en-CA"), "");
         assert_eq!(foreign_price_note(bare, &us), None);
         assert_eq!(foreign_price_note(bare, &ca), None);
         assert_eq!(foreign_price_note(bare, &Region::default()), None);
+    }
+
+    #[test]
+    fn local_prices_are_told_apart_from_foreign_ones() {
+        let gb = LocalPrices::for_region(&resolve(&uk(), "")).unwrap();
+        assert_eq!((gb.place.as_str(), gb.sign(), gb.search_sign(), gb.tells_apart), ("UK", "£", "£", true));
+        for local in ["Premium Individual: £12.99/month", "12.99 GBP a month", "GBP 12.99", "costs 12 pounds"] {
+            assert!(gb.local_in(local), "{local}");
+        }
+        for foreign in ["Plus: $8/month", "US$8", "€13.99 in Germany", "8 USD", "13,99 €"] {
+            assert!(gb.foreign_in(foreign), "{foreign}");
+            assert!(!gb.local_in(foreign), "{foreign}");
+        }
+        assert!(!gb.foreign_in("£12.99 a month, 256 GB"));
+        // Sweden: "kr" is a word, so searches add the code.
+        let se = LocalPrices::for_region(&resolve(&parse_stand_in("sv-SE"), "")).unwrap();
+        assert_eq!((se.place.as_str(), se.search_sign()), ("Sweden", "SEK"));
+        assert!(se.local_in("Spotify kostar 129 kr i månaden") && !se.local_in("krona"));
+        // No local prices for the US; dollars can't be told apart.
+        assert_eq!(LocalPrices::for_region(&resolve(&parse_stand_in("en-US"), "")), None);
+        assert!(!LocalPrices::for_region(&resolve(&parse_stand_in("en-CA"), "")).unwrap().tells_apart);
+        assert_eq!(LocalPrices::for_region(&Region::default()), None);
+    }
+
+    #[test]
+    fn a_query_that_already_says_where_is_left_alone() {
+        let gb = LocalPrices::for_region(&resolve(&uk(), "")).unwrap();
+        for q in [
+            "Grok price UK",
+            "Spotify Premium price United Kingdom",
+            "Netflix price in Britain",
+            "Grok subscription US price",
+            "iPhone 17 price USA",
+            "Game Pass price GBP",
+            "Netflix £ price",
+            "Spotify price Germany",
+            "Spotify price Europe",
+        ] {
+            assert!(gb.query_names_a_place(q), "{q}");
+        }
+        for q in ["Grok subscription price 2026", "iPhone 17 Pro 256GB price", "price for us", "Arsenal jersey price", "turkey crown price"] {
+            assert!(!gb.query_names_a_place(q), "{q}");
+        }
+    }
+
+    #[test]
+    fn an_offer_to_find_local_prices_goes() {
+        let gb = LocalPrices::for_region(&resolve(&uk(), "")).unwrap();
+        // Nathan's answer of 2026-10-22, its last paragraph.
+        let reply = "- **Plus**: $8/month\n- **Premium**: $30/month\n\nNote: These are US prices. Let me know if you need help finding the UK pricing or more details about what each plan includes!";
+        assert_eq!(
+            strip_price_offer(reply, &gb).as_deref(),
+            Some("- **Plus**: $8/month\n- **Premium**: $30/month\n\nNote: These are US prices.")
+        );
+        for offer in [
+            "Plus is $8.\n\nWould you like me to look up UK prices?",
+            "Plus is $8.\n\nI can search for the price in pounds if you'd like.",
+            "Plus is $8.\n\nIf you’d like, I can check the local pricing for you.",
+        ] {
+            assert_eq!(strip_price_offer(offer, &gb).as_deref(), Some("Plus is $8."), "{offer}");
+        }
+        // Not offers: saying what wasn't found, advice, a general offer.
+        for kept in [
+            "I couldn't find UK prices for Grok. Here are the US ones: Plus $8.99/month.",
+            "If you want the cheapest UK plan, Plus is £8.",
+            "Would you like more details about any plan?",
+            "Plus is £7.99 a month in the UK.",
+        ] {
+            assert_eq!(strip_price_offer(kept, &gb), None, "{kept}");
+        }
+    }
+
+    #[test]
+    fn a_dollar_price_is_never_passed_off_as_pounds() {
+        let gb = LocalPrices::for_region(&resolve(&uk(), "")).unwrap();
+        let pages = ["Plus: $8/month or $80/year. Premium: $30.00 a month. Free $0.".to_string(), "SuperGrok ≈ £24/mo in the UK".to_string()];
+        // The 4B's turn of 2026-10-22: x.ai's $8 written as £8.
+        let (fixed, restored) = restore_price_signs("**Plus** - £8/month (£80/year), **Premium** £30.", &pages, &gb).unwrap();
+        assert_eq!(fixed, "**Plus** - $8/month ($80/year), **Premium** $30.");
+        assert_eq!(restored, ["$8", "$80", "$30"]);
+        assert_eq!(restored_price_note(&restored, &gb), "*$8, $80 and $30 are as their pages give them, in dollars: not UK prices.*");
+        assert_eq!(restored_price_note(&["$8".into()], &gb), "*$8 is as its page gives it, in dollars: not UK prices.*");
+        // A £ price a page gives, free, an estimate said as one, a price no
+        // page has, and dollars left as dollars: nothing changes.
+        for kept in ["SuperGrok is £24 a month.", "Free (£0)", "about £6, ~£6, ≈ £6.50", "Plus costs £9.", "Plus is $8 (US price)."] {
+            assert_eq!(restore_price_signs(kept, &pages, &gb), None, "{kept}");
+        }
+        // Someone who pays in dollars: never.
+        let ca = LocalPrices::for_region(&resolve(&parse_stand_in("en-CA"), "")).unwrap();
+        assert_eq!(restore_price_signs("$8", &pages, &ca), None);
     }
 
     #[test]

@@ -43,8 +43,15 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   question that needs the web (`web::needs_web` and not `web::refers_back`:
   Nathan's "best RPG games coming out in 2026" cited [1][4][5] that drew as
   the indie games' sources) nor after a search that found nothing; code, a
-  link's text and "[0]" are left alone. Then, for someone who doesn't pay in
-  dollars (About you), **bare dollar prices** — "$8/month" with nothing
+  link's text and "[0]" are left alone. Then, for someone outside the US
+  (About you's region; 2026-10-22), a price question that searched loses
+  any **offer to look for local prices** ("Let me know if you need help
+  finding the UK pricing…": Yap looked, and looked again —
+  `about_you::strip_price_offer`), and **a price in their money the web
+  gave only in another** ("£8" where the pages said "$8") gets its page's
+  sign back (`about_you::restore_price_signs`, over the turn's web text);
+  and for someone who doesn't pay in
+  dollars, **bare dollar prices** — "$8/month" with nothing
   saying whose dollars — get "*Prices in $ are as the sources give them
   (most likely US dollars), not in £.*" (`about_you::foreign_price_note`, in
   `chat_turn`; 2026-10-21). **History**: never a note in an

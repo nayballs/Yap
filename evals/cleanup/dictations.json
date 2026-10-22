@@ -34,7 +34,7 @@
     "the meeting is on tuesday sorry thursday at ten in the big conference room",
     "tell dave the github action is broken again it's the windows runner that keeps timing out"
   ],
-  "spelling_description": "Dictations with words English spells two ways, as speech-to-text writes them (American: Parakeet's and Whisper's training text is mostly US English). With --locale en-GB the cleanup should write them the British way (\"Use my region's spelling\", about_you.rs); with en-US, or no locale, the American way. Run --cleanup-rounds times each, after the latency phases.",
+  "spelling_description": "Dictations with words English spells two ways, as speech-to-text writes them (American: Parakeet's and Whisper's training text is mostly US English). With --locale en-GB the cleanup should write them the British way (\"Write in my region's spelling\", about_you.rs); with en-US, or no locale, the American way. Run --cleanup-rounds times each, after the latency phases.",
   "spelling": [
     {
       "text": "we need to organize the color scheme for the new website before the meeting on friday",

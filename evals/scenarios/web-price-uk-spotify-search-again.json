@@ -1,0 +1,66 @@
+{
+  "name": "web-price-uk-spotify-search-again",
+  "description": "\"How much does Spotify Premium cost a month?\" from a UK PC, when naming the UK isn't enough. Stand-in web: a search that asks for the price in pounds (£, GBP, pounds, sterling) finds Spotify's UK page; any other — \"… UK\" included — finds only the US page in $. Right: after US-only results, a second search for the UK price, then the answer in £ (£12.99), not $11.99 relabelled. Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "prices",
+    "locale",
+    "standin"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Spotify Premium plans | Spotify (US)",
+        "url": "https://www.spotify.com/us/premium/",
+        "published": "2026-09-28",
+        "text": "Premium Individual: $11.99/month. Premium Duo: $16.99/month. Premium Family: $19.99/month, up to 6 accounts. Premium Student: $5.99/month. Cancel anytime."
+      },
+      {
+        "title": "Spotify raises Premium prices again",
+        "url": "https://musicbiz.example/spotify-price-rise-2026",
+        "published": "2026-09-30",
+        "text": "Spotify's Individual plan now costs $11.99 a month in the US, Duo $16.99 and Family $19.99."
+      }
+    ],
+    "searches": [
+      {
+        "when": [
+          "£",
+          "gbp",
+          "pounds",
+          "sterling"
+        ],
+        "results": [
+          {
+            "title": "Spotify Premium plans | Spotify (UK)",
+            "url": "https://www.spotify.com/uk/premium/",
+            "published": "2026-09-28",
+            "text": "Premium Individual: £12.99/month. Premium Duo: £17.99/month. Premium Family: £21.99/month, up to 6 accounts. Premium Student: £6.49/month. Cancel anytime."
+          }
+        ]
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "How much does Spotify Premium cost a month?",
+      "expect": {
+        "min_sources": 1,
+        "answer_matches": "£\\s?12\\.99",
+        "answer_not_matches": "\\b(?:let me know|would you like|do you want|want me to|i can|i could|happy to|shall i|if you(?:'d| would)? like)\\b[^.!?\\n]{0,80}(?:uk|british|£|gbp|local|your (?:country|region|currency))[^.!?\\n]{0,60}(?:pric|cost)",
+        "no_false_claims": true,
+        "opened_none": true,
+        "prices_keep_their_sign": true
+      },
+      "soft": {
+        "min_searches": 2,
+        "sources_any": [
+          "spotify.com/uk"
+        ],
+        "answer_not_matches": "\\$\\s?11\\.99"
+      }
+    }
+  ]
+}

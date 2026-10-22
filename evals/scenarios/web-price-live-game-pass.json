@@ -1,0 +1,42 @@
+{
+  "name": "web-price-live-game-pass",
+  "description": "\"How much is Xbox Game Pass Ultimate a month?\" from a UK PC, live (Exa with the run's key). Xbox's UK site gives it in £: the answer should too, not the US $29.99. Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "prices",
+    "locale",
+    "live"
+  ],
+  "needs_web": true,
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "How much is Xbox Game Pass Ultimate a month?",
+      "expect": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "min_sources": 1,
+        "answer_matches": "£\\s?\\d",
+        "answer_not_matches": "\\b(?:let me know|would you like|do you want|want me to|i can|i could|happy to|shall i|if you(?:'d| would)? like)\\b[^.!?\\n]{0,80}(?:uk|british|£|gbp|local|your (?:country|region|currency))[^.!?\\n]{0,60}(?:pric|cost)",
+        "no_false_claims": true,
+        "opened_none": true,
+        "prices_keep_their_sign": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search",
+            "args": {
+              "query": {
+                "matches": "\\buk\\b|united kingdom|britain|£|\\bgbp\\b|pounds"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

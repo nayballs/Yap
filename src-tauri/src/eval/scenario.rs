@@ -279,6 +279,8 @@ pub struct Expect {
     pub notes_count: Option<usize>,
     /// The answer came with at least this many web sources (Chat's Sources row).
     pub min_sources: Option<usize>,
+    /// At least this many web searches ran (the model's and Yap's own).
+    pub min_searches: Option<usize>,
     /// One of the sources' addresses holds one of these ("bg3.wiki").
     #[serde(default)]
     pub sources_any: Vec<String>,
@@ -527,9 +529,14 @@ fn false_claims(o: &Observed) -> Vec<String> {
             "early", "late", "next", "this", "january", "february", "march", "april", "may", "june", "july", "august",
             "september", "october", "november", "december",
         ];
+        // Nor a day ("launching 12 March 2026", 2026-10-22).
         let claim = open.iter().find_map(|r| {
             r.captures_iter(&reply)
-                .filter(|c| c.get(4).is_none_or(|w| !NOT_AN_APP.contains(&w.as_str().to_lowercase().as_str())))
+                .filter(|c| {
+                    c.get(4).is_none_or(|w| {
+                        !NOT_AN_APP.contains(&w.as_str().to_lowercase().as_str()) && !w.as_str().chars().all(|ch| ch.is_ascii_digit())
+                    })
+                })
                 .filter_map(|c| c.get(0))
                 .find(|m| !offer(m))
         });
@@ -763,10 +770,15 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
             }
         }
     }
-    // (A search Yap ran first, or a query it freed of earlier words, isn't a
-    // fix of the answer.)
-    let fixes: Vec<&str> =
-        o.stats.post_fixes.iter().map(String::as_str).filter(|f| !matches!(*f, "yap_search" | "fresh_query")).collect();
+    // (A search Yap ran first, or a query it freed of earlier words or aimed
+    // at the user's country, isn't a fix of the answer.)
+    let fixes: Vec<&str> = o
+        .stats
+        .post_fixes
+        .iter()
+        .map(String::as_str)
+        .filter(|f| !matches!(*f, "yap_search" | "fresh_query" | "local_query"))
+        .collect();
     if e.no_post_fixes && !fixes.is_empty() {
         fails.push(format!("Yap had to fix the answer: {}", fixes.join(", ")));
     }
@@ -797,6 +809,12 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
     if let Some(min) = e.min_sources {
         if o.sources.len() < min {
             fails.push(format!("{} web sources (expected at least {min})", o.sources.len()));
+        }
+    }
+    if let Some(min) = e.min_searches {
+        let n = calls.iter().filter(|c| c.name == "web_search").count();
+        if n < min {
+            fails.push(format!("{n} web searches (expected at least {min})"));
         }
     }
     if !e.sources_any.is_empty()
@@ -925,6 +943,7 @@ mod tests {
         assert_eq!(claims("Okay, I'll save that as a note for you.").len(), 1);
         assert_eq!(claims("I can't open apps from here, sorry.").len(), 0);
         assert_eq!(claims("Starting in Act 1, Gale is near the crash site.").len(), 0);
+        assert_eq!(claims("- **Starfall Requiem** – Sci-fi party RPG, launching 12 March 2026 on PC").len(), 0);
         // What the 1.5B said with no tools (2026-10-18 runs).
         assert_eq!(claims("Spotify has launched, and I'm ready to play your liked songs.").len(), 1);
         assert_eq!(claims("Got it. I'll move the beta ship date from Friday to Monday in the launch plan.").len(), 1);

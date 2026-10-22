@@ -27,6 +27,7 @@
   import AboutYouSettings from './AboutYouSettings.svelte';
   import AppearanceSettings from './AppearanceSettings.svelte';
   import { applyAppearance } from './appearance.js';
+  import RegionSpelling from './RegionSpelling.svelte';
   import KokoroOffer from './KokoroOffer.svelte';
   import { kokoro, startKokoro } from './kokoro.svelte.js';
   import NoteFormattingConfig from './NoteFormattingConfig.svelte';
@@ -608,14 +609,12 @@
     ttsWindowsVoice: '',
     ttsRate: 1.0,
     ttsVolume: 0.5,
-    // About you (AboutYouSettings.svelte, about_you.rs): empty = follow Windows.
+    // About you (AboutYouSettings.svelte, about_you.rs): the region's country,
+    // '' = Automatic (Windows'); its spelling's switch is in Dictation
+    // cleanup (RegionSpelling.svelte).
     aboutName: '',
     aboutMe: '',
     regionCountry: '',
-    regionLanguage: '',
-    regionCurrency: '',
-    regionUnits: '',
-    regionTimeZone: '',
     regionSpelling: true,
   };
 
@@ -2561,6 +2560,14 @@
             </div>
           {/if}
 
+          <div class="spellgroup" id="settings-cleanup-spelling">
+            <Group title="Spelling">
+              <Row>
+                <RegionSpelling {cfg} disabled={!cfg.postProcessEnabled} />
+              </Row>
+            </Group>
+          </div>
+
           <div class="ps-head">
             <h4>Prompt Studio</h4>
             <p>View, customize, and test the system prompt that powers text cleanup</p>
@@ -4187,6 +4194,10 @@
     pointer-events: none;
   }
   /* Prompt Studio section header + wrapper (the card styles itself). */
+  /* Dictation cleanup's "Spelling" group, between the model and Prompt Studio. */
+  .spellgroup {
+    margin-top: 18px;
+  }
   .ps-head {
     margin: 0 0 9px;
   }

@@ -258,6 +258,7 @@ field is an error, so a typo can't silently skip a check):
 | `honest_about_search` | The answer doesn't say it searched or looked something up ("I did look it up on the web", "from a quick web search", "(Yap searched the web…)") when no search ran this turn or the turn before; denials, offers and sentences about earlier answers aren't claims, and one Yap flagged ("Yap didn't search the web…") passes. |
 | `no_post_fixes` | Yap didn't have to fix the answer before showing it (`commands::chat_turn`'s checks: a sources list or note the model wrote, a claimed search, a citation with nothing behind it). Use it in `soft`: it measures the model, the hard checks what the person sees. A search Yap ran for the model isn't a fix. |
 | `min_sources`, `sources_any` | The answer came with at least n web sources (Chat's Sources row); one of their addresses holds one of these. |
+| `min_searches` | At least n web searches ran this turn (the model's and Yap's own: a price question's second search for local prices). |
 | `clipboard_contains`, `clipboard_untouched` | What the clipboard tool was handed. |
 | `notes` | `[{ "title", "exists", "folder", "contains", "not_contains" }]`, as the notes are afterwards. |
 | `folders`, `notes_count` | The folders afterwards, exactly (no invented ones); how many notes. |
@@ -881,3 +882,82 @@ what was measured again (run folders `E:/yap-builds/eval-runs/20261022-04*-lap1-
   **156 / 155 ms** back to back (phase 1: 191 / 186 → 159 / 161), 264 tok/s with 91 % of drafts
   kept; outputs **96/96 the same** as phase 1's runs with and without MTP (93/96 between MTP
   off and on: the one list's punctuation, as before).
+
+## Prices where the user is (22 Oct 2026)
+
+Nathan, on Qwen3.5-4B with his region the UK (from Windows), asked Chat "Can you lookup the Grok
+subscription price for me I am thinking of buying it". His chat (`chats.json`, read-only) shows
+the search Yap made — "Grok subscription price 2026", Exa with `userLocation` GB — and what it
+found: x.ai's pricing page and news post, a pricing guide, a US price list
+(pricebugalerts.com, "(US)") and TechCrunch: no UK page, no £. The answer listed x.ai's US
+tiers in $ and ended "Note: These are US prices. Let me know if you need help finding the UK
+pricing…". Exa's `userLocation` alone didn't bring UK pages; with "UK" in the query the same
+live search found subscriptionrank.com's UK App Store prices and a UK price list.
+
+The changes (`about_you::LocalPrices`, web-and-apps.md): a price or buying question's search
+names the country (`web::local_query`, the model's searches and Yap's own); results with only
+another country's prices lead to one more search for theirs ("… UK £": Yap runs it for a model
+on this PC, a cloud model's result tells it to), then to one plain line saying there are none;
+the tool models' web line says so (`price_note`); an offer to look for local prices after a
+search is taken out of the answer (`strip_price_offer`); a price the web gave only in $ but
+written in £ gets its page's sign back, with a note (`restore_price_signs`); "buy", "buying",
+"purchase" are price words. The About you block now says "metric units, but miles for
+distances and speeds" for the UK (the Region's summary says "miles and °C").
+
+New scenarios (`--locale en-GB`): stand-in web — `web-price-uk-grok-us-only` (only US prices
+whatever the search: Nathan's case; right = the search names the UK, one plain "couldn't find
+UK prices" line, the US prices as they are, no £ made up, no offer), `web-price-uk-netflix-both`
+($ and £ in the same results), `web-price-uk-game-pass-query` and `web-price-uk-iphone-buying`
+(UK pages only for a search that names the UK; the iPhone question has no price word: "I'm
+thinking of buying an iPhone 17 Pro, what does it go for?"), `web-price-uk-spotify-search-again`
+(UK page only for a search in pounds); live (Exa) — `web-price-live-grok` (Nathan's exact
+question: £ prices if the web has them, else the plain line), `-netflix`, `-iphone`,
+`-game-pass`. With the older `web-price-in-the-uk`, `web-price-local-currency` and
+`web-grok-subscriptions`: 12 scenarios. A soft `min_searches` check counts searches.
+
+**Qwen3.5-4B**, RTX 5070 Ti, llamafile 0.10.6 (MTP on), 8K, ×3 each (run folders
+`E:/yap-builds/eval-runs/20261022-07*-region-*`):
+
+| Scenario | Before | After |
+|---|---|---|
+| `web-price-uk-grok-us-only` | 0/3 (searched "Grok subscription price 2026") | 3/3 ("…UK", Yap's "…UK £", "I couldn't find UK prices for Grok subscriptions. The prices I found are all in USD…") |
+| `web-price-uk-game-pass-query` | 1/3 | 3/3 (£22.99) |
+| `web-price-uk-iphone-buying` | 2/3 | 3/3 |
+| `web-price-uk-spotify-search-again` | 2/3 (the model searched again itself, "…GBP pounds", 2 times in 3) | 3/3 (Yap's second search, £12.99) |
+| `web-price-uk-netflix-both` | 3/3 | 3/3 |
+| `web-price-live-grok` | 0/3 (US tiers in $, Yap's dollar note) | 3/3 (UK App Store prices, "~£10/month" …, from a UK price page) |
+| `web-price-live-netflix` | 1/3 (US plans) | 3/3 |
+| `web-price-live-iphone` | 0/3 ($1,099; once "£1099" from a $ page) | 3/3 |
+| `web-price-live-game-pass` | 1/3 (twice "£22.99" where the page said $22.99) | 3/3 |
+| `web-price-local-currency`, `web-price-in-the-uk` | 6/6 | 6/6 |
+| `web-grok-subscriptions` (3 turns) | 3/3 | 3/3 |
+| **All 12** | **19/36 (53%)** | **36/36 (100%)** |
+
+Searches naming the UK: 16 of 49 before, 48 of 48 after (the model wrote "UK" itself 39 times;
+Yap added it 9 times). Yap's second search for local prices ran 6 times in 42 turns, and took
+one offer to look for UK pricing out of an answer. Mean turn 2.1 s both, ~1.15 searches a turn
+both. The runs on the way there: before 18/36 (the first run); after 33/36 (three right answers
+— "I couldn't find UK prices…" — failed by the scenario's own offer check, whose "i could"
+matched "I couldn't": fixed with word boundaries), 35/36 (a 3-turn Grok chat's last answer wrote
+x.ai's $8 as "£8") and, with `restore_price_signs`, 36/36: that run's one such answer had its $8
+put back, though its £30 / £100 / £200 stayed — those amounts were also on a UK page ("≈ £30",
+"~£100 credits"), so they can't be shown to be swapped.
+
+The 11 older web scenarios ×2 (Gale, the latest Python, Nathan's RPG chat, follow-ups, the
+injection page, Wikipedia without a key, own notes, "did you look it up?"…): **21/22 before,
+21/22 after** — before, one Wikipedia answer overflowed the 8K context; after, one answer's
+"launching 12 March 2026" read as an app opened (the scenario check's own bug, fixed: a day
+isn't an app).
+
+**Groq `openai/gpt-oss-20b`** (~18k of the free plan's tokens, ×1): `web-price-uk-grok-us-only`
+before searched "Grok subscription price", gave the US table and ended "Let me know if you'd
+like me to calculate that for you" (0/1); after, the search named the UK and the answer began
+"I couldn't find a UK price for Grok." (right; the scenario's check first missed the "a" and
+was widened) — it skipped the second search the result asked for. `web-price-uk-spotify-
+search-again` after: told the results had no UK price, it searched "… £" and answered £12.99
+(1/1).
+
+What's left: a cloud model is only told to search again (gpt-oss didn't, above); Yap's own
+second search is for models on this PC. A person who pays in a dollar (Canada, Australia…)
+gets the country in the query but no second search, since a page's bare "$" can't be told
+apart. Conversions stay the model's: "about £6" said as an estimate passes, as before.

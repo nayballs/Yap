@@ -1,0 +1,84 @@
+{
+  "name": "web-price-uk-iphone-buying",
+  "description": "A buying question with no price word: \"I'm thinking of buying an iPhone 17 Pro, what does it go for?\" from a UK PC. Buying needs today's price, so it needs the web, aimed at the UK. Stand-in web: a search that names the UK (UK, United Kingdom, Britain, £, GBP) finds Apple's UK store; any other finds the US one. Right: a search naming the UK and the price in £. Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "prices",
+    "locale",
+    "standin"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "iPhone 17 Pro - Apple (US)",
+        "url": "https://www.apple.com/iphone-17-pro/",
+        "published": "2026-09-19",
+        "text": "iPhone 17 Pro from $1,099 or $45.79/mo. for 24 mo. iPhone 17 Pro Max from $1,199. Buy now."
+      },
+      {
+        "title": "iPhone 17 Pro review: worth the upgrade?",
+        "url": "https://techreviews.example/iphone-17-pro-review",
+        "published": "2026-10-06",
+        "text": "At $1,099 the iPhone 17 Pro is the same price as last year's model, with a brighter screen and a bigger battery."
+      }
+    ],
+    "searches": [
+      {
+        "when": [
+          "uk",
+          "united kingdom",
+          "britain",
+          "british",
+          "£",
+          "gbp",
+          "pounds"
+        ],
+        "results": [
+          {
+            "title": "iPhone 17 Pro - Apple (UK)",
+            "url": "https://www.apple.com/uk/iphone-17-pro/",
+            "published": "2026-09-19",
+            "text": "iPhone 17 Pro from £1,099 or £45.79/mo. at 0% APR. iPhone 17 Pro Max from £1,199. Buy now."
+          },
+          {
+            "title": "iPhone 17 Pro UK deals: the best prices this week",
+            "url": "https://ukdeals.example/iphone-17-pro",
+            "published": "2026-10-15",
+            "text": "Apple sells the iPhone 17 Pro from £1,099 SIM-free in the UK; the best SIM-free deal this week is £1,049 at a major retailer."
+          }
+        ]
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "I'm thinking of buying an iPhone 17 Pro, what does it go for?",
+      "expect": {
+        "tools_called": [
+          {
+            "name": "web_search",
+            "args": {
+              "query": {
+                "matches": "\\buk\\b|united kingdom|britain|£|\\bgbp\\b|pounds"
+              }
+            }
+          }
+        ],
+        "min_sources": 1,
+        "answer_matches": "£\\s?1,?(?:099|049)",
+        "answer_not_matches": "\\b(?:let me know|would you like|do you want|want me to|i can|i could|happy to|shall i|if you(?:'d| would)? like)\\b[^.!?\\n]{0,80}(?:uk|british|£|gbp|local|your (?:country|region|currency))[^.!?\\n]{0,60}(?:pric|cost)",
+        "no_false_claims": true,
+        "opened_none": true,
+        "prices_keep_their_sign": true
+      },
+      "soft": {
+        "sources_any": [
+          "apple.com/uk",
+          "ukdeals.example"
+        ]
+      }
+    }
+  ]
+}

@@ -9,48 +9,70 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
 - **`about_you.rs`** — **what every model is told about the person**
   (2026-10-21, Settings → General → About you; Nathan: "It keeps finding
   things in dollars… a better way to give the model better context on the
-  user"). **Region and language from Windows** (`detected`): the regional
-  format (`GetUserDefaultLocaleName`, "en-GB"), the home location
-  (`GetUserDefaultGeoName`, else `GetUserGeoID` → `GEO_ISO2`), the currency
-  (`GetLocaleInfoEx` `LOCALE_SINTLSYMBOL` "GBP" + `LOCALE_SCURRENCY` "£", the
-  user's own changes included), `LOCALE_IMEASURE` (metric / US) and the time
-  zone (`GetDynamicTimeZoneInformation`'s key name → IANA through
-  `calendar/tz.rs`' CLDR table). Settings' changes (`config.region_country /
-  _language / _currency / _units / _time_zone`, empty = Windows') go on top
-  (`resolve`, pure): a picked country brings its own currency (the
-  `COUNTRIES` table: ISO code, English name, ISO 4217) and units (`IMPERIAL`:
-  US and its territories, Liberia, Myanmar) unless those are picked too; the
-  language and the clock stay Windows' until picked. `summary`: "United
-  Kingdom · English (UK) · £ GBP · metric · UK time"; `Spelling` British /
-  American / Canadian from an English language tag's region (else an
-  English-speaking country; none for another language). **The block**
+  user"). **One Region** (2026-10-22, Nathan: "all of that should be
+  covered in the region selector only"): **Automatic** = Windows' home
+  location (`detected`: `GetUserDefaultGeoName`, else `GetUserGeoID` →
+  `GEO_ISO2`; no home location → the regional format's region), or a
+  country picked from the list (`config.region_country`, "" = Automatic).
+  **Everything else follows the country** (`resolve(detected, picked)`,
+  pure): its currency (the `COUNTRIES` table: ISO code, English name, ISO
+  4217; Windows' own currency settings — `GetLocaleInfoEx`
+  `LOCALE_SINTLSYMBOL` "GBP" + `LOCALE_SCURRENCY` "£", the user's changes
+  included — and `LOCALE_IMEASURE` only while Windows' regional format is
+  for that country: a UK PC with the US format still reads £ and miles),
+  its units (`Units`: km and °C; miles and °C for the UK and Crown
+  Dependencies, `MILES`; US units for `IMPERIAL`: the US and its
+  territories, Liberia, Myanmar), the language — Windows' language with
+  the country's variety ("en" + GB → "en-GB"; no Windows language: "en-XX"
+  for an English-speaking country) — and so the English spelling
+  (`Spelling` British / American / Canadian; none for another language).
+  **The time zone is always the PC's** (`GetDynamicTimeZoneInformation`'s
+  key name → IANA through `calendar/tz.rs`' CLDR table), never a setting.
+  `summary`: what follows, as Settings shows it under the picker — "Prices
+  in £ · miles and °C · British spelling · UK time" (`money_short`: £, €,
+  $ alone; a shared or lettered sign with its code, "$ (AUD)", "kr (SEK)").
+  Until 22 Oct 2026 (never shipped) there were five pickers (country,
+  language, currency, units, time zone) and a spelling toggle; their
+  config fields still load and go on the next save. **The block**
   (`prompt_block(profile, now)`, pure, unit-tested), last in the system
   prompt of Chat, the Voice Assistant, the Meetings view's and the Notes
   view's Ask bars (`commands::chat_turn`, `small_model_answer`'s web
   pipeline, `note_ask`), local and cloud: "About the user: they're in the
   United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK
-  time (UTC+01:00). Give times in UK time and metric units. Prices: in £ (GBP)
-  when you have them in £; never change a price's currency sign — a price in
-  another currency stays as it is, labelled, like "$15 a month (US price)".
-  Their name is Nathan. They told Yap: "…"" (the example is "£15 a month (UK
-  price)" for a US user, and no real plan's price: with "$8 a month" as the
-  example and "Give prices in £", Qwen3.5-4B wrote x.ai's
-  "$8/month" as "£8/month" 2 times in 3 — the model evaluations,
-  model-evals.md) — only
-  the parts known; with nothing known, just the date and time (its clock
-  changes every minute, so it goes last and the rest of the prompt stays
-  cacheable). `about_name` (≤ 60 characters) and `about_me` (≤ 300, one
-  line). **Search** is aimed at the country (`web::Settings.country`: Exa's
-  `userLocation`, Tavily's `country` via `tavily_country`, the providers'
-  own searches — web-and-apps.md); **cleanup** keeps the spelling
-  (`cleanup_spelling`, `region_spelling`, on). `about_you_status {overrides?}`
-  (Settings): Windows' region, "Automatic" for the picked country, the
-  result, its summary, the block as it reads now, the spelling line, the
-  pickers' lists. **Test mode** never reads Windows' settings: debug-only
-  `YAP_E2E_LOCALE` (a tag, or JSON `{locale, country, currency, symbol,
-  metric, timeZone}`) stands in, unset = nothing (the eval's `--locale`).
-  Kept in config.json, sent only to the model the person uses; accounts
-  don't sync it (they could, later: accounts.md).
+  time (UTC+01:00). Give times in UK time and metric units, but miles for
+  distances and speeds. Prices: in £ (GBP) when you have them in £; never
+  change a price's currency sign — a price in another currency stays as it
+  is, labelled, like "$15 a month (US price)". Their name is Nathan. They
+  told Yap: "…"" (the example is "£15 a month (UK price)" for a US user,
+  and no real plan's price: with "$8 a month" as the example and "Give
+  prices in £", Qwen3.5-4B wrote x.ai's "$8/month" as "£8/month" 2 times in
+  3 — the model evaluations, model-evals.md) — only the parts known; with
+  nothing known, just the date and time (its clock changes every minute, so
+  it goes last and the rest of the prompt stays cacheable). `about_name`
+  (≤ 60 characters) and `about_me` (≤ 300, one line). **Search** is aimed at
+  the country (`web::Settings.country`: Exa's `userLocation`, Tavily's
+  `country` via `tavily_country`, the providers' own searches —
+  web-and-apps.md), and **prices where the person is** (`LocalPrices`,
+  2026-10-22, for someone outside the US: the place as a search says it —
+  "UK" —, their money, and whether a page's price can be told apart as
+  theirs — not for a dollar: `tells_apart`; `local_in` / `foreign_in` read
+  prices in a text, `query_names_a_place` a search that already says where
+  or in what money): a price question's search names the country, results
+  with only another country's prices lead to one more search, then one
+  plain line (web-and-apps.md); `strip_price_offer` takes an offer to
+  look for local prices out of an answer after a search, and
+  `restore_price_signs` gives a price the web gave only in another money
+  ("$8" written "£8") its page's sign back. **Cleanup** keeps
+  the spelling (`cleanup_spelling`, `region_spelling`, on; its one switch,
+  "Write in my region's spelling", is in Language Models → Dictation
+  Cleanup). `about_you_status {overrides?}` (About you and that switch):
+  Windows' region (Automatic), the region with the country picked, its
+  summary, the block as it reads now, the spelling, the countries. **Test
+  mode** never reads Windows' settings: debug-only `YAP_E2E_LOCALE` (a tag,
+  or JSON `{locale, country, currency, symbol, metric, timeZone}`) stands
+  in, unset = nothing (the eval's `--locale`). Kept in config.json, sent
+  only to the model the person uses; accounts don't sync it (they could,
+  later: accounts.md).
 - **`llm.rs`** — the AI cleanup client (OpenAI-compatible). Frames the transcript as
   data (delimiters + one-shot) so small models *clean* it instead of *answering* it.
   **The dictation's two messages for a hybrid model** (`cleanup_messages`,
@@ -75,7 +97,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   output-only, never answer the transcript) that's always prepended via
   `build_system_prompt()` to the user's editable **body** (tone/format = a preset or
   custom text), then — in Yap's own layer, never the preset text —
-  **the spelling line** ("Use my region's spelling",
+  **the spelling line** ("Write in my region's spelling",
   `about_you::cleanup_spelling`: "When the transcript is in English, spell
   it the British way (honour, recognise, paralyse, metre, cancelled,
   catalogue, defence), without changing any words." — American or Canadian

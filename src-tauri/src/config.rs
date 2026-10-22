@@ -653,33 +653,24 @@ pub struct YapConfig {
 
     // ---- About you (Settings → General; `about_you.rs`) ----
     // Told to the AI model the person uses, with each question; kept here,
-    // never sent to Yap's account service. Empty region fields follow
-    // Windows' own settings.
+    // never sent to Yap's account service. (Until 22 Oct 2026, before it
+    // shipped, the region had language, currency, units and time zone
+    // fields of its own; a config.json that still has them loads, and they
+    // go on its next save.)
     /// "What should Yap call you?" (optional).
     #[serde(default)]
     pub about_name: String,
     /// "Anything the AI should know about you" (optional, ≤ 300 characters).
     #[serde(default)]
     pub about_me: String,
-    /// The country, ISO 3166-1 alpha-2 ("GB"); empty = Windows' home location.
+    /// The region: a country, ISO 3166-1 alpha-2 ("GB"); empty = Automatic
+    /// (Windows' home location). Its currency, units, language and spelling
+    /// follow it; the time zone is the PC's.
     #[serde(default)]
     pub region_country: String,
-    /// The regional format ("en-GB"); empty = Windows'.
-    #[serde(default)]
-    pub region_language: String,
-    /// The currency, ISO 4217 ("GBP"); empty = Windows' (or the picked
-    /// country's).
-    #[serde(default)]
-    pub region_currency: String,
-    /// "metric" | "imperial"; empty = Windows' (or the picked country's).
-    #[serde(default)]
-    pub region_units: String,
-    /// The time zone, IANA ("Europe/London"); empty = Windows'.
-    #[serde(default)]
-    pub region_time_zone: String,
-    /// "Use my region's spelling": dictation cleanup keeps the person's
-    /// variety of English (British "colour", American "color"). On by
-    /// default.
+    /// "Write in my region's spelling" (Language Models → Dictation
+    /// cleanup): cleanup keeps the region's variety of English (British
+    /// "colour", American "color"). On by default.
     #[serde(default = "default_true")]
     pub region_spelling: bool,
 
@@ -897,10 +888,6 @@ impl Default for YapConfig {
             about_name: String::new(),
             about_me: String::new(),
             region_country: String::new(),
-            region_language: String::new(),
-            region_currency: String::new(),
-            region_units: String::new(),
-            region_time_zone: String::new(),
             region_spelling: true,
             config_version: CONFIG_VERSION,
         }
@@ -1456,6 +1443,20 @@ mod tests {
         assert!(cfg.terminal_mode && cfg.chat_no_full_stop);
         let off: YapConfig = serde_json::from_str(r#"{"terminalMode":false,"chatNoFullStop":false}"#).unwrap();
         assert!(!off.terminal_mode && !off.chat_no_full_stop);
+    }
+
+    #[test]
+    fn the_old_region_fields_still_load() {
+        // A dev config.json from before the one Region picker (22 Oct 2026).
+        let cfg: YapConfig = serde_json::from_str(
+            r#"{"regionCountry":"US","regionLanguage":"en-US","regionCurrency":"EUR","regionUnits":"metric","regionTimeZone":"America/New_York","regionSpelling":false}"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.region_country, "US");
+        assert!(!cfg.region_spelling);
+        // …and leave on the next save.
+        let saved = serde_json::to_value(&cfg).unwrap();
+        assert!(saved.get("regionCurrency").is_none() && saved.get("regionTimeZone").is_none());
     }
 
     #[test]

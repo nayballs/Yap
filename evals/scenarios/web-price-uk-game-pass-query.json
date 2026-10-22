@@ -1,0 +1,85 @@
+{
+  "name": "web-price-uk-game-pass-query",
+  "description": "\"How much is Xbox Game Pass Ultimate?\" from a UK PC. Stand-in web: a search that names the UK (UK, United Kingdom, Britain, £, GBP) finds Xbox's UK page in £; any other search finds the US page in $ — as Exa found x.ai's US page for Nathan's Grok question when the query didn't say where (2026-10-22). Right: the search names the UK and the answer gives £22.99. Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "prices",
+    "locale",
+    "standin"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Xbox Game Pass: compare plans | Xbox (US)",
+        "url": "https://www.xbox.com/en-US/xbox-game-pass",
+        "published": "2026-10-01",
+        "text": "Choose your Game Pass. Game Pass Ultimate: $29.99/month. PC Game Pass: $16.49/month. Game Pass Premium: $14.99/month. Game Pass Essential: $9.99/month."
+      },
+      {
+        "title": "Xbox Game Pass price increase: what each plan costs now",
+        "url": "https://gamesnews.example/game-pass-price-2026",
+        "published": "2026-10-03",
+        "text": "In the US, Game Pass Ultimate went up to $29.99 a month and PC Game Pass to $16.49."
+      }
+    ],
+    "searches": [
+      {
+        "when": [
+          "uk",
+          "united kingdom",
+          "britain",
+          "british",
+          "£",
+          "gbp",
+          "pounds"
+        ],
+        "results": [
+          {
+            "title": "Xbox Game Pass: compare plans | Xbox (UK)",
+            "url": "https://www.xbox.com/en-GB/xbox-game-pass",
+            "published": "2026-10-01",
+            "text": "Choose your Game Pass. Game Pass Ultimate: £22.99/month. PC Game Pass: £13.49/month. Game Pass Premium: £10.99/month. Game Pass Essential: £6.99/month."
+          },
+          {
+            "title": "Game Pass UK prices: every plan in pounds",
+            "url": "https://ukgaming.example/game-pass-prices",
+            "published": "2026-10-04",
+            "text": "UK prices after the increase: Ultimate £22.99 a month, PC Game Pass £13.49, Premium £10.99 and Essential £6.99."
+          }
+        ]
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "How much is Xbox Game Pass Ultimate?",
+      "expect": {
+        "tools_called": [
+          {
+            "name": "web_search",
+            "args": {
+              "query": {
+                "matches": "\\buk\\b|united kingdom|britain|£|\\bgbp\\b|pounds"
+              }
+            }
+          }
+        ],
+        "min_sources": 1,
+        "answer_matches": "£\\s?22\\.99",
+        "answer_not_matches": "\\b(?:let me know|would you like|do you want|want me to|i can|i could|happy to|shall i|if you(?:'d| would)? like)\\b[^.!?\\n]{0,80}(?:uk|british|£|gbp|local|your (?:country|region|currency))[^.!?\\n]{0,60}(?:pric|cost)",
+        "no_false_claims": true,
+        "opened_none": true,
+        "prices_keep_their_sign": true
+      },
+      "soft": {
+        "sources_any": [
+          "en-gb",
+          "ukgaming.example"
+        ],
+        "answer_not_matches": "\\$\\s?29\\.99"
+      }
+    }
+  ]
+}

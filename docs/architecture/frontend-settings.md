@@ -85,17 +85,16 @@
   double-tap goes hands-free, "More shortcuts" naming the rewrite and
   assistant shortcuts with buttons to Commands / Voice Assistant; then
   **About you** (`AboutYouSettings.svelte`, `#settings-about-you`,
-  `about_you.rs`, 2026-10-21): "Region and language" as one line from
-  `about_you_status` ("United Kingdom · English (UK) · £ GBP · metric · UK
-  time") with **Change** → Country / Language / Currency / Units / Time zone
-  Selects (first option "Windows: United Kingdom" or "Automatic: £ GBP" —
-  what a picked country brings —, the zones from `Intl.supportedValuesOf`
-  grouped by region; `regionCountry` … `regionTimeZone`, empty = Windows'),
-  "Windows says: … · Use Windows' settings" once something's picked; "What
+  `about_you.rs`, 2026-10-21; one picker since 2026-10-22): **Region**, one
+  Select (`regionCountry`): "Automatic: United Kingdom (from Windows)", then
+  every country A–Z (the native list jumps as you type); one quiet line
+  under it says what follows from it (`about_you_status`'s summary, test id
+  `region-follows`: "Prices in £ · miles and °C · British spelling · UK
+  time"), its ⓘ that times follow the PC's clock. No other region pickers
+  and no spelling switch here (that's in Language Models → Dictation
+  Cleanup, below); "What
   should Yap call you?" (`aboutName`, ≤ 60) and "Anything the AI should know
-  about you" (`aboutMe`, a 300-character textarea with a count); "Use my
-  region's spelling" (`regionSpelling`: "AI cleanup writes British English:
-  honour, recognise, paralyse, metre…"); "See what the AI is told" (the
+  about you" (`aboutMe`, a 300-character textarea with a count); "See what the AI is told" (the
   block, as it reads now) and the privacy line ("Kept on this PC. Yap sends
   it to the AI model you use, with each question: a cloud provider … sees
   it, a model on this PC keeps it here. It's never sent to Yap."); the
@@ -192,7 +191,14 @@
   4B…" Download / No thanks → `localLlmUpgradeDismissed`), or, a big model
   left on the processor (`slowOnThisPc`, `placement`), "Runs on the processor
   on this PC: answers will be slow — Qwen2.5 1.5B Instruct is quicker." + Use
-  it (read afresh whenever the section opens). Below it, **Prompt Studio** (`PromptStudio.svelte`, OpenWhispr port):
+  it (read afresh whenever the section opens). Below it, a **Spelling**
+  group (`RegionSpelling.svelte`, `#settings-cleanup-spelling`, 2026-10-22):
+  "Write in my region's spelling" (`regionSpelling`, on; greyed out while
+  cleanup is off), its line naming the variety and the region it came from
+  ("British spelling, from your region (United Kingdom): honour,
+  recognise… Only the spelling changes, never your words.", from
+  `about_you_status`) — the one switch, for someone who writes another
+  English than their region's. Then **Prompt Studio** (`PromptStudio.svelte`, OpenWhispr port):
   View (full effective prompt via `get_base_prompt`) / Customize (preset +
   body + Save/Reset) / Test tabs. Plus usage meter + profiles w/ per-profile
   model override + per-app rules), **History** (stats

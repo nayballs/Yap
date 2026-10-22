@@ -145,6 +145,10 @@ pub struct Settings {
     /// About you, `about_you.rs`): searches are aimed at it — Exa's
     /// `userLocation`, Tavily's `country`, the providers' own searches.
     pub country: Option<String>,
+    /// Prices where the person is (outside the US): a price question's
+    /// search names the country ([`local_query`]), and results with only
+    /// another country's prices lead to one more search ([`Turn`]).
+    pub local: Option<crate::about_you::LocalPrices>,
 }
 
 impl Settings {
@@ -153,8 +157,8 @@ impl Settings {
     fn in_region(cfg: &crate::config::YapConfig, region: &crate::about_you::Region) -> Settings {
         let service = Service::parse(&cfg.web_search_service);
         let key = cfg.web_search_keys.get(service.id()).map(|k| k.trim().to_string()).unwrap_or_default();
-        // Wikipedia's edition: the speech language, else the language
-        // About you names (Windows' unless changed there).
+        // Wikipedia's edition: the speech language, else the region's
+        // (Windows' language).
         let system = region.language.clone().or_else(system_language);
         Settings {
             service,
@@ -162,6 +166,7 @@ impl Settings {
             lang: wiki_language(&cfg.selected_language, system.as_deref()),
             native: None,
             country: region.country.clone(),
+            local: crate::about_you::LocalPrices::for_region(region),
         }
     }
 
@@ -1471,6 +1476,21 @@ pub struct Turn {
     /// Google Search grounded this turn (Gemini): its answer shows every
     /// link it gave (≤ 5), as Google's terms ask ([`Turn::sources_for`]).
     grounded: bool,
+    /// **Prices where the person is** (a price question, someone outside
+    /// the US whose money can be told apart — `about_you::LocalPrices`):
+    /// results with only another country's prices get a note to search once
+    /// more for theirs (or, for a model on this PC, Yap's search for them:
+    /// [`Turn::take_local_retry`]), and if that finds none either, a note to
+    /// say so in one line instead of offering to look ([`Turn::local_note`]).
+    prices: bool,
+    local_found: bool,
+    retried: bool,
+    yap_retries: bool,
+    pending_retry: Option<String>,
+    /// The web text the model was given this turn (results, page parts):
+    /// what an answer's prices are checked against
+    /// (`about_you::restore_price_signs`).
+    pub texts: Vec<String>,
 }
 
 impl Turn {
@@ -1478,6 +1498,7 @@ impl Turn {
     /// links count as theirs).
     pub fn new(settings: Settings, endpoints: Endpoints, question: &str, earlier: &[&str]) -> Turn {
         let linked = std::iter::once(question).chain(earlier.iter().copied()).flat_map(links_in).map(|u| normal_url(&u)).collect();
+        let prices = asks_about_prices(question) && settings.local.as_ref().is_some_and(|l| l.tells_apart);
         Turn {
             settings,
             endpoints,
@@ -1488,7 +1509,64 @@ impl Turn {
             reads: 0,
             seen: false,
             grounded: false,
+            prices,
+            local_found: false,
+            retried: false,
+            yap_retries: false,
+            pending_retry: None,
+            texts: Vec::new(),
         }
+    }
+
+    /// Yap runs the search for local prices itself (a model on this PC),
+    /// instead of telling the model to.
+    pub fn set_yap_retries(&mut self, on: bool) {
+        self.yap_retries = on;
+    }
+
+    /// A search, aimed at the person's country when the question is about
+    /// prices ([`local_query`]): `None` when it stays as it is.
+    pub fn local_query(&self, query: &str) -> Option<String> {
+        local_query(query, &self.question, self.settings.local.as_ref())
+    }
+
+    /// The search for local prices Yap owes the model (results with only
+    /// another country's prices, a model on this PC): once.
+    pub fn take_local_retry(&mut self) -> Option<String> {
+        self.pending_retry.take()
+    }
+
+    /// What a search's result says about prices where the person is
+    /// (`local_prices` in it), from its pages' text: after results with
+    /// theirs that followed some without, "answer with those"; the first
+    /// results with only another country's, "search once more" (or nothing,
+    /// when Yap runs that search itself); after that, "say there are none,
+    /// in one line". `None` otherwise. (Keeps the turn's state.)
+    fn local_note(&mut self, query: &str, text: &str) -> Option<String> {
+        if !self.prices || self.local_found {
+            return None;
+        }
+        let local = self.settings.local.clone()?;
+        let (p, s) = (&local.place, local.sign());
+        if local.local_in(text) {
+            self.local_found = true;
+            return self.retried.then(|| format!("These results give {p} prices (in {s}): answer with those, as the pages give them."));
+        }
+        if self.retried {
+            return Some(format!(
+                "No {p} prices (in {s}) here either. Start your answer with one short line saying you couldn't find {p} prices, then give the prices you found as they are, saying which country they're for. Don't offer to look further."
+            ));
+        }
+        if !local.foreign_in(text) {
+            return None;
+        }
+        self.retried = true;
+        let retry = local_retry_query(query, &local);
+        if self.yap_retries {
+            self.pending_retry = Some(retry);
+            return None;
+        }
+        Some(format!("None of these results gives a {p} price (in {s}). Search once more for the {p} price, like \"{retry}\", before you answer."))
     }
 
     /// `read_page` may also open the sources of earlier answers in the
@@ -1595,6 +1673,13 @@ impl Turn {
                 if results.is_empty() {
                     data["hint"] = json!("Nothing found. Try other words once, or tell the user the web didn't answer it.");
                 }
+                let text: Vec<&str> =
+                    found.hits.iter().flat_map(|h| [h.title.as_str(), h.text.as_str()]).chain(found.summary.as_deref()).collect();
+                let text = text.join("\n");
+                if let Some(note) = self.local_note(&query, &text) {
+                    data["local_prices"] = json!(note);
+                }
+                self.texts.push(text);
                 ok(data, display)
             }
         }
@@ -1629,6 +1714,7 @@ impl Turn {
                 self.seen = true;
                 let n = self.number(&page.title, &url);
                 let (part, next) = page_part(&page.text, offset, PAGE_TOKENS);
+                self.texts.push(part.clone());
                 let mut data = json!({
                     "n": n,
                     "title": page.title,
@@ -1720,6 +1806,7 @@ const OWN_STUFF: &[&str] = &[
     "my calendar", "my dictation", "in my notes", "notes about", "note about", "meeting notes",
     "did i write", "i wrote", "did i save", "i saved", "did i say", "did we decide", "we decided", "did we agree",
     "we agreed", "we discussed", "my list", "my shopping list", "my to-do", "my todo", "my budget",
+    "did i buy", "have i bought", "what i bought",
 ];
 
 /// Is the question about the person's own notes, meetings or lists ("what
@@ -1732,14 +1819,15 @@ pub fn about_own_stuff(question: &str) -> bool {
     OWN_STUFF.iter().any(|p| lower.contains(p)) || NOTE.is_match(&lower.replace("patch notes", "").replace("release notes", ""))
 }
 
-/// Asking what something costs, whether it's on offer or in stock: today's
-/// price is on the web, never in a model's training — and the person's own
-/// currency matters (Nathan's "Can you check the Grok subscriptions please,
-/// for me?" got two notes searches and no answer, 2026-10-21). Pure.
+/// Asking what something costs, whether it's on offer or in stock, or about
+/// buying it: today's price is on the web, never in a model's training —
+/// and the person's own currency matters (Nathan's "Can you check the Grok
+/// subscriptions please, for me?" got two notes searches and no answer,
+/// 2026-10-21; "…I am thinking of buying it" US prices, 2026-10-22). Pure.
 pub fn asks_about_prices(question: &str) -> bool {
     static WORDS: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            r"(?i)\b(?:prices?|pricing|priced|costs?|costing|subscriptions?|subscribe|memberships?|fees|cheapest|cheaper|deals|best deal|good deal|discounts?|on offer|on sale|in stock|out of stock|sold out|in the sales|tariffs?|how much money)\b",
+            r"(?i)\b(?:prices?|pricing|priced|costs?|costing|subscriptions?|subscribe|memberships?|fees|cheapest|cheaper|deals|best deal|good deal|discounts?|on offer|on sale|in stock|out of stock|sold out|in the sales|tariffs?|how much money|buy|buying|purchase|purchasing|worth the money)\b",
         )
         .expect("static regex")
     });
@@ -1856,6 +1944,57 @@ pub fn search_query(question: &str) -> String {
     let q = parts.join(" ");
     let q = if q.trim().is_empty() { question.trim().to_string() } else { q };
     tidy(&q, 200)
+}
+
+/// **A price question's search, aimed at the person's country**: "Grok
+/// subscription price 2026" → "Grok subscription price 2026 UK". Exa's
+/// `userLocation` (GB) alone found x.ai's US page, a US price list and a
+/// guide in $ for Nathan's "Can you lookup the Grok subscription price for
+/// me I am thinking of buying it" (2026-10-22). `None` — the query as it
+/// is — when the question isn't about prices or buying
+/// ([`asks_about_prices`]), the person is in the US or Yap doesn't know
+/// where, or the query already says where or in what money ("… US price",
+/// "… in GBP"). Every search of the turn, the model's and Yap's. Pure.
+pub fn local_query(query: &str, question: &str, local: Option<&crate::about_you::LocalPrices>) -> Option<String> {
+    let local = local?;
+    let q = query.trim();
+    if q.is_empty() || !asks_about_prices(question) || local.query_names_a_place(q) {
+        return None;
+    }
+    Some(format!("{q} {}", local.place))
+}
+
+/// The second search for a price where the person is, when the first found
+/// only other countries' prices: the query with their money's sign ("…
+/// UK £"; the code for a sign that's a word: "… Sweden SEK"). Pure.
+pub fn local_retry_query(query: &str, local: &crate::about_you::LocalPrices) -> String {
+    let mentions = |q: &str, w: &str| {
+        let (q, w) = (q.to_lowercase(), w.to_lowercase());
+        if w.contains(' ') || !w.chars().all(char::is_alphanumeric) {
+            q.contains(&w)
+        } else {
+            q.split(|c: char| !c.is_alphanumeric()).any(|x| x == w)
+        }
+    };
+    let mut q = query.trim().to_string();
+    for w in [local.place.as_str(), local.search_sign()] {
+        if !mentions(&q, w) {
+            q.push(' ');
+            q.push_str(w);
+        }
+    }
+    q
+}
+
+/// The web tools' line on prices, for a tool-calling model with the web on,
+/// someone outside the US: search for their country's price, once more when
+/// the results only have another country's, then say plainly that there
+/// are none — never an offer to look further. Pure.
+pub fn price_note(local: &crate::about_you::LocalPrices) -> String {
+    let p = &local.place;
+    format!(
+        "For a price, a subscription or something to buy, search for the {p} price (\"{p}\" in the query). If the results only give another country's prices, search once more for the {p} price; if there's still none, start your answer with one short line saying you couldn't find {p} prices, then give the others as they are, saying which country they're for. Never offer to look further: search instead."
+    )
 }
 
 /// A forced first search's query without the words the model carried over
@@ -2126,7 +2265,7 @@ mod tests {
     use super::*;
 
     fn settings(key: &str) -> Settings {
-        Settings { service: Service::Exa, key: key.into(), lang: "en".into(), native: None, country: None }
+        Settings { service: Service::Exa, key: key.into(), lang: "en".into(), native: None, country: None, local: None }
     }
 
     fn offline() -> Endpoints {
@@ -2516,6 +2655,77 @@ mod tests {
         );
         // Nothing else in it: the question as it is.
         assert_eq!(search_query("Please?"), "Please?");
+    }
+
+    fn uk_prices() -> crate::about_you::LocalPrices {
+        let d = crate::about_you::parse_stand_in("en-GB");
+        crate::about_you::LocalPrices::for_region(&crate::about_you::resolve(&d, "")).unwrap()
+    }
+
+    #[test]
+    fn a_price_question_searches_where_the_user_is() {
+        let gb = uk_prices();
+        let grok = "Can you lookup the Grok subscription price for me I am thinking of buying it";
+        // Nathan's (2026-10-22): the model's own query, aimed at the UK.
+        assert_eq!(local_query("Grok subscription price 2026", grok, Some(&gb)).as_deref(), Some("Grok subscription price 2026 UK"));
+        // Buying counts; a query that already says where or in what money
+        // stays; not a price question, the US, or nowhere known: nothing.
+        assert!(asks_about_prices("I'm thinking of buying an iPhone 17 Pro, what does it go for?"));
+        assert!(needs_web_in("Should I buy the Xbox Series X?", 2026));
+        assert!(!needs_web_in("What did I buy last week?", 2026), "their own notes");
+        assert_eq!(local_query("Grok price UK", grok, Some(&gb)), None);
+        assert_eq!(local_query("Grok US price", grok, Some(&gb)), None);
+        assert_eq!(local_query("Grok price GBP", grok, Some(&gb)), None);
+        assert_eq!(local_query("Gale location", "Where do I find Gale?", Some(&gb)), None);
+        assert_eq!(local_query("Grok subscription price", grok, None), None);
+        // Once more for their money: the place and the sign.
+        assert_eq!(local_retry_query("Grok subscription price 2026 UK", &gb), "Grok subscription price 2026 UK £");
+        assert_eq!(local_retry_query("Spotify Premium price", &gb), "Spotify Premium price UK £");
+        assert_eq!(local_retry_query("Netflix price UK £", &gb), "Netflix price UK £");
+        // The tool models' line.
+        let note = price_note(&gb);
+        assert!(note.starts_with("For a price, a subscription or something to buy, search for the UK price (\"UK\" in the query)."), "{note}");
+        assert!(note.contains("couldn't find UK prices") && note.ends_with("Never offer to look further: search instead."), "{note}");
+    }
+
+    #[tokio::test]
+    async fn results_without_local_prices_lead_to_one_more_search_then_a_plain_line() {
+        let us = fake((500, Value::Null), json!({ "results": [{ "title": "Pricing | xAI", "url": "https://x.ai/pricing", "highlights": ["Plus: $8/month. Premium: $30/month."] }] }));
+        let uk = fake((500, Value::Null), json!({ "results": [{ "title": "Grok UK prices", "url": "https://uk.example/grok", "highlights": ["SuperGrok costs £24.99 a month in the UK."] }] }));
+        let s = || Settings { local: Some(uk_prices()), country: Some("GB".into()), ..settings("exa-key") };
+        let question = "How much is a Grok subscription?";
+        let search = |q: &str| json!({ "query": q });
+
+        // A cloud model: told to search once more, then told to say so.
+        let mut turn = Turn::new(s(), endpoints_of(&us), question, &[]);
+        let first = turn.execute("web_search", &search("Grok plans price UK")).await;
+        let note = first["data"]["local_prices"].as_str().unwrap();
+        assert!(note.starts_with("None of these results gives a UK price (in £). Search once more for the UK price, like \"Grok plans price UK £\""), "{note}");
+        assert_eq!(turn.take_local_retry(), None);
+        let second = turn.execute("web_search", &search("Grok plans price UK £")).await;
+        let note = second["data"]["local_prices"].as_str().unwrap();
+        assert!(note.starts_with("No UK prices (in £) here either. Start your answer with one short line saying you couldn't find UK prices"), "{note}");
+
+        // A model on this PC: Yap owes it the second search, once.
+        let mut turn = Turn::new(s(), endpoints_of(&us), question, &[]);
+        turn.set_yap_retries(true);
+        let first = turn.execute("web_search", &search("Grok tiers price UK")).await;
+        assert!(first["data"].get("local_prices").is_none());
+        assert_eq!(turn.take_local_retry().as_deref(), Some("Grok tiers price UK £"));
+        assert_eq!(turn.take_local_retry(), None, "once");
+
+        // Their prices after some without: "answer with those".
+        let mut turn = Turn::new(s(), endpoints_of(&us), question, &[]);
+        turn.execute("web_search", &search("Grok cost UK")).await;
+        turn.endpoints = endpoints_of(&uk);
+        let second = turn.execute("web_search", &search("Grok cost UK £")).await;
+        assert_eq!(second["data"]["local_prices"], "These results give UK prices (in £): answer with those, as the pages give them.");
+
+        // Theirs at once, or not a price question: nothing said.
+        let mut turn = Turn::new(s(), endpoints_of(&uk), question, &[]);
+        assert!(turn.execute("web_search", &search("Grok monthly price UK")).await["data"].get("local_prices").is_none());
+        let mut turn = Turn::new(s(), endpoints_of(&us), "What is Grok?", &[]);
+        assert!(turn.execute("web_search", &search("Grok chatbot")).await["data"].get("local_prices").is_none());
     }
 
     #[test]

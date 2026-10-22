@@ -1,0 +1,55 @@
+{
+  "name": "web-price-uk-netflix-both",
+  "description": "\"How much is Netflix a month?\" from a UK PC, when the results give both the US prices in $ and the UK prices in £ (stand-in web, whatever the query). Right: the UK prices in £, never a US figure with its sign swapped, and no offer to look further. Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "prices",
+    "locale",
+    "standin"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Netflix plans and pricing | Netflix Help Center (US)",
+        "url": "https://help.netflix.com/en/node/24926",
+        "published": "2026-09-20",
+        "text": "Netflix plans in the United States: Standard with ads $7.99 a month, Standard $17.99 a month, Premium $24.99 a month. Extra members $6.99–$8.99."
+      },
+      {
+        "title": "How much does Netflix cost? Plans and pricing | Netflix Help Centre (UK)",
+        "url": "https://help.netflix.com/en-gb/node/24926",
+        "published": "2026-09-20",
+        "text": "Netflix plans in the United Kingdom: Standard with adverts £5.99 a month, Standard £12.99 a month, Premium £18.99 a month. Add an extra member for £4.99 or £5.99 a month."
+      },
+      {
+        "title": "Netflix prices around the world in 2026",
+        "url": "https://streamwatch.example/netflix-prices-2026",
+        "published": "2026-10-05",
+        "text": "Netflix's Standard plan costs $17.99 in the US, £12.99 in the UK and €13.99 in Germany; Premium is $24.99, £18.99 and €19.99."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "How much is Netflix a month?",
+      "expect": {
+        "min_sources": 1,
+        "answer_matches": "£\\s?(?:5\\.99|12\\.99|18\\.99)",
+        "answer_not_matches": "\\b(?:let me know|would you like|do you want|want me to|i can|i could|happy to|shall i|if you(?:'d| would)? like)\\b[^.!?\\n]{0,80}(?:uk|british|£|gbp|local|your (?:country|region|currency))[^.!?\\n]{0,60}(?:pric|cost)",
+        "no_false_claims": true,
+        "opened_none": true,
+        "prices_keep_their_sign": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "answer_not_matches": "\\$\\s?(?:7\\.99|17\\.99|24\\.99)"
+      }
+    }
+  ]
+}

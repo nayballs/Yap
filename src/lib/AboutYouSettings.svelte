@@ -2,46 +2,40 @@
   // Settings → General → About you (about_you.rs, 2026-10-21): what Yap
   // tells the AI models about the person, so an answer fits where they are
   // (Nathan's "It keeps finding things in dollars…").
-  // - "Region and language": what Windows says (regional format, home
-  //   location, currency, measurement, time zone), as one line —
-  //   "United Kingdom · English (UK) · £ GBP · metric · UK time" — with
-  //   Change to pick each (cfg.regionCountry / regionLanguage /
-  //   regionCurrency / regionUnits / regionTimeZone; empty = follow
-  //   Windows, a picked country brings its own currency and units);
+  // - "Region" (one picker since 2026-10-22, Nathan: "all of that should be
+  //   covered in the region selector only"): "Automatic: United Kingdom
+  //   (from Windows)" — Windows' home location — or any country
+  //   (cfg.regionCountry, '' = Automatic). Its currency, units, language and
+  //   spelling follow it; the time zone is always the PC's. One quiet line
+  //   under it says what follows: "Prices in £ · miles and °C · British
+  //   spelling · UK time".
   // - "What should Yap call you?" (cfg.aboutName) and "Anything the AI should
   //   know about you" (cfg.aboutMe, ≤ 300 characters);
-  // - "Use my region's spelling" (cfg.regionSpelling): AI cleanup keeps
-  //   British or American spelling;
   // - "See what the AI is told": the block itself, as it reads now;
   // - the privacy line.
+  // The spelling's off switch is in Language Models → Dictation cleanup
+  // (RegionSpelling.svelte).
   //
   //   cfg: Settings' config $state. Auto-save does the saving.
   import { invoke } from '@tauri-apps/api/core';
   import Group from './ui/Group.svelte';
   import Row from './ui/Row.svelte';
   import Select from './ui/Select.svelte';
-  import Toggle from './ui/Toggle.svelte';
-  import Button from './ui/Button.svelte';
+  import Tooltip from './ui/Tooltip.svelte';
   import Input from './ui/Input.svelte';
   import Textarea from './ui/Textarea.svelte';
 
   let { cfg } = $props();
   let status = $state(null);
-  let changing = $state(false);
   let showPrompt = $state(false);
 
-  // Re-read as the fields change (Settings' copy, before its auto-save): the
-  // summary, what "Automatic" means for the country picked, the prompt.
+  // Re-read as the fields change (Settings' copy, before its auto-save): what
+  // follows from the region, and the prompt.
   $effect(() => {
     const overrides = {
       regionCountry: cfg.regionCountry ?? '',
-      regionLanguage: cfg.regionLanguage ?? '',
-      regionCurrency: cfg.regionCurrency ?? '',
-      regionUnits: cfg.regionUnits ?? '',
-      regionTimeZone: cfg.regionTimeZone ?? '',
       aboutName: cfg.aboutName ?? '',
       aboutMe: cfg.aboutMe ?? '',
-      regionSpelling: cfg.regionSpelling !== false,
     };
     let stale = false;
     invoke('about_you_status', { overrides })
@@ -54,93 +48,40 @@
     };
   });
 
-  const ZONES = (() => {
-    try {
-      return Intl.supportedValuesOf('timeZone');
-    } catch {
-      return [];
-    }
-  })();
-  const city = (z) => (z.split('/').slice(1).join(' / ') || z).replace(/_/g, ' ');
-  const money = (r) => (!r?.currency ? 'not known' : r.symbol && r.symbol !== r.currency ? `${r.symbol} ${r.currency}` : r.currency);
-  const units = (r) => (r?.metric === false ? 'US units' : r?.metric ? 'metric' : 'not known');
-
-  const overridden = $derived(
-    ['regionCountry', 'regionLanguage', 'regionCurrency', 'regionUnits', 'regionTimeZone'].some((k) => (cfg[k] ?? '') !== ''),
+  const windowsCountry = $derived(status?.windows?.countryName);
+  const regionOptions = $derived([
+    {
+      value: '',
+      label: windowsCountry ? `Automatic: ${windowsCountry} (from Windows)` : "Automatic (Windows doesn't say)",
+    },
+    ...[...(status?.countries ?? [])]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((c) => ({ value: c.code, label: c.name })),
+  ]);
+  const follows = $derived(
+    !status ? '…' : status.summary || 'Pick your country, so answers come with your prices and units',
   );
-  const win = $derived(status?.windows ?? {});
-  const countryOptions = $derived([
-    { value: '', label: `Windows: ${win.countryName ?? 'not set'}` },
-    ...[...(status?.countries ?? [])].sort((a, b) => a.name.localeCompare(b.name)).map((c) => ({ value: c.code, label: c.name })),
-  ]);
-  const languageOptions = $derived.by(() => {
-    const list = (status?.languages ?? []).map((l) => ({ value: l.tag, label: l.name }));
-    const picked = cfg.regionLanguage ?? '';
-    if (picked && !list.some((l) => l.value === picked)) list.unshift({ value: picked, label: picked });
-    return [{ value: '', label: `Windows: ${win.languageName ?? 'not set'}` }, ...list];
-  });
-  const currencyOptions = $derived.by(() => {
-    const list = (status?.currencies ?? []).map((c) => ({
-      value: c.code,
-      label: c.symbol !== c.code ? `${c.symbol} ${c.code} · ${c.name}` : `${c.code} · ${c.name}`,
-    }));
-    const picked = cfg.regionCurrency ?? '';
-    if (picked && !list.some((c) => c.value === picked)) list.unshift({ value: picked, label: picked });
-    return [{ value: '', label: `Automatic: ${money(status?.auto)}` }, ...list];
-  });
-  const unitOptions = $derived([
-    { value: '', label: `Automatic: ${units(status?.auto)}` },
-    { value: 'metric', label: 'Metric (km, kg, °C)' },
-    { value: 'imperial', label: 'US units (miles, pounds, °F)' },
-  ]);
-  const zoneOptions = $derived([
-    { value: '', label: `Windows: ${win.timeZoneLabel ?? 'not set'}${win.timeZone ? ` (${win.timeZone})` : ''}` },
-    ...ZONES.map((z) => ({ value: z, label: city(z), group: z.includes('/') ? z.split('/')[0] : 'Other' })),
-  ]);
 
   const aboutMax = $derived(status?.aboutMax ?? 300);
   const aboutLen = $derived([...(cfg.aboutMe ?? '')].length);
-  const spelling = $derived(status?.region?.spelling);
-
-  function useWindows() {
-    cfg.regionCountry = '';
-    cfg.regionLanguage = '';
-    cfg.regionCurrency = '';
-    cfg.regionUnits = '';
-    cfg.regionTimeZone = '';
-  }
 </script>
 
 <div id="settings-about-you">
   <Group title="About you">
-    <Row
-      label="Region and language"
-      desc={status ? status.summary || "Windows doesn't say: pick your country" : '…'}
-      hint="Yap tells the AI where you are, so prices come in your currency, times in your time zone and units the way you use them. It follows Windows' region settings until you change something here."
-    >
-      <Button variant="secondary" size="sm" onclick={() => (changing = !changing)}>
-        {changing ? 'Done' : 'Change'}
-      </Button>
-    </Row>
-    {#if changing}
-      <Row>
-        <div class="pickers" role="group" aria-label="Region and language">
-          <Select bind:value={cfg.regionCountry} options={countryOptions} label="Country" />
-          <Select bind:value={cfg.regionLanguage} options={languageOptions} label="Language" />
-          <Select bind:value={cfg.regionCurrency} options={currencyOptions} label="Currency" />
-          <Select bind:value={cfg.regionUnits} options={unitOptions} label="Units" />
-          <Select bind:value={cfg.regionTimeZone} options={zoneOptions} label="Time zone" />
-          <p class="small">
-            {#if overridden}
-              Windows says: {status?.windowsSummary || 'nothing'}.
-              <button type="button" class="link" onclick={useWindows}>Use Windows' settings</button>
-            {:else}
-              From Windows' region settings. A country you pick brings its own currency and units.
-            {/if}
-          </p>
+    <Row>
+      <div class="region">
+        <div class="head">
+          <span class="label" id="region-label">Region</span>
+          <Tooltip
+            text="Yap tells the AI where you are, so prices come in your currency, distances in your units and spelling your way. Times always follow this PC's clock."
+          />
         </div>
-      </Row>
-    {/if}
+        <div class="pick">
+          <Select bind:value={cfg.regionCountry} options={regionOptions} ariaLabel="Region" />
+        </div>
+        <p class="follows" data-testid="region-follows">{follows}</p>
+      </div>
+    </Row>
     <Row label="What should Yap call you?" desc="Optional">
       <div class="name">
         <Input
@@ -153,7 +94,7 @@
     </Row>
     <Row>
       <div class="about">
-        <div class="abouthead">
+        <div class="head">
           <span class="label" id="about-me-label">Anything the AI should know about you</span>
           <span class="count" class:full={aboutLen >= aboutMax}>{aboutLen}/{aboutMax}</span>
         </div>
@@ -166,16 +107,6 @@
           ariaLabel="Anything the AI should know about you"
         />
       </div>
-    </Row>
-    <Row>
-      <Toggle
-        bind:checked={cfg.regionSpelling}
-        label="Use my region's spelling"
-        desc={spelling
-          ? `AI cleanup writes ${spelling} English: ${status?.spellingExamples ?? ''}`
-          : 'AI cleanup keeps your English spelling once Yap knows which you use'}
-        hint="Only the spelling changes, never your words. It applies when AI cleanup is on (Language Models → Dictation Cleanup)."
-      />
     </Row>
     <Row>
       <div class="told">
@@ -195,19 +126,7 @@
 </div>
 
 <style>
-  .pickers {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    width: 100%;
-  }
-  /* One column of equal pickers. */
-  .pickers :global(.select-wrap) {
-    width: 260px;
-  }
-  .name {
-    width: 220px;
-  }
+  .region,
   .about,
   .told {
     display: flex;
@@ -215,19 +134,34 @@
     gap: 6px;
     width: 100%;
   }
-  .abouthead {
+  .pick {
+    width: 300px;
+    max-width: 100%;
+  }
+  .pick :global(.select-wrap) {
+    max-width: none;
+    width: 100%;
+  }
+  .name {
+    width: 220px;
+  }
+  .head {
     display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .about .head {
     justify-content: space-between;
     align-items: baseline;
     gap: 12px;
   }
   .label {
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 650;
     color: var(--yap-fg);
   }
   .desc,
-  .small,
+  .follows,
   .privacy,
   .count {
     font-size: 11.5px;
@@ -238,7 +172,7 @@
     color: var(--yap-warning);
     font-weight: 600;
   }
-  .small,
+  .follows,
   .privacy {
     margin: 0;
   }
