@@ -207,7 +207,7 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   **header** (52 px, a drag region): **back** (beige square → the note in the
   main window's Notes, `yap-meeting-open-note`), **⋯** (Copy as Markdown /
   Copy as text / Copy consent message / Audio settings while recording →
-  Settings → General / Save as .md via the dialog plugin + `note_export` /
+  Settings → Dictation's microphone / Save as .md via the dialog plugin + `note_export` /
   **Delete** in red → a Wispr-style confirm dialog → `meeting_delete`),
   **split screen** (tooltip "Split screen with meeting"; hover →
   `notepad_split_preview`, click → `notepad_split`), a **Share** split button

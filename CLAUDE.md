@@ -219,7 +219,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
 - `Overlay.svelte` + `bar/` — the Yap bar's page ([yap-bar.md](./docs/architecture/yap-bar.md)).
-- `Settings.svelte` — Settings, always mounted in the modal ([frontend-settings.md](./docs/architecture/frontend-settings.md)); `AboutYouSettings.svelte` its General → About you (one Region picker), `RegionSpelling.svelte` Dictation Cleanup's spelling switch.
+- `Settings.svelte` + `settings/` — Settings, always mounted in the modal: the nav by scope with search (`settingsIndex.js`; old links land via `nav.js` aliases), General / Dictation / Shortcuts / Meetings / Privacy & data / About as page components, one row style in `lib/ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch.
 - `AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
 - `ModelManager` / `ModelRow`, `Onboarding`, `lib/ui/` — speech models, first run, primitives, right-click menus.
 - Window config (`tauri.conf.json`) — [app-shell.md](./docs/architecture/app-shell.md#window-config-src-tauritauriconfjson).

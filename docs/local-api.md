@@ -93,7 +93,7 @@ Wispr Flow's Notetaker has an MCP page ("Sync Notetaker with your favorite AI
 apps… The Wispr MCP does not have access to your dictations") backed by
 Wispr's cloud. Yap's is local: the AI app runs **`yap.exe mcp`** on this PC,
 and that process reads the meetings from the running Yap through this local
-API. No server in between, no account. **Settings → MCP** (the Connections
+API. No server in between, no account. **Settings → AI apps (MCP)** (the Connections
 group, laid out like Wispr's page; Integrations has a "Go to MCP" card) adds
 it to an app in one click (`src/lib/McpSection.svelte` →
 `src-tauri/src/mcp_clients.rs`); the server is `src-tauri/src/mcp.rs`.
@@ -156,7 +156,7 @@ apart), and the tool descriptions and server instructions say so.
 
 ### Adding Yap to an AI app
 
-Settings → MCP follows Wispr's page: a light card each for **Claude,
+Settings → AI apps (MCP) follows Wispr's page: a light card each for **Claude,
 ChatGPT, Gemini and Cursor** ("Allow Claude to access your meeting notes and
 transcripts", **Add to Claude**, then **Added ✓ · Remove**), then **All
 other apps:** with one-click rows for Claude Code, VS Code and Windsurf, the
@@ -166,7 +166,7 @@ docs describe adding a local server (checked 2026-10-05):
 | App | File (Windows) | Entry |
 |-----|----------------|-------|
 | Claude (desktop) | `%APPDATA%\Claude\claude_desktop_config.json`; the MSIX build (today's installer) reads `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json` instead ([claude-code#26073](https://github.com/anthropics/claude-code/issues/26073)), so every copy that exists is written | `mcpServers.yap = {command, args}` |
-| ChatGPT | `~\.codex\config.toml`, shared by the ChatGPT desktop app (Settings → MCP servers), the Codex CLI and IDE extension ([OpenAI docs](https://learn.chatgpt.com/docs/extend/mcp)) | `[mcp_servers.yap]` |
+| ChatGPT | `~\.codex\config.toml`, shared by the ChatGPT desktop app (Settings → AI apps (MCP) servers), the Codex CLI and IDE extension ([OpenAI docs](https://learn.chatgpt.com/docs/extend/mcp)) | `[mcp_servers.yap]` |
 | Gemini | `~\.gemini\settings.json` (Gemini CLI) | `mcpServers.yap` |
 | Cursor | `~\.cursor\mcp.json` | `mcpServers.yap` with `type: "stdio"` |
 | Claude Code | `~\.claude.json` (user scope, what `claude mcp add --scope user` writes) | `mcpServers.yap` with `type`, `env` |
@@ -231,7 +231,7 @@ page warns about that in dev builds.
   malformed files, BOM/CRLF/tabs, TOML, the `.bak`, Claude Code's lock, a
   stand-in profile) and the real binary (`tests/mcp_stdio.rs`: spawns
   `yap.exe mcp` against a fake bridge).
-- `e2e/mcp.spec.js` adds and removes Yap through Settings → MCP in a
+- `e2e/mcp.spec.js` adds and removes Yap through Settings → AI apps (MCP) in a
   stand-in profile, then runs a real `yap.exe mcp` session against the test
   instance's bridge (see [e2e-tests.md](./e2e-tests.md)).
 - Debug builds only: `YAP_BRIDGE_FILE` moves the discovery file (the app and

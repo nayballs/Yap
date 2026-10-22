@@ -121,7 +121,7 @@
   verified). Attribution: Settings → Voice Assistant → Voice. Deleted from the
   Kokoro row; ~352 MB.
 - Groq usage: `%APPDATA%/yap/groq_usage.json`.
-- History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → History).
+- History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History).
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
   participants, meeting transcripts).
 - Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chats.rs`).
@@ -159,7 +159,7 @@
 - Local API bridge discovery: `~/.yap/cli-bridge.json` (fixed path, NOT the
   data dir; written while the app runs, deleted on exit — see `bridge.rs` +
   `docs/local-api.md`).
-- AI apps' own config files (Settings → MCP → Add to …): Yap only adds or
+- AI apps' own config files (Settings → AI apps (MCP) → Add to …): Yap only adds or
   removes its `yap` entry, keeps the original as `<file>.bak` the first time,
   and never edits a file that isn't plain JSON (`mcp_clients.rs`).
 - Account session: a Windows Credential Manager generic credential

@@ -148,7 +148,7 @@ including safe partial note edits (search → exact-once replace, `note_text.rs`
 ≤20-step loop, gated to cloud or ≥4B local models). An **MCP server** (`mcp.rs`,
 `yap.exe mcp`) lets Claude, ChatGPT desktop/Codex, Gemini CLI, Cursor, Claude Code,
 VS Code and Windsurf read meetings and notes (never dictations) through the local
-API, added in one click from Settings → MCP (`mcp_clients.rs`); tested in-process,
+API, added in one click from Settings → AI apps (MCP) (`mcp_clients.rs`); tested in-process,
 against the real binary and end to end (2026-10-05), not yet with a real AI app.
 The **calendar** (`calendar.rs` + `calendar/`, Wispr Flow's, local-first,
 2026-10-05): Google Calendar in one click (read-only, PKCE, loopback) or any

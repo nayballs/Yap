@@ -85,8 +85,9 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   real one, for checking a real click reaches it — never while Nathan's
   using the mouse). Every card answer (button, ✕, Esc, its timer) is logged
   as "bar: card answered" with the card and action; the hover check logs at
-  debug when it changes. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Light / Dark,
-  `bar_dictation_buttons`; `overlay_position` puts it at the top). Bar off = the old behaviour: the
+  debug when it changes. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Light / Dark;
+  `overlay_position` puts it at the top) and Settings → Dictation → While you dictate (`bar_dictation_buttons`,
+  the live preview). Bar off = the old behaviour: the
   overlay only while dictating, notices as Windows notifications — but a
   showing dictation's ✕ / ✓ and Undo still take clicks (`clickable`).
 - **`overlay.rs`** — the bar window's Win32 side + its pure, unit-tested maths:

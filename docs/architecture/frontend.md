@@ -156,14 +156,14 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   summarise / Keep recording", both with `icon: 'call'` and withdrawn when
   Rust withdraws the prompt; the card's ✕ runs its `onClose` = the quiet
   answer; `yap-meeting-detect-choice` with `confirm` shows "Won't ask about
-  Teams calls" + Open Settings (→ `general#meetings`);
+  Teams calls" + Open Settings (→ `meetings#call-apps-list`);
   `yap-meeting-open-note` switches to Notes and hands NotesView a
   `noteRequest` to open, and stop if asked), the **meeting guard rails**
   (`meetingGuard.js` — meeting_guard.rs / capture.rs: the sticky "Notes stop
   in 5 minutes" + **Keep going** toast (`icon: 'timer'`, counting down,
   only when `inApp`, withdrawn when Rust sends `{warning: null}`), and one-off
   `yap-meeting-notice` toasts: the screen-share tip (`icon: 'screen'`,
-  **Update settings** → `general#screen-sharing`), "Stopped at 2 hours", "Teams
+  **Update settings** → `meetings#screen-sharing`), "Stopped at 2 hours", "Teams
   call ended · Yap stopped recording…", "Taking notes" (a notice addressed
   to the notepad, `surface`, isn't shown here), and meeting.rs's warnings
   (kind `warning`, 12 s: "Yap can't hear the call", "Transcription is

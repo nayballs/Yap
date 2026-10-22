@@ -164,7 +164,7 @@ that side is heard again:
   through a headset, make that Windows' default output device." (naming the
   call when call detection sees one; else "the call").
 - "You" quiet: "Yap hasn't heard your mic for 3 minutes. If you're talking,
-  check it isn't muted, and pick the right mic in Settings → General."
+  check it isn't muted, and pick the right mic in Settings → Dictation."
 
 Both sides quiet is a break, not a fault, and a cough isn't talk. The warning
 is the existing `yap-meeting-warning`: a toast in the main window, in
@@ -437,7 +437,7 @@ motion), in Yap's own code, wording and icons; the palette is the
 
 **When it opens.** Whenever a meeting recording starts, from anywhere ("Record
 notes" on a call prompt, the Notes view's Record, the tray, the Yap bar), with
-**Open the notepad when a meeting starts** on (Settings → General → Meetings,
+**Open the notepad when a meeting starts** on (Settings → Meetings,
 `meetingOpenNotepad`, default on). It never takes the focus from the call: the
 window is created unfocused, so Windows shows it without activating it.
 Closing it only hides it; the recording carries on, and **Notepad** on the
@@ -481,7 +481,7 @@ Yap noticed, the button says so.
 
 **The header.** **Back** opens the note in Yap's Notes view. **⋯**: Copy as
 Markdown, Copy as text, Copy consent message, Audio settings (while
-recording: Settings → General), Save as .md (a save dialog, the same file as
+recording: Settings → Dictation's microphone), Save as .md (a save dialog, the same file as
 the Notes view's export), and **Delete** in red, behind a confirm dialog
 ("Delete this meeting?"; a meeting still recording stops first, then its note
 goes: `meeting_delete`). **Share** is local (Wispr's is cloud sharing): a
@@ -730,7 +730,7 @@ made-up title shows muted in the notepad and the Notes view.
 
 ## Guard rails
 
-Wispr Flow's Notetaker settings, ported (Settings → General → Meetings, one
+Wispr Flow's Notetaker settings, ported (Settings → Meetings, one
 block under "Ask about calls in"). Code: `src-tauri/src/meeting_guard.rs`,
 `src-tauri/src/capture.rs`, `src/lib/meetingGuard.js`,
 `src/lib/meetingCheckIn.js`.
@@ -1209,8 +1209,8 @@ has passed, so no prompt).
     game or a slideshow (`SHQueryUserNotificationState`) doesn't: the card
     waits, unseen, and shows when you alt-tab out, unless the call has ended
     by then (no countdown runs meanwhile, and Esc stays the game's).
-  - **Start notes automatically after 10 seconds** (Settings → General →
-    Meetings, `meetingAutoStart`, **off** by default: nothing records without
+  - **Start notes automatically after 10 seconds** (Settings → Meetings →
+    Call detection, `meetingAutoStart`, **off** by default: nothing records without
     a click unless you switch it on). Wispr's card starts notes after a
     countdown; Yap's does too when this is on: "Notes start in 7…" with a
     ring draining round the Yap logo on the bar's card ("Starting notes in
@@ -1228,7 +1228,7 @@ has passed, so no prompt).
   so there a quiet prompt is just the tray item.
 - **Don't ask for Teams** saves Teams as switched off, withdraws the prompt
   everywhere, and with the window on screen confirms it there: "Won't ask
-  about Teams calls" with **Open Settings** (General → Meetings).
+  about Teams calls" with **Open Settings** (Meetings → Ask about calls in).
 - **The tray**, in both styles: while a call of an app Yap asks about is live
   and nothing records, the menu's top item is **Record this Teams call**
   (same as Record notes; it also answers a prompt still up for that call). So
@@ -1290,7 +1290,7 @@ question and says so.
 
 ### Setting
 
-Settings → General → Meetings: **Detect calls and offer to take notes**
+Settings → Meetings: **Detect calls and offer to take notes**
 (`meetingDetection`, default **on**, like OpenWhispr's
 `notifyMeetingDetection`). It only reads Windows' own record of mic use,
 locally, and only ever asks, and the prompt is how people find out notes
@@ -1458,7 +1458,7 @@ meetings and their notes meet in four places:
   meeting notes with search and an Ask bar for questions about your
   meetings.
 - **The reminder card** ("Notify before scheduled meetings start": right
-  before, 1 or 2 minutes, never; Settings → General → Meetings): **Join &
+  before, 1 or 2 minutes, never; Settings → Meetings): **Join &
   take notes**, **Start notes**, Snooze 2 min, ✕ — in the main window, and
   while it isn't focused on the **Yap bar** (`bar.rs`) as a call card like
   call detection's ("Design review · ● In 1 min · with Tanay +1"), else a

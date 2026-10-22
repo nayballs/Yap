@@ -1,258 +1,297 @@
 # Frontend: Settings
 
-`lib/Settings.svelte`, page by page (Commands, Voice Assistant, General, Speech-to-Text, Language Models, History, Advanced, About, Connectors, MCP, Account). Account's own page is [accounts.md](./accounts.md).
+`lib/Settings.svelte` and its pages in `lib/settings/`, page by page. Account's
+own page is [accounts.md](./accounts.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
-- **`lib/Settings.svelte`** — the settings surface, now rendered **inside the
-  ControlPanel's modal** (`embedded` prop; ✕ closes). Grouped sidebar (App / AI models / Data / Connections / System):
-  two pages for two different things (2026-10-18; both were "Voice
-  Agent"), each opening with one sentence and an example in a note
-  (`role="note"`) that links to the other: **Commands** (App, after
-  General; id `commands`): "Tell Yap's AI what to write, and it types the
-  result where you are" — *Say "Hey Jarvis, reply that I'll be late" in
-  any app; Yap writes it and types it there* (the agent's name, live); **Say
-  its name** (`#settings-wake-word`: the Commands scope's enable switch
-  `llmScopes.voiceAgent.enabled` "Answer to its name in any dictation", the
-  agent name — `AgentNameField.svelte`), **Rewrite selected text** (the
-  **Rewrite shortcut**, `editHotkey`, moved here from General →
-  Activation), **Model and prompt** → Language Models → Commands. **Voice
-  Assistant** (id `voice`): "Ask Yap something by voice and hear the
-  answer, like a voice assistant" — the example names the shortcut once
-  set; **Assistant shortcut** (`#settings-assistant-shortcut`,
-  `ui/HotkeyInput` `assistantHotkey`, clearable, "Set a shortcut", with a
-  gentle "Set an assistant shortcut…" line while none is set; its line
-  follows the recording mode), **Opening apps** (`OpenAppsSettings.svelte`,
-  `#settings-opening-apps`: "Let Yap open apps when you ask" `openApps`;
-  **Nicknames** — "Say … → App to open" with a type-ahead of the apps,
-  `appNicknames`, duplicates refused, ✕ to remove; **Apps Yap found** —
-  `apps_list`, a count, Refresh, a search box, two columns of the app's
-  own icon (`apps_icons`, else its letter) + a switch each, off = "Yap
-  won't open this one" `appsBlocked`; the first 40, then Show all),
-  **Web search** (`WebSearchSettings.svelte`, `#settings-web-search`:
-  "Look things up on the web" `webSearch`, off; **"Search with"**, a radio
-  list: **The AI's own search** (Recommended, `webSearchNative`, the
-  default: "Cloud models (Groq, Google Gemini, Anthropic, OpenAI,
-  OpenRouter) search with their provider's built-in search, on the API key
-  Chat already uses. Local and self-hosted models use Yap's search below.")
-  / **Exa** / **Tavily** (every model, `webSearchService`); with the AI's
-  own search, **"What each provider charges for its search"** (Groq: no
-  charge on the free plan but ~4,000 of its 8,000 tokens a minute per
-  searched answer, paid $5/1k + $1/1k pages; Gemini 3+ billing only,
-  5,000 a month free then $14/1k — on a free key Yap's own search answers —,
-  2.5 Flash/Flash-Lite where still offered 500 a day free, free tier used
-  to improve Google's products; Anthropic and OpenAI $10/1k + tokens; OpenRouter the
-  provider's price or $0.007 a search; as published 18 Oct 2026) and
-  **"Yap's search"** (Exa (Recommended) / Tavily, for local and
-  self-hosted models and when a provider's search is unavailable); each
-  key masked in `webSearchKeys` with "Get a free key →" (its dashboard via
-  `open_external`) and its free allowance; "Wikipedia and reference wikis"
-  (no key needed), always included; where the search words go (a cloud
-  model's provider, else the service / Wikipedia); the explain line adds a
-  web example while it's on), **Spoken replies in Chat** ("Speak replies" `speakReplies`;
-  "When to speak" Segmented When I asked by voice / Always `speakWhen`;
-  "Talk back hands-free" `talkBackHandsFree`, greyed while replies are off),
-  switching "Speak replies" on while Kokoro isn't downloaded offers it
-  under the switch (`KokoroOffer.svelte`, "Download Kokoro (379 MB)" / Not
-  now; replies stay on, Windows voices meanwhile; not offered while
-  ElevenLabs speaks), **Voice**
-  (`VoiceSettings.svelte`: **Speaks with** Segmented On this PC /
-  ElevenLabs `ttsProvider` (`#settings-voice-provider`, the fallback
-  notice's Open settings target); with **ElevenLabs** picked, the plain
-  line "The words Yap speaks are sent to ElevenLabs." under it, then
-  `ElevenLabsSettings.svelte`: the masked API key `ttsCloudKeys.elevenlabs`
-  (edit / done, as the web search keys) with "Get your API key →" (their
-  API-keys page via the opener) and a status line ("Key works · 37
-  voices", "ElevenLabs didn't accept it: …"); the account's voices as a
-  radio list — Your voices, then ElevenLabs voices; name + accent ·
-  gender · age; a ▶ / ■ per voice (`tts_cloud_preview`, its sample) —
-  saved as `ttsCloud.elevenlabs {voice, voiceName}`; **Model** Select
-  (Flash v2.5 · Recommended first; `ttsCloud.elevenlabs.model`); the
-  month's characters with a bar when the key may read them; and what
-  happens when ElevenLabs doesn't answer (Yap's own voice steps in, or, with
-  no Kokoro downloaded, nothing is read). The lists load with the key as
-  typed, 600 ms after typing stops, and when the page opens. On this PC:
-  **Engine** Segmented Kokoro / Windows voices
-  `ttsEngine`, "Natural voices, made on this PC. Recommended"; Kokoro's
-  **download row** (`ModelRow`: Kokoro-82M · size · 54 voices ·
-  Recommended, Download → progress → Active, delete via `ui/ConfirmDialog`;
-  in a stub build "In the full Yap build"); the **voice picker** following
-  the engine — Kokoro's 54 in `<optgroup>`s British English / American
-  English / Other languages × Female / Male (`kokoroOptions` in
-  `kokoro.svelte.js`, "Bella (default)", `ttsVoice`), or Windows' with its
-  default first (`ttsWindowsVoice`) — **▶ Preview** / ■ Stop →
-  `tts_preview` with the shown engine, voice and speed (off until Kokoro's
-  downloaded); Speed slider 0.5–2.0× `ttsRate`; Volume slider `ttsVolume`
-  (also in Chat's + menu, beside the Voice replies switch); the credit line: Kokoro
-  Apache-2.0 from onnx-community, misaki Apache-2.0, eSpeak NG GPL-3.0 run
-  separately, licences and the source link saved with them;
-  `kokoro.svelte.js` is the download store) and **Model** → Language
-  Models → Chat & Voice Assistant. `yap-voice-replies` (Chat's toggle) is
-  adopted into the config copy. **Hotkeys**: the four (`HOTKEY_CMD` /
-  `HOTKEY_NAMES`: dictation hotkey, rewrite shortcut, meeting shortcut,
-  assistant shortcut) are refused when they'd fire on one press
-  (`hotkeysClash`: "Already used by the …", or "Clashes with the … (Win +
-  Alt + M): one press would start both"); the in-page fallback catches the
-  meeting, assistant and dictation keys, in that order. **Language Models**
-  tabs read Dictation Cleanup / **Commands** (`VoiceAgentConfig.svelte`,
-  scope `voiceAgent`, "Name and shortcut in Commands") / Note Formatting /
-  **Chat & Voice Assistant** (`ChatConfig.svelte`, scope `chat`, a line
-  linking to the Voice Assistant page).
-  **General** (hotkey, recording mode — in push-to-talk its line says how
-  double-tap goes hands-free, "More shortcuts" naming the rewrite and
-  assistant shortcuts with buttons to Commands / Voice Assistant; then
-  **About you** (`AboutYouSettings.svelte`, `#settings-about-you`,
-  `about_you.rs`, 2026-10-21; one picker since 2026-10-22): **Region**, one
-  Select (`regionCountry`): "Automatic: United Kingdom (from Windows)", then
-  every country A–Z (the native list jumps as you type); one quiet line
-  under it says what follows from it (`about_you_status`'s summary, test id
-  `region-follows`: "Prices in £ · miles and °C · British spelling · UK
-  time"), its ⓘ that times follow the PC's clock. No other region pickers
-  and no spelling switch here (that's in Language Models → Dictation
-  Cleanup, below); "What
-  should Yap call you?" (`aboutName`, ≤ 60) and "Anything the AI should know
-  about you" (`aboutMe`, a 300-character textarea with a count); "See what the AI is told" (the
-  block, as it reads now) and the privacy line ("Kept on this PC. Yap sends
-  it to the AI model you use, with each question: a cloud provider … sees
-  it, a model on this PC keeps it here. It's never sent to Yap."); the
-  status re-reads as the fields change, before the auto-save), mic, sound+volume, then "Silence other apps
-  while you dictate" (`quietOtherApps`) and "Pause music and videos while
-  you dictate" (`pauseMedia`) where "Mute while recording" was; **Yap bar** group
-  (`#settings-bar`, the bar menu's Settings → "general#bar"): Show the Yap bar
+## The shell (2026-10-22 review: structure, search, one row style)
+
+Settings is a modal in the main window (`ControlPanel.svelte`: `embedded`,
+`open`, `onclose`, `onshowview`), **always mounted** so its in-page hotkey
+fallback (the dictation, assistant and meeting keys while a Yap window has the
+focus) and its auto-save run for the window's whole life. Esc closes it (a
+search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
+
+- **The nav** (`settings/nav.js` `NAV_GROUPS`, Claude-style scopes, sentence
+  case): a **search box** on top ("Search settings", Ctrl F); then General ·
+  Dictation · Shortcuts · Meetings | **Assistant**: Commands · Voice Assistant
+  (Memory, from another branch, goes here) | **AI models**: Speech-to-Text ·
+  Language Models | **Connections**: Connectors · AI apps (MCP) | **This PC**:
+  Privacy & data · About. At the bottom the account button and a footer with
+  the version and the "Saved ✓" pulse every auto-save gives (the old status
+  bar under the page is gone). The active page is a white pill with the amber
+  icon chip; the red attention count stays on its page's row (and the cog).
+- **Page ids** (never renamed: links use them): `general`, `dictation`,
+  `shortcuts`, `meetings`, `commands`, `voice`, `models` (Speech-to-Text),
+  `cleanup` (Language Models), `connectors`, `mcp`, `privacy`, `about`,
+  `account`.
+- **Links** — `yap-settings-goto` (window event), ControlPanel's
+  `openSettings(target)` and Rust's `yap-open-settings` all go through
+  `goto(target)`: `"page"`, `"page#anchor"` (scrolls to `#settings-<anchor>`,
+  else the row `[data-setting=<anchor>]`, and gives a row a short amber wash,
+  `.set-flash`), `"cleanup#<scope>"` (a Language Models tab), or the search's
+  `{page, anchor, fallback, scope, focus}` (focus = the row's control gets the
+  keyboard focus). **Old links still land** (`ALIASES`, OpenWhispr's
+  `SECTION_ALIASES`): `general#meetings` → `meetings`,
+  `general#screen-sharing` → `meetings#screen-sharing` (Windows notifications
+  already in the notification centre carry the old string),
+  `general#activation`/`#hotkey` → `dictation#hotkey`, `general#microphone`/
+  `#audio` → `dictation#microphone`, `history` → `privacy#history`,
+  `advanced` (and `advanced#output`) → `dictation#typing`,
+  `advanced#system` → `general#startup`, `advanced#debug` → `privacy#logs`,
+  `advanced#dictionary` → `dictation#dictionary`; a page that moved keeps an
+  anchor asked for. A page this build doesn't have (`memory` before it lands)
+  leaves Settings where it is. Callers today: bar.rs `general#bar`,
+  meeting_guard.rs `meetings#screen-sharing`, meeting.rs (quiet mic)
+  `dictation#microphone`, alert.rs `cleanup#chat` / `voice#voice-provider`,
+  updates.rs `about`, auth.rs `account`, the notepad's Audio settings
+  `dictation#microphone`, call detection's "Open Settings"
+  `meetings#call-apps-list`, Home's history link `privacy#history`, Chat's
+  `voice#assistant-shortcut` and `cleanup#chat`.
+- **Search** (`settings/settingsIndex.js` + `SearchResults.svelte`): a static
+  index of every setting — `{page, section, label, desc, keywords, anchor,
+  fallback?, scope?, toggle?}`, ~110 entries — since only the open page is
+  mounted. Ctrl+F (or `/` outside a text field) focuses the box; while there's
+  a query the page pane shows **Results for "…"**: grouped by page (pages in
+  order of their best match; inside one, by section, its heading once:
+  "Dictation › Typing into apps"), the words highlighted (`highlight`, every
+  form: "paste" also finds "pasting"), a plain on/off setting switchable in
+  place (`toggle`), ↑/↓ to move (the box keeps the focus;
+  `aria-activedescendant`), **Enter** or a click opens the page scrolled to the
+  row with the wash, the row's control focused; Esc clears, a second Esc
+  closes. The nav shows each page's count and dims the rest. Matching: every
+  word must be found in the label (weighted most), keywords, line, section or
+  page name; a word's start beats its middle; light stemming (`stems`).
+  `e2e/settings-search.spec.js` opens **every index entry** and finds its row,
+  so the index can't drift from the pages.
+- **860 × 600** (below 960 px of window): the nav is a **58 px icon rail**
+  with ink tooltips (fixed-position, so the rail can scroll), a search button
+  that opens the box over the page, a red dot for the attention count, and
+  the account's avatar. Rows put a control wider than ~42% of the row on its
+  own line (`ui/Row.svelte` measures it, OpenWhispr's `isCompact`), and long
+  choices are Selects, so nothing squeezes to a word a line.
+- **One look** (`ui/`): `Group` = a 14 px / 640 ink heading over flat rows
+  with hairlines (`--yap-rule`), no card (`bare` for a group holding a card or
+  its own list); `Row` = label 13.5 / 560, one grey line 12.5 in
+  `--yap-muted`, the control right-aligned in one column, `setting` = its
+  search/deep-link anchor, `desc` a string or a snippet; `Toggle` = an
+  **ink** switch, off an outlined track (`--yap-switch-edge`, 3.4:1 on the
+  page, Windows 11's); `Select` = one width (`--yap-select-w` 188 px, `wide`
+  248 px for devices, voices, countries); `Segmented` = segments sized to
+  their labels, the thumb measured; `Slider` ink (an `inline` one for a row's
+  control column); `HotkeyInput` = the shortcut in Yap's **amber keycaps** +
+  Change (+ ✕ when it can be unset), "Set a shortcut" when there's none, the
+  clash message under it; `LinkRow` = every jump to another page or list
+  ("Dictionary · 12 corrections · 3 snippets ›"). Content is one 700 px column
+  (`--yap-settings-w`) on every page; cards only for objects (a speech model,
+  a calendar connection, an AI app, Prompt Studio). Amber is kept for keycaps,
+  the active page, Recommended/Beta chips, links (`--yap-link` #a85a08) and
+  focus. **One focus ring** (`--yap-focus`: 2 px of page, 2 px of #c2690a) on
+  `:focus-visible` for every control. Thin scrollbars in Settings
+  (`settings/settings.css`, the pages' shared styles under `.settings-shell`:
+  page header, `.set-link`, `.set-note`, `.set-banner`, `details.set-more`
+  disclosures, `.set-card`, `.set-flash`).
+- **Contrast, measured** (WCAG AA on `--yap-s1`): descriptions, page lines
+  and nav group labels `--yap-muted` 5.1:1 (4.6:1 on the nav), links 4.8:1,
+  headings ink 15:1, the ✕ 4.8:1, an off switch's edge 3.4:1, the focus ring
+  3.8:1. Before: descriptions 3.1:1, headings 2.4:1, nav labels 2.3:1, links
+  3.75:1, an off track 1.2:1. The suite measures them in the app.
+- **The red badge says why** on the page: Speech-to-Text with no model (a
+  banner over "Your model", whose own Download is the fix), Language Models
+  with cleanup on a cloud provider and no key ("Add your Groq API key" + Add
+  key, which opens and focuses the field).
+- **Hotkeys** (`settings/hotkeys.svelte.js` + `SettingsHotkey.svelte`): the
+  four (`HOTKEY_CMD` / `HOTKEY_NAMES`: dictation hotkey, rewrite shortcut,
+  meeting shortcut, assistant shortcut) are refused when they'd fire on one
+  press (`hotkeysClash`: "Already used by the …", or "Clashes with the … (Win
+  + Alt + M): one press would start both"); while one is being picked
+  (`hotkeyCapture.on`) its live binding is paused and the in-page fallback
+  stands down. The fallback catches the meeting, assistant and dictation keys,
+  in that order.
+
+## The pages
+
+- **General** (`settings/GeneralPage.svelte`): **Language and region**
+  (`#settings-language`, `AboutYouSettings.svelte`, `about_you.rs`): one
+  **Region** Select (`regionCountry`): "Automatic: United Kingdom (from
+  Windows)", then every country A–Z; its line is what follows from it
+  (`about_you_status`'s summary, test id `region-follows`: "Prices in £ ·
+  miles and °C · British spelling · UK time"), an ⓘ that times follow the
+  PC's clock. The spelling switch is in Language Models → Dictation cleanup.
+  **About you** (`#settings-about-you`): "What should Yap call you?"
+  (`aboutName`, ≤ 60), "Anything the AI should know about you" (`aboutMe`, 300
+  characters, counted), one line on where it goes ("Kept on this PC, and sent
+  only to the AI model you use with each question: never sent to Yap."), "See
+  what the AI is told" (the block as it reads now) and a link to Privacy &
+  data; the status re-reads as the fields change. **Startup and updates**
+  (`#settings-startup`): "Start Yap when you sign in" (`autostart`,
+  `set_autostart` at once; the switch goes back if Windows says no), "Check
+  for updates automatically" (`updateChecksEnabled`). **Yap bar**
+  (`#settings-bar`, the bar menu's Settings → `general#bar`): Show the Yap bar
   (`barEnabled`; "Turn off the bar" in its menu arrives as `yap-bar-changed`
-  and is adopted), a "Hidden until 15:40 · Show it now" row while hidden for an
-  hour, Hide in fullscreen apps (`barHideFullscreen`), the live-preview toggle,
-  "Cancel and finish buttons while dictating" (`ui/Segmented` When you point
-  at it / Always / Off → `barDictationButtons`, Off by default, a line per
-  choice)
-  and Position (`overlayPosition`) — the dictation overlay itself is always on,
-  it's the hot-mic indicator; **Notifications** group
-  (`#settings-notifications`): "Show tips" (`showTips`, on: coaching hints
-  and the calendar nudge; questions, alerts and errors always show);
-  **Appearance** group (`#settings-appearance`, `AppearanceSettings.svelte`,
-  2026-10-22, after Claude desktop's General → Appearance): "Reading font"
-  (Select Default / Sans / Serif / System / OpenDyslexic, each option and
-  the closed box drawn in its own font, a line naming the font →
-  `readingFont`), "Text size" (Segmented Small / Default / Large / Larger →
-  `readingSize`, "For chats, notes and meeting notes"), a preview of the
-  reading text in both, and "Motion" (Segmented System / Reduced →
-  `motion`; System's line says whether Windows' "Animation effects" is on).
-  Settings applies its copy to the main window at once; the other windows
-  follow the save (`lib/appearance.js`; the tokens and what they reach:
-  [frontend.md](./frontend.md#look-and-the-main-window));
-  **Meetings** group (`#settings-meetings`, the
-  target of `yap-settings-goto` "general#meetings"): "Detect calls and offer to
-  take notes" (`meetingDetection`), then — disabled while it's off — "How Yap
-  asks" (`ui/Segmented` Pop-up / Quietly → `meetingDetectStyle`, a one-line
-  explanation of the choice) and "Ask about calls in" (a two-column list,
-  one row per call app from the `meetingDetect.apps` snapshot: [its icon,
-  `CallAppIcon` at 20 px — the real one as installed, else its mark or
-  letter; greyed with the switch while detection is off] [name] [switch],
-  showing the effective choice; a flip writes `meetingDetectApps[app]`; a
-  `yap-meeting-detect-choice` from Rust is adopted into Settings' config copy
-  so auto-save can't undo it), then, in Wispr's order: the guard rails
-  "When a call ends" (Select: Ask me / Stop and summarise automatically →
-  `meetingCallEnd`; disabled while detection is off), "Maximum recording
-  length" (Select 1–4 hours / No limit → `meetingMaxMinutes`), "End notes
-  when the meeting goes quiet" (`meetingEndWhenQuiet`, where Wispr has its
-  auto-end switch: after the length), "Hide Yap's
-  meeting windows from screen sharing" (`meetingHideFromCapture`, wrapped in
-  `#settings-screen-sharing` — the screen-share tip's "Update settings"
-  target); the meeting notepad's "Open the notepad when a meeting starts"
-  (`meetingOpenNotepad`) and "Split the screen when joining"
-  (`meetingSplitScreen`, greyed out while the first is off); "Meeting
-  shortcut" (`ui/HotkeyInput`, clearable → `meetingHotkey`; paused while
-  capturing via `configure_meeting_hotkey`; the three hotkeys can't clash);
-  "Notify before scheduled meetings start" (Select: Right before / 1 minute /
-  2 minutes / Never → `meetingReminder`) with a "Calendar" row under it
-  (Connected: <account> + Manage, or Connect calendar → Connectors);
-  "Show live transcript" (`meetingLiveTranscript`, the notepad's live lines)
-  + "Tell speakers apart in meetings" (`SpeakersToggle`, the same switch as
-  below, + a link to the models) + an always-visible consent line, "Recording a
-  call? Let people know you're taking notes."), **Speech-to-Text** (`ModelManager` + GPU +
-  language/translate, and **Speakers in meetings** (`#settings-speakers`,
-  `SpeakerModels.svelte` + `diarization.svelte.js`, `diarize.rs`): the speaker
-  models in `ModelRow`s (Download / Active / delete — the active one too;
-  the fallback greyed "For phone-only calls — coming later", status
-  `unavailable`), the **"Tell speakers apart in meetings"** switch (Beta chip,
-  "It all runs on this PC"; `SpeakersToggle.svelte`: off until a model is
-  installed — switching it on without one offers "Download and turn on" /
-  Not now with a progress bar instead; deleting the active model turns it
-  off), and where the files come from with their licences (OpenMDW-1.1,
-  Apache-2.0)), **Language Models** (OpenWhispr-style: enable toggle → mode
-  selector Cloud Providers/Local/Self-Hosted → provider pill tabs (Groq/Anthropic/
-  OpenAI/OpenRouter/Custom, brand icons) → API Key (masked + "Get your API key"
-  link) → Select Model rows (`ModelPicker.svelte`: `ppModels.js`'s curated
-  list merged with the provider's live one by `modelCatalog.js` — curated it
-  still lists, then "New" (released after `CURATED_AT`, by the provider's
-  date or, for Gemini's dateless list, not in the registry's `seen`; 120
-  days), the rest behind "Show N more" with a filter past 12, the saved
-  model it no longer lists kept with "No longer offered" and a line saying
-  so, "Groq's current models, checked 2 h ago · Check now" or "Couldn't
-  check…: … Showing Yap's list. · Try again"; no key, offline or a failed
-  check = exactly the curated list; switching provider picks its first model
-  it still offers; `ui/SelectList.svelte` draws the tags); a self-hosted or
-  custom endpoint's Model field suggests its server's `/models`
-  (`EndpointModels.svelte`, a `<datalist>` + "3 models on this server"), as
-  do the cleanup profiles' model fields;
-  UI-only `ppMode`/`cloudProvider` state resolves to the unchanged `ppProvider`
-  contract. Local = the on-device model browser (family tabs, Download / Use /
-  delete; each card's size line ends with its maximum, "2.8 GB · up to
-  256K"; above the cards the same **Context** control as the Chat picker's,
-  `LocalContext.svelte`, adding "Shared by Chat, dictation cleanup and
-  meeting notes."; Settings adopts `yap-local-context-changed` and re-reads
-  on `yap-local-llm-changed`): **"Recommended for this PC"** on `local_llm_status`'s pick (Qwen3.5
-  4B with a capable card, else the 1.5B; `isDefault` = the model an empty
-  `ppLocalModel` means), and under its heading one quiet line at most — the
-  4B offered once (`upgrade`: "Your NVIDIA GeForce RTX 5070 Ti can run Qwen3.5
-  4B…" Download / No thanks → `localLlmUpgradeDismissed`), or, a big model
-  left on the processor (`slowOnThisPc`, `placement`), "Runs on the processor
-  on this PC: answers will be slow — Qwen2.5 1.5B Instruct is quicker." + Use
-  it (read afresh whenever the section opens). Below it, a **Spelling**
-  group (`RegionSpelling.svelte`, `#settings-cleanup-spelling`, 2026-10-22):
-  "Write in my region's spelling" (`regionSpelling`, on; greyed out while
-  cleanup is off), its line naming the variety and the region it came from
-  ("British spelling, from your region (United Kingdom): honour,
-  recognise… Only the spelling changes, never your words.", from
-  `about_you_status`) — the one switch, for someone who writes another
-  English than their region's. Then **Prompt Studio** (`PromptStudio.svelte`, OpenWhispr port):
-  View (full effective prompt via `get_base_prompt`) / Customize (preset +
-  body + Save/Reset) / Test tabs. Plus usage meter + profiles w/ per-profile
-  model override + per-app rules), **History** (stats
-  dashboard + recent list + enable/clear), **Advanced** (output toggles —
-  "Match the text around the cursor" (`smartSpacing`) first, "Leave the full
-  stop off chat messages" (`chatNoFullStop`), then "Append
-  trailing space", whose line reads "Only where Yap can't read the text around
-  the cursor" while the first is on, auto-submit (its line adds "In a terminal,
-  only for coding tools like Claude Code" while terminal pasting is on), "Say
-  “press enter” to send" + the key, "Safer pasting into terminals"
-  (`terminalMode`), and "Restore clipboard after
-  paste", which says dictations never show up in Win+V history — system,
-  dictionary), **About** (version + an **Updates** card on the shared update
-  store: "Last checked …" / Check for updates, Downloading… %, "Yap X is ready to
-  install" + Restart to update, release notes + release-page link, the
-  "Check for updates automatically" toggle), **Connectors** (first in the
-  **Connections** group; `ConnectorsSection.svelte`, laid out like Wispr's
-  Settings → Connectors: serif title + one line on what a calendar gives you,
-  a rounded light card per connector — **Google Calendar** ("Reminders for
-  Google meetings before they begin", Connect → the browser, "Finish in your
-  browser…" + Cancel; a build without the client says "Google sign-in is in
-  the installed Yap. In this build, use a private iCal link below, under
-  Other calendar."), **Outlook
-  Calendar** (Connect → the guided publish-your-calendar ICS form), **Other
-  calendar** (an iCal link, help for Google/iCloud/Fastmail) — each
-  connection a row with its account or link host, "Synced …" or the error,
-  "Connect again" when Google needs it, and a ⋯ menu Sync now / Disconnect;
-  then a plain row with the AI apps' logos, "Give your AI access to your
-  meeting transcripts and notes" + **Go to MCP**), **MCP** (in the same
-  **Connections** group, between Data and System; `McpSection.svelte`, laid out like Wispr's Settings →
-  MCP: serif title, a light card each for Claude / ChatGPT / Gemini / Cursor with
-  "Allow X to access your meeting notes and transcripts" + **Add to X** (→ Added ✓
-  · Remove), the ChatGPT card's "desktop app and Codex, not the web" note, then
-  **All other apps:** with one-click rows for Claude Code / VS Code / Windsurf +
-  the command and JSON, the "Let AI apps save notes to Yap" switch
-  (`cfg.mcpAllowWrites`), a Local-API-off warning with "Turn on the Local API",
-  and the privacy line; it re-reads when it comes into view, as Settings stays
-  mounted), and **Account** (bottom of the
-  sidebar — `AccountSection.svelte`). The status bar's update link follows the
-  same store (Check for updates → Restart to update / Downloading… / Up to date ✓).
+  and is adopted), a "Hidden until 15:40 · Show it now" row while hidden for
+  an hour, Hide in fullscreen apps, Colours (Light / Dark, `barTheme`),
+  Position (`overlayPosition`). **Appearance** (`#settings-appearance`,
+  `AppearanceSettings.svelte`): "Reading font" (each option and the closed box
+  in its own font → `readingFont`), "Text size" (`readingSize`), a preview of
+  the reading text, "Motion" (System / Reduced → `motion`; System's line says
+  whether Windows' "Animation effects" is on). Settings applies its copy to
+  the main window at once; the other windows follow the save
+  (`lib/appearance.js`, [frontend.md](./frontend.md#look-and-the-main-window)).
+  **Notifications** (`#settings-notifications`): "Show tips" (`showTips`).
+- **Dictation** (`settings/DictationPage.svelte`): **Start and stop**
+  (`#settings-hotkey`): Hotkey (`hotkey`), Recording mode (Toggle /
+  Push-to-talk; in push-to-talk its line says how double-tap goes hands-free).
+  **Microphone and sound** (`#settings-microphone`): Microphone (`inputDevice`,
+  `set_input_device` at once), "Chime when recording starts and stops" (the
+  volume slider and the switch on one row: `audioFeedbackVolume`,
+  `soundEnabled`), "Chime plays on" (`outputDevice`), "Silence other apps while
+  you dictate" (`quietOtherApps`; ⓘ: calls are never silenced), "Pause music
+  and videos while you dictate" (`pauseMedia`). **While you dictate**: "Live
+  preview on the Yap bar" (`streamingPartials`), "Cancel and finish buttons"
+  (a Select When you point at it / Always / Off → `barDictationButtons`, Off
+  by default, a line per choice). **Typing into apps** (`#settings-typing`,
+  Advanced's old Output): "Match the text around the cursor"
+  (`smartSpacing`), "Leave the full stop off chat messages"
+  (`chatNoFullStop`), "Append trailing space" (its line "Only where Yap can't
+  read the text around the cursor" while the first is on), "Press Enter after
+  pasting" (`autoSubmit`; "In a terminal, only for coding tools like Claude
+  Code" while terminal pasting is on), "Say “press enter” to send"
+  (`voiceEnter`), "Send key" (`autoSubmitKey`, while either is on), "Safer
+  pasting into terminals" (`terminalMode`), "Restore clipboard after paste"
+  (dictations never show up in Win+V history), and the **Dictionary** link row
+  (its counts; it leaves Settings for the Dictionary view, `onshowview`).
+- **Shortcuts** (`settings/ShortcutsPage.svelte`, OpenWhispr's Hotkeys page):
+  the four global shortcuts together — Dictate, Rewrite selected text, Ask the
+  Voice Assistant, Meeting notes — each in keycaps with Change, a clash said
+  under the one being set. Their own pages show the same control.
+- **Meetings** (`settings/MeetingsPage.svelte`, Wispr's Notetaker page and
+  order): **Call detection** (`#settings-meetings`): "Detect calls and offer
+  to take notes" (`meetingDetection`), **"Ask about calls in · 8 of 12 apps ›"**
+  (a link row with the first apps' icons, `CallAppIcon`) opening one level
+  down the list of call apps (`meetings#call-apps-list`, a back link to
+  Meetings): two columns of [the app's icon — its own as installed, else its
+  mark or letter] [name] [switch], the effective choice (`meetingDetectApps[app]`,
+  else the app's default); greyed with a line while detection is off; a
+  `yap-meeting-detect-choice` from Rust is adopted into Settings' copy). "How
+  Yap asks" (Pop-up / Quietly → `meetingDetectStyle`), "Start notes
+  automatically after 10 seconds" (`meetingAutoStart`). **While a meeting
+  records**: Maximum length (`meetingMaxMinutes`), When a call ends (Ask me /
+  Stop and summarise → `meetingCallEnd`), "End notes when the meeting goes
+  quiet" (`meetingEndWhenQuiet`), "Hide Yap from screen sharing"
+  (`meetingHideFromCapture`, in `#settings-screen-sharing`), "Tell speakers
+  apart in meetings" (`SpeakersToggle`, the same switch as Speech-to-Text's,
+  with a link to the models). **Notepad**: "Open the notepad when a meeting
+  starts" (`meetingOpenNotepad`), "Split the screen when joining"
+  (`meetingSplitScreen`, greyed with a reason while the first is off), "Show
+  live transcript" (`meetingLiveTranscript`), Meeting shortcut
+  (`meetingHotkey`, clearable). **Calendar**: "Remind me before scheduled
+  meetings" (Right before / 1 / 2 minutes / Never → `meetingReminder`) and a
+  Calendars link row to Connectors. Last, the consent line.
+- **Commands** (`commands`): "Tell Yap's AI what to write, and it types the
+  result where you are", with an example note (`role="note"`) linking to the
+  Voice Assistant. **Say its name** (`#settings-wake-word`): "Answer to its
+  name in any dictation" (`llmScopes.voiceAgent.enabled`), Agent name
+  (`AgentNameField.svelte`: saves itself 0.8 s after typing stops or as you
+  leave it, and keeps the name in the dictionary). **Rewrite selected text**:
+  the Rewrite shortcut (`editHotkey`). **Model and prompt**: a link row with
+  the model in use → Language Models → Commands.
+- **Voice Assistant** (`voice`): "Ask Yap something by voice and hear the
+  answer", the example note (names the shortcut once set) linking to
+  Commands. **Assistant shortcut** (`#settings-assistant-shortcut`,
+  `assistantHotkey`, clearable; a quiet line while none is set; its line
+  follows the recording mode), "Show the answer on the Yap bar"
+  (`assistantAnswerCard`). **Opening apps** (`OpenAppsSettings.svelte`,
+  `#settings-opening-apps`: `openApps`, Nicknames `appNicknames`, Apps Yap
+  found with a switch each → `appsBlocked`). **Web search**
+  (`WebSearchSettings.svelte`, `#settings-web-search`: `webSearch`; "Search
+  with" — The AI's own search (Recommended, `webSearchNative`) / Exa / Tavily
+  (`webSearchService`); with the AI's own search, **"What each provider
+  charges for its search"** behind a disclosure (Groq, Gemini, Anthropic,
+  OpenAI, OpenRouter, as published 18 Oct 2026) and "Yap's search" (Exa /
+  Tavily); the service's key masked in `webSearchKeys` with "Get a free key";
+  Wikipedia and reference wikis, always; where the search words go, a link to
+  Privacy & data, and the safety rule). **Spoken replies in Chat**: Speak
+  replies (`speakReplies`; switching it on without Kokoro offers it,
+  `KokoroOffer.svelte`), When to speak (`speakWhen`), Talk back hands-free
+  (`talkBackHandsFree`). **Voice** (`VoiceSettings.svelte`): Speaks with (On
+  this PC / ElevenLabs → `ttsProvider`, `#settings-voice-provider`; with
+  ElevenLabs, its line and `ElevenLabsSettings.svelte`: the key, the voices
+  with ▶, the model, the month's characters), Engine (Kokoro / Windows voices
+  → `ttsEngine`), Kokoro's download row (`ModelRow`), Voice (Kokoro's 54 in
+  accent × gender groups, or Windows' → `ttsVoice` / `ttsWindowsVoice`) with ▶
+  Preview, Speed (`ttsRate`) and Volume (`ttsVolume`, `tts_volume_set` live)
+  as inline sliders, and the credits behind a "Credits" disclosure. **Model**:
+  a link row → Language Models → Chat & Voice Assistant.
+  `yap-voice-replies` and `yap-voice-volume` (Chat's) are adopted.
+- **Speech-to-Text** (`models`, `ModelManager.svelte`): **Your model** first —
+  a card with its name, size, languages and "In use", or "Not downloaded" +
+  Download (never "Active" for a model that isn't on this PC), and Change
+  (down to the catalogue); with no model at all, the red badge's reason in a
+  banner above it. **More models**: vendor pills (All / NVIDIA / OpenAI /
+  Community) over every other model, each with a quiet Download (or Use, for
+  one installed), delete behind Yap's confirm dialog. **Speakers in meetings**
+  (`#settings-speakers`, `SpeakerModels.svelte` + `diarization.svelte.js`: the
+  switch, the speaker models' rows, credits behind a disclosure). **Language**
+  (Language, Translate to English) and **Performance** (GPU acceleration,
+  Unload model when idle).
+- **Language Models** (`cleanup`): tabs Dictation Cleanup / Commands /
+  Note Formatting / Chat & Voice Assistant (scope keys `cleanup`,
+  `voiceAgent`, `noteFormatting`, `chat`; `cleanup#<scope>` opens one).
+  **Dictation cleanup** (`#settings-cleanup`): "Clean up dictations with AI"
+  (`postProcessEnabled`); **off, one line** ("Turn on cleanup to pick a
+  model…") instead of a screen of greyed choices. On: where it runs (Cloud
+  providers / Local / Self-hosted — the same names on every tab;
+  `ppMode`/`cloudProvider` are UI-only and resolve to `ppProvider`), the key
+  banner when one is missing, the provider pills, the masked API key with "Get
+  your API key", the model list (`ModelPicker.svelte`, the curated list merged
+  with the provider's live one, `modelCatalog.js`), a self-hosted or custom
+  endpoint's fields (`EndpointModels.svelte` suggests its server's models),
+  Local's on-device model browser (Recommended for this PC, the one upgrade
+  offer, the slow-on-this-PC line, the Context control `LocalContext.svelte`,
+  bring-your-own GGUFs), "Hide the model's thinking" for reasoning models.
+  **Spelling** (`#settings-cleanup-spelling`, `RegionSpelling.svelte`: "Write
+  in my region's spelling" → `regionSpelling`, greyed while cleanup is off).
+  With cleanup on: **Prompt Studio** (`PromptStudio.svelte`: View shows the
+  first four lines and "Show the whole prompt", Customize — preset + body +
+  Save/Reset —, Test), **Smart routing** (only clean up in apps with a rule;
+  profiles with a per-profile model; app rules; Yap's own Selects), **Usage
+  today**, and one line on where the text goes with a link to Privacy & data.
+  The other tabs (`VoiceAgentConfig`, `NoteFormattingConfig`, `ChatConfig`,
+  sharing `ScopeProviderConfig`): their switch first; off, one line; on, the
+  model and the prompt. Commands' tab links to the Commands page for the name
+  and shortcut; Chat's to the Voice Assistant page.
+- **Connectors** (`ConnectorsSection.svelte`, Wispr's): a card per source —
+  Google Calendar (the browser, "Finish in your browser…" + Cancel; a build
+  without the client says so), Outlook Calendar (the guided ICS form), Other
+  calendar (an iCal link) — each connection a row with ⋯ Sync now /
+  Disconnect; then the **AI apps (MCP)** link row.
+- **AI apps (MCP)** (`McpSection.svelte`, Wispr's): a card each for Claude /
+  ChatGPT / Gemini / Cursor ("Add to X" → Added ✓ · Remove), **All other
+  apps** (Claude Code / VS Code / Windsurf + the command and JSON), "Let AI
+  apps save notes to Yap" (`mcpAllowWrites`), the Local-API-off warning with
+  "Turn on the Local API", and one line on where their reads go with a link to
+  Privacy & data.
+- **Privacy & data** (`settings/PrivacyPage.svelte`, OpenWhispr's Privacy &
+  Data, Claude's Privacy; replaces History and gathers the scattered privacy
+  notes): **What leaves this PC** — a table by feature as Yap is set up now
+  (your voice, AI cleanup, Chat and the Voice Assistant, About you, web search,
+  spoken replies, AI apps, calendar, account), each row linking to its
+  setting. **History** (`#settings-history`): "Keep dictation history"
+  (`historyEnabled`) and Clear history… (asks first; the count from
+  `get_stats`, re-read on `yap-history-changed`); the list itself is Home's
+  feed. **Local API** (`#settings-local-api`): `bridgeEnabled` (the
+  Integrations view follows it, `yap-bridge-changed`). **Logs and data**
+  (`#settings-logs`): Debug logging (`debugLogging`; ⓘ: what you dictate can
+  appear in logs), the log file (Copy path, Open logs folder) and where the
+  data folder is (portable-aware).
+- **About** (`settings/AboutPage.svelte`): the version and one line on what
+  Yap does (Parakeet era wording), "Your voice never leaves this PC" with a
+  link to Privacy & data, **Updates** (the shared store's states: Check for
+  updates, Downloading…, "Yap X is ready to install" + Restart to update,
+  release notes; a line on automatic checks linking to General), **Learn
+  more** (Show setup guide again, the GitHub link).
+- **Account** (`AccountSection.svelte`, [accounts.md](./accounts.md)): while
+  Yap asks the service which sign-ins it offers, placeholder buttons and
+  "Checking sign-in options…".

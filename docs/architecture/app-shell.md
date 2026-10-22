@@ -135,7 +135,7 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   redirects data to `<exe>/Data`).
 - **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
   `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
-  **Debug mode** (Settings → Advanced → Debug Logging, OpenWhispr Developer-
+  **Debug mode** (Settings → Privacy & data → Debug logging, OpenWhispr Developer-
   section port): `config.debug_logging` raises `yap_lib` to `debug` live via a
   `reload::Layer` handle (`set_debug_logging`, applied on config save; RUST_LOG
   env always wins). `log_info`/`open_logs_folder` commands back the UI (current
