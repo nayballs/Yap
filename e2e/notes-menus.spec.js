@@ -303,6 +303,60 @@ test('a note row: Move to, Copy as Markdown, Delete…; a recording meeting stop
 
 const note_delete = (yap, id) => yap.invoke('note_delete', { id });
 
+test('recording from a Personal note files it in Meetings and says so; a folder chosen stays', async ({
+  yap,
+  main,
+  shot,
+}) => {
+  // A note made in Personal, recorded from the Notes view: it becomes a
+  // meeting note in Meetings, as "Take notes" files its own (notes.rs
+  // `file_as_meeting`), and the list follows it there.
+  await openView(main, 'Notes');
+  await folderRow(main, 'Personal').click();
+  await main.getByRole('button', { name: 'New note' }).first().click();
+  await main.getByPlaceholder('Untitled Note').fill('Supplier call');
+  await expectStore(yap, 'notes.json', (s) => s.notes.some((n) => n.title === 'Supplier call'));
+  const id = yap.readJson('notes.json').notes.find((n) => n.title === 'Supplier call').id;
+  await main.getByRole('button', { name: 'Record' }).click();
+  await expect.poll(() => recording(yap)).toBe(true);
+  const moved = main.getByRole('status').filter({ hasText: 'Moved to Meetings' });
+  await expect(moved).toContainText('“Supplier call” is a meeting note now');
+  await expect(folderRow(main, 'Meetings')).toHaveClass(/active/);
+  await expect(noteRow(main, 'Supplier call')).toBeVisible();
+  expect(yap.readJson('notes.json').notes.find((n) => n.id === id)).toMatchObject({
+    folder: 'Meetings',
+    noteType: 'meeting',
+  });
+  await shot(main, '20-recording-files-in-meetings');
+
+  // "Keep in Personal": back, and a choice that sticks — the next recording
+  // leaves it there and says nothing.
+  await moved.getByRole('button', { name: 'Keep in Personal' }).click();
+  await expect.poll(() => folderOf(yap, id)).toBe('Personal');
+  await expect(folderRow(main, 'Personal')).toHaveClass(/active/);
+  await expect(noteRow(main, 'Supplier call')).toBeVisible();
+  await yap.invoke('meeting_pause');
+  await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
+  await closeToasts(main);
+  await main.getByRole('button', { name: /^Resume|^Record$/ }).first().click();
+  await expect.poll(() => recording(yap)).toBe(true);
+  await main.waitForTimeout(500);
+  expect(folderOf(yap, id)).toBe('Personal');
+  await expect(main.getByRole('status').filter({ hasText: 'Moved to Meetings' })).toHaveCount(0);
+
+  // A note in a folder of the person's own stays there too.
+  await yap.invoke('meeting_pause');
+  await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
+  await yap.invoke('notes_folder_create', { name: 'Clients' });
+  const own = await yap.invoke('note_create', { title: 'Client check-in', folder: 'Clients' });
+  await yap.invoke('meeting_start', { noteId: own.id });
+  await expect.poll(() => recording(yap)).toBe(true);
+  expect(yap.readJson('notes.json').notes.find((n) => n.id === own.id)).toMatchObject({
+    folder: 'Clients',
+    noteType: 'meeting',
+  });
+});
+
 test('WebView2’s own menu: nothing on plain UI, the edit commands in a text field', async ({ yap, main }) => {
   const menus = () => yap.invoke('e2e_context_menus');
   // Every window is hooked.

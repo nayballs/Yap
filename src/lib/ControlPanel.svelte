@@ -28,6 +28,11 @@
   import { initAlerts } from './alerts.js';
   import { initMemory } from './memory.svelte.js';
   import ConnectCalendarDialog from './ConnectCalendarDialog.svelte';
+  // Every view is in this window's one chunk (~590 KB): loading the views
+  // other than Home on demand was measured on 2026-10-22 and changed nothing
+  // you'd see — Home on screen 63 → 57 ms (inside run-to-run noise), 256 →
+  // 253 ms with the CPU 4× slower — since V8 compiles code only when it
+  // runs; the load's time goes to its ~77 IPC calls (frontend.md).
   import MeetingsView from './MeetingsView.svelte';
   import HomeView from './HomeView.svelte';
   import InsightsView from './InsightsView.svelte';
@@ -239,7 +244,8 @@
         <button
           class="winbtn bell"
           class:open={bellOpen}
-          aria-label="Notifications"
+          aria-label={attention.items.length ? `Notifications (${attention.items.length})` : 'Notifications'}
+          aria-expanded={bellOpen}
           data-tip="Notifications"
           onclick={() => (bellOpen = !bellOpen)}
         >
@@ -309,10 +315,9 @@
         <span class="navicon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
         </span>
+        <!-- What needs doing is counted in one place, the title bar's bell
+             (it names each item); inside Settings its pages show where. -->
         <span class="navlabel">Settings</span>
-        {#if attention.items.length > 0}
-          <span class="navbadge" title={attention.items.map((i) => i.label).join(' · ')}>{attention.items.length}</span>
-        {/if}
       </button>
 
       <div class="rule"></div>
@@ -623,24 +628,6 @@
     width: 100%;
     height: 100%;
   }
-  /* Wispr-style "needs attention" count on the Settings row. */
-  .navbadge {
-    flex: 0 0 auto;
-    margin-left: auto;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--yap-r-full);
-    background: #e5484d;
-    color: #fff;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1;
-  }
-
   .spacer {
     flex: 1;
   }

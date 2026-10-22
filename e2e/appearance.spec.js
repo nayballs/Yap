@@ -252,7 +252,7 @@ test('the reading font: every choice reaches chats and notes, never the sidebar;
     await openNote(main);
     expect(await family(main.locator('textarea.raw'))).toBe(name);
     expect(await family(sidebar(main))).toBe(uiFont);
-    await main.locator('.tabs .tab').filter({ hasText: 'Enhanced' }).click();
+    await main.locator('.tabs .tab').filter({ hasText: 'Summary' }).click();
     const rendered = main.locator('.editor .rendered');
     await expect(rendered).toContainText('Send the revised budget');
     expect(await family(rendered)).toBe(name);

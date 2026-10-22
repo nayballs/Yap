@@ -286,7 +286,9 @@ Accounts in debug builds: `cd cloud && npm run dev` (wrangler dev on :8787; see 
 
 **CI on every push** (`.github/workflows/ci.yml`): the privacy guard's generic checks
 (keys, emails, phone numbers), `npm run build` + `cargo clippy
---locked --all-targets -- -D warnings` on the stub build. ⚠ Zero-warnings ratchet on
+--locked --all-targets -- -D warnings` on the stub build, then `cargo clippy --locked
+--release -- -D warnings` (debug-only code is dead in release: gate it with
+`#[cfg(debug_assertions)]`). ⚠ Zero-warnings ratchet on
 the **latest stable** toolchain — keep local Rust current (`rustup update`).
 `.github/workflows/e2e.yml` runs the e2e suite on the same triggers.
 
@@ -387,19 +389,12 @@ What was tested how, and every gap: [status.md](./docs/architecture/status.md).
 
 ---
 
-## Competitive context (why the roadmap looks the way it does)
+## Positioning
 
-Yap is in the **local-STT, hotkey, type-anywhere** category. Handy (~25k★, same
-Rust+Tauri stack) is the OSS leader but **outputs raw, unpolished text** — it has no
-AI cleanup. Paid tools (Wispr Flow, superwhisper, Aqua) win on exactly that cleanup
-layer; Wispr Flow's own stack is **Whisper + a fine-tuned Llama** — the same two
-stages Yap now runs, except Yap keeps transcription **local/free** and uses a cheap/
-fast cleanup model (Groq `openai/gpt-oss-20b`) or a fully-local one.
-
-**Yap's wedge (now real):** local + private + free transcription **plus** instant AI
-cleanup, Windows-first. Monetisation stays fair — core free/local forever; any future
-paid tier is *convenience* (a hosted cleanup option) or a one-time Pro, never the basic
-dictation.
+Local-first dictation and meeting notes for Windows: speech, cleanup, meetings and the
+assistant run on the user's own PC, free and open source, with the core never paywalled.
+Competitor research and where Yap stands live in the **private** repo
+(`../yap-private/docs/market-gap-analysis-2026-10.md`, then `ROADMAP.md`), never here.
 
 ---
 

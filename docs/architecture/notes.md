@@ -7,9 +7,12 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
 ## `notes.rs`
 
 - **`notes.rs`** — the AI Notepad's data layer (`notes.json`, camelCase). Stores:
-  `content` (raw markdown, never overwritten by AI), `enhanced_content` (the
-  Enhanced tab), `enhanced_at_hash` (OpenWhispr's `len+first-50` staleness
-  marker), `folder` (string, seeded with Personal + Meetings), `participants`
+  `content` (raw markdown, never overwritten by AI: the **My thoughts** tab),
+  `enhanced_content` (the **Summary** tab), `enhanced_at_hash` (OpenWhispr's
+  `len+first-50` staleness marker), `folder` (string, seeded with Personal +
+  Meetings), `folder_chosen` (the person moved the note there: `apply_update`
+  sets it on any folder change — the Notes view, the local API, Chat),
+  `participants`
   (attendee names, shown as chips and fed to prompts for attribution),
   `transcript` (meeting-recorder segments, time-ordered; `source` = the side,
   "you" (mic) | "them" (call); `speaker` = the voice (`speakers.rs`; empty =
@@ -38,6 +41,16 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   belongs to (`NoteEvent`: key, title, start/end, the invite's description,
   service), set by `link_event` (also the meeting's title as a real title,
   attendees merged, `note_type` meeting) and found by `find_by_event`.
+  **A recording files its note** (`file_as_meeting`, from
+  `commands::meeting_start`, every way a recording starts): it becomes a
+  meeting note and, if it sits in Personal by default (not `folder_chosen`),
+  moves to Meetings — where "Take notes", call detection, the bar and the
+  calendar put theirs — and `yap-note-filed {noteId, from, to}` (+
+  `yap-notes-changed`) tells the Notes view, which follows it there and
+  says so: "Moved to Meetings · “Supplier call” is a meeting note now…"
+  with **Keep in Personal** (a move, so it sticks). A note in a folder of
+  the person's own, or moved to Personal on purpose, stays put.
+  `updated_ts` untouched.
   **Folders** are user-creatable (backend `notes_folder_create` command) with
   counts shown in the sidebar; notes filter by active folder. `folder_rename`
   (trimmed, non-empty, never a name another folder has in any case — a
@@ -87,8 +100,8 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   → add/remove participants, folder-move menu w/ New folder option, meeting
   **Record / ● 12:34 · Pause / Resume** chip (Pause = `meeting_pause`) and,
   on meeting notes, a **Notepad** chip (`notepad_open`), **🔊 Read aloud**
-  (■ while it reads: the note as shown — its title, then the Enhanced
-  summary on that tab, else the note — read with the reading card on the Yap
+  (■ while it reads: the note as shown — its title, then the summary on
+  the Summary tab, else the note — read with the reading card on the Yap
   bar, `read_aloud.rs`; id `note:<id>`; it reads on if you leave Notes),
   export-to-markdown;
   ActionPicker split button + ActionManager dialog for custom actions +
@@ -98,7 +111,14 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   the **Action plan** button run the same Rust job via `meeting_summarise`);
   title + content saves send only the edited field with `origin: 'settings'`
   and follow `yap-note-changed` (the notepad's edits, the AI title; a made-up
-  title shows muted); **Raw ↔ Enhanced dual-view + staleness dot** (the safe
+  title shows muted); a reload of the open note (a recording's stop, the
+  action plan written) keeps every field an event changed while its read was
+  out (`changing` in NotesView.svelte, as in the notepad: a reply read
+  before the notepad's edit would otherwise put the old text back, and the
+  next keystroke here save it); **My thoughts ↔ Summary** tabs (the meeting notepad's
+  names for the same two fields since 2026-10-22, also the list's "summary"
+  tag and "## My thoughts" in an export; until then Raw / Enhanced) **+
+  staleness dot** (the safe
   renderer in `lib/markdown.js`, shared with chat answers, the notepad, the
   Voice Assistant's card and update notes — see "The markdown renderer"
   below) with **Copy as Markdown / Copy as text** (`markdownToText`:
@@ -122,8 +142,8 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
 
 ## The markdown renderer
 
-- **`lib/markdown.js`** — `renderMarkdown(md, {sources})` → safe HTML for the
-  Enhanced notes, chat answers (Chat and a note's Ask bar), the notepad's
+- **`lib/markdown.js`** — `renderMarkdown(md, {sources})` → safe HTML for
+  notes' Summary tab, chat answers (Chat and a note's Ask bar), the notepad's
   Summary and Ask sheet, the Voice Assistant's bar card, and update notes
   (toast, Settings → About). Since 2026-10-21 the parser is **markdown-it**
   15.0.3 (MIT: CommonMark + GitHub's tables and `~~strikethrough~~`, bare

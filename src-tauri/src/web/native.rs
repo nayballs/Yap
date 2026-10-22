@@ -1013,7 +1013,9 @@ fn lasting(provider: Provider, status: u16, body: &str) -> bool {
     matches!(status, 400 | 401 | 402 | 403 | 404 | 422) || (provider == Provider::Gemini && gemini_not_on_plan(status, body))
 }
 
-/// Forget which providers' searches were unavailable (`web::clear_caches`).
+/// Forget which providers' searches were unavailable (`web::clear_caches`,
+/// the model evaluations: debug builds).
+#[cfg(debug_assertions)]
 pub fn forget_unavailable() {
     UNAVAILABLE.lock().unwrap_or_else(|p| p.into_inner()).clear();
 }

@@ -61,6 +61,28 @@
   // brand-new user can go from install → dictating without hunting through the list.
   const recommended = MODELS.find((m) => m.recommended) || MODELS[0];
 
+  // A first run shows two speech models, the rest behind "More models", as
+  // the AI-cleanup step does (fourteen cards were a wall to scroll past):
+  // the recommended one and the best other pick for the language this PC
+  // speaks — Parakeet V2 (English only, the most accurate there) or Whisper
+  // Large v3 Turbo (beyond Parakeet's 25 European languages). A model
+  // already on this PC, or being set up, further down keeps the list open.
+  const SECOND = (navigator.language || 'en').toLowerCase().startsWith('en') ? 'parakeet-tdt-0.6b-v2' : 'turbo';
+  const SHORT_MODELS = [recommended.id, SECOND];
+  const orderedModels = [
+    ...SHORT_MODELS.map((id) => MODELS.find((m) => m.id === id)).filter(Boolean),
+    ...MODELS.filter((m) => !SHORT_MODELS.includes(m.id)),
+  ];
+  let allModels = $state(false);
+  const shownModels = $derived(
+    allModels ||
+      orderedModels.some(
+        (m) => !SHORT_MODELS.includes(m.id) && (installed.includes(m.id) || busyId === m.id || active === m.id)
+      )
+      ? orderedModels
+      : orderedModels.slice(0, SHORT_MODELS.length)
+  );
+
   function statusOf(id) {
     if (busyId === id) return installed.includes(id) ? 'switching' : 'downloading';
     if (active === id) return 'active';
@@ -527,9 +549,14 @@
     </header>
 
     <div class="cards">
-      {#each MODELS as m (m.id)}
+      {#each shownModels as m (m.id)}
         <ModelCard model={m} status={statusOf(m.id)} {percent} onclick={choose} />
       {/each}
+      {#if shownModels.length < orderedModels.length}
+        <button class="more-models" onclick={() => (allModels = true)}>
+          More models ({orderedModels.length - shownModels.length})
+        </button>
+      {/if}
     </div>
   {:else if step === 1}
     <header>

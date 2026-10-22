@@ -255,6 +255,7 @@ pub fn refused_after_web(name: &str, web_seen: bool) -> Option<Value> {
 }
 
 /// `tools` without the action tools (offered once web content is in the turn).
+#[cfg(any(test, debug_assertions))] // the evals' "no-actions" serving; tests
 pub fn without_actions(tools: &Value) -> Value {
     Value::Array(
         tools

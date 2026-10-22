@@ -23,11 +23,14 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   roles (2026-10-05), set to **Yap's own palette** since 2026-10-06 (warm
   paper and ink, an amber focus ring, burnt-orange "live", recording-red
   Stop/Resume); the Meetings view's grey card, Take notes pill and the
-  "Connect your calendar" dialog use them too. **Settings attention badge** (`lib/attention.svelte.js`):
+  "Connect your calendar" dialog use them too. **What needs doing** (`lib/attention.svelte.js`):
   Settings computes real needs-action items (update available / no STT model /
-  cleanup on a cloud provider with no key) into a shared runes store; the
-  ControlPanel cog + the matching Settings nav rows show a red count chip
-  (Wispr's Settings "1" pattern). **Onboarding is warm-light too** (2026-07-09
+  cleanup on a cloud provider with no key) into a shared runes store; they're
+  counted in **one place**, the title bar's **bell** (its count, its name
+  "Notifications (1)", and its list naming each item, a click opening the
+  Settings page that fixes it); inside Settings the matching nav rows show
+  which page. (Until 2026-10-22 the sidebar's Settings row repeated the
+  bell's count: "1" and "1" for one item.) **Onboarding is warm-light too** (2026-07-09
   redesign: same tokens as the main window, serif display headlines, ink CTA,
   brand icons on the model cards via `providerIcons.js`). Since 2026-10-22
   there's a **warm dark theme** too (below): every token has a dark value in
@@ -56,7 +59,7 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   text** uses them, each view multiplying its own base size and line height
   (`font-size: calc(12.5px * var(--yap-reading-scale))`): Chat's messages
   and answers (`.cbubble`, tables included), Notes' content (`textarea.raw`),
-  its Enhanced view (`.rendered`), its transcript lines (`.bubble p`, not
+  its Summary tab (`.rendered`), its transcript lines (`.bubble p`, not
   the speaker labels) and per-note Ask thread, the meeting notepad's My
   thoughts, Transcript bubbles, Summary (its display-serif section headings
   keep EB Garamond, scaled by the step) and "AI notes so far", and the Ask
@@ -302,7 +305,18 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   only its own view (`VIEWS[label]()`, a dynamic `import()` each — never a
   ternary of imports, which Vite gave one preload list, the last one's, so
   the main window lost its CSS). The Yap bar loads ~150 KB of script
-  instead of the whole ~1 MB app; the notepad ~310 KB.
+  instead of the whole ~1 MB app; the notepad ~310 KB. **The main window
+  stays one chunk** (~590 KB, `chunkSizeWarningLimit` 700 in
+  vite.config.js), measured 2026-10-22: loading the seven views other than
+  Home on demand (with an idle-time preload, the old view kept until the
+  new one's code was in) cut its initial script 904 → 711 KB and its heap
+  4.9 → 4.7 MB, but Home came up no sooner — 62.7 → 57.3 ms from a reload
+  to Home on screen (median of 22, inside the ±20 ms between runs), 256 →
+  253 ms with the CPU throttled 4× — so it wasn't kept. V8 compiles a
+  function only when it first runs; a CPU profile of the load puts ~4 ms in
+  ControlPanel's code and most of the rest in IPC: 77 calls per load, 64
+  before Home shows (50 `plugin:event|listen`, `get_config` ×4,
+  `installed_models` ×2). Fewer round trips there is the start-up win.
 - **AI errors in plain words** (`lib/aiErrors.js` `aiError`): Chat's
   "Couldn't send" says "Couldn't reach the AI model on this PC
   (127.0.0.1:11434). Check that it's running (Ollama, LM Studio…)…", "…check
@@ -322,7 +336,12 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   `ModelCard.svelte` (big cards) remains only in
   Onboarding. `ModelRow` also draws the speaker models (`SpeakerModels.svelte`:
   `unavailable` = a listed model's note instead of Download, `deleteActive`).
-- **`lib/Onboarding.svelte`** — first-run **guided setup** (5 steps): model picker →
+- **`lib/Onboarding.svelte`** — first-run **guided setup** (5 steps): model picker
+  (**two of the 14 shown**: Parakeet V3, recommended, and the best other pick
+  for the PC's language — Parakeet V2 where `navigator.language` is English,
+  else Whisper Large v3 Turbo; the rest behind "More models (12)", as the AI
+  cleanup step does, so the Download button shows without scrolling; a model
+  already installed or being set up further down keeps the list open) →
   mic check (live level meter via `set_mic_test` idle-amp mode + live device switch)
   → one-click **local AI cleanup** install (the model recommended for this PC
   first and picked: Qwen3.5 4B with a graphics card that can run it, "Your

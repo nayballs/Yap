@@ -185,6 +185,11 @@ pub struct Note {
     /// Folder name (OpenWhispr seeds Personal + Meetings; user-creatable).
     #[serde(default = "default_folder")]
     pub folder: String,
+    /// The person put the note in its folder (a move from the Notes view,
+    /// the local API or Chat): a recording starting from it leaves it there
+    /// instead of filing it in Meetings (`file_as_meeting`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub folder_chosen: bool,
     /// Meeting-recorder segments (You/Them), time-ordered. Empty for
     /// personal notes.
     #[serde(default)]
@@ -655,6 +660,45 @@ pub fn mark_meeting(id: u64) -> Result<(), String> {
     })
 }
 
+/// A recording is starting from note `id`: it becomes a meeting note and,
+/// like every note "Take notes" makes, is filed in Meetings — unless the
+/// person put it where it is (`folder_chosen`) or it's in a folder of their
+/// own. Returns the folder it left when it moved (the Notes view says so,
+/// with a way back). Leaves `updated_ts` alone.
+pub fn file_as_meeting(id: u64) -> Result<Option<String>, String> {
+    with_store(|store| {
+        // Meetings as the folder list spells it (it's there unless the
+        // store predates it).
+        let meetings = store.folders.iter().find(|f| f.eq_ignore_ascii_case(MEETINGS)).cloned();
+        let note = store
+            .notes
+            .iter_mut()
+            .find(|n| n.id == id)
+            .ok_or("Note not found")?;
+        let mut changed = false;
+        if note.note_type != "meeting" {
+            note.note_type = "meeting".to_string();
+            changed = true;
+        }
+        let folder = note.folder.trim();
+        let moved = if !note.folder_chosen && (folder.is_empty() || folder.eq_ignore_ascii_case(PERSONAL)) {
+            let from = if folder.is_empty() { PERSONAL.to_string() } else { folder.to_string() };
+            note.folder = meetings.clone().unwrap_or_else(|| MEETINGS.to_string());
+            changed = true;
+            Some(from)
+        } else {
+            None
+        };
+        if moved.is_some() && meetings.is_none() {
+            store.folders.push(MEETINGS.to_string());
+        }
+        if changed {
+            save_to_disk(store);
+        }
+        Ok(moved)
+    })
+}
+
 /// Note `id`'s title is one Yap made up (call detection's "Teams call · 5
 /// Oct, 14:30"): the AI meeting title may replace it.
 pub fn set_title_auto(id: u64) -> Result<(), String> {
@@ -788,6 +832,7 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
             enhanced_at_hash: String::new(),
             note_type: default_note_type(),
             folder,
+            folder_chosen: false,
             transcript: Vec::new(),
             participants: Vec::new(),
             digests: Vec::new(),
@@ -921,8 +966,10 @@ fn apply_update(
         changed |= set_if_changed(&mut note.content, c);
     }
     if let Some(f) = folder {
-        if !f.trim().is_empty() {
-            changed |= set_if_changed(&mut note.folder, f.trim().to_string());
+        if !f.trim().is_empty() && set_if_changed(&mut note.folder, f.trim().to_string()) {
+            // Moved on purpose: a recording starting from it won't refile it.
+            note.folder_chosen = true;
+            changed = true;
         }
     }
     if let Some(p) = participants {
@@ -1467,6 +1514,42 @@ mod tests {
         }
         assert_eq!(folders(), ["Personal", "Meetings"]);
         assert!(is_protected_folder("personal") && !is_protected_folder("Personal notes"));
+    }
+
+    #[test]
+    fn a_recording_files_a_note_in_meetings_unless_its_folder_was_chosen() {
+        folder_create("Camping");
+        let plain = filed("Sync check", "Personal");
+        let moved_back = filed("Kept here", "Meetings");
+        let own = filed("Tent call", "Camping");
+        let already = filed("Standup", "Meetings");
+        // The person moved this one into Personal on purpose.
+        update(moved_back, None, None, Some("Personal".into()), None).unwrap();
+        assert!(get(moved_back).unwrap().folder_chosen);
+
+        // A Personal note Yap filed there by default: to Meetings, said once.
+        assert_eq!(file_as_meeting(plain), Ok(Some("Personal".to_string())));
+        let n = get(plain).unwrap();
+        assert_eq!((n.folder.as_str(), n.note_type.as_str()), ("Meetings", "meeting"));
+        assert_eq!(n.updated_ts, 1, "filing isn't editing");
+        assert_eq!(file_as_meeting(plain), Ok(None));
+        // Chosen, or a folder of the person's own: a meeting note where it is.
+        for id in [moved_back, own] {
+            let before = folder_of(id);
+            assert_eq!(file_as_meeting(id), Ok(None));
+            assert_eq!(folder_of(id), before);
+            assert_eq!(get(id).unwrap().note_type, "meeting");
+        }
+        assert_eq!(file_as_meeting(already), Ok(None));
+        assert_eq!(file_as_meeting(9999), Err("Note not found".to_string()));
+        // A move the person makes afterwards sticks.
+        update(plain, None, None, Some("Personal".into()), None).unwrap();
+        assert_eq!(file_as_meeting(plain), Ok(None));
+        assert_eq!(folder_of(plain), "Personal");
+        // Old notes (no flag on disk) read as not chosen.
+        let old: Note = serde_json::from_value(json!({ "id": 5, "createdTs": 1, "updatedTs": 1 })).unwrap();
+        assert!(!old.folder_chosen);
+        assert!(serde_json::to_value(&old).unwrap().get("folderChosen").is_none());
     }
 
     #[test]

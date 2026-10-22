@@ -505,7 +505,7 @@ test('every view, every Settings page, the notepad, onboarding, a toast, the dia
     await main.waitForTimeout(250);
     await shot(main, `view-${view.toLowerCase()}`);
     if (view === 'Notes') {
-      await main.locator('.tabs .tab').filter({ hasText: 'Enhanced' }).click();
+      await main.locator('.tabs .tab').filter({ hasText: 'Summary' }).click();
       await expect(main.locator('.editor .rendered')).toContainText('Send the revised budget');
       await shot(main, 'view-notes-enhanced');
     }

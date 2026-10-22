@@ -62,7 +62,12 @@ console; `npm run mock:provider` stands in for a social provider). See
 also produces the `dist/` that `generate_context!` needs) + `cargo clippy --locked
 --all-targets -- -D warnings` (test code included) on the fast **stub** build (no
 `engines`, no Vulkan SDK) — a few minutes on a Windows runner, so a broken commit
-can never reach a nightly. The real GPU pipeline is only exercised by
+can never reach a nightly. Then `cargo clippy --locked --release -- -D warnings`
+(lib + exe, the release profile, since 2026-10-22): code only debug builds call —
+the e2e hooks, the model evaluations (`eval.rs`, `#[cfg(debug_assertions)]`) — is
+dead in release, and gets `#[cfg(debug_assertions)]` (or `any(test,
+debug_assertions)`) itself; until then six such warnings showed only in release
+builds. The real GPU pipeline is only exercised by
 nightly/release builds. ⚠ Zero-warnings ratchet: any warning or clippy lint fails
 the push, and the runner uses the **latest stable** toolchain, whose clippy can flag
 lints an older local one doesn't — keep local Rust current (`rustup update`) or read
