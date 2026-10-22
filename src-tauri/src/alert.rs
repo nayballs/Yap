@@ -27,12 +27,15 @@ pub const ASK_ABOUT_CALLS: &str = "callsTurnBackOn";
 /// **Open settings**: Yap's Settings → Language Models → Chat & Voice
 /// Assistant (the Voice Assistant has no AI model to answer with).
 pub const OPEN_AI_SETTINGS: &str = "openAiSettings";
+/// **Open settings**: Yap's Settings → Voice Assistant → Voice (a cloud
+/// voice didn't answer: `tts::cloud_failed`).
+pub const OPEN_VOICE_SETTINGS: &str = "openVoiceSettings";
 
 /// An alert's one button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Action {
     /// What [`act`] does: [`OPEN_MIC_SETTINGS`], [`STOP_ASKING_CALLS`],
-    /// [`ASK_ABOUT_CALLS`], [`OPEN_AI_SETTINGS`].
+    /// [`ASK_ABOUT_CALLS`], [`OPEN_AI_SETTINGS`], [`OPEN_VOICE_SETTINGS`].
     pub id: &'static str,
     pub label: &'static str,
 }
@@ -41,7 +44,7 @@ pub struct Action {
 #[serde(rename_all = "camelCase")]
 pub struct Alert {
     /// "pasteBlocked" | "micBlocked" | "calls-fatigue" | "assistantNoModel" |
-    /// "assistantFailed":
+    /// "assistantFailed" | "voiceFallback" (`tts.rs`: a cloud voice failed):
     /// the bar card's id, the Windows notification's tag (a newer one
     /// replaces it) and its rule in `notice.rs`.
     pub kind: &'static str,
@@ -111,11 +114,12 @@ pub fn act(app: &AppHandle, action: &str) {
         OPEN_MIC_SETTINGS => open_uri(app, crate::mic_privacy::SETTINGS_URI),
         STOP_ASKING_CALLS => crate::meeting_detect::set_detection(app, false),
         ASK_ABOUT_CALLS => crate::meeting_detect::set_detection(app, true),
-        OPEN_AI_SETTINGS => {
+        OPEN_AI_SETTINGS | OPEN_VOICE_SETTINGS => {
             use tauri::Emitter;
+            let at = if action == OPEN_AI_SETTINGS { "cleanup#chat" } else { "voice#voice-provider" };
             match crate::commands::show_settings(app) {
                 Ok(()) => {
-                    let _ = app.emit("yap-open-settings", "cleanup#chat");
+                    let _ = app.emit("yap-open-settings", at);
                 }
                 Err(e) => tracing::warn!("alert: couldn't open Settings ({e})"),
             }

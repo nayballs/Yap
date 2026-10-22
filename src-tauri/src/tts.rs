@@ -47,6 +47,8 @@ use std::time::{Duration, Instant};
 use regex::Regex;
 use serde::Serialize;
 
+pub mod cloud;
+pub mod elevenlabs;
 // The G2P only runs in builds with Kokoro's engine; it's tested in all.
 #[cfg_attr(not(feature = "engines"), allow(dead_code))]
 mod g2p;
@@ -141,6 +143,15 @@ pub trait Engine: Send + Sync {
 /// Text → audio, one sentence at a time.
 pub trait Synth {
     fn synthesize(&mut self, text: &str) -> Result<Pcm, String>;
+    /// Say `text`, handing the audio to `out` as it's made (`out` → false:
+    /// stop, which isn't a failure). A streaming engine (a cloud voice)
+    /// hands on its first piece before the sentence is all made; the rest
+    /// make the whole sentence first.
+    fn stream(&mut self, text: &str, out: &mut dyn FnMut(Pcm) -> bool) -> Result<(), String> {
+        let pcm = self.synthesize(text)?;
+        out(pcm);
+        Ok(())
+    }
 }
 
 /// The engine for `id`: Kokoro when that's asked for and it can speak
@@ -171,6 +182,62 @@ pub fn chosen(cfg: &crate::config::YapConfig) -> (Arc<dyn Engine>, String) {
         cfg.tts_windows_voice.clone()
     };
     (e, voice)
+}
+
+/// The local voice that can stand in for a cloud one: Kokoro when it's
+/// installed (and chosen), Windows voices when those were chosen — else
+/// none (Kokoro chosen but not downloaded: the answer goes unsaid rather
+/// than in a voice nobody picked).
+pub fn local_voice(cfg: &crate::config::YapConfig) -> Option<(Arc<dyn Engine>, String)> {
+    (cfg.tts_engine == WINDOWS || kokoro::available()).then(|| chosen(cfg))
+}
+
+/// Who reads an answer: an engine and its voice, and for a cloud voice
+/// the plan if it fails ([`CloudPlan`]).
+pub struct Voicing {
+    pub engine: Arc<dyn Engine>,
+    pub voice: String,
+    pub cloud: Option<CloudPlan>,
+}
+
+/// A cloud voice's way out: the local voice that takes over (if any) and
+/// what identifies this key and choice (`cloud::Health`).
+pub struct CloudPlan {
+    pub provider: &'static str,
+    pub local: Option<(Arc<dyn Engine>, String)>,
+    pub key: u64,
+    pub choice: u64,
+}
+
+/// Who speaks now, from the config (`tts_provider`): a cloud voice when one
+/// is picked **and** has a key — unless it failed a moment ago and a local
+/// voice can stand in (`cloud::Health::skipping`) — else the local voice
+/// ([`chosen`]). Nothing goes to a cloud service without its key.
+pub fn voicing(cfg: &crate::config::YapConfig) -> Voicing {
+    let local = || {
+        let (engine, voice) = chosen(cfg);
+        Voicing { engine, voice, cloud: None }
+    };
+    if cfg.tts_provider != elevenlabs::ID {
+        return local();
+    }
+    let key = cfg.tts_cloud_keys.get(elevenlabs::ID).map(|k| k.trim()).unwrap_or("");
+    if key.is_empty() {
+        return local();
+    }
+    let choice = cfg.tts_cloud.get(elevenlabs::ID).cloned().unwrap_or_default();
+    let fallback = local_voice(cfg);
+    let key_fp = elevenlabs::Key::new(key).fingerprint();
+    let choice_fp = elevenlabs::ElevenLabs::choice_fingerprint(key, &choice.voice, &choice.model);
+    if fallback.is_some() && cloud::with_health(|h| h.skipping(elevenlabs::ID, key_fp, choice_fp, Instant::now())) {
+        tracing::info!("Spoken replies: ElevenLabs failed a moment ago; Yap's own voice reads this one");
+        return local();
+    }
+    Voicing {
+        engine: Arc::new(elevenlabs::ElevenLabs::new(key, &choice.model, true)),
+        voice: choice.voice,
+        cloud: Some(CloudPlan { provider: elevenlabs::ID, local: fallback, key: key_fp, choice: choice_fp }),
+    }
 }
 
 /// The engines Settings lists: `(id, name)`.
@@ -793,7 +860,22 @@ pub struct Job {
     pub engine: Arc<dyn Engine>,
     pub voice: String,
     pub rate: f32,
+    /// For a cloud voice: what happens when it fails ([`Fallback`]).
+    pub fallback: Option<Fallback>,
 }
+
+/// When the engine fails mid-answer: `local` reads the rest — the sentence
+/// that failed included — or, with none, the answer stops there. `notify`
+/// is told once (the error, the sentences left, whether `local` took
+/// over): it says so to the person, so the state carries no error.
+pub struct Fallback {
+    pub local: Option<(Arc<dyn Engine>, String)>,
+    pub notify: Notify,
+}
+
+/// [`Fallback::notify`]: (the error, the sentences left, whether the local
+/// voice took over).
+pub type Notify = Box<dyn FnOnce(&str, &[String], bool) + Send>;
 
 struct Current {
     generation: u64,
@@ -873,7 +955,7 @@ impl Speaker {
         self.generation.load(Ordering::SeqCst) == generation
     }
 
-    fn run(self: Arc<Self>, generation: u64, job: Job, open: Opener) {
+    fn run(self: Arc<Self>, generation: u64, mut job: Job, open: Opener) {
         let opened = match open() {
             Ok(o) => o,
             Err(e) => return self.finish(generation, job.message_id, Some(e)),
@@ -890,28 +972,50 @@ impl Speaker {
             }
         }
         let mut error = None;
-        match job.engine.open(&job.voice, job.rate) {
-            Ok(mut synth) => {
-                for sentence in &job.sentences {
-                    if !self.live(generation) || (self.busy)() {
-                        break;
-                    }
-                    match synth.synthesize(sentence) {
-                        Ok(pcm) if self.live(generation) => opened.play.append(pcm),
-                        Ok(_) => break,
-                        // Stopped mid-sentence: not a failure.
-                        Err(_) if !self.live(generation) => break,
-                        Err(e) => {
-                            tracing::warn!("Spoken replies: {}", e);
-                            error = Some(e);
-                            break;
-                        }
-                    }
-                }
+        let mut synth = job.engine.open(&job.voice, job.rate);
+        let mut i = 0;
+        while i < job.sentences.len() {
+            if !self.live(generation) || (self.busy)() {
+                break;
             }
-            Err(e) => {
-                tracing::warn!("Spoken replies: {}", e);
-                error = Some(e);
+            let said = match synth.as_mut() {
+                Ok(s) => {
+                    let play = &opened.play;
+                    // Each piece as it comes, unless it's been stopped or a
+                    // dictation started meanwhile.
+                    let mut out = |pcm: Pcm| {
+                        let go = self.live(generation) && !(self.busy)();
+                        if go {
+                            play.append(pcm);
+                        }
+                        go
+                    };
+                    s.stream(&job.sentences[i], &mut out)
+                }
+                Err(e) => Err(e.clone()),
+            };
+            match said {
+                Ok(()) => i += 1,
+                // Stopped mid-sentence: not a failure.
+                Err(_) if !self.live(generation) => break,
+                Err(e) => {
+                    tracing::warn!("Spoken replies: {}", e);
+                    let Some(fallback) = job.fallback.take() else {
+                        error = Some(e);
+                        break;
+                    };
+                    // Once: the person is told, and the local voice (if
+                    // there's one) reads the rest, this sentence again
+                    // included. Never the failing engine again.
+                    (fallback.notify)(&e, &job.sentences[i..], fallback.local.is_some());
+                    let Some((engine, voice)) = fallback.local else {
+                        break;
+                    };
+                    if let Some(c) = self.current().as_mut().filter(|c| c.generation == generation) {
+                        c.engine = Arc::clone(&engine);
+                    }
+                    synth = engine.open(&voice, job.rate);
+                }
             }
         }
         // Let it play out, unless it's stopped or a dictation starts.
@@ -969,12 +1073,15 @@ impl Speaker {
 }
 
 static SPEAKER: OnceLock<Arc<Speaker>> = OnceLock::new();
+/// For a cloud voice's notice (`alert.rs`).
+static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 
 /// Start the speaker (lib.rs setup): its state goes to every window. A
 /// watcher unloads Kokoro once it's been idle for the speech model's unload
 /// time (10 minutes when that's "Never": it holds ~0.6 GB).
 pub fn init(app: &tauri::AppHandle) {
     set_volume(crate::config::load().tts_volume);
+    let _ = APP.set(app.clone());
     let app = app.clone();
     let _ = SPEAKER.set(Speaker::new(
         Box::new(move |s| {
@@ -1026,12 +1133,14 @@ pub fn stop_for_dictation() -> bool {
     was || s.recently_audible()
 }
 
-/// Say `md` (an answer's markdown) with the configured engine, voice, speed
-/// and output device. `message_id`: what the pages call it.
-pub fn speak(md: &str, message_id: Option<String>) -> Result<(), String> {
+/// **Say `text`** — an answer's markdown, or any plain text (a later "read
+/// the selection aloud" comes in here too) — with the voice Settings picked
+/// ([`voicing`]: the local one, or a cloud voice with the local one standing
+/// by), its speed, Yap's volume and the output device. `message_id`: what
+/// the pages call it.
+pub fn speak(text: &str, message_id: Option<String>) -> Result<(), String> {
     let cfg = crate::config::load();
-    let (engine, voice) = chosen(&cfg);
-    say(utterances(md), message_id, engine, &voice, cfg.tts_rate, cfg.output_device)
+    say(utterances(text), message_id, voicing(&cfg), cfg.tts_rate, cfg.output_device)
 }
 
 /// Why Yap mustn't talk now, if it mustn't: a meeting records (the notes
@@ -1048,19 +1157,13 @@ pub fn meeting_quiet() -> Option<&'static str> {
     }
 }
 
-fn say(
-    sentences: Vec<String>,
-    message_id: Option<String>,
-    engine: Arc<dyn Engine>,
-    voice: &str,
-    rate: f32,
-    device: Option<String>,
-) -> Result<(), String> {
+fn say(sentences: Vec<String>, message_id: Option<String>, voicing: Voicing, rate: f32, device: Option<String>) -> Result<(), String> {
     if let Some(why) = meeting_quiet() {
         return Err(why.into());
     }
     let speaker = speaker().ok_or("Spoken replies aren't ready yet")?;
     let rate = if rate.is_finite() && rate > 0.0 { rate.clamp(0.5, 2.0) } else { 1.0 };
+    let Voicing { engine, voice, cloud } = voicing;
     let sentences = engine.prepare(sentences);
     #[cfg(debug_assertions)]
     if crate::e2e::active() && !sentences.is_empty() {
@@ -1069,14 +1172,83 @@ fn say(
             text: sentences.join(" "),
             sentences: sentences.clone(),
             engine: engine.id().to_string(),
-            voice: voice.to_string(),
+            voice: voice.clone(),
             rate,
             volume: volume(),
+            fallback: None,
         });
     }
+    let fallback = cloud.map(|plan| fallback_for(plan, message_id.clone(), rate));
     let opener = if crate::e2e::active() { sim_opener() } else { rodio_opener(device) };
-    let job = Job { message_id, sentences, engine, voice: voice.to_string(), rate };
+    let job = Job { message_id, sentences, engine, voice, rate, fallback };
     speaker.speak(job, opener)
+}
+
+/// A cloud voice's [`Fallback`]: its local voice, and the notice.
+fn fallback_for(plan: CloudPlan, message_id: Option<String>, rate: f32) -> Fallback {
+    let CloudPlan { provider, local, key, choice } = plan;
+    // What test mode records when the local voice takes over.
+    #[cfg(debug_assertions)]
+    let record = local.as_ref().map(|(e, v)| (e.id().to_string(), v.clone()));
+    let _ = (&message_id, rate);
+    Fallback {
+        local,
+        notify: Box::new(move |error: &str, left: &[String], took_over: bool| {
+            #[cfg(debug_assertions)]
+            if let (true, Some((engine, voice))) = (crate::e2e::active(), record) {
+                spoken().push(Spoken {
+                    message_id,
+                    text: left.join(" "),
+                    sentences: left.to_vec(),
+                    engine,
+                    voice,
+                    rate,
+                    volume: volume(),
+                    fallback: Some(error.to_string()),
+                });
+            }
+            let _ = left;
+            cloud_failed(provider, key, choice, error, took_over);
+        }),
+    }
+}
+
+/// The alert's kind for "ElevenLabs didn't answer" (`alert.rs`).
+pub const CLOUD_FAILED: &str = "voiceFallback";
+
+/// A cloud voice failed mid-answer: say why — once per reason in ten
+/// minutes (`cloud::Health::announce`) — in the one place Yap's notices go
+/// (`alert.rs`: the main window's toast, else a Yap bar card, else a
+/// Windows notification), with a way to the voice settings.
+fn cloud_failed(provider: &'static str, key: u64, choice: u64, error: &str, took_over: bool) {
+    let failure = cloud::with_health(|h| {
+        // A failure the engine couldn't put on record itself (its request
+        // couldn't even be made): on record now, in its words.
+        if h.last(provider).is_none() {
+            let why = error.split_once(": ").map_or(error, |(_, w)| w);
+            h.failed(provider, key, choice, cloud::Failure::Rejected(why.to_string()), Instant::now());
+        }
+        h.announce(provider, Instant::now())
+    });
+    let Some(failure) = failure else {
+        tracing::info!("Spoken replies: {} failed again ({error}); said already", cloud::name(provider));
+        return;
+    };
+    let (title, body) = cloud::notice_text(provider, &failure, took_over);
+    match APP.get() {
+        Some(app) => crate::alert::show_soon(
+            app,
+            crate::alert::Alert {
+                kind: CLOUD_FAILED,
+                icon: "assistant",
+                title,
+                body,
+                action: Some(crate::alert::Action { id: crate::alert::OPEN_VOICE_SETTINGS, label: "Open settings" }),
+                timeout_ms: 12_000,
+            },
+        ),
+        None => tracing::warn!("Spoken replies: {title}"),
+    }
 }
 
 // ------------------------------------------------------------ commands
@@ -1096,7 +1268,11 @@ pub struct EngineVoices {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceList {
-    /// The configured engine.
+    /// Who speaks: "local" or a cloud voice ("elevenlabs").
+    pub provider: String,
+    /// The providers to pick from: `[{id, name}]` (`cloud::PROVIDERS`).
+    pub providers: Vec<serde_json::Value>,
+    /// The configured local engine.
     pub engine: String,
     /// The engine that would speak now.
     pub active: String,
@@ -1122,7 +1298,21 @@ pub async fn tts_voices() -> VoiceList {
     let engines: Vec<serde_json::Value> =
         ENGINES.iter().map(|(id, name)| serde_json::json!({ "id": id, "name": name })).collect();
     let fallback_engines = engines.clone();
+    let providers = || -> Vec<serde_json::Value> {
+        cloud::PROVIDERS
+            .iter()
+            .map(|(id, name)| {
+                // Where a cloud voice's key is made ("Get your API key").
+                let keys_page = (*id == elevenlabs::ID).then_some(elevenlabs::KEYS_PAGE);
+                serde_json::json!({ "id": id, "name": name, "keysPage": keys_page })
+            })
+            .collect()
+    };
+    let provider = if cloud::is_cloud(&cfg.tts_provider) { cfg.tts_provider.clone() } else { cloud::LOCAL.to_string() };
+    let fallback_provider = provider.clone();
     tauri::async_runtime::spawn_blocking(move || VoiceList {
+        provider,
+        providers: providers(),
         engine: cfg.tts_engine.clone(),
         active: chosen(&cfg).0.id().to_string(),
         engines,
@@ -1132,6 +1322,8 @@ pub async fn tts_voices() -> VoiceList {
     })
     .await
     .unwrap_or_else(|e| VoiceList {
+        provider: fallback_provider,
+        providers: providers(),
         engine: DEFAULT_ENGINE.into(),
         active: WINDOWS.into(),
         engines: fallback_engines,
@@ -1161,8 +1353,84 @@ pub fn tts_preview(voice: String, rate: f32, engine: Option<String>) -> Result<(
             kokoro::NOT_IN_BUILD.to_string()
         });
     }
-    let sample = "Hi, I'm the voice that reads Chat's answers. Ask me anything, and I'll say what I found.";
-    say(sentences(sample), Some(PREVIEW_ID.into()), e, &voice, rate, cfg.output_device)
+    say(sentences(PREVIEW_TEXT), Some(PREVIEW_ID.into()), Voicing { engine: e, voice, cloud: None }, rate, cfg.output_device)
+}
+
+/// What ▶ Preview says.
+const PREVIEW_TEXT: &str = "Hi, I'm the voice that reads Chat's answers. Ask me anything, and I'll say what I found.";
+
+// ---- cloud voices (Settings → Voice Assistant → Voice: ElevenLabs)
+
+/// The key for `provider`: the one Settings has now (`api_key`, maybe not
+/// saved yet), else the saved one.
+fn cloud_key(provider: &str, api_key: Option<String>) -> Result<elevenlabs::Key, String> {
+    if provider != elevenlabs::ID {
+        return Err("Yap doesn't know that voice service".into());
+    }
+    let key = api_key
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .or_else(|| crate::config::load().tts_cloud_keys.get(provider).map(|k| k.trim().to_string()))
+        .unwrap_or_default();
+    if key.is_empty() {
+        return Err(format!("Paste your {} API key first", cloud::name(provider)));
+    }
+    Ok(elevenlabs::Key::new(&key))
+}
+
+/// Settings: the voices of the account (its own first, then ElevenLabs'
+/// default ones). An error says why in a few words ("API key not accepted").
+#[tauri::command]
+pub async fn tts_cloud_voices(provider: String, api_key: Option<String>) -> Result<Vec<elevenlabs::CloudVoice>, String> {
+    let key = cloud_key(&provider, api_key)?;
+    elevenlabs::list_voices(&key).await.map_err(|f| f.reason())
+}
+
+/// Settings: the models that speak (the lowest-latency one first and
+/// recommended); Yap's own list when the service's can't be read.
+#[tauri::command]
+pub async fn tts_cloud_models(provider: String, api_key: Option<String>) -> Result<Vec<elevenlabs::CloudModel>, String> {
+    let key = cloud_key(&provider, api_key)?;
+    Ok(elevenlabs::list_models(&key).await)
+}
+
+/// Settings: characters used this month and the allowance, when the key
+/// may read them; else nothing (and Settings says nothing).
+#[tauri::command]
+pub async fn tts_cloud_usage(provider: String, api_key: Option<String>) -> Option<elevenlabs::Usage> {
+    let key = cloud_key(&provider, api_key).ok()?;
+    elevenlabs::usage(&key).await
+}
+
+/// Settings' ▶ on a cloud voice: its own sample (`preview_url`, fetched
+/// now, without the key, played like any answer — Yap's volume, the output
+/// device); a voice without one says the preview sentence through the
+/// service (`model`, `rate`). Never the local voice: an error is shown.
+#[tauri::command]
+pub fn tts_cloud_preview(
+    provider: String,
+    voice: String,
+    api_key: Option<String>,
+    model: Option<String>,
+    rate: Option<f32>,
+) -> Result<(), String> {
+    let key = cloud_key(&provider, api_key)?;
+    if !elevenlabs::valid_voice_id(&voice) {
+        return Err("Pick a voice first".into());
+    }
+    let cfg = crate::config::load();
+    let rate = rate.unwrap_or(cfg.tts_rate);
+    match elevenlabs::preview_url(&voice) {
+        Some(url) => {
+            let voicing = Voicing { engine: Arc::new(elevenlabs::Sample { url }), voice, cloud: None };
+            say(vec!["(sample)".into()], Some(PREVIEW_ID.into()), voicing, 1.0, cfg.output_device)
+        }
+        None => {
+            let engine = elevenlabs::ElevenLabs::with_key(key, model.as_deref().unwrap_or(""), false);
+            let voicing = Voicing { engine: Arc::new(engine), voice, cloud: None };
+            say(sentences(PREVIEW_TEXT), Some(PREVIEW_ID.into()), voicing, rate, cfg.output_device)
+        }
+    }
 }
 
 static DOWNLOADING: Mutex<Option<registry::Progress>> = Mutex::new(None);
@@ -1288,6 +1556,9 @@ pub struct Spoken {
     pub rate: f32,
     /// The volume setting it played at (0.0–1.0).
     pub volume: f32,
+    /// The local voice took over from a cloud voice that failed with this
+    /// error (these are the sentences it read).
+    pub fallback: Option<String>,
 }
 
 #[cfg(debug_assertions)]
@@ -1299,7 +1570,8 @@ fn spoken() -> std::sync::MutexGuard<'static, Vec<Spoken>> {
 }
 
 /// Debug-only, test mode: everything Yap would have said, oldest first;
-/// `clear` empties the record after reading it.
+/// `clear` empties the record after reading it, and forgets any cloud
+/// voice's failure (`cloud::Health`), so each test starts afresh.
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn tts_e2e_spoken(clear: Option<bool>) -> Result<Vec<Spoken>, String> {
@@ -1310,6 +1582,7 @@ pub fn tts_e2e_spoken(clear: Option<bool>) -> Result<Vec<Spoken>, String> {
     let out = s.clone();
     if clear.unwrap_or(false) {
         s.clear();
+        cloud::reset();
     }
     Ok(out)
 }
@@ -1527,6 +1800,7 @@ mod tests {
                 engine: Arc::new(Fake { said: Arc::clone(&self.said), delay: Duration::from_millis(delay_ms), fail_on }),
                 voice: String::new(),
                 rate: 1.0,
+                fallback: None,
             }
         }
         fn events(&self) -> Vec<(bool, String, Option<String>)> {
@@ -1654,6 +1928,265 @@ mod tests {
         assert!(r.events().is_empty());
     }
 
+    // ---- a cloud voice failing mid-answer
+
+    type Told = Arc<Mutex<Vec<(String, Vec<String>, bool)>>>;
+
+    /// A fallback reading into `said`, telling `told`.
+    fn fallback(said: &Arc<Mutex<Vec<String>>>, local: bool, told: &Told) -> Fallback {
+        let told = Arc::clone(told);
+        Fallback {
+            local: local.then(|| {
+                let e: Arc<dyn Engine> = Arc::new(Fake { said: Arc::clone(said), delay: Duration::from_millis(1), fail_on: None });
+                (e, String::new())
+            }),
+            notify: Box::new(move |e, left, took_over| told.lock().unwrap().push((e.to_string(), left.to_vec(), took_over))),
+        }
+    }
+
+    #[test]
+    fn a_failing_cloud_voice_hands_the_rest_to_the_local_voice_once() {
+        let r = rig();
+        let local_said = Arc::new(Mutex::new(Vec::new()));
+        let told: Told = Arc::default();
+        let mut job = r.job("a", &["One.", "Two.", "Three."], 1, Some("Two."));
+        job.fallback = Some(fallback(&local_said, true, &told));
+        r.speaker.speak(job, sim_opener()).unwrap();
+        r.wait_quiet();
+        // The cloud said the first sentence; the local voice the rest, the
+        // failed one included; nothing said twice, the cloud never asked again.
+        assert_eq!(*r.said.lock().unwrap(), vec!["One."]);
+        assert_eq!(*local_said.lock().unwrap(), vec!["Two.", "Three."]);
+        assert_eq!(*told.lock().unwrap(), vec![("synthesis failed".to_string(), vec!["Two.".to_string(), "Three.".to_string()], true)]);
+        // Told already: the answer ends without an error of its own.
+        assert_eq!(r.events(), vec![ev(true, "a"), ev(false, "a")]);
+    }
+
+    #[test]
+    fn no_local_voice_means_one_notice_and_silence() {
+        let r = rig();
+        let local_said = Arc::new(Mutex::new(Vec::new()));
+        let told: Told = Arc::default();
+        let mut job = r.job("a", &["One.", "Two.", "Three."], 1, Some("One."));
+        job.fallback = Some(fallback(&local_said, false, &told));
+        r.speaker.speak(job, sim_opener()).unwrap();
+        r.wait_quiet();
+        assert!(r.said.lock().unwrap().is_empty());
+        assert!(local_said.lock().unwrap().is_empty());
+        assert_eq!(told.lock().unwrap().len(), 1);
+        assert!(!told.lock().unwrap()[0].2);
+        assert_eq!(r.events(), vec![ev(true, "a"), ev(false, "a")]);
+        // Without a fallback (Settings' preview), the error is the answer's.
+        let r = rig();
+        r.speaker.speak(r.job("b", &["One."], 1, Some("One.")), sim_opener()).unwrap();
+        r.wait_quiet();
+        assert_eq!(r.events().last().and_then(|e| e.2.clone()).as_deref(), Some("synthesis failed"));
+    }
+
+    /// A streaming synthesiser: `pieces` of 10 ms audio, `gap` apart, each
+    /// handed on as it's made; counts the pieces it made.
+    struct Streaming {
+        pieces: usize,
+        gap: Duration,
+        made: Arc<AtomicU64>,
+    }
+    impl Synth for Streaming {
+        fn synthesize(&mut self, _text: &str) -> Result<Pcm, String> {
+            unreachable!("streams")
+        }
+        fn stream(&mut self, _text: &str, out: &mut dyn FnMut(Pcm) -> bool) -> Result<(), String> {
+            for _ in 0..self.pieces {
+                std::thread::sleep(self.gap);
+                self.made.fetch_add(1, Ordering::SeqCst);
+                if !out(Pcm { sample_rate: 1_000, channels: 1, samples: vec![0.0; 10] }) {
+                    break;
+                }
+            }
+            Ok(())
+        }
+    }
+    struct StreamingEngine(Arc<AtomicU64>);
+    impl Engine for StreamingEngine {
+        fn id(&self) -> &'static str {
+            "streaming"
+        }
+        fn voices(&self) -> Result<Vec<Voice>, String> {
+            Ok(Vec::new())
+        }
+        fn default_voice(&self) -> Option<String> {
+            None
+        }
+        fn open(&self, _voice: &str, _rate: f32) -> Result<Box<dyn Synth>, String> {
+            Ok(Box::new(Streaming { pieces: 20, gap: Duration::from_millis(15), made: Arc::clone(&self.0) }))
+        }
+    }
+
+    #[test]
+    fn a_streaming_voice_plays_its_first_piece_before_the_sentence_is_made_and_stops_mid_sentence() {
+        let r = rig();
+        let made = Arc::new(AtomicU64::new(0));
+        let play = Arc::new(SimPlayback::default());
+        let p = Arc::clone(&play);
+        let opener: Opener = Box::new(move || Ok(Opened { play: p, keep: None }));
+        let job = Job {
+            message_id: Some("a".into()),
+            sentences: vec!["A long sentence.".into()],
+            engine: Arc::new(StreamingEngine(Arc::clone(&made))),
+            voice: String::new(),
+            rate: 1.0,
+            fallback: None,
+        };
+        r.speaker.speak(job, opener).unwrap();
+        let start = Instant::now();
+        while play.appended.load(Ordering::SeqCst) == 0 {
+            assert!(start.elapsed() < Duration::from_secs(2), "nothing played");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        // Playing while most of the sentence is still to come.
+        assert!(made.load(Ordering::SeqCst) < 10, "{} pieces made before the first played", made.load(Ordering::SeqCst));
+        assert!(r.speaker.stop());
+        std::thread::sleep(Duration::from_millis(100));
+        // The stop ended the sentence being made, not just the playing.
+        assert!(made.load(Ordering::SeqCst) < 20, "made all {} pieces", made.load(Ordering::SeqCst));
+        assert_eq!(r.events(), vec![ev(true, "a"), ev(false, "a")]);
+    }
+
+    // ---- ElevenLabs through the speaker, against a local stand-in
+
+    use elevenlabs::standin::{pcm_bytes, serial, stub, Reply};
+
+    const KEY: &str = "sk_speaker_test_key_0001";
+
+    fn eleven_job(base: &str, sentences: &[&str], fallback: Option<Fallback>) -> Job {
+        Job {
+            message_id: Some("a".into()),
+            sentences: sentences.iter().map(|s| s.to_string()).collect(),
+            engine: Arc::new(elevenlabs::ElevenLabs::new(KEY, "", true).at(base)),
+            voice: "JBFqnCBsd6RMkjVDRZzb".into(),
+            rate: 1.0,
+            fallback,
+        }
+    }
+
+    #[test]
+    fn elevenlabs_streams_each_sentence_into_the_output() {
+        let _one_at_a_time = serial();
+        let r = rig();
+        let pcm = || Reply::Pcm { bytes: pcm_bytes(9_600), pieces: vec![4_801, 4_800, 9_599], delay: Duration::ZERO };
+        let s = stub(vec![pcm(), pcm()]);
+        let play = Arc::new(SimPlayback::default());
+        let p = Arc::clone(&play);
+        let opener: Opener = Box::new(move || Ok(Opened { play: p, keep: None }));
+        r.speaker.speak(eleven_job(&s.base, &["One sentence here.", "And another one."], None), opener).unwrap();
+        r.wait_quiet();
+        assert_eq!(r.events(), vec![ev(true, "a"), ev(false, "a")]);
+        // Each sentence its own request, its audio handed on in pieces.
+        let asked = s.requests.lock().unwrap().clone();
+        assert_eq!(asked.len(), 2);
+        assert!(asked[0].contains(r#""text":"One sentence here.""#) && asked[1].contains(r#""text":"And another one.""#));
+        assert!(play.appended.load(Ordering::SeqCst) >= 4, "{} pieces", play.appended.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn elevenlabs_failing_hands_over_to_the_local_voice_and_is_remembered() {
+        let _one_at_a_time = serial();
+        let r = rig();
+        let s = stub(vec![
+            Reply::Pcm { bytes: pcm_bytes(4_800), pieces: vec![9_600], delay: Duration::ZERO },
+            Reply::Error(401, r#"{"detail":{"type":"authentication_error","code":"invalid_api_key","message":"Invalid API key"}}"#.into()),
+        ]);
+        let local_said = Arc::new(Mutex::new(Vec::new()));
+        let told: Told = Arc::default();
+        let job = eleven_job(&s.base, &["First sentence works.", "Then the key fails.", "And one more."], Some(fallback(&local_said, true, &told)));
+        r.speaker.speak(job, sim_opener()).unwrap();
+        r.wait_quiet();
+        // Asked twice (never a third time, never a retry), then the local voice.
+        assert_eq!(s.requests.lock().unwrap().len(), 2);
+        assert_eq!(*local_said.lock().unwrap(), vec!["Then the key fails.", "And one more."]);
+        let told = told.lock().unwrap().clone();
+        assert_eq!(told, vec![("ElevenLabs: API key not accepted".to_string(), vec!["Then the key fails.".to_string(), "And one more.".to_string()], true)]);
+        assert_eq!(r.events(), vec![ev(true, "a"), ev(false, "a")]);
+        // On record: the next answers skip ElevenLabs for a while.
+        let key = elevenlabs::Key::new(KEY).fingerprint();
+        let choice = elevenlabs::ElevenLabs::choice_fingerprint(KEY, "JBFqnCBsd6RMkjVDRZzb", "");
+        assert!(cloud::with_health(|h| h.skipping(elevenlabs::ID, key, choice, Instant::now())));
+        cloud::with_health(|h| h.worked(elevenlabs::ID, key));
+    }
+
+    /// First audio — from `speak` to the first piece reaching the output —
+    /// for Kokoro (an `engines` build with it installed; `YAP_TTS_MODELS`)
+    /// cold and warm, and for ElevenLabs' path against a local stand-in that
+    /// answers after `YAP_TTS_STANDIN_MS` (default 0: Yap's own share).
+    /// Nothing is played. `cargo test --features engines
+    /// tts::tests::first_audio_latency -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn first_audio_latency() {
+        #[derive(Default)]
+        struct Timing {
+            first: Mutex<Option<Instant>>,
+            inner: SimPlayback,
+        }
+        impl Playback for Timing {
+            fn append(&self, pcm: Pcm) {
+                self.first.lock().unwrap().get_or_insert_with(Instant::now);
+                self.inner.append(pcm);
+            }
+            fn stop(&self) {
+                self.inner.stop();
+            }
+            fn done(&self) -> bool {
+                self.inner.done()
+            }
+        }
+        let text = "Hi, I'm the voice that reads Chat's answers. Ask me anything, and I'll say what I found.";
+        let measure = |engine: Arc<dyn Engine>, voice: &str| -> Duration {
+            let r = rig();
+            let t = Arc::new(Timing::default());
+            let t2 = Arc::clone(&t);
+            let opener: Opener = Box::new(move || Ok(Opened { play: t2, keep: None }));
+            let job = Job {
+                message_id: Some("m".into()),
+                sentences: engine.prepare(sentences(text)),
+                engine,
+                voice: voice.into(),
+                rate: 1.0,
+                fallback: None,
+            };
+            let start = Instant::now();
+            r.speaker.speak(job, opener).unwrap();
+            while t.first.lock().unwrap().is_none() {
+                assert!(start.elapsed() < Duration::from_secs(60), "no audio");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let took = t.first.lock().unwrap().unwrap() - start;
+            r.speaker.stop();
+            took
+        };
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        let median = |mut v: Vec<Duration>| {
+            v.sort();
+            v[v.len() / 2]
+        };
+        if kokoro::available() {
+            kokoro::unload(Duration::from_secs(5));
+            let cold = measure(Arc::new(kokoro::Kokoro), kokoro::DEFAULT_VOICE);
+            let warm = median((0..5).map(|_| measure(Arc::new(kokoro::Kokoro), kokoro::DEFAULT_VOICE)).collect());
+            println!("Kokoro ({}): first audio cold {:.0} ms, warm median {:.0} ms", kokoro::DEFAULT_VOICE, ms(cold), ms(warm));
+        } else {
+            println!("Kokoro: not available in this build/PC (needs --features engines and YAP_TTS_MODELS)");
+        }
+        let _one_at_a_time = serial();
+        let delay = Duration::from_millis(std::env::var("YAP_TTS_STANDIN_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(0));
+        let runs: Vec<Duration> = (0..7)
+            .map(|_| {
+                let s = stub(vec![Reply::Pcm { bytes: pcm_bytes(48_000), pieces: vec![4_096; 23].into_iter().chain([1_792]).collect(), delay }]);
+                measure(eleven_job(&s.base, &[], None).engine, "JBFqnCBsd6RMkjVDRZzb")
+            })
+            .collect();
+        println!("ElevenLabs path, stand-in answering after {} ms: first audio median {:.1} ms", delay.as_millis(), ms(median(runs)));
+    }
+
     /// The real thing on this PC, without a sound: every voice Windows
     /// gives apps, then the first one saying a sentence into a WAV in a
     /// temp folder, checked for real, plausibly long audio. Run with
@@ -1717,6 +2250,7 @@ mod tests {
             engine: Arc::new(StandIn),
             voice: String::new(),
             rate: 2.0,
+            fallback: None,
         };
         let started = Instant::now();
         r.speaker.speak(job("a"), rodio_opener(None)).unwrap();

@@ -597,6 +597,9 @@
     ttsWindowsVoice: '',
     ttsRate: 1.0,
     ttsVolume: 0.5,
+    ttsProvider: 'local',
+    ttsCloudKeys: {},
+    ttsCloud: {},
     // About you (AboutYouSettings.svelte, about_you.rs): empty = follow Windows.
     aboutName: '',
     aboutMe: '',
@@ -996,7 +999,8 @@
   let offerKokoro = $state(false);
   function setSpeakReplies(on) {
     cfg.speakReplies = on;
-    offerKokoro = on && cfg.ttsEngine !== 'windows' && kokoro.inBuild && !kokoro.installed;
+    // Not while a cloud voice (ElevenLabs) speaks: Kokoro is only its stand-in.
+    offerKokoro = on && cfg.ttsProvider !== 'elevenlabs' && cfg.ttsEngine !== 'windows' && kokoro.inBuild && !kokoro.installed;
   }
   onMount(() => {
     const un = listen('yap-voice-replies', (e) => {
