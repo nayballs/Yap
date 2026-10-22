@@ -41,6 +41,7 @@
   import { onMount, tick } from 'svelte';
   import ToastHost from './ui/ToastHost.svelte';
   import SpeakerMenu from './SpeakerMenu.svelte';
+  import SpeakerCard from './SpeakerCard.svelte';
   import BriefView from './BriefView.svelte';
   import { briefTeaser } from './brief.js';
   import { toast } from './ui/toast.svelte.js';
@@ -227,6 +228,7 @@
       note.participants = p.participants;
     }
     if (p.speakers) note.speakers = p.speakers;
+    if (typeof p.enhancedContent === 'string') note.enhancedContent = p.enhancedContent;
     if (p.lineSplice) {
       // The voice separation labelled lines, splitting some where the
       // speaker changed: the stretch that changed.
@@ -375,14 +377,16 @@
   function toggleSpeakerMenu(key, voice, lines, start = 'menu') {
     speakerMenu = speakerMenu?.key === key ? null : { key, voice, lines, start };
   }
-  /** A speaker edit made here: the map, and each line's voice. */
+  /** A speaker edit made here: the map, each line's voice (and echo: "It
+   *  was me"), and the summary (a name put on "Speaker 2"). */
   function onSpeakerChanged(updated) {
     if (!note || updated?.id !== note.id) return;
     note.speakers = updated.speakers || {};
     const t = updated.transcript || [];
     note.transcript = (note.transcript || []).map((s, i) =>
-      t[i] ? { ...s, speaker: t[i].speaker || '', speakerLocked: !!t[i].speakerLocked } : s
+      t[i] ? { ...s, speaker: t[i].speaker || '', speakerLocked: !!t[i].speakerLocked, echo: !!t[i].echo } : s
     );
+    if (typeof updated.enhancedContent === 'string') note.enhancedContent = updated.enhancedContent;
   }
   const echoCount = $derived((note?.transcript || []).filter((s) => s.echo).length);
   const lineCount = $derived((note?.transcript || []).length);
@@ -1216,6 +1220,12 @@
             {/if}
           </div>
           {/if}
+          {#if note && !searchQuery}
+            <!-- "Speaker 2 is Priya?" (speakers/naming.rs) -->
+            <div class="namecardwrap">
+              <SpeakerCard {note} origin={LABEL} onchanged={onSpeakerChanged} />
+            </div>
+          {/if}
           {#if recordingThis && !liveTranscript}
             <div class="tempty">
               <p class="t1">Live transcript is off</p>
@@ -1256,7 +1266,7 @@
                           class:guess={item.guess}
                           aria-haspopup="menu"
                           aria-expanded={speakerMenu?.key === item.key}
-                          title={item.guess ? 'A guess from the calendar invite: click to confirm or change' : 'Rename, merge or correct this speaker'}
+                          title={item.guess ? 'A guess: click to confirm or change' : 'Rename, merge or correct this speaker'}
                           onclick={() => toggleSpeakerMenu(item.key, item.speaker, item.lines.map((l) => l.i))}
                         >{item.label}</button>
                         {#if speakerMenu?.key === item.key}
@@ -1338,6 +1348,9 @@
           {/if}
         {:else}
           <div class="summary" role="region" aria-label="Summary">
+            {#if note && !recordingThis}
+              <SpeakerCard {note} origin={LABEL} onchanged={onSpeakerChanged} />
+            {/if}
             {#if brief}
               <!-- What to know going in (calendar/brief.rs): open until the
                    action plan is written, then folded above it. -->
@@ -2227,6 +2240,13 @@
   }
 
   /* Speaker groups of chat bubbles (Wispr's grouped corners). */
+  .namecardwrap {
+    flex: 0 0 auto;
+    margin: 12px 40px 0 32px;
+  }
+  .namecardwrap :global(.namecard) {
+    margin: 0;
+  }
   .lines {
     flex: 1 1 auto;
     min-height: 0;

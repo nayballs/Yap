@@ -142,7 +142,10 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   Generate summary, Retry, the Notes view's Action plan). Commands
   `meeting_end(origin)`, `meeting_pause`, `meeting_summarise`,
   `meeting_summary_status`, `meeting_discard`, `meeting_delete`; Rust callers
-  use `end()` / `pause()`.
+  use `end()` / `pause()`. The job first asks the meeting's AI who each
+  voice still unnamed is (`speakers::naming::ask_model`, "Suggest who's
+  speaking" on, a model that can call tools; best-effort), so the plan
+  reads the names.
 - **`meeting_assist.rs`** — the notepad's AI helpers, on the meeting's model
   (Note Formatting scope, else cleanup), bounded for an 8k local model, via
   `chat_beside_dictation`: **"What did I miss?"** (`meeting_catch_up(noteId,
@@ -231,7 +234,13 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   **`SpeakerMenu.svelte`** (shared with the Notes view): "It's Priya" / "Not
   Priya" on a guess, Rename X everywhere…, Rename just this line / these N
   lines… (a name field with the attendees and known names as picks), Merge
-  with… (other voices; never You) → the `speaker_*` commands; other windows
+  with… (other voices; never You), It was me (a voice told apart) → the
+  `speaker_*` commands; over the lines (and over the Summary), the name
+  card **`SpeakerCard.svelte`** (shared with the Notes view): "Speaker 2 is
+  Priya Shah?" with why, Yes / Someone else (then "Who is Speaker 2?") /
+  Not now, "1 of 2", "Speaker 3 is you?" → It was me + Undo
+  (`speakers/naming.rs`, `notepadText.js` `pendingSuggestions`,
+  `suggestionQuestion`, `suggestionWhy`); other windows
   follow `yap-note-changed`'s `lineSpeakers` (`withLineSpeakers`); Escape
   closes just the menu; a dashed **⏸ divider** wherever a recording stopped
   (`note.breaks`, `yap-meeting-breaks`) and a "**You dictated here · left

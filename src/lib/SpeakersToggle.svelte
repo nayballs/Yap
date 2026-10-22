@@ -64,7 +64,7 @@
     label="Tell speakers apart in meetings"
     badge="Beta"
     {desc}
-    hint="NVIDIA's Nemotron-3 Diarization tells up to 8 voices apart, on your CPU, for a few percent of it. Calls where everyone dials in by phone aren't supported yet."
+    hint="NVIDIA's Nemotron-3 Diarization tells up to 8 voices apart, on your CPU (about a tenth of one core while a meeting records). Still in beta: it's been measured on test meetings, not yet on real calls. Voices that sound alike can come out as one, and calls where everyone dials in by phone aren't supported yet."
   />
 
   {#if (asking || busy) && !ready && offer}

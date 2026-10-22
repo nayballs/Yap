@@ -1,0 +1,38 @@
+{
+  "name": "them-several-people",
+  "description": "No voices told apart and several people on the call: \"Them\" must stay Them.",
+  "tags": [
+    "them",
+    "trap"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah",
+    "Sam Patel"
+  ],
+  "lines": [
+    [
+      "you",
+      "Priya, can you start?"
+    ],
+    [
+      "them",
+      "Sure, the designs are done and with engineering."
+    ],
+    [
+      "you",
+      "Thanks Priya. Sam, how are the numbers?"
+    ],
+    [
+      "them",
+      "We're on budget for the quarter."
+    ],
+    [
+      "you",
+      "Thanks Sam."
+    ]
+  ],
+  "truth": {
+    "them": null
+  }
+}

@@ -73,6 +73,9 @@ Dictation cleanup:
                            | system (the instruction in the system prompt)
   --cleanup-quick          only the back-to-back rounds (no first call, Chat turns or spelling):
                            a cloud model's tokens   --cleanup-limit <n>  only the first n dictations
+Speaker names (speakers/naming.rs; instead of the scenarios; speakers.md):
+  --speakers               score Rust alone, then Rust + each --model's answers, on
+                           evals/speakers/*.json: correct / wrong / missed names per voice
 Pre-meeting briefs:
   --brief                  instead of the scenarios: write the brief of each meeting in
                            evals/briefs/*.json (--only picks them) through calendar/brief.rs, and
@@ -120,6 +123,7 @@ struct Args {
     dump_apps: Option<PathBuf>,
     list: bool,
     cleanup: bool,
+    speakers: bool,
     cleanup_rounds: u32,
     locale: Option<String>,
     cleanup_slot: Option<u64>,
@@ -186,6 +190,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--dump-apps" => a.dump_apps = Some(PathBuf::from(value()?)),
             "--list" => a.list = true,
             "--cleanup" => a.cleanup = true,
+            "--speakers" => a.speakers = true,
             "--cleanup-rounds" => a.cleanup_rounds = num(value()?, &flag)?.max(1) as u32,
             "--locale" => a.locale = Some(value()?),
             "--cleanup-slot" => a.cleanup_slot = Some(num(value()?, &flag)?),
@@ -245,7 +250,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         return dump_apps(p);
     }
     // Raw requests alone need no scenarios (and --only then names requests).
-    let scenarios = if (args.models.is_empty() || args.cleanup || args.brief || args.bench.is_some()) && !args.list {
+    let scenarios = if (args.models.is_empty() || args.cleanup || args.speakers || args.brief || args.bench.is_some()) && !args.list {
         Vec::new()
     } else {
         match load_scenarios(&args) {
@@ -268,7 +273,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         }
         return 0;
     }
-    if args.models.is_empty() && args.raw.is_none() {
+    if args.models.is_empty() && args.raw.is_none() && !args.speakers {
         eprintln!("Give at least one --model (or --raw).\n\n{USAGE}");
         return 2;
     }
@@ -280,7 +285,9 @@ pub fn main(argv: Vec<String>) -> i32 {
         .or_else(|| std::env::var_os("YAP_EVAL_OUT").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("test-results").join("evals"));
     let label = args.label.clone().unwrap_or_else(|| {
-        if args.models.is_empty() {
+        if args.models.is_empty() && args.speakers {
+            "speakers".to_string()
+        } else if args.models.is_empty() {
             "raw".to_string()
         } else {
             args.models.iter().map(|m| model_short(m)).collect::<Vec<_>>().join("+")
@@ -1128,6 +1135,23 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
     } else {
         None
     };
+    let speaker_meetings = if args.speakers {
+        let dir = scenarios_dir(args).join("..").join("speakers");
+        match super::speakers::load(&dir) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        None
+    };
+    let mut speaker_runs: Vec<(String, Value)> = Vec::new();
+    if let Some(meetings) = &speaker_meetings {
+        println!("\n=== Speaker names: Rust alone, {} meetings ===", meetings.len());
+        speaker_runs.push(("Rust only".to_string(), super::speakers::run_rust(meetings)));
+    }
     let briefs = if args.brief {
         let dir = scenarios_dir(args).join("..").join("briefs");
         match super::brief::load(&dir, &args.only) {
@@ -1199,6 +1223,15 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             cleanup = super::cleanup::run(b, &ep, args.cleanup_rounds, setup).await;
             cleanups.push((m.label.clone(), cleanup.clone()));
         }
+        let mut speakers_result = Value::Null;
+        if let Some(meetings) = &speaker_meetings {
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            println!("  speaker names, Rust + {} …", m.label);
+            speakers_result = super::speakers::run_model(meetings, &ep).await;
+            speaker_runs.push((format!("Rust + {}", m.label), speakers_result.clone()));
+        }
         let mut brief_result = Value::Null;
         if !briefs.is_empty() {
             record::set_config(Some(crate::config::YapConfig::default()));
@@ -1232,6 +1265,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "paced_ms": record::paced_ms() - paced_before,
             "wall_ms": model_started.elapsed().as_millis() as u64,
             "cleanup": cleanup,
+            "speakers": speakers_result,
             "bench": bench_result,
             "brief": brief_result,
         });
@@ -1270,11 +1304,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
     summary["paced_ms"] = json!(record::paced_ms());
     let totals = totals(&rows);
     summary["totals"] = json!(totals);
+    if !speaker_runs.is_empty() {
+        summary["speakers"] = json!(speaker_runs.iter().map(|(l, v)| json!({ "run": l, "result": v })).collect::<Vec<_>>());
+    }
     let text = record::redact(&serde_json::to_string_pretty(&summary).unwrap_or_default());
     let _ = std::fs::write(run_dir.join("summary.json"), text);
     if !cleanups.is_empty() {
         let md = record::redact(&super::cleanup::markdown(&cleanups));
         let _ = std::fs::write(run_dir.join("cleanup.md"), &md);
+    }
+    if !speaker_runs.is_empty() {
+        let md = record::redact(&super::speakers::markdown(&speaker_runs));
+        let _ = std::fs::write(run_dir.join("speakers.md"), &md);
+        println!("\n{}", md.split("\n## ").next().unwrap_or(""));
     }
     if !brief_results.is_empty() {
         let md = record::redact(&super::brief::markdown(&brief_results));

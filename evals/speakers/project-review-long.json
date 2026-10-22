@@ -1,0 +1,129 @@
+{
+  "name": "project-review-long",
+  "description": "A longer project review: handovers, thanks, a late joiner, a name said in passing and a question nobody answers.",
+  "tags": [
+    "handover",
+    "thanks",
+    "introduction",
+    "long"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Tom Baker",
+    "Grace Okafor",
+    "Declan Byrne",
+    "Hannah Price"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Right, let's get going, we've got a lot to cover. The goal today is to decide whether the mobile release goes out on the fourteenth or slips a week."
+    ],
+    [
+      "them-1",
+      "I'll start with where we are overall, then I'd like each area to give a quick status."
+    ],
+    [
+      "them-1",
+      "Overall we're green on scope, amber on testing, and red on the app store review, because the new privacy labels aren't done."
+    ],
+    [
+      "you",
+      "Who owns the privacy labels?"
+    ],
+    [
+      "them-1",
+      "That's legal plus engineering. Grace, can you give us the engineering view first?"
+    ],
+    [
+      "them-2",
+      "Sure. The code freeze happened on Monday as planned. We've got eleven open bugs, two of them are release blockers, and both have fixes in review."
+    ],
+    [
+      "them-2",
+      "On the privacy labels, we've listed every data type the app collects, but legal still needs to sign off on the wording."
+    ],
+    [
+      "them-1",
+      "Thanks Grace. Is legal on the call?"
+    ],
+    [
+      "them-3",
+      "Hi, yes, Declan from legal here, sorry I joined a few minutes late."
+    ],
+    [
+      "them-3",
+      "We got the list from Grace's team yesterday. Most of it is fine, there are two items around analytics where the wording needs to change."
+    ],
+    [
+      "them-1",
+      "How long will that take?"
+    ],
+    [
+      "them-3",
+      "I can turn it around by Wednesday if nothing else comes up."
+    ],
+    [
+      "them-1",
+      "Great, thanks Declan. Hannah, what about testing?"
+    ],
+    [
+      "them-4",
+      "Testing is behind. We lost two days to the flaky payment tests, and we still have the accessibility pass to do on the new screens."
+    ],
+    [
+      "them-4",
+      "If the blockers land tomorrow, we can finish regression by Thursday, but the accessibility pass would push into the next week."
+    ],
+    [
+      "you",
+      "Could we do the accessibility pass after release and ship a fix update?"
+    ],
+    [
+      "them-4",
+      "We could, but I'd rather not, the new checkout screens are the ones most likely to have problems."
+    ],
+    [
+      "them-1",
+      "Okay. So it sounds like the fourteenth is at risk. Does anyone strongly disagree with slipping a week?"
+    ],
+    [
+      "them-2",
+      "Not from engineering, the extra week gives us room for the second blocker."
+    ],
+    [
+      "them-1",
+      "Thanks. Then let's slip to the twenty first. Hannah, can you update the test plan for that?"
+    ],
+    [
+      "them-4",
+      "Yes, I'll send the new plan round this afternoon."
+    ],
+    [
+      "them-1",
+      "And Declan, can you send the label wording to Grace by Wednesday?"
+    ],
+    [
+      "them-3",
+      "Will do."
+    ],
+    [
+      "them-1",
+      "Lovely. Imogen, can you let marketing know about the new date?"
+    ],
+    [
+      "you",
+      "Yes, I'll tell them today."
+    ],
+    [
+      "them-1",
+      "Great, thanks everyone, that's it."
+    ]
+  ],
+  "truth": {
+    "them-1": "Tom Baker",
+    "them-2": "Grace Okafor",
+    "them-3": "Declan Byrne",
+    "them-4": "Hannah Price"
+  }
+}

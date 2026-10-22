@@ -92,6 +92,11 @@ impl VoiceIds {
     fn contains(&self, id: &str) -> bool {
         self.ids.iter().any(|(_, i)| i == id)
     }
+
+    /// Engine voice `v`'s id, if it has one yet (lines of its own).
+    pub fn get(&self, v: (u32, u8)) -> Option<&str> {
+        self.ids.iter().find(|(k, _)| *k == v).map(|(_, id)| id.as_str())
+    }
 }
 
 /// A turn's stand-in for engine voice `(stream, speaker)` until a line of it
@@ -208,8 +213,11 @@ pub fn label(note: &mut Note, base: usize, tl: &Timeline, voices: &mut VoiceIds)
     if first != usize::MAX {
         out.span = Some((first, last_end - first));
     }
-    let found = recording_voices(note, base, voices);
+    let mut found = recording_voices(note, base, voices);
     out.voices = found.len();
+    // A voice that only repeats yours (your voice reaching the call side)
+    // never takes the call's name.
+    found.retain(|(v, _)| !super::naming::repeats_you(note, v));
     out.map = settle_them(note, &found, tl.done);
     out
 }
@@ -373,22 +381,52 @@ pub fn begin(note_id: u64, session: Option<u64>) {
         base: note.transcript.len(),
         voices: VoiceIds::for_note(&note),
     };
+    let base = rec.base;
     let mut all = recordings();
     all.retain(|r| r.note_id != note_id);
     all.push(rec);
+    drop(all);
+    // Who the call app shows talking (experimental, `call_ui.rs`).
+    super::call_ui::begin(note_id, session, base);
 }
 
 /// Lines of the recording into `note_id` arrived (`meeting::ingest`, after
 /// the windows got them): those the latest labels already cover get their
 /// voices now, not at the next update.
 pub fn after_ingest(app: &AppHandle, note_id: u64) {
-    if !recordings().iter().any(|r| r.note_id == note_id) {
+    let Some(session) = recordings().iter().find(|r| r.note_id == note_id).map(|r| r.session) else {
         return;
-    }
+    };
     if let Some(tl) = crate::diarize::timeline(note_id).filter(|t| !t.done) {
         apply(app, &tl, false);
+    } else if session.is_none() && naming_due(note_id) {
+        // No voices told apart: the call's names (a 1:1 invite's guess to
+        // confirm, the call app's) for "Them".
+        super::naming::refresh_note(app, note_id);
     }
 }
+
+/// At most one naming pass every [`NAMING_EVERY`] per note for a recording
+/// with no speaker engine (every new line would ask otherwise).
+fn naming_due(note_id: u64) -> bool {
+    static LAST: Mutex<Vec<(u64, std::time::Instant)>> = Mutex::new(Vec::new());
+    let mut last = LAST.lock().unwrap_or_else(|p| p.into_inner());
+    let now = std::time::Instant::now();
+    match last.iter_mut().find(|(id, _)| *id == note_id) {
+        Some((_, at)) if now.duration_since(*at) < NAMING_EVERY => false,
+        Some((_, at)) => {
+            *at = now;
+            true
+        }
+        None => {
+            last.retain(|(_, at)| now.duration_since(*at) < std::time::Duration::from_secs(3600));
+            last.push((note_id, now));
+            true
+        }
+    }
+}
+
+const NAMING_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The recording into `note_id` ended (`meeting.rs`, after its engine
 /// finished, before it says it stopped). Final labels came: nothing to do.
@@ -407,7 +445,15 @@ pub fn end(app: &AppHandle, note_id: u64) {
             tl.error.get_or_insert_with(|| "the speaker engine didn't finish".to_string());
             apply(app, &tl, true);
         }
-        None => recordings().retain(|r| r.note_id != note_id),
+        None => {
+            recordings().retain(|r| r.note_id != note_id);
+            // The final labels came (and named the voices), or there were
+            // none: name "Them" from the whole meeting.
+            if session.is_none() {
+                super::naming::refresh_note(app, note_id);
+            }
+            super::call_ui::finish(note_id);
+        }
     }
 }
 
@@ -422,9 +468,19 @@ fn apply(app: &AppHandle, tl: &Timeline, last: bool) {
     let rec = &mut all[pos];
     let base = rec.base;
     let voices = &mut rec.voices;
-    // (Lock order: this module's, then the notes store's.)
+    // Who each voice is (`naming.rs`): the settings read before the notes'
+    // lock; the call app's readings once this pass gave its voices their
+    // ids. (Lock order: this module's, the notes store's, then
+    // `call_ui`'s.)
+    let sources = super::naming::Sources::now();
+    let words = crate::memory::Words::new();
+    let ordinary = |w: &str| words.is(w);
     let result = crate::notes::modify(tl.note_id, |note| {
-        let out = label(note, base, tl, voices);
+        let mut out = label(note, base, tl, voices);
+        if sources.enabled && (out.changed() || last || super::call_ui::watching(tl.note_id)) {
+            let platform = super::call_ui::votes_for(tl, voices);
+            out.map |= super::naming::refresh(note, &sources.context(&ordinary, platform));
+        }
         let changed = out.changed();
         Ok(((out, changed.then(|| note.clone())), changed))
     });
@@ -453,6 +509,7 @@ fn apply(app: &AppHandle, tl: &Timeline, last: bool) {
     };
     if last {
         finished(app, tl, out.voices);
+        super::call_ui::finish(tl.note_id);
     }
 }
 

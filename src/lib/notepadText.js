@@ -101,17 +101,74 @@ export function withLineSplice(transcript, change) {
 
 /**
  * A transcript with each line's voice from a `yap-note-changed` after a
- * speaker edit (`lineSpeakers`: `[speaker, locked]` per line), or `null`
- * when the lengths differ (a line arrived meanwhile: fetch the note).
+ * speaker edit (`lineSpeakers`: `[speaker, locked, echo]` per line; `echo`
+ * since "It was me" hides a voice's repeats of your lines), or `null` when
+ * the lengths differ (a line arrived meanwhile: fetch the note).
  */
 export function withLineSpeakers(transcript, lineSpeakers) {
   if (!Array.isArray(lineSpeakers) || !Array.isArray(transcript) || lineSpeakers.length !== transcript.length) {
     return null;
   }
   return transcript.map((s, i) => {
-    const [speaker, locked] = lineSpeakers[i] || [];
-    return { ...s, speaker: speaker && speaker !== s.source ? speaker : '', speakerLocked: !!locked };
+    const entry = lineSpeakers[i] || [];
+    const [speaker, locked] = entry;
+    const out = { ...s, speaker: speaker && speaker !== s.source ? speaker : '', speakerLocked: !!locked };
+    if (entry.length > 2) out.echo = !!entry[2];
+    return out;
   });
+}
+
+/**
+ * The name cards still to answer (speakers/naming.rs): `[{ voice, name,
+ * me, confidence, why }]`, surest first — voices with a suggestion that
+ * wasn't put off ("Not now"), not merged into another, with lines of
+ * their own.
+ */
+export function pendingSuggestions(note) {
+  const voices = new Set(noteVoices(note));
+  return Object.entries(note?.speakers || {})
+    .filter(([id, s]) => s?.suggestion && !s.suggestion.later && !s.mergedInto && voices.has(id))
+    .map(([voice, s]) => ({ voice, ...s.suggestion }))
+    .sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+}
+
+/** What a card calls the voice it asks about: "Speaker 2" (not the guess on it). */
+function cardVoice(note, voice) {
+  const info = speakerInfo(note?.speakers, voice);
+  return info.guess ? defaultSpeakerName(voice) : info.label;
+}
+
+/** "Speaker 2 is Priya?" / "Speaker 3 is you?" */
+export function suggestionQuestion(note, card) {
+  const who = cardVoice(note, card.voice);
+  return card.me ? `${who} is you?` : `${who} is ${card.name}?`;
+}
+
+/** Why Yap thinks so, in a line (the card's small print). */
+export function suggestionWhy(note, card) {
+  const why = card.why || {};
+  const who = cardVoice(note, card.voice);
+  const by = why.by ? speakerInfo(note?.speakers, why.by).label : 'Someone';
+  const quote = why.quote ? `“${why.quote}”` : '';
+  const first = (card.name || '').split(/\s+/)[0];
+  switch (why.kind) {
+    case 'introduced':
+      return `${who} said ${quote}`;
+    case 'asked':
+      return `${by} asked ${quote} and ${who} answered`;
+    case 'thanked':
+      return `${by} said ${quote} right after ${who} spoke`;
+    case 'invite':
+      return `${first} is the only other person invited`;
+    case 'app':
+      return `The call app showed ${first} talking while ${who} spoke`;
+    case 'model':
+      return quote ? `The AI matched ${quote}` : `The AI matched it from the transcript`;
+    case 'echo':
+      return `It repeats what you said: your voice may be reaching the call audio`;
+    default:
+      return '';
+  }
 }
 
 /** Spoken lines worth sharing: no echo (the call through the speakers), no markers. */

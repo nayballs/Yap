@@ -1,0 +1,36 @@
+{
+  "name": "memory-person",
+  "description": "No invite, but Memory knows the person by name.",
+  "tags": [
+    "memory",
+    "handover",
+    "thanks"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [],
+  "known": [
+    "Rochelle Grant"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Rochelle, could you remind everyone what the deadline is?"
+    ],
+    [
+      "them-2",
+      "Of course. Entries close on the thirtieth, and the judging happens the week after."
+    ],
+    [
+      "them-1",
+      "Thanks, Rochelle. And who's sorting the venue?"
+    ],
+    [
+      "you",
+      "I'll do the venue, I've got two options already."
+    ]
+  ],
+  "truth": {
+    "them-1": null,
+    "them-2": "Rochelle Grant"
+  }
+}

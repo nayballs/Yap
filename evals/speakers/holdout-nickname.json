@@ -1,0 +1,43 @@
+{
+  "name": "holdout-nickname",
+  "description": "The invite has full names; people call each other by short forms.",
+  "tags": [
+    "holdout",
+    "handover",
+    "thanks",
+    "nickname"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Declan Byrne",
+    "Robert Dunne",
+    "Katherine Moss"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Rob, can you kick us off with the fundraising numbers?"
+    ],
+    [
+      "them-2",
+      "Sure. We're at about seventy percent of the target, with three weeks to go."
+    ],
+    [
+      "them-1",
+      "Thanks Rob, that's ahead of last year. Kate, how's the volunteer rota looking?"
+    ],
+    [
+      "them-3",
+      "Nearly full, we just need two more people for the Saturday morning shift."
+    ],
+    [
+      "them-1",
+      "Brilliant, thanks Kate."
+    ]
+  ],
+  "truth": {
+    "them-1": "Declan Byrne",
+    "them-2": "Robert Dunne",
+    "them-3": "Katherine Moss"
+  }
+}

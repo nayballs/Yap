@@ -1,0 +1,42 @@
+{
+  "name": "echo-you",
+  "description": "Your own voice reaches the call side: one voice repeats your lines.",
+  "tags": [
+    "echo",
+    "you"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah"
+  ],
+  "lines": [
+    [
+      "you",
+      "Can everyone see my screen? It's the roadmap for the next two quarters."
+    ],
+    [
+      "them-2",
+      "Can everyone see my screen? It's the roadmap for the next two quarters."
+    ],
+    [
+      "them-1",
+      "Yes, we can see it fine."
+    ],
+    [
+      "you",
+      "Great. So the first quarter is all about the checkout rebuild and the new payment provider."
+    ],
+    [
+      "them-2",
+      "Great. So the first quarter is all about the checkout rebuild and the new payment provider."
+    ],
+    [
+      "them-1",
+      "Makes sense. What about the second quarter?"
+    ]
+  ],
+  "truth": {
+    "them-1": "Priya Shah",
+    "them-2": "you"
+  }
+}

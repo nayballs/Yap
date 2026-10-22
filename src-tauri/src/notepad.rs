@@ -166,6 +166,18 @@ pub fn pick_call_window(
         .map(|c| c.hwnd)
 }
 
+/// The live call's main window, without a word in the log (the call
+/// names reader looks for it every few seconds: `speakers/call_ui.rs`).
+pub fn call_window_quiet() -> Option<isize> {
+    platform::call_window_quiet()
+}
+
+/// The visible top-level windows of processes running one of `exes`
+/// (`yap.exe call-dump` picks the call's).
+pub fn windows_of(exes: &[String]) -> Vec<Candidate> {
+    platform::windows_of(exes)
+}
+
 /// The note the notepad shows (0 = none).
 pub fn current_note() -> u64 {
     NOTE.load(Ordering::SeqCst)
@@ -578,6 +590,17 @@ mod platform {
                 })
             })
             .collect()
+    }
+
+    pub fn call_window_quiet() -> Option<isize> {
+        let (app_id, exes) = crate::meeting_detect::call_window_exes()?;
+        pick_call_window(&candidates(&exes), &exes, std::process::id(), |title| {
+            crate::meeting_detect::title_shows(app_id, title)
+        })
+    }
+
+    pub fn windows_of(exes: &[String]) -> Vec<Candidate> {
+        candidates(exes)
     }
 
     /// The live call's main window (call detection's latest call), if any.

@@ -163,6 +163,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 **Speakers** — [speakers.md](./docs/architecture/speakers.md)
 - `diarize.rs` (+ `diarize/`) — the beta speaker engine: the `yap.exe diarize` child, its wire, models.
 - `speakers.rs` (+ `speakers/labels.rs`) — the speaker map, names on lines, lines split by voice.
+- `speakers/naming.rs` — who each voice is: names suggested from what's said and the invite (+ the AI's checked answers), "Speaker 2 is Priya?" cards, "It was me".
+- `speakers/call_ui.rs` — who the call app shows talking (experimental, off): UI Automation reads on the meeting's clock; `yap.exe call-dump`.
 
 **Call detection and guard rails** — [call-detection-and-guards.md](./docs/architecture/call-detection-and-guards.md)
 - `meeting_detect.rs` — notices calls (mic consent store), prompts, per-app choice, fatigue, tray item.
@@ -194,7 +196,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `updates.rs` — background update checks and downloads, announcements, safe install.
 
 **App shell, config, tests** — [app-shell.md](./docs/architecture/app-shell.md), [config-and-data.md](./docs/architecture/config-and-data.md), [build-and-test.md](./docs/architecture/build-and-test.md)
-- `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` run before the app starts.
+- `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` / `call-dump` run before the app starts.
 - `lib.rs` — Tauri setup: plugins, hook + pipeline, tray, shutdown cleanup, DWM-cloak init.
 - `tray.rs` — tray icon and menu (models, Paste last transcript, Read selection aloud, Record this call, updates).
 - `context_menu.rs` — WebView2's context menu cut to editing commands (Inspect: debug + Shift).
@@ -219,7 +221,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)).
 - `lib/markdown.js` — every rendered answer/note: markdown-it + DOMPurify, citation pills ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
 - `ChatView.svelte` + `ChatModelPicker.svelte` — Chat and its model picker ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)).
-- `MeetingsView` / `Notepad` / `SplitPreview` — meetings and the notepad ([meetings.md](./docs/architecture/meetings.md)); `BriefView.svelte` + `brief.js` — a meeting's pre-meeting brief everywhere it shows ([calendar.md](./docs/architecture/calendar.md#pre-meeting-briefs)).
+- `MeetingsView` / `Notepad` / `SplitPreview` — meetings and the notepad ([meetings.md](./docs/architecture/meetings.md)); `BriefView.svelte` + `brief.js` — a meeting's pre-meeting brief everywhere it shows ([calendar.md](./docs/architecture/calendar.md#pre-meeting-briefs)); `SpeakerMenu` / `SpeakerCard` — a speaker's menu and the name cards ([speakers.md](./docs/architecture/speakers.md)).
 - `ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
 - `Overlay.svelte` + `bar/` — the Yap bar's page, the reading card `bar/ReadingCard.svelte` ([yap-bar.md](./docs/architecture/yap-bar.md)).
@@ -372,7 +374,7 @@ replies off. Every setting, file and default: [config-and-data.md](./docs/archit
 - **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation).
 - **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly.
 - Much is unit-, e2e- and robot-tested but not yet tried in real use (a real call, real AI apps, answers heard on speakers…).
-- **Not yet done**: Chat streaming and semantic search, a rich notes editor, naming voices by themselves, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.
+- **Not yet done**: Chat streaming and semantic search, a rich notes editor, the call app's speaker names checked in a real call, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.
 
 What was tested how, and every gap: [status.md](./docs/architecture/status.md).
 

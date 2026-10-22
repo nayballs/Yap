@@ -1,0 +1,38 @@
+{
+  "name": "holdout-panel-intros",
+  "description": "A panel where the host introduces each speaker in the third person before they speak.",
+  "tags": [
+    "holdout",
+    "introduction",
+    "third-person",
+    "handover"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah",
+    "Sam Patel"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Welcome everyone. Our first speaker is Priya Shah, who leads design at a fintech startup. Priya, over to you."
+    ],
+    [
+      "them-2",
+      "Thank you. I want to talk about what we learned rebuilding our onboarding from scratch."
+    ],
+    [
+      "them-1",
+      "Thanks Priya. Next we have Sam Patel from the payments team. Sam, the floor's yours."
+    ],
+    [
+      "them-3",
+      "Thanks. I'll pick up where Priya left off and talk about the payments side of onboarding."
+    ]
+  ],
+  "truth": {
+    "them-1": null,
+    "them-2": "Priya Shah",
+    "them-3": "Sam Patel"
+  }
+}

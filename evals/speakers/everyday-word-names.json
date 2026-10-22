@@ -1,0 +1,41 @@
+{
+  "name": "everyday-word-names",
+  "description": "Names that are also everyday words (Will, Mark) used both ways.",
+  "tags": [
+    "handover",
+    "trap"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Will Turner",
+    "Mark Evans",
+    "Grace Okafor"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Will we have the budget signed off by Friday?"
+    ],
+    [
+      "them-2",
+      "I think so, finance said Thursday at the latest."
+    ],
+    [
+      "them-1",
+      "Mark my words, they'll slip. Will, can you chase them tomorrow?"
+    ],
+    [
+      "them-3",
+      "Yes, I'll chase them first thing in the morning."
+    ],
+    [
+      "them-1",
+      "Thanks Will."
+    ]
+  ],
+  "truth": {
+    "them-1": "Grace Okafor",
+    "them-2": "Mark Evans",
+    "them-3": "Will Turner"
+  }
+}

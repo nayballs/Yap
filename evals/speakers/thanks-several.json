@@ -1,0 +1,33 @@
+{
+  "name": "thanks-several",
+  "description": "\"Thanks Priya and Sam\" thanks two people at once: it says nothing about one voice.",
+  "tags": [
+    "thanks",
+    "trap"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah",
+    "Sam Patel",
+    "Siobhan Kelly"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "The migration finished overnight and everything checks out on our side."
+    ],
+    [
+      "them-2",
+      "Same on the reporting side, the numbers match."
+    ],
+    [
+      "them-3",
+      "Brilliant, thanks Priya and Sam. Let's close the incident then."
+    ]
+  ],
+  "truth": {
+    "them-1": "Priya Shah",
+    "them-2": "Sam Patel",
+    "them-3": "Siobhan Kelly"
+  }
+}

@@ -37,6 +37,14 @@
 
   const info = $derived(speakerInfo(note?.speakers, voice));
   const isYou = $derived(voice === YOU);
+  // A name Yap suggests but didn't put on (speakers/naming.rs: the card's).
+  const suggested = $derived.by(() => {
+    const s = note?.speakers?.[voice]?.suggestion;
+    return s && !s.me && s.name && !(info.named && info.name.toLowerCase() === s.name.toLowerCase()) ? s.name : '';
+  });
+  // "It was me" for a voice the separation told apart (or a person named on
+  // some lines), never for "Them" (everyone on the call).
+  const canBeMe = $derived(!isYou && voice !== 'them');
   const lineCount = $derived(lines.length);
   const linesLabel = $derived(lineCount === 1 ? 'just this line' : `just these ${lineCount} lines`);
   // Other voices this one could be (never You).
@@ -136,6 +144,12 @@
         <span>Not {info.name}</span>
       </button>
     {/if}
+    {#if suggested}
+      <button role="menuitem" class="item" disabled={busy} onclick={() => run('speaker_suggestion', { speaker: voice, answer: 'yes' })}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+        <span>It's {suggested}</span>
+      </button>
+    {/if}
     {#if !isYou}
       <button role="menuitem" class="item" onclick={() => begin('all')}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 19.5l1-4L15.8 5.2a2 2 0 0 1 2.9 0l.1.1a2 2 0 0 1 0 2.9L8.5 18.5z" /></svg>
@@ -152,6 +166,18 @@
       <button role="menuitem" class="item" onclick={() => (mode = 'merge')}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5v4a5 5 0 0 0 5 5h7" /><path d="M6 19.5v-4a5 5 0 0 1 5-5" /><path d="M15 10.5l3 3-3 3" /></svg>
         <span>Merge with…</span>
+      </button>
+    {/if}
+    {#if canBeMe}
+      <button
+        role="menuitem"
+        class="item"
+        disabled={busy}
+        title="Your own voice reached the call audio: these lines become yours, and repeats of your lines are hidden"
+        onclick={() => run('speaker_is_me', { speaker: voice })}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5 19.5a7 7 0 0 1 14 0" /><path d="M16.5 4.5l1.5 1.5 3-3" /></svg>
+        <span>It was me</span>
       </button>
     {/if}
   {:else if mode === 'merge'}

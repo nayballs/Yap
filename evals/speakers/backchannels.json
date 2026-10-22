@@ -1,0 +1,44 @@
+{
+  "name": "backchannels",
+  "description": "You say \"Yeah\" and \"Mm-hmm\" between the handover and the answer.",
+  "tags": [
+    "handover",
+    "thanks",
+    "backchannel"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah",
+    "Sam Patel"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Priya, can you take us through the survey results?"
+    ],
+    [
+      "you",
+      "Yeah."
+    ],
+    [
+      "them-2",
+      "Sure. We had about four hundred responses, and the top request by far was offline mode."
+    ],
+    [
+      "you",
+      "Mm-hmm."
+    ],
+    [
+      "them-2",
+      "The second was better search, which we already have on the roadmap for the spring."
+    ],
+    [
+      "them-1",
+      "Great, thanks Priya."
+    ]
+  ],
+  "truth": {
+    "them-1": "Sam Patel",
+    "them-2": "Priya Shah"
+  }
+}

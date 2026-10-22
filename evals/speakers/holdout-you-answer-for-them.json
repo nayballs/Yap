@@ -1,0 +1,41 @@
+{
+  "name": "holdout-you-answer-for-them",
+  "description": "Someone is asked by name but you answer for them; then the person speaks up later.",
+  "tags": [
+    "holdout",
+    "handover",
+    "you",
+    "trap"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah",
+    "Sam Patel"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Priya, did the vendor ever get back to you about the licence?"
+    ],
+    [
+      "you",
+      "I can answer that, Priya forwarded it to me yesterday. They've agreed to the discount."
+    ],
+    [
+      "them-1",
+      "Oh great, thanks Imogen."
+    ],
+    [
+      "them-2",
+      "Yes, and I've asked them to send the updated contract by Monday."
+    ],
+    [
+      "them-1",
+      "Perfect, thanks Priya."
+    ]
+  ],
+  "truth": {
+    "them-1": "Sam Patel",
+    "them-2": "Priya Shah"
+  }
+}
