@@ -67,11 +67,13 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   earlier answer ("the top five in that list", "which of those…", "the
   second one"). **A model on this PC with tools** (`ai_model::runs_here`), a
   question that `needs_web`: its first step **must be a web search**
-  (`tools::FirstStep::MustSearch`: only `web_search` offered —
-  `forced_search_definition`, whose description says to search what the
-  latest message asks and leave out earlier messages' words unless it points
+  (`tools::FirstStep::MustSearch`: a named `tool_choice` for `web_search`
+  over all the tools — the next step offers the same ones, so a local model
+  re-uses its cache, 2026-10-22 — which llamafile honours, and
+  `tools::MUST_SEARCH_NOTE` in the question's context, saying to search what
+  this message asks and leave out earlier messages' words unless it points
   back at them: "Grok subscriptions check account" carried "check" from the
-  question before, 2026-10-21 —, `tool_choice: "required"`, which llamafile honours — its own query, with
+  question before, 2026-10-21 — its own query, with
   the conversation in mind: "Arsenal Football Club match tonight 21 October
   2026 time"); a server that refuses or answers in words anyway gets **Yap's
   search instead** (`search_query(question)`: the asking — "can you check /

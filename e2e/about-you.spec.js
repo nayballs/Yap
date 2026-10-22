@@ -151,16 +151,23 @@ test("Chat: the model is told about the user, and Exa searches the user's countr
   await expect(main.locator('.msgs .cbubble.assistant').last()).toContainText('SuperGrok is £24 a month');
 
   const steps = fakeLlm.requests.slice(from).filter((r) => r.tools.length);
-  expect(steps[0].toolChoice).toBe('required');
+  // The search made to come first: named, over the same tools as the next step.
+  expect(steps[0].toolChoice).toEqual({ type: 'function', function: { name: 'web_search' } });
+  expect(steps[1].tools).toEqual(steps[0].tools);
   const system = steps[0].system;
-  // The block, last in the prompt.
+  // The block, last in the prompt — without the clock, so the prompt stays
+  // the same from turn to turn (a local model re-uses its cache)…
   const block = system.slice(system.lastIndexOf('About the user: '));
-  expect(block).toMatch(/^About the user: they're in the United Kingdom \(British English\); it's \w+day \d{1,2} \w+ \d{4}, \d\d:\d\d UK time \(UTC\+0[01]:00\)\./);
+  expect(block).toMatch(/^About the user: they're in the United Kingdom \(British English\)\. Give times/);
+  expect(block).not.toMatch(/\d\d:\d\d/);
   expect(block).toContain(
     `Give times in UK time and metric units. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like "$15 a month (US price)".`
   );
   expect(block).toContain('Their name is Nathan.');
   expect(block).toContain('They told Yap: "I work day shifts"');
+  // …and the clock with the question, in its context.
+  expect(steps[0].user).toMatch(/^<context>\nIt's \w+day \d{1,2} \w+ \d{4}, \d\d:\d\d UK time \(UTC\+0[01]:00\)\./);
+  expect(steps[0].user).toMatch(/<\/context>\n\nHow much is a Grok subscription\?$/);
   // The web tools' line on times names the user's.
   expect(system).toContain("convert it to the user's time (UK time)");
 

@@ -730,20 +730,30 @@ pub async fn note_ask(
     // The note and About you in the system prompt, the same for every
     // question about it; the clock with the question (`chats::with_context`):
     // a hybrid local model re-uses the note's prompt from one question to
-    // the next instead of reading it again.
+    // the next instead of reading it again. A model without tools keeps the
+    // clock in the system prompt too, as `chat_turn` does.
     let profile = crate::about_you::profile(&cfg);
+    let now = chrono::Utc::now();
+    let in_message = crate::tools::supports_tools(&provider, &model);
     let mut system = format!(
-        "{}\n\nThe user is asking about the following note. Ground your answers in it; if the answer isn't in the note, say so briefly.\n\n<note>\n{}\n</note>\n\n{}",
+        "{}\n\nThe user is asking about the following note. Ground your answers in it; if the answer isn't in the note, say so briefly.\n\n<note>\n{}\n</note>",
         persona.trim(),
         context.trim(),
-        crate::chats::CONTEXT_NOTE
     );
-    let profile_block = crate::about_you::profile_block(&profile);
-    if !profile_block.is_empty() {
+    let asked = if in_message {
         system.push_str("\n\n");
-        system.push_str(&profile_block);
-    }
-    let asked = crate::chats::with_context(&[crate::about_you::clock_line(&profile, chrono::Utc::now())], &question);
+        system.push_str(crate::chats::CONTEXT_NOTE);
+        let profile_block = crate::about_you::profile_block(&profile);
+        if !profile_block.is_empty() {
+            system.push_str("\n\n");
+            system.push_str(&profile_block);
+        }
+        crate::chats::with_context(&[crate::about_you::clock_line(&profile, now)], &question)
+    } else {
+        system.push_str("\n\n");
+        system.push_str(&crate::about_you::prompt_block(&profile, now));
+        question.clone()
+    };
 
     crate::llm::note_chat(
         &system,
@@ -805,25 +815,32 @@ pub fn open_logs_folder() -> Result<(), String> {
 // ---- AI Chat (the Chat surface; OpenWhispr chat/ChatView port) ----
 
 /// What the notes the eager RAG found ([`rag_context`]) come under, in the
-/// question's context (`chats::with_context`). A keyword match, so not
-/// always what the question is about: right before a follow-up ("Whose
-/// house is it at, and what time?" after a book club answer) a note that
-/// only shared "time" made Qwen3.5-4B answer about that note instead (the
-/// model evaluations, 2026-10-22, `notes-long-chat`); said so, it follows
-/// the conversation.
-const RAG_LEAD: &str = "Notes from the user's library that share words with this message. They may not be what it's about (a follow-up is usually about the conversation so far): use them only if they answer it.";
+/// question's context (`chats::with_context`): OpenWhispr's framing line.
+/// (Telling the model the notes "may not be what it's about" didn't keep
+/// Qwen3.5-4B from answering a follow-up about a note that only shared
+/// "time" with it — 0 of 6, `notes-long-chat`, 2026-10-22; the stricter
+/// match, `tools::rag_notes`, did.)
+const RAG_LEAD: &str = "Below are notes from the user's library that may be relevant. Reference them naturally if they help answer the question.";
 
 /// Eager keyword-RAG (OpenWhispr `buildRAGContext`, keyword edition per the
-/// ROADMAP's escalating plan): top-5 notes by the shared keyword scorer,
-/// only those that really match the question (`tools::rag_notes`: since
-/// 22 Oct 2026, when the notes moved next to the question), formatted
-/// exactly like theirs — `<note id="N" title="T">\n{first 500 chars}\n</note>`
-/// joined by blank lines.
-fn rag_context(query: &str) -> String {
+/// ROADMAP's escalating plan): top-5 notes by the shared keyword scorer —
+/// `strict`, only those that really match the question (`tools::rag_notes`:
+/// for a question's context, since 22 Oct 2026, where a loose match pulled
+/// follow-ups off the conversation); else the loose search, as before, in
+/// the system prompt of a model without tools (Qwen2.5-1.5B answered less
+/// well from one note than from five) — formatted exactly like theirs —
+/// `<note id="N" title="T">\n{first 500 chars}\n</note>` joined by blank
+/// lines.
+fn rag_context(query: &str, strict: bool) -> String {
     const RAG_NOTE_LIMIT: usize = 5;
     const RAG_NOTE_SNIPPET_LENGTH: usize = 500;
 
-    crate::tools::rag_notes(query, RAG_NOTE_LIMIT)
+    let notes = if strict {
+        crate::tools::rag_notes(query, RAG_NOTE_LIMIT)
+    } else {
+        crate::tools::search_notes(query, RAG_NOTE_LIMIT)
+    };
+    notes
         .into_iter()
         .map(|(_, n)| {
             // Snippet from raw content (their choice); fall back to enhanced /
@@ -980,10 +997,15 @@ pub(crate) async fn chat_turn(
     // model (Qwen3.5) re-uses its cache only up to a checkpoint, so a
     // system prompt that changed every turn made every Chat request read
     // the whole conversation again (docs/model-evals.md); cloud providers'
-    // prefix caches like a stable start too. OpenWhispr runs BOTH eager
-    // RAG and the notes tools: the model gets relevant notes up front AND
-    // can search for more.
+    // prefix caches like a stable start too. That's for a model that calls
+    // tools (Qwen3.5-4B, the cloud models); one that can't (Qwen2.5-1.5B,
+    // dense: it re-reads only from the first change anyway) keeps it all in
+    // the system prompt — with the notes next to the question it gave half
+    // answers (4 of 10 turns, `notes-follow-ups`, 2026-10-22). OpenWhispr
+    // runs BOTH eager RAG and the notes tools: the model gets relevant notes
+    // up front AND can search for more.
     let tools_supported = crate::tools::supports_tools(&provider, &model);
+    let in_message = tools_supported;
     // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
     // bar: that's about the meetings.
     let web_on = cfg.web_search && scope != Some("meetings");
@@ -1001,7 +1023,10 @@ pub(crate) async fn chat_turn(
     let about = crate::about_you::prompt_block(&profile, now);
     let zone = profile.region.time_zone_label.clone();
     let mut system = persona.trim().to_string();
-    let mut context: Vec<String> = vec![crate::about_you::clock_line(&profile, now)];
+    let mut context: Vec<String> = Vec::new();
+    if in_message {
+        context.push(crate::about_you::clock_line(&profile, now));
+    }
     if tools_supported {
         system.push_str("\n\nYou have access to tools. ");
         system.push_str(&crate::tools::TOOL_INSTRUCTIONS.join(" "));
@@ -1026,7 +1051,12 @@ pub(crate) async fn chat_turn(
     }
     if history_note && !replay {
         if let Some(note) = crate::chats::web_history_note(earlier) {
-            context.push(note);
+            if in_message {
+                context.push(note);
+            } else {
+                system.push_str("\n\n");
+                system.push_str(&note);
+            }
         }
     }
     // A model on this PC asked something that needs the web: its first step
@@ -1041,26 +1071,42 @@ pub(crate) async fn chat_turn(
     // Asked from the Meetings view: grounded in the latest meetings and the
     // meeting notes that match (calendar.rs).
     if scope == Some("meetings") {
-        system.push_str("\n\nThe user is asking about their meetings: the context of their message gives their most recent meetings (newest first) and the meeting notes that match it. Answer from them, say which meeting an answer comes from, and say so when they don't cover the question.");
         let meetings = crate::calendar::meetings_context(&text);
-        context.push(if meetings.is_empty() {
-            "No meetings or meeting notes match this question.".to_string()
-        } else {
-            format!("Their most recent meetings and the meeting notes that match:\n\n{meetings}")
-        });
+        if in_message {
+            system.push_str("\n\nThe user is asking about their meetings: the context of their message gives their most recent meetings (newest first) and the meeting notes that match it. Answer from them, say which meeting an answer comes from, and say so when they don't cover the question.");
+            context.push(if meetings.is_empty() {
+                "No meetings or meeting notes match this question.".to_string()
+            } else {
+                format!("Their most recent meetings and the meeting notes that match:\n\n{meetings}")
+            });
+        } else if !meetings.is_empty() {
+            system.push_str(&format!(
+                "\n\nThe user is asking about their meetings. Below are their most recent meetings (newest first) and the meeting notes that match the question. Answer from them, say which meeting an answer comes from, and say so when they don't cover the question.\n\n{meetings}"
+            ));
+        }
     }
-    let rag = if scope == Some("meetings") { String::new() } else { rag_context(&text) };
+    let rag = if scope == Some("meetings") { String::new() } else { rag_context(&text, in_message) };
     if !rag.is_empty() {
-        context.push(format!("{RAG_LEAD}\n\n{rag}"));
+        if in_message {
+            context.push(format!("{RAG_LEAD}\n\n{rag}"));
+        } else {
+            system.push_str(&format!("\n\n{RAG_LEAD}\n\n{rag}"));
+        }
     }
-    // What the context block is, and About you without its clock: last in
-    // the system prompt, where small models heed it.
-    system.push_str("\n\n");
-    system.push_str(crate::chats::CONTEXT_NOTE);
-    let profile_block = crate::about_you::profile_block(&profile);
-    if !profile_block.is_empty() {
+    // Last in the system prompt, where small models heed it: what the
+    // context block is and About you without its clock — or, the context
+    // staying in the system prompt, the whole block with it.
+    if in_message {
         system.push_str("\n\n");
-        system.push_str(&profile_block);
+        system.push_str(crate::chats::CONTEXT_NOTE);
+        let profile_block = crate::about_you::profile_block(&profile);
+        if !profile_block.is_empty() {
+            system.push_str("\n\n");
+            system.push_str(&profile_block);
+        }
+    } else {
+        system.push_str("\n\n");
+        system.push_str(&about);
     }
     // Asked out loud: a tool model with the web starts with the answer; one
     // read aloud whole — the Voice Assistant, or a question dictated into
@@ -1072,7 +1118,12 @@ pub(crate) async fn chat_turn(
     }
     let spoken = by_voice && (scope == Some("assistant") || cfg.speak_replies);
     if spoken && !(tools_supported && web_on) {
-        context.push(crate::assistant::SPOKEN_ANSWER_NOTE.to_string());
+        if in_message {
+            context.push(crate::assistant::SPOKEN_ANSWER_NOTE.to_string());
+        } else {
+            system.push_str("\n\n");
+            system.push_str(crate::assistant::SPOKEN_ANSWER_NOTE);
+        }
     }
 
     let (reply, tools_used, sources, looked) = if tools_supported {
@@ -1125,7 +1176,7 @@ pub(crate) async fn chat_turn(
         // Yap's fixed web pipeline when the question needs the web.
         let endpoint = (base_url.as_str(), api_key.as_str(), model.as_str(), provider.as_str(), disable_thinking);
         let (reply, chips, sources, looked) =
-            small_model_answer(&cfg, &persona, &system, &about, &history, &text, &context, endpoint, web_on, by_voice).await?;
+            small_model_answer(&cfg, &persona, &system, &about, &history, &text, endpoint, web_on, by_voice).await?;
         // "Opening Baldur's Gate 3." from a model that can't open anything:
         // said as it is instead (apps.rs).
         let corrected = if crate::apps::claims_unasked(&reply, &text) {
@@ -1181,11 +1232,9 @@ const SMALL_HISTORY_TOKENS: usize = 2_000;
 /// model to answer only from them and cite them. It never lets the model
 /// claim a search that didn't happen: it's told so (and `chat_turn`'s
 /// checks flag an answer that claims one anyway). Also returns whether a
-/// search ran. `about`: the whole About you block with its clock
-/// (`about_you::prompt_block`), last in the web pipeline's own prompt (one
-/// made for the question, so nothing to keep cacheable there). `context`:
-/// the question's context (`chats::with_context`), sent with it on the
-/// plain-chat path; `system` stays the same from turn to turn.
+/// search ran. `about`: the About you block (`about_you::prompt_block`),
+/// already last in `system`, kept last in the web pipeline's own prompt.
+/// (These models keep the whole context in the system prompt, `chat_turn`.)
 #[allow(clippy::too_many_arguments)]
 async fn small_model_answer(
     cfg: &YapConfig,
@@ -1194,7 +1243,6 @@ async fn small_model_answer(
     about: &str,
     history: &[(String, String)],
     text: &str,
-    context: &[String],
     (base_url, api_key, model, provider, disable_thinking): (&str, &str, &str, &str, bool),
     web_on: bool,
     by_voice: bool,
@@ -1203,10 +1251,6 @@ async fn small_model_answer(
     let mut sources = Vec::new();
     let mut system = system.to_string();
     let mut history = history.to_vec();
-    let mut context = context.to_vec();
-    // The web pipeline's prompt is the question's own: the question goes
-    // as typed.
-    let mut grounded = false;
     let looked = web_on && crate::web::needs_web(text);
     if looked {
         let query = crate::web::search_query(text);
@@ -1224,7 +1268,6 @@ async fn small_model_answer(
                 system.push_str("\n\n");
                 system.push_str(about);
                 history = crate::web::fit_history(&history, SMALL_HISTORY_TOKENS);
-                grounded = true;
                 chips.push(crate::web::search_chip(&query, &found, &settings));
                 chips.push(match found_sources.len() {
                     1 => "Answered from 1 web page".to_string(),
@@ -1234,12 +1277,12 @@ async fn small_model_answer(
             }
             Ok(found) => {
                 chips.push(crate::web::search_chip(&query, &found, &settings));
-                context.push(crate::web::no_search_line(Some("the search found nothing for it")));
+                system.push_str(&format!("\n\n{}", crate::web::no_search_line(Some("the search found nothing for it"))));
             }
             Err(e) => {
                 tracing::info!("Chat: the web search for a small model failed");
                 chips.push(format!("Couldn't search the web: {}", crate::web::short(&e)));
-                context.push(crate::web::no_search_line(Some(&e)));
+                system.push_str(&format!("\n\n{}", crate::web::no_search_line(Some(&e))));
             }
         }
     } else if web_on {
@@ -1247,18 +1290,8 @@ async fn small_model_answer(
     } else {
         system.push_str(&format!("\n\n{}", crate::web::no_search_line(None)));
     }
-    let asked = if grounded {
-        text.to_string()
-    } else if crate::chats::context_at() == "message" {
-        if let Some(block) = crate::chats::context_block(&context) {
-            history.push(("user".to_string(), block));
-        }
-        text.to_string()
-    } else {
-        crate::chats::with_context(&context, text)
-    };
     let reply =
-        crate::llm::note_chat(&system, &history, &asked, base_url, api_key, model, provider, disable_thinking).await?;
+        crate::llm::note_chat(&system, &history, text, base_url, api_key, model, provider, disable_thinking).await?;
     Ok((reply, chips, sources, looked))
 }
 

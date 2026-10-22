@@ -53,6 +53,20 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   don't sync it (they could, later: accounts.md).
 - **`llm.rs`** — the AI cleanup client (OpenAI-compatible). Frames the transcript as
   data (delimiters + one-shot) so small models *clean* it instead of *answering* it.
+  **The dictation's two messages for a hybrid model** (`cleanup_messages`,
+  `split_dictation`, `splits_dictation`; 2026-10-22): the restated
+  instruction (with the spelling line) as a user message of its own, then
+  "Transcript: …" — the same words as the one message it was, the one-shots
+  unchanged — when the model is hybrid: the on-device model whose GGUF has
+  recurrent layers (`local_llm::serving_hybrid_at`, `gguf::Shape::is_hybrid`)
+  or a Qwen3.5/3.6/Qwen3-Next by name (`hybrid_by_name`). Such a model
+  resumes its cache only from a checkpoint before the last user message, so
+  it read the ~370-token instruction again for every dictation: Qwen3.5-4B
+  on an RTX 5070 Ti 447 → 55 prompt tokens read, ~237 → ~187 ms a dictation
+  (greedy outputs 27 of 32 the same; model-evals.md "Local AI, phase 1").
+  Every other model keeps the one message: a dense model already re-used
+  its cache (Qwen2.5-1.5B read 24 tokens either way) and, split, wrote
+  numbers as words more often; Groq's gpt-oss changed 2 of 6.
   The system prompt is split FluidVoice-style: an immutable `BASE_PROMPT` (guardrails:
   output-only, never answer the transcript) that's always prepended via
   `build_system_prompt()` to the user's editable **body** (tone/format = a preset or
@@ -130,7 +144,59 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   copy back of the saved prompt — and a 4B server peaked at 6.7 GB on the
   processor; Qwen3.5-4B's peak is now 3.85 GB there, 3.7 GB on the card),
   `--ctx-checkpoints 4` (Qwen3.5's recurrent-state checkpoints, ~50 MB each),
-  `-lv 4` (the log names the layers that went to the GPU). **The context**
+  `-lv 4` (the log names the layers that went to the GPU), and MTP as the
+  `Plan` says (below). **The runtime** (2026-10-22): **llamafile 0.10.6**
+  (`RUNTIME_VERSION`, mozilla-ai's release, SHA-256 `d579f61d…` = GitHub's
+  digest; over 0.10.3: CUDA graphs, a ~430 MiB smaller compute buffer, the
+  June tool-call grammar fixes, checkpoints at every user message, the
+  Qwen3.5 MTP fix — the 4B's cleanup ~300 → ~245 ms, generation ~116 → ~167
+  tokens/s, greedy outputs identical, model-evals.md "Local AI, phase 1").
+  **Which one is on disk**: the marker beside it (`llamafile.json`:
+  `{version, sha256, unproven, refused}`, written after every verified
+  download — no hashing 368 MB at a start); no marker = the 0.10.3 every
+  install had (`UNMARKED_RUNTIME_VERSION`). **The upgrade for existing
+  installs** (`spawn_runtime_upgrade`, from setup; `ensure_runtime` only ever
+  downloads a missing runtime): 90 s after launch, then after a "not now"
+  every 30 min doubling to 6 h — only while the on-device model is in use
+  and not on a metered connection (`updates::metered`), it downloads the
+  pinned runtime to `llamafile-next.exe` (verified; a file already there is
+  hashed once and kept if whole; a failed download is retried later, the
+  reason logged), checks it runs here (`probe_version`: `--version`, ≤ 60 s,
+  tied to Yap's job object), then waits until nothing uses the sidecar — no
+  dictation (`pipeline_busy`), no request to it under way
+  (`requests_in_flight`), no meeting recording or action plan being written
+  (`meeting_end::summary_running`) — idle, then idle again after a settle,
+  never under a context restart (it takes `RESTARTING` only once idle, so a
+  context change isn't held up), and swaps it in under the start lock:
+  stop, `swap_in` (the old runtime and marker kept as
+  `llamafile-previous.*`, the new marker `unproven`), start. **Never without
+  a working sidecar** (`start_locked`): the first start on an unproven
+  runtime that fails puts the previous one back (`roll_back`: the new SHA
+  noted as `refused`, never downloaded again) and starts it; if that fails
+  too, the fault isn't the runtime's and the new one goes back in
+  (`swap_in`); once the new one has started, the previous one is deleted
+  (`prove`). Both run as `llamafile.exe`, so the orphan sweep
+  (`procs::orphaned`) and the job object cover them. A test run upgrades
+  only from its stand-in (`YAP_LLM_SOURCES`) when
+  `YAP_E2E_RUNTIME_UPGRADE_MS` says when to look, and never runs either
+  (e2e `local-runtime-upgrade.spec.js`). `local_llm_status().runtime`:
+  `{version, pinned, upgrade: "downloading" | "waiting" | "", mtp}`.
+  **The warm-up** (`warm_up`): right after the sidecar is healthy, one
+  cleanup-sized request — the cleanup's own messages as Settings has them,
+  a made-up dictation, ≤ 8 tokens — in the background, not through `llm.rs`
+  and not counted; the first real request (`request_starting`) cancels it.
+  It leaves the cleanup's prompt in a slot: the first dictation after
+  loading 599 → ~275 ms on the 4B. **Requests in flight**
+  (`request_starting`, called by `llm::post_chat_request` for a call to the
+  sidecar's URL): counted while they run — the context restart now waits
+  for a Chat answer or digest too (`sidecar_busy`), not only a dictation.
+  **MTP** (`plan_for` → `Plan { runtime, mtp }`, `server_args` adds
+  `--spec-type draft-mtp`): on 0.10.6 or newer, for a model with the
+  prediction layer (Qwen3.5), all on a card with room for it at that
+  context (`mtp_fits`: `gguf::estimate` with MTP ≤ `card_room`),
+  `config.local_mtp` on (default; no switch in Settings); never on the
+  processor — a model that lands (partly) on the processor with it starts
+  again without it for the session. **The context**
   (2026-10-20, Nathan's ask: "show what context length it's set at, and let
   me set my own"): `config.local_context` (tokens; 0 = `DEFAULT_CONTEXT`
   8,192, today's behaviour) — one setting for the one sidecar, so Chat,
@@ -198,26 +264,38 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   huge allocation. `Shape`: `context_length` (n_ctx_train), block count,
   heads, KV heads (one or per layer), key/value length,
   `full_attention_interval` (Qwen3.5: attention every 4th layer),
-  `nextn_predict_layers`, the `ssm.*` sizes, the vocabulary. `model_file`
-  caches per file (size + mtime). **`estimate(shape, file, ctx, on_card)`**,
+  `nextn_predict_layers` and the prediction blocks' bytes (`nextn_bytes`,
+  from the tensor list), `feed_forward_length`, the `ssm.*` sizes, the
+  vocabulary. `model_file` caches per file (size + mtime).
+  **`estimate(shape, file, ctx, on_card, Server { current, mtp })`**,
   calibrated against llamafile's log on the RTX 5070 Ti — model on the card
   = the tensors' data less the token embedding (kept on the processor)
-  unless the output shares it (no `output.weight`: copied to the card);
-  KV = attention layers × KV heads × (k + v) × 2 bytes per token (one
-  unified cache for 4 slots); recurrent state per slot (f32 conv + state,
-  × 4 slots); compute = vocab × 512 × 4 + 2 KiB per token of context.
-  Within 1% of the log (64K: 2% high): Qwen3.5-4B 3,821 / 4,637 MiB estimated vs 3,815 /
-  4,641 at 8K / 32K, Qwen2.5-1.5B 1,472 / 2,192 vs 1,480 / 2,186
-  (docs/model-evals.md "Context length"). Unit-tested on synthetic headers
-  (`tests::Writer`, the two models' real shapes); `#[ignore]`d
-  `this_pcs_models` reads `%APPDATA%\yap\llm` read-only.
+  unless the output shares it (no `output.weight`: copied to the card), and
+  on 0.10.6 less the prediction block unless MTP is on; KV = attention
+  layers × KV heads × (k + v) × 2 bytes per token (one unified cache for 4
+  slots); recurrent state per slot (f32 conv + state, × 4 slots); compute
+  on 0.10.3 = vocab × 512 × 4 + 2 KiB per token of context, on 0.10.6 = 2
+  × feed-forward × 512 × 4 + embedding × 512 × 20 + 12 MiB + 1 KiB per
+  token; MTP (`mtp_mib`) = the prediction block + the recurrent state × 3
+  more + 36 MiB + one attention layer's KV + a draft compute buffer.
+  Within 1% of the log, erring high: Qwen3.5-4B on 0.10.3 3,821 / 4,637
+  MiB estimated vs 3,815 / 4,641 at 8K / 32K; on 0.10.6 3,279 / 4,071 /
+  5,127 vs 3,270 / 4,062 / 5,118 at 8K / 32K / 64K, with MTP 4,153 / 5,065
+  / 6,281 vs 4,134 / 5,024 / 6,240; Qwen3.5-9B 5,646 vs 5,634 (8K);
+  Qwen2.5-1.5B 1,472 / 2,192 vs 1,480 / 2,186 on 0.10.3 (docs/model-evals.md
+  "Context length", "Local AI, phase 1"). The CUDA context itself
+  (~230–250 MiB more in `nvidia-smi`) isn't counted: `card_room` leaves it
+  aside. Unit-tested on synthetic headers (`tests::Writer`, the models' real
+  shapes); `#[ignore]`d `this_pcs_models` reads `%APPDATA%\yap\llm`
+  read-only (`YAP_GGUF_DIR` for another folder).
 - **`gpu.rs`** — the graphics card, for the on-device model recommended for
   this PC: DXGI (`CreateDXGIFactory1` → `EnumAdapters1` → `GetDesc1`, software
   adapters and Microsoft's Basic Render Driver left out), the card with the most
   memory of its own, cached; **`can_run_big_model`** = ≥ `BIG_MODEL_VRAM_MIB`
   (5.5 GiB, so "6 GB" cards count) of dedicated video memory — the 4B takes
-  ~3.7 GiB on the card (model 2,863 MiB + 8k context's KV 256 + recurrent state
-  201 + compute 495, read from the sidecar's log), beside Yap's speech model
+  ~3.2 GiB on the card on llamafile 0.10.6 (model 2,741 MiB + 8k context's KV
+  256 + recurrent state 201 + compute 72, read from the sidecar's log; 3.7
+  GiB on 0.10.3; MTP, only where it fits, ~0.85 GiB more), beside Yap's speech model
   (~1–1.6 GB) and Windows (~0.5–1 GB); integrated graphics report little of
   their own (this PC's Ryzen Radeon: 2 GiB). Debug-only `YAP_E2E_GPU`
   ("none" | "<name>,<MiB>") stands in for the card in test mode. `#[ignore]`d
@@ -350,8 +428,17 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   **`--locale`** stands in for Windows' region (`YAP_E2E_LOCALE`, About you):
   without it no region reaches the prompts. A scenario with `needs_web` and
   no `web` object runs live with the run's key (until 2026-10-21 a derived
-  `Default` left them keyless: Wikipedia). `--cleanup-layout`
-  tries the cleanup's prompt laid out another way. **`--bench`**
+  `Default` left them keyless: Wikipedia). `--cleanup-layout combined |
+  system` tries the cleanup's prompt laid out another way (`combined` = the
+  layout before 2026-10-22); `--cleanup-quick` / `--cleanup-limit n` keep a
+  cloud model's tokens down. A local model's server runs Yap's `Plan` (the
+  runtime's version from `--version`, MTP as the sidecar would decide on
+  this PC; `--mtp on|off` overrides, never with `--ngl 0`) and is warmed up
+  as the sidecar is (`--no-warm-up`); a runtime is used from the installed
+  app only when its marker says it's the pinned one, else downloaded with
+  its marker. `--clock-step <min>` moves the clock Chat tells the model on
+  by that much each turn (`eval::now`: a real chat's turns are minutes
+  apart, so the time in the prompt changes). **`--bench`**
   (`eval/serving.rs`): `stream` (time to the first token, streamed vs
   not, and streamed tool calls), `layout` (a Chat turn's prompt re-read
   with the time + notes in the system prompt vs the last user message),
