@@ -529,9 +529,14 @@ fn false_claims(o: &Observed) -> Vec<String> {
             "early", "late", "next", "this", "january", "february", "march", "april", "may", "june", "july", "august",
             "september", "october", "november", "december",
         ];
+        // Nor a day ("launching 12 March 2026", 2026-10-22).
         let claim = open.iter().find_map(|r| {
             r.captures_iter(&reply)
-                .filter(|c| c.get(4).is_none_or(|w| !NOT_AN_APP.contains(&w.as_str().to_lowercase().as_str())))
+                .filter(|c| {
+                    c.get(4).is_none_or(|w| {
+                        !NOT_AN_APP.contains(&w.as_str().to_lowercase().as_str()) && !w.as_str().chars().all(|ch| ch.is_ascii_digit())
+                    })
+                })
                 .filter_map(|c| c.get(0))
                 .find(|m| !offer(m))
         });
@@ -938,6 +943,7 @@ mod tests {
         assert_eq!(claims("Okay, I'll save that as a note for you.").len(), 1);
         assert_eq!(claims("I can't open apps from here, sorry.").len(), 0);
         assert_eq!(claims("Starting in Act 1, Gale is near the crash site.").len(), 0);
+        assert_eq!(claims("- **Starfall Requiem** – Sci-fi party RPG, launching 12 March 2026 on PC").len(), 0);
         // What the 1.5B said with no tools (2026-10-18 runs).
         assert_eq!(claims("Spotify has launched, and I'm ready to play your liked songs.").len(), 1);
         assert_eq!(claims("Got it. I'll move the beta ship date from Friday to Monday in the launch plan.").len(), 1);
