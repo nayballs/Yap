@@ -57,7 +57,12 @@
   Windows' default), tts_rate (1.0, 0.5–2.0), tts_volume (0.5: Yap's own
   gain on the voice, squared — `tts::gain`, half = −12 dB, 10 % = −40 dB —
   under the Windows mixer, live mid-sentence via the rodio sink's volume;
-  `tts_volume_set {volume, save?}` → `yap-voice-volume`); config v2 moved a saved
+  `tts_volume_set {volume, save?}` → `yap-voice-volume`), tts_provider
+  ("local" — the engines above — or "elevenlabs"; `tts/cloud.rs`) +
+  tts_cloud_keys (cloud voice service → API key, like web_search_keys:
+  never logged, sent only to that service in its header) + tts_cloud
+  (service → `CloudVoiceChoice {voice, voiceName, model}`, empty = George
+  and `eleven_flash_v2_5`); config v2 moved a saved
   Windows voice from tts_voice to tts_windows_voice and "windows" (never a
   choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
   = unbound, the default), opening apps (`apps.rs`): open_apps (true) +

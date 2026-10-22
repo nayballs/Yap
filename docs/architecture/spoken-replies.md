@@ -1,13 +1,25 @@
 # Spoken replies
 
-Reading answers aloud: Kokoro and Windows' voices, text prepared for speech, the speaker queue and when Yap talks. ("§Current status" below means [status.md](./status.md).)
+Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on the person's own key; text prepared for speech, the speaker queue and when Yap talks. ("§Current status" below means [status.md](./status.md).)
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
 - **`tts.rs`** — **spoken replies** (Settings → Voice Assistant, Chat's Voice
-  replies toggle, ▶ on answers). **Engines** (`Engine` → `Synth`, text →
-  `Pcm`; `prepare` (Kokoro joins sentences under 3 words to the next),
-  `cancel`): **Kokoro** (`tts/kokoro.rs`, below; the default) and
+  replies toggle, ▶ on answers). **Who speaks** (`config.tts_provider`,
+  `voicing(cfg)` → `Voicing {engine, voice, cloud}`): "local" (the
+  default — the engines below, `chosen(cfg)`) or a **cloud voice**,
+  ElevenLabs (`tts/elevenlabs.rs`, below) — only when it's picked **and**
+  has a key (`tts_cloud_keys`); without one the local voice speaks. A cloud
+  voicing carries a `CloudPlan`: the local voice that can stand in
+  (`local_voice`: Kokoro installed, or Windows voices chosen — not Windows
+  voices as a stand-in for an undownloaded Kokoro) and the key/choice
+  fingerprints. `speak(text, id)` is the one way in — an answer's
+  markdown or any plain text (a later "read the selection aloud" reuses
+  it). **Engines** (`Engine` → `Synth`, text → `Pcm`; `Synth::stream`
+  hands audio on as it's made — a cloud voice's first piece plays before
+  the sentence is all made; the default makes the whole sentence;
+  `prepare` (Kokoro and ElevenLabs join sentences under 3 words to the
+  next), `cancel`): **Kokoro** (`tts/kokoro.rs`, below; the default) and
   **Windows voices** (`WindowsVoices`: WinRT `SpeechSynthesizer`,
   `SynthesizeTextToStreamAsync` → WAV → `parse_wav`; rate via
   `SpeakingRate`, minimal appended silence). `chosen(cfg)`: Kokoro with
@@ -47,15 +59,33 @@ Reading answers aloud: Kokoro and Windows' voices, text prepared for speech, the
   utterance replaces the old; it checks before every sentence and while one
   plays that no dictation records (`pipeline::dictation_state`), refuses to
   start over one, and refuses while a meeting records (the loopback would
-  put Yap in "Them"; `meeting::start` stops it). `yap-tts-state
-  {speaking, messageId, error}` on every change. **When to speak** (pure):
+  put Yap in "Them"; `meeting::start` stops it). Each sentence is
+  `stream`ed into the sink piece by piece (each piece checked: stopped, or
+  a dictation started → the stream ends). **A cloud voice failing**
+  (`Job.fallback`: `Fallback {local, notify}`): the rest of that answer —
+  the failed sentence included — goes to the local voice, if there's one,
+  else the answer stops there; the failing engine is never asked again for
+  that answer (no retry loop), and `notify` runs once:
+  `cloud_failed` → `alert::show_soon` kind **"voiceFallback"** (the main
+  window's toast while it's focused, else a Yap bar card, else a Windows
+  notification; icon "assistant", **Open settings** →
+  `OPEN_VOICE_SETTINGS` → Settings → Voice Assistant `voice#voice-provider`):
+  "ElevenLabs didn't answer (quota used up)" + "Speaking with Yap's own
+  voice." / "Yap's own voice isn't downloaded, so this answer wasn't read
+  aloud." + what to do — said once per reason in 10 minutes
+  (`cloud::Health::announce`); the state then carries no error (no second
+  toast). `yap-tts-state {speaking, messageId, error}` on every change. **When to speak** (pure):
   `auto_speak(speak_replies, speak_when, asked_by_voice, dictating,
   meeting)` (chat_send's `speak`), `sends_by_itself(speak_replies,
   hands_free, said_enter)` — the Voice Assistant's answers ignore both
   (`assistant::reply`), and every state change is passed to
-  `assistant::on_tts_state` (its answer ended). Commands `tts_voices` (`{engine, active,
+  `assistant::on_tts_state` (its answer ended). Commands `tts_voices` (`{provider,
+  providers: [{id, name, keysPage}], engine, active,
   engines, kokoro: {voices, defaultVoice}, kokoroStatus, windows: {voices,
-  defaultVoice, error}}`), `tts_speak {text, messageId}`, `tts_preview
+  defaultVoice, error}}`), the cloud voice's `tts_cloud_voices` /
+  `tts_cloud_models` / `tts_cloud_usage` / `tts_cloud_preview {provider,
+  voice, apiKey?, model?, rate?}` (the key Settings has now, else the saved
+  one), `tts_speak {text, messageId}`, `tts_preview
   {voice, rate, engine?}` (Kokoro not installed → "Download Kokoro to hear
   its voices"), `tts_stop`, `tts_state`, `tts_kokoro_status` /
   `tts_kokoro_download` (`tts-download-progress {percent, downloadedBytes,
@@ -69,9 +99,61 @@ Reading answers aloud: Kokoro and Windows' voices, text prepared for speech, the
   answer is a later job. Test mode: stand-in Windows voices, Kokoro as
   silence once installed from the suite's local server, a simulated clock
   (`SimPlayback`), no device; what would have been said (with its `engine`)
-  goes to the debug-only `tts_e2e_spoken {clear?}`. An `#[ignore]`d
+  goes to the debug-only `tts_e2e_spoken {clear?}` (a cloud voice's
+  stand-in taking over adds a record with its `fallback` error; `clear`
+  also forgets the cloud's last failure). An `#[ignore]`d
   `windows_voices_on_this_pc` lists the voices and synthesises a sentence
-  to a WAV in a temp folder (never played).
+  to a WAV in a temp folder (never played); `first_audio_latency`
+  (`--features engines`) times `speak` → first piece at the output for
+  Kokoro and for ElevenLabs' path against a local stand-in
+  (`YAP_TTS_STANDIN_MS`).
+  - **`tts/cloud.rs`** — what any cloud voice shares (another service —
+    OpenAI's, Azure's — slots in beside ElevenLabs): `PROVIDERS` ("local"
+    "On this PC", "elevenlabs" "ElevenLabs"), `Failure` (BadKey,
+    NotAllowed, Quota, RateLimited, ServiceDown, Offline, TimedOut,
+    VoiceGone, ModelGone, Rejected(their words)) with its `reason` ("quota
+    used up"), `advice` and `skip_for`, `notice_text`, and **`Health`**
+    (pure, unit-tested on a simulated clock): the last failure per
+    provider by key and key + voice + model fingerprint (`fingerprint`,
+    in memory only, never the key); `announce` says a reason once per
+    `ANNOUNCE_EVERY` (10 min); `skipping` sends the next answers straight
+    to the local voice — when there is one — for `skip_for` (30 s after a
+    rate limit, 60 s offline / timed out / 5xx, 5 min refused, 15 min quota,
+    30 min bad key / not allowed / voice or model gone); another key, voice
+    or model, or any request that works (Settings' list, ▶), starts afresh.
+  - **`tts/elevenlabs.rs`** — **ElevenLabs**, on the person's own key (API
+    as of 22 Oct 2026). Speech: `POST /v1/text-to-speech/{voice}/stream?
+    output_format=pcm_24000` with `{text, model_id, voice_settings?:
+    {speed}}` (raw 16-bit LE mono PCM at 24 kHz, every plan; `speed` only
+    when Yap's isn't 1×, clamped to ElevenLabs' 0.7–1.2) — `stream_speech`
+    decodes it as it arrives (`S16Le`, a sample split across pieces kept)
+    and hands on ≥ 100 ms at a time, then 150 ms of quiet; 4 s to connect,
+    6 s to the first audio, 6 s between pieces (`TimedOut`); a stop
+    (`cancel`: a counter + a tokio `Notify`) ends a sentence still being
+    fetched at once. Model: **`eleven_flash_v2_5`** by default (the docs'
+    lowest latency, ~75 ms; 32 languages); the picker reads `GET
+    /v1/models` (`can_do_text_to_speech`, no alpha), else `KNOWN_MODELS`.
+    Voices: `GET /v2/voices?page_size=100` (≤ 3 pages; the account's own
+    voices plus ElevenLabs' defaults on page 0), the account's own first;
+    default voice **George** (`JBFqnCBsd6RMkjVDRZzb`). Usage: `GET
+    /v1/user/subscription` → `character_count` / `character_limit` /
+    `next_character_count_reset_unix`; any error → none shown. ▶ plays a
+    voice's own `preview_url` (`Sample` engine: fetched on the speaker's
+    thread when clicked, without the key, https only — a test run: only
+    the stand-in —, ≤ 4 MB, decoded by Symphonia) from the list Yap read
+    last (`PREVIEWS`: never a URL a page hands over); a voice without one
+    says the preview sentence through the service. **The key**: `Key`
+    (`Debug` redacted), only in the `xi-api-key` header, never a URL, a log
+    line or an error (`tidy` cuts it from anything the service says back);
+    keyed requests follow no redirect. Errors: `classify` reads `{detail:
+    {code | status, message}}` — `invalid_api_key` (401) → BadKey,
+    `insufficient_credits` (402) / the older 401 `quota_exceeded` → Quota,
+    `missing_permissions` / `insufficient_permissions` / 403 → NotAllowed,
+    429 → RateLimited, `voice_not_found` / 404 → VoiceGone, 5xx →
+    ServiceDown. Debug-only `YAP_ELEVENLABS_URL` names a test run's
+    stand-in (`e2e/support/fake-elevenlabs.js`); without it a test run
+    never reaches the internet. Unit tests run against an in-process
+    stand-in (`standin`: chunked PCM in odd pieces, errors, silence).
   - **`tts/kokoro.rs`** — **Kokoro-82M v1.0** (hexgrad, Apache-2.0), the
     natural voice: onnx-community's **fp32** export (the fp16 one turns
     longer British sentences into NaN — `checks::nan_probe`; int8 is 3.5–4×

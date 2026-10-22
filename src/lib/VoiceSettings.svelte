@@ -1,13 +1,17 @@
 <script>
-  // Settings → Voice Assistant → Voice: the engine (Kokoro, the natural voices
-  // on this PC, recommended; or Windows' own voices), Kokoro's download row
-  // (Download / Active / delete, like the speech models'), the voice picker
-  // that follows the engine (Kokoro's 54 voices grouped by accent and
-  // gender), ▶ Preview, the speed, and where Kokoro's files come from
-  // (tts.rs, tts/kokoro.rs, tts/registry.rs).
+  // Settings → Voice Assistant → Voice: who speaks (ttsProvider: "On this
+  // PC", the default, or a cloud voice — ElevenLabs, ElevenLabsSettings.svelte
+  // — with the privacy line under the choice while it's picked); on this PC,
+  // the engine (Kokoro, the natural voices on this PC, recommended; or
+  // Windows' own voices), Kokoro's download row (Download / Active / delete,
+  // like the speech models'), the voice picker that follows the engine
+  // (Kokoro's 54 voices grouped by accent and gender), ▶ Preview, and where
+  // Kokoro's files come from; for both, the speed and the volume (tts.rs,
+  // tts/kokoro.rs, tts/registry.rs, tts/elevenlabs.rs).
   //
-  //   cfg: Settings' config $state (ttsEngine, ttsVoice — Kokoro's —,
-  //        ttsWindowsVoice, ttsRate). Auto-save does the saving.
+  //   cfg: Settings' config $state (ttsProvider, ttsCloudKeys, ttsCloud,
+  //        ttsEngine, ttsVoice — Kokoro's —, ttsWindowsVoice, ttsRate,
+  //        ttsVolume). Auto-save does the saving.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
@@ -17,6 +21,7 @@
   import Segmented from './ui/Segmented.svelte';
   import ModelRow from './ModelRow.svelte';
   import ConfirmDialog from './ui/ConfirmDialog.svelte';
+  import ElevenLabsSettings from './ElevenLabsSettings.svelte';
   import { speech } from './speech.svelte.js';
   import { toast } from './ui/toast.svelte.js';
   import { openExternalLink } from './externalLinks.js';
@@ -38,6 +43,29 @@
     const un = listen('tts-kokoro-changed', loadVoices);
     return () => un.then((f) => f());
   });
+
+  // Who speaks: the providers tts_voices lists (cloud/PROVIDERS), these
+  // until it answers.
+  const PROVIDERS = [
+    { value: 'local', label: 'On this PC' },
+    { value: 'elevenlabs', label: 'ElevenLabs' },
+  ];
+  const providers = $derived(
+    voiceList?.providers?.length ? voiceList.providers.map((p) => ({ value: p.id, label: p.name })) : PROVIDERS
+  );
+  const provider = $derived(providers.some((p) => p.value === cfg.ttsProvider) ? cfg.ttsProvider : 'local');
+  const cloud = $derived(provider !== 'local');
+  const keysPage = $derived(voiceList?.providers?.find((p) => p.id === provider)?.keysPage || undefined);
+  function setProvider(v) {
+    cfg.ttsProvider = v;
+    if (speech.speakingId === 'preview') invoke('tts_stop').catch(() => {});
+  }
+  const providerDesc = $derived(
+    cloud ? "ElevenLabs' voices, on your own API key" : "Yap's own voice, made on this PC: nothing leaves it"
+  );
+  // A local voice that can stand in when the cloud voice fails: Kokoro
+  // downloaded, or Windows voices chosen (tts.rs local_voice).
+  const localFallback = $derived(cfg.ttsEngine === 'windows' || (kokoro.inBuild && kokoro.installed));
 
   const ENGINES = [
     { value: 'kokoro', label: 'Kokoro' },
@@ -142,6 +170,19 @@
   }
 </script>
 
+<div id="settings-voice-provider">
+  <Row label="Speaks with" desc={providerDesc}>
+    <Segmented bind:value={() => provider, setProvider} options={providers} label="Speaks with" />
+  </Row>
+</div>
+
+{#if cloud}
+  <!-- Where the words go, said plainly while a cloud voice is picked. -->
+  <Row>
+    <p class="privacy">The words Yap speaks are sent to ElevenLabs.</p>
+  </Row>
+  <ElevenLabsSettings {cfg} {keysPage} {localFallback} />
+{:else}
 <Row label="Engine" desc={engineDesc}>
   <Segmented bind:value={cfg.ttsEngine} options={ENGINES} label="Engine" />
 </Row>
@@ -201,9 +242,13 @@
     </button>
   </div>
 </Row>
+{/if}
 
 <Row>
   <Slider bind:value={cfg.ttsRate} min={0.5} max={2} step={0.1} label="Speed" format={(v) => `${Number(v).toFixed(1)}×`} />
+  {#if cloud && (Number(cfg.ttsRate) < 0.7 || Number(cfg.ttsRate) > 1.2)}
+    <span class="note under">ElevenLabs speaks between 0.7× and 1.2×: it uses the nearest.</span>
+  {/if}
 </Row>
 
 <!-- Yap's own volume for the voice (tts.rs `gain`), under the Windows
@@ -220,7 +265,7 @@
   />
 </Row>
 
-{#if engine === 'kokoro'}
+{#if !cloud && engine === 'kokoro'}
   <Row>
     <p class="credit">
       <a href="https://huggingface.co/hexgrad/Kokoro-82M" onclick={link('https://huggingface.co/hexgrad/Kokoro-82M')}>Kokoro-82M</a>
@@ -254,6 +299,16 @@
     font-size: 11.5px;
     color: var(--yap-muted);
     line-height: 1.5;
+  }
+  .note.under {
+    display: block;
+    margin-top: 6px;
+  }
+  .privacy {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--yap-fg-80, var(--yap-fg));
   }
   .err {
     margin: 0;

@@ -158,6 +158,20 @@ pub struct AppRoute {
     pub prompt: String,
 }
 
+/// A cloud voice service's choices (`tts_cloud`): its voice and model.
+/// Empty = the service's default (`tts::elevenlabs::DEFAULT_VOICE`,
+/// `DEFAULT_MODEL`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CloudVoiceChoice {
+    /// The service's voice id ("JBFqnCBsd6RMkjVDRZzb").
+    pub voice: String,
+    /// Its name, to show while the list can't be read ("George").
+    pub voice_name: String,
+    /// The model id ("eleven_flash_v2_5").
+    pub model: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct YapConfig {
@@ -531,6 +545,20 @@ pub struct YapConfig {
     /// under the Windows mixer's. Half by default.
     #[serde(default = "default_tts_volume")]
     pub tts_volume: f32,
+    /// Who reads spoken replies (`tts::cloud::PROVIDERS`): "local" (the
+    /// default — Kokoro or Windows voices, on this PC) or "elevenlabs"
+    /// (ElevenLabs' voices on the person's own key: the words Yap speaks go
+    /// there; until a key is set the local voice speaks).
+    #[serde(default = "default_tts_provider")]
+    pub tts_provider: String,
+    /// Each cloud voice service's API key (service id → key), like
+    /// `web_search_keys`: stored in config.json, never logged, sent only to
+    /// that service, in a header.
+    #[serde(default)]
+    pub tts_cloud_keys: std::collections::HashMap<String, String>,
+    /// Each cloud voice service's voice and model (service id → choice).
+    #[serde(default)]
+    pub tts_cloud: std::collections::HashMap<String, CloudVoiceChoice>,
 
     /// Show live partial transcripts in the overlay while you speak. On by
     /// default (2026-07-10, after live validation): the worker transcribes a
@@ -784,6 +812,9 @@ fn default_tts_rate() -> f32 {
 fn default_tts_volume() -> f32 {
     0.5
 }
+fn default_tts_provider() -> String {
+    crate::tts::cloud::LOCAL.into()
+}
 fn default_diarization_model() -> String {
     crate::diarize::DEFAULT_MODEL.into()
 }
@@ -865,6 +896,9 @@ impl Default for YapConfig {
             tts_windows_voice: String::new(),
             tts_rate: default_tts_rate(),
             tts_volume: default_tts_volume(),
+            tts_provider: default_tts_provider(),
+            tts_cloud_keys: std::collections::HashMap::new(),
+            tts_cloud: std::collections::HashMap::new(),
             streaming_partials: true,
             history_enabled: true,
             bridge_enabled: true,

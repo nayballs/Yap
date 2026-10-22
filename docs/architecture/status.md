@@ -48,7 +48,17 @@ answer after the text pass: 0 misread words for af_bella / bf_emma /
 bm_george (before it, "£12,400" lost its "pounds"); the download, the
 Settings rows and the fallback e2e-tested against a local server, the real
 download and msiexec unpack checked once; not yet heard on speakers by a
-person), combo hotkeys, the audio pre-roll (anti first-word clipping), **live
+person) and **ElevenLabs** as an optional cloud voice on the person's own
+key (2026-10-22, `tts/elevenlabs.rs` + `tts/cloud.rs`: streamed PCM per
+sentence, the account's voices with ▶ samples, Flash v2.5 by default,
+usage; any failure hands the answer to the local voice with one notice, or
+a notice and silence without one; request building, PCM, errors and the
+fallback rules unit-tested against an in-process stand-in, Settings and
+the reply/fallback flows e2e-tested against `fake-elevenlabs.js`; first
+audio measured on this PC with `first_audio_latency`: Kokoro af_bella
+1.4 s cold / ~0.43 s warm for the preview sentence, ElevenLabs' path
+< 1 ms of Yap's own on top of the service's answer; not yet tried with a
+real key), combo hotkeys, the audio pre-roll (anti first-word clipping), **live
 streaming partials** (sliding-window, on by default, word-paced overlay reveal —
 validated live 2026-07-10), transcription history + stats, cleanup presets,
 **other apps silenced or paused while you dictate** (`mute.rs` + `media_pause.rs`,
@@ -249,7 +259,7 @@ with real keys; Gemini grounding untried on a billed key.
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), no calendar tools and no conversation
-search/archive; spoken replies have no cloud voices, read Kokoro's
+search/archive; ElevenLabs as the reply voice isn't yet tried with a real key; spoken replies read Kokoro's
 Japanese and Mandarin voices' text as English, don't check a slow PC's
 speed before choosing Kokoro (the research's first-use RTF check), wait for the whole answer
 before the first sentence, don't listen again by themselves after an answer,

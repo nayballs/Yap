@@ -36,7 +36,9 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   microphone access…", call-prompt fatigue's "Stop asking about calls?" /
   "Yap stopped asking about calls", the Voice Assistant's "Pick an AI model
   for the Voice Assistant" with Open settings → Language Models → Chat &
-  Voice Assistant): in one place (`notice::place`) — a
+  Voice Assistant, spoken replies' "ElevenLabs didn't answer (quota used
+  up)" — kind `voiceFallback`, once per reason in 10 minutes
+  (`tts/cloud.rs`), Open settings → Voice Assistant → Voice): in one place (`notice::place`) — a
   toast in the main window while it's focused (`yap-alert` →
   `lib/alerts.js`, kind `alert`), else a Yap bar card, else a Windows
   notification, else the window on screen; the same alert again within its
