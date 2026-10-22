@@ -1,18 +1,23 @@
 // About you (Settings → General; src-tauri/src/about_you.rs,
-// src/lib/AboutYouSettings.svelte, 2026-10-21):
-// - "Region and language" as Windows has it — in a test run the debug-only
-//   YAP_E2E_LOCALE stands in for Windows (never the PC's own settings): an
-//   en-GB format, home location United Kingdom, £ GBP, metric, the Windows
-//   zone "GMT Standard Time" (→ Europe/London) — shown as one line;
-// - Change: pickers for the country, language, currency, units and time
-//   zone; a country picked brings its own currency and units; "Use Windows'
-//   settings" puts it back; the picks are saved (config.json);
+// src/lib/AboutYouSettings.svelte, 2026-10-21; one Region picker since
+// 2026-10-22):
+// - "Region": "Automatic: United Kingdom (from Windows)" — in a test run the
+//   debug-only YAP_E2E_LOCALE stands in for Windows (never the PC's own
+//   settings): an en-GB format, home location United Kingdom, £ GBP,
+//   metric, the Windows zone "GMT Standard Time" (→ Europe/London) — or any
+//   country; one quiet line under it says what follows ("Prices in £ ·
+//   miles and °C · British spelling · UK time"), and changes with the
+//   country; the pick is saved (config.json), Automatic saves "";
+// - no other region pickers and no spelling switch here: the spelling's
+//   one switch is in Language Models → Dictation Cleanup ("Write in my
+//   region's spelling"), its line naming the variety and the region;
 // - "What should Yap call you?" and "Anything the AI should know about you"
-//   (300 characters at most, counted), saved; "Use my region's spelling" on,
-//   naming British English; "See what the AI is told" shows the block;
-// - Chat: the model's system prompt ends with that block (where, the
-//   clock, prices in £, the name, the note); a web search asks Exa for
-//   results from the UK (userLocation "GB").
+//   (300 characters at most, counted), saved; "See what the AI is told"
+//   shows the block;
+// - Chat: the model's system prompt ends with that block (where, prices in
+//   £, the name, the note) and its web line says to search for UK prices;
+//   a web search asks Exa for results from the UK (userLocation "GB"), and
+//   a price question's query names the UK.
 //
 // The model is the scripted fake AI (support/fake-llm.js), the web the fake
 // web (support/fake-web.js): nothing goes on the internet.
@@ -21,7 +26,7 @@ import { startFakeLlm } from './support/fake-llm.js';
 import { startFakeWeb } from './support/fake-web.js';
 
 const UK = JSON.stringify({ locale: 'en-GB', country: 'GB', currency: 'GBP', symbol: '£', metric: true, timeZone: 'GMT Standard Time' });
-const SUMMARY = 'United Kingdom · English (UK) · £ GBP · metric · UK time';
+const UK_FOLLOWS = 'Prices in £ · miles and °C · British spelling · UK time';
 const EXA_KEY = 'fake-exa-key-for-tests';
 
 const test = base.extend({
@@ -57,43 +62,43 @@ const test = base.extend({
 
 const aboutGroup = (dialog) => dialog.getByRole('group', { name: 'About you' });
 
-test('About you: the region from Windows, changed and put back, the name and note saved', async ({ yap, main, shot }) => {
+test('About you: one Region picker — Automatic from Windows, a country picked and put back — and the name and note saved', async ({
+  yap,
+  main,
+  shot,
+}) => {
   const dialog = await openSettings(main, 'General');
   const group = aboutGroup(dialog);
   await expect(group).toBeVisible();
-  await expect(group.getByText(SUMMARY)).toBeVisible();
-  await expect(group.getByText("AI cleanup writes British English: honour, recognise, paralyse, metre, cancelled, catalogue, defence")).toBeVisible();
-  await group.scrollIntoViewIfNeeded();
+  // One picker, Automatic: Windows' country; what follows from it, in a line.
+  const region = group.getByRole('combobox', { name: 'Region' });
+  await expect(region).toHaveValue('');
+  await expect(region.locator('option').first()).toHaveText('Automatic: United Kingdom (from Windows)');
+  await expect(region.locator('option[value="FR"]')).toHaveText('France');
+  const follows = group.getByTestId('region-follows');
+  await expect(follows).toHaveText(UK_FOLLOWS);
+  // No other region pickers, and the spelling switch isn't here any more.
+  await expect(group.getByRole('combobox')).toHaveCount(1);
+  await expect(group.getByRole('button', { name: /spelling/i })).toHaveCount(0);
+  await region.scrollIntoViewIfNeeded();
   await shot(main, '01-about-you');
 
-  // Change: the pickers, each following Windows until picked.
-  await group.getByRole('button', { name: 'Change' }).click();
-  const pickers = group.getByRole('group', { name: 'Region and language' });
-  const country = pickers.getByRole('combobox', { name: 'Country' });
-  await expect(country).toHaveValue('');
-  await expect(country.locator('option').first()).toHaveText('Windows: United Kingdom');
-  await expect(pickers.getByRole('combobox', { name: 'Time zone' }).locator('option').first()).toHaveText('Windows: UK time (Europe/London)');
-  await expect(pickers.getByRole('combobox', { name: 'Currency' }).locator('option').first()).toHaveText('Automatic: £ GBP');
-  await shot(main, '02-about-you-change');
-
-  // The US: its own currency and units; the language and the clock stay Windows'.
-  await country.selectOption('US');
-  await expect(group.getByText('United States · English (UK) · $ USD · US units · UK time')).toBeVisible();
-  await expect(pickers.getByRole('combobox', { name: 'Currency' }).locator('option').first()).toHaveText('Automatic: $ USD');
-  await expect(pickers.getByText(`Windows says: ${SUMMARY}.`)).toBeVisible();
+  // A country picked: everything follows it (the clock stays the PC's).
+  await region.selectOption('US');
+  await expect(follows).toHaveText('Prices in $ · miles and °F · American spelling · UK time');
   await expectStore(yap, 'config.json', (c) => c.regionCountry === 'US');
-  // A currency and a time zone picked too.
-  await pickers.getByRole('combobox', { name: 'Currency' }).selectOption('EUR');
-  await pickers.getByRole('combobox', { name: 'Time zone' }).selectOption('America/New_York');
-  await expect(group.getByText('United States · English (UK) · € EUR · US units · New York time')).toBeVisible();
-  await shot(main, '03-about-you-us-picked');
-  await expectStore(yap, 'config.json', (c) => c.regionCurrency === 'EUR' && c.regionTimeZone === 'America/New_York');
-  // Back to Windows' settings.
-  await pickers.getByRole('button', { name: "Use Windows' settings" }).click();
-  await expect(group.getByText(SUMMARY)).toBeVisible();
-  await expectStore(yap, 'config.json', (c) => c.regionCountry === '' && c.regionCurrency === '' && c.regionTimeZone === '');
-  await group.getByRole('button', { name: 'Done' }).click();
-  await expect(pickers).toBeHidden();
+  await region.selectOption('DE');
+  await expect(follows).toHaveText('Prices in € · km and °C · British spelling · UK time');
+  await expectStore(yap, 'config.json', (c) => c.regionCountry === 'DE');
+  await shot(main, '02-about-you-region-picked');
+  // Back to Automatic: saved as "", and none of the old fields.
+  await region.selectOption('');
+  await expect(follows).toHaveText(UK_FOLLOWS);
+  await expectStore(
+    yap,
+    'config.json',
+    (c) => c.regionCountry === '' && !('regionCurrency' in c) && !('regionTimeZone' in c) && !('regionLanguage' in c) && !('regionUnits' in c)
+  );
 
   // The name and the note, counted and capped.
   await group.getByRole('textbox', { name: 'What should Yap call you?' }).fill('Nathan');
@@ -107,20 +112,50 @@ test('About you: the region from Windows, changed and put back, the name and not
   await group.getByRole('button', { name: 'See what the AI is told' }).click();
   const told = group.getByLabel('What the AI is told');
   await expect(told).toContainText("About the user: they're in the United Kingdom (British English); it's ");
-  await expect(told).toContainText('Give times in UK time and metric units. Prices: in £ (GBP) when you have them in £');
+  await expect(told).toContainText(
+    'Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £'
+  );
   await expect(told).toContainText('Their name is Nathan.');
   await expect(told).toContainText("They told Yap: \"I'm in Manchester, I play PC games, I work day shifts\"");
   await expect(group.getByText('never sent to Yap', { exact: false })).toBeVisible();
   await group.scrollIntoViewIfNeeded();
-  await shot(main, '04-about-you-filled');
+  await shot(main, '03-about-you-filled');
+  await closeSettings(main);
+});
 
-  // "Use my region's spelling": on by default, saved off and on.
-  const spelling = group.getByRole('button', { name: "Use my region's spelling", exact: true });
+test("Dictation Cleanup: the one spelling switch, named for the region's variety", async ({ yap, main, shot }) => {
+  const dialog = await openSettings(main, 'Language Models');
+  await dialog.getByRole('tab', { name: 'Dictation Cleanup' }).click();
+  const spellingGroup = dialog.getByRole('group', { name: 'Spelling' });
+  const spelling = spellingGroup.getByRole('button', { name: "Write in my region's spelling", exact: true });
+  await expect(spelling).toBeVisible();
   await expect(spelling).toHaveAttribute('aria-pressed', 'true');
+  // It works with cleanup: off with it.
+  await expect(spelling).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Enable text cleanup', exact: true }).click();
+  await expect(spelling).toBeEnabled();
+  await expect(spellingGroup).toContainText(
+    'British spelling, from your region (United Kingdom): honour, recognise, paralyse, metre, cancelled, catalogue, defence. Only the spelling changes, never your words.'
+  );
+  await spellingGroup.scrollIntoViewIfNeeded();
+  await shot(main, '04-cleanup-spelling');
+  // Saved off and on.
   await spelling.click();
   await expectStore(yap, 'config.json', (c) => c.regionSpelling === false);
   await spelling.click();
   await expectStore(yap, 'config.json', (c) => c.regionSpelling === true);
+
+  // The region picked in About you: the line follows it.
+  await openSettings(main, 'General');
+  await aboutGroup(dialog).getByRole('combobox', { name: 'Region' }).selectOption('US');
+  await openSettings(main, 'Language Models');
+  await dialog.getByRole('tab', { name: 'Dictation Cleanup' }).click();
+  await expect(spellingGroup).toContainText('American spelling, from your region (United States): honor, recognize');
+  // Cleanup off and the region Automatic again, for the next test.
+  await dialog.getByRole('button', { name: 'Enable text cleanup', exact: true }).click();
+  await openSettings(main, 'General');
+  await aboutGroup(dialog).getByRole('combobox', { name: 'Region' }).selectOption('');
+  await expectStore(yap, 'config.json', (c) => c.regionCountry === '' && c.postProcessEnabled === false);
   await closeSettings(main);
 });
 
@@ -162,15 +197,17 @@ test("Chat: the model is told about the user, and Exa searches the user's countr
   expect(block).toMatch(/^About the user: they're in the United Kingdom \(British English\)\. Give times/);
   expect(block).not.toMatch(/\d\d:\d\d/);
   expect(block).toContain(
-    `Give times in UK time and metric units. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like "$15 a month (US price)".`
+    `Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like "$15 a month (US price)".`
   );
   expect(block).toContain('Their name is Nathan.');
   expect(block).toContain('They told Yap: "I work day shifts"');
   // …and the clock with the question, in its context.
   expect(steps[0].user).toMatch(/^<context>\nIt's \w+day \d{1,2} \w+ \d{4}, \d\d:\d\d UK time \(UTC\+0[01]:00\)\./);
   expect(steps[0].user).toMatch(/<\/context>\n\nHow much is a Grok subscription\?$/);
-  // The web tools' line on times names the user's.
+  // The web tools' line on times names the user's; the one on prices, their
+  // country.
   expect(system).toContain("convert it to the user's time (UK time)");
+  expect(system).toContain('For a price, a subscription or something to buy, search for the UK price ("UK" in the query).');
 
   // Exa was asked for results from the user's country.
   const exa = fakeWeb.requests.slice(webFrom).filter((r) => r.service === 'exa');
@@ -188,4 +225,9 @@ test("Chat: the model is told about the user, and Exa searches the user's countr
   const answer = main.locator('.msgs .cbubble.assistant').last();
   await expect(answer).toContainText('Grok Premium is $30/month');
   await expect(answer.locator('em')).toHaveText('Prices in $ are as the sources give them (most likely US dollars), not in £.');
+  // The model's search didn't say where: Yap aimed it at the UK (its
+  // "price", carried over from the search before, left out: fresh_query).
+  const searches = fakeWeb.requests.slice(webFrom).filter((r) => r.service === 'exa');
+  expect(searches.map((r) => r.body.query)).toEqual(['Grok subscription price UK', 'Grok Premium UK']);
+  await expect(main.locator('.msgs .toolchips').last().locator('.toolchip').first()).toContainText('Searched the web: "Grok Premium UK"');
 });

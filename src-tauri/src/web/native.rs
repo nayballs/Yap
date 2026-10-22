@@ -350,10 +350,14 @@ pub fn system_prompt(today: &str) -> String {
 }
 
 /// The sub-call's line on where the person is (About you): " The user is in
-/// the United Kingdom: prefer pages and prices for there (in GBP)." Pure.
+/// the United Kingdom: prefer pages and prices for there (in GBP), and say
+/// which country any other price is for." Pure.
 pub fn region_line(c: &crate::about_you::Country) -> String {
     let money = if c.currency.is_empty() { String::new() } else { format!(" (in {})", c.currency) };
-    format!(" The user is in {}: prefer pages and prices for there{money}.", crate::about_you::in_sentence(c))
+    format!(
+        " The user is in {}: prefer pages and prices for there{money}, and say which country any other price is for.",
+        crate::about_you::in_sentence(c)
+    )
 }
 
 /// What the sub-call is asked: the search, and the person's question for
@@ -1118,7 +1122,10 @@ mod tests {
         // Every provider's sub-call names the country in its prompt.
         let groq = ns(Provider::Groq, "openai/gpt-oss-20b").body("grok price", "How much is Grok?", today);
         let system = groq["messages"][0]["content"].as_str().unwrap();
-        assert!(system.ends_with(" The user is in the United Kingdom: prefer pages and prices for there (in GBP)."), "{system}");
+        assert!(
+            system.ends_with(" The user is in the United Kingdom: prefer pages and prices for there (in GBP), and say which country any other price is for."),
+            "{system}"
+        );
         assert_eq!(groq["tools"], json!([{ "type": "browser_search" }]), "Groq's tool takes no location");
         let gemini = ns(Provider::Gemini, "gemini-2.5-flash").body("q", "Q", today);
         assert!(gemini["systemInstruction"]["parts"][0]["text"].as_str().unwrap().contains("United Kingdom"));

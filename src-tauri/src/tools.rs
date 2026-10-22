@@ -1142,6 +1142,8 @@ fn empty_notes_rule(local: bool) -> EmptyNotes {
 /// sources, the safety rule's flag and the 3-search cap all as for a call
 /// of the model's).
 async fn search_for_the_model(turn: &mut crate::web::Turn, query: &str, messages: &mut Vec<Value>, tools_used: &mut Vec<String>) {
+    // A price question's search names the person's country ("… UK").
+    let query = turn.local_query(query).unwrap_or_else(|| query.to_string());
     let args = json!({ "query": query });
     let result = turn.execute("web_search", &args).await;
     tracing::info!(success = %result["success"], "Chat: Yap searched the web for the model");
@@ -1204,6 +1206,11 @@ pub async fn run_tool_loop(
     first: FirstStep,
 ) -> Result<(String, Vec<String>), String> {
     let must_search_first = first == FirstStep::MustSearch && web.is_some();
+    // A model on this PC gets Yap's second search for local prices; a cloud
+    // model is told to make it.
+    if let Some(turn) = web.as_deref_mut() {
+        turn.set_yap_retries(crate::ai_model::runs_here(provider, base_url));
+    }
     let mut context = context.to_vec();
     if must_search_first {
         context.push(MUST_SEARCH_NOTE.to_string());
@@ -1332,23 +1339,35 @@ pub async fn run_tool_loop(
             let id = call["id"].as_str().unwrap_or("");
             let name = call["function"]["name"].as_str().unwrap_or("");
             let mut args = call_arguments(call);
-            // The forced first search: for this question, not words carried
-            // over from earlier ones.
-            if forced && name == "web_search" {
-                if let Some(q) = args["query"].as_str() {
-                    let fresh = crate::web::fresh_query(q, question, &earlier);
+            if name == "web_search" {
+                let asked = args["query"].as_str().unwrap_or("").to_string();
+                let mut q = asked.clone();
+                // The forced first search: for this question, not words
+                // carried over from earlier ones.
+                if forced {
+                    let fresh = crate::web::fresh_query(&q, question, &earlier);
                     if fresh != q {
                         tracing::info!(words_before = q.split_whitespace().count(), words_after = fresh.split_whitespace().count(), "Chat: earlier words left out of the forced search");
                         crate::eval::post_fix("fresh_query");
-                        args["query"] = json!(fresh);
-                        // The call as it ran, in the conversation too.
-                        if let Some(c) = messages
-                            .last_mut()
-                            .and_then(|m| m["tool_calls"].as_array_mut())
-                            .and_then(|calls| calls.iter_mut().find(|c| c["id"].as_str() == Some(id)))
-                        {
-                            c["function"]["arguments"] = json!(args.to_string());
-                        }
+                        q = fresh;
+                    }
+                }
+                // A price question: the search names the person's country
+                // ("… UK"), every search of the turn.
+                if let Some(local) = web.as_deref().and_then(|t| t.local_query(&q)) {
+                    tracing::info!("Chat: the search names the user's country (a price question)");
+                    crate::eval::post_fix("local_query");
+                    q = local;
+                }
+                if q != asked {
+                    args["query"] = json!(q);
+                    // The call as it ran, in the conversation too.
+                    if let Some(c) = messages
+                        .last_mut()
+                        .and_then(|m| m["tool_calls"].as_array_mut())
+                        .and_then(|calls| calls.iter_mut().find(|c| c["id"].as_str() == Some(id)))
+                    {
+                        c["function"]["arguments"] = json!(args.to_string());
                     }
                 }
             }
@@ -1390,6 +1409,15 @@ pub async fn run_tool_loop(
                 "tool_call_id": id,
                 "content": result.to_string(),
             }));
+        }
+        // A price question whose results only had another country's prices:
+        // a model on this PC gets Yap's search for the local price straight
+        // away ("… UK £"; a cloud model is told to search again).
+        if let Some(turn) = web.as_deref_mut() {
+            if let Some(q) = turn.take_local_retry() {
+                tracing::info!(provider, "Chat: no local prices in the results; Yap searches again for them");
+                search_for_the_model(turn, &q, &mut messages, &mut tools_used).await;
+            }
         }
         // Nothing in the notes for a question the web may answer: a model on
         // this PC gets Yap's search for it straight away (the question as
@@ -1956,7 +1984,7 @@ mod tests {
             exa,
         );
         let settings =
-            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None };
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None };
         let endpoints = crate::web::Endpoints {
             exa: format!("{}/exa", fake.base),
             tavily: String::new(),
@@ -2165,7 +2193,7 @@ mod tests {
             exa,
         );
         let settings =
-            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None };
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None };
         let endpoints = crate::web::Endpoints {
             exa: format!("{}/exa", fake.base),
             tavily: String::new(),
@@ -2210,7 +2238,7 @@ mod tests {
         let notes_twice = calls(&[("search_notes", json!({ "query": "Grok plans" })), ("search_notes", json!({ "query": "Grok" }))]);
         let run = |fake: &FakeServer, question: &'static str| {
             let settings =
-                crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: Some("GB".into()) };
+                crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: Some("GB".into()), local: None };
             let endpoints = crate::web::Endpoints { exa: format!("{}/exa", fake.base), tavily: String::new(), standin: None, offline: false };
             let base = format!("{}/v1", fake.base);
             async move {
@@ -2267,7 +2295,7 @@ mod tests {
             exa,
         );
         let settings =
-            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None };
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None };
         let endpoints = crate::web::Endpoints { exa: format!("{}/exa", fake.base), tavily: String::new(), standin: None, offline: false };
         let question = "What's the latest Python?";
         let mut turn = crate::web::Turn::new(settings, endpoints, question, &[]);

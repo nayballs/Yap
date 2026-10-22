@@ -1046,6 +1046,12 @@ pub(crate) async fn chat_turn(
             system.push_str(&crate::tools::WEB_TOOL_INSTRUCTIONS.join(" "));
             system.push(' ');
             system.push_str(&crate::web::time_note(zone.as_deref()));
+            // Outside the US: prices from where they are, or one plain line
+            // saying there are none.
+            if let Some(local) = crate::about_you::LocalPrices::for_region(&profile.region) {
+                system.push(' ');
+                system.push_str(&crate::web::price_note(&local));
+            }
         }
     } else {
         // No tools: it can't do anything on the PC, so it mustn't say so.
@@ -1207,6 +1213,18 @@ pub(crate) async fn chat_turn(
         tracing::info!(fix = f, "Chat: Yap fixed the model's answer");
         crate::eval::post_fix(f);
     }
+    // A price question that searched: no offer to look for prices where the
+    // person is — Yap looked (and, finding only another country's, looked
+    // again).
+    if looked && crate::web::asks_about_prices(&text) {
+        if let Some(stripped) = crate::about_you::LocalPrices::for_region(&profile.region)
+            .and_then(|local| crate::about_you::strip_price_offer(&reply, &local))
+        {
+            tracing::info!("Chat: Yap took out the answer's offer to look for local prices");
+            crate::eval::post_fix("price_offer");
+            reply = stripped;
+        }
+    }
     // Prices in $ without saying whose, for someone who pays in £ (About
     // you): Yap says so under the answer.
     if let Some(note) = crate::about_you::foreign_price_note(&reply, &profile.region) {
@@ -1260,22 +1278,36 @@ async fn small_model_answer(
     let mut history = history.to_vec();
     let looked = web_on && crate::web::needs_web(text);
     if looked {
-        let query = crate::web::search_query(text);
         let settings = crate::web::Settings::for_chat(cfg, provider, model, base_url, api_key);
-        match crate::web::search(&settings, &crate::web::Endpoints::current(), &query, text).await {
-            Ok(found) if found.hits.iter().any(|h| !h.text.trim().is_empty()) => {
+        // A price question's search names the person's country ("… UK").
+        let query = crate::web::search_query(text);
+        let query = crate::web::local_query(&query, text, settings.local.as_ref()).unwrap_or(query);
+        let endpoints = crate::web::Endpoints::current();
+        match crate::web::search(&settings, &endpoints, &query, text).await {
+            Ok(mut found) if found.hits.iter().any(|h| !h.text.trim().is_empty()) => {
+                chips.push(crate::web::search_chip(&query, &found, &settings));
+                // Only another country's prices: once more for theirs.
+                let price_line = match settings.local.as_ref() {
+                    Some(local) if local.tells_apart && crate::web::asks_about_prices(text) => {
+                        local_prices_again(&settings, &endpoints, local, &query, text, &mut found, &mut chips).await
+                    }
+                    _ => None,
+                };
                 let (found_sources, block) = crate::web::grounded_sources(&found.hits, SMALL_WEB_TOKENS);
                 system = crate::web::grounded_prompt(persona, &block, &crate::web::today(), by_voice);
                 system.push(' ');
                 let zone = crate::about_you::profile(cfg).region.time_zone_label;
                 system.push_str(&crate::web::time_note(zone.as_deref()));
+                if let Some(line) = price_line {
+                    system.push(' ');
+                    system.push_str(&line);
+                }
                 // Still only text: it can't open or change anything (apps.rs).
                 system.push_str("\n\n");
                 system.push_str(crate::apps::NO_TOOLS_NOTE);
                 system.push_str("\n\n");
                 system.push_str(about);
                 history = crate::web::fit_history(&history, SMALL_HISTORY_TOKENS);
-                chips.push(crate::web::search_chip(&query, &found, &settings));
                 chips.push(match found_sources.len() {
                     1 => "Answered from 1 web page".to_string(),
                     n => format!("Answered from {n} web pages"),
@@ -1300,6 +1332,52 @@ async fn small_model_answer(
     let reply =
         crate::llm::note_chat(&system, &history, text, base_url, api_key, model, provider, disable_thinking).await?;
     Ok((reply, chips, sources, looked))
+}
+
+/// The fixed web pipeline's second search for a price where the person is
+/// (`about_you::LocalPrices`), when the first results only gave another
+/// country's: "… UK £". Their prices found: those pages first. None again:
+/// the others stay, and the answer is told to say so in one line. Returns
+/// the prompt's line on prices, if any. (Its chip goes in `chips`.)
+async fn local_prices_again(
+    settings: &crate::web::Settings,
+    endpoints: &crate::web::Endpoints,
+    local: &crate::about_you::LocalPrices,
+    query: &str,
+    question: &str,
+    found: &mut crate::web::Found,
+    chips: &mut Vec<String>,
+) -> Option<String> {
+    let text_of = |f: &crate::web::Found| f.hits.iter().map(|h| format!("{}\n{}", h.title, h.text)).collect::<Vec<_>>().join("\n");
+    let first = text_of(found);
+    if local.local_in(&first) || !local.foreign_in(&first) {
+        return None;
+    }
+    let (p, s) = (&local.place, local.sign());
+    let none = format!(
+        "The sources have no {p} prices (in {s}): start your answer with one short line saying you couldn't find {p} prices, then give the sources' prices as they are, saying which country they're for. Don't offer to look further."
+    );
+    let retry = crate::web::local_retry_query(query, local);
+    crate::eval::post_fix("yap_search");
+    let more = match crate::web::search(settings, endpoints, &retry, question).await {
+        Ok(more) => more,
+        Err(e) => {
+            chips.push(format!("Couldn't search the web: {}", crate::web::short(&e)));
+            return Some(none);
+        }
+    };
+    chips.push(crate::web::search_chip(&retry, &more, settings));
+    let theirs = local.local_in(&text_of(&more));
+    // Their prices' pages first (the prompt keeps the first few), else the
+    // first search's.
+    let (mut hits, rest) = if theirs { (more.hits, std::mem::take(&mut found.hits)) } else { (std::mem::take(&mut found.hits), more.hits) };
+    for h in rest {
+        if !hits.iter().any(|x| crate::web::normal_url(&x.url) == crate::web::normal_url(&h.url)) {
+            hits.push(h);
+        }
+    }
+    found.hits = hits;
+    Some(if theirs { format!("The first sources give {p} prices (in {s}): answer with those, as the sources give them.") } else { none })
 }
 
 /// How earlier web answers reach the model: `(replay, note)` — their
