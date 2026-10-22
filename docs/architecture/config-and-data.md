@@ -66,7 +66,9 @@
   and `eleven_flash_v2_5`); config v2 moved a saved
   Windows voice from tts_voice to tts_windows_voice and "windows" (never a
   choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
-  = unbound, the default), opening apps (`apps.rs`): open_apps (true) +
+  = unbound, the default), Read aloud's read_hotkey ("" = unbound, the
+  default; `read_aloud.rs`: the selection in any app read aloud, its speed
+  the card's − / +, saved as tts_rate), opening apps (`apps.rs`): open_apps (true) +
   apps_blocked (app ids, "Don't open this one") + app_nicknames
   (`AppNickname {say, app, name}`), the web (`web.rs`): web_search (false) +
   web_search_native (true: cloud models use their provider's own search) +

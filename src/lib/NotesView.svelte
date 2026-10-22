@@ -626,6 +626,9 @@
           })),
         },
         { separator: true },
+        readingNote(n.id)
+          ? { label: 'Stop reading', icon: 'stop', onselect: () => readNote(n.id) }
+          : { label: 'Read aloud', icon: 'play', onselect: () => readNote(n.id) },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyNoteMarkdown(n.id) },
         { label: 'Export…', icon: 'download', onselect: () => exportNote(n.id) },
         { separator: true },
@@ -659,6 +662,24 @@
       titleEl?.select();
     }, 0);
   }
+  // Read a note aloud (read_aloud.rs: the reading card on the Yap bar, its
+  // words lit up as they're said; it reads on if you leave Notes): the open
+  // note as it's shown — the Enhanced summary on that tab, else the note —
+  // or note `id` (its row's menu). Again while it reads: Stop.
+  const readingNote = (id) => speech.speakingId === `note:${id}`;
+  async function readNote(id = selected?.id) {
+    if (id == null) return;
+    if (selected?.id === id) flushSave();
+    try {
+      const n = selected?.id === id ? selected : await invoke('note_get', { id });
+      const body = selected?.id === id && tab === 'enhanced' && n.enhancedContent ? n.enhancedContent : n.content || n.enhancedContent || '';
+      const title = displayTitle(n);
+      await readAloud(title && body.trim() ? `# ${title}\n\n${body}` : body, `note:${id}`);
+    } catch (e) {
+      toast({ title: "Couldn't read it aloud", description: String(e), variant: 'destructive' });
+    }
+  }
+
   async function copyNoteMarkdown(id) {
     if (selected?.id === id) flushSave();
     try {
@@ -873,8 +894,9 @@
   let chatThread = $state([]);
   let chatInput = $state('');
   let asking = $state(false);
-  // Each answer's id for ▶ Read aloud (speech.svelte.js / tts.rs).
-  initSpeech(['notes:']);
+  // Each answer's id for ▶ Read aloud (speech.svelte.js / tts.rs), and a
+  // note's own ("note:<id>").
+  initSpeech(['notes:', 'note:']);
   let turnSeq = 0;
   const turnId = () => `notes:${selected?.id ?? 0}:${++turnSeq}`;
 
@@ -1369,6 +1391,21 @@
             {selected.transcript?.length ? 'Resume' : 'Record'}
           </button>
         {/if}
+        <!-- Read aloud (read_aloud.rs): the reading card on the Yap bar. -->
+        <button
+          class="iconbtn"
+          class:on={readingNote(selected.id)}
+          title={readingNote(selected.id) ? 'Stop reading' : 'Read aloud'}
+          aria-label={readingNote(selected.id) ? 'Stop reading' : 'Read aloud'}
+          aria-pressed={readingNote(selected.id)}
+          onclick={() => readNote()}
+        >
+          {#if readingNote(selected.id)}
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
+          {:else}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z" /><path d="M15.5 9a4 4 0 0 1 0 6" /><path d="M18.5 6.5a7.5 7.5 0 0 1 0 11" /></svg>
+          {/if}
+        </button>
         <button class="iconbtn" title="Export as Markdown" aria-label="Export as Markdown" onclick={() => exportNote()}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
         </button>
@@ -2918,6 +2955,11 @@
   .iconbtn:hover {
     background: var(--yap-s2);
     color: var(--yap-fg);
+  }
+  /* Reading this note aloud: ■ until it stops. */
+  .iconbtn.on {
+    color: var(--yap-fg);
+    background: var(--yap-s2);
   }
   .iconbtn svg {
     width: 14px;

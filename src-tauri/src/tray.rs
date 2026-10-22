@@ -12,6 +12,9 @@
 //!   records, "Record this Teams call" sits at the top of the idle menu.
 //! - **Paste last transcript** (text_injector.rs): the latest dictation again,
 //!   into the app you were in — for a paste that went astray.
+//! - **Read selection aloud** (read_aloud.rs): the text selected in the app
+//!   you were in, read aloud with the reading card; "Stop reading aloud"
+//!   while it reads.
 //! - **Left-click** opens Settings.
 //!
 //! The tray is rebuilt on every `yap-state` change via [`update_tray`], and on
@@ -230,6 +233,13 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
         crate::text_injector::has_last_transcript(),
         None::<&str>,
     )?;
+    // The selection in the app you're in, read aloud (read_aloud.rs); while
+    // Yap reads, its Stop.
+    let read = if crate::read_aloud::active() {
+        MenuItem::with_id(app, "read_stop", "Stop reading aloud", true, None::<&str>)?
+    } else {
+        MenuItem::with_id(app, "read_selection", "Read selection aloud", true, None::<&str>)?
+    };
     let (sep_update, sep_models, sep_quit) = (sep()?, sep()?, sep()?);
     let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&version, &sep_update];
     if let Some(call) = &call {
@@ -243,6 +253,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     }
     let sep_paste = sep()?;
     items.push(&paste_last);
+    items.push(&read);
     items.push(&sep_paste);
     items.push(models.as_ref());
     let sep_settings = sep()?;
@@ -306,6 +317,9 @@ fn on_menu_event(app: &AppHandle, id: &str) {
         }
         // Off the main thread: it focuses the app and waits on the paste.
         "paste_last" => crate::text_injector::paste_last_from_tray(app),
+        // Off the main thread (UI Automation can take a moment).
+        "read_selection" => crate::read_aloud::read_selection(app, crate::read_aloud::Origin::Tray),
+        "read_stop" => crate::read_aloud::stop(app),
         other if other.starts_with("meeting_record:") => {
             // Off the main thread: starting the recorder blocks for a moment
             // and looks at the main window.
@@ -350,12 +364,13 @@ fn idle_menu_key() -> String {
         .map(|(id, label)| format!("{id}:{label}"))
         .unwrap_or_default();
     format!(
-        "{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}",
         config::load().model_size,
         installed.join(","),
         update,
         call,
-        crate::text_injector::has_last_transcript()
+        crate::text_injector::has_last_transcript(),
+        crate::read_aloud::active()
     )
 }
 

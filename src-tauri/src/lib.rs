@@ -66,6 +66,7 @@ mod partials;
 mod pipeline;
 mod portable;
 mod procs;
+mod read_aloud;
 mod realtest;
 mod selection;
 mod smart_insert;
@@ -507,7 +508,12 @@ pub fn run() {
             commands::chat_dictate,
             commands::chat_input_focus,
             commands::configure_assistant_hotkey,
+            commands::configure_read_hotkey,
             commands::assistant_key,
+            read_aloud::read_aloud_text,
+            read_aloud::read_aloud_selection,
+            read_aloud::read_aloud_action,
+            read_aloud::read_aloud_state,
             assistant::chat_view_state,
             assistant::assistant_stop,
             tts::tts_voices,
@@ -694,6 +700,8 @@ pub fn run() {
             realtest::commands::realtest_other_apps,
             #[cfg(debug_assertions)]
             realtest::commands::realtest_delivered,
+            #[cfg(debug_assertions)]
+            realtest::commands::realtest_read_selection,
         ])
         .on_page_load(|webview, payload| {
             // No browser context menu (Back, Refresh, Print, Inspect…) in any
@@ -740,6 +748,8 @@ pub fn run() {
             // The Voice Assistant's shortcut (assistant.rs; unbound by
             // default, and never one that clashes with the other three).
             input_hook::configure_assistant_from(&cfg);
+            // Read aloud's (read_aloud.rs; unbound by default, never a clash).
+            input_hook::configure_read_from(&cfg);
 
             // Clear ort's 0-byte DirectML.dll stub so ONNX uses the real system
             // DirectML, then fix the transcribe-rs accelerator policy before any
@@ -888,6 +898,13 @@ pub fn run() {
                         p.on_assistant_key(false, at);
                     }
                 }
+            });
+
+            // …and Read aloud's: the selection in the app you're in, read
+            // aloud (read_aloud.rs). Only its press.
+            let read_handle = handle.clone();
+            handle.listen("read-key-pressed", move |_| {
+                read_aloud::read_selection(&read_handle, read_aloud::Origin::Shortcut);
             });
 
             // Drive the overlay (the Yap bar) from the pipeline's `yap-state`

@@ -53,6 +53,7 @@ pub mod elevenlabs;
 #[cfg_attr(not(feature = "engines"), allow(dead_code))]
 mod g2p;
 pub mod kokoro;
+pub mod marks;
 mod normalize;
 pub mod registry;
 
@@ -152,6 +153,13 @@ pub trait Synth {
         out(pcm);
         Ok(())
     }
+    /// When the words of the sentence just made start, if the engine says
+    /// (`marks::CharTime`s over the text it was given): Windows voices' word
+    /// cues, ElevenLabs' character alignment. `None`: the speaker works it
+    /// out from the audio (`marks::from_audio`). Asked once, after `stream`.
+    fn marks(&mut self) -> Option<Vec<marks::CharTime>> {
+        None
+    }
 }
 
 /// The engine for `id`: Kokoro when that's asked for and it can speak
@@ -214,6 +222,13 @@ pub struct CloudPlan {
 /// voice can stand in (`cloud::Health::skipping`) — else the local voice
 /// ([`chosen`]). Nothing goes to a cloud service without its key.
 pub fn voicing(cfg: &crate::config::YapConfig) -> Voicing {
+    voicing_for(cfg, false)
+}
+
+/// [`voicing`], for reading aloud when `timed`: a cloud voice is asked for
+/// its word timing too (ElevenLabs' `/stream/with-timestamps`), for the
+/// reading card's karaoke.
+pub fn voicing_for(cfg: &crate::config::YapConfig, timed: bool) -> Voicing {
     let local = || {
         let (engine, voice) = chosen(cfg);
         Voicing { engine, voice, cloud: None }
@@ -234,7 +249,7 @@ pub fn voicing(cfg: &crate::config::YapConfig) -> Voicing {
         return local();
     }
     Voicing {
-        engine: Arc::new(elevenlabs::ElevenLabs::new(key, &choice.model, true)),
+        engine: Arc::new(elevenlabs::ElevenLabs::new(key, &choice.model, true).timed(timed)),
         voice: choice.voice,
         cloud: Some(CloudPlan { provider: elevenlabs::ID, local: fallback, key: key_fp, choice: choice_fp }),
     }
@@ -264,9 +279,13 @@ impl Engine for WindowsVoices {
 
 #[cfg(windows)]
 mod win {
+    use super::marks::CharTime;
     use super::{Pcm, Synth, Voice};
-    use windows::core::HSTRING;
-    use windows::Media::SpeechSynthesis::{SpeechAppendedSilence, SpeechSynthesizer, VoiceGender, VoiceInformation};
+    use windows::core::{Interface, HSTRING};
+    use windows::Media::Core::SpeechCue;
+    use windows::Media::SpeechSynthesis::{
+        SpeechAppendedSilence, SpeechSynthesisStream, SpeechSynthesizer, VoiceGender, VoiceInformation,
+    };
     use windows::Storage::Streams::DataReader;
 
     fn err(e: windows::core::Error) -> String {
@@ -303,6 +322,36 @@ mod win {
 
     struct Windows {
         synth: SpeechSynthesizer,
+        /// The last sentence's word cues (`marks`).
+        cues: Option<Vec<CharTime>>,
+    }
+
+    /// The word cues Windows put on a sentence's stream (asked for with
+    /// `IncludeWordBoundaryMetadata`): where each word starts in `text` (a
+    /// UTF-16 offset there, a char index here) and when. Sentence cues, if
+    /// any, are left out. `None` when there are none (Windows before 1709).
+    fn word_cues(stream: &SpeechSynthesisStream, text: &str) -> Option<Vec<CharTime>> {
+        let tracks = stream.TimedMetadataTracks().ok()?;
+        let mut out = Vec::new();
+        for i in 0..tracks.Size().ok()? {
+            let Ok(track) = tracks.GetAt(i) else { continue };
+            if track.Id().is_ok_and(|id| id.to_string().to_ascii_lowercase().contains("sentence")) {
+                continue;
+            }
+            let Ok(cues) = track.Cues() else { continue };
+            for j in 0..cues.Size().unwrap_or(0) {
+                let Ok(cue) = cues.GetAt(j) else { continue };
+                let Ok(speech) = cue.cast::<SpeechCue>() else { continue };
+                let Some(at) = speech.StartPositionInInput().ok().and_then(|r| r.Value().ok()) else { continue };
+                let Ok(start) = cue.StartTime() else { continue };
+                out.push(CharTime {
+                    at: super::marks::utf16_to_char(text, at.max(0) as usize),
+                    start: std::time::Duration::from_nanos(start.Duration.max(0) as u64 * 100),
+                });
+            }
+        }
+        out.sort_by_key(|c| (c.start, c.at));
+        (!out.is_empty()).then_some(out)
     }
 
     pub fn open(voice: &str, rate: f32) -> Result<Box<dyn Synth>, String> {
@@ -317,12 +366,15 @@ mod win {
         options.SetSpeakingRate(f64::from(rate.clamp(0.5, 3.0))).map_err(err)?;
         // The queue adds its own pause between sentences (Windows 10 1709+).
         let _ = options.SetAppendedSilence(SpeechAppendedSilence::Min);
-        Ok(Box::new(Windows { synth }))
+        // Where each word starts, for reading aloud's karaoke (1703+).
+        let _ = options.SetIncludeWordBoundaryMetadata(true);
+        Ok(Box::new(Windows { synth, cues: None }))
     }
 
     impl Synth for Windows {
         fn synthesize(&mut self, text: &str) -> Result<Pcm, String> {
             let stream = self.synth.SynthesizeTextToStreamAsync(&HSTRING::from(text)).and_then(|op| op.get()).map_err(err)?;
+            self.cues = word_cues(&stream, text);
             let size = u32::try_from(stream.Size().map_err(err)?).map_err(|_| "Windows speech: too much audio".to_string())?;
             let reader = DataReader::CreateDataReader(&stream.GetInputStreamAt(0).map_err(err)?).map_err(err)?;
             reader.LoadAsync(size).and_then(|op| op.get()).map_err(err)?;
@@ -330,6 +382,9 @@ mod win {
             reader.ReadBytes(&mut bytes).map_err(err)?;
             let _ = stream.Close();
             super::parse_wav(&bytes)
+        }
+        fn marks(&mut self) -> Option<Vec<CharTime>> {
+            self.cues.take()
         }
     }
 }
@@ -747,10 +802,88 @@ pub struct TtsState {
 /// Where the audio goes: rodio's sink, or a simulated clock in test mode.
 pub trait Playback: Send + Sync {
     fn append(&self, pcm: Pcm);
+    /// Append audio of a read-aloud's sentence (`tag`): the playback then
+    /// knows which sentence is playing, and how far in ([`position`]).
+    ///
+    /// [`position`]: Playback::position
+    fn append_tagged(&self, pcm: Pcm, tag: Tag) {
+        let _ = tag;
+        self.append(pcm);
+    }
     /// Empty the queue and go quiet, now.
     fn stop(&self);
-    /// Played to the end (or stopped).
+    /// Played to the end (or stopped). Never while paused mid-way.
     fn done(&self) -> bool;
+    /// Hold where it is (a read-aloud's ⏸), and go on from there.
+    fn pause(&self) {}
+    fn resume(&self) {}
+    fn paused(&self) -> bool {
+        false
+    }
+    /// The tagged sentence playing now (or last), and how far into its
+    /// audio. `None` before any tagged audio has played.
+    fn position(&self) -> Option<(usize, Duration)> {
+        None
+    }
+}
+
+/// Which read-aloud sentence a piece of audio is (`Track`'s index), and
+/// where it starts in that sentence's audio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Tag {
+    pub sentence: usize,
+    pub offset: Duration,
+}
+
+/// A position as one atomic word: the sentence + 1 above bit 40, the
+/// nanoseconds into it below (≤ 18 minutes a sentence). 0 = none yet.
+const POS_SHIFT: u32 = 40;
+const POS_NS: u64 = (1 << POS_SHIFT) - 1;
+
+fn pack_position(sentence: usize, ns: u64) -> u64 {
+    ((sentence as u64 + 1) << POS_SHIFT) | ns.min(POS_NS)
+}
+
+fn unpack_position(v: u64) -> Option<(usize, Duration)> {
+    (v != 0).then(|| (((v >> POS_SHIFT) - 1) as usize, Duration::from_nanos(v & POS_NS)))
+}
+
+/// A sentence's audio on its way to the output, saying how far it's got:
+/// every sample the output takes moves [`RodioPlayback`]'s position on
+/// (paused, the output takes none).
+struct Tagged<S> {
+    inner: S,
+    pos: Arc<AtomicU64>,
+    sentence: usize,
+    base_ns: f64,
+    ns_per_sample: f64,
+    taken: u64,
+}
+
+impl<S: Iterator<Item = f32>> Iterator for Tagged<S> {
+    type Item = f32;
+    fn next(&mut self) -> Option<f32> {
+        let s = self.inner.next()?;
+        self.taken += 1;
+        let ns = self.base_ns + self.taken as f64 * self.ns_per_sample;
+        self.pos.store(pack_position(self.sentence, ns as u64), Ordering::Relaxed);
+        Some(s)
+    }
+}
+
+impl<S: rodio::Source<Item = f32>> rodio::Source for Tagged<S> {
+    fn current_frame_len(&self) -> Option<usize> {
+        self.inner.current_frame_len()
+    }
+    fn channels(&self) -> u16 {
+        self.inner.channels()
+    }
+    fn sample_rate(&self) -> u32 {
+        self.inner.sample_rate()
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
 }
 
 /// A playback, plus whatever must stay alive (on the worker's thread) for it
@@ -797,17 +930,44 @@ pub fn set_volume(volume: f32) {
     }
 }
 
-struct RodioPlayback(Arc<rodio::Sink>);
+struct RodioPlayback {
+    sink: Arc<rodio::Sink>,
+    /// [`pack_position`] of the tagged sample the output took last.
+    pos: Arc<AtomicU64>,
+}
 
 impl Playback for RodioPlayback {
     fn append(&self, pcm: Pcm) {
-        self.0.append(rodio::buffer::SamplesBuffer::new(pcm.channels, pcm.sample_rate, pcm.samples));
+        self.sink.append(rodio::buffer::SamplesBuffer::new(pcm.channels, pcm.sample_rate, pcm.samples));
+    }
+    fn append_tagged(&self, pcm: Pcm, tag: Tag) {
+        let ns_per_sample = 1e9 / (f64::from(pcm.sample_rate.max(1)) * f64::from(pcm.channels.max(1)));
+        self.sink.append(Tagged {
+            inner: rodio::buffer::SamplesBuffer::new(pcm.channels, pcm.sample_rate, pcm.samples),
+            pos: Arc::clone(&self.pos),
+            sentence: tag.sentence,
+            base_ns: tag.offset.as_nanos() as f64,
+            ns_per_sample,
+            taken: 0,
+        });
     }
     fn stop(&self) {
-        self.0.stop();
+        self.sink.stop();
     }
     fn done(&self) -> bool {
-        self.0.empty()
+        self.sink.empty()
+    }
+    fn pause(&self) {
+        self.sink.pause();
+    }
+    fn resume(&self) {
+        self.sink.play();
+    }
+    fn paused(&self) -> bool {
+        self.sink.is_paused()
+    }
+    fn position(&self) -> Option<(usize, Duration)> {
+        unpack_position(self.pos.load(Ordering::Relaxed))
     }
 }
 
@@ -820,32 +980,106 @@ fn rodio_opener(device: Option<String>) -> Opener {
         let sink = Arc::new(rodio::Sink::try_new(&handle).map_err(|e| format!("Couldn't play the voice: {e}"))?);
         sink.set_volume(gain(volume()));
         *LIVE_SINK.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::downgrade(&sink));
-        Ok(Opened { play: Arc::new(RodioPlayback(sink)), keep: Some(Box::new(stream)) })
+        Ok(Opened {
+            play: Arc::new(RodioPlayback { sink, pos: Arc::new(AtomicU64::new(0)) }),
+            keep: Some(Box::new(stream)),
+        })
     })
 }
 
-/// Plays nothing: each sentence takes its length on the clock. (Test mode
-/// and the unit tests.)
+/// Plays nothing: each sentence takes its length on the clock — a clock
+/// that stands still while paused. (Test mode and the unit tests.)
 #[derive(Default)]
 pub struct SimPlayback {
-    ends: Mutex<Option<Instant>>,
+    clock: Mutex<SimClock>,
     stopped: std::sync::atomic::AtomicBool,
     appended: AtomicU64,
 }
 
+/// [`SimPlayback`]'s clock: time played so far ("virtual" time: the pauses
+/// left out), when the queue runs out, and what's queued (the last few).
+#[derive(Default)]
+struct SimClock {
+    origin: Option<Instant>,
+    paused_at: Option<Instant>,
+    /// All the time spent paused.
+    held: Duration,
+    ends: Option<Duration>,
+    queued: std::collections::VecDeque<(Duration, Duration, Option<Tag>)>,
+}
+
+impl SimClock {
+    fn now(&mut self) -> Duration {
+        let origin = *self.origin.get_or_insert_with(Instant::now);
+        let at = self.paused_at.unwrap_or_else(Instant::now);
+        at.saturating_duration_since(origin).saturating_sub(self.held)
+    }
+}
+
+impl SimPlayback {
+    fn clock(&self) -> std::sync::MutexGuard<'_, SimClock> {
+        self.clock.lock().unwrap_or_else(|p| p.into_inner())
+    }
+    fn push(&self, length: Duration, tag: Option<Tag>) {
+        let mut c = self.clock();
+        let now = c.now();
+        let from = c.ends.filter(|e| *e > now).unwrap_or(now);
+        c.ends = Some(from + length);
+        c.queued.push_back((from, length, tag));
+        while c.queued.len() > 64 {
+            c.queued.pop_front();
+        }
+        drop(c);
+        self.appended.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 impl Playback for SimPlayback {
     fn append(&self, pcm: Pcm) {
-        let mut ends = self.ends.lock().unwrap_or_else(|p| p.into_inner());
-        let from = ends.filter(|e| *e > Instant::now()).unwrap_or_else(Instant::now);
-        *ends = Some(from + pcm.duration());
-        self.appended.fetch_add(1, Ordering::SeqCst);
+        self.push(pcm.duration(), None);
+    }
+    fn append_tagged(&self, pcm: Pcm, tag: Tag) {
+        self.push(pcm.duration(), Some(tag));
     }
     fn stop(&self) {
         self.stopped.store(true, Ordering::SeqCst);
     }
     fn done(&self) -> bool {
-        self.stopped.load(Ordering::SeqCst)
-            || self.ends.lock().unwrap_or_else(|p| p.into_inner()).is_none_or(|e| Instant::now() >= e)
+        if self.stopped.load(Ordering::SeqCst) {
+            return true;
+        }
+        let mut c = self.clock();
+        if c.paused_at.is_some() {
+            return false;
+        }
+        let now = c.now();
+        c.ends.is_none_or(|e| now >= e)
+    }
+    fn pause(&self) {
+        let mut c = self.clock();
+        if c.paused_at.is_none() {
+            c.now();
+            c.paused_at = Some(Instant::now());
+        }
+    }
+    fn resume(&self) {
+        let mut c = self.clock();
+        if let Some(p) = c.paused_at.take() {
+            c.held += p.elapsed();
+        }
+    }
+    fn paused(&self) -> bool {
+        self.clock().paused_at.is_some()
+    }
+    fn position(&self) -> Option<(usize, Duration)> {
+        let mut c = self.clock();
+        let now = c.now();
+        c.queued
+            .iter()
+            .rev()
+            .filter_map(|&(from, len, tag)| tag.map(|t| (from, len, t)))
+            .find(|&(from, _, _)| from <= now)
+            .map(|(from, len, t)| (t.sentence, t.offset + (now - from).min(len)))
     }
 }
 
@@ -862,6 +1096,94 @@ pub struct Job {
     pub rate: f32,
     /// For a cloud voice: what happens when it fails ([`Fallback`]).
     pub fallback: Option<Fallback>,
+    /// A read-aloud (`read_aloud.rs`): `sentences` are `track`'s from
+    /// `first` on, as shown — each is said as [`said_text`] writes it, made
+    /// only once the one before it plays, and its words' times kept on the
+    /// track for the reading card.
+    pub track: Option<Arc<Track>>,
+    pub first: usize,
+}
+
+/// What's said for a sentence shown on the reading card: its markdown, links
+/// and emoji out ([`inline_text`]), written for the ear (`normalize.rs`).
+pub fn said_text(shown: &str) -> String {
+    normalize::for_speech(&inline_text(shown))
+}
+
+/// A read-aloud's sentences as shown (`read_aloud.rs` splits the text), and
+/// for each one made so far, when its words start in its audio — the
+/// speaker writes, the reading card reads.
+pub struct Track {
+    shown: Vec<String>,
+    made: Mutex<std::collections::HashMap<usize, Made>>,
+    /// Sentences made so far (a long text is made a sentence ahead of the
+    /// voice, never all at once).
+    made_count: std::sync::atomic::AtomicUsize,
+}
+
+/// One sentence, made: when its shown words start (word index, from the
+/// start of its audio), how that was found, and by which engine.
+#[derive(Debug, Clone)]
+pub struct Made {
+    pub starts: Vec<(usize, Duration)>,
+    pub timing: marks::Timing,
+    pub engine: &'static str,
+}
+
+impl Track {
+    pub fn new(shown: Vec<String>) -> Arc<Track> {
+        Arc::new(Track { shown, made: Mutex::new(std::collections::HashMap::new()), made_count: Default::default() })
+    }
+
+    pub fn len(&self) -> usize {
+        self.shown.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.shown.is_empty()
+    }
+
+    pub fn shown(&self, i: usize) -> Option<&str> {
+        self.shown.get(i).map(String::as_str)
+    }
+
+    pub fn all(&self) -> &[String] {
+        &self.shown
+    }
+
+    /// Sentence `i`, if it has been made.
+    pub fn made(&self, i: usize) -> Option<Made> {
+        self.made.lock().unwrap_or_else(|p| p.into_inner()).get(&i).cloned()
+    }
+
+    pub fn made_count(&self) -> usize {
+        self.made_count.load(Ordering::SeqCst)
+    }
+
+    /// Sentence `i` was made: `said` (what the engine was given) in `heard`
+    /// (its audio, interleaved, `format` = rate and channels; empty if it
+    /// didn't come in one format), `length` long. Its words' starts come
+    /// from the engine's `times` if it gave them (and they fit), else from
+    /// the audio ([`marks::from_audio`]), mapped back to the shown words.
+    #[allow(clippy::too_many_arguments)]
+    fn record(&self, i: usize, said: &str, times: Option<Vec<marks::CharTime>>, heard: &[f32], format: (u32, u16), length: Duration, engine: &'static str) {
+        let Some(shown) = self.shown.get(i) else { return };
+        let said_spans = marks::words(said);
+        let (said_starts, timing) = match times.and_then(|t| marks::from_chars(&said_spans, &t)) {
+            Some(t) => (t, marks::Timing::Engine),
+            None if format.0 > 0 && !heard.is_empty() => marks::from_audio(said, &said_spans, heard, format.0, format.1),
+            None => (marks::estimate(said, &said_spans, Duration::ZERO, length), marks::Timing::Estimate),
+        };
+        let shown_spans = marks::words(shown);
+        let map = marks::align(shown, &shown_spans, said, &said_spans);
+        let starts = marks::shown_starts(&map, &said_starts);
+        let mut made = self.made.lock().unwrap_or_else(|p| p.into_inner());
+        // Only the sentences round the voice are worth keeping.
+        made.retain(|&k, _| k + 16 > i && k < i + 16);
+        made.insert(i, Made { starts, timing, engine });
+        drop(made);
+        self.made_count.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 /// When the engine fails mid-answer: `local` reads the rest — the sentence
@@ -973,29 +1295,65 @@ impl Speaker {
         }
         let mut error = None;
         let mut synth = job.engine.open(&job.voice, job.rate);
+        let mut engine_id = job.engine.id();
         let mut i = 0;
         while i < job.sentences.len() {
             if !self.live(generation) || (self.busy)() {
                 break;
             }
+            let at = job.first + i;
+            let track = job.track.clone();
+            // A read-aloud: one sentence ahead of the voice, no more.
+            if track.is_some() && i > 0 && !self.wait_turn(generation, &opened.play, at) {
+                break;
+            }
+            let text = if track.is_some() { said_text(&job.sentences[i]) } else { job.sentences[i].clone() };
+            // A read-aloud's sentence: its audio kept a moment (for its
+            // words' times), each piece tagged with where it is.
+            let mut heard: Vec<f32> = Vec::new();
+            let mut format = (0u32, 0u16);
+            let mut length = Duration::ZERO;
             let said = match synth.as_mut() {
                 Ok(s) => {
                     let play = &opened.play;
+                    let tracked = track.is_some();
                     // Each piece as it comes, unless it's been stopped or a
                     // dictation started meanwhile.
                     let mut out = |pcm: Pcm| {
                         let go = self.live(generation) && !(self.busy)();
                         if go {
-                            play.append(pcm);
+                            if tracked {
+                                let piece = pcm.duration();
+                                if format.0 == 0 {
+                                    format = (pcm.sample_rate, pcm.channels);
+                                }
+                                if format == (pcm.sample_rate, pcm.channels) {
+                                    heard.extend_from_slice(&pcm.samples);
+                                } else {
+                                    heard.clear();
+                                    format = (u32::MAX, 0);
+                                }
+                                play.append_tagged(pcm, Tag { sentence: at, offset: length });
+                                length += piece;
+                            } else {
+                                play.append(pcm);
+                            }
                         }
                         go
                     };
-                    s.stream(&job.sentences[i], &mut out)
+                    let r = s.stream(&text, &mut out);
+                    r.map(|()| if tracked { s.marks() } else { None })
                 }
                 Err(e) => Err(e.clone()),
             };
             match said {
-                Ok(()) => i += 1,
+                Ok(times) => {
+                    if let Some(t) = &track {
+                        let format = if format.0 == u32::MAX { (0, 0) } else { format };
+                        t.record(at, &text, times, &heard, format, length, engine_id);
+                    }
+                    i += 1;
+                }
                 // Stopped mid-sentence: not a failure.
                 Err(_) if !self.live(generation) => break,
                 Err(e) => {
@@ -1014,6 +1372,7 @@ impl Speaker {
                     if let Some(c) = self.current().as_mut().filter(|c| c.generation == generation) {
                         c.engine = Arc::clone(&engine);
                     }
+                    engine_id = engine.id();
                     synth = engine.open(&voice, job.rate);
                 }
             }
@@ -1024,12 +1383,60 @@ impl Speaker {
                 opened.play.stop();
                 break;
             }
-            self.heard_now();
+            if !opened.play.paused() {
+                self.heard_now();
+            }
             std::thread::sleep(Duration::from_millis(20));
         }
         drop(opened.keep);
         self.finish(generation, job.message_id, error);
     }
+
+    /// A read-aloud's pace: sentence `at` is made once the one before it has
+    /// started playing (or the voice ran dry), so a long text is made a
+    /// sentence ahead of the voice, never all at once. `false`: stopped (or
+    /// a dictation started) while it waited.
+    fn wait_turn(&self, generation: u64, play: &Arc<dyn Playback>, at: usize) -> bool {
+        loop {
+            if !self.live(generation) || (self.busy)() {
+                return false;
+            }
+            if play.done() || play.position().is_some_and(|(playing, _)| playing + 1 >= at) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(15));
+        }
+    }
+
+    /// The read-aloud sentence playing now, and how far into it.
+    pub fn position(&self) -> Option<(usize, Duration)> {
+        self.current().as_ref()?.play.as_ref()?.position()
+    }
+
+    /// Hold the voice where it is (`true` if it was speaking).
+    pub fn pause(&self) -> bool {
+        let play = self.current().as_ref().and_then(|c| c.play.clone());
+        match play {
+            Some(p) => {
+                p.pause();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Go on from where it was held.
+    pub fn resume(&self) -> bool {
+        let play = self.current().as_ref().and_then(|c| c.play.clone());
+        match play {
+            Some(p) => {
+                p.resume();
+                true
+            }
+            None => false,
+        }
+    }
+
 
     /// The worker's end: "not speaking" — unless it was stopped or replaced,
     /// which said so already.
@@ -1089,6 +1496,8 @@ pub fn init(app: &tauri::AppHandle) {
             let _ = app.emit("yap-tts-state", s);
             // The Voice Assistant's answer ended (or was stopped).
             crate::assistant::on_tts_state(&app, s.speaking, s.message_id.as_deref());
+            // So did a read-aloud (its card goes).
+            crate::read_aloud::on_tts_state(&app, s);
         }),
         Box::new(|| crate::pipeline::dictation_state().1),
     ));
@@ -1117,6 +1526,11 @@ fn speaker() -> Option<&'static Arc<Speaker>> {
 /// Stop speaking now (Stop, Esc, leaving Chat, a meeting starting).
 pub fn stop() -> bool {
     speaker().is_some_and(|s| s.stop())
+}
+
+/// What's being read aloud now, if anything (its message id).
+pub fn speaking_id() -> Option<String> {
+    speaker().map(|s| s.state()).filter(|s| s.speaking).and_then(|s| s.message_id)
 }
 
 /// A dictation is starting (`pipeline::start_recording`): stop speaking
@@ -1180,9 +1594,68 @@ fn say(sentences: Vec<String>, message_id: Option<String>, voicing: Voicing, rat
     }
     let fallback = cloud.map(|plan| fallback_for(plan, message_id.clone(), rate));
     let opener = if crate::e2e::active() { sim_opener() } else { rodio_opener(device) };
-    let job = Job { message_id, sentences, engine, voice, rate, fallback };
+    let job = Job { message_id, sentences, engine, voice, rate, fallback, track: None, first: 0 };
     speaker.speak(job, opener)
 }
+
+// ---- reading aloud (read_aloud.rs) ----
+
+/// The sentences of a read-aloud as the voice Settings picked says them best
+/// (Kokoro and ElevenLabs join a sentence under three words to the next).
+pub fn prepare_for_reading(sentences: Vec<String>) -> Vec<String> {
+    voicing_for(&crate::config::load(), true).engine.prepare(sentences)
+}
+
+/// **Read `track` aloud** from sentence `from` (`read_aloud.rs`): the voice
+/// Settings picked (a cloud voice asked for its word timing), at `rate`,
+/// Yap's volume, the output device. Each sentence is made only once the one
+/// before it plays, and the track keeps when its words start. `message_id`:
+/// what the pages call it (an answer's id keeps its ▶ / ■).
+pub fn read(track: Arc<Track>, from: usize, message_id: String, rate: f32) -> Result<(), String> {
+    if let Some(why) = meeting_quiet() {
+        return Err(why.into());
+    }
+    let speaker = speaker().ok_or("Spoken replies aren't ready yet")?;
+    let cfg = crate::config::load();
+    let rate = if rate.is_finite() && rate > 0.0 { rate.clamp(0.5, 2.0) } else { 1.0 };
+    let sentences: Vec<String> = track.all().get(from..).map(<[String]>::to_vec).unwrap_or_default();
+    let Voicing { engine, voice, cloud } = voicing_for(&cfg, true);
+    #[cfg(debug_assertions)]
+    if crate::e2e::active() && !sentences.is_empty() {
+        let said: Vec<String> = sentences.iter().map(|s| said_text(s)).collect();
+        spoken().push(Spoken {
+            message_id: Some(message_id.clone()),
+            text: said.join(" "),
+            sentences: said,
+            engine: engine.id().to_string(),
+            voice: voice.clone(),
+            rate,
+            volume: volume(),
+            fallback: None,
+        });
+    }
+    let fallback = cloud.map(|plan| fallback_for(plan, Some(message_id.clone()), rate));
+    let opener = if crate::e2e::active() { sim_opener() } else { rodio_opener(cfg.output_device) };
+    let job = Job { message_id: Some(message_id), sentences, engine, voice, rate, fallback, track: Some(track), first: from };
+    speaker.speak(job, opener)
+}
+
+/// The read-aloud sentence playing now (its index on the track), and how
+/// far into its audio.
+pub fn position() -> Option<(usize, Duration)> {
+    speaker().and_then(|s| s.position())
+}
+
+/// Hold the voice where it is (a read-aloud's ⏸).
+pub fn pause() -> bool {
+    speaker().is_some_and(|s| s.pause())
+}
+
+/// Go on from where it was held.
+pub fn resume() -> bool {
+    speaker().is_some_and(|s| s.resume())
+}
+
 
 /// A cloud voice's [`Fallback`]: its local voice, and the notice.
 fn fallback_for(plan: CloudPlan, message_id: Option<String>, rate: f32) -> Fallback {
@@ -1801,6 +2274,8 @@ mod tests {
                 voice: String::new(),
                 rate: 1.0,
                 fallback: None,
+                track: None,
+                first: 0,
             }
         }
         fn events(&self) -> Vec<(bool, String, Option<String>)> {
@@ -1928,6 +2403,132 @@ mod tests {
         assert!(r.events().is_empty());
     }
 
+    // ---- a read-aloud: paced, its words timed, held
+
+    fn read_job(track: &Arc<Track>, first: usize, engine: Arc<dyn Engine>, rate: f32) -> Job {
+        Job {
+            message_id: Some("read:1".into()),
+            sentences: track.all()[first..].to_vec(),
+            engine,
+            voice: String::new(),
+            rate,
+            fallback: None,
+            track: Some(Arc::clone(track)),
+            first,
+        }
+    }
+
+    fn sim(play: &Arc<SimPlayback>) -> Opener {
+        let p = Arc::clone(play);
+        Box::new(move || Ok(Opened { play: p, keep: None }))
+    }
+
+    #[test]
+    fn a_read_aloud_is_made_a_sentence_ahead_never_all_at_once() {
+        let r = rig();
+        // 30 short sentences, ~170 ms each at 3× on the stand-in.
+        let track = Track::new((0..30).map(|i| format!("Line {}.", ["one", "two", "three"][i % 3])).collect());
+        let play = Arc::new(SimPlayback::default());
+        r.speaker.speak(read_job(&track, 0, Arc::new(StandIn), 3.0), sim(&play)).unwrap();
+        let start = Instant::now();
+        let mut seen = 0;
+        while start.elapsed() < Duration::from_millis(900) {
+            let made = track.made_count();
+            if let Some((playing, _)) = r.speaker.position() {
+                // Made: the one playing and the next, never more.
+                assert!(made <= playing + 2, "made {made} with {playing} playing");
+                seen = seen.max(playing);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(seen >= 2, "it moved on: {seen}");
+        assert!(track.made_count() < 30);
+        // Each sentence made has its words' starts, estimated (silence).
+        let made = track.made(0).unwrap();
+        assert_eq!(made.timing, marks::Timing::Estimate);
+        assert_eq!(made.starts.iter().map(|&(w, _)| w).collect::<Vec<_>>(), vec![0, 1]);
+        assert_eq!(made.starts[0].1, Duration::ZERO);
+        assert!(r.speaker.stop());
+    }
+
+    #[test]
+    fn a_held_read_aloud_stands_still_and_goes_on_from_there() {
+        let r = rig();
+        let track = Track::new((0..6).map(|_| "Read these four words.".to_string()).collect());
+        let play = Arc::new(SimPlayback::default());
+        r.speaker.speak(read_job(&track, 0, Arc::new(StandIn), 1.0), sim(&play)).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(r.speaker.pause());
+        let held = r.speaker.position().unwrap();
+        let made = track.made_count();
+        std::thread::sleep(Duration::from_millis(400));
+        // Held: the same place, nothing more made, still "speaking".
+        assert_eq!(r.speaker.position().unwrap(), held);
+        assert_eq!(track.made_count(), made);
+        assert!(r.speaker.state().speaking);
+        assert!(r.speaker.resume());
+        std::thread::sleep(Duration::from_millis(300));
+        let now = r.speaker.position().unwrap();
+        assert!(now > held, "{now:?} after {held:?}");
+        // Starting from a later sentence: tagged from there.
+        r.speaker.speak(read_job(&track, 4, Arc::new(StandIn), 1.0), sim(&Arc::new(SimPlayback::default()))).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(r.speaker.position().map(|p| p.0), Some(4));
+        r.speaker.stop();
+    }
+
+    /// An engine that says when each character starts (as Windows' cues
+    /// and ElevenLabs' alignment do): 50 ms a character.
+    struct Timed;
+    struct TimedSynth(Option<Vec<marks::CharTime>>);
+    impl Engine for Timed {
+        fn id(&self) -> &'static str {
+            "timed"
+        }
+        fn voices(&self) -> Result<Vec<Voice>, String> {
+            Ok(Vec::new())
+        }
+        fn default_voice(&self) -> Option<String> {
+            None
+        }
+        fn open(&self, _voice: &str, _rate: f32) -> Result<Box<dyn Synth>, String> {
+            Ok(Box::new(TimedSynth(None)))
+        }
+    }
+    impl Synth for TimedSynth {
+        fn synthesize(&mut self, text: &str) -> Result<Pcm, String> {
+            let n = text.chars().count();
+            self.0 = Some((0..n).map(|i| marks::CharTime { at: i, start: Duration::from_millis(i as u64 * 50) }).collect());
+            Ok(Pcm { sample_rate: 1_000, channels: 1, samples: vec![0.0; n * 50] })
+        }
+        fn marks(&mut self) -> Option<Vec<marks::CharTime>> {
+            self.0.take()
+        }
+    }
+
+    #[test]
+    fn an_engines_own_word_timing_is_kept_on_the_shown_words() {
+        let r = rig();
+        // Said "It came to twelve pounds." for "It came to £12."
+        let track = Track::new(vec!["It came to £12.".into()]);
+        let play = Arc::new(SimPlayback::default());
+        r.speaker.speak(read_job(&track, 0, Arc::new(Timed), 1.0), sim(&play)).unwrap();
+        let start = Instant::now();
+        while track.made(0).is_none() {
+            assert!(start.elapsed() < Duration::from_secs(2));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let made = track.made(0).unwrap();
+        assert_eq!(made.timing, marks::Timing::Engine);
+        assert_eq!(made.engine, "timed");
+        // "It" 0, "came" 3 chars in, "to" 8, "£12" when "twelve" starts (11).
+        assert_eq!(
+            made.starts,
+            vec![(0, Duration::ZERO), (1, Duration::from_millis(150)), (2, Duration::from_millis(400)), (3, Duration::from_millis(550))]
+        );
+        r.speaker.stop();
+    }
+
     // ---- a cloud voice failing mid-answer
 
     type Told = Arc<Mutex<Vec<(String, Vec<String>, bool)>>>;
@@ -2035,6 +2636,8 @@ mod tests {
             voice: String::new(),
             rate: 1.0,
             fallback: None,
+            track: None,
+            first: 0,
         };
         r.speaker.speak(job, opener).unwrap();
         let start = Instant::now();
@@ -2065,6 +2668,8 @@ mod tests {
             voice: "JBFqnCBsd6RMkjVDRZzb".into(),
             rate: 1.0,
             fallback,
+            track: None,
+            first: 0,
         }
     }
 
@@ -2152,6 +2757,8 @@ mod tests {
                 voice: voice.into(),
                 rate: 1.0,
                 fallback: None,
+                track: None,
+                first: 0,
             };
             let start = Instant::now();
             r.speaker.speak(job, opener).unwrap();
@@ -2236,6 +2843,38 @@ mod tests {
         println!("wrote {}", path.display());
     }
 
+    /// Windows' word cues on this PC, without a sound: a sentence made into
+    /// memory, each word's start where the cue says, in order and inside
+    /// the audio — then the words as the reading card would light them.
+    /// `cargo test tts::tests::windows_word_cues_on_this_pc -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn windows_word_cues_on_this_pc() {
+        let engine = WindowsVoices;
+        let text = "Reading aloud helps, and it costs twelve pounds.";
+        let mut synth = engine.open("", 1.0).expect("a synthesiser");
+        let pcm = synth.synthesize(text).expect("audio");
+        let cues = synth.marks().expect("word cues");
+        let spans = marks::words(text);
+        let chars: Vec<char> = text.chars().collect();
+        for c in &cues {
+            let word: String = chars[c.at..].iter().take_while(|ch| ch.is_alphanumeric()).collect();
+            println!("{:>6.0} ms  {word}", c.start.as_secs_f64() * 1000.0);
+        }
+        let starts = marks::from_chars(&spans, &cues).expect("a time for most words");
+        assert_eq!(starts.len(), spans.len());
+        assert!(starts.windows(2).all(|w| w[0] <= w[1]), "{starts:?}");
+        assert!(*starts.last().unwrap() < pcm.duration(), "the last word starts inside the audio");
+        assert!(cues.len() >= spans.len() - 1, "{} cues for {} words", cues.len(), spans.len());
+        // The audio's own shape against the cues: Windows' times are the real ones.
+        let (estimated, how) = marks::from_audio(text, &spans, &pcm.samples, pcm.sample_rate, pcm.channels);
+        println!("audio {:.2} s; from the audio alone ({how:?}):", pcm.duration().as_secs_f32());
+        for (i, (cue, est)) in starts.iter().zip(&estimated).enumerate() {
+            let w: String = chars[spans[i].0..spans[i].1].iter().collect();
+            println!("  {w:<10} cue {:>5.0} ms   estimate {:>5.0} ms", cue.as_secs_f64() * 1000.0, est.as_secs_f64() * 1000.0);
+        }
+    }
+
     /// The speaker's real output path (rodio on the default device) playing
     /// **silence** from the stand-in engine — nothing audible: it plays to
     /// its end, and a stop ends it at once. Run with `cargo test
@@ -2251,6 +2890,8 @@ mod tests {
             voice: String::new(),
             rate: 2.0,
             fallback: None,
+            track: None,
+            first: 0,
         };
         let started = Instant::now();
         r.speaker.speak(job("a"), rodio_opener(None)).unwrap();

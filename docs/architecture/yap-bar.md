@@ -14,7 +14,10 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   pill outline 14 px above the work area; **hover** opens it into 🎤 Dictate (`toggle_recording`, tooltip
   "Dictate · F9"), ◉ Meeting notes (`meeting_guard::start_or_stop`, as the
   meeting shortcut: the live call, else a new meeting note; while recording,
-  `meeting_end::end`) and a ^ menu (Open Yap, New meeting note, Settings,
+  `meeting_end::end`), 🔊 Read aloud (`read-aloud`: the selection in the app
+  you're in, read aloud — the bar never takes the focus, so it's still
+  selected there; ■ `read-stop` while reading; its tooltip names the Read
+  aloud shortcut, `Status.readHotkey`) and a ^ menu (Open Yap, New meeting note, Settings,
   Hide the bar for 1 hour, Turn off the bar — `bar_action`); **dictating** =
   the dictation overlay (waveform, live partials, Transcribing…, errors), with
   ✕ (`dictation-cancel`) and ✓ (`dictation-stop`: stop and paste, as the
@@ -75,9 +78,15 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   "answer"; Esc stops its voice). The bar also follows `yap-assistant`
   (`State.assistant`, in `Status.assistant`): the window shows while a
   question is asked, answered or read aloud, bar on or off, and ■ on the
-  capsule is `bar_action "assistant-stop"`. An Esc watch (a low-level keyboard
+  capsule is `bar_action "assistant-stop"`. **The reading card**
+  (`read_aloud.rs`, `set_reading`, `State.reading` / `Status.reading`):
+  while Yap reads text aloud (or the card has a note: "Nothing selected")
+  the window shows, bar on or off, hidden for an hour or over a fullscreen
+  app (`shows`), takes clicks on the card (`clickable`), the poller watches
+  (`State::watching`), and Esc stops the reading (`escape`, before any
+  card's own Esc). An Esc watch (a low-level keyboard
   hook that only looks) runs only while an on-screen card offers Esc (the
-  auto-start countdown, the assistant's answer). Debug-only `bar_simulate` (pretend cursor on a
+  auto-start countdown, the assistant's answer) or the reading card is up. Debug-only `bar_simulate` (pretend cursor on a
   region, fake fullscreen kinds, Esc, demo cards) and `bar_debug` (the real
   ex-styles, WindowFromPoint on the pill, the thread's active window) for the
   e2e suite; a test run's bar only sees `bar_simulate`'s cursor unless it's
@@ -117,7 +126,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   **idle pill** is 40×8 (light: white at 85 % with a 1 px ink border at
   30 %; dark: warm ink at 55 %, cream border), radius 6, no shadow, in a
   60×20 wrapper; it morphs into the open
-  pill (not measured yet: Yap's own 128×38); tooltips (ink in both schemes,
+  pill (not measured yet: Yap's own 162×38 — 🎤, ◉, 🔊 and ^); tooltips (ink in both schemes,
   radius 8, 12 / 600: "Dictate F9", "New note Win + Alt + M") and the ^ menu
   sit above it. The **meeting pill**: 69×30, the bar surface, a 2 px ring in Yap's
   recording red (`#e5645e`; Wispr's is emerald), radius 22.5, half opacity
@@ -146,7 +155,23 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   shows (positioned from the dock's height, gliding 0.16 s when it grows),
   one at a time (`notice.rs` picks it; the rest wait in `bar.waiting`); it
   fades in and out in 0.12 s and has Wispr's 4 px hit strip on the pill's
-  side.
+  side. **The reading card** (`bar/ReadingCard.svelte` + `bar/reading.svelte.js`,
+  `yap-read` / `yap-read-word` / `read_aloud_state`) sits nearest the pill
+  whenever Yap reads aloud, a notice card above it: 440 wide, the bar
+  surface, radius 16; a chip ("Reading aloud" / "Paused", its tooltip how
+  the word timing was found), "3 of 42", ✕ (Stop); the sentence in the
+  **reading font and size** from Settings → General → Appearance
+  (`--yap-font-reading`, OpenDyslexic included; 17 px × `--yap-reading-scale`,
+  line height 1.65 × `--yap-reading-leading`, a little word spacing), up to
+  five lines before it scrolls, the word being said kept in view; **the
+  word being said** an amber mark (`--bar-chip`, drawn with a box-shadow so
+  the words never move); ⏮ / ⏸▶ (the ink circle) / ⏭, the speed (− 1.25× +,
+  0.5–2×), Stop (a red square); a hairline of how far through the text, in
+  amber. The whole card is region "reading" (+ its hit strip). A note
+  (`phase` "note": "Nothing selected", "Not now" during a meeting or call,
+  "Couldn't read it aloud") is a 400-wide card with the chip, title, body
+  (`{key}` = the shortcut, `fillHotkey`) and ✕ (`dismiss`), gone after
+  4.5 s. Light and Dark from the `--bar-*` tokens. `e2e/read-aloud.spec.js`.
   `bar/BarCard.svelte` (notices: update, guard rails, "Taking notes", the
   call ending, errors) is Wispr's card in Yap's colours: 400 wide,
   the bar surface with a 1 px edge, radius 16, padding 20; a chip naming its

@@ -132,9 +132,13 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   call"** above it (`meeting_detect::tray_item`; the click runs
   `on_tray_record` on a worker thread). **"Paste last transcript"** sits above
   the model submenu (greyed out until there's a dictation;
-  `text_injector::paste_last_from_tray`, worker thread). All three are in the
+  `text_injector::paste_last_from_tray`, worker thread), and under it **"Read
+  selection aloud"** — "Stop reading aloud" while Yap reads
+  (`read_aloud::read_selection(Origin::Tray)`: the app window on top, brought
+  back, its selection read aloud with the reading card). All four are in the
   idle menu's cache key (`idle_menu_key`), so the menu rebuilds when they
-  change; all tray work runs on the main thread.
+  change (the reading card coming or going refreshes it); all tray work runs
+  on the main thread.
 - **`context_menu.rs`** — no browser context menu in Yap's windows: each
   webview's `ContextMenuRequested` (WebView2, via `webview2-com`) keeps only
   the editing commands, or shows nothing (pure `keep`, unit-tested on the
@@ -193,7 +197,10 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   {text}` (a dictated chat question without a mic), `chat_send`'s turn
   itself is `chat_turn` (shared with the Voice Assistant),
   `configure_assistant_hotkey` / `assistant_key` (the assistant shortcut,
-  live-applied / in-page), `chat_view_state` + `assistant_stop`
+  live-applied / in-page), `configure_read_hotkey` (Read aloud's,
+  live-applied; its press is `read-key-pressed` → `read_aloud::read_selection`
+  in lib.rs), `read_aloud_text` / `_selection` / `_action` / `_state`
+  (read_aloud.rs), `chat_view_state` + `assistant_stop`
   (assistant.rs),
   `meeting_start` (then `calendar::on_meeting_started`)/`meeting_stop`/
   `meeting_state`, `transcribe_file`/`cancel_file_transcription`/

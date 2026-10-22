@@ -193,6 +193,13 @@ pub struct YapConfig {
     /// a key with the other three (`input_hook::clashes`).
     #[serde(default)]
     pub assistant_hotkey: String,
+    /// The **Read aloud** shortcut (Settings → Shortcuts / Voice Assistant,
+    /// `read_aloud.rs`): select text in any app, press it, and Yap reads the
+    /// selection aloud in the chosen voice, with a reading card on the Yap
+    /// bar. Empty = unbound (the default: the bar's 🔊 and the tray work
+    /// without it). Never shares a key with the others.
+    #[serde(default)]
+    pub read_hotkey: String,
     /// Active model id from the STT registry (e.g. "parakeet-tdt-0.6b-v3",
     /// "small"). Field name kept as `model_size` for config back-compat.
     #[serde(default = "default_model_size")]
@@ -853,6 +860,7 @@ impl Default for YapConfig {
             hotkey: default_hotkey(),
             edit_hotkey: String::new(),
             assistant_hotkey: String::new(),
+            read_hotkey: String::new(),
             model_size: default_model_size(),
             use_gpu: true,
             input_device: None,
