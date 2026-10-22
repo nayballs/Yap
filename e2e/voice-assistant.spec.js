@@ -411,6 +411,35 @@ test('■ stops the answer, and a press while Yap speaks cuts it off to listen (
   await setConfig(yap, main, { assistantHotkey: '' });
 });
 
+// Streamed (stream.rs): the voice starts at the answer's first whole
+// sentence, while the rest is still being written — and says it all once.
+test('a spoken answer starts at its first sentence, while the rest is still being written', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  await setConfig(yap, main, { speakReplies: true, speakWhen: 'voice' });
+  await inAnotherApp(yap);
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  const answer = 'The match starts at eight tonight. It is on the main channel. Kick-off is at the home ground.';
+  fakeLlm.scriptChat([{ content: answer, stream: { gapMs: 300 } }]);
+  const cap = capsule(yap);
+  await ask(yap, 'when does the match start');
+  // Speaking, and the answer still coming.
+  await expect
+    .poll(async () => (await speaking(yap)) && !fakeLlm.requests.at(-1).ended, { timeout: 10_000 })
+    .toBe(true);
+  await expect(cap).toHaveAttribute('data-ask', 'speaking');
+  await shot(yap.overlay, '26-assistant-speaking-while-written');
+  // All of it said, once, as it was written.
+  await expect.poll(async () => (await spoken(yap)).map((s) => s.text), { timeout: 15_000 }).toEqual([answer]);
+  const [said] = await spoken(yap);
+  expect(said.streamed).toBe(true);
+  await yap.invoke('tts_stop');
+  await mainOnScreen(yap);
+});
+
 // The maintainer (2026-10-18): "We do not want this feature enabled during meetings,
 // we don't want Bella to talk … this would be too much". While a meeting
 // records or a call is on, the shortcut doesn't listen and Yap doesn't talk.

@@ -29,6 +29,19 @@
 // Gale in Baldur's Gate 3. `failNext("groqSearch", 1, 429)` answers the
 // next one with an HTTP error, to see Yap fall back to its own search.
 //
+// **Streaming** (src-tauri/src/stream.rs): a request with `stream: true`
+// gets server-sent events, as llama.cpp and the cloud providers send them —
+// the content in pieces of a few words, each tool call as a header (index,
+// id, name) then its arguments in fragments, a finish reason, the usage and
+// "[DONE]". A scripted step's `stream` (or `streamPace(kind, …)` for a kind)
+// paces it: `gapMs` between chunks, `chunks` (the content's own pieces),
+// `failAfter: n` (an error event after n chunks, then the end: a provider
+// failing mid-stream), `hangAfter: n` (nothing more after n chunks until
+// Yap closes the connection: a stop). The request record keeps `stream`,
+// `streamOptions`, and `aborted` when Yap hung up mid-stream.
+// `setStreaming(false)` answers whole even when asked to stream (a server
+// that ignores `stream`).
+//
 // It also lists models (src-tauri/src/model_catalog.rs): `GET <base>/models`
 // as a self-hosted OpenAI-compatible server (`serverModels`), and — through
 // `modelsStandin`, the debug-only YAP_MODELS_STANDIN — each cloud provider's
@@ -152,6 +165,61 @@ export function estimateTokens(text) {
     else other += 1;
   }
   return Math.ceil((ascii * 2) / 7) + other;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Text in pieces of a couple of words, spaces kept (as a model streams). */
+export function pieces(text) {
+  const words = String(text ?? '').match(/\S+\s*|\s+/g) ?? [];
+  const out = [];
+  for (let i = 0; i < words.length; i += 2) out.push(words.slice(i, i + 2).join(''));
+  return out;
+}
+
+/**
+ * `message` as server-sent events (OpenAI's chat.completion.chunk, as
+ * llama.cpp streams it), paced by `pace` ({ gapMs, chunks, failAfter,
+ * hangAfter }); `record.aborted` when the client hangs up mid-stream.
+ */
+async function streamOut(res, record, model, message, finish, pace = {}) {
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+  let gone = false;
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      gone = true;
+      record.aborted = true;
+    }
+  });
+  const chunk = (delta, finishReason = null) =>
+    `data: ${JSON.stringify({ id: 'fake-stream', object: 'chat.completion.chunk', model, choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`;
+  const out = [chunk({ role: 'assistant', content: '' })];
+  for (const part of pace.chunks ?? pieces(message.content ?? '')) out.push(chunk({ content: part }));
+  (message.tool_calls ?? []).forEach((call, index) => {
+    out.push(chunk({ tool_calls: [{ index, id: call.id, type: 'function', function: { name: call.function.name, arguments: '' } }] }));
+    const args = call.function.arguments ?? '';
+    const third = Math.max(1, Math.ceil(args.length / 3));
+    for (let i = 0; i < args.length; i += third) out.push(chunk({ tool_calls: [{ index, function: { arguments: args.slice(i, i + third) } }] }));
+  });
+  out.push(chunk({}, finish));
+  out.push(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } })}\n\n`);
+  out.push('data: [DONE]\n\n');
+  for (let i = 0; i < out.length; i++) {
+    if (gone) return;
+    if (pace.failAfter != null && i === pace.failAfter) {
+      res.write(`data: ${JSON.stringify({ error: { code: 502, message: 'fake provider error mid-stream' } })}\n\n`);
+      res.end();
+      return;
+    }
+    if (pace.hangAfter != null && i === pace.hangAfter) {
+      record.hung = true;
+      return; // open until the client goes
+    }
+    res.write(out[i]);
+    if (pace.gapMs) await sleep(pace.gapMs);
+  }
+  res.end();
+  record.ended = true;
 }
 
 const DIGEST = 'You are a meeting note-taker';
@@ -355,6 +423,8 @@ export async function startFakeLlm() {
   const delays = new Map();
   const chatScript = [];
   const replies = new Map();
+  const paces = new Map();
+  let streaming = true;
   const lists = new Map();
   const listFailures = new Map();
   const modelRequests = [];
@@ -493,7 +563,10 @@ export async function startFakeLlm() {
         toolChoice: body.tool_choice ?? null,
         responseFormat: body.response_format ?? null,
         messages,
+        stream: !!body.stream,
+        streamOptions: body.stream_options ?? null,
       });
+      const record = requests.at(-1);
       const wait = delays.get(kind) ?? 0;
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       const failing = failures.get(kind);
@@ -502,13 +575,29 @@ export async function startFakeLlm() {
         res.writeHead(failing.status, { 'content-type': 'text/plain' }).end('fake failure: the model is down');
         return;
       }
+      // The answer, whole or (asked for, and on) streamed.
+      const answerWith = (message, finish, pace = {}) => {
+        if (body.stream && streaming) return streamOut(res, record, body.model, message, finish, pace);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            id: `fake-${requests.length}`,
+            object: 'chat.completion',
+            model: body.model,
+            choices: [{ index: 0, message, finish_reason: finish }],
+            usage: { total_tokens: 0 },
+          })
+        );
+      };
       // The chat's tool loop, scripted: the next step's tool calls or answer.
-      const step = offered.length > 0 ? chatScript.shift() : undefined;
+      // A step without tools offered takes one too when it says `plain`
+      // (a model's answer without tools, the loop's last call).
+      const step = offered.length > 0 || chatScript[0]?.plain ? chatScript.shift() : undefined;
       if (step) {
         const message = step.tools
           ? {
               role: 'assistant',
-              content: null,
+              content: step.preamble ?? null,
               tool_calls: step.tools.map(({ name, args }) => ({
                 id: `call_${++callIds}`,
                 type: 'function',
@@ -516,16 +605,7 @@ export async function startFakeLlm() {
               })),
             }
           : { role: 'assistant', content: step.content };
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            id: `fake-${requests.length}`,
-            object: 'chat.completion',
-            model: body.model,
-            choices: [{ index: 0, message, finish_reason: step.tools ? 'tool_calls' : 'stop' }],
-            usage: { total_tokens: 0 },
-          })
-        );
+        await answerWith(message, step.tools ? 'tool_calls' : 'stop', step.stream ?? paces.get(kind) ?? {});
         return;
       }
       const answer = {
@@ -543,16 +623,7 @@ export async function startFakeLlm() {
         brief: () => 'Nothing to add.',
       };
       const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user);
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          id: `fake-${requests.length}`,
-          object: 'chat.completion',
-          model: body.model,
-          choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
-          usage: { total_tokens: 0 },
-        })
-      );
+      await answerWith({ role: 'assistant', content }, 'stop', paces.get(kind) ?? {});
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -571,6 +642,14 @@ export async function startFakeLlm() {
     delay: (kind, ms) => delays.set(kind, ms),
     scriptChat: (steps) => chatScript.push(...steps),
     reply: (kind, fn) => replies.set(kind, fn),
-    close: () => new Promise((resolve) => server.close(resolve)),
+    /** Pace a kind's streamed answers: `{ gapMs, chunks, failAfter, hangAfter }` (null: as they come). */
+    streamPace: (kind, pace) => (pace ? paces.set(kind, pace) : paces.delete(kind)),
+    /** Answer whole even when asked to stream (`false`), or stream again. */
+    setStreaming: (on) => (streaming = on),
+    close: () => {
+      // A connection held open mid-stream (`hangAfter`) mustn't keep it up.
+      server.closeAllConnections?.();
+      return new Promise((resolve) => server.close(resolve));
+    },
   };
 }

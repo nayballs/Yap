@@ -44,10 +44,19 @@
 //! the notice policy) with Open settings (Language Models → Chat & Voice
 //! Assistant). No STT model or no mic: the dictation's own messages.
 //!
+//! **Streamed** (`stream.rs`, 2026-10-22): the answer is spoken from its
+//! first whole sentence while the rest is still being written
+//! ([`Streamed`]), the same short version as before ([`spoken_answer`]: at
+//! most two sentences go to the voice while it's written, the rest of what's
+//! said once the answer is whole and checked); a web answer's sentence with
+//! a price in it waits for the check (`about_you::restore_price_signs` may
+//! change it). Barge-in, ■ and the meeting rule stop it as before.
+//!
 //! Events: `yap-assistant {phase, conversationId, messageId}` (the bar's
-//! capsule) and `yap-assistant-turn {phase: asked | answered | failed |
+//! capsule), `yap-assistant-turn {phase: asked | answered | failed |
 //! open, conversationId, text, show}` (the main window: `show` = bring the
-//! Chat view up).
+//! Chat view up) and `yap-assistant-stream {conversationId, event}` (the
+//! Chat view follows the answer as it's written: a `stream::Event`).
 
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -63,6 +72,11 @@ pub const RECENT_SECS: u64 = 30 * 60;
 const EVENT: &str = "yap-assistant";
 /// The main window follows this (the Chat view, ControlPanel).
 const TURN: &str = "yap-assistant-turn";
+/// The Chat view follows the answer as it's written.
+const STREAM: &str = "yap-assistant-stream";
+/// How many sentences go to the voice while the answer is still being
+/// written: the short version's ([`spoken_answer`]'s `tts::brief(…, 2)`).
+const STREAM_SAY: usize = 2;
 /// The answer's card on the bar (its rule in `notice.rs`).
 pub const CARD: &str = "assistant";
 /// The "no AI model" alert's kind.
@@ -366,6 +380,154 @@ fn failed_alert(why: &str) -> crate::alert::Alert {
     }
 }
 
+/// A price in a sentence ("$8", "£20 a month", "15 euros"): in a web
+/// answer it waits for the answer's check before it's said. Pure.
+pub fn mentions_price(sentence: &str) -> bool {
+    static PRICE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)[$£€¥₹]\s?\d|\d\s?(?:usd|gbp|eur|dollars?|pounds?|euros?|cents?|pence|quid|bucks)\b|\b\d{1,2}p\b")
+            .expect("static regex")
+    });
+    PRICE.is_match(sentence)
+}
+
+/// **A spoken question's answer as it's written** (a `stream::Sink` for
+/// `chat_turn`): the Chat view follows it (`yap-assistant-stream`), and the
+/// voice starts at its first whole sentence ([`STREAM_SAY`] at most until
+/// the answer is whole), with the card on the Yap bar.
+struct Streamed {
+    app: AppHandle,
+    generation: u64,
+    /// Dictations started when the question was heard.
+    since: u64,
+    question: String,
+    voice_on: bool,
+    show_card: bool,
+    s: Mutex<Speaking>,
+}
+
+#[derive(Default)]
+struct Speaking {
+    conversation: Option<u64>,
+    /// The answer's id, as it will be saved ("chat:<conversation>:<index>").
+    message_id: Option<String>,
+    feed: Option<std::sync::Arc<crate::tts::Feed>>,
+    /// Sentences handed to the voice.
+    said: usize,
+    /// The turn has read the web.
+    web: bool,
+    /// A sentence waits for the answer's check (a price in a web answer).
+    held: bool,
+    /// The voice can't go on (stopped, a dictation or a meeting started).
+    quiet: bool,
+    carded: bool,
+}
+
+impl Streamed {
+    fn lock(&self) -> MutexGuard<'_, Speaking> {
+        self.s.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// May the voice speak now: still the latest question, and no meeting
+    /// or new dictation since it was asked.
+    fn may_speak(&self) -> bool {
+        self.voice_on
+            && current(self.generation)
+            && crate::tts::meeting_quiet().is_none()
+            && crate::pipeline::dictation_state().0 == self.since
+    }
+
+    /// Hand the voice the sentences of `text` that are ready, starting it
+    /// with the first.
+    fn speak_ready(&self, text: &str) {
+        let started_id = {
+            let mut st = self.lock();
+            if st.quiet || st.held {
+                return;
+            }
+            if !self.may_speak() {
+                st.quiet = true;
+                return;
+            }
+            let ready = crate::tts::ready_sentences(text, STREAM_SAY, false);
+            if ready.len() <= st.said {
+                return;
+            }
+            let mut new = Vec::new();
+            for sentence in &ready[st.said..] {
+                if st.web && mentions_price(sentence) {
+                    st.held = true;
+                    break;
+                }
+                new.push(sentence.clone());
+            }
+            if new.is_empty() {
+                return;
+            }
+            let n = new.len();
+            match &st.feed {
+                Some(feed) => {
+                    if !feed.push(new) {
+                        st.quiet = true;
+                        return;
+                    }
+                    st.said += n;
+                    None
+                }
+                None => {
+                    let Some(id) = st.message_id.clone() else { return };
+                    match crate::tts::speak_streamed(Some(id.clone())) {
+                        Ok(feed) => {
+                            feed.push(new);
+                            st.feed = Some(feed);
+                            st.said += n;
+                            Some(id)
+                        }
+                        Err(e) => {
+                            tracing::info!("Voice Assistant: couldn't start the voice while the answer came ({e})");
+                            st.quiet = true;
+                            None
+                        }
+                    }
+                }
+            }
+        };
+        // The voice started: "Speaking" on the capsule, and the card.
+        let Some(id) = started_id else { return };
+        tracing::info!("Voice Assistant: speaking from the answer's first sentence");
+        let ev = {
+            let mut s = lock();
+            if s.generation != self.generation {
+                return;
+            }
+            s.phase = Phase::Speaking;
+            s.message_id = Some(id);
+            snapshot(&s)
+        };
+        emit(&self.app, ev);
+        let on_bar = crate::notice::place(&self.app, false) == crate::notice::Place::Bar;
+        if on_bar && card_on_bar(self.show_card, true) {
+            let shown = crate::tts::brief(text, STREAM_SAY);
+            let carded = show_card(&self.app, &self.question, &shown, true, None);
+            self.lock().carded = carded;
+        }
+    }
+}
+
+impl crate::stream::Sink for Streamed {
+    fn send(&self, ev: crate::stream::Event) {
+        let conversation = self.lock().conversation;
+        if let crate::stream::Event::Chips { web, .. } = &ev {
+            self.lock().web = *web;
+        }
+        if let crate::stream::Event::Text { text } = &ev {
+            if !text.trim().is_empty() {
+                self.speak_ready(text);
+            }
+        }
+        let _ = self.app.emit(STREAM, serde_json::json!({ "conversationId": conversation, "event": ev }));
+    }
+}
+
 async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     let cfg = crate::config::load();
     let viewing = view();
@@ -391,8 +553,24 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     let (_, focused) = crate::notice::window_view(&app);
     let asked_app = app.clone();
     let asked_text = question.clone();
-    let turn = crate::commands::chat_turn(Some(&app), conversation_id, &question, Some("assistant"), true, move |conv, index| {
+    // The answer as it's written: the Chat view follows it, the voice
+    // starts at its first sentence.
+    let streamed = Streamed {
+        app: app.clone(),
+        generation,
+        since,
+        question: question.clone(),
+        voice_on: cfg.speak_replies,
+        show_card: cfg.assistant_answer_card,
+        s: Mutex::new(Speaking::default()),
+    };
+    let asked = |conv: u64, index: usize| {
         lock().conversation = Some(conv);
+        {
+            let mut st = streamed.lock();
+            st.conversation = Some(conv);
+            st.message_id = Some(format!("chat:{conv}:{}", index + 1));
+        }
         let _ = asked_app.emit(
             TURN,
             serde_json::json!({
@@ -403,11 +581,30 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                 "show": focused,
             }),
         );
-    })
+    };
+    let turn = crate::commands::chat_turn(
+        Some(&app),
+        conversation_id,
+        &question,
+        Some("assistant"),
+        true,
+        asked,
+        Some(&streamed as &dyn crate::stream::Sink),
+        None,
+    )
     .await;
+    let (feed, said, carded_early) = {
+        let st = streamed.lock();
+        (st.feed.clone(), st.said, st.carded)
+    };
     let turn = match turn {
         Ok(turn) => turn,
         Err(e) => {
+            // Half an answer said: it stops there.
+            if let Some(feed) = &feed {
+                feed.close();
+                crate::tts::stop();
+            }
             tracing::warn!("Voice Assistant: no answer ({e})");
             let conv = lock().conversation;
             let _ = app.emit(TURN, serde_json::json!({ "phase": "failed", "conversationId": conv, "error": e }));
@@ -428,6 +625,12 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             "show": focused,
         }),
     );
+    // Already speaking (the answer was spoken as it came): the rest of what's
+    // said, now the answer is whole and checked.
+    if let Some(feed) = feed {
+        finish_streamed(&app, generation, since, &question, &turn, &feed, said, carded_early, &cfg);
+        return;
+    }
     // A meeting or a call that started while the answer was coming: shown,
     // not read aloud.
     let meeting = crate::tts::meeting_quiet().is_some();
@@ -507,6 +710,97 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
         }
     }
     tracing::info!(spoken = how == Reply::Speak, carded, meeting, interrupted, "Voice Assistant: answered");
+}
+
+/// The end of an answer the voice began while it was written ([`Streamed`]):
+/// the rest of what's said ([`spoken_answer`] of the checked answer, after
+/// the `said` sentences already handed over), or — a meeting, a dictation
+/// or ■ since — nothing more; the card shows the whole short answer.
+#[allow(clippy::too_many_arguments)]
+fn finish_streamed(
+    app: &AppHandle,
+    generation: u64,
+    since: u64,
+    question: &str,
+    turn: &crate::commands::ChatTurn,
+    feed: &crate::tts::Feed,
+    said: usize,
+    carded: bool,
+    cfg: &crate::config::YapConfig,
+) {
+    let meeting = crate::tts::meeting_quiet().is_some();
+    let interrupted = crate::pipeline::dictation_state().0 != since;
+    let how = reply(crate::config::load().speak_replies, meeting, interrupted);
+    let (said_text, shown) = spoken_answer(&turn.reply, turn.sources.len());
+    let still = current(generation);
+    if how == Reply::Speak && still {
+        let rest: Vec<String> = crate::tts::utterances(&said_text).into_iter().skip(said).collect();
+        if !rest.is_empty() {
+            feed.push(rest);
+        }
+        feed.close();
+    } else {
+        feed.close();
+        // A meeting started while it was said: the voice stops, and the
+        // answer stays on its card to read (not taken away with the voice).
+        if meeting && still {
+            let ev = {
+                let mut s = lock();
+                if s.generation == generation && s.phase == Phase::Speaking {
+                    s.phase = Phase::Idle;
+                    s.message_id = None;
+                    Some(snapshot(&s))
+                } else {
+                    None
+                }
+            };
+            if let Some(ev) = ev {
+                emit(app, ev);
+            }
+            crate::tts::stop();
+        }
+    }
+    let note = if meeting {
+        Some("Not read aloud during a meeting")
+    } else if interrupted {
+        Some("Not read aloud: you started dictating")
+    } else {
+        None
+    };
+    let sources_note = (!turn.sources.is_empty()).then(|| match turn.sources.len() {
+        1 => "1 source in Chat".to_string(),
+        n => format!("{n} sources in Chat"),
+    });
+    let note = note.or(sources_note.as_deref());
+    if !still {
+        return;
+    }
+    {
+        let mut s = lock();
+        if s.generation == generation {
+            s.conversation = Some(turn.conversation_id);
+        }
+    }
+    if carded {
+        let body = shown.clone();
+        let status = note.map(str::to_string);
+        // Not read aloud to the end: it stays a reading time, as a shown
+        // answer does.
+        let timeout = (how != Reply::Speak).then(|| read_ms(&shown));
+        crate::bar::update_card(app, CARD, |c| {
+            c.body = body;
+            c.status = status;
+            if timeout.is_some() {
+                c.timeout_ms = timeout;
+            }
+        });
+    } else {
+        let on_bar = crate::notice::place(app, false) == crate::notice::Place::Bar;
+        if on_bar && card_on_bar(cfg.assistant_answer_card, how == Reply::Speak) {
+            show_card(app, question, &shown, how == Reply::Speak, note);
+        }
+    }
+    tracing::info!(spoken = how == Reply::Speak, streamed = true, meeting, interrupted, "Voice Assistant: answered");
 }
 
 /// The answer on the Yap bar: the question over the answer (markdown, cut
@@ -742,6 +1036,16 @@ mod tests {
         // A short one is said whole.
         let short = "Boil it for six to seven minutes, then cool it in cold water.";
         assert_eq!(spoken_answer(short, 0).0, short);
+    }
+
+    #[test]
+    fn a_price_in_a_spoken_web_answer_waits_for_the_check() {
+        for s in ["ChatGPT Plus costs $20 a month.", "It's £8.99 now.", "About 15 euros.", "Roughly 20 USD a seat.", "It's 99p."] {
+            assert!(mentions_price(s), "{s}");
+        }
+        for s in ["It starts at 8 tonight.", "Version 3.12 is out.", "Gale is on the beach.", "Use the $PATH variable."] {
+            assert!(!mentions_price(s), "{s}");
+        }
     }
 
     #[test]

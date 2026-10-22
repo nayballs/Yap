@@ -593,18 +593,26 @@ pub(crate) async fn chat_with(
         opts.timeout,
         RATE_LIMIT_PATIENCE,
         extra,
+        None,
     )
     .await?;
+    answer_text(&message, opts.disable_thinking)
+}
+
+/// A message's answer as [`chat`] gives it: unwrapped (`strip_wrapping`)
+/// and, when asked, without reasoning blocks.
+pub(crate) fn answer_text(message: &Value, disable_thinking: bool) -> Result<String, String> {
     let content = message["content"]
         .as_str()
         .ok_or_else(|| "response missing choices[0].message.content".to_string())?;
     let out = strip_wrapping(content.trim());
-    Ok(if opts.disable_thinking { strip_thinking(&out) } else { out })
+    Ok(if disable_thinking { strip_thinking(&out) } else { out })
 }
 
 /// One embedded note-chat turn (OpenWhispr `useEmbeddedChat`): system = the
 /// Chat scope's prompt + the note injected as context, then a short history
-/// and the user's question. Returns the assistant's answer.
+/// and the user's question. Returns the assistant's answer. `live`: someone
+/// watches it as it's written (`stream.rs`: a small model's Chat answer).
 #[allow(clippy::too_many_arguments)]
 pub async fn note_chat(
     system: &str,
@@ -615,6 +623,7 @@ pub async fn note_chat(
     model: &str,
     provider: &str,
     disable_thinking: bool,
+    live: Option<crate::stream::Live<'_>>,
 ) -> Result<String, String> {
     let question = question.trim();
     if question.is_empty() {
@@ -627,20 +636,11 @@ pub async fn note_chat(
     }
     messages.push(json!({ "role": "user", "content": question }));
     // A model on this PC may take a while on a processor (`chat_timeout`).
-    let message = post_chat_request(
-        base_url,
-        api_key,
-        model,
-        provider,
-        0.5,
-        serde_json::Value::Array(messages),
-        None,
-        None,
-        chat_timeout(base_url),
-        RATE_LIMIT_PATIENCE,
-        serde_json::Map::new(),
-    )
-    .await?;
+    let req = ChatRequest::chat(base_url, api_key, model, provider, 0.5, Value::Array(messages), None, None);
+    let message = match live {
+        Some(live) => crate::stream::call(live, &req, false, disable_thinking).await?,
+        None => post(&req, None).await?,
+    };
     let out = strip_wrapping(
         message["content"]
             .as_str()
@@ -741,6 +741,7 @@ async fn post_chat(
         CLEANUP_TIMEOUT,
         rate_limit_patience,
         serde_json::Map::new(),
+        None,
     )
     .await?;
     let content = message["content"]
@@ -771,24 +772,240 @@ pub(crate) async fn post_chat_message(
     tools: Option<&Value>,
     tool_choice: Option<Value>,
 ) -> Result<Value, String> {
-    let mut extra = serde_json::Map::new();
-    if let (Some(choice), Some(_)) = (tool_choice, tools) {
-        extra.insert("tool_choice".into(), choice);
+    let req = ChatRequest::chat(base_url, api_key, model, provider, temperature, messages, tools, tool_choice);
+    post(&req, None).await
+}
+
+/// What a streamed call hands its watcher as the answer comes
+/// (`stream.rs`).
+pub(crate) enum Delta<'a> {
+    /// More of the answer's text.
+    Content(&'a str),
+    /// The model began a tool call (its name).
+    ToolCall(&'a str),
+    /// Start over: what came so far is void (the stream broke, and the call
+    /// goes again without streaming).
+    Restart,
+}
+
+/// A streamed call's watcher.
+pub(crate) type OnDelta<'a> = &'a mut (dyn FnMut(Delta<'_>) + Send);
+
+/// One chat call, as [`post_chat_request`] sends it — what a streamed call
+/// (`stream::call`) is given.
+#[derive(Clone)]
+pub(crate) struct ChatRequest {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub provider: String,
+    pub temperature: f32,
+    pub messages: Value,
+    pub tools: Option<Value>,
+    pub max_tokens: Option<u32>,
+    pub timeout: Duration,
+    pub rate_limit_patience: Duration,
+    pub extra: serde_json::Map<String, Value>,
+}
+
+impl ChatRequest {
+    /// A Chat step's ([`post_chat_message`]): Chat's timeout, waiting out a
+    /// rate limit, `tool_choice` with the tools.
+    #[allow(clippy::too_many_arguments)]
+    pub fn chat(
+        base_url: &str,
+        api_key: &str,
+        model: &str,
+        provider: &str,
+        temperature: f32,
+        messages: Value,
+        tools: Option<&Value>,
+        tool_choice: Option<Value>,
+    ) -> ChatRequest {
+        let mut extra = serde_json::Map::new();
+        if let (Some(choice), Some(_)) = (tool_choice, tools) {
+            extra.insert("tool_choice".into(), choice);
+        }
+        ChatRequest {
+            base_url: base_url.to_string(),
+            api_key: api_key.to_string(),
+            model: model.to_string(),
+            provider: provider.to_string(),
+            temperature,
+            messages,
+            tools: tools.cloned(),
+            max_tokens: None,
+            timeout: chat_timeout(base_url),
+            rate_limit_patience: RATE_LIMIT_PATIENCE,
+            extra,
+        }
     }
+
+    /// A call with explicit options ([`chat_with`]: the meeting helpers).
+    pub fn with_options(
+        base_url: &str,
+        api_key: &str,
+        model: &str,
+        provider: &str,
+        messages: Value,
+        opts: &ChatOptions,
+        extra: serde_json::Map<String, Value>,
+    ) -> ChatRequest {
+        ChatRequest {
+            base_url: base_url.to_string(),
+            api_key: api_key.to_string(),
+            model: model.to_string(),
+            provider: provider.to_string(),
+            temperature: opts.temperature,
+            messages,
+            tools: None,
+            max_tokens: opts.max_tokens,
+            timeout: opts.timeout,
+            rate_limit_patience: RATE_LIMIT_PATIENCE,
+            extra,
+        }
+    }
+}
+
+async fn post(req: &ChatRequest, on: Option<OnDelta<'_>>) -> Result<Value, String> {
     post_chat_request(
-        base_url,
-        api_key,
-        model,
-        provider,
-        temperature,
-        messages,
-        tools,
-        None,
-        chat_timeout(base_url),
-        RATE_LIMIT_PATIENCE,
-        extra,
+        &req.base_url,
+        &req.api_key,
+        &req.model,
+        &req.provider,
+        req.temperature,
+        req.messages.clone(),
+        req.tools.as_ref(),
+        req.max_tokens,
+        req.timeout,
+        req.rate_limit_patience,
+        req.extra.clone(),
+        on,
     )
     .await
+}
+
+/// **`req`, streamed** (`stream: true`, server-sent events): `on` hears the
+/// answer's text and its tool calls as they come, and the whole message
+/// comes back as [`post_chat_message`] returns it — the same retries, rate-
+/// limit waits and timeout. A server that won't stream (it refuses
+/// `stream`, or answers whole anyway) still answers: `on` then hears it all
+/// at once. A stream that breaks — the connection drops, the provider sends
+/// an error mid-way, it ends early — is asked again whole (`on` hears
+/// [`Delta::Restart`]), and an endpoint whose streams break twice isn't
+/// streamed again this session ([`streams_to`]).
+pub(crate) async fn post_chat_streamed(req: &ChatRequest, on: OnDelta<'_>) -> Result<Value, String> {
+    post(req, Some(on)).await
+}
+
+/// `req` as a whole answer (nobody watches it come).
+pub(crate) async fn post_whole(req: &ChatRequest) -> Result<Value, String> {
+    post(req, None).await
+}
+
+/// How streaming went with each endpoint this session (by base URL).
+#[derive(Debug, Default, Clone, Copy)]
+struct StreamTrouble {
+    /// Streams that broke ([`STREAM_BREAKS_ALLOWED`] → no more).
+    broke: u32,
+    /// The server refused `stream` itself.
+    refused: bool,
+    /// The server refused `stream_options` (usage in the stream).
+    no_options: bool,
+}
+
+static STREAM_TROUBLE: std::sync::Mutex<Option<std::collections::HashMap<String, StreamTrouble>>> = std::sync::Mutex::new(None);
+
+/// A streamed answer that broke this many times on an endpoint: no more
+/// streaming there until Yap restarts (one blip doesn't cost it).
+const STREAM_BREAKS_ALLOWED: u32 = 2;
+
+fn trouble(base_url: &str) -> StreamTrouble {
+    STREAM_TROUBLE
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .as_ref()
+        .and_then(|m| m.get(base_url.trim_end_matches('/')).copied())
+        .unwrap_or_default()
+}
+
+fn note_trouble(base_url: &str, f: impl FnOnce(&mut StreamTrouble)) {
+    let mut guard = STREAM_TROUBLE.lock().unwrap_or_else(|p| p.into_inner());
+    f(guard.get_or_insert_with(Default::default).entry(base_url.trim_end_matches('/').to_string()).or_default());
+}
+
+/// Is a call to `base_url` streamed (when someone watches it)? Not once
+/// the server refused it, or its streams broke [`STREAM_BREAKS_ALLOWED`]
+/// times this session.
+pub(crate) fn streams_to(base_url: &str) -> bool {
+    let t = trouble(base_url);
+    !t.refused && t.broke < STREAM_BREAKS_ALLOWED
+}
+
+/// An error that's about streaming ("stream", "streaming" as a word — not
+/// "upstream"). Pure.
+fn mentions_streaming(lower: &str) -> bool {
+    lower.match_indices("stream").any(|(i, _)| !lower[..i].chars().next_back().is_some_and(|c| c.is_ascii_alphabetic()))
+}
+
+/// Why a stream couldn't be read to its end ([`read_stream`]).
+enum ReadFail {
+    /// The model's own tool call was refused mid-stream (Groq's
+    /// `tool_use_failed`), or its arguments weren't JSON: asked again.
+    Rejected(String),
+    /// The stream broke: asked again without streaming.
+    Broken(String),
+    /// A failure a whole answer would have had too (the timeout).
+    Failed(String),
+}
+
+/// Read a streamed answer to its end, `on` hearing it as it comes.
+async fn read_stream(mut resp: reqwest::Response, on: OnDelta<'_>) -> Result<crate::stream::Assembler, ReadFail> {
+    let mut sse = crate::stream::SseParser::default();
+    let mut asm = crate::stream::Assembler::default();
+    let mut handle = |data: String, asm: &mut crate::stream::Assembler| -> Result<(), ReadFail> {
+        match asm.push(&data) {
+            Ok(pieces) => {
+                for p in pieces {
+                    match p {
+                        crate::stream::Piece::Content(s) => on(Delta::Content(&s)),
+                        crate::stream::Piece::Call(name) => on(Delta::ToolCall(&name)),
+                    }
+                }
+                Ok(())
+            }
+            Err(raw) => {
+                let v: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+                let status = v["error"]["code"].as_u64().and_then(|c| u16::try_from(c).ok()).unwrap_or(500);
+                if let Some(why) = tool_call_rejection(status, &raw) {
+                    return Err(ReadFail::Rejected(why));
+                }
+                let said: String = v["error"]["message"].as_str().unwrap_or(&raw).chars().take(200).collect();
+                Err(ReadFail::Broken(format!("the provider sent an error mid-way: {said}")))
+            }
+        }
+    };
+    loop {
+        let bytes = match resp.chunk().await {
+            Ok(Some(b)) => b,
+            Ok(None) => break,
+            Err(e) if e.is_timeout() => return Err(ReadFail::Failed(format!("request failed: {e}"))),
+            Err(e) => return Err(ReadFail::Broken(format!("the connection dropped: {e}"))),
+        };
+        for data in sse.feed(&bytes) {
+            handle(data, &mut asm)?;
+        }
+        if asm.finished() {
+            break;
+        }
+    }
+    for data in sse.finish() {
+        handle(data, &mut asm)?;
+    }
+    if !asm.complete() {
+        return Err(ReadFail::Broken(format!("it ended early, after {} chunks", asm.chunks())));
+    }
+    Ok(asm)
 }
 
 /// How long, in all, a call that someone is happy to wait for (the chat, the
@@ -885,6 +1102,9 @@ pub(crate) fn takes_temperature(model: &str) -> bool {
     }
 }
 
+/// The one chat call every other goes through. `on`: someone watches the
+/// answer as it comes ([`post_chat_streamed`]) — then it's streamed, unless
+/// this endpoint can't ([`streams_to`]).
 #[allow(clippy::too_many_arguments)]
 async fn post_chat_request(
     base_url: &str,
@@ -898,6 +1118,7 @@ async fn post_chat_request(
     timeout: Duration,
     rate_limit_patience: Duration,
     extra: serde_json::Map<String, Value>,
+    mut on: Option<OnDelta<'_>>,
 ) -> Result<Value, String> {
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let mut body = json!({
@@ -917,12 +1138,22 @@ async fn post_chat_request(
     if let Some(n) = max_tokens {
         body["max_tokens"] = json!(n);
     }
+    // Streamed: the answer's text as it's written, and its usage at the end
+    // (`stream_options`, which a server may refuse, below).
+    let mut streaming = on.is_some() && streams_to(base_url);
+    if streaming {
+        body["stream"] = json!(true);
+        if !trouble(base_url).no_options {
+            body["stream_options"] = json!({ "include_usage": true });
+        }
+    }
     // A model evaluation's request overrides (`--temperature`, `--set`, a
     // bench's `id_slot`); otherwise a no-op.
     crate::eval::adjust_body(&mut body);
     // A request to the on-device sidecar is counted while it runs: its
     // runtime isn't swapped nor its context changed under it, and the
-    // warm-up gives way (`local_llm::request_starting`).
+    // warm-up gives way (`local_llm::request_starting`). A streamed answer
+    // runs until its last chunk.
     let _busy = crate::local_llm::request_starting(base_url);
 
     let client = reqwest::Client::builder()
@@ -939,109 +1170,190 @@ async fn post_chat_request(
     // then 4 s), then the same request goes again.
     let mut waited = Duration::ZERO;
     let mut attempt = 0u32;
-    let resp = loop {
-        call.send(&body);
-        let mut req = client.post(&endpoint).json(&body);
-        // Local servers (Ollama / LM Studio) need no key; only send one if set.
-        if !api_key.is_empty() {
-            req = req.bearer_auth(api_key);
-        }
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| call.failed(format!("request failed: {}", e)))?;
-        let status = resp.status();
-        if status.is_success() {
-            break resp;
-        }
-        let header = |name: &str| {
+    loop {
+        let resp = loop {
+            call.send(&body);
+            let mut req = client.post(&endpoint).json(&body);
+            // Local servers (Ollama / LM Studio) need no key; only send one if set.
+            if !api_key.is_empty() {
+                req = req.bearer_auth(api_key);
+            }
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| call.failed(format!("request failed: {}", e)))?;
+            let status = resp.status();
+            if status.is_success() {
+                break resp;
+            }
+            let header = |name: &str| {
+                resp.headers()
+                    .get(name)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string)
+            };
+            let (retry_ms, retry_s) = (header("retry-after-ms"), header("retry-after"));
+            let limits = crate::eval::limit_headers(resp.headers());
+            // Surface a little of the body to help the user debug (no key in it).
+            let detail = resp.text().await.unwrap_or_default();
+            call.refused(status.as_u16(), &limits, &detail);
+            if status.as_u16() == 429 {
+                let hinted = rate_limit_wait(retry_ms.as_deref(), retry_s.as_deref(), &detail);
+                // A little more than asked: the window has to have moved on.
+                let wait = hinted.unwrap_or(Duration::from_secs(2u64 << attempt.min(3)))
+                    + Duration::from_millis(250);
+                if attempt < 4 && waited + wait <= rate_limit_patience {
+                    tracing::info!(
+                        "{} is rate-limiting this key; trying again in {:.1} s",
+                        provider,
+                        wait.as_secs_f64()
+                    );
+                    call.waiting(wait);
+                    tokio::time::sleep(wait).await;
+                    waited += wait;
+                    attempt += 1;
+                    continue;
+                }
+                tracing::warn!("Rate-limited by {}: {}", provider, detail.chars().take(300).collect::<String>());
+                return Err(call.failed(rate_limited_error(provider, hinted)));
+            }
+            let lower = detail.to_ascii_lowercase();
+            // A server that won't put the usage in a stream: the same
+            // request without asking for it (and never again this session).
+            if streaming
+                && matches!(status.as_u16(), 400 | 422)
+                && lower.contains("stream_options")
+                && body.as_object_mut().and_then(|b| b.remove("stream_options")).is_some()
+            {
+                tracing::info!("{} won't take stream_options; streaming without them", provider);
+                note_trouble(base_url, |t| t.no_options = true);
+                continue;
+            }
+            // A server that won't stream at all: a whole answer, and never a
+            // stream to it again this session.
+            if streaming && matches!(status.as_u16(), 400 | 422) && mentions_streaming(&lower) {
+                tracing::info!("{} won't stream; asking for a whole answer", provider);
+                note_trouble(base_url, |t| t.refused = true);
+                streaming = false;
+                body["stream"] = json!(false);
+                if let Some(b) = body.as_object_mut() {
+                    b.remove("stream_options");
+                }
+                continue;
+            }
+            // A model that only takes its default temperature (a newer one than
+            // `takes_temperature` knows): the same request again without it, once.
+            if status.as_u16() == 400
+                && lower.contains("temperature")
+                && body.as_object_mut().and_then(|b| b.remove("temperature")).is_some()
+            {
+                tracing::info!("{} wants {}'s default temperature; asking again without one", provider, model);
+                continue;
+            }
+            // The model's own tool call refused: the tool loop asks it again.
+            if let Some(why) = tool_call_rejection(status.as_u16(), &detail) {
+                return Err(call.failed(format!("{TOOL_CALL_REJECTED}{why}")));
+            }
+            // A model that takes tools on Chat Completions only with its
+            // reasoning off (OpenAI's GPT-6 family says so): the same request
+            // again with `reasoning_effort: "none"`, once.
+            if status.as_u16() == 400
+                && body.get("tools").is_some()
+                && body.get("reasoning_effort").is_none()
+                && lower.contains("reasoning")
+            {
+                body["reasoning_effort"] = json!("none");
+                tracing::info!("{} takes tools from {} only with reasoning off; asking again so", model, provider);
+                continue;
+            }
+            let detail: String = detail.chars().take(300).collect();
+            return Err(call.failed(format!("HTTP {}: {}", status.as_u16(), detail)));
+        };
+        let limits = crate::eval::limit_headers(resp.headers());
+
+        // Capture Groq's daily request headers BEFORE consuming the body. These are
+        // absent on non-Groq endpoints (local servers, OpenAI), which is fine — the
+        // usage tracker falls back to counting calls.
+        let header_u64 = |name: &str| -> Option<u64> {
             resp.headers()
                 .get(name)
                 .and_then(|v| v.to_str().ok())
-                .map(str::to_string)
+                .and_then(|s| s.trim().parse::<u64>().ok())
         };
-        let (retry_ms, retry_s) = (header("retry-after-ms"), header("retry-after"));
-        let limits = crate::eval::limit_headers(resp.headers());
-        // Surface a little of the body to help the user debug (no key in it).
-        let detail = resp.text().await.unwrap_or_default();
-        call.refused(status.as_u16(), &limits, &detail);
-        if status.as_u16() == 429 {
-            let hinted = rate_limit_wait(retry_ms.as_deref(), retry_s.as_deref(), &detail);
-            // A little more than asked: the window has to have moved on.
-            let wait = hinted.unwrap_or(Duration::from_secs(2u64 << attempt.min(3)))
-                + Duration::from_millis(250);
-            if attempt < 4 && waited + wait <= rate_limit_patience {
-                tracing::info!(
-                    "{} is rate-limiting this key; trying again in {:.1} s",
-                    provider,
-                    wait.as_secs_f64()
-                );
-                call.waiting(wait);
-                tokio::time::sleep(wait).await;
-                waited += wait;
-                attempt += 1;
-                continue;
-            }
-            tracing::warn!("Rate-limited by {}: {}", provider, detail.chars().take(300).collect::<String>());
-            return Err(call.failed(rate_limited_error(provider, hinted)));
-        }
-        // A model that only takes its default temperature (a newer one than
-        // `takes_temperature` knows): the same request again without it, once.
-        if status.as_u16() == 400
-            && detail.to_ascii_lowercase().contains("temperature")
-            && body.as_object_mut().and_then(|b| b.remove("temperature")).is_some()
-        {
-            tracing::info!("{} wants {}'s default temperature; asking again without one", provider, model);
-            continue;
-        }
-        // The model's own tool call refused: the tool loop asks it again.
-        if let Some(why) = tool_call_rejection(status.as_u16(), &detail) {
-            return Err(call.failed(format!("{TOOL_CALL_REJECTED}{why}")));
-        }
-        // A model that takes tools on Chat Completions only with its
-        // reasoning off (OpenAI's GPT-6 family says so): the same request
-        // again with `reasoning_effort: "none"`, once.
-        if status.as_u16() == 400
-            && body.get("tools").is_some()
-            && body.get("reasoning_effort").is_none()
-            && detail.to_ascii_lowercase().contains("reasoning")
-        {
-            body["reasoning_effort"] = json!("none");
-            tracing::info!("{} takes tools from {} only with reasoning off; asking again so", model, provider);
-            continue;
-        }
-        let detail: String = detail.chars().take(300).collect();
-        return Err(call.failed(format!("HTTP {}: {}", status.as_u16(), detail)));
-    };
-    let limits = crate::eval::limit_headers(resp.headers());
-
-    // Capture Groq's daily request headers BEFORE consuming the body. These are
-    // absent on non-Groq endpoints (local servers, OpenAI), which is fine — the
-    // usage tracker falls back to counting calls.
-    let header_u64 = |name: &str| -> Option<u64> {
-        resp.headers()
-            .get(name)
+        let limit_req = header_u64("x-ratelimit-limit-requests");
+        let remaining_req = header_u64("x-ratelimit-remaining-requests");
+        let json_body = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.trim().parse::<u64>().ok())
-    };
-    let limit_req = header_u64("x-ratelimit-limit-requests");
-    let remaining_req = header_u64("x-ratelimit-remaining-requests");
+            .is_some_and(|t| t.to_ascii_lowercase().contains("json"));
 
-    let value: Value = resp
-        .json()
-        .await
-        .map_err(|e| call.failed(format!("failed to parse response: {}", e)))?;
-    call.answered(&limits, &value);
+        // The answer as it's written (a server that answers whole anyway
+        // goes on below).
+        if let (true, false, Some(on)) = (streaming, json_body, on.as_deref_mut()) {
+            match read_stream(resp, on).await {
+                Ok(asm) => {
+                    let message = match asm.message() {
+                        Ok(m) => m,
+                        Err(crate::stream::Unusable::BadArguments(name)) => {
+                            tracing::info!(tool = %name, "A streamed tool call's arguments weren't JSON");
+                            return Err(call.failed(format!(
+                                "{TOOL_CALL_REJECTED}its arguments weren't complete JSON. Call the tool again with short, valid JSON arguments"
+                            )));
+                        }
+                    };
+                    let whole = asm.response(&message);
+                    call.answered(&limits, &whole);
+                    let total_tokens = whole["usage"]["total_tokens"].as_u64().unwrap_or(0);
+                    crate::usage::record(provider, total_tokens, remaining_req, limit_req);
+                    return Ok(message);
+                }
+                Err(ReadFail::Rejected(why)) => return Err(call.failed(format!("{TOOL_CALL_REJECTED}{why}"))),
+                Err(ReadFail::Failed(e)) => return Err(call.failed(e)),
+                Err(ReadFail::Broken(why)) => {
+                    // Asked again whole; an endpoint whose streams keep
+                    // breaking isn't streamed again this session.
+                    tracing::info!(provider, "A streamed answer broke ({why}); asking again without streaming");
+                    note_trouble(base_url, |t| t.broke += 1);
+                    on(Delta::Restart);
+                    streaming = false;
+                    body["stream"] = json!(false);
+                    if let Some(b) = body.as_object_mut() {
+                        b.remove("stream_options");
+                    }
+                    continue;
+                }
+            }
+        }
 
-    // Best-effort daily-usage accounting (never fails the call).
-    let total_tokens = value["usage"]["total_tokens"].as_u64().unwrap_or(0);
-    crate::usage::record(provider, total_tokens, remaining_req, limit_req);
+        let value: Value = resp
+            .json()
+            .await
+            .map_err(|e| call.failed(format!("failed to parse response: {}", e)))?;
+        call.answered(&limits, &value);
 
-    let message = value["choices"][0]["message"].clone();
-    if message.is_null() {
-        return Err("response missing choices[0].message".to_string());
+        // Best-effort daily-usage accounting (never fails the call).
+        let total_tokens = value["usage"]["total_tokens"].as_u64().unwrap_or(0);
+        crate::usage::record(provider, total_tokens, remaining_req, limit_req);
+
+        let message = value["choices"][0]["message"].clone();
+        if message.is_null() {
+            return Err("response missing choices[0].message".to_string());
+        }
+        // Someone watching a whole answer hears it all at once: its tool
+        // calls (so its text is never taken for the answer), then its text.
+        if let Some(on) = on.as_deref_mut() {
+            for c in message["tool_calls"].as_array().into_iter().flatten() {
+                if let Some(name) = c["function"]["name"].as_str() {
+                    on(Delta::ToolCall(name));
+                }
+            }
+            if let Some(text) = message["content"].as_str().filter(|t| !t.is_empty()) {
+                on(Delta::Content(text));
+            }
+        }
+        return Ok(message);
     }
-    Ok(message)
 }
 
 /// Remove `<think>…</think>` / `<thinking>…</thinking>` reasoning blocks that

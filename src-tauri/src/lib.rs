@@ -77,6 +77,7 @@ mod smart_insert;
 mod sound;
 mod speakers;
 mod stt;
+mod stream;
 mod stt_speed;
 mod text_injector;
 mod tray;
@@ -519,6 +520,7 @@ pub fn run() {
             commands::chat_delete_many,
             commands::chat_rename,
             commands::chat_send,
+            stream::stream_stop,
             ai_model::ai_model_status,
             ai_model::chat_set_model,
             ai_model::chat_provider_key,

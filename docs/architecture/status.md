@@ -363,8 +363,11 @@ only unit-level.
 
 ## Not yet done
 
-Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
-search (keyword-RAG only), no calendar tools and no conversation
+Not yet done: the AI Chat surface has no semantic-vector
+search (keyword-RAG only; its answers stream since 2026-10-22 —
+unit- and e2e-tested against stand-ins, measured on the on-device
+Qwen3.5-4B and Groq, not yet through a real Anthropic, Gemini, OpenAI or
+OpenRouter stream, whose shapes are taken from their docs), no calendar tools and no conversation
 search/archive (Chat's `search_chats` searches past chats by keyword for the
 model, not for the person); memory isn't synced between PCs, matches
 questions by keyword (no embeddings), and doesn't learn with a model too

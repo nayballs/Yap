@@ -220,6 +220,86 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   model read it all again); the person's next message is a clean turn.
   Unit-tested through the real loop against a local fake model + Exa
   (`a_web_page_can_never_make_the_chat_act`).
+- **`stream.rs`** — **streaming answers** (2026-10-22): every model call
+  of a Chat turn — each step of the tool loop, a small model's plain
+  answer, the loop's last no-tools call — the notepad's Ask sheet and the
+  Voice Assistant show the answer as it's written. On the on-device
+  Qwen3.5-4B the first words of a long answer came after ~0.6 s instead of
+  ~2.6 s (model-evals.md "Streaming answers"). **The wire**: OpenAI's
+  `stream: true` server-sent events, with `stream_options: {include_usage:
+  true}` (`llm::post_chat_streamed`, the same function as every call,
+  `post_chat_request`, so the retries, rate-limit waits, temperature and
+  reasoning fallbacks and the timeout are today's — the timeout covers the
+  whole stream, as it covered the whole answer). `SseParser` (lines split
+  anywhere, even mid-character; `:` comments such as OpenRouter's `:
+  OPENROUTER PROCESSING`; a bare JSON line) and `Assembler` (content
+  deltas; a tool call as a header — index, id, name — then argument
+  fragments, or whole and without an `index` as Gemini's OpenAI-compatible
+  endpoint sends it, or arguments as an object; usage from `usage` or
+  Groq's `x_groq.usage`; llama.cpp's `timings`; the message rebuilt as a
+  non-streamed one, every tool call's arguments **checked as JSON** — not
+  JSON is a rejected call, `llm::TOOL_CALL_REJECTED`, which the loop asks
+  again, as llama.cpp's 500 for it). The providers as Yap talks to them:
+  the sidecar and other llama.cpp servers, Ollama and LM Studio (custom,
+  self-hosted), Groq, OpenAI, OpenRouter, and Anthropic's and Gemini's
+  OpenAI-compatible endpoints — all the same shape. **Falling back**, per
+  endpoint (`llm::streams_to`): a server that refuses `stream_options`
+  (400/422 naming it) is asked again without, and never with them again
+  this session; one that refuses `stream` itself ("stream"/"streaming" as
+  a word in a 400/422 — not "upstream") is asked whole and never streamed
+  to again this session; one that answers whole anyway (a JSON body) is
+  read whole; **a stream that breaks** (the connection drops, an `error`
+  object mid-stream — OpenRouter's, llama.cpp's —, no finish reason or
+  `[DONE]`) is asked again whole at once (the page is told to drop what
+  came, `Delta::Restart`), and an endpoint whose streams broke twice isn't
+  streamed again this session. Groq's `tool_use_failed` mid-stream is a
+  rejected tool call, as its HTTP 400 is. **A step** (`Step`): with tools
+  offered, a step's opening text is **held until it's an answer** —
+  `releases`: a sentence's end (`. ! ? :` + space, or a line break)
+  followed by more text, or 200 characters — so the line a model writes
+  before a tool call ("I'll search your notes for that.") never shows; a
+  tool-call delta turns the step into its chip (`Event::Tool`, "Searching
+  the web…" from `doing`), and text shown before it is taken back; without
+  tools (a small model, the last call) text shows at once. Reasoning blocks
+  never show (`without_thinking`, even a half-written `<thi`, when the
+  scope hides thinking); gpt-oss's `【1】` shows as `[1]`; the text goes out
+  at most every 50 ms (`MIN_GAP`), whole each time. **The events** (the
+  page's channel, `stream::Event`, tagged `kind`): `text {text}` (the
+  answer so far; "" takes it back), `tool {name, doing}`, `chips {chips,
+  sources, web}` (after each tool and each of Yap's own searches: the chips
+  so far and the web sources found, so a "[1]" is a pill while it's
+  written), `waiting {waiting}`; `chat_send` adds `turn {conversationId,
+  userMessageId}` once the question is saved. The command's own reply is
+  still the **checked** answer (`chats::checked_answer` and the price
+  fixes), which the page puts in place of what streamed. **The channel**:
+  `PageChannel`, an optional Tauri channel argument (`onStream`; Tauri's
+  own `Channel` can't be left out, and the e2e suite's direct invokes
+  don't send one — no channel, a whole answer as before). **Stop**
+  (`Stoppable`, `stream_stop {id}`, `unless_stopped`): the page sends a
+  `turnId`; ■ drops the turn's future, which closes the stream (llama.cpp
+  stops generating on a closed connection); `chat_turn` keeps what was
+  shown (`Watch`), checks it like any answer and saves it with `stopped:
+  true` (`chats::append_message`); nothing shown yet → the error
+  `stream::STOPPED`, the question kept (as after a failure). **Never
+  slowing a dictation** (`Dictations`, a model on this PC only:
+  `ai_model::runs_here`): a Chat stream is dropped when a **new**
+  dictation starts during it (`NewDictations`: the dictations-started
+  count moved — not one under way when the step began, which is the Voice
+  Assistant's own question being finished), the page told it's waiting
+  ("Waiting for your dictation to finish…"), and the step asked again once
+  the dictation is done (`meeting_summary::wait_idle`, ≤ 5 times); the
+  notepad's helpers keep their rule (`AnyDictation`, as
+  `chat_beside_dictation`: wait one out first, drop the call whenever one
+  is busy — `chat_beside_dictation_live`). The sidecar's Busy guard
+  (`local_llm::request_starting` for each request, `hold` for the run)
+  covers a stream to its last chunk. Unit-tested (the wire, every split
+  point; a step's release, retraction and restart; the stop) and through
+  the real tool loop against a local SSE stand-in (`tools.rs` tests: a
+  preamble never shown, fragments reassembled, a broken stream asked again
+  whole then not streamed again, a refused `stream`/`stream_options`, cut
+  arguments and Groq's mid-stream refusal asked again). Model evaluations
+  stream like the Chat view (`YAP_EVAL_STREAM=off`: whole) and measure the
+  first words (`first_words_ms`).
 - **`assistant.rs`** — the **Voice Assistant** (2026-10-18; Settings →
   Voice Assistant): ask Yap's Chat out loud from any app with its own
   shortcut (`assistant_hotkey`, unbound by default) and hear the answer;
@@ -256,6 +336,21 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   own turn: RAG, tools, `voice: true`), `yap-assistant-turn {phase:
   asked|answered|failed|open, conversationId, show}` for the main window
   (`show` = the window was in front: ControlPanel brings Chat up on it).
+  **Streamed** (`Streamed`, a `stream::Sink`, 2026-10-22): the Chat view
+  follows the answer as it's written (`yap-assistant-stream
+  {conversationId, event}`), and the voice **starts at its first whole
+  sentence** (`tts::speak_streamed` → a `tts::Feed`; `tts::ready_sentences`:
+  the first block's sentences, never the one still being written, at most
+  `STREAM_SAY` = 2 while it's written — the short version's), the capsule
+  going to Speaking and the card coming up then; once the answer is whole
+  and checked, the rest of what `spoken_answer` says goes after the
+  sentences already handed over and the feed closes (`finish_streamed`).
+  In a web answer a sentence with a price waits for the check
+  (`mentions_price`: `about_you::restore_price_signs` may change "£8"
+  back to "$8"). The answer's id is known before it's saved (the question's
+  index + 1). Barge-in, ■, a newer question, a meeting starting: the voice
+  stops and no more goes in (`Feed::push` says so); a meeting started
+  meanwhile leaves the answer on its card for a reading time.
   **`reply(meeting, interrupted)`** (pure): always **spoken** (whatever
   "Speak replies" / "When to speak" say), except when a meeting or call
   started while the answer was coming, or a dictation did → shown only; a
@@ -414,5 +509,25 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   window is in front (`show`) or "Open in Chat" (`chatRequest {assistant}`).
   An empty chat says "Or press F8 in any app to ask out loud…", or offers
   **Set an assistant shortcut** (→ Settings `voice#assistant-shortcut`).
-  No streaming or
-  semantic vectors yet (ROADMAP step 3).
+  **Streamed answers** (`stream.rs`, `streaming.js`; 2026-10-22): `send`
+  calls `chat_send` through `streamCall` (a Tauri `Channel` as `onStream`,
+  a `turnId`); the answer's bubble appears with its first text or tool
+  call ("Thinking…" until then) and **grows in place** — markdown rendered
+  as it comes through `renderMarkdown(closePartial(text))` (an open code
+  fence closed, a half-written `**bold**` or `` `code` `` on the last line
+  closed, a half-typed "[1" or link left out until whole), a caret at the
+  end of its last line, the chip of the tool call under way (spinner,
+  "Searching the web…"), "Waiting for your dictation to finish…" while a
+  model on this PC steps aside; the thread follows the newest words unless
+  you scrolled up. **■** (the composer's Send becomes Stop while an answer
+  comes; Esc) stops it: what came stays, "· Stopped" under it; stopped
+  before anything came, the question stays with "Stopped". **The checked
+  answer** (`chat_send`'s reply) takes the streamed one's place in the
+  same bubble: the same text stays put; a changed one (a sources list
+  taken out, a note added, an unsourced "[1]" gone) glides from the
+  streamed height to the new one and fades in (`settle`,
+  `streamingHeight`; nothing while motion is reduced) — an unchecked claim
+  never stays after the end. A failure removes the streamed bubble with
+  the question, as before. A question asked out loud streams the same way
+  while its conversation is open (`yap-assistant-stream`).
+  No semantic vectors yet (ROADMAP step 3).

@@ -1102,6 +1102,87 @@ pub struct Job {
     /// track for the reading card.
     pub track: Option<Arc<Track>>,
     pub first: usize,
+    /// A streamed answer (the Voice Assistant's, `assistant.rs`): more
+    /// sentences come through it as the answer is written, after
+    /// `sentences` (which may be empty), until it's closed.
+    pub feed: Option<Arc<Feed>>,
+}
+
+/// How long the voice waits for a streamed answer's next sentence before it
+/// gives up ([`Feed`]; Chat's own timeout is 2 minutes a call).
+const FEED_PATIENCE: Duration = Duration::from_secs(180);
+
+/// **Sentences handed to the voice as an answer is written** (the Voice
+/// Assistant speaks a streamed answer from its first sentence, `stream.rs`):
+/// [`speak_streamed`] starts the voice with none, [`Feed::push`] adds
+/// sentences, [`Feed::close`] says there are no more. The voice waits for
+/// the next sentence while the feed is open; a stop (■, a dictation's
+/// barge-in, a newer answer) ends it, and pushing after that says so.
+#[derive(Default)]
+pub struct Feed {
+    state: Mutex<FeedState>,
+    /// The speaker and its job it feeds (none: not started).
+    voice: std::sync::OnceLock<(std::sync::Weak<Speaker>, u64)>,
+}
+
+#[derive(Default)]
+struct FeedState {
+    queued: Vec<String>,
+    closed: bool,
+    /// Everything pushed (what test mode records).
+    all: Vec<String>,
+    #[cfg(debug_assertions)]
+    record: Option<Spoken>,
+}
+
+impl Feed {
+    /// More sentences (as `utterances` writes them). `false`: the voice has
+    /// stopped, so they won't be said.
+    pub fn push(&self, sentences: Vec<String>) -> bool {
+        if !self.live() {
+            return false;
+        }
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if s.closed {
+            return false;
+        }
+        s.all.extend(sentences.iter().cloned());
+        s.queued.extend(sentences);
+        true
+    }
+
+    /// No more sentences: the voice ends after the last one.
+    pub fn close(&self) {
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if s.closed {
+            return;
+        }
+        s.closed = true;
+        #[cfg(debug_assertions)]
+        if let Some(mut rec) = s.record.take() {
+            if !s.all.is_empty() {
+                rec.text = s.all.join(" ");
+                rec.sentences = s.all.clone();
+                spoken().push(rec);
+            }
+        }
+    }
+
+    /// The voice it feeds is still going.
+    pub fn live(&self) -> bool {
+        self.voice.get().is_some_and(|(s, g)| s.upgrade().is_some_and(|s| s.live(*g)))
+    }
+
+    /// It feeds `speaker`'s job `generation` (started by [`Speaker::start`]).
+    fn attach(&self, speaker: &Arc<Speaker>, generation: u64) {
+        let _ = self.voice.set((Arc::downgrade(speaker), generation));
+    }
+
+    /// What's queued now, and whether it's closed.
+    fn take(&self) -> (Vec<String>, bool) {
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        (std::mem::take(&mut s.queued), s.closed)
+    }
 }
 
 /// What's said for a sentence shown on the reading card: its markdown, links
@@ -1251,7 +1332,13 @@ impl Speaker {
     /// once; the worker opens the output (`open`), then makes each sentence
     /// and queues it while the one before plays.
     pub fn speak(self: &Arc<Self>, job: Job, open: Opener) -> Result<(), String> {
-        if job.sentences.is_empty() {
+        self.start(job, open).map(|_| ())
+    }
+
+    /// [`Speaker::speak`], returning the job's generation (a [`Feed`]
+    /// follows it).
+    fn start(self: &Arc<Self>, job: Job, open: Opener) -> Result<u64, String> {
+        if job.sentences.is_empty() && job.feed.is_none() {
             return Err("Nothing to read aloud".into());
         }
         if (self.busy)() {
@@ -1266,7 +1353,7 @@ impl Speaker {
         std::thread::Builder::new()
             .name("tts-speaker".into())
             .spawn(move || me.run(generation, job, open))
-            .map(|_| ())
+            .map(|_| generation)
             .map_err(|e| {
                 self.finish(generation, None, Some(format!("Couldn't start speaking: {e}")));
                 "Couldn't start speaking".to_string()
@@ -1297,7 +1384,26 @@ impl Speaker {
         let mut synth = job.engine.open(&job.voice, job.rate);
         let mut engine_id = job.engine.id();
         let mut i = 0;
-        while i < job.sentences.len() {
+        // A streamed answer's last sentence (or its start): a feed that
+        // never closes (its answer lost) ends after [`FEED_PATIENCE`].
+        let mut fed_at = Instant::now();
+        loop {
+            // A streamed answer: its next sentences as they're written.
+            if i >= job.sentences.len() {
+                let Some(feed) = job.feed.clone() else { break };
+                let (more, closed) = feed.take();
+                if !more.is_empty() {
+                    let more = job.engine.prepare(more);
+                    job.sentences.extend(more);
+                    fed_at = Instant::now();
+                    continue;
+                }
+                if closed || !self.live(generation) || (self.busy)() || fed_at.elapsed() > FEED_PATIENCE {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(15));
+                continue;
+            }
             if !self.live(generation) || (self.busy)() {
                 break;
             }
@@ -1557,6 +1663,59 @@ pub fn speak(text: &str, message_id: Option<String>) -> Result<(), String> {
     say(utterances(text), message_id, voicing(&cfg), cfg.tts_rate, cfg.output_device)
 }
 
+/// **Start saying a streamed answer** (the Voice Assistant, `assistant.rs`):
+/// the voice Settings picked, as [`speak`] uses it, with no sentences yet —
+/// they come through the returned [`Feed`] as the answer is written.
+pub fn speak_streamed(message_id: Option<String>) -> Result<Arc<Feed>, String> {
+    if let Some(why) = meeting_quiet() {
+        return Err(why.into());
+    }
+    let speaker = speaker().ok_or("Spoken replies aren't ready yet")?;
+    let cfg = crate::config::load();
+    let rate = if cfg.tts_rate.is_finite() && cfg.tts_rate > 0.0 { cfg.tts_rate.clamp(0.5, 2.0) } else { 1.0 };
+    let Voicing { engine, voice, cloud } = voicing(&cfg);
+    let feed = Arc::new(Feed::default());
+    #[cfg(debug_assertions)]
+    if crate::e2e::active() {
+        feed.state.lock().unwrap_or_else(|p| p.into_inner()).record = Some(Spoken {
+            message_id: message_id.clone(),
+            text: String::new(),
+            sentences: Vec::new(),
+            engine: engine.id().to_string(),
+            voice: voice.clone(),
+            rate,
+            volume: volume(),
+            fallback: None,
+            streamed: true,
+        });
+    }
+    let fallback = cloud.map(|plan| fallback_for(plan, message_id.clone(), rate));
+    let opener = if crate::e2e::active() { sim_opener() } else { rodio_opener(cfg.output_device) };
+    let job = Job { message_id, sentences: Vec::new(), engine, voice, rate, fallback, track: None, first: 0, feed: Some(Arc::clone(&feed)) };
+    let generation = speaker.start(job, opener)?;
+    feed.attach(speaker, generation);
+    Ok(feed)
+}
+
+/// A streamed answer's sentences the voice can say now
+/// ([`speak_streamed`]): its first block's, as [`brief`] takes them, at most
+/// `n` — without the last while the block may still be being written
+/// (`done`: the answer is whole). Written for the ear as [`utterances`]
+/// writes them. Pure.
+pub fn ready_sentences(md: &str, n: usize, done: bool) -> Vec<String> {
+    let md: String = md.chars().take(MAX_CHARS).collect();
+    let blocks = speakable_blocks(&md);
+    let Some(at) = blocks.iter().position(|b| b.chars().any(char::is_alphanumeric)) else {
+        return Vec::new();
+    };
+    let mut out = sentences(&normalize::for_speech(&blocks[at]));
+    if !done && at + 1 == blocks.len() {
+        out.pop();
+    }
+    out.truncate(n);
+    out
+}
+
 /// Why Yap mustn't talk now, if it mustn't: a meeting records (the notes
 /// would hear Yap) or a call is on (the people on it could, and a voice over
 /// a meeting is too much — the maintainer, 2026-10-18). Spoken replies, ▶ and the
@@ -1590,11 +1749,12 @@ fn say(sentences: Vec<String>, message_id: Option<String>, voicing: Voicing, rat
             rate,
             volume: volume(),
             fallback: None,
+            streamed: false,
         });
     }
     let fallback = cloud.map(|plan| fallback_for(plan, message_id.clone(), rate));
     let opener = if crate::e2e::active() { sim_opener() } else { rodio_opener(device) };
-    let job = Job { message_id, sentences, engine, voice, rate, fallback, track: None, first: 0 };
+    let job = Job { message_id, sentences, engine, voice, rate, fallback, track: None, first: 0, feed: None };
     speaker.speak(job, opener)
 }
 
@@ -1632,11 +1792,12 @@ pub fn read(track: Arc<Track>, from: usize, message_id: String, rate: f32) -> Re
             rate,
             volume: volume(),
             fallback: None,
+            streamed: false,
         });
     }
     let fallback = cloud.map(|plan| fallback_for(plan, Some(message_id.clone()), rate));
     let opener = if crate::e2e::active() { sim_opener() } else { rodio_opener(cfg.output_device) };
-    let job = Job { message_id: Some(message_id), sentences, engine, voice, rate, fallback, track: Some(track), first: from };
+    let job = Job { message_id: Some(message_id), sentences, engine, voice, rate, fallback, track: Some(track), first: from, feed: None };
     speaker.speak(job, opener)
 }
 
@@ -1678,6 +1839,7 @@ fn fallback_for(plan: CloudPlan, message_id: Option<String>, rate: f32) -> Fallb
                     rate,
                     volume: volume(),
                     fallback: Some(error.to_string()),
+                    streamed: false,
                 });
             }
             let _ = left;
@@ -2032,6 +2194,8 @@ pub struct Spoken {
     /// The local voice took over from a cloud voice that failed with this
     /// error (these are the sentences it read).
     pub fallback: Option<String>,
+    /// Said as the answer was written ([`speak_streamed`]).
+    pub streamed: bool,
 }
 
 #[cfg(debug_assertions)]
@@ -2276,6 +2440,7 @@ mod tests {
                 fallback: None,
                 track: None,
                 first: 0,
+                feed: None,
             }
         }
         fn events(&self) -> Vec<(bool, String, Option<String>)> {
@@ -2397,6 +2562,63 @@ mod tests {
     }
 
     #[test]
+    fn a_streamed_answer_is_said_as_its_sentences_come() {
+        let r = rig();
+        let feed = Arc::new(Feed::default());
+        let mut job = r.job("s", &[], 1, None);
+        job.feed = Some(Arc::clone(&feed));
+        let g = r.speaker.start(job, sim_opener()).expect("started with no sentences yet");
+        feed.attach(&r.speaker, g);
+        assert!(r.speaker.state().speaking);
+        assert!(feed.push(vec!["The first one.".into()]));
+        let start = Instant::now();
+        while r.said.lock().unwrap().is_empty() {
+            assert!(start.elapsed() < Duration::from_secs(5), "the first sentence wasn't said");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // Still open: it waits for more, speaking.
+        std::thread::sleep(Duration::from_millis(40));
+        assert!(r.speaker.state().speaking);
+        assert!(feed.push(vec!["The second one.".into(), "And the third.".into()]));
+        feed.close();
+        r.wait_quiet();
+        assert_eq!(*r.said.lock().unwrap(), vec!["The first one.", "The second one.", "And the third."]);
+        // Closed: nothing more goes in.
+        assert!(!feed.push(vec!["Too late.".into()]));
+        assert_eq!(r.events(), vec![ev(true, "s"), ev(false, "s")]);
+    }
+
+    #[test]
+    fn a_stopped_streamed_answer_takes_no_more() {
+        let r = rig();
+        let feed = Arc::new(Feed::default());
+        let mut job = r.job("s", &[], 1, None);
+        job.feed = Some(Arc::clone(&feed));
+        let g = r.speaker.start(job, sim_opener()).unwrap();
+        feed.attach(&r.speaker, g);
+        assert!(feed.live() && feed.push(vec!["One more time.".into()]));
+        assert!(r.speaker.stop());
+        assert!(!feed.live());
+        assert!(!feed.push(vec!["Two more times.".into()]));
+        // Never attached: never live.
+        assert!(!Feed::default().push(vec!["Nobody hears this.".into()]));
+    }
+
+    #[test]
+    fn a_streamed_answer_gives_the_voice_its_whole_sentences() {
+        // While it's written: the first block's whole sentences, never the
+        // one still being written.
+        assert!(ready_sentences("The match starts at", 2, false).is_empty());
+        assert_eq!(ready_sentences("The match starts at eight. It is", 2, false), ["The match starts at eight."]);
+        assert_eq!(ready_sentences("Up first. Then the second. Then a third. And", 2, false), ["Up first.", "Then the second."]);
+        // Another block began: the first is whole (its citation not read).
+        assert_eq!(ready_sentences("Gale is on the beach [1].\n\n- He", 2, false), ["Gale is on the beach."]);
+        // Done: all of it, up to n.
+        assert_eq!(ready_sentences("Only this.", 2, true), ["Only this."]);
+        assert!(ready_sentences("", 2, true).is_empty());
+    }
+
+    #[test]
     fn nothing_to_say_is_an_error() {
         let r = rig();
         assert!(r.speaker.speak(r.job("a", &[], 1, None), sim_opener()).is_err());
@@ -2415,6 +2637,7 @@ mod tests {
             fallback: None,
             track: Some(Arc::clone(track)),
             first,
+            feed: None,
         }
     }
 
@@ -2638,6 +2861,7 @@ mod tests {
             fallback: None,
             track: None,
             first: 0,
+            feed: None,
         };
         r.speaker.speak(job, opener).unwrap();
         let start = Instant::now();
@@ -2670,6 +2894,7 @@ mod tests {
             fallback,
             track: None,
             first: 0,
+            feed: None,
         }
     }
 
@@ -2759,6 +2984,7 @@ mod tests {
                 fallback: None,
                 track: None,
                 first: 0,
+                feed: None,
             };
             let start = Instant::now();
             r.speaker.speak(job, opener).unwrap();
@@ -2892,6 +3118,7 @@ mod tests {
             fallback: None,
             track: None,
             first: 0,
+            feed: None,
         };
         let started = Instant::now();
         r.speaker.speak(job("a"), rodio_opener(None)).unwrap();
