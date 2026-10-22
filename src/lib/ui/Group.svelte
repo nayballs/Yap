@@ -1,38 +1,55 @@
 <script>
-  let { title = '', children } = $props();
+  // A Settings section: a plain sentence-case heading over flat rows with
+  // hairlines between them (Claude's and Wispr's settings; no card around
+  // them — cards are for things that are objects: a model, a connection, an
+  // AI app). `desc` is an optional line under the heading; `id` makes it a
+  // deep-link target ("general#bar" → #settings-bar). `bare`: no hairlines,
+  // for a group that holds a card (your speech model) or its own list.
+  let { title = '', desc = '', id = undefined, bare = false, children } = $props();
   // Named after its heading, so assistive tech (and the e2e tests) can find
   // a group by its title.
-  const id = $props.id();
+  const hid = $props.id();
 </script>
 
-<div class="group" role={title ? 'group' : undefined} aria-labelledby={title ? id : undefined}>
-  {#if title}<h2 {id}>{title}</h2>{/if}
-  <div class="card">
+<div class="group" {id} role={title ? 'group' : undefined} aria-labelledby={title ? hid : undefined}>
+  {#if title}<h2 id={hid}>{title}</h2>{/if}
+  {#if desc}<p class="gdesc">{desc}</p>{/if}
+  <div class="rows" class:bare>
     {@render children?.()}
   </div>
 </div>
 
 <style>
   .group {
-    margin-bottom: 22px;
+    margin: 0 0 30px;
+    scroll-margin-top: 16px;
   }
   h2 {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.09em;
-    color: var(--yap-muted-55);
-    margin: 0 0 9px;
-    padding-left: 2px;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 640;
+    letter-spacing: -0.003em;
+    line-height: 1.4;
+    color: var(--yap-fg);
   }
-  .card {
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-lg);
-    background: var(--yap-s2);
-    overflow: hidden;
+  .gdesc {
+    margin: 2px 0 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--yap-muted);
   }
-  /* Divided rows: each direct child gets a hairline top border except the first. */
-  .card > :global(* + *) {
-    border-top: 1px solid var(--yap-border-subtle);
+  .rows {
+    margin-top: 8px;
+    border-top: 1px solid var(--yap-rule);
+  }
+  /* Every row (each direct child) ends in a hairline. */
+  .rows:not(.bare) > :global(*) {
+    border-bottom: 1px solid var(--yap-rule);
+  }
+  .rows > :global(*:empty) {
+    display: none;
+  }
+  .rows.bare {
+    border-top: none;
   }
 </style>

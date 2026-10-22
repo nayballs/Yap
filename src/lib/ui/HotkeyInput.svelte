@@ -17,7 +17,7 @@
     value = $bindable(''),
     clearable = false,
     disabled = false,
-    placeholder = 'Click to set',
+    placeholder = 'Set a shortcut',
     // validate(spec) → error string to reject, or null/undefined to accept
     validate = null,
     // called with true/false when capturing starts/stops — Settings uses it to
@@ -159,37 +159,42 @@
 
 <div class="hk" class:disabled>
   {#if capturing}
-    <div class="face capturing">
+    <div class="capture" role="status" aria-live="polite">
       {#if heldMods.length}
         {#each heldMods as m (m)}
-          <span class="chip live">{MOD_LABELS[m]}</span>
+          <kbd class="key live">{MOD_LABELS[m]}</kbd>
         {/each}
-        <span class="hint">+ key, or release to set</span>
+        <span class="hint">+ a key, or let go to set</span>
       {:else}
-        <span class="hint">Press a key or hold modifiers… <span class="dim">Esc cancels{clearable ? ' · Backspace clears' : ''}</span></span>
+        <span class="hint">Press a key or hold modifiers <span class="dim">· Esc cancels{clearable ? ' · Backspace clears' : ''}</span></span>
       {/if}
     </div>
   {:else}
     <div class="row">
-      <button class="face" onclick={start} {disabled}>
-        {#if parts.length}
-          {#each parts as p (p)}
-            <span class="chip">{p}</span>
-          {/each}
-          {#if isChord}<span class="holdtag">hold</span>{/if}
-        {:else}
-          <span class="none">{placeholder}</span>
-        {/if}
-      </button>
-      {#if clearable && value}
-        <button class="clear" onclick={clear} title="Remove hotkey" aria-label="Remove hotkey">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
+      {#if parts.length}
+        <!-- The keys, in Yap's keycaps (the Home greeting's), and Change:
+             one button, so the whole thing is the target. -->
+        <button class="face" onclick={start} {disabled} title="Change the shortcut">
+          <span class="keys">
+            {#each parts as p (p)}
+              <kbd class="key">{p}</kbd>
+            {/each}
+            {#if isChord}<span class="holdtag">hold</span>{/if}
+          </span>
+          <span class="change">Change</span>
         </button>
+        {#if clearable}
+          <button class="clear" onclick={clear} title="Remove the shortcut" aria-label="Remove hotkey">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          </button>
+        {/if}
+      {:else}
+        <button class="set" onclick={start} {disabled}>{placeholder}</button>
       {/if}
     </div>
   {/if}
   {#if warning}
-    <p class="warn">
+    <p class="warn" role="alert">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4M12 17h.01" /></svg>
       {warning}
     </p>
@@ -210,66 +215,111 @@
   .row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 2px;
   }
   .face {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    min-width: 120px;
+    gap: 10px;
     min-height: 32px;
-    justify-content: center;
-    padding: 4px 10px;
-    border: 1px solid var(--yap-border);
+    padding: 3px 4px 3px 3px;
+    border: none;
     border-radius: var(--yap-r);
-    background: var(--yap-s1);
+    background: none;
     color: var(--yap-fg);
     font: inherit;
-    font-size: 12px;
     cursor: pointer;
-    transition:
-      border-color var(--yap-dur) ease,
-      background var(--yap-dur) ease;
   }
-  button.face:hover {
-    border-color: var(--yap-primary);
-  }
-  .face.capturing {
-    border-color: var(--yap-primary);
-    background: var(--yap-primary-wash);
-    cursor: default;
-  }
-  .chip {
+  .keys {
     display: inline-flex;
     align-items: center;
-    padding: 2px 7px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-sm);
-    background: var(--yap-s2);
-    font-family: ui-monospace, Consolas, monospace;
-    font-size: 11.5px;
-    line-height: 1.4;
+    gap: 4px;
   }
-  .chip.live {
-    border-color: var(--yap-primary);
-    color: var(--yap-primary);
-    background: transparent;
+  /* Yap's keycap: the amber key, as in Home's greeting. */
+  .key {
+    display: inline-grid;
+    place-items: center;
+    min-width: 26px;
+    height: 24px;
+    padding: 0 7px;
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--yap-key-fg);
+    background: var(--yap-key-bg);
+    border: 1px solid var(--yap-key-border);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+  .key.live {
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+    border-color: var(--yap-border-hover);
+  }
+  .change {
+    padding: 0 8px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: var(--yap-r);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--yap-fg-62);
+    transition:
+      background var(--yap-dur) ease,
+      color var(--yap-dur) ease;
+  }
+  .face:hover .change {
+    background: var(--yap-s3);
+    color: var(--yap-fg);
+  }
+  .face:focus-visible,
+  .set:focus-visible,
+  .clear:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
+  }
+  .set {
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-sm);
+    color: var(--yap-fg-80);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .set:hover {
+    border-color: var(--yap-border-hover);
+    color: var(--yap-fg);
+  }
+  .capture {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--yap-primary-line);
+    border-radius: var(--yap-r);
+    background: var(--yap-primary-wash);
   }
   .holdtag {
     font-size: 9.5px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
-    color: var(--yap-muted-55);
-  }
-  .hint {
-    font-size: 11.5px;
     color: var(--yap-muted);
   }
-  .hint .dim {
-    color: var(--yap-muted-55);
+  .hint {
+    font-size: 12px;
+    color: var(--yap-fg-80);
   }
-  .none {
+  .hint .dim {
     color: var(--yap-muted);
   }
   .clear {
@@ -279,26 +329,31 @@
     width: 28px;
     height: 28px;
     border: none;
-    border-radius: var(--yap-r-sm);
+    border-radius: var(--yap-r);
     background: none;
-    color: var(--yap-muted-55);
+    color: var(--yap-fg-62);
     cursor: pointer;
-    transition: color var(--yap-dur) ease;
+    transition:
+      color var(--yap-dur) ease,
+      background var(--yap-dur) ease;
   }
   .clear:hover {
-    color: var(--yap-danger, #e5484d);
+    color: var(--yap-danger);
+    background: var(--yap-s3);
   }
   .clear svg {
-    width: 14px;
-    height: 14px;
+    width: 13px;
+    height: 13px;
   }
   .warn {
     display: flex;
     align-items: center;
     gap: 6px;
     margin: 0;
-    font-size: 11.5px;
-    color: var(--yap-warning, #f5a524);
+    max-width: 320px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--yap-danger);
   }
   .warn svg {
     width: 13px;

@@ -29,11 +29,11 @@
   .input {
     width: 100%;
     box-sizing: border-box;
-    background: var(--yap-s1);
+    background: var(--yap-s2);
     border: 1px solid var(--yap-border);
     border-radius: var(--yap-r);
     color: var(--yap-fg);
-    padding: 8px 12px;
+    padding: 7px 11px;
     font: inherit;
     font-size: 12.5px;
     transition: border-color var(--yap-dur) ease, box-shadow var(--yap-dur) ease;
@@ -43,8 +43,9 @@
   }
   .input:focus {
     outline: none;
-    border-color: var(--yap-primary);
-    box-shadow: 0 0 0 3px var(--yap-primary-wash);
+  }
+  .input:focus-visible {
+    box-shadow: var(--yap-focus);
   }
   .input::placeholder {
     color: var(--yap-fg-45);

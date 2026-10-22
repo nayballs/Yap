@@ -103,6 +103,20 @@ body {
 
   --yap-dur: 150ms;
 
+  /* ---- Settings (2026-10-22 review), measured against the page they sit
+     on (--yap-s1 #faf9f6, the nav --yap-bg #f0ede7) for WCAG AA:
+     body text --yap-muted 5.1:1 (nav 4.6:1), links 4.8:1, an off switch's
+     edge 3.4:1 (non-text, ≥ 3:1), the focus ring 3.8:1. ---- */
+  --yap-rule: #ebe7de;                     /* row hairlines */
+  --yap-link: #a85a08;                     /* links and chips' text (was #c2690a, 3.75:1) */
+  --yap-switch-edge: #8c8679;              /* an off switch's track edge and knob */
+  --yap-focus-ring: #c2690a;               /* amber, but the darker one (#e2982a is 2.3:1) */
+  --yap-focus: 0 0 0 2px var(--yap-s1), 0 0 0 4px var(--yap-focus-ring);
+  --yap-success-text: #17733e;             /* "Saved ✓", "Up to date ✓" at 11–12 px */
+  --yap-select-w: 188px;                   /* every select's width, so the control column lines up */
+  --yap-select-w-wide: 248px;              /* long names: devices, voices, countries */
+  --yap-settings-w: 700px;                 /* the content column, on every page */
+
   /* ---- The meeting notepad (Notepad.svelte; also the Meetings view and the
      Connect calendar dialog): Wispr Flow's measured notepad layout
      (notepad-spec.md) in Yap's own palette (2026-10-06, Nathan) — Yap's warm

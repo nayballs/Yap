@@ -9,6 +9,11 @@
     onchange,
     // Accessible name when the visible label sits elsewhere (a Row's label).
     ariaLabel = '',
+    // One width for every select in Settings (--yap-select-w), so the
+    // control column lines up; `wide` for long names (devices, voices,
+    // countries), `fill` to take the space it's given.
+    wide = false,
+    fill = false,
   } = $props();
 
   // An option's `style` draws it in the list (e.g. a font picker showing
@@ -28,14 +33,14 @@
   });
 </script>
 
-<div class="select-row">
+<div class="select-row" class:labelled={!!label}>
   {#if label}
     <span class="ldesc">
       <span class="label">{label}</span>
       {#if hint}<Tooltip text={hint} />{/if}
     </span>
   {/if}
-  <div class="select-wrap" class:disabled>
+  <div class="select-wrap" class:disabled class:wide class:fill>
     <select bind:value {disabled} style={pickedStyle} aria-label={ariaLabel || label || undefined} onchange={() => onchange?.(value)}>
       {#each blocks as b, i (i)}
         {#if b.group}
@@ -51,7 +56,7 @@
         {/if}
       {/each}
     </select>
-    <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none"
+    <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none"
       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M6 9l6 6 6-6" />
     </svg>
@@ -60,8 +65,11 @@
 
 <style>
   .select-row {
-    display: flex;
+    display: inline-flex;
     align-items: center;
+  }
+  .select-row.labelled {
+    display: flex;
     justify-content: space-between;
     gap: 14px;
     width: 100%;
@@ -74,26 +82,35 @@
   }
   .label {
     color: var(--yap-fg);
-    font-size: 13px;
-    font-weight: 650;
+    font-size: 13.5px;
+    font-weight: 560;
   }
   .select-wrap {
     position: relative;
     flex: 0 0 auto;
-    max-width: 260px;
+    width: var(--yap-select-w);
+    max-width: 100%;
+  }
+  .select-wrap.wide {
+    width: var(--yap-select-w-wide);
+  }
+  .select-wrap.fill {
+    width: 100%;
   }
   select {
     appearance: none;
     -webkit-appearance: none;
     width: 100%;
     height: 32px;
-    background: var(--yap-s1);
+    background: var(--yap-s2);
     border: 1px solid var(--yap-border);
     border-radius: var(--yap-r);
+    box-shadow: var(--yap-shadow-sm);
     color: var(--yap-fg);
-    padding: 0 32px 0 12px;
+    padding: 0 30px 0 11px;
     font: inherit;
     font-size: 12.5px;
+    text-overflow: ellipsis;
     cursor: pointer;
     transition: border-color var(--yap-dur) ease, box-shadow var(--yap-dur) ease;
   }
@@ -102,8 +119,9 @@
   }
   select:focus {
     outline: none;
-    border-color: var(--yap-primary);
-    box-shadow: 0 0 0 3px var(--yap-primary-wash);
+  }
+  select:focus-visible {
+    box-shadow: var(--yap-focus);
   }
   select:disabled {
     opacity: 0.5;
@@ -114,7 +132,7 @@
     right: 10px;
     top: 50%;
     transform: translateY(-50%);
-    color: var(--yap-muted);
+    color: var(--yap-fg-62);
     pointer-events: none;
   }
   .select-wrap.disabled .chev {
