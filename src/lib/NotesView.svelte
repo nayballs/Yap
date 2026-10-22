@@ -2336,9 +2336,14 @@
   .bubble.menuopen {
     box-shadow: 0 0 0 2px var(--yap-border-hover);
   }
+  /* The line itself is reading text (Settings → General → Appearance); its
+     speaker label and menu keep Yap's font. */
   .bubble p {
     margin: 0;
     overflow-wrap: anywhere;
+    font-family: var(--yap-font-reading);
+    font-size: calc(12px * var(--yap-reading-scale));
+    line-height: calc(1.5 * var(--yap-reading-leading));
   }
   .bubble .who {
     display: block;
@@ -2496,8 +2501,9 @@
     max-width: 85%;
     border-radius: 10px;
     padding: 7px 11px;
-    font-size: 12.5px;
-    line-height: 1.55;
+    font-family: var(--yap-font-reading);
+    font-size: calc(12.5px * var(--yap-reading-scale));
+    line-height: calc(1.55 * var(--yap-reading-leading));
   }
   .cbubble.user {
     align-self: flex-end;
@@ -2978,8 +2984,10 @@
     background: transparent;
     color: var(--yap-fg);
     font: inherit;
-    font-size: 13px;
-    line-height: 1.7;
+    /* Reading text: Settings → General → Appearance (app.css). */
+    font-family: var(--yap-font-reading);
+    font-size: calc(13px * var(--yap-reading-scale));
+    line-height: calc(1.7 * var(--yap-reading-leading));
     padding: 4px 2px;
   }
   .raw:focus {
@@ -2996,8 +3004,9 @@
     border: none;
     background: transparent;
     padding: 4px 2px;
-    font-size: 13px;
-    line-height: 1.7;
+    font-family: var(--yap-font-reading);
+    font-size: calc(13px * var(--yap-reading-scale));
+    line-height: calc(1.7 * var(--yap-reading-leading));
   }
   .rendered :global(h2),
   .rendered :global(h3),
@@ -3007,10 +3016,10 @@
     line-height: 1.3;
   }
   .rendered :global(h2) {
-    font-size: 15px;
+    font-size: calc(15px * var(--yap-reading-scale));
   }
   .rendered :global(h3) {
-    font-size: 13.5px;
+    font-size: calc(13.5px * var(--yap-reading-scale));
   }
   .rendered :global(p) {
     margin: 6px 0;
@@ -3033,7 +3042,7 @@
   }
   .rendered :global(code) {
     font-family: ui-monospace, Consolas, monospace;
-    font-size: 12px;
+    font-size: calc(12px * var(--yap-reading-step));
     background: var(--yap-s1);
     border-radius: 4px;
     padding: 1px 5px;

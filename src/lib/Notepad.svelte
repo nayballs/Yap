@@ -1947,8 +1947,10 @@
     background: transparent;
     color: var(--yap-paper-ink);
     font: inherit;
-    font-size: 15px;
-    line-height: 24px;
+    /* Reading text: Settings → General → Appearance (app.css). */
+    font-family: var(--yap-font-reading);
+    font-size: calc(15px * var(--yap-reading-scale));
+    line-height: calc(1.6 * var(--yap-reading-leading));
     resize: none;
     outline: none;
     user-select: text;
@@ -2161,9 +2163,10 @@
     box-sizing: border-box;
     padding: 8px 12px;
     background: var(--yap-paper-s1);
-    font-size: 15px;
+    font-family: var(--yap-font-reading);
+    font-size: calc(15px * var(--yap-reading-scale));
     font-weight: 500;
-    line-height: 22.5px;
+    line-height: calc(1.5 * var(--yap-reading-leading));
     overflow-wrap: anywhere;
     user-select: text;
     -webkit-user-select: text;
@@ -2379,8 +2382,9 @@
   }
   .rendered {
     padding: 0 12px;
-    font-size: 15px;
-    line-height: 24px;
+    font-family: var(--yap-font-reading);
+    font-size: calc(15px * var(--yap-reading-scale));
+    line-height: calc(1.6 * var(--yap-reading-leading));
     user-select: text;
     -webkit-user-select: text;
   }
@@ -2396,14 +2400,14 @@
   .rendered :global(h2),
   .rendered :global(h3) {
     font-family: var(--yap-font-display);
-    font-size: 24px;
+    font-size: calc(24px * var(--yap-reading-step));
     font-weight: 400;
     letter-spacing: -0.02em;
   }
   .rendered :global(h4),
   .rendered :global(h5) {
     margin-top: 12px;
-    font-size: 15px;
+    font-size: calc(15px * var(--yap-reading-scale));
     font-weight: 600;
   }
   .rendered :global(p) {
@@ -2442,6 +2446,9 @@
   .sofar ul {
     margin: 0 0 8px;
     padding-left: 18px;
+    font-family: var(--yap-font-reading);
+    font-size: calc(14px * var(--yap-reading-scale));
+    line-height: calc(1.5 * var(--yap-reading-leading));
   }
   .sofar li.task {
     list-style: none;
@@ -2766,7 +2773,9 @@
     padding: 8px 12px;
     border-radius: 18px 18px 4px 18px;
     background: var(--yap-paper-s2);
-    line-height: 21px;
+    font-family: var(--yap-font-reading);
+    font-size: calc(15px * var(--yap-reading-scale));
+    line-height: calc(1.4 * var(--yap-reading-leading));
     overflow-wrap: anywhere;
     user-select: text;
     -webkit-user-select: text;
@@ -2787,7 +2796,9 @@
     padding-right: 8px;
   }
   .mabody {
-    line-height: 22.5px;
+    font-family: var(--yap-font-reading);
+    font-size: calc(15px * var(--yap-reading-scale));
+    line-height: calc(1.5 * var(--yap-reading-leading));
     overflow-wrap: anywhere;
     user-select: text;
     -webkit-user-select: text;

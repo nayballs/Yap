@@ -4,6 +4,15 @@ import { mount } from 'svelte';
 import '@fontsource-variable/figtree';
 import '@fontsource-variable/eb-garamond';
 import '@fontsource-variable/eb-garamond/wght-italic.css';
+// The reading fonts (Settings → General → Appearance, lib/appearance.js; all
+// OFL-1.1): Geist (Vercel) = "Sans", Literata (+italic; TypeTogether for
+// Google Play Books, picked over Source Serif 4 and Newsreader as the most
+// readable at 12–15 px) = "Serif"; OpenDyslexic's @font-face rules are in
+// app.css (woff2 only). Bundled, never fetched from the internet; a font's
+// files load only once some text uses it (and only the scripts it shows).
+import '@fontsource-variable/geist';
+import '@fontsource-variable/literata/wght.css';
+import '@fontsource-variable/literata/wght-italic.css';
 import App from './App.svelte';
 import { openExternalLink } from './lib/externalLinks.js';
 import './app.css';

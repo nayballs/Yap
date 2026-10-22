@@ -1287,12 +1287,14 @@
     gap: 8px;
     padding: 2px;
   }
+  /* Reading text: Settings → General → Appearance (app.css). */
   .cbubble {
     max-width: 78%;
     border-radius: 12px;
     padding: 8px 12px;
-    font-size: 12.5px;
-    line-height: 1.6;
+    font-family: var(--yap-font-reading);
+    font-size: calc(12.5px * var(--yap-reading-scale));
+    line-height: calc(1.6 * var(--yap-reading-leading));
   }
   .cbubble.user {
     align-self: flex-end;
@@ -1448,11 +1450,11 @@
   .cbubble.assistant :global(h2),
   .cbubble.assistant :global(h3) {
     margin: 8px 0 4px;
-    font-size: 13px;
+    font-size: calc(13px * var(--yap-reading-scale));
   }
   .cbubble.assistant :global(code) {
     font-family: ui-monospace, Consolas, monospace;
-    font-size: 11.5px;
+    font-size: calc(11.5px * var(--yap-reading-step));
     background: var(--yap-s1);
     border-radius: 4px;
     padding: 1px 5px;

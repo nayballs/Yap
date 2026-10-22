@@ -176,6 +176,105 @@ body {
   --bar-mark-tile: #f2efe9;                   /* the app icon's tile on a call card */
 }
 
+/* ------------------------------------------------------------------ *
+ * Reading text (Settings → General → Appearance; lib/appearance.js marks
+ * <html> in every window from the config). Only what you READ uses these:
+ * Chat's messages, notes and their Enhanced view, the meeting notepad's My
+ * thoughts / Transcript / Summary and its Ask answers. Buttons, menus and the
+ * sidebar keep Figtree. Each view keeps its own base size and multiplies:
+ *   font-family: var(--yap-font-reading);
+ *   font-size: calc(13px * var(--yap-reading-scale));
+ *   line-height: calc(1.7 * var(--yap-reading-leading));
+ * and code stays monospace, sized by the step alone:
+ *   font-size: calc(11.5px * var(--yap-reading-step));
+ * --yap-reading-fit evens out the fonts' own sizes, so a switch of font
+ * doesn't also look like a switch of size. Their x-heights, measured in the
+ * app (2026-10-22, a fraction of the em): Figtree 0.50, Geist 0.53, Literata
+ * 0.51, Segoe UI 0.50, OpenDyslexic 0.56 (and 1.6× as wide). All fonts are
+ * bundled (main.js, below): nothing is fetched from the internet, and a
+ * font's files load only once something uses it.
+ * ------------------------------------------------------------------ */
+:root {
+  --yap-font-reading: 'Figtree Variable', 'Segoe UI Variable Text', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+  --yap-reading-step: 1;    /* Text size */
+  --yap-reading-fit: 1;     /* the font's own size, evened out */
+  --yap-reading-leading: 1; /* the font's line spacing, × each view's own */
+  --yap-reading-scale: calc(var(--yap-reading-step) * var(--yap-reading-fit));
+}
+:root[data-reading-font='sans'] {
+  /* Geist (Vercel; OFL) */
+  --yap-font-reading: 'Geist Variable', 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
+  --yap-reading-fit: 0.95;
+}
+:root[data-reading-font='serif'] {
+  /* Literata (TypeTogether for Google Play Books; OFL), a book serif made for
+     screens: picked over Source Serif 4 and Newsreader as the most readable
+     at 12–15 px (Newsreader's small x-height thins out there). */
+  --yap-font-reading: 'Literata Variable', Georgia, 'Palatino Linotype', serif;
+  --yap-reading-fit: 1;
+}
+:root[data-reading-font='system'] {
+  --yap-font-reading: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --yap-reading-fit: 1;
+}
+:root[data-reading-font='dyslexic'] {
+  /* OpenDyslexic (Abbie Gonzalez; OFL): large, wide letters, so a little
+     smaller, with more room between lines. */
+  --yap-font-reading: 'OpenDyslexic', 'Segoe UI', sans-serif;
+  --yap-reading-fit: 0.9;
+  --yap-reading-leading: 1.08;
+}
+:root[data-reading-size='small'] {
+  --yap-reading-step: 0.92;
+}
+:root[data-reading-size='large'] {
+  --yap-reading-step: 1.12;
+}
+:root[data-reading-size='larger'] {
+  --yap-reading-step: 1.25;
+}
+
+/* OpenDyslexic, from @fontsource/opendyslexic (OFL-1.1): its woff2 files
+   only (the package's own CSS lists a .woff copy of each too, which WebView2
+   never needs). Regular, bold and italic, Latin. */
+@font-face {
+  font-family: 'OpenDyslexic';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('@fontsource/opendyslexic/files/opendyslexic-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'OpenDyslexic';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('@fontsource/opendyslexic/files/opendyslexic-latin-700-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'OpenDyslexic';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('@fontsource/opendyslexic/files/opendyslexic-latin-400-italic.woff2') format('woff2');
+}
+
+/* Motion: Reduced (Settings → General → Appearance, or Windows' "Animation
+   effects" off while Motion follows the system; appearance.js marks <html
+   data-motion="reduced"> in every window, the Yap bar's included). Nothing
+   slides, fades, pulses or glides — except what tells you something is
+   under way or how long is left: spinners, progress bars and the
+   countdown drains on toasts and the bar's cards (their classes below; mark
+   anything new like them `data-keep-motion`). The bar's Svelte transitions
+   go to 0 ms in script (`motionMs`). */
+:root[data-motion='reduced'] *:not(.spin, .spinner, .progress, .drain, .run-down, .undoline > span, [data-keep-motion]),
+:root[data-motion='reduced'] *::before,
+:root[data-motion='reduced'] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
 /* The Yap bar, DARK (Settings → Yap bar → Colours): the in-app toasts'
  * palette (ui/ToastHost.svelte) — a warm near-black card, sand chips, cream
  * buttons, Yap amber, Yap's recording red. */
@@ -340,7 +439,8 @@ pre.md-code code {
   border-radius: 0 !important;
   background: none !important;
   font-family: ui-monospace, Consolas, monospace;
-  font-size: 11.5px;
+  /* Code stays monospace whatever the reading font; Text size scales it. */
+  font-size: calc(11.5px * var(--yap-reading-step));
   line-height: 1.5;
 }
 a.md-link {

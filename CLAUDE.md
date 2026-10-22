@@ -207,6 +207,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 
 [frontend.md](./docs/architecture/frontend.md) unless noted.
 - Theme — warm-light `--yap-*` tokens in `src/app.css`, Figtree + EB Garamond; mark `src/assets/yap-logo.svg`.
+- `lib/appearance.js` — General → Appearance in every window: reading font/size tokens (`--yap-font-reading`, `--yap-reading-scale`) for chats/notes/notepad only, and reduced Motion.
 - `lib/ControlPanel.svelte` — the main window (label `settings`): sidebar, Settings modal, title bar.
 - `ui/toast.svelte.js` + `ui/noticePolicy.js` — app-wide toasts running the page's notice policy.
 - `HomeView` / `InsightsView` / `UploadView` — dictation feed, stats, audio-file transcription.

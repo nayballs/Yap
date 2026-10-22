@@ -325,6 +325,25 @@ pub struct YapConfig {
     /// push-to-talk key is held. `bar.rs` carries it to the bar page.
     #[serde(default = "default_bar_dictation_buttons")]
     pub bar_dictation_buttons: String,
+    /// Settings → General → Appearance: the font of the reading text —
+    /// Chat's messages, notes and their Enhanced view, the meeting notepad's
+    /// My thoughts / Transcript / Summary and its Ask answers; never the
+    /// app's buttons and menus. "default" (Figtree, the UI's own), "sans"
+    /// (Geist), "serif" (Literata), "system" (Segoe UI) or "dyslexic"
+    /// (OpenDyslexic). Every window sets `data-reading-font` from it
+    /// (`src/lib/appearance.js`, the `--yap-font-reading` token in app.css).
+    #[serde(default = "default_reading_font")]
+    pub reading_font: String,
+    /// The reading text's size: "small", "default", "large" or "larger" (a
+    /// step around each view's own size: `--yap-reading-scale`).
+    #[serde(default = "default_reading_size")]
+    pub reading_size: String,
+    /// Motion in every Yap window: "system" (follows Windows' "Animation
+    /// effects", i.e. `prefers-reduced-motion`) or "reduced" (no
+    /// non-essential animations or transitions; spinners and countdowns
+    /// stay).
+    #[serde(default = "default_motion")]
+    pub motion: String,
     /// Which key auto-submit presses after pasting: "enter", "ctrlEnter",
     /// or "shiftEnter".
     #[serde(default = "default_auto_submit_key")]
@@ -734,6 +753,15 @@ fn default_bar_theme() -> String {
 fn default_bar_dictation_buttons() -> String {
     "off".into()
 }
+fn default_reading_font() -> String {
+    "default".into()
+}
+fn default_reading_size() -> String {
+    "default".into()
+}
+fn default_motion() -> String {
+    "system".into()
+}
 fn default_meeting_max_minutes() -> u32 {
     120
 }
@@ -806,6 +834,9 @@ impl Default for YapConfig {
             bar_hide_fullscreen: true,
             bar_theme: default_bar_theme(),
             bar_dictation_buttons: default_bar_dictation_buttons(),
+            reading_font: default_reading_font(),
+            reading_size: default_reading_size(),
+            motion: default_motion(),
             auto_submit_key: default_auto_submit_key(),
             update_checks_enabled: true,
             debug_logging: false,

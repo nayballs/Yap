@@ -36,6 +36,56 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   `src/assets/yap-logo.svg` — warm-ink rounded badge, amber yapping mouth,
   cream soundwaves (replaced the old blue `yap-icon.png` in the title bar +
   onboarding; `src-tauri/icons/*` regenerated from it via `npx tauri icon`).
+- **Reading text and Motion (2026-10-22, Settings → General → Appearance;
+  after Claude desktop's own Appearance settings, in free fonts)** —
+  `lib/appearance.js` marks `<html>` in **every** window (App.svelte calls
+  `initAppearance()`: `get_config` now, again on every `yap-config-saved`,
+  and when `prefers-reduced-motion` changes; Settings also applies its own
+  copy at once, before the 400 ms auto-save) with `data-reading-font`,
+  `data-reading-size` and `data-motion`, and app.css turns them into
+  tokens: **`--yap-font-reading`** (Default = Figtree, Sans = **Geist**,
+  Serif = **Literata**, System = Segoe UI Variable / Segoe UI,
+  **OpenDyslexic**), **`--yap-reading-step`** (Text size: Small 0.92 /
+  Default 1 / Large 1.12 / Larger 1.25), **`--yap-reading-fit`** (each
+  font's own size evened out by its measured x-height: Geist 0.95,
+  OpenDyslexic 0.9, the rest 1), `--yap-reading-scale` = step × fit and
+  **`--yap-reading-leading`** (OpenDyslexic 1.08). Only the **reading
+  text** uses them, each view multiplying its own base size and line height
+  (`font-size: calc(12.5px * var(--yap-reading-scale))`): Chat's messages
+  and answers (`.cbubble`, tables included), Notes' content (`textarea.raw`),
+  its Enhanced view (`.rendered`), its transcript lines (`.bubble p`, not
+  the speaker labels) and per-note Ask thread, the meeting notepad's My
+  thoughts, Transcript bubbles, Summary (its display-serif section headings
+  keep EB Garamond, scaled by the step) and "AI notes so far", and the Ask
+  sheet's questions and answers (`.mq`, `.mabody`). Never the sidebar,
+  buttons, menus, chips or titles. Code stays monospace, scaled by the step
+  alone (`pre.md-code code` in app.css, the views' inline `code`). **Fonts**
+  are bundled, never fetched (`main.js`: `@fontsource-variable/geist`,
+  `@fontsource-variable/literata` `wght` + `wght-italic`; OpenDyslexic's
+  regular, bold and italic woff2 from `@fontsource/opendyslexic` as
+  `@font-face` rules in app.css, skipping the package's duplicate .woff
+  files); `font-display: swap`, and WebView2 loads a font's files only once
+  some text uses it (and only the scripts' subsets it shows). All are
+  **SIL OFL 1.1**: Geist © The Geist Project Authors (Vercel), Literata ©
+  The Literata Project Authors (TypeTogether for Google), OpenDyslexic ©
+  Abbie Gonzalez (Reserved Font Name "OpenDyslexic"; used unmodified);
+  each package's LICENSE ships in `node_modules`, and the woff2 files carry
+  their copyright and licence in their name tables (no separate
+  third-party notices file in the repo; Figtree and EB Garamond are
+  credited the same way). Literata was picked over **Source Serif 4** and
+  **Newsreader** (all OFL) from a side-by-side at 12.5–18 px: the most
+  readable at body size (x-height 0.51 em, sturdy serifs, a distinct I / l
+  / 1), where Newsreader (0.44 em) thins out. The picker (`ui/Select`'s
+  per-option `style`) draws each name in its own font, the closed box too,
+  and a preview line under it shows the reading text as it'll look.
+  **Motion**: Reduced (or System while Windows' "Animation effects" is
+  off) stops every transition and animation with one `!important` rule in
+  app.css (`:root[data-motion='reduced'] *`), except what says something is
+  under way or how long is left: `.spin`, `.spinner`, `.progress`,
+  `.drain`, `.run-down`, `.undoline > span` and anything marked
+  `data-keep-motion`. The Yap bar's Svelte transitions (`fade`, `scale`,
+  `flip`, which run as Web Animations that CSS can't stop) take
+  `motionMs(ms)` = 0 while reduced. `e2e/appearance.spec.js`.
 - **Custom window chrome (2026-07-09)** — the settings window is **undecorated**
   (`decorations: false` in tauri.conf.json): ControlPanel draws a 40px
   `data-tauri-drag-region` title bar (brand left; min / max-restore / close

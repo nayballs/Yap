@@ -31,6 +31,9 @@
   import { fade, scale } from 'svelte/transition';
   import { flip } from 'svelte/animate';
   import { cubicOut } from 'svelte/easing';
+  // Motion: Reduced (Settings → General → Appearance) — the transitions
+  // below take 0 ms; app.css stops the CSS ones.
+  import { motionMs } from './appearance.js';
   import { formatHotkeySpec } from './hotkeys.js';
   import { dictation, initDictation } from './bar/dictation.svelte.js';
   import DictationCapsule from './bar/DictationCapsule.svelte';
@@ -294,9 +297,9 @@
     {#each cards as card (card.id)}
       <div
         class="cardwrap"
-        animate:flip={{ duration: 160, easing: cubicOut }}
-        in:fade={{ duration: 120 }}
-        out:fade={{ duration: 120 }}
+        animate:flip={{ duration: motionMs(160), easing: cubicOut }}
+        in:fade={{ duration: motionMs(120) }}
+        out:fade={{ duration: motionMs(120) }}
       >
         {#if card.style === 'call'}
           <CallCard
@@ -316,7 +319,7 @@
 
   <div class="dock" bind:clientHeight={dockH}>
     {#if mode === 'dictation'}
-      <div class="hit quiet" in:scale={{ start: 0.7, duration: 220, easing: cubicOut }} out:fade={{ duration: 120 }}>
+      <div class="hit quiet" in:scale={{ start: 0.7, duration: motionMs(220), easing: cubicOut }} out:fade={{ duration: motionMs(120) }}>
         <DictationCapsule buttons={bar.dictationButtons} hovered={pointer === 'dictation'} />
       </div>
     {:else if mode === 'meeting'}
@@ -327,7 +330,7 @@
         onpointerenter={() => (domHover = true)}
         onpointerleave={() => (domHover = false)}
       >
-        <div class="slot" in:scale={{ start: 0.7, duration: 220, easing: cubicOut }} out:fade={{ duration: 120 }}>
+        <div class="slot" in:scale={{ start: 0.7, duration: motionMs(220), easing: cubicOut }} out:fade={{ duration: motionMs(120) }}>
           <div class="meeting" class:hot={hovering} aria-label="Recording meeting notes">
             <button
               class="mbody"
@@ -351,7 +354,7 @@
           </div>
         </div>
         {#if tip && !menuOpen}
-          <span class="tip" style={`left:${tipX}px`} role="tooltip" transition:fade={{ duration: 110 }}>
+          <span class="tip" style={`left:${tipX}px`} role="tooltip" transition:fade={{ duration: motionMs(110) }}>
             {tips[tip].label}{#if tips[tip].keys}<b>{tips[tip].keys}</b>{/if}
           </span>
         {/if}
@@ -403,12 +406,12 @@
           </button>
         </div>
         {#if tip && !menuOpen}
-          <span class="tip" style={`left:${tipX}px`} role="tooltip" transition:fade={{ duration: 110 }}>
+          <span class="tip" style={`left:${tipX}px`} role="tooltip" transition:fade={{ duration: motionMs(110) }}>
             {tips[tip].label}{#if tips[tip].keys}<b>{tips[tip].keys}</b>{/if}
           </span>
         {/if}
         {#if menuOpen}
-          <div class="menu" data-region="menu" role="menu" transition:fade={{ duration: 120 }}>
+          <div class="menu" data-region="menu" role="menu" transition:fade={{ duration: motionMs(120) }}>
             <button role="menuitem" onclick={() => menuItem('open')}>Open Yap</button>
             <button role="menuitem" onclick={() => menuItem('new-note')}>New meeting note</button>
             <button role="menuitem" onclick={() => menuItem('settings')}>Settings</button>

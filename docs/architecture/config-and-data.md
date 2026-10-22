@@ -46,7 +46,11 @@
   may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
   bar_hide_fullscreen (true) + bar_theme ("light" | "dark", light) +
   bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
-  off), spoken replies (`tts.rs`): speak_replies (off), speak_when ("voice" |
+  off), General → Appearance (`src/lib/appearance.js`, every window):
+  reading_font ("default" Figtree | "sans" Geist | "serif" Literata |
+  "system" Segoe UI | "dyslexic" OpenDyslexic, default) + reading_size
+  ("small" | "default" | "large" | "larger", default) + motion ("system" |
+  "reduced", system), spoken replies (`tts.rs`): speak_replies (off), speak_when ("voice" |
   "always", voice), talk_back_hands_free (true; only while speak_replies is
   on), tts_engine ("kokoro" — Windows voices until it's downloaded — or
   "windows"), tts_voice (Kokoro's, "af_bella"), tts_windows_voice ("" =
