@@ -140,6 +140,8 @@ test('Settings: pick ElevenLabs, paste a key, its voices load, ▶ plays a sampl
   // No Kokoro downloaded: it says the answer would go unsaid if ElevenLabs fails.
   await expect(dialog.getByText(/If ElevenLabs doesn't answer, nothing is read aloud/)).toBeVisible();
   expect(eleven.requests).toEqual([]);
+  await dialog.getByRole('group', { name: 'Voice', exact: true }).scrollIntoViewIfNeeded();
+  await shot(main, '00-elevenlabs-picked-no-key');
 
   // "Get your API key" opens their API-keys page in the browser.
   await dialog.getByRole('link', { name: 'Get your API key →' }).click();
