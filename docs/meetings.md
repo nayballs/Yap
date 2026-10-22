@@ -362,6 +362,12 @@ spoke when on the call side, ms on the recording's clock) on the lines:
   median ~15 s of audio after its last word (at most ~23 s): the engine's
   30 s preset settles its labels in steps of up to ~20 s. The errors are
   words at a change of speaker ("…so finance isn't surprised / later.").
+- **Still beta** (measured again 2026-10-22 on eight distinct Kokoro voices,
+  crosstalk, an hour of audio, a resumed meeting, the download): distinct
+  voices are told apart well and it costs ~11% of one core, but voices that
+  sound alike merge and nothing has been measured on a real call yet — see
+  [`architecture/speakers.md`](./architecture/speakers.md) "The speaker
+  engine measured".
 
 ## Summaries that keep up with long meetings
 

@@ -789,17 +789,19 @@ pub mod win {
 
 // ---- `yap.exe call-dump`: a real call window's tree, to a file ----
 
-const DUMP_USAGE: &str = "yap.exe call-dump — record a call window's UI Automation tree (read only) for Yap's\n\
-developers, to teach Yap how the call app shows who's talking.\n\n\
-  --window <text>    the window whose title contains <text> (else: the call app's, found by itself)\n\
-  --app <id>         teams | zoom | meet | … (the reading rules to try; else guessed)\n\
-  --every <ms>       read every <ms> (default 1000)\n\
-  --count <n>        this many reads (default 30)\n\
-  --out <file>       where (default call-dump-<app>-<time>.json in this folder)\n\
-  --names <map>      \"Real Name=Priya Shah;Other Name=Sam Patel\": names swapped for these in\n\
-                     the file, for sharing (check the file after: it holds whatever the\n\
-                     window showed, chat messages included)\n\
-  --show-names       print who the rules found talking (else counts only)\n";
+const DUMP_USAGE: &str = r#"yap.exe call-dump — record a call window's UI Automation tree (read only) for Yap's
+developers, to teach Yap how the call app shows who's talking.
+
+  --window <text>    the window whose title contains <text> (else: the call app's, found by itself)
+  --app <id>         teams | zoom | meet | … (the reading rules to try; else guessed)
+  --every <ms>       read every <ms> (default 1000)
+  --count <n>        this many reads (default 30)
+  --out <file>       where (default call-dump-<app>-<time>.json in this folder)
+  --names <map>      "Real Name=Priya Shah;Other Name=Sam Patel": names swapped for these in
+                     the file, for sharing (check the file after: it holds whatever the
+                     window showed, chat messages included)
+  --show-names       print who the rules found talking (else counts only)
+"#;
 
 /// `yap.exe call-dump …` (main.rs; any build): read a call window's tree
 /// every so often and write it, with what the reading rules made of each

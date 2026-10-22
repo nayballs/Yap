@@ -355,3 +355,59 @@ for some and off for others):
    call: the voices should take the people's names, no "?", within ~15 s
    of the labels.
 
+## The speaker engine measured (2026-10-22), and why it stays in beta
+
+`cargo test --test diarize_child -- --ignored --nocapture` (the real child,
+started as Yap starts it, frame-level error with a 0.25 s collar and the
+best speaker mapping, overlap scored) on the spike's Windows-voice meetings
+and on new ones made from **Kokoro** voices (eight distinct US/UK voices
+reading the spike's 70 meeting sentences, mixed by the spike's composer;
+the scripts and WAVs are in `references/diarization-spike/` —
+`scripts/kokoro_utts.py`, `scripts/compose_kokoro.py`,
+`audio/conv-kokoro/`). The PC was busy (other builds and benchmarks), so the
+times are high; the error isn't affected.
+
+| Meeting | People | Found | Error |
+|---|---|---|---|
+| Kokoro, 2 / 3 / 4 voices, clean | 2 / 3 / 4 | all | 0.4% / 3.0% / 1.6% |
+| Kokoro, 5 / 6 voices, clean | 5 / 6 | all | 7.7% / 10.0% |
+| Kokoro, 4 / 6 voices, overlaps, levels −9…0 dB, noise at 15 dB | 4 / 6 | all | 0.3% / 5.5% |
+| Kokoro, crosstalk (half the turns start 0.5–2.5 s early, backchannels over most long turns), 3 / 4 voices | 3 / 4 | all | 0.6% / 0.8% |
+| Kokoro + Windows voices mixed, 5, overlaps, noise at 20 dB | 5 | 5 | 1.6% |
+| Kokoro, 4 voices, 30 min | 4 | 4 | 0.3% |
+| **Three similar voices** (three US women) | 3 | **2** | **32.9%** |
+| Spike: 2 / 3 voices clean, 3 noisy, 3 / 4 dial-ins, 4 hard (Opus) | — | all | 2.7% / 1.5% / 0.7% / 0.4% / 8.0% / 2.3% |
+| Spike: 4–6 voices made from three (pitch-shifted copies) | 4–6 | 5–6 | 12.5–21.0% |
+| Spike: 30 / 60 min, Opus | 4 | 4 | 0.3% / 0.7% |
+| Spike: everyone on a phone line | 2 / 3 | 1 / 2 | 48.0% / 50.9% |
+
+**CPU and memory over a one-hour meeting** (`long60_opus`, the engine as
+Yap runs it — 4 OpenMP threads, a timeline every 5 s of audio, below-normal
+priority — CPU time read by psutil, `scripts/cpu_cost.py` beside the others): **391 CPU seconds an hour of meeting**,
+on average **~11% of one core** while it records (0.7% of this 16-thread
+PC), **148 MB** at most; the same hour fed as fast as it would take it ran in
+122 s. **A resumed meeting** (`diarization-real.spec.js`, the real engine
+on the spike's 3-voice meeting recorded twice into one note): a second
+engine for the second recording, its voices Speaker 4–6 after the first's
+1–3, the first recording's lines untouched. **The download** (`cargo test
+diarize::registry::tests::real_download -- --ignored`, the pinned NVIDIA
+release + Hugging Face commit): 112.5 MB in all downloaded, SHA-256 checked,
+unpacked into place with its licences and NOTICE files, passed.
+
+**Verdict: "Tell speakers apart" stays beta and off by default.** Distinct
+voices are told apart well (≤ 3% for 2–4 people, overlap and crosstalk
+included, steady over an hour) and it's cheap. But: every number above is
+synthetic speech — not one real call has been measured; voices that sound
+alike merge (three similar women came out as two, 33% error), and that is
+the failure that hurts most, because one "Speaker 2" then holds two people
+(name suggestions abstain on such a voice, but its lines are mixed); 5–6
+people climb to 8–10%; phone-only calls are ~50% wrong; and the runtime is
+NeMo-Speech.cpp 0.2.0, whose asserts abort the child (Yap restarts it, ≤
+2). The Settings hint now says so plainly ("measured on test meetings, not
+yet on real calls; voices that sound alike can come out as one"). What
+would take it out of beta: one real multi-person call measured (the
+`diarization-real.spec.js` path with a recording of it, or the maintainer's
+own meeting with the call app's names as the truth once `call_ui.rs` is
+checked), and the similar-voices case improved or at least flagged in the
+notepad.
+

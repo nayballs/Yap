@@ -1004,7 +1004,8 @@ pub fn echo_lines(note: &Note, voice: &str) -> (Vec<usize>, usize, usize) {
     let rec_of = |i: usize| note.breaks.iter().filter(|&&b| b <= i).count();
     let (mut lines, mut same, mut total) = (Vec::new(), 0, 0);
     for (i, s) in note.transcript.iter().enumerate() {
-        if s.source != THEM || !s.is_talk() || voice_of(&note.speakers, s) != voice {
+        // (A voice "It was me" merged into You still owns its own lines.)
+        if s.source != THEM || !s.is_talk() || (voice_of(&note.speakers, s) != voice && s.speaker != voice) {
             continue;
         }
         let theirs = norm_words(&s.text);
@@ -1300,7 +1301,22 @@ pub const ME_REFUSED: &str = "You";
 /// otherwise. Returns whether the map changed.
 pub fn refresh(note: &mut Note, ctx: &Context) -> bool {
     let (proposals, _) = propose(note, ctx);
-    apply_proposals(note, &proposals)
+    let mut changed = apply_proposals(note, &proposals);
+    // A voice the person said was them ("It was me"): its new lines that
+    // repeat theirs are hidden too, as its old ones were.
+    let mine: Vec<String> = note
+        .speakers
+        .iter()
+        .filter(|(id, s)| s.merged_into == YOU && id.starts_with(SEPARATED_PREFIX))
+        .map(|(id, _)| id.clone())
+        .collect();
+    for voice in mine {
+        for i in echo_lines(note, &voice).0 {
+            note.transcript[i].echo = true;
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn apply_proposals(note: &mut Note, proposals: &[Proposal]) -> bool {
@@ -1600,8 +1616,11 @@ pub fn asks(note: &Note, ctx: &Context) -> Vec<Ask> {
         .collect();
     let mut out = Vec::new();
     for (voice, words) in open {
-        // "Them" is everyone on the call: only voices told apart are asked about.
-        if voice == THEM || words < ASK_WORDS || out.len() >= ASK_MAX || firm.iter().any(|f| f.voice == voice) {
+        // "Them" is everyone on the call: only voices told apart are asked
+        // about; and a voice the AI already answered for isn't asked again
+        // ("Generate summary" runs this a second time).
+        let answered = note.speakers.get(&voice).and_then(|s| s.suggestion.as_ref()).and_then(|g| g.why.as_ref()).is_some_and(|w| w.kind == "model");
+        if voice == THEM || answered || words < ASK_WORDS || out.len() >= ASK_MAX || firm.iter().any(|f| f.voice == voice) {
             continue;
         }
         let names: Vec<String> = names
@@ -2061,6 +2080,27 @@ mod tests {
         assert!(answer(&mut n, "them-2", "yes").unwrap());
         assert_eq!(resolve(&n.speakers, "them-2"), YOU);
         assert!(n.transcript[1].echo, "the repeat is hidden");
+        // A later repeat from that voice is hidden too.
+        n.transcript.push(TranscriptSegment {
+            source: "them".into(),
+            speaker: "them-2".into(),
+            text: "Can everyone see my screen with the roadmap on it?".into(),
+            ts: 1_009,
+            start_ms: Some(9_300),
+            end_ms: Some(13_300),
+            ..Default::default()
+        });
+        n.transcript.push(TranscriptSegment {
+            source: "you".into(),
+            text: "Can everyone see my screen with the roadmap on it?".into(),
+            ts: 1_009,
+            start_ms: Some(9_000),
+            end_ms: Some(13_000),
+            ..Default::default()
+        });
+        assert!(refresh(&mut n, &ctx()));
+        assert!(n.transcript[3].echo);
+        assert!(!refresh(&mut n, &ctx()), "once");
         // Undo: the call's again, and not suggested again.
         assert!(not_me(&mut n, "them-2").unwrap());
         assert!(!n.transcript[1].echo);
