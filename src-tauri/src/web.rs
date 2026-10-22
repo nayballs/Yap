@@ -2019,11 +2019,17 @@ pub fn strip_sources_note(reply: &str) -> Option<String> {
         Regex::new(r"(?i)^\s*(?:#{1,4}\s*)?(?:\*\*|__|\*)?\s*(?:sources?|references?|citations?)(?:\s+used)?\s*(?:\*\*|__|\*)?\s*:?\s*(?:\*\*|__|\*)?\s*(.*)$")
             .expect("static regex")
     });
-    // One of them: "[1] Title", "1. Title — site", "- [2] …", "- Title (site.com)".
+    // One of them: "[1] Title", "1. Title — site", "- [2] …", "- Title (site.com)",
+    // "- IndieGames: "The best…" [1]" (a bullet ending in its number, or a
+    // site and a quoted title: Qwen3.5-4B's, web-no-sources-list, 2026-10-22).
     static ITEM: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)^\s*(?:[-*•]\s*)?(?:\[\d{1,2}\]|\d{1,2}[.)])\s*\S|^\s*[-*•]\s+.*(?:https?://|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b)")
+        Regex::new(r#"(?i)^\s*(?:[-*•]\s*)?(?:\[\d{1,2}\]|\d{1,2}[.)])\s*\S|^\s*[-*•]\s+.*(?:https?://|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b)|^\s*[-*•]\s+.*\[\d{1,2}\][\s.,;:)]*$|^\s*[-*•]\s+[^"“\n]{1,60}?[:—–-]\s*["“].+["”]"#)
             .expect("static regex")
     });
+    // Any bullet or numbered line: under a sources heading with nothing but
+    // such lines to the end of the answer, they're its sources.
+    static BULLET: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+\S").expect("static regex"));
     let noted = NOTE.replace_all(reply, "").into_owned();
     // A list of sources: its heading and the sources under it (blank lines
     // between them allowed) go; what follows ("Would you like more…?") stays.
@@ -2044,6 +2050,12 @@ pub fn strip_sources_note(reply: &str) -> Option<String> {
                 end = j + 1;
             }
             j += 1;
+        }
+        // Or a plain list to the very end ("- IndieGames — The best indie
+        // games of 2026"): nothing after a sources heading but its items.
+        let rest: Vec<&str> = lines[i + 1..].iter().copied().filter(|l| !l.trim().is_empty()).collect();
+        if !rest.is_empty() && rest.iter().all(|l| BULLET.is_match(l)) {
+            end = lines.len();
         }
         if end == i + 1 && inline.is_empty() {
             kept.push(lines[i]); // a heading with nothing under it: not a list
@@ -2563,12 +2575,35 @@ mod tests {
             strip_sources_note("Top picks [1][2].\n\nSources:\n1. indiegames.example - \"The best indie games of 2026 so far\"\n\n2. gamecritic.example - \"Contenders\"\n\nWould you like more details?").as_deref(),
             Some("Top picks [1][2].\n\nWould you like more details?")
         );
+        // Qwen3.5-4B's on llamafile 0.10.3 and 0.10.6 alike (web-no-sources-list,
+        // the model evaluations of 2026-10-22): a site, a quoted title and the
+        // number — the answer's own list above it (its lines end in [n] too)
+        // stays.
+        let answer = "Based on recent reviews and lists, the top indie games of 2026 include:\n\n1. **Hollow Lantern** – A hand-drawn metroidvania praised for its atmosphere and tight gameplay [1][2].\n2. **Pixel Tides** – A cozy fishing simulation that became a surprise hit of the summer [1][2][3].\n3. **Static Hearts** – A narrative mystery set in a 1990s radio station [1].\n\n**Hollow Lantern** currently leads in critical acclaim with a 94 average score, followed by Glasswing and Static Hearts [2].";
+        let with_list = format!("{answer}\n\nSources:\n- Indie Games: \"The best indie games of 2026 so far\" [1]\n- GameCritic: \"Indie game of the year 2026: the contenders\" [2]\n- CozyGames: \"10 cozy indie games from 2026\" [3]");
+        assert_eq!(strip_sources_note(&with_list).as_deref(), Some(answer));
+        assert_eq!(strip_sources_note(answer), None, "a list of games is not a list of sources");
+        // The same with a closing question after it, without the numbers,
+        // with dashes, or a bare list to the end.
+        for list in [
+            "Sources:\n- Indie Games: \"The best indie games of 2026 so far\"\n- GameCritic: \"The contenders\"\n\nWant more?",
+            "**Sources**\n- IndieGames — “The best indie games of 2026 so far”\n- GameCritic — “The contenders”\n\nWant more?",
+            "Sources:\n- The best indie games of 2026 so far [1].\n- The contenders [2]\n\nWant more?",
+        ] {
+            assert_eq!(strip_sources_note(&format!("Hollow Lantern leads [1].\n\n{list}")).as_deref(), Some("Hollow Lantern leads [1].\n\nWant more?"), "{list}");
+        }
+        assert_eq!(
+            strip_sources_note("Hollow Lantern leads [1].\n\nSources:\n- IndieGames, The best indie games of 2026 so far\n- GameCritic, The contenders").as_deref(),
+            Some("Hollow Lantern leads [1].")
+        );
         // Not a list of sources: left as it is.
         for keep in [
             "Good sources of protein: beans, lentils and tofu.",
             "Sources:\n\nThe page says Alt+2 opens scientific mode, and history keeps your sums.",
             "Hollow Lantern leads [1].",
             "Source: Wikipedia",
+            "Sources of fibre:\n- oats\n- beans\n- lentils",
+            "Sources:\n- The page says Alt+2 opens scientific mode.\n\nThat's all it says about the calculator, and history keeps your sums.",
         ] {
             assert_eq!(strip_sources_note(keep), None, "{keep}");
         }
