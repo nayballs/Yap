@@ -124,8 +124,8 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   to a WAV in a temp folder (never played); `windows_word_cues_on_this_pc`
   makes a sentence into memory and prints each word's cue beside the
   estimate from its audio alone (measured 2026-10-22, the default voice:
-  cues at 101 / 436 / 761 / 1386 … ms, the audio estimate within 0–150 ms
-  of them, the comma's pause pinned within 4 ms); `first_audio_latency`
+  cues at 101 / 436 / 761 / 1386 … ms, the comma's pause pinned within
+  4 ms; `tts/marks.rs` for the numbers); `first_audio_latency`
   (`--features engines`) times `speak` → first piece at the output for
   Kokoro and for ElevenLabs' path against a local stand-in
   (`YAP_TTS_STANDIN_MS`).
@@ -246,7 +246,15 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     × 0.6, a comma's pause 2.5, a full stop's 4 — fitted to Windows' cues)
     and pins each pause in the audio to the punctuation whose estimated
     place is nearest (`pinned`), the words between two pins spread between
-    them; **Estimate** — no speech in the audio (test mode's silent
+    them, each but a segment's first lit 65 ms earlier (`SPREAD_LEAD`: the
+    spread lands late by that much). Measured 2026-10-22 (`kokoro::real::
+    checks::word_timing_against_parakeet` / `windows_cues_against_parakeet`,
+    `--features engines`, nothing played): Parakeet's word times sit −21 ms
+    (median; |59| ms) from Windows' real cues, a fair yardstick; against it,
+    Kokoro's audio estimate (3 voices × 4 sentences, 171 words) is off by
+    a median 100 ms (+36 signed), 90th 297 ms, 71 % within 150 ms — the
+    plain spread over the length 154 ms, 49 %; on Windows' voice the audio
+    estimate is +10 ms (median |70|, 90th 184) from the real cues; **Estimate** — no speech in the audio (test mode's silent
     stand-in): the same spread over its whole length (`estimate`). What's
     said isn't always what's shown ("£12,400" → "twelve thousand four
     hundred pounds"): `align` pairs the words the same on both sides (LCS,

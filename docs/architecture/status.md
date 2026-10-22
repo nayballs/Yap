@@ -62,7 +62,9 @@ real key), **Read aloud, anywhere** (`read_aloud.rs` + `tts/marks.rs`,
 2026-10-22: the selection in any app, a note or a Chat answer read in that
 voice with a karaoke reading card on the Yap bar; word timing from Windows'
 own word cues, ElevenLabs' `with-timestamps` alignment, else from Kokoro's
-audio — checked silently against Windows' cues on this PC, within 0–150 ms;
+audio — measured silently against Parakeet's word times (itself −21 ms from
+Windows' real cues): Kokoro's karaoke a median 100 ms off, 71 % of words
+within 150 ms;
 the selection read for real by the robot in the test pad, Notepad and an
 Edge page, a terminal never by Ctrl+C; the card, karaoke, ⏸ ⏭ ⏮, speed,
 Esc, a 30,000-character text made a sentence ahead, e2e-tested; not yet

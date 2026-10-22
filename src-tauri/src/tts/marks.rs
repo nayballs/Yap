@@ -13,7 +13,9 @@
 //!   export hands back the waveform only (its one output is `waveform`, no
 //!   durations), so the words are spread over the part of the audio that's
 //!   speech (its silent ends cut off) by their syllables, with the pauses
-//!   the voice made in it pinned to the commas and full stops nearest them.
+//!   the voice made in it pinned to the commas and full stops nearest them
+//!   (measured against Parakeet's word times: a median 100 ms off, 71 %
+//!   of words within 150 ms — `kokoro::real::checks`).
 //! - **From the length alone** ([`Timing::Estimate`], [`estimate`]): the
 //!   same spread over the whole sentence, when the audio has no speech to go
 //!   by (test mode's silent stand-in).
@@ -300,14 +302,27 @@ pub fn pinned(text: &str, spans: &[Span], shape: &Shape) -> Vec<Duration> {
     let mut out = Vec::with_capacity(n);
     let mut word = 0;
     let mut t0 = shape.start;
+    // A segment's first word starts where its sound does (measured); the
+    // spread lands the rest a little late (measured against Windows' own
+    // word cues and Parakeet: ~65 ms), so they're lit that much earlier.
+    let lead = |times: Vec<Duration>, from: Duration| -> Vec<Duration> {
+        times
+            .into_iter()
+            .enumerate()
+            .map(|(k, t)| if k == 0 { t } else { t.saturating_sub(SPREAD_LEAD).max(from) })
+            .collect()
+    };
     for &(next, (from, to)) in &pins {
-        out.extend(spread(&weights, &pauses, word..next, t0, from));
+        out.extend(lead(spread(&weights, &pauses, word..next, t0, from), t0));
         word = next;
         t0 = to;
     }
-    out.extend(spread(&weights, &pauses, word..n, t0, shape.end));
+    out.extend(lead(spread(&weights, &pauses, word..n, t0, shape.end), t0));
     out
 }
+
+/// How much earlier [`pinned`] lights a word than the even spread says.
+const SPREAD_LEAD: Duration = Duration::from_millis(65);
 
 /// When each word starts, from the engine's [`CharTime`]s over the same
 /// text: a word's first timed character in it. A word with none is put
