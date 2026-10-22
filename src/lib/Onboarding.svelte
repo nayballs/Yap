@@ -750,7 +750,7 @@
     {#if step > 0}
       <button class="skip" onclick={back}>← Back</button>
     {:else}
-      <button class="skip" onclick={next}>I'll choose later</button>
+      <button class="skip" onclick={next} disabled={!cfg}>I'll choose later</button>
     {/if}
 
     {#if step === 0}
