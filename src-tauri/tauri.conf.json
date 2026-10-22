@@ -85,7 +85,7 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "license": "MIT",
-    "publisher": "Nathan",
+    "publisher": "Context Mirror",
     "category": "Productivity",
     "icon": [
       "icons/32x32.png",

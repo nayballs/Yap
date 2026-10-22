@@ -415,7 +415,7 @@ Function PageLeaveReinstall
       ReadRegStr $R1 HKLM "$R6" "UninstallString"
       ExecWait '$R1' $0
     ${Else}
-      ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
+      Call ReadPreviousInstallDir
       ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
       ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
       ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
@@ -1050,8 +1050,27 @@ Section Uninstall
   ${EndIf}
 SectionEnd
 
-Function RestorePreviousInstallLocation
+; --- YAP: PREVIOUS INSTALL DIR --- The folder of the install this one
+; replaces, into $4. Tauri keeps it under the publisher's key
+; (Software\<publisher>\Yap); an install made while the publisher had another
+; name has it only in its uninstall entry (InstallLocation, quoted), so that's
+; read next — otherwise an update would land in the default folder beside it.
+Function ReadPreviousInstallDir
   ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
+  ${If} $4 == ""
+    ReadRegStr $4 SHCTX "${UNINSTKEY}" "InstallLocation"
+    Push $0
+    StrCpy $0 $4 1
+    ${If} $0 == "$\""
+      StrCpy $4 $4 "" 1
+      StrCpy $4 $4 -1
+    ${EndIf}
+    Pop $0
+  ${EndIf}
+FunctionEnd
+
+Function RestorePreviousInstallLocation
+  Call ReadPreviousInstallDir
   StrCmp $4 "" +2 0
     StrCpy $INSTDIR $4
 FunctionEnd
