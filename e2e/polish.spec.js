@@ -190,6 +190,22 @@ test('onboarding: the main button in view, the tray step, the shortcut picker, e
   const ob = yap.onboarding;
   await yap.invoke('open_onboarding');
   await expect(ob.getByRole('heading', { level: 1, name: 'Welcome to Yap' })).toBeVisible();
+
+  // Speech models: the recommended one and the best other one for this
+  // PC's language (Parakeet V2 for English), the rest behind "More models",
+  // and the Download button in view without scrolling.
+  const english = (await ob.evaluate(() => navigator.language)).toLowerCase().startsWith('en');
+  const cards = ob.locator('.cards .card');
+  await expect(cards).toHaveCount(2);
+  await expect(cards.locator('h3')).toHaveText(['Parakeet V3', english ? 'Parakeet V2' : 'Whisper Large v3 Turbo']);
+  await expect(cards.first().locator('.badge')).toHaveText('Recommended');
+  const download = ob.getByRole('button', { name: /^Download Parakeet V3/ });
+  await expect(download).toBeInViewport();
+  await shot(ob, '12-onboarding-speech-models-short');
+  await ob.getByRole('button', { name: 'More models (12)' }).click();
+  await expect(cards).toHaveCount(14);
+  await expect(cards.locator('h3').first()).toHaveText('Parakeet V3');
+  await expect(ob.getByRole('button', { name: /^More models/ })).toHaveCount(0);
   await ob.getByRole('button', { name: "I'll choose later" }).click();
   await ob.getByRole('button', { name: 'Continue →' }).click();
 
@@ -276,6 +292,28 @@ test('an empty Chat with no AI model says what it needs', async ({ yap, main, sh
     await yap.invoke('save_config', { cfg: before });
   }
   await expect(main.locator('.needsai')).toHaveCount(0);
+});
+
+test("what needs doing is counted once, on the title bar's bell", async ({ main, shot }) => {
+  // The stub build has no speech model: one item ("No speech-to-text model
+  // installed"). The bell counts and names it; the Settings row doesn't
+  // repeat the count (it showed "1" beside the bell's "1").
+  const bell = main.getByRole('button', { name: /^Notifications/ });
+  const count = await bell.locator('.belldot').textContent();
+  expect(Number(count)).toBeGreaterThanOrEqual(1);
+  await expect(bell).toHaveAccessibleName(`Notifications (${count})`);
+  const settingsRow = main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Settings', exact: true });
+  await expect(settingsRow).toBeVisible();
+  await expect(settingsRow).toHaveText('Settings');
+  await bell.click();
+  await expect(bell).toHaveAttribute('aria-expanded', 'true');
+  const items = main.locator('.bellmenu .bellitem');
+  await expect(items).toHaveCount(Number(count));
+  await expect(items.filter({ hasText: 'No speech-to-text model installed' })).toHaveCount(1);
+  await shot(main, '13-bell-the-one-count');
+  await items.filter({ hasText: 'No speech-to-text model installed' }).click();
+  await expect(settingsDialog(main).getByRole('heading', { level: 1, name: 'Speech-to-Text' })).toBeVisible();
+  await closeSettings(main);
 });
 
 test('Home with no speech model yet says so first, and leads to the download', async ({ yap, main, shot }) => {
