@@ -25,16 +25,21 @@ app you're in.
 
 ## Why Yap?
 
-Voice dictation tools force a choice: the free, open-source ones transcribe locally but
-dump out raw, unpunctuated text — while the polished ones charge ~$15/month and send
-your voice to the cloud. Yap refuses the choice:
+Yap is dictation and meeting notes for Windows that run on your own PC:
 
-|  | Free/OSS tools | Paid apps (Wispr Flow, etc.) | **Yap** |
-|---|:---:|:---:|:---:|
-| Transcribes locally (voice never uploaded) | ✅ | ❌ cloud | ✅ |
-| AI cleanup (filler, punctuation, grammar) | ❌ raw text | ✅ | ✅ — even **fully offline** |
-| Price | Free | ~$15/mo | **Free, forever** |
-| Open source | ✅ | ❌ | ✅ MIT |
+- 🔒 **Local from end to end.** Your speech is transcribed on your PC, and the AI
+  cleanup can run there too, offline, with no account and no key. Prefer a cloud
+  model? Bring your own key.
+- ⌨️ **Pasting that knows the app it types into.** Terminals get their own paste keys
+  and one tidy line, Claude Code and Codex (in Windows Terminal) keep your line
+  breaks, a short chat message loses its full stop, and nothing you dictate is left in
+  Win+V clipboard history.
+- 🗓️ **Meeting notes that stay on your PC.** Yap notices a Teams, Zoom or Meet call and
+  offers to take notes, keeps its windows out of screen shares, and writes an action
+  plan whose owners and deadlines are checked against what was actually said.
+- 🗣️ **A voice assistant that's local too.** Ask out loud from any app and hear the
+  answer in a voice that runs on your PC.
+- 💸 **Free and open source** (MIT). No telemetry, and no account needed.
 
 ```
 🎤 your voice → Whisper / Parakeet (LOCAL, on your GPU) → raw transcript
@@ -56,8 +61,9 @@ your voice to the cloud. Yap refuses the choice:
 - ⚡ **Local GPU transcription** — 14 models to choose from (Parakeet, Whisper,
   Moonshine, SenseVoice, Canary…), downloaded in-app and SHA-256 verified. Runs on
   **any** GPU — NVIDIA, AMD, or Intel — via Vulkan + DirectML. No CUDA. CPU fallback included.
-- 🧠 **AI cleanup, private by default** — one click downloads a small local model
-  (Qwen2.5 1.5B via Mozilla llamafile) that strips filler words, fixes punctuation and
+- 🧠 **AI cleanup, private by default** — one click downloads a local model (Qwen3.5 4B
+  where your graphics card runs it well, else Qwen2.5 1.5B, via Mozilla llamafile)
+  that strips filler words, fixes punctuation and
   grammar, and resolves "no wait, I meant…" self-corrections — **entirely on your PC**.
   Prefer your own stack? Point it at Ollama/LM Studio, or bring a Groq/OpenAI key.
   Even bring your own GGUF.
