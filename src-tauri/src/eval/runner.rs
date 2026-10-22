@@ -43,6 +43,8 @@ Running:
   --tokens-per-minute <n>  pacing budget (default 8000 for Groq, its free plan; none otherwise)
   --max-total-tokens <n>   stop starting scenarios for a model past this many tokens
   --timeout <secs>         per model call (default: Yap's own, 20 s for Chat)
+  --clock-step <minutes>   each turn the clock Chat tells the model moves on this much (a real
+                           chat's turns are minutes apart; default 0: the real time)
   --locale <tag|json>      the user's region, as Windows would say it (About you, about_you.rs):
                            \"en-GB\" (currency and units from its region), or JSON {locale, country,
                            currency, symbol, metric, timeZone}; default none (no region in prompts)
@@ -107,6 +109,7 @@ struct Args {
     models_dir: Option<PathBuf>,
     raw: Option<PathBuf>,
     repeat: u32,
+    clock_step: u64,
     dump_apps: Option<PathBuf>,
     list: bool,
     cleanup: bool,
@@ -169,6 +172,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--models-dir" => a.models_dir = Some(PathBuf::from(value()?)),
             "--raw" => a.raw = Some(PathBuf::from(value()?)),
             "--repeat" => a.repeat = num(value()?, &flag)?.max(1) as u32,
+            "--clock-step" => a.clock_step = num(value()?, &flag)?,
             "--dump-apps" => a.dump_apps = Some(PathBuf::from(value()?)),
             "--list" => a.list = true,
             "--cleanup" => a.cleanup = true,
@@ -796,6 +800,9 @@ async fn run_scenario(
         record::set_context(json!({ "model": m.label, "scenario": name, "turn": i + 1 }));
         let voice = turn.voice.unwrap_or(s.voice);
         record::write("turn_start", json!({ "user": turn.user, "voice": voice }));
+        if i > 0 && args.clock_step > 0 {
+            crate::eval::clock_forward(args.clock_step as i64 * 60);
+        }
         record::begin_turn();
         let t0 = Instant::now();
         // Asked out loud = the Voice Assistant's turn (its shorter history,

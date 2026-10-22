@@ -619,7 +619,8 @@ async fn post_chat(
 /// `tools` array attached to the request. Waits out a rate limit (up to
 /// [`RATE_LIMIT_PATIENCE`]): a tool-using answer makes several calls, which
 /// is just what runs into a free plan's tokens-per-minute cap. `tool_choice`:
-/// OpenAI's `tool_choice` ("required": the model must call one of `tools`).
+/// OpenAI's `tool_choice` ("required": the model must call one of `tools`;
+/// `{"type": "function", "function": {"name": …}}`: that one).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn post_chat_message(
     base_url: &str,
@@ -629,11 +630,11 @@ pub(crate) async fn post_chat_message(
     temperature: f32,
     messages: Value,
     tools: Option<&Value>,
-    tool_choice: Option<&str>,
+    tool_choice: Option<Value>,
 ) -> Result<Value, String> {
     let mut extra = serde_json::Map::new();
     if let (Some(choice), Some(_)) = (tool_choice, tools) {
-        extra.insert("tool_choice".into(), json!(choice));
+        extra.insert("tool_choice".into(), choice);
     }
     post_chat_request(
         base_url,

@@ -1,0 +1,50 @@
+{
+  "name": "notes-long-chat",
+  "description": "Fourteen short questions in one chat about five notes: longer than the 19 messages Chat sends, so the history's window moves. The answers stay right, and — on a hybrid local model — a turn re-reads only its own message most of the time (the window moves three turns at a time, chats::history_start; prompt tokens processed per call in transcript.jsonl).",
+  "tags": ["notes", "follow-up", "cache"],
+  "apps": "standard",
+  "seed": {
+    "folders": ["Work", "Home"],
+    "notes": [
+      {
+        "title": "Kitchen quotes",
+        "folder": "Home",
+        "content": "Harlow Kitchens: £14,200 including fitting, quartz worktops, eight weeks lead time.\nLocal joiner: £11,800, laminate worktops, appliances not fitted.\nDeposit 25% on signing."
+      },
+      {
+        "title": "Car service",
+        "folder": "Home",
+        "content": "Golf due its 60,000-mile service: £340 plus £95 for front brake pads.\nMOT runs out on 3 January: book both together in December.\nInsurance renews 19 November, last year £612."
+      },
+      {
+        "title": "Running plan",
+        "content": "Week 6: Tuesday 8 km easy, Thursday 6 x 800 m intervals, Saturday long run 16 km.\nRace in Cardiff on 7 December, target under 1:55."
+      },
+      {
+        "title": "Team retro",
+        "folder": "Work",
+        "content": "Went well: release checklist, faster code review.\nDidn't: flaky end-to-end tests, unclear owner of the support inbox.\nActions: Priya quarantines the flaky tests, Dave drafts a support rota."
+      },
+      {
+        "title": "Book club",
+        "content": "Next book: The Remains of the Day. Meeting at Sarah's on the 28th at 7:30. Sarah is vegetarian; bring snacks."
+      }
+    ]
+  },
+  "turns": [
+    { "user": "What did the two kitchen quotes come to?", "expect": { "answer_contains": ["14,200", "11,800"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "Which of the two fits the appliances?", "expect": { "answer_contains_any": ["Harlow", "14,200"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "How much is the deposit?", "expect": { "answer_contains": ["25"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "When does my car insurance renew?", "expect": { "answer_contains_any": ["19 November", "November 19", "19th November", "November 19th"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "And what did it cost last year?", "expect": { "answer_contains": ["612"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "When does the MOT run out?", "expect": { "answer_contains_any": ["3 January", "January 3", "3rd January", "January 3rd"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "How much is the car service with the brake pads?", "expect": { "answer_contains_any": ["435", "340"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "How long is my long run this week?", "expect": { "answer_contains": ["16"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "Where's the race?", "expect": { "answer_contains": ["Cardiff"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "What finish time am I aiming for in that race?", "expect": { "answer_contains_any": ["1:55", "1 hour 55", "one hour fifty-five", "an hour and 55"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "Who's sorting out the flaky tests from the retro?", "expect": { "answer_contains": ["Priya"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "And who's doing the support rota?", "expect": { "answer_contains": ["Dave"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "What's the next book for book club?", "expect": { "answer_contains": ["Remains of the Day"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } },
+    { "user": "Whose house is it at, and what time?", "expect": { "answer_contains": ["Sarah", "7:30"], "tools_not_called": ["edit_note", "update_note", "create_note", "open_app", "copy_to_clipboard"], "no_false_claims": true } }
+  ]
+}
