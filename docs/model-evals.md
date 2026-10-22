@@ -751,13 +751,15 @@ while the on-device model is in use and the connection isn't metered, 0.10.6 dow
 `llamafile-next.exe` (verified against the pinned SHA-256), `--version` checks it runs, and it's
 swapped in once nothing uses the sidecar (no dictation, no request to it, no meeting recording or
 summarised), the old one kept as `llamafile-previous.exe` until the new one has started; a new one
-that won't start gives way to the old one and is never downloaded again. Unit-tested (the marker,
+that won't start (twice: the second try without MTP, with longer to load) gives way to the old one,
+and is refused after three sessions like that ("Review fixes" below). Unit-tested (the marker,
 the swap, the way back) and e2e-tested with stand-ins (`local-runtime-upgrade.spec.js`); not run
 against the installed app (its `%APPDATA%\yap` is never written by these runs).
 
 **2. A cache-friendly Chat prompt** (for a model that calls tools: the clock, the notes found,
 the meetings, the earlier-searches line and the spoken notes in the question's message; the same
-tools on every step; a must-search first step named in `tool_choice`; the history window moving
+tools on every step; a must-search first step forced over all of them — `tool_choice: "required"`
+since the review below, the named form llamafile ignored before; the history window moving
 three turns at a time). Every A/B here is on 0.10.6 without MTP.
 
 | Measure | Before | After |
@@ -766,7 +768,7 @@ three turns at a time). Every A/B here is on 0.10.6 without MTP.
 | — its prompt time (median / mean) | 169–172 / 212–214 ms | **105–109 / 147–154 ms** |
 | `--bench layout`, 20 earlier turns (9.6k tokens), turns 2–4 | 9,577–9,752 read, 1,563–1,589 ms | **693–738 read, 185–192 ms** |
 | `--bench layout`, 50 earlier turns on 64K (18.8k tokens) | 18,759–18,934 read, 3,187–3,217 ms | **693–738 read, 210–216 ms** |
-| `--bench loop`: a web answer's second step | 3,677 read, 632 ms | **1,695 read, 312 ms** (named `tool_choice` too) |
+| `--bench loop`: a web answer's second step | 3,677 read, 632 ms | **1,695 read, 312 ms** (`"required"` over all the tools the same) |
 | The suite ×2 (32K): a turn's first call, turns 2+, prompt time (mean) | 310 ms | **183 ms** |
 | — the tool loop's later steps, prompt time (mean) | 178 ms | **124 ms** |
 | — model time a turn, the 35 scenarios both runs had (mean / median) | 1.20 / 1.11 s | **1.11 / 1.02 s** |
@@ -841,5 +843,41 @@ processor (and none for a model without the prediction layer); Chat's prompt for
 
 **5. `web::strip_sources_note`** now takes out a "Sources:" list of bullets with a site and a
 quoted title or its number at the end (Qwen3.5-4B's `- IndieGames: "…" [1]`), and a plain list
-to the end of the answer under such a heading; the answer's own list stays. Unit-tested on the
-answer the suite failed on.
+to the end of the answer under such a heading — after a web search only — and never a list the
+question asked for (sources for an essay, references, reading; the review below); the answer's
+own list stays. Unit-tested on the answer the suite failed on and on the review's examples.
+
+### Review fixes (22 Oct 2026)
+
+An independent review of the branch found bugs, mostly in the runtime upgrade; the fixes, and
+what was measured again (run folders `E:/yap-builds/eval-runs/20261022-04*-lap1-fix-*`):
+
+- **`tool_choice`**: llamafile 0.10.6 doesn't take the named form — "Wrong type supplied for
+  parameter 'tool_choice'. Expected 'string', using default value" 34 times in the final suite —
+  so the must-search step ran as `auto` (the model searched by itself, told to by
+  `MUST_SEARCH_NOTE`). Now `"required"` over all the tools (llama.cpp enforces it with a
+  grammar). The web scenarios ×2 on the 4B at 32K with MTP: **28/28**, every forced step a
+  `web_search` (no fallback to Yap's search), **0** "Wrong type" lines; ~22 % of the prompt
+  tokens sent were read (78k of 354k, ~800 a call: the cache re-used as before; `--bench loop`
+  had measured `"required"` over all tools at 1,695 read for the second step, the same as the
+  named form). The first run, 27/28, had kept a sources list for "…Include your sources." —
+  the new `asks_for_sources` rule was too broad, then narrowed (below).
+- **`strip_sources_note`** cut lists the person asked for ("Here are some sources you could use
+  for your essay: ### Sources - IPCC… - NASA…" → the first line). The looser list rules (a
+  bullet ending in its number, a site and a quoted title, any bullets to the end) now apply only
+  when the turn searched the web, and no list goes when the question asks for sources,
+  references or reading — but "Include your sources" asks where the answer came from, which the
+  Sources row shows, so the model's copy of it still goes (`web-no-sources-list`).
+- **The runtime's way back** (`local_llm::start_with`, unit-tested with a scripted start, and run
+  for real on the 5070 Ti in test-mode Yaps with portable data, `llm/` hard-linked to the eval
+  models): **(a)** a proven 0.10.6 autostarted with MTP (`mtp=true`, 4,206 MiB on the card by
+  the log, 8K), cleanups through it 169 / 162 ms after the first; **(b)** an unproven "new
+  runtime" that exits at once (`where.exe`): tried with MTP, then without it with 300 s, then
+  the previous runtime went back and served — `failures: {sha: 1}`, not refused, the new one
+  kept as `llamafile-next.exe` for the next launch; **(c)** a start stopped from Settings while
+  it loaded: "stopped while it started", no second try, no way back, the marker untouched. No
+  process left behind.
+- **The cleanup, same build** (32 dictations × 3, MTP off / on, two runs each): 188 / 193 →
+  **156 / 155 ms** back to back (phase 1: 191 / 186 → 159 / 161), 264 tok/s with 91 % of drafts
+  kept; outputs **96/96 the same** as phase 1's runs with and without MTP (93/96 between MTP
+  off and on: the one list's punctuation, as before).
