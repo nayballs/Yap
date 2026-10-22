@@ -103,7 +103,7 @@ function countryName(code: string): string {
 /** Countries whose English name takes "the" ("in the United Kingdom"). */
 const WITH_THE = new Set(["GB", "US", "NL", "AE", "PH", "BS", "GM", "DO", "CF", "KY", "MV", "SC", "KM", "MH", "SB", "VG", "VI", "TC", "FO"]);
 
-/** "near Leeds, United Kingdom", "in the United Kingdom" without a city,
+/** "near Norwich, United Kingdom", "in the United Kingdom" without a city,
  *  "" when Cloudflare doesn't know. Its guess is about the network, hence
  *  "near". */
 export function placeOf(country: string | null, city: string | null): string {
@@ -117,7 +117,7 @@ export function placeOf(country: string | null, city: string | null): string {
 export interface OriginView {
   /** The app that asked, e.g. "Yap 0.1.1 on Windows". */
   label: string;
-  /** e.g. "near Leeds, United Kingdom"; "" if unknown. */
+  /** e.g. "near Norwich, United Kingdom"; "" if unknown. */
   place: string;
   minutesAgo: number;
   /** Same network as the phone (null: one side unknown). */
@@ -165,7 +165,7 @@ export async function describeOrigin(
 }
 
 /** Where and from what a code was requested, for the new-sign-in email:
- *  "near Leeds, United Kingdom" ("" if unknown) and "Yap 0.1.1 on Windows". */
+ *  "near Norwich, United Kingdom" ("" if unknown) and "Yap 0.1.1 on Windows". */
 export async function originSummary(userCode: string): Promise<{ place: string; device: string }> {
   const row = await env.DB.prepare(`SELECT "country", "city", "userAgent" FROM "deviceOrigin" WHERE "userCode" = ?1`)
     .bind(normalizeUserCode(userCode))

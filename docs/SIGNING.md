@@ -37,7 +37,7 @@ reputation" (stars, downloads, coverage), so apply once Yap has some users.
 Ready-to-paste answers, the README "Code signing policy" section SignPath
 requires, and their conditions (2FA, manual approval of every signed release,
 "SignPath Foundation" shown as publisher) are in `signpath-application.md`
-in the private docs repo (`E:\Projects\yap-private\docs\`).
+in the private docs repo (its `docs/` folder).
 
 1. Go to **https://signpath.org/apply** (SignPath Foundation OSS program).
 2. Submit Yap: repo `https://github.com/nayballs/Yap`, MIT licence, Windows

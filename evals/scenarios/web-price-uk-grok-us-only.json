@@ -1,6 +1,6 @@
 {
   "name": "web-price-uk-grok-us-only",
-  "description": "Nathan's question of 2026-10-22 on Qwen3.5-4B, from a UK PC: \"Can you lookup the Grok subscription price for me I am thinking of buying it\". Yap searched \"Grok subscription price 2026\" (Exa, userLocation GB) and found x.ai's US tiers; the answer listed them in $ and ended \"Note: These are US prices. Let me know if you need help finding the UK pricing…\". Stand-in web: every search finds only US prices, whatever it asks. Right: the search names the UK, it looks once more for a UK price, then says in one plain line that it couldn't find UK prices and gives the US ones as they are: no £ price made up, no offer to look further. Run with --locale en-GB.",
+  "description": "A tester's question of 2026-10-22 on Qwen3.5-4B, from a UK PC: \"Can you lookup the Grok subscription price for me I am thinking of buying it\". Yap searched \"Grok subscription price 2026\" (Exa, userLocation GB) and found x.ai's US tiers; the answer listed them in $ and ended \"Note: These are US prices. Let me know if you need help finding the UK pricing…\". Stand-in web: every search finds only US prices, whatever it asks. Right: the search names the UK, it looks once more for a UK price, then says in one plain line that it couldn't find UK prices and gives the US ones as they are: no £ price made up, no offer to look further. Run with --locale en-GB.",
   "tags": [
     "web",
     "prices",

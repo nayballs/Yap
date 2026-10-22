@@ -338,7 +338,7 @@
     {/if}
     <label class="field">
       <span>{list ? 'What Yap knows' : 'One per line'}</span>
-      <Textarea bind:value={draft.facts} rows={list ? 3 : 5} ariaLabel="Facts, one per line" placeholder={list ? 'Lives in York\nBirthday 3 May' : section === 'preferences' ? 'Short answers\nBritish spelling' : 'Works night shifts as a nurse\nLives in Leeds'} />
+      <Textarea bind:value={draft.facts} rows={list ? 3 : 5} ariaLabel="Facts, one per line" placeholder={list ? 'Lives in York\nBirthday 3 May' : section === 'preferences' ? 'Short answers\nBritish spelling' : 'Works night shifts as a nurse\nLives in Norwich'} />
     </label>
     {#if item && list && (section === 'people' || section === 'projects')}
       <div class="spell">

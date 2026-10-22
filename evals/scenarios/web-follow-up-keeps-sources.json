@@ -1,6 +1,6 @@
 {
   "name": "web-follow-up-keeps-sources",
-  "description": "Nathan's follow-up after a web answer: \"Can you tell me the top five in that list?\" It refers back, so it may answer from the earlier answer and cite its sources (Chat draws them as that answer's pills); no new search needed. Stand-in web.",
+  "description": "A tester's follow-up after a web answer: \"Can you tell me the top five in that list?\" It refers back, so it may answer from the earlier answer and cite its sources (Chat draws them as that answer's pills); no new search needed. Stand-in web.",
   "tags": [
     "web",
     "follow-up"

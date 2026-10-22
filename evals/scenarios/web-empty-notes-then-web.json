@@ -1,6 +1,6 @@
 {
   "name": "web-empty-notes-then-web",
-  "description": "Nathan's first Grok question with \"plans\" for \"subscriptions\", so web::needs_web doesn't spot it (no \"look up\", no price words) and the model decides: the web, never \"I don't see any notes about…\" (Nathan's Grok chat, turn 1, 2026-10-21). Should it take it to the notes first, an empty notes search leads to the web (the search_notes result says so, and for a model on this PC Yap searches it). Qwen3.5-4B went to the web directly for \"plans\" in every run; with \"subscriptions\" it went to the notes (run web-grok-subscriptions with YAP_EVAL_FIRST=model to see the rule at work). Live (Exa with the run's key).",
+  "description": "A tester's first Grok question with \"plans\" for \"subscriptions\", so web::needs_web doesn't spot it (no \"look up\", no price words) and the model decides: the web, never \"I don't see any notes about…\" (a tester's Grok chat, turn 1, 2026-10-21). Should it take it to the notes first, an empty notes search leads to the web (the search_notes result says so, and for a model on this PC Yap searches it). Qwen3.5-4B went to the web directly for \"plans\" in every run; with \"subscriptions\" it went to the notes (run web-grok-subscriptions with YAP_EVAL_FIRST=model to see the rule at work). Live (Exa with the run's key).",
   "tags": [
     "web",
     "routing",

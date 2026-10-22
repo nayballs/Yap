@@ -41,7 +41,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   earlier answer that had some (`earlier_source_numbers`, what ChatView's
   `citedSources` draws a follow-up's "[1]" against), but not for a new
   question that needs the web (`web::needs_web` and not `web::refers_back`:
-  Nathan's "best RPG games coming out in 2026" cited [1][4][5] that drew as
+  a tester's "best RPG games coming out in 2026" cited [1][4][5] that drew as
   the indie games' sources) nor after a search that found nothing; code, a
   link's text and "[0]" are left alone. Then, for someone outside the US
   (About you's region; 2026-10-22), a price question that searched loses
@@ -226,7 +226,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   it never takes the focus or types. Not **Commands** (the agent's name in a
   dictation, the rewrite shortcut: the AI types for you — Wispr's Command
   Mode and old "Hey Flow"; Wispr has no spoken-answer assistant). **Off
-  during meetings** (Nathan: Bella talking over a meeting "would be too
+  during meetings** (the maintainer: Bella talking over a meeting "would be too
   much"): while a meeting records or a call is on (`tts::meeting_quiet` =
   `meeting::is_recording` || `meeting_detect::call_live`), a press doesn't
   listen — `off_for_meeting` shows "The Voice Assistant is off during
@@ -323,7 +323,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   where it runs in its tooltip (and, on the on-device model, "Context: 8K
   tokens": `ai_model_status.context`), "No AI model" when nothing is set up. The
   chip opens **the Chat model picker** (`ChatModelPicker.svelte`, data in
-  `chatModels.svelte.js`; Nathan's "Concept A, provider rail",
+  `chatModels.svelte.js`; the maintainer's "Concept A, provider rail",
   2026-10-19): a popover above the composer (`data-model-picker-above`;
   560 px, its rail a strip across the top below 520) — **search** across
   the top ("Search models and providers", Ctrl+K, typing anywhere searches,

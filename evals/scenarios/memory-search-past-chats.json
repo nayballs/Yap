@@ -15,7 +15,7 @@
       {
         "title": "Garden plans",
         "messages": [
-          { "role": "user", "text": "When should I plant tomatoes in Leeds?" },
+          { "role": "user", "text": "When should I plant tomatoes in Norwich?" },
           { "role": "assistant", "text": "Sow them indoors in March and plant them out in late May." }
         ]
       }

@@ -7,10 +7,10 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
 ## Modules
 
 - **`bar.rs`** — the **Yap bar** (2026-10-05, after Wispr Flow's Flow Bar —
-  `E:\Projects\references\wispr-flow\README.md`, screenshots 20–22, 25): the
+  `references/wispr-flow/README.md` (beside this repo), screenshots 20–22, 25): the
   `overlay` window as one fixed-size (520×560 logical), transparent,
   always-on-top tool window, drawn to Wispr's measured Flow Bar
-  (`E:\Projects\references\wispr-flow\flowbar-spec.md`). **Idle** a 40×8
+  (`references/wispr-flow/flowbar-spec.md`). **Idle** a 40×8
   pill outline 14 px above the work area; **hover** opens it into 🎤 Dictate (`toggle_recording`, tooltip
   "Dictate · F9"), ◉ Meeting notes (`meeting_guard::start_or_stop`, as the
   meeting shortcut: the live call, else a new meeting note; while recording,
@@ -20,7 +20,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   ✕ (`dictation-cancel`) and ✓ (`dictation-stop`: stop and paste, as the
   hotkey's second press — into the app the dictation started in) while it
   records, as `bar_dictation_buttons` says (`Status.dictationButtons`):
-  **"off"** (the default, Nathan's call: Cancel stays in the tray), "hover"
+  **"off"** (the default, the maintainer's call: Cancel stays in the tray), "hover"
   (only while Rust's pointer is on the capsule, which is then a region) or
   "always"; never while the push-to-talk key is held (`yap-dictation-held`,
   from the press until it locks hands-free), as Wispr's bar draws them only
@@ -82,7 +82,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   ex-styles, WindowFromPoint on the pill, the thread's active window) for the
   e2e suite; a test run's bar only sees `bar_simulate`'s cursor unless it's
   started with `YAP_E2E_REAL_CURSOR=1` (debug-only, `e2e::real_cursor`: the
-  real one, for checking a real click reaches it — never while Nathan's
+  real one, for checking a real click reaches it — never while the maintainer's
   using the mouse). Every card answer (button, ✕, Esc, its timer) is logged
   as "bar: card answered" with the card and action; the hover check logs at
   debug when it changes. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Light / Dark;
@@ -101,7 +101,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
 
 - **`lib/Overlay.svelte`** — the **Yap bar** page (window `overlay`, `bar.rs`),
   laid out to Wispr's measured Flow Bar (`flowbar-spec.md`, checked by
-  `bar.spec.js`) but in **Yap's own colours** (2026-10-06, Nathan): every
+  `bar.spec.js`) but in **Yap's own colours** (2026-10-06, the maintainer): every
   colour is a `--bar-*` token in app.css, in two schemes picked in Settings →
   General → Yap bar → **Colours** (`bar_theme`, carried to the page in
   `bar::Status.theme`, which sets `data-bar-theme`; the main window follows it

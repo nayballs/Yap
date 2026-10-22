@@ -20,31 +20,28 @@ the competitive strategy, see `ROADMAP.md` in the **private** docs repo (below).
 > **Mission — the best-of-everything blend.** Take the best of superwhisper,
 > OpenWhispr, Wispr Flow, Handy, Aqua and FluidVoice into one Windows-first,
 > local-first app, porting proven patterns **from source**, not screenshots:
-> OpenWhispr is cloned at `E:\Projects\references\openwhispr` (Handy at
-> `references/Handy`) — read its implementation first. The Settings / Language
+> OpenWhispr is cloned beside this repo at `../references/openwhispr` (Handy at
+> `../references/Handy`) — read its implementation first. The Settings / Language
 > Models / Prompt Studio surface tracks OpenWhispr's UX and wording while keeping
 > Yap's backend contract (immutable guardrails + editable body). Full notes:
 > [architecture README](./docs/architecture/README.md#background-notes-from-claudemd).
 >
 > **Private docs (2026-10-17).** The roadmap, competitor research, feature
 > checklists and internal test plans are NOT in this public repo: they live in
-> the private repo `nayballs/yap-private`, cloned at **`E:\Projects\yap-private`**
+> the private repo `nayballs/yap-private`, cloned beside this one as **`../yap-private`**
 > (`ROADMAP.md`, `docs/wispr-flow-features.md`, `docs/openwhispr-*.md`,
 > `docs/competitive-analysis.md`, …). Paths in this file named `ROADMAP.md` or
 > one of those `docs/` files mean that repo. Write new competitor research,
-> teardown findings and plans there (or in `E:\Projects\references\`), never in
+> teardown findings and plans there (or in `../references/`), never in
 > this repo: its `docs/` keeps only how Yap works.
+>
+> **Maintainer-specific working notes live in the private repo** (`docs/maintainer.md`:
+> what you may do without asking, how to hand over a change to try, the maintainer's PC).
 
-> **Working agreement — standing permission (Nathan, 2026-10-04).** Nathan has given
-> Claude full permission to do whatever the work needs **without stopping to
-> double-check first**: commits/pushes to main, deploys of `cloud/`, releases and
-> nightlies, test emails or sign-in codes to his own inbox, email/DNS hygiene such as
-> DMARC, and configuring the project's third-party dashboards (Cloudflare, Google,
-> GitHub, Discord, Resend). Do it, verify it, then report what was done. Limits that
-> still stand regardless: never type passwords, OTPs or secrets for him (he pastes
-> secrets himself, e.g. into `npx wrangler secret put`), never create accounts or
-> move money, and if the harness blocks an action (DNS edits have been blocked
-> before) hand him the exact clicks instead of retrying.
+> **Privacy in the repo.** It's public: fixtures, tests, evals and comments use fictional
+> people and details (example.com, 07700 900xxx), never real names, emails, places or
+> details of the maintainer or of users. The pre-push guard enforces it
+> (`scripts/privacy-guard.mjs`; `npm run hooks:install` once per clone).
 
 ---
 
@@ -205,6 +202,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `commands.rs` — the Tauri commands; logging is `lib.rs init_logging` (app-shell.md).
 - `config.rs` — `YapConfig`, load/save, migrations, dictionary helpers (config-and-data.md).
 - `e2e.rs` / `realtest.rs` — test mode, and robot mode's real pastes into the test's own windows.
+- `log_privacy.rs` — a test: no user content in the log at `info` and above (app-shell.md, Logging).
 
 ## Frontend index (`src/`)
 
@@ -236,7 +234,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - Never `window.confirm/alert/prompt` in a Yap window — use `ui/ConfirmDialog.svelte` (`frontend.md`).
 - The bar window is transparent: no `backdrop-filter`, no big shadows (`yap-bar.md`).
 - A **signed-out Yap never contacts the account service** on its own (`auth.rs`).
-- Transcripts DO appear in logs at `info` (`app-shell.md`, Logging).
+- No user content in logs at `info`/`warn`/`error` — lengths, counts and ids only; the text at `debug` at most, never keys (`log_privacy.rs` checks; `app-shell.md`, Logging).
 - Lock rules in `meeting_detect.rs` and `calendar.rs`: never touch windows/WinRT/the network under their state locks.
 - New settings that must change saved values once go in `config::migrate_once` (`config-and-data.md`).
 
@@ -256,11 +254,11 @@ GPU policy: **universal, no CUDA** (Whisper → Vulkan, ONNX → DirectML); buil
 
 **Dev:** `scripts/dev.bat` (= `npm run tauri dev -- --features engines`, Vite on
 **:51437**, hot-reloads `src/`) behind the **"Yap - Dev"** desktop shortcut; the plain
-**"Yap"** shortcut is the *installed* app (`D:\Hobby Project\Yap`, nightly channel).
+**"Yap"** shortcut is the *installed* app (nightly channel).
 dev.bat first fast-forwards the checkout to `origin/main` (`scripts/dev-update.ps1`)
 and stops AI apps' `yap.exe mcp` helpers running from its exe.
-So merged work reaches Nathan by pushing to main; never fast-forward his checkout by hand
-while Yap - Dev runs.
+So merged work reaches the maintainer's dev build by pushing to main; never
+fast-forward that checkout by hand while Yap - Dev runs.
 
 ```bash
 # real GPU pipeline (default in dev.bat) — requires the Vulkan SDK
@@ -275,17 +273,19 @@ Accounts in debug builds: `cd cloud && npm run dev` (wrangler dev on :8787; see 
 > and restarting that `.exe` changes nothing. For live frontend changes use dev
 > (Vite on :51437). If :51437 isn't listening, you're looking at a release build.
 
-**CI on every push** (`.github/workflows/ci.yml`): `npm run build` + `cargo clippy
+**CI on every push** (`.github/workflows/ci.yml`): the privacy guard's generic checks
+(keys, emails, phone numbers), `npm run build` + `cargo clippy
 --locked --all-targets -- -D warnings` on the stub build. ⚠ Zero-warnings ratchet on
 the **latest stable** toolchain — keep local Rust current (`rustup update`).
 `.github/workflows/e2e.yml` runs the e2e suite on the same triggers.
 
 **Tests:**
 - `npm run test:app` — the end-to-end UI suite: Playwright drives a real stub debug build over CDP (~20 s + the build), leaving named screenshots in `test-results/app/screenshots/`. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md).
-- `npm run test:real` — real-app robot tests: a robot-mode Yap pastes into real windows the harness opens (`--engines` build: real STT). ⚠ **It takes the keyboard focus for ~2 min** (local only, not CI): say so before running it while Nathan's at the PC. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md) "Real-app robot tests".
+- `npm run test:real` — real-app robot tests: a robot-mode Yap pastes into real windows the harness opens (`--engines` build: real STT). ⚠ **It takes the keyboard focus for ~2 min** (local only, not CI): say so before running it while the maintainer is at the PC. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md) "Real-app robot tests".
+- `npm run privacy:scan` / `npm run test:privacy` — the privacy guard over the whole tree, and its own tests ([build-and-test.md](./docs/architecture/build-and-test.md#the-privacy-guard-scriptsprivacy-guardmjs)).
 - `npm run eval` — model evaluations: real models through Yap's own Chat code, every request logged; use it before changing a prompt, a tool or the default local model. Guide: [`docs/model-evals.md`](./docs/model-evals.md).
 
-### The dev → nightly → stable workflow (agreed with Nathan, 2026-10-05)
+### The dev → nightly → stable workflow (agreed 2026-10-05)
 **Dev first, nightly for batches.** Every change goes through these steps in order:
 1. **Claude builds it and tests it.** `npm run build` + `cargo clippy --all-targets
    --locked -- -D warnings` + `cargo test`, then the e2e robot suite (`npm run
@@ -294,40 +294,28 @@ the **latest stable** toolchain — keep local Rust current (`rustup update`).
    the clipboard, terminals/chat apps, the mic path or STT**, also the real-app
    robot tests (`npm run test:real`, + `npm run test:real:build -- --engines` for
    real STT): they paste into real windows, so Claude checks it itself instead of
-   handing Nathan a checklist (they take the keyboard focus ~1.5 min). Push to
-   main: CI and the E2E workflow re-check every push.
-2. **Nathan tries it in the dev build** ("Yap - Dev" desktop shortcut =
+   handing the maintainer a checklist (they take the keyboard focus ~1.5 min). Push
+   to main: CI and the E2E workflow re-check every push (and the pre-push privacy
+   guard every push from here).
+2. **The maintainer tries it in the dev build** ("Yap - Dev" desktop shortcut =
    `scripts\dev.bat`, the real GPU pipeline from this checkout). Anything visual or
    about how it feels gets checked HERE: Vite hot-reloads `src/` edits in seconds;
    Rust edits need the dev build restarted (a minute or two to recompile). Something
-   off → Claude fixes it → he sees it straight away. Never burn a 15-min nightly to
-   check something dev shows in seconds.
+   off → Claude fixes it → it shows straight away. Never burn a 15-min nightly to
+   check something dev shows in seconds. Hand it over with exact steps (the private
+   `docs/maintainer.md` says how).
 3. **Nightly, once a batch feels right.** Claude dispatches it (or the 05:00 UTC
-   cron picks up main) and Nathan uses it day to day on the installed app.
+   cron picks up main) and the maintainer uses it day to day on the installed app.
    Nightlies catch what only the installed release build can show: the updater
    flow, the installer, Windows notifications under Yap's own name (dev builds
    borrow PowerShell's), `com.contextmirror.yap://` deep links, start on login.
    Those go straight to a nightly check; everything else goes through dev first.
-4. **Stable** — tag `v*` deliberately for curated milestones, when Nathan's happy.
+4. **Stable** — tag `v*` deliberately for curated milestones, when the maintainer
+   is happy.
 
-**Guiding Nathan through step 2.** When work is ready for him, don't just say "try
-it in dev": give him the exact steps, every time:
-- **Quit the installed Yap first** (tray icon → Quit). The dev build skips the
-  single-instance lock and shares `%APPDATA%\yap` (config, hotkey, notes) with
-  the installed app, so with both running one hotkey press starts two dictations.
-- **Double-click "Yap - Dev"** on the desktop (it updates itself to the latest main
-  first). It opens a console window: leave it
-  open, closing it closes the dev Yap. The first start after Rust changes compiles
-  for a few minutes; it's ready when the Yap window appears (and Vite listens on
-  :51437).
-- Then a short numbered checklist of what to try, what should happen (✅ lines),
-  and what to send back (screenshots of anything off).
-- Say which fixes appear on their own (frontend, hot reload) and which need the dev
-  build closed and reopened (Rust).
-- **When he's done:** close the dev console window, then start the installed
-  **Yap** again (desktop shortcut or Start menu).
-- He works day shifts and follows along on his phone while at work. Queue
-  hands-on dev testing for when he's home, and keep at-work messages short.
+The dev build skips the single-instance lock and shares `%APPDATA%\yap` with the
+installed app: quit the installed Yap before starting Yap - Dev, or one hotkey press
+starts two dictations.
 
 ### Releases
 Two auto-update channels, both CI-built: **stable** (tag `v*` → `release.yml` → a

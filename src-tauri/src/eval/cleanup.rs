@@ -219,7 +219,7 @@ async fn chat_between(question: &str, ep: &Endpoint<'_>, setup: Setup) -> bool {
 /// A long Chat question (~6k tokens with the tools: a long note pasted in),
 /// which fills most of the server's 8k context next to the cleanup's prompt.
 fn long_question() -> String {
-    let para = "The quarterly planning meeting covered the launch schedule, the hiring plan for the support team, the budget for the new office in Leeds, and the migration of the billing system. Dave said the beta could ship on Friday if the installer bug is fixed by Wednesday; Priya will check the signing certificate. ";
+    let para = "The quarterly planning meeting covered the launch schedule, the hiring plan for the support team, the budget for the new office in Norwich, and the migration of the billing system. Dave said the beta could ship on Friday if the installer bug is fixed by Wednesday; Priya will check the signing certificate. ";
     format!("Summarise this note in three bullets:\n\n{}", para.repeat(60))
 }
 

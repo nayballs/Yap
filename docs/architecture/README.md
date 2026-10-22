@@ -55,15 +55,15 @@ Paths in these files named `ROADMAP.md`, `docs/wispr-flow-features.md`,
 > every top-tier dictation app — **superwhisper**, **OpenWhispr**, **Wispr Flow**,
 > **Handy**, **Aqua**, **FluidVoice** — and combine them into one Windows-first,
 > local-first app. We port proven patterns **from source**, not from screenshots:
-> **OpenWhispr is cloned at `E:\Projects\references\openwhispr`** (Handy at
-> `references/Handy`) — when working on a feature one of these apps does well, read
+> **OpenWhispr is cloned beside this repo, at `../references/openwhispr`** (Handy at
+> `../references/Handy`) — when working on a feature one of these apps does well, read
 > its actual implementation first. See ROADMAP.md "North star" +
 > `docs/openwhispr-teardown.md` + `docs/openwhispr-parity.md`. Every Wispr Flow
 > feature with Yap's status, as a checklist with a "Next up" list:
 > `docs/wispr-flow-features.md`.
 
 > Active work note: the Settings / Language-Models / Prompt-Studio surface is being
-> reshaped to track **OpenWhispr** (`E:\Projects\references\openwhispr`) as the design
+> reshaped to track **OpenWhispr** (`../references/openwhispr`) as the design
 > reference — porting its UX patterns and wording while keeping Yap's own backend
 > contract (split immutable-guardrails + editable body). Treat that repo as the
 > source of truth for this redesign pass.

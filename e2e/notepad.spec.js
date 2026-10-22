@@ -21,7 +21,7 @@
 // dialog and the mail app, so they're checked through the text they'd use.
 //
 // The screenshots are named after the states in Wispr's own captures
-// (E:\Projects\references\wispr-flow), for a side-by-side look.
+// (references/wispr-flow, beside this repo), for a side-by-side look.
 import {
   test as base,
   expect,
@@ -851,7 +851,7 @@ test('a meeting note named after its calendar event keeps that name', async ({ y
   // A local stand-in for a calendar's private iCal link (calendar.spec.js),
   // with one meeting on now.
   const feed = await startCalendarFeed();
-  const owner = { name: 'Nathan', email: 'nathan@example.com' };
+  const owner = { name: 'Imogen', email: 'imogen@example.com' };
   feed.set(
     calendarFile(owner.email, [
       vevent({

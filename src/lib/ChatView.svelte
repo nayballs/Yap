@@ -101,7 +101,7 @@
 
   // ---- Spoken replies
   let speakReplies = $state(false);
-  // The composer's + (Nathan, 2026-10-20, after Claude Code's; the model
+  // The composer's + (the maintainer, 2026-10-20, after Claude Code's; the model
   // stays out of it, quiet under the box on the left, always in view): Voice
   // replies and the voice's volume ("so loud, even at 1% on the volume
   // mixer") — moving it changes what's being said at once; letting go keeps
@@ -328,7 +328,7 @@
     }
   }
 
-  // ---- Several at once (Nathan, 2026-10-19: "shift click some chats and
+  // ---- Several at once (the maintainer, 2026-10-19: "shift click some chats and
   // delete them all together", as Claude Code's sessions list) ----
   // Click opens a conversation; Shift+click selects the range from the last
   // one clicked, Ctrl+click adds or takes out one (File Explorer's rules).

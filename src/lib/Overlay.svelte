@@ -2,7 +2,7 @@
   // The Yap bar (the `overlay` window; behaviour in src-tauri/src/bar.rs).
   // One fixed-size transparent window, bottom-centre on the monitor with the
   // cursor; everything is drawn inside it, to the measurements of Wispr
-  // Flow's Flow Bar (E:\Projects\references\wispr-flow\flowbar-spec.md):
+  // Flow's Flow Bar (references/wispr-flow/flowbar-spec.md, beside this repo):
   //   idle      a 40 × 8 pill outline, its bottom 14 px above the work area,
   //             in a 60 × 20 hit wrapper;
   //   hover     it opens into 🎤 Dictate, ◉ Meeting notes and a ^ menu, with

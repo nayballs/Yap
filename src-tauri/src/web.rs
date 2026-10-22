@@ -1821,7 +1821,7 @@ pub fn about_own_stuff(question: &str) -> bool {
 
 /// Asking what something costs, whether it's on offer or in stock, or about
 /// buying it: today's price is on the web, never in a model's training —
-/// and the person's own currency matters (Nathan's "Can you check the Grok
+/// and the person's own currency matters (a tester's "Can you check the Grok
 /// subscriptions please, for me?" got two notes searches and no answer,
 /// 2026-10-21; "…I am thinking of buying it" US prices, 2026-10-22). Pure.
 pub fn asks_about_prices(question: &str) -> bool {
@@ -1846,7 +1846,7 @@ const ASKS_FOR_WEB: &[&str] = &[
     "latest", "news", "today's", "this week's", "right now", "currently", "current price", "price of",
     "release date", "patch notes", "walkthrough", "where do i find", "where can i find", "how do i get to",
     "where is the", "where's the",
-    // Something new or still to come (Nathan's "best RPG games coming out in 2026", 2026-10-21).
+    // Something new or still to come (a tester's "best RPG games coming out in 2026", 2026-10-21).
     "coming out", "come out", "comes out", "upcoming", "out yet", "new releases", "just released", "this year's",
     "next year's", "who won", "who is winning", "who's winning", "weather", "forecast", "exchange rate", "stock price",
 ];
@@ -1919,7 +1919,7 @@ pub fn refers_back(question: &str) -> bool {
 /// for", "please", "for me"… ("Can you look up the latest Rust release?" →
 /// "the latest Rust release"), sentence by sentence, a sentence of nothing
 /// else left out ("Can you look up please, for me? Can you look up Groc
-/// subscriptions for me, please?" → "Groc subscriptions": Nathan's, dictated,
+/// subscriptions for me, please?" → "Groc subscriptions": a tester's, dictated,
 /// 2026-10-21). Pure.
 pub fn search_query(question: &str) -> String {
     static ASK: LazyLock<Regex> = LazyLock::new(|| {
@@ -1949,7 +1949,7 @@ pub fn search_query(question: &str) -> String {
 /// **A price question's search, aimed at the person's country**: "Grok
 /// subscription price 2026" → "Grok subscription price 2026 UK". Exa's
 /// `userLocation` (GB) alone found x.ai's US page, a US price list and a
-/// guide in $ for Nathan's "Can you lookup the Grok subscription price for
+/// guide in $ for a tester's "Can you lookup the Grok subscription price for
 /// me I am thinking of buying it" (2026-10-22). `None` — the query as it
 /// is — when the question isn't about prices or buying
 /// ([`asks_about_prices`]), the person is in the US or Yap doesn't know
@@ -2002,7 +2002,7 @@ pub fn price_note(local: &crate::about_you::LocalPrices) -> String {
 /// management check account billing" for "Can you look up Groc
 /// subscriptions for me, please?" — every word after "subscription" from
 /// the turn before ("check", its search, its answer about billing), and the
-/// answer was about checking a bill (Nathan's chat, 2026-10-21; told in the
+/// answer was about checking a bill (a tester's chat, 2026-10-21; told in the
 /// tool's description to leave them out, it still did 1 time in 3). A word
 /// stays when the question has it (or a near-miss of it: "Groc" → the
 /// model's "Grok"), when nothing earlier had it (the model's own "price",
@@ -2251,7 +2251,7 @@ pub fn today() -> String {
 }
 
 /// For answers that give a time: pages often give one in another zone (an
-/// American site's "3:00 PM ET" is 8 pm in the UK; Nathan's Arsenal answer,
+/// American site's "3:00 PM ET" is 8 pm in the UK; a tester's Arsenal answer,
 /// 2026-10-21, called it "3:00 PM UK time"). The user's own time and its
 /// offset from UTC are in the About you block (`about_you::prompt_block`),
 /// last in the prompt; `zone`: its name there ("UK time"). Pure.
@@ -2580,7 +2580,7 @@ mod tests {
         ] {
             assert!(!needs_web(no), "{no}");
         }
-        // Something new or still to come (Nathan's chat, 2026-10-21), a
+        // Something new or still to come (a tester's chat, 2026-10-21), a
         // year from last year on.
         for yes in [
             "What are some of the best RPG games coming out in 2026",
@@ -2611,7 +2611,7 @@ mod tests {
             assert!(!needs_web_in(no, 2026), "{no}");
         }
         assert!(needs_web_in("What are the latest patch notes for Baldur's Gate 3?", 2026));
-        // Prices, plans, deals and stock (Nathan's Grok chat, 2026-10-21).
+        // Prices, plans, deals and stock (a tester's Grok chat, 2026-10-21).
         for yes in [
             "Can you check the Grok subscriptions please, for me?",
             "Can you web search Grok's subscription and how much it costs for me?",
@@ -2646,7 +2646,7 @@ mod tests {
         assert_eq!(search_query("search the web for cheap flights to Lisbon please"), "cheap flights to Lisbon");
         assert_eq!(search_query("Google the opening hours of the Louvre."), "the opening hours of the Louvre");
         assert_eq!(search_query("Where do I find Gale in Baldur's Gate 3?"), "Where do I find Gale in Baldur's Gate 3");
-        // Nathan's, dictated (2026-10-21): the asking and the please left out.
+        // A tester's, dictated (2026-10-21): the asking and the please left out.
         assert_eq!(search_query("Can you check the Grok subscriptions please, for me?"), "the Grok subscriptions");
         assert_eq!(search_query("Can you look up please, for me? Can you look up Groc subscriptions for me, please?"), "Groc subscriptions");
         assert_eq!(
@@ -2666,7 +2666,7 @@ mod tests {
     fn a_price_question_searches_where_the_user_is() {
         let gb = uk_prices();
         let grok = "Can you lookup the Grok subscription price for me I am thinking of buying it";
-        // Nathan's (2026-10-22): the model's own query, aimed at the UK.
+        // A tester's (2026-10-22): the model's own query, aimed at the UK.
         assert_eq!(local_query("Grok subscription price 2026", grok, Some(&gb)).as_deref(), Some("Grok subscription price 2026 UK"));
         // Buying counts; a query that already says where or in what money
         // stays; not a price question, the US, or nowhere known: nothing.
@@ -2730,7 +2730,7 @@ mod tests {
 
     #[test]
     fn a_forced_search_leaves_out_words_from_earlier_turns() {
-        // Nathan's chat (2026-10-21): turn 1 searched "check" and answered
+        // A tester's chat (2026-10-21): turn 1 searched "check" and answered
         // about billing; turn 2's own search carried them over.
         let earlier = [
             "Can you check the Grok subscriptions please, for me?",
@@ -2797,7 +2797,7 @@ mod tests {
     fn a_sources_note_or_list_the_model_wrote_is_taken_out() {
         // After a web search, for a question that doesn't ask for sources.
         let web = |reply: &str| strip_sources_note(reply, true, "What are the best indie games of 2026?");
-        // Qwen3.5-4B's copy of the history note (Nathan's chat, 2026-10-21).
+        // Qwen3.5-4B's copy of the history note (a tester's chat, 2026-10-21).
         let made_up = "Here are some RPGs:\n\n1. **Black Myth: Wukong** [1]\n2. **Dragon's Dogma 2** [5]\n\nWould you like more details?\n\n(Yap searched the web for this answer. Its sources: [1] Black Myth: Wukong - Wikipedia; Starfield: Bound by Honor - Microsoft Store; [5] Dragon's Dogma 2 - IGN.)";
         assert_eq!(
             web(made_up).unwrap(),
@@ -3129,7 +3129,7 @@ mod tests {
         assert!(claims_browsing("I just looked it up: 42."));
         assert!(!claims_browsing("You could search the web for that."));
         assert!(!claims_browsing("Gale is on the beach."));
-        // Qwen3.5-4B, Nathan's chat (2026-10-21): no search that turn.
+        // Qwen3.5-4B, a tester's chat (2026-10-21): no search that turn.
         assert!(claims_browsing("I did look it up on the web. I searched for \"best RPG games coming out 2026\"."));
         assert!(claims_browsing("Yes, I have searched online for it."));
         // Denials, offers, and the person's notes aren't claims about the web.

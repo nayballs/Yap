@@ -206,7 +206,7 @@ replaced. A full stop cleanup put straight after the phrase is dropped where
 it would spoil the snippet's own text: after a text that ends in punctuation
 ("Many thanks," never becomes "Many thanks,."), and as the dictation's last
 character after a text of several lines, so a sign-off or an address ends as
-saved ("…see you soon. Speak soon,⏎Nathan", not "Nathan."). A one-line
+saved ("…see you soon. Speak soon,⏎Imogen", not "Imogen."). A one-line
 snippet mid-sentence keeps the sentence's punctuation ("Mail it to
 sam@example.com."), and an ellipsis, "?" or "!" always stays. The text goes
 in verbatim (`$1` is text). Snippets are never in the

@@ -2,7 +2,7 @@
 //! (`config::apply_dictionary`) can't.
 //!
 //! Ported from Handy's `audio_toolkit/text.rs` `apply_custom_words`
-//! (`E:\Projects\references\Handy`): 1–3 word n-grams are matched against the
+//! (`references/Handy`, beside this repo): 1–3 word n-grams are matched against the
 //! dictionary's spellings using normalized Levenshtein distance with a Soundex
 //! phonetic boost (score × 0.3 on a phonetic hit), a ≤25% length-difference
 //! gate, and Handy's default acceptance threshold (0.18). So "jaison" snaps to
@@ -280,7 +280,7 @@ fn apply_with(text: &str, dict: &[DictionaryEntry], accept: &dyn Fn(&[&str], usi
             let run = &words[i..i + n];
             if let Some((replacement, dist)) = find_best_match(&build_ngram(run), &candidates) {
                 // An everyday word is never a near-miss of a term, only its
-                // exact spelling: "could" isn't "cloud" → "Claude" (Nathan,
+                // exact spelling: "could" isn't "cloud" → "Claude" (the maintainer,
                 // 2026-10-21: "was there anything that Claude be changed"),
                 // "motion" isn't "Notion" (learn.rs' everyday words).
                 if n == 1 && dist > 0 && crate::learn::is_frequent(&build_ngram(run)) {
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn an_everyday_word_is_never_a_near_miss() {
-        // Nathan's dictionary: "cloud" → "claude" (Parakeet hears Claude as cloud).
+        // A tester's dictionary: "cloud" → "claude" (Parakeet hears Claude as cloud).
         let dict = vec![entry("cloud", "claude"), entry("", "Notion")];
         assert_eq!(
             apply_fuzzy("was there anything that could be changed", &dict),

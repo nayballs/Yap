@@ -97,10 +97,10 @@ test('an item edited by hand: added, changed, the dictation switch, a secret ref
   // Profile lines go into the one Profile item.
   const you = dialog.getByRole('group', { name: 'You', exact: true });
   await you.getByRole('button', { name: /^Profile/ }).click();
-  await you.getByRole('textbox', { name: 'Facts, one per line' }).fill('Works night shifts as a nurse\nLives in Leeds');
+  await you.getByRole('textbox', { name: 'Facts, one per line' }).fill('Works night shifts as a nurse\nLives in Norwich');
   await you.getByRole('button', { name: 'Save' }).click();
   await expectStore(yap, 'memory.json', (m) => m.items.some((i) => i.section === 'profile' && i.details.length === 2));
-  await expect(you.getByRole('button', { name: /^Profile/ })).toContainText('Works night shifts as a nurse · Lives in Leeds');
+  await expect(you.getByRole('button', { name: /^Profile/ })).toContainText('Works night shifts as a nurse · Lives in Norwich');
   await shot(main, '02-edited');
 
   // Open Rochelle: "Spell this name in dictation" (on; her name is fixed in dictation).
@@ -305,31 +305,31 @@ test("You: About you's name, region and note, each a way to About you, and not k
   const aboutYou = dialog.locator('#settings-about-you');
   await expect(aboutYou).toBeVisible();
   await aboutYou.getByRole('textbox', { name: 'What should Yap call you?' }).fill('Declan');
-  await aboutYou.getByRole('textbox', { name: 'Anything the AI should know about you' }).fill('I work day shifts at a warehouse in Leeds.');
-  await expectStore(yap, 'config.json', (c) => c.aboutName === 'Declan' && c.aboutMe?.startsWith('I work day shifts'));
+  await aboutYou.getByRole('textbox', { name: 'Anything the AI should know about you' }).fill('I work weekends at a bakery in Norwich.');
+  await expectStore(yap, 'config.json', (c) => c.aboutName === 'Declan' && c.aboutMe?.startsWith('I work weekends'));
 
   // Back in Memory: the rows follow.
   await openSettings(main, 'Memory');
   await expect(row('name')).toContainText('Declan');
-  await expect(row('note')).toContainText('“I work day shifts at a warehouse in Leeds.”');
+  await expect(row('note')).toContainText('“I work weekends at a bakery in Norwich.”');
   await you.scrollIntoViewIfNeeded();
   await shot(main, '08-about-you');
 
   // What About you says isn't kept twice: an import (as a learning pass)
   // repeating the note and the name keeps only what's new.
   answerMemory(fakeLlm, 'learning Spanish', [
-    { action: 'add', section: 'profile', facts: ['Works day shifts at a warehouse in Leeds', 'Learning Spanish for a trip to Seville'] },
+    { action: 'add', section: 'profile', facts: ['Works weekends at a bakery in Norwich', 'Learning Spanish for a trip to Seville'] },
     { action: 'add', section: 'profile', facts: ['Name is Declan'] },
   ]);
   await dialog.getByRole('button', { name: 'Import', exact: true }).click();
   await dialog
     .getByRole('textbox', { name: "The other assistant's answer" })
-    .fill('- Name is Declan\n- Works day shifts at a warehouse in Leeds\n- Is learning Spanish for a trip to Seville');
+    .fill('- Name is Declan\n- Works weekends at a bakery in Norwich\n- Is learning Spanish for a trip to Seville');
   await dialog.getByRole('button', { name: 'Turn into memory' }).click();
   const review = dialog.getByRole('list', { name: 'Proposed changes' });
   await expect(review.getByRole('checkbox')).toHaveCount(1);
   await expect(review).toContainText('Learning Spanish for a trip to Seville');
-  await expect(review).not.toContainText('warehouse');
+  await expect(review).not.toContainText('bakery');
   await expect(review).not.toContainText('Name is Declan');
   await dialog.getByRole('button', { name: 'Discard' }).click();
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
@@ -342,7 +342,7 @@ test("You: About you's name, region and note, each a way to About you, and not k
   const packed = zip.readUInt32LE(18);
   const nameLen = zip.readUInt16LE(26);
   const youMd = zlib.inflateRawSync(zip.subarray(30 + nameLen, 30 + nameLen + packed)).toString();
-  expect(youMd).toContain('## About you\n\n- Name: Declan\n- Region: United Kingdom\n- What you told Yap: “I work day shifts at a warehouse in Leeds.”');
+  expect(youMd).toContain('## About you\n\n- Name: Declan\n- Region: United Kingdom\n- What you told Yap: “I work weekends at a bakery in Norwich.”');
 
   // Left as they were for the other tests.
   await row('name').click();

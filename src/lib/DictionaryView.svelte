@@ -294,7 +294,7 @@
                   </div>
                   <span class="arrow">→</span>
                   <textarea
-                    placeholder={'e.g. 12 Station Road\nLeeds LS1 4AB'}
+                    placeholder={'e.g. 12 Station Road\nNorwich NR1 4AB'}
                     aria-label="Text Yap types"
                     rows={snippetRows(entry.to)}
                     bind:value={entry.to}

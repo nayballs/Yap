@@ -1,9 +1,9 @@
 //! **About you** (Settings → General → About you, 2026-10-21): what Yap
 //! tells the AI models about the person, so an answer fits where they are
-//! and who they are — Nathan's ask: "It keeps finding things in dollars…"
-//! (his Grok question on Qwen3.5-4B answered in US $ from a UK PC).
+//! and who they are — a tester's ask: "It keeps finding things in dollars…"
+//! (their Grok question on Qwen3.5-4B answered in US $ from a UK PC).
 //!
-//! - **The region: one country** (2026-10-22, Nathan: "all of that should
+//! - **The region: one country** (2026-10-22, the maintainer: "all of that should
 //!   be covered in the region selector only"). Settings → About you →
 //!   **Region** is "Automatic: United Kingdom (from Windows)" — Windows'
 //!   home location ([`detected`]: `GetUserDefaultGeoName`, else
@@ -690,7 +690,7 @@ fn language_in_prompt(r: &Region) -> Option<String> {
 /// time and metric units. Prices: in £ (GBP) when you have them in £; never
 /// change a price's currency sign — a price in another currency stays as it
 /// is, labelled, like "$15 a month (US price)".
-/// Their name is Nathan. They told Yap: "I play PC games.""
+/// Their name is Imogen. They told Yap: "I run at weekends.""
 pub fn prompt_block(p: &Profile, now: DateTime<Utc>) -> String {
     let when = when(p, now);
     let mut out = String::from("About the user: ");
@@ -823,7 +823,7 @@ pub fn foreign_price_note(reply: &str, r: &Region) -> Option<String> {
     Some(format!("*Prices in $ are as the sources give them (most likely US dollars), not in {theirs}.*"))
 }
 
-/// **Prices where the person is** (2026-10-22): Nathan asked for Grok's
+/// **Prices where the person is** (2026-10-22): a tester asked for Grok's
 /// price from a UK PC; Yap searched "Grok subscription price 2026" (Exa's
 /// `userLocation` was GB) and found only x.ai's US page and US price lists,
 /// and the answer gave the US tiers and offered to "help finding the UK
@@ -967,7 +967,7 @@ const DOLLARS: &[&str] = &[
 /// if you need help finding the UK pricing…", "Would you like me to look up
 /// UK prices?" — taken out after a search, when Yap could have looked (and
 /// did: a price question searches for the local price, and once more when
-/// the first results had none): Nathan's Grok answer ended so, 2026-10-22.
+/// the first results had none): a tester's Grok answer ended so, 2026-10-22.
 /// A sentence that offers (let me know, would you like, I can…), to look
 /// (find, look, search, check, help…), for a price, where they are (the
 /// UK, £, local, your country…) goes — never one that says something
@@ -1193,26 +1193,26 @@ mod tests {
     const UK_BLOCK: &str = "About the user: they're in the United Kingdom (British English). Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\".";
 
     #[test]
-    fn nathans_pc_reads_as_the_uk() {
+    fn a_uk_pc_reads_as_the_uk() {
         let r = resolve(&uk(), "");
         assert!(r.automatic);
         assert_eq!(r.country_name.as_deref(), Some("United Kingdom"));
         assert_eq!(summary(&r), "Prices in £ · miles and °C · British spelling · UK time");
         assert_eq!(r.spelling, Some(Spelling::British));
         assert_eq!(r.language.as_deref(), Some("en-GB"));
-        let p = Profile { region: r, name: "Nathan".into(), about: "I'm in Manchester, I play PC games, I work day shifts".into() };
+        let p = Profile { region: r, name: "Imogen".into(), about: "I'm a teacher in Bristol and I run at weekends".into() };
         assert_eq!(
             prompt_block(&p, at()),
-            "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Their name is Nathan. They told Yap: \"I'm in Manchester, I play PC games, I work day shifts\""
+            "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Their name is Imogen. They told Yap: \"I'm a teacher in Bristol and I run at weekends\""
         );
     }
 
     #[test]
     fn chat_gets_the_block_without_the_clock_and_the_clock_on_its_own() {
-        let p = Profile { region: resolve(&uk(), ""), name: "Nathan".into(), about: String::new() };
+        let p = Profile { region: resolve(&uk(), ""), name: "Imogen".into(), about: String::new() };
         // The same every minute (Chat's system prompt stays cacheable)…
         let block = profile_block(&p);
-        assert_eq!(block, format!("{UK_BLOCK} Their name is Nathan."));
+        assert_eq!(block, format!("{UK_BLOCK} Their name is Imogen."));
         assert!(!block.contains("2026") && !block.contains("21:40"));
         // …and the moment in the question's context.
         assert_eq!(clock_line(&p, at()), "It's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00).");
@@ -1428,7 +1428,7 @@ mod tests {
     #[test]
     fn an_offer_to_find_local_prices_goes() {
         let gb = LocalPrices::for_region(&resolve(&uk(), "")).unwrap();
-        // Nathan's answer of 2026-10-22, its last paragraph.
+        // A tester's answer of 2026-10-22, its last paragraph.
         let reply = "- **Plus**: $8/month\n- **Premium**: $30/month\n\nNote: These are US prices. Let me know if you need help finding the UK pricing or more details about what each plan includes!";
         assert_eq!(
             strip_price_offer(reply, &gb).as_deref(),
@@ -1474,7 +1474,7 @@ mod tests {
 
     #[test]
     fn the_note_is_one_line_and_short() {
-        assert_eq!(one_line("  I'm in\n\nManchester  ", 300), "I'm in Manchester");
+        assert_eq!(one_line("  I'm in\n\nBristol  ", 300), "I'm in Bristol");
         assert_eq!(one_line(&"a".repeat(400), ABOUT_MAX).chars().count(), ABOUT_MAX);
         let p = Profile { region: Region::default(), name: String::new(), about: "I say \"hi\"".into() };
         assert!(prompt_block(&p, at()).ends_with("They told Yap: \"I say 'hi'\""));

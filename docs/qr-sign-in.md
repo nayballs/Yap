@@ -75,7 +75,7 @@ Done when every box is ticked.
       option hidden in "Confirm it's you", sign-in announced before the
       provider lookup.
 - [x] Shipped in nightly `0.1.1-nightly.108` (2026-10-05).
-- [x] Tried on the installed app (Nathan, nightly .108, 2026-10-05).
+- [x] Tried on the installed app (the maintainer, nightly .108, 2026-10-05).
 - [x] Migration `0004` applied to production (2026-10-05).
 - [x] Emails redesigned after that test ("looks a bit unprofessional"):
       one Google/Apple-style layout for all three (`668a0b6`, `0b9a00c`); the

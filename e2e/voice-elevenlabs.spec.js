@@ -160,7 +160,7 @@ test('Settings: pick ElevenLabs, paste a key, its voices load, ▶ plays a sampl
   const list = dialog.getByRole('radiogroup', { name: 'ElevenLabs voice' });
   await expect(list.locator('.vgroup')).toHaveText(['Your voices', 'ElevenLabs voices']);
   await expect(list.getByRole('radio')).toHaveCount(3);
-  await expect(list.getByRole('radio', { name: 'Nathan (cloned)' })).toBeVisible();
+  await expect(list.getByRole('radio', { name: 'Imogen (cloned)' })).toBeVisible();
   // George, the default, chosen until another is picked.
   await expect(list.getByRole('radio', { name: 'George' })).toHaveAttribute('aria-checked', 'true');
   await expect(list.locator('.vrow', { hasText: 'Alice' })).toContainText('British · female · middle aged');
@@ -209,7 +209,7 @@ test('Settings: pick ElevenLabs, paste a key, its voices load, ▶ plays a sampl
   expect(await speaking(yap)).toBe(false);
 
   // ▶ on a voice without a sample says the preview sentence through ElevenLabs.
-  await list.getByRole('button', { name: 'Preview Nathan (cloned)' }).click();
+  await list.getByRole('button', { name: 'Preview Imogen (cloned)' }).click();
   await expect.poll(() => eleven.speech().map((r) => r.path)).toContain(`/v1/text-to-speech/${OWN}/stream`);
   await yap.invoke('tts_stop');
 

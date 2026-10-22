@@ -215,7 +215,7 @@ test('"Still in your meeting?" after the calendar meeting ran over; Stop and sum
   const now = Date.now();
   const at = (ms) => new Date(Math.floor((now + ms) / SECOND) * SECOND);
   feed.set(
-    calendarFile('nathan@example.com', [
+    calendarFile('imogen@example.com', [
       vevent({
         uid: 'quiet-review@e2e',
         summary: 'Quiet review',
@@ -223,7 +223,7 @@ test('"Still in your meeting?" after the calendar meeting ran over; Stop and sum
         end: at(12 * SECOND),
         attendees: [
           { name: 'Sam Lee', email: 'sam@example.com' },
-          { name: 'Nathan', email: 'nathan@example.com' },
+          { name: 'Imogen', email: 'imogen@example.com' },
         ],
       }),
     ])

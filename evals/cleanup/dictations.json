@@ -9,7 +9,7 @@
     "so the thing is the parakeet model is faster on the cpu than direct ml at least on my machine",
     "thanks for the update i'll take a look tonight and get back to you by tomorrow morning",
     "we should probably uh we should probably push the release to next week the installer still has that bug",
-    "what time does the train to manchester leave on saturday",
+    "what time does the train to bristol leave on saturday",
     "dear sarah new line thank you for the lovely dinner last night comma it was great to catch up",
     "i think the problem is in the uh the audio callback it's resampling twice wait no it's downmixing twice",
     "lets meet at the coffee place on king street around two",
@@ -21,10 +21,10 @@
     "i'll be working from home on tuesday and thursday so um maybe we can do the review on wednesday instead",
     "the new api endpoint returns a four oh four when the user id is missing we should return a four hundred instead",
     "shopping list colon bread comma milk comma two dozen eggs comma and some cheddar",
-    "please let nathan and siobhan know that the meeting with acme corp has been moved to half past three",
+    "please let imogen and siobhan know that the meeting with acme corp has been moved to half past three",
     "our q3 revenue was up twelve percent to two point four million which is above the forecast",
     "i ran the e2e tests again and they passed on chrome but failed on firefox because of the clipboard permissions",
-    "it's about um about forty minutes from leeds to york by train if you get the fast one",
+    "it's about um about forty minutes from norwich to ipswich by train if you get the fast one",
     "new paragraph the next step is to finalise the contract and get it signed by the end of the month",
     "could you uh could you check whether the parcel arrived it was meant to come yesterday between nine and twelve",
     "the dentist appointment is on the fourth of november at quarter to nine at the surgery on high street",
@@ -61,7 +61,7 @@
       ]
     },
     {
-      "text": "the team traveled to leeds and analyzed the results their behavior was brilliant",
+      "text": "the team traveled to norwich and analyzed the results their behavior was brilliant",
       "british": [
         "travelled",
         "analysed",

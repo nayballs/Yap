@@ -26,7 +26,7 @@ import { startCalendarFeed, calendarFile, vevent } from './support/calendar-feed
 const NOW = Math.floor(Date.now() / 1000);
 const MINUTE = 60 * 1000;
 const TEAMS_LINK = 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_rc%40thread.v2/0';
-const OWNER = { name: 'Nathan', email: 'nathan@example.com', partstat: 'ACCEPTED' };
+const OWNER = { name: 'Imogen', email: 'imogen@example.com', partstat: 'ACCEPTED' };
 const SAM = { name: 'Sam Lee', email: 'sam@example.com' };
 
 const HISTORY = [

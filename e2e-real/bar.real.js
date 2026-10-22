@@ -1,4 +1,4 @@
-// The Yap bar's cards with a REAL mouse (Nathan, 2026-10-19: a card's ✕
+// The Yap bar's cards with a REAL mouse (the maintainer, 2026-10-19: a card's ✕
 // "wouldn't let me click"). The bar is a click-through window that takes
 // clicks only where the cursor is on something it draws (bar.rs polls the
 // cursor), so the e2e suite's simulated pointer can't prove a real click
@@ -65,7 +65,7 @@ for (const c of CARDS) {
 }
 
 // Straight after the card appears: the pointer arrives as the card fades in
-// (where Nathan's click was), with only a short rest before the click.
+// (where the maintainer's click was), with only a short rest before the click.
 test('a card clicked the moment it appears still closes', async ({ robot }) => {
   const { yap } = robot;
   const bar = yap.overlay;

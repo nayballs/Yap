@@ -1,6 +1,6 @@
 {
   "name": "web-price-live-grok",
-  "description": "Nathan's question of 2026-10-22, live (Exa with the run's key, real pages), from a UK PC: \"Can you lookup the Grok subscription price for me I am thinking of buying it\". That day Yap searched \"Grok subscription price 2026\" with Exa's userLocation GB and found x.ai's US page, a US price list and a guide in $; the answer gave the US tiers and offered to look for UK pricing. Right: UK prices in £ if the web has them; else one plain line saying there are none, then the US prices as they are, and no offer to look further. Run with --locale en-GB.",
+  "description": "A tester's question of 2026-10-22, live (Exa with the run's key, real pages), from a UK PC: \"Can you lookup the Grok subscription price for me I am thinking of buying it\". That day Yap searched \"Grok subscription price 2026\" with Exa's userLocation GB and found x.ai's US page, a US price list and a guide in $; the answer gave the US tiers and offered to look for UK pricing. Right: UK prices in £ if the web has them; else one plain line saying there are none, then the US prices as they are, and no offer to look further. Run with --locale en-GB.",
   "tags": [
     "web",
     "prices",

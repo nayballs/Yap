@@ -431,7 +431,7 @@ While a meeting records, its notes live in a slim window docked to the right
 edge of the screen, beside the call (Wispr Flow's Notetaker notepad, ported to
 Yap: `src-tauri/src/notepad.rs`, `src/lib/Notepad.svelte`). Its look and
 behaviour follow Wispr's notepad as measured from its DOM
-(`E:\Projects\references\wispr-flow\notepad-spec.md`: sizes, type, colours,
+(`references/wispr-flow/notepad-spec.md`, beside this repo: sizes, type, colours,
 motion), in Yap's own code, wording and icons; the palette is the
 `--yap-paper-*` tokens in `src/app.css`.
 

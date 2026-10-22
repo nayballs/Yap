@@ -1327,7 +1327,7 @@ pub fn apply_snippets(text: &str, dict: &[DictionaryEntry]) -> String {
 /// the snippet's own text — straight after text that ends in punctuation
 /// ("Speak soon," + "." → ",."), or as the dictation's last character after a
 /// snippet of several lines (a sign-off or an address ends where its text
-/// ends, not on "Leeds."). A one-line snippet mid-sentence keeps the
+/// ends, not on "Norwich."). A one-line snippet mid-sentence keeps the
 /// sentence's punctuation ("Mail it to sam@example.com.").
 fn stray_full_stop(expansion: &str, rest: &str) -> usize {
     let after = rest.trim_start();
@@ -1421,10 +1421,10 @@ mod tests {
         // Ending a dictation, a snippet of several lines ends where its text
         // does: no full stop on its last line (a sign-off, an address).
         assert_eq!(apply_snippets("Send it to my address.", &dict), "Send it to 1 Long Lane\nLeeds");
-        let sign_off = vec![snippet("my sign-off", "Speak soon,\nNathan")];
+        let sign_off = vec![snippet("my sign-off", "Speak soon,\nImogen")];
         assert_eq!(
             apply_snippets("I'll see you soon. My sign off.", &sign_off),
-            "I'll see you soon. Speak soon,\nNathan"
+            "I'll see you soon. Speak soon,\nImogen"
         );
         // Mid-dictation it stays: more text follows.
         assert_eq!(

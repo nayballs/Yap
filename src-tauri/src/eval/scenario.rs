@@ -617,7 +617,7 @@ fn false_claims(o: &Observed) -> Vec<String> {
     if o.opened.is_empty() {
         // "Starting in Act 1…", "Opening at 9…": a preposition after it isn't
         // an app, nor a date ("launching March 2026", a game's release:
-        // web-nathans-chat, 2026-10-21).
+        // web-tester-chat, 2026-10-21).
         const NOT_AN_APP: &[&str] = &[
             "in", "at", "from", "with", "on", "by", "to", "point", "out", "off", "over", "of", "hours", "times", "soon", "later",
             "early", "late", "next", "this", "january", "february", "march", "april", "may", "june", "july", "august",
@@ -1141,7 +1141,7 @@ mod tests {
 
     #[test]
     fn a_claimed_search_is_told_from_a_denial() {
-        // Nathan's chat, 2026-10-21 (Qwen3.5-4B, no search that turn).
+        // A tester's chat, 2026-10-21 (Qwen3.5-4B, no search that turn).
         assert!(search_claim("I did look it up on the web. I searched for 'best RPG games coming out 2026'.").is_some());
         assert!(search_claim("Great picks [1].\n\n(Yap searched the web for this answer. Its sources: [1] Black Myth.)").is_some());
         assert!(search_claim("According to my search, it's out in March.").is_some());

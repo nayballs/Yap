@@ -5,7 +5,7 @@
   "apps": "standard",
   "seed": {
     "memory": [
-      { "section": "profile", "details": ["Works night shifts as a nurse", "Lives in Leeds"] },
+      { "section": "profile", "details": ["Works night shifts as a nurse", "Lives in Norwich"] },
       { "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York", "Birthday 3 May", "Loves gardening"] },
       { "section": "people", "title": "Sam Patel", "summary": "Colleague at St James's", "details": ["Product manager"] }
     ]

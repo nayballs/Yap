@@ -1114,7 +1114,7 @@ pub(crate) async fn chat_turn(
     }
     // A model on this PC asked something that needs the web: its first step
     // must be a search (left to decide, Qwen3.5-4B answered "the best RPG
-    // games coming out in 2026" from memory, Nathan's chat, 2026-10-21).
+    // games coming out in 2026" from memory, a tester's chat, 2026-10-21).
     // Cloud models decide for themselves.
     let first = if tools_supported && web_on && crate::ai_model::runs_here(&provider, &base_url) && crate::web::needs_web(&text) {
         first_search(&text)

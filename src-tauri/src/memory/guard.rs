@@ -196,8 +196,8 @@ mod tests {
             "Sort code 20-45-77",
             "Lives at 12 Oak Street",
             "Lives at 221b Baker St.",
-            "Postcode LS1 4AP",
-            "Email is nathan@example.com",
+            "Postcode NR1 4AP",
+            "Email is imogen@example.com",
             "Mobile +44 7700 900123",
             "Phone 07700 900123",
             "NI number AB 12 34 56 C",
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn ordinary_facts_are_not_secrets() {
         for s in [
-            "Lives in Leeds",
+            "Lives in Norwich",
             "Works night shifts at St James's Hospital",
             "Sister, lives in York",
             "Birthday 3 May",
@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(sensitive_in("Christian is a colleague at Acme", "Christian"), None);
         assert_eq!(sensitive_in("Colleague at Acme", "Faith Hope"), None);
         // Everyday facts.
-        for s in ["Works as a nurse", "Lives in Leeds", "Plays football on Sundays", "Training for a 10k race", "Has a dog called Beans", "Likes running"] {
+        for s in ["Works as a nurse", "Lives in Norwich", "Plays football on Sundays", "Training for a 10k race", "Has a dog called Beans", "Likes running"] {
             assert_eq!(sensitive_in(s, ""), None, "{s}");
         }
     }

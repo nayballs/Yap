@@ -680,7 +680,7 @@ mod tests {
         assert_eq!(for_speech("about 45 minutes"), "about forty-five minutes");
         assert_eq!(for_speech("12,400 people"), "twelve thousand four hundred people");
         assert_eq!(for_speech("code 0042"), "code zero zero four two");
-        assert_eq!(for_speech("call 07946095800"), "call zero seven nine four six zero nine five eight zero zero");
+        assert_eq!(for_speech("call 07700900800"), "call zero seven seven zero zero nine zero zero eight zero zero");
         assert_eq!(for_speech("-3 degrees"), "minus three degrees");
         assert_eq!(for_speech("the Q3 budget"), "the Q three budget");
         assert_eq!(for_speech("a 4K screen"), "a four K screen");

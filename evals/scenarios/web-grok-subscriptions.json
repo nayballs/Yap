@@ -1,6 +1,6 @@
 {
   "name": "web-grok-subscriptions",
-  "description": "Nathan's chat of 2026-10-21 on Qwen3.5-4B, replayed live (Exa with the run's key, real pages). 1: \"Can you check the Grok subscriptions please, for me?\" — the model searched his notes twice (\"No notes found for 'Grok subscriptions'\", \"…'Grok'\") and stopped: web::needs_web didn't fire. 2: \"Can you look up Groc subscriptions…\" — it searched \"Grok subscriptions check billing\" (stale words from turn 1) and explained how to check a bill. 3: \"…how much it costs\" — the right plans, but in US $ with nothing saying he's in the UK. Run with the UK locale (--locale en-GB) to see the prices in £, or labelled as US $.",
+  "description": "A tester's chat of 2026-10-21 on Qwen3.5-4B, replayed live (Exa with the run's key, real pages). 1: \"Can you check the Grok subscriptions please, for me?\" — the model searched their notes twice (\"No notes found for 'Grok subscriptions'\", \"…'Grok'\") and stopped: web::needs_web didn't fire. 2: \"Can you look up Groc subscriptions…\" — it searched \"Grok subscriptions check billing\" (stale words from turn 1) and explained how to check a bill. 3: \"…how much it costs\" — the right plans, but in US $ with nothing saying they're in the UK. Run with the UK locale (--locale en-GB) to see the prices in £, or labelled as US $.",
   "tags": [
     "web",
     "prices",

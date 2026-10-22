@@ -1172,7 +1172,7 @@ pub enum FirstStep {
     /// [`MUST_SEARCH_NOTE`] in the message's context saying which one. A
     /// model on this PC asked something that needs the web
     /// (`web::needs_web`) — left to decide, Qwen3.5-4B answered a new
-    /// current-information question from memory (Nathan's chat,
+    /// current-information question from memory (a tester's chat,
     /// 2026-10-21). Its own query is better than the question as one
     /// ("Arsenal Football Club match tonight 21 October 2026 time"). A
     /// server that refuses `tool_choice`, or a step that calls another tool
@@ -1201,7 +1201,7 @@ const YAP_SEARCH_ID: &str = "yap-search-1";
 /// from earlier ones. Left to the whole conversation, Qwen3.5-4B searched
 /// "Grok subscriptions check account" for "Can you look up Groc
 /// subscriptions for me, please?" — "check" from the question before
-/// (Nathan's chat, 2026-10-21: "…check billing", and an answer on checking
+/// (a tester's chat, 2026-10-21: "…check billing", and an answer on checking
 /// a bill). Until 22 Oct 2026 this was the forced step's own `web_search`
 /// description; in the message, the tools stay the same on every step.
 pub const MUST_SEARCH_NOTE: &str = "First search the web (web_search) for what this message asks. The query: a few words from this message (names spelled right), plus a year or place when it matters; leave out words from earlier messages unless this one points back to them (\"it\", \"that one\").";
@@ -1215,7 +1215,7 @@ pub fn must_search_choice() -> Value {
 
 /// What a `search_notes` that found nothing tells the model while web
 /// search is on, for a question that isn't about the person's own notes
-/// (`web::about_own_stuff`): Nathan's "Can you check the Grok subscriptions
+/// (`web::about_own_stuff`): a tester's "Can you check the Grok subscriptions
 /// please, for me?" got two empty notes searches and "I don't see any notes
 /// about Grok subscriptions" (Qwen3.5-4B, 2026-10-21).
 pub const NOTHING_IN_NOTES_HINT: &str =
@@ -2478,8 +2478,8 @@ mod tests {
         }
     }
 
-    /// Nathan's "Can you check the Grok subscriptions please, for me?"
-    /// (2026-10-21): Qwen3.5-4B searched his notes twice, found nothing and
+    /// A tester's "Can you check the Grok subscriptions please, for me?"
+    /// (2026-10-21): Qwen3.5-4B searched their notes twice, found nothing and
     /// stopped. With web search on, an empty notes search says to search the
     /// web next, and for a model on this PC Yap searches it straight away.
     #[tokio::test]
@@ -2532,7 +2532,7 @@ mod tests {
     /// A search that must come first: `tool_choice: "required"` over all
     /// the tools — the next step offers the same ones — and the message's
     /// context says to search this message only ("Grok subscriptions check
-    /// account" carried "check" from the question before, Nathan's chat).
+    /// account" carried "check" from the question before, a tester's chat).
     #[tokio::test]
     async fn a_search_that_must_come_first_is_required_over_the_same_tools() {
         assert!(MUST_SEARCH_NOTE.contains("this message") && MUST_SEARCH_NOTE.contains("leave out words from earlier messages"));

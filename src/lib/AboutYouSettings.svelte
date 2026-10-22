@@ -1,8 +1,8 @@
 <script>
   // Settings → General → Language and region, and About you (about_you.rs,
   // 2026-10-21): what Yap tells the AI models about the person, so an answer
-  // fits where they are (Nathan's "It keeps finding things in dollars…").
-  // - "Region" (one picker since 2026-10-22, Nathan: "all of that should be
+  // fits where they are (a tester's "It keeps finding things in dollars…").
+  // - "Region" (one picker since 2026-10-22, the maintainer: "all of that should be
   //   covered in the region selector only"): "Automatic: United Kingdom
   //   (from Windows)" — Windows' home location — or any country
   //   (cfg.regionCountry, '' = Automatic). Its currency, units, language and
@@ -97,7 +97,7 @@
         bind:value={cfg.aboutMe}
         rows={3}
         maxlength={aboutMax}
-        placeholder="I'm in Manchester, I play PC games, I work day shifts"
+        placeholder="I'm a teacher in Bristol and I run at weekends"
         ariaLabel="Anything the AI should know about you"
       />
       <p class="privacy">

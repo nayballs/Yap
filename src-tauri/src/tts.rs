@@ -763,7 +763,7 @@ pub struct Opened {
 /// Opens the output, on the worker's thread.
 pub type Opener = Box<dyn FnOnce() -> Result<Opened, String> + Send>;
 
-// ---- The voice's volume (Nathan, 2026-10-20: "so loud, even at 1% on the
+// ---- The voice's volume (the maintainer, 2026-10-20: "so loud, even at 1% on the
 // volume mixer"). Yap scales its own voice, so it's quiet enough whatever
 // the Windows mixer says; a change applies at once, mid-sentence too.
 
@@ -1145,7 +1145,7 @@ pub fn speak(text: &str, message_id: Option<String>) -> Result<(), String> {
 
 /// Why Yap mustn't talk now, if it mustn't: a meeting records (the notes
 /// would hear Yap) or a call is on (the people on it could, and a voice over
-/// a meeting is too much — Nathan, 2026-10-18). Spoken replies, ▶ and the
+/// a meeting is too much — the maintainer, 2026-10-18). Spoken replies, ▶ and the
 /// Voice Assistant (`assistant::off_for_meeting`) all keep quiet then.
 pub fn meeting_quiet() -> Option<&'static str> {
     if crate::meeting::is_recording() {

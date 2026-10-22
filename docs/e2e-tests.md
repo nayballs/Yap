@@ -239,7 +239,7 @@ and every spec asserts **what actually landed there** (the field's text, the
 terminal's buffer, what a stand-in coding CLI received). It's how Claude
 tests paste, smart spacing, snippets, "press enter", the clipboard, terminal
 and chat-app handling, the microphone path and real speech-to-text without
-handing Nathan a checklist.
+handing the maintainer a checklist.
 
 ```bash
 npm run test:real                         # build the test app (stub), then run
@@ -411,7 +411,7 @@ fixed since, their tests now asserting the right result:
   selection (`EM_GETSEL`, `selection.rs`), and `testpad.real.js` expects
   "I want the blue one please".
 
-Also seen, not pinned: now and then (a few in a hundred on Nathan's PC, not
+Also seen, not pinned: now and then (a few in a hundred on the test PC, not
 on demand) a Ctrl+V reaches the test pad's WinForms box and nothing is
 pasted — the pad says so on stderr ("Ctrl+V reached the box but nothing was
 pasted"); a bare Ctrl+V from the harness did the same, so it looks like the

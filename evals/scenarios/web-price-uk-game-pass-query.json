@@ -1,6 +1,6 @@
 {
   "name": "web-price-uk-game-pass-query",
-  "description": "\"How much is Xbox Game Pass Ultimate?\" from a UK PC. Stand-in web: a search that names the UK (UK, United Kingdom, Britain, £, GBP) finds Xbox's UK page in £; any other search finds the US page in $ — as Exa found x.ai's US page for Nathan's Grok question when the query didn't say where (2026-10-22). Right: the search names the UK and the answer gives £22.99. Run with --locale en-GB.",
+  "description": "\"How much is Xbox Game Pass Ultimate?\" from a UK PC. Stand-in web: a search that names the UK (UK, United Kingdom, Britain, £, GBP) finds Xbox's UK page in £; any other search finds the US page in $ — as Exa found x.ai's US page for a tester's Grok question when the query didn't say where (2026-10-22). Right: the search names the UK and the answer gives £22.99. Run with --locale en-GB.",
   "tags": [
     "web",
     "prices",

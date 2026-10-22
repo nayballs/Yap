@@ -5,7 +5,7 @@
   "apps": "standard",
   "seed": {
     "memory": [
-      { "section": "profile", "details": ["Works night shifts as a nurse", "Lives in Leeds"] },
+      { "section": "profile", "details": ["Works night shifts as a nurse", "Lives in Norwich"] },
       { "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York", "Loves gardening"] },
       { "section": "projects", "title": "Yap", "summary": "Their dictation app", "details": ["Written in Rust and Svelte"] }
     ]
@@ -15,7 +15,7 @@
       "user": "What's the tallest mountain in Japan?",
       "expect": {
         "answer_contains": ["Fuji"],
-        "answer_not_contains": ["Rochelle", "Yap", "nurse", "Leeds", "York", "shift"],
+        "answer_not_contains": ["Rochelle", "Yap", "nurse", "Norwich", "York", "shift"],
         "no_false_claims": true
       }
     }
