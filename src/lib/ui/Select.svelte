@@ -11,6 +11,10 @@
     ariaLabel = '',
   } = $props();
 
+  // An option's `style` draws it in the list (e.g. a font picker showing
+  // each font in itself) and draws the box while it's the one picked.
+  const pickedStyle = $derived(options.find((o) => o.value === value)?.style || undefined);
+
   // Options with a `group` go under an <optgroup> of that name (runs of the
   // same group, in order); the rest stand alone.
   const blocks = $derived.by(() => {
@@ -32,17 +36,17 @@
     </span>
   {/if}
   <div class="select-wrap" class:disabled>
-    <select bind:value {disabled} aria-label={ariaLabel || label || undefined} onchange={() => onchange?.(value)}>
+    <select bind:value {disabled} style={pickedStyle} aria-label={ariaLabel || label || undefined} onchange={() => onchange?.(value)}>
       {#each blocks as b, i (i)}
         {#if b.group}
           <optgroup label={b.group}>
             {#each b.options as o (o.value)}
-              <option value={o.value}>{o.label}</option>
+              <option value={o.value} style={o.style || undefined}>{o.label}</option>
             {/each}
           </optgroup>
         {:else}
           {#each b.options as o (o.value)}
-            <option value={o.value}>{o.label}</option>
+            <option value={o.value} style={o.style || undefined}>{o.label}</option>
           {/each}
         {/if}
       {/each}

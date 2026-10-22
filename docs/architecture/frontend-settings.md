@@ -113,6 +113,17 @@
   it's the hot-mic indicator; **Notifications** group
   (`#settings-notifications`): "Show tips" (`showTips`, on: coaching hints
   and the calendar nudge; questions, alerts and errors always show);
+  **Appearance** group (`#settings-appearance`, `AppearanceSettings.svelte`,
+  2026-10-22, after Claude desktop's General → Appearance): "Reading font"
+  (Select Default / Sans / Serif / System / OpenDyslexic, each option and
+  the closed box drawn in its own font, a line naming the font →
+  `readingFont`), "Text size" (Segmented Small / Default / Large / Larger →
+  `readingSize`, "For chats, notes and meeting notes"), a preview of the
+  reading text in both, and "Motion" (Segmented System / Reduced →
+  `motion`; System's line says whether Windows' "Animation effects" is on).
+  Settings applies its copy to the main window at once; the other windows
+  follow the save (`lib/appearance.js`; the tokens and what they reach:
+  [frontend.md](./frontend.md#look-and-the-main-window));
   **Meetings** group (`#settings-meetings`, the
   target of `yap-settings-goto` "general#meetings"): "Detect calls and offer to
   take notes" (`meetingDetection`), then — disabled while it's off — "How Yap

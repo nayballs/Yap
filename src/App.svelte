@@ -6,11 +6,16 @@
   import SplitPreview from './lib/SplitPreview.svelte';
   import Overlay from './lib/Overlay.svelte';
   import ContextMenuHost from './lib/ui/ContextMenuHost.svelte';
+  import { initAppearance } from './lib/appearance.js';
 
   // The settings, onboarding, notepad and overlay windows (and the notepad's
   // on-demand split preview) all load the same SPA; pick the rendered view
   // from the window label.
   const label = getCurrentWindow().label;
+
+  // Settings → General → Appearance (the reading font and size, Motion) in
+  // every window, following each save live (lib/appearance.js).
+  initAppearance();
   const isSettings = label === 'settings';
   const isOnboarding = label === 'onboarding';
   const isNotepad = label === 'notepad';
