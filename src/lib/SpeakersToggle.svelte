@@ -1,7 +1,7 @@
 <script>
   // "Tell speakers apart in meetings" (beta; diarize.rs). One switch, shown in
-  // Settings → Speech-to-Text under the speaker models and again in General →
-  // Meetings, both bound to the same config fields (meetingDiarization,
+  // Settings → Speech-to-Text under the speaker models and again in Settings
+  // → Meetings → While a meeting records, both bound to the same config fields (meetingDiarization,
   // diarizationModel). It stays off until a speaker model is installed:
   // switching it on without one offers the download instead.
   import { onMount } from 'svelte';
@@ -19,7 +19,7 @@
   let {
     enabled = $bindable(false),
     model = $bindable(''),
-    // 'models' (under the model rows) | 'meetings' (General → Meetings)
+    // 'models' (under the model rows) | 'meetings' (the Meetings page)
     place = 'models',
     onopenmodels = null,
   } = $props();
@@ -50,7 +50,7 @@
   }
 
   const desc = $derived.by(() => {
-    const what = 'Labels each voice on the call as Speaker 1, 2, 3… while a meeting records. It all runs on this PC: no audio leaves it.';
+    const what = 'Speaker 1, 2, 3… for each voice on the call. It all runs on this PC.';
     if (ready || !diarization.loaded) return what;
     return place === 'meetings'
       ? `${what} Needs the speaker model${offer ? ` (${formatBytes(offer.downloadBytes)})` : ''}.`
@@ -106,13 +106,13 @@
     flex-direction: column;
     gap: 9px;
     padding: 11px 12px;
-    border: 1px solid var(--yap-border-subtle);
+    border: 1px solid var(--yap-border);
     border-radius: var(--yap-r);
-    background: var(--yap-s1);
+    background: var(--yap-s2);
   }
   .offer p {
     margin: 0;
-    font-size: 12px;
+    font-size: 12.5px;
     line-height: 1.5;
     color: var(--yap-fg);
   }
@@ -129,7 +129,7 @@
   .progress span {
     display: block;
     height: 100%;
-    background: var(--yap-primary);
+    background: var(--yap-ink);
     transition: width var(--yap-dur) ease;
   }
   .pct {
@@ -146,12 +146,20 @@
     border: none;
     background: none;
     font: inherit;
-    font-size: 12px;
+    font-size: 12.5px;
     font-weight: 600;
-    color: var(--yap-primary);
+    color: var(--yap-link);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--yap-link) 40%, transparent);
+    text-underline-offset: 2px;
     cursor: pointer;
   }
   .link:hover {
-    text-decoration: underline;
+    text-decoration-color: currentColor;
+  }
+  .link:focus-visible {
+    outline: none;
+    border-radius: 2px;
+    box-shadow: var(--yap-focus);
   }
 </style>

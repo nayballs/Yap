@@ -126,9 +126,9 @@ const read = (profile, rel) => fs.readFileSync(path.join(profile, rel), 'utf8');
 const exe = (yap) => path.join(yap.appDir, 'yap.exe');
 const toast = (main, title) => main.getByRole('status').filter({ hasText: title });
 
-/** Settings → MCP (in the "Connections" group). */
+/** Settings → AI apps (MCP) (in the "Connections" group). */
 async function openMcp(main) {
-  const dialog = await openSettings(main, 'MCP');
+  const dialog = await openSettings(main, 'AI apps');
   await expect(dialog.getByRole('heading', { level: 1, name: 'MCP' })).toBeVisible();
   await expect(dialog.getByRole('list', { name: 'AI apps', exact: true })).toBeVisible();
   return dialog;
@@ -155,7 +155,7 @@ test('Integrations points to Settings → MCP', async ({ main, shot }) => {
 
 test('Settings → MCP lists each AI app with what Yap found on this PC', async ({ main, shot }) => {
   const page = await openMcp(main);
-  await expect(page).toContainText("Yap's MCP can't see your dictations, and everything stays on this PC.");
+  await expect(page).toContainText('Let your AI apps read your meeting transcripts and notes, through Yap on this PC. Never your dictations.');
   // Wispr's order, each with its "Allow … to access" line and Add button.
   const names = await page
     .getByRole('list', { name: 'AI apps', exact: true })
@@ -265,7 +265,10 @@ test('with the Local API off, Settings → MCP says so and turns it back on', as
   expect(fs.existsSync(yap.bridgeFile)).toBe(true);
   await expectStore(yap, 'config.json', (c) => c.bridgeEnabled === true);
   // Settings' own copy agrees, so its next auto-save keeps the API on.
-  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: /^Advanced/ }).click();
+  // (Privacy & data has the same switch, and shows it on.)
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: /^Privacy/ }).click();
+  await expect(page.getByRole('button', { name: "Let apps on this PC use Yap's data" })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: /^Dictation/ }).click();
   await page.getByRole('button', { name: 'Append trailing space' }).click();
   await expectStore(yap, 'config.json', (c) => c.appendTrailingSpace === true);
   expect(yap.readConfig().bridgeEnabled).toBe(true);

@@ -771,7 +771,7 @@ pub async fn note_ask(
     .await
 }
 
-// ---- Debug logging (Settings → Advanced, OpenWhispr Developer section) ----
+// ---- Debug logging (Settings → Privacy & data, OpenWhispr Developer section) ----
 
 /// Where logs live + the most recent log file (the one to attach to a bug
 /// report). Yap always writes a daily-rolling file at `info`; Debug mode

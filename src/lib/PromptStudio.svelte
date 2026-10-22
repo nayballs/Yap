@@ -33,6 +33,9 @@
   const hasPresets = $derived(presets.length > 0);
 
   let activeTab = $state('view'); // view | edit | test
+  // View shows the first lines; the whole prompt on demand (review #10: no
+  // scroll box inside the page's scroll).
+  let showAll = $state(false);
   // Snapshots of the saved prompt/preset for the Customize tab; re-synced on
   // mount and every time the tab is entered (see the tab button).
   let editedPrompt = $state('');
@@ -151,9 +154,12 @@
           {/if}
         </button>
       </div>
-      <div class="promptbox">
+      <div class="promptbox" class:clamped={!showAll}>
         <pre>{currentPrompt}</pre>
       </div>
+      <button class="more" aria-expanded={showAll} onclick={() => (showAll = !showAll)}>
+        {showAll ? 'Show less' : 'Show the whole prompt'}
+      </button>
     </div>
   {:else if activeTab === 'edit'}
     <div class="pane hairline">
@@ -184,7 +190,7 @@
         </button>
       </div>
       {#if savedNote}
-        <p class="savednote">Prompt Saved — your custom prompt will be used for all future AI processing.</p>
+        <p class="savednote">Prompt saved: Yap uses it from now on.</p>
       {/if}
     </div>
   {:else}
@@ -222,7 +228,7 @@
       <div class="pane hairline">
         <button class="primary wide" onclick={runTest} disabled={!testText.trim() || testRunning || !enabled}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4l14 8-14 8V4z" /></svg>
-          {testRunning ? 'Processing...' : 'Run Test'}
+          {testRunning ? 'Testing…' : 'Run test'}
         </button>
       </div>
     {/if}
@@ -245,9 +251,10 @@
 <style>
   .studio {
     width: 100%;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-xl);
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r-lg);
     background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-sm);
     overflow: hidden;
   }
   .tabs {
@@ -266,13 +273,21 @@
     background: none;
     color: var(--yap-muted);
     font: inherit;
-    font-size: 11.5px;
-    font-weight: 500;
+    font-size: 12.5px;
+    font-weight: 560;
     cursor: pointer;
     transition:
       color var(--yap-dur) ease,
       background var(--yap-dur) ease,
       border-color var(--yap-dur) ease;
+  }
+  .tab:focus-visible,
+  .ghost:focus-visible,
+  .more:focus-visible,
+  .primary:focus-visible,
+  .outline:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
   }
   .tab svg {
     width: 13px;
@@ -283,9 +298,8 @@
     background: var(--yap-s3);
   }
   .tab.active {
-    border-bottom-color: var(--yap-primary);
+    border-bottom-color: var(--yap-ink);
     color: var(--yap-fg);
-    background: color-mix(in srgb, var(--yap-primary) 5%, transparent);
   }
 
   .pane {
@@ -306,11 +320,9 @@
     gap: 8px;
   }
   .caps {
-    font-size: 10.5px;
+    font-size: 12.5px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--yap-muted-55);
+    color: var(--yap-fg);
   }
   .lbl {
     font-size: 12px;
@@ -322,7 +334,7 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--yap-primary);
+    color: var(--yap-link);
     background: var(--yap-primary-wash);
     padding: 1px 7px;
     border-radius: var(--yap-r-full);
@@ -357,24 +369,54 @@
   }
 
   .promptbox {
+    position: relative;
     background: var(--yap-s1);
     border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-lg);
-    padding: 13px 15px;
-    max-height: 320px;
-    overflow-y: auto;
+    border-radius: var(--yap-r);
+    padding: 12px 14px;
+  }
+  /* The first four lines, fading out. */
+  .promptbox.clamped {
+    max-height: calc(4 * 1.65 * 11.5px + 24px);
+    overflow: hidden;
+  }
+  .promptbox.clamped::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 28px;
+    border-radius: 0 0 var(--yap-r) var(--yap-r);
+    background: linear-gradient(to bottom, transparent, var(--yap-s1));
   }
   .promptbox pre {
     margin: 0;
     font-family: ui-monospace, Consolas, monospace;
-    font-size: 11px;
+    font-size: 11.5px;
     line-height: 1.65;
-    color: var(--yap-muted);
+    color: var(--yap-fg-80);
     white-space: pre-wrap;
     word-break: break-word;
   }
+  .more {
+    margin-top: 8px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: none;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--yap-link);
+    cursor: pointer;
+  }
+  .more:hover {
+    text-decoration: underline;
+  }
   .promptbox.out {
     max-height: 190px;
+    overflow-y: auto;
   }
   .promptbox.out pre {
     color: var(--yap-fg);
@@ -384,7 +426,7 @@
 
   .caution {
     margin: 0;
-    font-size: 11.5px;
+    font-size: 12.5px;
     color: var(--yap-muted);
     line-height: 1.55;
   }
@@ -461,8 +503,8 @@
   }
   .savednote {
     margin: 9px 0 0;
-    font-size: 11.5px;
-    color: var(--yap-success);
+    font-size: 12.5px;
+    color: var(--yap-success-text);
   }
 
   .warnbox {

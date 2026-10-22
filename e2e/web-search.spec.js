@@ -148,7 +148,7 @@ test('Settings: web search is off until turned on, the AI’s own search recomme
   const own = modes.getByRole('radio', { name: /The AI's own search/ });
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await expect(group).toContainText('Wikipedia and reference wikis');
-  await expect(group).toContainText('Always available, no API key needed.');
+  await expect(group).toContainText('Always available, no API key needed');
   // The AI's own search is the default (and recommended) for cloud models.
   await expect(own).toHaveAttribute('aria-checked', 'true');
   await expect(own).toContainText('Recommended');
@@ -161,7 +161,9 @@ test('Settings: web search is off until turned on, the AI’s own search recomme
 
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  // What each provider charges, and what local models use.
+  // What each provider charges (behind a disclosure: details on demand),
+  // and what local models use.
+  await group.getByText('What each provider charges for its search').click();
   const costs = group.locator('.costs');
   await expect(costs.locator('dt')).toHaveText(['Groq', 'Google Gemini', 'Anthropic', 'OpenAI', 'OpenRouter']);
   await expect(costs).toContainText('about 4,000 of the 8,000 tokens a minute');
@@ -170,6 +172,7 @@ test('Settings: web search is off until turned on, the AI’s own search recomme
   await expect(group).toContainText('Used by local and self-hosted models');
   await expect(group.getByRole('tab', { name: 'Exa (Recommended)' })).toHaveAttribute('aria-selected', 'true');
   await expect(group).toContainText("With a cloud model, your search words go to that model’s provider");
+  await expect(group.getByRole('button', { name: 'Privacy & data' })).toBeVisible();
   await expect(group).toContainText('they go to Wikipedia and reference wikis, as no Exa API key is set');
   await expectStore(yap, 'config.json', (c) => c.webSearch === true && c.webSearchNative === true);
   await costs.scrollIntoViewIfNeeded();
@@ -184,7 +187,7 @@ test('Settings: web search is off until turned on, the AI’s own search recomme
   await group.scrollIntoViewIfNeeded();
   await expect(group).toContainText('fak…ests');
   await expect(group).not.toContainText(EXA_KEY);
-  await group.getByRole('link', { name: 'Get a free key →' }).click();
+  await group.getByRole('link', { name: 'Get a free key' }).click();
   await expect.poll(() => opened(yap)).toContain('https://dashboard.exa.ai/api-keys');
 
   // Exa for every model: no provider prices, searches go to Exa.
@@ -199,7 +202,7 @@ test('Settings: web search is off until turned on, the AI’s own search recomme
   // Tavily: its own key, its own dashboard; Exa's key is kept.
   await modes.getByRole('radio', { name: /^Tavily/ }).click();
   await expect(group.getByPlaceholder('tvly-…')).toHaveValue('');
-  await group.getByRole('link', { name: 'Get a free key →' }).click();
+  await group.getByRole('link', { name: 'Get a free key' }).click();
   await expect.poll(() => opened(yap)).toContain('https://app.tavily.com/home');
   await shot(main, '03b-settings-web-search-tavily');
   await expectStore(yap, 'config.json', (c) => c.webSearchService === 'tavily' && c.webSearchKeys?.exa === EXA_KEY);

@@ -134,15 +134,16 @@
 
 <div id="settings-opening-apps">
   <Group title="Opening apps">
-    <Row>
+    <Row setting="open-apps">
       <Toggle
         bind:checked={cfg.openApps}
         label="Let Yap open apps when you ask"
-        desc="Say “open Spotify” to the Voice Assistant, or type it in Chat. Yap only opens apps installed on this PC, from the list below: never a file, a link or a command."
+        desc="Say “open Spotify” to the Voice Assistant, or type it in Chat. Yap only opens apps installed on this PC"
+        hint="From the list below: never a file, a link or a command."
       />
     </Row>
 
-    <Row>
+    <Row setting="app-nicknames">
       <div class="block" class:off={!cfg.openApps} role="group" aria-label="Nicknames">
         <span class="blabel">Nicknames</span>
         <span class="bdesc">Say a nickname, and Yap opens that app.</span>
@@ -279,13 +280,14 @@
   }
   .blabel {
     color: var(--yap-fg);
-    font-size: 13px;
-    font-weight: 650;
+    font-size: 13.5px;
+    font-weight: 560;
+    line-height: 1.4;
   }
   .bdesc {
-    color: var(--yap-muted-70);
-    font-size: 11.5px;
-    line-height: 1.5;
+    color: var(--yap-muted);
+    font-size: 12.5px;
+    line-height: 1.45;
   }
   .field {
     box-sizing: border-box;
@@ -300,8 +302,9 @@
   }
   .field:focus {
     outline: none;
-    border-color: var(--yap-primary);
-    box-shadow: 0 0 0 3px var(--yap-primary-wash);
+  }
+  .field:focus-visible {
+    box-shadow: var(--yap-focus);
   }
   .field:disabled {
     opacity: 0.6;
@@ -337,12 +340,12 @@
     color: var(--yap-fg-80);
   }
   .arrow {
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
   }
   .rm {
     background: none;
     border: none;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
     cursor: pointer;
     font-size: 17px;
     line-height: 1;
@@ -462,7 +465,7 @@
   .none {
     margin: 0;
     font-size: 12px;
-    color: var(--yap-muted-70);
+    color: var(--yap-muted);
   }
   .more {
     align-self: flex-start;
@@ -473,7 +476,7 @@
     font: inherit;
     font-size: 12px;
     font-weight: 600;
-    color: var(--yap-primary);
+    color: var(--yap-link);
     cursor: pointer;
   }
   .more:hover {

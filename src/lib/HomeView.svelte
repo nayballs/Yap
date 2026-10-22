@@ -311,7 +311,7 @@
         {#if !historyEnabled}
           <div class="notice">
             History is turned off, so new dictations won't appear here.
-            <button class="link" onclick={() => onopensettings?.('history')}>Turn it on in Settings → History</button>
+            <button class="link" onclick={() => onopensettings?.('privacy#history')}>Turn it on in Settings → Privacy & data</button>
           </div>
         {/if}
 

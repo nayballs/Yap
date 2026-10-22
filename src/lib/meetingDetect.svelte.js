@@ -19,12 +19,12 @@
 // "Starting notes in 7…" instead, Rust starting the notes when it runs out
 // (Start now / Not now / Esc answer it sooner). A
 // prompt Rust withdraws (the call ended, the other surface answered) takes
-// its toast with it. `apps` feeds Settings → General → Meetings.
+// its toast with it. `apps` feeds Settings → Meetings.
 //
 // `yap-meeting-detect-choice` { app, asks, confirm }: Yap switched an app
 // off itself ("Don't ask for Teams", from either surface). Settings adopts it
 // into its config copy; `confirm` (the window is on screen) is shown here as
-// a brief toast with a way to Settings → General → Meetings.
+// a brief toast with a way to Settings → Meetings.
 //
 // `yap-meeting-open-note` { noteId, stop } opens a note in Notes (the new
 // meeting note, or the one to stop): the main window switches view and
@@ -48,7 +48,7 @@ let shown = null;
 /**
  * Load the snapshot and follow changes. Idempotent; the main window calls it
  * with `showNotes`, which switches it to the Notes view, and `openSettings`
- * (a Settings section, e.g. 'general#meetings').
+ * (a Settings section, e.g. 'meetings').
  */
 export function initMeetingDetect(opts = {}) {
   if (opts.showNotes) showNotes = opts.showNotes;
@@ -157,7 +157,7 @@ function confirmChoice(c) {
     title: c.confirm,
     variant: 'success',
     duration: 6000,
-    action: { label: 'Open Settings', onClick: () => openSettings('general#meetings') },
+    action: { label: 'Open Settings', onClick: () => openSettings('meetings#call-apps-list') },
   });
 }
 

@@ -379,7 +379,7 @@ test('Motion: Reduced stops transitions and animations in every window; System f
   const pill = yap.overlay.locator('.pill');
 
   // Full motion: things glide.
-  expect(await css(thumb, 'transitionProperty')).toBe('transform');
+  expect(await css(thumb, 'transitionProperty')).toMatch(/^transform\b/);
   expect(await moving(main)).toBeGreaterThan(0);
   expect(await moving(pad)).toBeGreaterThan(0);
   if (await pill.count()) expect(await css(pill, 'transitionDuration')).not.toBe('0s');
@@ -416,7 +416,7 @@ test('Motion: Reduced stops transitions and animations in every window; System f
   // System: motion again, unless Windows' "Animation effects" is off.
   await pick(main, yap, { motion: 'system' });
   expect(await main.evaluate(() => document.documentElement.dataset.motion)).toBeUndefined();
-  expect(await css(thumb, 'transitionProperty')).toBe('transform');
+  expect(await css(thumb, 'transitionProperty')).toMatch(/^transform\b/);
   await expect.poll(() => pad.evaluate(() => document.documentElement.dataset.motion ?? null)).toBe(null);
   await expect(group.getByText('Follows Windows’ “Animation effects”, which is on')).toBeVisible();
 

@@ -34,9 +34,16 @@ const simulate = async (yap, appId, active, fadeMs) => {
 };
 const status = (yap) => yap.invoke('meeting_detect_status');
 const meetingNotes = (yap) => (yap.readJson('notes.json')?.notes ?? []).filter((n) => n.source === 'meeting');
-/** The Meetings card in Settings → General, and its "Ask about calls in" list. */
-const meetingsCard = (main) => settingsDialog(main).getByRole('group', { name: 'Meetings' });
-const callApps = (main) => meetingsCard(main).getByRole('group', { name: 'Ask about calls in' });
+/** Settings → Meetings → Call detection, and one level down its "Ask about calls in" list. */
+const meetingsCard = (main) => settingsDialog(main).getByRole('group', { name: 'Call detection' });
+const callApps = (main) => settingsDialog(main).getByRole('group', { name: 'Ask about calls in' });
+/** Settings → Meetings → "Ask about calls in · 8 of 12 apps ›": the list of apps. */
+async function openCallApps(main) {
+  await openSettings(main, 'Meetings');
+  const link = meetingsCard(main).getByRole('button', { name: /^Ask about calls in/ });
+  if (await link.isVisible()) await link.click();
+  await expect(callApps(main)).toBeVisible();
+}
 
 test('a call starting offers to take notes, and "Not now" leaves it alone', async ({ yap, main, shot }) => {
   await simulate(yap, 'webex', true);
@@ -206,12 +213,13 @@ test('"Don\'t ask for Teams" stops the prompts for Teams, and Settings shows it'
   expect(s.prompt).toBeNull();
   expect(s.apps.find((a) => a.id === 'teams').asks).toBe(false);
 
-  // "Open Settings" lands on General → Meetings, where Teams is off.
+  // "Open Settings" lands on Meetings → Ask about calls in, where Teams is off.
   await confirmed.getByRole('button', { name: 'Open Settings' }).click();
   await expect(settingsDialog(main)).toBeVisible();
   await expect(
-    settingsDialog(main).getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: /^General/ })
+    settingsDialog(main).getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: /^Meetings/ })
   ).toHaveAttribute('aria-current', 'page');
+  await expect(settingsDialog(main).getByRole('heading', { level: 1, name: 'Ask about calls in' })).toBeVisible();
   const teams = callApps(main).getByRole('button', { name: 'Teams', exact: true });
   await expect(teams).toHaveAttribute('aria-pressed', 'false');
   await expect(teams).toBeInViewport();
@@ -226,7 +234,7 @@ test('"Don\'t ask for Teams" stops the prompts for Teams, and Settings shows it'
   await simulate(yap, 'teams', false);
 
   // Switched back on in Settings: picked up at once, the next call asks.
-  await openSettings(main, 'General');
+  await openCallApps(main);
   await teams.click();
   await expect(teams).toHaveAttribute('aria-pressed', 'true');
   await expectStore(yap, 'config.json', (c) => c.meetingDetectApps?.teams === true);
@@ -240,7 +248,7 @@ test('"Don\'t ask for Teams" stops the prompts for Teams, and Settings shows it'
 });
 
 test('"Quietly" keeps the prompt out of the window', async ({ yap, main, shot }) => {
-  const dialog = await openSettings(main, 'General');
+  const dialog = await openSettings(main, 'Meetings');
   const style = meetingsCard(main).getByRole('tablist', { name: 'How Yap asks' });
   await style.getByRole('tab', { name: 'Quietly' }).click();
   await expect(style.getByRole('tab', { name: 'Quietly' })).toHaveAttribute('aria-selected', 'true');
@@ -261,7 +269,7 @@ test('"Quietly" keeps the prompt out of the window', async ({ yap, main, shot })
   expect((await status(yap)).prompt).toBeNull();
 
   // Back to pop-ups.
-  await openSettings(main, 'General');
+  await openSettings(main, 'Meetings');
   await style.getByRole('tab', { name: 'Pop-up' }).click();
   await expectStore(yap, 'config.json', (c) => c.meetingDetectStyle === 'popup');
   await expect.poll(() => status(yap).then((s) => s.style)).toBe('popup');
@@ -269,13 +277,19 @@ test('"Quietly" keeps the prompt out of the window', async ({ yap, main, shot })
 });
 
 test('Settings lists how Yap asks and the apps it asks about', async ({ yap, main, shot }) => {
-  await openSettings(main, 'General');
+  await openSettings(main, 'Meetings');
   const meetings = meetingsCard(main);
   await meetings.scrollIntoViewIfNeeded();
   await expect(
     meetings.getByRole('tablist', { name: 'How Yap asks' }).getByRole('tab', { name: 'Pop-up' })
   ).toHaveAttribute('aria-selected', 'true');
-  await expect(meetings).toContainText('A card in Yap, or on the Yap bar while you work in another app');
+  await expect(meetings).toContainText("A card in Yap, or on the Yap bar while you're in another app");
+  // The apps are one level down, behind a link row that says how many Yap asks about.
+  const { apps: listed } = await status(yap);
+  const asking = listed.filter((a) => a.asks).length;
+  await expect(meetings.getByRole('button', { name: /^Ask about calls in/ })).toContainText(`${asking} of ${listed.length} apps`);
+  await shot(main, '09-settings-meetings-link-row');
+  await openCallApps(main);
 
   // One switch per call app, showing what Yap does now (the person's
   // choice, else the app's default); two columns.
@@ -320,7 +334,7 @@ test('Settings lists how Yap asks and the apps it asks about', async ({ yap, mai
   const installed = callApps(main).locator('[data-app-icon="discord"] img');
   expect(await installed.evaluate((img) => [img.complete, img.naturalWidth])).toEqual([true, 48]);
   await shot(callApps(main), '09-settings-call-app-icons');
-  await shot(main, '09-settings-meetings');
+  await shot(main, '09-settings-meetings-call-apps');
 
   // Switching one on saves it and Yap asks about its calls at once.
   const whatsapp = callApps(main).getByRole('button', { name: 'WhatsApp', exact: true });
@@ -330,17 +344,17 @@ test('Settings lists how Yap asks and the apps it asks about', async ({ yap, mai
   await simulate(yap, 'whatsapp', true);
   await expect(toast(main, 'WhatsApp call detected')).toBeVisible();
   await simulate(yap, 'whatsapp', false);
-  await openSettings(main, 'General');
+  await openCallApps(main);
   await whatsapp.click();
   await expectStore(yap, 'config.json', (c) => c.meetingDetectApps?.whatsapp === false);
 });
 
 test('the Settings toggle turns call detection off', async ({ yap, main, shot }) => {
-  const dialog = await openSettings(main, 'General');
-  const meetings = dialog.getByRole('group', { name: 'Meetings' });
+  const dialog = await openSettings(main, 'Meetings');
+  const meetings = meetingsCard(main);
   const toggle = meetings.getByRole('button', { name: 'Detect calls and offer to take notes' });
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(meetings.getByText("Recording a call? Let people know you're taking notes.")).toBeVisible();
+  await expect(dialog.getByText("Recording a call? Let people know you're taking notes.")).toBeVisible();
 
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
@@ -348,14 +362,17 @@ test('the Settings toggle turns call detection off', async ({ yap, main, shot })
   await expect.poll(() => status(yap).then((s) => s.enabled)).toBe(false);
   // How and about which apps it asks wait, greyed out, until it's back on.
   await expect(meetings.getByRole('tab', { name: 'Quietly' })).toBeDisabled();
+  await meetings.scrollIntoViewIfNeeded();
+  await shot(main, '10-settings-detection-off');
+  await openCallApps(main);
+  await expect(dialog.getByText("Call detection is off, so Yap doesn't ask about any of them.")).toBeVisible();
   await expect(callApps(main).getByRole('button', { name: 'Zoom', exact: true })).toBeDisabled();
   for (const app of ['zoom', 'teams']) {
     const icon = callApps(main).locator(`[data-app-icon="${app}"]`);
     await expect(icon).toHaveCSS('filter', 'grayscale(1)');
     await expect(icon).toHaveCSS('opacity', '0.5');
   }
-  await meetings.scrollIntoViewIfNeeded();
-  await shot(main, '10-settings-detection-off');
+  await shot(main, '10-settings-call-apps-off');
   await closeSettings(main);
 
   await simulate(yap, 'goto', true);
@@ -364,10 +381,11 @@ test('the Settings toggle turns call detection off', async ({ yap, main, shot })
   expect((await status(yap)).calls).toEqual([]);
 
   // Back on: the next call is offered again.
-  await openSettings(main, 'General');
+  await openSettings(main, 'Meetings');
   await toggle.click();
   await expectStore(yap, 'config.json', (c) => c.meetingDetection === true);
   await expect.poll(() => status(yap).then((s) => s.enabled)).toBe(true);
+  await openCallApps(main);
   await expect(callApps(main).getByRole('button', { name: 'Zoom', exact: true })).toBeEnabled();
   await expect(callApps(main).locator('[data-app-icon="zoom"]')).toHaveCSS('filter', 'none');
   await closeSettings(main);

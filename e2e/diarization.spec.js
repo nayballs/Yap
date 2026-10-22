@@ -130,9 +130,9 @@ test('switching it on without a model offers the download, which installs it and
   await closeSettings(main);
 });
 
-test('General → Meetings has the same switch, and links to the models', async ({ yap, main, shot }) => {
-  const dialog = await openSettings(main, 'General');
-  const meetings = dialog.getByRole('group', { name: 'Meetings' });
+test('Meetings has the same switch, and links to the models', async ({ yap, main, shot }) => {
+  const dialog = await openSettings(main, 'Meetings');
+  const meetings = dialog.getByRole('group', { name: 'While a meeting records' });
   const toggle = theSwitch(meetings);
   await toggle.scrollIntoViewIfNeeded();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');

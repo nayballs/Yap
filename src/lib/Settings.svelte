@@ -2,13 +2,12 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy, tick } from 'svelte';
-  import yapIcon from '../assets/yap-logo.svg';
   import Group from './ui/Group.svelte';
   import Row from './ui/Row.svelte';
   import Toggle from './ui/Toggle.svelte';
   import Select from './ui/Select.svelte';
-  import Slider from './ui/Slider.svelte';
   import Button from './ui/Button.svelte';
+  import LinkRow from './ui/LinkRow.svelte';
   import Input from './ui/Input.svelte';
   import Textarea from './ui/Textarea.svelte';
   import ModeSelector from './ui/ModeSelector.svelte';
@@ -24,15 +23,12 @@
   import VoiceSettings from './VoiceSettings.svelte';
   import OpenAppsSettings from './OpenAppsSettings.svelte';
   import WebSearchSettings from './WebSearchSettings.svelte';
-  import AboutYouSettings from './AboutYouSettings.svelte';
-  import AppearanceSettings from './AppearanceSettings.svelte';
   import { applyAppearance } from './appearance.js';
   import RegionSpelling from './RegionSpelling.svelte';
   import KokoroOffer from './KokoroOffer.svelte';
   import { kokoro, startKokoro } from './kokoro.svelte.js';
   import NoteFormattingConfig from './NoteFormattingConfig.svelte';
   import ChatConfig from './ChatConfig.svelte';
-  import StatusBar from './StatusBar.svelte';
   import { PP_CLOUD_MODELS, modelThinks } from './ppModels.js';
   import { PROVIDER_ICONS } from './providerIcons.js';
   import ModelPicker from './ModelPicker.svelte';
@@ -42,27 +38,36 @@
   import { modelsFor, defaultModel, providerOffers, loadCatalog } from './modelCatalog.svelte.js';
   import { createExternalLinkHandler } from './externalLinks.js';
   import { toast } from './ui/toast.svelte.js';
-  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup, formatHotkeySpec, fillHotkey, hotkeysClash } from './hotkeys.js';
-  import HotkeyInput from './ui/HotkeyInput.svelte';
+  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup, formatHotkeySpec, fillHotkey } from './hotkeys.js';
   import { modelStore } from './modelStore.svelte.js';
   import { attention, attentionCount } from './attention.svelte.js';
   import AccountSection from './AccountSection.svelte';
   import ConnectorsSection from './ConnectorsSection.svelte';
-  import { calendar } from './calendar.svelte.js';
   import McpSection from './McpSection.svelte';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
-  import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from './updates.svelte.js';
-  import { meetingDetect } from './meetingDetect.svelte.js';
-  import CallAppIcon from './CallAppIcon.svelte';
-  import { renderMarkdown } from './markdown.js';
+  import { updates } from './updates.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
+  import './settings/settings.css';
+  import { NAV_GROUPS, PAGE_LABELS, resolveTarget } from './settings/nav.js';
+  import { searchSettings, groupResults, countByPage } from './settings/settingsIndex.js';
+  import { hotkeyCapture } from './settings/hotkeys.svelte.js';
+  import SettingsHotkey from './settings/SettingsHotkey.svelte';
+  import SearchResults from './settings/SearchResults.svelte';
+  import GeneralPage from './settings/GeneralPage.svelte';
+  import DictationPage from './settings/DictationPage.svelte';
+  import ShortcutsPage from './settings/ShortcutsPage.svelte';
+  import MeetingsPage from './settings/MeetingsPage.svelte';
+  import PrivacyPage from './settings/PrivacyPage.svelte';
+  import AboutPage from './settings/AboutPage.svelte';
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
   // (OpenWhispr SettingsModal-style) instead of filling the window. The parent
   // keeps this component ALWAYS MOUNTED — the in-window hotkey fallback and
   // auto-save below must live for the whole window, not just while the modal
-  // is open. `onclose` closes the modal (the ✕ button).
-  let { embedded = false, onclose = null } = $props();
+  // is open. `onclose` closes the modal (the ✕ button); `open` says whether
+  // it's on screen (Ctrl+F, the search's Esc); `onshowview` leaves Settings
+  // for a main-window view (Dictation's Dictionary row).
+  let { embedded = false, open = true, onclose = null, onshowview = null } = $props();
 
   let cfg = $state(null);
   // The main window draws the bar's cards too (the Connect calendar dialog's
@@ -78,9 +83,8 @@
   let loaded = $state(false); // gates auto-save until the initial config loads
   let devices = $state([]);
   let outputs = $state([]); // audio output device names (for the chime)
-  let recording = $state(false); // hotkey-recorder active
   let saved = $state(false);
-  let section = $state('general'); // general | models | advanced | about
+  let section = $state('general'); // a page id (settings/nav.js)
   // Sidebar account button (account state lives in account.svelte.js).
   initAccount();
   let acctUser = $derived(account.status?.signedIn ? account.status.user : null);
@@ -91,55 +95,13 @@
   // Update state lives in updates.svelte.js (Rust's updates.rs drives it);
   // ControlPanel starts it, About + the attention badge render it.
 
-  // Sidebar nav, grouped OpenWhispr-style under small caps labels. Section ids
-  // are unchanged — only the presentation is grouped.
-  const NAV_GROUPS = [
-    {
-      label: 'App',
-      items: [
-        { id: 'general', label: 'General' },
-        // Two different things, side by side: Commands make the AI *do*
-        // something and type it where you are (the agent's name in a
-        // dictation, agent_detect.rs; the rewrite shortcut); the Voice
-        // Assistant answers a question out loud (assistant.rs, tts.rs).
-        { id: 'commands', label: 'Commands' },
-        { id: 'voice', label: 'Voice Assistant' },
-      ],
-    },
-    {
-      label: 'AI models',
-      items: [
-        { id: 'models', label: 'Speech-to-Text' },
-        { id: 'cleanup', label: 'Language Models' },
-      ],
-    },
-    { label: 'Data', items: [{ id: 'history', label: 'History' }] },
-    // Wispr's Connectors + MCP pages. Connectors: your calendars
-    // (calendar.rs, ConnectorsSection.svelte). MCP: AI apps read your
-    // meetings (McpSection.svelte).
-    {
-      label: 'Connections',
-      items: [
-        { id: 'connectors', label: 'Connectors' },
-        { id: 'mcp', label: 'MCP' },
-      ],
-    },
-    {
-      label: 'System',
-      items: [
-        { id: 'advanced', label: 'Advanced' },
-        { id: 'about', label: 'About' },
-      ],
-    },
-  ];
-
   // AI cleanup provider presets. Selecting one fills in the base URL; "custom"
   // leaves it editable. The backend only ever uses ppBaseUrl.
   // NOTE: `value` ids are persisted in config.json and matched by the backend
   // ("ondevice" = local_llm::PROVIDER_ONDEVICE) — never change them. Labels are
   // display-only and safe to reword.
   const PP_PROVIDERS = [
-    { value: 'ondevice', label: 'Built-in local AI (private · no cloud)', baseUrl: null },
+    { value: 'ondevice', label: 'Local (on this PC)', baseUrl: null },
     { value: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1' },
     // Anthropic's OpenAI-compatible /v1/chat/completions layer.
     { value: 'anthropic', label: 'Anthropic (Claude)', baseUrl: 'https://api.anthropic.com/v1' },
@@ -156,9 +118,10 @@
   // 'local' (Ollama/LM Studio) ↔ Self-Hosted mode, everything else ↔ a cloud
   // provider tab. `ppMode`/`cloudProvider` are UI-only derived state.
   const PP_MODES = [
-    { value: 'cloud', label: 'Cloud Providers', desc: 'Bring your own API key.', kind: 'cloud' },
-    { value: 'ondevice', label: 'Local', desc: 'On-device model. Fully private.', kind: 'local' },
-    { value: 'selfhosted', label: 'Self-Hosted', desc: 'Your own server on your network.', kind: 'server' },
+    // One set of names on every tab (ScopeProviderConfig.svelte has the same).
+    { value: 'cloud', label: 'Cloud providers', desc: 'Groq, OpenAI, Anthropic, Gemini or OpenRouter, on your own API key', kind: 'cloud' },
+    { value: 'ondevice', label: 'Local', desc: 'A model on this PC. Nothing leaves it', kind: 'local' },
+    { value: 'selfhosted', label: 'Self-hosted', desc: 'Your own server, like Ollama or LM Studio', kind: 'server' },
   ];
   const PP_ICON_KIND = Object.fromEntries(PP_MODES.map((o) => [o.value, o.kind]));
   const CLOUD_PROVIDER_IDS = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter', 'custom'];
@@ -191,9 +154,9 @@
     { value: 'chat', label: 'Chat & Voice Assistant' },
   ];
   const SCOPE_SUBTITLE = {
-    cleanup: 'Configure the model that cleans up your dictation.',
+    cleanup: 'The model that cleans up your dictation: filler words out, grammar and punctuation fixed.',
     voiceAgent: 'The model that carries out Commands: "Hey {name}, …" in a dictation, and the rewrite shortcut. Its name and shortcut are on the Commands page.',
-    noteFormatting: 'Configure the model that formats dictation into notes. Coming soon.',
+    noteFormatting: 'The model that writes your meeting summaries and runs the Actions on your notes.',
     chat: 'The model that answers in Chat, in the Ask bar on your notes, and when you ask the Voice Assistant out loud.',
   };
   // Per-scope UI copy + seed config for the three non-cleanup bubbles.
@@ -281,6 +244,33 @@
       }
     }
   }
+  // Cleanup on, a cloud provider, no key: the red badge's reason, said on
+  // the page with the way to fix it (review #9).
+  let keyBox = $state(null);
+  const cleanupNeedsKey = $derived(
+    !!cfg?.postProcessEnabled &&
+      ['groq', 'anthropic', 'openai', 'gemini', 'openrouter'].includes(cfg.ppProvider) &&
+      !(cfg.ppApiKey || '').trim()
+  );
+  function focusKey() {
+    keyEditing = true;
+    tick().then(() => {
+      keyBox?.scrollIntoView({ block: 'center' });
+      keyBox?.querySelector('input')?.focus();
+    });
+  }
+  // Smart routing's pickers, in Yap's own Select.
+  let presetPick = $state('');
+  const PRESET_PICKS = [
+    { value: '', label: 'New from a preset…' },
+    ...[
+      ['default', 'Default'],
+      ['email', 'Email'],
+      ['notes', 'Notes'],
+      ['slack', 'Slack / Chat'],
+      ['code', 'Code / Technical'],
+    ].map(([value, label]) => ({ value, label })),
+  ];
   // Masked API-key display (OpenWhispr style): shown until the user hits edit.
   let keyEditing = $state(false);
 
@@ -335,32 +325,6 @@
     custom: 'the model id your endpoint expects',
   };
 
-  // History / stats dashboard state.
-  let stats = $state(null);
-  let historyItems = $state([]);
-
-  async function loadHistory() {
-    try {
-      [stats, historyItems] = await Promise.all([
-        invoke('get_stats'),
-        invoke('get_history', { limit: 50 }),
-      ]);
-    } catch (e) {
-      stats = null;
-      historyItems = [];
-    }
-  }
-
-  async function clearHistory() {
-    await invoke('clear_history');
-    await loadHistory();
-  }
-
-  // Refresh the dashboard whenever the History tab is opened.
-  $effect(() => {
-    if (section === 'history') loadHistory();
-  });
-
   // Populate the per-app routing picker (from history) when AI Cleanup opens,
   // …and the providers' live model lists (a day-old one is checked behind),
   // and read the on-device model's state afresh (where its layers went, the
@@ -373,21 +337,6 @@
     }
   });
 
-  function fmtMinutes(min) {
-    const v = Number(min) || 0;
-    const m = Math.round(v);
-    if (m < 1) return v > 0 ? '<1 min' : '0 min';
-    if (m < 60) return `${m} min`;
-    const h = Math.floor(m / 60);
-    return `${h} h ${m % 60} min`;
-  }
-  function fmtWhen(ts) {
-    try {
-      return new Date((ts || 0) * 1000).toLocaleString();
-    } catch {
-      return '';
-    }
-  }
 
   // Daily Groq usage meter (camelCase from get_groq_usage / groq-usage event).
   let usage = $state({ day: 0, tokens: 0, tokenCap: 500000, requests: 0, requestCap: 14400 });
@@ -397,24 +346,6 @@
   function fmtK(n) {
     const v = Number(n) || 0;
     return v < 1000 ? String(v) : `${(v / 1000).toFixed(1)}k`;
-  }
-  // Activity heatmap: bucket a day's words into 5 intensity levels (0 = none),
-  // relative to the busiest day in the window. Intensity (not bar height) is
-  // what keeps sparse data readable — one active day reads as one bright cell,
-  // not a lone full-height tower.
-  function activityLevel(words, max) {
-    if (!words) return 0;
-    const t = words / Math.max(1, max);
-    return t > 0.75 ? 4 : t > 0.5 ? 3 : t > 0.25 ? 2 : 1;
-  }
-  // Day-numbers are UTC (unix secs / 86400, same trick as the backend).
-  function activityDayLabel(day) {
-    return new Date((day || 0) * 86400000).toLocaleDateString(undefined, {
-      timeZone: 'UTC',
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    });
   }
   // 0–100 percentage of a value against a cap (guards a zero/absent cap).
   function pctOf(value, cap) {
@@ -437,82 +368,12 @@
     }
   }
 
-  const RECORDING_MODES = [
-    { value: 'toggle', label: 'Toggle (press to start/stop)' },
-    { value: 'pushToTalk', label: 'Push-to-talk (hold to record)' },
-  ];
-
   const UNLOAD_TIMEOUTS = [
-    { value: 'never', label: 'Never (keep model loaded)' },
+    { value: 'never', label: 'Never' },
     { value: '1min', label: 'After 1 minute' },
     { value: '5min', label: 'After 5 minutes' },
     { value: '15min', label: 'After 15 minutes' },
     { value: '30min', label: 'After 30 minutes' },
-  ];
-
-  const OVERLAY_POSITIONS = [
-    { value: 'bottom', label: 'Bottom' },
-    { value: 'top', label: 'Top' },
-  ];
-
-  const AUTO_SUBMIT_KEYS = [
-    { value: 'enter', label: 'Enter' },
-    { value: 'ctrlEnter', label: 'Ctrl + Enter' },
-    { value: 'shiftEnter', label: 'Shift + Enter' },
-  ];
-
-  // General → Meetings: how Yap asks about a call it noticed
-  // (meeting_detect.rs, `meetingDetectStyle`), one line on what each means.
-  const CALL_PROMPT_STYLES = [
-    { value: 'popup', label: 'Pop-up' },
-    { value: 'quiet', label: 'Quietly' },
-  ];
-  // General → Yap bar → Colours (`barTheme`, the --bar-* tokens in app.css).
-  const BAR_THEMES = [
-    { value: 'light', label: 'Light' },
-    { value: 'dark', label: 'Dark' },
-  ];
-  // General → Yap bar: the dictation capsule's ✕ / ✓ (`barDictationButtons`,
-  // bar.rs → DictationCapsule.svelte), one line on what each choice means.
-  const DICTATION_BUTTONS = [
-    { value: 'hover', label: 'When you point at it' },
-    { value: 'always', label: 'Always' },
-    { value: 'off', label: 'Off' },
-  ];
-  const DICTATION_BUTTONS_DESC = {
-    hover: '✕ to cancel and ✓ to paste appear when you point at the bar',
-    always: '✕ to cancel and ✓ to paste show the whole time you dictate',
-    off: 'Cancel from the tray icon instead; Undo still shows after a cancel',
-  };
-  const CALL_PROMPT_STYLE_DESC = {
-    popup: 'A card in Yap, or a Windows notification while Yap is in the background',
-    // With the Yap bar on, the card goes on the bar instead (bar.rs).
-    popupBar: 'A card in Yap, or on the Yap bar while you work in another app',
-    quiet: 'No pop-up: it waits in the notification centre and the tray menu',
-  };
-  // General → Meetings guard rails (meeting_guard.rs, capture.rs).
-  const CALL_END_OPTIONS = [
-    { value: 'ask', label: 'Ask me' },
-    { value: 'stop', label: 'Stop and summarise automatically' },
-  ];
-  const CALL_END_DESC = {
-    ask: 'Yap asks whether to stop recording and summarise',
-    stop: 'Yap stops recording and writes your action plan, no question asked',
-  };
-  // General → Meetings → "Notify before scheduled meetings start" (calendar.rs,
-  // `meetingReminder`; Wispr's choices).
-  const REMINDER_OPTIONS = [
-    { value: '15s', label: 'Right before (15 sec)' },
-    { value: '1min', label: '1 minute before' },
-    { value: '2min', label: '2 minutes before' },
-    { value: 'never', label: 'Never' },
-  ];
-  const MEETING_MAX_LENGTHS = [
-    { value: 60, label: '1 hour' },
-    { value: 120, label: '2 hours' },
-    { value: 180, label: '3 hours' },
-    { value: 240, label: '4 hours' },
-    { value: 0, label: 'No limit' },
   ];
 
   // Display names for the language codes the backend returns.
@@ -664,7 +525,6 @@
     if (!Array.isArray(cfg.appRoutes)) cfg.appRoutes = [];
     if (!Array.isArray(cfg.cleanupProfiles)) cfg.cleanupProfiles = [];
     ensureScopes();
-    refreshLogInfo();
     // On-device cleanup status + live download progress.
     refreshLocalLlm();
     listen('local-llm-download-progress', (e) => {
@@ -701,16 +561,6 @@
     if (unlistenUsage) unlistenUsage();
   });
 
-  const micOptions = $derived([
-    { value: null, label: 'System default' },
-    ...devices.map((d) => ({ value: d, label: d })),
-  ]);
-
-  const outputOptions = $derived([
-    { value: null, label: 'System default' },
-    ...outputs.map((d) => ({ value: d, label: d })),
-  ]);
-
   // Language dropdown: Auto + whatever the active model supports.
   const langOptions = $derived([
     { value: 'auto', label: 'Auto-detect' },
@@ -728,39 +578,6 @@
       .catch(() => {});
   });
 
-  // ---- Hotkey capture (OpenWhispr-style ui/HotkeyInput port) ----
-  // The <HotkeyInput> component owns the capture UX (live modifier chips,
-  // combos, modifier-only chords). Settings pauses the LIVE global binding
-  // while capturing (so pressing the current hotkey doesn't start a
-  // recording) and re-applies the picked spec after — plus validates that the
-  // dictation, rewrite, meeting and assistant keys never fire on one press
-  // (`hotkeysClash`, input_hook.rs `clashes`).
-  const HOTKEY_CMD = {
-    hotkey: 'configure_hotkey',
-    editHotkey: 'configure_edit_hotkey',
-    meetingHotkey: 'configure_meeting_hotkey',
-    assistantHotkey: 'configure_assistant_hotkey',
-  };
-  const HOTKEY_NAMES = {
-    hotkey: 'dictation hotkey',
-    editHotkey: 'rewrite shortcut',
-    meetingHotkey: 'meeting shortcut',
-    assistantHotkey: 'assistant shortcut',
-  };
-  function onHotkeyCapturing(target, on) {
-    if (!cfg) return;
-    recording = on;
-    invoke(HOTKEY_CMD[target], { spec: on ? '' : cfg[target] });
-  }
-  function validateHotkey(target, spec) {
-    if (!spec) return null;
-    const clash = Object.keys(HOTKEY_NAMES).find((other) => other !== target && hotkeysClash(cfg?.[other], spec));
-    if (!clash) return null;
-    return cfg[clash] === spec
-      ? `Already used by the ${HOTKEY_NAMES[clash]}`
-      : `Clashes with the ${HOTKEY_NAMES[clash]} (${formatHotkeySpec(cfg[clash])}): one press would start both`;
-  }
-
   // In-window hotkey fallback: when OUR OWN window has focus, the global
   // low-level hook never sees the hotkey (WebView2 front-runs the hook chain;
   // log-proven 2026-07-05). The page gets the keydown normally, so drive the
@@ -771,7 +588,8 @@
   // to `dictation_key` / `assistant_key`, the hook's own paths: the recording
   // mode (and push-to-talk's tap / double-tap) is Rust's to decide.
   function onFallbackKeyDown(e) {
-    if (recording || e.repeat) return;
+    // (Not while a shortcut is being picked: settings/hotkeys.svelte.js.)
+    if (hotkeyCapture.on || e.repeat) return;
     if (hotkeyMatchesKeydown(e, cfg?.meetingHotkey)) {
       e.preventDefault();
       e.stopPropagation();
@@ -790,7 +608,7 @@
     invoke('dictation_key', { pressed: true }).catch(() => {});
   }
   function onFallbackKeyUp(e) {
-    if (recording) return;
+    if (hotkeyCapture.on) return;
     if (hotkeyMatchesKeyup(e, cfg?.assistantHotkey)) {
       e.preventDefault();
       invoke('assistant_key', { pressed: false }).catch(() => {});
@@ -809,59 +627,171 @@
     };
   });
 
-  // About: a portable install keeps config + models in a Data folder next to
-  // yap.exe instead of %APPDATA%/yap/ (portable.rs).
-  let portable = $state(false);
-  onMount(() => {
-    invoke('is_portable')
-      .then((p) => (portable = !!p))
-      .catch(() => {});
-  });
-
-  // ---- Debug logging (Advanced → Debug Logging, OpenWhispr Developer port) ----
-  let logInfo = $state(null); // { dir, file } from log_info
-  let logCopied = $state(false);
-  function refreshLogInfo() {
-    invoke('log_info')
-      .then((i) => (logInfo = i))
-      .catch(() => {});
-  }
-  async function copyLogPath() {
-    if (!logInfo?.file) return;
-    try {
-      await navigator.clipboard.writeText(logInfo.file);
-      logCopied = true;
-      setTimeout(() => (logCopied = false), 1500);
-      toast({ title: 'Copied', description: 'Log file path copied to clipboard', variant: 'success' });
-    } catch {
-      toast({ title: "Couldn't copy", description: 'Something went wrong copying to clipboard.', variant: 'destructive' });
-    }
-  }
-  function logFileName(p) {
-    return (p || '').split(/[/\\]/).pop() || p;
-  }
-
   // ---- ControlPanel integration ----
   // Deep-links from the shell (e.g. "Sign in" → account section) and dictionary
   // sync with the DictionaryView surface: both edit the same config field from
   // separate components, so events keep the two copies converged instead of the
   // last-saved-wins clobbering each other.
   let lastReceivedDictJson = null;
-  function onSettingsGoto(e) {
-    if (typeof e.detail !== 'string') return;
-    // "general#meetings": a section, then the card in it to scroll to.
-    const [target, card] = e.detail.split('#');
-    // A section this build doesn't have (Connectors' "Go to MCP" before the
-    // MCP page lands): stay put.
-    if (target !== 'account' && !NAV_GROUPS.some((g) => g.items.some((i) => i.id === target))) return;
-    section = target;
-    // "cleanup#chat": Language Models on one scope's tab (the Chat view's
-    // model chip).
-    if (target === 'cleanup' && SCOPE_TABS.some((t) => t.value === card)) {
-      llmScope = card;
-    } else if (card) {
-      tick().then(() => document.getElementById(`settings-${card}`)?.scrollIntoView({ block: 'start' }));
+  // ---- Settings search (2026-10-22 review #3): the box at the top of the
+  // nav (Ctrl+F or / while Settings is open), over a static index of every
+  // setting (settings/settingsIndex.js). While there's a query the content
+  // pane shows the results; ↑/↓ move, Enter opens the page at the row, Esc
+  // clears (and a second Esc closes Settings).
+  let query = $state('');
+  let selected = $state(0);
+  let searchEl = $state(null);
+  let railSearch = $state(false); // the icon rail's search box, open
+  const searching = $derived(query.trim().length > 0);
+  const results = $derived(searching ? searchSettings(query) : []);
+  const resultGroups = $derived(groupResults(results));
+  const flatResults = $derived(resultGroups.flatMap((g) => g.results));
+  const counts = $derived(searching ? countByPage(results) : null);
+  $effect(() => {
+    query;
+    selected = 0;
+  });
+  function openResult(r) {
+    goto({ page: r.page, anchor: r.anchor, fallback: r.fallback, scope: r.scope, focus: true });
+  }
+  function onSearchKey(e) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selected = Math.min(selected + 1, Math.max(0, flatResults.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selected = Math.max(selected - 1, 0);
+    } else if (e.key === 'Enter') {
+      const r = flatResults[selected];
+      if (r) {
+        e.preventDefault();
+        openResult(r);
+      }
+    } else if (e.key === 'Escape') {
+      if (query) {
+        e.preventDefault();
+        e.stopPropagation();
+        query = '';
+      } else if (railSearch) {
+        e.preventDefault();
+        e.stopPropagation();
+        railSearch = false;
+      }
     }
+  }
+  function focusSearch() {
+    if (rail) railSearch = true;
+    tick().then(() => {
+      searchEl?.focus();
+      searchEl?.select();
+    });
+  }
+  function typingIn(el) {
+    return !!el?.closest?.('input, textarea, select, [contenteditable="true"]');
+  }
+  function onFindKey(e) {
+    if (!open || hotkeyCapture.on) return;
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f') {
+      e.preventDefault();
+      focusSearch();
+    } else if (e.key === '/' && !e.ctrlKey && !e.altKey && !e.metaKey && !typingIn(e.target)) {
+      e.preventDefault();
+      focusSearch();
+    }
+  }
+  $effect(() => {
+    window.addEventListener('keydown', onFindKey);
+    return () => window.removeEventListener('keydown', onFindKey);
+  });
+  // Closed: the next open starts on a clean page, not old results.
+  $effect(() => {
+    if (!open) {
+      query = '';
+      railSearch = false;
+    }
+  });
+
+  // ---- The minimum window (860 × 600): below ~960 px the nav becomes an
+  // icon rail with tooltips and a search button (review #5, concept 5;
+  // OpenWhispr's compact mode). ----
+  let rail = $state(false);
+  onMount(() => {
+    const mq = window.matchMedia?.('(max-width: 960px)');
+    if (!mq) return;
+    rail = mq.matches;
+    const on = () => {
+      rail = mq.matches;
+      if (!rail) railSearch = false;
+    };
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  });
+  let railTip = $state(null); // { label, x, y } of the item pointed at
+  function showTip(e, label) {
+    if (!rail) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    railTip = { label, x: r.right + 8, y: r.top + r.height / 2 };
+  }
+  function hideTip() {
+    railTip = null;
+  }
+
+  // Where a link lands (settings/nav.js: aliases keep old links working —
+  // "general#meetings", "general#screen-sharing" in Windows notifications
+  // still in the notification centre, "history", "advanced"). "page#anchor"
+  // scrolls to #settings-<anchor> or the row [data-setting=<anchor>] and
+  // gives it a short wash; "cleanup#chat" opens that Language Models tab.
+  let contentEl = $state(null);
+  let meetingApps = $state(false); // Meetings → "Ask about calls in"'s list
+  function goto(target) {
+    const to = resolveTarget(target, SCOPE_TABS.map((t) => t.value));
+    if (!to) return false;
+    to.focus = !!target?.focus;
+    to.fallback = typeof target?.fallback === 'string' ? target.fallback : '';
+    query = '';
+    railSearch = false;
+    section = to.page;
+    meetingApps = to.page === 'meetings' && to.anchor === 'call-apps-list';
+    if (to.scope) llmScope = to.scope;
+    tick().then(() => {
+      if (!to.anchor) {
+        contentEl?.scrollTo?.({ top: 0 });
+        return;
+      }
+      // A row that only exists once its page has loaded (the AI apps) gets
+      // a moment to appear.
+      let tries = 0;
+      const find = (a) => a && (document.getElementById(`settings-${a}`) || contentEl?.querySelector(`[data-setting="${CSS.escape(a)}"]`));
+      const land = () => {
+        // The search's fallback: the row to land on while the setting itself
+        // isn't showing (Prompt Studio with cleanup off).
+        const el = find(to.anchor) || (tries >= 3 ? find(to.fallback) : null);
+        if (!el) {
+          if (++tries < 20) setTimeout(land, 100);
+          return;
+        }
+        el.scrollIntoView({ block: 'start' });
+        const row = el.matches('[data-setting]') ? el : null;
+        if (row) {
+          row.classList.remove('set-flash');
+          void row.offsetWidth;
+          row.classList.add('set-flash');
+          setTimeout(() => row.classList.remove('set-flash'), 1900);
+          // From the search, the keyboard goes on to the setting itself.
+          if (to.focus) {
+            const ctl = row.matches('button, a[href], input, select, textarea')
+              ? row
+              : row.querySelector('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]');
+            ctl?.focus({ preventScroll: true });
+          }
+        }
+      };
+      land();
+    });
+    return true;
+  }
+  function onSettingsGoto(e) {
+    if (typeof e.detail === 'string' || (e.detail && typeof e.detail === 'object')) goto(e.detail);
   }
   function onDictChanged(e) {
     const entries = Array.isArray(e.detail) ? e.detail : e.detail?.entries;
@@ -912,28 +842,11 @@
       window.removeEventListener('yap-provider-key-saved', onProviderKeySaved);
     };
   });
-  // General → Meetings → "Ask about calls in": each app's effective choice
-  // is the saved one (`meetingDetectApps`), else the app's default from
-  // meeting_detect.rs (work apps on, personal chat apps off). Flipping one
-  // saves it as the person's choice.
-  function callAppAsks(app) {
-    return cfg.meetingDetectApps?.[app.id] ?? app.asksByDefault;
-  }
+  // Meetings → "Ask about calls in" (MeetingsPage.svelte) saves a flipped
+  // app as the person's choice in `meetingDetectApps`.
   function setCallAppAsks(id, asks) {
     cfg.meetingDetectApps = { ...(cfg.meetingDetectApps || {}), [id]: asks };
   }
-  // General → Meetings → "Maximum recording length": a length set outside
-  // the list (config.json by hand) still shows as itself.
-  const maxLengthOptions = $derived(
-    !cfg || MEETING_MAX_LENGTHS.some((o) => o.value === cfg.meetingMaxMinutes)
-      ? MEETING_MAX_LENGTHS
-      : [...MEETING_MAX_LENGTHS, { value: cfg.meetingMaxMinutes, label: `${cfg.meetingMaxMinutes} minutes` }]
-  );
-  const meetingShortcutDesc = $derived(
-    cfg?.meetingHotkey
-      ? `Press ${formatHotkeySpec(cfg.meetingHotkey)} to take notes on a call, and again to stop and write the action plan`
-      : 'Start and stop meeting notes from any app with a shortcut'
-  );
   // "Don't ask for Teams" on a call prompt saves that in Rust: adopt it into
   // this config copy, or the next auto-save would switch Teams back on.
   onMount(() => {
@@ -1034,14 +947,30 @@
     always: 'Every answer in Chat is read aloud',
   };
   const wakeName = $derived((cfg?.agentName || '').trim() || 'Yap');
+  // A link row's value: which model a Language Models tab runs on now
+  // ("Groq · openai/gpt-oss-20b", "On this PC · Qwen3.5 4B").
+  const PROVIDER_SHORT = {
+    groq: 'Groq',
+    anthropic: 'Anthropic',
+    openai: 'OpenAI',
+    gemini: 'Gemini',
+    openrouter: 'OpenRouter',
+    custom: 'Custom',
+    local: 'Self-hosted',
+    ondevice: 'On this PC',
+  };
+  function scopeModelLabel(scope) {
+    const sc = cfg?.llmScopes?.[scope];
+    if (!sc) return '';
+    const who = PROVIDER_SHORT[sc.provider] || sc.provider || '';
+    const model = sc.provider === 'ondevice' ? localLlm.model : sc.model;
+    return [who, model].filter(Boolean).join(' · ');
+  }
   // Commands' model and prompt: Language Models → Commands. The Voice
   // Assistant's: Language Models → Chat & Voice Assistant.
   function openScope(scope) {
-    section = 'cleanup';
-    llmScope = scope;
+    goto({ page: 'cleanup', scope });
   }
-  // The other shortcuts, named for the General page's pointer to them.
-  const shortcutName = (spec) => (spec ? formatHotkeySpec(spec) : 'not set');
 
   // The notepad's consent message, edited there (notepad.rs): the same.
   onMount(() => {
@@ -1068,9 +997,6 @@
     ];
     return () => uns.forEach((u) => u.then((f) => f()));
   });
-  function hiddenUntilLabel(ms) {
-    return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
 
   // Broadcast Settings-side dictionary edits (e.g. the Commands name save)
   // to DictionaryView — skipping echoes of updates we just received from it.
@@ -1081,16 +1007,6 @@
       new CustomEvent('yap-dictionary-external', { detail: JSON.parse(json) })
     );
   });
-
-  // ---- Autostart (apply immediately + persist on Save) ----
-  async function onAutostart(enabled) {
-    try {
-      await invoke('set_autostart', { enabled });
-    } catch (e) {
-      // revert the toggle if the OS rejected it
-      cfg.autostart = !enabled;
-    }
-  }
 
   // ---- AI cleanup ----
   // Picking a provider preset fills in its base URL (except "custom", which
@@ -1381,6 +1297,7 @@
     groq: 'Groq',
     anthropic: 'Anthropic',
     openai: 'OpenAI',
+    gemini: 'Google Gemini',
     openrouter: 'OpenRouter',
     custom: 'Custom endpoint',
     local: 'Self-hosted',
@@ -1461,6 +1378,10 @@
     return id;
   }
 
+  const PROFILE_PROVIDERS = [
+    { value: '', label: 'Model: the cleanup model' },
+    ...PP_PROVIDERS.map((p) => ({ value: p.value, label: `Model: ${p.label}` })),
+  ];
   // Picking a per-profile provider fills its base-URL default (mirrors the
   // global onProviderChange); clearing back to "global" wipes the override so
   // stale URLs/keys can't linger invisibly.
@@ -1598,71 +1519,39 @@
 </script>
 
 {#snippet navIcon(id)}
-  {#if id === 'general'}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M6 4v4M6 12v8M12 4v10M12 18v2M18 4v2M18 10v10" />
-      <circle cx="6" cy="10" r="2" />
-      <circle cx="12" cy="16" r="2" />
-      <circle cx="18" cy="8" r="2" />
-    </svg>
-  {:else if id === 'commands'}
-    <!-- A wand: the AI does it. -->
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="m4 20 11-11" />
-      <path d="m13 7 4 4" />
-      <path d="M17 3v3M15.5 4.5h3M20 9v2M19 10h2M9 3v2M8 4h2" />
-    </svg>
-  {:else if id === 'voice'}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M11 5 6 9H2v6h4l5 4z" />
-      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-      <path d="M18.4 5.6a9 9 0 0 1 0 12.8" />
-    </svg>
-  {:else if id === 'models'}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <rect x="9" y="2" width="6" height="12" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0" />
-      <path d="M12 18v4" />
-    </svg>
-  {:else if id === 'cleanup'}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M12 5a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0-2 2.8 3 3 0 0 0 .3 4.2A3.2 3.2 0 0 0 7.5 21c1 0 1.9-.4 2.5-1.1.6.7 1.5 1.1 2.5 1.1a3.2 3.2 0 0 0 3.2-4 3 3 0 0 0 .3-4.2 3 3 0 0 0-2-2.8 3 3 0 0 0-3-3z" />
-      <path d="M12 5v14" />
-      <path d="M19 8h2M19 12h3M19 16h2" />
-    </svg>
-  {:else if id === 'history'}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-      <path d="M3 3v5h5" />
-      <path d="M12 8v4l3 2" />
-    </svg>
-  {:else if id === 'advanced'}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5" />
-      <circle cx="16" cy="6" r="2" />
-      <circle cx="8" cy="12" r="2" />
-      <circle cx="13" cy="18" r="2" />
-    </svg>
-  {:else if id === 'connectors'}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M9 3v4M15 3v4" />
-      <path d="M6 7h12v3a6 6 0 0 1-12 0z" />
-      <path d="M12 16v5" />
-    </svg>
-  {:else if id === 'about'}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 16v-4" />
-      <path d="M12 8h.01" />
-    </svg>
-  {:else if id === 'mcp'}
-    <!-- The Model Context Protocol's knot mark, redrawn on the 24 grid. -->
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M3.1 12 11.4 3.7c1.2-1.2 3.1-1.2 4.2 0s1.2 3.1 0 4.2L9.3 14.2" />
-      <path d="m9.4 14.1 6.2-6.2c1.2-1.2 3.1-1.2 4.2 0c1.2 1.2 1.2 3.1 0 4.2l-7.6 7.6c-.4.4-.4 1 0 1.4l1.6 1.6" />
-      <path d="M13.5 5.8 7.3 12c-1.2 1.2-1.2 3.1 0 4.2s3.1 1.2 4.2 0l6.2-6.2" />
-    </svg>
-  {/if}
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    {#if id === 'general'}
+      <path d="M6 4v4M6 12v8M12 4v10M12 18v2M18 4v2M18 10v10" /><circle cx="6" cy="10" r="2" /><circle cx="12" cy="16" r="2" /><circle cx="18" cy="8" r="2" />
+    {:else if id === 'dictation'}
+      <rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v4" />
+    {:else if id === 'shortcuts'}
+      <rect x="2.5" y="6" width="19" height="12" rx="2.5" /><path d="M6.5 10h1M10.5 10h1M14.5 10h1M8 14h8" />
+    {:else if id === 'meetings'}
+      <circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" />
+    {:else if id === 'commands'}
+      <!-- A wand: the AI does it. -->
+      <path d="m4 20 11-11" /><path d="m13 7 4 4" /><path d="M17 3v3M15.5 4.5h3M20 9v2M19 10h2M9 3v2M8 4h2" />
+    {:else if id === 'voice'}
+      <path d="M11 5 6 9H2v6h4l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.4 5.6a9 9 0 0 1 0 12.8" />
+    {:else if id === 'memory'}
+      <path d="M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.6 2.4 4.7.8.8 1.1 1.6 1.1 2.6V18h5v-1.7c0-1 .3-1.8 1.1-2.6C16.8 12.6 18 11.2 18 9a6 6 0 0 0-6-6z" /><path d="M10 21h4" />
+    {:else if id === 'models'}
+      <path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2" />
+    {:else if id === 'cleanup'}
+      <path d="M12 5a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0-2 2.8 3 3 0 0 0 .3 4.2A3.2 3.2 0 0 0 7.5 21c1 0 1.9-.4 2.5-1.1.6.7 1.5 1.1 2.5 1.1a3.2 3.2 0 0 0 3.2-4 3 3 0 0 0 .3-4.2 3 3 0 0 0-2-2.8 3 3 0 0 0-3-3z" /><path d="M12 5v14" />
+    {:else if id === 'connectors'}
+      <path d="M9 3v4M15 3v4" /><path d="M6 7h12v3a6 6 0 0 1-12 0z" /><path d="M12 16v5" />
+    {:else if id === 'mcp'}
+      <!-- The Model Context Protocol's knot mark, redrawn on the 24 grid. -->
+      <path d="M3.1 12 11.4 3.7c1.2-1.2 3.1-1.2 4.2 0s1.2 3.1 0 4.2L9.3 14.2" /><path d="m9.4 14.1 6.2-6.2c1.2-1.2 3.1-1.2 4.2 0c1.2 1.2 1.2 3.1 0 4.2l-7.6 7.6c-.4.4-.4 1 0 1.4l1.6 1.6" /><path d="M13.5 5.8 7.3 12c-1.2 1.2-1.2 3.1 0 4.2s3.1 1.2 4.2 0l6.2-6.2" />
+    {:else if id === 'privacy'}
+      <path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z" /><path d="m9 12 2 2 4-4" />
+    {:else if id === 'about'}
+      <circle cx="12" cy="12" r="9" /><path d="M12 16v-4" /><path d="M12 8h.01" />
+    {:else if id === 'search'}
+      <circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" />
+    {/if}
+  </svg>
 {/snippet}
 
 {#snippet provIcon(v)}
@@ -1707,40 +1596,93 @@
   {/if}
 {/snippet}
 
-<div class="shell" class:embedded>
+<div class="shell settings-shell" class:embedded class:rail>
   {#if embedded}
     <button class="modal-x" title="Close settings" aria-label="Close settings" onclick={() => onclose?.()}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
     </button>
   {/if}
   <nav class="sidebar" aria-label="Settings sections">
-    <div class="brand">
-      <img class="brandlogo" src={yapIcon} alt="" aria-hidden="true" />
-      <span class="brandname">{embedded ? 'Settings' : 'Yap'}</span>
-    </div>
-    <div class="brand-divider"></div>
-    {#each NAV_GROUPS as g (g.label)}
-      <div class="navcap">{g.label}</div>
-      {#each g.items as s (s.id)}
-        {@const attn = attentionCount(s.id)}
-        <button
-          class="navitem"
-          class:active={section === s.id}
-          aria-current={section === s.id ? 'page' : undefined}
-          onclick={() => (section = s.id)}
-        >
-          <span class="navicon">{@render navIcon(s.id)}</span>
-          <span class="navlabel">{s.label}</span>
-          {#if attn > 0}
-            <span class="navbadge" title={attention.items.filter((i) => i.section === s.id).map((i) => i.label).join(' · ')}>{attn}</span>
-          {/if}
-        </button>
+    {#if rail}
+      <button
+        class="railsearch"
+        class:on={railSearch || searching}
+        aria-label="Search settings"
+        onclick={() => (railSearch ? (railSearch = false) : focusSearch())}
+        onmouseenter={(e) => showTip(e, 'Search settings · Ctrl F')}
+        onmouseleave={hideTip}
+        onfocus={(e) => showTip(e, 'Search settings · Ctrl F')}
+        onblur={hideTip}
+      >
+        {@render navIcon('search')}
+      </button>
+    {:else}
+      <div class="search" class:on={searching}>
+        {@render navIcon('search')}
+        <input
+          bind:this={searchEl}
+          bind:value={query}
+          type="search"
+          placeholder="Search settings"
+          aria-label="Search settings"
+          aria-controls="settings-search-results"
+          aria-activedescendant={searching && flatResults.length ? `settings-result-${selected}` : undefined}
+          autocomplete="off"
+          spellcheck="false"
+          onkeydown={onSearchKey}
+        />
+        <kbd>{searching ? 'Esc' : 'Ctrl F'}</kbd>
+      </div>
+    {/if}
+
+    <div class="navlist">
+      {#each NAV_GROUPS as g, gi (g.label ?? gi)}
+        {#if g.label && !rail}<div class="navcap">{g.label}</div>{/if}
+        {#if g.label && rail}<div class="railsep" aria-hidden="true"></div>{/if}
+        {#each g.items as s (s.id)}
+          {@const attn = attentionCount(s.id)}
+          {@const hits = counts ? (counts[s.id] ?? 0) : null}
+          <button
+            class="navitem"
+            class:active={!searching && section === s.id}
+            class:dim={hits === 0}
+            aria-current={section === s.id ? 'page' : undefined}
+            aria-label={rail ? (attn > 0 ? `${s.label} ${attn}` : s.label) : undefined}
+            onclick={() => goto(s.id)}
+            onmouseenter={(e) => showTip(e, s.label)}
+            onmouseleave={hideTip}
+            onfocus={(e) => showTip(e, s.label)}
+            onblur={hideTip}
+          >
+            <span class="navicon">{@render navIcon(s.id)}</span>
+            {#if !rail}<span class="navlabel">{s.label}</span>{/if}
+            {#if hits}
+              {#if !rail}<span class="navcount" aria-label={`${hits} found`}>{hits}</span>{/if}
+            {:else if attn > 0}
+              {#if rail}
+                <span class="navdot" aria-hidden="true"></span>
+              {:else}
+                <span class="navbadge" title={attention.items.filter((i) => i.section === s.id).map((i) => i.label).join(' · ')}>{attn}</span>
+              {/if}
+            {/if}
+          </button>
+        {/each}
       {/each}
-    {/each}
+    </div>
 
     <div class="side-spacer"></div>
-    <div class="acct-rule"></div>
-    <button class="acct" class:active={section === 'account'} class:signed={!!acctUser} onclick={() => (section = 'account')}>
+    <button
+      class="acct"
+      class:active={section === 'account'}
+      class:signed={!!acctUser}
+      aria-current={section === 'account' ? 'page' : undefined}
+      aria-label={rail ? (acctUser ? `Account: ${displayName(acctUser)}` : 'Sign in') : undefined}
+      onclick={() => goto('account')}
+      onmouseenter={(e) => showTip(e, acctUser ? 'Account' : 'Sign in')}
+      onmouseleave={hideTip}
+      onfocus={(e) => showTip(e, acctUser ? 'Account' : 'Sign in')}
+      onblur={hideTip}
+    >
       <span class="acct-avatar">
         {#if acctUser?.image && !acctImgFailed}
           <img src={acctUser.image} alt="" referrerpolicy="no-referrer" onerror={() => (acctImgFailed = true)} />
@@ -1752,352 +1694,66 @@
           </svg>
         {/if}
       </span>
-      <span class="acct-who">
-        {#if acctUser}
-          <span class="l1">{displayName(acctUser)}</span>
-          <span class="l2">{acctUser.name?.trim() ? acctUser.email : 'Yap account'}</span>
-        {:else}
-          <span class="l1">Sign in</span>
-          <span class="l2">Optional · works offline</span>
-        {/if}
-      </span>
+      {#if !rail}
+        <span class="acct-who">
+          {#if acctUser}
+            <span class="l1">{displayName(acctUser)}</span>
+            <span class="l2">{acctUser.name?.trim() ? acctUser.email : 'Yap account'}</span>
+          {:else}
+            <span class="l1">Sign in</span>
+            <span class="l2">Optional · works offline</span>
+          {/if}
+        </span>
+      {/if}
     </button>
+    <!-- The version, and the "Saved" pulse every change gets (Wispr's
+         "Flow v1.6" in its nav's footer). -->
+    {#if !rail}
+      <div class="navfoot">
+        <span class="ver">Yap {APP_VERSION}</span>
+        <span class="saved" class:show={saved} aria-live="polite">{saved ? 'Saved ✓' : ''}</span>
+      </div>
+    {:else}
+      <span class="railsaved" class:show={saved} aria-hidden="true">✓</span>
+    {/if}
   </nav>
+
+  {#if railTip}
+    <span class="railtip" style:left="{railTip.x}px" style:top="{railTip.y}px" role="tooltip">{railTip.label}</span>
+  {/if}
 
   <main>
     {#if cfg}
-      <div class="content">
-        {#if section === 'general'}
-          <div class="page-h">
-            <h1>General</h1>
-            <p>Hotkey, what the AI knows about you, audio devices, and how Yap looks on screen.</p>
-          </div>
-          <Group title="Activation">
-            <Row
-              label="Hotkey"
-              desc="Press from any app to start and stop dictation"
-              hint="A key, a combo (Ctrl+Shift+Space), a right-side modifier alone, or a held modifier chord (Ctrl+Alt)"
-            >
-              <HotkeyInput
-                bind:value={cfg.hotkey}
-                validate={(s) => validateHotkey('hotkey', s)}
-                oncapturingchange={(on) => onHotkeyCapturing('hotkey', on)}
+      <div class="content" bind:this={contentEl}>
+        <div class="inner">
+          {#if rail && railSearch}
+            <div class="search inpage" class:on={searching}>
+              {@render navIcon('search')}
+              <input
+                bind:this={searchEl}
+                bind:value={query}
+                type="search"
+                placeholder="Search settings"
+                aria-label="Search settings"
+                aria-controls="settings-search-results"
+                aria-activedescendant={searching && flatResults.length ? `settings-result-${selected}` : undefined}
+                autocomplete="off"
+                spellcheck="false"
+                onkeydown={onSearchKey}
               />
-            </Row>
-            <Row
-              label="Recording mode"
-              desc={cfg.recordingMode === 'pushToTalk'
-                ? fillHotkey('Hold {key} while you talk. Double-tap it to keep recording hands-free, then press it once more to stop.', cfg.hotkey)
-                : 'Press to start and stop, or hold the key while you talk'}
-            >
-              <Segmented
-                bind:value={cfg.recordingMode}
-                options={[
-                  { value: 'toggle', label: 'Toggle' },
-                  { value: 'pushToTalk', label: 'Push-to-talk' },
-                ]}
-              />
-            </Row>
-            <!-- The rewrite and assistant shortcuts live with what they do. -->
-            <Row
-              label="More shortcuts"
-              desc={`Rewrite selected text: ${shortcutName(cfg.editHotkey)} · Ask the Voice Assistant: ${shortcutName(cfg.assistantHotkey)}`}
-            >
-              <div class="morekeys">
-                <Button variant="secondary" size="sm" onclick={() => (section = 'commands')}>Commands</Button>
-                <Button variant="secondary" size="sm" onclick={() => (section = 'voice')}>Voice Assistant</Button>
-              </div>
-            </Row>
-          </Group>
-
-          <!-- What the AI models are told about you (about_you.rs). -->
-          <AboutYouSettings {cfg} />
-
-          <Group title="Audio">
-            <Row label="Microphone" desc="Applies instantly">
-              <Select
-                bind:value={cfg.inputDevice}
-                options={micOptions}
-                onchange={() => invoke('set_input_device', { device: cfg.inputDevice || null }).catch(() => {})}
-              />
-            </Row>
-            <Row label="Output device" desc="Where the start/stop chime plays">
-              <Select bind:value={cfg.outputDevice} options={outputOptions} disabled={!cfg.soundEnabled} />
-            </Row>
-            <Row>
-              <Toggle bind:checked={cfg.soundEnabled} label="Sound cue" desc="Play a chime when recording starts and stops" />
-            </Row>
-            <Row>
-              <Slider
-                bind:value={cfg.audioFeedbackVolume}
-                min={0}
-                max={1}
-                step={0.05}
-                label="Cue volume"
-                disabled={!cfg.soundEnabled}
-                hint={`${Math.round(cfg.audioFeedbackVolume * 100)}%`}
-              />
-            </Row>
-            <!-- Other apps' sound while you dictate (mute.rs, media_pause.rs):
-                 after the start chime, back after the stop chime. -->
-            <Row>
-              <Toggle
-                bind:checked={cfg.quietOtherApps}
-                label="Silence other apps while you dictate"
-                desc="Music, videos and games go quiet while you talk, then come back as they were"
-                hint="Yap's chime still plays, and calls are never silenced: not Teams, Zoom or other call apps, nor a meeting in your browser."
-              />
-            </Row>
-            <Row>
-              <Toggle
-                bind:checked={cfg.pauseMedia}
-                label="Pause music and videos while you dictate"
-                desc="What's playing pauses when you start and plays again when you're done"
-                hint="Anything in Windows' media controls, like Spotify or a YouTube tab. Only what Yap paused plays again, and calls are never paused."
-              />
-            </Row>
-          </Group>
-
-          <div id="settings-bar">
-            <Group title="Yap bar">
-              <Row>
-                <Toggle
-                  bind:checked={cfg.barEnabled}
-                  label="Show the Yap bar"
-                  desc="A small pill above the taskbar on the screen you're using. Hover it to dictate or take meeting notes; call prompts show on it too."
-                  hint="Off: the overlay shows only while you dictate, and Yap's notices come as Windows notifications."
-                />
-              </Row>
-              {#if cfg.barEnabled && barHiddenUntil}
-                <Row label={`Hidden until ${hiddenUntilLabel(barHiddenUntil)}`} desc="You hid it from its menu for an hour">
-                  <Button variant="secondary" size="sm" onclick={() => invoke('bar_action', { action: 'show' }).catch(() => {})}>Show it now</Button>
-                </Row>
-              {/if}
-              <Row>
-                <Toggle
-                  bind:checked={cfg.barHideFullscreen}
-                  label="Hide in fullscreen apps"
-                  desc="Games, videos and presentations stay clear. It still shows while you're recording."
-                  disabled={!cfg.barEnabled}
-                />
-              </Row>
-              <Row label="Colours" desc="Light matches Yap's window; dark stands out on a bright screen">
-                <Segmented bind:value={cfg.barTheme} options={BAR_THEMES} label="Bar colours" disabled={!cfg.barEnabled} />
-              </Row>
-              <Row>
-                <Toggle
-                  bind:checked={cfg.streamingPartials}
-                  label="Live transcription preview"
-                  desc="Show your words on the bar as you speak"
-                  hint="Preview only — the final result on stop is always authoritative."
-                />
-              </Row>
-              <Row
-                label="Cancel and finish buttons while dictating"
-                desc={DICTATION_BUTTONS_DESC[cfg.barDictationButtons] ?? DICTATION_BUTTONS_DESC.off}
-                hint="Never while you hold the push-to-talk key: letting go finishes it. A double-tap's hands-free recording follows this setting."
-              >
-                <Segmented
-                  bind:value={cfg.barDictationButtons}
-                  options={DICTATION_BUTTONS}
-                  label="Cancel and finish buttons while dictating"
-                />
-              </Row>
-              <Row label="Position" desc="Where the bar and the dictation overlay sit on screen">
-                <Select bind:value={cfg.overlayPosition} options={OVERLAY_POSITIONS} />
-              </Row>
-            </Group>
-          </div>
-
-          <!-- Yap's notice policy (notice.rs): one notice at a time, held
-               while you dictate. Tips are the one kind you can switch off. -->
-          <div id="settings-notifications">
-            <Group title="Notifications">
-              <Row>
-                <Toggle
-                  bind:checked={cfg.showTips}
-                  label="Show tips"
-                  desc="Short tips on using Yap, like push-to-talk's double-tap, and the nudge to connect your calendar"
-                  hint="Questions, alerts and errors always show. Yap shows one at a time, and holds them back while you dictate."
-                />
-              </Row>
-            </Group>
-          </div>
-
-          <!-- The reading font and size, and Motion, for every window
-               (AppearanceSettings.svelte, lib/appearance.js). -->
-          <div id="settings-appearance">
-            <AppearanceSettings {cfg} />
-          </div>
-
-          <div id="settings-meetings">
-            <Group title="Meetings">
-              <Row>
-                <Toggle
-                  bind:checked={cfg.meetingDetection}
-                  label="Detect calls and offer to take notes"
-                  desc="Asks when a Teams, Zoom, Meet, Slack or Webex call starts, and offers to stop and summarise when it ends"
-                  hint="Yap reads Windows' own record of which app is using your microphone, on this PC only. Nothing records until you click Record notes."
-                />
-              </Row>
-              <Row
-                label="How Yap asks"
-                desc={cfg.meetingDetectStyle !== 'quiet' && cfg.barEnabled
-                  ? CALL_PROMPT_STYLE_DESC.popupBar
-                  : (CALL_PROMPT_STYLE_DESC[cfg.meetingDetectStyle] ?? CALL_PROMPT_STYLE_DESC.popup)}
-              >
-                <Segmented
-                  bind:value={cfg.meetingDetectStyle}
-                  options={CALL_PROMPT_STYLES}
-                  label="How Yap asks"
-                  disabled={!cfg.meetingDetection}
-                />
-              </Row>
-              <Row>
-                <Toggle
-                  bind:checked={cfg.meetingAutoStart}
-                  label="Start notes automatically after 10 seconds"
-                  desc="The prompt counts down, and you can cancel. Not when Yap asks quietly."
-                  disabled={!cfg.meetingDetection}
-                />
-              </Row>
-              <Row>
-                <div class="callapps" role="group" aria-label="Ask about calls in">
-                  <span class="callapps-label">Ask about calls in</span>
-                  <span class="callapps-desc">Work apps to start with. Personal ones like Discord and WhatsApp stay quiet unless you switch them on.</span>
-                  <div class="callapps-grid">
-                    {#each meetingDetect.apps as app (app.id)}
-                      <div class="callapp">
-                        <CallAppIcon app={app.id} disabled={!cfg.meetingDetection} />
-                        <Toggle
-                          bind:checked={() => callAppAsks(app), (on) => setCallAppAsks(app.id, on)}
-                          label={app.label}
-                          disabled={!cfg.meetingDetection}
-                        />
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-              </Row>
-              <!-- Guard rails while a meeting records (meeting_guard.rs,
-                   capture.rs): Wispr Flow's Notetaker settings. -->
-              <Row
-                label="When a call ends"
-                desc={CALL_END_DESC[cfg.meetingCallEnd] ?? CALL_END_DESC.ask}
-              >
-                <Select
-                  bind:value={cfg.meetingCallEnd}
-                  options={CALL_END_OPTIONS}
-                  ariaLabel="When a call ends"
-                  disabled={!cfg.meetingDetection}
-                />
-              </Row>
-              <Row
-                label="Maximum recording length"
-                desc="Yap stops at this length and writes your action plan, with a warning 5 minutes before"
-              >
-                <Select
-                  bind:value={cfg.meetingMaxMinutes}
-                  options={maxLengthOptions}
-                  ariaLabel="Maximum recording length"
-                />
-              </Row>
-              <Row>
-                <Toggle
-                  bind:checked={cfg.meetingEndWhenQuiet}
-                  label="End notes when the meeting goes quiet"
-                  desc="After 10 minutes with nobody speaking, Yap counts down 30 seconds, then stops and writes your action plan"
-                  hint="Anyone speaking cancels it, and Keep going gives you another 10 minutes. Separately, Yap asks “Still in your meeting?” when a calendar meeting runs over, and an hour in."
-                />
-              </Row>
-              <!-- The screen-share tip's "Update settings" lands here
-                   (yap-settings-goto "general#screen-sharing"). -->
-              <div id="settings-screen-sharing">
-                <Row>
-                  <Toggle
-                    bind:checked={cfg.meetingHideFromCapture}
-                    label="Hide Yap's meeting windows from screen sharing"
-                    desc="While a meeting records, the notepad and the recording overlay stay out of screenshots and screen shares"
-                    hint="Windows leaves them out of every capture (Teams, Zoom and Meet screen shares, the Snipping Tool, OBS) while they stay on your own screen."
-                  />
-                </Row>
-              </div>
-              <!-- The meeting notepad (notepad.rs): docked beside the call. -->
-              <Row>
-                <Toggle
-                  bind:checked={cfg.meetingOpenNotepad}
-                  label="Open the notepad when a meeting starts"
-                  desc="Your notes, the live transcript and the summary, docked to the right of your screen"
-                  hint="It opens without taking the focus from your call. Closing it never stops the recording; reopen it from the meeting note."
-                />
-              </Row>
-              <Row>
-                <Toggle
-                  bind:checked={cfg.meetingSplitScreen}
-                  label="Split the screen when joining"
-                  desc="Moves the call's window left of the notepad, so you see both at once"
-                  hint="When a recording starts during a call Yap detected, it moves the call app's window to the left of the screen."
-                  disabled={!cfg.meetingOpenNotepad}
-                />
-              </Row>
-              <Row label="Meeting shortcut" desc={meetingShortcutDesc}>
-                <HotkeyInput
-                  bind:value={cfg.meetingHotkey}
-                  clearable
-                  validate={(s) => validateHotkey('meetingHotkey', s)}
-                  oncapturingchange={(on) => onHotkeyCapturing('meetingHotkey', on)}
-                />
-              </Row>
-              <!-- The calendar (calendar.rs): a heads-up card before each
-                   meeting on a connected calendar; the calendars themselves are
-                   in Settings → Connectors. -->
-              <Row
-                label="Notify before scheduled meetings start"
-                desc="A heads-up before each meeting on your calendar, with Join & take notes"
-              >
-                <Select
-                  bind:value={cfg.meetingReminder}
-                  options={REMINDER_OPTIONS}
-                  ariaLabel="Notify before scheduled meetings start"
-                />
-              </Row>
-              <Row
-                label="Calendar"
-                desc={calendar.connections.length
-                  ? `Connected: ${calendar.connections.map((c) => c.label).join(', ')}`
-                  : 'Connect Google, Outlook or any calendar for meeting names and attendees'}
-              >
-                <Button variant="secondary" size="sm" onclick={() => (section = 'connectors')}>
-                  {calendar.connections.length ? 'Manage' : 'Connect calendar'}
-                </Button>
-              </Row>
-              <Row>
-                <Toggle
-                  bind:checked={cfg.meetingLiveTranscript}
-                  label="Show live transcript"
-                  desc="See the words appear in the notepad while a meeting records"
-                  hint="Off, the notepad's Transcript tab stays quiet until you stop; Yap still transcribes as the meeting goes."
-                />
-              </Row>
-              <!-- Speaker diarization (diarize.rs): the same switch as in
-                   Speech-to-Text, where the models are. -->
-              <Row>
-                <SpeakersToggle
-                  bind:enabled={cfg.meetingDiarization}
-                  bind:model={cfg.diarizationModel}
-                  place="meetings"
-                  onopenmodels={() => {
-                    section = 'models';
-                    tick().then(() => document.getElementById('settings-speakers')?.scrollIntoView({ block: 'start' }));
-                  }}
-                />
-              </Row>
-              <Row>
-                <p class="consent">Recording a call? Let people know you're taking notes.</p>
-              </Row>
-            </Group>
-          </div>
-
+              <kbd>Esc</kbd>
+            </div>
+          {/if}
+        {#if searching}
+          <SearchResults {query} groups={resultGroups} bind:selected {cfg} onopen={openResult} />
+        {:else if section === 'general'}
+          <GeneralPage {cfg} {barHiddenUntil} {goto} />
+        {:else if section === 'dictation'}
+          <DictationPage {cfg} {devices} {outputs} {onshowview} />
+        {:else if section === 'shortcuts'}
+          <ShortcutsPage {cfg} {goto} />
+        {:else if section === 'meetings'}
+          <MeetingsPage {cfg} {goto} bind:apps={meetingApps} />
         {:else if section === 'commands'}
           <!-- Commands (pipeline.rs run_agent; Wispr Flow's Command Mode and
                its old "Hey Flow"): the AI does what you say and types the
@@ -2113,46 +1769,39 @@
             </p>
             <p class="crossref">
               Want an answer you can hear instead?
-              <button class="xlink" onclick={() => (section = 'voice')}>Voice Assistant</button>
+              <button class="set-link" onclick={() => goto('voice')}>Voice Assistant</button>
             </p>
           </div>
-          <div id="settings-wake-word">
-            <Group title="Say its name">
-              <Row>
-                <Toggle
-                  bind:checked={cfg.llmScopes.voiceAgent.enabled}
-                  label="Answer to its name in any dictation"
-                  desc={`Say "${wakeName}, …" while you dictate anywhere and the AI does what you ask instead of typing your words`}
-                />
-              </Row>
-              <Row>
-                {#snippet children()}
-                  <div class="agentname">
-                    <span class="anlabel">Agent name</span>
-                    <AgentNameField {cfg} />
-                  </div>
-                {/snippet}
-              </Row>
-            </Group>
-          </div>
-          <Group title="Rewrite selected text">
-            <Row
-              label="Rewrite shortcut"
-              desc="Select text in any app, press this, and say how to change it: Yap rewrites it in place. With nothing selected, it writes new text where your cursor is"
-              hint="e.g. “make this a bulleted list”, “more formal”. Backspace clears."
-            >
-              <HotkeyInput
-                bind:value={cfg.editHotkey}
-                clearable
-                validate={(s) => validateHotkey('editHotkey', s)}
-                oncapturingchange={(on) => onHotkeyCapturing('editHotkey', on)}
+          <Group title="Say its name" id="settings-wake-word">
+            <Row setting="wake-word">
+              <Toggle
+                bind:checked={cfg.llmScopes.voiceAgent.enabled}
+                label="Answer to its name in any dictation"
+                desc={`Say "${wakeName}, …" while you dictate and the AI does what you ask, instead of typing your words`}
               />
             </Row>
-          </Group>
-          <Group title="Model and prompt">
-            <Row label="Which AI carries out Commands, and how" desc="Language Models → Commands. With “Answer to its name” off, the rewrite shortcut uses the Dictation Cleanup model">
-              <Button variant="secondary" size="sm" onclick={() => openScope('voiceAgent')}>Language Models → Commands</Button>
+            <Row label="Agent name" desc="Short and easy to say. Until you pick one, it's “Yap”" setting="agent-name">
+              <AgentNameField {cfg} />
             </Row>
+          </Group>
+          <Group title="Rewrite selected text" id="settings-rewrite">
+            <Row
+              label="Rewrite shortcut"
+              desc="Select text in any app, press it and say how to change it. With nothing selected, it writes where your cursor is"
+              hint="For example “make this a bulleted list” or “more formal”."
+              setting="rewrite-shortcut"
+            >
+              <SettingsHotkey {cfg} target="editHotkey" clearable />
+            </Row>
+          </Group>
+          <Group title="Model and prompt" id="settings-commands-model">
+            <LinkRow
+              label="Model and prompt"
+              desc="In Language Models. With “Answer to its name” off, the rewrite shortcut uses the cleanup model"
+              value={scopeModelLabel('voiceAgent')}
+              setting="commands-model"
+              onclick={() => openScope('voiceAgent')}
+            />
           </Group>
 
         {:else if section === 'voice'}
@@ -2174,127 +1823,117 @@
             </p>
             <p class="crossref">
               Want Yap to write something into the app you're in?
-              <button class="xlink" onclick={() => (section = 'commands')}>Commands</button>
+              <button class="set-link" onclick={() => goto('commands')}>Commands</button>
             </p>
           </div>
-          <div id="settings-assistant-shortcut">
-            <Group title="Assistant shortcut">
-              <Row
-                label="Assistant shortcut"
-                desc={cfg.recordingMode === 'pushToTalk'
-                  ? 'Hold it while you ask, or double-tap it to ask hands-free. It never types into the app you are in; press it while Yap speaks to cut in'
-                  : 'Press it, ask, press it again. It never types into the app you are in; press it while Yap speaks to cut in'}
-                hint="Answers are read aloud when Speak replies is on, and shown on the Yap bar otherwise. Paused during meetings and calls. Press Backspace to clear."
-              >
-                <HotkeyInput
-                  bind:value={cfg.assistantHotkey}
-                  clearable
-                  placeholder="Set a shortcut"
-                  validate={(s) => validateHotkey('assistantHotkey', s)}
-                  oncapturingchange={(on) => onHotkeyCapturing('assistantHotkey', on)}
-                />
-              </Row>
-              {#if !cfg.assistantHotkey}
-                <Row>
-                  <p class="gentle">Set an assistant shortcut to ask Yap from any app, even while its window is closed.</p>
-                </Row>
-              {/if}
+          <Group title="Assistant shortcut" id="settings-assistant-shortcut">
+            <Row
+              label="Assistant shortcut"
+              desc={cfg.recordingMode === 'pushToTalk'
+                ? 'Hold it while you ask, or double-tap it to ask hands-free. It never types into your app'
+                : 'Press it, ask, press it again. It never types into your app'}
+              hint="Press it while Yap speaks to cut in. Answers are read aloud with Speak replies on, and shown on the Yap bar otherwise. Paused during meetings and calls."
+              setting="assistant-shortcut"
+            >
+              <SettingsHotkey {cfg} target="assistantHotkey" clearable />
+            </Row>
+            {#if !cfg.assistantHotkey}
               <Row>
-                <Toggle
-                  bind:checked={cfg.assistantAnswerCard}
-                  label="Show the answer on the Yap bar"
-                  desc="While Yap reads the answer out, your question and its answer show above the bar. Off: just the voice, with ■ on the bar to stop it. An answer Yap couldn't read aloud still shows"
-                />
+                <p class="set-note">Set an assistant shortcut to ask Yap from any app, even while its window is closed.</p>
               </Row>
-            </Group>
-          </div>
+            {/if}
+            <Row setting="answer-card">
+              <Toggle
+                bind:checked={cfg.assistantAnswerCard}
+                label="Show the answer on the Yap bar"
+                desc="Your question and its answer, above the bar while Yap reads it out"
+                hint="Off: just the voice, with ■ on the bar to stop it. An answer Yap couldn't read aloud still shows."
+              />
+            </Row>
+          </Group>
           <!-- "Open Teams": apps installed on this PC (apps.rs). -->
           <OpenAppsSettings {cfg} />
           <!-- Looking things up on the web (web.rs), for Chat too. -->
-          <WebSearchSettings {cfg} />
-          <Group title="Spoken replies in Chat">
-            <Row>
+          <WebSearchSettings {cfg} {goto} />
+          <Group title="Spoken replies in Chat" id="settings-spoken-replies">
+            <Row setting="speak-replies">
               <Toggle
                 bind:checked={() => cfg.speakReplies, setSpeakReplies}
                 label="Speak replies"
-                desc="Yap reads its answers aloud, in Chat and from the assistant shortcut. When this is off, Yap never speaks. Same as Voice replies in Chat."
+                desc="Yap reads its answers aloud, in Chat and from the assistant shortcut. Off, Yap never speaks"
+                hint="The same switch as Voice replies in Chat."
               />
               <KokoroOffer bind:open={offerKokoro} {cfg} />
             </Row>
-            <Row label="When to speak" desc={SPEAK_WHEN_DESC[cfg.speakWhen] ?? SPEAK_WHEN_DESC.voice}>
+            <Row label="When to speak" desc={SPEAK_WHEN_DESC[cfg.speakWhen] ?? SPEAK_WHEN_DESC.voice} setting="speak-when">
               <Segmented bind:value={cfg.speakWhen} options={SPEAK_WHEN} label="When to speak" disabled={!cfg.speakReplies} />
             </Row>
-            <Row>
+            <Row setting="talk-back">
               <Toggle
                 bind:checked={cfg.talkBackHandsFree}
                 label="Talk back hands-free"
-                desc={fillHotkey("A question you dictate into Chat is sent as soon as you stop, and the answer is read out. Press the mic or {key} to ask the next one: it cuts Yap off mid-answer", cfg.hotkey)}
+                desc="A question you dictate into Chat is sent when you stop, and the answer read out"
+                hint={fillHotkey('Press the mic or {key} to ask the next one: it cuts Yap off mid-answer.', cfg.hotkey)}
                 disabled={!cfg.speakReplies}
               />
             </Row>
           </Group>
-          <Group title="Voice">
+          <Group title="Voice" id="settings-voice">
             <VoiceSettings {cfg} />
           </Group>
-          <Group title="Model">
-            <Row label="Which AI answers" desc="The same as Chat's: Language Models → Chat & Voice Assistant">
-              <Button variant="secondary" size="sm" onclick={() => openScope('chat')}>Language Models → Chat & Voice Assistant</Button>
-            </Row>
+          <Group title="Model" id="settings-assistant-model">
+            <LinkRow
+              label="Model"
+              desc="The same as Chat's, in Language Models"
+              value={scopeModelLabel('chat')}
+              setting="assistant-model"
+              onclick={() => openScope('chat')}
+            />
           </Group>
 
         {:else if section === 'models'}
           <div class="page-h">
             <h1>Speech-to-Text</h1>
-            <p>Pick the local model that turns your voice into text.</p>
+            <p>The model on this PC that turns your voice into text.</p>
           </div>
-          <Group title="Speech model">
-            <Row>
-              {#snippet children()}
-                <div class="mm-wrap"><ModelManager /></div>
-              {/snippet}
+          <!-- Your model first (with the red badge's reason, when there's
+               none), then the catalogue: ModelManager.svelte. -->
+          <ModelManager />
+          <!-- Speaker diarization's models + its switch (diarize.rs); the
+               Meetings page has the switch too and links here. -->
+          <Group title="Speakers in meetings" id="settings-speakers">
+            <Row setting="speakers">
+              <SpeakerModels bind:enabled={cfg.meetingDiarization} bind:model={cfg.diarizationModel} />
             </Row>
           </Group>
-          <!-- Speaker diarization's models + its switch (diarize.rs); General →
-               Meetings has the switch too and links here. -->
-          <div id="settings-speakers">
-            <Group title="Speakers in meetings">
-              <Row>
-                {#snippet children()}
-                  <SpeakerModels bind:enabled={cfg.meetingDiarization} bind:model={cfg.diarizationModel} />
-                {/snippet}
-              </Row>
-            </Group>
-          </div>
-          <Group title="Language">
+          <Group title="Language" id="settings-stt-language">
             <Row
               label="Language"
-              desc={langInfo.supportsLanguage
-                ? 'Spoken language — auto-detect works for most models'
-                : 'This model uses a fixed language'}
+              desc={langInfo.supportsLanguage ? 'The language you speak. Auto-detect works for most models' : 'This model uses a fixed language'}
+              setting="language"
             >
-              <Select
-                bind:value={cfg.selectedLanguage}
-                options={langOptions}
-                disabled={!langInfo.supportsLanguage}
-              />
+              <Select bind:value={cfg.selectedLanguage} options={langOptions} ariaLabel="Language" disabled={!langInfo.supportsLanguage} />
             </Row>
-            <Row>
+            <Row setting="translate">
               <Toggle
                 bind:checked={cfg.translateToEnglish}
                 label="Translate to English"
-                desc={langInfo.supportsTranslate
-                  ? 'Output English regardless of the spoken language'
-                  : 'This model can’t translate'}
+                desc={langInfo.supportsTranslate ? 'Output English whatever language you speak' : 'This model can’t translate'}
                 disabled={!langInfo.supportsTranslate}
               />
             </Row>
           </Group>
-          <Group title="Performance">
-            <Row>
-              <Toggle bind:checked={cfg.useGpu} label="GPU acceleration (Whisper)" desc="Run Whisper on your GPU via Vulkan — applies after restart" hint="ONNX models (Parakeet etc.) always use the GPU via DirectML." />
+          <Group title="Performance" id="settings-performance">
+            <Row setting="gpu">
+              <Toggle
+                bind:checked={cfg.useGpu}
+                label="GPU acceleration"
+                desc="Whisper models run on your graphics card. Applies after a restart"
+                hint="Parakeet and the other ONNX models always use the graphics card, through DirectML."
+              />
             </Row>
-            <Row label="Unload model when idle" desc="Free memory when not dictating — reloads on next use">
-              <Select bind:value={cfg.modelUnloadTimeout} options={UNLOAD_TIMEOUTS} />
+            <Row label="Unload model when idle" desc="Frees memory between dictations. It loads again for the next one" setting="unload">
+              <Select bind:value={cfg.modelUnloadTimeout} options={UNLOAD_TIMEOUTS} ariaLabel="Unload model when idle" />
             </Row>
           </Group>
 
@@ -2320,25 +1959,36 @@
               <ChatConfig {cfg} scope={cfg.llmScopes.chat} defaultPrompt={SCOPE_DEFAULTS.chat.prompt} />
             {/key}
           {:else}
-          <Group title="AI Cleanup">
-            <Row>
+          <Group title="Dictation cleanup" id="settings-cleanup">
+            <Row setting="cleanup-enable">
               <Toggle
                 bind:checked={cfg.postProcessEnabled}
-                label="Enable text cleanup"
-                desc="Use AI to remove filler words, fix grammar, and polish punctuation"
+                label="Clean up dictations with AI"
+                desc="Filler words out, grammar and punctuation fixed"
               />
             </Row>
-            <ModeSelector
-              bind:value={ppMode}
-              options={PP_MODES}
-              icon={provIcon}
-              onchange={onModeChange}
-              disabled={!cfg.postProcessEnabled}
-            />
+            {#if cfg.postProcessEnabled}
+              <ModeSelector bind:value={ppMode} options={PP_MODES} icon={provIcon} onchange={onModeChange} />
+            {/if}
           </Group>
 
+          {#if !cfg.postProcessEnabled}
+            <!-- Off: one line instead of a screen of greyed-out choices. -->
+            <p class="set-note offnote">Turn on cleanup to pick a model. Until then, Yap types exactly what you said.</p>
+          {:else}
+          {#if cleanupNeedsKey}
+            <!-- The red badge's reason, said where it's fixed. -->
+            <div class="set-banner" role="status" data-testid="cleanup-key-banner">
+              <span class="dot" aria-hidden="true"></span>
+              <span class="text">
+                Add your {PP_PROVIDER_LABELS[cfg.ppProvider] || cfg.ppProvider} API key
+                <span>Cleanup is on, but without a key Yap types your words as they are.</span>
+              </span>
+              <Button size="sm" onclick={focusKey}>Add key</Button>
+            </div>
+          {/if}
           {#if ppMode === 'cloud'}
-            <div class="cloudcfg" class:off={!cfg.postProcessEnabled}>
+            <div class="cloudcfg">
               <PillTabs bind:value={cloudProvider} options={CLOUD_TABS} onchange={onCloudProviderChange} />
 
               {#if cloudProvider === 'custom'}
@@ -2368,7 +2018,7 @@
                 </div>
               {:else}
                 <div class="keyhead">
-                  <h4>API Key</h4>
+                  <h4>API key</h4>
                   <a
                     class="keylink"
                     href={PP_CLOUD_MODELS[cloudProvider].keyUrl}
@@ -2376,7 +2026,7 @@
                     target="_blank"
                     rel="noreferrer"
                   >
-                    Get your API key →
+                    Get your API key
                   </a>
                 </div>
                 {#if maskedKey && !keyEditing}
@@ -2391,20 +2041,20 @@
                     <button class="keyedit" onclick={() => (keyEditing = true)}>edit</button>
                   </div>
                 {:else}
-                  <div class="keymask editing">
-                    <Input type="password" bind:value={cfg.ppApiKey} oninput={stashApiKey} disabled={!cfg.postProcessEnabled} placeholder="sk-…" />
+                  <div class="keymask editing" bind:this={keyBox}>
+                    <Input type="password" bind:value={cfg.ppApiKey} oninput={stashApiKey} placeholder="sk-…" ariaLabel="API key" />
                     {#if maskedKey}
                       <button class="keyedit" onclick={() => (keyEditing = false)}>done</button>
                     {/if}
                   </div>
                 {/if}
 
-                <h4 class="selhead">Select Model</h4>
-                <ModelPicker provider={cloudProvider} bind:value={cfg.ppModel} disabled={!cfg.postProcessEnabled} />
+                <h4 class="selhead">Model</h4>
+                <ModelPicker provider={cloudProvider} bind:value={cfg.ppModel} />
               {/if}
             </div>
           {:else if ppMode === 'selfhosted'}
-            <div class="cloudcfg" class:off={!cfg.postProcessEnabled}>
+            <div class="cloudcfg">
               <div class="panelcard">
                 <Row label="Base URL" desc="Your Ollama or LM Studio endpoint">
                   {#snippet children()}
@@ -2431,11 +2081,11 @@
               </div>
             </div>
           {:else}
-            <div class="cloudcfg" class:off={!cfg.postProcessEnabled}>
+            <div class="cloudcfg">
               <div class="localbrowser">
                 <div class="lb-head">
                   <span class="lb-title">On-device models</span>
-                  <span class="lb-sub">Downloaded once, then run fully offline on your PC via Mozilla llamafile — no key, no cloud.</span>
+                  <span class="lb-sub">Downloaded once, then they run on this PC (Mozilla llamafile): no key, nothing sent.</span>
                 </div>
                 {#if localLlm.slowOnThisPc}
                   {@const small = (localLlm.curated || []).find((c) => c.isDefault)}
@@ -2554,29 +2204,27 @@
           {/if}
 
           {#if cleanupShowThinking}
-            <div class="thinkrow" class:off={!cfg.postProcessEnabled}>
-              <Toggle
-                bind:checked={cfg.ppDisableThinking}
-                label="Disable thinking output"
-                desc="Strip the model's reasoning blocks from the cleaned text — for reasoning models like Qwen3 or GPT-OSS"
-                disabled={!cfg.postProcessEnabled}
-              />
-            </div>
-          {/if}
-
-          <div class="spellgroup" id="settings-cleanup-spelling">
-            <Group title="Spelling">
-              <Row>
-                <RegionSpelling {cfg} disabled={!cfg.postProcessEnabled} />
+            <Group bare>
+              <Row setting="cleanup-thinking">
+                <Toggle
+                  bind:checked={cfg.ppDisableThinking}
+                  label="Hide the model's thinking"
+                  desc="Strips a reasoning model's thinking (Qwen3, GPT-OSS) from the cleaned text"
+                />
               </Row>
             </Group>
-          </div>
+          {/if}
+          {/if}
 
-          <div class="ps-head">
-            <h4>Prompt Studio</h4>
-            <p>View, customize, and test the system prompt that powers text cleanup</p>
-          </div>
-          <div class="ps-wrap">
+          <Group title="Spelling" id="settings-cleanup-spelling">
+            <Row setting="cleanup-spelling">
+              <RegionSpelling {cfg} disabled={!cfg.postProcessEnabled} />
+            </Row>
+          </Group>
+
+          {#if cfg.postProcessEnabled}
+          <Group title="Prompt Studio" id="settings-prompt-studio" desc="View, change and test what the cleanup model is told" bare>
+            <div class="ps-wrap" data-setting="prompt-studio">
             <PromptStudio
               bind:prompt={cfg.ppPrompt}
               bind:preset={cfg.ppPreset}
@@ -2590,17 +2238,19 @@
               onpersist={persist}
               ontested={refreshUsage}
             />
-          </div>
+            </div>
+          </Group>
 
-          {#if cfg.postProcessEnabled}
-            <Group title="Smart routing">
+            <Group title="Smart routing" id="settings-smart-routing">
               <Row
                 label="Only clean up in apps with a rule"
-                desc="Dictation stays raw everywhere except the apps you list below"
-                hint="When off, the cleanup above applies everywhere and rules just override it per app."
+                desc="Dictations stay as they are everywhere else"
+                hint="Off: the cleanup above applies everywhere, and rules change it per app."
+                setting="smart-routing"
               >
                 <Toggle
                   checked={cfg.routingScope === 'selected_apps_only'}
+                  ariaLabel="Only clean up in apps with a rule"
                   onchange={(v) => (cfg.routingScope = v ? 'selected_apps_only' : 'all_apps')}
                 />
               </Row>
@@ -2609,8 +2259,8 @@
                   <div class="routes">
                     <div class="routes-sub">Profiles</div>
                     <p class="note">
-                      Reusable cleanup styles — e.g. terse for chat, formal for email,
-                      code-aware for your editor. Edit one and every app using it updates.
+                      Cleanup styles to reuse: terse for chat, formal for email, careful with code.
+                      Change one and every app using it follows.
                     </p>
                     {#if cfg.cleanupProfiles.length > 0}
                       {#each cfg.cleanupProfiles as prof (prof.id)}
@@ -2622,17 +2272,13 @@
                           </div>
                           <Textarea bind:value={prof.prompt} rows={3} />
                           <div class="prof-model">
-                            <select
-                              class="route-pick"
+                            <Select
                               bind:value={prof.provider}
+                              options={PROFILE_PROVIDERS}
+                              ariaLabel="Which AI model runs this profile"
+                              wide
                               onchange={() => onProfileProviderChange(prof)}
-                              title="Which AI model runs this profile"
-                            >
-                              <option value="">Model: global setting</option>
-                              {#each PP_PROVIDERS as p (p.value)}
-                                <option value={p.value}>Model: {p.label}</option>
-                              {/each}
-                            </select>
+                            />
                             {#if prof.provider && prof.provider !== 'ondevice'}
                               <input class="route-input prof-inp" placeholder="Base URL (https://…/v1)" bind:value={prof.baseUrl} />
                               <input
@@ -2659,22 +2305,25 @@
                                 />
                               {/if}
                             {:else if prof.provider === 'ondevice'}
-                              <span class="prof-note">Runs on the built-in local model — private, no key needed.</span>
+                              <span class="prof-note">Runs on the on-device model: nothing leaves this PC, no key needed.</span>
                             {/if}
                           </div>
                         </div>
                       {/each}
                     {:else}
-                      <div class="empty">No profiles yet — add one, then assign it to an app below.</div>
+                      <div class="empty">No profiles yet. Add one, then give it to an app below.</div>
                     {/if}
                     <div class="route-add">
-                      <select class="route-pick" onchange={(e) => { addProfileFromPreset(e.currentTarget.value); e.currentTarget.value = ''; }}>
-                        <option value="">New from preset…</option>
-                        {#each PP_PRESETS.filter((p) => p.value !== 'custom') as p}
-                          <option value={p.value}>{p.label}</option>
-                        {/each}
-                      </select>
-                      <button class="add" onclick={() => addProfile()}>+ Blank profile</button>
+                      <Select
+                        bind:value={presetPick}
+                        options={PRESET_PICKS}
+                        ariaLabel="New profile from a preset"
+                        onchange={(v) => {
+                          if (v) addProfileFromPreset(v);
+                          presetPick = '';
+                        }}
+                      />
+                      <Button variant="secondary" size="sm" onclick={() => addProfile()}>Blank profile</Button>
                     </div>
                   </div>
                 {/snippet}
@@ -2684,20 +2333,21 @@
                   <div class="routes">
                     <div class="routes-sub">App rules</div>
                     <p class="note">
-                      Assign a profile to each app. Yap matches the app you were focused
-                      on when you started dictating.
+                      A profile for each app: Yap goes by the app you were in when you started dictating.
                     </p>
                     {#if cfg.appRoutes.length > 0}
                       {#each cfg.appRoutes as route, i (i)}
                         <div class="route-rule">
                           <input class="route-label" placeholder="App name" bind:value={route.label} />
                           <span class="route-proc">{route.app}</span>
-                          <select class="route-pick grow" bind:value={route.profileId}>
-                            <option value="">Default cleanup</option>
-                            {#each cfg.cleanupProfiles as p (p.id)}
-                              <option value={p.id}>{p.name}</option>
-                            {/each}
-                          </select>
+                          <span class="grow">
+                            <Select
+                              bind:value={route.profileId}
+                              options={[{ value: '', label: 'Default cleanup' }, ...cfg.cleanupProfiles.map((p) => ({ value: p.id, label: p.name }))]}
+                              ariaLabel={`Profile for ${route.label || route.app}`}
+                              fill
+                            />
+                          </span>
                           <button class="rm" title="Remove rule" aria-label="Remove rule" onclick={() => removeRoute(i)}>×</button>
                         </div>
                       {/each}
@@ -2706,26 +2356,26 @@
                     {/if}
                     <div class="route-add">
                       {#if recentApps.length > 0}
-                        <select class="route-pick" bind:value={newRouteApp}>
-                          <option value="">Recent apps…</option>
-                          {#each recentApps as app}
-                            <option value={app}>{app}</option>
-                          {/each}
-                        </select>
+                        <Select
+                          bind:value={newRouteApp}
+                          options={[{ value: '', label: 'Recent apps…' }, ...recentApps.map((a) => ({ value: a, label: a }))]}
+                          ariaLabel="An app you've dictated into"
+                        />
                       {/if}
                       <input
                         class="route-input"
                         placeholder="or type an app, e.g. slack.exe"
+                        aria-label="App"
                         bind:value={newRouteApp}
                       />
-                      <button class="add" disabled={!newRouteApp.trim()} onclick={() => addRoute()}>+ Add rule</button>
+                      <Button variant="secondary" size="sm" disabled={!newRouteApp.trim()} onclick={() => addRoute()}>Add rule</Button>
                     </div>
                   </div>
                 {/snippet}
               </Row>
             </Group>
 
-            <Group title="Usage today">
+            <Group title="Usage today" id="settings-usage">
               <Row>
                 {#snippet children()}
                   {@const prov = usage.providers?.[cfg.ppProvider] ?? { tokens: 0, requests: 0 }}
@@ -2740,7 +2390,7 @@
                         <span class="usage-stat">{prov.requests}</span>
                       </div>
                       <p class="usage-caption">
-                        The built-in local AI only — processed entirely on this PC, free, no limits.
+                        The on-device model: on this PC, free, no limits.
                       </p>
                     </div>
                   {:else if cfg.ppProvider === 'local'}
@@ -2754,7 +2404,7 @@
                         <span class="usage-stat">{prov.requests}</span>
                       </div>
                       <p class="usage-caption">
-                        Your own local server only — no usage limits.
+                        Your own server: no usage limits.
                       </p>
                     </div>
                   {:else if cfg.ppProvider === 'groq'}
@@ -2764,7 +2414,7 @@
                       <div class="usage-bar">
                         <div class="usage-row">
                           <span class="usage-label">Tokens today</span>
-                          <span class="usage-stat" style="color:{usageColor(tPct)}">
+                          <span class="usage-stat">
                             {tPct}%&nbsp;·&nbsp;{fmtK(usage.tokens)} / {fmtK(usage.tokenCap)}
                           </span>
                         </div>
@@ -2775,7 +2425,7 @@
                       <div class="usage-bar">
                         <div class="usage-row">
                           <span class="usage-label">Requests today</span>
-                          <span class="usage-stat" style="color:{usageColor(rPct)}">
+                          <span class="usage-stat">
                             {rPct}%&nbsp;·&nbsp;{usage.requests} / {usage.requestCap}
                           </span>
                         </div>
@@ -2804,357 +2454,51 @@
                 {/snippet}
               </Row>
             </Group>
-          {/if}
 
-          <Group title="Privacy">
-            <Row>
-              {#snippet children()}
-                <p class="pp-privacy">
-                  {#if cfg.ppProvider === 'ondevice'}
-                    Cleanup runs entirely on this PC (built-in local AI) — your
-                    transcript never leaves your machine.
-                  {:else if cfg.ppProvider === 'local'}
-                    Cleanup goes to your own local server (Ollama / LM Studio) —
-                    it stays on your machine.
-                  {:else}
-                    Cleanup sends your transcript to the chosen cloud endpoint.
-                    Choose "Built-in local AI" to keep everything on your machine.
-                  {/if}
-                </p>
-              {/snippet}
-            </Row>
-          </Group>
-          {/if}
-
-        {:else if section === 'history'}
-          <div class="page-h">
-            <h1>History</h1>
-            <p>Your dictations — stored only on this PC. Stats live in the Insights tab.</p>
-          </div>
-          <Group title="History">
-            <Row>
-              <Toggle
-                bind:checked={cfg.historyEnabled}
-                label="Keep local history"
-                desc="Stored only on this machine — powers the stats above"
-              />
-            </Row>
-            <Row>
-              {#snippet children()}
-                <div class="hist-list">
-                  {#if historyItems.length}
-                    {#each historyItems as item}
-                      <div class="hist-row">
-                        <div class="hist-text">{item.text}</div>
-                        <div class="hist-meta">
-                          {fmtWhen(item.ts)}{item.app ? ` · ${item.app}` : ''}{item.words
-                            ? ` · ${item.words}w`
-                            : ''}
-                        </div>
-                      </div>
-                    {/each}
-                  {:else}
-                    <p class="hist-empty">Nothing recorded yet.</p>
-                  {/if}
-                </div>
-              {/snippet}
-            </Row>
-            <Row>
-              {#snippet children()}
-                <Button variant="secondary" size="sm" onclick={clearHistory}>Clear history</Button>
-              {/snippet}
-            </Row>
-          </Group>
-
-        {:else if section === 'advanced'}
-          <div class="page-h">
-            <h1>Advanced</h1>
-            <p>Output behaviour, system integration, and the dictation dictionary.</p>
-          </div>
-          <Group title="Output">
-            <Row>
-              <Toggle
-                bind:checked={cfg.smartSpacing}
-                label="Match the text around the cursor"
-                desc="Fit spaces, capitals and full stops to where you're typing. Yap reads a little of the text beside your cursor, on this PC only"
-              />
-            </Row>
-            <Row>
-              <Toggle
-                bind:checked={cfg.chatNoFullStop}
-                label="Leave the full stop off chat messages"
-                desc="In Slack, Discord, WhatsApp, Teams and other chat apps, a message of one or two sentences ends without a full stop, the way people type them"
-              />
-            </Row>
-            <Row>
-              <Toggle
-                bind:checked={cfg.appendTrailingSpace}
-                label="Append trailing space"
-                desc={cfg.smartSpacing
-                  ? "Only where Yap can't read the text around the cursor"
-                  : 'Add a space after each transcription'}
-              />
-            </Row>
-            <Row>
-              <Toggle
-                bind:checked={cfg.autoSubmit}
-                label="Auto-submit (press Enter)"
-                desc={cfg.terminalMode
-                  ? 'Press Enter after pasting the text. In a terminal, only for coding tools like Claude Code'
-                  : 'Press Enter after pasting the text'}
-              />
-            </Row>
-            <Row>
-              <Toggle
-                bind:checked={cfg.voiceEnter}
-                label="Say “press enter” to send"
-                desc="End a dictation with “press enter” or “press return” and Yap leaves the words out and presses the key after pasting"
-              />
-            </Row>
-            {#if cfg.autoSubmit || cfg.voiceEnter}
-              <Row label="Auto-submit key" desc="Which key to press after pasting, for auto-submit and “press enter”">
-                <Select bind:value={cfg.autoSubmitKey} options={AUTO_SUBMIT_KEYS} />
-              </Row>
+          <p class="set-note pp-privacy">
+            {#if cfg.ppProvider === 'ondevice'}
+              Cleanup runs on this PC: your words never leave it.
+            {:else if cfg.ppProvider === 'local'}
+              Cleanup goes to your own server.
+            {:else}
+              Cleanup sends the text of each dictation to {PP_PROVIDER_LABELS[cfg.ppProvider] || 'the provider'}. Pick Local to keep it on this PC.
             {/if}
-            <Row>
-              <Toggle
-                bind:checked={cfg.terminalMode}
-                label="Safer pasting into terminals"
-                desc="In Windows Terminal, PowerShell and other terminals, a dictation pastes as one line and Enter is pressed only when you say “press enter”, so nothing runs by itself. Claude Code and Codex in Windows Terminal keep line breaks"
-              />
-            </Row>
-            <Row>
-              <Toggle
-                bind:checked={cfg.restoreClipboard}
-                label="Restore clipboard after paste"
-                desc="Put your previous clipboard contents back. Dictations never show up in Win+V clipboard history"
-              />
-            </Row>
-          </Group>
+            <button class="set-link" onclick={() => goto('privacy#leaves')}>Privacy & data</button>
+          </p>
+          {/if}
+          {/if}
 
-          <Group title="System">
-            <Row>
-              <Toggle bind:checked={cfg.autostart} label="Start on login" desc="Launch Yap when you sign in" onchange={onAutostart} />
-            </Row>
-          </Group>
-
-          <Group title="Dictation dictionary">
-            <Row
-              label="Dictionary"
-              desc="Moved to the main sidebar — corrections and snippets live on their own page"
-            >
-              {#snippet children()}
-                <span class="dict-moved">Close settings and pick <strong>Dictionary</strong></span>
-              {/snippet}
-            </Row>
-          </Group>
-
-          <Group title="Debug Logging">
-            <Row>
-              {#snippet children()}
-                <div class="dbg">
-                  <!-- The switch and its line say it (no toast on top). -->
-                  <Toggle
-                    bind:checked={cfg.debugLogging}
-                    label="Debug mode"
-                    desc={cfg.debugLogging
-                      ? 'Logging audio processing, AI requests, and system operations'
-                      : 'Enable to capture detailed diagnostic information'}
-                  />
-
-                  <div class="dbg-row">
-                    <span class="dbg-label">Current log file</span>
-                    {#if logInfo?.file}
-                      <button class="dbg-file" title={logInfo.file} onclick={copyLogPath}>
-                        <span class="mono">{logFileName(logInfo.file)}</span>
-                        <span class="copyhint">{logCopied ? 'Copied!' : 'copy path'}</span>
-                      </button>
-                    {:else}
-                      <span class="dbg-none">No log file yet</span>
-                    {/if}
-                  </div>
-
-                  <div class="dbg-actions">
-                    <Button onclick={() => invoke('open_logs_folder').catch(() => {})}>
-                      Open Logs Folder
-                    </Button>
-                  </div>
-
-                  <div class="dbg-note">
-                    <p class="dbg-cap">What gets logged</p>
-                    <p class="dbg-items">
-                      Audio pipeline · Transcription pipeline · AI cleanup requests · Hotkey &amp;
-                      injection events · Error details · System diagnostics
-                    </p>
-                    <p class="dbg-cap">Sharing logs for support</p>
-                    <p class="dbg-items">
-                      1. Reproduce the issue while Debug mode is enabled &nbsp;2. Open the logs
-                      folder &nbsp;3. Attach the most recent log file to your bug report
-                    </p>
-                    <p class="dbg-foot">
-                      Logs never contain API keys. Transcribed text can appear in them (stored
-                      only on this PC) — skim a log before attaching it to a public report.
-                      Debug mode writes more detail to disk; disable it when you're not
-                      troubleshooting.
-                    </p>
-                  </div>
-                </div>
-              {/snippet}
-            </Row>
-          </Group>
+        {:else if section === 'privacy'}
+          <PrivacyPage {cfg} {goto} />
 
         {:else if section === 'about'}
-          <div class="page-h">
-            <h1>About</h1>
-            <p>Version, updates, and project links.</p>
-          </div>
-          <Group title="About Yap">
-            <Row>
-              {#snippet children()}
-                <div class="about">
-                  <div class="abrand">
-                    <img class="ablogo" src={yapIcon} alt="" aria-hidden="true" />
-                    <div>
-                      <div class="aname">Yap <span class="ver">{APP_VERSION}</span></div>
-                      <div class="atag">A tiny local voice-dictation app.</div>
-                    </div>
-                  </div>
-                  <p class="aline">
-                    Press your hotkey, speak, press again — Yap transcribes locally
-                    with Whisper and types the text into whatever window is focused.
-                  </p>
-                  <p class="aprivacy">
-                    🔒 Transcription is 100% local — your voice never leaves this machine.
-                    If you point AI cleanup at a cloud provider, only the transcript text
-                    is sent to it; the built-in local AI keeps that on your PC too.
-                  </p>
-                  <p class="adir">
-                    Config &amp; models live in
-                    {#if portable}the <code>Data</code> folder next to <code>yap.exe</code> (portable){:else}<code>%APPDATA%/yap/</code>{/if}.
-                  </p>
-                  <div class="arow">
-                    <a class="alink" href="https://github.com/nayballs/Yap" onclick={createExternalLinkHandler('https://github.com/nayballs/Yap')} target="_blank" rel="noreferrer">GitHub →</a>
-                    <button class="alink abtn" onclick={() => invoke('open_onboarding')}>
-                      Show setup guide again →
-                    </button>
-                  </div>
-                </div>
-              {/snippet}
-            </Row>
-          </Group>
-
-          <Group title="Updates">
-            <Row>
-              {#snippet children()}
-                <div class="upd">
-                  <div class="upd-main">
-                    <div class="upd-text" aria-live="polite">
-                      {#if updates.status === 'installing'}
-                        <span class="upd-title">Restarting to update…</span>
-                        <span class="upd-sub">Installing {updates.version}. Yap will be right back.</span>
-                      {:else if updates.status === 'ready' && updates.deferred}
-                        <span class="upd-title">Restarting after this dictation</span>
-                        <span class="upd-sub">Yap installs {updates.version} as soon as you finish dictating.</span>
-                      {:else if updates.status === 'ready'}
-                        <span class="upd-title avail">Yap {updates.version} is ready to install</span>
-                        <span class="upd-sub">Downloaded in the background. Restarting takes a few seconds.</span>
-                      {:else if updates.status === 'downloading' || (updates.status === 'available' && updates.installQueued)}
-                        <span class="upd-title">Downloading Yap {updates.version}… {updates.progress}%</span>
-                        <span class="upd-sub">{updates.installQueued ? 'Yap restarts as soon as it’s done.' : 'You can keep working.'}</span>
-                      {:else if updates.status === 'available' && updates.portable}
-                        <span class="upd-title avail">Yap {updates.version} is available</span>
-                        <span class="upd-sub">Portable installs update by hand — download the new version from GitHub.</span>
-                      {:else if updates.status === 'available'}
-                        <span class="upd-title avail">Yap {updates.version} is available</span>
-                        <span class="upd-sub">
-                          {updates.error ||
-                            (updates.metered
-                              ? 'Not downloaded yet — you’re on a metered connection.'
-                              : 'Download it and restart to update.')}
-                        </span>
-                      {:else if updates.status === 'checking'}
-                        <span class="upd-title">Checking for updates…</span>
-                        <span class="upd-sub">Yap {updates.currentVersion}</span>
-                      {:else if updates.checked === 'uptodate'}
-                        <span class="upd-title ok">You’re up to date ✓</span>
-                        <span class="upd-sub">Yap {updates.currentVersion} is the latest version.</span>
-                      {:else if updates.checked === 'error'}
-                        <span class="upd-title">Couldn’t check for updates</span>
-                        <span class="upd-sub">{updates.checkError}</span>
-                      {:else}
-                        <span class="upd-title">Yap {updates.currentVersion || APP_VERSION}</span>
-                        <span class="upd-sub">
-                          {updates.lastChecked ? `Last checked ${formatAgo(updates.lastChecked)}` : 'Not checked yet'}
-                        </span>
-                      {/if}
-                    </div>
-                    <div class="upd-actions">
-                      {#if updates.status === 'ready' && !updates.deferred}
-                        <button class="upd-btn" onclick={installUpdate}>Restart to update</button>
-                      {:else if updates.status === 'available' && updates.portable}
-                        <button class="upd-btn" onclick={openRelease}>Get it on GitHub</button>
-                      {:else if updates.status === 'available' && !updates.installQueued}
-                        <button class="upd-btn" onclick={installUpdate}>Download and restart</button>
-                      {:else if updates.status === 'idle'}
-                        <button class="upd-btn ghost" onclick={checkForUpdates}>Check for updates</button>
-                      {/if}
-                    </div>
-                  </div>
-                  {#if updates.status === 'downloading'}
-                    <div class="upd-bar"><div class="upd-fill" style={`width:${updates.progress}%`}></div></div>
-                  {/if}
-                  {#if updates.error && updates.status === 'ready'}
-                    <p class="upd-err">{updates.error}</p>
-                  {/if}
-                  {#if updates.notes && ['ready', 'available', 'downloading'].includes(updates.status)}
-                    <div class="upd-notes">
-                      <div class="upd-notes-h">What’s new in {updates.version}</div>
-                      <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/markdown.js). -->
-                      <div class="upd-notes-b">{@html renderMarkdown(updates.notes)}</div>
-                    </div>
-                  {/if}
-                  {#if updates.version && ['ready', 'available', 'downloading'].includes(updates.status)}
-                    <a class="alink upd-link" href={updates.releaseUrl} onclick={createExternalLinkHandler(updates.releaseUrl)} target="_blank" rel="noreferrer">Release page on GitHub →</a>
-                  {/if}
-                </div>
-              {/snippet}
-            </Row>
-            <Row>
-              <Toggle
-                bind:checked={cfg.updateChecksEnabled}
-                label="Check for updates automatically"
-                desc="Checks GitHub every few hours and downloads new versions in the background. Yap never restarts without asking."
-              />
-            </Row>
-          </Group>
+          <AboutPage {cfg} version={APP_VERSION} {goto} />
 
         {:else if section === 'connectors'}
           <div class="page-h">
             <h1>Connectors</h1>
-            <p>Connecting your calendar gives you a reminder before each meeting and notes with the meeting's name and who's in it. Yap reads it straight from this PC.</p>
+            <p>A calendar gives you a reminder before each meeting, and notes with its name and who's in it. Yap reads it straight from this PC.</p>
           </div>
-          <ConnectorsSection />
+          <ConnectorsSection {goto} />
 
         {:else if section === 'mcp'}
           <div class="page-h">
-            <h1>MCP</h1>
-            <p>
-              Connect Yap to your favourite AI apps, so you can ask about your meeting transcripts
-              and notes. Yap's MCP can't see your dictations, and everything stays on this PC.
-            </p>
+            <h1>AI apps (MCP)</h1>
+            <p>Let your AI apps read your meeting transcripts and notes, through Yap on this PC. Never your dictations.</p>
           </div>
-          <McpSection bind:cfg />
+          <McpSection bind:cfg {goto} />
 
         {:else if section === 'account'}
           <div class="page-h">
             <h1>Account</h1>
-            <p>Optional. Yap works fully offline without an account; sign in only for the extras that need one.</p>
+            <p>Optional. Yap works fully offline without one; sign in only for the extras that need it.</p>
           </div>
-          <AccountSection />
+          <div data-setting="account">
+            <AccountSection />
+          </div>
         {/if}
+        </div>
       </div>
-
-      <StatusBar {saved} />
     {:else}
       <p class="loading">Loading…</p>
     {/if}
@@ -3191,99 +2535,175 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     border: none;
-    border-radius: var(--yap-r-sm);
+    border-radius: var(--yap-r);
     background: none;
-    color: var(--yap-muted-55);
+    color: var(--yap-fg-62);
     cursor: pointer;
     transition:
       color var(--yap-dur) ease,
       background var(--yap-dur) ease;
   }
   .modal-x:hover {
-    background: var(--yap-s2);
+    background: var(--yap-raised-soft);
     color: var(--yap-fg);
   }
+  .modal-x:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
+  }
   .modal-x svg {
-    width: 14px;
-    height: 14px;
+    width: 15px;
+    height: 15px;
   }
 
+  /* ---- the nav: search, the pages by scope, the account and the version ---- */
   .sidebar {
-    flex: 0 0 202px;
+    flex: 0 0 224px;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    min-height: 0;
     padding: 14px 10px 10px;
+    box-sizing: border-box;
     border-right: 1px solid var(--yap-border-subtle);
     background: var(--yap-bg);
   }
-  .brand {
+  .search {
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 4px 8px 0;
+    gap: 8px;
+    height: 32px;
+    padding: 0 6px 0 10px;
+    margin: 0 2px 10px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+    color: var(--yap-fg-62);
+    transition:
+      border-color var(--yap-dur) ease,
+      box-shadow var(--yap-dur) ease;
   }
-  .brandlogo {
-    width: 22px;
-    height: 22px;
-    border-radius: 7px;
-    object-fit: contain;
+  .search:hover {
+    border-color: var(--yap-border-hover);
+  }
+  .search:focus-within {
+    border-color: var(--yap-border-hover);
+    box-shadow: var(--yap-focus);
+  }
+  .search :global(svg) {
     flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
   }
-  .brandname {
-    font-size: 14px;
-    font-weight: 650;
+  .search input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    border: none;
+    outline: none;
+    background: none;
+    font: inherit;
+    font-size: 12.5px;
     color: var(--yap-fg);
-    letter-spacing: -0.01em;
   }
-  .brand-divider {
-    height: 1px;
-    background: var(--yap-border-subtle);
-    margin: 12px 4px 10px;
+  .search input::placeholder {
+    color: var(--yap-fg-62);
+  }
+  .search input::-webkit-search-cancel-button {
+    display: none;
+  }
+  .search kbd {
+    flex: 0 0 auto;
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 15px;
+    padding: 0 4px;
+    color: var(--yap-fg-62);
+    border: 1px solid var(--yap-border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--yap-s1);
+  }
+  /* The rail's search, at the top of the page it opens over. */
+  .search.inpage {
+    margin: 0 0 22px;
+    height: 36px;
+  }
+  .navlist {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin: 0 -4px;
+    padding: 0 4px 6px;
   }
   .navcap {
-    font-size: 10px;
+    padding: 0 10px;
+    margin: 12px 0 3px;
+    font-size: 11.5px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.09em;
-    color: var(--yap-muted-55);
-    padding: 0 8px;
-    margin: 10px 0 4px;
+    color: var(--yap-muted);
   }
-  .navcap:first-of-type {
-    margin-top: 0;
-  }
-  /* Wispr-weight nav: labels read in near-ink medium even when inactive. */
   .navitem {
+    position: relative;
     display: flex;
+    flex: 0 0 auto;
     align-items: center;
     gap: 10px;
-    text-align: left;
-    background: none;
-    border: none;
-    color: var(--yap-fg-80);
+    height: 31px;
     padding: 0 8px;
-    height: 33px;
+    border: none;
     border-radius: var(--yap-r);
-    cursor: pointer;
+    background: none;
+    color: var(--yap-fg-80);
     font: inherit;
     font-size: 13px;
-    font-weight: 550;
+    font-weight: 520;
+    text-align: left;
+    cursor: pointer;
     transition:
       background var(--yap-dur) ease,
-      color var(--yap-dur) ease;
+      color var(--yap-dur) ease,
+      opacity var(--yap-dur) ease;
+  }
+  .navitem:hover {
+    color: var(--yap-fg);
+    background: var(--yap-raised-soft);
+  }
+  .navitem:focus-visible,
+  .acct:focus-visible,
+  .railsearch:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
+  }
+  /* The active page: a white pill with the amber icon chip. */
+  .navitem.active {
+    color: var(--yap-fg);
+    font-weight: 620;
+    background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-sm);
+  }
+  .navitem.active:focus-visible {
+    box-shadow: var(--yap-focus);
+  }
+  /* A search with no results on a page dims it. */
+  .navitem.dim {
+    opacity: 0.45;
   }
   .navicon {
-    width: 24px;
-    height: 24px;
-    flex: 0 0 24px;
-    border-radius: var(--yap-r-sm);
+    width: 22px;
+    height: 22px;
+    flex: 0 0 22px;
+    border-radius: 6px;
     display: grid;
     place-items: center;
-    color: var(--yap-fg-45);
+    color: var(--yap-fg-62);
     transition:
       background var(--yap-dur) ease,
       color var(--yap-dur) ease;
@@ -3292,23 +2712,14 @@
     width: 15px;
     height: 15px;
   }
+  .navitem.active .navicon {
+    background: var(--yap-primary-tint);
+    color: var(--yap-link);
+  }
   .navlabel {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .navitem:hover {
-    color: var(--yap-fg);
-    background: var(--yap-raised-soft);
-  }
-  .navitem.active {
-    color: var(--yap-fg);
-    font-weight: 650;
-    background: var(--yap-raised-soft);
-  }
-  .navitem.active .navicon {
-    background: var(--yap-primary-tint);
-    color: var(--yap-primary);
   }
   /* Wispr-style red attention count. */
   .navbadge {
@@ -3317,6 +2728,7 @@
     min-width: 16px;
     height: 16px;
     padding: 0 4px;
+    box-sizing: border-box;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3327,42 +2739,44 @@
     font-weight: 700;
     line-height: 1;
   }
+  /* How many search results a page has. */
+  .navcount {
+    margin-left: auto;
+    padding: 0 7px;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-raised);
+    color: var(--yap-fg-80);
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 17px;
+  }
 
   .side-spacer {
     flex: 1 1 auto;
-  }
-  .acct-rule {
-    height: 1px;
-    background: var(--yap-border-subtle);
-    margin: 8px 4px;
+    min-height: 8px;
   }
   .acct {
     display: flex;
+    flex: 0 0 auto;
     align-items: center;
     gap: 10px;
-    padding: 8px;
-    border-radius: var(--yap-r-lg);
-    cursor: pointer;
-    border: 1px dashed var(--yap-border);
-    background: transparent;
     width: 100%;
+    padding: 10px 8px 6px;
+    margin-top: 2px;
+    border: none;
+    border-top: 1px solid var(--yap-border-subtle);
+    border-radius: 0;
+    background: transparent;
     font: inherit;
     text-align: left;
-    transition:
-      background var(--yap-dur) ease,
-      border-color var(--yap-dur) ease;
+    cursor: pointer;
   }
-  .acct:hover {
-    background: var(--yap-raised-soft);
-    border-color: var(--yap-border-hover);
+  .acct:hover .l1,
+  .acct.active .l1 {
+    color: var(--yap-fg);
   }
-  .acct.active {
-    border-style: solid;
-    background: var(--yap-raised-soft);
-  }
-  .acct.signed {
-    border-style: solid;
-    border-color: var(--yap-border-subtle);
+  .acct:hover .acct-avatar {
+    background: var(--yap-border-subtle);
   }
   .acct-avatar img {
     width: 100%;
@@ -3371,27 +2785,31 @@
     object-fit: cover;
   }
   .acct-ini {
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 700;
-    color: var(--yap-primary-hover);
+    color: var(--yap-link);
   }
   .acct.signed .acct-avatar {
     background: var(--yap-primary-tint);
     overflow: hidden;
   }
   .acct-avatar {
-    width: 30px;
-    height: 30px;
-    flex: 0 0 30px;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
     border-radius: var(--yap-r-full);
     background: var(--yap-raised);
     display: grid;
     place-items: center;
-    color: var(--yap-fg-45);
+    color: var(--yap-fg-62);
+    transition: background var(--yap-dur) ease;
+  }
+  .acct.active .acct-avatar {
+    box-shadow: 0 0 0 2px var(--yap-bg), 0 0 0 3.5px var(--yap-primary);
   }
   .acct-avatar :global(svg) {
-    width: 17px;
-    height: 17px;
+    width: 16px;
+    height: 16px;
   }
   .acct-who {
     min-width: 0;
@@ -3401,18 +2819,135 @@
   .acct-who .l1 {
     font-size: 12.5px;
     color: var(--yap-fg-80);
-    font-weight: 500;
-    line-height: 1.25;
+    font-weight: 560;
+    line-height: 1.3;
   }
   .acct-who .l2 {
     font-size: 11.5px;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
     line-height: 1.3;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .navfoot {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    padding: 4px 8px 0;
+    font-size: 11px;
+    color: var(--yap-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .navfoot .saved {
+    color: var(--yap-success-text);
+    font-weight: 600;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+  .navfoot .saved.show {
+    opacity: 1;
+  }
 
+  /* ---- 860 × 600: the nav as an icon rail (concept 5) ---- */
+  .shell.rail .sidebar {
+    flex-basis: 58px;
+    align-items: center;
+    padding: 12px 8px 8px;
+  }
+  .railsearch {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 32px;
+    margin-bottom: 8px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+    color: var(--yap-fg-62);
+    cursor: pointer;
+  }
+  .railsearch:hover,
+  .railsearch.on {
+    color: var(--yap-fg);
+    border-color: var(--yap-border-hover);
+  }
+  .railsearch :global(svg) {
+    width: 15px;
+    height: 15px;
+  }
+  .shell.rail .navlist {
+    align-items: center;
+    margin: 0;
+    padding: 0;
+    scrollbar-width: none;
+  }
+  .shell.rail .navitem {
+    width: 38px;
+    height: 31px;
+    padding: 0;
+    justify-content: center;
+  }
+  .railsep {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 1px;
+    margin: 4px 0;
+    background: var(--yap-border);
+  }
+  .navdot {
+    position: absolute;
+    top: 5px;
+    right: 6px;
+    width: 7px;
+    height: 7px;
+    border-radius: 99px;
+    background: #e5484d;
+    box-shadow: 0 0 0 1.5px var(--yap-bg);
+  }
+  .shell.rail .acct {
+    width: auto;
+    padding: 8px 4px 4px;
+    justify-content: center;
+  }
+  .railsaved {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--yap-success-text);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+  .railsaved.show {
+    opacity: 1;
+  }
+  .railtip {
+    position: fixed;
+    z-index: 100;
+    transform: translateY(-50%);
+    padding: 5px 9px;
+    border-radius: 7px;
+    background: var(--yap-ink);
+    color: var(--yap-ink-fg);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    box-shadow: var(--yap-shadow-menu);
+    pointer-events: none;
+  }
+  .railtip::before {
+    content: '';
+    position: absolute;
+    left: -4px;
+    top: 50%;
+    margin-top: -4px;
+    border: 4px solid transparent;
+    border-right-color: var(--yap-ink);
+    border-left: 0;
+  }
+
+  /* ---- the page: one content column (700 px) on every page ---- */
   main {
     flex: 1 1 auto;
     display: flex;
@@ -3423,29 +2958,17 @@
   .content {
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: 26px 30px 40px;
+    padding: 32px 44px 48px 48px;
   }
-  .page-h {
-    margin: 0 0 22px;
+  .inner {
+    max-width: var(--yap-settings-w);
+  }
+  .shell.rail .content {
+    padding: 26px 30px 36px 34px;
   }
   /* Scope "bubbles" row (Dictation Cleanup / Commands / Note Formatting / Chat & Voice Assistant). */
   .scope-tabs {
-    margin: 0 0 20px;
-  }
-  /* Serif page titles (Wispr's settings pages — EB Garamond). */
-  .page-h h1 {
-    margin: 0;
-    font-family: var(--yap-font-display);
-    font-size: 25px;
-    font-weight: 550;
-    letter-spacing: -0.005em;
-    color: var(--yap-fg);
-  }
-  .page-h p {
-    margin: 4px 0 0;
-    font-size: 12.5px;
-    color: var(--yap-muted-70);
-    line-height: 1.5;
+    margin: -6px 0 26px;
   }
 
   /* ---- Language Models: cloud/self-hosted/local config (OpenWhispr layout) ---- */
@@ -3455,18 +2978,12 @@
     gap: 10px;
     margin-bottom: 22px;
   }
-  .cloudcfg.off {
-    opacity: 0.5;
-    pointer-events: none;
-  }
+  /* A custom or self-hosted endpoint's fields: rows like the rest. */
   .panelcard {
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-lg);
-    background: var(--yap-s2);
-    overflow: hidden;
+    border-top: 1px solid var(--yap-rule);
   }
-  .panelcard > :global(* + *) {
-    border-top: 1px solid var(--yap-border-subtle);
+  .panelcard > :global(*) {
+    border-bottom: 1px solid var(--yap-rule);
   }
   .keyhead {
     display: flex;
@@ -3477,20 +2994,28 @@
   .keyhead h4,
   .selhead {
     margin: 0;
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 13.5px;
+    font-weight: 560;
     color: var(--yap-fg);
   }
   .selhead {
     margin-top: 6px;
   }
   .keylink {
-    font-size: 11.5px;
-    color: var(--yap-primary-hover);
-    text-decoration: none;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--yap-link);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--yap-link) 40%, transparent);
+    text-underline-offset: 2px;
   }
   .keylink:hover {
-    text-decoration: underline;
+    text-decoration-color: currentColor;
+  }
+  .keylink:focus-visible {
+    outline: none;
+    border-radius: 2px;
+    box-shadow: var(--yap-focus);
   }
   .keymask {
     display: flex;
@@ -3498,12 +3023,14 @@
     justify-content: space-between;
     gap: 10px;
     padding: 8px 10px;
-    border: 1px solid var(--yap-border-subtle);
+    border: 1px solid var(--yap-border);
     border-radius: var(--yap-r);
-    background: var(--yap-s1);
+    background: var(--yap-s2);
   }
   .keymask.editing {
-    padding: 4px 10px 4px 4px;
+    padding: 0;
+    border: none;
+    background: none;
   }
   .keymask.editing :global(.input) {
     flex: 1 1 auto;
@@ -3524,19 +3051,21 @@
   .keyedit {
     border: none;
     background: none;
-    padding: 0;
+    padding: 2px 4px;
+    border-radius: 4px;
     font: inherit;
-    font-size: 11.5px;
-    color: var(--yap-muted);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--yap-link);
     cursor: pointer;
     transition: color var(--yap-dur) ease;
   }
+  .keyedit:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
+  }
   .keyedit:hover {
     color: var(--yap-fg);
-  }
-
-  .mm-wrap {
-    width: 100%;
   }
 
   /* Commands / Voice Assistant: what the page does, in one example, and the
@@ -3545,16 +3074,15 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    margin: -8px 0 22px;
+    margin: -8px 0 28px;
     padding: 12px 14px;
     border: 1px solid var(--yap-border-subtle);
-    border-left: 3px solid var(--yap-primary-line);
     border-radius: var(--yap-r-lg);
-    background: var(--yap-s2);
+    background: var(--yap-raised-soft);
   }
   .explain p {
     margin: 0;
-    font-size: 12.5px;
+    font-size: 13px;
     line-height: 1.55;
   }
   .explain .example {
@@ -3570,233 +3098,49 @@
     gap: 4px 8px;
     color: var(--yap-muted);
   }
-  .xlink {
-    padding: 0;
-    border: none;
-    background: none;
-    color: var(--yap-primary);
-    font: inherit;
-    font-weight: 650;
-    cursor: pointer;
-  }
-  .xlink::after {
-    content: ' →';
-  }
-  .xlink:hover {
-    text-decoration: underline;
-  }
-  /* "Set an assistant shortcut…": a quiet nudge while none is set. */
-  .gentle {
-    margin: 0;
-    padding: 8px 10px;
-    border-radius: var(--yap-r);
-    background: var(--yap-primary-wash);
-    color: var(--yap-fg-80);
-    font-size: 12px;
-    line-height: 1.5;
-  }
-  /* General → Activation: the ways to the other shortcuts. */
-  .morekeys {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  /* Commands: the agent's name. */
-  .agentname {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .anlabel {
-    color: var(--yap-fg);
-    font-size: 13px;
-    font-weight: 650;
-  }
-
-  /* dictionary moved to the ControlPanel sidebar (styles live in
-     DictionaryView.svelte); .note/.rm/.empty stay — profiles + rules use them */
-  .dict-moved {
-    font-size: 12px;
-    color: var(--yap-muted);
-  }
-
-  /* Debug Logging (Advanced) */
-  .dbg {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    width: 100%;
-  }
-  .dbg-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .dbg-label {
-    font-size: 12.5px;
-    font-weight: 500;
-  }
-  .dbg-file {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 8px;
-    max-width: 340px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-sm);
-    background: var(--yap-s1);
-    padding: 4px 9px;
-    color: var(--yap-muted);
-    font: inherit;
-    cursor: pointer;
-  }
-  .dbg-file:hover {
-    border-color: var(--yap-border-hover);
-  }
-  .dbg-file .mono {
-    font-family: ui-monospace, Consolas, monospace;
-    font-size: 11.5px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .copyhint {
-    flex: 0 0 auto;
-    font-size: 10.5px;
-    color: var(--yap-primary);
-  }
-  .dbg-none {
-    font-size: 11.5px;
-    color: var(--yap-muted-55);
-  }
-  .dbg-actions {
-    display: flex;
-  }
-  .dbg-note {
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-lg);
-    background: var(--yap-s1);
-    padding: 10px 13px;
-  }
-  .dbg-cap {
-    margin: 6px 0 2px;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--yap-muted-55);
-  }
-  .dbg-cap:first-child {
-    margin-top: 0;
-  }
-  .dbg-items {
-    margin: 0;
-    font-size: 11.5px;
-    color: var(--yap-muted);
-    line-height: 1.55;
-  }
-  .dbg-foot {
-    margin: 8px 0 0;
-    font-size: 10.5px;
-    color: var(--yap-muted-55);
-    line-height: 1.55;
-  }
   .note {
-    color: var(--yap-muted-55);
-    font-size: 11px;
+    color: var(--yap-muted);
+    font-size: 12.5px;
     margin: 0 0 10px;
     line-height: 1.5;
   }
-  .consent {
-    color: var(--yap-muted-55);
-    font-size: 12px;
-    margin: 0;
-    line-height: 1.5;
+  /* Cleanup off: one line where its choices were. */
+  .offnote {
+    margin: -18px 0 30px;
   }
-  /* General → Meetings → "Ask about calls in": one row per call app, [its
-     icon] [name] [switch], two columns when the card is wide enough (each
-     column ≥ 190px). */
-  .callapps {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .callapps-label {
-    color: var(--yap-fg);
-    font-size: 13px;
-    font-weight: 650;
-  }
-  .callapps-desc {
-    color: var(--yap-muted-70);
-    font-size: 11.5px;
-    line-height: 1.5;
-  }
-  .callapps-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(max(190px, calc((100% - 32px) / 2)), 1fr));
-    gap: 9px 32px;
-    margin-top: 10px;
-  }
-  .callapps-grid :global(.toggle-row .label) {
-    font-weight: 500;
-  }
-  .callapp {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-  .callapp :global(.toggle-row) {
-    flex: 1;
-    min-width: 0;
+  .pp-privacy {
+    margin: -10px 0 0;
   }
   .rm {
     background: none;
     border: none;
-    color: var(--yap-muted-55);
+    border-radius: 4px;
+    color: var(--yap-fg-62);
     cursor: pointer;
     font-size: 17px;
     line-height: 1;
   }
   .rm:hover {
-    color: #ef4444;
+    color: var(--yap-danger);
+  }
+  .rm:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
   }
   .empty {
-    color: var(--yap-muted-55);
-    font-size: 12px;
+    color: var(--yap-muted);
+    font-size: 12.5px;
     padding: 4px 0 8px;
   }
-  .add {
-    margin-top: 8px;
-    background: none;
-    border: 1px dashed var(--yap-border);
-    color: var(--yap-muted);
-    border-radius: 6px;
-    padding: 6px 10px;
-    cursor: pointer;
-    font-size: 12px;
-  }
-  .add:hover {
-    color: var(--yap-fg);
-    border-color: var(--yap-primary);
-  }
-  .add:disabled {
-    opacity: 0.5;
-    cursor: default;
-    border-color: var(--yap-border);
-    color: var(--yap-muted-55);
-  }
-
   /* Smart routing (profiles + per-app rules) */
   .routes {
     width: 100%;
   }
   .routes-sub {
     color: var(--yap-fg);
-    font-size: 13px;
-    font-weight: 600;
-    margin-bottom: 4px;
+    font-size: 13.5px;
+    font-weight: 560;
+    margin-bottom: 2px;
   }
   .route-rule {
     display: flex;
@@ -3811,16 +3155,17 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .route-pick.grow {
+  .route-rule .grow {
     flex: 1 1 auto;
     min-width: 0;
   }
   .route {
     border: 1px solid var(--yap-border);
-    border-radius: 8px;
-    padding: 10px;
+    border-radius: var(--yap-r-lg);
+    padding: 10px 12px;
     margin-bottom: 10px;
     background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-sm);
   }
   .route-head {
     display: flex;
@@ -3830,22 +3175,24 @@
   }
   .route-label {
     flex: 0 0 auto;
-    width: 140px;
-    background: var(--yap-s1);
+    width: 150px;
+    background: var(--yap-s2);
     border: 1px solid var(--yap-border);
-    border-radius: 6px;
+    border-radius: var(--yap-r);
     color: var(--yap-fg);
-    padding: 5px 8px;
+    padding: 6px 9px;
     font: inherit;
-    font-size: 13px;
+    font-size: 12.5px;
   }
   .route-label:focus {
     outline: none;
-    border-color: var(--yap-primary);
+  }
+  .route-label:focus-visible {
+    box-shadow: var(--yap-focus);
   }
   .route-proc {
     flex: 1 1 auto;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
     font-size: 12px;
     font-family: ui-monospace, monospace;
   }
@@ -3863,8 +3210,8 @@
     font-size: 12px;
   }
   .prof-note {
-    color: var(--yap-muted-55);
-    font-size: 12px;
+    color: var(--yap-muted);
+    font-size: 12.5px;
   }
   .route-add {
     display: flex;
@@ -3872,27 +3219,26 @@
     gap: 8px;
     flex-wrap: wrap;
   }
-  .route-add .add {
-    margin-top: 0;
-  }
-  .route-pick,
   .route-input {
-    background: var(--yap-s1);
+    background: var(--yap-s2);
     border: 1px solid var(--yap-border);
-    border-radius: 6px;
+    border-radius: var(--yap-r);
     color: var(--yap-fg);
-    padding: 6px 8px;
+    height: 32px;
+    box-sizing: border-box;
+    padding: 0 10px;
     font: inherit;
-    font-size: 13px;
+    font-size: 12.5px;
   }
   .route-input {
     flex: 1 1 160px;
     min-width: 140px;
   }
-  .route-pick:focus,
   .route-input:focus {
     outline: none;
-    border-color: var(--yap-primary);
+  }
+  .route-input:focus-visible {
+    box-shadow: var(--yap-focus);
   }
 
   /* AI cleanup */
@@ -3907,15 +3253,16 @@
     padding: 0;
     border: none;
     background: none;
-    color: var(--accent, var(--yap-primary));
-    font-size: inherit;
+    color: var(--yap-link);
+    font: inherit;
+    font-weight: 600;
     cursor: pointer;
     text-decoration: underline;
     text-underline-offset: 2px;
   }
   .ondevice-err {
-    color: #fca5a5;
-    font-size: 12px;
+    color: var(--yap-danger);
+    font-size: 12.5px;
   }
 
   /* On-device model browser (curated downloadable cleanup models). */
@@ -3930,12 +3277,12 @@
     gap: 2px;
   }
   .lb-title {
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 13.5px;
+    font-weight: 560;
     color: var(--yap-fg);
   }
   .lb-sub {
-    font-size: 11.5px;
+    font-size: 12.5px;
     color: var(--yap-muted);
     line-height: 1.45;
   }
@@ -3957,8 +3304,8 @@
       background var(--yap-dur) ease;
   }
   .lb-card.sel {
-    border-color: var(--yap-primary-line);
-    background: var(--yap-primary-wash);
+    border-color: var(--yap-border-hover);
+    box-shadow: var(--yap-shadow-sm);
   }
   .lb-card.menuopen {
     border-color: var(--yap-border-hover);
@@ -4010,13 +3357,13 @@
     flex-wrap: wrap;
   }
   .lb-name {
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--yap-fg);
   }
   .lb-size {
-    font-size: 11px;
-    color: var(--yap-muted-55);
+    font-size: 12px;
+    color: var(--yap-muted);
     font-variant-numeric: tabular-nums;
   }
   .lb-context {
@@ -4027,22 +3374,22 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--yap-primary);
+    color: var(--yap-link);
     background: var(--yap-primary-wash);
     padding: 1px 6px;
     border-radius: var(--yap-r-full);
   }
   .lb-learn {
-    font-size: 11px;
-    color: var(--yap-primary);
+    font-size: 12px;
+    color: var(--yap-link);
     text-decoration: none;
   }
   .lb-learn:hover {
     text-decoration: underline;
   }
   .lb-blurb {
-    font-size: 11.5px;
-    color: var(--yap-muted-70);
+    font-size: 12.5px;
+    color: var(--yap-muted);
     line-height: 1.4;
   }
   .lb-progress {
@@ -4052,7 +3399,7 @@
     gap: 4px;
   }
   .lb-plabel {
-    font-size: 10.5px;
+    font-size: 11.5px;
     color: var(--yap-muted);
     font-variant-numeric: tabular-nums;
   }
@@ -4065,7 +3412,7 @@
   .lb-bar span {
     display: block;
     height: 100%;
-    background: var(--yap-primary);
+    background: var(--yap-ink);
     transition: width 0.2s ease;
   }
   .lb-action {
@@ -4083,10 +3430,10 @@
     padding: 0 11px;
     border-radius: var(--yap-r);
     border: 1px solid var(--yap-border);
-    background: transparent;
+    background: var(--yap-s2);
     color: var(--yap-fg-80);
     font: inherit;
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     transition:
@@ -4094,14 +3441,17 @@
       color var(--yap-dur) ease,
       background var(--yap-dur) ease;
   }
-  .lb-dl {
-    border-color: var(--yap-primary-line);
-    color: var(--yap-primary);
-    background: var(--yap-primary-wash);
-  }
+  /* The same quiet Download as the speech models' (ModelRow). */
   .lb-dl svg {
-    width: 13px;
-    height: 13px;
+    width: 12px;
+    height: 12px;
+  }
+  .lb-dl:focus-visible,
+  .lb-use:focus-visible,
+  .lb-del:focus-visible,
+  .lb-later:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
   }
   .lb-dl:hover:not(:disabled),
   .lb-use:hover:not(:disabled) {
@@ -4133,16 +3483,16 @@
     height: 13px;
   }
   .lb-del:hover {
-    color: #fca5a5;
-    border-color: #fca5a5;
+    color: var(--yap-danger);
+    border-color: color-mix(in srgb, var(--yap-danger) 45%, var(--yap-border));
   }
   .lb-activetag {
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 600;
-    color: var(--yap-success);
+    color: var(--yap-success-text);
   }
   .lb-busy {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--yap-muted);
   }
   /* A quiet line under the heading: the bigger model offered once, or a
@@ -4152,10 +3502,10 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 6px 10px;
-    font-size: 11.5px;
+    font-size: 12.5px;
     line-height: 1.45;
     color: var(--yap-fg);
-    background: var(--yap-primary-wash);
+    background: var(--yap-raised-soft);
     border-radius: var(--yap-r-md, 8px);
     padding: 8px 10px;
   }
@@ -4167,9 +3517,10 @@
   }
   .lb-later {
     border: 0;
+    border-radius: 4px;
     background: none;
-    color: var(--yap-muted);
-    font-size: 11.5px;
+    color: var(--yap-fg-62);
+    font-size: 12px;
     cursor: pointer;
     padding: 2px 4px;
   }
@@ -4178,8 +3529,8 @@
   }
   .lb-byo {
     margin: 2px 0 0;
-    font-size: 11.5px;
-    color: var(--yap-muted-70);
+    font-size: 12.5px;
+    color: var(--yap-muted);
     line-height: 1.45;
   }
   .lb-byo code {
@@ -4189,78 +3540,10 @@
     padding: 1px 5px;
     border-radius: var(--yap-r-sm);
   }
-  .thinkrow {
-    margin: 4px 0 2px;
-    transition: opacity var(--yap-dur) ease;
-  }
-  .thinkrow.off {
-    opacity: 0.55;
-    pointer-events: none;
-  }
-  /* Prompt Studio section header + wrapper (the card styles itself). */
-  /* Dictation cleanup's "Spelling" group, between the model and Prompt Studio. */
-  .spellgroup {
-    margin-top: 18px;
-  }
-  .ps-head {
-    margin: 0 0 9px;
-  }
-  .ps-head h4 {
-    margin: 0;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--yap-fg);
-  }
-  .ps-head p {
-    margin: 3px 0 0;
-    font-size: 11.5px;
-    color: var(--yap-muted-70);
-    line-height: 1.5;
-  }
   .ps-wrap {
-    margin-bottom: 22px;
+    margin-top: 6px;
+    scroll-margin-top: 16px;
   }
-  .pp-privacy {
-    width: 100%;
-    margin: 0;
-    color: var(--yap-muted);
-    font-size: 12.5px;
-    line-height: 1.6;
-  }
-
-  /* History (the stats dashboard moved to the Insights view) */
-  .hist-list {
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    max-height: 320px;
-    overflow-y: auto;
-  }
-  .hist-row {
-    background: var(--yap-s1);
-    border: 1px solid var(--yap-border);
-    border-radius: 6px;
-    padding: 8px 10px;
-  }
-  .hist-text {
-    color: var(--yap-fg);
-    font-size: 13px;
-    line-height: 1.45;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .hist-meta {
-    margin-top: 3px;
-    font-size: 11px;
-    color: var(--yap-muted-55);
-  }
-  .hist-empty {
-    margin: 0;
-    color: var(--yap-muted);
-    font-size: 12.5px;
-  }
-
   /* Usage meter (Pulse-style daily bars) */
   .usage {
     width: 100%;
@@ -4292,7 +3575,7 @@
   .usage .track {
     width: 100%;
     height: 6px;
-    background: var(--yap-s1);
+    background: var(--yap-raised);
     border-radius: 999px;
     overflow: hidden;
   }
@@ -4309,214 +3592,18 @@
   }
   .usage-caption {
     margin: 2px 0 0;
-    color: var(--yap-muted-55);
-    font-size: 11px;
+    color: var(--yap-muted);
+    font-size: 12px;
   }
   .usage-fine {
     margin: 0;
-    color: var(--yap-muted-55);
-    font-size: 11px;
+    color: var(--yap-muted);
+    font-size: 12px;
     line-height: 1.5;
-  }
-
-  /* about */
-  .about {
-    width: 100%;
-  }
-  .abrand {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .ablogo {
-    width: 44px;
-    height: 44px;
-    border-radius: 10px;
-    object-fit: contain;
-    flex: 0 0 auto;
-  }
-  .aname {
-    font-size: 15px;
-    font-weight: 600;
-  }
-  .ver {
-    color: var(--yap-muted-55);
-    font-weight: 400;
-    font-size: 12px;
-    margin-left: 4px;
-  }
-  .atag {
-    color: var(--yap-muted);
-    font-size: 12px;
-    margin-top: 2px;
-  }
-  .aline {
-    color: var(--yap-muted);
-    font-size: 12.5px;
-    line-height: 1.6;
-    margin: 14px 0 0;
-  }
-  .aprivacy {
-    color: var(--yap-primary);
-    font-size: 12.5px;
-    margin: 12px 0 0;
-  }
-  .adir {
-    color: var(--yap-muted-55);
-    font-size: 12px;
-    margin: 10px 0 0;
-  }
-  .adir code {
-    color: var(--yap-muted);
-    background: var(--yap-s1);
-    border: 1px solid var(--yap-border);
-    border-radius: 4px;
-    padding: 1px 5px;
-  }
-  .alink {
-    display: inline-block;
-    margin-top: 14px;
-    color: var(--yap-primary-hover);
-    text-decoration: none;
-    font-size: 12.5px;
-  }
-  .arow {
-    display: flex;
-    align-items: center;
-    gap: 18px;
-  }
-  /* A button that reads like .alink (for actions, e.g. re-run onboarding). */
-  .abtn {
-    background: none;
-    border: none;
-    padding: 0;
-    font: inherit;
-    font-size: 12.5px;
-    cursor: pointer;
-  }
-  .alink:hover {
-    text-decoration: underline;
-  }
-
-  /* updates */
-  .upd {
-    width: 100%;
-  }
-  .upd-main {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    flex-wrap: wrap;
-  }
-  .upd-text {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-  }
-  .upd-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--yap-fg);
-  }
-  .upd-title.avail {
-    color: var(--yap-primary);
-  }
-  .upd-title.ok {
-    color: var(--yap-success);
-  }
-  .upd-sub {
-    font-size: 12px;
-    color: var(--yap-muted);
-  }
-  .upd-actions {
-    flex: 0 0 auto;
-  }
-  .upd-err {
-    margin: 8px 0 0;
-    font-size: 12px;
-    color: var(--yap-danger);
-  }
-  .upd-notes {
-    margin-top: 12px;
-    padding: 10px 12px;
-    border-radius: var(--yap-r);
-    background: var(--yap-s3);
-    border: 1px solid var(--yap-border-subtle);
-  }
-  .upd-notes-h {
-    font-size: 11px;
-    font-weight: 650;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--yap-muted);
-    margin-bottom: 4px;
-  }
-  .upd-notes-b {
-    max-height: 180px;
-    overflow-y: auto;
-    font-size: 12.5px;
-    line-height: 1.5;
-    color: var(--yap-fg-80);
-    user-select: text;
-  }
-  .upd-notes-b :global(:is(h2, h3, h4, h5)) {
-    margin: 6px 0 2px;
-    font-size: 12.5px;
-    font-weight: 700;
-    color: var(--yap-fg);
-  }
-  .upd-notes-b :global(p) {
-    margin: 0 0 6px;
-  }
-  .upd-notes-b :global(:is(ul, ol)) {
-    margin: 0 0 6px;
-    padding-left: 18px;
-  }
-  .upd-notes-b :global(:last-child) {
-    margin-bottom: 0;
-  }
-  .upd-link {
-    display: inline-block;
-    margin-top: 10px;
-  }
-  .upd-btn {
-    background: var(--yap-ink, var(--yap-primary));
-    color: var(--yap-ink-fg, #fff);
-    border: none;
-    border-radius: 6px;
-    padding: 6px 12px;
-    cursor: pointer;
-    font-size: 12.5px;
-  }
-  .upd-btn:hover {
-    background: var(--yap-ink-hover, var(--yap-primary-hover));
-  }
-  .upd-btn.ghost {
-    background: var(--yap-s2);
-    color: var(--yap-fg);
-    border: 1px solid var(--yap-border);
-  }
-  .upd-btn.ghost:hover {
-    background: var(--yap-s3);
-    border-color: var(--yap-border-hover);
-  }
-  .upd-bar {
-    margin-top: 10px;
-    height: 6px;
-    border-radius: 3px;
-    background: var(--yap-border);
-    overflow: hidden;
-  }
-  .upd-fill {
-    height: 100%;
-    background: var(--yap-primary);
-    transition: width 0.15s ease;
   }
 
   .loading {
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
     padding: 20px;
   }
 </style>

@@ -1,5 +1,5 @@
-// Shared reactive model state so the ModelManager (Models section) and the
-// bottom StatusBar selector stay in sync — switching in one updates the other.
+// Shared reactive model state so the ModelManager (Speech-to-Text) and the
+// tray and Settings' attention badge stay in sync.
 import { invoke } from '@tauri-apps/api/core';
 
 export const modelStore = $state({

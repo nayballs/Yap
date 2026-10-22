@@ -171,13 +171,13 @@ test('Commands and the Voice Assistant: two pages that say what they do, with li
   await expect(name.getByPlaceholder('e.g. Jarvis, Nova, Atlas...')).toBeVisible();
   const rewrite = dialog.getByRole('group', { name: 'Rewrite selected text' });
   await expect(rewrite).toContainText('Rewrite shortcut');
-  await expect(rewrite.getByRole('button', { name: 'Click to set' })).toBeVisible();
+  await expect(rewrite.getByRole('button', { name: 'Set a shortcut' })).toBeVisible();
   // No spoken replies or voices: that's the Voice Assistant.
   await expect(dialog.getByRole('button', { name: 'Speak replies' })).toHaveCount(0);
   await shot(main, '10-settings-commands');
 
   // Its model: Language Models → Commands, which points back for the name.
-  await dialog.getByRole('button', { name: 'Language Models → Commands' }).click();
+  await dialog.getByRole('group', { name: 'Model and prompt' }).getByRole('button', { name: /^Model and prompt/ }).click();
   await expect(dialog.getByRole('heading', { level: 1, name: 'Language Models' })).toBeVisible();
   await expect(dialog.locator('.scope-tabs').getByRole('tab')).toHaveText([
     'Dictation Cleanup',
@@ -202,12 +202,14 @@ test('Commands and the Voice Assistant: two pages that say what they do, with li
   await dialog.getByRole('note').getByRole('button', { name: 'Commands' }).click();
   await expect(dialog.getByRole('heading', { level: 1, name: 'Commands' })).toBeVisible();
 
-  // General says where the other shortcuts are.
-  dialog = await openSettings(main, 'General');
-  const activation = dialog.getByRole('group', { name: 'Activation' });
-  await expect(activation).toContainText('Rewrite selected text: not set · Ask the Voice Assistant: not set');
-  await activation.getByRole('button', { name: 'Voice Assistant' }).click();
-  await expect(dialog.getByRole('heading', { level: 1, name: 'Voice Assistant' })).toBeVisible();
+  // Shortcuts has all four together, the two unset ones saying so.
+  dialog = await openSettings(main, 'Shortcuts');
+  const all = dialog.getByRole('group', { name: 'Global shortcuts' });
+  await expect(all.locator('[data-setting="shortcut-dictation"] kbd')).toHaveText(['F24']);
+  await expect(all.locator('[data-setting="shortcut-rewrite"]').getByRole('button', { name: 'Set a shortcut' })).toBeVisible();
+  await expect(all.locator('[data-setting="shortcut-assistant"]').getByRole('button', { name: 'Set a shortcut' })).toBeVisible();
+  await expect(all.locator('[data-setting="shortcut-meeting"] kbd')).toHaveText(['Win', 'Alt', 'M']);
+  await shot(main, '12b-settings-shortcuts');
   await closeSettings(main);
 });
 
@@ -234,14 +236,14 @@ test('the assistant shortcut: set in Settings, never one that clashes, and Chat 
   // F23: taken, saved, and the page's example names it.
   await pressKey(main, 'F23', 134);
   await expectStore(yap, 'config.json', (c) => c.assistantHotkey === 'kb:134');
-  await expect(group.getByRole('button', { name: /^F23$/ })).toBeVisible();
+  await expect(group.getByRole('button', { name: /^F23\s*Change$/ })).toBeVisible();
   await expect(group).not.toContainText('Set an assistant shortcut to ask Yap');
   await expect(dialog.getByRole('note')).toContainText('Press F23 in any app');
   await shot(main, '15-assistant-shortcut-set');
   // The rewrite shortcut can't take it now.
   await openSettings(main, 'Commands');
   const rewrite = dialog.getByRole('group', { name: 'Rewrite selected text' });
-  await rewrite.getByRole('button', { name: 'Click to set' }).click();
+  await rewrite.getByRole('button', { name: 'Set a shortcut' }).click();
   await pressKey(main, 'F23', 134);
   await expect(rewrite).toContainText('Already used by the assistant shortcut');
   await main.keyboard.press('Escape');
@@ -610,7 +612,7 @@ test('Settings → Voice Assistant: spoken replies, the engine, the voice and it
 
   // Its model is Chat's: Language Models → Chat & Voice Assistant, which
   // points back here.
-  await dialog.getByRole('group', { name: 'Model', exact: true }).getByRole('button', { name: 'Language Models → Chat & Voice Assistant' }).click();
+  await dialog.getByRole('group', { name: 'Model', exact: true }).getByRole('button', { name: /^Model/ }).click();
   await expect(dialog.getByRole('heading', { level: 1, name: 'Language Models' })).toBeVisible();
   await expect(dialog.getByRole('tab', { name: 'Chat & Voice Assistant' })).toHaveAttribute('aria-selected', 'true');
   await expect(dialog.getByText('The Voice Assistant asks this model too')).toBeVisible();

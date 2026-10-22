@@ -41,11 +41,11 @@
   );
 </script>
 
-<Group title="Appearance">
-  <Row label="Reading font" desc={READING_FONT_DESC[cfg.readingFont] ?? READING_FONT_DESC.default}>
+<Group title="Appearance" id="settings-appearance">
+  <Row label="Reading font" desc={READING_FONT_DESC[cfg.readingFont] ?? READING_FONT_DESC.default} setting="reading-font">
     <Select bind:value={cfg.readingFont} options={FONT_OPTIONS} ariaLabel="Reading font" />
   </Row>
-  <Row label="Text size" desc="For chats, notes and meeting notes">
+  <Row label="Text size" desc="For chats, notes and meeting notes" setting="text-size">
     <Segmented bind:value={cfg.readingSize} options={READING_SIZES} label="Text size" />
   </Row>
   <Row>
@@ -58,7 +58,7 @@
       <figcaption>Chats, notes and meeting notes read like this. Buttons and menus keep Yap’s font.</figcaption>
     </figure>
   </Row>
-  <Row label="Motion" desc={motionDesc}>
+  <Row label="Motion" desc={motionDesc} setting="motion">
     <Segmented bind:value={cfg.motion} options={MOTION_OPTIONS} label="Motion" />
   </Row>
 </Group>
@@ -69,7 +69,7 @@
     padding: 12px 14px;
     border: 1px solid var(--yap-border-subtle);
     border-radius: var(--yap-r);
-    background: var(--yap-s1);
+    background: var(--yap-s2);
   }
   .sample p {
     margin: 0;
@@ -80,8 +80,8 @@
   }
   .sample figcaption {
     margin-top: 6px;
-    color: var(--yap-muted-70);
-    font-size: 11.5px;
+    color: var(--yap-muted);
+    font-size: 12px;
     line-height: 1.5;
   }
 </style>

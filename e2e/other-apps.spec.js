@@ -1,4 +1,4 @@
-// Other apps' sound while you dictate, in Settings → General (mute.rs,
+// Other apps' sound while you dictate, in Settings → Dictation (mute.rs,
 // media_pause.rs): "Silence other apps while you dictate" where "Mute while
 // recording" was — a config from before carries its choice over (this
 // instance starts with the old `muteWhileRecording: true`) — and "Pause
@@ -16,7 +16,7 @@ test('the old "Mute while recording" is now "Silence other apps", with "Pause mu
   main,
   shot,
 }) => {
-  const dialog = await openSettings(main, 'General');
+  const dialog = await openSettings(main, 'Dictation');
   const silence = dialog.getByRole('button', { name: 'Silence other apps while you dictate' });
   const pause = dialog.getByRole('button', { name: 'Pause music and videos while you dictate' });
   await silence.scrollIntoViewIfNeeded();
@@ -24,8 +24,8 @@ test('the old "Mute while recording" is now "Silence other apps", with "Pause mu
   await expect(silence).toHaveAttribute('aria-pressed', 'true');
   await expect(pause).toHaveAttribute('aria-pressed', 'false');
   await expect(dialog.getByText('Mute while recording')).toHaveCount(0);
-  await expect(dialog).toContainText('Music, videos and games go quiet while you talk, then come back as they were');
-  await expect(dialog).toContainText("What's playing pauses when you start and plays again when you're done");
+  await expect(dialog).toContainText('Music, videos and games go quiet, then come back as they were');
+  await expect(dialog).toContainText("What's playing pauses, and plays again when you're done");
   await shot(main, '01-settings-other-apps');
 
   // Saved under the new names; the old one is gone from config.json.

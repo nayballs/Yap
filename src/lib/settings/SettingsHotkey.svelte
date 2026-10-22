@@ -1,0 +1,20 @@
+<script>
+  // One of the four global shortcuts, wherever Settings shows it: Yap's
+  // keycaps + Change (+ ✕ when it can be unset), checked against the other
+  // three, with the live binding paused while a new one is picked.
+  //
+  //   cfg:    Settings' config $state (auto-save does the saving).
+  //   target: 'hotkey' | 'editHotkey' | 'meetingHotkey' | 'assistantHotkey'.
+  import HotkeyInput from '../ui/HotkeyInput.svelte';
+  import { onHotkeyCapturing, validateHotkey } from './hotkeys.svelte.js';
+
+  let { cfg, target, clearable = false, placeholder = undefined } = $props();
+</script>
+
+<HotkeyInput
+  bind:value={cfg[target]}
+  {clearable}
+  {placeholder}
+  validate={(s) => validateHotkey(cfg, target, s)}
+  oncapturingchange={(on) => onHotkeyCapturing(cfg, target, on)}
+/>

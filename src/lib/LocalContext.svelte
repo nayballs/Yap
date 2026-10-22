@@ -126,7 +126,7 @@
     border-color: var(--yap-border-hover);
   }
   select:focus-visible {
-    outline: 2px solid var(--yap-primary);
+    outline: 2px solid var(--yap-focus-ring);
     outline-offset: 1px;
   }
   select:disabled {

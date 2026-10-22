@@ -633,6 +633,16 @@
       </Button>
     </div>
   {:else}
+    {#if !methods}
+      <!-- While Yap asks the account service which sign-ins it offers: the
+           buttons' places, and a quiet line (review #19). -->
+      <div class="providers skeleton" aria-hidden="true">
+        <span class="skel"></span>
+        <span class="skel"></span>
+        <span class="skel"></span>
+      </div>
+      <p class="checking" role="status"><span class="spinner small" aria-hidden="true"></span>Checking sign-in options…</p>
+    {/if}
     {#if offered.length}
       <div class="providers">
         {#each offered as id (id)}
@@ -854,7 +864,7 @@
 
 <style>
   .muted {
-    color: var(--yap-muted-70);
+    color: var(--yap-muted);
   }
   .small {
     font-size: 11.5px;
@@ -895,6 +905,24 @@
     margin-bottom: 2px;
   }
 
+  .providers.skeleton {
+    pointer-events: none;
+  }
+  .skel {
+    display: block;
+    height: 38px;
+    border-radius: var(--yap-r);
+    background: linear-gradient(90deg, var(--yap-raised-soft), var(--yap-s3), var(--yap-raised-soft));
+    border: 1px solid var(--yap-border-subtle);
+  }
+  .checking {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0 0;
+    font-size: 12.5px;
+    color: var(--yap-muted);
+  }
   .providers {
     display: flex;
     flex-direction: column;
@@ -940,7 +968,7 @@
     gap: 10px;
     max-width: 340px;
     margin: 14px 0;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
     font-size: 11.5px;
   }
   .or::before,
@@ -1000,7 +1028,7 @@
   .fine {
     margin-top: 14px;
     font-size: 11.5px;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
   }
   .fine a,
   .footer-links a {
@@ -1141,7 +1169,7 @@
     color: var(--yap-fg);
   }
   .usercode.lapsed {
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
   }
   .phone-wait {
     margin-top: 14px;
@@ -1285,7 +1313,7 @@
     white-space: nowrap;
   }
   .dmeta {
-    color: var(--yap-muted-70);
+    color: var(--yap-muted);
     font-size: 11.5px;
     line-height: 1.5;
   }
@@ -1321,6 +1349,6 @@
     display: flex;
     gap: 8px;
     font-size: 11.5px;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
   }
 </style>

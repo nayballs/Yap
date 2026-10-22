@@ -171,7 +171,7 @@
 </script>
 
 <div id="settings-voice-provider">
-  <Row label="Speaks with" desc={providerDesc}>
+  <Row label="Speaks with" desc={providerDesc} setting="voice-provider">
     <Segmented bind:value={() => provider, setProvider} options={providers} label="Speaks with" />
   </Row>
 </div>
@@ -213,7 +213,7 @@
   </Row>
 {/if}
 
-<Row label="Voice" desc={voiceDesc}>
+<Row label="Voice" desc={voiceDesc} setting="voice">
   <div class="voicepick">
     {#if voiceList}
       {#if engine === 'kokoro'}
@@ -244,17 +244,19 @@
 </Row>
 {/if}
 
-<Row>
-  <Slider bind:value={cfg.ttsRate} min={0.5} max={2} step={0.1} label="Speed" format={(v) => `${Number(v).toFixed(1)}×`} />
-  {#if cloud && (Number(cfg.ttsRate) < 0.7 || Number(cfg.ttsRate) > 1.2)}
-    <span class="note under">ElevenLabs speaks between 0.7× and 1.2×: it uses the nearest.</span>
-  {/if}
+<Row
+  label="Speed"
+  desc={cloud && (Number(cfg.ttsRate) < 0.7 || Number(cfg.ttsRate) > 1.2) ? 'ElevenLabs speaks between 0.7× and 1.2×: it uses the nearest' : ''}
+  setting="voice-speed"
+>
+  <Slider inline bind:value={cfg.ttsRate} min={0.5} max={2} step={0.1} label="Speed" format={(v) => `${Number(v).toFixed(1)}×`} />
 </Row>
 
 <!-- Yap's own volume for the voice (tts.rs `gain`), under the Windows
      mixer's: moving it changes what's being said at once; auto-save keeps it. -->
-<Row>
+<Row label="Volume" setting="voice-volume">
   <Slider
+    inline
     bind:value={cfg.ttsVolume}
     min={0}
     max={1}
@@ -267,7 +269,9 @@
 
 {#if !cloud && engine === 'kokoro'}
   <Row>
-    <p class="credit">
+    <details class="set-more">
+    <summary>Credits</summary>
+    <p class="credit more-body">
       <a href="https://huggingface.co/hexgrad/Kokoro-82M" onclick={link('https://huggingface.co/hexgrad/Kokoro-82M')}>Kokoro-82M</a>
       by hexgrad and its voices, Apache-2.0, downloaded from onnx-community on
       <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" onclick={link('https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX')}>Hugging Face</a>;
@@ -277,6 +281,7 @@
       (GPL-3.0), downloaded with it and run as a separate program. All checked against pinned checksums; their
       licences and the source link are saved with them.
     </p>
+    </details>
   </Row>
 {/if}
 
@@ -299,10 +304,6 @@
     font-size: 11.5px;
     color: var(--yap-muted);
     line-height: 1.5;
-  }
-  .note.under {
-    display: block;
-    margin-top: 6px;
   }
   .privacy {
     margin: 0;
@@ -335,7 +336,7 @@
   .progress span {
     display: block;
     height: 100%;
-    background: var(--yap-primary);
+    background: var(--yap-ink);
     transition: width var(--yap-dur) ease;
   }
   .voicepick {
@@ -370,8 +371,12 @@
     cursor: default;
   }
   .previewbtn.on {
-    color: var(--yap-primary);
-    background: var(--yap-primary-wash);
+    color: var(--yap-fg);
+    border-color: var(--yap-fg-62);
+  }
+  .previewbtn:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
   }
   .previewbtn svg {
     width: 11px;
@@ -384,9 +389,9 @@
   }
   .credit {
     margin: 0;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.55;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
   }
   .credit a {
     color: inherit;

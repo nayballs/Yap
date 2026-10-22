@@ -68,7 +68,7 @@
   .progress span {
     display: block;
     height: 100%;
-    background: var(--yap-primary);
+    background: var(--yap-ink);
     transition: width var(--yap-dur) ease;
   }
   .pct {

@@ -262,7 +262,7 @@ test('a provider without a key connects right in the picker', async ({ yap, main
   expect(yap.readJson('config.json').llmScopes.chat.apiKey).toBe(ANTHROPIC_KEY);
 
   // Settings' copy kept the key: a save from Settings (any setting) keeps it.
-  const general = await openSettings(main, 'General');
+  const general = await openSettings(main, 'Meetings');
   const live = general.getByRole('button', { name: 'Show live transcript' });
   const was = (await live.getAttribute('aria-pressed')) === 'true';
   await live.click();

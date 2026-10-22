@@ -29,7 +29,7 @@ const suggestion = (main) => main.getByRole('status').filter({ hasText: 'to your
 
 /** Settings auto-saves its whole copy of the config: flip a switch there and back. */
 async function settingsAutoSave(yap, main) {
-  const dialog = await openSettings(main, 'Advanced');
+  const dialog = await openSettings(main, 'Dictation');
   const space = dialog.getByRole('button', { name: 'Append trailing space' });
   const before = await space.getAttribute('aria-pressed');
   await space.click();

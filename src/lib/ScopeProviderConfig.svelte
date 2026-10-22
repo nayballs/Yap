@@ -30,10 +30,11 @@
   // (locales/en `dictationAgent.modes` etc.). Yap supports three of OpenWhispr's
   // five modes — it has no OpenWhispr-hosted "managed cloud" and no enterprise
   // cloud brokerage (Bedrock/Azure/Vertex), which are OpenWhispr's own services.
+  // One set of names on every tab (Dictation cleanup's are the same).
   const MODES = [
-    { value: 'cloud', label: 'Bring your own key', desc: 'Connect to OpenAI, Anthropic, Groq, or OpenRouter with your own API key.', kind: 'cloud' },
-    { value: 'ondevice', label: 'Local', desc: 'Run a local model on your device — fully private.', kind: 'local' },
-    { value: 'selfhosted', label: 'Self-hosted', desc: 'Point at a self-hosted OpenAI-compatible endpoint.', kind: 'server' },
+    { value: 'cloud', label: 'Cloud providers', desc: 'Groq, OpenAI, Anthropic, Gemini or OpenRouter, on your own API key', kind: 'cloud' },
+    { value: 'ondevice', label: 'Local', desc: 'A model on this PC. Nothing leaves it', kind: 'local' },
+    { value: 'selfhosted', label: 'Self-hosted', desc: 'Your own server, like Ollama or LM Studio', kind: 'server' },
   ];
   const CLOUD_TABS = [
     { value: 'groq', label: 'Groq', icon: PROVIDER_ICONS.groq },
@@ -179,13 +180,13 @@
         </div>
       {:else}
         <div class="keyhead">
-          <h4>API Key</h4>
+          <h4>API key</h4>
           <a
             class="keylink"
             href={PP_CLOUD_MODELS[cloudProvider]?.keyUrl}
             onclick={createExternalLinkHandler(PP_CLOUD_MODELS[cloudProvider]?.keyUrl)}
             target="_blank"
-            rel="noreferrer">Get your API key →</a
+            rel="noreferrer">Get your API key</a
           >
         </div>
         {#if maskedKey && !keyEditing}
@@ -203,7 +204,7 @@
           </div>
         {/if}
 
-        <h4 class="selhead">Select Model</h4>
+        <h4 class="selhead">Model</h4>
         <ModelPicker provider={cloudProvider} bind:value={scope.model} {disabled} />
       {/if}
     </div>
@@ -232,21 +233,22 @@
     <div class="cloudcfg">
       <div class="panelcard">
         <p class="localnote">
-          Uses Yap's built-in on-device model — the same local server as Dictation Cleanup.
-          Install it and pick the model under <strong>Dictation Cleanup → Local</strong>; this
-          scope will share it. Nothing leaves your PC.
+          Uses the on-device model, the same one as Dictation cleanup: download and pick it under
+          <strong>Dictation cleanup → Local</strong>. Nothing leaves this PC.
         </p>
       </div>
     </div>
   {/if}
 
   {#if showThinking}
-    <Toggle
-      bind:checked={scope.disableThinking}
-      label="Disable thinking output"
-      desc="Strip the model's reasoning blocks from the result — for reasoning models like Qwen3 or GPT-OSS"
-      {disabled}
-    />
+    <div class="thinking">
+      <Toggle
+        bind:checked={scope.disableThinking}
+        label="Hide the model's thinking"
+        desc="Strips a reasoning model's thinking (Qwen3, GPT-OSS) from the result"
+        {disabled}
+      />
+    </div>
   {/if}
 </div>
 
@@ -261,11 +263,17 @@
     flex-direction: column;
     gap: 12px;
   }
+  /* A custom or self-hosted endpoint's fields: rows like the rest. */
   .panelcard {
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-lg);
-    background: var(--yap-s2);
-    padding: 4px 14px;
+    border-top: 1px solid var(--yap-rule);
+  }
+  .panelcard > :global(*) {
+    border-bottom: 1px solid var(--yap-rule);
+  }
+  .thinking {
+    padding: 12px 0;
+    border-top: 1px solid var(--yap-rule);
+    border-bottom: 1px solid var(--yap-rule);
   }
   .pp-field {
     min-width: 220px;
@@ -279,33 +287,44 @@
   .keyhead h4,
   .selhead {
     margin: 0;
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 13.5px;
+    font-weight: 560;
     color: var(--yap-fg);
   }
   .selhead {
     margin-top: 2px;
   }
   .keylink {
-    font-size: 11.5px;
-    color: var(--yap-primary);
-    text-decoration: none;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--yap-link);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--yap-link) 40%, transparent);
+    text-underline-offset: 2px;
   }
   .keylink:hover {
-    text-decoration: underline;
+    text-decoration-color: currentColor;
+  }
+  .keylink:focus-visible,
+  .keyedit:focus-visible {
+    outline: none;
+    border-radius: 3px;
+    box-shadow: var(--yap-focus);
   }
   .keymask {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    border: 1px solid var(--yap-border-subtle);
+    border: 1px solid var(--yap-border);
     border-radius: var(--yap-r);
-    background: var(--yap-s1);
+    background: var(--yap-s2);
     padding: 8px 12px;
   }
   .keymask.editing {
-    padding: 6px 8px 6px 12px;
+    padding: 0;
+    border: none;
+    background: none;
   }
   .keytext {
     display: inline-flex;
@@ -322,14 +341,15 @@
   .keyedit {
     border: none;
     background: none;
-    color: var(--yap-primary);
+    color: var(--yap-link);
     font: inherit;
-    font-size: 11.5px;
+    font-size: 12.5px;
+    font-weight: 600;
     cursor: pointer;
   }
   .localnote {
-    margin: 8px 0;
-    font-size: 12px;
+    margin: 12px 0;
+    font-size: 12.5px;
     color: var(--yap-muted);
     line-height: 1.55;
   }

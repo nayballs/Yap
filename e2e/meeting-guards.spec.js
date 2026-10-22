@@ -27,7 +27,8 @@ const toast = (main, text) => main.getByRole('status').filter({ hasText: text })
 const recording = (yap) => yap.invoke('meeting_state').then((s) => s.recording);
 const overlayAffinity = (yap) => yap.invoke('capture_affinity').then((a) => a.windows.overlay);
 const simulate = (yap, appId, active) => yap.invoke('meeting_detect_simulate', { appId, active });
-const meetingsCard = (main) => settingsDialog(main).getByRole('group', { name: 'Meetings' });
+/** Settings → Meetings (its own page since 2026-10-22). */
+const meetingsCard = (main) => settingsDialog(main).locator('.inner');
 const meetingNotes = (yap) => (yap.readJson('notes.json')?.notes ?? []).filter((n) => n.source === 'meeting');
 /** WDA_EXCLUDEFROMCAPTURE: on screen, left out of every capture. */
 const EXCLUDED = 17;
@@ -91,8 +92,8 @@ test('with hiding off, a meeting starting warns, and Update settings goes to Mee
   main,
   shot,
 }) => {
-  await openSettings(main, 'General');
-  const hide = meetingsCard(main).getByRole('button', { name: "Hide Yap's meeting windows from screen sharing" });
+  await openSettings(main, 'Meetings');
+  const hide = meetingsCard(main).getByRole('button', { name: 'Hide Yap from screen sharing' });
   await expect(hide).toHaveAttribute('aria-pressed', 'true');
   await hide.click();
   await expectStore(yap, 'config.json', (c) => c.meetingHideFromCapture === false);
@@ -108,11 +109,11 @@ test('with hiding off, a meeting starting warns, and Update settings goes to Mee
   expect(await recording(yap)).toBe(true);
   expect(await overlayAffinity(yap)).toBe(0);
 
-  // "Update settings" opens General → Meetings at the switch.
+  // "Update settings" opens Meetings at the switch.
   await tip.getByRole('button', { name: 'Update settings' }).click();
   await expect(settingsDialog(main)).toBeVisible();
   await expect(
-    settingsDialog(main).getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: /^General/ })
+    settingsDialog(main).getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: /^Meetings/ })
   ).toHaveAttribute('aria-current', 'page');
   await expect(hide).toBeInViewport();
   await expect(hide).toHaveAttribute('aria-pressed', 'false');
@@ -176,12 +177,12 @@ test('"When a call ends: Stop and summarise automatically" stops without asking'
   main,
   shot,
 }) => {
-  await openSettings(main, 'General');
+  await openSettings(main, 'Meetings');
   const callEnd = meetingsCard(main).getByRole('combobox', { name: 'When a call ends' });
   await expect(callEnd.locator('option:checked')).toHaveText('Ask me');
-  await callEnd.selectOption({ label: 'Stop and summarise automatically' });
+  await callEnd.selectOption({ label: 'Stop and summarise' });
   await expectStore(yap, 'config.json', (c) => c.meetingCallEnd === 'stop');
-  await expect(meetingsCard(main)).toContainText('Yap stops recording and writes your action plan, no question asked');
+  await expect(meetingsCard(main)).toContainText('Yap stops and writes your action plan, no question asked');
   await closeSettings(main);
 
   await simulate(yap, 'zoom', true);
@@ -205,7 +206,7 @@ test('"When a call ends: Stop and summarise automatically" stops without asking'
   await closeToasts(yap.notepad);
 
   // Back to asking.
-  await openSettings(main, 'General');
+  await openSettings(main, 'Meetings');
   await callEnd.selectOption({ label: 'Ask me' });
   await expectStore(yap, 'config.json', (c) => c.meetingCallEnd === 'ask');
   await closeSettings(main);
@@ -258,12 +259,12 @@ test('with a call going on, the meeting shortcut takes notes on that call', asyn
   await closeToasts(main);
 });
 
-test('Settings → General → Meetings has the guard rails, and the shortcut can be changed', async ({
+test('Settings → Meetings has the guard rails, and the shortcut can be changed', async ({
   yap,
   main,
   shot,
 }) => {
-  await openSettings(main, 'General');
+  await openSettings(main, 'Meetings');
   const card = meetingsCard(main);
   const callEnd = card.getByRole('combobox', { name: 'When a call ends' });
   await callEnd.scrollIntoViewIfNeeded();
@@ -271,13 +272,11 @@ test('Settings → General → Meetings has the guard rails, and the shortcut ca
   await expect(card).toContainText('Yap asks whether to stop recording and summarise');
   const maxLength = card.getByRole('combobox', { name: 'Maximum recording length' });
   await expect(maxLength.locator('option:checked')).toHaveText('2 hours');
-  await expect(card.getByRole('button', { name: "Hide Yap's meeting windows from screen sharing" })).toHaveAttribute(
-    'aria-pressed',
-    'true'
-  );
-  await expect(card).toContainText(
-    'Press Win + Alt + M to take notes on a call, and again to stop and write the action plan'
-  );
+  await expect(card.getByRole('button', { name: 'Hide Yap from screen sharing' })).toHaveAttribute('aria-pressed', 'true');
+  // The shortcut in Yap's keycaps, with Change.
+  const row = card.locator('[data-setting="meeting-shortcut"]');
+  await expect(row).toContainText('Take notes on a call, and press again to stop and summarise');
+  await expect(row.locator('kbd')).toHaveText(['Win', 'Alt', 'M']);
   await card.getByText('Meeting shortcut').scrollIntoViewIfNeeded();
   await shot(main, '09-settings-meeting-guards');
 
@@ -288,12 +287,16 @@ test('Settings → General → Meetings has the guard rails, and the shortcut ca
   await expectStore(yap, 'config.json', (c) => c.meetingMaxMinutes === 120);
 
   // A new shortcut, recorded like the dictation key; then Win+Alt+M again.
-  const shortcut = card.getByRole('button', { name: /^Win\s*Alt\s*M$/ });
+  const shortcut = row.getByRole('button', { name: /^Win\s*Alt\s*M\s*Change$/ });
   await shortcut.click();
   await main.keyboard.press('Control+Alt+KeyK');
   await expectStore(yap, 'config.json', (c) => c.meetingHotkey === 'kb:ctrl+alt+75');
-  await expect(card).toContainText('Press Ctrl + Alt + K to take notes on a call');
-  await card.getByRole('button', { name: /^Ctrl\s*Alt\s*K$/ }).click();
+  await expect(row.locator('kbd')).toHaveText(['Ctrl', 'Alt', 'K']);
+  // The Shortcuts page shows the same, with the other three.
+  await openSettings(main, 'Shortcuts');
+  await expect(settingsDialog(main).locator('[data-setting="shortcut-meeting"] kbd')).toHaveText(['Ctrl', 'Alt', 'K']);
+  await openSettings(main, 'Meetings');
+  await row.getByRole('button', { name: /^Ctrl\s*Alt\s*K\s*Change$/ }).click();
   await main.keyboard.press('Meta+Alt+KeyM');
   await expectStore(yap, 'config.json', (c) => c.meetingHotkey === 'kb:alt+win+77');
   await expect(shortcut).toBeVisible();

@@ -253,9 +253,9 @@ test('"Still in your meeting?" after the calendar meeting ran over; Stop and sum
   for (const c of (await yap.invoke('calendar_status')).connections) await yap.invoke('calendar_disconnect', { id: c.id });
 });
 
-test('Settings → General → Meetings: "End notes when the meeting goes quiet", on by default', async ({ yap, main, shot }) => {
-  await openSettings(main, 'General');
-  const card = settingsDialog(main).getByRole('group', { name: 'Meetings' });
+test('Settings → Meetings: "End notes when the meeting goes quiet", on by default', async ({ yap, main, shot }) => {
+  await openSettings(main, 'Meetings');
+  const card = settingsDialog(main).getByRole('group', { name: 'While a meeting records' });
   const toggle = card.getByRole('button', { name: 'End notes when the meeting goes quiet' });
   await toggle.scrollIntoViewIfNeeded();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
@@ -274,7 +274,7 @@ test('Settings → General → Meetings: "End notes when the meeting goes quiet"
   await pauseAll(yap);
 
   // And back on.
-  await openSettings(main, 'General');
+  await openSettings(main, 'Meetings');
   await toggle.click();
   await expectStore(yap, 'config.json', (c) => c.meetingEndWhenQuiet === true);
   await closeSettings(main);

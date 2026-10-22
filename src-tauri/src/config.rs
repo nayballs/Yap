@@ -252,7 +252,7 @@ pub struct YapConfig {
     /// `smart_spacing` on it only applies where Yap couldn't read the field.
     #[serde(default)]
     pub append_trailing_space: bool,
-    /// "Match the text around the cursor" (Settings → Advanced → Output): at
+    /// "Match the text around the cursor" (Settings → Dictation → Typing into apps): at
     /// record start Yap reads a little text either side of the caret over UI
     /// Automation (`selection::begin_dictation`, in memory only) and fits the
     /// dictation to it — spaces, a capital mid-sentence, a full stop before
@@ -260,8 +260,8 @@ pub struct YapConfig {
     /// read, a dictation pastes exactly as without it.
     #[serde(default = "default_true")]
     pub smart_spacing: bool,
-    /// "Leave the full stop off chat messages" (Settings → Advanced →
-    /// Output): in a chat app (Slack, Discord, WhatsApp, Teams…, desktop or
+    /// "Leave the full stop off chat messages" (Settings → Dictation →
+    /// Typing into apps): in a chat app (Slack, Discord, WhatsApp, Teams…, desktop or
     /// in a browser; `app_kind.rs`), a message of one or two sentences in one
     /// paragraph pastes without its final full stop.
     #[serde(default = "default_true")]
@@ -275,7 +275,7 @@ pub struct YapConfig {
     /// `auto_submit` on. See `pipeline::take_voice_enter`.
     #[serde(default = "default_true")]
     pub voice_enter: bool,
-    /// "Safer pasting into terminals" (Settings → Advanced → Output): in a
+    /// "Safer pasting into terminals" (Settings → Dictation → Typing into apps): in a
     /// terminal (`app_kind.rs`) a dictation pastes as one line with no space
     /// after it, and Enter is pressed only for "press enter" (auto-submit
     /// only in a coding CLI, where it sends a prompt); Claude Code and Codex
@@ -365,7 +365,7 @@ pub struct YapConfig {
     /// Automatically check GitHub Releases for a newer Yap on launch.
     #[serde(default = "default_true")]
     pub update_checks_enabled: bool,
-    /// Debug mode (Settings → Advanced → Debug Logging, OpenWhispr-style):
+    /// Debug mode (Settings → Privacy & data → Debug logging, OpenWhispr-style):
     /// raises Yap's file/console log level to `debug` for troubleshooting.
     /// A RUST_LOG env var overrides it. Applied live on save.
     #[serde(default)]
@@ -588,7 +588,7 @@ pub struct YapConfig {
     pub mcp_allow_writes: bool,
 
     /// Open the meeting notepad when a meeting recording starts (Settings →
-    /// General → Meetings; `notepad.rs`): docked to the right edge of the
+    /// Meetings → Notepad; `notepad.rs`): docked to the right edge of the
     /// screen beside the call, without taking the focus. On by default, as
     /// Wispr Flow's "Open Notepad when starting Notetaker".
     #[serde(default = "default_true")]
@@ -608,7 +608,7 @@ pub struct YapConfig {
     #[serde(default)]
     pub meeting_consent_message: String,
     /// "Tell speakers apart in meetings" (beta; Settings → Speech-to-Text,
-    /// and General → Meetings): label the voices on the call side while a
+    /// and Meetings): label the voices on the call side while a
     /// meeting records, on this PC (`diarize.rs`). Off by default, and it
     /// only runs once its model is installed.
     #[serde(default)]
@@ -629,7 +629,7 @@ pub struct YapConfig {
     /// Off by default: nothing records without a click.
     #[serde(default)]
     pub meeting_auto_start: bool,
-    /// Which call apps it asks about (Settings → General → Meetings, or "Don't
+    /// Which call apps it asks about (Settings → Meetings, or "Don't
     /// ask for Discord" on a prompt): app id → the person's choice. An app
     /// without an entry uses its default in `meeting_detect::APPS` (work apps
     /// yes, personal chat apps no), so apps added later start at their own.
@@ -641,7 +641,7 @@ pub struct YapConfig {
     #[serde(default = "default_meeting_detect_style")]
     pub meeting_detect_style: String,
 
-    // ---- Meeting guard rails (Settings → General → Meetings) ----
+    // ---- Meeting guard rails (Settings → Meetings) ----
     /// Hide Yap's meeting windows (the notepad and the recording overlay)
     /// from screenshots and screen sharing while a meeting records
     /// (`capture.rs`: Windows' exclude-from-capture flag). On by default, as

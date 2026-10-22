@@ -11,8 +11,11 @@
   //   secret address…).
   // Links and tokens go to Windows Credential Manager, never the page: the
   // snapshot only carries each calendar's name and its link's host. Last, a
-  // row to the MCP page (`yap-settings-goto` 'mcp').
+  // link row to the AI apps (MCP) page.
+  //
+  //   goto: opens another Settings page (Settings.svelte).
   import { invoke } from '@tauri-apps/api/core';
+  import LinkRow from './ui/LinkRow.svelte';
   import { calendar } from './calendar.svelte.js';
   import { toast } from './ui/toast.svelte.js';
   import CalendarMark from './CalendarMark.svelte';
@@ -20,6 +23,8 @@
   import claudeLogo from '../assets/providers/claude.svg';
   import openaiLogo from '../assets/providers/openai.svg';
   import geminiLogo from '../assets/providers/gemini.svg';
+
+  let { goto = null } = $props();
 
   // The link form that's open: 'outlook' | 'ics' | null.
   let form = $state(null);
@@ -139,7 +144,8 @@
   }
 
   function goMcp() {
-    window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: 'mcp' }));
+    if (goto) goto('mcp');
+    else window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: 'mcp' }));
   }
 
 </script>
@@ -214,7 +220,7 @@
 {/snippet}
 
 <div class="connectors">
-  <div class="ccard" role="group" aria-label="Google Calendar">
+  <div class="ccard" role="group" aria-label="Google Calendar" data-setting="google-calendar">
     <div class="chead">
       <span class="cicon"><CalendarMark kind="google" /></span>
       <div class="ctext">
@@ -240,7 +246,7 @@
     {/if}
   </div>
 
-  <div class="ccard" role="group" aria-label="Outlook Calendar">
+  <div class="ccard" role="group" aria-label="Outlook Calendar" data-setting="outlook-calendar">
     <div class="chead">
       <span class="cicon"><CalendarMark kind="outlook" /></span>
       <div class="ctext">
@@ -259,7 +265,7 @@
     {#if form === 'outlook'}{@render linkForm('outlook')}{/if}
   </div>
 
-  <div class="ccard" role="group" aria-label="Other calendar">
+  <div class="ccard" role="group" aria-label="Other calendar" data-setting="other-calendar">
     <div class="chead">
       <span class="cicon other"><CalendarMark kind="ics" /></span>
       <div class="ctext">
@@ -282,14 +288,17 @@
     <p class="fine">That's as many calendars as Yap holds ({calendar.maxConnections}). Disconnect one to add another.</p>
   {/if}
 
+  <!-- The way to the AI apps (MCP) page: one link row, as everywhere. -->
   <div class="mcprow">
-    <span class="logos" aria-hidden="true">
-      <img src={claudeLogo} alt="" />
-      <img src={openaiLogo} alt="" />
-      <img src={geminiLogo} alt="" />
-    </span>
-    <span class="mcptext">Give your AI access to your meeting transcripts and notes</span>
-    <button class="cbtn" onclick={goMcp}>Go to MCP</button>
+    <LinkRow label="AI apps (MCP)" desc="Give your AI access to your meeting transcripts and notes" onclick={goMcp}>
+      {#snippet extra()}
+        <span class="logos" aria-hidden="true">
+          <img src={claudeLogo} alt="" />
+          <img src={openaiLogo} alt="" />
+          <img src={geminiLogo} alt="" />
+        </span>
+      {/snippet}
+    </LinkRow>
   </div>
 </div>
 
@@ -297,14 +306,16 @@
   .connectors {
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    max-width: 660px;
+    gap: 12px;
   }
-  /* Wispr's connector cards: rounded, light, the action on the right. */
+  /* Wispr's connector cards (a calendar is an object: it gets a card),
+     white like every other card in Settings, the action on the right. */
   .ccard {
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-xl);
-    background: var(--yap-s3);
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-sm);
+    scroll-margin-top: 16px;
   }
   .chead {
     display: flex;
@@ -331,7 +342,7 @@
   }
   .cname {
     font-size: 14px;
-    font-weight: 650;
+    font-weight: 620;
   }
   .cdesc {
     margin-top: 2px;
@@ -349,14 +360,15 @@
     color: var(--yap-muted);
   }
   .cbtn {
-    height: 32px;
-    padding: 0 14px;
+    height: 30px;
+    padding: 0 12px;
     border: 1px solid var(--yap-border);
     border-radius: var(--yap-r);
     background: var(--yap-s2);
-    color: var(--yap-fg);
+    box-shadow: var(--yap-shadow-sm);
+    color: var(--yap-fg-80);
     font: inherit;
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
     white-space: nowrap;
     cursor: pointer;
@@ -364,6 +376,14 @@
   }
   .cbtn:hover:not(:disabled) {
     border-color: var(--yap-border-hover);
+    background: var(--yap-s3);
+    color: var(--yap-fg);
+  }
+  .cbtn:focus-visible,
+  .dots:focus-visible,
+  .linput:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
   }
   .cbtn:disabled {
     opacity: 0.55;
@@ -393,8 +413,8 @@
     gap: 10px;
     margin: 0 10px 10px;
     padding: 9px 10px 9px 12px;
-    border-radius: var(--yap-r-lg);
-    background: var(--yap-s2);
+    border-radius: var(--yap-r);
+    background: var(--yap-s1);
     border: 1px solid var(--yap-border-subtle);
   }
   .cdot {
@@ -483,8 +503,6 @@
   }
   .linput:focus {
     outline: none;
-    border-color: var(--yap-primary-line);
-    box-shadow: 0 0 0 3px var(--yap-primary-wash);
   }
   .lerr {
     margin: 8px 0 0;
@@ -493,17 +511,16 @@
   }
   .fine {
     margin: 8px 0 0;
-    font-size: 11.5px;
+    font-size: 12px;
     line-height: 1.5;
-    color: var(--yap-muted-70);
+    color: var(--yap-muted);
   }
 
   /* The plain row to MCP (not a card), as Wispr's. */
   .mcprow {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 2px 0;
+    margin-top: 10px;
+    border-top: 1px solid var(--yap-rule);
+    border-bottom: 1px solid var(--yap-rule);
   }
   .logos {
     display: inline-flex;
@@ -519,10 +536,5 @@
   }
   .logos img + img {
     margin-left: -5px;
-  }
-  .mcptext {
-    flex: 1 1 auto;
-    font-size: 13px;
-    color: var(--yap-fg-80);
   }
 </style>

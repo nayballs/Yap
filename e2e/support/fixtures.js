@@ -109,7 +109,10 @@ export function settingsDialog(main) {
   return main.getByRole('dialog', { name: 'Settings' });
 }
 
-/** Open Settings (from the sidebar cog) at a section ("General", "About", …). */
+/**
+ * Open Settings (from the sidebar cog) at a page, by the start of its name
+ * in the nav ("General", "AI apps", "Privacy & data", …).
+ */
 export async function openSettings(main, section) {
   const dialog = settingsDialog(main);
   if (!(await dialog.isVisible())) {
@@ -117,10 +120,12 @@ export async function openSettings(main, section) {
     await expect(dialog).toBeVisible();
   }
   if (section) {
-    // Labels can carry an attention count ("Speech-to-Text 1").
+    // Labels can carry an attention count ("Speech-to-Text 1"); a name can
+    // carry brackets ("AI apps (MCP)").
+    const name = section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const item = dialog
       .getByRole('navigation', { name: 'Settings sections' })
-      .getByRole('button', { name: new RegExp(`^${section}`) });
+      .getByRole('button', { name: new RegExp(`^${name}`) });
     await item.click();
     await expect(item).toHaveAttribute('aria-current', 'page');
   }

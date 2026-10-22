@@ -47,20 +47,20 @@ test('paste last transcript: the latest dictation, nothing pasted in a test run'
 });
 
 test('settings: "Match the text around the cursor" is on, and off is saved', async ({ yap, main, shot }) => {
-  const dialog = await openSettings(main, 'Advanced');
-  const output = dialog.getByRole('group', { name: 'Output' });
+  const dialog = await openSettings(main, 'Dictation');
+  const output = dialog.getByRole('group', { name: 'Typing into apps' });
   const smart = output.getByRole('button', { name: 'Match the text around the cursor' });
   await expect(smart).toHaveAttribute('aria-pressed', 'true');
   // With it on, the trailing space is only for fields Yap can't read.
   await expect(output.getByText("Only where Yap can't read the text around the cursor")).toBeVisible();
-  await expect(output.getByText(/Dictations never show up in Win\+V clipboard history/)).toBeVisible();
+  await expect(output.getByText(/Dictations never show up in Win\+V history/)).toBeVisible();
   await output.scrollIntoViewIfNeeded();
   await shot(main, '01-settings-output');
 
   await smart.click();
   await expect(smart).toHaveAttribute('aria-pressed', 'false');
   await expectStore(yap, 'config.json', (c) => c.smartSpacing === false);
-  await expect(output.getByText('Add a space after each transcription')).toBeVisible();
+  await expect(output.getByText('A space after each dictation')).toBeVisible();
   await shot(main, '02-settings-output-off');
 
   await smart.click();
@@ -72,14 +72,14 @@ test('settings: "Match the text around the cursor" is on, and off is saved', asy
 // the paste) is unit-tested in Rust: a test run reads no other app's window
 // and pastes nothing.
 test('settings: chat full stops and safer terminal pasting are on, and off is saved', async ({ yap, main, shot }) => {
-  const dialog = await openSettings(main, 'Advanced');
-  const output = dialog.getByRole('group', { name: 'Output' });
+  const dialog = await openSettings(main, 'Dictation');
+  const output = dialog.getByRole('group', { name: 'Typing into apps' });
   const chat = output.getByRole('button', { name: 'Leave the full stop off chat messages' });
   const terminal = output.getByRole('button', { name: 'Safer pasting into terminals' });
   await expect(chat).toHaveAttribute('aria-pressed', 'true');
   await expect(terminal).toHaveAttribute('aria-pressed', 'true');
-  await expect(output.getByText(/a message of one or two sentences ends without a full stop/)).toBeVisible();
-  await expect(output.getByText(/a dictation pastes as one line and Enter is pressed only when you say/)).toBeVisible();
+  await expect(output.getByText(/a short message ends without one/)).toBeVisible();
+  await expect(output.getByText(/One line, and Enter only when you say “press enter”/)).toBeVisible();
   // Auto-submit says where it doesn't press Enter.
   await expect(output.getByText(/In a terminal, only for coding tools like Claude Code/)).toBeVisible();
   await terminal.scrollIntoViewIfNeeded();
@@ -91,7 +91,7 @@ test('settings: chat full stops and safer terminal pasting are on, and off is sa
   await terminal.click();
   await expect(terminal).toHaveAttribute('aria-pressed', 'false');
   await expectStore(yap, 'config.json', (c) => c.terminalMode === false);
-  await expect(output.getByText('Press Enter after pasting the text', { exact: true })).toBeVisible();
+  await expect(output.getByText('Sends the message for you', { exact: true })).toBeVisible();
   await shot(main, '04-settings-chat-and-terminals-off');
 
   await chat.click();

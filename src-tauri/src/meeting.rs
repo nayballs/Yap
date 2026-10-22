@@ -1322,7 +1322,7 @@ fn quiet_message(side: Side, quiet: u64, call: Option<&str>) -> String {
             "Yap hasn't heard the call for {span}. If your call plays through a headset, make it Windows' default output device."
         ),
         (Side::You, _) => format!(
-            "Yap hasn't heard your mic for {span}. If you're talking, check it isn't muted, and pick the right mic in Settings \u{2192} General."
+            "Yap hasn't heard your mic for {span}. If you're talking, check it isn't muted, and pick the right mic in Settings \u{2192} Dictation."
         ),
     }
 }
@@ -1340,7 +1340,7 @@ fn watch_quiet(app: &AppHandle, note_id: u64, watch: &mut QuietWatch, you: &Audi
     tracing::info!(note_id, ?side, "Meeting: one side was quiet while the other talked; telling the person");
     let (title, settings) = match side {
         Side::Them => ("Yap can't hear the call", None),
-        Side::You => ("Yap can't hear your mic", Some("general")),
+        Side::You => ("Yap can't hear your mic", Some("dictation#microphone")),
     };
     warn(app, title, message, settings);
 }
@@ -1934,7 +1934,7 @@ mod tests {
         );
         let mic = quiet_message(Side::You, three, Some("Teams call"));
         assert!(mic.starts_with("Yap hasn't heard your mic for 3 minutes."));
-        assert!(mic.contains("Settings \u{2192} General"));
+        assert!(mic.contains("Settings \u{2192} Dictation"));
         assert!(quiet_message(Side::Them, 6 * R, None).contains("for 6 seconds."));
         assert_eq!(span_words(60 * R), "1 minute");
         assert_eq!(span_words(R), "1 second");

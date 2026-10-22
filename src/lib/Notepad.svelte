@@ -88,7 +88,7 @@
   let stopping = $state(false);
   let tab = $state('thoughts'); // thoughts | transcript | summary
   let cfg = null; // for the in-page hotkey fallback
-  // "Show live transcript" (Settings → General → Meetings): off, the
+  // "Show live transcript" (Settings → Meetings): off, the
   // Transcript tab stays quiet until the meeting stops.
   let liveTranscript = $state(true);
   let maximized = $state(false);
@@ -727,7 +727,7 @@
   }
   function audioSettings() {
     menu = null;
-    openSettings('general');
+    openSettings('dictation#microphone');
   }
   function askDelete() {
     menu = null;
