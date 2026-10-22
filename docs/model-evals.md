@@ -161,8 +161,12 @@ with the Chat persona Settings sets by default. Only the side effects are swappe
 - **Memory and chats** (`memory::eval_reset`, in memory only; `chats::eval_reset`, the
   run's data dir): reset and seeded per scenario, so a past-chats search sees only the
   scenario's own chats. Memory's scheduler never runs in a run: a turn's `learn` calls the
-  pass itself. `YAP_EVAL_MEMORY_JSON=off` sends a model on this PC its passes without the
-  JSON grammar (`response_format`), to compare.
+  pass itself, and the pass alone is timed (`memory_pass` in the transcript: its calls, time,
+  prompt and generated tokens). `YAP_EVAL_MEMORY_PATH=full|small` puts any model on memory's
+  full or small path (`memory::learn::path`; by default a model that calls tools takes the
+  full one); `YAP_EVAL_MEMORY_JSON=off` sends a model on the full path its passes without
+  the JSON grammar (`response_format`), to compare. A local model's `--ngl` says whether it
+  runs on the graphics card (`eval::local_on_gpu`: the small path's limits on the processor).
 - **Apps**: test mode (`YAP_E2E=1`, as the e2e suite): the index is the scenario's stand-in
   list, and opening an app is only recorded (`apps::e2e_opened_apps`). Nothing launches.
   `"apps": "this_pc"` reads this PC's Start menu instead (read-only, in a child process
@@ -279,6 +283,15 @@ field is an error, so a typo can't silently skip a check):
 | `allow_error` | The turn may end in an error (else an error fails it). |
 | `memory` | `[{ "has", "section", "exists", "count" }]`: memory afterwards has an item whose name, summary or facts hold `has` (in `section`), or none does (`exists: false`), or exactly `count` do. |
 | `memory_changes_max`, `memory_changes_min` | Memory changed at most / at least this many times in the turn (a learning pass, a tell, an import, the chat's remember/forget; each change is logged as `memory_changed`). |
+| `memory_allowed` | **Precision**: every text memory gained in the turn (a new item's name and "about", each fact added, a changed name or "about") holds one of these (case-insensitive); anything else is a **false memory**, named in the failure. `[]`: nothing may be gained. |
+
+Each turn that touches memory also gets a **memory score** in `turn_end` (`memory_score`: the
+`has` checks met over all of them in `expect` and `soft` — recall — and the false memories:
+gained texts `memory_allowed` doesn't allow, or holding what an `exists: false` check
+forbids, or any at all where `memory_changes_max` is 0), and `summary.md` a **"Memory:
+precision and recall"** table per model — learning (tag `memory-learn`) apart from Tell /
+imports / remember (`memory-tell`): false memories, recall, the learning passes, calls a
+pass, mean and slowest pass — with every false memory listed.
 
 Argument predicates: a string (equal, case-insensitive), a number or bool (equal), or an
 object: `{"contains": s}`, `{"contains_any": [..]}`, `{"not_contains": s}`, `{"matches":
@@ -950,10 +963,10 @@ about last time"). Run folders `E:/yap-builds/eval-runs/20261022-07*` and `-08*`
 the prompt: 4/4); learning isn't. Even under the strict grammar it kept what the person only
 asked about ("Australia: capital is Canberra"), filed "Nurse at St James's in Leeds" as a person,
 wrote nothing for a job change, and took 10–124 s of the processor a pass (the import's 124 s).
-So **a model that can't call tools doesn't learn by itself** (`learn::learns_by_itself`;
-Settings → Memory says so and points at Qwen3.5 4B or a cloud model): "Tell Yap what to change",
-imports (each change reviewed) and "Remember that…" still use it. `YAP_EVAL_MEMORY_SMALL=learn`
-makes it learn in a run, as above. Two of Yap's guards came out of its answers: anything about a
+So **a model that can't call tools didn't learn by itself** at first (Settings → Memory said
+so); later that day it got its own careful path — "Memory on small models" below
+(`YAP_EVAL_MEMORY_PATH=full` puts a small model back on this pass in a run; it was
+`YAP_EVAL_MEMORY_SMALL=learn`). Two of Yap's guards came out of its answers: anything about a
 password ("Saved password hint: tulip99", from an import) and a one-off request written as a
 fact ("Wanted a recipe for lasagne on 3 March"); and a person must be named by a name.
 
