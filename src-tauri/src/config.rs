@@ -398,6 +398,14 @@ pub struct YapConfig {
     /// the sidecar, never mid-dictation (`local_llm::restart_when_idle`).
     #[serde(default)]
     pub local_context: u32,
+    /// **MTP drafting** for the on-device model (`--spec-type draft-mtp`:
+    /// Qwen3.5's own multi-token-prediction layer drafts the next tokens,
+    /// the model checks them): on wherever it can be — llamafile 0.10.6 or
+    /// newer, a model with the layer, all of it on a graphics card with room
+    /// for it (`local_llm::plan_for`). No switch in Settings: `false` here
+    /// (config.json) turns it off, should a driver or model misbehave with it.
+    #[serde(default = "default_true")]
+    pub local_mtp: bool,
     /// Smart-routing scope (FluidVoice's `PromptRoutingScope`):
     /// - "all_apps" (default): the global `pp_prompt` cleans everywhere, and
     ///   `app_routes` override it for matching apps.
@@ -813,6 +821,7 @@ impl Default for YapConfig {
             pp_local_model: String::new(),
             local_llm_upgrade_dismissed: false,
             local_context: 0,
+            local_mtp: true,
             routing_scope: default_routing_scope(),
             app_routes: Vec::new(),
             cleanup_profiles: Vec::new(),

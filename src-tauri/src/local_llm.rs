@@ -928,6 +928,15 @@ async fn start_locked() -> Result<String, String> {
                 prove(&dir);
                 tracing::info!(version = %runtime_version().map(|v| v.to_string()).unwrap_or_default(), "The new llamafile runtime started; the previous one is deleted");
             }
+            // MTP is for a model all on the graphics card: one that landed
+            // (partly) on the processor starts again without it.
+            let on_cpu_with_mtp = SERVING.lock().ok().and_then(|s| s.as_ref().map(|s| s.plan.server().mtp && s.placement.is_some_and(|p| p.kind() != "gpu")));
+            if on_cpu_with_mtp == Some(true) {
+                tracing::warn!("The on-device model didn't all go to the graphics card: starting it again without MTP");
+                MTP_OFF.store(true, Ordering::SeqCst);
+                stop();
+                return spawn_and_wait().await;
+            }
             return Ok(url);
         }
         Err(e) => e,
@@ -962,9 +971,39 @@ async fn start_locked() -> Result<String, String> {
     }
 }
 
-/// How the sidecar runs `model` at `ctx` on `runtime` ([`Plan`]).
-pub fn plan_for(_model: &Path, _ctx: u32, runtime: Version) -> Plan {
-    Plan { runtime, mtp: false }
+/// MTP turned off for this session: the model landed on the processor with
+/// it ([`start_locked`]).
+static MTP_OFF: AtomicBool = AtomicBool::new(false);
+
+/// How the sidecar runs `model` at `ctx` on `runtime` ([`Plan`]): **MTP
+/// drafting** (`--spec-type draft-mtp`) wherever it can be — llamafile
+/// 0.10.6 or newer (on 0.10.3 it kept fewer drafts and cost 2.15 GB), a
+/// model with the prediction layer (`gguf::Shape::has_mtp`: Qwen3.5), the
+/// whole model on a graphics card with room for it at this context
+/// ([`mtp_fits`]), `config.local_mtp` on, and not turned off for this
+/// session. Never on the processor. Measured on an RTX 5070 Ti
+/// (docs/model-evals.md "Local AI, phase 1"): the 4B's generation
+/// ~165 → ~255 tokens/s, greedy outputs unchanged, ~+0.85 GB on the card.
+pub fn plan_for(cfg: &crate::config::YapConfig, model: &Path, ctx: u32, runtime: Version) -> Plan {
+    let mtp = runtime.is_current()
+        && cfg.local_mtp
+        && !MTP_OFF.load(Ordering::SeqCst)
+        && mtp_fits(model, ctx, crate::gpu::this_pc().map(|g| g.vram_mib));
+    Plan { runtime, mtp }
+}
+
+/// Can `model` draft with MTP at `ctx`, and does it fit on a card of
+/// `vram_mib` with it ([`card_room`]: the card's memory less what Windows,
+/// the apps on screen and Yap's speech model keep there)? `false` without a
+/// card of its own.
+pub fn mtp_fits(model: &Path, ctx: u32, vram_mib: Option<u64>) -> bool {
+    let Some(f) = crate::gguf::model_file(model) else { return false };
+    if !f.shape.has_mtp() || !runs_on_card(None, vram_mib) {
+        return false;
+    }
+    let Some(room) = card_room(vram_mib) else { return false };
+    let server = crate::gguf::Server { current: true, mtp: true };
+    crate::gguf::estimate(&f.shape, f.bytes, ctx as u64, true, server).total_mib <= room
 }
 
 /// Launch the runtime on the configured model and wait for `/health`; then
@@ -984,7 +1023,7 @@ async fn spawn_and_wait() -> Result<String, String> {
     if !model.is_file() {
         return Err(format!("cleanup model not installed: {}", model.display()));
     }
-    let plan = plan_for(&model, ctx, runtime_version().unwrap_or(Version(0, 10, 3)));
+    let plan = plan_for(&cfg, &model, ctx, runtime_version().unwrap_or(Version(0, 10, 3)));
 
     let port = find_free_port().ok_or_else(|| "no free localhost port".to_string())?;
 
@@ -1663,7 +1702,7 @@ pub fn context_view(cfg: &crate::config::YapConfig) -> ContextView {
     let options = context_choices(max, tokens)
         .into_iter()
         .map(|c| {
-            let server = plan_for(&path, c, runtime).server();
+            let server = plan_for(cfg, &path, c, runtime).server();
             let estimate_mib = file
                 .as_ref()
                 .map(|f| crate::gguf::estimate(&f.shape, f.bytes, c as u64, on_card, server).total_mib);
@@ -2354,6 +2393,31 @@ mod tests {
         assert_eq!((read(&dir, RUNTIME_FILENAME), read(&dir, RUNTIME_PREVIOUS)), ("new".into(), "old".into()));
         let m = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap();
         assert!(m.unproven && m.refused.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mtp_only_for_a_model_that_can_draft_on_a_card_with_room() {
+        let dir = scratch("mtp");
+        let qwen35 = dir.join("Qwen_Qwen3.5-4B-Q4_K_M.gguf");
+        std::fs::write(&qwen35, crate::gguf::tests::qwen35_4b(1_000).bytes()).unwrap();
+        let qwen25 = dir.join(MODEL_FILENAME);
+        std::fs::write(&qwen25, crate::gguf::tests::qwen25_1_5b(1_000).bytes()).unwrap();
+        // A 16 GB card: room for it (the stand-in file is small; the KV,
+        // recurrent state and compute aren't).
+        assert!(mtp_fits(&qwen35, 8_192, Some(16_303)));
+        // No prediction layer, no card of its own, or no room: off.
+        assert!(!mtp_fits(&qwen25, 8_192, Some(16_303)));
+        assert!(!mtp_fits(&qwen35, 8_192, None));
+        assert!(!mtp_fits(&qwen35, 8_192, Some(512)), "integrated graphics");
+        assert!(!mtp_fits(&qwen35, 8_192, Some(2_600)), "no room beside Windows and speech");
+        // At 256K the KV alone is 8 GiB: not on a 12 GB card with MTP.
+        assert!(!mtp_fits(&qwen35, 262_144, Some(12_282)));
+        // The plan: only on 0.10.6, only with the setting on.
+        let cfg = crate::config::YapConfig::default();
+        assert!(cfg.local_mtp, "on by default");
+        assert!(!plan_for(&cfg, &qwen35, 8_192, OLD).server().mtp);
+        assert!(!plan_for(&crate::config::YapConfig { local_mtp: false, ..cfg.clone() }, &qwen35, 8_192, NEW).mtp);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

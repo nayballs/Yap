@@ -128,7 +128,7 @@ pub async fn plan(runtime: &Path, model: &Path, ngl: u32, ctx: u32, mtp: Option<
         .await
         .or_else(|| crate::local_llm::Version::parse(crate::local_llm::RUNTIME_VERSION))
         .expect("a version");
-    let yap = crate::local_llm::plan_for(model, ctx, version);
+    let yap = crate::local_llm::plan_for(&crate::config::load(), model, ctx, version);
     let on = ngl > 0 && mtp.unwrap_or(yap.mtp);
     crate::local_llm::Plan { runtime: version, mtp: on }
 }
