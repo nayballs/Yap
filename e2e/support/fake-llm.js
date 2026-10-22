@@ -164,6 +164,10 @@ const FOLLOW_UP = 'You write the follow-up email';
 const BLIND_SPOTS = 'You review a meeting for what it left open';
 // A dictation's AI cleanup (llm.rs BASE_PROMPT).
 const CLEANUP = 'You are a dictation cleanup engine';
+// Memory's passes (memory/prompt.rs): learning from a chat or a meeting,
+// "Tell Yap what to change", an import. Answered `{"changes": []}` unless a
+// spec says otherwise (`reply('memory', fn)`).
+const MEMORY = "You keep Yap's memory of the user";
 
 const KINDS = [
   [DIGEST, 'digest'],
@@ -175,6 +179,7 @@ const KINDS = [
   [FOLLOW_UP, 'followUpEmail'],
   [BLIND_SPOTS, 'blindSpots'],
   [CLEANUP, 'cleanup'],
+  [MEMORY, 'memory'],
 ];
 
 /**
@@ -523,6 +528,7 @@ export async function startFakeLlm() {
         questions: questionsReply,
         followUpEmail: followUpReply,
         blindSpots: blindSpotsReply,
+        memory: () => '{"changes": []}',
       };
       const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user);
       res.writeHead(200, { 'content-type': 'application/json' });

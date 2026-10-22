@@ -1,0 +1,20 @@
+{
+  "name": "memory-learn-sister",
+  "description": "A chat that mentions the user's sister by name in passing: memory keeps who Rochelle is, not the weekend's plans or the question.",
+  "tags": ["memory", "memory-learn"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "My sister Rochelle is coming to stay this weekend. Any ideas for a rainy Saturday in York?",
+      "learn": true,
+      "expect": {
+        "memory": [
+          { "has": "Rochelle", "section": "people" },
+          { "has": "rain", "exists": false },
+          { "has": "saturday", "exists": false }
+        ],
+        "memory_changes_max": 3
+      }
+    }
+  ]
+}

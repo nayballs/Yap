@@ -32,7 +32,8 @@
 // `'alert'` a warning triangle ("Started by mistake?") and `'calendar'` a
 // calendar (a meeting reminder), `'dictionary'` a book (a word to add to
 // the dictionary), `'mic'` a microphone and `'clipboard'` a clipboard (a
-// dictation's alerts, alerts.js).
+// dictation's alerts, alerts.js), `'memory'` a bookmark (what Yap remembered,
+// memory.svelte.js).
 // `updateToast(id, patch)` changes a toast in place, on screen or waiting
 // (the update toast goes ready → downloading → restarting without stacking
 // new cards); `isToastLive(id)` is true until it's closed.

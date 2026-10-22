@@ -172,8 +172,10 @@ pub async fn meeting_catch_up(
         },
         Some(q) => summary::meeting_ask_messages(&note, q),
     };
-    let ep = summary::resolve_endpoint(&crate::config::load())?;
+    let cfg = crate::config::load();
+    let ep = summary::resolve_endpoint(&cfg)?;
     let opts = ep.options(summary::CATCH_UP_REPLY_TOKENS, 0.3);
+    let messages = crate::memory::with_helper_block(messages, &cfg);
     let answer = summary::chat_beside_dictation(&app, &ep, messages, &opts).await?;
     let answer = answer.trim().to_string();
     if answer.is_empty() {
@@ -254,10 +256,13 @@ pub async fn meeting_assist(app: AppHandle, note_id: u64, kind: Helper) -> Resul
     let Some(input) = kind.input(&note) else {
         return Ok(Assist { answer: kind.too_little().to_string(), plain: false, too_little: true });
     };
-    let ep = summary::resolve_endpoint(&crate::config::load())?;
+    let cfg = crate::config::load();
+    let ep = summary::resolve_endpoint(&cfg)?;
     let (cap, temperature) = kind.reply();
     let opts = ep.options(cap, temperature);
-    let messages = summary::helper_messages(kind.prompt(), &input);
+    // The person (About you's name and note, memory's "You"): the email
+    // signs with their name, the questions fit their role.
+    let messages = crate::memory::with_helper_block(summary::helper_messages(kind.prompt(), &input), &cfg);
     let reply = summary::chat_beside_dictation(&app, &ep, messages, &opts).await?;
     let answer = if plain {
         summary::clean_email(&reply, &summary::email_subject(&note))

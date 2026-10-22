@@ -1,0 +1,16 @@
+{
+  "name": "memory-learn-preferences",
+  "description": "The user says how they want answers: memory keeps it as a preference.",
+  "tags": ["memory", "memory-learn"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Please keep your answers short from now on, I read them on my phone. And always use metric units.",
+      "learn": true,
+      "expect": {
+        "memory": [{ "has": "short", "section": "preferences" }]
+      },
+      "soft": { "memory": [{ "has": "metric", "section": "preferences" }] }
+    }
+  ]
+}

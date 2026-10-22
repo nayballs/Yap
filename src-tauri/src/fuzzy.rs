@@ -233,6 +233,27 @@ fn extract_punctuation(word: &str) -> (&str, &str) {
 /// one wins: see the loop); each match consumes its words and emits the
 /// entry's `to` with the original case pattern + edge punctuation.
 pub fn apply_fuzzy(text: &str, dict: &[DictionaryEntry]) -> String {
+    apply_with(text, dict, &|_, _| true)
+}
+
+/// **The names Yap remembers** (`memory/vocab.rs`), corrected more
+/// carefully than the person's own dictionary: a near-miss is only taken
+/// when what was heard isn't a word in its own right — a single heard word
+/// that's an ordinary word (`is_word`: the everyday list, then Windows'
+/// spell checker) is never replaced ("lucky" stays "lucky" with a Lucy in
+/// memory), nor a run of words that are all ordinary ("row shell" isn't
+/// taken for Rochelle). A different spelling of the name ("Shivon",
+/// "Pria") or its case ("rochelle") is fixed. `is_word` gets the heard word
+/// lowercased.
+pub fn apply_names(text: &str, names: &[DictionaryEntry], is_word: &dyn Fn(&str) -> bool) -> String {
+    apply_with(text, names, &|run, dist| {
+        dist == 0 || run.iter().any(|w| !is_word(&build_ngram(std::slice::from_ref(w))))
+    })
+}
+
+/// [`apply_fuzzy`]'s loop; `accept(run, dist)` may refuse a match it found
+/// (on top of the everyday-word rule below).
+fn apply_with(text: &str, dict: &[DictionaryEntry], accept: &dyn Fn(&[&str], usize) -> bool) -> String {
     let candidates = build_candidates(dict);
     if candidates.is_empty() {
         return text.to_string();
@@ -263,6 +284,9 @@ pub fn apply_fuzzy(text: &str, dict: &[DictionaryEntry]) -> String {
                 // 2026-10-21: "was there anything that Claude be changed"),
                 // "motion" isn't "Notion" (learn.rs' everyday words).
                 if n == 1 && dist > 0 && crate::learn::is_frequent(&build_ngram(run)) {
+                    continue;
+                }
+                if !accept(run, dist) {
                     continue;
                 }
                 if chosen.is_none_or(|(_, _, best)| dist < best)

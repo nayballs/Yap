@@ -1246,8 +1246,9 @@ impl Endpoint {
 }
 
 /// A dictation is recording or transcribing / cleaning up (or an Upload is
-/// transcribing): the moments a local model must be free.
-fn dictation_busy(app: &AppHandle) -> bool {
+/// transcribing): the moments a local model must be free (memory's passes
+/// keep to it too, `memory/learn.rs`).
+pub(crate) fn dictation_busy(app: &AppHandle) -> bool {
     app.try_state::<crate::AppState>()
         .and_then(|s| {
             s.pipeline
@@ -1277,7 +1278,7 @@ pub async fn unless_busy<T>(call: impl Future<Output = T>, busy: impl Fn() -> bo
 
 /// Wait until `busy()` is false — plus [`IDLE_GRACE`] if it was busy — or
 /// give up (`false`) once `wanted()` is false.
-async fn wait_idle(busy: impl Fn() -> bool, wanted: impl Fn() -> bool) -> bool {
+pub(crate) async fn wait_idle(busy: impl Fn() -> bool, wanted: impl Fn() -> bool) -> bool {
     let mut was_busy = false;
     loop {
         if !wanted() {

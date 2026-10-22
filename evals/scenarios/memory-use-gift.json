@@ -1,0 +1,17 @@
+{
+  "name": "memory-use-gift",
+  "description": "A question about someone memory knows by name: the answer uses what Yap remembers (she loves gardening).",
+  "tags": ["memory", "memory-use"],
+  "apps": "standard",
+  "seed": {
+    "memory": [
+      { "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York", "Loves gardening"] }
+    ]
+  },
+  "turns": [
+    {
+      "user": "What should I get Rochelle for her birthday? Give me three ideas.",
+      "expect": { "answer_contains_any": ["garden", "plant", "seed", "trowel", "glove", "flower"], "no_false_claims": true }
+    }
+  ]
+}

@@ -98,6 +98,17 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   change) and answered no better with the notes next to the question. The
   Notes view's Ask bar (`note_ask`) does the same by the same rule: the note
   in the system prompt, the clock with the question for a tool model.
+  **Memory** ([memory.md](./memory.md)): memory's "You" block ends the
+  system prompt after About you (stable); the people, projects and topics a
+  question is about, and the person's answer preferences, go in its
+  `<context>` (a model without tools: its system prompt); a tool model gets
+  `remember` / `forget` (only when the person's own message asks) and, with
+  "Search and reference past chats", `search_chats` (`tools::Extra`,
+  `run_tool_loop_with`); a model without tools gets "Remember that…" done
+  by Yap (`memory::learn::spoken`) and a past chat's lines when the question
+  points back at one (`chats::refers_to_past`). Every turn tells memory's
+  scheduler (`memory::learn::after_turn`): the chat is read for lasting
+  facts once it's gone quiet.
   **The history window** moves three turns at a time
   (`chats::history_start`: 14–19 messages, the Voice Assistant's 5–8), not
   every turn, so a long chat keeps its prompt's start.

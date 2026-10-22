@@ -637,6 +637,18 @@ impl Ordinary {
         }
         false
     }
+
+    /// Is there a spell checker behind [`Ordinary::is`] (else only the
+    /// built-in list)? Memory's names are near-miss targets only when
+    /// there is (`memory/vocab.rs`).
+    pub fn has_spell_checker(&self) -> bool {
+        #[cfg(windows)]
+        {
+            self.spell.is_some()
+        }
+        #[cfg(not(windows))]
+        false
+    }
 }
 
 /// Windows' spell checker (`ISpellChecker`, Windows 8+): the languages of

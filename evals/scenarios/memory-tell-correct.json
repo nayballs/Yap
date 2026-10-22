@@ -1,0 +1,22 @@
+{
+  "name": "memory-tell-correct",
+  "description": "\"Rochelle moved to Bristol\": the old fact is replaced, not kept beside the new one.",
+  "tags": ["memory", "memory-tell"],
+  "apps": "standard",
+  "seed": {
+    "memory": [{ "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York", "Loves gardening"] }]
+  },
+  "turns": [
+    {
+      "tell": "Rochelle moved to Bristol",
+      "expect": {
+        "memory": [
+          { "has": "Bristol", "section": "people" },
+          { "has": "York", "exists": false },
+          { "has": "gardening", "section": "people" },
+          { "has": "Rochelle", "count": 1 }
+        ]
+      }
+    }
+  ]
+}

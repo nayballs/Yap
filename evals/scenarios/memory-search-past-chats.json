@@ -1,0 +1,31 @@
+{
+  "name": "memory-search-past-chats",
+  "description": "\"Search and reference past chats\": a question about an earlier conversation finds it (search_chats for a model with tools, the past chat's lines with the question for one without).",
+  "tags": ["memory", "memory-use"],
+  "apps": "standard",
+  "seed": {
+    "chats": [
+      {
+        "title": "Trip to Lisbon",
+        "messages": [
+          { "role": "user", "text": "We're going to Lisbon in March. Where should we eat in Alfama?" },
+          { "role": "assistant", "text": "Try Taberna Sal Grosso for small plates, and Prado for seasonal Portuguese food. Book Sal Grosso ahead: it only has a few tables." }
+        ]
+      },
+      {
+        "title": "Garden plans",
+        "messages": [
+          { "role": "user", "text": "When should I plant tomatoes in Leeds?" },
+          { "role": "assistant", "text": "Sow them indoors in March and plant them out in late May." }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "What was that small-plates place in Lisbon we talked about last time?",
+      "expect": { "answer_contains": ["Sal Grosso"], "no_false_claims": true },
+      "soft": { "tools_called": [{ "name": "search_chats" }] }
+    }
+  ]
+}

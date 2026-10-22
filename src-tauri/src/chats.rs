@@ -160,6 +160,16 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     TEST_STORE.with(|s| f(&mut s.borrow_mut()))
 }
 
+/// A model evaluation: each scenario starts with no conversations (its
+/// seeded ones only), so a past-chats search sees nothing of the others.
+#[cfg(debug_assertions)]
+pub fn eval_reset() {
+    with_store(|s| {
+        *s = Store::default();
+        save_to_disk(s);
+    });
+}
+
 /// The longest title a rename keeps (a first message's title is its first
 /// 50 characters).
 pub const TITLE_MAX: usize = 80;
@@ -308,6 +318,141 @@ pub fn delete_many(ids: &[u64]) -> usize {
         }
         gone
     })
+}
+
+/// A conversation a [`search`] found: its id, title, last activity and the
+/// lines that matched (≤ 2, each ≤ 240 characters, around the first hit).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Found {
+    pub id: u64,
+    pub title: String,
+    pub updated_ts: u64,
+    pub lines: Vec<String>,
+}
+
+/// Words a past-chats search ignores (the eager note search's, `tools.rs`).
+fn search_words(query: &str) -> Vec<String> {
+    const STOP: &[&str] = &[
+        "and", "the", "for", "are", "was", "were", "what", "when", "where", "which", "who", "why", "how", "with", "this",
+        "that", "these", "those", "from", "have", "has", "had", "does", "did", "can", "could", "would", "should", "will",
+        "about", "into", "your", "you", "our", "their", "there", "then", "than", "them", "they", "any", "all", "some",
+        "just", "not", "but", "chat", "chats", "talked", "said", "told", "asked", "earlier", "before", "last", "time",
+        "remember", "conversation", "conversations",
+    ];
+    query
+        .to_lowercase()
+        .replace('’', "'")
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() > 2 && !STOP.contains(w))
+        .map(str::to_string)
+        .collect()
+}
+
+/// A message clipped to ≤ 240 characters around the first of `words` in it.
+fn around(text: &str, words: &[String]) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = flat.to_lowercase();
+    let at = words.iter().filter_map(|w| lower.find(w.as_str())).min().unwrap_or(0);
+    let chars: Vec<char> = flat.chars().collect();
+    let char_at = lower.get(..at).map(|p| p.chars().count()).unwrap_or(0).min(chars.len());
+    let start = char_at.saturating_sub(80);
+    let end = (start + 240).min(chars.len());
+    let mut s: String = chars[start..end].iter().collect();
+    if start > 0 {
+        s = format!("…{s}");
+    }
+    if end < chars.len() {
+        s.push('…');
+    }
+    s
+}
+
+/// **Search past chats** (the `search_chats` tool, "Search and reference
+/// past chats"): the conversations whose title or messages hold the query's
+/// words, best first — a title word ×3, each matching message ×1, a
+/// conversation needing two of the words or one in its title (as the eager
+/// note search) — leaving out `exclude` (the chat asking). At most `limit`.
+pub fn search(query: &str, exclude: Option<u64>, limit: usize) -> Vec<Found> {
+    let words = search_words(query);
+    if words.is_empty() {
+        return Vec::new();
+    }
+    let need = words.len().min(2);
+    with_store(|s| {
+        let mut scored: Vec<(usize, &Conversation, Vec<&ChatMessage>)> = s
+            .conversations
+            .iter()
+            .filter(|c| Some(c.id) != exclude)
+            .filter_map(|c| {
+                let title = c.title.to_lowercase();
+                let in_title = words.iter().filter(|w| title.contains(w.as_str())).count();
+                let mut hits: Vec<(usize, &ChatMessage)> = c
+                    .messages
+                    .iter()
+                    .map(|m| {
+                        let t = m.text.to_lowercase();
+                        (words.iter().filter(|w| t.contains(w.as_str())).count(), m)
+                    })
+                    .filter(|(n, _)| *n > 0)
+                    .collect();
+                let distinct = words
+                    .iter()
+                    .filter(|w| title.contains(w.as_str()) || c.messages.iter().any(|m| m.text.to_lowercase().contains(w.as_str())))
+                    .count();
+                if in_title == 0 && distinct < need {
+                    return None;
+                }
+                let score = in_title * 3 + hits.iter().map(|(n, _)| n).sum::<usize>();
+                // The person's own words first, then the most words matched.
+                hits.sort_by_key(|(n, m)| (std::cmp::Reverse(*n), m.role != "user"));
+                Some((score, c, hits.into_iter().take(2).map(|(_, m)| m).collect()))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.updated_ts.cmp(&a.1.updated_ts)));
+        scored
+            .into_iter()
+            .take(limit)
+            .map(|(_, c, msgs)| Found {
+                id: c.id,
+                title: c.title.clone(),
+                updated_ts: c.updated_ts,
+                lines: msgs
+                    .iter()
+                    .map(|m| format!("{}: {}", if m.role == "user" { "User" } else { "Yap's AI" }, around(&m.text, &words)))
+                    .collect(),
+            })
+            .collect()
+    })
+}
+
+/// Does a question point back at an earlier chat ("what did we say about
+/// Lisbon?", "like you told me last time")? For a model without tools,
+/// which gets those chats' lines with the question ([`past_chats_block`]).
+pub fn refers_to_past(question: &str) -> bool {
+    static PAST: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b(?:(?:we|you|i)\s+(?:talked|spoke|chatted|discussed|went over|decided|agreed)|(?:we|you|i)\s+(?:said|told|mentioned|asked)\b.{0,40}\b(?:before|earlier|last time|the other day|yesterday|last week)|what did (?:we|you|i) (?:say|decide|talk|come up with|agree)|last time|(?:earlier|previous|other|last|old) (?:chat|conversation)s?|you told me|i told you|remember when|we were talking|as (?:we|you) said)")
+            .expect("static regex")
+    });
+    PAST.is_match(&question.replace('’', "'"))
+}
+
+/// The earlier chats a question points back to, as a block for a model
+/// without tools: up to two conversations, their matching lines (`search`).
+/// `None` when none match.
+pub fn past_chats_block(question: &str, conversation: u64) -> Option<String> {
+    let found = search(question, Some(conversation), 2);
+    if found.is_empty() {
+        return None;
+    }
+    let mut out = String::from("From the user's earlier chats with you (their own words and your answers then):");
+    for f in found {
+        out.push_str(&format!("\n- \"{}\":", f.title));
+        for l in f.lines {
+            out.push_str(&format!("\n  {l}"));
+        }
+    }
+    Some(out)
 }
 
 /// The web searches an answer ran, as its chips say them (`Searched the
@@ -860,6 +1005,30 @@ mod tests {
         // Denials aren't claims.
         let (_, fixed) = checked_answer("I didn't look it up: that was from memory.", "Did you look it up?", false, &chat, &[]);
         assert!(fixed.is_empty());
+    }
+
+    #[test]
+    fn past_chats_are_searched_by_their_words() {
+        let trip = create("Trip to Lisbon");
+        append(trip.id, "user", "We're flying to Lisbon on the 12th, any tips for Alfama?", &[], None, false).unwrap();
+        append(trip.id, "assistant", "Alfama is best explored on foot early in the morning.", &[], None, false).unwrap();
+        let cake = create("Birthday cake");
+        append(cake.id, "user", "A lemon drizzle recipe for Rochelle's birthday please", &[], None, false).unwrap();
+        let asking = create("Now");
+        append(asking.id, "user", "What did we say about Lisbon?", &[], None, false).unwrap();
+        let found = search("What did we say about Lisbon?", Some(asking.id), 5);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].title, "Trip to Lisbon");
+        assert!(found[0].lines[0].starts_with("User: We're flying to Lisbon"), "{:?}", found[0].lines);
+        // Two words needed unless one is in the title.
+        assert_eq!(search("birthday plans", None, 5).len(), 1);
+        assert!(search("plans for the weekend", None, 5).is_empty());
+        assert!(search("what did we talk about", None, 5).is_empty());
+        // A long message comes clipped around the hit.
+        let long = create("Long");
+        append(long.id, "user", &format!("{} the Kubernetes cluster {}", "word ".repeat(100), "word ".repeat(100)), &[], None, false).unwrap();
+        let f = search("kubernetes cluster", None, 5);
+        assert!(f[0].lines[0].contains("Kubernetes cluster") && f[0].lines[0].chars().count() < 260, "{}", f[0].lines[0]);
     }
 
     #[test]

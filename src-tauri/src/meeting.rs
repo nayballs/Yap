@@ -1014,7 +1014,7 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option
     };
     let translate = cfg.translate_to_english;
     let dict_prompt =
-        crate::config::dictionary_prompt(&with_attendees(&crate::dict_usage::ranked(&cfg.dictionary)));
+        crate::config::dictionary_prompt(&with_attendees(&crate::dict_usage::ranked(&crate::memory::with_names(&cfg.dictionary))));
 
     let slot = Arc::clone(engine_slot);
     let outcome = tokio::task::spawn_blocking(move || {

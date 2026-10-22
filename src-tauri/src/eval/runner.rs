@@ -623,6 +623,10 @@ fn settings_for(m: &Model, s: &Scenario, apps: &[AppEntry], web: &WebPlan) -> cr
         pp_api_key: m.key.clone(),
         pp_model: m.model.clone(),
         open_apps: s.settings.open_apps,
+        memory_sensitive: s.settings.memory_sensitive,
+        memory_search_chats: s.settings.memory_search_chats,
+        about_name: s.settings.about_name.clone(),
+        about_me: s.settings.about_me.clone(),
         web_search: web.on,
         web_search_native: web.native,
         web_search_service: web.service.clone(),
@@ -693,9 +697,36 @@ fn resolve_apps(apps: &Apps, scenarios: &Path, run_dir: &Path, this_pc: &mut Opt
     Ok(list)
 }
 
-/// Put the scenario's notes and folders in the (fresh, in-memory) store.
+/// Put the scenario's notes and folders in the (fresh, in-memory) store,
+/// its memory and its earlier chats.
 fn seed(s: &Scenario) -> Result<(), String> {
     crate::notes::eval_reset();
+    crate::memory::eval_reset();
+    crate::chats::eval_reset();
+    for m in &s.seed.memory {
+        use crate::memory::ops::{Action, Change, Origin, Rules, Section};
+        let section = Section::parse(&m.section).ok_or_else(|| format!("memory section \"{}\"", m.section))?;
+        let change = Change {
+            action: Action::Add,
+            id: None,
+            section: Some(section),
+            name: m.title.clone(),
+            about: (!m.summary.is_empty()).then(|| m.summary.clone()),
+            facts: m.details.clone(),
+            remove_facts: vec![],
+            say: String::new(),
+        };
+        let rules = Rules { sensitive_ok: true, origin: Origin::new("chat", None, "Seed"), now: crate::memory::now_secs(), max_changes: 1, grounding: None };
+        if crate::memory::change(&[change], &rules).done.is_empty() {
+            return Err(format!("memory seed \"{}\" wasn't kept", m.title));
+        }
+    }
+    for c in &s.seed.chats {
+        let conv = crate::chats::create(&c.title);
+        for m in &c.messages {
+            crate::chats::append(conv.id, &m.role, &m.text, &[], None, false)?;
+        }
+    }
     for f in &s.seed.folders {
         crate::notes::folder_create(f);
     }
@@ -812,17 +843,54 @@ async fn run_scenario(
         }
         record::begin_turn();
         let t0 = Instant::now();
+        let memory_before = crate::memory::items();
         // Asked out loud = the Voice Assistant's turn (its shorter history,
         // its spoken-answer prompt).
         let scope = voice.then_some("assistant");
-        let result = crate::commands::chat_turn(None, conversation, &turn.user, scope, voice, |_, _| {}).await;
+        let result = if turn.user.trim().is_empty() {
+            // A memory action alone (learn, tell, import): no chat turn.
+            Ok(None)
+        } else {
+            crate::commands::chat_turn(None, conversation, &turn.user, scope, voice, |_, _| {}).await.map(Some)
+        };
+        // Memory's passes after the turn: what a quiet chat, "Tell Yap what
+        // to change" or an import would do.
+        let mut memory_error: Option<String> = None;
+        if turn.learn {
+            let id = result.as_ref().ok().and_then(|t| t.as_ref().map(|t| t.conversation_id)).or(conversation);
+            match id {
+                Some(id) => {
+                    if let Err(e) = crate::memory::learn::learn_from_chat(id, false).await {
+                        memory_error = Some(format!("learning: {e}"));
+                    }
+                }
+                None => memory_error = Some("learning: no chat to read".to_string()),
+            }
+        }
+        for (kind, text) in [(crate::memory::learn::Kind::Tell, &turn.tell), (crate::memory::learn::Kind::Import, &turn.import)] {
+            if let Some(text) = text {
+                match crate::memory::learn::propose(text, kind).await {
+                    Ok(p) => {
+                        record::write("memory_proposal", json!({ "changes": p.changes }));
+                        if let Err(e) = crate::memory::learn::apply_proposal(p.id, None) {
+                            memory_error = Some(e);
+                        }
+                    }
+                    Err(e) => memory_error = Some(format!("{kind:?}: {e}")),
+                }
+            }
+        }
+        let memory_done = scenario::memory_diff(&memory_before, &crate::memory::items());
+        if !memory_done.is_empty() {
+            record::write("memory_changed", json!({ "changes": memory_done }));
+        }
         let stats = record::end_turn();
         let opened = crate::apps::e2e_opened_apps(Some(true))
             .unwrap_or_default()
             .iter()
             .filter_map(|v| v["name"].as_str().map(str::to_string))
             .collect();
-        let mut o = Observed { stats, opened, ..Default::default() };
+        let mut o = Observed { stats, opened, memory_done, ..Default::default() };
         // What a follow-up's "[1]" points at — for "where did you get that?",
         // only the answer it asks about — and whether the answer before it
         // searched (a "did you look that up?" asks about that one).
@@ -831,7 +899,7 @@ async fn run_scenario(
         o.earlier_searched =
             seen.last().is_some_and(|p| p.stats.tool_calls.iter().any(|c| crate::web::TOOL_NAMES.contains(&c.name.as_str())));
         match result {
-            Ok(t) => {
+            Ok(Some(t)) => {
                 conversation = Some(t.conversation_id);
                 o.reply = t.reply;
                 o.chips = t.tools_used;
@@ -842,10 +910,14 @@ async fn run_scenario(
                     earlier_numbers = previous_numbers.clone();
                 }
             }
+            Ok(None) => {}
             Err(e) => {
                 o.error = Some(e);
                 previous_numbers.clear();
             }
+        }
+        if let Some(e) = memory_error {
+            o.error = Some(o.error.take().map(|x| format!("{x}; {e}")).unwrap_or(e));
         }
         let ms = t0.elapsed().as_millis() as u64;
         let f = scenario::check(&turn.expect, &o);

@@ -1,6 +1,6 @@
 # Frontend: Settings
 
-`lib/Settings.svelte`, page by page (Commands, Voice Assistant, General, Speech-to-Text, Language Models, History, Advanced, About, Connectors, MCP, Account). Account's own page is [accounts.md](./accounts.md).
+`lib/Settings.svelte`, page by page (Commands, Voice Assistant, General, Speech-to-Text, Language Models, History, Memory, Advanced, About, Connectors, MCP, Account). Account's own page is [accounts.md](./accounts.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -219,7 +219,12 @@
   View (full effective prompt via `get_base_prompt`) / Customize (preset +
   body + Save/Reset) / Test tabs. Plus usage meter + profiles w/ per-profile
   model override + per-app rules), **History** (stats
-  dashboard + recent list + enable/clear), **Advanced** (output toggles —
+  dashboard + recent list + enable/clear), **Memory** (in the Data group after
+  History; `MemorySection.svelte`, laid out like Claude's Settings → Memory:
+  the four switches, the "needs an AI model" card, You / People / Projects /
+  Topics with rows that open to edit, "Tell Yap what to change" with its
+  diff, Import / Export / Clear all, the privacy line — see
+  [memory.md](./memory.md#settings--memory)), **Advanced** (output toggles —
   "Match the text around the cursor" (`smartSpacing`) first, "Leave the full
   stop off chat messages" (`chatNoFullStop`), then "Append
   trailing space", whose line reads "Only where Yap can't read the text around

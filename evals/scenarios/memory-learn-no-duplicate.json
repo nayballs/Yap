@@ -1,0 +1,21 @@
+{
+  "name": "memory-learn-no-duplicate",
+  "description": "Something new about someone memory has: it goes into their item, not a second Rochelle.",
+  "tags": ["memory", "memory-learn"],
+  "apps": "standard",
+  "seed": {
+    "memory": [{ "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York"] }]
+  },
+  "turns": [
+    {
+      "user": "Rochelle's birthday is on the 3rd of May. What should I get my sister this year? She loves gardening.",
+      "learn": true,
+      "expect": {
+        "memory": [
+          { "has": "Rochelle", "section": "people", "count": 1 },
+          { "has": "May", "section": "people" }
+        ]
+      }
+    }
+  ]
+}

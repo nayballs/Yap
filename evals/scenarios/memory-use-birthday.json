@@ -1,0 +1,20 @@
+{
+  "name": "memory-use-birthday",
+  "description": "A question that needs a remembered fact: the sister's birthday comes with the question (memory's relevant items).",
+  "tags": ["memory", "memory-use"],
+  "apps": "standard",
+  "seed": {
+    "memory": [
+      { "section": "profile", "details": ["Works night shifts as a nurse", "Lives in Leeds"] },
+      { "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York", "Birthday 3 May", "Loves gardening"] },
+      { "section": "people", "title": "Sam Patel", "summary": "Colleague at St James's", "details": ["Product manager"] }
+    ]
+  },
+  "turns": [
+    {
+      "user": "When's my sister's birthday again?",
+      "expect": { "answer_matches": "May\\W{0,3}3(rd)?\\b|\\b3(rd)?\\W{0,3}(of\\W{0,3})?May", "no_false_claims": true },
+      "soft": { "answer_not_contains": ["Sam"], "tools_not_called": ["*"] }
+    }
+  ]
+}

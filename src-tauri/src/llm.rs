@@ -511,6 +511,21 @@ pub(crate) async fn chat(
     messages: Value,
     opts: &ChatOptions,
 ) -> Result<String, String> {
+    chat_with(base_url, api_key, model, provider, messages, opts, serde_json::Map::new()).await
+}
+
+/// [`chat`] with fields of the caller's own in the request body (memory's
+/// passes send a model on this PC their changes' JSON schema as
+/// `response_format`, `memory/learn.rs`).
+pub(crate) async fn chat_with(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    provider: &str,
+    messages: Value,
+    opts: &ChatOptions,
+    extra: serde_json::Map<String, Value>,
+) -> Result<String, String> {
     let message = post_chat_request(
         base_url,
         api_key,
@@ -522,18 +537,14 @@ pub(crate) async fn chat(
         opts.max_tokens,
         opts.timeout,
         RATE_LIMIT_PATIENCE,
-        serde_json::Map::new(),
+        extra,
     )
     .await?;
     let content = message["content"]
         .as_str()
         .ok_or_else(|| "response missing choices[0].message.content".to_string())?;
     let out = strip_wrapping(content.trim());
-    Ok(if opts.disable_thinking {
-        strip_thinking(&out)
-    } else {
-        out
-    })
+    Ok(if opts.disable_thinking { strip_thinking(&out) } else { out })
 }
 
 /// One embedded note-chat turn (OpenWhispr `useEmbeddedChat`): system = the

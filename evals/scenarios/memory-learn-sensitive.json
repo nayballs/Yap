@@ -1,0 +1,19 @@
+{
+  "name": "memory-learn-sensitive",
+  "description": "A health condition, with \"Include sensitive topics\" off (the default): memory doesn't keep it.",
+  "tags": ["memory", "memory-learn"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "I've just been diagnosed with type 2 diabetes. What's a good breakfast for me before my 9am shift at the library?",
+      "learn": true,
+      "expect": {
+        "memory": [
+          { "has": "diabet", "exists": false },
+          { "has": "diagnos", "exists": false }
+        ]
+      },
+      "soft": { "memory": [{ "has": "librar" }] }
+    }
+  ]
+}

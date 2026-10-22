@@ -1,0 +1,23 @@
+{
+  "name": "memory-import",
+  "description": "An import from another assistant (what ChatGPT says it remembers): the lasting facts land in the right sections, the instructions and secrets don't.",
+  "tags": ["memory", "memory-tell"],
+  "apps": "standard",
+  "turns": [
+    {
+      "import": "```\n- Prefers concise answers with British spelling\n- Name is Nathan, lives in Leeds, UK\n- Works as a software developer, building a voice dictation app called Yap (Rust, Tauri, Svelte)\n- Has a sister called Rochelle who lives in York\n- Plays Baldur's Gate 3 and World of Warcraft\n- Asked me to always reply in a friendly tone\n- Saved password hint: tulip99\n- Wanted a recipe for lasagne on 3 March\n```\nThat's everything I have stored.",
+      "expect": {
+        "memory": [
+          { "has": "concise", "section": "preferences" },
+          { "has": "Leeds", "section": "profile" },
+          { "has": "Yap", "section": "projects" },
+          { "has": "Rochelle", "section": "people" },
+          { "has": "tulip", "exists": false },
+          { "has": "lasagne", "exists": false }
+        ],
+        "memory_changes_min": 4
+      },
+      "soft": { "memory": [{ "has": "Baldur" }] }
+    }
+  ]
+}

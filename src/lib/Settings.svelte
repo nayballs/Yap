@@ -50,6 +50,7 @@
   import ConnectorsSection from './ConnectorsSection.svelte';
   import { calendar } from './calendar.svelte.js';
   import McpSection from './McpSection.svelte';
+  import MemorySection from './MemorySection.svelte';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
   import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from './updates.svelte.js';
   import { meetingDetect } from './meetingDetect.svelte.js';
@@ -113,7 +114,14 @@
         { id: 'cleanup', label: 'Language Models' },
       ],
     },
-    { label: 'Data', items: [{ id: 'history', label: 'History' }] },
+    // Memory (memory.rs, MemorySection.svelte): what Yap remembers about you.
+    {
+      label: 'Data',
+      items: [
+        { id: 'history', label: 'History' },
+        { id: 'memory', label: 'Memory' },
+      ],
+    },
     // Wispr's Connectors + MCP pages. Connectors: your calendars
     // (calendar.rs, ConnectorsSection.svelte). MCP: AI apps read your
     // meetings (McpSection.svelte).
@@ -558,6 +566,11 @@
     meetingDiarization: false,
     diarizationModel: 'nemotron-3-diarization',
     meetingReminder: '15s',
+    // Memory (MemorySection.svelte, memory.rs): the switches only.
+    memorySearchChats: true,
+    memoryLearnChats: true,
+    memoryLearnMeetings: false,
+    memorySensitive: false,
     barEnabled: true,
     barHideFullscreen: true,
     barTheme: 'light',
@@ -1635,6 +1648,12 @@
       <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
       <path d="M3 3v5h5" />
       <path d="M12 8v4l3 2" />
+    </svg>
+  {:else if id === 'memory'}
+    <!-- A bookmark with a spark: what Yap keeps about you (the toast's chip too). -->
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M6 3h12v18l-6-4-6 4z" />
+      <path d="M12 7.5v4M10 9.5h4" />
     </svg>
   {:else if id === 'advanced'}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -3127,6 +3146,13 @@
               />
             </Row>
           </Group>
+
+        {:else if section === 'memory'}
+          <div class="page-h">
+            <h1>Memory</h1>
+            <p>What Yap remembers about you, so its AI can answer you better. You can see, change and clear all of it here.</p>
+          </div>
+          <MemorySection {cfg} />
 
         {:else if section === 'connectors'}
           <div class="page-h">

@@ -19,7 +19,12 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   before a term survives ("to Kubernetes", "1. kubernetes"; found by the real-app
   robot, 2026-10-17). Max 3 words per n-gram, so "Chat G P T" (4) leaves a "T".
   Runs after `apply_dictionary` for ONNX models (`dictionary_fuzzy`, default on);
-  snippets are never candidates.
+  snippets are never candidates. **`apply_names`** is the same loop for the
+  names Yap remembers (`memory/vocab.rs`, run after the dictionary's own pass
+  in `pipeline::apply_corrections`), refusing a near-miss heard as an
+  ordinary word ("lucky" with a Lucy in memory, "row shell" for Rochelle); the
+  Whisper prompt gets those names after the dictionary's words
+  (`memory::with_names`). See [memory.md](./memory.md).
   Also `is_prompt_echo` (OpenWhispr `dictionaryEchoFilter` port) used by `stt.rs`
   against Whisper hallucinating the dictionary prompt on silence, and, for
   `learn.rs`, `spelling_distance` (Handy's score on the letters alone, no

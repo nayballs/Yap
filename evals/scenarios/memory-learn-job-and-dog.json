@@ -1,0 +1,26 @@
+{
+  "name": "memory-learn-job-and-dog",
+  "description": "The user says what they do and that they have a dog, asking for meal ideas: memory keeps the job and the dog, not the meals.",
+  "tags": ["memory", "memory-learn"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "I'm a nurse at St James's in Leeds and I work night shifts, so I need easy meals I can take to work. Any ideas?",
+      "expect": {}
+    },
+    {
+      "user": "Thanks! Oh and they need to be quick, I have to walk my dog Beans before every shift.",
+      "learn": true,
+      "expect": {
+        "memory": [
+          { "has": "nurse", "section": "profile" },
+          { "has": "Beans" },
+          { "has": "pasta", "exists": false },
+          { "has": "curry", "exists": false }
+        ],
+        "memory_changes_max": 5
+      },
+      "soft": { "memory": [{ "has": "night", "section": "profile" }] }
+    }
+  ]
+}

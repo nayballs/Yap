@@ -1,0 +1,23 @@
+{
+  "name": "memory-use-unrelated",
+  "description": "A question with nothing to do with what Yap remembers: no memory dragged into the answer.",
+  "tags": ["memory", "memory-use"],
+  "apps": "standard",
+  "seed": {
+    "memory": [
+      { "section": "profile", "details": ["Works night shifts as a nurse", "Lives in Leeds"] },
+      { "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York", "Loves gardening"] },
+      { "section": "projects", "title": "Yap", "summary": "Their dictation app", "details": ["Written in Rust and Svelte"] }
+    ]
+  },
+  "turns": [
+    {
+      "user": "What's the tallest mountain in Japan?",
+      "expect": {
+        "answer_contains": ["Fuji"],
+        "answer_not_contains": ["Rochelle", "Yap", "nurse", "Leeds", "York", "shift"],
+        "no_false_claims": true
+      }
+    }
+  ]
+}

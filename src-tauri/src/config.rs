@@ -679,6 +679,26 @@ pub struct YapConfig {
     #[serde(default = "default_meeting_reminder")]
     pub meeting_reminder: String,
 
+    // ---- Memory (Settings → Memory; `memory.rs`) ----
+    // The switches only: what Yap remembers lives in memory.json, never
+    // here (Settings' wholesale saves would put an old copy back).
+    /// "Search and reference past chats": Chat may look through earlier
+    /// conversations (`search_chats`). On by default.
+    #[serde(default = "default_true")]
+    pub memory_search_chats: bool,
+    /// "Learn from my chats": a quiet conversation is read for lasting
+    /// facts about the person. On by default.
+    #[serde(default = "default_true")]
+    pub memory_learn_chats: bool,
+    /// "Learn from meetings": a finished meeting's attendees and action plan
+    /// (other people's words: off by default).
+    #[serde(default)]
+    pub memory_learn_meetings: bool,
+    /// "Include sensitive topics in memory" (health, religion, politics…):
+    /// off by default.
+    #[serde(default)]
+    pub memory_sensitive: bool,
+
     // ---- About you (Settings → General; `about_you.rs`) ----
     // Told to the AI model the person uses, with each question; kept here,
     // never sent to Yap's account service. (Until 22 Oct 2026, before it
@@ -919,6 +939,10 @@ impl Default for YapConfig {
             meeting_end_when_quiet: true,
             meeting_hotkey: default_meeting_hotkey(),
             meeting_reminder: default_meeting_reminder(),
+            memory_search_chats: true,
+            memory_learn_chats: true,
+            memory_learn_meetings: false,
+            memory_sensitive: false,
             about_name: String::new(),
             about_me: String::new(),
             region_country: String::new(),

@@ -757,6 +757,12 @@ pub async fn note_ask(
         system.push_str(&crate::about_you::prompt_block(&profile, now));
         question.clone()
     };
+    // Memory's "You" part, as every Chat answer gets it (memory.rs).
+    let memory_you = crate::memory::you_block();
+    if !memory_you.is_empty() {
+        system.push_str("\n\n");
+        system.push_str(&memory_you);
+    }
 
     crate::llm::note_chat(
         &system,
@@ -1013,6 +1019,34 @@ pub(crate) async fn chat_turn(
     // up front AND can search for more.
     let tools_supported = crate::tools::supports_tools(&provider, &model);
     let in_message = tools_supported;
+    // "Remember that…" / "Forget that…" to a model without tools: Yap's
+    // own memory pass makes the change (memory/learn.rs), and says so. A
+    // model with tools does it with `remember` / `forget`.
+    if !tools_supported {
+        if let Some(done) = crate::memory::learn::spoken(&text).await {
+            let (reply, chips) = done?;
+            let index = crate::chats::append(conv.id, "assistant", &reply, &chips, Some(answered_by.clone()), false)?;
+            return Ok(ChatTurn {
+                conversation_id: conv.id,
+                user_index,
+                index,
+                reply,
+                tools_used: chips,
+                model: Some(answered_by),
+                sources: Vec::new(),
+            });
+        }
+    }
+    // Memory (memory.rs): the "You" part in the system prompt with About
+    // you (stable from turn to turn), what this question is about with it.
+    let memory_you = crate::memory::you_block();
+    let memory_here = crate::memory::relevant_block(&text);
+    // "Search and reference past chats": a tool for a model with tools; for
+    // one without, the chats a question points back to ("what did we say
+    // about Lisbon?"), a couple of lines each.
+    let past_chats = (cfg.memory_search_chats && !tools_supported && crate::chats::refers_to_past(&text))
+        .then(|| crate::chats::past_chats_block(&text, conv.id))
+        .flatten();
     // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
     // bar: that's about the meetings.
     let web_on = cfg.web_search && scope != Some("meetings");
@@ -1052,6 +1086,12 @@ pub(crate) async fn chat_turn(
                 system.push(' ');
                 system.push_str(&crate::web::price_note(&local));
             }
+        }
+        system.push(' ');
+        system.push_str(&crate::tools::MEMORY_TOOL_INSTRUCTIONS.join(" "));
+        if cfg.memory_search_chats {
+            system.push(' ');
+            system.push_str(&crate::tools::CHATS_TOOL_INSTRUCTIONS.join(" "));
         }
     } else {
         // No tools: it can't do anything on the PC, so it mustn't say so.
@@ -1106,6 +1146,22 @@ pub(crate) async fn chat_turn(
             system.push_str(&format!("\n\n{RAG_LEAD}\n\n{rag}"));
         }
     }
+    for block in memory_here.into_iter().chain(past_chats) {
+        if in_message {
+            context.push(block);
+        } else {
+            system.push_str("\n\n");
+            system.push_str(&block);
+        }
+    }
+    // How the person wants answers, again last in the context, where a
+    // small tool model heeds it (a model without tools has it at the end
+    // of its system prompt, in memory's "You" block).
+    if in_message {
+        if let Some(note) = crate::memory::answer_note() {
+            context.push(note);
+        }
+    }
     // Last in the system prompt, where small models heed it: what the
     // context block is and About you without its clock — or, the context
     // staying in the system prompt, the whole block with it.
@@ -1120,6 +1176,10 @@ pub(crate) async fn chat_turn(
     } else {
         system.push_str("\n\n");
         system.push_str(&about);
+    }
+    if !memory_you.is_empty() {
+        system.push_str("\n\n");
+        system.push_str(&memory_you);
     }
     // Asked out loud: a tool model with the web starts with the answer; one
     // read aloud whole — the Voice Assistant, or a question dictated into
@@ -1163,7 +1223,8 @@ pub(crate) async fn chat_turn(
                 .map(|(r, t)| serde_json::json!({ "role": if r == "assistant" { "assistant" } else { "user" }, "content": t }))
                 .collect()
         };
-        let (reply, tools_used) = crate::tools::run_tool_loop(
+        let extra = crate::tools::Extra { memory: true, search_chats: cfg.memory_search_chats, conversation: Some(conv.id) };
+        let (reply, tools_used) = crate::tools::run_tool_loop_with(
             &system,
             &messages,
             &text,
@@ -1177,6 +1238,7 @@ pub(crate) async fn chat_turn(
             &notify,
             web.as_mut(),
             first,
+            extra,
         )
         .await?;
         // gpt-oss sometimes cites as "【1】" (its own browsing style): Yap's [1].
@@ -1189,8 +1251,11 @@ pub(crate) async fn chat_turn(
         // Small/local models: plain chat + eager RAG (their fallback), or
         // Yap's fixed web pipeline when the question needs the web.
         let endpoint = (base_url.as_str(), api_key.as_str(), model.as_str(), provider.as_str(), disable_thinking);
+        // The web pipeline's own prompt ends as this one does: About you,
+        // then memory's "You".
+        let about_and_memory = if memory_you.is_empty() { about.clone() } else { format!("{about}\n\n{memory_you}") };
         let SmallAnswer { reply, chips, sources, looked, pages } =
-            small_model_answer(&cfg, &persona, &system, &about, &history, &text, endpoint, web_on, by_voice).await?;
+            small_model_answer(&cfg, &persona, &system, &about_and_memory, &history, &text, endpoint, web_on, by_voice).await?;
         // "Opening Baldur's Gate 3." from a model that can't open anything:
         // said as it is instead (apps.rs).
         let corrected = if crate::apps::claims_unasked(&reply, &text) {
@@ -1255,6 +1320,8 @@ pub(crate) async fn chat_turn(
         false,
         &sources,
     )?;
+    // Read for lasting facts once the chat goes quiet ("Learn from my chats").
+    crate::memory::learn::after_turn(conv.id);
     Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by), sources })
 }
 
