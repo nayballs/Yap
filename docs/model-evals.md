@@ -996,6 +996,98 @@ GPU, ×2: 20/22, 41/44, 42/44, then **43/44 and 43/44** (run folders
 - What's left differs run to run: an import filing "building Yap" under Profile instead of
   Projects (1 in 8), a 115-word answer where the preference says short (1 in 8).
 
+## Memory on small models (22 Oct 2026)
+
+The ask: local models should learn memory too, carefully — **a wrong memory is worse than a
+missed one**. Until now a Chat model without tools (Qwen2.5-1.5B on the processor, the
+on-device default) learned nothing by itself: given the whole chat and memory's format it
+kept what the person only asked about and took up to two minutes of a processor. Now every
+local model learns from chats by **the small path** (`memory/small.rs`,
+[architecture](./architecture/memory.md)): Yap picks the sentences the person wrote about
+themselves (most chats: none, no call), one ~300-token call a sentence fills a small form
+under llama.cpp's grammar, and Yap checks every answer against the person's own words — and
+finds people, named projects, birthdays and preferences itself.
+
+**The scenarios** (`memory`, 35 of them; the 13 new ones also `memory-small`): chats of
+questions and web answers (a stand-in web), "I read that…", names with no relationship
+word, a friend and a manager, a flatmate named first, a novel, tools only asked about,
+one-off requests, a hobby, everyday first-person chat (confused, stuck, a late train), a
+fact among noise, a Tell with someone new; every learning, Tell and import scenario now
+lists what it may learn (`memory_allowed`), so **every false memory is counted**
+(precision) apart from the `has` checks met (recall) and the learning pass's own time
+(`memory_pass`). Fixtures are fictional (after the privacy pass: Norwich, the cookbook
+"Small Plates").
+
+**Before → after**, on the same scenarios (run folders `E:/yap-builds/eval-runs/
+20261022-13*-memfinal-before-*` and `20261022-14*-memfinal2-after-*`). Before = memory's
+full pass forced onto the small model (`YAP_EVAL_MEMORY_PATH=full`, then
+`YAP_EVAL_MEMORY_SMALL=learn`; ×1) — what shipped learned nothing at all with them (no false
+memory, no recall). After = the small path, ×2. Recall counts every `has` check, soft ones
+included (two can't be met by design: the library shift is only in a question, Tobias's
+second fact). Pass time is the learning pass alone, mean / slowest; the processor is a
+Ryzen 7 9800X3D, the card an RTX 5070 Ti.
+
+| Model | False memories: learning · Tell/import/remember | Recall: learning · Tell/import/remember | Learning pass, mean / slowest |
+|---|---|---|---|
+| Qwen2.5-1.5B, CPU | 4 · 1 → **0 · 0** | 9/22 · 11/16 → **42/44 · 32/32** | 4.9 / 9.9 s → **0.6 / 2.6 s** |
+| Qwen3.5-2B, CPU | 3 · 0 → **0 · 0** | 14/22 · 7/16 → **40/44 · 30/32** | 2.8 / 7.6 s → **0.7 / 2.9 s** |
+| Qwen3.5-0.8B (Q8), CPU | 4 · 1 → **0 · 0** | 13/22 · 8/16 → **38/44 · 30/32** ¹ | 4.4 / 29.0 s → **0.6 / 2.6 s** |
+| Qwen3.5-2B, GPU | → **0 · 0** | → **40/44 · 30/32** | → **0.1 / 0.5 s** |
+| Qwen3.5-0.8B, GPU | → **0 · 0** | → **40/44 · 30/32** | → **0.1 / 0.4 s** |
+| Qwen3.5-4B, GPU (×2 both) | 3 · 2 → **0** · 1 ² | 36/44 · 32/32 → **42/44 · 32/32** | 0.2 / 0.6 s → **0.1 / 0.7 s** |
+
+¹ Two of the 0.8B's misses are a chat answer that timed out (2 min on the processor), so the
+person's sentence never reached the conversation. ² The 4B's chat learning on its full path
+had kept 15 false memories in an earlier ×2 run (people named in passing — "Marco: sent
+invoice", "Ingrid: coffee date" — "Coming to stay this weekend"…) and 3 in this one; on the
+small path none. The 1 after it in Tell / import / remember is the chat's `remember` tool
+filing "user" as a person (Chat's tool path, not the small path), fixed after (below); Tell /
+remember / forget re-run ×4 then: 24/24, 0 false, 44/44.
+
+A pass with a candidate makes 1–3 calls of ~285 prompt tokens (the shared ~275 cached by
+llama.cpp after the first: 8–24 new tokens a call) and ≤ 80 generated; across the scenarios
+0.7 calls a pass, since most chats have no candidate. On the processor that's ~0.6–1.2 s a
+call for the 1.5B.
+
+**So**: no false memory on any of the five small-model runs ×2 (nor the 4B's learning), recall 86–95 % of
+learning checks. **Every local model now learns from chats this way**, the 4B included
+(`learn::chat_path`: no false memory where its full path kept 3–15, recall 42 vs 36/44 —
+better on precision at no loss, as the ask required); cloud models keep the full path (not
+measured: no cloud spend). The 4B keeps its full path for meetings, Tell and imports
+(32/32 either way), except **"Forget …", which is now Yap's own for every model**: the 4B's
+full path took the sister out with "Forget everything about my old job at Acme" in 2 of 4
+runs; Yap's (`small::forget`) was right every time.
+
+What it took, step by step (1.5B on the processor, then the others):
+
+- **First cut** (candidates + form + checks): 7 false → 0, recall 7/21 → 14/21, the pass
+  5.5 → 0.9 s. The 1.5B then picked the section badly: "people: I" for "I play chess…", the
+  prompt's own "The name as written" as a name, "Norwich" (the 2B) as a person, a preference
+  skipped. Now a "name" the sentence doesn't have (or a place after "in") falls back to what
+  the person said of themselves, and Yap finds people ("my sister Rochelle", "Daniel, my
+  flatmate"), projects ("a novel called The Salt Road" — the 2B filed it under Profile) and
+  birthdays itself; a preference is the person's own words (no call).
+- **The person's own words for Profile**: the 1.5B's paraphrase once dropped "nurse" ("Works
+  at St James's in Norwich") and once added "at the hospital" from a one-shot; Profile now
+  keeps the clause in the third person, and a fact's every word must be in the sentence.
+- **Who someone is, not what they do**: "Daniel: leaves the heating on all day" (a fact
+  about him, in the person's words, but a complaint) → only facts saying who they are.
+- **serde_json sorts a schema's keys**, so llama.cpp's grammar makes the model write
+  `fact`, then `section`, then `title`; the one-shots follow that order.
+- **Everyday first-person chat** never reaches a model: moods ("I'm so confused"),
+  problems ("I can't get it to run"), plans ("I'll try that"), one-off events ("I sent…"),
+  where they are now — and "My code keeps crashing" isn't the person's (only "my" +
+  birthday, job, home, pet, family… is).
+- The 0.8B wrote "Rochelle moved to Bristol": "moved to" becomes "Lives in" (replacing the
+  old one) only once her name is off — fixed. The 4B's `remember` tool filed "user" and "dog"
+  as people: a "name" that isn't one is a fact about the person now.
+
+**Left out**: learning from meetings with a small model (an action plan is other people's
+words in the third person; the small path reads only what the person said of themselves);
+more than one fact a sentence (Tobias "lives in Cardiff and works as a paramedic" keeps
+one); sentences with only a pronoun ("She loves gardening"); chats not in English (the
+candidate rules are English); cloud models on the small path (not measured).
+
 ## Prices where the user is (22 Oct 2026)
 
 A tester, on Qwen3.5-4B with their region the UK (from Windows), asked Chat "Can you lookup the Grok
