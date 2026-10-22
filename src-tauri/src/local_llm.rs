@@ -564,6 +564,9 @@ struct Serving {
     ctx: u32,
     /// The runtime and MTP it runs with.
     plan: Plan,
+    /// Its model is hybrid (recurrent layers beside attention, Qwen3.5):
+    /// llama.cpp resumes its cache only from checkpoints.
+    hybrid: bool,
     /// Its log's facts, read once it was ready.
     facts: LogFacts,
 }
@@ -614,6 +617,15 @@ pub fn serving_context() -> Option<u32> {
         return Some(s.ctx);
     }
     SERVING.lock().ok()?.as_ref().map(|s| s.facts.n_ctx.unwrap_or(s.ctx))
+}
+
+/// Whether the running sidecar at `url` serves a hybrid model (`None`: no
+/// sidecar there — another server, or it isn't up).
+pub fn serving_hybrid_at(url: &str) -> Option<bool> {
+    if !base_url().is_some_and(|ours| url.trim_end_matches('/') == ours) {
+        return None;
+    }
+    SERVING.lock().ok()?.as_ref().map(|s| s.hybrid)
 }
 
 /// The running sidecar's runtime and MTP (`None` while it isn't running).
@@ -1036,7 +1048,8 @@ async fn spawn_and_wait() -> Result<String, String> {
                     tokio::time::sleep(Duration::from_millis(300)).await;
                 }
                 if let Ok(mut s) = SERVING.lock() {
-                    *s = Some(Serving { model_id: model_id(&model), placement, ctx, plan, facts });
+                    let hybrid = crate::gguf::model_file(&model).is_some_and(|f| f.shape.is_hybrid());
+                    *s = Some(Serving { model_id: model_id(&model), placement, ctx, plan, hybrid, facts });
                 }
                 READY.store(true, Ordering::SeqCst);
                 tracing::info!(
@@ -1093,7 +1106,8 @@ pub struct WarmUp {
 pub async fn warm_up(url: &str, model: &str) -> WarmUp {
     let cfg = crate::config::load();
     let spelling = crate::about_you::cleanup_spelling(&cfg);
-    let messages = crate::llm::cleanup_messages(WARM_UP_TEXT, &cfg.pp_prompt, spelling.as_deref(), &cfg.dictionary);
+    let split = crate::llm::splits_dictation(url, model);
+    let messages = crate::llm::cleanup_messages(WARM_UP_TEXT, &cfg.pp_prompt, spelling.as_deref(), &cfg.dictionary, split);
     let body = serde_json::json!({
         "model": model,
         "stream": false,

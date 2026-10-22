@@ -96,7 +96,7 @@ pub struct Setup {
 
 /// `--cleanup-layout`: `combined` (the layout until 22 Oct 2026: the
 /// restated instruction and the transcript in one message — `llm::cleanup`
-/// sends them as two since, `llm::split_dictation`) or `system` (the
+/// sends them as two since for a hybrid model, `llm::splits_dictation`) or `system` (the
 /// instruction at the end of the system prompt; every user message only
 /// "Transcript: …"). A hybrid model like Qwen3.5 re-uses its cache only up
 /// to a checkpoint before the last user message: combined, it reads the
@@ -484,7 +484,7 @@ mod tests {
         assert_eq!(m[1]["content"], "Transcript:\n\"\"\"\num hi\n\"\"\"");
         assert_eq!(m[3]["content"], "Transcript:\n\"\"\"\nso yeah\n\"\"\"");
         // The real cleanup's messages, combined: the old single message.
-        let real = crate::llm::cleanup_messages("so yeah", "", None, &[]);
+        let real = crate::llm::cleanup_messages("so yeah", "", None, &[], true);
         let mut b = serde_json::json!({ "messages": real.clone() });
         super::combined_layout(&mut b);
         let m = b["messages"].as_array().unwrap();

@@ -211,6 +211,13 @@ impl Shape {
         2 * self.feed_forward_length * UBATCH * 4 + self.embedding_length * UBATCH * 20 + COMPUTE_SLACK + ctx * COMPUTE_PER_TOKEN
     }
 
+    /// Recurrent layers beside attention (Qwen3.5's Gated DeltaNet, Mamba
+    /// hybrids): llama.cpp resumes such a model's cache only from a
+    /// checkpoint.
+    pub fn is_hybrid(&self) -> bool {
+        self.recurrent_layers() > 0
+    }
+
     /// Can llama.cpp draft with this model's own multi-token-prediction
     /// layer (`--spec-type draft-mtp`)? Qwen3.5 (dense and MoE) carries one
     /// in the GGUFs Yap offers; another architecture with such a layer

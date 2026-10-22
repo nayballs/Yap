@@ -37,7 +37,10 @@ Nathan's PC: `YAP_EVAL_TARGET_DIR=E:/yap-builds/evals`, `--out E:/yap-builds/eva
 | `--timeout <secs>` | Per model call, instead of Yap's own (Chat: 20 s for a cloud model, 2 minutes for one on this PC since 18 Oct 2026, `llm::chat_timeout`). Leave it to measure what Yap does; raise it to measure what a slow model *could* do. |
 | `--cleanup`, `--cleanup-rounds <n>` | Time the dictation cleanup instead of the scenarios (below). |
 | `--cleanup-slot <n>`, `--chat-slot <n>` | Send the cleanup (and the Chat turns between) to llama.cpp slot n (`id_slot`). |
-| `--cleanup-layout split\|system` | The same cleanup prompt laid out another way (below). |
+| `--cleanup-layout combined\|system` | The same cleanup prompt laid out another way (below). |
+| `--cleanup-quick`, `--cleanup-limit <n>` | Only the back-to-back rounds (no first call, Chat turns or spelling), of the first n dictations: a cloud model's tokens. |
+| `--mtp on\|off`, `--no-warm-up` | A local model's MTP drafting (default: as Yap's sidecar decides on this PC, never with `--ngl 0`) and its warm-up request. |
+| `--clock-step <min>` | Each turn of a scenario, the clock Chat tells the model moves on this much (a real chat's turns are minutes apart). |
 | `--bench stream\|layout\|loop\|embed`, `--bench-rounds <n>` | Serving benches instead of the scenarios (below; `serving.md`). |
 | `--temperature <t>` | Every request's temperature (0: greedy, to check that a server change keeps the same outputs). |
 | `--set <key>=<json>` | A field laid over every request body (repeatable; `null` removes one), e.g. `--set cache_prompt=false`. |
@@ -50,7 +53,10 @@ Nathan's PC: `YAP_EVAL_TARGET_DIR=E:/yap-builds/evals`, `--out E:/yap-builds/eva
 
 `--model local:<spec>` starts **Yap's own llamafile runtime** with the sidecar's own
 arguments (`local_llm::server_args`: `-c 8192`, `--reasoning off`, `--cache-ram 0`,
-`--ctx-checkpoints 4`, `-lv 4`) on a free localhost port for the run, and stops it after.
+`--ctx-checkpoints 4`, `-lv 4`, and `--spec-type draft-mtp` where the sidecar would draft with
+MTP: llamafile ≥ 0.10.6, a Qwen3.5 GGUF, `--ngl` > 0 and room on this PC's card; `--mtp
+on|off` decides instead) on a free localhost port for the run, warms it up as the sidecar does
+(`local_llm::warm_up`; `--no-warm-up`), and stops it after.
 `--llamafile-arg` adds arguments after those, and a later flag wins: `--llamafile-arg=--cache-ram
 --llamafile-arg=8192` measures llama.cpp's old prompt cache, `--reasoning auto` its thinking.
 `<spec>`:
@@ -60,7 +66,8 @@ arguments (`local_llm::server_args`: `-c 8192`, `--reasoning off`, `--cache-ram 
 - a path to any `.gguf`, or `https://…gguf#sha256=<hex>` (the Hugging Face LFS oid).
 
 The runtime and models are taken from the installed app's `%APPDATA%\yap\llm\` when they're
-there, **read-only** (run in place; the server's log and working folder are the run's), else
+there (the runtime only when its marker, `llamafile.json`, says it's the version Yap pins),
+**read-only** (run in place; the server's log and working folder are the run's), else
 downloaded and SHA-256-verified with `local_llm::download_verified` into `--models-dir`
 (default `<out>/../eval-models`). `--ngl <n>` puts layers on the GPU (default **0: CPU only**,
 what a normal PC without a big GPU gets); `--ctx`, `--llamafile <path>` and repeatable
@@ -104,10 +111,11 @@ come out British and how many American, under the run's `--locale` ("Use my regi
 spelling", on by default; no locale = no spelling line). `cleanup.md` in the run folder; the
 numbers in `summary.json` (`models[].cleanup`, every back-to-back output in `all_outputs`: at
 `--temperature 0` two runs — a draft model or not — should write the same text).
-`--cleanup-layout split` sends the restated instruction as a user message of its own before
-the transcript, `system` moves it to the end of the system prompt (a hybrid model like Qwen3.5
-re-uses its cache only up to a checkpoint before the last user message, so today it reads the
-~370-token instruction again for every dictation).
+`--cleanup-layout combined` sends the restated instruction and the transcript in one message,
+as `llm::cleanup` did until 22 Oct 2026 (it sends them as two since, to a hybrid model: one like
+Qwen3.5 re-uses its cache only up to a checkpoint before the last user message, so it read the
+~370-token instruction again for every dictation); `system` moves the instruction to the end
+of the system prompt.
 
 ### Serving benches (`--bench`)
 
