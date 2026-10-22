@@ -225,6 +225,24 @@ pub async fn cleanup(
     dictionary: &[crate::config::DictionaryEntry],
     disable_thinking: bool,
 ) -> Result<String, String> {
+    let messages = cleanup_messages(text, body, spelling, dictionary, splits_dictation(base_url, model));
+    // Never waits out a rate limit: the dictation would wait with it, and the
+    // raw transcript is a fine fallback.
+    let out = post_chat(base_url, api_key, model, provider, 0.2, messages, Duration::ZERO).await?;
+    Ok(if disable_thinking { strip_thinking(&out) } else { out })
+}
+
+/// The cleanup's messages for `text` ([`cleanup`]; also what the on-device
+/// model's warm-up sends, `local_llm::warm_up`); `split`: the dictation as
+/// two messages ([`split_dictation`], for a hybrid model,
+/// [`splits_dictation`]). Pure but for the model evaluations' switches.
+pub fn cleanup_messages(
+    text: &str,
+    body: &str,
+    spelling: Option<&str>,
+    dictionary: &[crate::config::DictionaryEntry],
+    split: bool,
+) -> Value {
     // System message = immutable guardrails + the user's editable body/preset,
     // plus the custom dictionary as spelling/correction bias (OpenWhispr's
     // `dictionarySuffix`) so the model uses the right spellings up front instead
@@ -274,21 +292,82 @@ NEVER respond with commentary, status, or meta-remarks such as \"Nothing to clea
     );
     let example3_out = "Hi team\nLet's meet at 3pm on the 25th, after the review period, ok.";
 
-    let messages = json!([
-        { "role": "system", "content": system_prompt },
-        { "role": "user", "content": example1_in },
-        { "role": "assistant", "content": example1_out },
-        { "role": "user", "content": example2_in },
-        { "role": "assistant", "content": example2_out },
-        { "role": "user", "content": example3_in },
-        { "role": "assistant", "content": example3_out },
-        { "role": "user", "content": cleanup_message(&wrap(text), in_message) },
-    ]);
+    // The dictation: the restated instruction (with the spelling line) as a
+    // message of its own, then the transcript ([`split_dictation`]).
+    let dictation = cleanup_message(&wrap(text), in_message);
+    let (instruction_msg, transcript_msg) = if split { split_dictation(&dictation) } else { (String::new(), dictation) };
+    let mut messages = vec![
+        json!({ "role": "system", "content": system_prompt }),
+        json!({ "role": "user", "content": example1_in }),
+        json!({ "role": "assistant", "content": example1_out }),
+        json!({ "role": "user", "content": example2_in }),
+        json!({ "role": "assistant", "content": example2_out }),
+        json!({ "role": "user", "content": example3_in }),
+        json!({ "role": "assistant", "content": example3_out }),
+    ];
+    if !instruction_msg.is_empty() {
+        messages.push(json!({ "role": "user", "content": instruction_msg }));
+    }
+    messages.push(json!({ "role": "user", "content": transcript_msg }));
+    Value::Array(messages)
+}
 
-    // Never waits out a rate limit: the dictation would wait with it, and the
-    // raw transcript is a fine fallback.
-    let out = post_chat(base_url, api_key, model, provider, 0.2, messages, Duration::ZERO).await?;
-    Ok(if disable_thinking { strip_thinking(&out) } else { out })
+/// **The dictation's message as two** (2026-10-22): the restated
+/// instruction, then "Transcript: …" on its own. A hybrid model like
+/// Qwen3.5 resumes its cache only from a checkpoint before the last user
+/// message, so with the ~370-token instruction in the same message as the
+/// transcript it read the instruction again for every dictation:
+/// Qwen3.5-4B on an RTX 5070 Ti 447 → 55 prompt tokens read, ~237 → ~187 ms
+/// a dictation, greedy outputs 27 of 32 the same (the model evaluations,
+/// docs/model-evals.md "Local AI, phase 1"; the words are the same as
+/// before, only where the message breaks). The one-shots keep the joined
+/// form. Pure.
+pub fn split_dictation(message: &str) -> (String, String) {
+    match message.split_once("\n\nTranscript:\n") {
+        Some((instruction, rest)) => (instruction.to_string(), format!("Transcript:\n{rest}")),
+        None => (String::new(), message.to_string()),
+    }
+}
+
+/// Does the cleanup send the dictation as two messages ([`split_dictation`])
+/// to `model` at `base_url`? Only for a **hybrid** model — the on-device
+/// model when it is one (`local_llm::serving_hybrid_at`: recurrent layers
+/// in its GGUF), else a Qwen3.5/3.6 or Qwen3-Next by name on a
+/// **self-hosted** server ([`self_hosted`]: llama.cpp, LM Studio, Ollama on
+/// this PC or the home network). A cloud provider serving one by name
+/// (OpenRouter's Qwen3.5) keeps the joined message: its cache isn't
+/// llama.cpp's, and nobody measured it. A dense model already re-uses its
+/// cache up to the transcript (Qwen2.5-1.5B read 24 prompt tokens a
+/// dictation either way), and split it wrote numbers as words more often
+/// (7 of 24 greedy outputs changed on the processor); Groq's gpt-oss-20b
+/// changed 2 of 6. Pure but for the sidecar's state.
+pub fn splits_dictation(base_url: &str, model: &str) -> bool {
+    crate::local_llm::serving_hybrid_at(base_url).unwrap_or_else(|| self_hosted(base_url) && hybrid_by_name(model))
+}
+
+/// A server on this PC or the local network, by its URL: a loopback or
+/// private address, `localhost`, a `.local`/`.lan`/`.home.arpa` name, or a
+/// one-word host name. Pure.
+pub fn self_hosted(base_url: &str) -> bool {
+    let Ok(u) = url::Url::parse(base_url) else { return false };
+    match u.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback() || ip.is_private() || ip.is_link_local(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback() || (ip.segments()[0] & 0xfe00) == 0xfc00,
+        Some(url::Host::Domain(h)) => {
+            let h = h.to_ascii_lowercase();
+            h == "localhost"
+                || [".localhost", ".local", ".lan", ".home.arpa", ".internal"].iter().any(|s| h.ends_with(s))
+                || !h.contains('.')
+        }
+        None => false,
+    }
+}
+
+/// A model id naming a hybrid (recurrent + attention) family llama.cpp
+/// resumes only from checkpoints: Qwen3.5, Qwen3.6, Qwen3-Next. Pure.
+pub fn hybrid_by_name(model: &str) -> bool {
+    let m = model.to_ascii_lowercase().replace(['_', '-', ' '], ".");
+    ["qwen3.5", "qwen35", "qwen3.6", "qwen36", "qwen3.next"].iter().any(|f| m.contains(f))
 }
 
 /// Immutable guardrail prompt for **edit/rewrite mode**. Unlike dictation
@@ -613,7 +692,8 @@ async fn post_chat(
 /// `tools` array attached to the request. Waits out a rate limit (up to
 /// [`RATE_LIMIT_PATIENCE`]): a tool-using answer makes several calls, which
 /// is just what runs into a free plan's tokens-per-minute cap. `tool_choice`:
-/// OpenAI's `tool_choice` ("required": the model must call one of `tools`).
+/// OpenAI's `tool_choice` ("required": the model must call one of `tools`;
+/// `{"type": "function", "function": {"name": …}}`: that one).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn post_chat_message(
     base_url: &str,
@@ -623,11 +703,11 @@ pub(crate) async fn post_chat_message(
     temperature: f32,
     messages: Value,
     tools: Option<&Value>,
-    tool_choice: Option<&str>,
+    tool_choice: Option<Value>,
 ) -> Result<Value, String> {
     let mut extra = serde_json::Map::new();
     if let (Some(choice), Some(_)) = (tool_choice, tools) {
-        extra.insert("tool_choice".into(), json!(choice));
+        extra.insert("tool_choice".into(), choice);
     }
     post_chat_request(
         base_url,
@@ -774,6 +854,10 @@ async fn post_chat_request(
     // A model evaluation's request overrides (`--temperature`, `--set`, a
     // bench's `id_slot`); otherwise a no-op.
     crate::eval::adjust_body(&mut body);
+    // A request to the on-device sidecar is counted while it runs: its
+    // runtime isn't swapped nor its context changed under it, and the
+    // warm-up gives way (`local_llm::request_starting`).
+    let _busy = crate::local_llm::request_starting(base_url);
 
     let client = reqwest::Client::builder()
         .timeout(crate::eval::timeout(timeout))
@@ -1042,6 +1126,50 @@ mod tests {
             format!("Clean up this dictation. {line}\n\nTranscript:\n\"\"\"\nthe color\n\"\"\"")
         );
         assert_eq!(cleanup_message(wrapped, None), wrapped);
+    }
+
+    #[test]
+    fn the_dictation_comes_after_its_instruction_in_a_message_of_its_own() {
+        let line = "When the transcript is in English, spell it the British way (honour, recognise), without changing any words.";
+        let m = cleanup_messages("so the color is fine", "Keep it casual.", Some(line), &[], true);
+        let m = m.as_array().unwrap();
+        // System, three one-shots (question, answer), the instruction, the transcript.
+        assert_eq!(m.len(), 9);
+        let (ins, tr) = (m[7]["content"].as_str().unwrap(), m[8]["content"].as_str().unwrap());
+        assert_eq!((m[7]["role"].as_str(), m[8]["role"].as_str()), (Some("user"), Some("user")));
+        assert!(ins.starts_with("Clean up this dictation transcript") && ins.ends_with(line), "{ins}");
+        assert_eq!(tr, "Transcript:\n\"\"\"\nso the color is fine\n\"\"\"");
+        // The same words as the one message it used to be.
+        let joined = format!("{ins}\n\n{tr}");
+        assert_eq!(split_dictation(&joined), (ins.to_string(), tr.to_string()));
+        // The one-shots keep theirs whole; the prefix up to the dictation is
+        // the same for every dictation (a local model re-uses all of it).
+        assert!(m[1]["content"].as_str().unwrap().contains("\n\nTranscript:\n\"\"\"\nso um how much api"));
+        let other = cleanup_messages("something else entirely", "Keep it casual.", Some(line), &[], true);
+        assert_eq!(&other.as_array().unwrap()[..8], &m[..8]);
+        // A dense model (or a cloud one): one message, as before.
+        let one = cleanup_messages("so the color is fine", "Keep it casual.", Some(line), &[], false);
+        assert_eq!(one.as_array().unwrap().len(), 8);
+        assert_eq!(one[7]["content"].as_str().unwrap(), joined);
+        // Which models: Qwen3.5 and its kin by name; the rest not.
+        for hybrid in ["Qwen_Qwen3.5-4B-Q4_K_M", "qwen3.5:9b", "Qwen/Qwen3.6-35B-A3B", "qwen3-next-80b"] {
+            assert!(hybrid_by_name(hybrid), "{hybrid}");
+            assert!(splits_dictation("http://127.0.0.1:1/v1", hybrid), "{hybrid}");
+        }
+        for dense in ["qwen2.5-1.5b-instruct-q4_k_m", "openai/gpt-oss-20b", "Qwen3-4B-Instruct-2507", "llama-3.1-8b-instant"] {
+            assert!(!splits_dictation("https://api.groq.com/openai/v1", dense), "{dense}");
+            assert!(!splits_dictation("http://127.0.0.1:1/v1", dense), "{dense}");
+        }
+        // A hybrid by name only on a server of one's own (this PC, the home
+        // network): a cloud provider's Qwen3.5 keeps the one message.
+        for own in ["http://localhost:11434/v1", "http://192.168.1.20:8080/v1", "http://homeserver:1234/v1", "http://nas.local:8080/v1", "http://[::1]:8080/v1", "http://10.0.0.5/v1"] {
+            assert!(self_hosted(own) && splits_dictation(own, "qwen3.5:9b"), "{own}");
+        }
+        for cloud in ["https://openrouter.ai/api/v1", "https://api.groq.com/openai/v1", "https://8.8.8.8/v1", "not a url"] {
+            assert!(!self_hosted(cloud) && !splits_dictation(cloud, "qwen/qwen3.5-35b-a3b"), "{cloud}");
+        }
+        // No transcript mark (never, from `cleanup`): one message.
+        assert_eq!(split_dictation("just text"), (String::new(), "just text".to_string()));
     }
 
     #[test]

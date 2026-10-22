@@ -70,6 +70,30 @@ pub fn run(args: Vec<String>) -> i32 {
     }
 }
 
+/// How far a run's clock is ahead of the real one, seconds (`--clock-step`:
+/// each turn of a scenario a few minutes after the one before, as in a real
+/// chat — what Chat tells the model the time is, `commands::chat_turn`).
+#[cfg(debug_assertions)]
+static CLOCK_AHEAD: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Now, as Chat tells the model: the real time, or a run's clock
+/// (`--clock-step`).
+pub fn now() -> chrono::DateTime<chrono::Utc> {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            return chrono::Utc::now() + chrono::Duration::seconds(CLOCK_AHEAD.load(std::sync::atomic::Ordering::SeqCst));
+        }
+    }
+    chrono::Utc::now()
+}
+
+/// Move a run's clock on by `secs` (the runner, before each turn).
+#[cfg(debug_assertions)]
+pub(crate) fn clock_forward(secs: i64) {
+    CLOCK_AHEAD.fetch_add(secs, std::sync::atomic::Ordering::SeqCst);
+}
+
 /// The settings a run is on (`config::load` returns them): `None` outside a
 /// run.
 pub fn config() -> Option<crate::config::YapConfig> {

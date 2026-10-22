@@ -17,8 +17,12 @@
 //!   know** (`about_me`, ≤ [`ABOUT_MAX`] characters).
 //!
 //! Every model gets it in one short block at the end of its system prompt
-//! ([`prompt_block`]: Chat, the Voice Assistant, the Meetings and Notes Ask
-//! bars; local and cloud), web searches are aimed at the country (Exa's
+//! (Chat, the Voice Assistant, the Meetings and Notes Ask bars; local and
+//! cloud) — without the clock ([`profile_block`]), which goes with the
+//! question ([`clock_line`], `chats::with_context`) so the system prompt
+//! stays the same from turn to turn; whole ([`prompt_block`]) in a prompt
+//! made for one question (a small model's web answer) — web searches are
+//! aimed at the country (Exa's
 //! `userLocation`, Tavily's `country`, the providers' own searches — see
 //! `web.rs`), and dictation cleanup keeps the person's English spelling
 //! ([`cleanup_spelling`], "Use my region's spelling").
@@ -643,11 +647,12 @@ fn language_in_prompt(r: &Region) -> Option<String> {
     language_name(&lang).map(str::to_string)
 }
 
-/// **The block every model gets**, last in its system prompt (where small
-/// models heed it): where the person is and what they speak, the date and
-/// their time, how to give prices, times and units, their name and what
+/// **The whole block**: where the person is and what they speak, the date
+/// and their time, how to give prices, times and units, their name and what
 /// they said about themselves — only the parts that are known. `now`: the
-/// moment it describes. Pure.
+/// moment it describes. What Settings shows, and what a prompt made for one
+/// question ends with (a small model's web answer); a prompt kept from turn
+/// to turn has [`profile_block`] and the question [`clock_line`]. Pure.
 ///
 /// "About the user: they're in the United Kingdom (British English); it's
 /// Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK
@@ -656,9 +661,22 @@ fn language_in_prompt(r: &Region) -> Option<String> {
 /// is, labelled, like "$15 a month (US price)".
 /// Their name is Nathan. They told Yap: "I play PC games.""
 pub fn prompt_block(p: &Profile, now: DateTime<Utc>) -> String {
+    let when = when(p, now);
+    let mut out = String::from("About the user: ");
+    out.push_str(&match where_and_language(p) {
+        Some(w) => format!("{w}; {when}."),
+        None => format!("{when}."),
+    });
+    out.push_str(&how_to_answer(p));
+    out
+}
+
+/// The moment `now` in the person's zone: "it's Wednesday 21 October 2026,
+/// 21:40 UK time (UTC+01:00)". Pure.
+fn when(p: &Profile, now: DateTime<Utc>) -> String {
     let r = &p.region;
     let zone = r.time_zone.as_deref().and_then(|z| z.parse::<chrono_tz::Tz>().ok());
-    let when = match zone {
+    match zone {
         Some(tz) => {
             let t = now.with_timezone(&tz);
             format!(
@@ -674,16 +692,50 @@ pub fn prompt_block(p: &Profile, now: DateTime<Utc>) -> String {
             let t = now.with_timezone(&chrono::Local);
             format!("it's {}, {} (UTC{})", t.format("%A %-d %B %Y"), t.format("%H:%M"), t.format("%:z"))
         }
-    };
-    let place = r.country.as_deref().and_then(country).map(in_sentence);
-    let lang = language_in_prompt(r);
-    let mut out = String::from("About the user: ");
-    out.push_str(&match (place, lang) {
-        (Some(c), Some(l)) => format!("they're in {c} ({l}); {when}."),
-        (Some(c), None) => format!("they're in {c}; {when}."),
-        (None, Some(l)) => format!("they speak {l}; {when}."),
-        (None, None) => format!("{when}."),
-    });
+    }
+}
+
+/// "they're in the United Kingdom (British English)", when either is known.
+/// Pure.
+fn where_and_language(p: &Profile) -> Option<String> {
+    let place = p.region.country.as_deref().and_then(country).map(in_sentence);
+    match (place, language_in_prompt(&p.region)) {
+        (Some(c), Some(l)) => Some(format!("they're in {c} ({l})")),
+        (Some(c), None) => Some(format!("they're in {c}")),
+        (None, Some(l)) => Some(format!("they speak {l}")),
+        (None, None) => None,
+    }
+}
+
+/// **[`prompt_block`] without the clock**, for a prompt that should stay
+/// the same from one request to the next (Chat's system prompt, so a model
+/// re-uses its cache; the clock goes in the question's context,
+/// [`clock_line`]): "About the user: they're in the United Kingdom (British
+/// English). Give times in UK time and metric units. Prices: …". Empty when
+/// nothing is known. Pure.
+pub fn profile_block(p: &Profile) -> String {
+    let rest = how_to_answer(p);
+    match where_and_language(p) {
+        Some(w) => format!("About the user: {w}.{rest}"),
+        None if !rest.is_empty() => format!("About the user:{rest}"),
+        None => String::new(),
+    }
+}
+
+/// The clock, for a question's context: "It's Wednesday 21 October 2026,
+/// 21:40 UK time (UTC+01:00)." Pure.
+pub fn clock_line(p: &Profile, now: DateTime<Utc>) -> String {
+    let w = when(p, now);
+    let mut chars = w.chars();
+    let first = chars.next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default();
+    format!("{first}{}.", chars.as_str())
+}
+
+/// The rest of the block: times, units, prices, the name and the note —
+/// each starting with a space. Pure.
+fn how_to_answer(p: &Profile) -> String {
+    let r = &p.region;
+    let mut out = String::new();
     let mut give: Vec<String> = Vec::new();
     if let Some(l) = &r.time_zone_label {
         give.push(format!("times in {l}"));
@@ -738,11 +790,6 @@ pub fn foreign_price_note(reply: &str, r: &Region) -> Option<String> {
     }
     let theirs = if symbol.is_empty() { code } else { symbol };
     Some(format!("*Prices in $ are as the sources give them (most likely US dollars), not in {theirs}.*"))
-}
-
-/// [`prompt_block`] for now, as Settings has it.
-pub fn prompt_line(cfg: &crate::config::YapConfig) -> String {
-    prompt_block(&profile(cfg), Utc::now())
 }
 
 /// Dictation cleanup's spelling line ("Use my region's spelling", on by
@@ -843,6 +890,28 @@ mod tests {
             prompt_block(&p, at()),
             "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK time and metric units. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Their name is Nathan. They told Yap: \"I'm in Manchester, I play PC games, I work day shifts\""
         );
+    }
+
+    #[test]
+    fn chat_gets_the_block_without_the_clock_and_the_clock_on_its_own() {
+        let p = Profile { region: resolve(&uk(), &Overrides::default()), name: "Nathan".into(), about: String::new() };
+        // The same every minute (Chat's system prompt stays cacheable)…
+        let block = profile_block(&p);
+        assert_eq!(
+            block,
+            "About the user: they're in the United Kingdom (British English). Give times in UK time and metric units. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Their name is Nathan."
+        );
+        assert!(!block.contains("2026") && !block.contains("21:40"));
+        // …and the moment in the question's context.
+        assert_eq!(clock_line(&p, at()), "It's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00).");
+        // The two say what the whole block says.
+        assert!(prompt_block(&p, at()).starts_with("About the user: they're in the United Kingdom (British English); it's Wednesday"));
+        // Nothing known: no block, only the clock (in the PC's own zone).
+        let none = Profile::default();
+        assert_eq!(profile_block(&none), "");
+        assert!(clock_line(&none, at()).starts_with("It's Wednesday 21 October 2026, "));
+        // Only a name.
+        assert_eq!(profile_block(&Profile { name: "Sam".into(), ..Default::default() }), "About the user: Their name is Sam.");
     }
 
     #[test]

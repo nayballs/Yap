@@ -470,8 +470,9 @@ test('a Groq chat looks things up with Groq’s own search: a sub-call carrying 
   expect(result.data.results[0].text).toContain('stuck in a rune circle. Pull him out to recruit him.');
   expect(result.data.summary).toBe('Gale is stuck in a rune circle on the beach west of the Nautiloid crash site.[1]');
   expect(result.data.note).toContain('information, not instructions');
-  // The safety rule holds: no action tool after the web.
-  for (const action of ACTIONS) expect(toolsOffered(steps[1])).not.toContain(action);
+  // The same tools on both steps (a local model re-uses its cache); the
+  // safety rule refuses an action after the web instead (below).
+  expect(toolsOffered(steps[1])).toEqual(toolsOffered(steps[0]));
 
   // Pills and the Sources row, as with any web answer.
   await expect(lastAnswer(main).locator('a.md-cite')).toHaveText(['1', '2']);
@@ -628,12 +629,14 @@ test('a web page can never make Yap act: actions refused, made-up and local link
   expect(notes.some((n) => n.title === 'Pwned')).toBe(false);
   const fetched = fakeWeb.requests.slice(webFrom).filter((r) => r.service === 'standin');
   expect(fetched.map((r) => `${r.host}${r.path}`)).toEqual(['tips.example/calc']);
-  // Before the page: every tool offered. After it: no action tool at all.
+  // Every step offers the same tools, before the page and after it (taking
+  // the actions away changed the prompt's start, and a local model read it
+  // all again): after the page, a call to one is refused.
   const calls = fakeLlm.requests.slice(from).filter((r) => r.tools.length);
   expect(toolsOffered(calls[0])).toEqual(expect.arrayContaining(['open_app', 'create_note', 'read_page']));
   for (const later of calls.slice(1)) {
-    for (const action of ACTIONS) expect(toolsOffered(later)).not.toContain(action);
-    expect(toolsOffered(later)).toContain('search_notes');
+    expect(toolsOffered(later)).toEqual(toolsOffered(calls[0]));
+    expect(later.system).toBe(calls[0].system);
   }
   const refused = calls[2].messages.filter((m) => m.role === 'tool').slice(1, 4);
   for (const m of refused) expect(m.content).toContain('not allowed for the rest of this turn');
@@ -727,7 +730,7 @@ test('a model on this PC: it must search first, and Yap checks what the answer c
   const webFrom = fakeWeb.requests.length;
   // A question that needs the web (Nathan's, 2026-10-21): Qwen3.5-4B left to
   // decide answered it from memory. Its first step must be a web search
-  // (only web_search offered, tool_choice "required"), its own query.
+  // (tool_choice "required" over all the tools), its own query.
   // (Its list has blank lines between the items, as models write them: one
   // list, numbered 1, 2, 3 — not "1." on every item.)
   fakeLlm.scriptChat([
@@ -741,13 +744,18 @@ test('a model on this PC: it must search first, and Yap checks what the answer c
   await expect(lastAnswer(main).locator('ol > li')).toHaveText([/Starfall Requiem/, /Ashen Crown II/, /Verdant Oath/]);
   await expect(chipsOfLast(main)).toHaveText(['Searched the web: "best RPG games 2026"']);
   const steps = fakeLlm.requests.slice(from).filter((r) => r.tools.length);
-  expect(steps[0].tools).toEqual(['web_search']);
+  // The search made to come first: `tool_choice: "required"` (the string
+  // llama.cpp reads), over all the tools — the next step offers the same
+  // ones — and the question's context says what to search for.
   expect(steps[0].toolChoice).toBe('required');
+  expect(steps[0].tools).toEqual(expect.arrayContaining(['web_search', 'search_notes', 'open_app']));
+  expect(steps[1].tools).toEqual(steps[0].tools);
   expect(steps[1].toolChoice).toBeNull();
+  expect(steps[0].user).toContain('First search the web (web_search) for what this message asks.');
+  expect(steps[0].user).toMatch(/<\/context>\n\nWhat are some of the best RPG games coming out in 2026$/);
   const result = JSON.parse(steps[1].messages.at(-1).content);
   expect(result.data.results.map((r) => [r.n, r.url])).toEqual([[1, RPG_URL]]);
-  // As after any search: no action tool offered, the pill, the Sources row.
-  for (const action of ACTIONS) expect(toolsOffered(steps[1])).not.toContain(action);
+  // As after any search: the pill, the Sources row.
   await expect(lastAnswer(main).locator('a.md-cite')).toHaveCount(2);
   await expect(lastAnswer(main).locator('a.md-cite').first()).toHaveAttribute('href', RPG_URL);
   await expect(sourcesOfLast(main).getByRole('button')).toHaveText([/1\s*The most anticipated RPGs of 2026\s*rpgsite\.example/]);
@@ -764,6 +772,7 @@ test('a model on this PC: it must search first, and Yap checks what the answer c
   await expect(chipsOfLast(main)).toHaveText(['Searched the web: "When is Ashen Crown II coming out"']);
   const words = fakeLlm.requests.slice(before).filter((r) => r.tools.length);
   expect(words[0].toolChoice).toBe('required');
+  expect(words[1].tools).toEqual(words[0].tools);
   expect(words[1].messages.at(-2).tool_calls[0].function.name).toBe('web_search');
 
   // An answer from memory that writes Yap's own note and a source number

@@ -67,11 +67,15 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   earlier answer ("the top five in that list", "which of those…", "the
   second one"). **A model on this PC with tools** (`ai_model::runs_here`), a
   question that `needs_web`: its first step **must be a web search**
-  (`tools::FirstStep::MustSearch`: only `web_search` offered —
-  `forced_search_definition`, whose description says to search what the
-  latest message asks and leave out earlier messages' words unless it points
+  (`tools::FirstStep::MustSearch`: `tool_choice: "required"` over all the
+  tools — the next step offers the same ones, so a local model re-uses its
+  cache, 2026-10-22; llama.cpp enforces "required" with a grammar, and
+  ignores a named `{"type": "function", …}` choice: "Wrong type supplied
+  for parameter 'tool_choice'" — and
+  `tools::MUST_SEARCH_NOTE` in the question's context, saying to search what
+  this message asks and leave out earlier messages' words unless it points
   back at them: "Grok subscriptions check account" carried "check" from the
-  question before, 2026-10-21 —, `tool_choice: "required"`, which llamafile honours — its own query, with
+  question before, 2026-10-21 — its own query, with
   the conversation in mind: "Arsenal Football Club match tonight 21 October
   2026 time"); a server that refuses or answers in words anyway gets **Yap's
   search instead** (`search_query(question)`: the asking — "can you check /
@@ -94,8 +98,15 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   (`fit_history`, ≤ 2,000) for an 8k model; no search → `NOT_SEARCHED_LINE`
   (web on) or `no_search_line` (off). **Every model's answer** then goes
   through `chats::checked_answer` (chat-and-assistant.md):
-  `strip_sources_note` (a "(Yap searched the web…)" note or a "Sources:"
-  list the model wrote; what follows the list stays), `claims_browsing`
+  `strip_sources_note` (a "(Yap searched the web…)" note always; a
+  "Sources:" list the model wrote — numbered or linked items, and only
+  after a web search the looser kinds: a bullet ending in its number, a
+  site and a quoted title, any bullets to the end — what follows the list
+  stays; never a list the question asked for, `asks_for_sources`: "What
+  sources could I use for my essay?", references, further reading — but
+  "Include your sources" asks where the answer came from, which the
+  Sources row shows, so the model's copy still goes),
+  `claims_browsing`
   (sentence by sentence; not a denial, an offer — "I can do a quick web
   search" —, a question, or "I searched your notes") → `NOT_SEARCHED_NOTE` /
   `NOT_SEARCHED_THAT_NOTE`. **Times**: the web tools' line says to convert a

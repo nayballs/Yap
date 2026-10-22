@@ -37,7 +37,10 @@ Nathan's PC: `YAP_EVAL_TARGET_DIR=E:/yap-builds/evals`, `--out E:/yap-builds/eva
 | `--timeout <secs>` | Per model call, instead of Yap's own (Chat: 20 s for a cloud model, 2 minutes for one on this PC since 18 Oct 2026, `llm::chat_timeout`). Leave it to measure what Yap does; raise it to measure what a slow model *could* do. |
 | `--cleanup`, `--cleanup-rounds <n>` | Time the dictation cleanup instead of the scenarios (below). |
 | `--cleanup-slot <n>`, `--chat-slot <n>` | Send the cleanup (and the Chat turns between) to llama.cpp slot n (`id_slot`). |
-| `--cleanup-layout split\|system` | The same cleanup prompt laid out another way (below). |
+| `--cleanup-layout combined\|system` | The same cleanup prompt laid out another way (below). |
+| `--cleanup-quick`, `--cleanup-limit <n>` | Only the back-to-back rounds (no first call, Chat turns or spelling), of the first n dictations: a cloud model's tokens. |
+| `--mtp on\|off`, `--no-warm-up` | A local model's MTP drafting (default: as Yap's sidecar decides on this PC, never with `--ngl 0`) and its warm-up request. |
+| `--clock-step <min>` | Each turn of a scenario, the clock Chat tells the model moves on this much (a real chat's turns are minutes apart). |
 | `--bench stream\|layout\|loop\|embed`, `--bench-rounds <n>` | Serving benches instead of the scenarios (below; `serving.md`). |
 | `--temperature <t>` | Every request's temperature (0: greedy, to check that a server change keeps the same outputs). |
 | `--set <key>=<json>` | A field laid over every request body (repeatable; `null` removes one), e.g. `--set cache_prompt=false`. |
@@ -50,7 +53,10 @@ Nathan's PC: `YAP_EVAL_TARGET_DIR=E:/yap-builds/evals`, `--out E:/yap-builds/eva
 
 `--model local:<spec>` starts **Yap's own llamafile runtime** with the sidecar's own
 arguments (`local_llm::server_args`: `-c 8192`, `--reasoning off`, `--cache-ram 0`,
-`--ctx-checkpoints 4`, `-lv 4`) on a free localhost port for the run, and stops it after.
+`--ctx-checkpoints 4`, `-lv 4`, and `--spec-type draft-mtp` where the sidecar would draft with
+MTP: llamafile ≥ 0.10.6, a Qwen3.5 GGUF, `--ngl` > 0 and room on this PC's card; `--mtp
+on|off` decides instead) on a free localhost port for the run, warms it up as the sidecar does
+(`local_llm::warm_up`; `--no-warm-up`), and stops it after.
 `--llamafile-arg` adds arguments after those, and a later flag wins: `--llamafile-arg=--cache-ram
 --llamafile-arg=8192` measures llama.cpp's old prompt cache, `--reasoning auto` its thinking.
 `<spec>`:
@@ -60,7 +66,8 @@ arguments (`local_llm::server_args`: `-c 8192`, `--reasoning off`, `--cache-ram 
 - a path to any `.gguf`, or `https://…gguf#sha256=<hex>` (the Hugging Face LFS oid).
 
 The runtime and models are taken from the installed app's `%APPDATA%\yap\llm\` when they're
-there, **read-only** (run in place; the server's log and working folder are the run's), else
+there (the runtime only when its marker, `llamafile.json`, says it's the version Yap pins),
+**read-only** (run in place; the server's log and working folder are the run's), else
 downloaded and SHA-256-verified with `local_llm::download_verified` into `--models-dir`
 (default `<out>/../eval-models`). `--ngl <n>` puts layers on the GPU (default **0: CPU only**,
 what a normal PC without a big GPU gets); `--ctx`, `--llamafile <path>` and repeatable
@@ -104,10 +111,11 @@ come out British and how many American, under the run's `--locale` ("Use my regi
 spelling", on by default; no locale = no spelling line). `cleanup.md` in the run folder; the
 numbers in `summary.json` (`models[].cleanup`, every back-to-back output in `all_outputs`: at
 `--temperature 0` two runs — a draft model or not — should write the same text).
-`--cleanup-layout split` sends the restated instruction as a user message of its own before
-the transcript, `system` moves it to the end of the system prompt (a hybrid model like Qwen3.5
-re-uses its cache only up to a checkpoint before the last user message, so today it reads the
-~370-token instruction again for every dictation).
+`--cleanup-layout combined` sends the restated instruction and the transcript in one message,
+as `llm::cleanup` did until 22 Oct 2026 (it sends them as two since, to a hybrid model: one like
+Qwen3.5 re-uses its cache only up to a checkpoint before the last user message, so it read the
+~370-token instruction again for every dictation); `system` moves the instruction to the end
+of the system prompt.
 
 ### Serving benches (`--bench`)
 
@@ -691,4 +699,185 @@ write-up with sources and what to build is in the private repo, `docs/local-ai-r
   1.90 s: generation 29 → 14 tok/s — most likely attention over the other slots' cells in the
   unified cache).
 - One product bug the suite keeps showing on both runtimes: `web-no-sources-list` — the 4B wrote
-  `Sources:` then `- IndieGames: "…" [1]` lines, which `web::strip_sources_note` lets through.
+  `Sources:` then `- IndieGames: "…" [1]` lines, which `web::strip_sources_note` lets through
+  (fixed the same day, below).
+
+## Local AI, phase 1 (22 Oct 2026)
+
+The research's top four, built and measured step by step on the RTX 5070 Ti (Ryzen 7 9800X3D,
+llama.cpp's 8 threads), Qwen3.5-4B Q4_K_M unless said, `--locale en-GB` (Nathan's region: the
+cleanup's spelling line, About you), `--temperature 0` for the cleanup benches. Each before/after
+is the same session, interleaved where it's a timing (medians); run folders
+`E:/yap-builds/eval-runs/20261022-0[1-3]*-lap1-*`.
+
+**1. llamafile 0.10.3 → 0.10.6** (`local_llm::RUNTIME_*`; the background upgrade for existing
+installs, the warm-up, `gguf::estimate` recalibrated). Cleanup, twelve dictations × 3, two runs
+each, 8K:
+
+| | 0.10.3 | 0.10.6 |
+|---|---|---|
+| Back to back (median) | 303 / 302 ms | **241 / 249 ms** |
+| After a Chat turn (median) | 322 / 322 ms | 256 / 261 ms |
+| Generation | 116 tok/s | **169 tok/s** |
+| On the card (the log's buffers) | 3,815 MiB | **3,270 MiB** (compute buffer 495 → 72) |
+| Greedy outputs | — | **36/36 the same** as 0.10.3 |
+| First cleanup after loading | 689 / 676 ms | 612 / 599 ms; **271 / 280 ms with the warm-up** |
+
+The warm-up (one cleanup-sized request as soon as the sidecar is healthy, ~500 ms in the
+background, cancelled by a real request) leaves the cleanup's prompt in a slot: the first
+dictation reads 441 prompt tokens instead of 2,180. The research's 2.8 s first request didn't
+come back (599 ms without the warm-up, both runs).
+
+**Memory on 0.10.6** (the log's buffers, `nvidia-smi` +230–250 MiB for the CUDA context):
+
+| Model, context | Model | KV | Recurrent | Compute | Log total | Estimate |
+|---|---|---|---|---|---|---|
+| Qwen3.5-4B, 8K / 32K / 64K | 2,741 | 256 / 1,024 / 2,048 | 201 | 72 / 96 / 128 | 3,270 / 4,062 / 5,118 | 3,279 / 4,071 / 5,127 |
+| Qwen3.5-4B + MTP, 8K / 32K / 64K | 2,863 | + 32 / 128 / 256 (draft) | 804 | 107+72 / 131+74 / 163+106 | 4,134 / 5,024 / 6,240 | 4,153 / 5,065 / 6,281 |
+| Qwen3.5-9B, 8K / 32K | 5,081 | 256 / 1,024 | 201 | 96 / 120 | 5,634 / 6,426 | 5,646 / 6,438 |
+| Qwen3.5-2B, 8K (+ MTP) | 1,259 (1,321) | 96 (+16) | 77 (308) | 53 (73+52) | 1,485 (1,866) | 1,498 (1,908) |
+| Qwen2.5-1.5B, 8K / 32K | 935 | 224 / 896 | 0 | 70 / 94 | 1,228 / 1,920 | within 10 |
+
+(MiB.) What changed: 0.10.6 reserves no batch of logits (the compute buffer is one batch's
+feed-forward and hidden states, + 1 KiB a token), and leaves Qwen3.5's prediction block (blk.32,
+122 MiB on the 4B, 247 on the 9B) off the card unless MTP drafts. MTP's cost: the block, the
+recurrent state four times (one copy per drafted token), ~35 MiB more compute, and the draft
+context (one attention layer's KV, a compute buffer) — +864 MiB at 8K by the log, **+865 MiB by
+`nvidia-smi`** (+925 at 32K): less than the research's +0.94 GB, which counted the draft's compute
+buffer twice (it's reserved twice, the second replacing the first).
+
+**The upgrade path, for a 0.10.3 install** (no marker beside `llamafile.exe`): 90 s after launch,
+while the on-device model is in use and the connection isn't metered, 0.10.6 downloads to
+`llamafile-next.exe` (verified against the pinned SHA-256), `--version` checks it runs, and it's
+swapped in once nothing uses the sidecar (no dictation, no request to it, no meeting recording or
+summarised), the old one kept as `llamafile-previous.exe` until the new one has started; a new one
+that won't start (twice: the second try without MTP, with longer to load) gives way to the old one,
+and is refused after three sessions like that ("Review fixes" below). Unit-tested (the marker,
+the swap, the way back) and e2e-tested with stand-ins (`local-runtime-upgrade.spec.js`); not run
+against the installed app (its `%APPDATA%\yap` is never written by these runs).
+
+**2. A cache-friendly Chat prompt** (for a model that calls tools: the clock, the notes found,
+the meetings, the earlier-searches line and the spoken notes in the question's message; the same
+tools on every step; a must-search first step forced over all of them — `tool_choice: "required"`
+since the review below, the named form llamafile ignored before; the history window moving
+three turns at a time). Every A/B here is on 0.10.6 without MTP.
+
+| Measure | Before | After |
+|---|---|---|
+| A real notes chat, turns 3 min apart (`--clock-step 3`; notes-follow-ups + notes-long-chat ×4): a turn's first call, prompt tokens read (median / mean) | 658–666 / 926–940 | **212–240 / 493–531** |
+| — its prompt time (median / mean) | 169–172 / 212–214 ms | **105–109 / 147–154 ms** |
+| `--bench layout`, 20 earlier turns (9.6k tokens), turns 2–4 | 9,577–9,752 read, 1,563–1,589 ms | **693–738 read, 185–192 ms** |
+| `--bench layout`, 50 earlier turns on 64K (18.8k tokens) | 18,759–18,934 read, 3,187–3,217 ms | **693–738 read, 210–216 ms** |
+| `--bench loop`: a web answer's second step | 3,677 read, 632 ms | **1,695 read, 312 ms** (`"required"` over all the tools the same) |
+| The suite ×2 (32K): a turn's first call, turns 2+, prompt time (mean) | 310 ms | **183 ms** |
+| — the tool loop's later steps, prompt time (mean) | 178 ms | **124 ms** |
+| — model time a turn, the 35 scenarios both runs had (mean / median) | 1.20 / 1.11 s | **1.11 / 1.02 s** |
+| Pass rate (the suite ×2, 32K) | 67/70 (95.7 %) | **70/72 (97.2 %)**; the 35 shared: 68/70 |
+
+On 0.10.6 a short chat costs less than the research measured on 0.10.3 (0.10.6 checkpoints at
+every message start, so the old layout restored the checkpoint after the tool instructions and
+re-read ~650 tokens); a long chat still re-read all of it every turn (the four checkpoints a slot
+keeps are near the end), which the benches show. **What the layout change broke, and the
+fixes:** next to the question, the notes the keyword RAG found pulled a follow-up off the
+conversation — "Whose house is it at, and what time?" (after a book club answer) got "the note I
+found is about kitchen quotes", which shared only "time": turn 14 of `notes-long-chat` passed 1 of
+12 times (before: 11 of 14). Telling the model the notes "may not be what it's about" didn't help
+(0/6), nor the context after the question (3/6) or in a message of its own (1/6); **a stricter
+match did** (`tools::rag_notes`: no "what"/"and", two of the question's words or one in the
+title): 15 of 18 (5 of 6 with OpenWhispr's framing line kept, what ships), and the probes (three
+two-turn follow-ups ×8) 24/24 before and after. A model
+**without** tools (Qwen2.5-1.5B on the processor) keeps the old layout: with the notes in the
+question's message it got 13 of 20 `notes-follow-ups` turns right, against 19 of 25 before and
+12 of 15 with the old layout kept (a noisy model at temperature 0.5 — the before runs scored 10/10
+and 9/15) — no reason to change it, and a dense model re-uses its cache to the first change
+anyway. Groq `openai/gpt-oss-20b` (cloud: the same layout) passed `notes-find-fact`,
+`notes-edit-partial` and `voice-boil-an-egg` (7.5k tokens).
+
+**3. The cleanup's dictation as two messages** (the restated instruction, then the transcript),
+for a hybrid model. 32 dictations (the twelve and twenty more: self-corrections, lists, numbers,
+money, names, British spellings, a question and a command) × 3, two runs each, no MTP:
+
+| Qwen3.5-4B, 0.10.6 | One message (before) | Two messages |
+|---|---|---|
+| Back to back (median / p90) | 238 / 262, 237 / 260 ms | **188 / 225, 186 / 226 ms** |
+| After a Chat turn | 244 / 243 ms | **195 / 198 ms** |
+| Prompt tokens read a dictation | 447 | **55** |
+| First after loading (warmed) | 317 / 311 ms | 215 / 217 ms |
+
+Greedy outputs: **27 of 32 the same**; the five: "Direct ML" → "DirectML" (better), a list's commas
+→ semicolons, "e2e" → "E2E", "the 4th November" → "the 4th of November" (as said), and "two point
+four million" → "$2.4m" where the one message wrote "£2.4m" — both invent a currency; a line
+against it ("never add a currency or a unit that wasn't said") didn't stop it and stopped "three
+pm" → "3pm", so it isn't in. **Qwen2.5-1.5B on the processor** (12 dictations × 2): 795 → 799 ms,
+24 prompt tokens read either way (dense: already cached), and 17 of 24 outputs the same — numbers
+written as words more often (10:30 → "ten thirty"); **Groq gpt-oss-20b** (6 dictations): 4 of 6
+the same ("just" dropped; "The thing is" kept), 236–745 ms either way, 14.3k tokens a run. So
+only a hybrid model gets the two messages (`llm::splits_dictation`).
+
+**4. MTP** (`--spec-type draft-mtp`, on 0.10.6, the two messages): 32 dictations × 3, two runs each:
+
+| Qwen3.5-4B | MTP off | MTP on |
+|---|---|---|
+| Back to back (median) | 191 / 186 ms | **159 / 161 ms** |
+| After a Chat turn | 193 / 188 ms | **164 / 163 ms** |
+| Generation | 171–172 tok/s | **255–262 tok/s**, 91 % of drafts kept |
+| On the card (8K) | 3,270 MiB | 4,134 MiB by the log, +865 by `nvidia-smi` |
+| Peak RAM (server) | 3.63 GB | 3.99 GB |
+| Greedy outputs | — | **31 of 32 the same** (a list's punctuation; MTP on is the same in both its runs, 96/96) |
+
+**The suite ×2 at 32K, everything in** (0.10.6, the new prompt, MTP on as Yap decides on this PC,
+turns 3 min apart): **71/72 (98.6 %)** — the one failure `notes-create-in-folder` #2, the commonest
+local miss — against 67/70 at the start of the day (0.10.6 alone) and 70/72 with the new prompt
+without MTP; `notes-long-chat` 2/2. Model time a turn over the 35 scenarios every run had: **1.20 s
+(0.10.6) → 1.11 s (+ the prompt) → 0.91 s (+ MTP)**; generation in Chat 159 → 219 tok/s, 71 % of
+drafts kept; on the card (32K, the log) 4,062 → 5,098 MiB; the server's peak RAM 3.8 → 4.2 GB.
+Qwen2.5-1.5B (no tools; its prompt as before) 50/72 before and after, the same failures (the tool
+scenarios it can't do, and "the two kitchen quotes" answered with one).
+
+**The cleanup, all four**: 0.10.3, one message ~302 ms → 0.10.6 + two messages + MTP **~160 ms** a
+dictation (−47 %), the first after loading 680 → ~200 ms.
+
+**The CPU tier** (Qwen2.5-1.5B, all layers on the processor, 0.10.6): the cleanup works (795 ms
+back to back, 1.1 s after a Chat turn, 1.8–2.0 s after a long one, as on 0.10.3); no MTP on the
+processor (and none for a model without the prediction layer); Chat's prompt for it is unchanged.
+
+**5. `web::strip_sources_note`** now takes out a "Sources:" list of bullets with a site and a
+quoted title or its number at the end (Qwen3.5-4B's `- IndieGames: "…" [1]`), and a plain list
+to the end of the answer under such a heading — after a web search only — and never a list the
+question asked for (sources for an essay, references, reading; the review below); the answer's
+own list stays. Unit-tested on the answer the suite failed on and on the review's examples.
+
+### Review fixes (22 Oct 2026)
+
+An independent review of the branch found bugs, mostly in the runtime upgrade; the fixes, and
+what was measured again (run folders `E:/yap-builds/eval-runs/20261022-04*-lap1-fix-*`):
+
+- **`tool_choice`**: llamafile 0.10.6 doesn't take the named form — "Wrong type supplied for
+  parameter 'tool_choice'. Expected 'string', using default value" 34 times in the final suite —
+  so the must-search step ran as `auto` (the model searched by itself, told to by
+  `MUST_SEARCH_NOTE`). Now `"required"` over all the tools (llama.cpp enforces it with a
+  grammar). The web scenarios ×2 on the 4B at 32K with MTP: **28/28**, every forced step a
+  `web_search` (no fallback to Yap's search), **0** "Wrong type" lines; ~22 % of the prompt
+  tokens sent were read (78k of 354k, ~800 a call: the cache re-used as before; `--bench loop`
+  had measured `"required"` over all tools at 1,695 read for the second step, the same as the
+  named form). The first run, 27/28, had kept a sources list for "…Include your sources." —
+  the new `asks_for_sources` rule was too broad, then narrowed (below).
+- **`strip_sources_note`** cut lists the person asked for ("Here are some sources you could use
+  for your essay: ### Sources - IPCC… - NASA…" → the first line). The looser list rules (a
+  bullet ending in its number, a site and a quoted title, any bullets to the end) now apply only
+  when the turn searched the web, and no list goes when the question asks for sources,
+  references or reading — but "Include your sources" asks where the answer came from, which the
+  Sources row shows, so the model's copy of it still goes (`web-no-sources-list`).
+- **The runtime's way back** (`local_llm::start_with`, unit-tested with a scripted start, and run
+  for real on the 5070 Ti in test-mode Yaps with portable data, `llm/` hard-linked to the eval
+  models): **(a)** a proven 0.10.6 autostarted with MTP (`mtp=true`, 4,206 MiB on the card by
+  the log, 8K), cleanups through it 169 / 162 ms after the first; **(b)** an unproven "new
+  runtime" that exits at once (`where.exe`): tried with MTP, then without it with 300 s, then
+  the previous runtime went back and served — `failures: {sha: 1}`, not refused, the new one
+  kept as `llamafile-next.exe` for the next launch; **(c)** a start stopped from Settings while
+  it loaded: "stopped while it started", no second try, no way back, the marker untouched. No
+  process left behind.
+- **The cleanup, same build** (32 dictations × 3, MTP off / on, two runs each): 188 / 193 →
+  **156 / 155 ms** back to back (phase 1: 191 / 186 → 159 / 161), 264 tok/s with 91 % of drafts
+  kept; outputs **96/96 the same** as phase 1's runs with and without MTP (93/96 between MTP
+  off and on: the one list's punctuation, as before).

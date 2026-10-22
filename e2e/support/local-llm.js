@@ -48,6 +48,8 @@ export async function startFakeLocalModels(dir, ids = ['qwen3.5-4b', 'qwen2.5-1.
 
   return {
     env: { YAP_LLM_SOURCES: sourcesFile },
+    /** Each id's { url, sha256 } ("runtime" for the engine). */
+    sources,
     requests,
     /** The next download stops half-way until `release()`. */
     hold() {

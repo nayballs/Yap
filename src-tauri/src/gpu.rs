@@ -11,8 +11,10 @@
 //! **The rule** ([`can_run_big_model`]): a card with at least
 //! [`BIG_MODEL_VRAM_MIB`] of its own memory. What the 4B needs there
 //! (llama.cpp's buffers, read from the sidecar's log on an RTX 5070 Ti, all
-//! 34 layers on the card): the model 2,863 MiB, the 8k context's KV 256 MiB
-//! and recurrent state 201 MiB, compute 495 MiB — ~3.7 GiB. Besides it,
+//! 34 layers on the card): on llamafile 0.10.6 the model 2,741 MiB, the 8k
+//! context's KV 256 MiB and recurrent state 201 MiB, compute 72 MiB —
+//! ~3.2 GiB (0.10.3: ~3.7); MTP drafting, only where it fits
+//! (`local_llm::mtp_fits`), adds ~0.85 GiB. Besides it,
 //! Yap's speech model sits on the same card (Parakeet through DirectML ~1
 //! GB, a large Whisper through Vulkan up to ~1.6 GB) and Windows and the
 //! apps on screen keep ~0.5–1 GB. A "6 GB" card (which reports 5.9–6 GiB)

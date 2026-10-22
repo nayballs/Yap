@@ -26,7 +26,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   (`checked_answer`, in `chat_turn`, every model; each fix logged and, in a
   model evaluation, counted — `eval::post_fix`): a sources list or "(Yap
   searched the web for this answer…)" note the model wrote itself goes
-  (`web::strip_sources_note`: Yap shows the real sources); a search it claims
+  (`web::strip_sources_note`: Yap shows the real sources; a list the
+  question asked for — sources for an essay, references, reading — stays,
+  and the looser list shapes count only after a web search); a search it claims
   when none ran this turn ("I did look it up on the web",
   `web::claims_browsing`) gets "*Yap didn't search the web for this answer: it
   comes from the AI model's own knowledge, which may be out of date.*" — or
@@ -56,14 +58,42 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   to answer follow-ups from the answer after it — told "the text isn't
   kept", Qwen3.5-4B said it couldn't list "the top five in that list" —, or
   to read one of those pages, which `read_page` allows); any other model gets
-  one system-prompt line naming the questions Yap searched the web to answer
+  one line (in the question's context for a tool model, else the system
+  prompt) naming the questions Yap searched the web to answer
   (`web_history_note`). **Every** system prompt ends with the **About you
-  block** (`about_you::prompt_block`, ai-models.md: where the person is and
-  their English, the date and their time with its UTC offset, prices in
+  block** (ai-models.md: where the person is and their English, prices in
   their currency — or a foreign price said as such —, times, units, their
-  name and note), and a web answer's tool lines say to convert a page's time
-  zone to theirs (`web::time_note`), so a page's "3:00 PM ET" is converted,
-  not mislabelled, and "$8/month" isn't passed off as the UK price.
+  name and note) — a tool model's without its clock
+  (`about_you::profile_block`), the date and their time with its UTC offset
+  going in the question's context (`about_you::clock_line`), a model
+  without tools' whole (`prompt_block`); a web answer's tool lines say to convert
+  a page's time zone to theirs (`web::time_note`), so a page's "3:00 PM ET"
+  is converted, not mislabelled, and "$8/month" isn't passed off as the UK
+  price. **The prompt's two parts** (2026-10-22, for the model's cache), for
+  a model that calls tools (Qwen3.5-4B, the cloud models): the system prompt
+  holds only what stays the same from turn to turn — the persona, the
+  instructions, `chats::CONTEXT_NOTE`, About you without the clock — and
+  everything that changes with the question goes in a `<context>` block in
+  the question's own message (`chats::with_context`): the clock, the notes
+  the eager RAG found (`rag_context` under `RAG_LEAD`, strict:
+  `tools::rag_notes`, only notes matching two of the question's words or one
+  in their title, words like "what" and "and" left out — next to the
+  question, a note that only shared "time" pulled a follow-up off the
+  conversation), the Meetings view's meetings, the earlier-searches line,
+  the spoken-answer notes. Only the latest question carries it (the history
+  keeps what was typed). A hybrid local model (Qwen3.5) resumes its cache
+  only from a checkpoint, so a system prompt that changed every turn made
+  every Chat request read the conversation again; now a turn reads its own
+  message (model-evals.md "Local AI, phase 1"); cloud providers' prefix
+  caches like a stable start too. **A model without tools** (Qwen2.5-1.5B)
+  keeps it all in the system prompt, the loose RAG and the whole About you
+  block with the clock, as before: it's dense (re-reads only from the first
+  change) and answered no better with the notes next to the question. The
+  Notes view's Ask bar (`note_ask`) does the same by the same rule: the note
+  in the system prompt, the clock with the question for a tool model.
+  **The history window** moves three turns at a time
+  (`chats::history_start`: 14–19 messages, the Voice Assistant's 5–8), not
+  every turn, so a long chat keeps its prompt's start.
 - **`tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
@@ -145,11 +175,16 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   up on the web" is on; run by `web.rs`'s per-turn `web::Turn`, passed as
   `run_tool_loop`'s `web` argument). `run_tool_loop` takes the history as
   OpenAI messages (`chats::history_messages`: earlier web answers' searches
-  replayed) and a **`FirstStep`**: `Model` (it decides), `MustSearch` (a
-  model on this PC asked something that needs the web — only `web_search`
-  offered — `forced_search_definition`: "the user's latest message", not
-  earlier messages' words —, `tool_choice: "required"`; no call made, or the server refuses →
-  Yap's own search for it, `search_for_the_model`) or `YapSearches(query)`
+  replayed), the question's context (`chats::with_context`) and a
+  **`FirstStep`**: `Model` (it decides), `MustSearch` (a model on this PC
+  asked something that needs the web — `tool_choice: "required"`
+  (`must_search_choice`; a named choice is ignored by llama.cpp) over all
+  the tools, and `MUST_SEARCH_NOTE` in the question's context: search this
+  message, not earlier messages' words; no `web_search` made (another
+  tool, or words), or the server refuses →
+  Yap's own search for it, `search_for_the_model`; until 2026-10-22 only
+  `web_search` was offered, so the next step's tools differed and a local
+  model read the whole prompt again) or `YapSearches(query)`
   (Yap searches before the first step; the model evaluations' comparison,
   `YAP_EVAL_FIRST`). **Nothing in the notes** (`EmptyNotes`, 2026-10-21):
   with the web on and a question not about the person's own things
@@ -160,9 +195,11 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   search | none compares). **The safety rule**
   (`refused_after_web`, `ACTION_TOOLS` = open_app, create_note,
   update_note, edit_note, copy_to_clipboard): once web content is in a turn
-  (`Turn::seen`), those are no longer offered (`without_actions`) and a call
-  to one is refused with a reason for the model (chip `Didn't open an app:
-  not after reading the web`); the person's next message is a clean turn.
+  (`Turn::seen`), a call to one is refused with a reason for the model (chip
+  `Didn't open an app: not after reading the web`) — they stay offered:
+  **every step of a turn offers the same tools and system prompt**
+  (2026-10-22; taking them away changed the prompt's start, and a local
+  model read it all again); the person's next message is a clean turn.
   Unit-tested through the real loop against a local fake model + Exa
   (`a_web_page_can_never_make_the_chat_act`).
 - **`assistant.rs`** — the **Voice Assistant** (2026-10-18; Settings →

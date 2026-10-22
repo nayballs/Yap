@@ -81,36 +81,45 @@ struct Shot {
 /// How the bench sends the cleanup: `--cleanup-slot` / `--chat-slot`, the
 /// llama.cpp slots (`id_slot`) the cleanup and the Chat turns between them
 /// go to (`None`: the server picks, by prompt similarity, else the least
-/// recently used), and `--cleanup-layout`, the same prompt laid out another
-/// way ([`LAYOUTS`]).
+/// recently used), `--cleanup-layout`, the same prompt laid out another way
+/// ([`LAYOUTS`]), and `--cleanup-quick` / `--cleanup-limit` (a cloud
+/// model's tokens: only the back-to-back rounds, of the first `limit`
+/// dictations).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Setup {
     pub cleanup: Option<u64>,
     pub chat: Option<u64>,
     pub layout: Option<&'static str>,
+    pub quick: bool,
+    pub limit: Option<usize>,
 }
 
-/// `--cleanup-layout`: `split` (the restated instruction as a user message
-/// of its own, the transcript after it) or `system` (the instruction at the
-/// end of the system prompt; every user message only "Transcript: …").
-/// Today the last user message carries the instruction (~370 tokens) before
-/// the transcript, and a hybrid model like Qwen3.5 re-uses its cache only up
-/// to a checkpoint before that message, so it reads the instruction again
-/// for every dictation.
-pub const LAYOUTS: &[&str] = &["split", "system"];
+/// `--cleanup-layout`: `combined` (the layout until 22 Oct 2026: the
+/// restated instruction and the transcript in one message — `llm::cleanup`
+/// sends them as two since for a hybrid model, `llm::splits_dictation`) or `system` (the
+/// instruction at the end of the system prompt; every user message only
+/// "Transcript: …"). A hybrid model like Qwen3.5 re-uses its cache only up
+/// to a checkpoint before the last user message: combined, it reads the
+/// ~370-token instruction again for every dictation.
+pub const LAYOUTS: &[&str] = &["combined", "system"];
 
 const TRANSCRIPT_MARK: &str = "\n\nTranscript:\n";
 
-/// The cleanup's last user message as two: the instruction, then the
-/// transcript.
-fn split_layout(body: &mut Value) {
+/// The dictation's instruction and transcript (`llm::cleanup`'s last two
+/// messages) as one message again: the layout before 22 Oct 2026.
+fn combined_layout(body: &mut Value) {
     let Some(msgs) = body["messages"].as_array_mut() else { return };
-    let Some(last) = msgs.last().and_then(|m| m["content"].as_str()).map(str::to_string) else { return };
-    if let Some((instruction, rest)) = last.split_once(TRANSCRIPT_MARK) {
-        msgs.pop();
-        msgs.push(json!({ "role": "user", "content": instruction }));
-        msgs.push(json!({ "role": "user", "content": format!("Transcript:\n{rest}") }));
+    let n = msgs.len();
+    if n < 2 || msgs[n - 2]["role"] != "user" || msgs[n - 1]["role"] != "user" {
+        return;
     }
+    let (Some(ins), Some(tr)) = (msgs[n - 2]["content"].as_str(), msgs[n - 1]["content"].as_str()) else { return };
+    if !tr.starts_with("Transcript:\n") {
+        return;
+    }
+    let joined = format!("{ins}\n\n{tr}");
+    msgs.truncate(n - 2);
+    msgs.push(json!({ "role": "user", "content": joined }));
 }
 
 /// The instruction moved to the system prompt; each user message keeps only
@@ -118,6 +127,15 @@ fn split_layout(body: &mut Value) {
 fn system_layout(body: &mut Value) {
     let Some(msgs) = body["messages"].as_array_mut() else { return };
     let mut instruction = None;
+    // The dictation's own instruction (a message before its transcript).
+    let n = msgs.len();
+    if n >= 2
+        && msgs[n - 2]["role"] == "user"
+        && msgs[n - 1]["content"].as_str().is_some_and(|t| t.starts_with("Transcript:\n"))
+        && msgs[n - 2]["content"].as_str().is_some_and(|t| !t.contains(TRANSCRIPT_MARK))
+    {
+        instruction = msgs.remove(n - 2)["content"].as_str().map(str::to_string);
+    }
     for m in msgs.iter_mut().filter(|m| m["role"] == "user") {
         let Some(text) = m["content"].as_str().map(str::to_string) else { continue };
         if let Some((ins, rest)) = text.split_once(TRANSCRIPT_MARK) {
@@ -147,7 +165,7 @@ async fn clean(phase: &'static str, text: &str, ep: &Endpoint<'_>, setup: Setup)
     let spelling = crate::about_you::cleanup_spelling(&cfg);
     pin(setup.cleanup);
     record::set_phase_rewrite(match setup.layout {
-        Some("split") => Some(split_layout as fn(&mut Value)),
+        Some("combined") => Some(combined_layout as fn(&mut Value)),
         Some("system") => Some(system_layout as fn(&mut Value)),
         _ => None,
     });
@@ -223,18 +241,22 @@ const CHAT_QUESTIONS: &[&str] = &[
 /// cleanup.md.
 pub async fn run(bench: &Bench, ep: &Endpoint<'_>, rounds: u32, setup: Setup) -> Value {
     let mut shots: Vec<Shot> = Vec::new();
+    let dictations = &bench.dictations[..setup.limit.unwrap_or(usize::MAX).clamp(1, bench.dictations.len())];
     // The first call after the model loaded (its caches cold).
-    let first = clean("first", &bench.dictations[0], ep, setup).await;
-    println!("  first cleanup after loading: {} ms", first.ms);
-    shots.push(first);
+    if !setup.quick {
+        let first = clean("first", &dictations[0], ep, setup).await;
+        println!("  first cleanup after loading: {} ms", first.ms);
+        shots.push(first);
+    }
     for _ in 0..rounds.max(1) {
-        for d in &bench.dictations {
+        for d in dictations {
             let s = clean("back to back", d, ep, setup).await;
             shots.push(s);
         }
     }
     let mut chat_failed = 0;
-    for (i, d) in bench.dictations.iter().enumerate() {
+    let quick = setup.quick;
+    for (i, d) in dictations.iter().enumerate().filter(|_| !quick) {
         if !chat_between(CHAT_QUESTIONS[i % CHAT_QUESTIONS.len()], ep, setup).await {
             chat_failed += 1;
         }
@@ -246,7 +268,7 @@ pub async fn run(bench: &Bench, ep: &Endpoint<'_>, rounds: u32, setup: Setup) ->
     // cost?
     let long = long_question();
     let mut long_failed = 0;
-    for d in bench.dictations.iter().take(4) {
+    for d in dictations.iter().take(if quick { 0 } else { 4 }) {
         if !chat_between(&long, ep, setup).await {
             long_failed += 1;
         }
@@ -254,12 +276,14 @@ pub async fn run(bench: &Bench, ep: &Endpoint<'_>, rounds: u32, setup: Setup) ->
         shots.push(s);
     }
     pin(None);
-    println!("  Chat turns that failed: {chat_failed} of {}, long ones {long_failed} of 4", bench.dictations.len());
+    if !quick {
+        println!("  Chat turns that failed: {chat_failed} of {}, long ones {long_failed} of 4", dictations.len());
+    }
     // The spelling dictations, `rounds` times each: which way the words
     // come out.
     let mut spelling_outputs: Vec<Value> = Vec::new();
     let (mut british, mut american, mut words) = (0usize, 0usize, 0usize);
-    for _ in 0..rounds.max(1) {
+    for _ in 0..if quick { 0 } else { rounds.max(1) } {
         for case in &bench.spelling {
             let s = clean("spelling", &case.text, ep, setup).await;
             let (b, a) = (count_words(&s.output, &case.british), count_words(&s.output, &case.american));
@@ -303,7 +327,7 @@ pub async fn run(bench: &Bench, ep: &Endpoint<'_>, rounds: u32, setup: Setup) ->
     let outputs: Vec<Value> = shots
         .iter()
         .filter(|s| s.phase == "back to back")
-        .take(bench.dictations.len())
+        .take(dictations.len())
         .map(|s| json!({ "input": s.input, "output": s.output, "error": s.error, "ms": s.ms }))
         .collect();
     // Every back-to-back output, in order: at --temperature 0 two runs (a
@@ -441,15 +465,17 @@ mod tests {
                 { "role": "system", "content": "Guardrails." },
                 { "role": "user", "content": "Clean it.\n\nTranscript:\n\"\"\"\num hi\n\"\"\"" },
                 { "role": "assistant", "content": "Hi." },
-                { "role": "user", "content": "Clean it.\n\nTranscript:\n\"\"\"\nso yeah\n\"\"\"" },
+                { "role": "user", "content": "Clean it." },
+                { "role": "user", "content": "Transcript:\n\"\"\"\nso yeah\n\"\"\"" },
             ] })
         };
+        // `llm::cleanup`'s layout: the dictation's instruction, then its
+        // transcript. Combined: one message, as before 22 Oct 2026.
         let mut b = body();
-        super::split_layout(&mut b);
+        super::combined_layout(&mut b);
         let m = b["messages"].as_array().unwrap();
-        assert_eq!(m.len(), 5);
-        assert_eq!(m[3]["content"], "Clean it.");
-        assert_eq!(m[4]["content"], "Transcript:\n\"\"\"\nso yeah\n\"\"\"");
+        assert_eq!(m.len(), 4);
+        assert_eq!(m[3]["content"], "Clean it.\n\nTranscript:\n\"\"\"\nso yeah\n\"\"\"");
         let mut b = body();
         super::system_layout(&mut b);
         let m = b["messages"].as_array().unwrap();
@@ -457,6 +483,14 @@ mod tests {
         assert_eq!(m[0]["content"], "Guardrails.\n\nClean it.");
         assert_eq!(m[1]["content"], "Transcript:\n\"\"\"\num hi\n\"\"\"");
         assert_eq!(m[3]["content"], "Transcript:\n\"\"\"\nso yeah\n\"\"\"");
+        // The real cleanup's messages, combined: the old single message.
+        let real = crate::llm::cleanup_messages("so yeah", "", None, &[], true);
+        let mut b = serde_json::json!({ "messages": real.clone() });
+        super::combined_layout(&mut b);
+        let m = b["messages"].as_array().unwrap();
+        assert_eq!(m.len(), real.as_array().unwrap().len() - 1);
+        let last = m.last().unwrap()["content"].as_str().unwrap();
+        assert!(last.starts_with("Clean up this dictation transcript") && last.ends_with("\n\nTranscript:\n\"\"\"\nso yeah\n\"\"\""));
     }
 
     #[test]

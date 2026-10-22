@@ -253,6 +253,12 @@ fn needs_ai(error: &str) -> bool {
 /// What the action plan has nothing to work with.
 const NOTHING: &str = "Nothing to summarise yet: no speech was transcribed and nothing was typed.";
 
+/// An action plan is being written (any note's): the on-device model's
+/// runtime isn't swapped under it (`local_llm::upgrade_runtime`).
+pub fn summary_running() -> bool {
+    jobs().values().any(|j| j.state == "running")
+}
+
 fn publish(app: &AppHandle, summary: Summary) {
     jobs().insert(summary.note_id, summary.clone());
     let _ = app.emit(EVENT_SUMMARY, summary);

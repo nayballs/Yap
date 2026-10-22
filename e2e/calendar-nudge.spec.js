@@ -183,8 +183,11 @@ test('past meeting notes with search, and the Ask bar asks Chat about your meeti
     .poll(() => fakeLlm.requests.filter((r) => r.system.includes('The user is asking about their meetings')).length)
     .toBeGreaterThan(0);
   const request = fakeLlm.requests.find((r) => r.system.includes('The user is asking about their meetings'));
-  expect(request.system).toContain('title="Launch review"');
-  expect(request.system).toContain('March third');
+  // The meetings come with the question, in its context (the system
+  // prompt stays the same from turn to turn).
+  expect(request.user).toContain('title="Launch review"');
+  expect(request.user).toContain('March third');
+  expect(request.user).toMatch(/<\/context>\n\nWhen does the launch happen\?$/);
   await expect(main.locator('.chat')).toContainText('OK');
   await shot(main, '07-chat-from-the-ask-bar');
 

@@ -132,7 +132,7 @@ pub(crate) fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
 /// ever reaching the Exit handler (see `updates::build_updater`).
 pub(crate) fn shutdown_cleanup() {
     tts::stop();
-    local_llm::stop();
+    local_llm::shutdown();
     bridge::stop();
     mute::restore_all();
 }
@@ -699,9 +699,15 @@ pub fn run() {
             {
                 let cfg2 = cfg.clone();
                 tauri::async_runtime::spawn(async move {
+                    // A runtime cut off mid-swap (or taken by an antivirus)
+                    // comes back first; leftovers go.
+                    local_llm::tidy_runtime().await;
                     local_llm::autostart_if_configured(&cfg2).await;
                 });
             }
+            // An older llamafile runtime (installs before 22 Oct 2026) is
+            // replaced in the background, never under a dictation.
+            local_llm::spawn_runtime_upgrade(handle.clone());
 
             // Local API bridge (Integrations): loopback server for CLIs/agents.
             bridge::sync(&handle, cfg.bridge_enabled);

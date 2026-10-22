@@ -19,19 +19,23 @@ pub fn installed_llm_dir() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("yap").join("llm"))
 }
 
-/// The llamafile runtime: `--llamafile`, else the installed one (read-only),
-/// else downloaded into `models_dir`.
+/// The llamafile runtime: `--llamafile`, else the installed one (read-only)
+/// when it's the version Yap pins now (its marker says so), else the pinned
+/// one downloaded into `models_dir` (verified, with its marker).
 pub async fn runtime(explicit: Option<&Path>, models_dir: &Path) -> Result<PathBuf, String> {
     if let Some(p) = explicit {
         return if p.is_file() { Ok(p.to_path_buf()) } else { Err(format!("no llamafile at {}", p.display())) };
     }
-    if let Some(p) = installed_llm_dir().map(|d| d.join(crate::local_llm::RUNTIME_FILENAME)).filter(|p| p.is_file()) {
-        return Ok(p);
+    let pinned = crate::local_llm::Version::parse(crate::local_llm::RUNTIME_VERSION);
+    let current = |dir: &Path| crate::local_llm::runtime_version_in(dir).filter(|v| Some(*v) == pinned).is_some();
+    if let Some(dir) = installed_llm_dir().filter(|d| current(d)) {
+        return Ok(dir.join(crate::local_llm::RUNTIME_FILENAME));
     }
     let dest = models_dir.join(crate::local_llm::RUNTIME_FILENAME);
-    if !dest.is_file() {
+    if !current(models_dir) {
         std::fs::create_dir_all(models_dir).map_err(|e| e.to_string())?;
-        println!("Downloading the llamafile runtime into {} …", models_dir.display());
+        println!("Downloading the llamafile runtime {} into {} …", crate::local_llm::RUNTIME_VERSION, models_dir.display());
+        let _ = std::fs::remove_file(&dest);
         crate::local_llm::download_verified(
             crate::local_llm::RUNTIME_URL,
             &dest,
@@ -40,6 +44,15 @@ pub async fn runtime(explicit: Option<&Path>, models_dir: &Path) -> Result<PathB
             None,
         )
         .await?;
+        crate::local_llm::write_marker(
+            models_dir,
+            &crate::local_llm::Marker {
+                version: crate::local_llm::RUNTIME_VERSION.to_string(),
+                sha256: crate::local_llm::RUNTIME_SHA256.to_string(),
+                ..Default::default()
+            },
+        )
+        .map_err(|e| e.to_string())?;
     }
     Ok(dest)
 }
@@ -100,20 +113,42 @@ pub struct Server {
     pub log: PathBuf,
     pub load_ms: u64,
     pub args: Vec<String>,
+    pub plan: crate::local_llm::Plan,
+    /// The warm-up Yap's sidecar sends once loaded (`local_llm::warm_up`),
+    /// unless the run said `--no-warm-up`.
+    pub warm_up: Option<crate::local_llm::WarmUp>,
+}
+
+/// How a run's server runs the model (`local_llm::Plan`): the runtime's
+/// version (`--version`, else the one Yap pins), and MTP as Yap's sidecar
+/// would decide on this PC — `mtp` overrides; never on the processor
+/// (`ngl` 0).
+pub async fn plan(runtime: &Path, model: &Path, ngl: u32, ctx: u32, mtp: Option<bool>) -> crate::local_llm::Plan {
+    let version = crate::local_llm::probe_version(runtime)
+        .await
+        .or_else(|| crate::local_llm::Version::parse(crate::local_llm::RUNTIME_VERSION))
+        .expect("a version");
+    let yap = crate::local_llm::plan_for(&crate::config::load(), model, ctx, version);
+    let on = ngl > 0 && mtp.unwrap_or(yap.mtp);
+    crate::local_llm::Plan { runtime: version, mtp: on }
 }
 
 /// Start `runtime` serving `model` with `local_llm::server_args` — as Yap's
-/// sidecar runs (thinking off, the caches capped, `-lv 4`) — but with `ngl`
-/// GPU layers (0 = CPU only), the run's folder as its working dir and log,
-/// and `extra` arguments after Yap's (a later flag wins: `--reasoning auto`,
-/// `--cache-ram 8192` measure the old way). Waits for `/health`.
+/// sidecar runs (thinking off, the caches capped, `-lv 4`, MTP as `plan`
+/// says) — but with `ngl` GPU layers (0 = CPU only), the run's folder as its
+/// working dir and log, and `extra` arguments after Yap's (a later flag wins:
+/// `--reasoning auto`, `--cache-ram 8192` measure the old way). Waits for
+/// `/health`, then warms the model up as the sidecar does (`warm`).
+#[allow(clippy::too_many_arguments)]
 pub async fn start(
     runtime: &Path,
     model: &Path,
     ngl: u32,
     ctx: u32,
+    plan: crate::local_llm::Plan,
     extra: &[String],
     workdir: &Path,
+    warm: bool,
 ) -> Result<Server, String> {
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .and_then(|l| l.local_addr())
@@ -122,7 +157,7 @@ pub async fn start(
     let stem = model.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let log = workdir.join(format!("llamafile-{stem}.log"));
     let file = std::fs::File::create(&log).map_err(|e| e.to_string())?;
-    let mut args = crate::local_llm::server_args(model, port, ngl, ctx);
+    let mut args = crate::local_llm::server_args(model, port, ngl, ctx, plan);
     args.extend(extra.iter().cloned());
     let mut cmd = std::process::Command::new(runtime);
     cmd.args(&args)
@@ -148,14 +183,9 @@ pub async fn start(
             return Err(format!("llamafile exited during startup ({status}); see {}", log.display()));
         }
         if client.get(&health).send().await.is_ok_and(|r| r.status().is_success()) {
-            return Ok(Server {
-                child: Some(child),
-                pid,
-                base_url,
-                log,
-                load_ms: started.elapsed().as_millis() as u64,
-                args,
-            });
+            let load_ms = started.elapsed().as_millis() as u64;
+            let warm_up = if warm { Some(crate::local_llm::warm_up(&base_url, &stem).await) } else { None };
+            return Ok(Server { child: Some(child), pid, base_url, log, load_ms, args, plan, warm_up });
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }

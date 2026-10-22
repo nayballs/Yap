@@ -323,7 +323,7 @@ fn portable() -> bool {
     test_flag("YAP_UPDATE_TEST_PORTABLE").unwrap_or_else(crate::portable::is_portable)
 }
 
-fn metered() -> bool {
+pub(crate) fn metered() -> bool {
     if let Some(forced) = test_flag("YAP_UPDATE_TEST_METERED") {
         return forced;
     }

@@ -43,6 +43,8 @@ Running:
   --tokens-per-minute <n>  pacing budget (default 8000 for Groq, its free plan; none otherwise)
   --max-total-tokens <n>   stop starting scenarios for a model past this many tokens
   --timeout <secs>         per model call (default: Yap's own, 20 s for Chat)
+  --clock-step <minutes>   each turn the clock Chat tells the model moves on this much (a real
+                           chat's turns are minutes apart; default 0: the real time)
   --locale <tag|json>      the user's region, as Windows would say it (About you, about_you.rs):
                            \"en-GB\" (currency and units from its region), or JSON {locale, country,
                            currency, symbol, metric, timeZone}; default none (no region in prompts)
@@ -50,6 +52,9 @@ Local models (Yap's llamafile, like local_llm.rs, on a free port, stopped after)
   --ngl <n>                GPU layers (default 0: CPU only)   --ctx <n> (default 8192, as Yap)
   --llamafile <path>       the runtime (default: the installed one, else downloaded)
   --llamafile-arg <arg>    extra server argument (repeatable)
+  --mtp on|off             MTP speculative decoding (default: as Yap's sidecar decides on this PC;
+                           never with --ngl 0)
+  --no-warm-up             skip the warm-up request Yap's sidecar sends once the model is loaded
   --models-dir <dir>       downloads go here (default <out>/../eval-models)
 Output:
   --out <dir>              run folders go here (default $YAP_EVAL_OUT, else test-results/evals)
@@ -63,8 +68,11 @@ Dictation cleanup:
                            cleanup.md   --cleanup-rounds <n> (default 3)
   --cleanup-slot <n>       send the cleanup to llama.cpp slot n (`id_slot`), and with
   --chat-slot <n>          the Chat turns between them to slot n (measures pinned slots)
-  --cleanup-layout <l>     the same cleanup prompt laid out another way: split (the restated
-                           instruction its own user message) | system (in the system prompt)
+  --cleanup-layout <l>     the same cleanup prompt laid out another way: combined (the restated
+                           instruction and the transcript in one message, as until 22 Oct 2026)
+                           | system (the instruction in the system prompt)
+  --cleanup-quick          only the back-to-back rounds (no first call, Chat turns or spelling):
+                           a cloud model's tokens   --cleanup-limit <n>  only the first n dictations
 Serving benches (local servers; instead of the scenarios; serving.md):
   --bench stream           time to the first token, streamed vs not, on Chat-shaped requests
                            (a short answer, a long one, a web answer, a tool call)
@@ -99,9 +107,12 @@ struct Args {
     ctx: u32,
     llamafile: Option<PathBuf>,
     llamafile_args: Vec<String>,
+    mtp: Option<bool>,
+    no_warm_up: bool,
     models_dir: Option<PathBuf>,
     raw: Option<PathBuf>,
     repeat: u32,
+    clock_step: u64,
     dump_apps: Option<PathBuf>,
     list: bool,
     cleanup: bool,
@@ -110,6 +121,8 @@ struct Args {
     cleanup_slot: Option<u64>,
     chat_slot: Option<u64>,
     cleanup_layout: Option<&'static str>,
+    cleanup_quick: bool,
+    cleanup_limit: Option<usize>,
     bench: Option<String>,
     bench_rounds: u32,
     bench_history: usize,
@@ -152,9 +165,19 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--ctx" => a.ctx = num(value()?, &flag)? as u32,
             "--llamafile" => a.llamafile = Some(PathBuf::from(value()?)),
             "--llamafile-arg" => a.llamafile_args.push(value()?),
+            "--mtp" => {
+                a.mtp = match value()?.as_str() {
+                    "on" | "true" | "yes" => Some(true),
+                    "off" | "false" | "no" => Some(false),
+                    "auto" => None,
+                    other => return Err(format!("--mtp on|off|auto, not {other}")),
+                }
+            }
+            "--no-warm-up" => a.no_warm_up = true,
             "--models-dir" => a.models_dir = Some(PathBuf::from(value()?)),
             "--raw" => a.raw = Some(PathBuf::from(value()?)),
             "--repeat" => a.repeat = num(value()?, &flag)?.max(1) as u32,
+            "--clock-step" => a.clock_step = num(value()?, &flag)?,
             "--dump-apps" => a.dump_apps = Some(PathBuf::from(value()?)),
             "--list" => a.list = true,
             "--cleanup" => a.cleanup = true,
@@ -172,6 +195,8 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                         .ok_or_else(|| format!("--cleanup-layout {}, not {l}", super::cleanup::LAYOUTS.join("|")))?,
                 );
             }
+            "--cleanup-quick" => a.cleanup_quick = true,
+            "--cleanup-limit" => a.cleanup_limit = Some(num(value()?, &flag)?.max(1) as usize),
             "--bench" => {
                 let b = value()?;
                 if !super::serving::BENCHES.contains(&b.as_str()) {
@@ -505,9 +530,21 @@ async fn prepare(spec: &str, args: &Args, keys: &HashMap<String, String>, run_di
         "local" => {
             let runtime = local::runtime(args.llamafile.as_deref(), models_dir).await?;
             let gguf = local::model(rest, models_dir).await?;
-            println!("Starting llamafile ({}) with {} (ngl {}, ctx {}) …", runtime.display(), gguf.display(), args.ngl, args.ctx);
-            let server = local::start(&runtime, &gguf, args.ngl, args.ctx, &args.llamafile_args, run_dir).await?;
+            let plan = local::plan(&runtime, &gguf, args.ngl, args.ctx, args.mtp).await;
+            println!(
+                "Starting llamafile {} ({}) with {} (ngl {}, ctx {}, MTP {}) …",
+                plan.runtime,
+                runtime.display(),
+                gguf.display(),
+                args.ngl,
+                args.ctx,
+                if plan.server().mtp { "on" } else { "off" }
+            );
+            let server = local::start(&runtime, &gguf, args.ngl, args.ctx, plan, &args.llamafile_args, run_dir, !args.no_warm_up).await?;
             println!("  ready in {:.1} s", server.load_ms as f64 / 1000.0);
+            if let Some(w) = &server.warm_up {
+                println!("  warm-up: {} ms{}{}", w.ms, if w.cancelled { " (cancelled)" } else { "" }, w.error.as_deref().map(|e| format!(" — {e}")).unwrap_or_default());
+            }
             m.provider = "local".into();
             m.base_url = server.base_url.clone();
             // The id Yap would send for this file; its size ("-1.5b") is
@@ -770,6 +807,9 @@ async fn run_scenario(
         record::set_context(json!({ "model": m.label, "scenario": name, "turn": i + 1 }));
         let voice = turn.voice.unwrap_or(s.voice);
         record::write("turn_start", json!({ "user": turn.user, "voice": voice }));
+        if i > 0 && args.clock_step > 0 {
+            crate::eval::clock_forward(args.clock_step as i64 * 60);
+        }
         record::begin_turn();
         let t0 = Instant::now();
         // Asked out loud = the Voice Assistant's turn (its shorter history,
@@ -930,7 +970,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         "args": {
             "models": args.models, "tools": args.tools, "tokens_per_minute": args.tokens_per_minute,
             "max_total_tokens": args.max_total_tokens, "timeout_s": args.timeout, "ngl": args.ngl, "ctx": args.ctx,
-            "llamafile_args": args.llamafile_args, "repeat": args.repeat, "no_web": args.no_web,
+            "llamafile_args": args.llamafile_args, "mtp": args.mtp, "no_warm_up": args.no_warm_up, "repeat": args.repeat, "no_web": args.no_web,
         },
     });
     let mut failed = false;
@@ -1012,7 +1052,13 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             record::set_config(Some(crate::config::YapConfig::default()));
             record::set_tools_forced(None);
             let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
-            let setup = super::cleanup::Setup { cleanup: args.cleanup_slot, chat: args.chat_slot, layout: args.cleanup_layout };
+            let setup = super::cleanup::Setup {
+                cleanup: args.cleanup_slot,
+                chat: args.chat_slot,
+                layout: args.cleanup_layout,
+                quick: args.cleanup_quick,
+                limit: args.cleanup_limit,
+            };
             cleanup = super::cleanup::run(b, &ep, args.cleanup_rounds, setup).await;
             cleanups.push((m.label.clone(), cleanup.clone()));
         }
@@ -1057,6 +1103,9 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             info["load_ms"] = json!(server.load_ms);
             info["peak_ram_mb"] = json!(server.peak_ram_mb());
             info["server_args"] = json!(server.args);
+            info["runtime_version"] = json!(server.plan.runtime.to_string());
+            info["mtp"] = json!(server.plan.server().mtp);
+            info["warm_up"] = json!(server.warm_up);
             info["server_log"] = json!(server.log);
             info["log_facts"] = server.log_facts();
             server.stop();

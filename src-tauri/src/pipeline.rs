@@ -1266,10 +1266,17 @@ impl Shared {
             .unwrap_or_default();
 
         if base_url.is_empty() {
-            tracing::warn!("Edit mode needs an AI cleanup endpoint (none configured)");
-            let _ = self
-                .app
-                .emit(DICTATION_ERROR, "Set up AI cleanup to use edit mode");
+            // The on-device model, down for a moment while Yap restarts it.
+            let restarting = provider == crate::local_llm::PROVIDER_ONDEVICE && crate::local_llm::restart_under_way();
+            tracing::warn!(restarting, "Edit mode needs an AI cleanup endpoint (none configured)");
+            let _ = self.app.emit(
+                DICTATION_ERROR,
+                if restarting {
+                    "The on-device AI model is restarting. Try again in a moment."
+                } else {
+                    "Set up AI cleanup to use edit mode"
+                },
+            );
             let _ = self.app.emit("yap-state", "error");
             return;
         }

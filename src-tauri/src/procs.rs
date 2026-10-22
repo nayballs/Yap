@@ -13,6 +13,24 @@ pub fn orphaned(exe_name: &str) -> Vec<u32> {
         .collect()
 }
 
+/// Live `exe_name` processes in `dir` started by another running Yap (a dev
+/// build beside the installed app, sharing the data folder): its sidecar,
+/// which a runtime swap waits for. One whose folder can't be read counts.
+#[cfg(windows)]
+pub fn sidecars_of_other_yaps(dir: &std::path::Path, exe_name: &str) -> usize {
+    let me = std::process::id();
+    let dir = dir.to_string_lossy().trim_end_matches(['\\', '/']).to_ascii_lowercase();
+    imp::snapshot()
+        .into_iter()
+        .filter(|p| p.exe.eq_ignore_ascii_case(exe_name) && p.parent != me && is_running_yap(p.parent))
+        .filter(|p| {
+            imp::live_image_path(p.pid).is_none_or(|full| {
+                full.rsplit_once(['\\', '/']).is_none_or(|(folder, _)| folder.to_ascii_lowercase() == dir)
+            })
+        })
+        .count()
+}
+
 /// Whether `pid` is a live process whose executable is a Yap build
 /// (`yap.exe`, or a renamed copy such as the updater's `yap-old.exe`).
 #[cfg(windows)]
@@ -170,6 +188,11 @@ mod imp {
     /// Exe file name of `pid` if it is still running (an exited process can
     /// linger while handles to it are open, so check the exit code too).
     pub fn live_image_name(pid: u32) -> Option<String> {
+        live_image_path(pid).and_then(|full| full.rsplit(['\\', '/']).next().map(str::to_string))
+    }
+
+    /// Full exe path of `pid` if it is still running.
+    pub fn live_image_path(pid: u32) -> Option<String> {
         if pid == 0 {
             return None;
         }
@@ -190,8 +213,7 @@ mod imp {
             if !alive || !named {
                 return None;
             }
-            let full = String::from_utf16_lossy(&buf[..len as usize]);
-            full.rsplit(['\\', '/']).next().map(str::to_string)
+            Some(String::from_utf16_lossy(&buf[..len as usize]))
         }
     }
 

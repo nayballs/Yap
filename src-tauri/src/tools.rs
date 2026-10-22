@@ -49,8 +49,10 @@
 //! sources the answer cites as `[1]`. **The safety rule**
 //! ([`refused_after_web`]): once web content is in a turn, the action tools
 //! ([`ACTION_TOOLS`]: `open_app`, `create_note`, `update_note`,
-//! `edit_note`, `copy_to_clipboard`) are no longer offered and a call to one
-//! is refused for the rest of that turn, so a web page can't make Yap do
+//! `edit_note`, `copy_to_clipboard`) are refused for the rest of that turn —
+//! still offered, so every step of a turn offers the same tools (a step that
+//! offered others would make a hybrid local model like Qwen3.5 read the whole
+//! prompt again, [`run_tool_loop`]) — so a web page can't make Yap do
 //! anything. The person's next message starts a clean turn.
 //!
 //! **Capability gating** (their `estimateModelSizeB` + `LOCAL_TOOL_MIN_PARAMS_B`,
@@ -439,10 +441,19 @@ pub fn search_notes(query: &str, limit: usize) -> Vec<(usize, crate::notes::Note
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
         .filter(|w| w.chars().count() > 2)
         .collect();
+    let mut scored: Vec<(usize, crate::notes::Note)> =
+        scored_notes(&words).into_iter().map(|(score, _, n)| (score, n)).collect();
+    scored.truncate(limit);
+    scored
+}
+
+/// Every note matching one of `words`, best first: (score, distinct words
+/// matched, whether the title matched one, the note).
+fn scored_notes(words: &[String]) -> Vec<(usize, (usize, bool), crate::notes::Note)> {
     if words.is_empty() {
         return Vec::new();
     }
-    let mut scored: Vec<(usize, crate::notes::Note)> = crate::notes::all()
+    let mut scored: Vec<(usize, (usize, bool), crate::notes::Note)> = crate::notes::all()
         .into_iter()
         .filter_map(|n| {
             let title = n.title.to_lowercase();
@@ -456,16 +467,53 @@ pub fn search_notes(query: &str, limit: usize) -> Vec<(usize, crate::notes::Note
                     .collect::<Vec<_>>()
                     .join("\n")
             );
-            let score: usize = words
-                .iter()
-                .map(|w| title.matches(w.as_str()).count() * 3 + body.matches(w.as_str()).count())
-                .sum();
-            (score > 0).then_some((score, n))
+            let per_word: Vec<(usize, usize)> =
+                words.iter().map(|w| (title.matches(w.as_str()).count(), body.matches(w.as_str()).count())).collect();
+            let score: usize = per_word.iter().map(|(t, b)| t * 3 + b).sum();
+            let distinct = per_word.iter().filter(|(t, b)| t + b > 0).count();
+            let in_title = per_word.iter().any(|(t, _)| *t > 0);
+            (score > 0).then_some((score, (distinct, in_title), n))
         })
         .collect();
     scored.sort_by_key(|s| std::cmp::Reverse(s.0));
-    scored.truncate(limit);
     scored
+}
+
+/// Words that say nothing about which note a question is about.
+const RAG_STOP_WORDS: &[&str] = &[
+    "and", "the", "for", "are", "was", "were", "what", "what's", "whats", "when", "when's", "where", "where's", "which", "who",
+    "who's", "whose", "why", "how", "how's", "with", "this", "that", "that's", "these", "those", "from", "have", "has", "had",
+    "does", "did", "can", "could", "would", "should", "will", "about", "into", "your", "you", "our", "their", "there", "then",
+    "than", "them", "they", "she", "her", "him", "his", "its", "it's", "any", "all", "some", "one", "also", "just", "not", "but",
+    "yet", "too", "very", "much", "many", "more", "most", "get", "got", "i'm", "i've", "i'll", "let's", "isn't", "don't",
+    "doesn't", "tell", "show", "give", "find", "know", "need", "want", "please", "thanks", "remind", "again", "still", "now",
+    "today", "my", "me", "mine",
+];
+
+/// **The eager RAG's notes** (`commands::rag_context`): the keyword search,
+/// stricter — without words like "what" or "and", and only notes that match
+/// two of the question's words or one in their title (or the one word a
+/// short question has). In a question's context, right before a follow-up
+/// ("Whose house is it at, and what time?" after a book club answer), a
+/// note that only shared "time" made Qwen3.5-4B answer about that note
+/// instead of the conversation (the model evaluations, 2026-10-22,
+/// `notes-long-chat`). The `search_notes` tool keeps the loose search.
+pub fn rag_notes(query: &str, limit: usize) -> Vec<(usize, crate::notes::Note)> {
+    let words: Vec<String> = query
+        .to_lowercase()
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'').replace('’', "'"))
+        .map(|w| w.trim_matches('\'').to_string())
+        .filter(|w| w.chars().count() > 2 && !RAG_STOP_WORDS.contains(&w.as_str()))
+        .collect();
+    let need = words.len().min(2);
+    let mut kept: Vec<(usize, crate::notes::Note)> = scored_notes(&words)
+        .into_iter()
+        .filter(|(_, (distinct, in_title), _)| *in_title || *distinct >= need)
+        .map(|(score, _, n)| (score, n))
+        .collect();
+    kept.truncate(limit);
+    kept
 }
 
 fn tool_result(success: bool, data: Value, display_text: String) -> Value {
@@ -969,17 +1017,6 @@ fn edit_note(args: &Value) -> Value {
     }
 }
 
-/// The tools offered on a step: all of them, or — once web content is in
-/// the turn — none of the action tools. A web tool past its cap stays
-/// offered (`web::Turn` answers "you've searched 3 times"): taking it away
-/// mid-turn made Groq refuse the model's next call to it with HTTP 400.
-fn offered_tools(tools: &Value, web: Option<&crate::web::Turn>) -> Value {
-    match web {
-        Some(turn) if turn.seen() => without_actions(tools),
-        _ => tools.clone(),
-    }
-}
-
 /// How many times a turn asks again after the provider rejected the
 /// model's tool call, before it answers without tools.
 const REJECTED_CALL_RETRIES: u32 = 1;
@@ -1013,15 +1050,24 @@ pub enum FirstStep {
     /// The model decides what to call (a cloud model; a question that needs
     /// no search).
     Model,
-    /// **The model's first step must be a `web_search`** (only that tool
-    /// offered, `tool_choice: "required"`, which llamafile honours): a model
-    /// on this PC asked something that needs the web (`web::needs_web`) —
-    /// left to decide, Qwen3.5-4B answered a new current-information
-    /// question from memory (Nathan's chat, 2026-10-21). Its own query is
-    /// better than the question as one ("Arsenal Football Club match
-    /// tonight 21 October 2026 time"). A server that refuses `tool_choice`
-    /// or answers in words anyway gets Yap's search instead
-    /// ([`search_for_the_model`], the question as the query).
+    /// **The model's first step must be a `web_search`**: `tool_choice:
+    /// "required"` over all the tools ([`must_search_choice`]: some tool
+    /// call, which llama.cpp enforces with a grammar) and
+    /// [`MUST_SEARCH_NOTE`] in the message's context saying which one. A
+    /// model on this PC asked something that needs the web
+    /// (`web::needs_web`) — left to decide, Qwen3.5-4B answered a new
+    /// current-information question from memory (Nathan's chat,
+    /// 2026-10-21). Its own query is better than the question as one
+    /// ("Arsenal Football Club match tonight 21 October 2026 time"). A
+    /// server that refuses `tool_choice`, or a step that calls another tool
+    /// or answers in words, gets Yap's search instead
+    /// ([`search_for_the_model`], the question as the query). Until 22 Oct
+    /// 2026 the step offered `web_search` alone: the next step, offering all
+    /// the tools, then read the whole prompt again (0.63 s instead of 0.31 s
+    /// on the card, 40 s instead of 20 s on a processor,
+    /// docs/model-evals.md). A named `tool_choice` (`{"type": "function",
+    /// …}`) isn't one llamafile 0.10.6 takes: "Wrong type supplied for
+    /// parameter 'tool_choice'", and it goes on as "auto".
     MustSearch,
     /// Yap searches first for this query and hands the model the results as
     /// the `web_search` call it would have made — chip, sources, citations,
@@ -1034,19 +1080,21 @@ pub enum FirstStep {
 /// The id of a search Yap runs for the model.
 const YAP_SEARCH_ID: &str = "yap-search-1";
 
-/// `web_search` as the only tool of a step that must search
-/// ([`FirstStep::MustSearch`]): its description says what to search for —
-/// the latest message, not words from earlier ones. Left to the whole
-/// conversation, Qwen3.5-4B searched "Grok subscriptions check account" for
-/// "Can you look up Groc subscriptions for me, please?" — "check" from the
-/// question before (Nathan's chat, 2026-10-21: "…check billing", and an
-/// answer on checking a bill). Pure.
-pub fn forced_search_definition() -> Value {
-    let mut def = web_definitions()[0].clone();
-    def["function"]["description"] = json!(
-        "Search the web for what the user's latest message asks. The query: a few words from that message (names spelled right), plus a year or place when it matters; leave out words from earlier messages unless the latest one points back to them (\"it\", \"that one\")."
-    );
-    def
+/// What a turn that must search first ([`FirstStep::MustSearch`]) adds to
+/// the message's context: search now, and for the latest message, not words
+/// from earlier ones. Left to the whole conversation, Qwen3.5-4B searched
+/// "Grok subscriptions check account" for "Can you look up Groc
+/// subscriptions for me, please?" — "check" from the question before
+/// (Nathan's chat, 2026-10-21: "…check billing", and an answer on checking
+/// a bill). Until 22 Oct 2026 this was the forced step's own `web_search`
+/// description; in the message, the tools stay the same on every step.
+pub const MUST_SEARCH_NOTE: &str = "First search the web (web_search) for what this message asks. The query: a few words from this message (names spelled right), plus a year or place when it matters; leave out words from earlier messages unless this one points back to them (\"it\", \"that one\").";
+
+/// The `tool_choice` that makes a step call a tool — `web_search`, as the
+/// message's context says ([`FirstStep::MustSearch`]): `"required"`, the
+/// string llama.cpp's server reads (it ignores the named object form).
+pub fn must_search_choice() -> Value {
+    json!("required")
 }
 
 /// What a `search_notes` that found nothing tells the model while web
@@ -1123,15 +1171,28 @@ async fn search_for_the_model(turn: &mut crate::web::Turn, query: &str, messages
 /// too (`apps.rs`), acting on `question`, the person's own message. `web`:
 /// the turn's web side while web search is on (`web.rs`): its tools are
 /// offered, its sources collected, and once web content is in the turn the
-/// action tools go ([`refused_after_web`]). `history`: the earlier messages
-/// as OpenAI messages (`chats::history_messages`: an earlier web answer's
-/// search replayed as its tool call). `first`: whether the model must
-/// search first ([`FirstStep`]).
+/// action tools are refused ([`refused_after_web`]). `history`: the earlier
+/// messages as OpenAI messages (`chats::history_messages`: an earlier web
+/// answer's search replayed as its tool call). `context`: what Yap adds to
+/// the question for this turn (the time, notes found, …), sent in the
+/// question's own message (`chats::with_context`), never in `system`.
+/// `first`: whether the model must search first ([`FirstStep`]).
+///
+/// **The same prompt start on every step** (2026-10-22): `system` and the
+/// offered tools never change within a turn — not after web content (the
+/// action tools are refused instead of taken away), not for a search that
+/// must come first (`tool_choice: "required"` over all of them instead of
+/// `web_search` alone).
+/// A hybrid model like Qwen3.5 resumes its cache only from a checkpoint,
+/// so a step whose prompt starts otherwise is read again from the start
+/// (the model evaluations, docs/model-evals.md); cloud providers' prefix
+/// caches like it too.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_tool_loop(
     system: &str,
     history: &[Value],
     question: &str,
+    context: &[String],
     base_url: &str,
     api_key: &str,
     model: &str,
@@ -1142,9 +1203,14 @@ pub async fn run_tool_loop(
     mut web: Option<&mut crate::web::Turn>,
     first: FirstStep,
 ) -> Result<(String, Vec<String>), String> {
+    let must_search_first = first == FirstStep::MustSearch && web.is_some();
+    let mut context = context.to_vec();
+    if must_search_first {
+        context.push(MUST_SEARCH_NOTE.to_string());
+    }
     let mut messages: Vec<Value> = vec![json!({ "role": "system", "content": system })];
     messages.extend(history.iter().cloned());
-    messages.push(json!({ "role": "user", "content": question }));
+    messages.extend(crate::chats::question_messages(&context, question));
 
     let mut tools = definitions();
     if open_apps {
@@ -1170,7 +1236,7 @@ pub async fn run_tool_loop(
     if let (FirstStep::YapSearches(query), Some(turn)) = (&first, web.as_deref_mut()) {
         search_for_the_model(turn, query, &mut messages, &mut tools_used).await;
     }
-    let mut must_search = first == FirstStep::MustSearch && web.is_some();
+    let mut must_search = must_search_first;
     // A notes search that finds nothing, for a question that isn't about the
     // person's notes, leads to the web (once a turn).
     let empty_notes = if web.is_some() && !crate::web::about_own_stuff(question) {
@@ -1195,11 +1261,6 @@ pub async fn run_tool_loop(
     let mut rejected = 0u32;
     for _step in 0..MAX_TOOL_STEPS {
         let forced = must_search;
-        let offered = if must_search {
-            json!([forced_search_definition()])
-        } else {
-            offered_tools(&tools, web.as_deref())
-        };
         let answer = crate::llm::post_chat_message(
             base_url,
             api_key,
@@ -1207,16 +1268,18 @@ pub async fn run_tool_loop(
             provider,
             0.5,
             Value::Array(messages.clone()),
-            Some(&offered),
-            must_search.then_some("required"),
+            Some(&tools),
+            must_search.then(must_search_choice),
         )
         .await;
-        // A server that won't be made to call a tool (it refuses
-        // `tool_choice`, or answers in words anyway): Yap searches for the
+        // A server that won't be made to search (it refuses `tool_choice`,
+        // answers in words, or calls another tool): Yap searches for the
         // model, with the question as the query, and the model goes on.
         if must_search {
             must_search = false;
-            let searched = answer.as_ref().is_ok_and(|m| m["tool_calls"].as_array().is_some_and(|c| !c.is_empty()));
+            let searched = answer.as_ref().is_ok_and(|m| {
+                m["tool_calls"].as_array().is_some_and(|c| c.iter().any(|call| call["function"]["name"] == "web_search"))
+            });
             if !searched {
                 tracing::info!(provider, "Chat: the model wasn't made to search; Yap searches for it");
                 if let Some(turn) = web.as_deref_mut() {
@@ -1399,6 +1462,34 @@ mod tests {
         assert_eq!(estimate_model_size_b("Qwen3-30B-A3B-Instruct"), 30.0);
         // Cloud: always.
         assert!(supports_tools("openrouter", "meta-llama/llama-3.2-3b-instruct"));
+    }
+
+    #[test]
+    fn the_eager_rag_keeps_only_notes_that_match_the_question() {
+        crate::notes::create("Kitchen quotes", "Harlow Kitchens: £14,200 including fitting, eight weeks lead time.", "manual", "");
+        crate::notes::create("Book club", "Next book: The Remains of the Day. Meeting at Sarah's on the 28th at 7:30.", "manual", "");
+        crate::notes::create("Home network", "Home Wi-Fi password: Gr33nTea!77", "manual", "");
+        crate::notes::create("Cabin trip", "Wi-Fi network: CabinGuest, password: MooseLake42", "manual", "");
+        let titles = |q: &str| rag_notes(q, 5).into_iter().map(|(_, n)| n.title).collect::<Vec<_>>();
+        // A follow-up sharing one ordinary word with a note: no note (the
+        // loose search the tool runs still finds it).
+        assert!(titles("Whose house is it at, and what time?").is_empty());
+        assert_eq!(search_notes("Whose house is it at, and what time?", 5).len(), 1);
+        // A title word, or two of the question's words.
+        assert_eq!(titles("What's the next book for book club?"), ["Book club"]);
+        assert_eq!(titles("What's the wifi password at the cabin?"), ["Cabin trip"]);
+        assert_eq!(titles("Kitchen quotes?"), ["Kitchen quotes"]);
+        // One word asked about: one word is enough.
+        assert_eq!(titles("password").len(), 2);
+        // Words like "what" and "and" never count.
+        assert!(titles("what and the").is_empty());
+        // A note that answers from its body alone, under a title that says
+        // nothing about it (the review's example, 2026-10-22): two of the
+        // question's words in the body are enough.
+        crate::notes::create("Finance sync", "Agreed the kitchen budget at £15,000; Sam checks the quotes.", "manual", "");
+        assert!(titles("What's the budget for the kitchen?").contains(&"Finance sync".to_string()));
+        assert!(titles("How much did we agree to spend on the kitchen?").contains(&"Finance sync".to_string()));
+        assert_eq!(titles("What's the budget?"), ["Finance sync"]);
     }
 
     #[test]
@@ -1880,6 +1971,7 @@ mod tests {
             "You are helpful.",
             &[],
             question,
+            &[],
             &format!("{}/v1", fake.base),
             "",
             "fake-chat",
@@ -1911,15 +2003,14 @@ mod tests {
         let requests = fake.requests.lock().unwrap().clone();
         let chat: Vec<&Value> = requests.iter().filter(|(u, _)| u.ends_with("/chat/completions")).map(|(_, b)| b).collect();
         assert_eq!(chat.len(), 3);
-        // Before the web: everything offered. After: no action tool.
+        // Every step offers the same tools, before the web and after (the
+        // action tools are refused, not taken away: the prompt's start stays
+        // the same, so a local model re-uses its cache).
         let first = tool_names(&chat[0]["tools"]);
         assert!(first.iter().any(|n| n == "open_app") && first.iter().any(|n| n == "web_search"));
         for later in &chat[1..] {
-            let offered = tool_names(&later["tools"]);
-            for action in ACTION_TOOLS {
-                assert!(!offered.iter().any(|n| n == action), "{action} offered after the web");
-            }
-            assert!(offered.iter().any(|n| n == "search_notes"));
+            assert_eq!(later["tools"], chat[0]["tools"], "the same tools on every step");
+            assert_eq!(later["messages"][0], chat[0]["messages"][0], "the same system prompt");
         }
         // The model was told why, in each refused call's result.
         let results: Vec<&Value> = chat[2]["messages"].as_array().unwrap().iter().filter(|m| m["role"] == "tool").collect();
@@ -1940,6 +2031,7 @@ mod tests {
             "You are helpful.",
             &[],
             "hello",
+            &[],
             &format!("{}/v1", fake.base),
             "",
             "fake-chat",
@@ -2002,6 +2094,7 @@ mod tests {
             "You are helpful.",
             &[],
             "Move the beta to Monday in my launch plan.",
+            &[],
             &format!("{}/v1", fake.base),
             "gsk-fake",
             "openai/gpt-oss-20b",
@@ -2084,6 +2177,7 @@ mod tests {
             "You are helpful.",
             &[],
             "Where's Gale?",
+            &[],
             &format!("{}/v1", fake.base),
             "",
             "fake-chat",
@@ -2121,7 +2215,7 @@ mod tests {
             let base = format!("{}/v1", fake.base);
             async move {
                 let mut turn = crate::web::Turn::new(settings, endpoints, question, &[]);
-                let out = run_tool_loop("You are helpful.", &[], question, &base, "", "fake-chat", "custom", false, false, &|_| {}, Some(&mut turn), FirstStep::Model)
+                let out = run_tool_loop("You are helpful.", &[], question, &[], &base, "", "fake-chat", "custom", false, false, &|_| {}, Some(&mut turn), FirstStep::Model)
                     .await
                     .expect("an answer");
                 (out, turn.sources.len())
@@ -2157,16 +2251,58 @@ mod tests {
         assert!(!last.to_string().contains("search the web for it next"));
     }
 
-    /// The forced first search's tool says to search the latest message
-    /// only: "Grok subscriptions check account" carried "check" from the
-    /// question before (Nathan's chat).
-    #[test]
-    fn the_forced_search_names_the_latest_message() {
-        let def = forced_search_definition();
-        assert_eq!(def["function"]["name"], "web_search");
-        assert_eq!(def["function"]["parameters"], web_definitions()[0]["function"]["parameters"]);
-        let d = def["function"]["description"].as_str().unwrap();
-        assert!(d.contains("latest message") && d.contains("leave out words from earlier messages"), "{d}");
+    /// A search that must come first: `tool_choice: "required"` over all
+    /// the tools — the next step offers the same ones — and the message's
+    /// context says to search this message only ("Grok subscriptions check
+    /// account" carried "check" from the question before, Nathan's chat).
+    #[tokio::test]
+    async fn a_search_that_must_come_first_is_required_over_the_same_tools() {
+        assert!(MUST_SEARCH_NOTE.contains("this message") && MUST_SEARCH_NOTE.contains("leave out words from earlier messages"));
+        let exa = json!({ "results": [{ "title": "Python 3.15", "url": "https://python.example/3.15", "highlights": ["Python 3.15 came out on 1 October."] }] });
+        let fake = fake_server(
+            vec![
+                calls(&[("web_search", json!({ "query": "latest Python release" }))]),
+                json!({ "role": "assistant", "content": "Python 3.15 [1]." }),
+            ],
+            exa,
+        );
+        let settings =
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None };
+        let endpoints = crate::web::Endpoints { exa: format!("{}/exa", fake.base), tavily: String::new(), standin: None, offline: false };
+        let question = "What's the latest Python?";
+        let mut turn = crate::web::Turn::new(settings, endpoints, question, &[]);
+        let context = vec!["It's Wednesday 22 October 2026, 09:00 UK time (UTC+01:00).".to_string()];
+        let (reply, _) = run_tool_loop(
+            "You are helpful.",
+            &[],
+            question,
+            &context,
+            &format!("{}/v1", fake.base),
+            "",
+            "fake-chat",
+            "custom",
+            false,
+            true,
+            &|_| {},
+            Some(&mut turn),
+            FirstStep::MustSearch,
+        )
+        .await
+        .expect("an answer");
+        assert_eq!(reply, "Python 3.15 [1].");
+        let requests = fake.requests.lock().unwrap().clone();
+        let chat: Vec<&Value> = requests.iter().filter(|(u, _)| u.ends_with("/chat/completions")).map(|(_, b)| b).collect();
+        assert_eq!(chat.len(), 2);
+        assert_eq!(chat[0]["tool_choice"], "required", "the string llama.cpp reads, not a named function");
+        assert!(chat[1].get("tool_choice").is_none(), "only the first step is made to search");
+        assert_eq!(chat[1]["tools"], chat[0]["tools"], "the same tools on both steps");
+        assert!(tool_names(&chat[0]["tools"]).len() > 5, "all of them, not web_search alone");
+        // The question's message: the context (the clock, the search note), then the question.
+        let asked = chat[0]["messages"][1]["content"].as_str().unwrap();
+        assert!(asked.starts_with("<context>\nIt's Wednesday 22 October 2026"), "{asked}");
+        assert!(asked.contains(MUST_SEARCH_NOTE) && asked.ends_with("</context>\n\nWhat's the latest Python?"), "{asked}");
+        assert_eq!(chat[1]["messages"][1], chat[0]["messages"][1], "the same message on the next step");
+        assert!(!chat[0]["messages"][0]["content"].as_str().unwrap().contains("2026"), "no clock in the system prompt");
     }
 
     /// The web tools' instructions and schemas, on top of a tool step's

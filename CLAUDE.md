@@ -129,7 +129,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 **AI models** — [ai-models.md](./docs/architecture/ai-models.md)
 - `about_you.rs` — About you: the region from Windows (or picked), name and note → the block every model's prompt ends with, search country, cleanup spelling.
 - `llm.rs` — OpenAI-compatible client, immutable base prompts, chat/tool calls, rate-limit waits.
-- `local_llm.rs` — on-device llamafile sidecar: models, recommendation, server args, context, restarts.
+- `local_llm.rs` — on-device llamafile sidecar: models, recommendation, server args (MTP), context, restarts, warm-up, the runtime's background upgrade (retry without MTP, the way back, launch repair, cross-Yap lock).
 - `gguf.rs` — read-only GGUF headers and memory estimates per context length.
 - `gpu.rs` — the graphics card (DXGI), for the recommended on-device model.
 - `ai_model.rs` — which model a scope's next call goes to; the Chat picker's switch.

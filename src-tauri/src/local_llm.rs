@@ -13,9 +13,9 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Child;
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
 
@@ -39,13 +39,27 @@ pub(crate) const MODEL_URL: &str =
     "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf";
 pub(crate) const MODEL_SHA256: &str = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e";
 
-/// Download source + pinned SHA-256 for the llamafile runtime (v0.10.3, full
-/// build — bundles the GPU backends so it works on a clean machine with no dev
-/// tools; CPU fallback guaranteed). It's an Actually-Portable-Executable that
-/// runs on Windows when saved with a `.exe` name.
+/// The llamafile runtime Yap downloads: **0.10.6** (15 Sep 2026, llama.cpp
+/// b10441), the full build — it bundles the GPU backends, so it works on a
+/// clean machine with no dev tools, with the processor as the fallback. An
+/// Actually-Portable-Executable that runs on Windows when saved with a
+/// `.exe` name. The SHA-256 is the GitHub release's published digest
+/// (368,094,430 bytes). Over 0.10.3 (measured on an RTX 5070 Ti, Qwen3.5-4B,
+/// docs/model-evals.md "llamafile 0.10.6"): CUDA graphs (generation ~115 →
+/// ~165 tokens/s, a dictation's cleanup ~300 → ~245 ms), a much smaller
+/// compute buffer (~550 MiB less on the card), the June tool-call grammar
+/// fixes, context checkpoints at every user message, the Qwen3.5 MTP fix.
+/// Installs that have an older runtime get this one in the background
+/// ([`spawn_runtime_upgrade`]).
+pub const RUNTIME_VERSION: &str = "0.10.6";
 pub(crate) const RUNTIME_URL: &str =
-    "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.10.3/llamafile-0.10.3";
-pub(crate) const RUNTIME_SHA256: &str = "e6d4041a82ca37cee15aab62e6826d7a61c6a3ea83bca68387958970df250883";
+    "https://github.com/mozilla-ai/llamafile/releases/download/0.10.6/llamafile-0.10.6";
+pub(crate) const RUNTIME_SHA256: &str = "d579f61dcd3a306f518e6d90e599d77793ed5f09543023d09c96ad35fcfa63f0";
+
+/// The runtime Yap downloaded before markers ([`RUNTIME_MARKER`]): a
+/// `llamafile.exe` with no marker beside it is this one (Mozilla-Ocho's
+/// 0.10.3, SHA-256 `e6d4041a…`, July–October 2026).
+pub const UNMARKED_RUNTIME_VERSION: &str = "0.10.3";
 
 /// The llamafile runtime executable name on disk.
 #[cfg(windows)]
@@ -53,8 +67,303 @@ pub const RUNTIME_FILENAME: &str = "llamafile.exe";
 #[cfg(not(windows))]
 pub const RUNTIME_FILENAME: &str = "llamafile";
 
+/// Beside the runtime: which version it is and its SHA-256, written after
+/// every verified download, so Yap knows what's on disk without hashing
+/// 368 MB at every start.
+pub const RUNTIME_MARKER: &str = "llamafile.json";
+
+/// The new runtime while it downloads and waits to be swapped in, and the
+/// one it replaced until the new one has started once (the way back).
+#[cfg(windows)]
+const RUNTIME_NEXT: &str = "llamafile-next.exe";
+#[cfg(not(windows))]
+const RUNTIME_NEXT: &str = "llamafile-next";
+#[cfg(windows)]
+const RUNTIME_PREVIOUS: &str = "llamafile-previous.exe";
+#[cfg(not(windows))]
+const RUNTIME_PREVIOUS: &str = "llamafile-previous";
+const MARKER_PREVIOUS: &str = "llamafile-previous.json";
+
+/// A llamafile version, "0.10.6". Ordered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Version(pub u32, pub u32, pub u32);
+
+impl Version {
+    /// "0.10.6", "v0.10.6", "llamafile v0.10.6" (what `--version` prints).
+    /// Pure.
+    pub fn parse(s: &str) -> Option<Version> {
+        let word = s.split_whitespace().find(|w| w.trim_start_matches('v').starts_with(|c: char| c.is_ascii_digit()))?;
+        let mut parts = word.trim_start_matches('v').split('.').map(|p| p.trim().parse::<u32>());
+        let v = Version(parts.next()?.ok()?, parts.next()?.ok()?, parts.next().unwrap_or(Ok(0)).ok()?);
+        Some(v)
+    }
+
+    /// The runtime that brought the buffers and the MTP that Yap's memory
+    /// estimate and MTP drafting are calibrated for (0.10.6).
+    pub fn is_current(self) -> bool {
+        self >= Version(0, 10, 6)
+    }
+}
+
+impl std::fmt::Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.0, self.1, self.2)
+    }
+}
+
+/// [`RUNTIME_MARKER`]'s contents: the runtime on disk, and what this PC has
+/// learnt about runtimes and MTP — carried from marker to marker through
+/// every swap and roll-back (never config.json: Settings' wholesale saves).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Marker {
+    pub version: String,
+    /// The SHA-256 the download was verified against ("" when unknown: the
+    /// old runtime, put back after a new one wouldn't start).
+    pub sha256: String,
+    /// Swapped in, not yet started once ([`swap_in`]): a start that fails
+    /// on it goes back to the previous runtime.
+    #[serde(default)]
+    pub unproven: bool,
+    /// Runtimes (SHA-256) that downloaded fine but wouldn't run on this PC
+    /// [`REFUSE_AFTER`] times: never downloaded again.
+    #[serde(default)]
+    pub refused: Vec<String>,
+    /// Sessions in which a downloaded runtime (by SHA-256) wouldn't start,
+    /// or wouldn't say its version: refused at [`REFUSE_AFTER`].
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub failures: std::collections::BTreeMap<String, u32>,
+    /// "<runtime>/<GGUF file>" pairs MTP failed with here — the model
+    /// wouldn't start with it, or landed (partly) on the processor
+    /// ([`mtp_key`]): never with MTP again on that runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mtp_failed: Vec<String>,
+}
+
+impl Marker {
+    /// `self` with what this PC learnt, as `from` has it.
+    fn learnt_from(mut self, from: &Marker) -> Marker {
+        self.refused = from.refused.clone();
+        self.failures = from.failures.clone();
+        self.mtp_failed = from.mtp_failed.clone();
+        self
+    }
+}
+
+/// A downloaded runtime that fails in this many sessions (its first start,
+/// or `--version`) is refused on this PC; until then the previous one
+/// serves, and the next launch tries the new one again.
+pub const REFUSE_AFTER: u32 = 3;
+
+/// Write the marker for the runtime in `dir` (after a verified download).
+pub fn write_marker(dir: &Path, m: &Marker) -> std::io::Result<()> {
+    write_marker_at(&dir.join(RUNTIME_MARKER), m)
+}
+
+fn read_marker_at(path: &Path) -> Option<Marker> {
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+}
+
+fn write_marker_at(path: &Path, m: &Marker) -> std::io::Result<()> {
+    let json = serde_json::to_string_pretty(m).map_err(std::io::Error::other)?;
+    crate::config::atomic_write(path, &json).map_err(std::io::Error::other)
+}
+
+/// Change the marker in `dir` (none: the unmarked 0.10.3's, made).
+fn update_marker(dir: &Path, f: impl FnOnce(&mut Marker)) -> std::io::Result<Marker> {
+    let path = dir.join(RUNTIME_MARKER);
+    let mut m = read_marker_at(&path)
+        .unwrap_or_else(|| Marker { version: UNMARKED_RUNTIME_VERSION.to_string(), ..Default::default() });
+    f(&mut m);
+    write_marker_at(&path, &m)?;
+    Ok(m)
+}
+
+/// Note a session in which the runtime `sha256` failed (once a session:
+/// the caller's to say). Returns how many sessions now; at
+/// [`REFUSE_AFTER`] it's refused.
+pub fn count_failure(dir: &Path, sha256: &str) -> u32 {
+    if sha256.is_empty() {
+        return 0;
+    }
+    let mut n = 0;
+    let _ = update_marker(dir, |m| {
+        let c = m.failures.entry(sha256.to_ascii_lowercase()).or_insert(0);
+        *c += 1;
+        n = *c;
+        if n >= REFUSE_AFTER && !m.refused.iter().any(|r| r.eq_ignore_ascii_case(sha256)) {
+            m.refused.push(sha256.to_ascii_lowercase());
+        }
+    });
+    n
+}
+
+/// Take back a failure [`count_failure`] noted (and the refusal it made):
+/// it wasn't the runtime's fault after all.
+fn uncount_failure(dir: &Path, sha256: &str) {
+    let _ = update_marker(dir, |m| {
+        let key = sha256.to_ascii_lowercase();
+        if let Some(c) = m.failures.get_mut(&key) {
+            *c = c.saturating_sub(1);
+            if *c == 0 {
+                m.failures.remove(&key);
+            }
+        }
+        m.refused.retain(|r| !r.eq_ignore_ascii_case(sha256));
+    });
+}
+
+/// Is the runtime `sha256` refused in `dir`'s marker?
+fn refused_in(dir: &Path, sha256: &str) -> bool {
+    read_marker_at(&dir.join(RUNTIME_MARKER)).is_some_and(|m| m.refused.iter().any(|r| r.eq_ignore_ascii_case(sha256)))
+}
+
+/// The runtime in `dir`: its version (the marker's; none = 0.10.3) — `None`
+/// when there's no runtime there.
+pub fn runtime_version_in(dir: &Path) -> Option<Version> {
+    if !dir.join(RUNTIME_FILENAME).is_file() {
+        return None;
+    }
+    let v = read_marker_at(&dir.join(RUNTIME_MARKER)).and_then(|m| Version::parse(&m.version));
+    Some(v.unwrap_or_else(|| Version::parse(UNMARKED_RUNTIME_VERSION).expect("a version")))
+}
+
+/// The installed runtime's version (`None`: not installed).
+pub fn runtime_version() -> Option<Version> {
+    runtime_version_in(&llm_dir())
+}
+
+/// Should the runtime on disk be replaced by the one pinned (`want_sha`)?
+/// Only when there is one (`exe`), its marker doesn't say it's that one, and
+/// that one wasn't refused here before. Pure.
+pub fn upgrade_due(exe: bool, marker: Option<&Marker>, want_sha: &str) -> bool {
+    exe && !marker.is_some_and(|m| m.sha256.eq_ignore_ascii_case(want_sha) || m.refused.iter().any(|r| r.eq_ignore_ascii_case(want_sha)))
+}
+
+/// Put the downloaded runtime (`llamafile-next.exe`) in place in `dir`: the
+/// current one (and its marker) kept as the previous, the new one's marker
+/// written, `unproven` until it has started once. Nothing runs from `dir`
+/// meanwhile (the caller stopped the sidecar). A failure puts the old one
+/// back.
+pub fn swap_in(dir: &Path, version: &str, sha256: &str) -> std::io::Result<()> {
+    let (cur, next, prev) = (dir.join(RUNTIME_FILENAME), dir.join(RUNTIME_NEXT), dir.join(RUNTIME_PREVIOUS));
+    let (marker, prev_marker) = (dir.join(RUNTIME_MARKER), dir.join(MARKER_PREVIOUS));
+    if !next.is_file() {
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no new runtime to swap in"));
+    }
+    let learnt = read_marker_at(&marker).unwrap_or_default();
+    let _ = std::fs::remove_file(&prev);
+    let _ = std::fs::remove_file(&prev_marker);
+    let had_old = cur.is_file();
+    if had_old {
+        std::fs::rename(&cur, &prev)?;
+    }
+    if marker.is_file() {
+        let _ = std::fs::rename(&marker, &prev_marker);
+    }
+    if let Err(e) = std::fs::rename(&next, &cur) {
+        if had_old {
+            let _ = std::fs::rename(&prev, &cur);
+        }
+        let _ = std::fs::rename(&prev_marker, &marker);
+        return Err(e);
+    }
+    let mut m = Marker { version: version.to_string(), sha256: sha256.to_string(), unproven: true, ..Default::default() }
+        .learnt_from(&learnt);
+    m.refused.retain(|r| !r.eq_ignore_ascii_case(sha256));
+    write_marker_at(&marker, &m)
+}
+
+/// The swapped-in runtime has started: the previous one and its marker go.
+pub fn prove(dir: &Path) {
+    let path = dir.join(RUNTIME_MARKER);
+    if let Some(mut m) = read_marker_at(&path).filter(|m| m.unproven) {
+        m.unproven = false;
+        let _ = write_marker_at(&path, &m);
+    }
+    let _ = std::fs::remove_file(dir.join(RUNTIME_PREVIOUS));
+    let _ = std::fs::remove_file(dir.join(MARKER_PREVIOUS));
+}
+
+/// The swapped-in runtime didn't start: the previous one goes back in place
+/// (with its marker, or none — the unmarked 0.10.3) and the new one is kept
+/// as `llamafile-next.exe`, for [`swap_in`] again (the old one won't start
+/// either: the fault was elsewhere) or the next launch's try. What this PC
+/// learnt goes with it — the caller counted this failure first
+/// ([`count_failure`]). A new one that's gone (an antivirus took it) leaves
+/// whatever waits as `llamafile-next.exe` alone. Returns the new one's
+/// marker; `None` when there was no previous one to go back to.
+pub fn roll_back(dir: &Path) -> std::io::Result<Option<Marker>> {
+    let (cur, next, prev) = (dir.join(RUNTIME_FILENAME), dir.join(RUNTIME_NEXT), dir.join(RUNTIME_PREVIOUS));
+    let (marker, prev_marker) = (dir.join(RUNTIME_MARKER), dir.join(MARKER_PREVIOUS));
+    if !prev.is_file() {
+        return Ok(None);
+    }
+    let failed = read_marker_at(&marker).unwrap_or_default();
+    if cur.is_file() {
+        let _ = std::fs::remove_file(&next);
+        std::fs::rename(&cur, &next)?;
+        if let Err(e) = std::fs::rename(&prev, &cur) {
+            let _ = std::fs::rename(&next, &cur);
+            return Err(e);
+        }
+    } else {
+        std::fs::rename(&prev, &cur)?;
+    }
+    let mut old = read_marker_at(&prev_marker)
+        .unwrap_or(Marker { version: UNMARKED_RUNTIME_VERSION.to_string(), ..Default::default() })
+        .learnt_from(&failed);
+    old.unproven = false;
+    let _ = std::fs::remove_file(&prev_marker);
+    write_marker_at(&marker, &old)?;
+    Ok(Some(failed))
+}
+
+/// Put `dir` right at launch, before anything starts: a missing
+/// `llamafile.exe` comes back from the previous one (a roll-back or swap
+/// cut off) or from a whole `llamafile-next.exe` of the pinned runtime
+/// (`next_sha` is its hash, `None` = not worth hashing: there's none, or
+/// the caller didn't); a previous one kept past a proven start goes. Returns
+/// what it did, for the log. Pure but for the files.
+pub fn repair_runtime(dir: &Path, next_sha: Option<&str>, pinned: (&str, &str)) -> Option<&'static str> {
+    let (cur, next, prev) = (dir.join(RUNTIME_FILENAME), dir.join(RUNTIME_NEXT), dir.join(RUNTIME_PREVIOUS));
+    let (marker, prev_marker) = (dir.join(RUNTIME_MARKER), dir.join(MARKER_PREVIOUS));
+    if !cur.is_file() {
+        let learnt = read_marker_at(&marker).unwrap_or_default();
+        if prev.is_file() && std::fs::rename(&prev, &cur).is_ok() {
+            let old = read_marker_at(&prev_marker)
+                .unwrap_or(Marker { version: UNMARKED_RUNTIME_VERSION.to_string(), ..Default::default() })
+                .learnt_from(&learnt);
+            let _ = write_marker_at(&marker, &Marker { unproven: false, ..old });
+            let _ = std::fs::remove_file(&prev_marker);
+            return Some("restored the previous runtime");
+        }
+        let (version, sha) = pinned;
+        if next.is_file() && next_sha.is_some_and(|h| h.eq_ignore_ascii_case(sha)) {
+            // The marker first: never a runtime on disk its marker doesn't
+            // describe.
+            let m = Marker { version: version.to_string(), sha256: sha.to_string(), unproven: false, ..Default::default() }
+                .learnt_from(&learnt);
+            if write_marker_at(&marker, &m).is_ok() && std::fs::rename(&next, &cur).is_ok() {
+                return Some("restored the downloaded runtime");
+            }
+        }
+        return None;
+    }
+    let proven = !read_marker_at(&marker).is_some_and(|m| m.unproven);
+    if proven && prev.is_file() {
+        let _ = std::fs::remove_file(&prev);
+        let _ = std::fs::remove_file(&prev_marker);
+        return Some("deleted the previous runtime");
+    }
+    None
+}
+
 /// Cold model-load can take a while on first start; cap the health wait.
 const HEALTH_TIMEOUT_SECS: u64 = 120;
+/// The wait for a second try ([`Attempt::AGAIN`]): a first run of a new
+/// runtime can take minutes (an antivirus reading 368 MB), a big model on a
+/// slow disk too.
+const HEALTH_TIMEOUT_AGAIN_SECS: u64 = 300;
 
 /// The context the sidecar serves when none is set (`local_context` 0; one
 /// cache shared by its slots): room for the structured cleanup prompt +
@@ -176,6 +485,22 @@ pub const CACHE_RAM_MIB: u32 = 0;
 /// step the latest, so 4 a slot measured the same (cleanup 0.32–0.36 s).
 pub const CTX_CHECKPOINTS: u32 = 4;
 
+/// How a server runs a model beyond its context: the runtime's version (the
+/// arguments it understands) and whether MTP drafting is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Plan {
+    pub runtime: Version,
+    pub mtp: bool,
+}
+
+impl Plan {
+    /// The memory estimate's view of it (`gguf::estimate`).
+    pub fn server(self) -> crate::gguf::Server {
+        let current = self.runtime.is_current();
+        crate::gguf::Server { current, mtp: current && self.mtp }
+    }
+}
+
 /// The llamafile server's arguments, for Yap's sidecar and for the model
 /// evaluations (`eval/local.rs`), so both run a model the same way.
 /// `ngl`: layers on the GPU (999 = all that fit; 0 = the processor).
@@ -188,7 +513,17 @@ pub const CTX_CHECKPOINTS: u32 = 4;
 /// - `-lv 4`: the log names the layers that went to the GPU
 ///   (`load_tensors: offloaded 33/33 layers to GPU`, [`placement_in_log`]);
 ///   a request adds ~25 lines and never its text.
-pub fn server_args(model: &Path, port: u16, ngl: u32, ctx: u32) -> Vec<String> {
+/// - `--spec-type draft-mtp` when `plan` says MTP (only on the runtime it's
+///   measured on, 0.10.6; every other argument works on 0.10.3 and 0.10.6).
+pub fn server_args(model: &Path, port: u16, ngl: u32, ctx: u32, plan: Plan) -> Vec<String> {
+    let mut args = base_args(model, port, ngl, ctx);
+    if plan.server().mtp {
+        args.extend(["--spec-type".to_string(), "draft-mtp".to_string()]);
+    }
+    args
+}
+
+fn base_args(model: &Path, port: u16, ngl: u32, ctx: u32) -> Vec<String> {
     vec![
         // `--server` = OpenAI-compatible HTTP API only (no browser UI, no
         // --nobrowser flag needed — and that flag is invalid in llamafile 0.10.3).
@@ -308,12 +643,86 @@ pub fn log_facts(log: &str) -> LogFacts {
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
 static PORT: AtomicU16 = AtomicU16::new(0);
 static READY: AtomicBool = AtomicBool::new(false);
+/// Bumped by every [`stop`] (Yap stopping the sidecar: a model switch, the
+/// Stop button, a restart, quitting): a start under way that sees it move
+/// was stopped, not failed — never retried, never blamed on the runtime.
+static STOP_GEN: AtomicU64 = AtomicU64::new(0);
+/// Yap is quitting ([`shutdown`]): nothing starts or rolls back any more.
+static CLOSING: AtomicBool = AtomicBool::new(false);
+/// Yap's own restart of the sidecar under way (a new context, a new
+/// runtime): an on-device cleanup meanwhile gets no endpoint — the raw
+/// text — instead of the configured cloud one ([`effective_endpoint_for`]).
+static PLANNED_RESTART: AtomicU32 = AtomicU32::new(0);
+
+/// A planned restart, until dropped ([`PLANNED_RESTART`]).
+struct PlannedRestart;
+
+impl PlannedRestart {
+    fn begin() -> PlannedRestart {
+        PLANNED_RESTART.fetch_add(1, Ordering::SeqCst);
+        PlannedRestart
+    }
+}
+
+impl Drop for PlannedRestart {
+    fn drop(&mut self) {
+        PLANNED_RESTART.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Is Yap restarting the sidecar itself right now (a new context or
+/// runtime)? Its requests wait for it or go without.
+pub fn restart_under_way() -> bool {
+    PLANNED_RESTART.load(Ordering::SeqCst) > 0
+}
 /// The running sidecar's model id (its GGUF's name) and where its layers
 /// went; set once it's ready.
 static SERVING: Mutex<Option<Serving>> = Mutex::new(None);
 /// One start at a time (a restart, a Chat waking the model, a Settings
-/// switch): a second waits, then finds it up.
+/// switch, a runtime swap): a second waits, then finds it up.
 static STARTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Requests to the sidecar under way (`llm::post_chat_request` holds a
+/// [`Busy`] for each): a runtime swap and a context restart wait for none.
+static IN_FLIGHT: AtomicU32 = AtomicU32::new(0);
+/// Requests to the sidecar started, ever: the warm-up gives way when this
+/// moves.
+static STARTED: AtomicU64 = AtomicU64::new(0);
+
+/// A request to the sidecar under way, until dropped.
+pub struct Busy;
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// A request to `url` is starting: when that's the running sidecar it's
+/// counted until the guard drops, and a warm-up under way gives way to it.
+pub fn request_starting(url: &str) -> Option<Busy> {
+    let busy = hold(url)?;
+    STARTED.fetch_add(1, Ordering::SeqCst);
+    Some(busy)
+}
+
+/// **Work of several requests** to `url` is under way (a Chat turn's tool
+/// steps, with web searches and page reads between them; a meeting's
+/// digests; a notepad helper that waits out a dictation): when that's the
+/// running sidecar, it counts as busy until the guard drops — between the
+/// requests too — so a context restart or a runtime swap never cuts it off.
+pub fn hold(url: &str) -> Option<Busy> {
+    if !base_url().is_some_and(|ours| url.trim_end_matches('/') == ours) {
+        return None;
+    }
+    IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
+    Some(Busy)
+}
+
+/// Requests to the sidecar under way now.
+pub fn requests_in_flight() -> u32 {
+    IN_FLIGHT.load(Ordering::SeqCst)
+}
 
 #[derive(Debug, Clone)]
 struct Serving {
@@ -321,6 +730,11 @@ struct Serving {
     placement: Option<Placement>,
     /// The `-c` it was started with.
     ctx: u32,
+    /// The runtime and MTP it runs with.
+    plan: Plan,
+    /// Its model is hybrid (recurrent layers beside attention, Qwen3.5):
+    /// llama.cpp resumes its cache only from checkpoints.
+    hybrid: bool,
     /// Its log's facts, read once it was ready.
     facts: LogFacts,
 }
@@ -371,6 +785,20 @@ pub fn serving_context() -> Option<u32> {
         return Some(s.ctx);
     }
     SERVING.lock().ok()?.as_ref().map(|s| s.facts.n_ctx.unwrap_or(s.ctx))
+}
+
+/// Whether the running sidecar at `url` serves a hybrid model (`None`: no
+/// sidecar there — another server, or it isn't up).
+pub fn serving_hybrid_at(url: &str) -> Option<bool> {
+    if !base_url().is_some_and(|ours| url.trim_end_matches('/') == ours) {
+        return None;
+    }
+    SERVING.lock().ok()?.as_ref().map(|s| s.hybrid)
+}
+
+/// The running sidecar's runtime and MTP (`None` while it isn't running).
+pub fn serving_plan() -> Option<Plan> {
+    SERVING.lock().ok()?.as_ref().map(|s| s.plan)
 }
 
 /// The running sidecar's log facts (`None` while it isn't running).
@@ -608,6 +1036,12 @@ pub fn effective_endpoint_for(
             let id = serving_id().unwrap_or_else(|| model_id(&model_path()));
             return (url, String::new(), id, PROVIDER_ONDEVICE.to_string());
         }
+        // Down for a moment because Yap is restarting it (a new context or
+        // runtime): no endpoint — a dictation keeps its raw text — never the
+        // cloud endpoint someone on the on-device model left configured.
+        if restart_under_way() {
+            return (String::new(), String::new(), model_id(&model_path()), PROVIDER_ONDEVICE.to_string());
+        }
     }
     (
         base_url.to_string(),
@@ -648,6 +1082,289 @@ pub async fn start() -> Result<String, String> {
     if let Some(url) = base_url() {
         return Ok(url);
     }
+    start_locked().await
+}
+
+/// One way back per session from a runtime that won't start ([`start_locked`]).
+static WENT_BACK: AtomicBool = AtomicBool::new(false);
+/// One failure counted per session for a runtime that won't say its version
+/// ([`upgrade_runtime`]).
+static PROBE_COUNTED: AtomicBool = AtomicBool::new(false);
+
+/// How one try at starting the sidecar goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Attempt {
+    /// MTP as [`plan_for`] decides (`false`: never).
+    pub mtp: bool,
+    /// How long to wait for `/health`.
+    pub wait: Duration,
+}
+
+impl Attempt {
+    pub const FIRST: Attempt = Attempt { mtp: true, wait: Duration::from_secs(HEALTH_TIMEOUT_SECS) };
+    /// After a failed start: without MTP, and longer to load.
+    pub const AGAIN: Attempt = Attempt { mtp: false, wait: Duration::from_secs(HEALTH_TIMEOUT_AGAIN_SECS) };
+}
+
+/// Why a start didn't get the sidecar up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Failure {
+    /// Yap stopped it meanwhile ([`stop`]), or is quitting: not a failure.
+    Stopped,
+    /// Something isn't there (the runtime, the model, a free port): not the
+    /// runtime's fault, and trying again won't help.
+    Missing(String),
+    /// It wouldn't launch (an antivirus holding a new exe back).
+    Launch(String),
+    /// It exited while loading.
+    Exited,
+    /// It wasn't ready in time.
+    Timeout,
+}
+
+impl Failure {
+    /// Worth another try, and — on a new runtime — the runtime's to answer for.
+    pub fn counts(&self) -> bool {
+        matches!(self, Failure::Launch(_) | Failure::Exited | Failure::Timeout)
+    }
+}
+
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Failure::Stopped => write!(f, "the on-device model was stopped while it started"),
+            Failure::Missing(why) | Failure::Launch(why) => write!(f, "{why}"),
+            Failure::Exited => write!(f, "llamafile exited during startup"),
+            Failure::Timeout => write!(f, "llamafile did not become ready in time"),
+        }
+    }
+}
+
+/// A sidecar that came up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Started {
+    pub url: String,
+    /// It runs with MTP…
+    pub mtp: bool,
+    /// …and its model didn't all go to the graphics card.
+    pub off_card: bool,
+    /// Its [`mtp_key`].
+    pub key: String,
+}
+
+/// A start that failed, and whether it tried MTP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failed {
+    pub why: Failure,
+    pub mtp: bool,
+    pub key: String,
+}
+
+/// [`start`] under its lock.
+async fn start_locked() -> Result<String, String> {
+    // A stop from now on — by anyone — makes this start "stopped".
+    let gen = STOP_GEN.load(Ordering::SeqCst);
+    start_with(&llm_dir(), &WENT_BACK, &|| CLOSING.load(Ordering::SeqCst), |a| spawn_and_wait(a, gen)).await
+}
+
+/// **A start, and what it does when the sidecar won't come up** (`spawn`:
+/// one try, [`spawn_and_wait`] — a stand-in in the unit tests):
+/// - stopped by Yap meanwhile (a model switch, the Stop button, a restart,
+///   quitting), or something missing: that's the answer, nothing tried
+///   again and nothing blamed;
+/// - else **once more, without MTP and with longer to load**
+///   ([`Attempt::AGAIN`]) — a first run of a new runtime past two minutes
+///   (an antivirus), or MTP that crashes it. Up that way after a try with
+///   MTP: MTP is off for this model on this runtime here, for good
+///   ([`note_mtp_failed`]);
+/// - still not up, on a runtime swapped in and not yet started once: the
+///   **previous runtime goes back** in place and starts instead (once a
+///   session, `went_back`), the new one kept as `llamafile-next.exe` for
+///   the next launch — refused for good after [`REFUSE_AFTER`] sessions
+///   like this ([`count_failure`]). When the previous one won't start
+///   either, the fault isn't the runtime's: the new one goes back in and
+///   the failure isn't counted.
+///
+/// Up: a new runtime is proven (the previous one deleted); one that runs
+/// MTP with its model partly on the processor starts again without it,
+/// and MTP stays off for that model on that runtime.
+pub async fn start_with<F, Fut>(
+    dir: &Path,
+    went_back: &AtomicBool,
+    closing: &(dyn Fn() -> bool + Sync),
+    mut spawn: F,
+) -> Result<String, String>
+where
+    F: FnMut(Attempt) -> Fut,
+    Fut: std::future::Future<Output = Result<Started, Failed>>,
+{
+    let unproven = read_marker_at(&dir.join(RUNTIME_MARKER)).is_some_and(|m| m.unproven);
+    let first = match spawn(Attempt::FIRST).await {
+        Ok(s) => return up(dir, unproven, s, &mut spawn).await,
+        Err(f) => f,
+    };
+    if !first.why.counts() || closing() {
+        return Err(first.why.to_string());
+    }
+    tracing::warn!(mtp = first.mtp, "The on-device model didn't start ({}); trying once more without MTP", first.why);
+    match spawn(Attempt::AGAIN).await {
+        Ok(s) => {
+            if first.mtp {
+                note_mtp_failed(dir, &first.key);
+            }
+            return up(dir, unproven, s, &mut spawn).await;
+        }
+        Err(again) if !again.why.counts() || closing() => return Err(again.why.to_string()),
+        Err(_) => {}
+    }
+    if !unproven || went_back.swap(true, Ordering::SeqCst) {
+        return Err(first.why.to_string());
+    }
+    let sha = read_marker_at(&dir.join(RUNTIME_MARKER)).map(|m| m.sha256).unwrap_or_default();
+    let tries = count_failure(dir, &sha);
+    tracing::warn!(tries, "The new llamafile runtime didn't start ({}); going back to the previous one", first.why);
+    let failed = match roll_back(dir) {
+        Ok(Some(m)) => m,
+        Ok(None) => return Err(first.why.to_string()),
+        Err(e) => {
+            tracing::warn!("Couldn't put the previous llamafile runtime back: {e}");
+            return Err(first.why.to_string());
+        }
+    };
+    match spawn(Attempt::AGAIN).await {
+        Ok(s) => {
+            if refused_in(dir, &failed.sha256) {
+                let _ = std::fs::remove_file(dir.join(RUNTIME_NEXT));
+                tracing::warn!(version = %failed.version, "The previous llamafile runtime runs again; the new one won't be downloaded again");
+            } else {
+                tracing::warn!(version = %failed.version, "The previous llamafile runtime runs again; the new one is tried again at the next launch");
+            }
+            Ok(s.url)
+        }
+        // Stopped meanwhile: the previous runtime stays, the failure counted.
+        Err(again) if !again.why.counts() || closing() => Err(first.why.to_string()),
+        Err(again) => {
+            // Neither starts: the model (or the PC) is at fault, not the
+            // new runtime, which goes back in.
+            tracing::warn!("The previous llamafile runtime didn't start either ({}); keeping the new one", again.why);
+            match swap_in(dir, &failed.version, &failed.sha256) {
+                Ok(()) => uncount_failure(dir, &failed.sha256),
+                Err(e) => tracing::warn!("Couldn't put the new llamafile runtime back: {e}"),
+            }
+            Err(first.why.to_string())
+        }
+    }
+}
+
+/// The sidecar is up ([`start_with`]).
+async fn up<F, Fut>(dir: &Path, unproven: bool, s: Started, spawn: &mut F) -> Result<String, String>
+where
+    F: FnMut(Attempt) -> Fut,
+    Fut: std::future::Future<Output = Result<Started, Failed>>,
+{
+    if unproven {
+        prove(dir);
+        tracing::info!(version = %runtime_version_in(dir).map(|v| v.to_string()).unwrap_or_default(), "The new llamafile runtime started; the previous one is deleted");
+    }
+    // MTP is for a model all on the graphics card: one that landed (partly)
+    // on the processor starts again without it — and stays without it.
+    if s.mtp && s.off_card {
+        tracing::warn!("The on-device model didn't all go to the graphics card: starting it again without MTP");
+        note_mtp_failed(dir, &s.key);
+        return spawn(Attempt::AGAIN).await.map(|s| s.url).map_err(|f| f.why.to_string());
+    }
+    Ok(s.url)
+}
+
+/// "<runtime>/<GGUF file>": what MTP failing is remembered by
+/// ([`Marker::mtp_failed`]) — a newer runtime gets to try it again.
+pub fn mtp_key(runtime: Version, model: &Path) -> String {
+    let file = model.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    format!("{runtime}/{file}")
+}
+
+/// MTP failed this session ([`note_mtp_failed`]; also when the marker
+/// can't be written).
+static MTP_FAILED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// MTP failed with `key` here: never again (this session, and in the
+/// marker for the next ones).
+fn note_mtp_failed(dir: &Path, key: &str) {
+    if key.is_empty() {
+        return;
+    }
+    if let Ok(mut g) = MTP_FAILED.lock() {
+        if !g.iter().any(|k| k == key) {
+            g.push(key.to_string());
+        }
+    }
+    if dir.join(RUNTIME_MARKER).is_file() {
+        let _ = update_marker(dir, |m| {
+            if !m.mtp_failed.iter().any(|k| k == key) {
+                m.mtp_failed.push(key.to_string());
+            }
+        });
+    }
+    tracing::info!(key, "MTP is off for this model on this runtime from now on");
+}
+
+/// Did MTP fail with `key` on this PC (this session, or the marker says)?
+fn mtp_failed_here(dir: &Path, key: &str) -> bool {
+    MTP_FAILED.lock().is_ok_and(|g| g.iter().any(|k| k == key))
+        || read_marker_at(&dir.join(RUNTIME_MARKER)).is_some_and(|m| m.mtp_failed.iter().any(|k| k == key))
+}
+
+/// NVIDIA's PCI vendor id: the cards MTP was measured on (CUDA).
+pub const NVIDIA: u32 = 0x10DE;
+
+/// May the sidecar draft with MTP, before the memory sums ([`mtp_fits`])?
+/// llamafile 0.10.6 or newer, the setting on, an **NVIDIA** card (MTP was
+/// measured on CUDA only; AMD and Intel cards run llama.cpp's Vulkan
+/// backend, where nobody has measured it), and it hasn't failed with this
+/// model here. Pure.
+pub fn mtp_allowed(runtime: Version, setting: bool, vendor: Option<u32>, failed_here: bool) -> bool {
+    runtime.is_current() && setting && vendor == Some(NVIDIA) && !failed_here
+}
+
+/// How the sidecar runs `model` at `ctx` on `runtime` ([`Plan`]): **MTP
+/// drafting** (`--spec-type draft-mtp`) wherever it can be — llamafile
+/// 0.10.6 or newer (on 0.10.3 it kept fewer drafts and cost 2.15 GB), an
+/// NVIDIA card, `config.local_mtp` on, not failed with this model here
+/// ([`mtp_allowed`]), a model with the prediction layer
+/// (`gguf::Shape::has_mtp`: Qwen3.5), the whole model on the card with room
+/// for it at this context ([`mtp_fits`]). Never on the processor. Measured
+/// on an RTX 5070 Ti (docs/model-evals.md "Local AI, phase 1"): the 4B's
+/// generation ~165 → ~255 tokens/s, greedy outputs unchanged, ~+0.85 GB on
+/// the card.
+pub fn plan_for(cfg: &crate::config::YapConfig, model: &Path, ctx: u32, runtime: Version) -> Plan {
+    let gpu = crate::gpu::this_pc();
+    let failed = mtp_failed_here(&llm_dir(), &mtp_key(runtime, model));
+    let mtp = mtp_allowed(runtime, cfg.local_mtp, gpu.as_ref().map(|g| g.vendor), failed)
+        && mtp_fits(model, ctx, gpu.map(|g| g.vram_mib));
+    Plan { runtime, mtp }
+}
+
+/// Can `model` draft with MTP at `ctx`, and does it fit on a card of
+/// `vram_mib` with it ([`card_room`]: the card's memory less what Windows,
+/// the apps on screen and Yap's speech model keep there)? `false` without a
+/// card of its own.
+pub fn mtp_fits(model: &Path, ctx: u32, vram_mib: Option<u64>) -> bool {
+    let Some(f) = crate::gguf::model_file(model) else { return false };
+    if !f.shape.has_mtp() || !runs_on_card(None, vram_mib) {
+        return false;
+    }
+    let Some(room) = card_room(vram_mib) else { return false };
+    let server = crate::gguf::Server { current: true, mtp: true };
+    crate::gguf::estimate(&f.shape, f.bytes, ctx as u64, true, server).total_mib <= room
+}
+
+/// Launch the runtime on the configured model and wait for `/health`; then
+/// read where the model went, and warm it up ([`warm_up`], in the
+/// background). One try ([`start_with`] decides what's next): `gen` is
+/// [`STOP_GEN`] when the start began — a stop since makes it
+/// [`Failure::Stopped`]. A sidecar already running (MTP's restart off the
+/// processor) is stopped first.
+async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
     let exe = runtime_path();
     // Load whichever GGUF the user picked (custom models live in the same dir);
     // falls back to the bundled default if the selection is gone.
@@ -655,14 +1372,23 @@ pub async fn start() -> Result<String, String> {
     let model = active_model_path(&cfg);
     // The context set in the pickers, within what the model was trained for.
     let ctx = context_for(&cfg);
+    let mut plan = plan_for(&cfg, &model, ctx, runtime_version().unwrap_or(Version(0, 10, 3)));
+    plan.mtp &= attempt.mtp;
+    let key = mtp_key(plan.runtime, &model);
+    let fail = |why: Failure| Failed { why, mtp: plan.server().mtp, key: key.clone() };
+    let stopped = || CLOSING.load(Ordering::SeqCst) || STOP_GEN.load(Ordering::SeqCst) != gen;
+    if stopped() {
+        return Err(fail(Failure::Stopped));
+    }
     if !exe.is_file() {
-        return Err(format!("llamafile runtime not installed: {}", exe.display()));
+        return Err(fail(Failure::Missing(format!("llamafile runtime not installed: {}", exe.display()))));
     }
     if !model.is_file() {
-        return Err(format!("cleanup model not installed: {}", model.display()));
+        return Err(fail(Failure::Missing(format!("cleanup model not installed: {}", model.display()))));
     }
+    stop_inner();
 
-    let port = find_free_port().ok_or_else(|| "no free localhost port".to_string())?;
+    let port = find_free_port().ok_or_else(|| fail(Failure::Missing("no free localhost port".to_string())))?;
 
     // Capture the server's output to a log so startup failures are diagnosable
     // (an invalid `--nobrowser` flag silently killing it is exactly how we'd
@@ -676,7 +1402,7 @@ pub async fn start() -> Result<String, String> {
     let mut cmd = std::process::Command::new(&exe);
     // All layers on the GPU (999; llama.cpp fits what it can, the rest stays
     // on the processor, `placement`), thinking off, the caches capped.
-    cmd.args(server_args(&model, port, 999, ctx))
+    cmd.args(server_args(&model, port, 999, ctx, plan))
         .stdin(std::process::Stdio::null())
         .stdout(to_stdio(log.as_ref().and_then(|f| f.try_clone().ok())))
         .stderr(to_stdio(log.and_then(|f| f.try_clone().ok())));
@@ -688,25 +1414,35 @@ pub async fn start() -> Result<String, String> {
 
     let child = cmd
         .spawn()
-        .map_err(|e| format!("failed to launch llamafile: {}", e))?;
+        .map_err(|e| fail(Failure::Launch(format!("failed to launch llamafile: {}", e))))?;
     // The model never keeps running after Yap: a crash or End task ends it too.
     crate::procs::end_with_yap(&child);
     *CHILD.lock().unwrap() = Some(child);
     PORT.store(port, Ordering::SeqCst);
     READY.store(false, Ordering::SeqCst);
-    tracing::info!(port, ctx, model = %model.display(), "Starting on-device cleanup sidecar");
+    // A stop between the look above and the child being kept missed it.
+    if stopped() {
+        stop_inner();
+        return Err(fail(Failure::Stopped));
+    }
+    tracing::info!(port, ctx, runtime = %plan.runtime, mtp = plan.server().mtp, wait_s = attempt.wait.as_secs(), model = %model.display(), "Starting on-device cleanup sidecar");
 
     // Poll /health until the model has loaded (or the process dies / we time out).
     let health = format!("http://127.0.0.1:{}/health", port);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| fail(Failure::Missing(e.to_string())))?;
 
-    for _ in 0..HEALTH_TIMEOUT_SECS {
+    let t0 = Instant::now();
+    while t0.elapsed() < attempt.wait {
+        // Stopped by Yap meanwhile (`stop` killed it): not a failure.
+        if stopped() {
+            return Err(fail(Failure::Stopped));
+        }
         if child_exited() {
-            stop();
-            return Err("llamafile exited during startup".to_string());
+            stop_inner();
+            return Err(fail(Failure::Exited));
         }
         if let Ok(resp) = client.get(&health).send().await {
             if resp.status().is_success() {
@@ -723,8 +1459,12 @@ pub async fn start() -> Result<String, String> {
                     }
                     tokio::time::sleep(Duration::from_millis(300)).await;
                 }
+                if stopped() {
+                    return Err(fail(Failure::Stopped));
+                }
                 if let Ok(mut s) = SERVING.lock() {
-                    *s = Some(Serving { model_id: model_id(&model), placement, ctx, facts });
+                    let hybrid = crate::gguf::model_file(&model).is_some_and(|f| f.shape.is_hybrid());
+                    *s = Some(Serving { model_id: model_id(&model), placement, ctx, plan, hybrid, facts });
                 }
                 READY.store(true, Ordering::SeqCst);
                 tracing::info!(
@@ -738,35 +1478,95 @@ pub async fn start() -> Result<String, String> {
                     host_mib = facts.host_mib.unwrap_or(0),
                     "On-device cleanup sidecar ready"
                 );
-                return Ok(format!("http://127.0.0.1:{}/v1", port));
+                let url = format!("http://127.0.0.1:{}/v1", port);
+                // The first request after loading is slow: one small cleanup
+                // now, cancelled by the first real request.
+                let (u, id) = (url.clone(), model_id(&model));
+                tauri::async_runtime::spawn(async move {
+                    let w = warm_up(&u, &id).await;
+                    tracing::info!(ms = w.ms, cancelled = w.cancelled, error = w.error.as_deref().unwrap_or(""), "On-device model warmed up");
+                });
+                let off_card = placement.is_some_and(|p| p.kind() != "gpu");
+                return Ok(Started { url, mtp: plan.server().mtp, off_card, key });
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
-    stop();
-    Err("llamafile did not become ready in time".to_string())
+    if stopped() {
+        return Err(fail(Failure::Stopped));
+    }
+    stop_inner();
+    Err(fail(Failure::Timeout))
+}
+
+/// A short dictation for the warm-up (made up; never pasted anywhere).
+const WARM_UP_TEXT: &str = "so um I think we should uh move the team meeting to Thursday afternoon";
+
+/// What a warm-up did.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct WarmUp {
+    pub ms: u64,
+    /// A real request came first, so it gave way.
+    pub cancelled: bool,
+    pub error: Option<String>,
+}
+
+/// **Warm the model up** once it's loaded: the first request after loading
+/// is slow — CUDA graphs captured, kernels loaded, the cleanup's ~2k-token
+/// prompt read cold (on llamafile 0.10.6, 2.8 s once where a dictation's
+/// cleanup takes 0.25 s; docs/model-evals.md). One cleanup-sized request
+/// — the cleanup's own prompt as Settings has it, a short made-up
+/// dictation, a few tokens of answer — does that, and leaves the prompt in
+/// a slot for the first real dictation. It never stands in a real request's
+/// way: the first one to start ([`request_starting`]) cancels it (closing
+/// the connection stops it in llama.cpp). Not through `llm.rs`: it isn't a
+/// request anyone waits for, and it isn't counted as one.
+pub async fn warm_up(url: &str, model: &str) -> WarmUp {
+    let cfg = crate::config::load();
+    let spelling = crate::about_you::cleanup_spelling(&cfg);
+    let split = crate::llm::splits_dictation(url, model);
+    let messages = crate::llm::cleanup_messages(WARM_UP_TEXT, &cfg.pp_prompt, spelling.as_deref(), &cfg.dictionary, split);
+    let body = serde_json::json!({
+        "model": model,
+        "stream": false,
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 8,
+    });
+    let t0 = Instant::now();
+    let started = STARTED.load(Ordering::SeqCst);
+    let client = match reqwest::Client::builder().timeout(Duration::from_secs(60)).build() {
+        Ok(c) => c,
+        Err(e) => return WarmUp { error: Some(e.to_string()), ..Default::default() },
+    };
+    let send = client.post(format!("{}/chat/completions", url.trim_end_matches('/'))).json(&body).send();
+    let gave_way = async {
+        while STARTED.load(Ordering::SeqCst) == started {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    };
+    let mut out = WarmUp::default();
+    tokio::select! {
+        r = send => match r {
+            Ok(resp) if resp.status().is_success() => {
+                let _ = resp.bytes().await;
+            }
+            Ok(resp) => out.error = Some(format!("HTTP {}", resp.status().as_u16())),
+            Err(e) => out.error = Some(e.to_string()),
+        },
+        _ = gave_way => out.cancelled = true,
+    }
+    out.ms = t0.elapsed().as_millis() as u64;
+    out
 }
 
 /// The sidecar's URL: as it is when it's up, after the start already under
 /// way (never a second process), else after starting it. For callers that
 /// need the model now (the AI Chat on the on-device model).
 pub async fn ensure_started() -> Result<String, String> {
-    if let Some(url) = base_url() {
-        return Ok(url);
-    }
-    if PORT.load(Ordering::SeqCst) != 0 && !child_exited() {
-        for _ in 0..HEALTH_TIMEOUT_SECS {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            if let Some(url) = base_url() {
-                return Ok(url);
-            }
-            if PORT.load(Ordering::SeqCst) == 0 {
-                break;
-            }
-        }
-        return base_url().ok_or_else(|| "llamafile did not become ready in time".to_string());
-    }
+    // Every start holds `STARTING` (its tries, a way back included): waiting
+    // for it is waiting for the start under way.
     start().await
 }
 
@@ -788,7 +1588,22 @@ pub fn kill_orphans() {
 pub fn kill_orphans() {}
 
 /// Stop the sidecar (kill + reap the child). Safe to call when not running.
+/// Yap's own stop: a start under way ends as stopped ([`STOP_GEN`]), never
+/// tried again or blamed on the runtime.
 pub fn stop() {
+    STOP_GEN.fetch_add(1, Ordering::SeqCst);
+    stop_inner();
+}
+
+/// Yap is quitting: stop the sidecar, and start nothing (nor go back to a
+/// previous runtime) from now on. From every way out (`shutdown_cleanup`).
+pub fn shutdown() {
+    CLOSING.store(true, Ordering::SeqCst);
+    stop();
+}
+
+/// Kill + reap the child, as part of a start ([`spawn_and_wait`]).
+fn stop_inner() {
     READY.store(false, Ordering::SeqCst);
     PORT.store(0, Ordering::SeqCst);
     if let Ok(mut s) = SERVING.lock() {
@@ -919,9 +1734,16 @@ fn pipeline_busy(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
+/// The sidecar is in use: a dictation (above), or a request to it under way
+/// — a Chat answer, a meeting digest, the Ask bar ([`request_starting`]).
+fn sidecar_busy(app: &AppHandle) -> bool {
+    pipeline_busy(app) || requests_in_flight() > 0
+}
+
 /// Restart the sidecar on the context the config now asks for, once no
-/// dictation is going on (never under one: its cleanup would lose the
-/// model mid-answer). The model switch's path: stop, start. Emits
+/// dictation is going on and no request to it is under way (never under
+/// one: its cleanup or a Chat answer would lose the model mid-answer,
+/// [`sidecar_busy`]). The model switch's path: stop, start. Emits
 /// `yap-local-llm-changed` when done (the pickers re-read), and
 /// `yap-chat-model-changed {scope: null}` so the chips do.
 pub fn restart_when_idle(app: AppHandle) {
@@ -930,10 +1752,10 @@ pub fn restart_when_idle(app: AppHandle) {
     let _ = app.emit("yap-local-llm-changed", serde_json::json!({ "pending": true }));
     tauri::async_runtime::spawn(async move {
         let latest = || RESTART_GEN.load(Ordering::SeqCst) == gen;
-        if pipeline_busy(&app) {
-            tracing::info!("On-device model: the new context waits for the dictation to finish");
+        if sidecar_busy(&app) {
+            tracing::info!("On-device model: the new context waits for the dictation or answer to finish");
         }
-        if !wait_until_idle(|| pipeline_busy(&app), latest, RESTART_TICK, RESTART_SETTLE).await {
+        if !wait_until_idle(|| sidecar_busy(&app), latest, RESTART_TICK, RESTART_SETTLE).await {
             return; // a newer change took over
         }
         let result = {
@@ -974,8 +1796,412 @@ async fn restart_on(wanted: u32) -> Result<(), String> {
         return Ok(());
     }
     tracing::info!(ctx = wanted, "Restarting the on-device model with its new context");
+    let _restarting = PlannedRestart::begin();
     stop();
     start().await.map(|_| ())
+}
+
+// ---- the runtime: a newer llamafile, in the background ----------------------
+
+/// When the background upgrade first looks (after launch: the sidecar
+/// starts and the first dictations come first), and how long it waits
+/// after a "not now" (metered, not in use, a failed download), doubling up
+/// to the longest.
+const UPGRADE_FIRST_LOOK: Duration = Duration::from_secs(90);
+const UPGRADE_RETRY: Duration = Duration::from_secs(30 * 60);
+const UPGRADE_RETRY_MAX: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// What one look at the runtime came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpgradeStep {
+    /// The runtime on disk is the one pinned (or none is installed).
+    Done,
+    /// Not now, and why ("a metered connection", a download error…).
+    Later(String),
+}
+
+/// The upgrade under way, for Settings and the log: "downloading" |
+/// "waiting" (for the sidecar to be idle) | "" (none).
+static UPGRADE_PHASE: Mutex<&'static str> = Mutex::new("");
+
+fn set_upgrade_phase(p: &'static str) {
+    if let Ok(mut g) = UPGRADE_PHASE.lock() {
+        *g = p;
+    }
+}
+
+/// The background upgrade's phase now ("" when there's none).
+pub fn upgrade_phase() -> &'static str {
+    UPGRADE_PHASE.lock().map(|g| *g).unwrap_or("")
+}
+
+/// **Upgrade an older runtime in the background** (installs from before 22
+/// Oct 2026 have 0.10.3, which `ensure_runtime` never replaced: it only
+/// downloads a missing one). Looks 90 s after launch, then — after a "not
+/// now" — every 30 min, doubling to 6 h:
+/// - only while the on-device model is in use (no 368 MB for nothing), and
+///   not on a metered connection (`updates::metered`);
+/// - downloads the pinned runtime to `llamafile-next.exe` (SHA-256 verified;
+///   a failed download is retried later, the reason logged) while the old
+///   one keeps serving, and checks it runs here (`--version`);
+/// - swaps it in once the sidecar is idle — no dictation, no request to it
+///   under way, no meeting recording or being summarised — stopping it
+///   first and starting it again on the new runtime ([`start_locked`]: a
+///   new runtime that won't start gives way to the previous one, which is
+///   kept until the new one has started once).
+///
+/// The new runtime runs as `llamafile.exe` like the old one, so the orphan
+/// sweep (`kill_orphans`) and the job object (`procs::end_with_yap`) cover
+/// it. A test run only upgrades from its own stand-in (`YAP_LLM_SOURCES`),
+/// never runs it, and looks after `YAP_E2E_RUNTIME_UPGRADE_MS` (debug).
+pub fn spawn_runtime_upgrade(app: AppHandle) {
+    let Some(first) = first_look() else { return };
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(first).await;
+        let mut wait = UPGRADE_RETRY;
+        loop {
+            match upgrade_runtime(&app).await {
+                UpgradeStep::Done => {
+                    set_upgrade_phase("");
+                    return;
+                }
+                UpgradeStep::Later(why) => {
+                    set_upgrade_phase("");
+                    tracing::info!(retry_min = wait.as_secs() / 60, "llamafile upgrade: not now ({why})");
+                    tokio::time::sleep(wait).await;
+                    wait = (wait * 2).min(UPGRADE_RETRY_MAX);
+                }
+            }
+        }
+    });
+}
+
+/// When the upgrade first looks; `None` = never (a test run that didn't
+/// ask for it with `YAP_E2E_RUNTIME_UPGRADE_MS`, debug builds).
+fn first_look() -> Option<Duration> {
+    if crate::e2e::active() {
+        #[cfg(debug_assertions)]
+        if let Some(ms) = std::env::var("YAP_E2E_RUNTIME_UPGRADE_MS").ok().and_then(|v| v.trim().parse().ok()) {
+            return Some(Duration::from_millis(ms));
+        }
+        return None;
+    }
+    Some(UPGRADE_FIRST_LOOK)
+}
+
+/// A meeting recording or being summarised (its digests and action plan
+/// go to the on-device model one call after another).
+fn meeting_busy() -> bool {
+    crate::meeting::is_recording() || crate::meeting_end::summary_running()
+}
+
+/// The runtime's size (the pinned download's): what a download and a swap
+/// need on the disk.
+const RUNTIME_BYTES: u64 = 368_094_430;
+
+/// Free space an upgrade wants before it downloads: the new runtime beside
+/// the old one (and the old one kept until the new one has started), plus
+/// room to spare.
+const UPGRADE_ROOM: u64 = 2 * RUNTIME_BYTES + 256 * 1_048_576;
+
+/// **One upgrade at a time across Yaps**: a dev build and the installed app
+/// share `llm/`. A lock file holding the owner's process id, taken with
+/// create-new; one whose owner isn't a running Yap any more is stale and
+/// taken over. Released (deleted) when dropped.
+pub struct UpgradeLock(PathBuf);
+
+/// The upgrade lock's file in `llm/`.
+const UPGRADE_LOCK: &str = "llamafile-upgrade.lock";
+
+impl UpgradeLock {
+    /// `None`: another running Yap holds it (or the folder can't be written).
+    pub fn take(dir: &Path) -> Option<UpgradeLock> {
+        Self::take_unless(dir, |pid| pid != std::process::id() && running_yap(pid))
+    }
+
+    /// [`take`](Self::take), `held(pid)` saying whether the pid in an
+    /// existing lock still holds it (the unit tests' stand-in).
+    fn take_unless(dir: &Path, held: impl Fn(u32) -> bool) -> Option<UpgradeLock> {
+        use std::io::Write;
+        let path = dir.join(UPGRADE_LOCK);
+        for _ in 0..2 {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(mut f) => {
+                    let _ = write!(f, "{}", std::process::id());
+                    return Some(UpgradeLock(path));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let owner = std::fs::read_to_string(&path).ok().and_then(|s| s.trim().parse::<u32>().ok());
+                    if owner.is_some_and(&held) {
+                        return None;
+                    }
+                    // Stale (its Yap is gone), or ours from before.
+                    let _ = std::fs::remove_file(&path);
+                }
+                Err(_) => return None,
+            }
+        }
+        None
+    }
+}
+
+impl Drop for UpgradeLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(windows)]
+fn running_yap(pid: u32) -> bool {
+    crate::procs::is_running_yap(pid)
+}
+#[cfg(not(windows))]
+fn running_yap(_pid: u32) -> bool {
+    false
+}
+
+/// Another running Yap's sidecar (a dev build beside the installed app),
+/// running the runtime in this `llm/`: a swap waits for it to stop.
+#[cfg(windows)]
+fn other_yaps_sidecar() -> bool {
+    crate::procs::sidecars_of_other_yaps(&llm_dir(), RUNTIME_FILENAME) > 0
+}
+#[cfg(not(windows))]
+fn other_yaps_sidecar() -> bool {
+    false
+}
+
+/// Free bytes on the disk `dir` is on (`None`: unknown).
+#[cfg(windows)]
+pub fn free_bytes(dir: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut free = 0u64;
+    // SAFETY: a NUL-terminated path, an out pointer that lives through the call.
+    unsafe { GetDiskFreeSpaceExW(windows::core::PCWSTR(wide.as_ptr()), Some(&mut free), None, None) }.ok()?;
+    Some(free)
+}
+#[cfg(not(windows))]
+pub fn free_bytes(_dir: &Path) -> Option<u64> {
+    None
+}
+
+/// Enough room on the disk for `need` bytes? Unknown: yes. Pure.
+pub fn room_for(free: Option<u64>, need: u64) -> bool {
+    free.is_none_or(|f| f >= need)
+}
+
+/// The `llamafile-next.exe` this session already hashed and found whole:
+/// its size and time, so a later look doesn't read 368 MB again.
+static NEXT_CHECKED: Mutex<Option<(u64, std::time::SystemTime)>> = Mutex::new(None);
+
+fn file_stamp(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let m = std::fs::metadata(path).ok()?;
+    Some((m.len(), m.modified().ok()?))
+}
+
+/// Is `next` the whole pinned runtime (`sha`)? Hashed once a session.
+async fn next_is_whole(next: &Path, sha: &str) -> bool {
+    let Some(stamp) = file_stamp(next) else { return false };
+    if NEXT_CHECKED.lock().is_ok_and(|g| *g == Some(stamp)) {
+        return true;
+    }
+    let p = next.to_path_buf();
+    let ok = tokio::task::spawn_blocking(move || compute_sha256(&p)).await.ok().and_then(Result::ok).is_some_and(|h| h.eq_ignore_ascii_case(sha));
+    if ok {
+        if let Ok(mut g) = NEXT_CHECKED.lock() {
+            *g = Some(stamp);
+        }
+    }
+    ok
+}
+
+/// **At launch, before the sidecar starts**: a runtime cut off mid-swap or
+/// taken by an antivirus comes back ([`repair_runtime`]), a previous one
+/// kept past a proven start goes, and a download that was cut off leaves
+/// no partial file. Not while another Yap holds the upgrade lock.
+pub async fn tidy_runtime() {
+    let dir = llm_dir();
+    if !dir.is_dir() {
+        return;
+    }
+    let Some(_lock) = UpgradeLock::take(&dir) else { return };
+    let _ = std::fs::remove_file(dir.join(RUNTIME_NEXT).with_extension("partial"));
+    let (_, sha) = source("runtime", RUNTIME_URL, RUNTIME_SHA256);
+    let next = dir.join(RUNTIME_NEXT);
+    let next_sha = if !dir.join(RUNTIME_FILENAME).is_file() && next.is_file() {
+        tokio::task::spawn_blocking(move || compute_sha256(&next)).await.ok().and_then(Result::ok)
+    } else {
+        None
+    };
+    if let Some(did) = repair_runtime(&dir, next_sha.as_deref(), (RUNTIME_VERSION, &sha)) {
+        tracing::info!("llamafile runtime: {did}");
+    }
+}
+
+/// Wait until `idle()` (then a settle, and idle again), then take the
+/// restart lock — never waiting for it: a context restart under way isn't
+/// held up — and the start lock, looking again once it's had to wait for
+/// that one: a request that began meanwhile (a Chat turn, a dictation) sends
+/// it back to waiting. Returns both locks, held.
+async fn idle_with_locks(
+    restarting: &'static tokio::sync::Mutex<()>,
+    starting: &'static tokio::sync::Mutex<()>,
+    idle: impl Fn() -> bool,
+    tick: Duration,
+    settle: Duration,
+) -> (tokio::sync::MutexGuard<'static, ()>, tokio::sync::MutexGuard<'static, ()>) {
+    loop {
+        wait_until_idle(|| !idle(), || true, tick, settle).await;
+        tokio::time::sleep(settle).await;
+        if let Ok(restart) = restarting.try_lock() {
+            if idle() {
+                let one = starting.lock().await;
+                if idle() {
+                    return (restart, one);
+                }
+            }
+        }
+        tokio::time::sleep(tick).await;
+    }
+}
+
+/// One look: download the pinned runtime if it's due, then swap it in.
+pub async fn upgrade_runtime(app: &AppHandle) -> UpgradeStep {
+    let dir = llm_dir();
+    let (url, sha) = source("runtime", RUNTIME_URL, RUNTIME_SHA256);
+    // This session went back from it: the next launch tries it again.
+    if WENT_BACK.load(Ordering::SeqCst) {
+        return UpgradeStep::Done;
+    }
+    let marker = read_marker_at(&dir.join(RUNTIME_MARKER));
+    if !upgrade_due(dir.join(RUNTIME_FILENAME).is_file(), marker.as_ref(), &sha) {
+        return UpgradeStep::Done;
+    }
+    let test_run = crate::e2e::active();
+    if test_run && !allowed_in_test_run(&url) {
+        return UpgradeStep::Done; // a test run without a stand-in runtime
+    }
+    let cfg = crate::config::load();
+    if !in_use(&cfg) && !is_running() {
+        return UpgradeStep::Later("the on-device model isn't in use".into());
+    }
+    if !test_run && crate::updates::metered() {
+        return UpgradeStep::Later("a metered connection".into());
+    }
+    let Some(_lock) = UpgradeLock::take(&dir) else {
+        return UpgradeStep::Later("another Yap is upgrading it".into());
+    };
+    // Under the lock: the other Yap may have done it meanwhile.
+    let marker = read_marker_at(&dir.join(RUNTIME_MARKER));
+    if !upgrade_due(dir.join(RUNTIME_FILENAME).is_file(), marker.as_ref(), &sha) {
+        return UpgradeStep::Done;
+    }
+    let next = dir.join(RUNTIME_NEXT);
+    // Downloaded before (Yap closed before the swap, or a way back kept it):
+    // kept if it's whole.
+    if !(next.is_file() && next_is_whole(&next, &sha).await) {
+        let free = free_bytes(&dir);
+        if !room_for(free, UPGRADE_ROOM) {
+            return UpgradeStep::Later(format!(
+                "only {} MB free on the disk; it needs {} MB",
+                free.unwrap_or(0) / 1_048_576,
+                UPGRADE_ROOM / 1_048_576
+            ));
+        }
+        set_upgrade_phase("downloading");
+        tracing::info!(from = %marker.as_ref().map(|m| m.version.clone()).unwrap_or_else(|| UNMARKED_RUNTIME_VERSION.into()), to = RUNTIME_VERSION, "llamafile upgrade: downloading the new runtime in the background");
+        if let Err(e) = download_for(&url, &next, &sha, "runtime", "", None).await {
+            return UpgradeStep::Later(format!("the download failed: {e}"));
+        }
+        if let (Some(stamp), Ok(mut g)) = (file_stamp(&next), NEXT_CHECKED.lock()) {
+            *g = Some(stamp);
+        }
+    }
+    // It runs on this PC (an antivirus can hold a new exe back). One that
+    // won't, session after session, is refused and deleted.
+    if !test_run {
+        let why = match probe_version(&next).await {
+            Some(v) if v.to_string() == RUNTIME_VERSION => None,
+            Some(v) => Some(format!("the download says it's {v}, not {RUNTIME_VERSION}")),
+            None => Some("the new runtime didn't run (--version)".to_string()),
+        };
+        if let Some(why) = why {
+            if !PROBE_COUNTED.swap(true, Ordering::SeqCst) && count_failure(&dir, &sha) >= REFUSE_AFTER {
+                let _ = std::fs::remove_file(&next);
+                tracing::warn!("llamafile upgrade: {why}, again; this runtime won't be downloaded again");
+                return UpgradeStep::Done;
+            }
+            return UpgradeStep::Later(why);
+        }
+    }
+    // Swapped in once nothing uses the sidecar (idle, then idle again after
+    // a settle), never under a context restart — which isn't held up
+    // meanwhile: the locks are only taken once it's idle — and never under
+    // a request that began while the start lock was awaited.
+    set_upgrade_phase("waiting");
+    let idle = || !(sidecar_busy(app) || meeting_busy());
+    let (_restart, _one) = idle_with_locks(&RESTARTING, &STARTING, idle, RESTART_TICK, RESTART_SETTLE).await;
+    // Another Yap's sidecar runs the runtime here: not under it.
+    if !test_run && other_yaps_sidecar() {
+        return UpgradeStep::Later("another Yap is using the on-device model".into());
+    }
+    let result = {
+        let _restarting = PlannedRestart::begin();
+        let was_running = is_running();
+        if was_running {
+            stop();
+        }
+        match swap_in(&dir, RUNTIME_VERSION, &sha) {
+            Ok(()) => {
+                tracing::info!(version = RUNTIME_VERSION, restart = was_running, "llamafile upgrade: the new runtime is in place");
+                if was_running {
+                    start_locked().await.map(|_| ())
+                } else {
+                    Ok(())
+                }
+            }
+            Err(e) => {
+                tracing::warn!("llamafile upgrade: couldn't swap the runtime in: {e}");
+                if was_running {
+                    let _ = start_locked().await;
+                }
+                Err(e.to_string())
+            }
+        }
+    };
+    let _ = app.emit("yap-local-llm-changed", serde_json::json!({ "pending": restart_pending(), "error": result.as_ref().err() }));
+    let _ = app.emit("yap-chat-model-changed", serde_json::json!({ "scope": null }));
+    match result {
+        Ok(()) => UpgradeStep::Done,
+        Err(e) => UpgradeStep::Later(e),
+    }
+}
+
+/// What `exe --version` says it is ("llamafile v0.10.6"), within a minute
+/// (a fresh download's first run waits for the antivirus); `None` when it
+/// didn't run or said nothing readable. Tied to Yap like the sidecar.
+pub async fn probe_version(exe: &Path) -> Option<Version> {
+    let exe = exe.to_path_buf();
+    let run = tokio::task::spawn_blocking(move || {
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.arg("--version")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let child = cmd.spawn().ok()?;
+        crate::procs::end_with_yap(&child);
+        let out = child.wait_with_output().ok()?;
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        Version::parse(&text)
+    });
+    tokio::time::timeout(Duration::from_secs(60), run).await.ok()?.ok()?
 }
 
 /// One context the pickers offer, with what it takes.
@@ -1051,12 +2277,15 @@ pub fn context_view(cfg: &crate::config::YapConfig) -> ContextView {
     let vram = gpu.as_ref().map(|g| g.vram_mib);
     let on_card = runs_on_card(placement, vram);
     let room = on_card.then(|| card_room(vram)).flatten();
+    // The runtime on disk (its buffers differ), or the one an install gets.
+    let runtime = runtime_version().unwrap_or_else(|| Version::parse(RUNTIME_VERSION).expect("a version"));
     let options = context_choices(max, tokens)
         .into_iter()
         .map(|c| {
+            let server = plan_for(cfg, &path, c, runtime).server();
             let estimate_mib = file
                 .as_ref()
-                .map(|f| crate::gguf::estimate(&f.shape, f.bytes, c as u64, on_card).total_mib);
+                .map(|f| crate::gguf::estimate(&f.shape, f.bytes, c as u64, on_card, server).total_mib);
             ContextOption {
                 tokens: c,
                 estimate_mib,
@@ -1392,7 +2621,9 @@ pub fn curated_by_id(id: &str) -> Option<&'static CuratedLlm> {
     CURATED_MODELS.iter().find(|m| m.id == id)
 }
 
-/// Ensure the llamafile runtime is on disk (SHA-verified download if missing).
+/// Ensure the llamafile runtime is on disk (SHA-verified download if missing),
+/// with its marker ([`RUNTIME_MARKER`]). An older one already there stays
+/// until the background upgrade replaces it ([`spawn_runtime_upgrade`]).
 /// `model`: the curated id the install is for (its progress names it).
 async fn ensure_runtime(model: &str, app: Option<&AppHandle>) -> Result<(), String> {
     tokio::fs::create_dir_all(llm_dir())
@@ -1400,8 +2631,23 @@ async fn ensure_runtime(model: &str, app: Option<&AppHandle>) -> Result<(), Stri
         .map_err(|e| format!("failed to create llm dir: {}", e))?;
 
     if !runtime_path().is_file() {
+        let dir = llm_dir();
+        let _lock = UpgradeLock::take(&dir)
+            .ok_or_else(|| "Another Yap is setting up the on-device model's engine. Try again in a minute.".to_string())?;
+        if runtime_path().is_file() {
+            return Ok(()); // the other Yap just did
+        }
         let (url, sha) = source("runtime", RUNTIME_URL, RUNTIME_SHA256);
-        download_for(&url, &runtime_path(), &sha, "runtime", model, app).await?;
+        // Beside it first (or kept from an upgrade), then the marker, then
+        // into place: never a runtime on disk its marker doesn't describe.
+        let next = dir.join(RUNTIME_NEXT);
+        if !(next.is_file() && next_is_whole(&next, &sha).await) {
+            download_for(&url, &next, &sha, "runtime", model, app).await?;
+        }
+        let learnt = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap_or_default();
+        let marker = Marker { version: RUNTIME_VERSION.to_string(), sha256: sha, unproven: false, ..Default::default() }.learnt_from(&learnt);
+        write_marker_at(&dir.join(RUNTIME_MARKER), &marker).map_err(|e| format!("Couldn't write the engine's marker: {e}"))?;
+        std::fs::rename(&next, runtime_path()).map_err(|e| format!("Couldn't put the engine in place: {e}"))?;
         // On Unix the runtime needs the executable bit (Windows infers from .exe).
         #[cfg(unix)]
         {
@@ -1457,7 +2703,17 @@ pub(crate) async fn download_verified(
     download_for(url, dest, expected_sha, stage, "", app).await
 }
 
+/// How long a download may go without a byte (or a server without an
+/// answer) before it's given up on: a stalled connection never leaves an
+/// install or the background upgrade at "downloading".
+const DOWNLOAD_STALL: Duration = Duration::from_secs(60);
+
+/// Room left on the disk beside a download, past its own size.
+const DOWNLOAD_SPARE: u64 = 64 * 1_048_576;
+
 /// [`download_verified`], its progress naming the curated model `model`.
+/// Whatever goes wrong — the server, a stalled connection, a full disk, a
+/// bad hash — the partial file goes too.
 async fn download_for(
     url: &str,
     dest: &Path,
@@ -1466,34 +2722,66 @@ async fn download_for(
     model: &str,
     app: Option<&AppHandle>,
 ) -> Result<(), String> {
-    use futures_util::StreamExt;
-    use tokio::io::AsyncWriteExt;
-
     if crate::e2e::active() && !allowed_in_test_run(url) {
         return Err("Test runs never download models from the internet".to_string());
     }
     let partial = dest.with_extension("partial");
     tracing::info!(url, dest = %dest.display(), stage, "Downloading on-device cleanup asset");
+    let result = fetch_to(url, dest, &partial, expected_sha, stage, model, app).await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&partial).await;
+    }
+    result
+}
 
-    let client = reqwest::Client::new();
-    let resp = client
-        .get(url)
-        .send()
+/// [`download_for`]'s work: `url` → `partial`, verified, renamed to `dest`.
+async fn fetch_to(
+    url: &str,
+    dest: &Path,
+    partial: &Path,
+    expected_sha: &str,
+    stage: &'static str,
+    model: &str,
+    app: Option<&AppHandle>,
+) -> Result<(), String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("request failed: {}", e))?;
+    let resp = tokio::time::timeout(DOWNLOAD_STALL, client.get(url).send())
         .await
+        .map_err(|_| "the server didn't answer".to_string())?
         .map_err(|e| format!("request failed: {}", e))?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {} from {}", resp.status(), url));
     }
     let total = resp.content_length();
+    if let Some(total) = total {
+        let free = dest.parent().and_then(free_bytes);
+        if !room_for(free, total + DOWNLOAD_SPARE) {
+            return Err(format!(
+                "not enough disk space: it needs {} MB, {} MB are free",
+                (total + DOWNLOAD_SPARE) / 1_048_576,
+                free.unwrap_or(0) / 1_048_576
+            ));
+        }
+    }
 
-    let mut file = tokio::fs::File::create(&partial)
+    let mut file = tokio::fs::File::create(partial)
         .await
         .map_err(|e| format!("create temp file: {}", e))?;
     let mut downloaded: u64 = 0;
     let mut last_pct: u8 = 0;
     let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("download stream error: {}", e))?;
+    loop {
+        let chunk = match tokio::time::timeout(DOWNLOAD_STALL, stream.next()).await {
+            Ok(Some(chunk)) => chunk.map_err(|e| format!("download stream error: {}", e))?,
+            Ok(None) => break,
+            Err(_) => return Err("the download stalled".to_string()),
+        };
         file.write_all(&chunk).await.map_err(|e| format!("write: {}", e))?;
         downloaded += chunk.len() as u64;
         if let (Some(total), Some(app)) = (total, app) {
@@ -1517,20 +2805,19 @@ async fn download_for(
     drop(file);
 
     // Verify SHA-256 on a blocking thread (files are hundreds of MB to ~1 GB).
-    let verify_path = partial.clone();
+    let verify_path = partial.to_path_buf();
     let expected = expected_sha.to_string();
     let ok = tokio::task::spawn_blocking(move || match compute_sha256(&verify_path) {
-        Ok(actual) => actual == expected,
+        Ok(actual) => actual.eq_ignore_ascii_case(&expected),
         Err(_) => false,
     })
     .await
     .map_err(|e| format!("sha task panicked: {}", e))?;
     if !ok {
-        let _ = tokio::fs::remove_file(&partial).await;
         return Err(format!("{} verification failed (corrupt download) — retry", stage));
     }
 
-    tokio::fs::rename(&partial, dest)
+    tokio::fs::rename(partial, dest)
         .await
         .map_err(|e| format!("rename: {}", e))?;
     Ok(())
@@ -1632,9 +2919,12 @@ mod tests {
         );
     }
 
+    const NEW: Version = Version(0, 10, 6);
+    const OLD: Version = Version(0, 10, 3);
+
     #[test]
     fn the_server_runs_without_thinking_and_with_its_caches_capped() {
-        let args = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT);
+        let args = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: NEW, mtp: false });
         let after = |flag: &str| args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str());
         assert_eq!(after("--reasoning"), Some("off"));
         assert_eq!(after("--cache-ram"), Some("0"));
@@ -1644,6 +2934,433 @@ mod tests {
         assert_eq!(after("-lv"), Some("4"));
         assert_eq!(after("--port"), Some("5000"));
         assert!(args.iter().any(|a| a == "--server"));
+        assert!(!args.iter().any(|a| a == "--spec-type"), "no MTP unless the plan says");
+        // MTP drafting: on the runtime it's measured on, never on 0.10.3
+        // (whatever the plan says), whose other arguments are the same.
+        let mtp = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: NEW, mtp: true });
+        assert_eq!(&mtp[mtp.len() - 2..], ["--spec-type", "draft-mtp"]);
+        let old = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: OLD, mtp: true });
+        assert_eq!(old, args);
+    }
+
+    /// A folder of its own under the temp dir, emptied first.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("yap-runtime-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn read(dir: &Path, file: &str) -> String {
+        std::fs::read_to_string(dir.join(file)).unwrap_or_default()
+    }
+
+    #[test]
+    fn an_old_runtime_is_upgraded_once_and_a_refused_one_never() {
+        let current = Marker { version: "0.10.6".into(), sha256: RUNTIME_SHA256.into(), ..Default::default() };
+        // No runtime: nothing to upgrade (an install downloads the new one).
+        assert!(!upgrade_due(false, None, RUNTIME_SHA256));
+        // No marker: the 0.10.3 every install had before markers.
+        assert!(upgrade_due(true, None, RUNTIME_SHA256));
+        assert!(!upgrade_due(true, Some(&current), RUNTIME_SHA256));
+        assert!(!upgrade_due(true, Some(&current), &RUNTIME_SHA256.to_uppercase()));
+        // A newer pin later: due again.
+        assert!(upgrade_due(true, Some(&current), "ab12"));
+        // One that wouldn't start here: never again.
+        let refused = Marker { version: "0.10.3".into(), refused: vec![RUNTIME_SHA256.into()], ..Default::default() };
+        assert!(!upgrade_due(true, Some(&refused), RUNTIME_SHA256));
+        // The version on disk: the marker's, else 0.10.3; none without a runtime.
+        let dir = scratch("version");
+        assert_eq!(runtime_version_in(&dir), None);
+        std::fs::write(dir.join(RUNTIME_FILENAME), "old").unwrap();
+        assert_eq!(runtime_version_in(&dir), Some(OLD));
+        write_marker(&dir, &current).unwrap();
+        assert_eq!(runtime_version_in(&dir), Some(NEW));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_new_runtime_swaps_in_and_the_old_one_stays_until_it_has_started() {
+        let dir = scratch("swap");
+        std::fs::write(dir.join(RUNTIME_FILENAME), "old").unwrap();
+        // Nothing downloaded: nothing changes.
+        assert!(swap_in(&dir, "0.10.6", "aa").is_err());
+        assert_eq!(read(&dir, RUNTIME_FILENAME), "old");
+        std::fs::write(dir.join(RUNTIME_NEXT), "new").unwrap();
+        swap_in(&dir, "0.10.6", "aa").unwrap();
+        assert_eq!((read(&dir, RUNTIME_FILENAME), read(&dir, RUNTIME_PREVIOUS)), ("new".into(), "old".into()));
+        assert!(!dir.join(RUNTIME_NEXT).exists());
+        let m = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap();
+        assert_eq!((m.version.as_str(), m.sha256.as_str(), m.unproven), ("0.10.6", "aa", true));
+        // It started: the old one goes.
+        prove(&dir);
+        assert!(!dir.join(RUNTIME_PREVIOUS).exists());
+        assert!(!read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap().unproven);
+        // Nothing to go back to now.
+        assert_eq!(roll_back(&dir).unwrap(), None);
+        assert_eq!(read(&dir, RUNTIME_FILENAME), "new");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_new_runtime_that_wont_start_gives_way_to_the_old_one() {
+        let dir = scratch("rollback");
+        std::fs::write(dir.join(RUNTIME_FILENAME), "old").unwrap();
+        std::fs::write(dir.join(RUNTIME_NEXT), "new").unwrap();
+        swap_in(&dir, "0.10.6", "aa").unwrap();
+        // It didn't start (counted once): the old one (unmarked: 0.10.3) is
+        // back, the new one kept aside for the next launch — not refused yet.
+        assert_eq!(count_failure(&dir, "aa"), 1);
+        let failed = roll_back(&dir).unwrap().unwrap();
+        assert_eq!((failed.version.as_str(), failed.sha256.as_str()), ("0.10.6", "aa"));
+        assert_eq!((read(&dir, RUNTIME_FILENAME), read(&dir, RUNTIME_NEXT)), ("old".into(), "new".into()));
+        assert!(!dir.join(RUNTIME_PREVIOUS).exists());
+        let m = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap();
+        assert_eq!((m.version.as_str(), m.unproven), (UNMARKED_RUNTIME_VERSION, false));
+        assert_eq!((m.failures.get("aa"), m.refused.is_empty()), (Some(&1), true), "what was learnt goes with it");
+        assert_eq!(runtime_version_in(&dir), Some(OLD));
+        assert!(upgrade_due(true, Some(&m), "aa"), "tried again at the next launch");
+        // The old one didn't start either: not the runtime's fault — the new
+        // one goes back in, the failure not counted.
+        swap_in(&dir, &failed.version, &failed.sha256).unwrap();
+        uncount_failure(&dir, "aa");
+        assert_eq!((read(&dir, RUNTIME_FILENAME), read(&dir, RUNTIME_PREVIOUS)), ("new".into(), "old".into()));
+        let m = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap();
+        assert!(m.unproven && m.refused.is_empty() && m.failures.is_empty());
+        // Three sessions it failed in: refused, never downloaded again.
+        for n in 1..=REFUSE_AFTER {
+            assert_eq!(count_failure(&dir, "aa"), n);
+        }
+        let m = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap();
+        assert_eq!(m.refused, vec!["aa".to_string()]);
+        roll_back(&dir).unwrap().unwrap();
+        let m = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap();
+        assert!(!upgrade_due(true, Some(&m), "aa"), "never downloaded again");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The review's finding (2026-10-22): a roll-back with the new runtime
+    /// gone (an antivirus took it) deleted the waiting `llamafile-next.exe`
+    /// and then failed to rename, leaving no runtime at all.
+    #[test]
+    fn a_roll_back_with_the_new_runtime_gone_still_puts_the_old_one_back() {
+        let dir = scratch("rollback-gone");
+        std::fs::write(dir.join(RUNTIME_FILENAME), "old").unwrap();
+        std::fs::write(dir.join(RUNTIME_NEXT), "new").unwrap();
+        swap_in(&dir, "0.10.6", "aa").unwrap();
+        std::fs::remove_file(dir.join(RUNTIME_FILENAME)).unwrap();
+        std::fs::write(dir.join(RUNTIME_NEXT), "waiting").unwrap();
+        roll_back(&dir).unwrap().unwrap();
+        assert_eq!((read(&dir, RUNTIME_FILENAME), read(&dir, RUNTIME_NEXT)), ("old".into(), "waiting".into()));
+        assert!(!dir.join(RUNTIME_PREVIOUS).exists());
+        assert_eq!(runtime_version_in(&dir), Some(OLD));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_runtime_comes_back_at_launch() {
+        let pinned = ("0.10.6", "aa");
+        // Cut off mid-swap or mid-roll-back (or an antivirus took the new
+        // one): the previous one comes back.
+        let dir = scratch("repair-prev");
+        std::fs::write(dir.join(RUNTIME_FILENAME), "old").unwrap();
+        std::fs::write(dir.join(RUNTIME_NEXT), "new").unwrap();
+        swap_in(&dir, "0.10.6", "aa").unwrap();
+        std::fs::remove_file(dir.join(RUNTIME_FILENAME)).unwrap();
+        assert_eq!(repair_runtime(&dir, None, pinned), Some("restored the previous runtime"));
+        assert_eq!(read(&dir, RUNTIME_FILENAME), "old");
+        assert_eq!(runtime_version_in(&dir), Some(OLD));
+        assert!(!read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap().unproven);
+        assert_eq!(repair_runtime(&dir, None, pinned), None, "nothing more to do");
+        let _ = std::fs::remove_dir_all(&dir);
+        // No previous one, a whole download waiting: it goes in, its marker first.
+        let dir = scratch("repair-next");
+        std::fs::write(dir.join(RUNTIME_NEXT), "new").unwrap();
+        assert_eq!(repair_runtime(&dir, Some("bb"), pinned), None, "not the pinned runtime");
+        assert!(!dir.join(RUNTIME_FILENAME).exists());
+        assert_eq!(repair_runtime(&dir, Some("AA"), pinned), Some("restored the downloaded runtime"));
+        assert_eq!(read(&dir, RUNTIME_FILENAME), "new");
+        assert_eq!(runtime_version_in(&dir), Some(NEW));
+        let _ = std::fs::remove_dir_all(&dir);
+        // A previous one kept past a proven start goes; not before.
+        let dir = scratch("repair-tidy");
+        std::fs::write(dir.join(RUNTIME_FILENAME), "old").unwrap();
+        std::fs::write(dir.join(RUNTIME_NEXT), "new").unwrap();
+        swap_in(&dir, "0.10.6", "aa").unwrap();
+        assert_eq!(repair_runtime(&dir, None, pinned), None, "unproven: the way back stays");
+        assert!(dir.join(RUNTIME_PREVIOUS).exists());
+        update_marker(&dir, |m| m.unproven = false).unwrap();
+        assert_eq!(repair_runtime(&dir, None, pinned), Some("deleted the previous runtime"));
+        assert!(!dir.join(RUNTIME_PREVIOUS).exists() && !dir.join(MARKER_PREVIOUS).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_old_marker_reads_and_an_empty_history_isnt_written() {
+        let old: Marker = serde_json::from_str(r#"{"version":"0.10.6","sha256":"aa","unproven":false,"refused":[]}"#).unwrap();
+        assert!(old.failures.is_empty() && old.mtp_failed.is_empty());
+        let json = serde_json::to_string(&old).unwrap();
+        assert!(!json.contains("failures") && !json.contains("mtp_failed"), "{json}");
+    }
+
+    const KEY: &str = "0.10.6/start-test.gguf";
+
+    fn up_ok(mtp: bool, off_card: bool) -> Result<Started, Failed> {
+        Ok(Started { url: "http://127.0.0.1:1/v1".into(), mtp, off_card, key: KEY.into() })
+    }
+
+    fn down(why: Failure, mtp: bool) -> Result<Started, Failed> {
+        Err(Failed { why, mtp, key: KEY.into() })
+    }
+
+    /// [`start_with`] over `script` (one result a try), in `dir`: what it
+    /// came to and the tries it made.
+    async fn start_scripted(dir: &Path, went_back: &AtomicBool, closing: bool, script: Vec<Result<Started, Failed>>) -> (Result<String, String>, Vec<Attempt>) {
+        let mut script = script.into_iter();
+        let mut tried = Vec::new();
+        let out = start_with(dir, went_back, &|| closing, |a| {
+            tried.push(a);
+            std::future::ready(script.next().expect("a scripted try"))
+        })
+        .await;
+        (out, tried)
+    }
+
+    /// A runtime just swapped in, not started yet.
+    fn swapped(name: &str) -> PathBuf {
+        let dir = scratch(name);
+        std::fs::write(dir.join(RUNTIME_FILENAME), "old").unwrap();
+        std::fs::write(dir.join(RUNTIME_NEXT), "new").unwrap();
+        swap_in(&dir, "0.10.6", "aa").unwrap();
+        dir
+    }
+
+    /// The review's first finding (2026-10-22): Yap stopping the sidecar
+    /// while a new runtime started counted as the runtime failing — it went
+    /// back and refused it for good. Stopped, missing or quitting: nothing
+    /// tried again, nothing blamed.
+    #[tokio::test]
+    async fn a_start_yap_stopped_is_never_blamed_on_the_runtime() {
+        let dir = swapped("start-stopped");
+        let went_back = AtomicBool::new(false);
+        let (out, tried) = start_scripted(&dir, &went_back, false, vec![down(Failure::Stopped, true)]).await;
+        assert!(out.is_err());
+        assert_eq!(tried, vec![Attempt::FIRST]);
+        // Stopped on the second try too.
+        let (_, tried) = start_scripted(&dir, &went_back, false, vec![down(Failure::Exited, false), down(Failure::Stopped, false)]).await;
+        assert_eq!(tried.len(), 2);
+        // Missing files; Yap quitting.
+        let (_, tried) = start_scripted(&dir, &went_back, false, vec![down(Failure::Missing("no model".into()), false)]).await;
+        assert_eq!(tried.len(), 1);
+        let (_, tried) = start_scripted(&dir, &went_back, true, vec![down(Failure::Exited, true)]).await;
+        assert_eq!(tried.len(), 1);
+        // The new runtime is still in place, still to be proven, not counted.
+        assert_eq!(read(&dir, RUNTIME_FILENAME), "new");
+        let m = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap();
+        assert!(m.unproven && m.failures.is_empty() && m.refused.is_empty());
+        assert!(!went_back.load(Ordering::SeqCst));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The review's second finding: a start with MTP that failed never
+    /// tried without it. Now it does, longer, and MTP stays off for that
+    /// model on that runtime here.
+    #[tokio::test]
+    async fn a_start_that_fails_with_mtp_tries_again_without_it() {
+        let dir = swapped("start-mtp");
+        let went_back = AtomicBool::new(false);
+        let (out, tried) = start_scripted(&dir, &went_back, false, vec![down(Failure::Exited, true), up_ok(false, false)]).await;
+        assert_eq!(out.as_deref(), Ok("http://127.0.0.1:1/v1"));
+        assert_eq!(tried, vec![Attempt::FIRST, Attempt::AGAIN]);
+        assert!(!Attempt::AGAIN.mtp && Attempt::AGAIN.wait > Attempt::FIRST.wait);
+        let m = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap();
+        assert_eq!(m.mtp_failed, vec![KEY.to_string()]);
+        assert!(mtp_failed_here(&dir, KEY));
+        // It started: proven, the previous one gone.
+        assert!(!m.unproven && !dir.join(RUNTIME_PREVIOUS).exists());
+        // A slow first start without MTP: up on the second try, MTP not blamed.
+        let dir2 = swapped("start-slow");
+        let (out, _) = start_scripted(&dir2, &went_back, false, vec![down(Failure::Timeout, false), up_ok(false, false)]).await;
+        assert!(out.is_ok());
+        assert!(read_marker_at(&dir2.join(RUNTIME_MARKER)).unwrap().mtp_failed.is_empty());
+        // Up with MTP but partly on the processor: again without it, and
+        // without it from then on (the marker, not only this session).
+        let dir3 = swapped("start-off-card");
+        let (out, tried) = start_scripted(&dir3, &went_back, false, vec![up_ok(true, true), up_ok(false, false)]).await;
+        assert!(out.is_ok());
+        assert_eq!(tried, vec![Attempt::FIRST, Attempt::AGAIN]);
+        assert_eq!(read_marker_at(&dir3.join(RUNTIME_MARKER)).unwrap().mtp_failed, vec![KEY.to_string()]);
+        for d in [dir, dir2, dir3] {
+            let _ = std::fs::remove_dir_all(&d);
+        }
+    }
+
+    /// Twice down on the new runtime: the previous one goes back and starts;
+    /// the new one waits for the next launch, refused after three.
+    #[tokio::test]
+    async fn a_new_runtime_down_twice_goes_back_and_is_refused_after_three_sessions() {
+        let dir = swapped("start-back");
+        for session in 1..=REFUSE_AFTER {
+            let went_back = AtomicBool::new(false);
+            let (out, tried) =
+                start_scripted(&dir, &went_back, false, vec![down(Failure::Exited, true), down(Failure::Exited, false), up_ok(false, false)]).await;
+            assert!(out.is_ok(), "the previous one serves");
+            assert_eq!(tried, vec![Attempt::FIRST, Attempt::AGAIN, Attempt::AGAIN]);
+            assert!(went_back.load(Ordering::SeqCst));
+            assert_eq!(read(&dir, RUNTIME_FILENAME), "old");
+            let m = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap();
+            assert_eq!(m.failures.get("aa"), Some(&session));
+            if session < REFUSE_AFTER {
+                assert!(m.refused.is_empty() && dir.join(RUNTIME_NEXT).is_file(), "kept for the next launch");
+                assert!(upgrade_due(true, Some(&m), "aa"));
+                swap_in(&dir, "0.10.6", "aa").unwrap(); // the next launch's upgrade
+            } else {
+                assert_eq!(m.refused, vec!["aa".to_string()]);
+                assert!(!dir.join(RUNTIME_NEXT).exists(), "refused: deleted");
+                assert!(!upgrade_due(true, Some(&m), "aa"));
+            }
+        }
+        // Once a session: a second failure the same session isn't another way back.
+        let dir2 = swapped("start-once");
+        let went_back = AtomicBool::new(true);
+        let (out, tried) = start_scripted(&dir2, &went_back, false, vec![down(Failure::Exited, false), down(Failure::Exited, false)]).await;
+        assert!(out.is_err() && tried.len() == 2);
+        assert_eq!(read(&dir2, RUNTIME_FILENAME), "new");
+        for d in [dir, dir2] {
+            let _ = std::fs::remove_dir_all(&d);
+        }
+    }
+
+    /// Neither runtime starts: the model or the PC is at fault — the new one
+    /// goes back in and the failure isn't counted.
+    #[tokio::test]
+    async fn when_neither_runtime_starts_the_new_one_stays_uncounted() {
+        let dir = swapped("start-neither");
+        let went_back = AtomicBool::new(false);
+        let (out, tried) =
+            start_scripted(&dir, &went_back, false, vec![down(Failure::Timeout, false), down(Failure::Timeout, false), down(Failure::Exited, false)]).await;
+        assert!(out.is_err());
+        assert_eq!(tried.len(), 3);
+        assert_eq!((read(&dir, RUNTIME_FILENAME), read(&dir, RUNTIME_PREVIOUS)), ("new".into(), "old".into()));
+        let m = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap();
+        assert!(m.unproven && m.failures.is_empty() && m.refused.is_empty());
+        // A proven runtime that won't start: tried twice, nothing else.
+        let proven = scratch("start-proven");
+        std::fs::write(proven.join(RUNTIME_FILENAME), "it").unwrap();
+        let (_, tried) = start_scripted(&proven, &AtomicBool::new(false), false, vec![down(Failure::Exited, false), down(Failure::Exited, false)]).await;
+        assert_eq!(tried.len(), 2);
+        for d in [dir, proven] {
+            let _ = std::fs::remove_dir_all(&d);
+        }
+    }
+
+    #[test]
+    fn mtp_on_nvidia_cards_only_and_never_where_it_failed() {
+        assert!(mtp_allowed(NEW, true, Some(NVIDIA), false));
+        assert!(!mtp_allowed(NEW, true, Some(0x1002), false), "AMD: Vulkan, not measured");
+        assert!(!mtp_allowed(NEW, true, Some(0x8086), false), "Intel");
+        assert!(!mtp_allowed(NEW, true, None, false), "no card");
+        assert!(!mtp_allowed(OLD, true, Some(NVIDIA), false));
+        assert!(!mtp_allowed(NEW, false, Some(NVIDIA), false), "turned off");
+        assert!(!mtp_allowed(NEW, true, Some(NVIDIA), true), "failed with it here");
+        assert_eq!(mtp_key(NEW, Path::new("C:/x/llm/Qwen_Qwen3.5-4B-Q4_K_M.gguf")), "0.10.6/Qwen_Qwen3.5-4B-Q4_K_M.gguf");
+        let dir = scratch("mtp-failed");
+        write_marker(&dir, &Marker { version: "0.10.6".into(), mtp_failed: vec!["0.10.6/a.gguf".into()], ..Default::default() }).unwrap();
+        assert!(mtp_failed_here(&dir, "0.10.6/a.gguf"));
+        assert!(!mtp_failed_here(&dir, "0.10.7/a.gguf"), "a newer runtime tries again");
+        assert!(!mtp_failed_here(&dir, "0.10.6/b.gguf"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn one_upgrade_at_a_time_across_yaps() {
+        let dir = scratch("upgrade-lock");
+        let held = UpgradeLock::take_unless(&dir, |_| true).expect("free");
+        assert!(UpgradeLock::take_unless(&dir, |_| true).is_none(), "another running Yap holds it");
+        drop(held);
+        assert!(!dir.join(UPGRADE_LOCK).exists(), "released");
+        // A lock left by a Yap that's gone: taken over.
+        std::fs::write(dir.join(UPGRADE_LOCK), "4000000").unwrap();
+        let _ours = UpgradeLock::take_unless(&dir, |_| false).expect("stale");
+        assert_eq!(read(&dir, UPGRADE_LOCK), std::process::id().to_string());
+        // The disk: room for the new runtime beside the old one, plus some.
+        assert!(room_for(None, UPGRADE_ROOM), "unknown: go");
+        assert!(room_for(Some(UPGRADE_ROOM), UPGRADE_ROOM));
+        assert!(!room_for(Some(RUNTIME_BYTES), UPGRADE_ROOM));
+        assert!(free_bytes(&dir).is_some_and(|f| f > 0) || cfg!(not(windows)));
+        // Not the sidecar's address: nothing held.
+        assert!(hold("http://127.0.0.1:9/v1").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The review's fourth finding: the swap waited for idle, then for the
+    /// start lock — and a request that began meanwhile was cut off. Now it
+    /// looks again once it has the lock, and goes back to waiting.
+    #[tokio::test]
+    async fn the_swap_backs_off_when_a_request_began_while_it_waited_for_the_lock() {
+        use std::sync::Arc;
+        static R: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        static S: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let busy = Arc::new(AtomicBool::new(false));
+        let done = Arc::new(AtomicBool::new(false));
+        let start_under_way = S.lock().await;
+        let task = {
+            let (busy, done) = (busy.clone(), done.clone());
+            tokio::spawn(async move {
+                let _locks = idle_with_locks(&R, &S, || !busy.load(Ordering::SeqCst), Duration::from_millis(1), Duration::from_millis(1)).await;
+                done.store(true, Ordering::SeqCst);
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!done.load(Ordering::SeqCst), "waiting for the start lock");
+        // A Chat turn begins while it waits; then the start lock comes free.
+        busy.store(true, Ordering::SeqCst);
+        drop(start_under_way);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!done.load(Ordering::SeqCst), "it backed off");
+        busy.store(false, Ordering::SeqCst);
+        task.await.unwrap();
+        assert!(done.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn mtp_only_for_a_model_that_can_draft_on_a_card_with_room() {
+        let dir = scratch("mtp");
+        let qwen35 = dir.join("Qwen_Qwen3.5-4B-Q4_K_M.gguf");
+        std::fs::write(&qwen35, crate::gguf::tests::qwen35_4b(1_000).bytes()).unwrap();
+        let qwen25 = dir.join(MODEL_FILENAME);
+        std::fs::write(&qwen25, crate::gguf::tests::qwen25_1_5b(1_000).bytes()).unwrap();
+        // A 16 GB card: room for it (the stand-in file is small; the KV,
+        // recurrent state and compute aren't).
+        assert!(mtp_fits(&qwen35, 8_192, Some(16_303)));
+        // No prediction layer, no card of its own, or no room: off.
+        assert!(!mtp_fits(&qwen25, 8_192, Some(16_303)));
+        assert!(!mtp_fits(&qwen35, 8_192, None));
+        assert!(!mtp_fits(&qwen35, 8_192, Some(512)), "integrated graphics");
+        assert!(!mtp_fits(&qwen35, 8_192, Some(2_600)), "no room beside Windows and speech");
+        // At 256K the KV alone is 8 GiB: not on a 12 GB card with MTP.
+        assert!(!mtp_fits(&qwen35, 262_144, Some(12_282)));
+        // The plan: only on 0.10.6, only with the setting on.
+        let cfg = crate::config::YapConfig::default();
+        assert!(cfg.local_mtp, "on by default");
+        assert!(!plan_for(&cfg, &qwen35, 8_192, OLD).server().mtp);
+        assert!(!plan_for(&crate::config::YapConfig { local_mtp: false, ..cfg.clone() }, &qwen35, 8_192, NEW).mtp);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn versions_read_and_order() {
+        assert_eq!(Version::parse("llamafile v0.10.6"), Some(NEW));
+        assert_eq!(Version::parse("0.10.3"), Some(OLD));
+        assert_eq!(Version::parse("v0.11"), Some(Version(0, 11, 0)));
+        assert_eq!(Version::parse("llamafile"), None);
+        assert_eq!(Version::parse(RUNTIME_VERSION), Some(NEW));
+        assert!(NEW.is_current() && Version(0, 11, 0).is_current());
+        assert!(!OLD.is_current() && !Version(0, 10, 5).is_current());
+        assert_eq!(NEW.to_string(), "0.10.6");
+        // The pinned runtime: mozilla-ai's release, its digest.
+        assert!(RUNTIME_URL.starts_with("https://github.com/mozilla-ai/llamafile/releases/download/0.10.6/"));
+        assert_eq!(RUNTIME_SHA256.len(), 64);
     }
 
     #[test]
