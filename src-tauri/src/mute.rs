@@ -22,9 +22,10 @@
 //!   down and brings it all back at its own end; a dictation that ended
 //!   before its chime finished never quiets anything.
 //! - **Bluetooth**: when the dictation itself put a headset into its call
-//!   profile (the default output dropped below 44.1 kHz since the start),
-//!   the restore waits for it to come back, polling every 50 ms for up to
-//!   5 s, plus 500 ms, so the music doesn't return through the call codec
+//!   profile (the default output dropped below 44.1 kHz since the start, or
+//!   its Bluetooth mic — opened on demand, `mic.rs` — was just closed), the
+//!   restore waits for it to come back, polling every 50 ms for up to 5 s,
+//!   plus 500 ms, so the music doesn't return through the call codec
 //!   ([`codec_wait`]).
 //! - **A crash mid-dictation**: Windows keeps an app's session level across
 //!   restarts, so a Yap that died with Spotify silenced would leave it
@@ -140,9 +141,15 @@ fn in_call_profile(rate: Option<u32>) -> bool {
 }
 
 /// Whether the restore should wait for the output to leave its call
-/// profile: it went into one during the dictation (with Yap's mic always
-/// open on a headset, or a call on, it was in one already: no wait).
-fn codec_wait(rate_at_start: Option<u32>, rate_now: Option<u32>) -> bool {
+/// profile: it went into one during the dictation (a call on, or "Keep the
+/// microphone ready" on a headset: it was in one already, no wait) — or the
+/// dictation's Bluetooth mic was just closed (`mic.rs` opens it on demand,
+/// so the headset dropped to its call profile before the start chime and
+/// leaves it now).
+fn codec_wait(rate_at_start: Option<u32>, rate_now: Option<u32>, closed_bluetooth: bool) -> bool {
+    if closed_bluetooth {
+        return in_call_profile(rate_now);
+    }
     rate_at_start.is_some() && !in_call_profile(rate_at_start) && in_call_profile(rate_now)
 }
 
@@ -270,7 +277,15 @@ pub fn end() -> u64 {
 /// quieted and paused, unless another dictation began meanwhile (it keeps
 /// them down and brings them back at its end). Waits for a Bluetooth output
 /// to leave the call profile first, if the dictation put it there.
+#[cfg(test)]
 pub fn after_stop_chime(token: u64) {
+    after_stop_chime_mic(token, false)
+}
+
+/// [`after_stop_chime`], told whether the dictation's Bluetooth mic was
+/// just closed (`mic::Mic::release`): its headset is leaving the call
+/// profile, which the restore waits for.
+pub fn after_stop_chime_mic(token: u64, closed_bluetooth: bool) {
     let rate_at_start = {
         // Once a quieting that's under way has finished (it's in the lists).
         let _work = WORK.lock().unwrap_or_else(|p| p.into_inner());
@@ -280,7 +295,7 @@ pub fn after_stop_chime(token: u64) {
         }
         s.rate_at_start
     };
-    if codec_wait(rate_at_start, platform::default_output_rate()) {
+    if codec_wait(rate_at_start, platform::default_output_rate(), closed_bluetooth) {
         tracing::info!("other apps: waiting for the headset to leave its call profile");
         for _ in 0..CODEC_POLLS {
             std::thread::sleep(std::time::Duration::from_millis(CODEC_POLL_MS));
@@ -690,15 +705,21 @@ mod tests {
     #[test]
     fn the_bluetooth_wait_is_only_for_a_profile_the_dictation_caused() {
         // A headset dropped to its call profile during the dictation.
-        assert!(codec_wait(Some(48_000), Some(16_000)));
-        // Already in it at the start (Yap's mic open on it, a call): no wait.
-        assert!(!codec_wait(Some(16_000), Some(16_000)));
+        assert!(codec_wait(Some(48_000), Some(16_000), false));
+        // Already in it at the start (a call, a mic kept ready): no wait.
+        assert!(!codec_wait(Some(16_000), Some(16_000), false));
         // Back to normal, or a normal device all along.
-        assert!(!codec_wait(Some(48_000), Some(48_000)));
-        assert!(!codec_wait(Some(44_100), Some(44_100)));
-        assert!(!codec_wait(None, None));
+        assert!(!codec_wait(Some(48_000), Some(48_000), false));
+        assert!(!codec_wait(Some(44_100), Some(44_100), false));
+        assert!(!codec_wait(None, None, false));
         // The start unknown: no waiting on a guess.
-        assert!(!codec_wait(None, Some(16_000)));
+        assert!(!codec_wait(None, Some(16_000), false));
+        // The dictation's own Bluetooth mic was just closed (opened on
+        // demand: the headset was in its call profile before the chime):
+        // wait while it's still there, not once it has left.
+        assert!(codec_wait(Some(16_000), Some(16_000), true));
+        assert!(codec_wait(None, Some(16_000), true));
+        assert!(!codec_wait(Some(16_000), Some(48_000), true));
         assert!(in_call_profile(Some(8_000)) && in_call_profile(Some(32_000)));
     }
 

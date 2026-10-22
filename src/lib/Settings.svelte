@@ -397,6 +397,7 @@
     recordingMode: 'toggle',
     quietOtherApps: false,
     pauseMedia: false,
+    keepMicReady: false,
     appendTrailingSpace: false,
     smartSpacing: true,
     screenNames: true,

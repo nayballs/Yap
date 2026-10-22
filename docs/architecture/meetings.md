@@ -57,7 +57,20 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   `Session` keeps both sources for it. Commands: `meeting_start`/`meeting_stop`/
   `meeting_state` (signatures unchanged). Test mode opens no audio device (WAVs
   from `YAP_E2E_MEETING_AUDIO`, or silence; `e2e::e2e_meeting_feed`; the
-  player also stages a dictation and an output switch, see `e2e.rs`).
+  player also stages a dictation and an output switch, see `e2e.rs`). A
+  meeting started right after Yap did waits for the speech model, still
+  loading in the background (`pipeline::wait_for_model`), never loading a
+  second copy. **Memory after a meeting** (measured 2026-10-22, the e2e
+  meeting audio — 10 minutes a side at 4× — through Parakeet V3 on DirectML,
+  `yap.exe`'s private working set): nothing outlives the recording — 259 MB
+  before, 333 MB at its end (77 MB of it the test player's two WAVs), 256 MB
+  a minute after. The ~170 MB the polish sweep saw kept after a meeting
+  (reproduced on the build before the DirectML fix, 4b822b5: 147 MB before →
+  318 MB after, +930 MB committed) was ONNX Runtime planning DirectML's
+  encoder for every new chunk length and keeping each plan for the engine's
+  life; since the encoder's input is padded to the one length it plans at
+  load (vendored transcribe-rs, `YAP.md`) a meeting adds nothing, and that
+  plan's memory is part of the loaded model's (~258 MB idle with it).
   **Speaker diarization's tee**: with "Tell speakers apart" on and its model
   installed, `start` opens a `diarize::Session` before the capture and gives
   the "Them" `Captured` its `Tee` — every sample appended (device audio,

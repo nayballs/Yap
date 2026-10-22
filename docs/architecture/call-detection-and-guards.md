@@ -14,7 +14,8 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   read for a known-call-app allowlist only (`APPS`); a browser counts when one
   of its windows shows a meeting (Meet/Teams/Zoom… in the title; the call
   sticks while you switch tabs). Yap's own mic use never counts (`yap.exe`
-  isn't a call app — it always holds the mic for the pre-roll). Event-driven:
+  isn't a call app — it holds the mic while it dictates and a minute after,
+  `mic.rs`, or the whole time with "Keep the microphone ready"). Event-driven:
   a thread blocks in `RegNotifyChangeKeyValue`; the detector rescans every
   2 s only while a call is starting/live/ending (60 s safety net; 5 s polling
   if the watch fails). Debounce: starts after 5 s on the mic (20 s for chat

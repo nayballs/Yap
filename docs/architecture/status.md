@@ -11,11 +11,21 @@ Ryzen 7 9800X3D, RTX 5070 Ti, Windows 11, Parakeet V3; memory = private working 
 - **Idle in the tray: ~290 MB** (321–325 MB before one chunk per window and the
   hidden webviews' low memory target), **0.7 % of one core**.
 - **A 10-minute meeting** (real mic + loopback): flat at ~535 MB, 23 % of one core;
-  ~200 MB isn't given back after it ends.
+  ~200 MB wasn't given back after it ended — ONNX Runtime's DirectML encoder
+  plans per chunk length, gone since the encoder runs at one planned length
+  (2026-10-22: `yap.exe` 259 MB before a meeting, 256 MB after; `meetings.md`).
 - **Hotkey → recording: 1–3 ms**; stop → transcript 0.30–0.45 s for 3.4 s of audio.
 - **Cold start → tray and bar: ~2.5 s**, nearly all of it loading the speech model on
   the setup thread (7.4 s on the very first launch); the main window comes up then on a
-  launch by the person (`app-shell.md`).
+  launch by the person (`app-shell.md`). Since 2026-10-22 the model loads in the
+  background: tray, bar and window at ~1.0 s instead of ~3.4 s (a release-optimised
+  build with debug assertions, test mode), the model ready at ~3.3 s; a dictation
+  started sooner waits for it ("Loading the speech model…").
+- **The microphone is closed while Yap idles** (2026-10-22, `mic.rs`): it opens when a
+  dictation starts and stays warm a minute (never on Bluetooth: a headset keeps its
+  music profile). Idle `yap.exe` 0.54 % → 0.21 % of one core; Windows no longer shows
+  the mic in use. USB mics deliver ~30 ms after the press; a wireless headset's dongle
+  gave digital silence for ~0.5 s, which the start chime now waits out.
 - **Installer 20.7 MB** (NSIS) + the 456 MB model on first run.
 - For comparison, Wispr Flow's Windows app is reported at ~800 MB and ~8 % CPU idle
   (user reports, no official figure); its own package is 221–316 MB.

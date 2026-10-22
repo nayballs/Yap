@@ -92,12 +92,36 @@ to **Run again** from Home.
 
 ## Modules
 
-- **`pipeline.rs`** — the heart. Owns the mic stream + shared state (`recording`,
-  audio `buffer`, idle `preroll` ring, warm STT `engine`, live `config`,
-  `last_activity`, `target_hwnd`). Audio callback buffers while recording,
-  downmixes→mono, resamples→16 kHz, and emits a throttled **peak amplitude**
-  (`yap-amp`) for the scrolling waveform; while idle it keeps a rolling ~300 ms
-  **pre-roll** ring that `start_recording` prepends (anti first-word-clipping).
+- **`pipeline.rs`** — the heart. Owns the shared state (`recording`, audio
+  `buffer`, idle `preroll` ring, the mic — `mic.rs`, opened on demand —, warm
+  STT `engine`, live `config`, `last_activity`, `target_hwnd`). The mic's
+  audio (`mic::Sink` for `Shared`: downmixed→mono, resampled→16 kHz on the
+  audio thread) is buffered while recording — and from the moment
+  `start_recording` begins (`gather`), so a cold mic's first audio is all
+  kept —, and emits a throttled **peak amplitude** (`yap-amp`) for the
+  scrolling waveform; while idle and the mic is warm it keeps a rolling
+  ~300 ms **pre-roll** ring that `start_recording` prepends (anti
+  first-word-clipping; never a closed mic's stale ring). **The start chime
+  follows the mic, not the key** (2026-10-22): `start_recording` holds the
+  mic (`Mic::hold`, its `mic_lease`), and when it isn't live yet the chime,
+  the other apps going quiet after it and the bar's "speak now" wait
+  (`PendingStart`, `fire_pending_start`) for its first real audio
+  (`mic::Sink::live`) — or `LIVE_FALLBACK_MS` (3 s) — while the capsule
+  says "Starting the mic…" (`yap-mic-ready` false, then true). A mic that
+  can't be opened ends the recording at once (`mic_failed` →
+  `end_without_mic`: "No microphone found", or Windows' privacy switches);
+  one that already gave audio and then fails a reopen carries on. The
+  recording lets go of the mic after its stop chime
+  (`stop_chime_then_restore`; a cancel at once, `release_now`), then
+  `mute::after_stop_chime_mic` — told when a Bluetooth mic was just closed,
+  so the restore waits for the headset to leave its call profile. **The
+  speech model loads off the startup thread** (`Pipeline::start` → an
+  `stt-load` thread; the tray, the bar and the window come first):
+  `model_loading` / `wait_for_model` — a dictation (`run_stt`, "Loading the
+  speech model…" on the bar, `yap-model-loading`), an Upload, a Run again
+  or a meeting chunk that needs the engine meanwhile waits for it instead of
+  failing or loading a second copy; the live partials skip until it's in.
+  Debug-only `YAP_E2E_MODEL_LOAD_MS` slows the load in a test run.
   `recording_mode` selects toggle vs push-to-talk; in push-to-talk `on_key` reads
   **gestures** (`gesture.rs`, Wispr Flow's by behaviour): hold to talk, a quick tap
   (< 300 ms) + a second press within 500 ms locks it **hands-free** until the next
@@ -168,14 +192,18 @@ to **Run again** from Home.
   idle-unloaded) and emits `yap-partial` text. An **idle watcher** unloads the model after
   `model_unload_timeout`; the next dictation lazily reloads it. **No microphone** (none
   plugged in, a headset that connects after login, a CI runner) doesn't take the
-  pipeline down: it runs without a stream (`has_mic`), a hotkey press retries
-  (`ensure_mic`), picking a mic (`set_input_device`) starts capture, and a recording
+  pipeline down: no stream is open until a recording needs one, every recording
+  tries to open it (`mic.rs`), picking a mic (`set_input_device`) switches a
+  running stream live or checks the device is there, and a recording
   attempt without one says "No microphone found" (on the overlay) — or, when
   Windows' privacy switches are why, "Windows is blocking microphone access for
   desktop apps" (`mic_privacy.rs`) — Upload, models and Settings work regardless. **Dead-mic watchdog** (`mic_watch.rs`): the audio
   callback tallies each recording's live audio (`mic_tally`: how much, any sample
   not exactly 0.0); a per-recording watcher (`spawn_mic_watch`) reopens the stream
-  once (`reopen_mic`) after 2 s without audio or 3 s of nothing but zeros, and at
+  once (`reopen_mic` → `Mic::reopen`) after 2 s without audio or 3 s of
+  nothing but zeros — counted from when the stream runs, a cold mic's open
+  (a Bluetooth headset's second or two) not counted, up to
+  `OPEN_PATIENCE_MS` (6 s) —, and at
   5 s says "No sound from <mic> — check it isn't muted or unplugged"
   (`yap-dictation-error`, plus `yap-mic-silent` for the overlay's line) while
   the recording carries on;
@@ -187,9 +215,8 @@ to **Run again** from Home.
   `alert.rs`; `mic_dead` set, so a stop with no sound isn't transcribed; the
   recording goes on, and sound arriving takes it back) — and again before the
   watchdog's report, which then blames the switch instead of the mic.
-  Capture start, `ensure_mic`,
-  `set_input_device` and the reopen all go through `open_stream` (the stream slot
-  is shared weakly with `Shared`; the reopen stops the dead stream first).
+  Opening, closing, the device switch and the reopen all happen on the mic's
+  own thread (`mic.rs`; the reopen stops the dead stream first).
   **Cancel and Undo**: `cancel(undo)` — the bar's ✕, the tray's Cancel and
   `cancel_recording` keep a recording of ≥ 0.5 s that heard a sound in `kept`
   (`Kept`: its audio, `target_hwnd`, `target_kind`, edit mode and selection)
@@ -288,6 +315,49 @@ to **Run again** from Home.
   Copilot app). Many laptops send the key's press and release together, so
   holding it can't keep push-to-talk going: Settings → Dictation says so
   (double-tap for hands-free, or Toggle).
+- **`mic.rs`** — **the dictation's microphone, opened on demand**
+  (2026-10-22). Until then Yap held Windows' default mic open the whole time
+  it ran, for the pre-roll: Windows showed the mic in use all day, a
+  **Bluetooth headset dropped to its call profile (HFP) system-wide** (music
+  in call quality because Yap was open) and the idle stream was most of
+  Yap's idle CPU. Now one thread (`dictation-mic`; cpal streams are `!Send`)
+  owns the stream and opens it when something **holds** it — a dictation
+  (`Mic::hold` in `start_recording`, released after its stop chime,
+  `Mic::release`; leases, so an old release never lets go of a newer
+  dictation's hold), onboarding's mic check (`Mic::test`, from
+  `set_mic_test`; closing the onboarding window turns it off, since WebView2
+  says a hidden page is visible) or **"Keep the microphone ready"**
+  (`config.keep_mic_ready`, off; Settings → Dictation → Microphone and sound;
+  `Mic::settings` on every config save) — and closes it when nothing does:
+  after a **warm window** (`WARM_MS`, 60 s; debug-only `YAP_MIC_WARM_MS`) so a
+  quick follow-up starts at once with the pre-roll, or **at once for a
+  Bluetooth input** (`is_bluetooth`, pure: the endpoint's
+  `PKEY_Device_EnumeratorName` "BTHENUM" / "BTHHFENUM" / "BTHLE…", its device
+  path, or a "Hands-Free" name — read with `IMMDevice::OpenPropertyStore`
+  for the input cpal opened), once its stop chime has played on it. What's
+  next is pure (`next(holds, open, bluetooth, warm_until, now)` → Stay /
+  Open / Close / CloseAt), unit-tested; a timed close first handles anything
+  asked meanwhile. An open never blocks the recording: it runs in the
+  background, and the stream's callback tells the pipeline (`Sink`) its
+  audio, its **first real audio** (`live_now`: a sample that isn't exactly
+  0.0, or `ZEROS_LIVE_MS` 1.5 s of silence — a muted mic), that it opened,
+  or that it failed. `Status` (debug-only `e2e_mic_status`): open, live,
+  Bluetooth, opens/closes and the last open's timing (`OpenTiming`: build,
+  first audio, live, in ms from asking) — the log says the same at `info`
+  ("Microphone: live … first_audio_ms"). **Measured on this PC**
+  (2026-10-22; the `--ignored` `open_latency_this_pc`, five cold opens
+  each): USB mics (a Razer Seiren Mini, a USB audio adapter) build in
+  4–8 ms, their first audio arrives 38–47 ms after asking and starts
+  28–37 ms after it (the first callback carries 10 ms); in the app
+  (`start_recording` → live) 10–23 ms. A wireless gaming headset's USB
+  dongle (Logitech G435) delivers from ~50 ms but **digital silence until
+  ~515–535 ms** (its radio link waking): the chime waits for it, and up to
+  ~0.5 s of a word said with the key is lost on a cold start there — the
+  warm window and "Keep the microphone ready" cover it. No Bluetooth headset
+  was paired here; HFP's profile switch is known to take 0.5–2 s, which the
+  same wait covers. Against the old always-open ring, a cold start on a
+  wired mic loses what was said in the 300 ms before the press and the
+  ~30 ms after it.
 - **`mic_watch.rs`** — the dictation's dead-mic watchdog, pure: `MicTally`
   (lock-free, fed by the audio callback), `DeadMicWatch::poll(elapsed, samples,
   heard)` → Wait / Reopen / Report / Recovered / Fine, the messages (the full one
@@ -461,8 +531,11 @@ to **Run again** from Home.
   `WORK`, never under the state lock the pipeline takes). Bluetooth: if the
   default output dropped into a call profile (< 44.1 kHz) during the
   dictation, the restore polls it every 50 ms ≤ 5 s, + 500 ms
-  (`codec_wait`; no wait when it was already in one at the start — Yap's
-  always-open mic on a headset, a call). Crash safety: Windows keeps an
+  (`codec_wait`; no wait when it was already in one at the start — "Keep
+  the microphone ready" on a headset, a call — unless the dictation's own
+  Bluetooth mic was just closed, `after_stop_chime_mic`: the mic opens on
+  demand, so the headset was in its call profile before the start chime
+  and leaves it now). Crash safety: Windows keeps an
   app's session level across restarts, so what's down is written to
   `<data>/quieted_apps.json` while it is; `recover()` at setup and every
   restore bring back sessions of those apps still at Yap's level (a week).

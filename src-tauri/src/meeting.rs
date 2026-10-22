@@ -1000,7 +1000,13 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option
     if samples.len() < MIN_CHUNK_SECS * RATE || peak(&samples) < SILENCE_PEAK {
         return None;
     }
-    let engine = engine_slot.lock().ok().and_then(|mut g| g.take());
+    let mut engine = engine_slot.lock().ok().and_then(|mut g| g.take());
+    // A meeting started right after Yap did: the model is still loading in
+    // the background (`pipeline::model_loading`): wait, never a second copy.
+    if engine.is_none() && crate::pipeline::model_loading() {
+        let _ = tokio::task::spawn_blocking(|| crate::pipeline::wait_for_model(Duration::from_secs(180))).await;
+        engine = engine_slot.lock().ok().and_then(|mut g| g.take());
+    }
     let engine = match engine {
         Some(e) => e,
         None => {

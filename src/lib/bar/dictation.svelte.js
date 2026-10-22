@@ -32,6 +32,14 @@ export const dictation = $state({
   // '' once sound arrives (or the recording ends).
   micSilent: '',
   micSilentFull: '',
+  // The mic opens on demand (mic.rs): a recording that started while it was
+  // still opening waits for its first real audio (`yap-mic-ready` false →
+  // true; a Bluetooth headset takes a second or two). Meanwhile the capsule
+  // says "Starting the mic…" instead of the waveform, so nobody talks early.
+  micWaiting: false,
+  // A dictation waiting for the speech model, still loading in the
+  // background after Yap started (`yap-model-loading`).
+  modelLoading: false,
   // How long a cancelled dictation can be undone (`yap-dictation-cancelled`).
   undoMs: 10_000,
   // How long "Use what I said" is offered (as_said.rs `OFFER_MS`).
@@ -105,7 +113,9 @@ export function initDictation() {
       dictation.held = false;
       dictation.micSilent = '';
       dictation.micSilentFull = '';
+      dictation.micWaiting = false;
     }
+    if (state !== 'processing' && state !== 'processing-slow') dictation.modelLoading = false;
     // Keep the partial visible through the brief "processing" state, then
     // drop it once we're idle/needs-model/error so it never lingers.
     if (state === 'idle' || state === 'needs-model' || state === 'error' || state === 'recording' || state === 'cancelled' || state === 'cleaned') {
@@ -140,6 +150,14 @@ export function initDictation() {
     dictation.micSilentFull = e.payload?.message || '';
     // A recording that ends on it ends in the error state, saying the same.
     if (dictation.micSilent) dictation.errorMsg = dictation.micSilent;
+  });
+  // Said just after "recording" when the mic was still opening, then true
+  // at its first real audio (pipeline.rs `fire_pending_start`).
+  listen('yap-mic-ready', (e) => {
+    dictation.micWaiting = e.payload === false;
+  });
+  listen('yap-model-loading', (e) => {
+    dictation.modelLoading = !!e.payload;
   });
   listen('yap-partial', (e) => {
     if (typeof e.payload === 'string') onPartial(e.payload);

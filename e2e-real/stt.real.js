@@ -18,6 +18,8 @@ test.use({
     prepare: linkModel,
     // The live preview off: one transcription, so the timing is the model's.
     config: { modelSize: MODEL_ID, streamingPartials: false },
+    // The mic's warm window (mic.rs) short, so a test can start cold.
+    env: { YAP_MIC_WARM_MS: '2000' },
   },
 });
 
@@ -35,5 +37,21 @@ test('Parakeet hears a spoken sentence, and it lands in the field', async ({ rob
   const found = said.filter((w) => heard.includes(w));
   // Synthetic speech, one model: most words, not necessarily all.
   expect(found.length, `heard "${r.raw}"`).toBeGreaterThanOrEqual(said.length - 2);
+  await expect.poll(() => pad.text('box')).toBe(r.text);
+});
+
+test('from a cold microphone, every word lands — the first one too', async ({ robot }) => {
+  test.setTimeout(240_000);
+  const { pad, yap } = robot;
+  // The mic closed (opened on demand: mic.rs); the dictation opens it.
+  await expect.poll(async () => (await yap.invoke('e2e_mic_status')).open, { timeout: 15_000 }).toBe(false);
+  await pad.set('box', '');
+  const sentence = 'Kangaroos can jump over a tall wooden fence.';
+  const r = await robot.dictateWav(pad, speechWav(sentence));
+  expect(r, 'a transcript').not.toBeNull();
+  const heard = words(r.raw);
+  expect(heard[0], `heard "${r.raw}"`).toMatch(/^kangaroo/);
+  const said = words(sentence);
+  expect(said.filter((w) => heard.includes(w)).length, `heard "${r.raw}"`).toBeGreaterThanOrEqual(said.length - 1);
   await expect.poll(() => pad.text('box')).toBe(r.text);
 });

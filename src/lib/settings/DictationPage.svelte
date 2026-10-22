@@ -106,6 +106,16 @@
       onchange={() => invoke('set_input_device', { device: cfg.inputDevice || null }).catch(() => {})}
     />
   </Row>
+  <!-- The mic opens when you dictate and closes after (mic.rs); this keeps
+       it open the whole time, as Yap used to. -->
+  <Row setting="keep-mic-ready">
+    <Toggle
+      bind:checked={cfg.keepMicReady}
+      label="Keep the microphone ready"
+      desc="Dictation starts instantly and catches your first word"
+      hint="Windows then shows the microphone in use the whole time Yap runs, and a Bluetooth headset switches to call-quality sound. Off, the microphone turns on when you dictate and off a minute after (at once on Bluetooth)."
+    />
+  </Row>
   <Row label="Chime when recording starts and stops" setting="chime">
     <Slider
       inline

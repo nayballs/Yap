@@ -196,7 +196,13 @@ until it's fixed (none open now). Guide: [`docs/e2e-tests.md`](../e2e-tests.md) 
   hooks; the `main` fixture runs it before every test, since call prompts
   only go in-app while the window is on screen), `e2e_dictation_mic { silent }`
   (the dictation mic's real audio zeroed, as a muted mic's — the dead-mic
-  watchdog's case, its stream really reopened), `e2e_learn_correction` (an
+  watchdog's case, its stream really reopened), `e2e_mic_status` (the
+  dictation mic's state, `mic.rs`: open, live, Bluetooth, opens/closes, the
+  last open's timing), `e2e_dictate_audio { seconds }` (a dictation of a
+  tone played in the mic's place — a real start and stop, the mic held as
+  for any dictation; no microphone needed), `YAP_MIC_WARM_MS` (the mic's
+  warm window, short) and `YAP_E2E_MODEL_LOAD_MS` (the startup model load,
+  slowed down), `e2e_learn_correction` (an
   edit of a pasted dictation as the correction watch would see it, or the
   field's text read by read for the watch's rules to run over — the watch
   thread itself never runs in a test run), no spoken reply played (`tts.rs`:
