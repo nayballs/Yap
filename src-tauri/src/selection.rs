@@ -576,7 +576,7 @@ fn units_to_bytes(value: &str, start: usize, end: usize, rich: bool) -> Option<(
 }
 
 #[cfg(windows)]
-mod uia {
+pub(crate) mod uia {
     use windows::core::{Interface, BOOL};
     use windows::Win32::Foundation::{HWND, RPC_E_CHANGED_MODE};
     use windows::Win32::System::Com::{
@@ -598,10 +598,10 @@ mod uia {
     /// COM on this thread for as long as it lives; undone on drop when this
     /// call did it. Declared first in a function, it drops after every COM
     /// object made there.
-    struct Com(bool);
+    pub(crate) struct Com(bool);
 
     impl Com {
-        fn init() -> Option<Com> {
+        pub(crate) fn init() -> Option<Com> {
             // S_OK / S_FALSE (already initialised): ours to balance. A
             // different apartment (RPC_E_CHANGED_MODE) is usable too.
             let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
@@ -625,7 +625,7 @@ mod uia {
 
     /// The UI Automation client, with `timeout_ms` for connections and
     /// transactions where Windows supports it (8+, `CUIAutomation8`).
-    fn automation(timeout_ms: u32) -> Option<IUIAutomation> {
+    pub(crate) fn automation(timeout_ms: u32) -> Option<IUIAutomation> {
         unsafe {
             let automation: IUIAutomation = CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER)
                 .or_else(|_| CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER))

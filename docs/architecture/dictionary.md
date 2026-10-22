@@ -31,6 +31,75 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   length gate) and `sound_distance` over `sound_key` (a Soundex/Metaphone-
   style consonant key: alike sounds merged, silent letters and vowels
   dropped — "cube and eighties" ≈ "Kubernetes", "kpnts"/"kprnts").
+- **`screen_terms.rs`** (+ `screen_terms/extract.rs`) — **"Spell names the way
+  they're written on screen"** (`config.screen_names`, default on; Aqua
+  Voice's "Deep Context", local and without screenshots; 2026-10-22).
+  **The read** (`begin_dictation(target, read)` from
+  `pipeline::capture_target`, a thread of its own): the target window's
+  visible text over UI Automation — its title; the document the focus is in
+  (the outermost element with a TextPattern above it: a web page, an editor,
+  a mail being written) through its **visible ranges**, or for a web page
+  (a `Chrome_WidgetWin` window or a "Chrome" document) **around the focus**
+  (± 6,000 characters from the caret: Chromium works out a page's visible
+  ranges or its whole tree on its UI thread — 5+ s on a long page, and it
+  kept Edge busy after the call timed out —, while text around the focus
+  costs what it reads: ~50–100 ms on a 3,000-paragraph page or a
+  5,000-line code view); then, unless a web page gave enough, a **bounded
+  walk** of the window's visible elements (one `FindAllBuildCache` of
+  children a parent, ≤ 250 calls / 2,500 elements: names of labels, links,
+  list/tree items, tabs, headers, buttons, cells; other text boxes' and
+  documents' text ≤ 2,000 characters each). ≤ 20,000 characters, 400 ms per
+  call, 1.5 s in all. Refusals as `selection.rs`: the target window's
+  process only, never a password box, never Yap's own windows, never a
+  password manager's (`NEVER_READ`), never in a test run (robot mode: the
+  test's own windows, `realtest::permits`). **The terms** (`extract`, pure):
+  capitalised names that aren't everyday words, full names ("Siobhan Ní
+  Bhriain", through particles, never across punctuation), CamelCase,
+  acronyms of 3+ capitals, words with digits and a capital ("Qwen3",
+  "M365"; not "value12", "10kg", "3rd"), "@handles" and email addresses;
+  brackets, quotes and code punctuation split words (`useState('Zentrix')`);
+  paths, URLs, identifiers with `_` and dotted words aren't terms; everyday
+  words dropped however written (`learn::is_frequent`, then Windows' spell
+  checker — without one a plain capitalised word only counts inside a full
+  name); one spelling per term (the most frequent; "Zentrix" over a
+  heading's "ZENTRIX"), the most frequent first, ≤ 200. Kept in memory for
+  that dictation only (`peek` at transcription, `take` once at
+  delivery, `forget` on a cancel; a read still going is never waited for
+  and its late result is dropped); the log (debug) has counts and times,
+  never a term. **The uses**: a **near-miss pass** after the corrections,
+  for every model (`correct`, gated by "Catch near-misses" too): full names
+  first, then single terms, each a target only when it can't swallow an
+  ordinary word (`memory::vocab::safe_for_fuzzy`: ≥ 4 letters a word, not
+  everyday, not a name-word, not spell-checker known; a full name: no word
+  ordinary, ≥ 8 letters), and `fuzzy::apply_screen` takes a near-miss only
+  when what was heard isn't ordinary words only ("row shell", "zen tricks",
+  "hash map" with a "HashMap" on screen stay as said), spells **and**
+  sounds close (plain edit distance ≤ 0.34, `sound_distance` ≤ 0.4, on top
+  of Handy's score), and is never a spelling the dictionary or memory gives
+  (`protected`: they have the final say; those terms are no targets
+  either); and only when the speech model wrote what it heard as a name (a
+  capital: "Rachelle", "Zentrics", "GPTOSS" — Parakeet wrote a spoken "row
+  shell" as "rouchell", which it then took for "Rochelle"); one word in
+  another case ("kubernetes") is always fixed. **Not in the Whisper
+  prompt** (`whisper_prompt`, `WhisperNames::Off`): measured with real
+  speech through large-v3, the names in its prompt — as a list or ending
+  as a sentence — made it hear "row shell" as "Rochelle" with Rochelle on
+  screen (and as a list dropped full stops, "Zen Tricks"), while the pass
+  alone got every name the prompt did ("Siobhan Nibrian" → "Siobhan Ní
+  Bhriain") and no everyday sentence changed; robot mode can put them
+  back to measure again (`YAP_REALTEST_SCREEN_WHISPER` = list | sentence |
+  off, `screen-names-stt.real.js`). **AI
+  cleanup** gets "Spell these names as written: Zentrix, Kubernetes." in
+  the dictation's own message, never the system prompt (`llm::
+  cleanup_with_names` / `with_names_line`: before "Transcript:", at the
+  start of the transcript's message when it's split, so a hybrid model's
+  cached instruction stays the same) — ≤ 8 terms the raw transcript seems
+  to contain (`in_transcript`: the same letters, or spelled or sounding
+  alike, looser than the pass — the model has the context; a handle only
+  as it's said, "at zentrix dev"), never one the dictionary or memory
+  spells. That line is all that can leave the PC (with the transcript, to
+  a cloud cleanup provider; Settings and Privacy & data say so); the
+  screen's text never does.
 - **`dict_usage.rs`** — how much each dictionary word is used, for the Whisper
   prompt's order (Wispr Flow ranks its vocabulary the same way):
   `<data>/dictionary_usage.json`, word (lowercased `to`) → `{uses, lastUsed}`

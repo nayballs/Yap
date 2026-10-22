@@ -67,6 +67,7 @@ mod pipeline;
 mod portable;
 mod procs;
 mod realtest;
+mod screen_terms;
 mod selection;
 mod smart_insert;
 mod sound;

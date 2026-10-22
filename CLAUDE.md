@@ -122,6 +122,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `fuzzy.rs` — near-miss correction (Levenshtein + Soundex), prompt-echo guard, sound distances.
 - `dict_usage.rs` — how often each dictionary word is used; orders the Whisper prompt.
 - `learn.rs` — "Suggest words from your corrections": the 60 s field watch and the offer.
+- `screen_terms.rs` (+ `screen_terms/`) — "Spell names the way they're written on screen": the target window's visible text read at record start (UIA, bounded) → its names and terms, for that dictation only: a strict near-miss pass (every model), cleanup's "Spell these names as written" line.
 
 **AI models** — [ai-models.md](./docs/architecture/ai-models.md)
 - `about_you.rs` — About you: one Region (Windows' country, or one picked; money, units, language and spelling follow it, the clock is the PC's), name and note → the block every model's prompt ends with, searches and prices aimed at the country, cleanup spelling.

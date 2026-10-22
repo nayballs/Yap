@@ -233,7 +233,49 @@ fn extract_punctuation(word: &str) -> (&str, &str) {
 /// one wins: see the loop); each match consumes its words and emits the
 /// entry's `to` with the original case pattern + edge punctuation.
 pub fn apply_fuzzy(text: &str, dict: &[DictionaryEntry]) -> String {
-    apply_with(text, dict, &|_, _| true)
+    apply_with(text, dict, &|_, _, _| true)
+}
+
+/// `text`'s words as one key, the way a heard run of words is compared:
+/// each word's edge punctuation off, lower case, joined without spaces
+/// ("Siobhan Ní Bhriain" → "siobhanníbhriain", "GPT-OSS" → "gpt-oss").
+pub fn ngram_key(text: &str) -> String {
+    build_ngram(&text.split_whitespace().collect::<Vec<_>>())
+}
+
+/// **The names and terms on screen** (`screen_terms.rs`), stricter than
+/// memory's names ([`apply_names`]), as there are many more of them: a
+/// near-miss is taken only when what was heard isn't ordinary words only
+/// (`is_word`) — "row shell", "zen tricks", and "hash map" with a
+/// "HashMap" on screen, stay as said —, when the speech model wrote it as a
+/// name too (a capital: "Rachelle", "Zentrics", "GPTOSS"; Parakeet heard
+/// the spoken "row shell" as "rouchell", which is no name), never when it's
+/// a spelling `keep` protects (the dictionary's or memory's, as
+/// [`ngram_key`]s), and only when it spells **and** sounds like the term:
+/// plain edit distance ≤ 0.34 of the longer spelling and
+/// [`sound_distance`] ≤ 0.4, on top of Handy's score. One word with the
+/// same letters in another case ("zentrix") is always fixed.
+pub fn apply_screen(
+    text: &str,
+    terms: &[DictionaryEntry],
+    is_word: &dyn Fn(&str) -> bool,
+    keep: &dyn Fn(&str) -> bool,
+) -> String {
+    apply_with(text, terms, &|run, replacement, dist| {
+        let heard = build_ngram(run);
+        if keep(&heard) {
+            return false;
+        }
+        let unordinary = run.iter().any(|w| !is_word(&build_ngram(std::slice::from_ref(w))));
+        if dist == 0 {
+            return run.len() == 1 || unordinary;
+        }
+        let named = run.iter().any(|w| w.chars().find(|c| c.is_alphabetic()).is_some_and(char::is_uppercase));
+        unordinary
+            && named
+            && plain_spelling_distance(&heard, replacement) <= 0.34
+            && sound_distance(&heard, replacement).0 <= 0.4
+    })
 }
 
 /// **The names Yap remembers** (`memory/vocab.rs`), corrected more
@@ -246,14 +288,14 @@ pub fn apply_fuzzy(text: &str, dict: &[DictionaryEntry]) -> String {
 /// "Pria") or its case ("rochelle") is fixed. `is_word` gets the heard word
 /// lowercased.
 pub fn apply_names(text: &str, names: &[DictionaryEntry], is_word: &dyn Fn(&str) -> bool) -> String {
-    apply_with(text, names, &|run, dist| {
+    apply_with(text, names, &|run, _, dist| {
         dist == 0 || run.iter().any(|w| !is_word(&build_ngram(std::slice::from_ref(w))))
     })
 }
 
-/// [`apply_fuzzy`]'s loop; `accept(run, dist)` may refuse a match it found
-/// (on top of the everyday-word rule below).
-fn apply_with(text: &str, dict: &[DictionaryEntry], accept: &dyn Fn(&[&str], usize) -> bool) -> String {
+/// [`apply_fuzzy`]'s loop; `accept(run, replacement, dist)` may refuse a
+/// match it found (on top of the everyday-word rule below).
+fn apply_with(text: &str, dict: &[DictionaryEntry], accept: &dyn Fn(&[&str], &str, usize) -> bool) -> String {
     let candidates = build_candidates(dict);
     if candidates.is_empty() {
         return text.to_string();
@@ -286,7 +328,7 @@ fn apply_with(text: &str, dict: &[DictionaryEntry], accept: &dyn Fn(&[&str], usi
                 if n == 1 && dist > 0 && crate::learn::is_frequent(&build_ngram(run)) {
                     continue;
                 }
-                if !accept(run, dist) {
+                if !accept(run, replacement, dist) {
                     continue;
                 }
                 if chosen.is_none_or(|(_, _, best)| dist < best)

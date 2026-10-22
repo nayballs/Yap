@@ -158,8 +158,22 @@ pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
 /// then snippets (`config::apply_snippets` — after the command is off, so
 /// "my address, press enter" still gives exactly the address). Returns the
 /// text to paste and whether the voice command asked for the submit key.
+#[cfg_attr(not(test), allow(dead_code))] // a dictation goes through finish_dictation_with
 pub(crate) fn finish_dictation(cleaned: &str, raw: &str, cfg: &YapConfig) -> (String, bool) {
-    let corrected = apply_corrections(cleaned, cfg);
+    finish_dictation_with(cleaned, raw, cfg, None)
+}
+
+/// [`finish_dictation`] with the names on screen (`screen_terms`): after
+/// the corrections (the dictionary and memory have the final say), a name
+/// heard a little wrong is spelled as the screen shows it — before the
+/// voice command and snippets, whose text is never touched.
+pub(crate) fn finish_dictation_with(
+    cleaned: &str,
+    raw: &str,
+    cfg: &YapConfig,
+    screen: Option<&crate::screen_terms::ScreenTerms>,
+) -> (String, bool) {
+    let corrected = crate::screen_terms::correct(&apply_corrections(cleaned, cfg), screen, cfg);
     let (text, enter) = match cfg.voice_enter.then(|| take_voice_enter(&corrected, raw)).flatten() {
         Some(text) => (text, true),
         None => (corrected, false),
@@ -852,11 +866,11 @@ impl Shared {
         if let Ok(mut k) = self.target_kind.lock() {
             *k = kind;
         }
-        let (smart_spacing, in_terminal) = self
+        let (smart_spacing, in_terminal, screen_names) = self
             .config
             .read()
-            .map(|c| (c.smart_spacing, kind.with_settings(c.terminal_mode, true).is_terminal()))
-            .unwrap_or((false, false));
+            .map(|c| (c.smart_spacing, kind.with_settings(c.terminal_mode, true).is_terminal(), c.screen_names))
+            .unwrap_or((false, false, false));
 
         // Edit/rewrite mode: grab the current selection NOW, while the target app
         // still has focus (before recording), so the spoken instruction can be
@@ -878,6 +892,10 @@ impl Shared {
         // nor for the assistant, which pastes nothing.
         let smart = !edit && !assistant && smart_spacing && !in_terminal;
         crate::selection::begin_dictation((hwnd != 0).then_some(hwnd), smart);
+        // "Spell names the way they're written on screen": the window's
+        // visible text, read in the background for its names
+        // (`screen_terms.rs`) — for a dictation that's pasted, not a rewrite.
+        crate::screen_terms::begin_dictation((hwnd != 0).then_some(hwnd), goes == Goes::Paste && !edit && screen_names);
     }
 
     /// The dead-mic watchdog for recording `session` (`mic_watch.rs`): polls
@@ -998,6 +1016,15 @@ impl Shared {
         config::dictionary_prompt(&crate::dict_usage::ranked(&crate::memory::with_names(&dict)))
     }
 
+    /// A dictation's Whisper prompt: [`Self::dictionary_prompt`]'s words,
+    /// then the names on screen, if they've been read by now
+    /// (`screen_terms`; never waited for).
+    fn dictation_prompt(&self) -> Option<String> {
+        let dict = self.config.read().ok()?.dictionary.clone();
+        let words = crate::dict_usage::ranked(&crate::memory::with_names(&dict));
+        crate::screen_terms::whisper_prompt(words, crate::screen_terms::peek().as_deref())
+    }
+
     /// If streaming partials are enabled, spawn the worker thread for this
     /// recording session (it exits on its own when `recording` flips false).
     fn maybe_start_streaming(self: &Arc<Self>) {
@@ -1033,6 +1060,9 @@ impl Shared {
         // recording, or nowhere), so it can't leak into a later session.
         let selection = self.selection.lock().ok().and_then(|mut g| g.take());
         let edit = self.edit_mode.swap(false, Ordering::SeqCst);
+        // The names read off the screen are this dictation's only (an Undo
+        // reads them again).
+        crate::screen_terms::forget();
         // A question for the assistant that's called off isn't kept for
         // Undo (Undo pastes; the assistant never does).
         let assistant = self.assistant.swap(false, Ordering::SeqCst);
@@ -1110,13 +1140,14 @@ impl Shared {
         if let Ok(mut g) = self.selection.lock() {
             *g = k.selection;
         }
-        let (smart_spacing, in_terminal) = self
+        let (smart_spacing, in_terminal, screen_names) = self
             .config
             .read()
-            .map(|c| (c.smart_spacing, k.target_kind.with_settings(c.terminal_mode, true).is_terminal()))
-            .unwrap_or((false, false));
+            .map(|c| (c.smart_spacing, k.target_kind.with_settings(c.terminal_mode, true).is_terminal(), c.screen_names))
+            .unwrap_or((false, false, false));
         let target = (k.target_hwnd != 0).then_some(k.target_hwnd);
         crate::selection::begin_dictation(target, smart_spacing && !k.edit && !in_terminal);
+        crate::screen_terms::begin_dictation(target, !k.edit && screen_names);
         let _ = self.app.emit("yap-state", "processing");
         tracing::info!(samples = k.audio.len(), "Undo: transcribing the cancelled dictation for its own window");
         self.undoing.store(true, Ordering::SeqCst);
@@ -1607,6 +1638,9 @@ impl Shared {
         // transcript — dictation is never blocked. The state stays
         // `processing` for the extra latency.
         let raw = text.trim().to_string();
+        // The names on screen, read at record start (`screen_terms`): this
+        // dictation's only, and only if the read is done.
+        let screen = crate::screen_terms::take();
         // `pp_body` is `None` when smart routing says "skip cleanup
         // for this app" (selected-apps-only scope, unbound app).
         let cleaned = match (&pp_body, pp_enabled && !pp_base_url.is_empty() && !raw.is_empty())
@@ -1615,7 +1649,9 @@ impl Shared {
                 // "Write in my region's spelling" (Dictation cleanup): British "colour"
                 // for en-GB, American "color" for en-US.
                 let spelling = self.config.read().ok().and_then(|c| crate::about_you::cleanup_spelling(&c));
-                match crate::llm::cleanup(
+                // The names on screen the transcript seems to hold.
+                let names = crate::screen_terms::cleanup_line(screen.as_deref(), &raw, &dict);
+                match crate::llm::cleanup_with_names(
                     &raw,
                     &pp_base_url,
                     &pp_api_key,
@@ -1623,6 +1659,7 @@ impl Shared {
                     &pp_provider,
                     body,
                     spelling.as_deref(),
+                    names.as_deref(),
                     &dict,
                     pp_disable_thinking,
                 )
@@ -1648,7 +1685,7 @@ impl Shared {
         let (mut corrected, voice_enter) = self
             .config
             .read()
-            .map(|c| finish_dictation(cleaned.trim(), &raw, &c))
+            .map(|c| finish_dictation_with(cleaned.trim(), &raw, &c, screen.as_deref()))
             .unwrap_or_else(|_| (config::apply_dictionary(cleaned.trim(), &dict), false));
         // A question for the Chat view: its page puts the text in the box
         // (and sends it, hands-free or after "press enter"); nothing is
@@ -1930,7 +1967,7 @@ impl Shared {
             }
         });
 
-        let dict_prompt = self.dictionary_prompt();
+        let dict_prompt = self.dictation_prompt();
         let outcome = tokio::task::spawn_blocking(move || {
             let result =
                 engine.transcribe(&audio, language.as_deref(), translate, dict_prompt.as_deref());
@@ -2330,6 +2367,7 @@ impl Robot {
         }
         shared.capture_target(false);
         crate::selection::wait_for_context(Duration::from_millis(1_500));
+        crate::screen_terms::wait_for_terms(Duration::from_millis(3_000));
         let _ = shared.app.emit("yap-state", "processing");
         tracing::info!(len = text.len(), "e2e: robot dictation from a transcript");
         let report = shared.deliver(text).await;
