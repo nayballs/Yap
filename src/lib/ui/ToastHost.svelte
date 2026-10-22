@@ -202,6 +202,14 @@
       opacity 200ms ease-out,
       transform 200ms ease-out;
   }
+  /* The same dark card in the dark theme, lifted off the dark page: a step
+     lighter, with a warm hairline (the page itself is #1c1a16). */
+  :global([data-yap-theme='dark']) .toast {
+    background: #2a2621;
+    box-shadow:
+      0 0 0 1px #3d372e,
+      0 12px 32px rgba(0, 0, 0, 0.45);
+  }
   .toast.exiting {
     opacity: 0;
     transform: translateY(6px) scale(0.98);

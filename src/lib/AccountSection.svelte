@@ -961,6 +961,19 @@
     place-items: center;
     color: #181717;
   }
+  /* Dark: the providers' own dark buttons (Google's, GitHub's) — a dark
+     button with light text, GitHub's mark in white; Google's and Discord's
+     colours read as they are. */
+  :global([data-yap-theme='dark']) .provider {
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+  }
+  :global([data-yap-theme='dark']) .provider:hover:not(:disabled) {
+    background: var(--yap-s3);
+  }
+  :global([data-yap-theme='dark']) .picon {
+    color: var(--yap-fg);
+  }
 
   .or {
     display: flex;

@@ -368,9 +368,10 @@ pub struct YapConfig {
     /// videos, slideshows). It always shows while recording.
     #[serde(default = "default_true")]
     pub bar_hide_fullscreen: bool,
-    /// The bar's colours: "light" (Yap's white cards and ink buttons, the
-    /// default) or "dark" (the in-app toasts' warm near-black). The
-    /// `--bar-*` tokens in app.css; the page sets `data-bar-theme`.
+    /// The bar's colours: "app" (the default: the same as Yap's windows,
+    /// `theme`), "light" (Yap's white cards and ink buttons) or "dark" (the
+    /// in-app toasts' warm near-black). The `--bar-*` tokens in app.css; the
+    /// page sets `data-bar-theme` (src/lib/appearance.js resolves "app").
     #[serde(default = "default_bar_theme")]
     pub bar_theme: String,
     /// The dictation capsule's ✕ (cancel) and ✓ (stop and paste) while it
@@ -379,6 +380,14 @@ pub struct YapConfig {
     /// push-to-talk key is held. `bar.rs` carries it to the bar page.
     #[serde(default = "default_bar_dictation_buttons")]
     pub bar_dictation_buttons: String,
+    /// Settings → General → Appearance → Theme, for every Yap window:
+    /// "system" (the default: Windows' app mode, Settings → Personalisation →
+    /// Colours, followed live), "light" or "dark". Every page sets
+    /// `data-yap-theme` from it (`src/lib/appearance.js`, the `--yap-*`
+    /// tokens in app.css), and `theme.rs` gives the opaque windows' webviews
+    /// the same background before their page paints.
+    #[serde(default = "default_theme")]
+    pub theme: String,
     /// Settings → General → Appearance: the font of the reading text —
     /// Chat's messages, notes and their Enhanced view, the meeting notepad's
     /// My thoughts / Transcript / Summary and its Ask answers; never the
@@ -851,7 +860,10 @@ fn default_meeting_detect_style() -> String {
     "popup".into()
 }
 fn default_bar_theme() -> String {
-    "light".into()
+    "app".into()
+}
+fn default_theme() -> String {
+    "system".into()
 }
 fn default_bar_dictation_buttons() -> String {
     "off".into()
@@ -946,6 +958,7 @@ impl Default for YapConfig {
             bar_hide_fullscreen: true,
             bar_theme: default_bar_theme(),
             bar_dictation_buttons: default_bar_dictation_buttons(),
+            theme: default_theme(),
             reading_font: default_reading_font(),
             reading_size: default_reading_size(),
             motion: default_motion(),
@@ -1121,7 +1134,7 @@ fn migrate_retired_groq_models(cfg: &mut YapConfig) {
 
 /// Current config schema version (see [`YapConfig::config_version`]). Bump it
 /// together with a new step in [`migrate_once`].
-const CONFIG_VERSION: u32 = 2;
+const CONFIG_VERSION: u32 = 3;
 
 /// One-time migrations, keyed by `config_version`. Returns whether anything
 /// ran; [`load`] then saves the result so no step ever runs twice.
@@ -1149,6 +1162,16 @@ fn migrate_once(cfg: &mut YapConfig) -> bool {
                 cfg.tts_windows_voice = std::mem::take(&mut cfg.tts_voice);
             }
             cfg.tts_voice = default_tts_voice();
+        }
+    }
+    if cfg.config_version < 3 {
+        // v3 (2026-10-22): Yap's windows got a theme, and the bar's colours
+        // "Match app" by default. Until then "light" was the bar's default
+        // and every install saved it without choosing it: it becomes "app"
+        // once (a light app keeps a light bar). A bar someone made dark
+        // stays dark.
+        if cfg.bar_theme.eq_ignore_ascii_case("light") {
+            cfg.bar_theme = default_bar_theme();
         }
     }
     cfg.config_version = CONFIG_VERSION;
@@ -1721,6 +1744,29 @@ mod tests {
 
         // Fresh installs start current: nothing to migrate.
         assert!(!migrate_once(&mut YapConfig::default()));
+    }
+
+    #[test]
+    fn the_bar_matches_the_app_once_and_a_dark_bar_stays_dark() {
+        // Saved before the theme: "light" was the default everyone saved.
+        let mut cfg: YapConfig = serde_json::from_str(r#"{"configVersion":2,"barTheme":"light"}"#).unwrap();
+        assert!(migrate_once(&mut cfg));
+        assert_eq!(cfg.bar_theme, "app");
+        assert_eq!(cfg.theme, "system");
+        // A bar made dark on purpose.
+        let mut cfg: YapConfig = serde_json::from_str(r#"{"configVersion":2,"barTheme":"dark"}"#).unwrap();
+        assert!(migrate_once(&mut cfg));
+        assert_eq!(cfg.bar_theme, "dark");
+        // Light chosen again afterwards sticks.
+        cfg.bar_theme = "light".into();
+        let mut reloaded: YapConfig = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert!(!migrate_once(&mut reloaded));
+        assert_eq!(reloaded.bar_theme, "light");
+        // A fresh install and an old file without the fields.
+        let fresh = YapConfig::default();
+        assert_eq!((fresh.theme.as_str(), fresh.bar_theme.as_str()), ("system", "app"));
+        let old: YapConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!((old.theme.as_str(), old.bar_theme.as_str()), ("system", "app"));
     }
 
     #[test]

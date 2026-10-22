@@ -21,29 +21,21 @@
   };
   const view = (VIEWS[label] ?? VIEWS.overlay)();
 
-  // Settings → General → Appearance (the reading font and size, Motion) in
-  // every window, following each save live (lib/appearance.js).
+  // Settings → General → Appearance (the theme, the reading font and size,
+  // Motion) and the bar's colours in every window, following each save live
+  // (lib/appearance.js).
   initAppearance();
   const isSettings = label === 'settings';
   const isOnboarding = label === 'onboarding';
   const isNotepad = label === 'notepad';
 
-  // The overlay and the split preview need a transparent body (app.css). The
-  // settings, onboarding and notepad windows are opaque, so override that
-  // here or they show OS white. They also set an explicit `color-scheme` (for
-  // native scrollbars/controls) — deliberately NOT global, because on a
-  // transparent window it makes the WebView paint an opaque backdrop (grey
-  // box bug). All three are warm-light (2026-07-09); the notepad uses Wispr
-  // Flow's paper (`--yap-paper`).
-  if (isSettings || isOnboarding) {
-    document.documentElement.style.colorScheme = 'light';
-    document.documentElement.style.background = '#f0ede7';
-    document.body.style.background = '#f0ede7';
-  } else if (isNotepad) {
-    document.documentElement.style.colorScheme = 'light';
-    document.documentElement.style.background = '#fcfcfb';
-    document.body.style.background = '#fcfcfb';
-  }
+  // The window's name on <html> (index.html's head script already put it
+  // there before the first paint; this is the fallback). app.css gives the
+  // opaque windows — settings, onboarding, notepad — their background and
+  // `color-scheme` per theme from it; the overlay and the split preview
+  // keep a transparent body and no `color-scheme` (on a transparent window
+  // it makes the WebView paint an opaque backdrop: the grey box bug).
+  if (document.documentElement.dataset.window !== label) document.documentElement.dataset.window = label;
 </script>
 
 <!-- settings → the main control panel (Home feed + surfaces, Settings as a

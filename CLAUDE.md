@@ -206,6 +206,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `context_menu.rs` — WebView2's context menu cut to editing commands (Inspect: debug + Shift).
 - `procs.rs` — process lineage; the kill-on-close job so helpers never outlive Yap.
 - `webview_memory.rs` — hidden windows' webviews get WebView2's low memory target; back to normal on screen.
+- `theme.rs` — the theme on the Rust side: the opaque windows' webview backgrounds (no white flash), onboarding's title bar, Windows' app mode (frontend.md).
 - `portable.rs` — portable mode (a `portable` marker → `<exe>/Data`).
 - `commands.rs` — the Tauri commands; logging is `lib.rs init_logging` (app-shell.md).
 - `config.rs` — `YapConfig`, load/save, migrations, dictionary helpers (config-and-data.md).
@@ -215,8 +216,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 ## Frontend index (`src/`)
 
 [frontend.md](./docs/architecture/frontend.md) unless noted.
-- Theme — warm-light `--yap-*` tokens in `src/app.css`, Figtree + EB Garamond; mark `src/assets/yap-logo.svg`.
-- `lib/appearance.js` — General → Appearance in every window: reading font/size tokens (`--yap-font-reading`, `--yap-reading-scale`) for chats/notes/notepad only, and reduced Motion.
+- Theme — `--yap-*` / `--yap-paper-*` tokens in `src/app.css`, warm light and a warm dark (`[data-yap-theme='dark']`, from the bar's dark scheme; never hard-code a colour), Figtree + EB Garamond; mark `src/assets/yap-logo.svg` ([frontend.md](./docs/architecture/frontend.md#the-dark-theme-2026-10-22)).
+- `lib/appearance.js` — General → Appearance in every window: Theme (System / Light / Dark → `data-yap-theme`, System follows Windows live; the bar's Match app → `data-bar-theme`; `index.html`'s head script puts it on before the first paint), reading font/size tokens (`--yap-font-reading`, `--yap-reading-scale`) for chats/notes/notepad only, and reduced Motion.
 - `lib/ControlPanel.svelte` — the main window (label `settings`): sidebar, Settings modal, title bar.
 - `ui/toast.svelte.js` + `ui/noticePolicy.js` — app-wide toasts running the page's notice policy.
 - `HomeView` / `InsightsView` / `UploadView` — dictation feed, stats, audio-file transcription; `lib/appNames.js` (apps by their names), `lib/aiErrors.js` (AI failures in plain words).

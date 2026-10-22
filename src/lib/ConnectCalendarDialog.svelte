@@ -399,7 +399,7 @@
     justify-content: center;
     padding: clamp(16px, calc(50vh - 262px), 200px) 16px 16px;
     box-sizing: border-box;
-    background: rgba(26, 26, 26, 0.3);
+    background: var(--yap-paper-scrim);
     animation: scrim-in 0.15s ease-out;
   }
   @keyframes scrim-in {
@@ -463,13 +463,13 @@
     padding: 0;
     border: none;
     border-radius: 50%;
-    background: rgba(26, 26, 26, 0.05);
+    background: color-mix(in srgb, var(--yap-paper-ink) 6%, transparent);
     color: var(--yap-paper-ink);
     cursor: pointer;
     transition: background-color 0.15s ease;
   }
   .x:hover {
-    background: rgba(26, 26, 26, 0.1);
+    background: color-mix(in srgb, var(--yap-paper-ink) 12%, transparent);
   }
   .x:focus-visible {
     outline: none;
@@ -532,7 +532,7 @@
       border-color 0.15s ease;
   }
   button.way:hover:not(:disabled) {
-    background: #fff;
+    background: var(--yap-paper-card);
     border-color: var(--yap-paper-s2-strong);
   }
   button.way:focus-visible {
@@ -604,7 +604,7 @@
   }
   .cancel:hover {
     border-color: var(--yap-paper-s2-strong);
-    background: #fff;
+    background: var(--yap-paper-card);
   }
   .cancel:focus-visible {
     outline: none;
@@ -695,7 +695,7 @@
     padding: 0 12px;
     border: 1px solid var(--yap-paper-s2);
     border-radius: 8px;
-    background: #fff;
+    background: var(--yap-paper-card);
     color: var(--yap-paper-ink);
     font: inherit;
     font-size: 14px;

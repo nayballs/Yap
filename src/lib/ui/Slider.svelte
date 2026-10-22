@@ -129,7 +129,7 @@
     height: 16px;
     margin-top: -6px;
     border-radius: 50%;
-    background: #fff;
+    background: var(--yap-s2);
     border: 1px solid var(--yap-switch-edge);
     box-shadow: var(--yap-shadow-sm);
   }

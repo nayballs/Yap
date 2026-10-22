@@ -1,8 +1,9 @@
 :root {
-  /* NOTE: `color-scheme: dark` is intentionally NOT set here. On a transparent
-     window (the pill + overlay) it makes the WebView paint an opaque dark UA
-     backdrop, which shows as a grey square behind the rounded pill. The opaque
-     windows (settings/onboarding) opt into dark scheme in App.svelte instead. */
+  /* NOTE: `color-scheme` is intentionally NOT set here. On a transparent
+     window (the Yap bar, the split preview) it makes the WebView paint an
+     opaque UA backdrop, which shows as a grey square behind the rounded pill.
+     The opaque windows (main, onboarding, notepad) set theirs per theme
+     below (`[data-window]`). */
   /* Figtree — the SAME UI sans Wispr Flow ships (OFL, bundled via
      @fontsource-variable/figtree in main.js); Segoe UI fallbacks if the
      webfont ever fails to load. */
@@ -25,12 +26,13 @@ body {
 }
 
 /* ------------------------------------------------------------------ *
- * Yap design tokens (warm light — Wispr-Flow-inspired, 2026-07-08).
- * Used by the opaque windows (settings window = the ControlPanel) and
- * their `ui/` primitives. These are just custom properties — they don't
- * paint anything, so the transparent pill / overlay windows (which stay
- * DARK: they float over other apps) are unaffected. Onboarding keeps its
- * own hardcoded dark styling for now (deferred).
+ * Yap design tokens (warm light — Wispr-Flow-inspired, 2026-07-08; the
+ * warm dark below since 2026-10-22). Used by the opaque windows (the main
+ * window = the ControlPanel, onboarding, the meeting notepad) and their
+ * `ui/` primitives. These are just custom properties — they don't paint
+ * anything, so the transparent Yap bar (its own `--bar-*` tokens) is
+ * unaffected. A component never hard-codes a surface or text colour: it
+ * takes a token, so both themes follow.
  *
  * The system: warm paper surfaces with white cards ON gray (a light
  * elevation ladder — depth from whiteness + soft shadow, not lines),
@@ -84,11 +86,28 @@ body {
   --yap-success: #1e8f4d;
   --yap-warning: #b07c10;
   --yap-danger: #c23b32;
+  /* a red button with white text on it (Delete, End meeting) */
+  --yap-danger-fill: #c23b32;
+  --yap-danger-fill-hover: #a8322a;
 
   /* shadows — soft, warm-tinted (light themes need them; dark didn't) */
   --yap-shadow-sm: 0 1px 2px rgba(60, 50, 30, 0.07), 0 1px 1px rgba(60, 50, 30, 0.04);
   --yap-shadow-menu: 0 12px 32px rgba(55, 45, 25, 0.16);
   --yap-shadow-modal: 0 24px 80px rgba(50, 40, 20, 0.28);
+
+  /* the dimmed page behind a modal (Settings, the Actions manager) */
+  --yap-scrim: rgba(45, 38, 25, 0.35);
+  /* a dark feature surface in both themes (Home's tip card): ink on light,
+     a raised warm card with a hairline on dark */
+  --yap-feature: #26231c;
+  --yap-feature-fg: #f7f5f0;
+  --yap-feature-edge: transparent;
+  --yap-feature-cta: #ffffff;
+  --yap-feature-cta-fg: #26231c;
+  --yap-feature-cta-hover: #f1eee6;
+  /* the light tile under brand marks drawn in black or their own colours
+     (the AI apps' logos, the call apps' icons), in both themes */
+  --yap-mark-tile: #ffffff;
 
   /* display face — EB Garamond, Wispr's exact serif (stat numerals, hero
      headlines, settings titles; bundled in main.js) */
@@ -123,6 +142,8 @@ body {
      paper and ink, its amber for focus and "live", its recording red for
      Stop / Resume. The names stay "paper" for the layout's roles. ---- */
   --yap-paper: #faf9f6;                    /* page (Yap's content sheet) */
+  --yap-paper-card: #ffffff;               /* white pills, menus and dialogs on the paper */
+  --yap-paper-scrim: rgba(26, 26, 26, 0.3); /* behind the notepad's dialogs (Wispr's) */
   --yap-paper-ink: #26231c;                /* text, filled buttons, tooltips (Yap ink) */
   --yap-paper-text-2: #4a463c;             /* inactive tabs, menu icons */
   --yap-paper-muted: #6e6a5f;              /* timer box, sheet buttons (Yap muted) */
@@ -329,48 +350,140 @@ body {
   --bar-mark-tile: #f7f5f0;
 }
 
-/* Dark token scope — currently UNSET everywhere (onboarding went warm-light
- * 2026-07-09; App.svelte no longer applies data-yap-theme="dark"). Kept as
- * the starting point for a future opt-in dark mode. */
+/* ------------------------------------------------------------------ *
+ * DARK (Settings → General → Appearance → Theme: System / Light / Dark;
+ * lib/appearance.js marks <html data-yap-theme="dark"> in every window, and
+ * the head script in index.html does it before the first paint). Yap's own
+ * warm dark, started from the Yap bar's dark scheme: a warm near-black
+ * (#1c1a16, the toasts' card) instead of a cold grey, cream text and cream
+ * filled buttons, sand chips, Yap amber brightened for dark surfaces, the
+ * recording red. Elevation goes the other way round from light: the frame
+ * is darkest, the content sheet a step up, cards and menus lighter again.
+ * Shadows are softer (dark surfaces show depth by lightness and a hairline,
+ * not by heavy black blur).
+ *
+ * Contrast, WCAG AA, measured on the content sheet (--yap-s1 #1c1a16) and
+ * the frame (--yap-bg #161410): body text --yap-fg 15:1, descriptions
+ * --yap-muted 6.8:1 (7.2:1 on the nav), links 9.1:1, danger text 5.2:1, an
+ * off switch's edge 4.9:1, the focus ring 9.1:1.
+ * ------------------------------------------------------------------ */
 :root[data-yap-theme='dark'] {
-  --yap-bg: #191a1e;
-  --yap-s1: #1e1f23;
-  --yap-s2: #232429;
-  --yap-s3: #2a2b31;
-  --yap-raised: #313239;
-  --yap-raised-soft: #26272d;
+  /* surfaces — darkest frame, content a step up, cards lighter */
+  --yap-bg: #161410;
+  --yap-s1: #1c1a16;
+  --yap-s2: #24211c;
+  --yap-s3: #2b2722;
+  --yap-raised: #36312a;
+  --yap-raised-soft: #221f1a;
 
-  --yap-fg: #e9e9ea;
-  --yap-fg-80: rgba(233, 233, 234, 0.8);
-  --yap-fg-62: rgba(233, 233, 234, 0.62);
-  --yap-fg-45: rgba(233, 233, 234, 0.45);
-  --yap-muted: #9a9aa0;
-  --yap-muted-70: rgba(154, 154, 160, 0.72);
-  --yap-muted-55: rgba(154, 154, 160, 0.55);
+  /* text — one warm cream, stepped by opacity */
+  --yap-fg: #f2efe8;
+  --yap-fg-80: rgba(242, 239, 232, 0.82);
+  --yap-fg-62: rgba(242, 239, 232, 0.64);
+  --yap-fg-45: rgba(242, 239, 232, 0.5);
+  --yap-muted: #a8a294;
+  /* (lighter steps than light's: small labels and chart legends still read
+     at AA on cards, 4.6:1 and up) */
+  --yap-muted-70: rgba(168, 162, 148, 0.88);
+  --yap-muted-55: rgba(168, 162, 148, 0.8);
 
-  /* Brand amber, brightened for dark surfaces (was the old violet accent). */
+  /* Yap amber, brightened for dark surfaces */
   --yap-primary: #e2982a;
   --yap-primary-fg: #1f1c16;
   --yap-primary-hover: #f0b04a;
-  --yap-primary-wash: rgba(226, 152, 42, 0.15);
-  --yap-primary-tint: rgba(226, 152, 42, 0.22);
-  --yap-primary-line: rgba(226, 152, 42, 0.45);
+  --yap-primary-wash: rgba(226, 152, 42, 0.14);
+  --yap-primary-tint: rgba(226, 152, 42, 0.24);
+  --yap-primary-line: rgba(240, 176, 74, 0.5);
 
-  --yap-ink: #e9e9ea;
+  /* ink — filled buttons are CREAM on dark (the bar's dark primary) */
+  --yap-ink: #ece8df;
   --yap-ink-hover: #ffffff;
-  --yap-ink-fg: #1e1f23;
+  --yap-ink-fg: #1c1a16;
 
-  --yap-border: #34353c;
-  --yap-border-subtle: #2c2d33;
-  --yap-border-hover: #41434b;
+  /* keycaps — the same amber, a touch deeper so they don't glare */
+  --yap-key-bg: #e8a33f;
+  --yap-key-border: #b97c1d;
+  --yap-key-fg: #2b1e05;
+
+  --yap-border: #3a352b;
+  --yap-border-subtle: #2e2a23;
+  --yap-border-hover: #4b453a;
 
   --yap-success: #3dbb74;
   --yap-warning: #dca03c;
-  --yap-danger: #e0564f;
+  --yap-danger: #e5645e;
+  /* (white on the text red would be 3.3:1: the fill is deeper, 5.1:1) */
+  --yap-danger-fill: #c0443c;
+  --yap-danger-fill-hover: #a8382f;
 
-  --yap-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --yap-shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.45);
-  --yap-shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.5);
+  --yap-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --yap-shadow-menu: 0 10px 28px rgba(0, 0, 0, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --yap-shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.42);
+
+  --yap-scrim: rgba(6, 5, 3, 0.58);
+  --yap-feature: #2b2722;
+  --yap-feature-fg: #f2efe8;
+  --yap-feature-edge: #3a352b;
+  --yap-feature-cta: #ece8df;
+  --yap-feature-cta-fg: #1c1a16;
+  --yap-feature-cta-hover: #ffffff;
+  --yap-mark-tile: #ece8df;
+
+  --yap-rule: #2c2822;
+  --yap-link: #f0b04a;
+  --yap-switch-edge: #8f887a;
+  --yap-focus-ring: #f0b04a;
+  --yap-success-text: #4cc985;
+
+  /* the meeting notepad's roles */
+  --yap-paper: #1c1a16;
+  --yap-paper-card: #2a2621;
+  --yap-paper-ink: #f2efe8;
+  --yap-paper-text-2: #cfc9bc;
+  --yap-paper-muted: #a8a294;
+  --yap-paper-faint: #6b665b;
+  --yap-paper-date: #8f887a;
+  --yap-paper-rule: #6b665b;
+  --yap-paper-s1: #26231e;
+  --yap-paper-s2: #312d26;
+  --yap-paper-s2-strong: #3d382f;
+  --yap-paper-ring: rgba(240, 176, 74, 0.34);
+  --yap-paper-band: #3a3123;
+  --yap-paper-danger: #e5645e;
+  --yap-paper-snag: #dca03c;
+  --yap-paper-scrim: rgba(6, 5, 3, 0.55);
+  --yap-live: #f0b04a;
+  --yap-live-strong: #ef6a62;
+  --yap-shadow-popover: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.26), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --yap-shadow-dialog: 0 20px 25px -5px rgba(0, 0, 0, 0.34), 0 8px 10px -6px rgba(0, 0, 0, 0.28);
+  --yap-shadow-sheet: 0 0 0 1px #34302a, 0 4px 16px rgba(0, 0, 0, 0.28), 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* The opaque windows' own background and native colour scheme (scrollbars,
+   form controls): the main window and onboarding on the frame colour, the
+   notepad on its paper. index.html's head script names the window
+   (data-window) before the first paint. Never on the Yap bar or the split
+   preview: a transparent window must keep a transparent body and no
+   `color-scheme` (WebView2 paints an opaque backdrop for it — the grey box). */
+:root[data-window='settings'],
+:root[data-window='settings'] body,
+:root[data-window='onboarding'],
+:root[data-window='onboarding'] body {
+  background: var(--yap-bg);
+  color-scheme: light;
+}
+:root[data-window='notepad'],
+:root[data-window='notepad'] body {
+  background: var(--yap-paper);
+  color-scheme: light;
+}
+:root[data-yap-theme='dark'][data-window='settings'],
+:root[data-yap-theme='dark'][data-window='settings'] body,
+:root[data-yap-theme='dark'][data-window='onboarding'],
+:root[data-yap-theme='dark'][data-window='onboarding'] body,
+:root[data-yap-theme='dark'][data-window='notepad'],
+:root[data-yap-theme='dark'][data-window='notepad'] body {
+  color-scheme: dark;
 }
 
 /* Rendered markdown (lib/markdown.js), wherever it shows — chat answers,

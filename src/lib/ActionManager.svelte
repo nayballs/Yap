@@ -255,7 +255,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(45, 38, 25, 0.35);
+    background: var(--yap-scrim);
   }
   .dialog {
     position: relative;
@@ -394,7 +394,7 @@
     opacity: 1;
   }
   .del:hover {
-    color: #ef4444;
+    color: var(--yap-danger);
   }
   .del svg {
     width: 11px;
@@ -500,7 +500,7 @@
   .err {
     margin: 0;
     font-size: 11.5px;
-    color: #ef4444;
+    color: var(--yap-danger);
   }
   .hint {
     margin: 0;

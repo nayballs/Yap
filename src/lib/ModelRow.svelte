@@ -157,8 +157,8 @@
     height: 14px;
     flex: 0 0 auto;
   }
-  /* Monochrome (black) brand logos read as-is on the light theme; only the
-     dark-scoped onboarding window still needs the white inversion. */
+  /* Monochrome (black) brand logos read as-is on the light theme and turn
+     white on the dark one. */
   .micon.mono {
     filter: none;
   }

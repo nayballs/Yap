@@ -98,7 +98,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   real one, for checking a real click reaches it — never while the maintainer's
   using the mouse). Every card answer (button, ✕, Esc, its timer) is logged
   as "bar: card answered" with the card and action; the hover check logs at
-  debug when it changes. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Light / Dark;
+  debug when it changes. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Match app / Light / Dark;
   `overlay_position` puts it at the top) and Settings → Dictation → While you dictate (`bar_dictation_buttons`,
   the live preview). Bar off = the old behaviour: the
   overlay only while dictating, notices as Windows notifications — but a
@@ -116,13 +116,18 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   laid out to Wispr's measured Flow Bar (`flowbar-spec.md`, checked by
   `bar.spec.js`) but in **Yap's own colours** (2026-10-06, the maintainer): every
   colour is a `--bar-*` token in app.css, in two schemes picked in Settings →
-  General → Yap bar → **Colours** (`bar_theme`, carried to the page in
-  `bar::Status.theme`, which sets `data-bar-theme`; the main window follows it
-  too, for the Connect calendar dialog's card picture). **Light** (default):
+  General → Yap bar → **Colours** (`bar_theme`: **Match app** — the default
+  since 2026-10-22, the same as Yap's theme, System / Light / Dark — or Light
+  or Dark as an override; carried to the page in `bar::Status.theme` ("app" |
+  "light" | "dark"), which `lib/appearance.js` `setBarChoice` resolves into
+  `data-bar-theme`, following the app's theme live — Windows switching app
+  mode included; the main window follows it too, for the Connect calendar
+  dialog's card picture). The bar window stays transparent with no
+  `color-scheme` whatever the theme (the grey box). **Light**:
   Yap's window — white cards with the warm `#dcd7cb` edge, ink text, ink
   primary buttons, amber chips, burnt-orange waveforms. **Dark**: the in-app
   toasts' palette — warm near-black `#1c1a16`, sand chips, cream buttons, Yap
-  amber. Both keep Yap's recording red:
+  amber (the app's dark theme starts from it). Both keep Yap's recording red:
   one stage anchored to the bottom (or top) edge — the pill's place below,
   states sharing one grid cell so they cross-fade, each in a hit wrapper
   (6 × 10 px of nearly invisible padding, reported as region "pill") whose

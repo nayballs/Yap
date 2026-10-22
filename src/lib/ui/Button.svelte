@@ -54,8 +54,8 @@
     font-size: 12px;
   }
 
-  /* Filled buttons are INK on the light theme — amber stays reserved for
-     keycaps/highlights (falls back to primary under the dark-token scope). */
+  /* Filled buttons are INK — dark on the light theme, cream on the dark one;
+     amber stays reserved for keycaps/highlights. */
   .primary {
     background: var(--yap-ink, var(--yap-primary));
     color: var(--yap-ink-fg, var(--yap-primary-fg));

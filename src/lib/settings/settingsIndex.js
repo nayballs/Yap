@@ -22,13 +22,14 @@ export const SETTINGS_INDEX = [
   { page: 'general', section: 'About you', label: 'Anything the AI should know about you', desc: 'A line or two the AI keeps in mind', keywords: 'about me personal profile context custom instructions', anchor: 'about-me' },
   { page: 'general', section: 'Startup and updates', label: 'Start Yap when you sign in', desc: 'Yap waits in the tray, ready for your hotkey', keywords: 'login startup boot windows autostart launch', anchor: 'autostart' },
   { page: 'general', section: 'Startup and updates', label: 'Check for updates automatically', desc: 'Downloads new versions in the background', keywords: 'update upgrade version auto-update nightly', anchor: 'update-checks', toggle: 'updateChecksEnabled' },
-  { page: 'general', section: 'Yap bar', label: 'Show the Yap bar', desc: 'A small pill above the taskbar', keywords: 'bar pill overlay taskbar flow bar', anchor: 'bar' },
-  { page: 'general', section: 'Yap bar', label: 'Hide in fullscreen apps', desc: 'Games and presentations stay clear', keywords: 'bar games fullscreen presentation video', anchor: 'bar-fullscreen', toggle: 'barHideFullscreen' },
-  { page: 'general', section: 'Yap bar', label: 'Colours', desc: "The Yap bar's light or dark look", keywords: 'bar theme dark light mode colors', anchor: 'bar-colours' },
-  { page: 'general', section: 'Yap bar', label: 'Position', desc: 'Where the bar and the dictation overlay sit', keywords: 'bar overlay top bottom placement', anchor: 'bar-position' },
+  { page: 'general', section: 'Appearance', label: 'Theme', desc: 'Light or dark, or follow Windows', keywords: 'dark mode light mode night theme colours colors appearance system windows black', anchor: 'theme' },
   { page: 'general', section: 'Appearance', label: 'Reading font', desc: 'For chats, notes and meeting notes', keywords: 'font typeface serif sans dyslexic opendyslexic appearance', anchor: 'reading-font' },
   { page: 'general', section: 'Appearance', label: 'Text size', desc: 'For chats, notes and meeting notes', keywords: 'font size larger smaller zoom appearance', anchor: 'text-size' },
   { page: 'general', section: 'Appearance', label: 'Motion', desc: 'Reduce sliding, fading and pulsing', keywords: 'animation reduced motion accessibility appearance', anchor: 'motion' },
+  { page: 'general', section: 'Yap bar', label: 'Show the Yap bar', desc: 'A small pill above the taskbar', keywords: 'bar pill overlay taskbar flow bar', anchor: 'bar' },
+  { page: 'general', section: 'Yap bar', label: 'Hide in fullscreen apps', desc: 'Games and presentations stay clear', keywords: 'bar games fullscreen presentation video', anchor: 'bar-fullscreen', toggle: 'barHideFullscreen' },
+  { page: 'general', section: 'Yap bar', label: 'Colours', desc: "The Yap bar's look: match Yap, light or dark", keywords: 'bar theme dark light colors match app', anchor: 'bar-colours' },
+  { page: 'general', section: 'Yap bar', label: 'Position', desc: 'Where the bar and the dictation overlay sit', keywords: 'bar overlay top bottom placement', anchor: 'bar-position' },
   { page: 'general', section: 'Notifications', label: 'Show tips', desc: "Short tips, like push-to-talk's double-tap", keywords: 'tips hints coaching notifications nudge', anchor: 'tips', toggle: 'showTips' },
 
   // ---- Dictation ----

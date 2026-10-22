@@ -495,7 +495,7 @@
     line-height: 1;
   }
   .rm:hover {
-    color: #ef4444;
+    color: var(--yap-danger);
   }
   .empty {
     color: var(--yap-muted-55);

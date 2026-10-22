@@ -1016,7 +1016,7 @@
     top: -8px;
     right: 8px;
     background: var(--yap-primary);
-    color: #fff;
+    color: var(--yap-primary-fg);
     font-size: 10px;
     font-weight: 600;
     border-radius: 5px;
@@ -1061,7 +1061,7 @@
   }
   .llm-badge {
     background: var(--yap-primary);
-    color: #fff;
+    color: var(--yap-primary-fg);
     font-size: 10px;
     font-weight: 600;
     border-radius: 5px;

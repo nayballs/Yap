@@ -220,12 +220,13 @@ test('Settings → General → Yap bar, and Dictation → While you dictate', as
   await expect(group).toContainText('Position');
   await shot(main, '07-settings-yap-bar');
 
-  // Colours: light by default; Dark recolours the bar at once (and the main
-  // window's picture of its cards), and Light brings it back.
+  // Colours: Match app by default (the suite's app is light, so light); Dark
+  // recolours the bar at once (and the main window's picture of its cards),
+  // and Match app brings it back. (theme.spec.js: the bar with a dark app.)
   const theme = () => yap.overlay.evaluate(() => document.documentElement.dataset.barTheme);
   const surface = () =>
     yap.overlay.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bar-surface').trim());
-  await expect(group.getByRole('tab', { name: 'Light' })).toHaveAttribute('aria-selected', 'true');
+  await expect(group.getByRole('tab', { name: 'Match app' })).toHaveAttribute('aria-selected', 'true');
   expect([await theme(), await surface()]).toEqual(['light', '#ffffff']);
   await group.getByRole('tab', { name: 'Dark' }).click();
   await expectStore(yap, 'config.json', (c) => c.barTheme === 'dark');
@@ -233,8 +234,8 @@ test('Settings → General → Yap bar, and Dictation → While you dictate', as
   expect(await surface()).toBe('#1c1a16');
   expect(await main.evaluate(() => document.documentElement.dataset.barTheme)).toBe('dark');
   await shot(main, '07-settings-yap-bar-dark');
-  await group.getByRole('tab', { name: 'Light' }).click();
-  await expectStore(yap, 'config.json', (c) => c.barTheme === 'light');
+  await group.getByRole('tab', { name: 'Match app' }).click();
+  await expectStore(yap, 'config.json', (c) => c.barTheme === 'app');
   await expect.poll(theme).toBe('light');
 
   // What shows while you dictate is on the Dictation page now: the live

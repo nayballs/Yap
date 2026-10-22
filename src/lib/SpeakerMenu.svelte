@@ -340,7 +340,7 @@
     padding: 0 10px;
     border: 1px solid var(--yap-paper-s2-strong, var(--yap-paper-s2));
     border-radius: 8px;
-    background: #fff;
+    background: var(--yap-paper-card);
     color: var(--yap-paper-ink);
     font: inherit;
     font-size: 14px;

@@ -138,6 +138,6 @@
     width: 6px;
     height: 6px;
     border-radius: var(--yap-r-full);
-    background: #fff;
+    background: var(--yap-ink-fg);
   }
 </style>

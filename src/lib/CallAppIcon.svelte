@@ -85,4 +85,8 @@
     font-weight: 750;
     line-height: 1;
   }
+  /* On a dark page a near-black badge (Webex) needs its edge. */
+  :global([data-yap-theme='dark']) .letter {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  }
 </style>

@@ -347,7 +347,8 @@ fn follow(
 struct State {
     enabled: bool,
     hide_fullscreen: bool,
-    /// "light" | "dark" (`bar_theme`): which `--bar-*` colours the page uses.
+    /// "app" | "light" | "dark" (`bar_theme`): which `--bar-*` colours the
+    /// page uses ("app": the same as Yap's windows, resolved by the page).
     theme: &'static str,
     /// "hover" | "always" | "off" (`bar_dictation_buttons`): the dictation
     /// capsule's ✕ / ✓.
@@ -406,7 +407,7 @@ impl Default for State {
         Self {
             enabled: true,
             hide_fullscreen: true,
-            theme: "light",
+            theme: "app",
             dictation_buttons: "off",
             edge: Edge::Bottom,
             hotkey: String::new(),
@@ -547,7 +548,9 @@ fn on_escape_key() {
 pub struct Status {
     enabled: bool,
     hide_fullscreen: bool,
-    /// "light" | "dark": the page sets `data-bar-theme` from it.
+    /// "app" | "light" | "dark": the page sets `data-bar-theme` from it
+    /// ("app" = the theme of Yap's windows, `config.theme`, as the page
+    /// resolves it: src/lib/appearance.js).
     theme: &'static str,
     /// The dictation capsule's ✕ / ✓ while it records: "off" (the default) |
     /// "hover" (only while the pointer is on it) | "always". None while the
@@ -1029,10 +1032,17 @@ pub fn init(app: &AppHandle) {
     tracing::info!(enabled = cfg.bar_enabled, "bar: started");
 }
 
-/// `bar_theme` as the page wants it: anything but "dark" is light (the
-/// default), so an unknown value from a newer or older Yap stays readable.
+/// `bar_theme` as the page wants it: "light" or "dark" as written, anything
+/// else "app" (the default: Yap's own theme), so an unknown value from a
+/// newer or older Yap stays readable.
 fn theme_from_config(value: &str) -> &'static str {
-    if value.eq_ignore_ascii_case("dark") { "dark" } else { "light" }
+    if value.eq_ignore_ascii_case("dark") {
+        "dark"
+    } else if value.eq_ignore_ascii_case("light") {
+        "light"
+    } else {
+        "app"
+    }
 }
 
 /// `bar_dictation_buttons` as the page wants it: "hover" or "always" as
@@ -1818,15 +1828,16 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_theme_reads_loosely_and_defaults_to_light() {
+    fn the_bar_theme_reads_loosely_and_matches_the_app_by_default() {
         assert_eq!(theme_from_config("dark"), "dark");
         assert_eq!(theme_from_config("Dark"), "dark");
         assert_eq!(theme_from_config("light"), "light");
-        assert_eq!(theme_from_config(""), "light");
-        assert_eq!(theme_from_config("sepia"), "light");
-        assert_eq!(crate::config::YapConfig::default().bar_theme, "light");
+        assert_eq!(theme_from_config("app"), "app");
+        assert_eq!(theme_from_config(""), "app");
+        assert_eq!(theme_from_config("sepia"), "app");
+        assert_eq!(crate::config::YapConfig::default().bar_theme, "app");
         let old: crate::config::YapConfig = serde_json::from_str("{}").unwrap();
-        assert_eq!(old.bar_theme, "light"); // a config saved before the setting
+        assert_eq!(old.bar_theme, "app"); // a config saved before the setting
     }
 
     #[test]

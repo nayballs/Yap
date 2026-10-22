@@ -1,21 +1,43 @@
 <script>
   // Settings → General → Appearance (after Claude's own Appearance settings,
-  // in free fonts): the font and size of the reading text — Chat's messages,
-  // notes and their Enhanced view, the meeting notepad's My thoughts /
-  // Transcript / Summary and its Ask answers — and Motion for every Yap
-  // window. lib/appearance.js applies them (Settings' copy at once, every
-  // other window after the auto-save); app.css has the tokens.
+  // in free fonts): the Theme (System / Light / Dark) for every Yap window,
+  // the font and size of the reading text — Chat's messages, notes and their
+  // Enhanced view, the meeting notepad's My thoughts / Transcript / Summary
+  // and its Ask answers — and Motion for every Yap window. lib/appearance.js
+  // applies them (Settings' copy at once, every other window after the
+  // auto-save); app.css has the tokens.
   //
-  //   cfg: Settings' config $state (`readingFont`, `readingSize`, `motion`).
-  //        Auto-save does the saving.
+  //   cfg: Settings' config $state (`theme`, `readingFont`, `readingSize`,
+  //        `motion`). Auto-save does the saving.
   import { onMount } from 'svelte';
   import Group from './ui/Group.svelte';
   import Row from './ui/Row.svelte';
   import Select from './ui/Select.svelte';
   import Segmented from './ui/Segmented.svelte';
-  import { READING_FONTS, READING_FONT_DESC, READING_SIZES, MOTION_OPTIONS } from './appearance.js';
+  import { READING_FONTS, READING_FONT_DESC, READING_SIZES, MOTION_OPTIONS, THEME_OPTIONS } from './appearance.js';
 
   let { cfg } = $props();
+
+  // What "System" means right now: Windows' app mode (Settings →
+  // Personalisation → Colours), as WebView2 reports it — followed live.
+  let osDark = $state(false);
+  onMount(() => {
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!mq) return;
+    osDark = mq.matches;
+    const on = () => (osDark = mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  });
+  const themeDesc = $derived(
+    cfg.theme === 'dark'
+      ? 'Every Yap window is dark: the main window, the meeting notepad and setup'
+      : cfg.theme === 'light'
+        ? 'Every Yap window is light, whatever Windows uses'
+        : osDark
+          ? 'Follows Windows’ app mode, which is dark right now'
+          : 'Follows Windows’ app mode, which is light right now'
+  );
 
   // Each font's name in itself, in the list and in the closed box (Claude's
   // picker does the same).
@@ -42,6 +64,9 @@
 </script>
 
 <Group title="Appearance" id="settings-appearance">
+  <Row label="Theme" desc={themeDesc} setting="theme">
+    <Segmented bind:value={cfg.theme} options={THEME_OPTIONS} label="Theme" />
+  </Row>
   <Row label="Reading font" desc={READING_FONT_DESC[cfg.readingFont] ?? READING_FONT_DESC.default} setting="reading-font">
     <Select bind:value={cfg.readingFont} options={FONT_OPTIONS} ariaLabel="Reading font" />
   </Row>

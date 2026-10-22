@@ -132,7 +132,7 @@
 
 {#snippet logo(c)}
   {#if ICONS[c.id]}
-    <img class="logo" src={ICONS[c.id]} alt="" aria-hidden="true" />
+    <img class="logo" class:mono={c.id !== 'gemini'} src={ICONS[c.id]} alt="" aria-hidden="true" />
   {:else if c.id === 'vscode'}
     <svg class="logo glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5" /><path d="m16 7 5 5-5 5" /></svg>
   {:else}
@@ -307,6 +307,10 @@
     width: 15px;
     height: 15px;
     flex: 0 0 auto;
+  }
+  /* The black marks (Claude, OpenAI, Cursor) in white on dark cards. */
+  :global([data-yap-theme='dark']) .logo.mono {
+    filter: invert(1);
   }
   .glyph {
     color: var(--yap-fg-62);

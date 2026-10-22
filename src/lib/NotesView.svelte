@@ -2500,12 +2500,12 @@
   }
   .enhance.endmeeting {
     border-radius: var(--yap-r);
-    background: var(--yap-danger);
+    background: var(--yap-danger-fill);
     color: #fff;
     padding: 0 14px;
   }
   .enhance.endmeeting:hover {
-    background: color-mix(in srgb, var(--yap-danger) 85%, black);
+    background: var(--yap-danger-fill-hover);
   }
   .enhance.endmeeting svg {
     width: 10px;
@@ -2513,7 +2513,7 @@
   }
   .enhance.chevron {
     border-radius: 0 var(--yap-r) var(--yap-r) 0;
-    border-left: 1px solid rgba(255, 255, 255, 0.22);
+    border-left: 1px solid color-mix(in srgb, var(--yap-ink-fg) 22%, transparent);
     padding: 0 7px;
   }
   .enhance:hover:not(:disabled) {
@@ -3020,7 +3020,7 @@
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #f5a524;
+    background: var(--yap-key-bg);
     flex: 0 0 auto;
   }
 

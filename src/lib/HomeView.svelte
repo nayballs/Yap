@@ -634,7 +634,8 @@
     min-width: 0;
   }
 
-  /* ---- hero: dark ink card, serif display headline (Wispr) ---- */
+  /* ---- hero: a dark feature card in both themes (ink on light, a raised
+     warm card on dark), serif display headline (Wispr) ---- */
   .hero {
     display: flex;
     align-items: center;
@@ -642,9 +643,10 @@
     padding: 26px 28px;
     margin-bottom: 26px;
     min-height: 76px;
+    border: 1px solid var(--yap-feature-edge);
     border-radius: var(--yap-r-xl);
-    background: var(--yap-ink);
-    color: var(--yap-ink-fg);
+    background: var(--yap-feature);
+    color: var(--yap-feature-fg);
   }
   .herotext {
     flex: 1 1 auto;
@@ -665,7 +667,7 @@
     margin: 0;
     font-size: 13px;
     line-height: 1.65;
-    color: rgba(247, 245, 240, 0.72);
+    color: color-mix(in srgb, var(--yap-feature-fg) 72%, transparent);
   }
   .heroside {
     flex: 0 0 auto;
@@ -678,8 +680,8 @@
     padding: 9px 16px;
     border: none;
     border-radius: var(--yap-r);
-    background: var(--yap-s2);
-    color: var(--yap-ink);
+    background: var(--yap-feature-cta);
+    color: var(--yap-feature-cta-fg);
     font: inherit;
     font-size: 13px;
     font-weight: 600;
@@ -687,7 +689,7 @@
     transition: background var(--yap-dur) ease;
   }
   .herocta:hover {
-    background: #f1eee6;
+    background: var(--yap-feature-cta-hover);
   }
   .herodots {
     display: flex;
@@ -699,12 +701,12 @@
     padding: 0;
     border: none;
     border-radius: 50%;
-    background: rgba(247, 245, 240, 0.28);
+    background: color-mix(in srgb, var(--yap-feature-fg) 28%, transparent);
     cursor: pointer;
     transition: background var(--yap-dur) ease;
   }
   .herodot:hover {
-    background: rgba(247, 245, 240, 0.55);
+    background: color-mix(in srgb, var(--yap-feature-fg) 55%, transparent);
   }
   .herodot.on {
     background: var(--yap-key-bg);
