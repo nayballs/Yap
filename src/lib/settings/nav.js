@@ -18,12 +18,13 @@ export const NAV_GROUPS = [
   },
   {
     // Commands make the AI *do* something and type it where you are; the
-    // Voice Assistant answers out loud. Memory (another agent's page) goes
-    // here, after the Voice Assistant.
+    // Voice Assistant answers out loud; Memory is what both (and Chat) know
+    // about you (memory.rs, MemorySection.svelte).
     label: 'Assistant',
     items: [
       { id: 'commands', label: 'Commands' },
       { id: 'voice', label: 'Voice Assistant' },
+      { id: 'memory', label: 'Memory' },
     ],
   },
   {

@@ -95,6 +95,21 @@ export const SETTINGS_INDEX = [
   { page: 'voice', section: 'Voice', label: 'Volume', desc: 'How loud Yap speaks', keywords: 'voice volume loudness', anchor: 'voice-volume' },
   { page: 'voice', section: 'Model', label: 'Assistant model', desc: "The same as Chat's", keywords: 'model chat language model ai', anchor: 'assistant-model' },
 
+  // Memory (MemorySection.svelte)
+  { page: 'memory', section: 'What Yap learns from', label: 'Search and reference past chats', desc: 'Yap looks through earlier chats when you mention one', keywords: 'memory chats history recall remember conversations', anchor: 'memory-search-chats', toggle: 'memorySearchChats' },
+  { page: 'memory', section: 'What Yap learns from', label: 'Learn from my chats', desc: 'Lasting facts about you, kept when a chat goes quiet', keywords: 'memory learn remember facts personal chats', anchor: 'memory-learn-chats', toggle: 'memoryLearnChats' },
+  { page: 'memory', section: 'What Yap learns from', label: 'Learn from meetings', desc: "Attendees and projects, from meetings' action plans", keywords: 'memory learn meetings attendees colleagues', anchor: 'memory-learn-meetings', toggle: 'memoryLearnMeetings' },
+  { page: 'memory', section: 'What Yap learns from', label: 'Include sensitive topics in memory', desc: 'Health, religion, politics and the like', keywords: 'memory sensitive private health religion politics privacy', anchor: 'memory-sensitive', toggle: 'memorySensitive' },
+  { page: 'memory', section: 'You', label: 'Profile', desc: 'Who you are: where you live, your work', keywords: 'memory about me profile personal facts job', anchor: 'memory-profile' },
+  { page: 'memory', section: 'You', label: 'Preferences', desc: "How you want Yap's AI to answer you", keywords: 'memory preferences style answers tone custom instructions', anchor: 'memory-preferences' },
+  { page: 'memory', section: 'People', label: 'People', desc: 'The people you mention, and who they are to you', keywords: 'memory people family friends colleagues names contacts', anchor: 'memory-people' },
+  { page: 'memory', section: 'Projects', label: 'Projects', desc: "What you're working on", keywords: 'memory projects work', anchor: 'memory-projects' },
+  { page: 'memory', section: 'Topics', label: 'Topics', desc: 'Games, hobbies and things you come back to', keywords: 'memory topics interests hobbies games', anchor: 'memory-topics' },
+  { page: 'memory', section: 'Tell Yap what to change', label: 'Tell Yap what to change', desc: 'Changes in your words, checked before they are kept', keywords: 'memory edit forget correct remember update', anchor: 'memory-tell' },
+  { page: 'memory', section: 'Import, export and clear', label: 'Import memory from other AI providers', desc: 'What ChatGPT, Claude or Gemini remembers', keywords: 'memory import chatgpt claude gemini bring in', anchor: 'memory-import' },
+  { page: 'memory', section: 'Import, export and clear', label: 'Export memory', desc: 'A .zip of Markdown, a file per section', keywords: 'memory export download backup markdown zip', anchor: 'memory-export' },
+  { page: 'memory', section: 'Import, export and clear', label: 'Clear all memory', desc: 'Forget everything Yap remembers', keywords: 'memory clear delete forget erase reset wipe', anchor: 'memory-clear' },
+
   // ---- Speech-to-Text ----
   { page: 'models', section: 'Speech model', label: 'Speech model', desc: 'The model that turns your voice into text', keywords: 'speech to text transcription model parakeet whisper canary moonshine download', anchor: 'stt-model' },
   { page: 'models', section: 'Speakers in meetings', label: 'Speaker models', desc: 'For telling speakers apart in meetings', keywords: 'diarization speakers model', anchor: 'speakers' },

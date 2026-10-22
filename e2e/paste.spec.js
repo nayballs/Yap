@@ -1,6 +1,6 @@
 // Paste privacy & smart insert (text_injector.rs, selection.rs,
-// smart_insert.rs): "Paste last transcript" and Settings → Advanced →
-// Output's "Match the text around the cursor". A test run never pastes,
+// smart_insert.rs): "Paste last transcript" and Settings → Dictation →
+// Typing into apps' "Match the text around the cursor". A test run never pastes,
 // copies or reads another app's text (e2e.rs), so the paste itself, the
 // clipboard's privacy formats and the text around the cursor are unit-tested
 // in Rust (`smart_insert`, and the `--ignored` real-window/clipboard tests);

@@ -1,6 +1,6 @@
 // Call detection (src-tauri/src/meeting_detect.rs): a call starting offers to
 // take notes, "Record notes" creates a meeting note and records it, the call
-// ending offers to stop and summarise, and Settings → General → Meetings
+// ending offers to stop and summarise, and Settings → Meetings
 // decides whether, how and about which apps Yap asks.
 // Test mode reads no registry: the debug-only `meeting_detect_simulate` hook
 // stands in for an app taking or letting go of the mic (no debounce; its

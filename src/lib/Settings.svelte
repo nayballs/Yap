@@ -2898,9 +2898,11 @@
     padding: 0;
     scrollbar-width: none;
   }
+  /* 13 pages, the search and the account in 600 px of window: every icon
+     on screen without scrolling the rail. */
   .shell.rail .navitem {
     width: 38px;
-    height: 31px;
+    height: 28px;
     padding: 0;
     justify-content: center;
   }
@@ -2908,7 +2910,7 @@
     flex: 0 0 auto;
     width: 24px;
     height: 1px;
-    margin: 4px 0;
+    margin: 3px 0;
     background: var(--yap-border);
   }
   .navdot {

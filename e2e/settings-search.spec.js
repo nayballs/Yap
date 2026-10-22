@@ -82,7 +82,8 @@ test('old links land: the aliases, and links that never existed stay put', () =>
   expect(resolveTarget('voice#assistant-shortcut', SCOPES)).toEqual({ page: 'voice', anchor: 'assistant-shortcut', scope: '' });
   expect(resolveTarget('account', SCOPES)).toEqual({ page: 'account', anchor: '', scope: '' });
   expect(resolveTarget({ page: 'cleanup', scope: 'voiceAgent' }, SCOPES)).toEqual({ page: 'cleanup', anchor: '', scope: 'voiceAgent' });
-  expect(resolveTarget('memory', SCOPES)).toBeNull(); // a page this build doesn't have
+  expect(resolveTarget('memory', SCOPES)).toEqual({ page: 'memory', anchor: '', scope: '' }); // the toast's Manage
+  expect(resolveTarget('nowhere', SCOPES)).toBeNull(); // a page this build doesn't have
   expect(resolveTarget('', SCOPES)).toBeNull();
   // Every alias goes to a page that exists.
   for (const [from, to] of Object.entries(ALIASES)) expect(PAGE_IDS, from).toContain(to.split('#')[0]);
@@ -210,8 +211,14 @@ test('old links land where their settings went', async ({ yap, main, shot }) => 
   await goto(main, 'cleanup#chat');
   await expect(dialog.locator('.scope-tabs').getByRole('tab', { name: 'Chat & Voice Assistant' })).toHaveAttribute('aria-selected', 'true');
   // A page this build doesn't have: Settings stays where it was.
-  await goto(main, 'memory');
+  await goto(main, 'nowhere');
   await expect(navItem(main, 'cleanup')).toHaveAttribute('aria-current', 'page');
+  // Memory, as the "Yap remembered…" toast's Manage opens it, and a row of it.
+  await goto(main, 'memory');
+  await expect(navItem(main, 'memory')).toHaveAttribute('aria-current', 'page');
+  await expect(dialog.getByRole('heading', { level: 1, name: 'Memory' })).toBeVisible();
+  await goto(main, 'memory#memory-tell');
+  await expect(dialog.getByRole('textbox', { name: 'Tell Yap what to change' })).toBeInViewport();
 
   // The way Rust sends one (meeting_guard.rs's Windows notification, still in
   // the notification centre with the old string): through the app's event.
@@ -259,7 +266,13 @@ test('860 × 600: the nav is an icon rail with tooltips, and rows stack instead 
     await expect(nav(main).locator('.navcap')).toHaveCount(0);
     const items = nav(main).locator('.navitem');
     await expect(items).toHaveCount(PAGE_IDS.length - 1);
-    for (let i = 0; i < (await items.count()); i++) await expect(items.nth(i)).toBeInViewport();
+    // Wholly inside the rail's list (which would scroll, its scrollbar hidden).
+    const list = await nav(main).locator('.navlist').boundingBox();
+    for (let i = 0; i < (await items.count()); i++) {
+      await expect(items.nth(i)).toBeInViewport();
+      const b = await items.nth(i).boundingBox();
+      expect(b.y + b.height, `rail item ${i + 1} cut off`).toBeLessThanOrEqual(list.y + list.height + 0.5);
+    }
     // A tooltip names the page under the pointer.
     await navItem(main, 'shortcuts').hover();
     await expect(dialog.getByRole('tooltip')).toHaveText('Shortcuts');

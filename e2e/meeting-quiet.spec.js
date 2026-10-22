@@ -4,7 +4,7 @@
 // with a notice that says why; "Still in your meeting?" after a calendar
 // meeting's end and an hour in, held back while anyone spoke lately; both
 // on the meeting notepad when it's on screen, else on the Yap bar; and
-// Settings → General → Meetings → "End notes when the meeting goes quiet".
+// Settings → Meetings → "End notes when the meeting goes quiet".
 //
 // Test mode: a recording opens no audio device. The debug-only
 // `e2e_meeting_checkins` shortens the timings to seconds and keeps the test

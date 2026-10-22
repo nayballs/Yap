@@ -51,6 +51,7 @@ const SECTIONS = [
   'Meetings',
   'Commands',
   'Voice Assistant',
+  'Memory',
   'Speech-to-Text',
   'Language Models',
   'Connectors',

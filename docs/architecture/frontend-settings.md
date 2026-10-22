@@ -68,7 +68,9 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   `e2e/settings-search.spec.js` opens **every index entry** and finds its row,
   so the index can't drift from the pages.
 - **860 × 600** (below 960 px of window): the nav is a **58 px icon rail**
-  with ink tooltips (fixed-position, so the rail can scroll), a search button
+  (28 px items: all 13 pages fit at 600 px without scrolling; a 14th page
+  needs that checked again — the search spec measures it) with ink tooltips
+  (fixed-position, so the rail can scroll), a search button
   that opens the box over the page, a red dot for the attention count, and
   the account's avatar. Rows put a control wider than ~42% of the row on its
   own line (`ui/Row.svelte` measures it, OpenWhispr's `isCompact`), and long

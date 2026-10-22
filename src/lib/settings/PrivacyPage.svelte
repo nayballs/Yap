@@ -83,6 +83,12 @@
       page: 'general#about-you',
     },
     {
+      // memory.rs: kept on this PC, sent with questions to the model in use.
+      what: 'Memory',
+      where: 'Kept on this PC. What fits a question goes with it to the AI model you use',
+      page: 'memory',
+    },
+    {
       what: 'Web search',
       where: cfg.webSearch
         ? cfg.webSearchNative !== false

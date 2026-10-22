@@ -201,29 +201,36 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
 
 ## Settings → Memory
 
-`MemorySection.svelte` (Settings → Data → Memory; store and toast in
-`memory.svelte.js`, started by ControlPanel), laid out like Claude's in Yap's
-own look:
+`MemorySection.svelte` (Settings → Assistant → Memory, after Commands and
+the Voice Assistant; page id `memory`, which the toast's **Manage** opens;
+store and toast in `memory.svelte.js`, started by ControlPanel), laid out like
+Claude's in Settings' one row style (2026-10-22 review,
+[frontend-settings.md](./frontend-settings.md)): the switches, You, "Tell Yap
+what to change" and import / export / clear are flat rows; the people,
+projects and topics are a card of objects each. Every row is in the Settings
+search (`settingsIndex.js`, anchors `memory-search-chats` … `memory-clear`):
 
-- **Memory**: "Search and reference past chats" (`memorySearchChats`, on),
+- **What Yap learns from**: "Search and reference past chats" (`memorySearchChats`, on),
   "Learn from my chats" (`memoryLearnChats`, on), "Learn from meetings"
   (`memoryLearnMeetings`, off: other people's words), "Include sensitive
   topics in memory" (`memorySensitive`, off) — config.json switches, saved by
   Settings' auto-save. With a Chat model too small to learn by itself
   (`memory_list`'s `ai.learns`), a note says so and points at Language Models.
-- With no AI model, a card says so ("Yap needs an AI model for memory") with
-  **Language Models** (→ `cleanup#chat`); hand edits still work.
+- With no AI model, a note at the top says so ("Yap needs an AI model for
+  memory") with **Language Models** (→ `cleanup#chat`); hand edits still
+  work.
 - **You**: Profile ("Who you are…"), Preferences ("How you want Yap's AI to
   answer you") — a row shows its facts and "Updated 5 Oct" — then **About
   you's three parts**, as Settings has them now (`about_you_status` with the
   unsaved fields, like About you itself): **Name**, **Region** ("United
   Kingdom (from Windows) · Prices in £ · miles and °C · British spelling · UK
-  time") and **Note** (in quotes), or "Not set: …"; each row says "In About
-  you" and goes there (`general#about-you`). Memory never writes them, and
+  time") and **Note** (in quotes), or "Not set: …"; each a link row ("In
+  About you ›") to its own row in General → About you (`about-name`, `region`,
+  `about-me`, the keyboard on it). Memory never writes them, and
   keeps no second copy from a chat, a meeting or an import
   (`ops::drop_about_you`).
-- **People / Projects / Topics**: a row per item (name, who or what it is,
-  "Updated …"), newest first; a row opens in place to edit it (name, "Who they
+- **People / Projects / Topics**: a card each, a row per item (name, who or
+  what it is, "Updated …"), newest first; a row opens in place to edit it (name, "Who they
   are to you" / "What it is", facts one per line, where it came from,
   **"Spell this name in dictation"** for people and projects with what it does
   for that name), Delete (Undo on the toast), Save; "Add a person / project /
@@ -234,13 +241,14 @@ own look:
   diff (+ added, ~ changed with old facts struck and new ones marked, −
   forgotten) → Apply (toast "Memory updated" with Undo) or Discard; "Nothing in
   memory changes for that."
-- **Bring it in, take it out**: **Import** (step 1: the prompt to copy, step 2:
+- **Import, export and clear**: **Import** (step 1: the prompt to copy, step 2:
   paste the answer → Turn into memory → each change with a checkbox → Save N),
   **Export** (the save dialog → the .zip), **Clear all** (asked first, Undo on
   the toast).
 - The privacy line: kept on this PC; sent with questions to the AI model you
   use (a cloud provider sees it, a model on this PC keeps it here); never sent
-  to Yap.
+  to Yap — and a link to Privacy & data, whose "What leaves this PC" lists
+  Memory too.
 
 ## Tests
 
