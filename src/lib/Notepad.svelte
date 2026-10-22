@@ -53,6 +53,7 @@
   import { initMeetingCheckIns } from './meetingCheckIn.js';
   import { openContextMenu, menuKey, menuOpenFor, menuOrDialogOpen } from './ui/contextMenu.svelte.js';
   import { messageItems } from './itemMenus.js';
+  import { streamCall, liveAnswer, applyEvent, closePartial, settle, streamingHeight, STOPPED } from './streaming.js';
   import {
     summaries,
     initMeetingSummary,
@@ -531,8 +532,12 @@
   });
 
   let askOpen = $state(false);
-  let askThread = $state([]); // { id, role: 'user' | 'assistant', text, error?, plain? }
+  let askThread = $state([]); // { id, role: 'user' | 'assistant', text, error?, plain?, streaming?, stopped? }
   let askBusy = $state(false);
+  // The answer being written (stream.rs): its ■, and whether it was pressed.
+  let askStop = null;
+  let askStopping = $state(false);
+  const askStreaming = $derived(askThread.some((m) => m.streaming));
   let askBusyText = $state(''); // what the busy line says
   let askSetup = $state(null); // the "set up an AI model" reason
   // The one-tap helpers on offer, by the recording state (notepadText.js).
@@ -572,7 +577,7 @@
     return converse(
       q ?? MEETING_HELPERS.catchUp.label,
       q ? 'Looking through the meeting…' : MEETING_HELPERS.catchUp.busy,
-      () => invoke('meeting_catch_up', { noteId: id, since: seen.get(id) ?? 0, question: q }),
+      (onEvent) => streamCall('meeting_catch_up', { noteId: id, since: seen.get(id) ?? 0, question: q }, onEvent),
       (r) => !q && seen.set(id, Math.max(seen.get(id) ?? 0, r.upto))
     );
   }
@@ -582,16 +587,19 @@
     if (kind === 'catchUp') return ask(null);
     if (!note || askBusy) return;
     const id = note.id;
-    return converse(MEETING_HELPERS[kind].label, MEETING_HELPERS[kind].busy, () =>
-      invoke('meeting_assist', { noteId: id, kind })
+    return converse(MEETING_HELPERS[kind].label, MEETING_HELPERS[kind].busy, (onEvent) =>
+      streamCall('meeting_assist', { noteId: id, kind }, onEvent)
     );
   }
 
   /**
-   * One turn in the sheet: `question` as the person's bubble, then `call()`'s
-   * `{answer, plain?}` (or what went wrong; no AI model = the setup card).
+   * One turn in the sheet: `question` as the person's bubble, then the
+   * answer `start(onEvent)` streams ({promise, stop}: streaming.js) — it
+   * grows in place as it's written, and the command's own `{answer, plain?,
+   * stopped?}` takes its place at the end (or what went wrong; no AI model =
+   * the setup card).
    */
-  async function converse(question, busyText, call, after = null) {
+  async function converse(question, busyText, start, after = null) {
     if (!note || askBusy) return;
     const id = note.id;
     openAsk();
@@ -599,22 +607,55 @@
     askThread = [...askThread, { id: `${Date.now()}-${++askSeq}`, role: 'user', text: question }];
     askBusy = true;
     askBusyText = busyText;
+    askStopping = false;
     scrollThread();
+    let live = liveAnswer();
+    let aid = null;
+    const onEvent = (ev) => {
+      if (note?.id !== id) return;
+      live = applyEvent(live, ev);
+      if (!live.text) {
+        if (ev?.kind === 'waiting') askBusyText = live.waiting ? 'Waiting for your dictation to finish…' : busyText;
+        return;
+      }
+      if (aid == null) {
+        aid = `${Date.now()}-${++askSeq}`;
+        askThread = [...askThread, { id: aid, role: 'assistant', text: '', streaming: true }];
+      }
+      const m = askThread.find((x) => x.id === aid);
+      if (m) m.text = live.text;
+      followAsk();
+    };
+    const call = start(onEvent);
+    askStop = call.stop;
     try {
       // Who answers (the Note Formatting scope, else cleanup), kept with it;
       // "Nothing new" and "too little to go on" come from Yap itself.
-      const [r, answeredBy] = await Promise.all([call(), nextModel('notes')]);
+      const [r, answeredBy] = await Promise.all([call.promise, nextModel('notes')]);
       if (note?.id !== id) return;
       const model = r.nothingNew || r.tooLittle ? null : answeredBy;
-      askThread = [
-        ...askThread,
-        { id: `${Date.now()}-${++askSeq}`, role: 'assistant', text: r.answer, plain: !!r.plain, model },
-      ];
+      // The finished answer takes the streamed one's place (the email
+      // cleaned up as plain text): a soft glide if it changed.
+      const streamed = aid ? askThread.find((x) => x.id === aid)?.text : null;
+      const from = streamingHeight(threadEl);
+      const answer = {
+        id: aid ?? `${Date.now()}-${++askSeq}`,
+        role: 'assistant',
+        text: r.answer,
+        plain: !!r.plain,
+        model,
+        stopped: !!r.stopped,
+        revisedFrom: streamed && streamed.trim() !== String(r.answer).trim() ? from : 0,
+      };
+      askThread = aid ? askThread.map((x) => (x.id === aid ? answer : x)) : [...askThread, answer];
       after?.(r);
     } catch (e) {
       if (note?.id !== id) return;
+      if (aid) askThread = askThread.filter((x) => x.id !== aid);
       const msg = String(e);
-      if (/No AI model configured|API key/i.test(msg)) askSetup = msg;
+      if (askStopping && msg.includes(STOPPED)) {
+        askThread = [...askThread, { id: `${Date.now()}-${++askSeq}`, role: 'assistant', text: 'Stopped.', quiet: true }];
+      } else if (/No AI model configured|API key/i.test(msg)) askSetup = msg;
       else
         askThread = [
           ...askThread,
@@ -622,8 +663,21 @@
         ];
     } finally {
       askBusy = false;
+      askStop = null;
+      askStopping = false;
       scrollThread();
     }
+  }
+  /** ■: stop the answer being written (what came stays). */
+  function stopAsk() {
+    if (!askBusy || askStopping || !askStop) return;
+    askStopping = true;
+    askStop();
+  }
+  /** Keep the newest words in view while they're written, unless you scrolled up. */
+  function followAsk() {
+    const el = threadEl;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 120) tick().then(() => (el.scrollTop = el.scrollHeight));
   }
   function sendTyped() {
     const q = askInput.trim();
@@ -1480,6 +1534,10 @@
                   <!-- svelte-ignore a11y_no_static_element_interactions -->
                   <div
                     class="ma"
+                    class:streaming={m.streaming}
+                    aria-busy={m.streaming ? 'true' : undefined}
+                    data-testid={m.streaming ? 'ask-streaming' : undefined}
+                    use:settle={m.revisedFrom || 0}
                     oncontextmenu={(e) => answerMenu(e, m)}
                     onkeydown={(e) => menuKey(e, (k) => answerMenu(k, m))}
                   >
@@ -1487,10 +1545,11 @@
                       <!-- An email: shown exactly as it copies. -->
                       <div class="mabody plain">{m.text}</div>
                     {:else}
-                      <!-- renderMarkdown passes no raw HTML and sanitises its output. -->
-                      <div class="mabody" class:err={m.error}>{@html renderMarkdown(m.text)}</div>
+                      <!-- renderMarkdown passes no raw HTML and sanitises its output;
+                           while it's written, half-written markdown is closed off. -->
+                      <div class="mabody" class:err={m.error} class:quiet={m.quiet}>{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text)}</div>
                     {/if}
-                    {#if !m.error}
+                    {#if !m.streaming && !m.error && !m.quiet}
                       <div class="mabtns">
                         <button class="fb" class:on={feedback[m.id]?.rating === 'up'} aria-label="Good answer" aria-pressed={feedback[m.id]?.rating === 'up'} onclick={() => rate(m, 'up')}>{@render icon('up')}</button>
                         <button class="fb" class:on={feedback[m.id]?.rating === 'down'} aria-label="Bad answer" aria-pressed={feedback[m.id]?.rating === 'down'} onclick={() => rate(m, 'down')}>{@render icon('down')}</button>
@@ -1503,12 +1562,15 @@
                         {#if m.model}
                           <span class="mamodel" title={whereItRuns(m.model)}>{modelLine(m.model)}</span>
                         {/if}
+                        {#if m.stopped}
+                          <span class="mamodel" title="You stopped this answer while it was being written">· Stopped</span>
+                        {/if}
                       </div>
                     {/if}
                   </div>
                 {/if}
               {/each}
-              {#if askBusy}
+              {#if askBusy && !askStreaming}
                 <p class="ma busy"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>{askBusyText}</p>
               {/if}
               {#if askSetup}
@@ -1557,7 +1619,10 @@
               oninput={fitAsk}
               onkeydown={onAskKeydown}
             ></textarea>
-            {#if askInput.trim()}
+            {#if askBusy}
+              <!-- ■: stop the answer being written. -->
+              <button class="send" aria-label="Stop the answer" data-tip="Stop" onclick={stopAsk} disabled={askStopping}>{@render icon('stop')}</button>
+            {:else if askInput.trim()}
               <button class="send" aria-label="Ask" onclick={sendTyped} disabled={askBusy}>{@render icon('send')}</button>
             {:else if helpers.length && !askOpen}
               <!-- The lead helper (the sheet shows them all when it's up, and
@@ -3022,6 +3087,36 @@
   }
   .mabody.err {
     color: var(--yap-paper-danger);
+  }
+  .mabody.quiet {
+    color: var(--yap-paper-muted);
+    font-size: 13px;
+  }
+  /* An answer being written: a soft caret at the end of its last line. */
+  .ma.streaming .mabody > :global(:is(p, h2, h3, h4, h5, blockquote):last-child)::after,
+  .ma.streaming .mabody > :global(:is(ul, ol):last-child > li:last-child)::after {
+    content: '';
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-left: 5px;
+    border-radius: 50%;
+    background: var(--yap-live);
+    vertical-align: middle;
+    animation: askcaret 1s ease-in-out infinite;
+  }
+  @keyframes askcaret {
+    0%,
+    100% {
+      opacity: 0.25;
+    }
+    50% {
+      opacity: 0.9;
+    }
+  }
+  :global(:root[data-motion='reduced']) .ma.streaming .mabody > :global(*)::after,
+  :global(:root[data-motion='reduced']) .ma.streaming .mabody > :global(* > li)::after {
+    animation: none;
   }
   .mabody.plain {
     white-space: pre-wrap;

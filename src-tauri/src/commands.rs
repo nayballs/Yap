@@ -849,6 +849,7 @@ pub async fn note_ask(
         &model,
         &provider,
         disable_thinking,
+        None,
     )
     .await
 }
@@ -1003,6 +1004,8 @@ pub(crate) struct ChatTurn {
     /// The web pages the answer was written from (`web.rs`), numbered as
     /// it cites them.
     pub sources: Vec<crate::chats::Source>,
+    /// Stopped while it was being written (the page's ■): what came so far.
+    pub stopped: bool,
 }
 
 impl ChatTurn {
@@ -1031,6 +1034,16 @@ impl ChatTurn {
 ///
 /// `app`: the windows told of note changes; `None` in a model evaluation
 /// (`eval.rs`), which runs this same turn with no windows.
+///
+/// **Streamed** (`stream.rs`) when someone watches (`watcher`: the Chat
+/// view's channel, the Voice Assistant, an evaluation's clock): every model
+/// call's text as it's written, each tool call as its chip; a model on this
+/// PC steps aside for a dictation. The answer that comes back is the
+/// **checked** one (below), which the page puts in place of what streamed.
+/// `stop`: the page's ■ — the stream closes, and what was shown so far is
+/// the answer, checked and saved as stopped (nothing shown: an error,
+/// [`crate::stream::STOPPED`]).
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn chat_turn(
     app: Option<&AppHandle>,
     conversation_id: Option<u64>,
@@ -1038,6 +1051,8 @@ pub(crate) async fn chat_turn(
     scope: Option<&str>,
     by_voice: bool,
     asked: impl FnOnce(u64, usize) + Send,
+    watcher: Option<&dyn crate::stream::Sink>,
+    stop: Option<&crate::stream::Stoppable>,
 ) -> Result<ChatTurn, String> {
     let text = text.trim().to_string();
     if text.is_empty() {
@@ -1110,6 +1125,7 @@ pub(crate) async fn chat_turn(
                 tools_used: chips,
                 model: Some(answered_by),
                 sources: Vec::new(),
+                stopped: false,
             });
         }
     }
@@ -1275,7 +1291,18 @@ pub(crate) async fn chat_turn(
         }
     }
 
-    let (reply, tools_used, sources, looked, pages) = if tools_supported {
+    // Streamed to whoever watches: what was shown is kept (a Stop keeps
+    // it), and a model on this PC steps aside for a new dictation.
+    let watch = watcher.map(crate::stream::Watch::new);
+    let beside = app
+        .filter(|_| crate::ai_model::runs_here(&provider, &base_url))
+        .map(|a| crate::stream::NewDictations(a.clone()));
+    let live = watch.as_ref().map(|w| crate::stream::Live {
+        sink: w,
+        beside: beside.as_ref().map(|b| b as &dyn crate::stream::Dictations),
+    });
+
+    let (reply, tools_used, sources, looked, pages, stopped) = if tools_supported {
         let notify = |id: u64| {
             use tauri::Emitter;
             if let Some(app) = app {
@@ -1300,7 +1327,7 @@ pub(crate) async fn chat_turn(
                 .collect()
         };
         let extra = crate::tools::Extra { memory: true, search_chats: cfg.memory_search_chats, conversation: Some(conv.id) };
-        let (reply, tools_used) = crate::tools::run_tool_loop_with(
+        let looped = crate::tools::run_tool_loop_with(
             &system,
             &messages,
             &text,
@@ -1315,14 +1342,27 @@ pub(crate) async fn chat_turn(
             web.as_mut(),
             first,
             extra,
-        )
-        .await?;
+            live,
+        );
+        // Stopped: what was shown so far is the answer (a step's text that
+        // came before a tool call was never shown).
+        let (reply, tools_used, stopped) = match crate::stream::unless_stopped(looped, stop).await {
+            Some(done) => {
+                let (reply, tools_used) = done?;
+                (reply, tools_used, false)
+            }
+            None => {
+                let seen = watch.as_ref().map(|w| w.seen()).unwrap_or_default();
+                tracing::info!(shown = seen.text.len(), "Chat: the answer was stopped");
+                (seen.text, seen.chips, true)
+            }
+        };
         // gpt-oss sometimes cites as "【1】" (its own browsing style): Yap's [1].
         let reply = if web.is_some() { crate::web::bracket_citations(&reply) } else { reply };
         let looked = web.as_ref().is_some_and(crate::web::Turn::looked);
         let sources = web.as_ref().map(|w| w.sources_for(&reply)).unwrap_or_default();
         let pages = web.map(|w| w.texts).unwrap_or_default();
-        (reply, tools_used, sources, looked, pages)
+        (reply, tools_used, sources, looked, pages, stopped)
     } else {
         // Small/local models: plain chat + eager RAG (their fallback), or
         // Yap's fixed web pipeline when the question needs the web.
@@ -1330,8 +1370,21 @@ pub(crate) async fn chat_turn(
         // The web pipeline's own prompt ends as this one does: About you,
         // then memory's "You".
         let about_and_memory = if memory_you.is_empty() { about.clone() } else { format!("{about}\n\n{memory_you}") };
-        let SmallAnswer { reply, chips, sources, looked, pages } =
-            small_model_answer(&cfg, &persona, &system, &about_and_memory, &history, &text, endpoint, web_on, by_voice).await?;
+        let SmallAnswer { reply, chips, sources, looked, pages, stopped } = small_model_answer(
+            &cfg,
+            &persona,
+            &system,
+            &about_and_memory,
+            &history,
+            &text,
+            endpoint,
+            web_on,
+            by_voice,
+            live,
+            stop,
+            watch.as_ref(),
+        )
+        .await?;
         // "Opening Baldur's Gate 3." from a model that can't open anything:
         // said as it is instead (apps.rs).
         let corrected = if crate::apps::claims_unasked(&reply, &text) {
@@ -1345,8 +1398,12 @@ pub(crate) async fn chat_turn(
         } else {
             None
         };
-        (corrected.unwrap_or(reply), chips, sources, looked, pages)
+        (corrected.unwrap_or(reply), chips, sources, looked, pages, stopped)
     };
+    // Stopped before any of the answer showed: nothing to save.
+    if stopped && reply.trim().is_empty() {
+        return Err(crate::stream::STOPPED.to_string());
+    }
     // Every model's answer, checked before it's shown: no sources list or
     // "Yap searched…" note of its own, no search claimed that didn't
     // happen, no "[1]" with nothing (or another question's pages) behind it.
@@ -1387,7 +1444,7 @@ pub(crate) async fn chat_turn(
     } else if let Some(note) = restored_note {
         reply = format!("{}\n\n{note}", reply.trim_end());
     }
-    let index = crate::chats::append_sourced(
+    let index = crate::chats::append_message(
         conv.id,
         "assistant",
         &reply,
@@ -1395,10 +1452,11 @@ pub(crate) async fn chat_turn(
         Some(answered_by.clone()),
         false,
         &sources,
+        stopped,
     )?;
     // Read for lasting facts once the chat goes quiet ("Learn from my chats").
     crate::memory::learn::after_turn(conv.id);
-    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by), sources })
+    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by), sources, stopped })
 }
 
 /// The fixed web pipeline's budgets for a model that can't call tools (an
@@ -1417,6 +1475,8 @@ const SMALL_HISTORY_TOKENS: usize = 2_000;
 /// search ran. `about`: the About you block (`about_you::prompt_block`),
 /// already last in `system`, kept last in the web pipeline's own prompt.
 /// (These models keep the whole context in the system prompt, `chat_turn`.)
+/// `live`: streamed to the page (its search as a chip, the answer as it's
+/// written); `stop` ends the answer where it is (`watch` has what showed).
 #[allow(clippy::too_many_arguments)]
 async fn small_model_answer(
     cfg: &YapConfig,
@@ -1428,6 +1488,9 @@ async fn small_model_answer(
     (base_url, api_key, model, provider, disable_thinking): (&str, &str, &str, &str, bool),
     web_on: bool,
     by_voice: bool,
+    live: Option<crate::stream::Live<'_>>,
+    stop: Option<&crate::stream::Stoppable>,
+    watch: Option<&crate::stream::Watch<'_>>,
 ) -> Result<SmallAnswer, String> {
     let mut chips = Vec::new();
     let mut sources = Vec::new();
@@ -1441,6 +1504,9 @@ async fn small_model_answer(
         let query = crate::web::search_query(text);
         let query = crate::web::local_query(&query, text, settings.local.as_ref()).unwrap_or(query);
         let endpoints = crate::web::Endpoints::current();
+        if let Some(live) = live {
+            live.sink.send(crate::stream::Event::Tool { name: "web_search".into(), doing: crate::stream::doing("web_search").into() });
+        }
         match crate::web::search(&settings, &endpoints, &query, text).await {
             Ok(mut found) if found.hits.iter().any(|h| !h.text.trim().is_empty()) => {
                 chips.push(crate::web::search_chip(&query, &found, &settings));
@@ -1488,9 +1554,15 @@ async fn small_model_answer(
     } else {
         system.push_str(&format!("\n\n{}", crate::web::no_search_line(None)));
     }
-    let reply =
-        crate::llm::note_chat(&system, &history, text, base_url, api_key, model, provider, disable_thinking).await?;
-    Ok(SmallAnswer { reply, chips, sources, looked, pages })
+    if let Some(live) = live {
+        live.sink.send(crate::stream::Event::Chips { chips: chips.clone(), sources: sources.clone(), web: looked });
+    }
+    let answered = crate::llm::note_chat(&system, &history, text, base_url, api_key, model, provider, disable_thinking, live);
+    let (reply, stopped) = match crate::stream::unless_stopped(answered, stop).await {
+        Some(reply) => (reply?, false),
+        None => (watch.map(|w| w.seen().text).unwrap_or_default(), true),
+    };
+    Ok(SmallAnswer { reply, chips, sources, looked, pages, stopped })
 }
 
 /// A small model's answer ([`small_model_answer`]): the text, its chips and
@@ -1501,6 +1573,8 @@ struct SmallAnswer {
     sources: Vec<crate::chats::Source>,
     looked: bool,
     pages: Vec<String>,
+    /// Stopped while it was written (`reply` = what showed).
+    stopped: bool,
 }
 
 /// The fixed web pipeline's second search for a price where the person is
@@ -1627,15 +1701,23 @@ async fn app_turn(
         tools_used,
         model: None,
         sources: Vec::new(),
+        stopped: false,
     })
 }
 
 /// Send one chat turn from the Chat view ([`chat_turn`]). Returns `{
 /// conversationId, reply, toolsUsed, model, sources, messageId,
-/// userMessageId, speak }`: the two messages' ids ("chat:<conversation>:<index>", what the page
+/// userMessageId, speak, stopped }`: the two messages' ids ("chat:<conversation>:<index>", what the page
 /// calls them) and whether the answer is read out by itself
 /// (`tts::auto_speak`: spoken replies on, and "When to speak" says so —
 /// `voice`: the question was dictated, kept with it).
+///
+/// `onStream`: the page's channel — the answer as it's written (`stream.rs`
+/// [`crate::stream::Event`]: `{kind: "text", text}`, `{kind: "tool", name,
+/// doing}`, `{kind: "chips", chips, sources, web}`, `{kind: "waiting",
+/// waiting}`, plus `{kind: "turn", conversationId}` once the question is
+/// saved); `reply` is then the checked answer to put in its place.
+/// `turnId`: what `stream_stop` stops it by (the ■).
 #[tauri::command]
 pub async fn chat_send(
     app: AppHandle,
@@ -1643,9 +1725,30 @@ pub async fn chat_send(
     text: String,
     scope: Option<String>,
     voice: Option<bool>,
+    on_stream: crate::stream::PageChannel,
+    turn_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let by_voice = voice.unwrap_or(false);
-    let turn = chat_turn(Some(&app), conversation_id, &text, scope.as_deref(), by_voice, |_, _| {}).await?;
+    let stop = crate::stream::Stoppable::new(turn_id.as_deref());
+    let watched = on_stream.0.is_some();
+    let turn = chat_turn(
+        Some(&app),
+        conversation_id,
+        &text,
+        scope.as_deref(),
+        by_voice,
+        |conv, index| {
+            // The page learns its conversation (a new one) as soon as it's made.
+            on_stream.send_json(serde_json::json!({
+                "kind": "turn",
+                "conversationId": conv,
+                "userMessageId": format!("chat:{conv}:{index}"),
+            }));
+        },
+        watched.then_some(&on_stream as &dyn crate::stream::Sink),
+        Some(&stop),
+    )
+    .await?;
     // Read out by itself? (Asked at the answer: a dictation may have started
     // meanwhile, and the settings may have changed.)
     let now = config::load();
@@ -1665,7 +1768,8 @@ pub async fn chat_send(
         "sources": turn.sources,
         "messageId": turn.message_id(),
         "userMessageId": format!("chat:{}:{}", turn.conversation_id, turn.user_index),
-        "speak": speak,
+        "speak": speak && !turn.stopped,
+        "stopped": turn.stopped,
     }))
 }
 

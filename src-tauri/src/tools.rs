@@ -1280,7 +1280,38 @@ async fn search_for_the_model(turn: &mut crate::web::Turn, query: &str, messages
     messages.push(json!({ "role": "tool", "tool_call_id": YAP_SEARCH_ID, "content": result.to_string() }));
 }
 
-/// The agent loop (their `useChatStreaming` re-invoke loop, non-streaming):
+/// One model call of the loop: streamed to `live` when someone watches
+/// (`stream::call`: a step's opening text held until it's an answer, a
+/// tool call shown as its chip; a model on this PC steps aside for a
+/// dictation), else as a whole answer.
+async fn ask(live: Option<crate::stream::Live<'_>>, req: &crate::llm::ChatRequest, tools_offered: bool, disable_thinking: bool) -> Result<Value, String> {
+    match live {
+        Some(live) => crate::stream::call(live, req, tools_offered, disable_thinking).await,
+        None => crate::llm::post_whole(req).await,
+    }
+}
+
+/// Yap's own web search is under way (the page shows it as a chip).
+fn searching(live: Option<crate::stream::Live<'_>>) {
+    if let Some(live) = live {
+        live.sink.send(crate::stream::Event::Tool { name: "web_search".into(), doing: crate::stream::doing("web_search").into() });
+    }
+}
+
+/// The chips so far, and the web sources found so far (a "[1]" in the
+/// answer draws as a pill while it's written).
+fn report(live: Option<crate::stream::Live<'_>>, tools_used: &[String], web: Option<&crate::web::Turn>) {
+    if let Some(live) = live {
+        live.sink.send(crate::stream::Event::Chips {
+            chips: tools_used.to_vec(),
+            sources: web.map(|w| w.sources.clone()).unwrap_or_default(),
+            web: web.is_some_and(crate::web::Turn::looked),
+        });
+    }
+}
+
+/// The agent loop (their `useChatStreaming` re-invoke loop, every step
+/// streamed when someone watches — `live`):
 /// send messages + tools; while the model calls tools, execute them locally,
 /// append the results as `role:"tool"` messages, and re-invoke — up to
 /// MAX_TOOL_STEPS. Returns the final answer + the tools' displayTexts (the UI
@@ -1324,8 +1355,9 @@ pub async fn run_tool_loop_with(
     web: Option<&mut crate::web::Turn>,
     first: FirstStep,
     extra: Extra,
+    live: Option<crate::stream::Live<'_>>,
 ) -> Result<(String, Vec<String>), String> {
-    tool_loop(system, history, question, context, base_url, api_key, model, provider, disable_thinking, open_apps, on_change, web, first, extra).await
+    tool_loop(system, history, question, context, base_url, api_key, model, provider, disable_thinking, open_apps, on_change, web, first, extra, live).await
 }
 
 /// [`run_tool_loop_with`] without memory's tools (the unit tests' way in).
@@ -1346,7 +1378,7 @@ pub async fn run_tool_loop(
     web: Option<&mut crate::web::Turn>,
     first: FirstStep,
 ) -> Result<(String, Vec<String>), String> {
-    tool_loop(system, history, question, context, base_url, api_key, model, provider, disable_thinking, open_apps, on_change, web, first, Extra::default()).await
+    tool_loop(system, history, question, context, base_url, api_key, model, provider, disable_thinking, open_apps, on_change, web, first, Extra::default(), None).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1365,6 +1397,7 @@ async fn tool_loop(
     mut web: Option<&mut crate::web::Turn>,
     first: FirstStep,
     extra: Extra,
+    live: Option<crate::stream::Live<'_>>,
 ) -> Result<(String, Vec<String>), String> {
     let must_search_first = first == FirstStep::MustSearch && web.is_some();
     // A model on this PC gets Yap's second search for local prices; a cloud
@@ -1405,7 +1438,9 @@ async fn tool_loop(
 
     // Yap searches first: the results go to the model as its own call's.
     if let (FirstStep::YapSearches(query), Some(turn)) = (&first, web.as_deref_mut()) {
+        searching(live);
         search_for_the_model(turn, query, &mut messages, &mut tools_used).await;
+        report(live, &tools_used, Some(turn));
     }
     let mut must_search = must_search_first;
     // A notes search that finds nothing, for a question that isn't about the
@@ -1432,7 +1467,7 @@ async fn tool_loop(
     let mut rejected = 0u32;
     for _step in 0..MAX_TOOL_STEPS {
         let forced = must_search;
-        let answer = crate::llm::post_chat_message(
+        let req = crate::llm::ChatRequest::chat(
             base_url,
             api_key,
             model,
@@ -1441,8 +1476,8 @@ async fn tool_loop(
             Value::Array(messages.clone()),
             Some(&tools),
             must_search.then(must_search_choice),
-        )
-        .await;
+        );
+        let answer = ask(live, &req, true, disable_thinking).await;
         // A server that won't be made to search (it refuses `tool_choice`,
         // answers in words, or calls another tool): Yap searches for the
         // model, with the question as the query, and the model goes on.
@@ -1453,8 +1488,14 @@ async fn tool_loop(
             });
             if !searched {
                 tracing::info!(provider, "Chat: the model wasn't made to search; Yap searches for it");
+                // What it wrote instead isn't the answer: off the page.
+                if let Some(live) = live {
+                    live.sink.send(crate::stream::Event::Text { text: String::new() });
+                }
                 if let Some(turn) = web.as_deref_mut() {
+                    searching(live);
                     search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used).await;
+                    report(live, &tools_used, Some(turn));
                 }
                 continue;
             }
@@ -1465,19 +1506,24 @@ async fn tool_loop(
             // argument, a tool it doesn't have, a call written as text):
             // tell it once and ask again, then answer without tools — never
             // an error for the person.
-            Err(e) => match crate::llm::rejected_tool_call(&e) {
-                Some(why) if rejected < REJECTED_CALL_RETRIES => {
+            Err(e) => {
+                let Some(why) = crate::llm::rejected_tool_call(&e) else {
+                    return Err(e);
+                };
+                // A step refused mid-stream may have shown some text: it
+                // wasn't the answer.
+                if let Some(live) = live {
+                    live.sink.send(crate::stream::Event::Text { text: String::new() });
+                }
+                if rejected < REJECTED_CALL_RETRIES {
                     rejected += 1;
                     tracing::info!(provider, "Chat: the provider rejected the model's tool call; asking again");
                     messages.push(json!({ "role": "user", "content": rejected_call_note(why) }));
                     continue;
                 }
-                Some(_) => {
-                    tracing::info!(provider, "Chat: the model's tool call was rejected again; answering without tools");
-                    break;
-                }
-                None => return Err(e),
-            },
+                tracing::info!(provider, "Chat: the model's tool call was rejected again; answering without tools");
+                break;
+            }
         };
 
         let tool_calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
@@ -1580,6 +1626,7 @@ async fn tool_loop(
             if let Some(d) = result["displayText"].as_str() {
                 tools_used.push(d.to_string());
             }
+            report(live, &tools_used, web.as_deref());
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": id,
@@ -1592,7 +1639,9 @@ async fn tool_loop(
         if let Some(turn) = web.as_deref_mut() {
             if let Some(q) = turn.take_local_retry() {
                 tracing::info!(provider, "Chat: no local prices in the results; Yap searches again for them");
+                searching(live);
                 search_for_the_model(turn, &q, &mut messages, &mut tools_used).await;
+                report(live, &tools_used, Some(turn));
             }
         }
         // Nothing in the notes for a question the web may answer: a model on
@@ -1602,7 +1651,9 @@ async fn tool_loop(
             if let Some(turn) = web.as_deref_mut().filter(|t| !t.looked()) {
                 led_to_web = true;
                 tracing::info!(provider, "Chat: nothing in the notes; Yap searches the web for the model");
+                searching(live);
                 search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used).await;
+                report(live, &tools_used, Some(turn));
             }
         }
     }
@@ -1610,17 +1661,8 @@ async fn tool_loop(
     // Out of steps, or the tool calls kept being rejected: one final call
     // WITHOUT tools to force a plain answer.
     messages.push(json!({ "role": "user", "content": ANSWER_NOW_NOTE }));
-    let msg = crate::llm::post_chat_message(
-        base_url,
-        api_key,
-        model,
-        provider,
-        0.5,
-        Value::Array(messages),
-        None,
-        None,
-    )
-    .await?;
+    let req = crate::llm::ChatRequest::chat(base_url, api_key, model, provider, 0.5, Value::Array(messages), None, None);
+    let msg = ask(live, &req, false, disable_thinking).await?;
     let content = msg["content"].as_str().unwrap_or("").trim().to_string();
     let content = if disable_thinking { crate::llm::strip_thinking(&content) } else { content };
     if content.is_empty() {
@@ -2109,7 +2151,7 @@ mod tests {
         let ask = |q: &'static str| {
             let base = base.clone();
             async move {
-                run_tool_loop_with("You are helpful.", &[], q, &[], &base, "", "fake-chat", "custom", false, false, &|_| {}, None, FirstStep::Model, extra)
+                run_tool_loop_with("You are helpful.", &[], q, &[], &base, "", "fake-chat", "custom", false, false, &|_| {}, None, FirstStep::Model, extra, None)
                     .await
                     .unwrap()
                     .1
@@ -2611,5 +2653,239 @@ mod tests {
         let (s, t) = (est(&system), est(&tools.to_string()));
         println!("one tool step sends: system {s} + tools {t} = {} tokens", s + t);
         assert!(s + t <= 2_250, "{} tokens", s + t);
+    }
+
+    // ---- streamed answers (stream.rs, llm::post_chat_streamed) ----
+
+    /// What a scripted model answers: server-sent events (each a chunk's
+    /// data), or a whole JSON body with a status.
+    enum Reply {
+        Sse(Vec<String>),
+        Json(u16, Value),
+    }
+
+    /// A stand-in chat model that streams when the script says so; every
+    /// request is kept.
+    fn fake_streamer(steps: Vec<Reply>) -> FakeServer {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("a local port");
+        let port = server.server_addr().to_ip().expect("ip").port();
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = requests.clone();
+        std::thread::spawn(move || {
+            let mut steps = steps.into_iter();
+            for mut req in server.incoming_requests() {
+                let mut body = String::new();
+                let _ = req.as_reader().read_to_string(&mut body);
+                kept.lock().unwrap().push((req.url().to_string(), serde_json::from_str(&body).unwrap_or(Value::Null)));
+                match steps.next() {
+                    Some(Reply::Sse(chunks)) => {
+                        let wire: String = chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
+                        let header = tiny_http::Header::from_bytes("content-type", "text/event-stream").unwrap();
+                        let _ = req.respond(tiny_http::Response::from_string(wire).with_header(header));
+                    }
+                    Some(Reply::Json(status, v)) => {
+                        let header = tiny_http::Header::from_bytes("content-type", "application/json").unwrap();
+                        let _ = req.respond(tiny_http::Response::from_string(v.to_string()).with_status_code(status).with_header(header));
+                    }
+                    None => {
+                        let v = json!({ "choices": [{ "index": 0, "message": { "role": "assistant", "content": "OK" } }] });
+                        let header = tiny_http::Header::from_bytes("content-type", "application/json").unwrap();
+                        let _ = req.respond(tiny_http::Response::from_string(v.to_string()).with_header(header));
+                    }
+                }
+            }
+        });
+        FakeServer { base: format!("http://127.0.0.1:{port}"), requests }
+    }
+
+    fn delta(d: Value) -> String {
+        json!({ "object": "chat.completion.chunk", "choices": [{ "index": 0, "delta": d, "finish_reason": null }] }).to_string()
+    }
+
+    fn finish(reason: &str) -> String {
+        json!({ "object": "chat.completion.chunk", "choices": [{ "index": 0, "delta": {}, "finish_reason": reason }] }).to_string()
+    }
+
+    /// An answer streamed in `pieces`, with usage and "[DONE]".
+    fn streamed_answer(pieces: &[&str]) -> Reply {
+        let mut c: Vec<String> = vec![delta(json!({ "role": "assistant", "content": "" }))];
+        c.extend(pieces.iter().map(|p| delta(json!({ "content": p }))));
+        c.push(finish("stop"));
+        c.push(json!({ "choices": [], "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 } }).to_string());
+        c.push("[DONE]".into());
+        Reply::Sse(c)
+    }
+
+    /// Every event a streamed turn sent.
+    #[derive(Default)]
+    struct Seen(std::sync::Mutex<Vec<crate::stream::Event>>);
+
+    impl crate::stream::Sink for Seen {
+        fn send(&self, ev: crate::stream::Event) {
+            self.0.lock().unwrap().push(ev);
+        }
+    }
+
+    impl Seen {
+        fn events(&self) -> Vec<crate::stream::Event> {
+            self.0.lock().unwrap().clone()
+        }
+        fn texts(&self) -> Vec<String> {
+            self.events()
+                .into_iter()
+                .filter_map(|e| match e {
+                    crate::stream::Event::Text { text } => Some(text),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    async fn ask_streamed(fake: &FakeServer, question: &str, seen: &Seen) -> Result<(String, Vec<String>), String> {
+        tool_loop(
+            "You are helpful.",
+            &[],
+            question,
+            &[],
+            &format!("{}/v1", fake.base),
+            "",
+            "fake-chat",
+            "custom",
+            false,
+            false,
+            &|_| {},
+            None,
+            FirstStep::Model,
+            Extra::default(),
+            Some(crate::stream::Live { sink: seen, beside: None }),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_streamed_turn_shows_the_answer_and_never_the_line_before_a_tool_call() {
+        crate::notes::create("Kitchen budget", "Agreed £15,000; Sam checks the quotes.", "manual", "");
+        let fake = fake_streamer(vec![
+            // "I'll look in your notes." then the call, its arguments in pieces.
+            Reply::Sse(vec![
+                delta(json!({ "role": "assistant", "content": "I'll look in " })),
+                delta(json!({ "content": "your notes." })),
+                delta(json!({ "tool_calls": [{ "index": 0, "id": "call_1", "type": "function", "function": { "name": "search_notes", "arguments": "" } }] })),
+                delta(json!({ "tool_calls": [{ "index": 0, "function": { "arguments": "{\"query\": \"kit" } }] })),
+                delta(json!({ "tool_calls": [{ "index": 0, "function": { "arguments": "chen budget\"}" } }] })),
+                finish("tool_calls"),
+                "[DONE]".into(),
+            ]),
+            streamed_answer(&["The kitchen ", "budget is £15,000. ", "Sam checks ", "the quotes."]),
+        ]);
+        let seen = Seen::default();
+        let (reply, chips) = ask_streamed(&fake, "What's the kitchen budget?", &seen).await.expect("an answer");
+        assert_eq!(reply, "The kitchen budget is £15,000. Sam checks the quotes.");
+        assert_eq!(chips, ["Found 1 note for \"kitchen budget\""]);
+
+        let events = seen.events();
+        // The line before the call never showed; the call did, as a chip.
+        assert!(!seen.texts().iter().any(|t| t.contains("look in")), "{events:?}");
+        let tool_at = events.iter().position(|e| matches!(e, crate::stream::Event::Tool { name, .. } if name == "search_notes")).expect("the call's chip");
+        let chips_at = events.iter().position(|e| matches!(e, crate::stream::Event::Chips { .. })).expect("the chips");
+        let first_text = events.iter().position(|e| matches!(e, crate::stream::Event::Text { text } if !text.is_empty())).expect("text");
+        assert!(tool_at < chips_at && chips_at < first_text, "{events:?}");
+        // The answer grew, and ended whole.
+        let texts = seen.texts();
+        assert!(texts.len() >= 2, "{texts:?}");
+        assert_eq!(texts.first().unwrap(), "The kitchen budget is £15,000. Sam checks");
+        assert_eq!(texts.last().unwrap(), &reply);
+
+        // Both steps were streamed, asking for the usage.
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 2);
+        for (_, body) in &requests {
+            assert_eq!(body["stream"], true);
+            assert_eq!(body["stream_options"]["include_usage"], true);
+        }
+        // The reassembled call went back as the model made it, with its result.
+        let messages = requests[1].1["messages"].as_array().unwrap();
+        let call = &messages[messages.len() - 2]["tool_calls"][0];
+        assert_eq!(call["id"], "call_1");
+        assert_eq!(serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap()).unwrap(), json!({ "query": "kitchen budget" }));
+        assert_eq!(messages.last().unwrap()["role"], "tool");
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_breaks_is_asked_again_whole_and_its_text_replaced() {
+        let half = || {
+            Reply::Sse(vec![
+                delta(json!({ "role": "assistant", "content": "Half an answer. And mo" })),
+                json!({ "error": { "code": 502, "message": "Provider disconnected" } }).to_string(),
+            ])
+        };
+        let whole = |t: &str| Reply::Json(200, json!({ "choices": [{ "index": 0, "message": { "role": "assistant", "content": t } }] }));
+        let fake = fake_streamer(vec![half(), whole("A whole answer."), half(), whole("Another."), whole("Not streamed.")]);
+        let seen = Seen::default();
+        let (reply, _) = ask_streamed(&fake, "hello", &seen).await.expect("an answer");
+        assert_eq!(reply, "A whole answer.");
+        // What streamed was replaced by the whole answer.
+        assert_eq!(seen.texts(), ["Half an answer. And mo", "A whole answer."]);
+        // Once more: then that server isn't streamed to again this session.
+        let (reply, _) = ask_streamed(&fake, "hello again", &Seen::default()).await.expect("an answer");
+        assert_eq!(reply, "Another.");
+        let (reply, _) = ask_streamed(&fake, "and again", &Seen::default()).await.expect("an answer");
+        assert_eq!(reply, "Not streamed.");
+        let streamed: Vec<bool> = fake.requests.lock().unwrap().iter().map(|(_, b)| b["stream"] == true).collect();
+        assert_eq!(streamed, [true, false, true, false, false]);
+    }
+
+    #[tokio::test]
+    async fn a_server_that_wont_stream_still_answers() {
+        // It refuses stream_options first, then streaming itself.
+        let fake = fake_streamer(vec![
+            Reply::Json(400, json!({ "error": { "message": "Unrecognized request argument supplied: stream_options" } })),
+            Reply::Json(400, json!({ "error": { "message": "Streaming is not supported for this model" } })),
+            Reply::Json(200, json!({ "choices": [{ "index": 0, "message": { "role": "assistant", "content": "Whole." } }] })),
+        ]);
+        let seen = Seen::default();
+        let (reply, _) = ask_streamed(&fake, "hello", &seen).await.expect("an answer");
+        assert_eq!(reply, "Whole.");
+        assert_eq!(seen.texts(), ["Whole."], "the page still sees the answer");
+        let requests = fake.requests.lock().unwrap().clone();
+        assert!(requests[0].1.get("stream_options").is_some());
+        assert!(requests[1].1.get("stream_options").is_none() && requests[1].1["stream"] == true);
+        assert_eq!(requests[2].1["stream"], false);
+        assert!(!crate::llm::streams_to(&format!("{}/v1", fake.base)));
+        // An "upstream" error isn't about streaming.
+        let other = fake_streamer(vec![Reply::Json(400, json!({ "error": { "message": "upstream provider rejected the request" } }))]);
+        assert!(ask_streamed(&other, "hello", &Seen::default()).await.unwrap_err().starts_with("HTTP 400"));
+        assert!(crate::llm::streams_to(&format!("{}/v1", other.base)));
+    }
+
+    #[tokio::test]
+    async fn a_streamed_call_cut_off_or_refused_mid_way_is_asked_again() {
+        let fake = fake_streamer(vec![
+            // Arguments cut off mid-string: not JSON.
+            Reply::Sse(vec![
+                delta(json!({ "tool_calls": [{ "index": 0, "id": "c1", "type": "function", "function": { "name": "search_notes", "arguments": "{\"query\": \"bu" } }] })),
+                finish("tool_calls"),
+                "[DONE]".into(),
+            ]),
+            // Groq's refusal of the model's call, mid-stream.
+            Reply::Sse(vec![json!({ "error": {
+                "message": "Tool call validation failed: parameters for tool edit_note did not match schema: errors: [missing properties: 'note_id']",
+                "type": "invalid_request_error",
+                "code": "tool_use_failed",
+                "failed_generation": "{}"
+            } })
+            .to_string()]),
+            streamed_answer(&["Which note do you mean?"]),
+        ]);
+        let seen = Seen::default();
+        let (reply, chips) = ask_streamed(&fake, "Fix my note", &seen).await.expect("an answer, never the error");
+        assert_eq!((reply.as_str(), chips.len()), ("Which note do you mean?", 0));
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 3);
+        let told = |i: usize| requests[i].1["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_string();
+        assert!(told(1).contains("weren't complete JSON"), "{}", told(1));
+        // Refused again (Groq's, mid-stream): answered without tools.
+        assert_eq!(told(2), ANSWER_NOW_NOTE);
+        assert!(requests[2].1.get("tools").is_none());
     }
 }

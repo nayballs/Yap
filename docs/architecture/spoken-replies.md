@@ -64,7 +64,17 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   start over one, and refuses while a meeting records (the loopback would
   put Yap in "Them"; `meeting::start` stops it). Each sentence is
   `stream`ed into the sink piece by piece (each piece checked: stopped, or
-  a dictation started → the stream ends). **A read-aloud job** (`Job.track`
+  a dictation started → the stream ends). **A streamed answer's job**
+  (`Job.feed`, `speak_streamed` → a `Feed`; the Voice Assistant,
+  2026-10-22): it starts with no sentences and is "speaking" at once; the
+  worker says each sentence pushed (`Feed::push`, prepared per batch),
+  waits while the feed is open (15 ms polls; ≤ 3 min without a sentence,
+  `FEED_PATIENCE`), and ends after the last once it's closed
+  (`Feed::close`); a stop, a newer utterance or a dictation ends it and
+  `push` says so (`false`). `ready_sentences(md, n, done)`: the sentences
+  of a streamed answer's first block the voice can have now — never the
+  one still being written. Test mode records the whole streamed utterance
+  when its feed closes (`streamed: true`). **A read-aloud job** (`Job.track`
   + `first`: the `Track`'s shown sentences from there): each sentence is
   said as `said_text` writes it (`inline_text` + `normalize::for_speech`),
   made only once the one before it **plays** (`wait_turn`: one sentence

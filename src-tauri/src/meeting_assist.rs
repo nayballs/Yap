@@ -148,17 +148,50 @@ pub struct CatchUp {
     pub answer: String,
     pub nothing_new: bool,
     pub upto: usize,
+    /// Stopped while it was being written (the sheet's ■): what came.
+    pub stopped: bool,
+}
+
+/// One notepad answer, streamed to the page's channel when it sent one
+/// (`stream.rs`) and stoppable by `turn_id` (its ■): the answer, and
+/// whether it was stopped (then: what had shown).
+async fn streamed_answer(
+    app: &AppHandle,
+    ep: &summary::Endpoint,
+    messages: serde_json::Value,
+    opts: &crate::llm::ChatOptions,
+    on_stream: &crate::stream::PageChannel,
+    turn_id: Option<&str>,
+) -> Result<(String, bool), String> {
+    let stop = crate::stream::Stoppable::new(turn_id);
+    let watch = crate::stream::Watch::new(on_stream);
+    let sink = on_stream.0.is_some().then_some(&watch as &dyn crate::stream::Sink);
+    let asked = summary::chat_beside_dictation_live(app, ep, messages, opts, sink);
+    match crate::stream::unless_stopped(asked, Some(&stop)).await {
+        Some(answer) => Ok((answer?, false)),
+        None => {
+            let shown = watch.seen().text;
+            if shown.trim().is_empty() {
+                return Err(crate::stream::STOPPED.to_string());
+            }
+            Ok((shown, true))
+        }
+    }
 }
 
 /// "What did I miss?" for meeting `note_id`: what was said since transcript
 /// segment `since` (where the person last looked). With `question`, a
 /// follow-up asked in the same chat, answered from the meeting so far.
+/// `onStream` / `turnId`: streamed to the sheet, stoppable
+/// ([`streamed_answer`]).
 #[tauri::command]
 pub async fn meeting_catch_up(
     app: AppHandle,
     note_id: u64,
     since: usize,
     question: Option<String>,
+    on_stream: crate::stream::PageChannel,
+    turn_id: Option<String>,
 ) -> Result<CatchUp, String> {
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
     let upto = note.transcript.len();
@@ -167,7 +200,7 @@ pub async fn meeting_catch_up(
         None => match summary::catch_up_input(&note, since) {
             Some(input) => summary::catch_up_messages(&input),
             None => {
-                return Ok(CatchUp { answer: NOTHING_NEW.to_string(), nothing_new: true, upto });
+                return Ok(CatchUp { answer: NOTHING_NEW.to_string(), nothing_new: true, upto, stopped: false });
             }
         },
         Some(q) => summary::meeting_ask_messages(&note, q),
@@ -176,12 +209,12 @@ pub async fn meeting_catch_up(
     let ep = summary::resolve_endpoint(&cfg)?;
     let opts = ep.options(summary::CATCH_UP_REPLY_TOKENS, 0.3);
     let messages = crate::memory::with_helper_block(messages, &cfg);
-    let answer = summary::chat_beside_dictation(&app, &ep, messages, &opts).await?;
+    let (answer, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref()).await?;
     let answer = answer.trim().to_string();
     if answer.is_empty() {
         return Err("The model returned an empty answer".to_string());
     }
-    Ok(CatchUp { answer, nothing_new: false, upto })
+    Ok(CatchUp { answer, nothing_new: false, upto, stopped })
 }
 
 /// The one-tap helpers besides "What did I miss?" (the `kind` of
@@ -245,16 +278,26 @@ pub struct Assist {
     pub answer: String,
     pub plain: bool,
     pub too_little: bool,
+    /// Stopped while it was being written (the sheet's ■): what came.
+    pub stopped: bool,
 }
 
 /// A one-tap helper for meeting `note_id` ([`Helper`]): one call on the
-/// meeting's model, never slowing a dictation.
+/// meeting's model, never slowing a dictation. `onStream` / `turnId`:
+/// streamed to the sheet, stoppable ([`streamed_answer`]); the email is
+/// cleaned (`clean_email`) once it's whole, in place of what streamed.
 #[tauri::command]
-pub async fn meeting_assist(app: AppHandle, note_id: u64, kind: Helper) -> Result<Assist, String> {
+pub async fn meeting_assist(
+    app: AppHandle,
+    note_id: u64,
+    kind: Helper,
+    on_stream: crate::stream::PageChannel,
+    turn_id: Option<String>,
+) -> Result<Assist, String> {
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
     let plain = kind == Helper::FollowUpEmail;
     let Some(input) = kind.input(&note) else {
-        return Ok(Assist { answer: kind.too_little().to_string(), plain: false, too_little: true });
+        return Ok(Assist { answer: kind.too_little().to_string(), plain: false, too_little: true, stopped: false });
     };
     let cfg = crate::config::load();
     let ep = summary::resolve_endpoint(&cfg)?;
@@ -263,7 +306,9 @@ pub async fn meeting_assist(app: AppHandle, note_id: u64, kind: Helper) -> Resul
     // The person (About you's name and note, memory's "You"): the email
     // signs with their name, the questions fit their role.
     let messages = crate::memory::with_helper_block(summary::helper_messages(kind.prompt(), &input), &cfg);
-    let reply = summary::chat_beside_dictation(&app, &ep, messages, &opts).await?;
+    let (reply, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref()).await?;
+    // A stopped email is what came, as it came (half an email isn't one).
+    let plain = plain && !stopped;
     let answer = if plain {
         summary::clean_email(&reply, &summary::email_subject(&note))
     } else {
@@ -274,7 +319,7 @@ pub async fn meeting_assist(app: AppHandle, note_id: u64, kind: Helper) -> Resul
     }
     // A one-line "too little to go on" isn't an email to copy as one.
     let plain = plain && answer.starts_with("Subject: ");
-    Ok(Assist { answer, plain, too_little: false })
+    Ok(Assist { answer, plain, too_little: false, stopped })
 }
 
 #[cfg(test)]

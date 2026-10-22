@@ -40,6 +40,10 @@ pub struct ChatMessage {
     /// when there are some.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<Source>,
+    /// An answer stopped while it was being written (the Chat view's ■,
+    /// `stream.rs`): what had come so far, checked like any answer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stopped: bool,
 }
 
 /// One web source of an answer: its number in the answer's citations, the
@@ -279,6 +283,22 @@ pub fn append_sourced(
     voice: bool,
     sources: &[Source],
 ) -> Result<usize, String> {
+    append_message(id, role, text, tools, model, voice, sources, false)
+}
+
+/// [`append_sourced`], and whether the answer was stopped while it was
+/// being written (`stopped`).
+#[allow(clippy::too_many_arguments)]
+pub fn append_message(
+    id: u64,
+    role: &str,
+    text: &str,
+    tools: &[String],
+    model: Option<ChatModel>,
+    voice: bool,
+    sources: &[Source],
+    stopped: bool,
+) -> Result<usize, String> {
     with_store(|s| {
         let conv = s
             .conversations
@@ -293,6 +313,7 @@ pub fn append_sourced(
             model,
             voice,
             sources: sources.to_vec(),
+            stopped,
         });
         conv.updated_ts = now_secs();
         let index = conv.messages.len() - 1;
@@ -872,6 +893,7 @@ mod tests {
             model: None,
             voice: false,
             sources,
+            stopped: false,
         };
         let messages = vec![
             msg("user", vec![]),

@@ -1983,6 +1983,35 @@ pub(crate) async fn chat_beside_dictation(
     chat_beside_dictation_with(app, ep, messages, opts, serde_json::Map::new()).await
 }
 
+/// [`chat_beside_dictation`], **streamed** to `sink` when someone watches
+/// (the notepad's Ask sheet, `stream.rs`): the answer as it's written, and
+/// the same rule beside a dictation — on a model on this PC it waits one out
+/// first and drops the stream when one starts, then asks again.
+pub(crate) async fn chat_beside_dictation_live(
+    app: &AppHandle,
+    ep: &Endpoint,
+    messages: Value,
+    opts: &ChatOptions,
+    sink: Option<&dyn crate::stream::Sink>,
+) -> Result<String, String> {
+    let Some(sink) = sink else {
+        return chat_beside_dictation(app, ep, messages, opts).await;
+    };
+    let req = crate::llm::ChatRequest::with_options(
+        &ep.base_url,
+        &ep.api_key,
+        &ep.model,
+        &ep.provider,
+        messages,
+        opts,
+        serde_json::Map::new(),
+    );
+    let beside = crate::stream::AnyDictation(app.clone());
+    let live = crate::stream::Live { sink, beside: ep.is_local().then_some(&beside as &dyn crate::stream::Dictations) };
+    let message = crate::stream::call(live, &req, false, opts.disable_thinking).await?;
+    crate::llm::answer_text(&message, opts.disable_thinking)
+}
+
 /// [`chat_beside_dictation`] with fields of the caller's own in the request
 /// body (the speaker names' JSON schema for a model on this PC,
 /// `speakers/naming.rs`).

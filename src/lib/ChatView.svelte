@@ -8,10 +8,19 @@
   //
   // A model that can call tools (tools.rs) looks notes up and changes them;
   // each answer shows what it did as chips above it ("Edited "Launch plan":
-  // "Friday." → "Monday.""), kept with the message in chats.json. v1
-  // divergences (ROADMAP "AI Chat" escalating plan): no streaming (one
-  // response per turn, "Thinking…" placeholder), no conversation
-  // search/archive.
+  // "Friday." → "Monday.""), kept with the message in chats.json. No
+  // conversation search/archive yet.
+  //
+  // Streamed (stream.rs, streaming.js; 2026-10-22): the answer grows in
+  // place as it's written — markdown rendered as it comes (closePartial), a
+  // tool call shown as its chip ("Searching the web…") while it runs, the
+  // ■ in the composer stopping it (what came stays, checked like any
+  // answer, marked Stopped). At the end the CHECKED answer (chat_send's
+  // reply: no made-up sources list, no claimed search, no citation with
+  // nothing behind it) takes the streamed text's place: the same text
+  // stays put; a changed one glides to its new height and fades in
+  // (`settle`). A question asked out loud streams here too
+  // (`yap-assistant-stream`).
   //
   // Right-click menus (ui/contextMenu.svelte.js, as in Notes): a conversation
   // — also from its hover ⋯ and the ContextMenu key / Shift+F10 — has Rename
@@ -64,6 +73,7 @@
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
   import { copyText, messageItems, conversationMarkdown } from './itemMenus.js';
   import { openExternalLink } from './externalLinks.js';
+  import { streamCall, liveAnswer, applyEvent, closePartial, settle, streamingHeight, STOPPED } from './streaming.js';
 
   // A chip about the web (web.rs) or the safety rule (tools.rs).
   const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;
@@ -83,7 +93,8 @@
   // its markers are pills too, never raw "[1][2]".
   const CITES = /\[\d{1,2}(?:\s*,\s*\d{1,2})*\]/;
   function citedSources(i) {
-    const own = messages[i]?.sources;
+    // Still being written: the sources found so far.
+    const own = messages[i]?.sources?.length ? messages[i].sources : messages[i]?.liveSources;
     if (own?.length) return own;
     if (!CITES.test(messages[i]?.text ?? '')) return null;
     for (let k = i - 1; k >= 0; k--) {
@@ -94,6 +105,12 @@
   }
   let input = $state('');
   let sending = $state(false);
+  // The ■ of the answer being written (streamCall's stop), and whether it
+  // was pressed.
+  let stopAnswerCall = null;
+  let stopping = $state(false);
+  // An answer is being written in the thread (its bubble shows, not "Thinking…").
+  const streaming = $derived(messages.some((m) => m.streaming));
   let inputEl = $state(null);
   let threadEl = $state(null);
   // 'meetings' when the Meetings view's Ask bar started this chat: answers
@@ -302,10 +319,33 @@
   // switches to its conversation and shows it as it goes — the question at
   // once, "Thinking…" while the answer comes, then the answer (read aloud by
   // Rust). Never stops the voice: it's the answer being followed.
+  // A spoken question's answer as it's written (assistant.rs): it grows at
+  // the end of its conversation while that's the one shown.
+  let assistantLive = liveAnswer();
+  function followAssistantStream(p) {
+    const id = p?.conversationId;
+    if (id == null || id !== activeId || assistantPending !== id) return;
+    assistantLive = applyEvent(assistantLive, p.event);
+    let last = messages[messages.length - 1];
+    if (!last?.streaming) {
+      if (!assistantLive.started) return;
+      messages = [...messages, { role: 'assistant', streaming: true, text: '', tools: [], id: null }];
+      last = messages[messages.length - 1];
+    }
+    last.text = assistantLive.text;
+    last.tools = assistantLive.chips;
+    last.doing = assistantLive.doing;
+    last.liveSources = assistantLive.sources;
+    last.waiting = assistantLive.waiting;
+    followThread();
+  }
+
   async function followAssistant(p) {
     const id = p?.conversationId;
-    if (p?.phase === 'asked') assistantPending = id ?? null;
-    else if (p?.phase === 'answered' || p?.phase === 'failed') assistantPending = null;
+    if (p?.phase === 'asked') {
+      assistantPending = id ?? null;
+      assistantLive = liveAnswer();
+    } else if (p?.phase === 'answered' || p?.phase === 'failed') assistantPending = null;
     if (id == null) return;
     try {
       const conv = await invoke('chat_get', { id });
@@ -314,7 +354,15 @@
         activeId = id;
         scope = null;
       }
-      messages = (conv.messages || []).map((m, i) => ({ ...m, id: chatId(id, i) }));
+      // The answer that streamed here, replaced by the saved (checked) one.
+      const streamedAt = messages.findIndex((m) => m.streaming);
+      const streamed = streamedAt >= 0 ? messages[streamedAt].text : null;
+      const fromHeight = streamingHeight(threadEl);
+      messages = (conv.messages || []).map((m, i) => ({
+        ...m,
+        id: chatId(id, i),
+        revisedFrom: i === streamedAt && streamed && streamed.trim() !== m.text.trim() ? fromHeight : 0,
+      }));
       refreshList();
       scrollThread();
     } catch {
@@ -546,13 +594,50 @@
     // The next question: the last answer stops talking.
     stopReading();
     messages = [...messages, { role: 'user', text, voice, id: null }];
+    const qi = messages.length - 1;
     sending = true;
+    stopping = false;
     scrollThread();
+    // The answer as it's written: its bubble appears with the first text
+    // or tool call, at `ai`, and grows in place.
+    let live = liveAnswer();
+    let ai = -1;
+    const onEvent = (ev) => {
+      if (!alive) return;
+      if (ev?.kind === 'turn') {
+        // A new conversation: it's in the list from the first question.
+        if (activeId == null && ev.conversationId != null) {
+          activeId = ev.conversationId;
+          refreshList();
+        }
+        return;
+      }
+      live = applyEvent(live, ev);
+      if (ai < 0) {
+        if (!live.started && !live.waiting) return;
+        messages = [...messages, { role: 'assistant', streaming: true, text: '', tools: [], id: null }];
+        ai = messages.length - 1;
+      }
+      const m = messages[ai];
+      if (!m?.streaming) return;
+      m.text = live.text;
+      m.tools = live.chips;
+      m.doing = live.doing;
+      m.liveSources = live.sources;
+      m.waiting = live.waiting;
+      followThread();
+    };
+    const call = streamCall('chat_send', { conversationId: activeId, text, scope, voice }, onEvent);
+    stopAnswerCall = call.stop;
     try {
-      const res = await invoke('chat_send', { conversationId: activeId, text, scope, voice });
+      const res = await call.promise;
       if (!alive) return;
       activeId = res.conversationId;
-      const asked = messages[messages.length - 1];
+      const asked = messages[qi];
+      const streamed = ai >= 0 ? messages[ai].text : null;
+      const fromHeight = streamingHeight(threadEl);
+      // The checked answer takes the streamed one's place: the same bubble,
+      // a soft glide when the check changed the text.
       const answer = {
         role: 'assistant',
         text: res.reply,
@@ -560,16 +645,25 @@
         model: res.model ?? null,
         sources: res.sources || [],
         id: res.messageId ?? null,
+        stopped: !!res.stopped,
+        revisedFrom:
+          streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
-      messages = [...messages.slice(0, -1), { ...asked, id: res.userMessageId ?? null }, answer];
+      messages = [...messages.slice(0, qi), { ...asked, id: res.userMessageId ?? null }, answer];
       refreshList();
-      scrollThread();
+      followThread();
       // Read out by itself ("When to speak", decided in Rust): the voice
       // alone, no reading card (that's ▶'s).
       if (res.speak && answer.id) speakReply(answer.text, answer.id);
     } catch (e) {
       if (!alive) return;
-      messages = messages.slice(0, -1);
+      if (stopping && String(e).includes(STOPPED)) {
+        // Stopped before any of the answer came: the question stays.
+        messages = [...messages.slice(0, qi), { ...messages[qi], stopped: true }];
+        refreshList();
+        return;
+      }
+      messages = messages.slice(0, qi);
       input = text; // give the message back
       byVoice = voice;
       // Said so it's clear what to do (aiErrors.js); the raw error is in the log.
@@ -588,11 +682,28 @@
       });
     } finally {
       sending = false;
+      stopping = false;
+      stopAnswerCall = null;
       if (alive && sendWhenFree) {
         sendWhenFree = false;
         send();
       }
     }
+  }
+
+  /** ■: stop the answer being written (what came stays, checked). */
+  function stopAnswer() {
+    if (!sending || stopping || !stopAnswerCall) return;
+    stopping = true;
+    stopAnswerCall();
+  }
+
+  /** Keep the newest text in view while it's written — unless you scrolled up to read. */
+  function followThread() {
+    const el = threadEl;
+    if (!el) return;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (near) tick().then(() => (el.scrollTop = el.scrollHeight));
   }
 
   // The mic: a dictation into the chat box (chat_dictate: the text comes
@@ -617,6 +728,9 @@
     } else if (e.key === 'Escape' && speakingId?.startsWith('chat:')) {
       e.preventDefault();
       stopReading();
+    } else if (e.key === 'Escape' && sending && streaming && !e.defaultPrevented) {
+      e.preventDefault();
+      stopAnswer();
     }
   }
 
@@ -658,6 +772,7 @@
       // A question asked with the assistant shortcut, live (and its card's
       // "Open in Chat").
       listen('yap-assistant-turn', (e) => followAssistant(e.payload)),
+      listen('yap-assistant-stream', (e) => followAssistantStream(e.payload)),
       listen('yap-voice-replies', (e) => {
         if (typeof e.payload?.on === 'boolean') speakReplies = e.payload.on;
       }),
@@ -823,7 +938,7 @@
     {:else}
       <div class="msgs" bind:this={threadEl}>
         {#each messages as m, i (i)}
-          {#if m.role === 'assistant' && m.tools?.length}
+          {#if m.role === 'assistant' && (m.tools?.length || m.doing)}
             <!-- Tool-activity chips (OpenWhispr shows tool calls above the answer) -->
             <div class="toolchips">
               {#each m.tools as t, j (j)}
@@ -839,23 +954,43 @@
                   {t}
                 </span>
               {/each}
+              {#if m.streaming && m.doing}
+                <!-- The tool call under way. -->
+                <span class="toolchip doing" data-testid="chat-doing" aria-live="polite">
+                  <span class="spin" aria-hidden="true"></span>
+                  {m.doing}
+                </span>
+              {/if}
             </div>
           {/if}
           {@const reading = m.role === 'assistant' && !!m.id && speakingId === m.id}
+          {#if m.role === 'assistant' && m.streaming && !m.text}
+            <!-- Tools run, or a dictation is being waited out, before the first words. -->
+            <div class="cbubble assistant" aria-busy="true">
+              <p class="cbody thinking">{m.waiting ? 'Waiting for your dictation to finish…' : 'Thinking…'}</p>
+            </div>
+          {:else}
           <!-- Focusable for its menu from the keyboard (the ContextMenu key, Shift+F10). -->
           <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
           <div
             class="cbubble {m.role}"
             class:reading
+            class:streaming={m.streaming}
             role="article"
             tabindex="0"
             aria-label={m.role === 'assistant' ? 'Answer' : 'Your question'}
+            aria-busy={m.streaming ? 'true' : undefined}
+            data-testid={m.streaming ? 'chat-streaming' : undefined}
+            use:settle={m.revisedFrom || 0}
             oncontextmenu={(e) => messageMenu(e, m)}
             onkeydown={(e) => e.target === e.currentTarget && menuKey(e, (ev) => messageMenu(ev, m))}
           >
             {#if m.role === 'assistant'}
               <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
-              <div class="cbody">{@html renderMarkdown(m.text, { sources: citedSources(i) })}</div>
+              <div class="cbody">{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, { sources: citedSources(i) })}</div>
+              {#if m.streaming && m.waiting}
+                <p class="cwait" aria-live="polite">Waiting for your dictation to finish…</p>
+              {/if}
             {:else}
               <p class="cbody">
                 {#if m.voice}
@@ -866,6 +1001,11 @@
               </p>
             {/if}
           </div>
+          {/if}
+          {#if m.role === 'user' && m.stopped && i === messages.length - 1}
+            <!-- Stopped before any of the answer came. -->
+            <p class="stoppednote">Stopped</p>
+          {/if}
           {#if m.role === 'assistant' && m.sources?.length}
             <!-- Where a web answer came from: each opens in the browser. -->
             <div class="sources" role="group" aria-label="Sources">
@@ -880,7 +1020,7 @@
               {/each}
             </div>
           {/if}
-          {#if m.role === 'assistant'}
+          {#if m.role === 'assistant' && !m.streaming}
             <div class="msgfoot">
               {#if m.id}
                 <button
@@ -906,10 +1046,13 @@
                 <!-- The model that wrote it (older answers don't say). -->
                 <span class="byline" title={whereItRuns(m.model)}>{modelLine(m.model)}</span>
               {/if}
+              {#if m.stopped}
+                <span class="byline stopped" title="You stopped this answer while it was being written">· Stopped</span>
+              {/if}
             </div>
           {/if}
         {/each}
-        {#if sending || (assistantPending != null && assistantPending === activeId)}
+        {#if (sending || (assistantPending != null && assistantPending === activeId)) && !streaming}
           <div class="cbubble assistant">
             <p class="cbody thinking">Thinking…</p>
             {#if waitedS >= STILL_WORKING_S}
@@ -1008,7 +1151,12 @@
         <button class="micbtn" title="Dictate your message" aria-label="Dictate your message" onclick={micChat}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
         </button>
-        {#if input.trim()}
+        {#if sending}
+          <!-- ■: stop the answer being written (Esc too). -->
+          <button class="sendbtn stopbtn" disabled={stopping} onclick={stopAnswer} aria-label="Stop the answer" title="Stop (Esc)">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
+          </button>
+        {:else if input.trim()}
           <button class="sendbtn" disabled={sending} onclick={send} aria-label="Send" title="Send (Enter)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10 4 15l5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>
           </button>
@@ -1348,6 +1496,62 @@
   .cbody.thinking {
     color: var(--yap-muted-55);
     font-style: italic;
+  }
+  /* An answer being written: a soft caret at the end of its last line. */
+  .cbubble.streaming .cbody > :global(:is(p, h2, h3, h4, h5, blockquote):last-child)::after,
+  .cbubble.streaming .cbody > :global(:is(ul, ol):last-child > li:last-child)::after {
+    content: '';
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-left: 5px;
+    border-radius: 50%;
+    background: var(--yap-primary);
+    vertical-align: middle;
+    animation: caret 1s ease-in-out infinite;
+  }
+  @keyframes caret {
+    0%,
+    100% {
+      opacity: 0.25;
+    }
+    50% {
+      opacity: 0.9;
+    }
+  }
+  .toolchip.doing {
+    color: var(--yap-fg);
+  }
+  .spin {
+    width: 9px;
+    height: 9px;
+    border: 1.5px solid var(--yap-border);
+    border-top-color: var(--yap-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cbubble.streaming .cbody > :global(*)::after,
+    .cbubble.streaming .cbody > :global(* > li)::after,
+    .spin {
+      animation: none;
+    }
+  }
+  :global(:root[data-motion='reduced']) .cbubble.streaming .cbody > :global(*)::after,
+  :global(:root[data-motion='reduced']) .cbubble.streaming .cbody > :global(* > li)::after,
+  :global(:root[data-motion='reduced']) .spin {
+    animation: none;
+  }
+  .stoppednote {
+    align-self: flex-end;
+    margin: -4px 4px 2px 0;
+    font-size: 10.5px;
+    color: var(--yap-muted-55);
   }
   .cwait {
     margin: 4px 0 0;

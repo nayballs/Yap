@@ -141,7 +141,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 **Chat and the Voice Assistant** — [chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)
 - `chats.rs` — conversations (`chats.json`), tool chips, sources; the history a model gets (earlier searches replayed) and the checks on every answer (made-up sources, claimed searches, unsourced citations).
 - `tools.rs` / `note_text.rs` — the tool loop: note tools (safe partial edits), apps, web (a local model must search first), safety rule.
-- `assistant.rs` — the Voice Assistant: ask Chat out loud from any app; off during meetings.
+- `stream.rs` — streaming answers: SSE from every provider (tool calls reassembled and checked, a whole answer when streaming fails), a step's text held until it's an answer, ■ Stop, a local stream stepping aside for a dictation; the checked answer replaces what streamed.
+- `assistant.rs` — the Voice Assistant: ask Chat out loud from any app, spoken from the answer's first sentence; off during meetings.
 
 **Memory** — [memory.md](./docs/architecture/memory.md)
 - `memory.rs` (+ `memory/`) — what Yap remembers about you (`memory.json`): learned from quiet chats and meetings (a model without tools by the careful small path, `memory/small.rs`), sent with questions, remember/forget/search_chats tools, names for dictation, export, Undo.
@@ -225,7 +226,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `DictionaryView.svelte` — corrections and snippets ([dictionary.md](./docs/architecture/dictionary.md)).
 - `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)).
 - `lib/markdown.js` — every rendered answer/note: markdown-it + DOMPurify, citation pills ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
-- `ChatView.svelte` + `ChatModelPicker.svelte` — Chat and its model picker ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)).
+- `ChatView.svelte` + `ChatModelPicker.svelte` — Chat and its model picker ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)); `lib/streaming.js` — streamed answers in Chat and the notepad's Ask sheet (the channel, ■, half-written markdown closed off, the checked answer's smooth swap).
 - `MeetingsView` / `Notepad` / `SplitPreview` — meetings and the notepad ([meetings.md](./docs/architecture/meetings.md)); `BriefView.svelte` + `brief.js` — a meeting's pre-meeting brief everywhere it shows ([calendar.md](./docs/architecture/calendar.md#pre-meeting-briefs)); `SpeakerMenu` / `SpeakerCard` — a speaker's menu and the name cards ([speakers.md](./docs/architecture/speakers.md)).
 - `ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
@@ -380,7 +381,7 @@ replies off. Every setting, file and default: [config-and-data.md](./docs/archit
 - **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation).
 - **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly.
 - Much is unit-, e2e- and robot-tested but not yet tried in real use (a real call, real AI apps, answers heard on speakers…).
-- **Not yet done**: Chat streaming and semantic search, a rich notes editor, the call app's speaker names checked in a real call, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.
+- **Not yet done**: Chat's semantic search, a rich notes editor, the call app's speaker names checked in a real call, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.
 
 What was tested how, and every gap: [status.md](./docs/architecture/status.md).
 
