@@ -255,11 +255,29 @@ and fell back to bg3.wiki correctly; Gemini 2.5 Flash/Flash-Lite are
 closed to new keys. Anthropic, OpenAI and OpenRouter searches untried
 with real keys; Gemini grounding untried on a billed key.
 
+**Memory** (`memory.rs`, 2026-10-22; [memory.md](./memory.md)): what Yap
+remembers about the person, learned from quiet chats (and, opt-in,
+meetings) by a Chat model that can call tools, sent with questions,
+changed by "Tell Yap what to change", imports, "Remember that…" and Settings
+→ Memory, the names of people and projects fed to dictation. Unit-tested
+(the rules, guards, prompts, export, the names pass over ~200 everyday
+sentences with this PC's spell checker, the memory tools through the real
+loop), e2e-tested against the fake model (Settings → Memory, Tell, import,
+the learned toast, no AI, a small model), evaluated on real models
+(Qwen3.5-4B 42/42, then 43/44 with About you, on the GPU, Groq gpt-oss-20b 8/8, Qwen2.5-1.5B on the CPU
+— model-evals.md "Memory"), and the dictation side robot-tested in the test
+pad. Not yet used day to day: whether what a real week of chats teaches it
+is worth keeping, and the 5-minute scheduler and the quit/restart path,
+only unit-level.
+
 ## Not yet done
 
 Not yet done: the AI Chat surface has no streaming responses, no semantic-vector
 search (keyword-RAG only), no calendar tools and no conversation
-search/archive; ElevenLabs as the reply voice isn't yet tried with a real key; spoken replies read Kokoro's
+search/archive (Chat's `search_chats` searches past chats by keyword for the
+model, not for the person); memory isn't synced between PCs, matches
+questions by keyword (no embeddings), and doesn't learn with a model too
+small to call tools; ElevenLabs as the reply voice isn't yet tried with a real key; spoken replies read Kokoro's
 Japanese and Mandarin voices' text as English, don't check a slow PC's
 speed before choosing Kokoro (the research's first-use RTF check), wait for the whole answer
 before the first sentence, don't listen again by themselves after an answer,

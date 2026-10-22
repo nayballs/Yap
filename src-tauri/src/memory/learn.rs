@@ -1,0 +1,879 @@
+//! The passes that change memory, all through the person's **Chat model**
+//! (`commands::resolve_chat_endpoint`):
+//! - **learning from a chat** that went quiet ([`learn_from_chat`]; the
+//!   scheduler: 5 minutes without a new message, another chat starting, or a
+//!   minute after the next start when Yap quit first);
+//! - **learning from a meeting** whose action plan is written
+//!   ([`learn_from_meeting`], "Learn from meetings");
+//! - **"Tell Yap what to change"** and **imports** ([`propose`]): changes
+//!   shown as a diff, applied when the person says so ([`apply_proposal`]);
+//! - **"remember" / "forget"** from a chat or the Voice Assistant ([`tool`]
+//!   for a model with tools, [`spoken`] for one without).
+//!
+//! A model on this PC follows the sidecar's rules: its work counts as busy
+//! (`local_llm::hold`), it never runs during a dictation, and a dictation
+//! starting drops the call (asked again after it). A model on this PC also
+//! answers under llama.cpp's JSON grammar (`response_format: json_object`),
+//! so it always writes JSON Yap can read. A pass that finds the on-device
+//! model stopped waits for the next one rather than starting it in the
+//! background.
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
+use serde_json::{json, Value};
+use tauri::AppHandle;
+
+use super::ops::{self, Action, Change, Done, Item, Origin, Rules, Section};
+use super::{prompt, Applied};
+
+/// The Chat model's endpoint, as a pass uses it.
+pub struct Endpoint {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub provider: String,
+    pub disable_thinking: bool,
+}
+
+impl Endpoint {
+    fn local(&self) -> bool {
+        crate::ai_model::runs_here(&self.provider, &self.base_url)
+    }
+}
+
+/// The Chat model, or why there's none ("No AI model configured — …").
+pub fn endpoint(cfg: &crate::config::YapConfig) -> Result<Endpoint, String> {
+    let (base_url, api_key, model, provider, _persona, disable_thinking) = crate::commands::resolve_chat_endpoint(cfg)?;
+    Ok(Endpoint { base_url, api_key, model, provider, disable_thinking })
+}
+
+/// A background pass that waited out dictations and gave up for now (the
+/// scheduler asks again later).
+pub const DEFERRED: &str = "Memory: put off for now";
+
+/// A dictation recording or transcribing (or an Upload): a model on this PC
+/// must be free then.
+fn dictation_busy(app: &AppHandle) -> bool {
+    crate::meeting_summary::dictation_busy(app)
+}
+
+/// One call to the Chat model for a pass: low temperature, a reply cap and
+/// the changes' JSON schema for a model on this PC, and the sidecar's rules
+/// (`background`: give up after one dictation got in the way).
+async fn ask(ep: &Endpoint, system: &str, user: &str, max_changes: usize, background: bool) -> Result<String, String> {
+    let local = ep.local();
+    let opts = crate::llm::ChatOptions {
+        temperature: 0.2,
+        max_tokens: local.then_some(if max_changes > 8 { 2_000 } else { 800 }),
+        // A 4B model on a processor writes ~10 tokens a second.
+        timeout: Duration::from_secs(if local { 240 } else { 60 }),
+        disable_thinking: ep.disable_thinking,
+    };
+    let messages = json!([{ "role": "system", "content": system }, { "role": "user", "content": user }]);
+    // A small model on this PC (one that can't call tools) answers under the
+    // changes' JSON schema as llama.cpp's grammar, every field required in a
+    // fixed order: left to itself Qwen2.5-1.5B wrote JSON Yap couldn't read.
+    // A bigger one writes better without it: under the strict schema
+    // Qwen3.5-4B passed 36 of 42 memory scenarios, without it 41; with the
+    // fields optional it stopped every change after its "section"; and
+    // llamafile 0.10.6 ignores a bare `json_object` (the model evaluations,
+    // 2026-10-22).
+    let mut schema = serde_json::Map::new();
+    if local {
+        let mode = match json_mode() {
+            "auto" if crate::tools::supports_tools(&ep.provider, &ep.model) => "off",
+            "auto" => "schema",
+            m => m,
+        };
+        match mode {
+            "schema" => {
+                schema.insert(
+                    "response_format".into(),
+                    json!({ "type": "json_schema", "json_schema": { "name": "memory_changes", "schema": prompt::schema(max_changes) } }),
+                );
+            }
+            "object" => {
+                schema.insert("response_format".into(), json!({ "type": "json_object" }));
+            }
+            _ => {}
+        }
+    }
+    let call = |extra: serde_json::Map<String, Value>| {
+        let messages = messages.clone();
+        let opts = &opts;
+        async move {
+            let out = crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages.clone(), opts, extra.clone()).await;
+            // A server that won't take the schema: once more without it.
+            match out {
+                Err(e) if !extra.is_empty() && (e.contains("response_format") || e.contains("400") || e.contains("schema")) => {
+                    tracing::info!("Memory: the model's server refused the JSON schema; asking without it");
+                    crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, opts, serde_json::Map::new()).await
+                }
+                other => other,
+            }
+        }
+    };
+    if !local {
+        return call(serde_json::Map::new()).await;
+    }
+    // The on-device model is busy for the whole pass, waits included.
+    let _sidecar = crate::local_llm::hold(&ep.base_url);
+    let Some(app) = super::app() else {
+        return call(schema).await; // a model evaluation: no dictations
+    };
+    let tries = if background { 2 } else { 5 };
+    for _ in 0..tries {
+        crate::meeting_summary::wait_idle(|| dictation_busy(app), || true).await;
+        match crate::meeting_summary::unless_busy(call(schema.clone()), || dictation_busy(app)).await {
+            Some(out) => return out,
+            None => tracing::info!("Memory pass set aside for a dictation"),
+        }
+    }
+    Err(DEFERRED.to_string())
+}
+
+/// How a model on this PC is held to JSON: "auto" (the changes' schema as
+/// llama.cpp's grammar for a model without tools, nothing for one with
+/// them), or — a model evaluation comparing, `YAP_EVAL_MEMORY_JSON` —
+/// "schema", "object" (`json_object`) or "off" for every model.
+fn json_mode() -> &'static str {
+    if crate::eval::active() {
+        match std::env::var("YAP_EVAL_MEMORY_JSON").as_deref() {
+            Ok("schema") => return "schema",
+            Ok("object") => return "object",
+            Ok("off") => return "off",
+            _ => {}
+        }
+    }
+    "auto"
+}
+
+/// No changes (nothing to learn, or nothing was asked).
+fn nothing() -> Applied {
+    Applied { batch: 0, done: Vec::new() }
+}
+
+/// Can this Chat model learn from chats and meetings by itself? A model
+/// that can call tools (a cloud model, Qwen3.5-4B…) yes; a small one
+/// (Qwen2.5-1.5B) no: in the model evaluations it kept what the person
+/// only asked about ("Australia: capital is Canberra") and filed "Nurse at
+/// St James's" as a person, on 6 of 12 learning scenarios, and a pass
+/// took 10–120 s of a processor (2026-10-22). "Tell Yap what to change",
+/// imports and "Remember that…" — reviewed or asked for — still use it.
+/// (A model evaluation may make it learn anyway: `YAP_EVAL_MEMORY_SMALL=learn`.)
+pub fn learns_by_itself(ep: &Endpoint) -> bool {
+    crate::tools::supports_tools(&ep.provider, &ep.model)
+        || (crate::eval::active() && std::env::var("YAP_EVAL_MEMORY_SMALL").as_deref() == Ok("learn"))
+}
+
+/// Is the on-device model the Chat model, and stopped? A background pass
+/// doesn't start it.
+fn on_device_stopped(ep: &Endpoint) -> bool {
+    ep.provider == crate::local_llm::PROVIDER_ONDEVICE && !crate::local_llm::is_running()
+}
+
+/// **Read a conversation's new messages for lasting facts** and change
+/// memory to match ("Learn from my chats"). Only messages since the last
+/// pass; nothing at all (no model call) when the person said nothing about
+/// themselves (`prompt::worth_a_pass`). `announce`: the main window's toast.
+pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applied, String> {
+    let cfg = crate::config::load();
+    let conv = crate::chats::get(conversation).ok_or("Conversation not found")?;
+    let len = conv.messages.len();
+    let start = super::read_upto(conversation).min(len);
+    let new = &conv.messages[start..];
+    let user_texts: Vec<&str> = new.iter().filter(|m| m.role == "user").map(|m| m.text.as_str()).collect();
+    if user_texts.is_empty() || !prompt::worth_a_pass(&user_texts) {
+        super::mark_read(conversation, len);
+        return Ok(nothing());
+    }
+    let ep = endpoint(&cfg)?;
+    if !learns_by_itself(&ep) {
+        super::mark_read(conversation, len);
+        return Ok(nothing());
+    }
+    if on_device_stopped(&ep) && !crate::eval::active() {
+        return Err(DEFERRED.to_string());
+    }
+    let pair = |m: &crate::chats::ChatMessage| (m.role.clone(), m.text.clone());
+    let before: Vec<(String, String)> = conv.messages[start.saturating_sub(2)..start].iter().map(pair).collect();
+    let fresh: Vec<(String, String)> = new.iter().map(pair).collect();
+    let budget = if ep.local() { 1_800 } else { 2_400 };
+    let user = prompt::pass_input(
+        &prompt::listing(&super::items(), 900),
+        "The chat (only what the user says about themselves counts)",
+        &prompt::chat_excerpt(&before, &fresh, budget),
+    );
+    let reply = ask(&ep, &prompt::learn_chat_system(cfg.memory_sensitive), &user, 5, !crate::eval::active()).await?;
+    let changes = ops::route_preferences(ops::parse_changes(&reply), &super::items());
+    let about_you = crate::about_you::profile(&cfg);
+    let changes = ops::drop_about_you(changes, &super::items(), &about_you.name, &about_you.about);
+    // Grounded in what the person said (theirs, not the AI's answers).
+    let said: Vec<&str> = conv.messages[start.saturating_sub(2)..].iter().filter(|m| m.role == "user").map(|m| m.text.as_str()).collect();
+    let applied = super::change(
+        &changes,
+        &Rules {
+            sensitive_ok: cfg.memory_sensitive,
+            origin: Origin::new("chat", Some(conversation), &conv.title),
+            now: super::now_secs(),
+            max_changes: 5,
+            grounding: Some(said.join("\n")),
+        },
+    );
+    super::mark_read(conversation, len);
+    if announce {
+        super::announce(&applied);
+    }
+    Ok(applied)
+}
+
+/// **Read a finished meeting** — its title, attendees and action plan — for
+/// who the attendees are to the person and the projects they work on
+/// ("Learn from meetings", off by default: other people's words).
+pub async fn learn_from_meeting(note_id: u64) -> Result<Applied, String> {
+    let cfg = crate::config::load();
+    let note = crate::notes::get(note_id).ok_or("Note not found")?;
+    if note.enhanced_content.trim().is_empty() && note.participants.is_empty() {
+        return Ok(nothing());
+    }
+    let ep = endpoint(&cfg)?;
+    if !learns_by_itself(&ep) {
+        super::meeting_read(note_id, true);
+        return Ok(nothing());
+    }
+    if on_device_stopped(&ep) && !crate::eval::active() {
+        return Err(DEFERRED.to_string());
+    }
+    let (plan, _) = crate::note_text::fit(&note.enhanced_content, 1_500);
+    let mut body = format!("Title: {}\n", note.title);
+    if !note.participants.is_empty() {
+        body.push_str(&format!("Attendees: {}\n", note.participants.join(", ")));
+    }
+    body.push_str(&format!("\nYap's notes after the meeting:\n{}", plan.trim()));
+    let user = prompt::pass_input(&prompt::listing(&super::items(), 900), "The meeting", &body);
+    let reply = ask(&ep, &prompt::learn_meeting_system(cfg.memory_sensitive), &user, 5, !crate::eval::active()).await?;
+    let changes: Vec<Change> = ops::parse_changes(&reply)
+        .into_iter()
+        // People and projects only (and updates of them).
+        .filter(|c| !matches!(c.section, Some(Section::Profile | Section::Preferences | Section::Topics)))
+        .collect();
+    let applied = super::change(
+        &changes,
+        &Rules {
+            sensitive_ok: cfg.memory_sensitive,
+            origin: Origin::new("meeting", Some(note_id), &note.title),
+            now: super::now_secs(),
+            max_changes: 5,
+            grounding: Some(body.clone()),
+        },
+    );
+    super::meeting_read(note_id, true);
+    super::announce(&applied);
+    Ok(applied)
+}
+
+/// A meeting's action plan is written (`meeting_end.rs`): learn from it,
+/// once, when "Learn from meetings" is on.
+pub fn meeting_ended(note_id: u64) {
+    let cfg = crate::config::load();
+    if !cfg.memory_learn_meetings || super::meeting_read(note_id, false) || crate::eval::active() {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        match learn_from_meeting(note_id).await {
+            Ok(a) => tracing::info!(note_id, changes = a.done.len(), "Memory: read a meeting"),
+            Err(e) => tracing::info!(note_id, "Memory: didn't read the meeting: {e}"),
+        }
+    });
+}
+
+// ---- the scheduler ----------------------------------------------------------------------------------
+
+/// A chat is read this long after its last message.
+const QUIET: Duration = Duration::from_secs(5 * 60);
+/// A pass put off (a dictation, the model stopped, a rate limit) is tried
+/// again this much later.
+const RETRY: Duration = Duration::from_secs(2 * 60);
+
+/// Conversations waiting for a pass, and when each was last active (or
+/// when it's due, back-dated by [`QUIET`]).
+static ACTIVITY: Mutex<Option<HashMap<u64, Instant>>> = Mutex::new(None);
+
+fn activity<R>(f: impl FnOnce(&mut HashMap<u64, Instant>) -> R) -> R {
+    let mut g = ACTIVITY.lock().unwrap_or_else(|p| p.into_inner());
+    f(g.get_or_insert_with(HashMap::new))
+}
+
+/// The scheduler runs in the app only (not a test run, not an evaluation:
+/// those call the passes themselves).
+fn scheduled() -> bool {
+    !crate::e2e::active() && !crate::eval::active() && super::app().is_some()
+}
+
+/// A chat turn was answered in `conversation`: it's read once it's been
+/// quiet for 5 minutes; any other conversation waiting is read now
+/// (another chat started).
+pub fn after_turn(conversation: u64) {
+    if !scheduled() || !crate::config::load().memory_learn_chats {
+        return;
+    }
+    let now = Instant::now();
+    let due_now = now.checked_sub(QUIET).unwrap_or(now);
+    let waiting: Vec<u64> = activity(|a| {
+        for (id, t) in a.iter_mut() {
+            if *id != conversation {
+                *t = (*t).min(due_now);
+            }
+        }
+        a.insert(conversation, now);
+        a.keys().copied().collect()
+    });
+    super::set_pending(&waiting);
+}
+
+/// Start the scheduler: what a quit left waiting is due a minute after
+/// start; then every 20 s the quiet conversations are read, one at a time.
+pub fn start(_app: &AppHandle) {
+    if !scheduled() {
+        return;
+    }
+    let left = super::pending();
+    if !left.is_empty() {
+        let due = Instant::now().checked_sub(QUIET).map(|t| t + Duration::from_secs(60)).unwrap_or_else(Instant::now);
+        activity(|a| {
+            for id in left {
+                a.insert(id, due);
+            }
+        });
+    }
+    tauri::async_runtime::spawn(async {
+        loop {
+            tokio::time::sleep(Duration::from_secs(20)).await;
+            tick().await;
+        }
+    });
+}
+
+async fn tick() {
+    if !crate::config::load().memory_learn_chats {
+        return;
+    }
+    let now = Instant::now();
+    let due: Vec<u64> = activity(|a| a.iter().filter(|(_, t)| now.duration_since(**t) >= QUIET).map(|(id, _)| *id).collect());
+    for id in due {
+        match learn_from_chat(id, true).await {
+            Ok(a) => {
+                tracing::info!(conversation = id, changes = a.done.len(), "Memory: read a quiet chat");
+                activity(|m| m.remove(&id));
+            }
+            Err(e) if e == DEFERRED || e.contains("limit") || e.contains("timed out") || e.contains("didn't start") => {
+                tracing::info!(conversation = id, "Memory: chat pass put off: {e}");
+                let later = Instant::now().checked_sub(QUIET).map(|t| t + RETRY).unwrap_or_else(Instant::now);
+                activity(|m| m.insert(id, later));
+            }
+            Err(e) => {
+                tracing::info!(conversation = id, "Memory: chat not read: {e}");
+                activity(|m| m.remove(&id));
+            }
+        }
+    }
+    let waiting: Vec<u64> = activity(|a| a.keys().copied().collect());
+    super::set_pending(&waiting);
+}
+
+// ---- "Tell Yap what to change", imports ---------------------------------------------------------
+
+/// What a proposal came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Tell,
+    Import,
+}
+
+/// Changes proposed for the person to confirm: as a diff (`changes`, each
+/// with its index for `include`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Proposal {
+    pub id: u64,
+    pub kind: &'static str,
+    pub changes: Vec<Done>,
+}
+
+struct Pending {
+    changes: Vec<Change>,
+    kind: Kind,
+    sensitive_ok: bool,
+    /// What the person wrote: every change must come from it (`Rules::grounding`).
+    grounding: String,
+}
+
+static PROPOSALS: Mutex<Option<HashMap<u64, Pending>>> = Mutex::new(None);
+static PROPOSAL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn proposals<R>(f: impl FnOnce(&mut HashMap<u64, Pending>) -> R) -> R {
+    let mut g = PROPOSALS.lock().unwrap_or_else(|p| p.into_inner());
+    f(g.get_or_insert_with(HashMap::new))
+}
+
+fn origin_of(kind: Kind) -> Origin {
+    match kind {
+        Kind::Tell => Origin::new("tell", None, ""),
+        Kind::Import => Origin::new("import", None, "Imported"),
+    }
+}
+
+/// What `changes` would do to memory now, without changing it.
+fn preview(changes: &[Change], kind: Kind, sensitive_ok: bool, grounding: &str) -> (Vec<Item>, Vec<Done>) {
+    let mut items = super::items();
+    let mut next = items.iter().map(|i| i.id).max().unwrap_or(0) + 1_000_000;
+    let out = ops::apply(
+        &mut items,
+        &mut next,
+        changes,
+        &Rules { sensitive_ok, origin: origin_of(kind), now: super::now_secs(), max_changes: max_changes(kind), grounding: Some(grounding.to_string()) },
+    );
+    (items, out.done)
+}
+
+fn max_changes(kind: Kind) -> usize {
+    match kind {
+        Kind::Tell => 8,
+        Kind::Import => 30,
+    }
+}
+
+/// An import's text in parts that fit an 8k model with memory beside them.
+fn parts(text: &str, budget: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for line in text.lines() {
+        if !cur.is_empty() && crate::meeting_summary::estimate_tokens(&cur) + crate::meeting_summary::estimate_tokens(line) > budget {
+            out.push(std::mem::take(&mut cur));
+        }
+        cur.push_str(line);
+        cur.push('\n');
+    }
+    if !cur.trim().is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Ask the Chat model what `text` changes ("Tell Yap what to change", an
+/// import), and keep its changes as a proposal for the person to confirm.
+pub async fn propose(text: &str, kind: Kind) -> Result<Proposal, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(match kind {
+            Kind::Tell => "Type what Yap should change first".to_string(),
+            Kind::Import => "Paste what the other assistant said first".to_string(),
+        });
+    }
+    let cfg = crate::config::load();
+    crate::ai_model::wake_on_device(&cfg).await?;
+    let ep = endpoint(&cfg)?;
+    // Told by the person themselves: theirs to keep. An import, reviewed,
+    // follows the setting.
+    let sensitive_ok = kind == Kind::Tell || cfg.memory_sensitive;
+    let (system, heading, chunks) = match kind {
+        Kind::Tell => (prompt::tell_system(), "What the user wants changed", vec![super::ops::one_line(text, 1_500)]),
+        Kind::Import => (
+            prompt::import_system(),
+            "What the other assistant remembers about the user",
+            parts(text, if ep.local() { 1_600 } else { 3_000 }).into_iter().take(6).collect(),
+        ),
+    };
+    let mut changes: Vec<Change> = Vec::new();
+    for chunk in &chunks {
+        // Each part sees memory with the earlier parts' changes.
+        let (now, _) = preview(&changes, kind, sensitive_ok, text);
+        let user = prompt::pass_input(&prompt::listing(&now, 900), heading, chunk);
+        let reply = ask(&ep, &system, &user, max_changes(kind), false).await?;
+        changes.extend(ops::parse_changes(&reply));
+    }
+    if kind == Kind::Tell {
+        changes = narrow_you_removals(changes, &super::items(), text);
+    }
+    let mut changes = ops::route_preferences(changes, &super::items());
+    // An import doesn't copy what About you says; a Tell is the person's
+    // own ask.
+    if kind == Kind::Import {
+        let about_you = crate::about_you::profile(&cfg);
+        changes = ops::drop_about_you(changes, &super::items(), &about_you.name, &about_you.about);
+    }
+    let (_, done) = preview(&changes, kind, sensitive_ok, text);
+    let id = PROPOSAL_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    proposals(|p| {
+        p.insert(id, Pending { changes, kind, sensitive_ok, grounding: text.to_string() });
+        // Only the latest few are kept.
+        if p.len() > 5 {
+            if let Some(oldest) = p.keys().min().copied() {
+                p.remove(&oldest);
+            }
+        }
+    });
+    Ok(Proposal { id, kind: if kind == Kind::Tell { "tell" } else { "import" }, changes: done })
+}
+
+/// A model asked to "forget everything about my old job at Acme" removed
+/// the whole Profile (Qwen3.5-4B, 2026-10-22), which memory never lets a
+/// pass do: such a removal becomes taking out the facts that share a word
+/// with what the person asked ("Works at Acme as a nurse"), or nothing.
+/// For a "forget …" request, an update that only takes Profile or
+/// Preferences facts out keeps the ones sharing a word with it too (the 4B
+/// took "Lives in Leeds" and the dog out with the job, 2026-10-22); a
+/// request with no such word ("Forget it") narrows nothing there.
+/// Pure.
+pub fn narrow_you_removals(changes: Vec<Change>, items: &[Item], asked: &str) -> Vec<Change> {
+    const VAGUE: &[&str] = &["forget", "remember", "everything", "anything", "about", "please", "that", "this", "with", "from", "they", "them", "there", "were", "what", "which", "also"];
+    const SMALL: &[&str] = &["the", "and", "for", "you", "your", "have", "has", "had", "not", "now", "all", "any", "can", "its", "out", "too", "was", "are", "but", "who"];
+    let asked = ops::norm(asked);
+    let words: Vec<&str> = asked.split(' ').filter(|w| w.len() >= 4 && !VAGUE.contains(w) && !crate::learn::is_frequent(w)).collect();
+    let forgetting = asked.split(' ').any(|w| matches!(w, "forget" | "remove" | "delete" | "erase"));
+    let fact_words: Vec<&str> = asked.split(' ').filter(|w| w.chars().count() >= 3 && !VAGUE.contains(w) && !SMALL.contains(w)).collect();
+    let in_you = |c: &Change| c.id.and_then(|id| items.iter().find(|i| i.id == id)).is_some_and(|i| i.section.is_you());
+    changes
+        .into_iter()
+        .filter_map(|c| {
+            let only_removes = c.action == Action::Update
+                && c.facts.is_empty()
+                && c.about.as_deref().is_none_or(|a| a.trim().is_empty())
+                && !c.remove_facts.is_empty();
+            if forgetting && only_removes && !fact_words.is_empty() && in_you(&c) {
+                let kept: Vec<String> =
+                    c.remove_facts.iter().filter(|f| ops::norm(f).split(' ').any(|w| fact_words.contains(&w))).cloned().collect();
+                return (!kept.is_empty()).then_some(Change { remove_facts: kept, ..c });
+            }
+            let you = c.action == Action::Remove && c.remove_facts.is_empty() && in_you(&c);
+            if !you {
+                return Some(c);
+            }
+            let item = items.iter().find(|i| Some(i.id) == c.id)?;
+            let facts: Vec<String> = item
+                .details
+                .iter()
+                .filter(|f| ops::norm(f).split(' ').any(|w| words.contains(&w)))
+                .cloned()
+                .collect();
+            (!facts.is_empty()).then_some(Change { remove_facts: facts, ..c })
+        })
+        .collect()
+}
+
+/// Apply a proposal: all of it, or the changes `include` names (by their
+/// index). Returns what was done (Undo: its batch).
+pub fn apply_proposal(id: u64, include: Option<&[usize]>) -> Result<Applied, String> {
+    let p = proposals(|p| p.remove(&id)).ok_or("Those changes are gone: ask again")?;
+    let changes: Vec<Change> = p
+        .changes
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| include.is_none_or(|inc| inc.contains(i)))
+        .map(|(_, c)| c.clone())
+        .collect();
+    Ok(super::change(
+        &changes,
+        &Rules {
+            sensitive_ok: p.sensitive_ok,
+            origin: origin_of(p.kind),
+            now: super::now_secs(),
+            max_changes: max_changes(p.kind),
+            grounding: Some(p.grounding),
+        },
+    ))
+}
+
+// ---- remember / forget in a chat ------------------------------------------------------------------
+
+/// "Remember that…" / "Forget that…" as a whole message, for a model
+/// without tools: `Some((forget, what))`. Not a question ("Remember when
+/// we…?").
+pub fn spoken_request(text: &str) -> Option<(bool, String)> {
+    static ASK: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?is)^\s*(?:hey\s+yap[,.]?\s+)?(?:(?:please|can you|could you|will you|yap)[,]?\s+)*(remember|forget|don't forget|do not forget)\b(?:\s+(?:that|this|about))?[:,]?\s+(.+?)\s*[.!]?\s*$")
+            .expect("static regex")
+    });
+    let t = text.trim();
+    if t.ends_with('?') {
+        return None;
+    }
+    let c = ASK.captures(t)?;
+    let verb = c[1].to_lowercase();
+    let what = c[2].trim().to_string();
+    let first = what.split_whitespace().next().unwrap_or("").to_lowercase();
+    if ["when", "what", "how", "who", "where", "why", "if", "whether", "the time"].contains(&first.as_str()) || what.len() < 3 {
+        return None;
+    }
+    // "Don't forget to call Mum" is a reminder, not memory.
+    if verb != "remember" && verb != "forget" {
+        return None;
+    }
+    if verb == "forget" && first == "to" {
+        return None;
+    }
+    if verb == "remember" && first == "to" {
+        return None;
+    }
+    Some((verb == "forget", what))
+}
+
+/// The answer to "Remember that …" / "Forget that …" for a model without
+/// tools: the request through "Tell Yap what to change", applied, and
+/// Yap's own words for it. `None` when it isn't such a request.
+pub async fn spoken(text: &str) -> Option<Result<(String, Vec<String>), String>> {
+    let (forget, what) = spoken_request(text)?;
+    let ask = if forget { format!("Forget: {what}") } else { format!("Remember: {what}") };
+    Some(
+        async {
+            let p = propose(&ask, Kind::Tell).await?;
+            let applied = apply_proposal(p.id, None)?;
+            if applied.done.is_empty() {
+                let reply = if forget {
+                    "I couldn't find that in what I remember. You can see everything in Settings → Memory.".to_string()
+                } else {
+                    "I didn't find anything to remember there. You can add it yourself in Settings → Memory.".to_string()
+                };
+                return Ok((reply, vec![]));
+            }
+            super::announce(&applied);
+            let chips: Vec<String> = applied.done.iter().map(chip).collect();
+            let reply = if forget { "Done: I've forgotten that." } else { "Got it: I'll remember that." };
+            Ok((reply.to_string(), chips))
+        }
+        .await,
+    )
+}
+
+/// A change as a chat chip: "Remembered: Rochelle, your sister".
+fn chip(d: &Done) -> String {
+    let what = if d.say.is_empty() { d.title.clone() } else { d.say.clone() };
+    match d.kind {
+        "removed" => format!("Forgot: {what}"),
+        _ if d.facts_added.is_empty() && !d.facts_removed.is_empty() => format!("Forgot: {what}"),
+        _ => format!("Remembered: {what}"),
+    }
+}
+
+/// The memory tools' results ({success, data, displayText}, like every
+/// Chat tool).
+fn result(success: bool, data: Value, display: String) -> Value {
+    json!({ "success": success, "data": data, "displayText": display })
+}
+
+/// Run `remember` or `forget` for the Chat's tool loop (`tools.rs`): the
+/// person asked in their own message, so it's theirs to keep (sensitive
+/// topics included); secrets never. The main window's toast says so, Undo
+/// with it.
+pub fn tool(name: &str, args: &Value) -> Value {
+    let text = |k: &str| args[k].as_str().unwrap_or("").trim().to_string();
+    let now = super::now_secs();
+    let rules = Rules { sensitive_ok: true, origin: Origin::new("voice", None, "Asked in a chat"), now, max_changes: 3, grounding: None };
+    match name {
+        "remember" => {
+            let fact = text("fact");
+            let name = text("name");
+            let mut section = Section::parse(&text("section")).unwrap_or(if name.is_empty() { Section::Profile } else { Section::People });
+            // A fact about someone with no name given: about the person.
+            if !section.is_you() && name.is_empty() {
+                section = Section::Profile;
+            }
+            if fact.is_empty() && name.is_empty() {
+                return json!({ "success": false, "error": "Say what to remember in fact.", "displayText": "Couldn't remember that" });
+            }
+            // Someone or something new: the fact says who or what it is
+            // ("Sister"); one Yap has: the fact goes with the rest.
+            let known = super::items().iter().any(|i| i.section == section && ops::same_thing(section, &i.title, &name));
+            let (about, facts) = if !section.is_you() && !known && fact.split_whitespace().count() <= 6 {
+                (Some(fact), vec![])
+            } else {
+                (None, if fact.is_empty() { vec![] } else { vec![fact] })
+            };
+            let change = Change { action: Action::Add, id: None, section: Some(section), name, about, facts, remove_facts: vec![], say: String::new() };
+            let applied = super::change(&[change], &rules);
+            match applied.done.first() {
+                Some(d) => {
+                    super::announce(&applied);
+                    result(true, json!({ "remembered": d.say, "section": d.section }), chip(d))
+                }
+                None => json!({
+                    "success": false,
+                    "error": "Nothing was saved: memory has that already, or it holds something Yap never keeps (passwords, numbers, addresses).",
+                    "displayText": "Nothing new to remember",
+                }),
+            }
+        }
+        "forget" => {
+            let what = text("what");
+            let changes = forget_changes(&super::items(), &what);
+            if changes.is_empty() {
+                let listing = prompt::listing(&super::items(), 400);
+                return json!({
+                    "success": false,
+                    "error": format!("Nothing in memory matches \"{what}\". Memory has:\n{listing}\nCall forget again with a name or a fact as memory words it, or tell the user it isn't there."),
+                    "displayText": format!("Nothing in memory about \"{}\"", ops::one_line(&what, 40)),
+                });
+            }
+            let applied = super::change(&changes, &rules);
+            super::announce(&applied);
+            let chips: Vec<String> = applied.done.iter().map(chip).collect();
+            result(true, json!({ "forgot": applied.done.iter().map(|d| d.title.clone()).collect::<Vec<_>>() }), chips.join(" · "))
+        }
+        other => result(false, Value::Null, format!("Unknown tool: {other}")),
+    }
+}
+
+/// The changes `forget(what)` makes: the facts it names (as memory words
+/// them, or nearly), else the person, project or topic it names, whole.
+pub fn forget_changes(items: &[Item], what: &str) -> Vec<Change> {
+    let key = ops::norm(what);
+    if key.is_empty() {
+        return Vec::new();
+    }
+    let words: Vec<&str> = key.split(' ').filter(|w| w.len() > 2).collect();
+    let mut changes = Vec::new();
+    for i in items {
+        // Facts: the same fact, or most of its words.
+        let facts: Vec<String> = i
+            .details
+            .iter()
+            .filter(|f| {
+                let fk = ops::norm(f);
+                let fw: Vec<&str> = fk.split(' ').filter(|w| w.len() > 2).collect();
+                // "work" and "works" are one word here.
+                let alike = |a: &str, b: &str| a == b || (a.len().min(b.len()) >= 4 && (a.starts_with(b) || b.starts_with(a)));
+                let shared = fw.iter().filter(|f| words.iter().any(|w| alike(f, w))).count();
+                fk == key || key.contains(&fk) || fk.contains(&key) || (!fw.is_empty() && shared * 10 >= fw.len() * 6 && shared >= 2)
+            })
+            .cloned()
+            .collect();
+        if !facts.is_empty() {
+            changes.push(Change {
+                action: Action::Update,
+                id: Some(i.id),
+                section: None,
+                name: String::new(),
+                about: None,
+                facts: vec![],
+                remove_facts: facts,
+                say: String::new(),
+            });
+        }
+    }
+    if !changes.is_empty() {
+        return changes;
+    }
+    // Whole items, by name ("Sam", "my colleague Sam", "the allotment").
+    for i in items.iter().filter(|i| !i.section.is_you()) {
+        let title = ops::norm(&i.title);
+        if title == key || (words.len() <= 4 && words.iter().any(|w| title.split(' ').next() == Some(w))) {
+            changes.push(Change {
+                action: Action::Remove,
+                id: Some(i.id),
+                section: None,
+                name: String::new(),
+                about: None,
+                facts: vec![],
+                remove_facts: vec![],
+                say: String::new(),
+            });
+        }
+    }
+    changes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remember_and_forget_requests_are_told_from_questions() {
+        assert_eq!(spoken_request("Remember that my dog is called Beans"), Some((false, "my dog is called Beans".into())));
+        assert_eq!(spoken_request("Please remember: I prefer short answers."), Some((false, "I prefer short answers".into())));
+        assert_eq!(spoken_request("Forget that I work at Acme"), Some((true, "I work at Acme".into())));
+        assert_eq!(spoken_request("forget everything about my old job"), Some((true, "everything about my old job".into())));
+        assert_eq!(spoken_request("Remember when we went to Paris?"), None);
+        assert_eq!(spoken_request("Remember to call Mum"), None);
+        assert_eq!(spoken_request("Don't forget to call Mum"), None);
+        assert_eq!(spoken_request("Can you remember what I said about the trip?"), None);
+        assert_eq!(spoken_request("What's the weather like?"), None);
+    }
+
+    fn item(id: u64, section: Section, title: &str, details: &[&str]) -> Item {
+        Item {
+            id,
+            section,
+            title: title.into(),
+            summary: String::new(),
+            details: details.iter().map(|d| d.to_string()).collect(),
+            source: Origin::new("chat", None, ""),
+            created_ts: 0,
+            updated_ts: 0,
+            dictation: true,
+        }
+    }
+
+    #[test]
+    fn forget_takes_out_what_it_names() {
+        let items = vec![
+            item(1, Section::Profile, "Profile", &["Works at Acme as a nurse", "Lives in Leeds"]),
+            item(2, Section::People, "Sam Patel", &["Colleague at Acme"]),
+            item(3, Section::People, "Rochelle", &["Lives in York"]),
+        ];
+        // A fact as memory words it, or nearly.
+        let c = forget_changes(&items, "works at Acme as a nurse");
+        assert_eq!(c.len(), 1);
+        assert_eq!((c[0].id, c[0].remove_facts.clone()), (Some(1), vec!["Works at Acme as a nurse".to_string()]));
+        // A person by name: the whole item.
+        let c = forget_changes(&items, "Sam");
+        assert_eq!((c.len(), c[0].action, c[0].id), (1, Action::Remove, Some(2)));
+        // Nearly as memory words it.
+        let c = forget_changes(&items, "I work at Acme as a nurse");
+        assert_eq!(c[0].remove_facts, ["Works at Acme as a nurse"]);
+        // Nothing matching: nothing.
+        assert!(forget_changes(&items, "my old car").is_empty());
+    }
+
+    #[test]
+    fn forgetting_a_job_never_takes_the_whole_profile() {
+        let items = vec![
+            item(1, Section::Profile, "Profile", &["Works at Acme as a nurse", "Lives in Leeds", "Has a dog called Beans"]),
+            item(2, Section::People, "Sam Patel", &["Colleague at Acme"]),
+        ];
+        let remove = |id| Change { action: Action::Remove, id: Some(id), section: None, name: String::new(), about: None, facts: vec![], remove_facts: vec![], say: String::new() };
+        let out = narrow_you_removals(vec![remove(1), remove(2)], &items, "Forget everything about my old job at Acme");
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].remove_facts, ["Works at Acme as a nurse"]);
+        assert!(out[1].remove_facts.is_empty(), "a person goes whole");
+        // Nothing shared: the profile stays as it is.
+        assert!(narrow_you_removals(vec![remove(1)], &items, "Forget everything").is_empty());
+        // The 4B's fact-by-fact removals for the job: only the job's fact goes.
+        let take_out = |facts: &[&str]| Change {
+            action: Action::Update,
+            remove_facts: facts.iter().map(|f| f.to_string()).collect(),
+            ..remove(1)
+        };
+        let asked = "Forget everything about my old job at Acme";
+        let out = narrow_you_removals(vec![take_out(&["Works at Acme as a nurse"]), take_out(&["Lives in Leeds"]), take_out(&["Has a dog called Beans"])], &items, asked);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].remove_facts, ["Works at Acme as a nurse"]);
+        // "Forget that I have a dog": the dog goes (a short everyday word counts here).
+        let out = narrow_you_removals(vec![take_out(&["Has a dog called Beans", "Lives in Leeds"])], &items, "Forget that I have a dog");
+        assert_eq!(out[0].remove_facts, ["Has a dog called Beans"]);
+        // Not a "forget": a correction's removal stays as the model wrote it.
+        let out = narrow_you_removals(vec![take_out(&["Lives in Leeds"])], &items, "Actually I moved to York last month");
+        assert_eq!(out[0].remove_facts, ["Lives in Leeds"]);
+    }
+
+    #[test]
+    fn an_import_comes_in_parts_an_8k_model_can_read() {
+        let text = (0..400).map(|i| format!("- Memory line number {i} about the user\n")).collect::<String>();
+        let p = parts(&text, 1_600);
+        assert!(p.len() > 1);
+        assert!(p.iter().all(|c| crate::meeting_summary::estimate_tokens(c) <= 1_700));
+        assert_eq!(p.concat().lines().count(), 400);
+    }
+}

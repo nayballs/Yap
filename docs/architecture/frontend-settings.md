@@ -16,14 +16,14 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
 - **The nav** (`settings/nav.js` `NAV_GROUPS`, Claude-style scopes, sentence
   case): a **search box** on top ("Search settings", Ctrl F); then General ·
   Dictation · Shortcuts · Meetings | **Assistant**: Commands · Voice Assistant
-  (Memory, from another branch, goes here) | **AI models**: Speech-to-Text ·
+  · Memory | **AI models**: Speech-to-Text ·
   Language Models | **Connections**: Connectors · AI apps (MCP) | **This PC**:
   Privacy & data · About. At the bottom the account button and a footer with
   the version and the "Saved ✓" pulse every auto-save gives (the old status
   bar under the page is gone). The active page is a white pill with the amber
   icon chip; the red attention count stays on its page's row (and the cog).
 - **Page ids** (never renamed: links use them): `general`, `dictation`,
-  `shortcuts`, `meetings`, `commands`, `voice`, `models` (Speech-to-Text),
+  `shortcuts`, `meetings`, `commands`, `voice`, `memory`, `models` (Speech-to-Text),
   `cleanup` (Language Models), `connectors`, `mcp`, `privacy`, `about`,
   `account`.
 - **Links** — `yap-settings-goto` (window event), ControlPanel's
@@ -41,14 +41,16 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   `advanced` (and `advanced#output`) → `dictation#typing`,
   `advanced#system` → `general#startup`, `advanced#debug` → `privacy#logs`,
   `advanced#dictionary` → `dictation#dictionary`; a page that moved keeps an
-  anchor asked for. A page this build doesn't have (`memory` before it lands)
-  leaves Settings where it is. Callers today: bar.rs `general#bar`,
+  anchor asked for. A page this build doesn't have leaves Settings where it
+  is. Callers today: bar.rs `general#bar`,
   meeting_guard.rs `meetings#screen-sharing`, meeting.rs (quiet mic)
   `dictation#microphone`, alert.rs `cleanup#chat` / `voice#voice-provider`,
   updates.rs `about`, auth.rs `account`, the notepad's Audio settings
   `dictation#microphone`, call detection's "Open Settings"
   `meetings#call-apps-list`, Home's history link `privacy#history`, Chat's
-  `voice#assistant-shortcut` and `cleanup#chat`.
+  `voice#assistant-shortcut` and `cleanup#chat`, the "Yap remembered…"
+  toast's Manage `memory`, Memory's About-you rows `general#about-name` /
+  `#region` / `#about-me`.
 - **Search** (`settings/settingsIndex.js` + `SearchResults.svelte`): a static
   index of every setting — `{page, section, label, desc, keywords, anchor,
   fallback?, scope?, toggle?}`, ~110 entries — since only the open page is
@@ -225,6 +227,14 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   as inline sliders, and the credits behind a "Credits" disclosure. **Model**:
   a link row → Language Models → Chat & Voice Assistant.
   `yap-voice-replies` and `yap-voice-volume` (Chat's) are adopted.
+- **Memory** (`memory`, `MemorySection.svelte`, [memory.md](./memory.md#settings--memory)):
+  **What Yap learns from** (the four switches, flat; a note when the Chat
+  model is too small to learn by itself), **You** (Profile and Preferences
+  as rows that open in place, then About you's name, region and note as link
+  rows to their rows in General), **People / Projects / Topics** (a card of
+  objects each: a row per item opening to edit, "Add a person"), **Tell Yap
+  what to change** (the box, Suggest changes, the diff), **Import, export and
+  clear**, the privacy line. With no AI model, a note at the top.
 - **Speech-to-Text** (`models`, `ModelManager.svelte`): **Your model** first —
   a card with its name, size, languages and "In use", or "Not downloaded" +
   Download (never "Active" for a model that isn't on this PC), and Change
@@ -276,7 +286,7 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
 - **Privacy & data** (`settings/PrivacyPage.svelte`, OpenWhispr's Privacy &
   Data, Claude's Privacy; replaces History and gathers the scattered privacy
   notes): **What leaves this PC** — a table by feature as Yap is set up now
-  (your voice, AI cleanup, Chat and the Voice Assistant, About you, web search,
+  (your voice, AI cleanup, Chat and the Voice Assistant, About you, memory, web search,
   spoken replies, AI apps, calendar, account), each row linking to its
   setting. **History** (`#settings-history`): "Keep dictation history"
   (`historyEnabled`) and Clear history… (asks first; the count from

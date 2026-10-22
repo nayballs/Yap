@@ -1,0 +1,23 @@
+{
+  "name": "memory-forget-in-chat",
+  "description": "\"Forget that…\" typed in Chat takes the fact out of memory, and only that.",
+  "tags": ["memory", "memory-tell"],
+  "apps": "standard",
+  "seed": {
+    "memory": [
+      { "section": "profile", "details": ["Works at Acme as a nurse", "Lives in Leeds", "Has a dog called Beans"] }
+    ]
+  },
+  "turns": [
+    {
+      "user": "Forget that I work at Acme, I left last month.",
+      "expect": {
+        "memory": [
+          { "has": "Acme", "exists": false },
+          { "has": "Leeds", "section": "profile" },
+          { "has": "Beans", "section": "profile" }
+        ]
+      }
+    }
+  ]
+}

@@ -142,6 +142,9 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `tools.rs` / `note_text.rs` — the tool loop: note tools (safe partial edits), apps, web (a local model must search first), safety rule.
 - `assistant.rs` — the Voice Assistant: ask Chat out loud from any app; off during meetings.
 
+**Memory** — [memory.md](./docs/architecture/memory.md)
+- `memory.rs` (+ `memory/`) — what Yap remembers about you (`memory.json`): learned from quiet chats and meetings, sent with questions, remember/forget/search_chats tools, names for dictation, export, Undo.
+
 **Web search and apps** — [web-and-apps.md](./docs/architecture/web-and-apps.md)
 - `web.rs` (+ `web/native.rs`) — web search (Exa/Tavily/wikis, or the provider's own), guarded page reads.
 - `apps.rs` — opens Start-menu apps on request: index, matching, fast path, consent.
@@ -220,6 +223,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
 - `Overlay.svelte` + `bar/` — the Yap bar's page ([yap-bar.md](./docs/architecture/yap-bar.md)).
 - `Settings.svelte` + `settings/` — Settings, always mounted in the modal: the nav by scope with search (`settingsIndex.js`; old links land via `nav.js` aliases), General / Dictation / Shortcuts / Meetings / Privacy & data / About as page components, one row style in `lib/ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch.
+- `MemorySection.svelte` + `memory.svelte.js` — Settings → Assistant → Memory and the "Yap remembered…" toast ([memory.md](./docs/architecture/memory.md)).
 - `AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
 - `ModelManager` / `ModelRow`, `Onboarding`, `lib/ui/` — speech models, first run, primitives, right-click menus.
 - Window config (`tauri.conf.json`) — [app-shell.md](./docs/architecture/app-shell.md#window-config-src-tauritauriconfjson).
@@ -357,7 +361,8 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 `models/` (speech; `diarization/`, `tts/`), `llm/` (on-device GGUFs), `history.json`,
 `notes.json`, `chats.json`, `calendar.json`, `updates.json`, `model_catalog.json`,
 `groq_usage.json`, `dictionary_usage.json`, `hints.json`, `word_suggestions.json`,
-`notices.json`, `quieted_apps.json` (only mid-dictation), `icons/`, `logs/`. Every JSON
+`notices.json`, `memory.json` (what Yap remembers about you), `quieted_apps.json`
+(only mid-dictation), `icons/`, `logs/`. Every JSON
 store writes atomically and quarantines a corrupt file instead of crashing. Secrets
 never go in files: the account session and calendar tokens live in Windows Credential
 Manager. The local API's discovery file is `~/.yap/cli-bridge.json`.
@@ -373,7 +378,7 @@ replies off. Every setting, file and default: [config-and-data.md](./docs/archit
 
 - **Dictation is complete and real**: GPU transcription (Whisper/Vulkan + ONNX/DirectML), push-to-talk, AI cleanup (cloud or on-device Qwen), Commands, smart pasting into terminals and chat apps, dictionary learning, Undo.
 - **Meetings**: recorder (You/Them), rolling digests + action plan, the notepad, call detection, guard rails, the calendar, beta speaker separation.
-- **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), web search, opening apps.
+- **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation).
 - **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly.
 - Much is unit-, e2e- and robot-tested but not yet tried in real use (a real call, real AI apps, answers heard on speakers…).
 - **Not yet done**: Chat streaming and semantic search, a rich notes editor, naming voices by themselves, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.

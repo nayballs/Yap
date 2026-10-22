@@ -77,6 +77,11 @@
   PC's — the language/currency/units/time-zone fields of before 22 Oct
   2026 still load and go on the next save) + region_spelling ("Write in
   my region's spelling", Dictation cleanup, on),
+  Memory's switches (`memory.rs`, Settings → Memory; what Yap remembers is
+  in memory.json, never here): memory_search_chats ("Search and reference
+  past chats", on) + memory_learn_chats ("Learn from my chats", on) +
+  memory_learn_meetings ("Learn from meetings", off) + memory_sensitive
+  ("Include sensitive topics in memory", off),
   Commands' edit_hotkey (the rewrite shortcut)
   + agent_name + the `voiceAgent` scope (field and key names unchanged by
   the 2026-10-18 rename, so no setting resets). JSON
@@ -151,6 +156,13 @@
   count and "Don't suggest this", and the words you removed from the
   dictionary (`removed`, never suggested again) (`learn.rs`). Never the
   field text it read.
+- Memory: `%APPDATA%/yap/memory.json` — what Yap remembers about the person
+  (Profile, Preferences, People, Projects, Topics: each a title, a summary,
+  facts, where it came from, when), how far each chat has been read for it,
+  the chats waiting to be read (across a quit) and the meetings read
+  (`memory.rs`). Changed only as changes (Undo in the app); cleared from
+  Settings → Memory, exported there as a .zip of Markdown. Sent with questions
+  to the AI model the person uses, never to Yap.
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`).
 - App icons: `%APPDATA%/yap/icons/` — `<app>.png` per installed call app and

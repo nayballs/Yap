@@ -26,6 +26,7 @@
   import { initCalendar, closeConnectDialog } from './calendar.svelte.js';
   import { initWordSuggestions } from './wordSuggestions.js';
   import { initAlerts } from './alerts.js';
+  import { initMemory } from './memory.svelte.js';
   import ConnectCalendarDialog from './ConnectCalendarDialog.svelte';
   import MeetingsView from './MeetingsView.svelte';
   import HomeView from './HomeView.svelte';
@@ -87,6 +88,9 @@
   // administrator left on the clipboard, Windows' microphone privacy
   // switch — with Open settings.
   initAlerts();
+  // Memory (memory.rs via memory.svelte.js): "Yap remembered: your sister
+  // is Rochelle" with Undo and Manage (→ Settings → Memory).
+  initMemory({ openSettings: (section) => openSettings(section) });
   let bellOpen = $state(false);
 
   // Sidebar nav (Wispr order: Home, Insights, then the work surfaces).

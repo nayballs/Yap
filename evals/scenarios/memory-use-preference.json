@@ -1,0 +1,16 @@
+{
+  "name": "memory-use-preference",
+  "description": "A remembered preference (short answers) shapes an answer that would otherwise run long.",
+  "tags": ["memory", "memory-use"],
+  "apps": "standard",
+  "seed": {
+    "memory": [{ "section": "preferences", "details": ["Short answers: two or three sentences at most, no lists"] }]
+  },
+  "turns": [
+    {
+      "user": "How does a heat pump work?",
+      "expect": { "max_words": 90, "no_false_claims": true },
+      "soft": { "max_words": 60 }
+    }
+  ]
+}

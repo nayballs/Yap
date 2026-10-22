@@ -1,0 +1,12 @@
+{
+  "name": "memory-tell-dog",
+  "description": "\"Tell Yap what to change\" (Settings → Memory): \"My dog's name is Beans\" adds it.",
+  "tags": ["memory", "memory-tell"],
+  "apps": "standard",
+  "turns": [
+    {
+      "tell": "My dog's name is Beans",
+      "expect": { "memory": [{ "has": "Beans" }], "memory_changes_min": 1, "memory_changes_max": 2 }
+    }
+  ]
+}

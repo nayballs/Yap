@@ -44,6 +44,7 @@
   import AccountSection from './AccountSection.svelte';
   import ConnectorsSection from './ConnectorsSection.svelte';
   import McpSection from './McpSection.svelte';
+  import MemorySection from './MemorySection.svelte';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
   import { updates } from './updates.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
@@ -419,6 +420,11 @@
     meetingDiarization: false,
     diarizationModel: 'nemotron-3-diarization',
     meetingReminder: '15s',
+    // Memory (MemorySection.svelte, memory.rs): the switches only.
+    memorySearchChats: true,
+    memoryLearnChats: true,
+    memoryLearnMeetings: false,
+    memorySensitive: false,
     barEnabled: true,
     barHideFullscreen: true,
     barTheme: 'light',
@@ -1534,7 +1540,8 @@
     {:else if id === 'voice'}
       <path d="M11 5 6 9H2v6h4l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.4 5.6a9 9 0 0 1 0 12.8" />
     {:else if id === 'memory'}
-      <path d="M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.6 2.4 4.7.8.8 1.1 1.6 1.1 2.6V18h5v-1.7c0-1 .3-1.8 1.1-2.6C16.8 12.6 18 11.2 18 9a6 6 0 0 0-6-6z" /><path d="M10 21h4" />
+      <!-- A bookmark with a spark: what Yap keeps about you (the toast's chip too). -->
+      <path d="M6 3h12v18l-6-4-6 4z" /><path d="M12 7.5v4M10 9.5h4" />
     {:else if id === 'models'}
       <path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2" />
     {:else if id === 'cleanup'}
@@ -2473,6 +2480,13 @@
 
         {:else if section === 'about'}
           <AboutPage {cfg} version={APP_VERSION} {goto} />
+
+        {:else if section === 'memory'}
+          <div class="page-h">
+            <h1>Memory</h1>
+            <p>What Yap remembers about you, so its AI answers you better. See, change or clear any of it.</p>
+          </div>
+          <MemorySection {cfg} {goto} />
 
         {:else if section === 'connectors'}
           <div class="page-h">

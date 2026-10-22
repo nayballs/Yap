@@ -1,0 +1,16 @@
+{
+  "name": "memory-learn-project",
+  "description": "The user mentions what they're building: memory keeps the project, not the question about Tauri.",
+  "tags": ["memory", "memory-learn"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "I'm building a dictation app called Yap in Rust and Svelte. How does Tauri's event system work?",
+      "learn": true,
+      "expect": {
+        "memory": [{ "has": "Yap", "section": "projects" }],
+        "memory_changes_max": 3
+      }
+    }
+  ]
+}

@@ -158,6 +158,11 @@ with the Chat persona Settings sets by default. Only the side effects are swappe
 - **Settings in memory** (`eval::config`, read by `config::load`; `config::save` does
   nothing): the run's provider, model and key never reach a file.
 - **Notes in memory** (`notes::eval_reset`, nothing saved): reset and seeded per scenario.
+- **Memory and chats** (`memory::eval_reset`, in memory only; `chats::eval_reset`, the
+  run's data dir): reset and seeded per scenario, so a past-chats search sees only the
+  scenario's own chats. Memory's scheduler never runs in a run: a turn's `learn` calls the
+  pass itself. `YAP_EVAL_MEMORY_JSON=off` sends a model on this PC its passes without the
+  JSON grammar (`response_format`), to compare.
 - **Apps**: test mode (`YAP_E2E=1`, as the e2e suite): the index is the scenario's stand-in
   list, and opening an app is only recorded (`apps::e2e_opened_apps`). Nothing launches.
   `"apps": "this_pc"` reads this PC's Start menu instead (read-only, in a child process
@@ -220,7 +225,11 @@ isn't logged.
     "open_apps": true,                        // "Let Yap open apps when you ask"
     "app_nicknames": [{ "say": "my editor", "app": "Visual Studio Code" }],
     "apps_blocked": ["Discord"],
-    "persona": "…"                            // the Chat scope's prompt
+    "persona": "…",                           // the Chat scope's prompt
+    "memory_sensitive": false,                // "Include sensitive topics in memory" (memory.rs)
+    "memory_search_chats": true,              // "Search and reference past chats"
+    "about_name": "Declan",                   // About you's name and note (about_you.rs; the region is --locale)
+    "about_me": "I work day shifts in Leeds."
   },
   "apps": "standard",                         // evals/apps/standard.json, an inline [{id, name}] list, or "this_pc"
   "seed": {
@@ -230,11 +239,16 @@ isn't logged.
       "enhanced": "…",                        // the AI summary
       "meeting": true, "participants": ["Dave"],
       "transcript": [{ "source": "them", "text": "…", "ts": 12 }]
-    }]
+    }],
+    "memory": [{ "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York"] }],
+    "chats": [{ "title": "Trip to Lisbon", "messages": [{ "role": "user", "text": "…" }, { "role": "assistant", "text": "…" }] }]
   },
   "turns": [
     { "user": "open python", "expect": { … }, "soft": { … } },   // soft: warnings, not failures
-    { "user": "the second one", "voice": false, "expect": { … } }
+    { "user": "the second one", "voice": false, "expect": { … } },
+    { "user": "My sister Rochelle is visiting", "learn": true },   // then memory's pass reads the chat, as a quiet chat is read
+    { "tell": "My dog's name is Beans" },                          // "Tell Yap what to change", applied as proposed (no chat turn)
+    { "import": "- Prefers concise answers…" }                     // an import from another assistant, applied as proposed
   ],
   "expect_end": { … },                        // checked over the whole scenario
   "soft_end": { … }
@@ -263,6 +277,8 @@ field is an error, so a typo can't silently skip a check):
 | `notes` | `[{ "title", "exists", "folder", "contains", "not_contains" }]`, as the notes are afterwards. |
 | `folders`, `notes_count` | The folders afterwards, exactly (no invented ones); how many notes. |
 | `allow_error` | The turn may end in an error (else an error fails it). |
+| `memory` | `[{ "has", "section", "exists", "count" }]`: memory afterwards has an item whose name, summary or facts hold `has` (in `section`), or none does (`exists: false`), or exactly `count` do. |
+| `memory_changes_max`, `memory_changes_min` | Memory changed at most / at least this many times in the turn (a learning pass, a tell, an import, the chat's remember/forget; each change is logged as `memory_changed`). |
 
 Argument predicates: a string (equal, case-insensitive), a number or bool (equal), or an
 object: `{"contains": s}`, `{"contains_any": [..]}`, `{"not_contains": s}`, `{"matches":
@@ -882,6 +898,90 @@ what was measured again (run folders `E:/yap-builds/eval-runs/20261022-04*-lap1-
   **156 / 155 ms** back to back (phase 1: 191 / 186 → 159 / 161), 264 tok/s with 91 % of drafts
   kept; outputs **96/96 the same** as phase 1's runs with and without MTP (93/96 between MTP
   off and on: the one list's punctuation, as before).
+
+## Memory (22 Oct 2026)
+
+What Yap remembers about the person (`memory.rs`, [architecture](./architecture/memory.md)):
+21 scenarios (`evals/scenarios/memory-*.json`, tag `memory`) — **learning** from a chat (11: a
+sister named in passing, a job and a dog, nothing to keep, a health condition with sensitive
+topics off, a password and an address, a colleague's private life, a job change, answer
+preferences, a project, something new about someone known), **use** (4: a birthday from
+memory, a gift fitting what Yap knows, an unrelated question that must not drag memory in, a
+remembered preference shaping an answer), **"Tell Yap what to change"** (3: add, correct,
+"forget everything about my old job"), an **import** from another assistant, "Remember that…" /
+"Forget that…" typed in Chat, and **past chats** ("that small-plates place in Lisbon we talked
+about last time"). Run folders `E:/yap-builds/eval-runs/20261022-07*` and `-08*`.
+
+| Model | Pass | Notes |
+|---|---|---|
+| **Qwen3.5-4B** (GPU, `--ngl 999`, ×2) | **42/42** (100 %) | 1.2 s a turn; the slowest call 2.5 s |
+| Groq `openai/gpt-oss-20b` (8 of them, ~22k tokens) | 8/8 | the birthday's first check missed "May 3" written with a no-break space (the check, fixed) |
+| Qwen2.5-1.5B (CPU, no tools, learning forced on) | 14/21 (67 %) | use 4/4, past chats 1/1, remember/forget 2/2, tell 2/3, import 0/1, learning 5/11 |
+
+**Qwen3.5-4B, step by step** (all 21, then ×2): 9/21 → 13/21 → 18/21 → 38/42 → 41/42 →
+**42/42**. What it took:
+
+- **No grammar for a model that calls tools.** With the changes' JSON schema as llama.cpp's
+  grammar and its fields optional, the 4B stopped every change after its `"section"`
+  (`{"action": "add", "section": "people"}`): 9/21. llamafile 0.10.6 ignores a bare
+  `response_format: json_object`. With every field required the 4B filled them oddly (a
+  `remove` carrying `remove_facts`) and fell to 36/42; left free it writes JSON Yap reads (fenced
+  or not, `ops::parse_changes`). So the schema goes only to a model **without** tools
+  (`learn::ask`; `YAP_EVAL_MEMORY_JSON` = schema | object | off compares).
+- **Yap's rules over what the model writes** (`memory/ops.rs`): an "about" or `A | B` facts on
+  Profile become facts (the 4B wrote "Nurse at St James's in Leeds" there); a pass never removes
+  the whole Profile (it did, for "forget my old job", taking where they live and their dog with
+  it), and a Tell that tries is narrowed to the facts sharing a word with the request;
+  preference-like facts headed for Profile go to Preferences; a nameless add goes to Profile.
+- **The prompt**: three short examples (a person, an update that replaces a fact, nothing to
+  keep), "update only an [id] in What Yap remembers now", where each kind of fact goes in an
+  import, and for a Tell "remove everything about it, including people and projects tied to it".
+  Before the examples the 4B kept nothing from "My colleague Sam Patel, the product manager at
+  Acme…" or "Rochelle's birthday is on the 3rd of May".
+- **Preferences next to the question.** In the system prompt alone, "Short answers: two or three
+  sentences at most, no lists" didn't stop a 138-word numbered answer; repeated last in the
+  question's context (`memory::answer_note`), 2/2.
+- **Grounding** (`ops::grounded`): a name, an "about" or a fact must share a word with what the
+  person said (their messages, not the AI's; the Tell's or the import's text). It cost the 4B
+  nothing (42/42), and stops a small model copying the prompt's example: Qwen2.5-1.5B added "Tom,
+  brother, lives in Glasgow" to a chat about a nurse and her dog.
+
+**Qwen2.5-1.5B**: using memory is easy for it (the "You" block and the relevant items come in
+the prompt: 4/4); learning isn't. Even under the strict grammar it kept what the person only
+asked about ("Australia: capital is Canberra"), filed "Nurse at St James's in Leeds" as a person,
+wrote nothing for a job change, and took 10–124 s of the processor a pass (the import's 124 s).
+So **a model that can't call tools doesn't learn by itself** (`learn::learns_by_itself`;
+Settings → Memory says so and points at Qwen3.5 4B or a cloud model): "Tell Yap what to change",
+imports (each change reviewed) and "Remember that…" still use it. `YAP_EVAL_MEMORY_SMALL=learn`
+makes it learn in a run, as above. Two of Yap's guards came out of its answers: anything about a
+password ("Saved password hint: tulip99", from an import) and a one-off request written as a
+fact ("Wanted a recipe for lasagne on 3 March"); and a person must be named by a name.
+
+**Past chats for a model without tools** (`chats::past_chats_block`, the light keyword pass):
+with it the 1.5B named "Taberna Sal Grosso" from the earlier chat; with "Search and reference
+past chats" off, 0 of 2 ("I don't recall any specific restaurant…"). Kept. A `search_memory`
+tool wasn't added: the relevant people, projects and topics already come with the question
+(`memory-use-*` 8/8 on the 4B, 4/4 on the 1.5B).
+
+**After merging `integration/next` and wiring in About you** (later on 22 Oct, 22 scenarios with
+`memory-learn-about-you`: About you holds the name and "I work day shifts at a warehouse in
+Leeds."; a chat says both again and that they've started learning Spanish). Qwen3.5-4B on the
+GPU, ×2: 20/22, 41/44, 42/44, then **43/44 and 43/44** (run folders
+`E:/yap-builds/eval-runs/20261022-0908*` to `-0920*`). What changed on the way:
+
+- **About you in the pass's input made it worse.** Told "these are the user's own settings,
+  don't add them", the 4B wrote About you back (`name: "Declan"`, the warehouse) and left
+  Spanish out; without it, it keeps both. So the input doesn't carry About you, and
+  `ops::drop_about_you` takes the repeats out afterwards (a short fact naming the person, or one
+  whose meaningful words are nearly all the note's): 4/4 since.
+- **"Forget everything about my old job at Acme"** failed 4 times in a row: the 4B took out
+  "Lives in Leeds" and the dog as separate fact removals (now narrowed to the facts sharing a
+  word with the request, like a whole-Profile removal), and removed Sam's "Colleague at Acme"
+  as a fact, though it's who he is (the listing shows both alike); `remove_facts` now takes
+  that out too. 4/4 since.
+- The birthday check missed "May 3rd" (no word boundary after the 3; the check, fixed).
+- What's left differs run to run: an import filing "building Yap" under Profile instead of
+  Projects (1 in 8), a 115-word answer where the preference says short (1 in 8).
 
 ## Prices where the user is (22 Oct 2026)
 

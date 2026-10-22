@@ -135,11 +135,20 @@ pub(crate) fn destination(edit: bool, assistant: bool, chat_armed: bool, chat_fo
 pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
     let corrected = config::apply_dictionary(text, &cfg.dictionary);
     let corrected = if cfg.dictionary_fuzzy && !stt::is_whisper_model(&cfg.model_size) {
-        crate::fuzzy::apply_fuzzy(&corrected, &cfg.dictionary)
+        let fixed = crate::fuzzy::apply_fuzzy(&corrected, &cfg.dictionary);
+        // The names Yap remembers (memory/vocab.rs), more carefully: only
+        // where what was heard isn't an ordinary word itself.
+        let names: Vec<_> = crate::memory::dictation_names(&cfg.dictionary).into_iter().filter(|e| e.fuzzy).collect();
+        if names.is_empty() {
+            fixed
+        } else {
+            let words = crate::memory::Words::new();
+            crate::fuzzy::apply_names(&fixed, &names, &|w| words.is(w))
+        }
     } else {
         corrected
     };
-    crate::dict_usage::record(&cfg.dictionary, &corrected);
+    crate::dict_usage::record(&crate::memory::with_names(&cfg.dictionary), &corrected);
     corrected
 }
 
@@ -985,7 +994,8 @@ impl Shared {
     /// `language_settings`; only Whisper engines consume it.
     fn dictionary_prompt(&self) -> Option<String> {
         let dict = self.config.read().ok()?.dictionary.clone();
-        config::dictionary_prompt(&crate::dict_usage::ranked(&dict))
+        // The dictionary's words, then the names Yap remembers (memory.rs).
+        config::dictionary_prompt(&crate::dict_usage::ranked(&crate::memory::with_names(&dict)))
     }
 
     /// If streaming partials are enabled, spawn the worker thread for this

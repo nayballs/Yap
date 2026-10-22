@@ -42,6 +42,7 @@ mod meeting_detect;
 mod meeting_end;
 mod meeting_guard;
 mod meeting_summary;
+mod memory;
 mod note_text;
 mod notepad;
 mod notes;
@@ -566,6 +567,19 @@ pub fn run() {
             #[cfg(debug_assertions)]
             diarize::e2e_diarize_timeline,
             // Test mode only (e2e.rs); not in release builds at all.
+            memory::memory_list,
+            memory::memory_save_item,
+            memory::memory_delete_item,
+            memory::memory_set_dictation,
+            memory::memory_clear,
+            memory::memory_undo,
+            memory::memory_import_prompt,
+            memory::memory_tell,
+            memory::memory_import,
+            memory::memory_apply,
+            memory::memory_export,
+            #[cfg(debug_assertions)]
+            memory::e2e_memory_learn,
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_feed,
             #[cfg(debug_assertions)]
@@ -927,6 +941,9 @@ pub fn run() {
             // written in Rust): both follow the recorder's events.
             notepad::init(&handle);
             meeting_end::init(&handle);
+            // Memory: its events, and reading quiet chats for what to
+            // remember (memory.rs).
+            memory::init(&handle);
             // The speaker engine's voices onto meeting lines (beta).
             speakers::labels::init(&handle);
 

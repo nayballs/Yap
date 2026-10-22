@@ -1,0 +1,27 @@
+{
+  "name": "memory-tell-forget-job",
+  "description": "\"Forget everything about my old job\": every item and fact about it goes; the rest stays.",
+  "tags": ["memory", "memory-tell"],
+  "apps": "standard",
+  "seed": {
+    "memory": [
+      { "section": "profile", "details": ["Works at Acme as a nurse", "Lives in Leeds", "Has a dog called Beans"] },
+      { "section": "people", "title": "Sam Patel", "summary": "Colleague at Acme", "details": ["Product manager"] },
+      { "section": "projects", "title": "Acme ward rota", "summary": "Their rota spreadsheet at Acme" },
+      { "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York"] }
+    ]
+  },
+  "turns": [
+    {
+      "tell": "Forget everything about my old job at Acme",
+      "expect": {
+        "memory": [
+          { "has": "Acme", "exists": false },
+          { "has": "Leeds", "section": "profile" },
+          { "has": "Rochelle", "section": "people" }
+        ]
+      },
+      "soft": { "memory": [{ "has": "Sam", "exists": false }] }
+    }
+  ]
+}

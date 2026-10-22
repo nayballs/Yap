@@ -305,7 +305,12 @@ pub fn start_summary(app: &AppHandle, note_id: u64) -> bool {
         };
         match &error {
             Some(e) => tracing::warn!(note_id, state, "Meeting action plan not written: {e}"),
-            None => tracing::info!(note_id, "Meeting action plan written"),
+            None => {
+                tracing::info!(note_id, "Meeting action plan written");
+                // "Learn from meetings" (memory.rs): who the attendees are,
+                // the person's projects.
+                crate::memory::learn::meeting_ended(note_id);
+            }
         }
         // A discard or a resume meanwhile retired this run.
         if jobs().get(&note_id).is_some_and(|j| j.run == run) {

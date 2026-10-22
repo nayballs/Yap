@@ -61,11 +61,32 @@ pub struct Settings {
     /// The Chat scope's prompt (default: Settings' default persona).
     #[serde(default)]
     pub persona: Option<String>,
+    /// "Include sensitive topics in memory" (memory.rs; default off).
+    #[serde(default)]
+    pub memory_sensitive: bool,
+    /// "Search and reference past chats" (default on).
+    #[serde(default = "yes")]
+    pub memory_search_chats: bool,
+    /// About you's "What should Yap call you?" and "Anything the AI should
+    /// know about you" (about_you.rs; the region comes from `--locale`).
+    #[serde(default)]
+    pub about_name: String,
+    #[serde(default)]
+    pub about_me: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { open_apps: true, app_nicknames: Vec::new(), apps_blocked: Vec::new(), persona: None }
+        Settings {
+            open_apps: true,
+            app_nicknames: Vec::new(),
+            apps_blocked: Vec::new(),
+            persona: None,
+            memory_sensitive: false,
+            memory_search_chats: true,
+            about_name: String::new(),
+            about_me: String::new(),
+        }
     }
 }
 
@@ -181,6 +202,41 @@ pub struct Seed {
     pub folders: Vec<String>,
     #[serde(default)]
     pub notes: Vec<SeedNote>,
+    /// What Yap remembers before the first turn (memory.rs).
+    #[serde(default)]
+    pub memory: Vec<SeedMemory>,
+    /// Earlier conversations (for `search_chats`).
+    #[serde(default)]
+    pub chats: Vec<SeedChat>,
+}
+
+/// One remembered item.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SeedMemory {
+    /// "profile" | "preferences" | "people" | "projects" | "topics".
+    pub section: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub details: Vec<String>,
+}
+
+/// An earlier conversation: its title and messages ("user" / "assistant").
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SeedChat {
+    pub title: String,
+    pub messages: Vec<SeedMessage>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SeedMessage {
+    pub role: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -217,7 +273,20 @@ pub struct SeedLine {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Turn {
+    /// The message asked in Chat ("" with `learn`, `tell` or `import`
+    /// alone: no chat turn).
+    #[serde(default)]
     pub user: String,
+    /// After the turn, memory's learning pass reads the chat so far, as a
+    /// quiet chat is read (`memory::learn::learn_from_chat`).
+    #[serde(default)]
+    pub learn: bool,
+    /// "Tell Yap what to change" (Settings → Memory), applied as proposed.
+    #[serde(default)]
+    pub tell: Option<String>,
+    /// An import (what another assistant remembers), applied as proposed.
+    #[serde(default)]
+    pub import: Option<String>,
     /// Asked by voice (default: the scenario's `voice`).
     #[serde(default)]
     pub voice: Option<bool>,
@@ -306,6 +375,27 @@ pub struct Expect {
     /// searched this turn: not checked.
     #[serde(default)]
     pub prices_keep_their_sign: bool,
+    /// Memory afterwards: items holding these words (or not).
+    #[serde(default)]
+    pub memory: Vec<MemoryExpect>,
+    /// Memory's learning / tell / import in this turn made at most this
+    /// many changes (0: none, the passing details stayed out).
+    pub memory_changes_max: Option<usize>,
+    pub memory_changes_min: Option<usize>,
+}
+
+/// Something memory holds afterwards: an item whose name, summary or facts
+/// contain `has` (case-insensitive) — in `section` when given — or, with
+/// `exists: false`, no item does.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryExpect {
+    pub has: String,
+    pub section: Option<String>,
+    #[serde(default = "yes")]
+    pub exists: bool,
+    /// Exactly this many items hold it (no duplicates).
+    pub count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -366,6 +456,9 @@ pub struct Observed {
     /// The turn before searched the web.
     pub earlier_searched: bool,
     pub stats: TurnStats,
+    /// Memory's changes this turn (its learning pass, a tell, an import, the
+    /// chat's remember/forget), as "added people: Rochelle".
+    pub memory_done: Vec<String>,
 }
 
 impl Observed {
@@ -382,6 +475,7 @@ impl Observed {
             }
             all.opened.extend(t.opened.iter().cloned());
             all.sources.extend(t.sources.iter().cloned());
+            all.memory_done.extend(t.memory_done.iter().cloned());
             let (a, b) = (&mut all.stats, &t.stats);
             a.requests += b.requests;
             a.retries += b.retries;
@@ -875,7 +969,73 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
             }
         }
     }
+    if !e.memory.is_empty() {
+        let items = crate::memory::items();
+        let text = |i: &crate::memory::ops::Item| lower(&format!("{} {} {}", i.title, i.summary, i.details.join(" | ")));
+        let listing = || {
+            let all: Vec<String> = items.iter().map(|i| format!("{}: {}", i.section.key(), clip(&text(i), 80))).collect();
+            if all.is_empty() { "empty".to_string() } else { all.join("; ") }
+        };
+        for want in &e.memory {
+            let section = want.section.as_deref().and_then(crate::memory::ops::Section::parse);
+            let hits = items.iter().filter(|i| section.is_none_or(|s| s == i.section) && text(i).contains(&lower(&want.has))).count();
+            let hit = hits > 0;
+            if let Some(n) = want.count {
+                if hits != n {
+                    fails.push(format!("{hits} memory items hold \"{}\" (expected {n}): {}", want.has, listing()));
+                }
+            }
+            match (hit, want.exists) {
+                (false, true) => fails.push(format!(
+                    "memory has nothing with \"{}\"{} (memory: {})",
+                    want.has,
+                    want.section.as_deref().map(|s| format!(" in {s}")).unwrap_or_default(),
+                    listing()
+                )),
+                (true, false) => fails.push(format!("memory kept \"{}\" (it shouldn't): {}", want.has, listing())),
+                _ => {}
+            }
+        }
+    }
+    if let Some(max) = e.memory_changes_max {
+        if o.memory_done.len() > max {
+            fails.push(format!("memory changed {} times (max {max}): {}", o.memory_done.len(), o.memory_done.join("; ")));
+        }
+    }
+    if let Some(min) = e.memory_changes_min {
+        if o.memory_done.len() < min {
+            fails.push(format!("memory changed {} times (expected at least {min})", o.memory_done.len()));
+        }
+    }
     fails
+}
+
+/// What changed in memory between two snapshots, in words ("added
+/// people: Rochelle", "changed profile", "removed projects: Yap"), for the
+/// checks and the logs.
+pub fn memory_diff(before: &[crate::memory::ops::Item], after: &[crate::memory::ops::Item]) -> Vec<String> {
+    let mut out = Vec::new();
+    for a in after {
+        match before.iter().find(|b| b.id == a.id) {
+            None => out.push(format!("added {}: {} ({})", a.section.key(), a.title, clip(&a.details.join(" | "), 80))),
+            Some(b) if b != a => {
+                let new: Vec<&String> = a.details.iter().filter(|d| !b.details.contains(d)).collect();
+                let gone: Vec<&String> = b.details.iter().filter(|d| !a.details.contains(d)).collect();
+                out.push(format!(
+                    "changed {}: {}{}{}",
+                    a.section.key(),
+                    a.title,
+                    if new.is_empty() { String::new() } else { format!(" +[{}]", new.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" | ")) },
+                    if gone.is_empty() { String::new() } else { format!(" -[{}]", gone.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" | ")) },
+                ));
+            }
+            _ => {}
+        }
+    }
+    for b in before.iter().filter(|b| !after.iter().any(|a| a.id == b.id)) {
+        out.push(format!("removed {}: {}", b.section.key(), b.title));
+    }
+    out
 }
 
 /// A turn's observation as JSON for the logs.
@@ -889,6 +1049,7 @@ pub fn observed_json(o: &Observed) -> Value {
         "sources": o.sources.iter().map(|(t, u)| json!({ "title": t, "url": u })).collect::<Vec<_>>(),
         "post_fixes": o.stats.post_fixes,
         "words": o.words(),
+        "memory_done": o.memory_done,
         "stats": o.stats,
     })
 }

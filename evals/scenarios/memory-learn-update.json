@@ -1,0 +1,24 @@
+{
+  "name": "memory-learn-update",
+  "description": "The user changed jobs: memory updates what it has (the old job goes) instead of keeping both.",
+  "tags": ["memory", "memory-learn"],
+  "apps": "standard",
+  "seed": {
+    "memory": [
+      { "section": "profile", "details": ["Works at Acme as a nurse", "Lives in Leeds"] }
+    ]
+  },
+  "turns": [
+    {
+      "user": "I've left Acme! I started at St James's Hospital last week as a ward manager. Can you help me plan my first team meeting?",
+      "learn": true,
+      "expect": {
+        "memory": [
+          { "has": "St James", "section": "profile" },
+          { "has": "Works at Acme", "exists": false },
+          { "has": "Leeds", "section": "profile" }
+        ]
+      }
+    }
+  ]
+}

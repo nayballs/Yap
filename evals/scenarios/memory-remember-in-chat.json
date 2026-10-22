@@ -1,0 +1,16 @@
+{
+  "name": "memory-remember-in-chat",
+  "description": "\"Remember that…\" typed in Chat updates memory (the remember tool for a model with tools, Yap's own pass for one without).",
+  "tags": ["memory", "memory-tell"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Remember that my dog's name is Beans.",
+      "expect": {
+        "memory": [{ "has": "Beans" }],
+        "memory_changes_min": 1,
+        "memory_changes_max": 2
+      }
+    }
+  ]
+}

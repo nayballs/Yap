@@ -1,0 +1,24 @@
+{
+  "name": "memory-learn-about-you",
+  "description": "About you already has the user's name and note (\"I work day shifts at a warehouse in Leeds\"). A chat says both again and something new: memory keeps the new thing (learning Spanish) and no second copy of the name or the job.",
+  "tags": ["memory", "memory-learn"],
+  "apps": "standard",
+  "settings": {
+    "about_name": "Declan",
+    "about_me": "I work day shifts at a warehouse in Leeds."
+  },
+  "turns": [
+    {
+      "user": "I'm Declan, by the way. I work day shifts at the warehouse in Leeds, and I've just started learning Spanish for a trip to Seville next spring. What's a good app for beginners?",
+      "learn": true,
+      "expect": {
+        "memory": [
+          { "has": "Spanish" },
+          { "has": "Declan", "exists": false },
+          { "has": "warehouse", "exists": false }
+        ]
+      },
+      "soft": { "memory": [{ "has": "Seville" }] }
+    }
+  ]
+}
