@@ -60,6 +60,19 @@ enter" voice command** (`voice_enter`, default on;
 enter"/"press return" (final text, else the raw transcript in case cleanup
 dropped it) loses them and presses `auto_submit_key` after the paste.
 
+**The words as said** (2026-10-22): when cleanup changed the transcript,
+`deliver` also makes the dictation's words before cleanup —
+`pipeline::as_said_text`: the corrections (without counting them as used
+again), the voice command and snippets — and fits them to the same place
+(`text_injector::prepare_dictation_as_said`), so **"Use what I said"**
+(`as_said.rs`, [pasting.md](./pasting.md)) can swap the paste for them; the
+bar offers it for a few seconds when the words differ (`yap-state`
+"cleaned", `Shared::end_state`). **Every dictation's audio** is kept a day
+(`recent_audio.rs`, below) from `run_stt`'s start, and its history entry
+carries it; a dictation that never got transcribed (no model, the model
+failed, Yap closed mid-way) or whose paste didn't land is listed as such,
+to **Run again** from Home.
+
 ## Modules
 
 - **`pipeline.rs`** — the heart. Owns the mic stream + shared state (`recording`,
@@ -176,6 +189,17 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   closed window's never: `read_context` refuses a target whose process is
   gone). `Pipeline::stop` is the bar's ✓ (the hotkey's second
   press). `holds_undo` keeps the updater from restarting under a pending Undo.
+  **Kept audio and failures** (`recent_audio.rs`): `run_stt` keeps the
+  audio first (`audio_id`), `deliver_text` hands its id to the history entry
+  (with `notPasted` when the paste didn't land: the app runs as
+  administrator, its window was gone, an inject error), `list_failed` lists a
+  dictation that never got transcribed (no model, the STT failed or
+  panicked) and `drop_kept_audio` drops what nothing took; `Rerun`
+  (`Pipeline::rerunner`) runs a kept one again. **The bar's offer**
+  (`end_state`): "cleaned" instead of "idle" for `as_said::OFFER_MS` after a
+  paste AI cleanup changed the words of (`Delivered.offer`), then "idle"
+  unless something came after. `deliver` is cleanup (`clean_up`, also Run
+  again's) then `deliver_text`.
 - **`gesture.rs`** — push-to-talk's pure gesture state machine: key down/up and
   the clock in (`now_ms`, monotonic, also what the input hook stamps events
   with), Start / Stop / Discard / Lock + an optional hint + "tick me in N ms"
@@ -202,12 +226,14 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   (press = key down w/ required modifiers held, release = key up OR required
   modifier up; chords fire on completion; suppressed keys are excluded from the
   GetAsyncKeyState self-heal — the hook eats them before the key-state table
-  updates). Four bindings: dictation, edit (`edit-key-*`, Commands' rewrite
+  updates). Five bindings: dictation, edit (`edit-key-*`, Commands' rewrite
   shortcut), the meeting
   shortcut (`meeting-key-*`, `configure_meeting`; only its press is used —
   `meeting_guard`) and the Voice Assistant's (`assistant-key-*`,
   `configure_assistant`; unbound by default; `configure_assistant_from`
-  leaves one that clashes unbound). **`clashes(a, b)`** (pure, unit-tested;
+  leaves one that clashes unbound) and "Use what I said" (`as-said-key-*`,
+  `configure_as_said`/`_from`, unbound by default; only its press is used —
+  `as_said::swap_soon`). **`clashes(a, b)`** (pure, unit-tested;
   `hotkeysClash` in `lib/hotkeys.js` is the same rule, Settings refuses with
   it): the same key however written, combos on one key nesting (Ctrl+Space
   inside Ctrl+Shift+Space), a chord completing inside a combo or bigger
@@ -255,12 +281,74 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   "engines")]`) and a stub (default build). Holds the **14-model registry**
   (`ModelDescriptor`: id/filename/url/sha256/is_directory/engine_type), resolves
   legacy/custom ids, and does download → SHA-256 verify → (tar.gz) extract.
-  `apply_accelerator_settings` sets whisper→Vulkan(Auto) / ONNX→DirectML.
+  **Each engine loads on a `Device`** — the graphics card (Whisper through
+  Vulkan, the ONNX models through DirectML) or the processor —
+  `create_stt_engine` asking `stt_speed::device_for` (the measured pick, or
+  Settings' "Runs on"), `create_stt_engine_on` for a given one (Whisper by
+  `WhisperLoadParams.use_gpu`; ONNX by setting transcribe-rs's execution
+  provider for that load, one ONNX load at a time); `SttAdapter::device()` /
+  `model()` say which. `apply_accelerator_settings` only sets the globals'
+  defaults now. `model_fingerprint` (the files' size + newest change) tells a
+  re-downloaded model.
   `transcribe_timed` (default: `transcribe`, no times) keeps the times the
   model gives (`Timed { text, words: Vec<TimedText> }`, seconds from the
   audio's start): Parakeet's words (`TimestampGranularity::Word`), Whisper's
   segments (a phrase each), SenseVoice's tokens joined at "▁"; none for
   Moonshine/GigaAM/Canary/Cohere or the stub. Only meetings call it.
+- **`stt_speed.rs`** — **the fastest speech engine on this PC** (2026-10-22):
+  a one-time background benchmark per installed model and PC. The clip
+  (`assets/stt-speed-clip.wav`, 8 s of Kokoro's af_bella — Apache-2.0 —
+  reading a fictional line, made by the `--ignored` `make_clips` test) is
+  transcribed on each device (`measure`): the load and the first
+  transcription timed, then three rounds with the devices taking turns, each
+  round a new length of the clip (`RUN_LENGTHS`: DirectML plans its graph
+  again for every new length, as every real dictation is one — the same clip
+  repeated made it look twice as fast as it is), the median kept. A device
+  5× slower at its first go (and over 3 s) isn't timed further, and Whisper
+  on the processor isn't tried at all beside a graphics card whose first
+  transcription took ≤ 3 s (`skip_cpu_whisper`: whisper.cpp's 4 processor
+  threads need far longer for its 30-second window — large-v3 took minutes
+  on this PC, under load, against Vulkan's ~2 s — and would hold the
+  processor all that time). **The pick** (`pick`, pure): the fastest whose words match
+  the processor's, the graphics card on a near-tie (5 %). **When**
+  (`schedule`): 60 s after start and 15 s after a model is installed or
+  switched to (`Pipeline::set_engine`), only when the stored result doesn't
+  fit (`fits`: the model's files, and `pc_print` — each graphics adapter's
+  ids, name and driver version, from DXGI — so a new driver measures again),
+  and on demand (Settings' Measure again, `stt_speed_measure`). Never beside
+  a dictation (or an Upload, or within 20 s of one), a meeting recording or a
+  model download: it waits for a quiet moment, and one starting mid-way
+  stops it (`Stopped::Interrupted`, retried in 2 min). Kept in
+  `<data>/stt_speed.json`; the numbers logged at `info` (ms, whether the
+  words matched — never the text). `device_for` / `device_choice`: Settings'
+  "Runs on" (`config.stt_device`: auto | gpu | cpu; the old `use_gpu` off =
+  the processor) else the measured pick, else the graphics card;
+  `reload_if_needed` moves the warm engine to the device it should be on at
+  the next quiet moment (`Pipeline::replace_engine`). Settings → Speech-to-
+  Text → Runs on (`stt_speed_status`, `yap-stt-speed`). Test runs: only on
+  demand, on the stub engine, `YAP_E2E_STT_SPEED` ("gpu=450,cpu=150")
+  standing in for each device's cost. An `--ignored` `bench_this_pc` times
+  every model and device with three dictation-length clips (the numbers in
+  the 2026-10-22 commit).
+- **`recent_audio.rs`** — **never lose a dictation** (2026-10-22, Wispr
+  Flow's of Aug 2026): each dictation's audio (16 kHz mono 16-bit WAV) in
+  `<data>/recent-audio/<id>.wav`, the id its time in unix ms, written on its
+  own thread as `run_stt` starts (`keep`; not for edit mode or the Voice
+  Assistant; only with `keep_recent_audio` and history on), with a
+  `<id>.pending` marker until its history entry is written (`finished`) — so
+  at the next start (`init` → `recover`) one Yap never finished is listed as
+  failed ("Yap closed before it was transcribed"). A Command or an empty
+  transcript drops it (`discard`). Kept 24 h, ≤ 500 files and ≤ 200 MB, the
+  oldest first (`to_drop`, pure; `prune` at start, after each dictation and
+  hourly); deleting a history entry deletes its audio, clearing history
+  clears it all, and Settings → Privacy & data has the switch and Clear
+  (`recent_audio_status`, `recent_audio_clear`). **Run again**
+  (`history_rerun {ts, audio, model?}` → `pipeline::Rerun`, under the
+  `processing` guard: the warm engine, or another installed model loaded for
+  it; AI cleanup as for its app, the corrections, snippets; nothing pasted)
+  gives the entry its new text and clears its failure; **Play**
+  (`recent_audio_wav`: the WAV's bytes). Logs say ids and counts, never the
+  folder's path beside text. Nothing here leaves the PC.
 - **`media.rs`** — audio-file decode front-end for Upload: pure-Rust **Symphonia**
   (mp3/wav/m4a/aac/flac/ogg-vorbis; no opus yet) → downmix mono → 16 kHz
   (`pipeline::resample_linear`), plus `chunk_ranges` (~60 s windows cut at the
@@ -319,7 +407,13 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   meeting records or is live in one (`pause_verdict`, pure). Debug-only
   `list` for the robot.
 - **`history.rs`** — local-only transcription history (`history.json`): each
-  dictation's timestamp, raw + final text, model, and focused app. Best-effort,
+  dictation's timestamp, raw + final text, model, and focused app — and its
+  audio's id (`audio`, `recent_audio.rs`; listed only while the file's kept)
+  and, for one that went wrong, `status` (`failed`: never transcribed, empty
+  text, kept in time order — `record_failed`; `notPasted`: its paste didn't
+  land — `record_with`) and `error`; `rerun_result` (Run again) fixes it up.
+  Failed entries don't count in the stats nor as the last dictation to paste;
+  unit tests keep it in memory. Best-effort,
   gated by `history_enabled`. Derives the stats dashboard (words, time-saved vs
   typing, day streak, 30-day activity) without a date crate (UTC day-numbers like
   `usage.rs`). Powers `get_history`/`clear_history`/`get_stats`. Every change

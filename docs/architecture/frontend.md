@@ -199,7 +199,14 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   section or view via `onnavigate`), the dictation feed (day-grouped flat rows
   w/ hover-revealed meta + copy/delete via `delete_history_entry`, live refresh
   on `yap-history-changed`, icon-expand search on Ctrl+K), and a right-rail stats
-  card with serif display numerals.
+  card with serif display numerals. A dictation whose audio is still kept
+  (`recent_audio.rs`, a day) has **Play** (▶/■: `recent_audio_wav` as a blob)
+  and **Run again** (↻: `history_rerun` on the model in use, or — with others
+  installed — a menu of them; also in the row's right-click menu, with "Run
+  again with ›"), answered by a "Transcribed again" toast with Copy. A failed
+  one (`status`: `failed` — "Not transcribed · Yap closed before it was
+  transcribed" — or `notPasted` — a "Didn't paste" flag and why) says so in the
+  row, with a Run again button in view.
 - **`InsightsView.svelte`** = the stats
   dashboard promoted out of Settings→History (serif hero number, stat grid,
   30-day amber heatmap, top-apps-by-words bars from `get_history`); Settings →

@@ -11,6 +11,7 @@ mod about_you;
 mod agent_detect;
 mod ai_model;
 mod alert;
+mod as_said;
 mod app_icons;
 mod app_kind;
 mod apps;
@@ -67,11 +68,13 @@ mod pipeline;
 mod portable;
 mod procs;
 mod realtest;
+mod recent_audio;
 mod selection;
 mod smart_insert;
 mod sound;
 mod speakers;
 mod stt;
+mod stt_speed;
 mod text_injector;
 mod tray;
 mod tts;
@@ -425,6 +428,14 @@ pub fn run() {
             commands::delete_history_entry,
             commands::get_stats,
             text_injector::paste_last_transcript,
+            as_said::as_said_swap,
+            commands::configure_as_said_hotkey,
+            stt_speed::stt_speed_status,
+            stt_speed::stt_speed_measure,
+            recent_audio::recent_audio_status,
+            recent_audio::recent_audio_clear,
+            recent_audio::recent_audio_wav,
+            recent_audio::history_rerun,
             commands::transcribe_file,
             commands::cancel_file_transcription,
             commands::audio_file_info,
@@ -629,6 +640,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             commands::e2e_chat_dictation,
             #[cfg(debug_assertions)]
+            commands::e2e_dictation,
+            #[cfg(debug_assertions)]
             assistant::e2e_assistant_ask,
             #[cfg(debug_assertions)]
             apps::e2e_opened_apps,
@@ -693,12 +706,17 @@ pub fn run() {
             // The Voice Assistant's shortcut (assistant.rs; unbound by
             // default, and never one that clashes with the other three).
             input_hook::configure_assistant_from(&cfg);
+            // "Use what I said" (as_said.rs; unbound by default).
+            input_hook::configure_as_said_from(&cfg);
 
             // Clear ort's 0-byte DirectML.dll stub so ONNX uses the real system
             // DirectML, then fix the transcribe-rs accelerator policy before any
             // model loads: whisper → CUDA (Auto), ONNX → DirectML. No-ops in stub.
             stt::fix_directml_stub();
             stt::apply_accelerator_settings(cfg.use_gpu);
+            // Each model loads on the device that runs it fastest here
+            // (Settings → Speech-to-Text → Runs on; stt_speed.rs).
+            stt_speed::sync(&cfg);
 
             // Start the dictation pipeline (audio capture + STT engine). It
             // runs without a microphone too (see `Pipeline::start`).
@@ -706,6 +724,12 @@ pub fn run() {
             if let Ok(mut guard) = app.state::<AppState>().pipeline.lock() {
                 *guard = Some(pipeline);
             }
+            // A model this PC hasn't timed yet (or a new graphics driver):
+            // measured once things have settled.
+            stt_speed::schedule(&handle, stt_speed::AFTER_START);
+            // Recent dictations' audio past its time goes (recent_audio.rs),
+            // and one Yap stopped transcribing (a crash) is listed as failed.
+            recent_audio::init(&handle);
 
             // Clear any orphaned cleanup sidecar from a previous session (a
             // crash or task-kill skips every exit path; installers launched by
@@ -828,6 +852,11 @@ pub fn run() {
                     }
                 }
             });
+
+            // "Use what I said": the last cleaned dictation's paste swapped
+            // for the words as said (as_said.rs), on its own thread.
+            let as_said_handle = handle.clone();
+            handle.listen("as-said-key-pressed", move |_| as_said::swap_soon(&as_said_handle));
 
             // Drive the overlay (the Yap bar) from the pipeline's `yap-state`
             // event (decoupled from the pipeline itself). It always shows

@@ -59,6 +59,7 @@
   import ShortcutsPage from './settings/ShortcutsPage.svelte';
   import MeetingsPage from './settings/MeetingsPage.svelte';
   import PrivacyPage from './settings/PrivacyPage.svelte';
+  import RunsOn from './settings/RunsOn.svelte';
   import AboutPage from './settings/AboutPage.svelte';
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
@@ -403,6 +404,13 @@
     audioFeedbackVolume: 1.0,
     soundEnabled: true,
     useGpu: true,
+    // Settings → Speech-to-Text → Runs on (stt_speed.rs): auto | gpu | cpu.
+    sttDevice: 'auto',
+    // A day of dictation audio, to run one again (recent_audio.rs).
+    keepRecentAudio: true,
+    // "Use what I said" (as_said.rs): its shortcut and the bar's offer.
+    asSaidHotkey: '',
+    asSaidOffer: true,
     streamingPartials: true,
     historyEnabled: true,
     meetingDetection: true,
@@ -1931,14 +1939,9 @@
             </Row>
           </Group>
           <Group title="Performance" id="settings-performance">
-            <Row setting="gpu">
-              <Toggle
-                bind:checked={cfg.useGpu}
-                label="GPU acceleration"
-                desc="Whisper models run on your graphics card. Applies after a restart"
-                hint="Parakeet and the other ONNX models always use the graphics card, through DirectML."
-              />
-            </Row>
+            <!-- The graphics card or the processor, measured per model on
+                 this PC (stt_speed.rs). -->
+            <RunsOn {cfg} />
             <Row label="Unload model when idle" desc="Frees memory between dictations. It loads again for the next one" setting="unload">
               <Select bind:value={cfg.modelUnloadTimeout} options={UNLOAD_TIMEOUTS} ariaLabel="Unload model when idle" />
             </Row>

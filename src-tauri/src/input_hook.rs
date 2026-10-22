@@ -105,6 +105,9 @@ static DICTATION_BINDING: KeyBinding = KeyBinding::new();
 static EDIT_BINDING: KeyBinding = KeyBinding::new();
 static MEETING_BINDING: KeyBinding = KeyBinding::new();
 static ASSISTANT_BINDING: KeyBinding = KeyBinding::new();
+/// "Use what I said" (`as_said.rs`): swap the last cleaned dictation's
+/// paste for the words as said. Unbound by default.
+static AS_SAID_BINDING: KeyBinding = KeyBinding::new();
 
 /// Channel from the hook callback to the emit-forwarder thread. The callback
 /// must NEVER do slow work (like `app.emit`, which can block on a busy webview):
@@ -191,6 +194,38 @@ pub fn configure_assistant_from(cfg: &crate::config::YapConfig) {
     };
     if let Err(e) = configure_assistant(spec) {
         tracing::warn!("Failed to apply the assistant shortcut: {}", e);
+    }
+}
+
+/// Parse a key spec string and configure the **"Use what I said"**
+/// shortcut (`as_said.rs`). An empty spec unbinds it (the default).
+pub fn configure_as_said(key_spec: &str) -> Result<String, String> {
+    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
+    AS_SAID_BINDING.configure(key_type, key_code, mods);
+    let desc = format_binding(key_type, key_code, mods);
+    info!("Use-what-I-said key configured: {} (spec: {:?})", desc, key_spec);
+    Ok(desc)
+}
+
+/// The "Use what I said" shortcut from config, unless it clashes with one
+/// of the other four (a hand-edited config.json: Settings never saves one).
+pub fn configure_as_said_from(cfg: &crate::config::YapConfig) {
+    let spec = cfg.as_said_hotkey.trim();
+    let others = [
+        ("dictation hotkey", cfg.hotkey.as_str()),
+        ("rewrite shortcut", cfg.edit_hotkey.as_str()),
+        ("meeting shortcut", cfg.meeting_hotkey.as_str()),
+        ("assistant shortcut", cfg.assistant_hotkey.as_str()),
+    ];
+    let spec = match others.iter().find(|(_, other)| clashes(spec, other)) {
+        Some((name, _)) => {
+            tracing::warn!("The Use-what-I-said shortcut {spec:?} clashes with the {name}: left unbound");
+            ""
+        }
+        None => spec,
+    };
+    if let Err(e) = configure_as_said(spec) {
+        tracing::warn!("Failed to apply the Use-what-I-said shortcut: {}", e);
     }
 }
 
@@ -726,6 +761,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
             (&EDIT_BINDING, "edit-key-pressed", "edit-key-released"),
             (&MEETING_BINDING, "meeting-key-pressed", "meeting-key-released"),
             (&ASSISTANT_BINDING, "assistant-key-pressed", "assistant-key-released"),
+            (&AS_SAID_BINDING, "as-said-key-pressed", "as-said-key-released"),
         ] {
             suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
         }
@@ -806,6 +842,12 @@ unsafe extern "system" fn low_level_mouse_proc(
                     "assistant-key-released",
                     is_press,
                 );
+                return 1;
+            }
+
+            // …and "Use what I said".
+            if AS_SAID_BINDING.matches_mouse(id) {
+                handle_binding_event(&AS_SAID_BINDING, "as-said-key-pressed", "as-said-key-released", is_press);
                 return 1;
             }
         }

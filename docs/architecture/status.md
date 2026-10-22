@@ -6,6 +6,27 @@ What works today, how it was tested, and what's not done yet. `ROADMAP.md` is in
 
 ## What works
 
+**Trusting a dictation** (2026-10-22): **the fastest speech engine on each
+PC** (`stt_speed.rs`: a one-time background benchmark per model, Settings →
+Speech-to-Text → Speed "Runs on: processor (fastest on this PC, …)" with
+Automatic / Graphics card / Processor) — on this PC (RTX 5070 Ti, Ryzen 7
+9800X3D; release build; other agents' builds and a local LLM loading the
+CPU and GPU meanwhile, so devices interleaved and medians kept) int8
+Parakeet V3 and V2 run faster on the processor at every dictation length
+(V3, 8.2 s of speech: DirectML ~475 ms warm vs the processor ~238 ms, and
+the first dictation after a load ~0.8 s vs ~0.1 s), so Automatic now picks
+the processor for both; Whisper large-v3 (q5_0) stays on Vulkan, the
+processor far too slow. DirectML re-plans for every new audio length, which
+a fixed clip hides: the benchmark times a new length each round. **"Use what
+I said"** (`as_said.rs`: the shortcut, the bar's offer, the tray's paste as
+said), checked by the robot in the test pad, Notepad, an Edge box, a chat
+app and its contenteditable (swapped) and in a terminal, after an edit and
+with another window in front (refused, copied). **A day of dictation audio**
+(`recent_audio.rs`): failed dictations listed, Run again (any installed
+model) and Play in Home, a crash mid-dictation recovered at the next start —
+e2e-tested on the stub engine (`dictation-trust.spec.js`), Run again on real
+speech not yet tried by a person.
+
 **Transcription is REAL and GPU-accelerated** (no longer a stub in `engines`
 builds), and the dictation pipeline around it is complete: multi-engine STT
 (Whisper/Vulkan + ONNX/DirectML), the 14-model registry + manager, recording modes

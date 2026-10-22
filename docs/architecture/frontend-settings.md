@@ -153,7 +153,9 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   `soundEnabled`), "Chime plays on" (`outputDevice`), "Silence other apps while
   you dictate" (`quietOtherApps`; ⓘ: calls are never silenced), "Pause music
   and videos while you dictate" (`pauseMedia`). **While you dictate**: "Live
-  preview on the Yap bar" (`streamingPartials`), "Cancel and finish buttons"
+  preview on the Yap bar" (`streamingPartials`), "Offer what you said after AI
+  cleanup" (`asSaidOffer`, on: the bar's "Cleaned up · Use what I said",
+  `as_said.rs`), "Cancel and finish buttons"
   (a Select When you point at it / Always / Off → `barDictationButtons`, Off
   by default, a line per choice). **Typing into apps** (`#settings-typing`,
   Advanced's old Output): "Match the text around the cursor"
@@ -167,9 +169,11 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   (dictations never show up in Win+V history), and the **Dictionary** link row
   (its counts; it leaves Settings for the Dictionary view, `onshowview`).
 - **Shortcuts** (`settings/ShortcutsPage.svelte`, OpenWhispr's Hotkeys page):
-  the four global shortcuts together — Dictate, Rewrite selected text, Ask the
-  Voice Assistant, Meeting notes — each in keycaps with Change, a clash said
-  under the one being set. Their own pages show the same control.
+  the five global shortcuts together — Dictate, Rewrite selected text, Ask the
+  Voice Assistant, **Use what I said** (`asSaidHotkey`, unbound by default;
+  `as_said.rs`), Meeting notes — each in keycaps with Change, a clash said
+  under the one being set. Their own pages show the same control. (No in-page
+  fallback for Use what I said: its paste is never in a Yap window.)
 - **Meetings** (`settings/MeetingsPage.svelte`, Wispr's Notetaker page and
   order): **Call detection** (`#settings-meetings`): "Detect calls and offer
   to take notes" (`meetingDetection`), **"Ask about calls in · 8 of 12 apps ›"**
@@ -246,8 +250,14 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   one installed), delete behind Yap's confirm dialog. **Speakers in meetings**
   (`#settings-speakers`, `SpeakerModels.svelte` + `diarization.svelte.js`: the
   switch, the speaker models' rows, credits behind a disclosure). **Language**
-  (Language, Translate to English) and **Performance** (GPU acceleration,
-  Unload model when idle).
+  (Language, Translate to English) and **Performance**: **Speed**, where the
+  model runs (`settings/RunsOn.svelte`, `stt_speed.rs`: "Runs on: processor (fastest on
+  this PC, 150 ms)" — or "(not measured on this PC yet)", "(your choice). The
+  graphics card was faster here (90 ms)" —, a Select Automatic / Graphics card /
+  Processor → `sttDevice`, with `useGpu` following it, and Measure now / Measure
+  again; the ⓘ has each device's numbers and the clip; it follows
+  `yap-stt-speed`) and Unload model when idle. (It replaced the GPU
+  acceleration switch, 2026-10-22.)
 - **Language Models** (`cleanup`): tabs Dictation Cleanup / Commands /
   Note Formatting / Chat & Voice Assistant (scope keys `cleanup`,
   `voiceAgent`, `noteFormatting`, `chat`; `cleanup#<scope>` opens one).
@@ -288,12 +298,16 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
 - **Privacy & data** (`settings/PrivacyPage.svelte`, OpenWhispr's Privacy &
   Data, Claude's Privacy; replaces History and gathers the scattered privacy
   notes): **What leaves this PC** — a table by feature as Yap is set up now
-  (your voice, AI cleanup, Chat and the Voice Assistant, About you, memory, web search,
+  (your voice, recent dictation audio, AI cleanup, Chat and the Voice Assistant, About you, memory, web search,
   spoken replies, AI apps, calendar, account), each row linking to its
   setting. **History** (`#settings-history`): "Keep dictation history"
   (`historyEnabled`) and Clear history… (asks first; the count from
-  `get_stats`, re-read on `yap-history-changed`); the list itself is Home's
-  feed. **Local API** (`#settings-local-api`): `bridgeEnabled` (the
+  `get_stats`, re-read on `yap-history-changed`; it clears the kept audio
+  too); the list itself is Home's feed. "Keep recent dictation audio"
+  (`keepRecentAudio`, `recent_audio.rs`: the last 24 hours, on this PC, to run
+  a dictation again; greyed while history is off) and Clear recent audio…
+  ("3 dictations · 1.2 MB" from `recent_audio_status`; asks first; history
+  stays). **Local API** (`#settings-local-api`): `bridgeEnabled` (the
   Integrations view follows it, `yap-bridge-changed`). **Logs and data**
   (`#settings-logs`): Debug logging (`debugLogging`; ⓘ: what you dictate can
   appear in logs), the log file (Copy path, Open logs folder) and where the

@@ -40,6 +40,7 @@ export const SETTINGS_INDEX = [
   { page: 'dictation', section: 'Microphone and sound', label: 'Silence other apps while you dictate', desc: 'Music, videos and games go quiet', keywords: 'mute quiet volume music sound', anchor: 'quiet-other-apps', toggle: 'quietOtherApps' },
   { page: 'dictation', section: 'Microphone and sound', label: 'Pause music and videos while you dictate', desc: "What's playing pauses, then plays again", keywords: 'media spotify youtube pause', anchor: 'pause-media', toggle: 'pauseMedia' },
   { page: 'dictation', section: 'While you dictate', label: 'Live preview on the Yap bar', desc: 'Your words show as you speak', keywords: 'partials streaming live transcription preview', anchor: 'live-preview', toggle: 'streamingPartials' },
+  { page: 'dictation', section: 'While you dictate', label: 'Offer what you said after AI cleanup', desc: 'Use what I said on the Yap bar for a few seconds', keywords: 'raw transcript revert undo cleanup as said original words restore', anchor: 'as-said-offer', toggle: 'asSaidOffer' },
   { page: 'dictation', section: 'While you dictate', label: 'Cancel and finish buttons', desc: '✕ to cancel and ✓ to paste on the bar', keywords: 'cancel finish buttons bar stop', anchor: 'dictation-buttons' },
   { page: 'dictation', section: 'Typing into apps', label: 'Match the text around the cursor', desc: "Spaces, capitals and full stops fit where you're typing", keywords: 'smart spacing capitals paste pasting cursor', anchor: 'smart-spacing', toggle: 'smartSpacing' },
   { page: 'dictation', section: 'Typing into apps', label: 'Leave the full stop off chat messages', desc: 'In Slack, Teams or WhatsApp, a short message ends without one', keywords: 'period full stop chat slack teams whatsapp discord', anchor: 'chat-full-stop', toggle: 'chatNoFullStop' },
@@ -55,6 +56,7 @@ export const SETTINGS_INDEX = [
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Dictate', desc: 'Start and stop dictating where you are typing', keywords: 'shortcut shortcuts hotkey keyboard dictation key', anchor: 'shortcut-dictation' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Rewrite selected text', desc: 'Select text, press it and say how to change it', keywords: 'shortcut shortcuts hotkey edit rewrite commands', anchor: 'shortcut-rewrite' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Ask the Voice Assistant', desc: 'Ask out loud from any app', keywords: 'shortcut shortcuts hotkey assistant voice', anchor: 'shortcut-assistant' },
+  { page: 'shortcuts', section: 'Global shortcuts', label: 'Use what I said', desc: 'Swap what Yap pasted for your words before AI cleanup', keywords: 'shortcut shortcuts hotkey raw transcript revert undo cleanup as said', anchor: 'shortcut-as-said' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Meeting notes', desc: 'Take notes on a call, press again to stop', keywords: 'shortcut shortcuts hotkey meeting win alt m', anchor: 'shortcut-meeting' },
 
   // ---- Meetings ----
@@ -115,7 +117,7 @@ export const SETTINGS_INDEX = [
   { page: 'models', section: 'Speakers in meetings', label: 'Speaker models', desc: 'For telling speakers apart in meetings', keywords: 'diarization speakers model', anchor: 'speakers' },
   { page: 'models', section: 'Language', label: 'Language', desc: 'The language you speak', keywords: 'spoken language auto-detect', anchor: 'language' },
   { page: 'models', section: 'Language', label: 'Translate to English', desc: 'Output English whatever you speak', keywords: 'translation translate', anchor: 'translate' },
-  { page: 'models', section: 'Performance', label: 'GPU acceleration', desc: 'Whisper on your graphics card', keywords: 'gpu vulkan graphics card performance speed', anchor: 'gpu', toggle: 'useGpu' },
+  { page: 'models', section: 'Performance', label: 'Speed', desc: 'Runs on the graphics card or the processor: the fastest on this PC', keywords: 'runs on gpu cpu processor graphics card directml vulkan performance speed fast benchmark measure', anchor: 'runs-on' },
   { page: 'models', section: 'Performance', label: 'Unload model when idle', desc: 'Free memory when not dictating', keywords: 'memory ram idle unload performance', anchor: 'unload' },
 
   // ---- Language Models ----
@@ -141,6 +143,8 @@ export const SETTINGS_INDEX = [
   { page: 'privacy', section: 'What leaves this PC', label: 'What leaves this PC', desc: 'Feature by feature, as Yap is set up', keywords: 'privacy cloud data sent private', anchor: 'leaves' },
   { page: 'privacy', section: 'History', label: 'Keep dictation history', desc: 'Kept only on this PC', keywords: 'history dictations saved stats', anchor: 'history', toggle: 'historyEnabled' },
   { page: 'privacy', section: 'History', label: 'Clear history', desc: 'Removes every saved dictation', keywords: 'delete erase history', anchor: 'clear-history' },
+  { page: 'privacy', section: 'History', label: 'Keep recent dictation audio', desc: 'A day of it, to run a dictation again', keywords: 'audio recordings voice run again retry lost failed recent', anchor: 'recent-audio', toggle: 'keepRecentAudio' },
+  { page: 'privacy', section: 'History', label: 'Clear recent audio', desc: 'Deletes the kept dictation audio', keywords: 'delete erase audio recordings voice', anchor: 'clear-recent-audio' },
   { page: 'privacy', section: 'Local API', label: "Let apps on this PC use Yap's data", desc: 'The Local API for scripts and AI apps', keywords: 'local api bridge cli scripts http', anchor: 'local-api' },
   { page: 'privacy', section: 'Logs and data', label: 'Debug logging', desc: 'More detail in the log, for a bug report', keywords: 'debug logs diagnostics bug report troubleshooting', anchor: 'debug-logging', toggle: 'debugLogging' },
   { page: 'privacy', section: 'Logs and data', label: 'Log file', desc: 'Open the logs folder', keywords: 'logs folder', anchor: 'logs' },

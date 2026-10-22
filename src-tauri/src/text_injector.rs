@@ -1144,9 +1144,16 @@ pub fn selection_via_copy(target_hwnd: Option<isize>) -> Option<String> {
 /// entries are deleted or cleared; after a restart, history's newest
 /// dictation stands in.
 static LAST_DICTATION: Mutex<Option<String>> = Mutex::new(None);
+/// …and its words as said, when AI cleanup changed them (corrections and
+/// snippets applied, no cleanup): "Paste last transcript (as said)".
+static LAST_SAID: Mutex<Option<String>> = Mutex::new(None);
 
 fn last_dictation() -> std::sync::MutexGuard<'static, Option<String>> {
     LAST_DICTATION.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn last_said() -> std::sync::MutexGuard<'static, Option<String>> {
+    LAST_SAID.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 /// The finished dictation `text` (cleaned up, corrected) as it should be
@@ -1157,8 +1164,56 @@ fn last_dictation() -> std::sync::MutexGuard<'static, Option<String>> {
 /// `append_space`.
 pub fn prepare_dictation(text: &str, append_space: bool, dictionary: &[DictionaryEntry], kind: AppKind) -> String {
     *last_dictation() = Some(text.trim().to_string());
+    *last_said() = None;
     let ctx = crate::selection::take_context();
     fit_for_paste(text, ctx.as_ref(), append_space, dictionary, kind)
+}
+
+/// [`prepare_dictation`] for a dictation AI cleanup changed, with its words
+/// as said (`said`: corrections and snippets, no cleanup) fitted to the same
+/// place, for "Use what I said" (`as_said.rs`). Returns both, fitted.
+pub fn prepare_dictation_as_said(
+    text: &str,
+    said: &str,
+    append_space: bool,
+    dictionary: &[DictionaryEntry],
+    kind: AppKind,
+) -> (String, String) {
+    *last_dictation() = Some(text.trim().to_string());
+    *last_said() = Some(said.trim().to_string());
+    let ctx = crate::selection::take_context();
+    (
+        fit_for_paste(text, ctx.as_ref(), append_space, dictionary, kind),
+        fit_for_paste(said, ctx.as_ref(), append_space, dictionary, kind),
+    )
+}
+
+/// What "Paste last transcript (as said)" would paste (before fitting):
+/// this session's latest dictation as said, else history's newest one's
+/// transcript through the corrections and snippets.
+pub fn last_said_transcript() -> Option<String> {
+    let remembered = last_dictation().is_some().then(|| last_said().clone().or_else(|| last_dictation().clone())).flatten();
+    remembered
+        .or_else(|| {
+            let raw = crate::history::latest_dictation_raw()?;
+            Some(crate::pipeline::as_said_text(&raw, &crate::config::load()))
+        })
+        .filter(|t| !t.trim().is_empty())
+}
+
+/// Put `text` on the clipboard as a dictation's paste does (out of Win+V
+/// history and cloud sync) and leave it there: "Use what I said" couldn't
+/// replace the paste. `false` if the clipboard couldn't be written.
+pub fn copy_privately(text: &str) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        clip::put_text_verified(text, true)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = text;
+        false
+    }
 }
 
 /// `text` for the paste. A terminal gets it as `app_kind::terminal_text`
@@ -1220,6 +1275,7 @@ fn fit_for_paste(
 /// a dictation the person just removed; history's newest stands in.
 pub fn forget_last_transcript() {
     *last_dictation() = None;
+    *last_said() = None;
 }
 
 /// What "Paste last transcript" would paste (before fitting): this
@@ -1258,8 +1314,8 @@ fn leave_on_clipboard(text: &str, receiver: Option<isize>) -> Result<Delivery, S
 /// Returns what was pasted. A test run pastes nothing and returns it. An app
 /// running as administrator gets it on the clipboard instead, and the person
 /// is told (`elevated.rs`).
-fn paste_last_blocking(app: &tauri::AppHandle) -> Result<String, String> {
-    let text = last_transcript().ok_or(NOTHING_TO_PASTE)?;
+fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, String> {
+    let text = if as_said { last_said_transcript() } else { last_transcript() }.ok_or(NOTHING_TO_PASTE)?;
     let cfg = crate::config::load();
     let test_mode = || {
         let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary, AppKind::Other);
@@ -1323,17 +1379,19 @@ fn paste_last_blocking(app: &tauri::AppHandle) -> Result<String, String> {
 /// pastes the latest dictation into the app you're in and returns it. Errors
 /// when there's nothing yet.
 #[tauri::command]
-pub async fn paste_last_transcript(app: tauri::AppHandle) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || paste_last_blocking(&app))
+pub async fn paste_last_transcript(app: tauri::AppHandle, as_said: Option<bool>) -> Result<String, String> {
+    let as_said = as_said.unwrap_or(false);
+    tokio::task::spawn_blocking(move || paste_last_blocking(&app, as_said))
         .await
         .map_err(|e| format!("Paste task failed: {e}"))?
 }
 
-/// The tray's "Paste last transcript" (off the main thread).
-pub fn paste_last_from_tray(app: &tauri::AppHandle) {
+/// The tray's "Paste last transcript" (off the main thread); `as_said`:
+/// "Paste last transcript (as said)", the words before AI cleanup.
+pub fn paste_last_from_tray(app: &tauri::AppHandle, as_said: bool) {
     let app = app.clone();
     std::thread::spawn(move || {
-        if let Err(e) = paste_last_blocking(&app) {
+        if let Err(e) = paste_last_blocking(&app, as_said) {
             warn!("Paste last transcript: {}", e);
         }
     });

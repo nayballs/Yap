@@ -23,6 +23,9 @@
   // capsule is a `data-region` whenever it has a button to offer, so the
   // click-through bar takes clicks on it (bar.rs); it's never focused, so
   // the app you were in keeps the keyboard.
+  // Cleaned: "Cleaned up" with **Use what I said** for a few seconds after a
+  // dictation whose words AI cleanup changed (as_said.rs) — it swaps the
+  // paste for your words before cleanup, in the app you dictated into.
   //
   // A question to the **Voice Assistant** (assistant.rs; `dictation.assistant`
   // isn't 'idle') has its own variant, never mistaken for a dictation: an
@@ -52,6 +55,7 @@
   const processing = $derived(dictation.state === 'processing' || dictation.state === 'processing-slow');
   const recording = $derived(dictation.state === 'recording');
   const cancelled = $derived(dictation.state === 'cancelled');
+  const cleaned = $derived(dictation.state === 'cleaned');
   // The push-to-talk key is down (not locked hands-free): no buttons.
   const keyHeld = $derived(dictation.held && !dictation.locked);
   // ✕ / ✓ have their places (and the capsule takes the pointer)…
@@ -60,7 +64,7 @@
   const showButtons = $derived(offer && (buttons === 'always' || hovered));
 
   // The Voice Assistant's variant.
-  const ask = $derived(dictation.assistant !== 'idle' && !cancelled && dictation.state !== 'error');
+  const ask = $derived(dictation.assistant !== 'idle' && !cancelled && !cleaned && dictation.state !== 'error');
   const askListening = $derived(ask && recording);
   const askSpeaking = $derived(ask && !recording && dictation.assistant === 'speaking');
   const askThinking = $derived(ask && !recording && !askSpeaking);
@@ -80,10 +84,10 @@
   class:rec={recording}
   class:offer
   class:show={showButtons}
-  class:cancelled
+  class:cancelled={cancelled || cleaned}
   class:ask
   class:askstop={askThinking || askSpeaking}
-  data-region={offer || cancelled ? 'dictation' : askThinking || askSpeaking ? 'assistant' : undefined}
+  data-region={offer || cancelled || cleaned ? 'dictation' : askThinking || askSpeaking ? 'assistant' : undefined}
   data-ask={ask ? dictation.assistant : undefined}
 >
   {#if ask}
@@ -137,6 +141,10 @@
     <span class="txt">Dictation cancelled</span>
     <button class="undo" onclick={() => act('dictation-undo')}>Undo</button>
     <span class="undoline" aria-hidden="true"><span style={`animation-duration:${dictation.undoMs}ms`}></span></span>
+  {:else if cleaned}
+    <span class="txt">Cleaned up</span>
+    <button class="undo" title="Swap it for your words before AI cleanup" onclick={() => act('as-said')}>Use what I said</button>
+    <span class="undoline" aria-hidden="true"><span style={`animation-duration:${dictation.offerMs}ms`}></span></span>
   {:else if dictation.state === 'error'}
     <span class="dot errdot"></span>
     <span class="txt">{dictation.errorMsg}</span>

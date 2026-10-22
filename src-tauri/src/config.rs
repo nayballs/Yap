@@ -193,13 +193,35 @@ pub struct YapConfig {
     /// a key with the other three (`input_hook::clashes`).
     #[serde(default)]
     pub assistant_hotkey: String,
+    /// "Use what I said" (Settings → Shortcuts, `as_said.rs`): right after a
+    /// dictation AI cleanup changed, swap what Yap pasted for the words as
+    /// said (corrections and snippets still applied). Empty = unbound (the
+    /// default). Never shares a key with the other shortcuts.
+    #[serde(default)]
+    pub as_said_hotkey: String,
+    /// The Yap bar offers "Use what I said" for a few seconds after a
+    /// dictation whose words AI cleanup changed (`as_said.rs`). On by default.
+    #[serde(default = "default_true")]
+    pub as_said_offer: bool,
     /// Active model id from the STT registry (e.g. "parakeet-tdt-0.6b-v3",
     /// "small"). Field name kept as `model_size` for config back-compat.
     #[serde(default = "default_model_size")]
     pub model_size: String,
     /// Use GPU acceleration (whisper → Vulkan, ONNX → DirectML; any GPU).
+    /// Since 2026-10-22 it mirrors `stt_device`: false ⇔ "cpu" (an old config
+    /// with it off keeps the processor).
     #[serde(default = "default_true")]
     pub use_gpu: bool,
+    /// Settings → Speech-to-Text → Runs on: "auto" (the default — the
+    /// fastest on this PC, measured per model by `stt_speed.rs`), "gpu" (the
+    /// graphics card) or "cpu" (the processor).
+    #[serde(default = "default_stt_device")]
+    pub stt_device: String,
+    /// Keep the audio of recent dictations on this PC for 24 hours, so one
+    /// that failed, or came out wrong, can be run again (`recent_audio.rs`;
+    /// Settings → Privacy & data). On by default; only with history on.
+    #[serde(default = "default_true")]
+    pub keep_recent_audio: bool,
     /// Preferred input device name (None = system default).
     #[serde(default)]
     pub input_device: Option<String>,
@@ -737,6 +759,9 @@ fn default_hotkey() -> String {
 fn default_model_size() -> String {
     "parakeet-tdt-0.6b-v3".into()
 }
+fn default_stt_device() -> String {
+    "auto".into()
+}
 fn default_true() -> bool {
     true
 }
@@ -845,8 +870,12 @@ impl Default for YapConfig {
             hotkey: default_hotkey(),
             edit_hotkey: String::new(),
             assistant_hotkey: String::new(),
+            as_said_hotkey: String::new(),
+            as_said_offer: true,
             model_size: default_model_size(),
             use_gpu: true,
+            stt_device: default_stt_device(),
+            keep_recent_audio: true,
             input_device: None,
             sound_enabled: true,
             dictionary: Vec::new(),
@@ -988,6 +1017,12 @@ pub fn load() -> YapConfig {
         cfg.pp_prompt = default_pp_prompt();
     }
     migrate_retired_groq_models(&mut cfg);
+    // The GPU switch from before "Runs on" (2026-10-22): off meant the
+    // processor. (`save` keeps the two in step, so this never undoes a
+    // choice made since.)
+    if !cfg.use_gpu {
+        cfg.stt_device = "cpu".into();
+    }
     // One-time migrations are saved straight away, so they can never run a
     // second time and undo a choice the user makes afterwards.
     if migrate_once(&mut cfg) {
@@ -1117,6 +1152,8 @@ pub fn save(cfg: &YapConfig) -> Result<(), String> {
     // Never lower it (a newer build's file, opened after a downgrade).
     let cfg = YapConfig {
         config_version: cfg.config_version.max(CONFIG_VERSION),
+        // "Runs on" is what's chosen; the old GPU switch follows it.
+        use_gpu: cfg.stt_device != "cpu",
         ..cfg.clone()
     };
     let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;

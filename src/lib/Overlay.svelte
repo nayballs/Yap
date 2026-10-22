@@ -81,6 +81,8 @@
       dictation.state === 'processing-slow' ||
       dictation.state === 'error' ||
       dictation.state === 'cancelled' ||
+      // "Cleaned up · Use what I said" (as_said.rs), a few seconds.
+      dictation.state === 'cleaned' ||
       // A question to the Voice Assistant, until its answer has been said.
       dictation.assistant !== 'idle'
   );

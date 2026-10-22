@@ -208,6 +208,9 @@ enum Dictation {
     Error,
     /// Just cancelled: "Dictation cancelled · Undo" while its audio is kept.
     Cancelled,
+    /// Just pasted, cleaned up by AI: "Cleaned up · Use what I said" for a
+    /// few seconds (`as_said.rs`).
+    Cleaned,
 }
 
 impl Dictation {
@@ -217,6 +220,7 @@ impl Dictation {
             "processing" | "processing-slow" => Self::Processing,
             "error" => Self::Error,
             "cancelled" => Self::Cancelled,
+            "cleaned" => Self::Cleaned,
             _ => Self::Idle,
         }
     }
@@ -1330,6 +1334,12 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
             let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
             guard.as_ref().ok_or("pipeline not started")?.undo()?;
         }
+        // "Cleaned up · Use what I said": swap the paste for the words as
+        // said (as_said.rs), in the window the dictation went into.
+        "as-said" => {
+            give_focus_back();
+            crate::as_said::swap_soon(app);
+        }
         // ■ on the assistant's capsule: stop the answer (its voice, or one
         // still coming; it's in Chat either way).
         "assistant-stop" => crate::assistant::stop(app),
@@ -1411,7 +1421,7 @@ pub fn bar_pointer_left(app: AppHandle) {
 }
 
 /// A bar button or menu item: "dictate" | "dictation-stop" |
-/// "dictation-cancel" | "dictation-undo" | "meeting" | "stop-meeting" |
+/// "dictation-cancel" | "dictation-undo" | "as-said" | "meeting" | "stop-meeting" |
 /// "open-note" | "new-note" | "open" | "settings" | "hide" | "show" | "off".
 #[tauri::command]
 pub async fn bar_action(app: AppHandle, action: String) -> Result<(), String> {
@@ -1948,6 +1958,7 @@ mod tests {
         assert_eq!(Dictation::from_state("processing-slow"), Dictation::Processing);
         assert_eq!(Dictation::from_state("error"), Dictation::Error);
         assert_eq!(Dictation::from_state("cancelled"), Dictation::Cancelled);
+        assert_eq!(Dictation::from_state("cleaned"), Dictation::Cleaned);
         assert_eq!(Dictation::from_state("needs-model"), Dictation::Idle);
         assert_eq!(Dictation::from_state("idle"), Dictation::Idle);
     }

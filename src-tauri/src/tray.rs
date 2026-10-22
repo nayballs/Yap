@@ -230,6 +230,14 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
         crate::text_injector::has_last_transcript(),
         None::<&str>,
     )?;
+    // …and as you said it: before AI cleanup (as_said.rs).
+    let paste_said = MenuItem::with_id(
+        app,
+        "paste_last_said",
+        "Paste last transcript (as said)",
+        crate::text_injector::has_last_transcript(),
+        None::<&str>,
+    )?;
     let (sep_update, sep_models, sep_quit) = (sep()?, sep()?, sep()?);
     let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&version, &sep_update];
     if let Some(call) = &call {
@@ -243,6 +251,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     }
     let sep_paste = sep()?;
     items.push(&paste_last);
+    items.push(&paste_said);
     items.push(&sep_paste);
     items.push(models.as_ref());
     let sep_settings = sep()?;
@@ -305,7 +314,8 @@ fn on_menu_event(app: &AppHandle, id: &str) {
             let _ = crate::commands::show_onboarding(app);
         }
         // Off the main thread: it focuses the app and waits on the paste.
-        "paste_last" => crate::text_injector::paste_last_from_tray(app),
+        "paste_last" => crate::text_injector::paste_last_from_tray(app, false),
+        "paste_last_said" => crate::text_injector::paste_last_from_tray(app, true),
         other if other.starts_with("meeting_record:") => {
             // Off the main thread: starting the recorder blocks for a moment
             // and looks at the main window.
