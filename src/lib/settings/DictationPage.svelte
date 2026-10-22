@@ -16,7 +16,7 @@
   import Segmented from '../ui/Segmented.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
-  import { fillHotkey } from '../hotkeys.js';
+  import { fillHotkey, isCopilotKey } from '../hotkeys.js';
 
   let { cfg, devices = [], outputs = [], onshowview = null } = $props();
 
@@ -66,7 +66,11 @@
     label="Recording mode"
     setting="recording-mode"
     desc={cfg.recordingMode === 'pushToTalk'
-      ? fillHotkey('Hold {key} while you talk. Double-tap it to keep recording hands-free, then press it once more to stop.', cfg.hotkey)
+      ? isCopilotKey(cfg.hotkey)
+        ? // Many laptops send the Copilot key's press and release together,
+          // so holding it may not keep a recording going.
+          'Hold the Copilot key while you talk. If your laptop sends it as a single tap, double-tap it to record hands-free, or use Toggle.'
+        : fillHotkey('Hold {key} while you talk. Double-tap it to keep recording hands-free, then press it once more to stop.', cfg.hotkey)
       : 'Press to start and stop, or hold the key while you talk'}
   >
     <Segmented bind:value={cfg.recordingMode} options={MODES} label="Recording mode" />

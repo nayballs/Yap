@@ -78,6 +78,7 @@ mod tts;
 mod updates;
 mod usage;
 mod web;
+mod webview_memory;
 #[cfg(windows)]
 mod win_toast;
 
@@ -118,6 +119,43 @@ pub fn set_autostart_enabled(app: &AppHandle, enabled: bool) -> Result<(), Strin
         manager.disable()
     };
     res.map_err(|e| format!("Failed to set autostart: {}", e))
+}
+
+/// The argument the sign-in launch carries (the autostart Run entry).
+const AUTOSTART_ARG: &str = "--autostart";
+
+/// Does this launch bring Yap's main window up? A launch by the person (the
+/// Start menu, a shortcut, the installer's "Run Yap") does — before
+/// 2026-10-22 a release build started to the tray with nothing on screen
+/// but the Yap bar, so opening Yap seemed to do nothing. Not: a launch at
+/// sign-in, "Start hidden", the first run (onboarding comes up instead) or
+/// the updater's relaunch (`updates::init` brings the window back if it was
+/// open). Pure.
+#[cfg_attr(debug_assertions, allow(dead_code))] // dev builds always show Settings
+fn launch_shows_window(at_sign_in: bool, start_hidden: bool, has_model: bool, after_update: bool) -> bool {
+    !at_sign_in && !start_hidden && has_model && !after_update
+}
+
+/// Was Yap started by the sign-in entry? Its `--autostart`, or — for an
+/// entry written before the argument existed, until the launch below writes
+/// it again — autostart on and Windows up for under ten minutes (with
+/// autostart on, a launch by hand later finds Yap running already and just
+/// brings its window up through single-instance).
+#[cfg_attr(debug_assertions, allow(dead_code))]
+fn launched_at_sign_in(autostart: bool) -> bool {
+    if std::env::args().any(|a| a == AUTOSTART_ARG) {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        let up_ms = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() };
+        autostart && up_ms < 10 * 60 * 1000
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = autostart;
+        false
+    }
 }
 
 /// What the window-state plugin remembers for the main window (see `run`).
@@ -174,12 +212,14 @@ static LOG_RELOAD: std::sync::OnceLock<
 
 /// The filter directives for normal vs debug mode. Debug raises YAP's own
 /// crate to `debug` while keeping dependencies at `info` (whisper/ort/reqwest
-/// at debug would drown the file).
+/// at debug would drown the file). ONNX Runtime's own log (`ort`) stays at
+/// `warn` either way: at `info` every model load wrote ~1,000 lines of graph
+/// optimisation notes, 96% of a release build's log at startup.
 fn log_directives(debug: bool) -> &'static str {
     if debug {
-        "info,yap_lib=debug"
+        "info,ort=warn,yap_lib=debug"
     } else {
-        "info"
+        "info,ort=warn"
     }
 }
 
@@ -347,9 +387,11 @@ pub fn run() {
         // Yap accounts: com.contextmirror.yap:// sign-in links (auth.rs). Must
         // come after single-instance, which forwards links from a second launch.
         .plugin(tauri_plugin_deep_link::init())
+        // A launch at sign-in carries `--autostart`, so it stays in the tray
+        // while a launch by the person brings the window up (`launch_shows_window`).
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            Some(vec![AUTOSTART_ARG]),
         ))
         // Auto-update from GitHub Releases. Driven Rust-side by updates.rs
         // (background checks, download, install-on-request); the plugin's JS
@@ -604,6 +646,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             context_menu::e2e_context_menus,
             #[cfg(debug_assertions)]
+            webview_memory::e2e_webview_memory,
+            #[cfg(debug_assertions)]
             coaching::e2e_coaching_reset,
             #[cfg(debug_assertions)]
             local_llm::e2e_local_llm_serving,
@@ -752,6 +796,20 @@ pub fn run() {
             if let Some(settings) = app.get_webview_window("settings") {
                 let _ = settings.show();
             }
+            // Release builds: a launch by the person brings the main window
+            // up (`launch_shows_window`); sign-in and "Start hidden" stay in
+            // the tray.
+            #[cfg(not(debug_assertions))]
+            if launch_shows_window(
+                launched_at_sign_in(cfg.autostart),
+                cfg.start_hidden,
+                !commands::installed_models().is_empty(),
+                updates::relaunch_after_update(),
+            ) {
+                if let Err(e) = commands::show_settings(&handle) {
+                    tracing::warn!("Could not show the main window: {}", e);
+                }
+            }
 
             // Route hotkey press/release into the pipeline. Done Rust-side so the
             // core loop doesn't depend on any webview being ready. The
@@ -895,6 +953,14 @@ pub fn run() {
                 if let Err(e) = set_autostart_enabled(&handle, cfg.autostart) {
                     tracing::debug!("autostart reconcile skipped: {}", e);
                 }
+            } else if cfg.autostart && !std::env::args().any(|a| a == AUTOSTART_ARG) {
+                // An entry written before `--autostart` existed starts Yap
+                // without it, which would now open the window at every
+                // sign-in: written again, with it. (A launch that carries
+                // the argument proves the entry already has it.)
+                if let Err(e) = set_autostart_enabled(&handle, true) {
+                    tracing::debug!("autostart entry not rewritten: {}", e);
+                }
             }
 
             // Closing the settings / onboarding windows hides them (so they can
@@ -982,6 +1048,11 @@ pub fn run() {
             // Other apps' sound a crash left silenced mid-dictation comes back.
             mute::recover();
 
+            // Windows off screen (the main window in the tray, onboarding,
+            // the notepad between meetings) ask WebView2 to keep less in
+            // memory (webview_memory.rs).
+            webview_memory::init(&handle);
+
             // Calendar: the connected calendars' meetings, reminders before
             // them, and their titles and attendees for meeting notes (talks
             // to Google or the person's iCal link only; calendar.rs).
@@ -1001,4 +1072,35 @@ pub fn run() {
                 shutdown_cleanup();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{launch_shows_window, log_directives};
+
+    #[test]
+    fn a_launch_by_the_person_brings_the_window_up() {
+        // (at sign-in, start hidden, a model installed, the updater's relaunch)
+        assert!(launch_shows_window(false, false, true, false));
+        // Sign-in and "Start hidden" stay in the tray.
+        assert!(!launch_shows_window(true, false, true, false));
+        assert!(!launch_shows_window(false, true, true, false));
+        // The first run shows onboarding instead.
+        assert!(!launch_shows_window(false, false, false, false));
+        // After "Restart to update", updates.rs decides.
+        assert!(!launch_shows_window(false, false, true, true));
+    }
+
+    #[test]
+    fn onnx_runtime_logs_warnings_only() {
+        // Its graph-optimisation notes at `info` were ~1,000 lines per model
+        // load; Yap's own debug mode doesn't bring them back.
+        for debug in [false, true] {
+            let d = log_directives(debug);
+            assert!(d.contains("ort=warn"), "{d}");
+            tracing_subscriber::EnvFilter::try_new(d).expect("valid directives");
+        }
+        assert!(log_directives(true).contains("yap_lib=debug"));
+        assert!(!log_directives(false).contains("yap_lib=debug"));
+    }
 }

@@ -245,7 +245,7 @@
       <div class="fuzzycard">
         <Toggle
           label="Catch near-misses"
-          desc="Also fix words that ALMOST match a correction — “jaison” still becomes “JSON”. Uses spelling + sound-alike matching (same engine as Handy). The ≈ button on a row exempts that correction — handy when a near-miss is a real word (“Jason”). With a Whisper model the dictionary is fed straight into the recognizer instead, the words you've used most lately first."
+          desc="Also fix words that nearly match a correction, by spelling or by sound — “jaison” still becomes “JSON”. Turn ≈ off on a row whose near-misses are real words (“Jason”). With a Whisper model, the dictionary goes straight to the recognizer instead, the words you've used most lately first."
           checked={fuzzy}
           onchange={setFuzzy}
         />
@@ -335,10 +335,14 @@
   .page-h {
     margin: 0 0 22px;
   }
+  /* The serif display title, as Meetings and Settings have it. */
   .page-h h1 {
-    margin: 0 0 4px;
-    font-size: 19px;
-    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+    font-family: var(--yap-font-display);
+    font-size: 28px;
+    font-weight: 550;
+    letter-spacing: -0.005em;
+    line-height: 1.2;
   }
   .page-h p,
   .sec-h p {

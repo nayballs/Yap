@@ -103,7 +103,18 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   builds the tray (always — it's the only persistent surface), reconciles
   autostart (release builds only: a dev build shares the installed app's `Yap`
   Run entry, so `set_autostart_enabled` leaves the OS setting alone), and
-  starts the update scheduler last (`updates::init`).
+  starts the update scheduler last (`updates::init`). **What a launch shows**
+  (2026-10-22; before it a release build started to the tray with nothing on
+  screen but the Yap bar, so opening Yap from the Start menu seemed to do
+  nothing): the sign-in entry passes **`--autostart`** (`AUTOSTART_ARG`, the
+  autostart plugin's args), and a release launch brings the main window up
+  unless it was at sign-in (`launched_at_sign_in`: the argument, or — for an
+  entry written before it existed — autostart on and Windows up < 10 min),
+  "Start hidden" is on, there's no speech model (onboarding instead) or it's
+  the updater's relaunch (`updates::relaunch_after_update`: `updates::init`
+  brings the window back if it was open) — `launch_shows_window`, pure,
+  unit-tested. An autostart entry without the argument is written again on
+  the next launch that lacks it. Dev builds show Settings on every launch.
   `shutdown_cleanup()` (sidecar, bridge, other apps' sound back — `mute::restore_all`) runs on `RunEvent::Exit`
   AND from the updater's pre-install hook. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
   Gives the hidden settings/onboarding webviews a one-shot **DWM-cloaked** show+hide
@@ -131,10 +142,23 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   Shift+right-click (`offers_inspect(debug, shift)`; Shift read with
   `GetKeyState`/`GetAsyncKeyState`, compiled out of release). See "Window
   config" below.
+- **`webview_memory.rs`** — hidden webviews keep less in memory (2026-10-22):
+  a watcher thread reads each window's visibility every 3 s (`target`, pure:
+  hidden or minimised → low) and gives an off-screen window's webview
+  WebView2's **low memory target** (`ICoreWebView2_19::
+  put_MemoryUsageTargetLevel`), back to normal on screen. Scripts keep
+  running (not `TrySuspend`: Settings' auto-save, the notepad and the toast
+  policy need their hidden pages live). The Yap bar and the split preview
+  are left alone. Debug-only `e2e_webview_memory` reports each window's
+  target (`polish.spec.js`). The main window, onboarding and the notepad
+  are hidden most of the day, each a renderer process of its own.
 - **`portable.rs`** — portable-mode detection (a `portable` marker next to the exe
   redirects data to `<exe>/Data`).
 - **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
   `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
+  ONNX Runtime's own log (`ort`) is held at `warn` in both modes
+  (`log_directives`): at `info` each model load wrote ~1,000 lines of graph
+  optimisation notes, 96% of a release build's startup log.
   **Debug mode** (Settings → Privacy & data → Debug logging, OpenWhispr Developer-
   section port): `config.debug_logging` raises `yap_lib` to `debug` live via a
   `reload::Layer` handle (`set_debug_logging`, applied on config save; RUST_LOG
@@ -183,8 +207,13 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   persisted by `tauri-plugin-window-state`
   across launches; overlay, onboarding, notepad, split-preview are excluded from persistence; the VISIBLE flag
   is excluded so the window never un-hides on start-hidden launches (see lib.rs window-state
-  plugin setup).
-- **onboarding**: 620×720 (min 520×560), hidden, hide-on-close.
+  plugin setup). **Fitted to the screen** on every show (`commands::fit_to_screen`,
+  pure `fit_rect`, unit-tested): a window bigger than its monitor's work area,
+  or partly off it, is shrunk and moved inside — 800 px is taller than a
+  1080p laptop at 150 % (672 px above the taskbar) or a 1366 × 768 screen,
+  where the centred window's title bar sat above the screen.
+- **onboarding**: 620×720 (min 520×560), hidden, hide-on-close; fitted to the
+  screen the same way (its buttons were under the taskbar on such laptops).
 - **notepad**: the meeting notepad, 560×900 (min 360×480), undecorated (its own
   title bar), hidden, **unfocused** (opening it beside a call never takes the
   foreground; only `notepad::open`, a click in Yap, focuses it), hide-on-close

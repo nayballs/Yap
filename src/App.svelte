@@ -1,17 +1,25 @@
 <script>
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import ControlPanel from './lib/ControlPanel.svelte';
-  import Onboarding from './lib/Onboarding.svelte';
-  import Notepad from './lib/Notepad.svelte';
-  import SplitPreview from './lib/SplitPreview.svelte';
-  import Overlay from './lib/Overlay.svelte';
   import ContextMenuHost from './lib/ui/ContextMenuHost.svelte';
   import { initAppearance } from './lib/appearance.js';
 
   // The settings, onboarding, notepad and overlay windows (and the notepad's
   // on-demand split preview) all load the same SPA; pick the rendered view
-  // from the window label.
+  // from the window label. Each window loads only its own view's code (a
+  // chunk of its own): the Yap bar no longer parses the whole app — Chat,
+  // Notes, Settings — to draw a pill, and neither does the notepad.
   const label = getCurrentWindow().label;
+  // One arrow per view, never a ternary of imports: Vite gives each import()
+  // its own preload list (the view's CSS chunk included), and a ternary of
+  // them got one list — the last one's — so the main window lost its CSS.
+  const VIEWS = {
+    settings: () => import('./lib/ControlPanel.svelte'),
+    onboarding: () => import('./lib/Onboarding.svelte'),
+    notepad: () => import('./lib/Notepad.svelte'),
+    'split-preview': () => import('./lib/SplitPreview.svelte'),
+    overlay: () => import('./lib/Overlay.svelte'),
+  };
+  const view = (VIEWS[label] ?? VIEWS.overlay)();
 
   // Settings → General → Appearance (the reading font and size, Motion) in
   // every window, following each save live (lib/appearance.js).
@@ -19,7 +27,6 @@
   const isSettings = label === 'settings';
   const isOnboarding = label === 'onboarding';
   const isNotepad = label === 'notepad';
-  const isSplitPreview = label === 'split-preview';
 
   // The overlay and the split preview need a transparent body (app.css). The
   // settings, onboarding and notepad windows are opaque, so override that
@@ -39,20 +46,12 @@
   }
 </script>
 
-{#if isSettings}
-  <!-- The "settings" window label is historic — it now hosts the main
-       control panel (Home feed + surfaces), with Settings as a modal. -->
-  <ControlPanel />
-{:else if isOnboarding}
-  <Onboarding />
-{:else if isNotepad}
-  <!-- The meeting notepad, docked beside a call (notepad.rs). -->
-  <Notepad />
-{:else if isSplitPreview}
-  <SplitPreview />
-{:else}
-  <Overlay />
-{/if}
+<!-- settings → the main control panel (Home feed + surfaces, Settings as a
+     modal; the label is historic), onboarding, notepad → the meeting notepad
+     docked beside a call (notepad.rs), split-preview, else the Yap bar. -->
+{#await view then { default: View }}
+  <View />
+{/await}
 
 {#if isSettings || isOnboarding || isNotepad}
   <!-- The window's one right-click menu and confirm dialog: every item with

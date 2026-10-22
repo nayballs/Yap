@@ -39,7 +39,8 @@
   import { createExternalLinkHandler } from './externalLinks.js';
   import { toast } from './ui/toast.svelte.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup, formatHotkeySpec, fillHotkey } from './hotkeys.js';
-  import { modelStore } from './modelStore.svelte.js';
+  import { appLabel } from './appNames.js';
+  import { modelStore, refreshModels } from './modelStore.svelte.js';
   import { attention, attentionCount } from './attention.svelte.js';
   import AccountSection from './AccountSection.svelte';
   import ConnectorsSection from './ConnectorsSection.svelte';
@@ -854,6 +855,20 @@
   function setCallAppAsks(id, asks) {
     cfg.meetingDetectApps = { ...(cfg.meetingDetectApps || {}), [id]: asks };
   }
+  // The speech models on disk, for the "no model" attention item (and
+  // Home's first-step card): read at once, not only when the Speech-to-Text
+  // page first opens — a new install never showed the badge until then —
+  // and again when the pipeline says it needs one or has one (onboarding's
+  // download happens in its own window).
+  onMount(() => {
+    refreshModels();
+    const un = listen('yap-state', (e) => {
+      if (e.payload === 'needs-model' || (e.payload === 'idle' && modelStore.installed.length === 0)) {
+        refreshModels();
+      }
+    });
+    return () => un.then((f) => f());
+  });
   // "Don't ask for Teams" on a call prompt saves that in Rust: adopt it into
   // this config copy, or the next auto-save would switch Teams back on.
   onMount(() => {
@@ -1332,10 +1347,10 @@
       recentApps = [];
     }
   }
-  // Strip the ".exe" for a friendlier default label (e.g. "slack.exe" → "Slack").
+  // The app's own name for a default label ("slack.exe" → "Slack",
+  // "winword.exe" → "Word"; appNames.js).
   function prettyAppLabel(app) {
-    const base = (app || '').replace(/\.exe$/i, '');
-    return base ? base.charAt(0).toUpperCase() + base.slice(1) : app;
+    return appLabel(app) || app;
   }
 
   let idSeq = 1;

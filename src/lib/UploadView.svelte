@@ -10,6 +10,7 @@
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { onMount } from 'svelte';
   import { toast } from './ui/toast.svelte.js';
+  import { MODELS } from './models.js';
 
   // Matches media.rs (Symphonia features): no opus/webm yet.
   const SUPPORTED_EXTENSIONS = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'oga'];
@@ -153,8 +154,12 @@
       .then((u) => unlisteners.push(u));
 
     // The active STT model, for the "transcribes with" label.
+    // By its name ("Parakeet V3"), not its id ("parakeet-tdt-0.6b-v3").
     invoke('get_config')
-      .then((cfg) => (modelLabel = cfg?.modelSize || ''))
+      .then((cfg) => {
+        const id = cfg?.modelSize || '';
+        modelLabel = MODELS.find((m) => m.id === id)?.name || id;
+      })
       .catch(() => {});
 
     return () => unlisteners.forEach((u) => u && u());
@@ -257,10 +262,14 @@
   .page-h {
     margin: 0 0 22px;
   }
+  /* The serif display title, as Meetings and Settings have it. */
   .page-h h1 {
-    margin: 0 0 4px;
-    font-size: 19px;
-    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+    font-family: var(--yap-font-display);
+    font-size: 28px;
+    font-weight: 550;
+    letter-spacing: -0.005em;
+    line-height: 1.2;
   }
   .page-h p {
     margin: 0;

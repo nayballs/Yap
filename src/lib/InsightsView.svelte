@@ -5,6 +5,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
+  import { appLabel } from './appNames.js';
 
   let stats = $state(null);
   let entries = $state([]);
@@ -66,7 +67,8 @@
   const topApps = $derived.by(() => {
     const byApp = new Map();
     for (const e of entries) {
-      const app = (e.app || '').replace(/\.exe$/i, '');
+      // By the app's own name: "ms-teams.exe" and "Teams.exe" are one Teams.
+      const app = appLabel(e.app);
       if (!app) continue;
       byApp.set(app, (byApp.get(app) || 0) + (e.words || 0));
     }
@@ -104,7 +106,7 @@
         </div>
         <div class="card">
           <div class="num">{fmtNum(stats.totalTranscriptions)}</div>
-          <div class="lbl">dictations</div>
+          <div class="lbl">{stats.totalTranscriptions === 1 ? 'dictation' : 'dictations'}</div>
         </div>
         <div class="card">
           <div class="num">{fmtNum(avgWords)}</div>
@@ -182,11 +184,14 @@
   .head {
     margin-bottom: 24px;
   }
+  /* The serif display title, as Meetings and Settings have it. */
   .head h1 {
-    margin: 0 0 5px;
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.012em;
+    margin: 0 0 6px;
+    font-family: var(--yap-font-display);
+    font-size: 28px;
+    font-weight: 550;
+    letter-spacing: -0.005em;
+    line-height: 1.2;
   }
   .head p {
     margin: 0;

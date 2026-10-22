@@ -32,7 +32,7 @@ export const SETTINGS_INDEX = [
   { page: 'general', section: 'Notifications', label: 'Show tips', desc: "Short tips, like push-to-talk's double-tap", keywords: 'tips hints coaching notifications nudge', anchor: 'tips', toggle: 'showTips' },
 
   // ---- Dictation ----
-  { page: 'dictation', section: 'Start and stop', label: 'Hotkey', desc: 'Press it in any app to start and stop dictating', keywords: 'shortcut key keyboard f9 dictation start stop', anchor: 'hotkey' },
+  { page: 'dictation', section: 'Start and stop', label: 'Hotkey', desc: 'Press it in any app to start and stop dictating', keywords: 'shortcut key keyboard f9 dictation start stop copilot key', anchor: 'hotkey' },
   { page: 'dictation', section: 'Start and stop', label: 'Recording mode', desc: 'Toggle, or hold the key while you talk', keywords: 'push-to-talk push to talk toggle hold hands-free double-tap', anchor: 'recording-mode' },
   { page: 'dictation', section: 'Microphone and sound', label: 'Microphone', desc: 'Changes apply straight away', keywords: 'mic input device audio headset', anchor: 'microphone' },
   { page: 'dictation', section: 'Microphone and sound', label: 'Chime when recording starts and stops', desc: 'A sound, and its volume', keywords: 'sound cue beep volume chime audio feedback', anchor: 'chime', toggle: 'soundEnabled' },

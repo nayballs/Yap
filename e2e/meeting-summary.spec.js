@@ -184,7 +184,7 @@ test('a two-hour meeting: rolling digests, then the action plan in seconds', asy
       window.__copied = t;
     };
   });
-  await main.getByRole('button', { name: 'Copy text' }).click();
+  await main.getByRole('button', { name: 'Copy as text' }).click();
   await expect.poll(() => main.evaluate(() => window.__copied)).toContain('☐ send the revised budget');
   const text = await main.evaluate(() => window.__copied);
   expect(text).not.toMatch(/^#/m);

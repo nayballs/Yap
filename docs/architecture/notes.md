@@ -97,7 +97,7 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   title shows muted); **Raw ↔ Enhanced dual-view + staleness dot** (the safe
   renderer in `lib/markdown.js`, shared with chat answers, the notepad, the
   Voice Assistant's card and update notes — see "The markdown renderer"
-  below) with **Copy markdown / Copy text** (`markdownToText`:
+  below) with **Copy as Markdown / Copy as text** (`markdownToText`:
   ☐ tasks, plain headings); embedded per-note **"Ask anything…" bar** = Chat
   scope grounded in the note, with mic button for in-box dictation, and on a
   meeting note the **one-tap helper chips** over it (`meetingHelpers` from
@@ -163,7 +163,7 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   `a.md-link`, `.md-quote`, `.md-rule` live in app.css (quotes and rules in
   the text's own colour, for light views, dark toasts and the bar alike);
   each view sets its own paragraph, list and heading spacing, and Chat its
-  pills. `markdownToText` (Copy text) is line-based: ☐ / ☑ tasks, • bullets,
+  pills. `markdownToText` (Copy as text) is line-based: ☐ / ☑ tasks, • bullets,
   plain headings, no bold or code marks. Tests: `e2e/markdown.spec.js`
   (Node + jsdom: lists, tables, links, raw HTML, hostile input against the
   allowlist, citations), plus the rendered views in chat-model, web-search

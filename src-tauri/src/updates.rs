@@ -934,6 +934,15 @@ fn open_release(app: &AppHandle) {
 
 // ---- lifecycle ---------------------------------------------------------------------
 
+/// Is this launch the installer's relaunch after "Restart to update"? Then
+/// [`init`] decides whether the main window comes back (it does if it was
+/// open), not the launch itself. Read before `init`, which clears the marker.
+#[cfg_attr(debug_assertions, allow(dead_code))] // read by release builds' launch
+pub fn relaunch_after_update() -> bool {
+    let rec = record();
+    !rec.restart_from.is_empty() && now().saturating_sub(rec.restart_at) < 3600
+}
+
 /// Start the scheduler (and confirm a just-finished update). Call at the end
 /// of `setup`, after the hidden webviews are initialized.
 pub fn init(app: &AppHandle) {
