@@ -1,0 +1,41 @@
+{
+  "name": "two-people-one-first-name",
+  "description": "Two Sams: only their full names say who's who.",
+  "tags": [
+    "handover",
+    "same-first-name"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Sam Patel",
+    "Sam Okafor",
+    "Priya Shah"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Sam Patel, can you give the finance update first?"
+    ],
+    [
+      "them-2",
+      "Yes. We're under budget by about three percent, mostly because two hires slipped."
+    ],
+    [
+      "them-1",
+      "Thanks. And Sam Okafor, how's the hiring going?"
+    ],
+    [
+      "them-3",
+      "Slowly, we've had fewer applicants than we hoped for the senior roles."
+    ],
+    [
+      "them-1",
+      "Okay, thanks Sam."
+    ]
+  ],
+  "truth": {
+    "them-1": "Priya Shah",
+    "them-2": "Sam Patel",
+    "them-3": "Sam Okafor"
+  }
+}

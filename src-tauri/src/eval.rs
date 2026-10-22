@@ -38,6 +38,8 @@ mod scenario;
 #[cfg(debug_assertions)]
 mod serving;
 #[cfg(debug_assertions)]
+mod speakers;
+#[cfg(debug_assertions)]
 mod spike;
 #[cfg(debug_assertions)]
 mod standin;

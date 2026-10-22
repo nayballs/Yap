@@ -202,6 +202,7 @@ test('rename a voice everywhere or one line, merge two, in the notepad and the N
     'Rename Speaker 1 everywhere…',
     'Rename just this line…',
     'Merge with…',
+    'It was me',
   ]);
   await shot(pad, '01-speaker-menu');
   await menu.getByRole('menuitem', { name: 'Rename Speaker 1 everywhere…' }).click();
@@ -309,7 +310,7 @@ test('a 1:1 meeting names "Them" after the other invitee, as a guess; "Not Alice
       ['you', 'Great, let me know if legal pushes back.']
     );
     const n = await yap.invoke('note_get', { id: noteId });
-    expect(n.speakers.them).toEqual({ name: 'Alice Moreau', email: 'alice@example.com', source: 'calendar' });
+    expect(n.speakers.them).toMatchObject({ name: 'Alice Moreau', email: 'alice@example.com', source: 'calendar' });
 
     // "What did I miss?": the prompt knows her as the other speaker, and
     // that it's a guess.

@@ -34,7 +34,12 @@
   notepad's "Copy consent message" text; empty = the default), speaker
   diarization: meeting_diarization ("Tell speakers apart in meetings", beta,
   off) + diarization_model (a `diarize/registry.rs` id, default
-  `nemotron-3-diarization`), call detection:
+  `nemotron-3-diarization`), speaker names: meeting_speaker_names ("Suggest
+  who's speaking", on: the name cards, Yap's strong guesses, the AI step at a
+  meeting's end; `speakers/naming.rs`) + meeting_call_names (read who's
+  talking from the call app's window, experimental, off, no setting;
+  `speakers/call_ui.rs`, whose rules a `<data>/call_speakers.json` can
+  override per app), call detection:
   meeting_detection + meeting_detect_style ("popup"|"quiet") +
   meeting_detect_apps (app id → bool overrides of `meeting_detect::APPS`'
   defaults) + meeting_auto_start (the opt-in 10-second countdown, off),

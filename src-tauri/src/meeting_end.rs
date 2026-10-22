@@ -329,6 +329,11 @@ async fn write_action_plan(app: &AppHandle, note_id: u64, step: impl Fn(u8)) -> 
     }
     // Found by kind (renaming it is fine); older stores fall back to Meeting
     // Notes, as the Notes view does.
+    // Who each voice is, before the plan names owners: the AI's answers
+    // (checked by Rust) on top of what the transcript says (`naming.rs`).
+    if crate::config::load().meeting_speaker_names {
+        crate::speakers::naming::ask_model(app, note_id).await;
+    }
     let actions = crate::notes::actions();
     let action = actions
         .iter()

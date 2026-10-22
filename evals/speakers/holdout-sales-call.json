@@ -1,0 +1,54 @@
+{
+  "name": "holdout-sales-call",
+  "description": "A sales call: the seller introduces a colleague, who then speaks; the buyer's side asks questions.",
+  "tags": [
+    "holdout",
+    "introduction",
+    "third-person"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Grace Okafor",
+    "Ben Ward",
+    "Siobhan Kelly"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Thanks for having us. I'm joined by my colleague Ben, who looks after implementation, so he can answer the technical questions."
+    ],
+    [
+      "them-2",
+      "Hi everyone, good to meet you."
+    ],
+    [
+      "you",
+      "Hi Ben. Our main worry is the migration from the old system, how long does that usually take?"
+    ],
+    [
+      "them-2",
+      "For a team your size it's usually four to six weeks, most of that is cleaning up the old data."
+    ],
+    [
+      "them-3",
+      "And does that include training for the support team?"
+    ],
+    [
+      "them-2",
+      "Yes, we run two training sessions as part of it."
+    ],
+    [
+      "them-1",
+      "Shall I send over the proposal after this, Siobhan?"
+    ],
+    [
+      "them-3",
+      "Yes please, send it to me and I'll share it with finance."
+    ]
+  ],
+  "truth": {
+    "them-1": "Grace Okafor",
+    "them-2": "Ben Ward",
+    "them-3": "Siobhan Kelly"
+  }
+}

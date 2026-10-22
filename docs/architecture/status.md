@@ -284,10 +284,12 @@ before the first sentence, don't listen again by themselves after an answer,
 and have no echo cancellation (a mic that hears the speakers during an
 answer is a later job); the AI Notepad has no rich markdown editor (plain textarea)
 or folder "add existing note" picker; meetings tell the call's voices apart
-only with the beta speaker engine on, and don't name them by themselves
-("Speaker 1"… until the user, a 1:1 invite or, later, the call app names
-them; voices of two recordings of one meeting aren't matched up; tasks are
-attributed from attendees, the speaker map and names said)
+only with the beta speaker engine on, and name them only from what's said
+and the invite (suggestions to confirm, a strong one as a guess; 0 wrong
+names but 34–60% found in the evaluation's fictional meetings; reading the
+call app's window is built behind a flag but untried in a real call; voices
+of two recordings of one meeting aren't matched up; tasks are attributed
+from attendees, the speaker map and names said)
 and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](../meetings.md) "Limits"), and a real call (live
 WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a

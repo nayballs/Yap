@@ -1,0 +1,55 @@
+{
+  "name": "intros-agency",
+  "description": "An agency call opens with introductions; two of the names aren't on the invite.",
+  "tags": [
+    "introduction",
+    "said-names"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Lee Chen"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Hi everyone, I'm Rochelle from the agency, I'll be running the session today."
+    ],
+    [
+      "them-2",
+      "And I'm Ola, I look after the media plan on the agency side."
+    ],
+    [
+      "them-3",
+      "Lee here, from the client side, thanks for setting this up."
+    ],
+    [
+      "you",
+      "Hi all, I'm Imogen, I lead the product team."
+    ],
+    [
+      "them-1",
+      "Great. So the plan for today is to walk through the campaign timeline and agree the budget split."
+    ],
+    [
+      "them-2",
+      "I've put the draft media plan in the shared folder, it's the version from Tuesday."
+    ],
+    [
+      "them-3",
+      "We had a look, the main question from our side is whether we can move some spend into video."
+    ],
+    [
+      "them-1",
+      "Ola, can you talk us through the video options?"
+    ],
+    [
+      "them-2",
+      "Sure. There are two routes, a short pre-roll package or a sponsored series, and the pre-roll is cheaper to test."
+    ]
+  ],
+  "truth": {
+    "them-1": "Rochelle",
+    "them-2": "Ola",
+    "them-3": "Lee Chen"
+  }
+}

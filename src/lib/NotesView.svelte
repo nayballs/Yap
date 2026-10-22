@@ -32,6 +32,7 @@
     hasLine,
   } from './notepadText.js';
   import SpeakerMenu from './SpeakerMenu.svelte';
+  import SpeakerCard from './SpeakerCard.svelte';
   import { nextModel, modelLine, whereItRuns } from './aiModel.js';
   import { speech, initSpeech, readAloud, stopReading } from './speech.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
@@ -162,14 +163,16 @@
     );
   }
 
-  /** A speaker edit made here: the map, and each line's voice. */
+  /** A speaker edit made here: the map, each line's voice (and echo: "It
+   *  was me"), and the summary (a name put on "Speaker 2"). */
   function onSpeakerChanged(updated) {
     if (!selected || updated?.id !== selected.id) return;
     selected.speakers = updated.speakers || {};
     const t = updated.transcript || [];
     selected.transcript = (selected.transcript || []).map((s, i) =>
-      t[i] ? { ...s, speaker: t[i].speaker || '', speakerLocked: !!t[i].speakerLocked } : s
+      t[i] ? { ...s, speaker: t[i].speaker || '', speakerLocked: !!t[i].speakerLocked, echo: !!t[i].echo } : s
     );
+    if (typeof updated.enhancedContent === 'string') selected.enhancedContent = updated.enhancedContent;
   }
   // "AI notes up to 40:12": where the digests reach, from the meeting's start.
   const digestedUpTo = $derived.by(() => {
@@ -352,6 +355,7 @@
       selected.folder = p.folder;
     }
     if (p.speakers) selected.speakers = p.speakers;
+    if (typeof p.enhancedContent === 'string') selected.enhancedContent = p.enhancedContent;
     // The voice separation labelled lines (`lineSplice`, some split where
     // the speaker changed), or a speaker was renamed or merged in the
     // notepad (`lineSpeakers`): every line's voice.
@@ -1479,6 +1483,10 @@
               </button>
             {/if}
           </div>
+          {#if selected.transcript?.length}
+            <!-- "Speaker 2 is Priya?" (speakers/naming.rs) -->
+            <SpeakerCard note={selected} origin={LABEL} onchanged={onSpeakerChanged} />
+          {/if}
           {#if recordingThisNote && !selected.transcript?.length}
             <p class="thint">
               Your mic is <strong>You</strong>, the call audio is <strong>Them</strong>. Use
@@ -1541,7 +1549,7 @@
                               class:guess={run.guess}
                               aria-haspopup="menu"
                               aria-expanded={speakerMenu?.key === run.key}
-                              title={run.guess ? 'A guess from the calendar invite: click to confirm or change' : 'Rename, merge or correct this speaker'}
+                              title={run.guess ? 'A guess: click to confirm or change' : 'Rename, merge or correct this speaker'}
                               onclick={() => toggleSpeakerMenu(run.key, run.speaker, run.lines.map((l) => l.i))}
                             >{run.label}</button>
                             {#if speakerMenu?.key === run.key}

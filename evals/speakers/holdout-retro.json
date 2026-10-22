@@ -1,0 +1,62 @@
+{
+  "name": "holdout-retro",
+  "description": "A retrospective with interruptions and questions at the end of turns.",
+  "tags": [
+    "holdout",
+    "handover",
+    "interruption"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Tom Baker",
+    "Lee Chen",
+    "Hannah Price"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Okay, retro time. What went well this sprint? Let's start with the release itself."
+    ],
+    [
+      "them-2",
+      "I think the release went really smoothly, the new checklist helped a lot."
+    ],
+    [
+      "them-3",
+      "Agreed, although the staging environment was down for most of Tuesday, which cost us a day of testing."
+    ],
+    [
+      "them-2",
+      "Sorry, can I just add, that wasn't the first time, staging has been flaky all month."
+    ],
+    [
+      "them-1",
+      "Sorry Hannah, go on, you were saying about Tuesday."
+    ],
+    [
+      "them-3",
+      "Just that we should have a fallback, maybe a second staging environment for the release week."
+    ],
+    [
+      "them-1",
+      "Good idea. What do you think, Lee?"
+    ],
+    [
+      "them-2",
+      "I'd support that, as long as someone owns keeping it in sync."
+    ],
+    [
+      "them-1",
+      "Great. Hannah, can you write that up as a proposal?"
+    ],
+    [
+      "them-3",
+      "Sure, I'll have it by Friday."
+    ]
+  ],
+  "truth": {
+    "them-1": "Tom Baker",
+    "them-2": "Lee Chen",
+    "them-3": "Hannah Price"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "split-voice",
+  "description": "The speaker engine split one person into two voices: neither should take a name the other contradicts.",
+  "tags": [
+    "diarization-error",
+    "trap"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah",
+    "Sam Patel"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Sam, can you walk us through the incident from last night?"
+    ],
+    [
+      "them-2",
+      "Sure. At about eleven the payment service started timing out, and the on-call got paged at ten past."
+    ],
+    [
+      "them-3",
+      "We rolled back the deploy at half past and it recovered within a few minutes."
+    ],
+    [
+      "them-1",
+      "Thanks Sam. Do we know the root cause yet?"
+    ],
+    [
+      "them-3",
+      "Not fully, it looks like a connection pool limit that the new release halved by accident."
+    ],
+    [
+      "them-1",
+      "Okay, let's write that up for Friday."
+    ]
+  ],
+  "truth": {
+    "them-1": "Priya Shah",
+    "them-2": "Sam Patel",
+    "them-3": "Sam Patel"
+  }
+}

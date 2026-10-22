@@ -162,6 +162,12 @@ pub fn run_eval() -> i32 {
     eval::run(std::env::args().skip(2).collect())
 }
 
+/// `yap.exe call-dump …` (main.rs): a call window's UI Automation tree,
+/// read only, to a file (`speakers/call_ui.rs`).
+pub fn run_call_dump() -> i32 {
+    speakers::call_ui::dump_main(std::env::args().skip(2).collect())
+}
+
 /// Reload handle for the global log filter — lets the Settings "Debug mode"
 /// toggle (OpenWhispr's Debug Logging section) bump verbosity at runtime
 /// without a restart. See `set_debug_logging`.
@@ -525,6 +531,9 @@ pub fn run() {
             speakers::speaker_rename_lines,
             speakers::speaker_merge,
             speakers::speaker_not,
+            speakers::speaker_suggestion,
+            speakers::speaker_is_me,
+            speakers::speaker_not_me,
             notepad::notepad_open,
             notepad::notepad_state,
             notepad::notepad_split,
@@ -568,6 +577,8 @@ pub fn run() {
             diarize::diarization_timeline,
             #[cfg(debug_assertions)]
             diarize::e2e_diarize_timeline,
+            #[cfg(debug_assertions)]
+            speakers::call_ui::e2e_call_readings,
             // Test mode only (e2e.rs); not in release builds at all.
             memory::memory_list,
             memory::memory_save_item,

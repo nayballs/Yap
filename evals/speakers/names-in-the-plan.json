@@ -1,0 +1,42 @@
+{
+  "name": "names-in-the-plan",
+  "description": "Action items are given to people by name, but each person also speaks after being addressed.",
+  "tags": [
+    "handover",
+    "thanks",
+    "actions"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Siobhan Kelly",
+    "Rochelle Grant",
+    "Ola Nowak"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Last item, the conference booth. Rochelle, can you confirm the booth size with the organisers?"
+    ],
+    [
+      "them-2",
+      "Yes, I'll email them today. I think we booked the six by three metre one."
+    ],
+    [
+      "them-1",
+      "Thanks Rochelle. Ola, you were looking at the printing?"
+    ],
+    [
+      "them-3",
+      "I've got two quotes, I'll pick the cheaper one unless anyone objects to the paper stock."
+    ],
+    [
+      "them-1",
+      "No objection from me. Thanks Ola."
+    ]
+  ],
+  "truth": {
+    "them-1": "Siobhan Kelly",
+    "them-2": "Rochelle Grant",
+    "them-3": "Ola Nowak"
+  }
+}

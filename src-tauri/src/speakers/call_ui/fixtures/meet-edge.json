@@ -1,0 +1,510 @@
+{
+  "version": 1,
+  "app": "meet",
+  "source": "synthetic, not a capture: built from public descriptions of the app and Wispr Flow's marker defaults; replace with a real `yap.exe call-dump` capture",
+  "snapshots": [
+    {
+      "atMs": 0,
+      "readMs": 40,
+      "root": {
+        "type": "Window",
+        "name": "Meet - abc-defg-hij - Work - Microsoft Edge",
+        "class": "Chrome_WidgetWin_1",
+        "children": [
+          {
+            "type": "Pane",
+            "name": "Meet - abc-defg-hij - Work - Microsoft Edge",
+            "class": "BrowserRootView",
+            "children": [
+              {
+                "type": "Document",
+                "name": "Meet - abc-defg-hij",
+                "children": [
+                  {
+                    "type": "Group",
+                    "class": "axUSnc",
+                    "children": [
+                      {
+                        "type": "Group",
+                        "class": "oZRSLe dkjMxf",
+                        "children": [
+                          {
+                            "type": "Image",
+                            "name": "Priya Shah's video"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "kssMZb ZdLaCd"
+                          },
+                          {
+                            "type": "Text",
+                            "name": "Priya Shah",
+                            "class": "zWGUib"
+                          },
+                          {
+                            "type": "Button",
+                            "name": "More options for Priya Shah",
+                            "class": "VfPpkd-Bz112c-LgbsSe"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "class": "oZRSLe dkjMxf",
+                        "children": [
+                          {
+                            "type": "Image",
+                            "name": "Sam Patel's video"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "ZdLaCd"
+                          },
+                          {
+                            "type": "Text",
+                            "name": "Sam Patel",
+                            "class": "zWGUib"
+                          },
+                          {
+                            "type": "Button",
+                            "name": "More options for Sam Patel",
+                            "class": "VfPpkd-Bz112c-LgbsSe"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "class": "oZRSLe dkjMxf",
+                        "children": [
+                          {
+                            "type": "Image",
+                            "name": "Your video"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "ZdLaCd"
+                          },
+                          {
+                            "type": "Text",
+                            "name": "You",
+                            "class": "zWGUib"
+                          },
+                          {
+                            "type": "Button",
+                            "name": "More options for You",
+                            "class": "VfPpkd-Bz112c-LgbsSe"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "ToolBar",
+                    "name": "Call controls",
+                    "children": [
+                      {
+                        "type": "Button",
+                        "name": "Turn off microphone"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Turn off camera"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Leave call"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "speaking": [
+          "Priya Shah"
+        ],
+        "selfSpeaking": false
+      }
+    },
+    {
+      "atMs": 1000,
+      "readMs": 38,
+      "root": {
+        "type": "Window",
+        "name": "Meet - abc-defg-hij - Work - Microsoft Edge",
+        "class": "Chrome_WidgetWin_1",
+        "children": [
+          {
+            "type": "Pane",
+            "name": "Meet - abc-defg-hij - Work - Microsoft Edge",
+            "class": "BrowserRootView",
+            "children": [
+              {
+                "type": "Document",
+                "name": "Meet - abc-defg-hij",
+                "children": [
+                  {
+                    "type": "Group",
+                    "class": "axUSnc",
+                    "children": [
+                      {
+                        "type": "Group",
+                        "class": "oZRSLe dkjMxf",
+                        "children": [
+                          {
+                            "type": "Image",
+                            "name": "Priya Shah's video"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "ZdLaCd"
+                          },
+                          {
+                            "type": "Text",
+                            "name": "Priya Shah",
+                            "class": "zWGUib"
+                          },
+                          {
+                            "type": "Button",
+                            "name": "More options for Priya Shah",
+                            "class": "VfPpkd-Bz112c-LgbsSe"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "class": "oZRSLe dkjMxf",
+                        "children": [
+                          {
+                            "type": "Image",
+                            "name": "Sam Patel's video"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "kssMZb ZdLaCd"
+                          },
+                          {
+                            "type": "Text",
+                            "name": "Sam Patel",
+                            "class": "zWGUib"
+                          },
+                          {
+                            "type": "Button",
+                            "name": "More options for Sam Patel",
+                            "class": "VfPpkd-Bz112c-LgbsSe"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "class": "oZRSLe dkjMxf",
+                        "children": [
+                          {
+                            "type": "Image",
+                            "name": "Your video"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "ZdLaCd"
+                          },
+                          {
+                            "type": "Text",
+                            "name": "You",
+                            "class": "zWGUib"
+                          },
+                          {
+                            "type": "Button",
+                            "name": "More options for You",
+                            "class": "VfPpkd-Bz112c-LgbsSe"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "ToolBar",
+                    "name": "Call controls",
+                    "children": [
+                      {
+                        "type": "Button",
+                        "name": "Turn off microphone"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Turn off camera"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Leave call"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "speaking": [
+          "Sam Patel"
+        ],
+        "selfSpeaking": false
+      }
+    },
+    {
+      "atMs": 2000,
+      "readMs": 41,
+      "root": {
+        "type": "Window",
+        "name": "Meet - abc-defg-hij - Work - Microsoft Edge",
+        "class": "Chrome_WidgetWin_1",
+        "children": [
+          {
+            "type": "Pane",
+            "name": "Meet - abc-defg-hij - Work - Microsoft Edge",
+            "class": "BrowserRootView",
+            "children": [
+              {
+                "type": "Document",
+                "name": "Meet - abc-defg-hij",
+                "children": [
+                  {
+                    "type": "Group",
+                    "class": "axUSnc",
+                    "children": [
+                      {
+                        "type": "Group",
+                        "class": "oZRSLe dkjMxf",
+                        "children": [
+                          {
+                            "type": "Image",
+                            "name": "Priya Shah's video"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "ZdLaCd"
+                          },
+                          {
+                            "type": "Text",
+                            "name": "Priya Shah",
+                            "class": "zWGUib"
+                          },
+                          {
+                            "type": "Button",
+                            "name": "More options for Priya Shah",
+                            "class": "VfPpkd-Bz112c-LgbsSe"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "class": "oZRSLe dkjMxf",
+                        "children": [
+                          {
+                            "type": "Image",
+                            "name": "Sam Patel's video"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "ZdLaCd"
+                          },
+                          {
+                            "type": "Text",
+                            "name": "Sam Patel",
+                            "class": "zWGUib"
+                          },
+                          {
+                            "type": "Button",
+                            "name": "More options for Sam Patel",
+                            "class": "VfPpkd-Bz112c-LgbsSe"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "class": "oZRSLe dkjMxf",
+                        "children": [
+                          {
+                            "type": "Image",
+                            "name": "Your video"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "kssMZb ZdLaCd"
+                          },
+                          {
+                            "type": "Text",
+                            "name": "You",
+                            "class": "zWGUib"
+                          },
+                          {
+                            "type": "Button",
+                            "name": "More options for You",
+                            "class": "VfPpkd-Bz112c-LgbsSe"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "ToolBar",
+                    "name": "Call controls",
+                    "children": [
+                      {
+                        "type": "Button",
+                        "name": "Turn off microphone"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Turn off camera"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Leave call"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "speaking": [],
+        "selfSpeaking": true
+      }
+    },
+    {
+      "atMs": 3000,
+      "readMs": 39,
+      "root": {
+        "type": "Window",
+        "name": "Meet - abc-defg-hij - Work - Microsoft Edge",
+        "class": "Chrome_WidgetWin_1",
+        "children": [
+          {
+            "type": "Pane",
+            "name": "Meet - abc-defg-hij - Work - Microsoft Edge",
+            "class": "BrowserRootView",
+            "children": [
+              {
+                "type": "Document",
+                "name": "Meet - abc-defg-hij",
+                "children": [
+                  {
+                    "type": "Group",
+                    "class": "axUSnc",
+                    "children": [
+                      {
+                        "type": "Group",
+                        "class": "oZRSLe dkjMxf",
+                        "children": [
+                          {
+                            "type": "Image",
+                            "name": "Priya Shah's video"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "kssMZb ZdLaCd"
+                          },
+                          {
+                            "type": "Text",
+                            "name": "Priya Shah",
+                            "class": "zWGUib"
+                          },
+                          {
+                            "type": "Button",
+                            "name": "More options for Priya Shah",
+                            "class": "VfPpkd-Bz112c-LgbsSe"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "class": "oZRSLe dkjMxf",
+                        "children": [
+                          {
+                            "type": "Image",
+                            "name": "Sam Patel's video"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "kssMZb ZdLaCd"
+                          },
+                          {
+                            "type": "Text",
+                            "name": "Sam Patel",
+                            "class": "zWGUib"
+                          },
+                          {
+                            "type": "Button",
+                            "name": "More options for Sam Patel",
+                            "class": "VfPpkd-Bz112c-LgbsSe"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "class": "oZRSLe dkjMxf",
+                        "children": [
+                          {
+                            "type": "Image",
+                            "name": "Your video"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "ZdLaCd"
+                          },
+                          {
+                            "type": "Text",
+                            "name": "You",
+                            "class": "zWGUib"
+                          },
+                          {
+                            "type": "Button",
+                            "name": "More options for You",
+                            "class": "VfPpkd-Bz112c-LgbsSe"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "ToolBar",
+                    "name": "Call controls",
+                    "children": [
+                      {
+                        "type": "Button",
+                        "name": "Turn off microphone"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Turn off camera"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Leave call"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "speaking": [
+          "Priya Shah",
+          "Sam Patel"
+        ],
+        "selfSpeaking": false
+      }
+    }
+  ]
+}

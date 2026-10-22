@@ -1,0 +1,38 @@
+{
+  "name": "no-invite-said-names",
+  "description": "No calendar: the names are only said in the meeting, each more than once.",
+  "tags": [
+    "handover",
+    "thanks",
+    "said-names"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [],
+  "lines": [
+    [
+      "them-1",
+      "Anika, can you start us off with the design review?"
+    ],
+    [
+      "them-2",
+      "Sure. I've updated the onboarding screens based on the feedback from last week's testing sessions."
+    ],
+    [
+      "them-1",
+      "Thanks Anika, they look much cleaner. Declan, can you check the copy before Friday?"
+    ],
+    [
+      "them-3",
+      "Yes, I'll go through it tomorrow morning."
+    ],
+    [
+      "them-1",
+      "Great, thanks Declan."
+    ]
+  ],
+  "truth": {
+    "them-1": null,
+    "them-2": "Anika",
+    "them-3": "Declan"
+  }
+}

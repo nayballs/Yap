@@ -1,0 +1,38 @@
+{
+  "name": "one-to-one-calendar",
+  "description": "A 1:1 from the calendar: the invite's other person is the one voice.",
+  "tags": [
+    "calendar",
+    "one-to-one"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah"
+  ],
+  "calendar_guess": "Priya Shah",
+  "lines": [
+    [
+      "you",
+      "Hi, thanks for making the time, how was the conference?"
+    ],
+    [
+      "them-1",
+      "Really good actually, lots of interest in the new pricing, I'll write it up for you."
+    ],
+    [
+      "you",
+      "Great. Did you get a chance to look at the hiring plan?"
+    ],
+    [
+      "them-1",
+      "Yes, I think we need one more designer before the launch, otherwise we'll slip."
+    ],
+    [
+      "you",
+      "Okay, let's put that in the plan and I'll take it to finance."
+    ]
+  ],
+  "truth": {
+    "them-1": "Priya Shah"
+  }
+}

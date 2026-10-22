@@ -1,0 +1,53 @@
+{
+  "name": "one-to-one-someone-joins",
+  "description": "A 1:1 invite, but a colleague joins half way and introduces himself.",
+  "tags": [
+    "calendar",
+    "one-to-one",
+    "introduction",
+    "said-names"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah"
+  ],
+  "calendar_guess": "Priya Shah",
+  "lines": [
+    [
+      "them-1",
+      "Hi Imogen, sorry, I've asked Ben to join us for the second half because it's about the vendor contract."
+    ],
+    [
+      "you",
+      "No problem at all."
+    ],
+    [
+      "them-1",
+      "So the short version is the vendor wants a three year term and we'd rather do one year with an option to extend."
+    ],
+    [
+      "them-2",
+      "Sorry, Ben here, just joining. I've read the draft and the termination clause is the bit I'd push back on."
+    ],
+    [
+      "you",
+      "Thanks Ben. What would you change?"
+    ],
+    [
+      "them-2",
+      "I'd ask for ninety days' notice instead of a hundred and eighty, and no early exit fee after the first year."
+    ],
+    [
+      "them-1",
+      "That works for me. Ben, can you send them the redline today?"
+    ],
+    [
+      "them-2",
+      "Yes, I'll send it this afternoon."
+    ]
+  ],
+  "truth": {
+    "them-1": "Priya Shah",
+    "them-2": "Ben"
+  }
+}

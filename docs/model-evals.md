@@ -89,6 +89,25 @@ first) | `yap` (Yap searches first, the question as the query) | `model` (it dec
 `YAP_EVAL_WEB_HISTORY` = `replay` (the default: earlier web answers' searches replayed as
 tool calls for a tool model) | `note` (a system-prompt line instead) | `none`.
 
+### Speaker names (`--speakers`)
+
+```bash
+yap.exe eval --speakers                                   # Rust alone
+yap.exe eval --speakers --model local:<4b.gguf> --ngl 999  # and with a model
+```
+
+Instead of the scenarios: who each meeting voice is (`speakers/naming.rs`)
+on `evals/speakers/*.json` (fictional meetings with diarized voices,
+attendees, Memory's people and the truth per voice; the shape is in
+`eval/speakers.rs`). Rust alone first, then for each model the AI step as the
+app asks it (`naming::asks`, the JSON schema as llama.cpp's grammar for a
+model on this PC, `naming::check_answer`). Per voice: correct / wrong /
+missed, for the names Yap *puts on* a voice and every name it *suggests*;
+per model, the questions, how many answers Rust kept and threw out, and the
+time a question. `speakers.md` in the run folder; `summary.json` has each
+reply and its verdict. `cargo test eval::speakers` runs Rust alone over the
+same meetings and fails on any wrong name.
+
 ### Dictation cleanup latency (`--cleanup`)
 
 ```bash

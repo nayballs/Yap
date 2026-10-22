@@ -321,7 +321,7 @@ test('a 1:1 invite names the one voice, and not a second one who joins', async (
     await labels(yap, [[0, 15_000, 1]], 20_000);
     await expect
       .poll(async () => (await yap.invoke('note_get', { id })).speakers['them-1'])
-      .toEqual({ name: 'Alice Moreau', email: 'alice@example.com', source: 'calendar' });
+      .toMatchObject({ name: 'Alice Moreau', email: 'alice@example.com', source: 'calendar' });
     expect(await groupNames(pad)).toEqual(['Alice Moreau?', 'You', 'Alice Moreau?']);
 
     // Someone else joins: a second voice, and the guess stays with one.

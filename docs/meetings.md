@@ -30,6 +30,8 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 | "What did I miss?", the one-tap helpers (Questions to ask, Follow-up email, Gaps and risks), the AI meeting title | `src-tauri/src/meeting_assist.rs` |
 | The notepad window: docking, split screen | `src-tauri/src/notepad.rs` |
 | Who said what: the speaker map, names on lines, 1:1 calendar guesses, line times and splitting | `src-tauri/src/speakers.rs`, `src/lib/SpeakerMenu.svelte` |
+| Names for the voices: suggestions from what's said and the invite, the AI's checked answers, "It was me"; the cards | `src-tauri/src/speakers/naming.rs`, `src/lib/SpeakerCard.svelte` |
+| Who the call app shows talking (experimental); `yap.exe call-dump` | `src-tauri/src/speakers/call_ui.rs` (+ `call_ui/profiles.json`) |
 | The calendar: meetings, the reminder card, a note's meeting | `src-tauri/src/calendar.rs` (+ `calendar/`; [`calendar.md`](./calendar.md)) |
 | Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_QUESTIONS_PROMPT`, `MEETING_FOLLOW_UP_PROMPT`, `MEETING_BLIND_SPOTS_PROMPT`, `MEETING_TITLE_PROMPT`) | `src-tauri/src/llm.rs` |
 | Storage (`Note::digests`, `Note::speakers`, `TranscriptSegment::echo` / `::dictated` / `::speaker` / `::start_ms` / `::words`, `Action::kind`, `Note::title_auto`) | `src-tauri/src/notes.rs` |
@@ -224,6 +226,86 @@ guesses: shown as **"Priya?"**, in italics, and told to the AI as a guess.
   SenseVoice, its words' times (`words`, ms from `startMs`, one per word of
   the corrected text). `speakers::split_line` cuts a line where the speaker
   changes, at its words (in proportion without them).
+
+### Names for the voices
+
+The speaker engine says which lines are one voice; it doesn't say who. Yap
+**suggests** who each voice is and the person confirms
+(`speakers/naming.rs`) — from what the meeting itself says and who was
+invited, never from how anyone sounds (no voiceprints: they're biometric
+data under UK GDPR, and what US lawsuits against note-takers were about).
+
+- **What counts.** Someone handing over by name at the end of a turn
+  ("Priya, can you walk us through it?", "What do you think, Sam?", "Over
+  to you, Siobhan") and a voice answering; someone thanking a person by
+  name right after a voice spoke ("Thanks, Priya"); a voice introducing
+  itself ("I'm Rochelle from the agency", "Ben here", "Declan from legal
+  here"). A voice that hands over to, thanks or talks about Priya ("Priya
+  will send it", "Sam's just dropped off") isn't Priya. A 1:1 invite's
+  other person counts too (the guess above), and, when a meeting ends, the
+  AI's answer (below). Names come from the invite's attendees and the
+  note's, Memory's People, and names said in the meeting (in an
+  introduction, or twice when handing over or thanking — never an everyday
+  word); "Kate" or "Rob" in the meeting is the invite's Katherine or
+  Robert. Your own name (About you) is always You.
+- **The card.** Over the transcript (and the summary) in the notepad, and
+  over the meeting transcript in the Notes view: **"Speaker 2 is Priya
+  Shah?"** with why ("Speaker 1 asked “Priya, can you walk us through the
+  new screens?” and Speaker 2 answered"), one card at a time, surest first
+  ("1 of 2"). **Yes** makes the name the person's own (locked, like a
+  rename; a summary already written says "Priya Shah" where it said
+  "Speaker 2"). **Someone else** never suggests that name for the voice
+  again and opens "Who is Speaker 2?" (the rename everywhere, attendees as
+  picks). **Not now** doesn't ask again in this meeting (the menu on the
+  name still offers "It's Priya Shah"). Settings → Meetings → "Suggest
+  who's speaking" (on) switches it all off.
+- **When Yap puts a name on by itself.** Only a strong suggestion — two
+  separate cues (asked, then thanked), or an introduction plus one more,
+  and nothing against it — goes on the voice as Yap's guess ("Priya
+  Shah?", in italics), so digests, the action plan and Ask read it (told
+  it's a guess); everything else waits on the card. A wrong name is worse
+  than "Speaker 2": when the cues disagree (one voice asked as Priya and
+  thanked as Sam — two people the engine merged), nothing.
+- **The AI's answer.** When a meeting ends, before the action plan, the
+  meeting's AI (Note Formatting, else cleanup; only a model that can call
+  tools — a cloud one or ≥ 4B on this PC) gets one short question per
+  voice still unnamed (at most four): the names, the lines around where
+  they were said, "which of these is Speaker 2, or unknown?". Rust keeps an
+  answer only if the words it quotes are really there, say the name, and
+  aren't the voice talking to that person. On its own an answer is a card,
+  never a name on the voice. A model on this PC answers under a JSON
+  grammar, never during a dictation.
+- **"It was me".** When your own voice reaches the call side (the call app
+  playing you back, a shared room), the engine finds it as one more voice
+  whose lines repeat yours: the card asks **"Speaker 3 is you?"**, and
+  **It was me** makes its lines yours, the repeats hidden and left out of
+  the summary (Undo in the toast). Any voice's menu has **It was me** too.
+- **Measured** (`yap.exe eval --speakers`, 31 fictional meetings with
+  diarized voices, 73 voices with a name to find, traps included: an
+  absent invitee talked about, someone answering for another, two Sams,
+  "Will" and "Mark" as words, a voice split in two or two merged, your
+  voice on the call side): Rust alone suggests 44 correct names (60%), puts
+  25 on voices (34%), **none wrong**; with Qwen3.5-4B on the graphics card
+  46 (63%) and 27 (37%), none wrong, ~0.2 s a question; Qwen2.5-1.5B on a
+  processor added nothing (Rust threw out every name it gave) at ~11 s a
+  question, so a model that small isn't asked. See
+  [`architecture/speakers.md`](./architecture/speakers.md) "Names for the
+  voices: evaluations".
+
+### Who the call app shows talking (experimental)
+
+Off, and not in Settings yet (`"meetingCallNames": true` in config.json
+turns it on): while a meeting records during a detected call, Yap reads
+the call window's accessibility tree about once a second — the tile Google
+Meet or Teams lights up for whoever is talking, Zoom's "Active speaker" —
+read only (no click, no focus, no screenshot), and dates each reading on
+the meeting's clock. A name shown alone for most of one voice's speech is
+that voice's (the call app's word ranks above the calendar and the AI:
+no "?", no card). The rules come from what's known publicly and from
+Wispr Flow's defaults, not yet from a real call: the capture steps that
+will check them are in
+[`architecture/speakers.md`](./architecture/speakers.md) "Reading the call
+app: what a real call has to show".
 
 ### The speaker engine's labels
 

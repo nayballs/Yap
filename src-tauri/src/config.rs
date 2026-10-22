@@ -616,6 +616,19 @@ pub struct YapConfig {
     /// Which diarization model (`diarize/registry.rs` id) it uses.
     #[serde(default = "default_diarization_model")]
     pub diarization_model: String,
+    /// "Suggest who's speaking" (Settings → Meetings): names for a
+    /// meeting's voices from what's said and who was invited, on cards to
+    /// confirm, a strong one put on as Yap's guess; and, when a meeting
+    /// ends, one short question per voice still unnamed to the meeting's
+    /// model (one that can call tools), each answer checked against the
+    /// transcript (`speakers/naming.rs`). On.
+    #[serde(default = "default_true")]
+    pub meeting_speaker_names: bool,
+    /// Read who's talking from the call app's window (Teams, Zoom, Meet in
+    /// a browser) while a meeting records, through UI Automation, read
+    /// only (`speakers/call_ui.rs`). Experimental, off: no setting shows it.
+    #[serde(default)]
+    pub meeting_call_names: bool,
 
     /// Call detection (`meeting_detect.rs`): when Teams, Zoom, Meet, Slack,
     /// Discord, Webex… start using the mic, offer to take notes, and offer to
@@ -929,6 +942,8 @@ impl Default for YapConfig {
             meeting_consent_message: String::new(),
             meeting_diarization: false,
             diarization_model: default_diarization_model(),
+            meeting_speaker_names: true,
+            meeting_call_names: false,
             meeting_detection: true,
             meeting_auto_start: false,
             meeting_detect_apps: std::collections::BTreeMap::new(),

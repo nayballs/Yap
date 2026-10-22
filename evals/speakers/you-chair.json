@@ -1,0 +1,48 @@
+{
+  "name": "you-chair",
+  "description": "You run the meeting and hand over by name.",
+  "tags": [
+    "handover",
+    "thanks",
+    "you"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah",
+    "Sam Patel"
+  ],
+  "lines": [
+    [
+      "you",
+      "Okay, let's start with the launch plan. Priya, over to you."
+    ],
+    [
+      "them-1",
+      "Thanks Imogen. The launch is still on for the fourteenth, the store listing is approved and the press kit goes out on the tenth."
+    ],
+    [
+      "you",
+      "Brilliant, thanks Priya. Sam, your turn, how are the support docs looking?"
+    ],
+    [
+      "them-2",
+      "About two thirds done. I need the final screenshots from Priya's team, then I can finish the rest by Friday."
+    ],
+    [
+      "you",
+      "Priya, can you get those over to Sam this week?"
+    ],
+    [
+      "them-1",
+      "Yes, I'll have them by Wednesday."
+    ],
+    [
+      "you",
+      "Perfect. Thanks both."
+    ]
+  ],
+  "truth": {
+    "them-1": "Priya Shah",
+    "them-2": "Sam Patel"
+  }
+}

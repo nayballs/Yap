@@ -1,0 +1,59 @@
+{
+  "name": "handover-standup",
+  "description": "A chair goes round the team by name; each answers in turn and is thanked.",
+  "tags": [
+    "handover",
+    "thanks"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Tom Baker",
+    "Priya Shah",
+    "Sam Patel",
+    "Siobhan Kelly"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Morning everyone, let's keep this quick because I know half of you have the planning session straight after this."
+    ],
+    [
+      "them-1",
+      "Okay, let's go round. Priya, you're up."
+    ],
+    [
+      "them-2",
+      "Thanks. Yesterday I finished the checkout screens, today I'm pairing with design on the empty states, and no blockers."
+    ],
+    [
+      "them-1",
+      "Great, thanks Priya. Sam?"
+    ],
+    [
+      "them-3",
+      "Still on the payments migration. I'm blocked on the sandbox keys from the provider, I chased them again this morning."
+    ],
+    [
+      "them-1",
+      "Okay, I'll escalate that after the call. Siobhan, anything from you?"
+    ],
+    [
+      "them-4",
+      "Just that the interview loop for the two backend roles is booked for next week, so please keep Thursday afternoon free."
+    ],
+    [
+      "you",
+      "I can take one of the Thursday slots."
+    ],
+    [
+      "them-1",
+      "Lovely, thanks Imogen. Okay, that's everyone, see you at planning."
+    ]
+  ],
+  "truth": {
+    "them-1": "Tom Baker",
+    "them-2": "Priya Shah",
+    "them-3": "Sam Patel",
+    "them-4": "Siobhan Kelly"
+  }
+}

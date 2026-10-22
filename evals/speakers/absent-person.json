@@ -1,0 +1,49 @@
+{
+  "name": "absent-person",
+  "description": "An invitee is off sick and talked about throughout; someone covers her update.",
+  "tags": [
+    "absent",
+    "thanks",
+    "trap"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Siobhan Kelly",
+    "Priya Shah",
+    "Sam Patel"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Before we start, has anyone heard from Siobhan? She was meant to give the hiring update."
+    ],
+    [
+      "them-2",
+      "She messaged me, she's off sick today, so I'll cover it."
+    ],
+    [
+      "them-1",
+      "Thanks, Priya, go for it."
+    ],
+    [
+      "them-2",
+      "So both offers went out on Monday. One is accepted, the other candidate wants a later start date, and Siobhan thinks that's fine."
+    ],
+    [
+      "them-1",
+      "Okay. Anything else on hiring? No? Then let's do the budget. I've got the numbers here."
+    ],
+    [
+      "you",
+      "Can you share the sheet in the chat?"
+    ],
+    [
+      "them-1",
+      "Done, it's the second tab."
+    ]
+  ],
+  "truth": {
+    "them-1": "Sam Patel",
+    "them-2": "Priya Shah"
+  }
+}

@@ -255,3 +255,40 @@ test('a meeting recording labels "Them" as it goes and finishes when it stops', 
   await yap.notepad.getByRole('tab', { name: 'Transcript' }).click();
   await shot(yap.notepad, '02-notepad-voices-from-the-engine');
 });
+
+test('a resumed meeting starts the engine again, and its voices carry on numbering', async ({ yap }) => {
+  test.setTimeout(STT ? 1_200_000 : 240_000);
+  fs.mkdirSync(meetingDir, { recursive: true });
+  fs.copyFileSync(path.join(AUDIO, `${FILE}.wav`), path.join(meetingDir, 'them.wav'));
+  writeWav(path.join(meetingDir, 'you.wav'), { seconds: 2, gaps: [[0, 2]] });
+  const people = new Set(readRttm(path.join(AUDIO, `${FILE}.rttm`)).map((s) => s.speaker)).size;
+  const note = await yap.invoke('note_create', { title: 'Resumed meeting', folder: 'Meetings' });
+  const count = (text) => fs.readFileSync(yap.logPath, 'utf8').split(text).length - 1;
+  const playedTimes = () => count('e2e: the test audio has played to the end');
+  const startedTimes = () => count('Diarization: engine started');
+  const recordOnce = async () => {
+    const [played, started] = [playedTimes(), startedTimes()];
+    await yap.invoke('meeting_start', { noteId: note.id });
+    await expect.poll(() => yap.invoke('meeting_state').then((s) => s.recording)).toBe(true);
+    await expect.poll(playedTimes, { timeout: STT ? 840_000 : 120_000, intervals: [500] }).toBeGreaterThan(played);
+    await yap.invoke('meeting_pause');
+    await expect.poll(() => yap.invoke('meeting_state').then((s) => s.recording), { timeout: STT ? 300_000 : 30_000 }).toBe(false);
+    expect(startedTimes(), 'an engine for this recording').toBe(started + 1);
+  };
+  await recordOnce();
+  const first = await yap.invoke('note_get', { id: note.id });
+  const firstVoices = new Set(first.transcript.filter((s) => s.speaker?.startsWith('them-')).map((s) => s.speaker));
+  await recordOnce();
+  const both = await yap.invoke('note_get', { id: note.id });
+  const after = both.transcript.slice(first.transcript.length).filter((s) => s.source === 'them' && s.text?.trim());
+  const secondVoices = new Set(after.filter((s) => s.speaker?.startsWith('them-')).map((s) => s.speaker));
+  const n = (id) => Number(id.slice('them-'.length));
+  console.log(`resumed: first recording ${[...firstVoices].join(', ')}; second ${[...secondVoices].join(', ')}; ${both.breaks?.length ?? 0} stops`);
+  // A new recording is a new engine session: its voices are new numbers,
+  // after the first recording's (never merged by themselves).
+  expect(firstVoices.size).toBe(people);
+  expect(secondVoices.size).toBe(people);
+  expect(Math.min(...[...secondVoices].map(n))).toBeGreaterThan(Math.max(...[...firstVoices].map(n)));
+  // The first recording's lines kept their voices.
+  expect(both.transcript.slice(0, first.transcript.length).map((s) => s.speaker)).toEqual(first.transcript.map((s) => s.speaker));
+});
