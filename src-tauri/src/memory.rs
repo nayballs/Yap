@@ -660,12 +660,21 @@ pub async fn memory_list() -> Value {
         Ok(ep) => json!({ "ready": true, "learns": true, "small": learn::path(&ep) == learn::Path::Small }),
         Err(e) => json!({ "ready": false, "learns": false, "small": false, "why": e }),
     };
-    let list = tauri::async_runtime::spawn_blocking(move || {
+    let list = match tauri::async_runtime::spawn_blocking(move || {
         let words = Words::new();
         items().iter().map(|i| item_view(i, &words)).collect::<Vec<_>>()
     })
     .await
-    .unwrap_or_default();
+    {
+        Ok(list) => list,
+        // The dictation hints failed (the spell checker): the items without
+        // them — never an empty list, which Settings would show as memory
+        // gone.
+        Err(e) => {
+            tracing::warn!("Memory: listing without dictation hints: {e}");
+            items().iter().map(|i| serde_json::to_value(i).unwrap_or(Value::Null)).collect()
+        }
+    };
     json!({ "items": list, "ai": ai })
 }
 
