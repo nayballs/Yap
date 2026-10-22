@@ -12,7 +12,10 @@
     "test:app:build": "node e2e/build.mjs",
     "test:real": "node e2e-real/build.mjs && playwright test -c e2e-real",
     "test:real:build": "node e2e-real/build.mjs",
-    "eval": "node scripts/eval.mjs"
+    "eval": "node scripts/eval.mjs",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "privacy:scan": "node scripts/privacy-guard.mjs --scan-tree",
+    "test:privacy": "node --test scripts/privacy-guard.test.mjs"
   },
   "dependencies": {
     "@fontsource-variable/eb-garamond": "^5.2.7",
