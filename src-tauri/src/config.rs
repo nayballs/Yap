@@ -678,6 +678,14 @@ pub struct YapConfig {
     /// Credential Manager, never here.
     #[serde(default = "default_meeting_reminder")]
     pub meeting_reminder: String,
+    /// "Prepare a brief before meetings" (`calendar/brief.rs`): before a
+    /// calendar meeting, last time with these people, their open items, what
+    /// memory knows about them and the invite's agenda, every line citing its
+    /// note — on the reminder card, the Meetings view and the notepad. Its
+    /// "In short" comes from the meeting's AI model when there is one. On by
+    /// default.
+    #[serde(default = "default_true")]
+    pub meeting_brief: bool,
 
     // ---- Memory (Settings → Memory; `memory.rs`) ----
     // The switches only: what Yap remembers lives in memory.json, never
@@ -939,6 +947,7 @@ impl Default for YapConfig {
             meeting_end_when_quiet: true,
             meeting_hotkey: default_meeting_hotkey(),
             meeting_reminder: default_meeting_reminder(),
+            meeting_brief: true,
             memory_search_chats: true,
             memory_learn_chats: true,
             memory_learn_meetings: false,

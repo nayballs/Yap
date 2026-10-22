@@ -9,7 +9,7 @@
 // Usage: toast({ title, description?, variant?: 'default'|'success'|
 // 'destructive', kind?, key?, duration?, chip?, icon?, action?: { label,
 // onClick, keepOpen? }, secondary?: { label, onClick }, tertiary?: { label,
-// onClick }, progress?, busy?, expand?: { label, markdown } }).
+// onClick }, progress?, busy?, expand?: { label, markdown } | { label, brief } }).
 // `kind` picks the policy (noticePolicy.js KINDS: prompt | update | alert |
 // info | warning | tip, or error | done for the answer to a click; by
 // default destructive → error, success → done, else info) and with it the
@@ -22,7 +22,8 @@
 // under them ("Don't ask for Teams"); all close the toast unless
 // `keepOpen`. `progress` (0–100) draws a determinate bar, `busy` a spinner
 // in the chip, and `expand` a "What's new"-style toggle that unfolds
-// markdown notes inside the card. Destructive toasts render the description
+// markdown notes inside the card (or, with `brief`, a meeting's pre-meeting
+// brief: BriefView.svelte). Destructive toasts render the description
 // as a copyable mono error box. Hovering a toast pauses its timer (and keeps
 // it in place); leaving resumes with the remaining time. `onClose` runs when
 // the person closes the card with its ✕, `onExpire` when its timer runs out

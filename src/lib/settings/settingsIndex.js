@@ -72,6 +72,7 @@ export const SETTINGS_INDEX = [
   { page: 'meetings', section: 'Notepad', label: 'Show live transcript', desc: 'The words appear in the notepad as people talk', keywords: 'live transcript notepad', anchor: 'live-transcript', toggle: 'meetingLiveTranscript' },
   { page: 'meetings', section: 'Notepad', label: 'Meeting shortcut', desc: 'Take notes on a call, and press again to stop', keywords: 'shortcut hotkey win alt m meeting', anchor: 'meeting-shortcut' },
   { page: 'meetings', section: 'Calendar', label: 'Remind me before scheduled meetings', desc: 'A card with Join & take notes', keywords: 'calendar reminder notify notification before meeting', anchor: 'meeting-reminder' },
+  { page: 'meetings', section: 'Calendar', label: 'Prepare a brief before meetings', desc: 'Last time with these people, open items and the agenda', keywords: 'brief briefing prepare prep before meeting last time open items action items agenda calendar', anchor: 'meeting-brief', toggle: 'meetingBrief' },
   { page: 'meetings', section: 'Calendar', label: 'Calendars', desc: 'Meeting names and attendees', keywords: 'calendar google outlook ical connect', anchor: 'calendars' },
 
   // ---- Commands ----
