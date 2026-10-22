@@ -1,0 +1,19 @@
+{
+  "name": "memory-learn-friend-and-manager",
+  "description": "Two people with a relationship word next to their names (\"my best friend Imogen\", \"my manager, Mr Okafor\"): both go into People as who they are; this week's report doesn't.",
+  "tags": ["memory", "memory-learn", "memory-small"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "My best friend Imogen is a vet in Bristol. My manager, Mr Okafor, wants a report from me by Friday. How do I tell him I need more time?",
+      "learn": true,
+      "expect": {
+        "memory": [{ "has": "Imogen", "section": "people" }],
+        "memory_allowed": ["Imogen", "friend", "vet", "Bristol", "Okafor", "manager", "boss"]
+      },
+      "soft": {
+        "memory": [{ "has": "Okafor", "section": "people" }, { "has": "report", "exists": false }]
+      }
+    }
+  ]
+}

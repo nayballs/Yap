@@ -1,0 +1,16 @@
+{
+  "name": "memory-learn-fact-among-noise",
+  "description": "One lasting fact (a primary school teacher) among a mood and tonight's plans: memory keeps the job, not the tiredness or the parents' evening.",
+  "tags": ["memory", "memory-learn", "memory-small"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Ugh, I'm so tired today. I'm a primary school teacher and we've got parents' evening tonight. Any tips for staying awake?",
+      "learn": true,
+      "expect": {
+        "memory": [{ "has": "teacher" }, { "has": "tired", "exists": false }, { "has": "evening", "exists": false }],
+        "memory_allowed": ["teacher", "primary", "school"]
+      }
+    }
+  ]
+}

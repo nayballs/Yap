@@ -1,0 +1,16 @@
+{
+  "name": "memory-learn-project-novel",
+  "description": "\"I'm writing a fantasy novel called The Salt Road\": a project the user owns, kept by its name; the outlining question isn't.",
+  "tags": ["memory", "memory-learn", "memory-small"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "I'm writing a fantasy novel called The Salt Road in the evenings. What's a good way to outline chapter three?",
+      "learn": true,
+      "expect": {
+        "memory": [{ "has": "Salt Road", "section": "projects" }, { "has": "chapter", "exists": false }],
+        "memory_allowed": ["Salt Road", "novel", "fantasy", "writ", "evening", "book"]
+      }
+    }
+  ]
+}

@@ -13,7 +13,8 @@
           { "has": "rain", "exists": false },
           { "has": "saturday", "exists": false }
         ],
-        "memory_changes_max": 3
+        "memory_changes_max": 3,
+        "memory_allowed": ["Rochelle", "sister"]
       }
     }
   ]

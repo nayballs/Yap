@@ -15,7 +15,8 @@
           { "has": "tulip", "exists": false },
           { "has": "lasagne", "exists": false }
         ],
-        "memory_changes_min": 4
+        "memory_changes_min": 4,
+        "memory_allowed": ["concise", "British", "Leeds", "UK", "software", "developer", "Yap", "dictation", "voice", "Rust", "Tauri", "Svelte", "Rochelle", "sister", "York", "Baldur", "Warcraft", "friendly", "name"]
       },
       "soft": { "memory": [{ "has": "Baldur" }] }
     }

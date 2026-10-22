@@ -1,0 +1,18 @@
+{
+  "name": "memory-learn-one-off-requests",
+  "description": "\"I need…\" / \"I want to…\" for this weekend, and a one-off answer style (\"this time\"): passing, so memory keeps nothing.",
+  "tags": ["memory", "memory-learn", "memory-small"],
+  "apps": "standard",
+  "turns": [
+    { "user": "I need a chocolate birthday cake recipe for Saturday, and I want to book a table for six in Manchester on Sunday. Any ideas?", "expect": {} },
+    {
+      "user": "Just give me a one-line answer this time: what's 15% of 80?",
+      "learn": true,
+      "expect": {
+        "memory_changes_max": 0,
+        "memory_allowed": [],
+        "memory": [{ "has": "cake", "exists": false }, { "has": "Manchester", "exists": false }, { "has": "one-line", "exists": false }]
+      }
+    }
+  ]
+}

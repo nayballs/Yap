@@ -11,7 +11,8 @@
       "learn": true,
       "expect": {
         "memory_changes_max": 0,
-        "memory": [{ "has": "lasagne", "exists": false }, { "has": "Australia", "exists": false }]
+        "memory_allowed": [],
+        "memory":[{ "has": "lasagne", "exists": false }, { "has": "Australia", "exists": false }]
       }
     }
   ]

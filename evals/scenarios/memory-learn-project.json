@@ -9,7 +9,8 @@
       "learn": true,
       "expect": {
         "memory": [{ "has": "Yap", "section": "projects" }],
-        "memory_changes_max": 3
+        "memory_changes_max": 3,
+        "memory_allowed": ["Yap", "dictation", "Rust", "Svelte", "Tauri"]
       }
     }
   ]

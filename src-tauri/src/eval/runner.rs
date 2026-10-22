@@ -856,13 +856,29 @@ async fn run_scenario(
         // Memory's passes after the turn: what a quiet chat, "Tell Yap what
         // to change" or an import would do.
         let mut memory_error: Option<String> = None;
+        let mut memory_pass = Value::Null;
         if turn.learn {
             let id = result.as_ref().ok().and_then(|t| t.as_ref().map(|t| t.conversation_id)).or(conversation);
             match id {
                 Some(id) => {
+                    // What the pass alone cost: its calls and time, apart
+                    // from the chat turn's.
+                    let (s0, p0) = (record::turn_so_far(), Instant::now());
                     if let Err(e) = crate::memory::learn::learn_from_chat(id, false).await {
                         memory_error = Some(format!("learning: {e}"));
                     }
+                    let s1 = record::turn_so_far();
+                    memory_pass = json!({
+                        "ms": p0.elapsed().as_millis() as u64,
+                        "calls": s1.requests - s0.requests,
+                        "model_ms": s1.model_ms - s0.model_ms,
+                        "prompt_tokens": s1.prompt_tokens - s0.prompt_tokens,
+                        "prompt_eval_tokens": s1.prompt_eval_tokens - s0.prompt_eval_tokens,
+                        "prompt_eval_ms": s1.prompt_eval_ms - s0.prompt_eval_ms,
+                        "gen_tokens": s1.gen_tokens - s0.gen_tokens,
+                        "gen_ms": s1.gen_ms - s0.gen_ms,
+                    });
+                    record::write("memory_pass", memory_pass.clone());
                 }
                 None => memory_error = Some("learning: no chat to read".to_string()),
             }
@@ -880,9 +896,11 @@ async fn run_scenario(
                 }
             }
         }
-        let memory_done = scenario::memory_diff(&memory_before, &crate::memory::items());
+        let memory_after = crate::memory::items();
+        let memory_done = scenario::memory_diff(&memory_before, &memory_after);
+        let memory_gained = scenario::memory_gained(&memory_before, &memory_after);
         if !memory_done.is_empty() {
-            record::write("memory_changed", json!({ "changes": memory_done }));
+            record::write("memory_changed", json!({ "changes": memory_done, "gained": memory_gained }));
         }
         let stats = record::end_turn();
         let opened = crate::apps::e2e_opened_apps(Some(true))
@@ -890,7 +908,7 @@ async fn run_scenario(
             .iter()
             .filter_map(|v| v["name"].as_str().map(str::to_string))
             .collect();
-        let mut o = Observed { stats, opened, memory_done, ..Default::default() };
+        let mut o = Observed { stats, opened, memory_done, memory_gained, ..Default::default() };
         // What a follow-up's "[1]" points at — for "where did you get that?",
         // only the answer it asks about — and whether the answer before it
         // searched (a "did you look that up?" asks about that one).
@@ -926,6 +944,18 @@ async fn run_scenario(
         let mut j = scenario::observed_json(&o);
         j["user"] = json!(turn.user);
         j["ms"] = json!(ms);
+        let touches_memory = turn.learn || turn.tell.is_some() || turn.import.is_some() || !o.memory_gained.is_empty();
+        let score = scenario::memory_score(&turn.expect, &turn.soft, &o);
+        if touches_memory || score.recall_total > 0 {
+            j["memory_score"] = json!({
+                "recall_hits": score.recall_hits,
+                "recall_total": score.recall_total,
+                "false": score.false_texts,
+            });
+        }
+        if !memory_pass.is_null() {
+            j["memory_pass"] = memory_pass.clone();
+        }
         // What a streamed answer would have shown first: everything before
         // the answering call, then its prompt and first token (local models).
         if o.stats.final_first_token_ms > 0.0 {
@@ -948,7 +978,11 @@ async fn run_scenario(
     fails.extend(end_f.iter().map(|r| format!("end: {r}")));
     warns.extend(end_w.iter().map(|r| format!("end: {r}")));
     let st = &all.stats;
-    let row = json!({
+    // Memory's precision and recall over the turns, and its passes' cost.
+    let scores: Vec<&Value> = turns.iter().filter_map(|t| t.get("memory_score")).collect();
+    let passes: Vec<&Value> = turns.iter().filter_map(|t| t.get("memory_pass")).collect();
+    let false_texts: Vec<Value> = scores.iter().flat_map(|s| s["false"].as_array().cloned().unwrap_or_default()).collect();
+    let mut row = json!({
         "model": m.label,
         "scenario": name,
         "tags": s.tags,
@@ -989,6 +1023,17 @@ async fn run_scenario(
         "errors": seen.iter().filter_map(|o| o.error.clone()).collect::<Vec<_>>(),
         "turn_details": turns,
     });
+    if !scores.is_empty() || !passes.is_empty() {
+        let n = |v: &Value, k: &str| v[k].as_u64().unwrap_or(0);
+        row["memory_false"] = json!(false_texts.len());
+        row["memory_false_texts"] = json!(false_texts);
+        row["memory_recall_hits"] = json!(scores.iter().map(|s| n(s, "recall_hits")).sum::<u64>());
+        row["memory_recall_total"] = json!(scores.iter().map(|s| n(s, "recall_total")).sum::<u64>());
+        row["memory_passes"] = json!(passes.len());
+        row["memory_pass_calls"] = json!(passes.iter().map(|p| n(p, "calls")).sum::<u64>());
+        row["memory_pass_ms"] = json!(passes.iter().map(|p| n(p, "ms")).sum::<u64>());
+        row["memory_pass_max_ms"] = json!(passes.iter().map(|p| n(p, "ms")).max().unwrap_or(0));
+    }
     record::write("scenario_end", row.clone());
     row
 }
@@ -1098,6 +1143,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         };
         let tpm = args.tokens_per_minute.or(if m.provider == "groq" { Some(8_000) } else { None });
         record::set_tokens_per_minute(tpm);
+        crate::eval::set_local_on_gpu(m.server.as_ref().map(|_| args.ngl > 0));
         let paced_before = record::paced_ms();
         let model_started = Instant::now();
         let mut used: u64 = 0;
@@ -1208,6 +1254,10 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         let md = record::redact(&markdown(&summary, &rows, &models_info, &totals));
         let _ = std::fs::write(run_dir.join("summary.md"), &md);
         println!("\n{}", table_only(&totals));
+        let mem = memory_table(&rows);
+        if !mem.is_empty() {
+            println!("{}", record::redact(&mem));
+        }
     }
     i32::from(failed)
 }
@@ -1328,6 +1378,74 @@ fn table_only(totals: &[Value]) -> String {
     md
 }
 
+/// Memory's scores per model, learning (tag `memory-learn`) apart from
+/// "Tell Yap what to change" / imports / remember (`memory-tell`): false
+/// memories (precision), the `has` checks met (recall), and the learning
+/// passes' time. "" when no scenario touched memory.
+fn memory_table(rows: &[Value]) -> String {
+    let with: Vec<&Value> = rows.iter().filter(|r| r.get("memory_recall_total").is_some()).collect();
+    if with.is_empty() {
+        return String::new();
+    }
+    let mut models: Vec<String> = Vec::new();
+    for r in &with {
+        let m = r["model"].as_str().unwrap_or("").to_string();
+        if !models.contains(&m) {
+            models.push(m);
+        }
+    }
+    let mut md = String::from(
+        "| Model | Group | Scenarios | False memories | Recall | Passes | Calls a pass | Mean pass (s) | Slowest pass (s) |\n|---|---|---|---|---|---|---|---|---|\n",
+    );
+    let mut lists = String::new();
+    for m in &models {
+        for (group, tag) in [("learning", "memory-learn"), ("tell / import / remember", "memory-tell"), ("other", "")] {
+            let mine: Vec<&&Value> = with
+                .iter()
+                .filter(|r| r["model"] == json!(m))
+                .filter(|r| {
+                    let tags: Vec<&str> = r["tags"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+                    if tag.is_empty() {
+                        !tags.contains(&"memory-learn") && !tags.contains(&"memory-tell")
+                    } else {
+                        tags.contains(&tag)
+                    }
+                })
+                .collect();
+            if mine.is_empty() {
+                continue;
+            }
+            let sum = |k: &str| mine.iter().map(|r| r[k].as_u64().unwrap_or(0)).sum::<u64>();
+            let passes = sum("memory_passes");
+            md.push_str(&format!(
+                "| {m} | {group} | {} | {} | {}/{} | {} | {} | {} | {} |\n",
+                mine.len(),
+                sum("memory_false"),
+                sum("memory_recall_hits"),
+                sum("memory_recall_total"),
+                passes,
+                if passes > 0 { format!("{:.1}", sum("memory_pass_calls") as f64 / passes as f64) } else { "—".into() },
+                if passes > 0 { format!("{:.1}", sum("memory_pass_ms") as f64 / passes as f64 / 1000.0) } else { "—".into() },
+                if passes > 0 {
+                    format!("{:.1}", mine.iter().map(|r| r["memory_pass_max_ms"].as_u64().unwrap_or(0)).max().unwrap_or(0) as f64 / 1000.0)
+                } else {
+                    "—".into()
+                },
+            ));
+            for r in &mine {
+                let texts: Vec<&str> = r["memory_false_texts"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+                if !texts.is_empty() {
+                    lists.push_str(&format!("- {m} · **{}**: {}\n", r["scenario"].as_str().unwrap_or(""), texts.join(" · ")));
+                }
+            }
+        }
+    }
+    if !lists.is_empty() {
+        md.push_str(&format!("\nFalse memories:\n\n{lists}"));
+    }
+    md
+}
+
 fn markdown(summary: &Value, rows: &[Value], models: &[Value], totals: &[Value]) -> String {
     let mut md = format!(
         "# Model eval {}\n\nCommit `{}` · {} → {}\n\n",
@@ -1339,6 +1457,12 @@ fn markdown(summary: &Value, rows: &[Value], models: &[Value], totals: &[Value])
     md.push_str("## Models\n\n");
     md.push_str(&table_only(totals));
     md.push('\n');
+    let mem = memory_table(rows);
+    if !mem.is_empty() {
+        md.push_str("## Memory: precision and recall\n\n");
+        md.push_str(&mem);
+        md.push('\n');
+    }
     for m in models {
         if let Some(e) = m["error"].as_str() {
             md.push_str(&format!("- {}: couldn't run: {e}\n", m["spec"].as_str().unwrap_or("")));

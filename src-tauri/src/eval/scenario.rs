@@ -382,6 +382,11 @@ pub struct Expect {
     /// many changes (0: none, the passing details stayed out).
     pub memory_changes_max: Option<usize>,
     pub memory_changes_min: Option<usize>,
+    /// **Precision**: every text memory gained this turn (a new item's name
+    /// and "about", each fact added, a name or "about" changed) holds one of
+    /// these (case-insensitive); anything else is a **false memory**. `[]`:
+    /// nothing may be gained.
+    pub memory_allowed: Option<Vec<String>>,
 }
 
 /// Something memory holds afterwards: an item whose name, summary or facts
@@ -459,6 +464,9 @@ pub struct Observed {
     /// Memory's changes this turn (its learning pass, a tell, an import, the
     /// chat's remember/forget), as "added people: Rochelle".
     pub memory_done: Vec<String>,
+    /// The texts memory gained this turn ([`memory_gained`]), for
+    /// `memory_allowed`.
+    pub memory_gained: Vec<String>,
 }
 
 impl Observed {
@@ -476,6 +484,7 @@ impl Observed {
             all.opened.extend(t.opened.iter().cloned());
             all.sources.extend(t.sources.iter().cloned());
             all.memory_done.extend(t.memory_done.iter().cloned());
+            all.memory_gained.extend(t.memory_gained.iter().cloned());
             let (a, b) = (&mut all.stats, &t.stats);
             a.requests += b.requests;
             a.retries += b.retries;
@@ -1007,7 +1016,87 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
             fails.push(format!("memory changed {} times (expected at least {min})", o.memory_done.len()));
         }
     }
+    if let Some(allowed) = &e.memory_allowed {
+        for t in false_memories(allowed, &o.memory_gained) {
+            fails.push(format!("false memory: \"{t}\""));
+        }
+    }
     fails
+}
+
+/// The texts in `gained` that hold none of `allowed` (case-insensitive):
+/// false memories. Pure.
+pub fn false_memories(allowed: &[String], gained: &[String]) -> Vec<String> {
+    gained.iter().filter(|t| !allowed.iter().any(|a| lower(t).contains(&lower(a)))).cloned().collect()
+}
+
+/// A turn's memory scores: recall (the `has` checks memory must meet, in
+/// `expect` and `soft`, met / all) and the false memories (a gained text
+/// `memory_allowed` doesn't allow, or holding what an `exists: false` check
+/// forbids, or any at all where `memory_changes_max` is 0), each counted
+/// once.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MemoryScore {
+    pub recall_hits: usize,
+    pub recall_total: usize,
+    pub false_texts: Vec<String>,
+}
+
+pub fn memory_score(expect: &Expect, soft: &Expect, o: &Observed) -> MemoryScore {
+    let mut s = MemoryScore::default();
+    let items = crate::memory::items();
+    let text = |i: &crate::memory::ops::Item| lower(&format!("{} {} {}", i.title, i.summary, i.details.join(" | ")));
+    let mut forbidden: Vec<String> = Vec::new();
+    let mut allowed: Option<Vec<String>> = None;
+    let mut none_allowed = false;
+    for e in [expect, soft] {
+        for want in &e.memory {
+            if want.exists {
+                let section = want.section.as_deref().and_then(crate::memory::ops::Section::parse);
+                s.recall_total += 1;
+                if items.iter().any(|i| section.is_none_or(|x| x == i.section) && text(i).contains(&lower(&want.has))) {
+                    s.recall_hits += 1;
+                }
+            } else {
+                forbidden.push(lower(&want.has));
+            }
+        }
+        if let Some(a) = &e.memory_allowed {
+            allowed.get_or_insert_with(Vec::new).extend(a.iter().cloned());
+        }
+        none_allowed |= e.memory_changes_max == Some(0);
+    }
+    for t in &o.memory_gained {
+        let bad = none_allowed
+            || forbidden.iter().any(|f| lower(t).contains(f))
+            || allowed.as_ref().is_some_and(|a| !false_memories(a, std::slice::from_ref(t)).is_empty());
+        if bad && !s.false_texts.contains(t) {
+            s.false_texts.push(t.clone());
+        }
+    }
+    s
+}
+
+/// What memory gained between two snapshots, as texts: a new item's name
+/// (people, projects, topics), its "about" and each fact; for a changed
+/// item, each fact added and a new name or "about". Pure.
+pub fn memory_gained(before: &[crate::memory::ops::Item], after: &[crate::memory::ops::Item]) -> Vec<String> {
+    let mut out = Vec::new();
+    for a in after {
+        let b = before.iter().find(|b| b.id == a.id);
+        if !a.section.is_you() && b.is_none_or(|b| crate::memory::ops::norm(&b.title) != crate::memory::ops::norm(&a.title)) {
+            out.push(a.title.clone());
+        }
+        if !a.summary.trim().is_empty() && b.is_none_or(|b| b.summary != a.summary) {
+            out.push(a.summary.clone());
+        }
+        for d in &a.details {
+            if b.is_none_or(|b| !b.details.contains(d)) {
+                out.push(d.clone());
+            }
+        }
+    }
+    out
 }
 
 /// What changed in memory between two snapshots, in words ("added
@@ -1050,6 +1139,7 @@ pub fn observed_json(o: &Observed) -> Value {
         "post_fixes": o.stats.post_fixes,
         "words": o.words(),
         "memory_done": o.memory_done,
+        "memory_gained": o.memory_gained,
         "stats": o.stats,
     })
 }
@@ -1061,6 +1151,37 @@ mod tests {
 
     fn obs(reply: &str) -> Observed {
         Observed { reply: reply.to_string(), ..Default::default() }
+    }
+
+    #[test]
+    fn false_memories_are_what_the_scenario_doesnt_allow() {
+        use crate::memory::ops::{Item, Origin, Section};
+        let item = |id: u64, section: Section, title: &str, summary: &str, details: &[&str]| Item {
+            id,
+            section,
+            title: title.into(),
+            summary: summary.into(),
+            details: details.iter().map(|d| d.to_string()).collect(),
+            source: Origin::new("chat", None, ""),
+            created_ts: 0,
+            updated_ts: 0,
+            dictation: true,
+        };
+        let before = vec![item(1, Section::Profile, "Profile", "", &["Lives in Leeds"])];
+        let after = vec![
+            item(1, Section::Profile, "Profile", "", &["Lives in Leeds", "Works night shifts"]),
+            item(2, Section::People, "Marisol", "Sister", &["Visiting this weekend"]),
+        ];
+        let gained = memory_gained(&before, &after);
+        assert_eq!(gained, ["Works night shifts", "Marisol", "Sister", "Visiting this weekend"]);
+        let allowed = vec!["night".to_string(), "marisol".to_string(), "sister".to_string()];
+        assert_eq!(false_memories(&allowed, &gained), ["Visiting this weekend"]);
+        // Nothing allowed: everything gained is false.
+        assert_eq!(false_memories(&[], &gained).len(), 4);
+        // The check reports each one.
+        let o = Observed { memory_gained: gained, ..Default::default() };
+        let e = Expect { memory_allowed: Some(allowed), ..Default::default() };
+        assert_eq!(check(&e, &o), ["false memory: \"Visiting this weekend\""]);
     }
 
     #[test]

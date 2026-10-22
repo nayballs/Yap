@@ -281,6 +281,12 @@ pub fn begin_turn() {
     }
 }
 
+/// The turn's tallies so far (the turn goes on): what a part of it cost is
+/// the difference between two of these (memory's learning pass).
+pub fn turn_so_far() -> TurnStats {
+    rec().as_ref().map(|r| r.turn.clone()).unwrap_or_default()
+}
+
 /// The turn's tallies (and start the next afresh).
 pub fn end_turn() -> TurnStats {
     rec().as_mut().map(|r| std::mem::take(&mut r.turn)).unwrap_or_default()

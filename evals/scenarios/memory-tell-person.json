@@ -1,0 +1,17 @@
+{
+  "name": "memory-tell-person",
+  "description": "\"Tell Yap what to change\" with someone new: \"My brother Tobias lives in Cardiff and works as a paramedic\" adds him to People, with where he lives and his work.",
+  "tags": ["memory", "memory-tell", "memory-small"],
+  "apps": "standard",
+  "turns": [
+    {
+      "tell": "My brother Tobias lives in Cardiff and works as a paramedic",
+      "expect": {
+        "memory": [{ "has": "Tobias", "section": "people", "count": 1 }],
+        "memory_changes_min": 1,
+        "memory_allowed": ["Tobias", "brother", "Cardiff", "paramedic"]
+      },
+      "soft": { "memory": [{ "has": "Cardiff", "section": "people" }] }
+    }
+  ]
+}
