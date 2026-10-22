@@ -218,8 +218,9 @@ Extraction, the guards (≈ 50 everyday sentences against a busy screen's
 unit-tested; robot-tested on an Edge page and the test pad, with the
 stand-in cleanup model, a read delayed 8 s (the paste doesn't wait), and
 real speech (`screen-names-stt.real.js`: Parakeet 4 → 5 of 7 names right,
-Whisper large-v3 6 → 7, no everyday sentence changed). The read: ~25–55 ms
-on the robot's page (debug build), ~50–100 ms on a 3,000-paragraph Edge
+Whisper large-v3 6 → 7, no everyday sentence changed). The read: 18–107 ms,
+median 39, over the robot suite's 94 reads (debug build, a busy PC), ~50–100
+ms on a 3,000-paragraph Edge
 page and a 5,000-line code view (a VS Code stand-in: VS Code isn't
 installed here), 30–80 ms on the WinForms pad. Gaps: a name a model spells
 far from the screen ("Shivon" for Siobhan with Parakeet) isn't fixed, nor a
