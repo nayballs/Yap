@@ -85,7 +85,7 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "license": "MIT",
-    "publisher": "Context Mirror",
+    "publisher": "Yap",
     "category": "Productivity",
     "icon": [
       "icons/32x32.png",
