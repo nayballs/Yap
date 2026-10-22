@@ -104,14 +104,23 @@
 
   // ---- loading and saving ----
 
+  let loads = 0;
   async function load(id) {
     flushSave();
+    const asked = ++loads;
     if (id == null) {
       note = null;
       return;
     }
+    // The note already shown (a recording resumed in it): only what changed,
+    // never over what arrived meanwhile.
+    if (note?.id === id) {
+      loadSummary(id);
+      return reload();
+    }
     try {
       const n = await invoke('note_get', { id });
+      if (asked !== loads) return; // another note was asked for since
       if (note?.id !== n.id) {
         tab = 'thoughts';
         askOpen = false;
@@ -128,31 +137,61 @@
       note = n;
       loadSummary(n.id);
     } catch {
-      note = null;
+      if (asked === loads) note = null;
     }
   }
 
+  // What the events below changed, field by field: a reload takes only the
+  // fields no event changed while its read was on its way. Without that, a
+  // read answered just before a change and delivered just after it put the
+  // older value back — a stop's paused divider (`yap-meeting-breaks` lands
+  // while the reload the stop started is still out), a line, a summary, the
+  // text typed in the Notes view — until something reloaded again.
+  const changed = { title: 0, content: 0, participants: 0, transcript: 0, speakers: 0, breaks: 0, digests: 0, summary: 0 };
+  function changing(...fields) {
+    for (const f of fields) changed[f] += 1;
+  }
+  let reloads = 0;
+  // The note's fields those events carry (the rest only a read brings).
+  const EVENT_FIELDS = new Set([
+    'title',
+    'titleAuto',
+    'content',
+    'participants',
+    'transcript',
+    'speakers',
+    'breaks',
+    'digests',
+    'enhancedContent',
+  ]);
+
   async function reload() {
     if (!note) return;
+    const asked = ++reloads;
+    const before = { ...changed };
+    const kept = (f) => changed[f] === before[f];
     try {
       const n = await invoke('note_get', { id: note.id });
-      if (note?.id !== n.id) return;
-      // Keep what's being typed; take the rest.
-      if (!dirty.title) {
+      // Another note, or a newer reload on its way: that one says it.
+      if (note?.id !== n.id || asked !== reloads) return;
+      // Keep what's being typed, and whatever arrived meanwhile; take the rest.
+      if (!dirty.title && kept('title')) {
         note.title = n.title;
         note.titleAuto = n.titleAuto;
       }
-      if (!dirty.content) note.content = n.content;
-      note.transcript = n.transcript;
-      note.speakers = n.speakers;
-      note.breaks = n.breaks;
-      note.digests = n.digests;
-      note.enhancedContent = n.enhancedContent;
-      note.participants = n.participants;
-      // Tied to its calendar meeting as the recording started (its brief follows).
-      note.event = n.event;
+      if (!dirty.content && kept('content')) note.content = n.content;
+      if (kept('transcript')) note.transcript = n.transcript;
+      if (kept('speakers')) note.speakers = n.speakers;
+      if (kept('breaks')) note.breaks = n.breaks;
+      if (kept('digests')) note.digests = n.digests;
+      if (kept('summary')) note.enhancedContent = n.enhancedContent;
+      if (kept('participants')) note.participants = n.participants;
+      // The rest as stored: no event brings them (its calendar meeting, tied
+      // as the recording started — its brief follows —, the date, the type).
+      for (const [k, v] of Object.entries(n)) if (!EVENT_FIELDS.has(k)) note[k] = v;
+      if (!('event' in n)) note.event = undefined;
     } catch {
-      note = null; // gone (deleted)
+      if (asked === reloads) note = null; // gone (deleted)
     }
   }
 
@@ -220,6 +259,7 @@
     // The speaker engine's labels change only the lines and the map: never
     // touch what's being typed for them (they come every few seconds).
     if (p.origin !== 'speakers') {
+      changing('title', 'content', 'participants');
       if (!dirty.title) {
         note.title = p.title;
         note.titleAuto = p.titleAuto;
@@ -227,21 +267,30 @@
       if (!dirty.content) note.content = p.content;
       note.participants = p.participants;
     }
-    if (p.speakers) note.speakers = p.speakers;
-    if (typeof p.enhancedContent === 'string') note.enhancedContent = p.enhancedContent;
+    if (p.speakers) {
+      changing('speakers');
+      note.speakers = p.speakers;
+    }
+    if (typeof p.enhancedContent === 'string') {
+      changing('summary');
+      note.enhancedContent = p.enhancedContent;
+    }
     if (p.lineSplice) {
       // The voice separation labelled lines, splitting some where the
       // speaker changed: the stretch that changed.
       const t = withLineSplice(note.transcript, p);
       if (t) {
+        changing('transcript', 'breaks');
         note.transcript = t;
         if (p.breaks) note.breaks = p.breaks;
       } else reload();
     } else if (p.lineSpeakers) {
       // A speaker renamed or merged in another window: every line's voice.
       const t = withLineSpeakers(note.transcript, p.lineSpeakers);
-      if (t) note.transcript = t;
-      else reload();
+      if (t) {
+        changing('transcript');
+        note.transcript = t;
+      } else reload();
     }
   }
 
@@ -295,6 +344,7 @@
 
   function onSegment(seg) {
     if (!seg || !recordingThis || hasLine(note.transcript, seg)) return;
+    changing('transcript');
     note.transcript = [...(note.transcript || []), seg];
   }
 
@@ -306,12 +356,16 @@
   }
 
   function onDigest(p) {
-    if (p?.digest && note?.id === p.noteId) note.digests = [...(note.digests || []), p.digest];
+    if (!p?.digest || note?.id !== p.noteId) return;
+    changing('digests');
+    note.digests = [...(note.digests || []), p.digest];
   }
 
   // A recording stopped: where, for the paused divider.
   function onBreaks(p) {
-    if (note && p?.noteId === note.id) note.breaks = p.breaks;
+    if (!note || p?.noteId !== note.id) return;
+    changing('breaks');
+    note.breaks = p.breaks;
   }
 
   // Stop = "End meeting & summarise": Rust writes the action plan once the
@@ -381,6 +435,7 @@
    *  was me"), and the summary (a name put on "Speaker 2"). */
   function onSpeakerChanged(updated) {
     if (!note || updated?.id !== note.id) return;
+    changing('speakers', 'transcript', 'summary');
     note.speakers = updated.speakers || {};
     const t = updated.transcript || [];
     note.transcript = (note.transcript || []).map((s, i) =>

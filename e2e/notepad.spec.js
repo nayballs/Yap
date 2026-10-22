@@ -169,7 +169,7 @@ test('the text it copies, saves and emails, and how the transcript is laid out',
   // Markdown, as "Save as .md" writes it: no echo, no markers.
   const md = noteMarkdown(note);
   expect(md).toMatch(/^# Launch sync\n\nAttendees: Priya\n\n## Action plan/);
-  expect(md).toContain('---\n\n## Raw notes\n\nAsk about legal');
+  expect(md).toContain('---\n\n## My thoughts\n\nAsk about legal');
   expect(md).toContain('**Them:** Legal needs a week.');
   expect(md.match(/\*\*(You|Them):\*\*/g)).toHaveLength(3);
   // Text: headings and emphasis dropped, tasks as ☐.
@@ -410,13 +410,21 @@ test('the transcript: paused and dictated dividers, hover copy, search, copy all
   expect(kinds).toEqual(['you', 'them', 'paused', 'you', 'dictated', 'them']);
   await shot(pad, '08-transcript-dividers');
 
-  // Hovering a line shows its copy button.
+  // Hovering a line shows its copy button. The reveal is a 0.12 s fade, and
+  // a CSS transition only moves on frames the webview draws: on a PC under
+  // heavy load WebView2 drew none for 12 s and more (a trace showed it),
+  // leaving the button at opacity 0 past this check's 10 s. Reduced motion
+  // (the app's own mode, from the system setting) shows it at once, so the
+  // check needs no frame.
+  await pad.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(pad.locator('html')).toHaveAttribute('data-motion', 'reduced');
   const row = log.locator('.row').filter({ hasText: 'Sounds good' });
   const lineCopy = row.getByRole('button', { name: 'Copy line' });
   await expect(lineCopy).toHaveCSS('opacity', '0');
   await row.hover();
   await expect(lineCopy).toHaveCSS('opacity', '1');
   await shot(pad, '09-line-hover-copy');
+  await pad.emulateMedia({ reducedMotion: null }).catch(() => {});
   await lineCopy.click();
   await expect.poll(copied).toBe('Sounds good, go ahead.');
 
@@ -446,6 +454,62 @@ test('the transcript: paused and dictated dividers, hover copy, search, copy all
         'You: Back again, where were we?\nThem: The second theme, the budget.'
     );
   await expect(toast(pad, 'Transcript copied')).toHaveCount(0);
+});
+
+test('a note read answered late never takes back what arrived meanwhile', async ({ yap }) => {
+  // On a loaded PC the reply to a note read can land after an event that
+  // changed the note: a stop's reload read before meeting_end added the
+  // paused divider and delivered after its `yap-meeting-breaks` took the
+  // divider away (a real flake of "My thoughts sync with the Notes view").
+  // Here the notepad's note reads answer only when the test lets them: Tauri's
+  // IPC is a fetch to ipc.localhost, held at the response stage through
+  // CDP's Fetch domain (read by Rust at once, delivered later). The events
+  // in between must survive the late answers.
+  await startMeeting(yap, 'Late reads');
+  const pad = yap.notepad;
+  await tab(yap, 'Transcript').click();
+  await say(yap, ['you', 'First, the agenda.'], ['them', 'Sounds good.']);
+  const log = transcript(pad);
+  await expect(log).toContainText('Sounds good.');
+  const cdp = await pad.context().newCDPSession(pad);
+  const held = [];
+  cdp.on('Fetch.requestPaused', (e) => held.push(e.requestId));
+  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: 'http://ipc.localhost/note_get*', requestStage: 'Response' }] });
+  // The held answers, newest first (as a busy PC may deliver them).
+  const release = async () => {
+    const ids = held.splice(0).reverse();
+    for (const requestId of ids) await cdp.send('Fetch.continueRequest', { requestId });
+    return ids.length;
+  };
+  // Any note change elsewhere makes the notepad read its note again.
+  const reread = () => yap.invoke('plugin:event|emit', { event: 'yap-notes-changed', payload: null });
+  try {
+    // A read goes out; a new line arrives before its answer.
+    await reread();
+    await expect.poll(() => held.length).toBeGreaterThanOrEqual(1);
+    await say(yap, ['you', 'Next, the budget.']);
+    await expect(log).toContainText('Next, the budget.');
+    expect(await release()).toBeGreaterThanOrEqual(1);
+    await pad.waitForTimeout(300);
+    await expect(log).toContainText('Next, the budget.');
+
+    // Another read goes out, then the recording pauses: its divider arrives,
+    // and the read the stop starts is held too. The older answer lands last.
+    await reread();
+    await expect.poll(() => held.length).toBeGreaterThanOrEqual(1);
+    await yap.invoke('meeting_pause');
+    await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
+    await expect(log.getByRole('separator', { name: 'Recording paused here' })).toHaveCount(1);
+    await expect.poll(() => held.length).toBeGreaterThanOrEqual(2);
+    expect(await release()).toBeGreaterThanOrEqual(2);
+    await pad.waitForTimeout(300);
+    await expect(log.getByRole('separator', { name: 'Recording paused here' })).toHaveCount(1);
+    await expect(log).toContainText('Next, the budget.');
+  } finally {
+    await release().catch(() => {});
+    await cdp.send('Fetch.disable').catch(() => {});
+    await cdp.detach().catch(() => {});
+  }
 });
 
 test('"What did I miss?" and Ask anything, in a sheet over the meeting', async ({ yap, fakeLlm, shot }) => {

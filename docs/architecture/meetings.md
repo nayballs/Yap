@@ -243,7 +243,13 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   `suggestionQuestion`, `suggestionWhy`); other windows
   follow `yap-note-changed`'s `lineSpeakers` (`withLineSpeakers`); Escape
   closes just the menu; a dashed **⏸ divider** wherever a recording stopped
-  (`note.breaks`, `yap-meeting-breaks`) and a "**You dictated here · left
+  (`note.breaks`, `yap-meeting-breaks`; **a late read never takes it
+  back**: the notepad re-reads its note on a stop, on `yap-notes-changed`
+  and when a recording resumes in it, and each read keeps the fields an
+  event changed while it was out — `changed`/`changing` in Notepad.svelte —
+  and is dropped when a newer read was asked for; until 2026-10-22 a stop's
+  reload answered after `meeting_end`'s break event put the old breaks back
+  on a loaded PC, the divider gone until the next reload) and a "**You dictated here · left
   out of the notes**" divider (mic glyph) for a `dictated` marker; echo
   behind "Show N lines…"; "Yap is listening" / "No transcript yet" / "Live
   transcript is off" states (layout: `notepadText.js` `transcriptItems`,
