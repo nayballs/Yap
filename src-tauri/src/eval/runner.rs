@@ -860,12 +860,18 @@ async fn run_scenario(
         // Asked out loud = the Voice Assistant's turn (its shorter history,
         // its spoken-answer prompt).
         let scope = voice.then_some("assistant");
+        // Streamed, as the Chat view gets it (`YAP_EVAL_STREAM=off`: whole
+        // answers, as before 22 Oct 2026): when the first words showed.
+        let watch = FirstWords::new();
+        let streamed = std::env::var("YAP_EVAL_STREAM").as_deref() != Ok("off");
         let result = if turn.user.trim().is_empty() {
             // A memory action alone (learn, tell, import): no chat turn.
             Ok(None)
         } else {
-            crate::commands::chat_turn(None, conversation, &turn.user, scope, voice, |_, _| {}).await.map(Some)
+            let watcher = streamed.then_some(&watch as &dyn crate::stream::Sink);
+            crate::commands::chat_turn(None, conversation, &turn.user, scope, voice, |_, _| {}, watcher, None).await.map(Some)
         };
+        let first_words = watch.at();
         // Memory's passes after the turn: what a quiet chat, "Tell Yap what
         // to change" or an import would do.
         let mut memory_error: Option<String> = None;
@@ -974,6 +980,13 @@ async fn run_scenario(
         if o.stats.final_first_token_ms > 0.0 {
             j["ttft_est_ms"] = json!(ttft_estimate(ms, o.stats.final_call_ms, o.stats.final_first_token_ms));
         }
+        // When the first words of the answer showed, streamed (measured,
+        // less the run's own pacing before them, as "Mean turn" leaves it
+        // out).
+        if let Some(t) = first_words.filter(|_| o.error.is_none()) {
+            j["first_words_ms"] = json!(t);
+        }
+        j["paced_ms"] = json!(o.stats.pacing_wait_ms);
         j["fails"] = json!(f);
         j["warnings"] = json!(w);
         record::write("turn_end", j.clone());
@@ -1031,6 +1044,14 @@ async fn run_scenario(
         "draft_accepted": st.draft_accepted,
         "ttft_est_ms": turns.iter().filter_map(|t| t["ttft_est_ms"].as_u64()).sum::<u64>(),
         "ttft_turns": turns.iter().filter(|t| t["ttft_est_ms"].is_u64()).count(),
+        // Streamed: each answered turn's first words (measured), and every
+        // turn's whole time (what a whole answer waited for its first words).
+        "first_words_ms": turns.iter().filter_map(|t| t["first_words_ms"].as_u64()).collect::<Vec<_>>(),
+        "turn_ms": turns
+            .iter()
+            .filter(|t| t["error"].is_null())
+            .filter_map(|t| Some(t["ms"].as_u64()?.saturating_sub(t["paced_ms"].as_u64().unwrap_or(0))))
+            .collect::<Vec<_>>(),
         "words": all.words(),
         "replies": seen.iter().map(|o| o.reply.clone()).collect::<Vec<_>>(),
         "errors": seen.iter().filter_map(|o| o.error.clone()).collect::<Vec<_>>(),
@@ -1049,6 +1070,36 @@ async fn run_scenario(
     }
     record::write("scenario_end", row.clone());
     row
+}
+
+/// When a streamed turn's first words showed (a `stream::Sink`): ms after
+/// the turn began, less the run's pacing until then (Groq's free plan's
+/// waits are the harness's, not Yap's).
+struct FirstWords {
+    start: Instant,
+    at: std::sync::Mutex<Option<u64>>,
+}
+
+impl FirstWords {
+    fn new() -> FirstWords {
+        FirstWords { start: Instant::now(), at: std::sync::Mutex::new(None) }
+    }
+
+    fn at(&self) -> Option<u64> {
+        *self.at.lock().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+impl crate::stream::Sink for FirstWords {
+    fn send(&self, ev: crate::stream::Event) {
+        if let crate::stream::Event::Text { text } = &ev {
+            let mut at = self.at.lock().unwrap_or_else(|p| p.into_inner());
+            if at.is_none() && !text.trim().is_empty() {
+                let ms = self.start.elapsed().as_millis() as u64;
+                *at = Some(ms.saturating_sub(record::turn_so_far().pacing_wait_ms));
+            }
+        }
+    }
 }
 
 /// A turn's time to its answer's first words, had the answer been streamed:
@@ -1411,9 +1462,33 @@ fn totals(rows: &[Value]) -> Vec<Value> {
                 },
                 "draft_tokens": sum("draft_tokens"),
                 "draft_accepted": sum("draft_accepted"),
+                "first_words": spread(&ran.iter().flat_map(|r| ms_list(&r["first_words_ms"])).collect::<Vec<_>>()),
+                "turn_time": spread(&ran.iter().flat_map(|r| ms_list(&r["turn_ms"])).collect::<Vec<_>>()),
             })
         })
         .collect()
+}
+
+/// A row's list of milliseconds.
+fn ms_list(v: &Value) -> Vec<u64> {
+    v.as_array().into_iter().flatten().filter_map(Value::as_u64).collect()
+}
+
+/// `{n, mean_s, median_s, p90_s}` of some milliseconds (`null` for none). Pure.
+fn spread(ms: &[u64]) -> Value {
+    if ms.is_empty() {
+        return Value::Null;
+    }
+    let mut v = ms.to_vec();
+    v.sort_unstable();
+    let s = |x: f64| (x / 10.0).round() / 100.0;
+    let at = |q: f64| v[((v.len() as f64 - 1.0) * q).round() as usize] as f64;
+    json!({
+        "n": v.len(),
+        "mean_s": s(v.iter().sum::<u64>() as f64 / v.len() as f64),
+        "median_s": s(at(0.5)),
+        "p90_s": s(at(0.9)),
+    })
 }
 
 /// Speculative decoding's acceptance, "73% of 1.2k" ("—" without drafts).
@@ -1436,11 +1511,11 @@ fn thousands(n: u64) -> String {
 
 fn table_only(totals: &[Value]) -> String {
     let mut md = String::from(
-        "| Model | Passed | Failed | Errors | Skipped | Pass rate | Model calls | Tool calls | Tokens | Mean turn (s, excl. pacing) | First words if streamed (s, est.) | Drafts accepted | Slowest call (s) | Calls > 20 s | 429s |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
+        "| Model | Passed | Failed | Errors | Skipped | Pass rate | Model calls | Tool calls | Tokens | Mean turn (s, excl. pacing) | First words, streamed (s, mean / median) | First words if streamed (s, est.) | Drafts accepted | Slowest call (s) | Calls > 20 s | 429s |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
     );
     for t in totals {
         md.push_str(&format!(
-            "| {} | {} | {} | {} | {} | {}% | {} | {} | {} | {} | {} | {} | {:.1} | {} | {} |\n",
+            "| {} | {} | {} | {} | {} | {}% | {} | {} | {} | {} | {} | {} | {} | {:.1} | {} | {} |\n",
             t["model"].as_str().unwrap_or(""),
             t["passed"],
             t["failed"],
@@ -1451,6 +1526,10 @@ fn table_only(totals: &[Value]) -> String {
             t["tool_calls"],
             thousands(t["total_tokens"].as_u64().unwrap_or(0)),
             t["mean_turn_s"],
+            t["first_words"]["mean_s"].as_f64().map_or("—".to_string(), |m| format!(
+                "{m} / {}",
+                t["first_words"]["median_s"].as_f64().unwrap_or(0.0)
+            )),
             t["mean_ttft_est_s"].as_f64().map_or("—".to_string(), |v| format!("{v}")),
             acceptance(t["draft_tokens"].as_u64().unwrap_or(0), t["draft_accepted"].as_u64().unwrap_or(0)),
             t["slowest_call_ms"].as_f64().unwrap_or(0.0) / 1000.0,

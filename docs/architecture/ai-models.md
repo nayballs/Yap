@@ -519,7 +519,8 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   by that much each turn (`eval::now`: a real chat's turns are minutes
   apart, so the time in the prompt changes). **`--bench`**
   (`eval/serving.rs`): `stream` (time to the first token, streamed vs
-  not, and streamed tool calls), `layout` (a Chat turn's prompt re-read
+  not, and streamed tool calls; scenario runs stream as Chat does and
+  measure the first words, `YAP_EVAL_STREAM=off` whole), `layout` (a Chat turn's prompt re-read
   with the time + notes in the system prompt vs the last user message),
   `loop` (a tool step after one that offered other tools), `embed` (an
   embedding model's speed and recall vs Chat's keyword search);

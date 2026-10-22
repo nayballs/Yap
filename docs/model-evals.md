@@ -190,10 +190,13 @@ run folder, `models[].bench` in `summary.json`; every request in `transcript.jso
   against Chat's keyword search (`tools::search_notes`, what its RAG uses). Query/document
   prefixes follow the model's card, by file name.
 
-Every scenario run also estimates **the time to an answer's first words had it been streamed**
-(local models: the turn's time less the answering call's, plus that call's prompt and first
-token from llama.cpp's timings), per turn (`ttft_est_ms`) and per model ("First words if
-streamed" in `summary.md`).
+Every scenario run **streams** its answers as the Chat view does (since 22 Oct 2026,
+`stream.rs`) and measures **when each answer's first words showed** (`first_words_ms` per turn,
+less the run's own pacing; "First words, streamed" in `summary.md`, mean / median);
+`YAP_EVAL_STREAM=off` answers whole, as before, where a turn's first words are the whole turn
+(`turn_ms`). It also still estimates them from llama.cpp's timings (local models: the turn's time
+less the answering call's, plus that call's prompt and first token), per turn (`ttft_est_ms`)
+and per model ("First words if streamed").
 
 ## What a run does, and what it doesn't touch
 
@@ -960,6 +963,64 @@ what was measured again (run folders `<builds>/eval-runs/20261022-04*-lap1-fix-*
   **156 / 155 ms** back to back (phase 1: 191 / 186 → 159 / 161), 264 tok/s with 91 % of drafts
   kept; outputs **96/96 the same** as phase 1's runs with and without MTP (93/96 between MTP
   off and on: the one list's punctuation, as before).
+
+## Streaming answers (22 Oct 2026)
+
+Chat's answers are streamed (`stream.rs`; chat-and-assistant.md): every model call of a turn,
+the notepad's Ask sheet, the Voice Assistant from its first sentence. A scenario run streams as
+the Chat view does and measures when the answer's **first words** showed (`first_words_ms` per
+turn, less the run's own pacing; "First words, streamed" in `summary.md`); `YAP_EVAL_STREAM=off`
+answers whole, as before. Whole, the first words are the whole turn: that's the "before".
+Qwen3.5-4B Q4_K_M on the RTX 5070 Ti, llamafile 0.10.6, MTP as Yap decides (on), `--ctx 32768
+--locale en-GB --clock-step 3 --keys-from-yap` (the live web scenarios on Exa), the whole
+suite (80 scenarios, 120 turns), whole and streamed interleaved, two runs each; run folders
+`<builds>/eval-runs/20261022-22*-stream-*`.
+
+**`--bench stream`** (Chat-shaped requests, each cold, medians of 3, ms):
+
+| Request | Prompt tok | Whole: done | Streamed: first words | Streamed: first tool call | Streamed: done |
+|---|---|---|---|---|---|
+| short answer (~64 tok) | 2,766 | 1,020 | **646** | — | 991 |
+| long answer (~257 tok) | 2,775 | 2,636 | **625** | — | 2,219 |
+| web answer (~306 tok) | 4,451 | 2,617 | **1,027** | — | 2,761 |
+| tool call first | 2,765 | 768 | — | **685** | 774 |
+
+Every streamed tool call put itself back together as valid JSON with the same tool (0 bad
+arguments). Cold requests read the whole prompt (~0.6 s for 2.8k tokens): a real Chat turn
+re-uses its cache (Local AI, phase 1), so in the suite the first words come sooner.
+
+**The suite, turn by turn** (the 109 turns both modes answered; a turn's median over its runs):
+
+| | Whole: first words = the whole turn | Streamed: first words |
+|---|---|---|
+| Every turn: median / mean | 1.12 / 1.86 s | **0.40 / 0.71 s** |
+| The 26 turns that took over 2 s whole: median / mean | 3.29 / 4.99 s | **1.41 / 1.40 s** |
+| Per run: median / mean / p90 (all turns) | 0.94 / 2.14 / 3.55 s, 0.89 / 1.29 / 2.97 s | 0.41 / 0.74 / 1.84 s, 0.41 / 0.69 / 1.41 s |
+
+(The first whole run's mean is pulled up by two runaway answers of 5,000+ tokens in
+`memory-learn-job-and-dog`, 51 s each — exactly what streaming makes bearable; the second whole
+run had none.) The old estimate ("First words if streamed", from llama.cpp's timings) said
+0.79–0.88 s a turn on average; measured, 0.69–0.74 s. A turn still takes as long to finish
+(streamed 1.13–1.17 s a turn on average, whole 1.29 s in the run without runaways).
+
+**Pass rates unchanged**: whole **156/160** (77/80, 79/80), streamed **156/160** (79/80,
+77/80); the web and honesty scenarios (27 a run) whole 52/54, streamed **53/54**. The failures
+are the model's, in both modes: `injection-note-opens-app` (once each way: "Done.", and a
+`<tool_code>` written as text), `notes-long-chat` turn 10 (once each way, the race note not
+found), `apps-not-installed`'s wording (twice whole), `memory-import` keeping a recipe (once
+streamed: memory's passes aren't streamed), and `web-grok-subscriptions` turn 3 on live pages
+(once streamed: the model wrote "Premium: $30/month (~£22)" for a page's £30; no Yap fix
+involved). No scenario failed because of streaming: no lost or garbled tool call, no answer
+cut, the checks (`checked_answer`, the price fixes) ran on every final answer as before.
+
+**Groq `openai/gpt-oss-20b`** (cloud, streamed; 18.5k tokens in all, `--only`
+knowledge-capital, voice-who-wrote, notes-find-fact, notes-edit-partial (twice),
+voice-boil-an-egg): 6/6 passed; streamed with `stream_options` (usage counted from the
+stream), a tool call (`edit_note`) reassembled and run. Its answers here were 5–14 words and
+the whole turn took 0.3–1.8 s, so the first words came at about the same time (0.33–1.75 s):
+streaming matters on a fast cloud model only for long answers, which this budget didn't
+measure. Not tried against a real Anthropic, Gemini, OpenAI or OpenRouter stream (their shapes
+are from their docs, and unit-tested).
 
 ## Memory (22 Oct 2026)
 
