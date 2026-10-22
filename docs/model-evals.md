@@ -36,6 +36,11 @@ Nathan's PC: `YAP_EVAL_TARGET_DIR=E:/yap-builds/evals`, `--out E:/yap-builds/eva
 | `--max-total-tokens <n>` | Stop starting scenarios on a model past this many tokens (a free plan's daily cap: Groq's gpt-oss-20b allows 200k a day). |
 | `--timeout <secs>` | Per model call, instead of Yap's own (Chat: 20 s for a cloud model, 2 minutes for one on this PC since 18 Oct 2026, `llm::chat_timeout`). Leave it to measure what Yap does; raise it to measure what a slow model *could* do. |
 | `--cleanup`, `--cleanup-rounds <n>` | Time the dictation cleanup instead of the scenarios (below). |
+| `--cleanup-slot <n>`, `--chat-slot <n>` | Send the cleanup (and the Chat turns between) to llama.cpp slot n (`id_slot`). |
+| `--cleanup-layout split\|system` | The same cleanup prompt laid out another way (below). |
+| `--bench stream\|layout\|loop\|embed`, `--bench-rounds <n>` | Serving benches instead of the scenarios (below; `serving.md`). |
+| `--temperature <t>` | Every request's temperature (0: greedy, to check that a server change keeps the same outputs). |
+| `--set <key>=<json>` | A field laid over every request body (repeatable; `null` removes one), e.g. `--set cache_prompt=false`. |
 | `--repeat <n>` | Run each scenario n times (models answer differently at temperature 0.5). |
 | `--no-web` | Skip the web scenarios (`needs_web` / `web`); live ones go on the internet (below). |
 | `--locale <tag\|json>` | The user's region, as Windows would give it (About you, `about_you.rs`; test mode never reads the PC's own): `en-GB` (currency and units from its region) or JSON `{"locale":"en-GB","country":"GB","currency":"GBP","symbol":"£","metric":true,"timeZone":"GMT Standard Time"}`. Default: none — no region in the prompts, no spelling line in cleanup. |
@@ -90,12 +95,48 @@ default body, the one-shots): the first call after loading, then `--cleanup-roun
 rounds back to back, then each after a Chat-shaped request (persona + tool instructions +
 the tools, ~2k tokens, untimed), then four after a long one (~5.6k tokens). Per phase:
 mean / median / p90 / max wall time, llama.cpp's prompt tokens **processed** (the rest came
-from its cache) and tokens generated, and errors; and every output, to compare the cleanup
-itself. Then the file's `spelling` dictations (words English spells two ways — organize/
-organise, color/colour… — as speech-to-text writes them), `--cleanup-rounds` times each:
-how many words come out British and how many American, under the run's `--locale` ("Use my
-region's spelling", on by default; no locale = no spelling line). `cleanup.md` in the run
-folder; the numbers in `summary.json` (`models[].cleanup`).
+from its cache) and tokens generated, its prompt and generation time, generation speed,
+speculative decoding's share of drafted tokens kept (`timings.draft_n` /
+`draft_n_accepted`), and errors; and every output, to compare the cleanup itself. Then the
+file's `spelling` dictations (words English spells two ways — organize/organise,
+color/colour… — as speech-to-text writes them), `--cleanup-rounds` times each: how many words
+come out British and how many American, under the run's `--locale` ("Use my region's
+spelling", on by default; no locale = no spelling line). `cleanup.md` in the run folder; the
+numbers in `summary.json` (`models[].cleanup`, every back-to-back output in `all_outputs`: at
+`--temperature 0` two runs — a draft model or not — should write the same text).
+`--cleanup-layout split` sends the restated instruction as a user message of its own before
+the transcript, `system` moves it to the end of the system prompt (a hybrid model like Qwen3.5
+re-uses its cache only up to a checkpoint before the last user message, so today it reads the
+~370-token instruction again for every dictation).
+
+### Serving benches (`--bench`)
+
+How the server is used rather than what the model says (`eval/serving.rs`; `serving.md` in the
+run folder, `models[].bench` in `summary.json`; every request in `transcript.jsonl` as
+`bench_request` / `bench_response`):
+
+- **`stream`**: Chat-shaped requests (Chat's persona, instructions and every tool schema; a short
+  answer, a long one, a web answer's last step with ~2.5k tokens of results, a question that
+  should start with a tool call), each cold, sent whole and streamed (SSE): the whole answer's
+  time vs the first words', the first tool-call delta's, and whether streamed tool calls
+  reassemble into valid JSON.
+- **`layout`**: a four-turn Chat twice — the time and the notes found for each question in the
+  system prompt (`chat_turn` today) and in the last user message — with the prompt tokens each
+  turn had to process again.
+- **`loop`**: a web answer's second step after a first step that offered the same tools, or
+  others (today's: the action tools dropped once web content is in, `web_search` alone when
+  the model must search): the second step's prompt tokens processed again. Also says whether
+  the server accepts a named `tool_choice`.
+- **`embed`**: an embedding model on a `--embedding` server (`--llamafile-arg=--embedding`):
+  dimensions, throughput over 64 note-sized chunks, one query's latency, and recall@1/3/5 over
+  `evals/retrieval/notes.json` (24 notes, 25 questions mostly worded differently from the note)
+  against Chat's keyword search (`tools::search_notes`, what its RAG uses). Query/document
+  prefixes follow the model's card, by file name.
+
+Every scenario run also estimates **the time to an answer's first words had it been streamed**
+(local models: the turn's time less the answering call's, plus that call's prompt and first
+token from llama.cpp's timings), per turn (`ttft_est_ms`) and per model ("First words if
+streamed" in `summary.md`).
 
 ## What a run does, and what it doesn't touch
 
@@ -604,3 +645,50 @@ more prompt tokens re-read per dictation (the 4B's recurrent layers re-read the 
 about +14 ms, inside the run-to-run noise; the other outputs changed only by the usual sampling
 noise. **Qwen2.5-1.5B ignores the line wherever it goes: 0/48** (121–145 ms, unchanged), so on a
 PC without a capable card cleanup stays American-spelt.
+
+## Serving measurements (22 Oct 2026)
+
+What the serving benches and the cleanup bench measured on the RTX 5070 Ti (Qwen3.5 Q4_K_M,
+llamafile 0.10.3 unless said; run folders `E:/yap-builds/eval-runs/2026102[12]-*-lair-*`; the
+write-up with sources and what to build is in the private repo, `docs/local-ai-research.md`):
+
+- **Chat re-reads its whole prompt every turn.** Qwen3.5 resumes a slot only from a context
+  checkpoint, and `chat_turn` puts the time and the notes RAG found in the system prompt, so a
+  turn matches the last one only for its first few hundred tokens: `--bench layout` re-read
+  3.3–3.5k tokens a turn (0.61–0.64 s; 9.6k tokens 1.5 s; 19k on a 64K context 3.1 s; the
+  processor 38–40 s) where the same text in the last user message re-read 0.7–0.9k (0.18–0.24 s
+  whatever the length; the processor 8–10 s). The installed sidecar's log shows the same
+  ("forcing full prompt re-processing … hybrid/recurrent memory").
+- **A tool step re-reads everything when the offered tools change** (`--bench loop`): after a
+  web search the action tools are dropped, and a must-search step offers `web_search` alone, so
+  the next step re-read 3,669 tokens (0.63–0.73 s; processor 39 s) instead of 1,712 (0.36 s; 18 s)
+  with the same tools offered. llamafile accepts a named `tool_choice` (and the model obeyed it 6/6).
+- **The cleanup re-reads its ~370-token instruction every dictation** (it's in the last user
+  message): 393 prompt tokens and 356 ms a dictation on the 4B; `--cleanup-layout split` 38
+  tokens, 295 ms (processor: 4B 7.5 → 2.9 s, Qwen3.5-2B 2.26 → 1.01 s); greedy outputs 11/12 the same.
+- **MTP speculative decoding** (`--spec-type draft-mtp`; Qwen3.5's GGUFs carry the head): 4B
+  generation 95 → 153 tok/s, cleanup 356 → 293 ms (189 ms with `split`), greedy outputs identical
+  (36/36); 79 % of drafts kept; **+2.15 GB on the card** (4 slots' recurrent state × 4, an MTP
+  context; `-np 2 -kvu -ub 256` brings it to +0.75 GB). A Qwen3.5-0.8B draft model was slower
+  (417 ms); n-gram drafting matched MTP on cleanup only.
+- **llamafile 0.10.6** (15 Sep 2026): 4B cleanup 238 ms (generation 171 tok/s), 3,270 MiB on the
+  card at 8K (3,815 on 0.10.3: the compute buffer 495 → 107 MiB, so `gguf::estimate` would need
+  recalibrating); with MTP 92 % of drafts kept, +0.94 GB, cleanup 217 ms (166 with `split`); the
+  suite ×2 at 32K with MTP: 4B **57/58** at 1.21 s of model time a turn (0.10.3 without MTP: 56/58,
+  1.98 s), 9B 56/58 at 1.44 s (57/58, 2.79 s). The first request after loading took 2.8 s once.
+- **Streaming** (`--bench stream`): the first words of a ~280-token answer after 0.49 s instead of
+  the whole answer's 2.86 s (a web answer 0.76 s vs 3.36 s); streamed tool calls reassembled into
+  valid JSON (12/12).
+- **Qwen3.5-9B** (suite ×2, 32K): 57/58 vs the 4B's 56/58, 2.79 s vs 1.98 s of model time a turn,
+  7.05 vs 4.64 GB on the card; cleanup 387 ms (212 ms with `split` + MTP). **Granite 4.1 8B**
+  (0.10.6): 56/58, 2.22 s, 10.3 GB at 32K, cleanup 195 ms.
+- **KV cache q8_0 at 64K**: −960 MiB on the 4B and the 9B, cleanup speed unchanged.
+- **Embeddings** (`--bench embed`, 25 paraphrased questions): EmbeddingGemma-300M and
+  Qwen3-Embedding-0.6B both recall@1 1.00 where Chat's keyword search scored 0.12 (recall@5
+  0.48); EmbeddingGemma embeds 64 note-sized chunks in 1.4 s on the card (387 MiB), 121 s on the
+  processor.
+- **On the processor**, a cleanup right after a long Chat turn is 2.3× slower (Qwen2.5-1.5B 0.82 →
+  1.90 s: generation 29 → 14 tok/s — most likely attention over the other slots' cells in the
+  unified cache).
+- One product bug the suite keeps showing on both runtimes: `web-no-sources-list` — the 4B wrote
+  `Sources:` then `- IndieGames: "…" [1]` lines, which `web::strip_sources_note` lets through.

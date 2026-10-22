@@ -36,6 +36,8 @@ mod runner;
 #[cfg(debug_assertions)]
 mod scenario;
 #[cfg(debug_assertions)]
+mod serving;
+#[cfg(debug_assertions)]
 mod spike;
 #[cfg(debug_assertions)]
 mod standin;
@@ -129,6 +131,19 @@ pub fn intercept_tool(name: &str, args: &Value) -> Option<Value> {
     }
     let _ = (name, args);
     None
+}
+
+/// A model call's request body as a run wants it: `--temperature`, `--set
+/// key=json` and a bench's own fields (llama.cpp's `id_slot`) laid over
+/// what the app built. Does nothing outside a run.
+pub fn adjust_body(body: &mut Value) {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            record::adjust_body(body);
+        }
+    }
+    let _ = body;
 }
 
 /// Every tool call of the chat's tool loop, with its result (the run logs

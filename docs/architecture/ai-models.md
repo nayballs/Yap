@@ -350,9 +350,18 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   **`--locale`** stands in for Windows' region (`YAP_E2E_LOCALE`, About you):
   without it no region reaches the prompts. A scenario with `needs_web` and
   no `web` object runs live with the run's key (until 2026-10-21 a derived
-  `Default` left them keyless: Wikipedia). The hooks in
-  `llm.rs` (`eval::Call`), `tools.rs`, `config.rs`, `notes.rs` are no-ops
-  outside a run. See [`docs/model-evals.md`](../model-evals.md).
+  `Default` left them keyless: Wikipedia). `--cleanup-layout`
+  tries the cleanup's prompt laid out another way. **`--bench`**
+  (`eval/serving.rs`): `stream` (time to the first token, streamed vs
+  not, and streamed tool calls), `layout` (a Chat turn's prompt re-read
+  with the time + notes in the system prompt vs the last user message),
+  `loop` (a tool step after one that offered other tools), `embed` (an
+  embedding model's speed and recall vs Chat's keyword search);
+  `--temperature` / `--set` lay fields over every request
+  (`eval::adjust_body`, in `llm::post_chat_request`). The hooks in
+  `llm.rs` (`eval::Call`, `eval::adjust_body`), `tools.rs`, `config.rs`,
+  `notes.rs` are no-ops outside a run. See
+  [`docs/model-evals.md`](../model-evals.md).
 
 ## Model evaluations (`npm run eval`)
 How real models do on Yap's own Chat code, with every request and response
