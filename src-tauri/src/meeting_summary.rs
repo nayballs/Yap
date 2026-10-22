@@ -1448,6 +1448,7 @@ async fn live_digests(app: &AppHandle, note_id: u64) {
             return;
         }
         let _turn = DIGEST_TURN.lock().await;
+        let _sidecar = crate::local_llm::hold(&ep.base_url);
         // Re-plan under the turn: the end-of-meeting step may have run.
         let Some(note) = crate::notes::get(note_id) else {
             return;
@@ -1492,6 +1493,8 @@ pub async fn prepare_final(
     budget: FinalBudget,
 ) -> Result<Note, String> {
     let _turn = DIGEST_TURN.lock().await;
+    // The on-device model is busy between the digests too.
+    let _sidecar = crate::local_llm::hold(&ep.base_url);
     let mut done = 0;
     loop {
         let note = crate::notes::get(note_id).ok_or("Note not found")?;
@@ -1982,6 +1985,9 @@ pub(crate) async fn chat_beside_dictation(
     if !ep.is_local() {
         return call(messages).await;
     }
+    // The on-device model is busy while the call waits out a dictation and
+    // asks again, not only while a request is under way.
+    let _sidecar = crate::local_llm::hold(&ep.base_url);
     for _ in 0..YIELD_RETRIES {
         wait_idle(|| dictation_busy(app), || true).await;
         match unless_busy(call(messages.clone()), || dictation_busy(app)).await {

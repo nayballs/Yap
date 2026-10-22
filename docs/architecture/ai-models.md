@@ -59,7 +59,11 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   "Transcript: …" — the same words as the one message it was, the one-shots
   unchanged — when the model is hybrid: the on-device model whose GGUF has
   recurrent layers (`local_llm::serving_hybrid_at`, `gguf::Shape::is_hybrid`)
-  or a Qwen3.5/3.6/Qwen3-Next by name (`hybrid_by_name`). Such a model
+  or a Qwen3.5/3.6/Qwen3-Next by name (`hybrid_by_name`) on a self-hosted
+  server (`llm::self_hosted`: loopback, a private address, `localhost`,
+  `.local`/`.lan`, a one-word host — a cloud provider's Qwen3.5, on
+  OpenRouter say, keeps the one message: its cache isn't llama.cpp's and
+  nobody measured it). Such a model
   resumes its cache only from a checkpoint before the last user message, so
   it read the ~370-token instruction again for every dictation: Qwen3.5-4B
   on an RTX 5070 Ti 447 → 55 prompt tokens read, ~237 → ~187 ms a dictation
@@ -152,35 +156,76 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   Qwen3.5 MTP fix — the 4B's cleanup ~300 → ~245 ms, generation ~116 → ~167
   tokens/s, greedy outputs identical, model-evals.md "Local AI, phase 1").
   **Which one is on disk**: the marker beside it (`llamafile.json`:
-  `{version, sha256, unproven, refused}`, written after every verified
-  download — no hashing 368 MB at a start); no marker = the 0.10.3 every
-  install had (`UNMARKED_RUNTIME_VERSION`). **The upgrade for existing
+  `{version, sha256, unproven, refused, failures, mtp_failed}`, written
+  after every verified download — no hashing 368 MB at a start — and, from
+  a fresh install's download, *before* the runtime is renamed into place
+  (`ensure_runtime` downloads to `llamafile-next.exe`, writes the marker,
+  then renames: never a runtime its marker doesn't describe)); no marker =
+  the 0.10.3 every install had (`UNMARKED_RUNTIME_VERSION`). What the PC
+  has learnt — runtimes `refused`, per-SHA `failures` (sessions it failed
+  in), `mtp_failed` — is carried from marker to marker through every swap
+  and roll-back (`Marker::learnt_from`). **The upgrade for existing
   installs** (`spawn_runtime_upgrade`, from setup; `ensure_runtime` only ever
   downloads a missing runtime): 90 s after launch, then after a "not now"
-  every 30 min doubling to 6 h — only while the on-device model is in use
-  and not on a metered connection (`updates::metered`), it downloads the
-  pinned runtime to `llamafile-next.exe` (verified; a file already there is
-  hashed once and kept if whole; a failed download is retried later, the
-  reason logged), checks it runs here (`probe_version`: `--version`, ≤ 60 s,
-  tied to Yap's job object), then waits until nothing uses the sidecar — no
-  dictation (`pipeline_busy`), no request to it under way
-  (`requests_in_flight`), no meeting recording or action plan being written
+  every 30 min doubling to 6 h — only while the on-device model is in use,
+  not on a metered connection (`updates::metered`), not in a session that
+  already went back from it, and under **the upgrade lock**
+  (`UpgradeLock`: `llm/llamafile-upgrade.lock` with the owner's pid, taken
+  create-new, a stale one taken over — a dev build and the installed app
+  share `llm/`; `ensure_runtime` and the launch tidy take it too) — it
+  checks the disk has room (`free_bytes`, `UPGRADE_ROOM` = twice the
+  runtime + 256 MB, else "not now"), downloads the pinned runtime to
+  `llamafile-next.exe` (verified; a file already there is hashed once a
+  session and kept if whole, `next_is_whole`; a failed download is retried
+  later, the reason logged), checks it runs here (`probe_version`:
+  `--version`, ≤ 60 s, tied to Yap's job object; one that won't, in
+  `REFUSE_AFTER` = 3 sessions, is refused and deleted), then waits until
+  nothing uses the sidecar — no dictation (`pipeline_busy`), no request or
+  run of requests to it under way (`requests_in_flight`, `hold` below), no
+  meeting recording or action plan being written
   (`meeting_end::summary_running`) — idle, then idle again after a settle,
   never under a context restart (it takes `RESTARTING` only once idle, so a
-  context change isn't held up), and swaps it in under the start lock:
-  stop, `swap_in` (the old runtime and marker kept as
+  context change isn't held up), and under the start lock, **looking again
+  once it has it** (`idle_with_locks`: a Chat turn that began while it
+  waited for the lock sends it back to waiting), and never while another
+  Yap's sidecar runs from this folder (`procs::sidecars_of_other_yaps`).
+  Then stop, `swap_in` (the old runtime and marker kept as
   `llamafile-previous.*`, the new marker `unproven`), start. **Never without
-  a working sidecar** (`start_locked`): the first start on an unproven
-  runtime that fails puts the previous one back (`roll_back`: the new SHA
-  noted as `refused`, never downloaded again) and starts it; if that fails
-  too, the fault isn't the runtime's and the new one goes back in
-  (`swap_in`); once the new one has started, the previous one is deleted
-  (`prove`). Both run as `llamafile.exe`, so the orphan sweep
-  (`procs::orphaned`) and the job object cover them. A test run upgrades
-  only from its stand-in (`YAP_LLM_SOURCES`) when
-  `YAP_E2E_RUNTIME_UPGRADE_MS` says when to look, and never runs either
-  (e2e `local-runtime-upgrade.spec.js`). `local_llm_status().runtime`:
-  `{version, pinned, upgrade: "downloading" | "waiting" | "", mtp}`.
+  a working sidecar** (`start_locked` → `start_with`, unit-tested with a
+  scripted start): a start Yap itself cut short — any `stop()` meanwhile
+  (a model switch, the Stop button, a restart; `STOP_GEN`) or quitting
+  (`shutdown`, from `shutdown_cleanup`: nothing starts or rolls back after
+  it) — or one missing a file is just an error, never retried and never
+  blamed on the runtime (`Failure::counts`). Any other failure (it wouldn't
+  launch, exited, or wasn't ready in 120 s) is **tried once more without
+  MTP and with 300 s to load** (`Attempt::AGAIN`: a new runtime's first run
+  under an antivirus can take minutes). Still down, on an unproven runtime,
+  once a session: the failure is counted for that SHA (`count_failure`),
+  the previous runtime goes back (`roll_back`; with the new one already
+  gone it just renames the previous one back, leaving `llamafile-next.exe`
+  alone) and starts; the new one waits as `llamafile-next.exe` for the next
+  launch, and is **refused only after 3 sessions** like this (then
+  deleted, never downloaded again). If the previous one won't start
+  either, the fault isn't the runtime's: the new one goes back in
+  (`swap_in`) and the failure is taken back (`uncount_failure`). Once the
+  new one has started, the previous one is deleted (`prove`). **At
+  launch** (`tidy_runtime`, before the autostart): a missing
+  `llamafile.exe` comes back from `llamafile-previous.exe`, else from a
+  whole `llamafile-next.exe` of the pinned runtime (`repair_runtime`); a
+  previous one kept past a proven start goes, and so does a cut-off
+  `llamafile-next.partial`. Every download (`download_for`) checks the
+  disk for its size + 64 MB first, gives up on a server or connection
+  silent for 60 s (`DOWNLOAD_STALL`), and deletes its partial file on any
+  error. All of them run as `llamafile.exe`, so the orphan sweep
+  (`procs::orphaned`) and the job object cover them. **Yap's own restart**
+  (a new context, the swap; `PlannedRestart`): meanwhile an on-device
+  cleanup gets no endpoint (`effective_endpoint_for`: the raw text; edit
+  mode says the model is restarting) — never the cloud endpoint someone on
+  the on-device model left configured. A test run upgrades only from its
+  stand-in (`YAP_LLM_SOURCES`) when `YAP_E2E_RUNTIME_UPGRADE_MS` says when
+  to look, and never runs either (e2e `local-runtime-upgrade.spec.js`).
+  `local_llm_status().runtime`: `{version, pinned, upgrade: "downloading" |
+  "waiting" | "", mtp}`.
   **The warm-up** (`warm_up`): right after the sidecar is healthy, one
   cleanup-sized request — the cleanup's own messages as Settings has them,
   a made-up dictation, ≤ 8 tokens — in the background, not through `llm.rs`
@@ -190,13 +235,25 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   (`request_starting`, called by `llm::post_chat_request` for a call to the
   sidecar's URL): counted while they run — the context restart now waits
   for a Chat answer or digest too (`sidecar_busy`), not only a dictation.
+  **Runs of requests** (`hold`, a guard for the whole run when the endpoint
+  is the sidecar): a Chat turn (`commands::chat_turn` — the Voice
+  Assistant's too — between its tool steps, web searches and page reads),
+  the Notes Ask bar, an action plan (`run_enhance`: digests to the final
+  call), `meeting_summary::prepare_final` and each live digest, and a
+  notepad helper while it waits out a dictation (`chat_beside_dictation`):
+  a context restart or a runtime swap never cuts one off between requests.
   **MTP** (`plan_for` → `Plan { runtime, mtp }`, `server_args` adds
-  `--spec-type draft-mtp`): on 0.10.6 or newer, for a model with the
-  prediction layer (Qwen3.5), all on a card with room for it at that
-  context (`mtp_fits`: `gguf::estimate` with MTP ≤ `card_room`),
-  `config.local_mtp` on (default; no switch in Settings); never on the
-  processor — a model that lands (partly) on the processor with it starts
-  again without it for the session. **The context**
+  `--spec-type draft-mtp`): on 0.10.6 or newer, on an **NVIDIA** card
+  (`mtp_allowed`: measured on CUDA only; AMD and Intel run llama.cpp's
+  Vulkan backend, unmeasured), for a model with the prediction layer
+  (Qwen3.5), all on the card with room for it at that context (`mtp_fits`:
+  `gguf::estimate` with MTP ≤ `card_room`), `config.local_mtp` on
+  (default; no switch in Settings), and not failed here: a start with MTP
+  that fails but comes up without it, or a model that lands (partly) on
+  the processor with it (started again without it), puts
+  `"<runtime>/<GGUF file>"` in the marker's `mtp_failed` (`mtp_key`) —
+  never with MTP again on that runtime; a newer runtime tries again. Never
+  on the processor. **The context**
   (2026-10-20, Nathan's ask: "show what context length it's set at, and let
   me set my own"): `config.local_context` (tokens; 0 = `DEFAULT_CONTEXT`
   8,192, today's behaviour) — one setting for the one sidecar, so Chat,

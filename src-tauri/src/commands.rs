@@ -534,6 +534,8 @@ pub(crate) async fn run_enhance(
     let hash = crate::notes::content_hash(&note.content);
     let cfg = config::load();
     let ep = crate::meeting_summary::resolve_endpoint(&cfg)?;
+    // The on-device model is busy from the digests to the final call.
+    let _sidecar = crate::local_llm::hold(&ep.base_url);
 
     // The fragment: the picked Action's prompt (OpenWhispr's Actions engine);
     // without one (older callers), the Note Formatting scope's editable
@@ -699,6 +701,7 @@ pub async fn note_ask(
     crate::ai_model::wake_on_device(&cfg).await?;
     let (base_url, api_key, model, provider, persona, disable_thinking) =
         resolve_chat_endpoint(&cfg)?;
+    let _sidecar = crate::local_llm::hold(&base_url);
 
     // Inject the note as grounding context (content + transcript + attendees).
     // A long meeting's transcript comes as its digests + the latest stretch,
@@ -965,6 +968,10 @@ pub(crate) async fn chat_turn(
     crate::ai_model::wake_on_device(&cfg).await?;
     let (base_url, api_key, model, provider, persona, disable_thinking) =
         resolve_chat_endpoint(&cfg)?;
+    // The on-device model is busy for the whole turn — between its tool
+    // steps too, while a web search or a page read runs — so a context
+    // restart or a runtime swap never cuts the answer off.
+    let _sidecar = crate::local_llm::hold(&base_url);
     // Who answers, as the chip named it, kept with the answer.
     let answered_by = crate::ai_model::describe(
         &provider,
