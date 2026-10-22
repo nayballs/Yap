@@ -352,6 +352,43 @@ pub fn e2e_dictation_mic(silent: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Test mode only (the e2e suite and the robot): the dictation mic's state
+/// (`mic.rs`) — whether a stream is open, live, Bluetooth, how many were
+/// opened and closed, how the last open went (ms from asking to its first
+/// audio), and the warm window.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_mic_status(state: tauri::State<'_, crate::AppState>) -> Result<crate::mic::Status, String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
+    Ok(guard.as_ref().ok_or("pipeline not started")?.mic_status())
+}
+
+/// Test mode only: a dictation of `seconds` of a quiet tone played in the
+/// microphone's place (the robot's `dictate_audio`: a real start and stop,
+/// the mic held and opened as for any dictation, the STT, the dictation's
+/// steps; nothing pasted in a test run) — a dictation without a microphone.
+/// `None`: nothing was transcribed.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn e2e_dictate_audio(
+    state: tauri::State<'_, crate::AppState>,
+    seconds: f32,
+) -> Result<Option<crate::pipeline::Delivered>, String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let robot = {
+        let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
+        guard.as_ref().ok_or("pipeline not started")?.robot()
+    };
+    let n = (seconds.clamp(0.2, 60.0) * 16_000.0) as usize;
+    let samples: Vec<f32> = (0..n).map(|i| 0.1 * (i as f32 * 2.0 * std::f32::consts::PI * 440.0 / 16_000.0).sin()).collect();
+    robot.dictate_audio(samples, false).await
+}
+
 /// Test mode only: hand the meeting being recorded transcript segments, as
 /// if its recorder had just transcribed them (`{ source, text, ts }`; `ts`
 /// in unix seconds, so a test can stage hours of meeting at once). They're

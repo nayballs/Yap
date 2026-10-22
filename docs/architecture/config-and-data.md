@@ -16,7 +16,10 @@
   on; both `as_said.rs`), input_device, sound +
   volume, output_device, quiet_other_apps ("Silence other apps while you
   dictate", off; reads old configs' `muteWhileRecording`) + pause_media
-  ("Pause music and videos while you dictate", off; both `mute.rs`), recording_mode,
+  ("Pause music and videos while you dictate", off; both `mute.rs`),
+  keep_mic_ready ("Keep the microphone ready", off: the mic opens when you
+  dictate, stays warm a minute and closes, at once on Bluetooth; on, it's
+  open the whole time Yap runs, as before 2026-10-22; `mic.rs`), recording_mode,
   overlay_position, dictionary (`DictionaryEntry`: from/to + `fuzzy` (default
   on) + `snippet` (default off)), append_trailing_space, smart_spacing ("Match
   the text around the cursor", default on), screen_names ("Spell names the

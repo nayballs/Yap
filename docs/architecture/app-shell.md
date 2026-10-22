@@ -96,7 +96,14 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
 ## Modules
 
 - **`lib.rs`** — app entry / Tauri `setup`. Runs `portable::init()`, registers the
-  updater/autostart/single-instance plugins, starts the input hook + pipeline,
+  updater/autostart/single-instance plugins, starts the input hook + pipeline
+  (which no longer loads the speech model or opens the mic on this thread:
+  the model loads in the background and the mic opens when a dictation needs
+  it — `pipeline.rs`, `mic.rs`, [dictation.md](./dictation.md); 2026-10-22,
+  cold start → tray 3.35 s → 0.99 s, the Yap bar 3.40 s → 1.03 s, the main
+  window 3.34 s → 0.98 s, the model ready at ~3.3 s either way: medians of
+  five launches of a release-optimised build with debug assertions on — so no
+  single-instance lock — in test mode, portable, Parakeet V3 on DirectML),
   routes `dictation-key-pressed`/`-released` → `Pipeline.on_key()` (so recording works
   before the webview is ready), drives the **overlay** (the Yap bar,
   `bar::on_pipeline_state`) and **tray** off `yap-state`,

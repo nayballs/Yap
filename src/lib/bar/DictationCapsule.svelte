@@ -6,7 +6,10 @@
   // dot carry its visibility on any background. A lock after the dot: push-
   // to-talk's double-tap made it hands-free. "No sound from <mic>…" in the
   // waveform's place: the dead-mic watchdog heard nothing but digital
-  // silence (the recording carries on).
+  // silence (the recording carries on). "Starting the mic…" in its place
+  // while a cold mic opens (mic.rs: the start chime waits for its first
+  // real audio too), and "Loading the speech model…" instead of
+  // "Transcribing…" while the model still loads after Yap started.
   //
   // While it records: ✕ (cancel) on the left and ✓ (stop and paste, as the
   // hotkey's second press) on the right, as Settings → Yap bar says
@@ -107,6 +110,8 @@
       {/if}
       {#if dictation.micSilent}
         <span class="txt warn" role="alert" title={dictation.micSilentFull}>{dictation.micSilent}</span>
+      {:else if dictation.micWaiting}
+        <span class="txt soft" role="status">Starting the mic…</span>
       {:else if dictation.words.length}
         <div class="partial" bind:this={clipEl}>
           <span class="ptext" bind:this={textEl} style="transform: translateX({shift}px)">
@@ -162,6 +167,8 @@
     {/if}
     {#if dictation.micSilent && !processing}
       <span class="txt warn" role="alert" title={dictation.micSilentFull}>{dictation.micSilent}</span>
+    {:else if dictation.micWaiting && !processing}
+      <span class="txt soft" role="status">Starting the mic…</span>
     {:else if dictation.words.length}
       <div class="partial" bind:this={clipEl}>
         <span class="ptext" bind:this={textEl} style="transform: translateX({shift}px)">
@@ -169,7 +176,13 @@
         </span>
       </div>
     {:else if processing}
-      <span class="txt">{dictation.state === 'processing-slow' ? 'Transcribing (CPU — slow)…' : 'Transcribing…'}</span>
+      <span class="txt" role="status"
+        >{dictation.modelLoading
+          ? 'Loading the speech model…'
+          : dictation.state === 'processing-slow'
+            ? 'Transcribing (CPU — slow)…'
+            : 'Transcribing…'}</span
+      >
     {:else}
       <div class="wave">
         {#each dictation.history as v}
@@ -487,6 +500,12 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* "Starting the mic…": quieter than a warning, in the waveform's place
+     until the mic delivers. */
+  .txt.soft {
+    color: var(--bar-text-soft);
+    font-weight: 550;
   }
   /* The dead-mic warning: one line, cut with "…" if a device's name is
      long (the whole message is its tooltip and the main window's toast). */

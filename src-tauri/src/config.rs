@@ -278,6 +278,15 @@ pub struct YapConfig {
     /// as Wispr Flow's.
     #[serde(default)]
     pub pause_media: bool,
+    /// "Keep the microphone ready" (Settings → Dictation, `mic.rs`): the
+    /// microphone stays open the whole time Yap runs, as it always did until
+    /// 2026-10-22 — a dictation starts instantly and catches a first word
+    /// said with the key, but Windows shows the mic in use and a Bluetooth
+    /// headset plays everything in call quality. Off (the default), the mic
+    /// opens when a dictation starts, stays warm a minute after (never on
+    /// Bluetooth) and closes.
+    #[serde(default)]
+    pub keep_mic_ready: bool,
     /// Append a single space after each injected transcription. With
     /// `smart_spacing` on it only applies where Yap couldn't read the field.
     #[serde(default)]
@@ -937,6 +946,7 @@ impl Default for YapConfig {
             recording_mode: default_recording_mode(),
             quiet_other_apps: false,
             pause_media: false,
+            keep_mic_ready: false,
             append_trailing_space: false,
             smart_spacing: true,
             screen_names: true,

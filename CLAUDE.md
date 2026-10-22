@@ -98,11 +98,12 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 ## Module index (`src-tauri/src/`)
 
 **Dictation** — [dictation.md](./docs/architecture/dictation.md)
-- `pipeline.rs` — the heart: mic stream, pre-roll, modes, `run_stt` → `deliver`, Undo, chat/assistant routing.
+- `pipeline.rs` — the heart: buffer and pre-roll, modes, the start chime on the mic's first audio, the model loaded off the startup thread, `run_stt` → `deliver`, Undo, chat/assistant routing.
 - `gesture.rs` — push-to-talk's pure state machine: hold, double-tap hands-free, lone tap.
 - `coaching.rs` — push-to-talk coaching hints (≤ 3 each; counts in `hints.json`).
 - `input_hook.rs` — low-level keyboard/mouse hooks: six bindings (Read aloud's the fifth, Use what I said's the sixth), combo rules, `clashes`, menu-mask key.
 - `partials.rs` / `agent_detect.rs` — live partials' sliding window; Commands by name (see `pipeline.rs`).
+- `mic.rs` — the dictation mic, opened on demand: held by a dictation / the mic check / "Keep the microphone ready", warm a minute after, closed at once on Bluetooth (HFP); its own thread.
 - `mic_watch.rs` — dead-mic watchdog: reopen the stream, then "No sound from <mic>".
 - `mic_privacy.rs` — reads Windows' microphone privacy switches; names the one blocking Yap.
 - `stt.rs` — `SttEngine` over transcribe-rs, the 14-model registry, download + verify, word times; each engine loads on a `Device` (graphics card or processor).

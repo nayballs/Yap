@@ -58,6 +58,7 @@ mod log_privacy;
 mod local_llm;
 mod mcp;
 mod mcp_clients;
+mod mic;
 mod mic_privacy;
 mod mic_watch;
 mod model_catalog;
@@ -670,6 +671,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             e2e::e2e_dictation_mic,
             #[cfg(debug_assertions)]
+            e2e::e2e_mic_status,
+            #[cfg(debug_assertions)]
+            e2e::e2e_dictate_audio,
+            #[cfg(debug_assertions)]
             mic_privacy::e2e_mic_privacy,
             #[cfg(debug_assertions)]
             elevated::e2e_paste_elevated,
@@ -1037,6 +1042,14 @@ pub fn run() {
                             let _ = w.hide();
                             if !main {
                                 notice::on_onboarding(false);
+                                // Its mic check's level meter holds the mic
+                                // open (mic.rs); the page can't tell it's
+                                // hidden (WebView2 says it's still visible).
+                                if let Ok(guard) = w.app_handle().state::<AppState>().pipeline.lock() {
+                                    if let Some(p) = guard.as_ref() {
+                                        p.set_mic_test(false);
+                                    }
+                                }
                             }
                         }
                         // The main window came up (tray, notification, second

@@ -1,16 +1,16 @@
 //! Yap's dictation pipeline.
 //!
 //! Simpler than Voice Mirror's (no TTS, no AI routing, no modes, no VAD):
-//! one mic stream captures audio into a buffer while *recording* is on;
-//! toggling off runs STT, applies the dictionary, and injects the text
-//! into whatever window is focused. A short chime marks start/stop.
+//! the mic (`mic.rs`, opened on demand) captures audio into a buffer while
+//! *recording* is on; toggling off runs STT, applies the dictionary, and
+//! injects the text into whatever window is focused. A short chime marks
+//! start/stop.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock, Weak};
+use std::sync::{Arc, Condvar, Mutex, RwLock, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use tauri::{AppHandle, Emitter};
 
 use crate::app_kind::AppKind;
@@ -267,17 +267,44 @@ pub const DICTATION_ERROR: &str = "yap-dictation-error";
 /// the callback stops appending (and logs once) rather than risk an OOM.
 const MAX_RECORDING_SAMPLES: usize = 15 * 60 * TARGET_SAMPLE_RATE as usize;
 
-/// cpal's `Stream` is `!Send` on some platforms; we only hold it alive.
-struct SendStream(#[allow(dead_code)] cpal::Stream);
-// SAFETY: the stream is only kept alive and dropped; cpal manages its own
-// internal threading and we never touch it from another thread.
-unsafe impl Send for SendStream {}
+/// A recording that started while the mic was still opening waits this long
+/// at most for its first real audio (`mic::Sink::live`) before the start
+/// chime plays anyway (a stream that never delivers: the dead-mic watchdog
+/// takes it from there).
+const LIVE_FALLBACK_MS: u64 = 3_000;
+/// The dead-mic watchdog counts from when the stream is running; a stream
+/// still being opened after this long is watched anyway.
+const OPEN_PATIENCE_MS: u64 = 6_000;
 
-/// Where the running mic stream lives (`None`: no microphone). The
-/// `Pipeline` owns it; `Shared` keeps a weak handle so the dead-mic watchdog
-/// can reopen it (a strong one would be a cycle through the stream's
-/// callback, which holds `Shared`).
-type StreamSlot = Mutex<Option<SendStream>>;
+/// The speech model loading in the background at startup (`Pipeline::start`,
+/// off the startup thread so the tray, the bar and the window come first).
+/// A dictation, a meeting chunk or a Run again that needs the engine
+/// meanwhile waits for it ([`wait_for_model`]) instead of loading a second
+/// copy.
+static MODEL_LOADING: Mutex<bool> = Mutex::new(false);
+static MODEL_LOADED: Condvar = Condvar::new();
+
+/// The startup load is still running.
+pub(crate) fn model_loading() -> bool {
+    *MODEL_LOADING.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn set_model_loading(on: bool) {
+    *MODEL_LOADING.lock().unwrap_or_else(|p| p.into_inner()) = on;
+    if !on {
+        MODEL_LOADED.notify_all();
+    }
+}
+
+/// Wait (blocking) up to `max` for the startup load to finish; `true` when
+/// it has (or none was running).
+pub(crate) fn wait_for_model(max: Duration) -> bool {
+    let guard = MODEL_LOADING.lock().unwrap_or_else(|p| p.into_inner());
+    let (guard, _) = MODEL_LOADED
+        .wait_timeout_while(guard, max, |loading| *loading)
+        .unwrap_or_else(|p| p.into_inner());
+    !*guard
+}
 
 /// Test mode only (`e2e::e2e_dictation_mic`): the mic's audio arrives as
 /// digital silence, as a muted mic's does — the dead-mic watchdog's case,
@@ -409,6 +436,16 @@ impl AmpMeter {
     }
 }
 
+/// A recording's start chime (and the other apps going quiet after it),
+/// held until the mic delivers real audio: people speak at the chime, so
+/// it never plays before the mic is on (`mic.rs`).
+struct PendingStart {
+    session: u64,
+    /// `mute::begin`'s token and plan.
+    token: u64,
+    plan: crate::mute::Plan,
+}
+
 /// The push-to-talk gesture (`gesture.rs`) and which hotkey its recording
 /// belongs to.
 #[derive(Default)]
@@ -426,9 +463,30 @@ struct Shared {
     recording: AtomicBool,
     buffer: Mutex<Vec<f32>>,
     /// Rolling ring of the most recent ~300 ms of mic audio, maintained while
-    /// *idle* so `start_recording` can seed the buffer with the moment before the
-    /// keypress (anti first-word-clipping). Capped at `PREROLL_SAMPLES`.
+    /// *idle* — only while the mic is warm (`mic.rs`) — so `start_recording`
+    /// can seed the buffer with the moment before the keypress (anti
+    /// first-word-clipping). Capped at `PREROLL_SAMPLES`.
     preroll: Mutex<VecDeque<f32>>,
+    /// A recording is starting (`start_recording`, before `recording`): the
+    /// mic's audio goes straight into the buffer, all of it — with a cold
+    /// mic it's the first audio the new stream delivers.
+    gather: AtomicBool,
+    /// The dictation's microphone, opened on demand (`mic.rs`).
+    mic: crate::mic::Mic,
+    /// The recording's hold on the mic (`Mic::hold`), released after its
+    /// stop chime.
+    mic_lease: AtomicU64,
+    /// The mic couldn't be opened for this lease (a recording that hadn't
+    /// started yet ends at once when it does).
+    mic_failed_lease: AtomicU64,
+    /// The waveform's level meter for the mic's callback.
+    amp: Mutex<AmpMeter>,
+    /// The recording waiting for its first real audio to play the start
+    /// chime (its session; 0: none), and its chime.
+    pending_session: AtomicU64,
+    pending_start: Mutex<Option<PendingStart>>,
+    /// Itself, for the mic's news (`mic::Sink`, called with `&Shared`).
+    me: Weak<Shared>,
     engine: EngineSlot,
     app: AppHandle,
     config: RwLock<YapConfig>,
@@ -468,10 +526,8 @@ struct Shared {
     /// Mic-test mode (onboarding "speak and see the waves react"): when set, the
     /// audio callback emits `yap-amp` while *idle* too, so a level meter works
     /// without recording. Normally amp is only emitted during a recording.
+    /// It holds the mic open meanwhile (`Mic::test`).
     mic_test: AtomicBool,
-    /// A mic stream is running. False when Yap found no microphone (see
-    /// `Pipeline::start`); `start_recording` refuses until there is one.
-    has_mic: AtomicBool,
     /// Push-to-talk's hold / tap / double-tap state. Locked while acting on
     /// a step, so key events and the tap timer take turns.
     gesture: Mutex<GestureSlot>,
@@ -483,8 +539,6 @@ struct Shared {
     /// Bumped by every `start_recording`: a recording's watcher stops when
     /// a newer one starts.
     rec_session: AtomicU64,
-    /// The pipeline's mic stream, to reopen (see `StreamSlot`).
-    stream_slot: Weak<StreamSlot>,
     /// The name of the device the mic stream captures from.
     mic_name: Mutex<String>,
     /// The last cancelled recording, for Undo (dropped after [`UNDO_MS`],
@@ -548,15 +602,127 @@ impl Shared {
             .unwrap_or_default()
     }
 
-    /// The stop chime (if it's on), then the other apps' sound back
-    /// (`mute.rs`), in that order; `token` from `mute::end`.
-    fn stop_chime_then_restore(&self, token: u64) {
-        let restore: crate::sound::Played = Box::new(move || crate::mute::after_stop_chime(token));
+    /// The stop chime (if it's on), then the recording lets go of the mic
+    /// (`mic.rs`: it stays warm a while, or a Bluetooth headset's closes now,
+    /// once the chime has played on it) and the other apps' sound comes
+    /// back (`mute.rs`), in that order; `token` from `mute::end`.
+    fn stop_chime_then_restore(self: &Arc<Self>, token: u64) {
+        let shared = Arc::clone(self);
+        let lease = self.mic_lease.load(Ordering::SeqCst);
+        let restore: crate::sound::Played = Box::new(move || {
+            let closed_bluetooth = shared.mic.release(lease);
+            crate::mute::after_stop_chime_mic(token, closed_bluetooth);
+        });
         if self.sound_enabled() {
             crate::sound::play_stop(self.audio_feedback_volume(), self.output_device().as_deref(), Some(restore));
         } else {
             std::thread::spawn(restore);
         }
+    }
+
+    /// The recording is over without a stop chime (cancelled, no mic): the
+    /// mic and the other apps' sound go back at once.
+    fn release_now(self: &Arc<Self>, token: u64) {
+        let shared = Arc::clone(self);
+        let lease = self.mic_lease.load(Ordering::SeqCst);
+        std::thread::spawn(move || {
+            let closed_bluetooth = shared.mic.release(lease);
+            crate::mute::after_stop_chime_mic(token, closed_bluetooth);
+        });
+    }
+
+    /// The start chime of the recording waiting for its first real audio
+    /// (`pending_start`), once — from the mic's first real audio
+    /// (`mic::Sink::live`), at once for a warm mic, or after
+    /// [`LIVE_FALLBACK_MS`]. Then the other apps go quiet (`mute.rs`) and
+    /// the bar's capsule shows the waveform ("speak now",
+    /// `yap-mic-ready`).
+    fn fire_pending_start(&self) {
+        let session = self.pending_session.swap(0, Ordering::SeqCst);
+        if session == 0 {
+            return;
+        }
+        let Some(start) = self.pending_start.lock().ok().and_then(|mut p| p.take()) else {
+            return;
+        };
+        if start.session != session
+            || !self.recording.load(Ordering::SeqCst)
+            || self.rec_session.load(Ordering::SeqCst) != session
+        {
+            return; // that recording is over
+        }
+        let token = start.token;
+        let quiet: Option<crate::sound::Played> =
+            start.plan.any().then(|| Box::new(move || crate::mute::after_start_chime(token)) as crate::sound::Played);
+        if self.sound_enabled() {
+            crate::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref(), quiet);
+        } else if let Some(quiet) = quiet {
+            std::thread::spawn(quiet);
+        }
+        let _ = self.app.emit("yap-mic-ready", true);
+    }
+
+    /// No start chime after all (the recording ended before its mic was on).
+    fn drop_pending_start(&self) {
+        self.pending_session.store(0, Ordering::SeqCst);
+        if let Ok(mut p) = self.pending_start.lock() {
+            *p = None;
+        }
+    }
+
+    /// The mic couldn't be opened for `lease`: a recording holding it that
+    /// has heard nothing ends now, saying why — Windows' privacy switches,
+    /// or no microphone at all. (The robot's WAV stands in for a mic.)
+    fn mic_failed(self: &Arc<Self>, lease: u64) {
+        // A recording the mic already gave audio (a reopen by the dead-mic
+        // watchdog that failed: unplugged mid-dictation) carries on with what
+        // it has; the watchdog says what's wrong.
+        if test_feed_on() {
+            return;
+        }
+        self.mic_failed_lease.store(lease, Ordering::SeqCst);
+        if self.mic_lease.load(Ordering::SeqCst) == lease
+            && self.recording.load(Ordering::SeqCst)
+            && self.mic_tally.read().0 == 0
+        {
+            self.end_without_mic();
+        }
+    }
+
+    /// End the recording that has no microphone (see [`Self::mic_failed`]).
+    fn end_without_mic(self: &Arc<Self>) {
+        if !self.recording.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        dictation_ended();
+        self.drop_pending_start();
+        let token = crate::mute::end();
+        self.release_now(token);
+        if let Ok(mut buf) = self.buffer.lock() {
+            buf.clear();
+        }
+        if let Ok(mut g) = self.selection.lock() {
+            *g = None;
+        }
+        self.edit_mode.store(false, Ordering::SeqCst);
+        crate::screen_terms::forget();
+        if self.assistant.swap(false, Ordering::SeqCst) {
+            crate::assistant::nothing(&self.app);
+        }
+        // Windows' privacy switches, if they're why: that's what to fix
+        // (unless the recording's start already said so).
+        if let Some(blocked) = crate::mic_privacy::blocked() {
+            tracing::warn!(?blocked, "Can't record — Windows' privacy settings block the microphone");
+            if !self.mic_dead.swap(true, Ordering::SeqCst) {
+                self.say_mic_blocked(blocked);
+            }
+        } else {
+            tracing::warn!("Can't record — no microphone");
+            let _ = self
+                .app
+                .emit(DICTATION_ERROR, "No microphone found — connect one and try again");
+        }
+        let _ = self.app.emit("yap-state", "error");
     }
 
     fn output_device(&self) -> Option<String> {
@@ -580,12 +746,13 @@ impl Shared {
             .unwrap_or_default()
     }
 
-    /// Mic audio (16 kHz mono) as it arrives: while recording, into the
-    /// buffer (and the dead-mic watchdog's tally); while idle, into the
-    /// short pre-roll ring the next recording starts with. The waveform's
-    /// level goes out while recording, or idle during a mic test (onboarding).
+    /// Mic audio (16 kHz mono) as it arrives: while recording — or while one
+    /// is starting (`gather`) — into the buffer (and the dead-mic watchdog's
+    /// tally); while idle, into the short pre-roll ring the next recording
+    /// starts with. The waveform's level goes out while recording, or idle
+    /// during a mic test (onboarding).
     fn take_audio(&self, samples: &[f32], amp: &mut AmpMeter) {
-        if !self.recording.load(Ordering::Relaxed) {
+        if !self.recording.load(Ordering::Relaxed) && !self.gather.load(Ordering::Relaxed) {
             if let Ok(mut pr) = self.preroll.lock() {
                 pr.extend(samples.iter().copied());
                 while pr.len() > PREROLL_SAMPLES {
@@ -769,28 +936,17 @@ impl Shared {
             tracing::info!("Ignoring start — a transcription is still processing");
             return;
         }
-        // Nothing to record from (`Pipeline::ensure_mic` has just retried):
-        // say so instead of "recording" silence. (The robot's WAV stands in
-        // for a mic.)
-        if !self.has_mic.load(Ordering::SeqCst) && !test_feed_on() {
-            // Windows' privacy switches, if they're why: that's what to fix.
-            if let Some(blocked) = crate::mic_privacy::blocked() {
-                tracing::warn!(?blocked, "Can't record — Windows' privacy settings block the microphone");
-                self.say_mic_blocked(blocked);
-                let _ = self.app.emit("yap-state", "error");
-                return;
-            }
-            tracing::warn!("Can't record — no microphone");
-            let _ = self
-                .app
-                .emit(DICTATION_ERROR, "No microphone found — connect one and try again");
-            let _ = self.app.emit("yap-state", "error");
-            return;
-        }
+        // The mic: still warm from a moment ago (the stream delivers, with
+        // the pre-roll), or opened now in the background — the recording
+        // doesn't wait for it, it keeps everything the new stream delivers.
+        // A mic that can't be opened ends the recording (`mic_failed`).
+        let warm = self.mic.is_live();
+        let lease = self.mic.hold();
+        self.mic_lease.store(lease, Ordering::SeqCst);
         // Seed the buffer with the pre-roll ring (the ~300 ms before the keypress)
         // so a word already in flight isn't clipped — unless Yap was speaking
-        // in it.
-        let pre: Vec<f32> = if heard_yap {
+        // in it, or the mic wasn't running (the ring is old audio then).
+        let pre: Vec<f32> = if heard_yap || !warm {
             Vec::new()
         } else {
             self.preroll
@@ -798,43 +954,71 @@ impl Shared {
                 .map(|p| p.iter().copied().collect())
                 .unwrap_or_default()
         };
+        if !warm {
+            if let Ok(mut p) = self.preroll.lock() {
+                p.clear();
+            }
+        }
         if let Ok(mut buf) = self.buffer.lock() {
             buf.clear();
             buf.extend_from_slice(&pre);
+            // The dead-mic watchdog's tally starts afresh with each
+            // recording; from here on the mic's audio is this recording's.
+            self.mic_tally.reset();
+            self.gather.store(true, Ordering::SeqCst);
         }
         self.capture_target(edit);
 
-        // The dead-mic watchdog's tally starts afresh with each recording.
-        self.mic_tally.reset();
         self.mic_dead.store(false, Ordering::SeqCst);
         let session = self.rec_session.fetch_add(1, Ordering::SeqCst) + 1;
 
         // A meeting recording keeps this dictation out of its "You" side.
         dictation_began();
         self.recording.store(true, Ordering::SeqCst);
+        self.gather.store(false, Ordering::SeqCst);
         self.touch_activity();
         let _ = self.app.emit("yap-state", "recording");
+        // The mic couldn't be opened before the recording even started.
+        if self.mic_failed_lease.load(Ordering::SeqCst) == lease && self.mic_tally.read().0 == 0 {
+            self.end_without_mic();
+            return;
+        }
         // The start chime first (Yap's own sound is never silenced), then
-        // the other apps go quiet / pause once it has played (`mute.rs`).
+        // the other apps go quiet / pause once it has played (`mute.rs`) —
+        // once the mic is on: at once when it's warm, else at its first
+        // real audio (`fire_pending_start`), so the chime says "speak now"
+        // only when Yap hears you.
         let plan = self.other_apps();
         let token = crate::mute::begin(plan);
-        let quiet: Option<crate::sound::Played> =
-            plan.any().then(|| Box::new(move || crate::mute::after_start_chime(token)) as crate::sound::Played);
-        if self.sound_enabled() {
-            crate::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref(), quiet);
-        } else if let Some(quiet) = quiet {
-            std::thread::spawn(quiet);
+        if let Ok(mut p) = self.pending_start.lock() {
+            *p = Some(PendingStart { session, token, plan });
+        }
+        self.pending_session.store(session, Ordering::SeqCst);
+        if self.mic.is_live() {
+            self.fire_pending_start();
+        } else {
+            let _ = self.app.emit("yap-mic-ready", false);
+            let shared = Arc::clone(self);
+            let _ = std::thread::Builder::new().name("dictation-mic-ready".into()).spawn(move || {
+                std::thread::sleep(Duration::from_millis(LIVE_FALLBACK_MS));
+                if shared.pending_session.load(Ordering::SeqCst) == session {
+                    tracing::info!("Microphone: no real audio yet, starting anyway");
+                    shared.fire_pending_start();
+                }
+            });
         }
         // Windows' privacy switches keep desktop apps off the mic: this
         // recording will hear digital silence. Said now, not after the
         // watchdog's five seconds; the recording carries on (switching it on
         // mid-dictation works), and if it ends without a sound it isn't
         // transcribed, as for a dead mic.
+        // (Said once: a mic that then fails to open says no more.)
         if !test_feed_on() {
             if let Some(blocked) = crate::mic_privacy::blocked() {
                 tracing::warn!(?blocked, "Recording, but Windows' privacy settings block the microphone");
-                self.mic_dead.store(true, Ordering::SeqCst);
-                self.say_mic_blocked(blocked);
+                if self.recording.load(Ordering::SeqCst) && !self.mic_dead.swap(true, Ordering::SeqCst) {
+                    self.say_mic_blocked(blocked);
+                }
             }
         }
         // Live partials: spawn a worker that re-transcribes a bounded sliding
@@ -934,7 +1118,8 @@ impl Shared {
         let spawned = std::thread::Builder::new()
             .name("dictation-mic-watch".into())
             .spawn(move || {
-                let started = Instant::now();
+                let asked = Instant::now();
+                let mut started = Instant::now();
                 let mut watch = DeadMicWatch::default();
                 loop {
                     std::thread::sleep(Duration::from_millis(crate::mic_watch::POLL_MS));
@@ -942,6 +1127,13 @@ impl Shared {
                         && shared.rec_session.load(Ordering::SeqCst) == session;
                     if !live {
                         break;
+                    }
+                    // The mic opens on demand (`mic.rs`), a Bluetooth
+                    // headset taking a second or two: its watch counts from
+                    // when the stream runs (a robot's WAV needs none).
+                    if !shared.mic.is_open() && !test_feed_on() && asked.elapsed() < Duration::from_millis(OPEN_PATIENCE_MS) {
+                        started = Instant::now();
+                        continue;
                     }
                     let (samples, heard) = shared.mic_tally.read();
                     match watch.poll(started.elapsed().as_millis() as u64, samples, heard) {
@@ -1011,10 +1203,7 @@ impl Shared {
     /// recording carries on into the new stream). The dead stream stops
     /// first: two running at once would interleave their audio.
     fn reopen_mic(self: &Arc<Self>) -> Result<(), String> {
-        let slot = self.stream_slot.upgrade().ok_or("the pipeline is gone")?;
-        let device = self.config.read().ok().and_then(|c| c.input_device.clone());
-        let mut slot = slot.lock().unwrap_or_else(|p| p.into_inner());
-        open_stream(self, &mut slot, device.as_deref(), false)
+        self.mic.reopen()
     }
 
     /// Snapshot the language/translate settings for a transcription.
@@ -1079,9 +1268,11 @@ impl Shared {
             return;
         }
         dictation_ended();
-        // No stop chime for a cancel: the other apps' sound comes back now.
+        self.drop_pending_start();
+        // No stop chime for a cancel: the mic and the other apps' sound go
+        // back now.
         let token = crate::mute::end();
-        std::thread::spawn(move || crate::mute::after_stop_chime(token));
+        self.release_now(token);
         let audio = self.buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
         // The edit-mode selection/state goes with it (into the kept
         // recording, or nowhere), so it can't leak into a later session.
@@ -1191,6 +1382,8 @@ impl Shared {
     fn stop_and_transcribe(self: &Arc<Self>) {
         self.recording.store(false, Ordering::SeqCst);
         dictation_ended();
+        // Stopped before the mic was on: no start chime after the stop's.
+        self.drop_pending_start();
         // The other apps' sound comes back once the stop chime has played.
         let quiet_token = crate::mute::end();
         // The dead-mic watchdog reported this recording and it never heard a
@@ -1458,7 +1651,11 @@ impl Shared {
         };
         let duration_secs = samples.len() as f32 / 16_000.0;
 
-        // 2. Warm engine, or lazy-reload (same pattern as run_stt).
+        // 2. Warm engine (the startup load waited for), or lazy-reload
+        // (same pattern as run_stt).
+        if model_loading() {
+            let _ = tokio::task::spawn_blocking(|| wait_for_model(Duration::from_secs(180))).await;
+        }
         let engine = self.engine.lock().ok().and_then(|mut g| g.take());
         let mut engine = match engine {
             Some(e) => e,
@@ -2004,7 +2201,17 @@ impl Shared {
         }
 
         // Take the engine out so the mutex isn't held across the await.
-        let engine = self.engine.lock().ok().and_then(|mut g| g.take());
+        let mut engine = self.engine.lock().ok().and_then(|mut g| g.take());
+        // Started before the model finished loading (`Pipeline::start` loads
+        // it in the background): wait for it — the bar says "Loading the
+        // speech model…" — instead of failing or loading a second copy.
+        if engine.is_none() && model_loading() {
+            tracing::info!("Dictation: waiting for the speech model to finish loading");
+            let _ = self.app.emit("yap-model-loading", true);
+            let _ = tokio::task::spawn_blocking(|| wait_for_model(Duration::from_secs(180))).await;
+            let _ = self.app.emit("yap-model-loading", false);
+            engine = self.engine.lock().ok().and_then(|mut g| g.take());
+        }
         let engine = match engine {
             Some(e) => e,
             None => {
@@ -2218,6 +2425,10 @@ impl Shared {
             return Err(format!("{} isn't installed", stt::model_name(&model_id)));
         }
         let warm = model_id == cfg.model_size;
+        if warm && model_loading() {
+            // The startup load is this model: wait for it, not a second copy.
+            let _ = tokio::task::spawn_blocking(|| wait_for_model(Duration::from_secs(180))).await;
+        }
         let engine = if warm { self.engine.lock().ok().and_then(|mut g| g.take()) } else { None };
         let engine = match engine {
             Some(e) => e,
@@ -2265,46 +2476,90 @@ impl Shared {
     }
 }
 
-/// The running pipeline. Owns the mic stream (kept alive) + shared state.
+/// The mic's audio and news (`mic.rs`) into the pipeline.
+impl crate::mic::Sink for Shared {
+    fn audio(&self, samples: &[f32]) {
+        // The e2e suite's "muted mic", and the robot's WAV playing in the
+        // mic's place (debug builds only).
+        #[cfg(debug_assertions)]
+        let zeros;
+        #[cfg(debug_assertions)]
+        let samples = if TEST_SILENT_MIC.load(Ordering::Relaxed) {
+            zeros = vec![0.0; samples.len()];
+            &zeros[..]
+        } else {
+            samples
+        };
+        if test_feed_on() {
+            return;
+        }
+        if let Ok(mut amp) = self.amp.lock() {
+            self.take_audio(samples, &mut amp);
+        }
+    }
+
+    fn live(&self) {
+        self.fire_pending_start();
+    }
+
+    fn opened(&self, device: &str) {
+        if let Ok(mut name) = self.mic_name.lock() {
+            *name = device.to_string();
+        }
+        // The pre-roll is this stream's from now on, never a minute-old
+        // stream's.
+        if !self.recording.load(Ordering::SeqCst) && !self.gather.load(Ordering::SeqCst) {
+            if let Ok(mut p) = self.preroll.lock() {
+                p.clear();
+            }
+        }
+    }
+
+    fn failed(&self, _error: &str, dictation: Option<u64>) {
+        // (The mic's thread: `Weak` gave it `&Shared`; the recording's end
+        // needs the `Arc`.)
+        if let Some(lease) = dictation {
+            if let Some(shared) = self.me.upgrade() {
+                shared.mic_failed(lease);
+            }
+        }
+    }
+}
+
+/// The running pipeline: the shared state, with the mic (`mic.rs`) and the
+/// warm speech engine in it.
 pub struct Pipeline {
     shared: Arc<Shared>,
-    /// `None` while there's no microphone to capture from. Behind a lock so a
-    /// hotkey press can retry (`ensure_mic`), and shared (weakly) with the
-    /// dead-mic watchdog, which may reopen it.
-    stream: Arc<StreamSlot>,
 }
 
 impl Pipeline {
-    /// Start audio capture and (best-effort) load the STT engine.
+    /// Start the pipeline; the speech model loads in the background
+    /// (`model_loading`), the mic opens when something needs it (`mic.rs`;
+    /// at once with "Keep the microphone ready").
     ///
     /// A missing model is tolerated: the pipeline still runs (so the hotkey
     /// works) and emits `yap-state: needs-model` until a model is downloaded.
     /// So is a missing microphone (none plugged in, a Bluetooth headset that
     /// connects after login, a CI runner): models, Upload and Settings work
-    /// without one, and the next hotkey press — or picking a mic in Settings —
-    /// tries again.
+    /// without one, and every recording tries to open it again.
     pub fn start(app: AppHandle, cfg: YapConfig) -> Self {
         let data_dir = config::data_dir();
-        let engine = match stt::create_stt_engine(&data_dir, &cfg.model_size, cfg.use_gpu) {
-            Ok(e) => Some(e),
-            Err(SttError::ModelNotFound(_)) => {
-                tracing::warn!("STT model not found — Yap needs a model download");
-                None
-            }
-            Err(e) => {
-                tracing::error!("STT engine init failed: {}", e);
-                None
-            }
-        };
+        // (The stub build has every model: it never needs one.)
+        let has_model = !cfg!(feature = "engines") || stt::is_model_installed(&data_dir, &cfg.model_size);
 
-        let has_engine = engine.is_some();
-
-        let stream_slot: Arc<StreamSlot> = Arc::new(Mutex::new(None));
-        let shared = Arc::new(Shared {
+        let shared = Arc::new_cyclic(|me: &Weak<Shared>| Shared {
             recording: AtomicBool::new(false),
             buffer: Mutex::new(Vec::new()),
             preroll: Mutex::new(VecDeque::with_capacity(PREROLL_SAMPLES + 1)),
-            engine: std::sync::Arc::new(Mutex::new(engine)),
+            gather: AtomicBool::new(false),
+            mic: crate::mic::Mic::start(me.clone() as Weak<dyn crate::mic::Sink>),
+            mic_lease: AtomicU64::new(0),
+            mic_failed_lease: AtomicU64::new(0),
+            amp: Mutex::new(AmpMeter::default()),
+            pending_session: AtomicU64::new(0),
+            pending_start: Mutex::new(None),
+            me: me.clone(),
+            engine: std::sync::Arc::new(Mutex::new(None)),
             app: app.clone(),
             config: RwLock::new(cfg.clone()),
             last_activity: AtomicU64::new(now_ms()),
@@ -2317,12 +2572,10 @@ impl Pipeline {
             processing: AtomicBool::new(false),
             upload_cancel: AtomicBool::new(false),
             mic_test: AtomicBool::new(false),
-            has_mic: AtomicBool::new(false),
             gesture: Mutex::new(GestureSlot::default()),
             mic_tally: MicTally::default(),
             mic_dead: AtomicBool::new(false),
             rec_session: AtomicU64::new(0),
-            stream_slot: Arc::downgrade(&stream_slot),
             mic_name: Mutex::new(String::new()),
             kept: Mutex::new(None),
             kept_seq: AtomicU64::new(0),
@@ -2332,46 +2585,75 @@ impl Pipeline {
 
         spawn_idle_watcher(&shared);
 
-        {
-            let mut slot = stream_slot.lock().unwrap_or_else(|p| p.into_inner());
-            if let Err(e) = open_stream(&shared, &mut slot, cfg.input_device.as_deref(), true) {
-                tracing::warn!("No audio input — running without a microphone: {}", e);
-            }
-        }
-        // Capture starts: if Windows' privacy switches keep desktop apps off
-        // the mic, the log says so now (a recording says it to the person).
+        // The mic: closed until something needs it, unless "Keep the
+        // microphone ready" (then open now, as Yap always was).
+        shared.mic.settings(cfg.keep_mic_ready, cfg.input_device.clone());
+        // If Windows' privacy switches keep desktop apps off the mic, the log
+        // says so now (a recording says it to the person).
         if let Some(blocked) = crate::mic_privacy::blocked() {
             tracing::warn!(?blocked, "Windows' privacy settings block the microphone for desktop apps");
         }
 
-        let _ = app.emit("yap-state", if has_engine { "idle" } else { "needs-model" });
+        let _ = app.emit("yap-state", if has_model { "idle" } else { "needs-model" });
 
-        Self {
-            shared,
-            stream: stream_slot,
+        // The speech model, off the startup thread: the tray, the bar and the
+        // window come up meanwhile, and a dictation started before it's
+        // ready waits for it ("Loading the speech model…", `run_stt`).
+        if has_model {
+            set_model_loading(true);
+            let loader = Arc::clone(&shared);
+            let model = cfg.model_size.clone();
+            let use_gpu = cfg.use_gpu;
+            let spawned = std::thread::Builder::new().name("stt-load".into()).spawn(move || {
+                // Test mode: a slow load, to see a dictation wait for it.
+                #[cfg(debug_assertions)]
+                if crate::e2e::active() {
+                    if let Some(ms) = std::env::var("YAP_E2E_MODEL_LOAD_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()) {
+                        tracing::info!(ms, "e2e: the speech model loads slowly");
+                        std::thread::sleep(Duration::from_millis(ms));
+                    }
+                }
+                let started = Instant::now();
+                let loaded = stt::create_stt_engine(&config::data_dir(), &model, use_gpu);
+                let ok = loaded.is_ok();
+                match loaded {
+                    Ok(e) => {
+                        tracing::info!(model = %model, ms = started.elapsed().as_millis() as u64, "Speech model loaded in the background");
+                        // A model switch meanwhile (`set_engine`) wins.
+                        if let Ok(mut g) = loader.engine.lock() {
+                            if g.is_none() {
+                                *g = Some(e);
+                            }
+                        }
+                        loader.touch_activity();
+                    }
+                    Err(SttError::ModelNotFound(_)) => {
+                        tracing::warn!("STT model not found — Yap needs a model download");
+                    }
+                    Err(e) => tracing::error!("STT engine init failed: {}", e),
+                }
+                set_model_loading(false);
+                // Nothing to wait for: a dictation that would have needs the
+                // model (`run_stt` says so).
+                let quiet = !loader.recording.load(Ordering::SeqCst) && !loader.processing.load(Ordering::SeqCst);
+                let engine_in = loader.engine.lock().map(|g| g.is_some()).unwrap_or(false);
+                if quiet && !ok && !engine_in {
+                    let _ = loader.app.emit("yap-state", "needs-model");
+                }
+            });
+            if let Err(e) = spawned {
+                set_model_loading(false);
+                tracing::error!("No thread to load the speech model on: {}", e);
+            }
+        } else {
+            tracing::warn!("STT model not found — Yap needs a model download");
         }
-    }
 
-    /// Without a mic stream, try to open one before a press that may start a
-    /// recording: a headset that connected after Yap started then just works.
-    /// A no-op while a stream is running.
-    fn ensure_mic(&self) {
-        if self.shared.recording.load(Ordering::SeqCst) {
-            return;
-        }
-        let mut slot = self.stream.lock().unwrap_or_else(|p| p.into_inner());
-        if slot.is_some() {
-            return;
-        }
-        let device = self.shared.config.read().ok().and_then(|c| c.input_device.clone());
-        if let Err(e) = open_stream(&self.shared, &mut slot, device.as_deref(), true) {
-            tracing::warn!("Still no microphone: {}", e);
-        }
+        Self { shared }
     }
 
     /// Toggle recording (the `toggle_recording` command).
     pub fn toggle(&self) {
-        self.ensure_mic();
         self.shared.toggle(false);
     }
 
@@ -2390,18 +2672,12 @@ impl Pipeline {
     /// the hook's timestamp, `gesture::now_ms`) and from the windows' in-page
     /// fallback (`dictation_key`, `None` = now).
     pub fn on_key(&self, pressed: bool, at: Option<u64>) {
-        if pressed {
-            self.ensure_mic();
-        }
         self.shared.on_key(pressed, false, at);
     }
 
     /// Route an **edit/rewrite** hotkey press/release. Same as `on_key` but the
     /// session captures the selection and rewrites it from the spoken instruction.
     pub fn on_edit_key(&self, pressed: bool, at: Option<u64>) {
-        if pressed {
-            self.ensure_mic();
-        }
         self.shared.on_key(pressed, true, at);
     }
 
@@ -2419,9 +2695,6 @@ impl Pipeline {
             && crate::assistant::off_for_meeting(&self.shared.app)
         {
             return;
-        }
-        if pressed {
-            self.ensure_mic();
         }
         ASSISTANT_ARMED.store(pressed, Ordering::SeqCst);
         self.shared.on_key(pressed, false, at);
@@ -2534,26 +2807,36 @@ impl Pipeline {
 
     /// Replace the live config (e.g. after the user saves settings).
     pub fn update_config(&self, cfg: YapConfig) {
+        // "Keep the microphone ready" and the microphone, for the mic.
+        self.shared.mic.settings(cfg.keep_mic_ready, cfg.input_device.clone());
         if let Ok(mut c) = self.shared.config.write() {
             *c = cfg;
         }
     }
 
-    /// Enable/disable mic-test mode: while on, the audio callback emits
-    /// `yap-amp` levels even when idle (onboarding's "see the waves react").
+    /// Enable/disable mic-test mode: while on, the mic is open and the audio
+    /// callback emits `yap-amp` levels even when idle (onboarding's "see the
+    /// waves react").
     pub fn set_mic_test(&self, on: bool) {
         self.shared.mic_test.store(on, Ordering::Relaxed);
+        self.shared.mic.test(on);
     }
 
     /// Swap the capture stream to a different input device **live** (no app
-    /// restart). Builds the new stream first, so on failure the old stream keeps
-    /// running and an error is returned. Also how capture starts when Yap had
-    /// no microphone.
+    /// restart) when one is running — the new stream is built first, so on
+    /// failure the old one keeps running and an error is returned — else
+    /// check the device is there for the next recording.
     pub fn set_input_device(&self, device: Option<&str>) -> Result<(), String> {
-        let mut slot = self.stream.lock().unwrap_or_else(|p| p.into_inner());
-        open_stream(&self.shared, &mut slot, device, true)?;
+        self.shared.mic.switch(device.map(str::to_string))?;
         tracing::info!(device = device.unwrap_or("default"), "Input device switched");
         Ok(())
+    }
+
+    /// The mic's state (`mic.rs`): open, live, Bluetooth, how the last open
+    /// went — robot mode's `realtest_mic`.
+    #[cfg(debug_assertions)]
+    pub(crate) fn mic_status(&self) -> crate::mic::Status {
+        self.shared.mic.status()
     }
 
     /// Robot mode's way into the pipeline (`realtest.rs`).
@@ -2725,6 +3008,10 @@ impl Robot {
                     break;
                 }
                 feeder.take_audio(chunk, &mut amp);
+                // The WAV is the mic here: its first audio says "speak now".
+                if i == 0 {
+                    feeder.fire_pending_start();
+                }
             }
             std::thread::sleep(Duration::from_millis(100));
         })
@@ -2749,31 +3036,6 @@ impl Robot {
         }
         Ok(LAST_DELIVERED.lock().ok().and_then(|mut last| last.take()))
     }
-}
-
-/// Open a capture stream on `device` (`None`: Windows' default) into the
-/// (locked) stream `slot`, replacing the one there — how capture starts,
-/// how Settings switches mics live, and how the dead-mic watchdog reopens
-/// one mid-recording (the recording carries on into the new stream).
-/// `keep_old`: build the new stream before stopping the old one, so a
-/// failure leaves the old one running (a mic picked in Settings); otherwise
-/// the old one stops first (the watchdog's: it's broken, and two streams at
-/// once would interleave their audio in the recording). `has_mic` follows.
-fn open_stream(
-    shared: &Arc<Shared>,
-    slot: &mut Option<SendStream>,
-    device: Option<&str>,
-    keep_old: bool,
-) -> Result<(), String> {
-    if !keep_old {
-        *slot = None;
-    }
-    let result = build_input_stream(shared, device).map(|s| {
-        // Dropping the old stream stops it.
-        *slot = Some(SendStream(s));
-    });
-    shared.has_mic.store(slot.is_some(), Ordering::SeqCst);
-    result
 }
 
 /// Streaming-partials worker. Runs on its own thread for one recording session
@@ -2919,6 +3181,10 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
 /// (e.g. after an idle unload). Best-effort: on failure the worker simply runs
 /// partial-less and the final pass surfaces `needs-model` as before.
 fn ensure_partial_engine(shared: &Arc<Shared>) {
+    // The startup load will put it there (the final pass waits for it).
+    if model_loading() {
+        return;
+    }
     let empty = shared
         .engine
         .try_lock()
@@ -2961,84 +3227,6 @@ fn spawn_idle_watcher(shared: &Arc<Shared>) {
             None => break, // pipeline dropped
         }
     });
-}
-
-/// Build and start the mic input stream.
-fn build_input_stream(shared: &Arc<Shared>, device_name: Option<&str>) -> Result<cpal::Stream, String> {
-    let host = cpal::default_host();
-    let device = match device_name {
-        Some(name) => host
-            .input_devices()
-            .map_err(|e| format!("Failed to enumerate input devices: {}", e))?
-            .find(|d| d.name().map(|n| n == name).unwrap_or(false))
-            .ok_or_else(|| format!("Input device not found: {}", name))?,
-        None => host
-            .default_input_device()
-            .ok_or_else(|| "No default input device available".to_string())?,
-    };
-
-    let dev_name = device.name().unwrap_or_else(|_| "unknown".into());
-    let default_config = device
-        .default_input_config()
-        .map_err(|e| format!("Failed to get default input config: {}", e))?;
-    let native_rate = default_config.sample_rate().0;
-    let channels = default_config.channels();
-    tracing::info!(device = %dev_name, native_rate, channels, "Audio input config");
-
-    let stream_config = cpal::StreamConfig {
-        channels,
-        sample_rate: cpal::SampleRate(native_rate),
-        buffer_size: cpal::BufferSize::Default,
-    };
-    let needs_resample = native_rate != TARGET_SAMPLE_RATE;
-    let needs_downmix = channels > 1;
-
-    let cb_shared = Arc::clone(shared);
-    let mut amp = AmpMeter::default();
-
-    let stream = device
-        .build_input_stream(
-            &stream_config,
-            move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                let mono = if needs_downmix {
-                    let ch = channels as usize;
-                    data.chunks_exact(ch)
-                        .map(|frame| frame.iter().sum::<f32>() / ch as f32)
-                        .collect::<Vec<f32>>()
-                } else {
-                    data.to_vec()
-                };
-                let resampled = if needs_resample {
-                    resample_linear(&mono, native_rate, TARGET_SAMPLE_RATE)
-                } else {
-                    mono
-                };
-                // The e2e suite's "muted mic", and the robot's WAV playing
-                // in the mic's place (debug builds only).
-                #[cfg(debug_assertions)]
-                let resampled = if TEST_SILENT_MIC.load(Ordering::Relaxed) {
-                    vec![0.0; resampled.len()]
-                } else {
-                    resampled
-                };
-                if test_feed_on() {
-                    return;
-                }
-                cb_shared.take_audio(&resampled, &mut amp);
-            },
-            move |err| tracing::error!("Audio input stream error: {}", err),
-            None,
-        )
-        .map_err(|e| format!("Failed to build input stream: {}", e))?;
-
-    stream
-        .play()
-        .map_err(|e| format!("Failed to start input stream: {}", e))?;
-    if let Ok(mut name) = shared.mic_name.lock() {
-        *name = dev_name;
-    }
-    tracing::info!("Audio capture started");
-    Ok(stream)
 }
 
 /// Simple linear resampler from one rate to another. Shared with `media.rs`
