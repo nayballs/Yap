@@ -34,7 +34,16 @@
 //! whose card is up, or was answered, isn't asked about twice; a call during
 //! the next meeting while recording the last one offers to switch
 //! ([`on_call_started`]).
+//!
+//! **Briefs** ("Prepare a brief before meetings", `meeting_brief`, on): from
+//! [`BRIEF_AHEAD`] before a meeting, what to know going in — last time with
+//! these people, their open items, what memory knows, the invite's agenda,
+//! every line citing its note, and two or three bullets from the meeting's
+//! AI model on top ([`brief`]). Kept per meeting in calendar.json and made
+//! again when what it was made from changes; shown on the reminder card, in
+//! the Meetings view and in the meeting's notepad.
 
+pub(crate) mod brief;
 mod google;
 mod ics;
 mod links;
@@ -62,6 +71,8 @@ const EVENT_CONNECTED: &str = "yap-calendar-connected";
 const EVENT_ERROR: &str = "yap-calendar-error";
 /// Open a note in Notes: `{ noteId, stop }` (call detection's event).
 const EVENT_OPEN: &str = "yap-meeting-open-note";
+/// A meeting's brief was made or finished (`brief::Brief`).
+const EVENT_BRIEF: &str = "yap-meeting-brief";
 
 /// Sync this often while Yap runs (Wispr: every 10–15 minutes).
 const SYNC_EVERY: i64 = 12 * 60;
@@ -85,6 +96,16 @@ const BAR_CARD: &str = "calendar";
 /// While a card is up the scheduler turns this often (seconds), so the bar
 /// card's "In 1 min" stays true and the card follows you out of the window.
 const CARD_TICK: i64 = 5;
+/// A meeting's brief is made this long before it starts (in time for the
+/// reminder card, with a small model on a processor)…
+const BRIEF_AHEAD: i64 = 15 * 60;
+/// …kept until this long after it started…
+const BRIEF_KEEP: i64 = 2 * 86_400;
+/// …at most this many of them…
+const BRIEF_MAX: usize = 40;
+/// …and one whose summary failed is tried again by itself after this long
+/// (asked for, at once).
+const BRIEF_RETRY: i64 = 2 * 60;
 
 const NO_GOOGLE: &str = "Google sign-in is in the installed Yap. In this build, use a private iCal link under Other calendar.";
 const TOO_MANY: &str = "You've connected as many calendars as Yap holds. Disconnect one first.";
@@ -138,6 +159,9 @@ struct Store {
     answered: BTreeMap<String, i64>,
     #[serde(default)]
     nudge: Nudge,
+    /// Meetings' briefs, by event key.
+    #[serde(default)]
+    briefs: BTreeMap<String, brief::Brief>,
 }
 
 fn store_path() -> std::path::PathBuf {
@@ -225,6 +249,16 @@ struct Runtime {
     seq: u64,
     /// Test runs: the links Yap would have opened.
     opened: Vec<String>,
+    /// The brief whose summary is being written (one at a time)…
+    brief_job: Option<String>,
+    /// …the ones waiting their turn…
+    brief_waiting: Vec<String>,
+    /// …and ones not tried again by themselves before (unix seconds).
+    brief_retry: HashMap<String, i64>,
+    /// Notes, memory or settings changed: the due briefs may be stale.
+    briefs_dirty: bool,
+    /// "Prepare a brief before meetings" as the pages last heard it.
+    briefs_on: Option<bool>,
 }
 
 static STATE: LazyLock<Mutex<Runtime>> = LazyLock::new(|| Mutex::new(Runtime::default()));
@@ -279,6 +313,8 @@ pub struct Snapshot {
     card: Option<CardView>,
     nudge: NudgeView,
     max_connections: u8,
+    /// "Prepare a brief before meetings" is on.
+    briefs: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -340,6 +376,8 @@ struct CardView {
     with: String,
     service_label: Option<&'static str>,
     has_link: bool,
+    /// Its meeting's brief, once made (briefs on).
+    brief: Option<brief::Brief>,
 }
 
 #[derive(Clone, Serialize)]
@@ -366,7 +404,7 @@ fn event_view(e: &Event, conflicts: &HashSet<String>, notes: &HashMap<String, u6
     }
 }
 
-fn snapshot_of(s: &Runtime, notes: &HashMap<String, u64>, now: i64) -> Snapshot {
+fn snapshot_of(s: &Runtime, notes: &HashMap<String, u64>, now: i64, briefs: bool) -> Snapshot {
     let mut upcoming: Vec<&Event> = s.store.events.iter().filter(|e| e.end > now && e.start < now + LOOK_AHEAD).collect();
     upcoming.sort_by_key(|e| (e.start, e.key.clone()));
     upcoming.truncate(MAX_SHOWN);
@@ -402,6 +440,7 @@ fn snapshot_of(s: &Runtime, notes: &HashMap<String, u64>, now: i64) -> Snapshot 
             with: c.event.with_line(),
             service_label: c.event.service_label(),
             has_link: c.event.join_url.is_some(),
+            brief: s.store.briefs.get(&c.event.key).filter(|_| briefs).cloned(),
         }),
         nudge: NudgeView {
             // A tip: not with tips switched off (Settings → Notifications).
@@ -411,6 +450,7 @@ fn snapshot_of(s: &Runtime, notes: &HashMap<String, u64>, now: i64) -> Snapshot 
                 && !crate::notice::tips_off(),
         },
         max_connections: vault::SLOTS,
+        briefs,
     }
 }
 
@@ -421,7 +461,8 @@ fn note_links() -> HashMap<String, u64> {
 
 pub fn status() -> Snapshot {
     let notes = note_links();
-    snapshot_of(&lock(), &notes, now_secs())
+    let briefs = crate::config::load().meeting_brief;
+    snapshot_of(&lock(), &notes, now_secs(), briefs)
 }
 
 fn emit(app: &AppHandle) {
@@ -441,12 +482,24 @@ pub fn init(app: &AppHandle) {
         let now = now_secs();
         s.store.answered.retain(|_, at| *at > now - ANSWER_KEEP);
         s.store.events.retain(|e| e.end > now - LOOK_BACK);
+        prune_briefs(&mut s.store, now);
+        // A summary a quit left half-written: the brief is made again when
+        // it's due or asked for.
+        for b in s.store.briefs.values_mut() {
+            b.writing = false;
+        }
         s.started = true;
         // A first sync straight away (it's cheap, and the cache may be old).
         s.next_sync = now;
     }
     // A recording starting or stopping changes which card is due.
     app.listen("yap-meeting-state", |_| wake());
+    // What a brief is made from changed: the due ones are looked at again at
+    // the scheduler's next turn (not at once: a recording changes its note
+    // often).
+    for event in ["yap-notes-changed", "yap-note-changed", "yap-memory-changed"] {
+        app.listen(event, |_| briefs_changed());
+    }
     let handle = app.clone();
     tauri::async_runtime::spawn(async move { scheduler(handle).await });
     tracing::info!("calendar: started");
@@ -471,6 +524,7 @@ async fn scheduler(app: AppHandle) {
             sync_all(&app).await;
         }
         tick_card(&app);
+        tick_briefs(&app);
         let wait = next_wake(now_secs());
         tokio::select! {
             _ = WAKE.notified() => {}
@@ -482,7 +536,8 @@ async fn scheduler(app: AppHandle) {
 /// Seconds until the scheduler has something to do: a sync, a reminder
 /// coming due, a card running out or a snooze ending; at most [`MAX_SLEEP`].
 fn next_wake(now: i64) -> u64 {
-    let lead = reminder_lead(&crate::config::load().meeting_reminder);
+    let cfg = crate::config::load();
+    let lead = reminder_lead(&cfg.meeting_reminder);
     let s = lock();
     let mut next = now + MAX_SLEEP as i64;
     if !s.store.connections.is_empty() {
@@ -494,11 +549,18 @@ fn next_wake(now: i64) -> u64 {
     if let Some(card) = &s.card {
         next = next.min(card.event.start + model::REMINDER_AFTER_SECS).min(now + CARD_TICK);
     }
+    if cfg.meeting_brief {
+        if let Some(t) = s.store.events.iter().map(|e| e.start - BRIEF_AHEAD).filter(|t| *t > now).min() {
+            next = next.min(t);
+        }
+    }
     (next - now).clamp(1, MAX_SLEEP as i64) as u64
 }
 
-/// Settings were saved: the reminder lead may have changed.
+/// Settings were saved: the reminder lead may have changed, and briefs been
+/// switched on or off or given another model.
 pub fn on_config_saved() {
+    briefs_changed();
     wake();
 }
 
@@ -1437,9 +1499,11 @@ fn tick_card(app: &AppHandle) {
 fn present_card(app: &AppHandle, card: &Card, focused: bool) {
     tracing::info!(kind = ?card.kind, focused, "calendar: meeting card");
     let now = now_secs();
+    let mut on_bar = bar_card(card, now);
+    on_bar.brief = card_brief(&card.event.key);
     let surface = if focused {
         Surface::InApp
-    } else if crate::bar::show_card(app, bar_card(card, now), Box::new(answer_from)) {
+    } else if crate::bar::show_card(app, on_bar, Box::new(answer_from)) {
         Surface::Bar
     } else {
         native_post(app, card)
@@ -1678,6 +1742,305 @@ pub fn calendar_nudge(app: AppHandle, action: String) {
         save_store(&s.store);
     }
     emit(&app);
+}
+
+// ---- briefs -------------------------------------------------------------------------------------
+
+/// Notes, memory or settings changed: the due briefs are looked at again.
+fn briefs_changed() {
+    lock().briefs_dirty = true;
+}
+
+/// Briefs of meetings long over go, and the oldest past [`BRIEF_MAX`].
+fn prune_briefs(store: &mut Store, now: i64) {
+    store.briefs.retain(|_, b| b.start > now - BRIEF_KEEP);
+    while store.briefs.len() > BRIEF_MAX {
+        let Some(oldest) = store.briefs.iter().min_by_key(|(_, b)| b.start).map(|(k, _)| k.clone()) else { break };
+        store.briefs.remove(&oldest);
+    }
+}
+
+/// The meeting as a brief needs it.
+fn brief_meeting(e: &Event) -> brief::Meeting {
+    brief::Meeting {
+        key: e.key.clone(),
+        title: e.display_title(),
+        start: e.start,
+        attendees: e.attendees.iter().map(|a| a.name.clone()).collect(),
+        description: e.description.clone(),
+    }
+}
+
+/// Where a brief's "In short" comes from: the meeting's own model (the Note
+/// Formatting scope, else cleanup's), or why there's none.
+enum BriefAi {
+    Model(crate::meeting_summary::Endpoint),
+    Plain(&'static str),
+}
+
+impl BriefAi {
+    fn of(cfg: &crate::config::YapConfig) -> BriefAi {
+        match crate::meeting_summary::resolve_endpoint(cfg) {
+            // A brief never starts a stopped on-device model.
+            Ok(ep) if ep.provider == crate::local_llm::PROVIDER_ONDEVICE && !crate::local_llm::is_running() => {
+                BriefAi::Plain("The on-device model isn't running, so this is the plain brief.")
+            }
+            // A small model on this PC got too much wrong (model-evals.md).
+            Ok(ep) if !brief::writes_summary(ep.is_local(), &ep.model) => {
+                BriefAi::Plain("A short summary on top needs a bigger AI model (4B or more, or a cloud model).")
+            }
+            Ok(ep) => BriefAi::Model(ep),
+            Err(_) => BriefAi::Plain("Set up an AI model in Language Models for a short summary on top."),
+        }
+    }
+
+    /// What the fingerprint knows of it: another model makes the brief again.
+    fn label(&self) -> String {
+        match self {
+            BriefAi::Model(ep) => format!("{}:{}", ep.provider, ep.model),
+            BriefAi::Plain(_) => "plain".to_string(),
+        }
+    }
+}
+
+/// The card's brief for the Yap bar, as the page draws it (briefs on).
+fn card_brief(key: &str) -> Option<Value> {
+    if !crate::config::load().meeting_brief {
+        return None;
+    }
+    lock().store.briefs.get(key).and_then(|b| serde_json::to_value(b).ok())
+}
+
+/// Keep `b` and show it: the `yap-meeting-brief` event (the Meetings view,
+/// the notepad), the snapshot (the in-app card) and, when its meeting's card
+/// is on the Yap bar, the card there.
+fn store_brief(app: &AppHandle, b: &brief::Brief) {
+    let on_bar = {
+        let mut s = lock();
+        s.store.briefs.insert(b.key.clone(), b.clone());
+        prune_briefs(&mut s.store, now_secs());
+        save_store(&s.store);
+        s.card.as_ref().is_some_and(|c| c.event.key == b.key && c.surface == Surface::Bar)
+    };
+    let _ = app.emit(EVENT_BRIEF, b);
+    emit(app);
+    if on_bar {
+        let value = serde_json::to_value(b).ok();
+        crate::bar::update_card(app, BAR_CARD, |c| c.brief = value);
+    }
+}
+
+/// The brief for meeting `key`: the one kept, when nothing it's made from
+/// has changed (`force`: made again anyway); else made now — Yap's own part
+/// at once, and "In short" in the background on the meeting's model (the
+/// brief kept meanwhile is `writing`; `yap-meeting-brief` brings the
+/// finished one). One summary is written at a time; others wait their turn.
+/// Blocking: it reads the notes.
+fn prepare_brief(app: &AppHandle, key: &str, force: bool) -> Result<brief::Brief, String> {
+    let cfg = crate::config::load();
+    if !cfg.meeting_brief {
+        return Err("Briefs are off (Settings → Meetings).".into());
+    }
+    let meeting = brief_meeting(&event_by_key(key)?);
+    let now = now_secs();
+    let facts = brief::gather(&meeting, &crate::notes::all(), &crate::memory::items(), now);
+    let ai = BriefAi::of(&cfg);
+    let fingerprint = facts.fingerprint(&ai.label());
+    {
+        let s = lock();
+        let busy = s.brief_job.as_deref() == Some(key) || s.brief_waiting.iter().any(|k| k == key);
+        if let Some(b) = s.store.briefs.get(key) {
+            if busy || (!force && b.fingerprint == fingerprint && !b.writing) {
+                return Ok(b.clone());
+            }
+        }
+    }
+    let wants_ai = matches!(ai, BriefAi::Model(_)) && facts.worth_a_call();
+    let note = match &ai {
+        BriefAi::Plain(why) if facts.worth_a_call() => why,
+        _ => "",
+    };
+    let mut b = brief::assemble(&facts, vec![], false, note, now);
+    b.fingerprint = fingerprint.clone();
+    b.writing = wants_ai;
+    let start = wants_ai && {
+        let mut s = lock();
+        if s.brief_job.is_none() {
+            s.brief_job = Some(key.to_string());
+            true
+        } else {
+            s.brief_waiting.retain(|k| k != key);
+            s.brief_waiting.push(key.to_string());
+            false
+        }
+    };
+    tracing::info!(
+        sources = b.sources.len(),
+        open = b.open_count(),
+        first = b.first,
+        words = b.words,
+        summary = wants_ai,
+        "calendar: brief made"
+    );
+    tracing::debug!("calendar: brief:\n{}", brief::plain_text(&b));
+    store_brief(app, &b);
+    if let (true, BriefAi::Model(ep)) = (start, ai) {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move { write_brief(app, facts, ep, fingerprint).await });
+    }
+    Ok(b)
+}
+
+/// Write `facts`' "In short" on the meeting's model (beside any dictation),
+/// keep the finished brief, then start the next one waiting.
+async fn write_brief(app: AppHandle, facts: brief::Facts, ep: crate::meeting_summary::Endpoint, fingerprint: String) {
+    let key = facts.meeting.key.clone();
+    let started = std::time::Instant::now();
+    let result = brief::write(Some(&app), &facts, &ep).await;
+    let now = now_secs();
+    let b = match result {
+        Ok((checked, _)) => {
+            tracing::info!(
+                kept = checked.lines.len(),
+                uncited = checked.uncited,
+                ungrounded = checked.ungrounded,
+                swapped = checked.swapped,
+                ms = started.elapsed().as_millis() as u64,
+                "calendar: brief's summary written"
+            );
+            let mut b = brief::assemble(&facts, checked.lines, true, "", now);
+            b.fingerprint = fingerprint;
+            b
+        }
+        Err(e) => {
+            tracing::info!("calendar: brief's summary not written ({e})");
+            lock().brief_retry.insert(key.clone(), now + BRIEF_RETRY);
+            // The plain brief, made again when asked for or after the wait.
+            brief::assemble(&facts, vec![], false, "The AI couldn't write a summary this time, so this is the plain brief.", now)
+        }
+    };
+    tracing::debug!("calendar: brief:\n{}", brief::plain_text(&b));
+    store_brief(&app, &b);
+    let next = {
+        let mut s = lock();
+        s.brief_job = None;
+        (!s.brief_waiting.is_empty()).then(|| s.brief_waiting.remove(0))
+    };
+    if let Some(next) = next {
+        let handle = app.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || prepare_brief(&handle, &next, false)).await;
+    }
+}
+
+/// The scheduler's turn: make the briefs of meetings starting within
+/// [`BRIEF_AHEAD`] (or on now) that have none, and look again at those whose
+/// notes or memory changed since.
+fn tick_briefs(app: &AppHandle) {
+    let on = crate::config::load().meeting_brief;
+    // Switched on or off in Settings: the pages show the Brief buttons, or not.
+    let switched = lock_started().is_some_and(|mut s| s.briefs_on.replace(on).is_some_and(|was| was != on));
+    if switched {
+        emit(app);
+    }
+    if !on {
+        return;
+    }
+    let now = now_secs();
+    let due: Vec<String> = {
+        let Some(mut s) = lock_started() else { return };
+        if s.brief_job.is_some() {
+            return;
+        }
+        let dirty = std::mem::take(&mut s.briefs_dirty);
+        s.brief_retry.retain(|_, until| *until > now);
+        s.store
+            .events
+            .iter()
+            .filter(|e| e.start - BRIEF_AHEAD <= now && now < e.start + model::REMINDER_AFTER_SECS && now < e.end)
+            .filter(|e| !s.brief_retry.contains_key(&e.key))
+            .filter(|e| dirty || s.store.briefs.get(&e.key).is_none_or(|b| b.writing || b.fingerprint.is_empty()))
+            .map(|e| e.key.clone())
+            .collect()
+    };
+    if due.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        for key in due {
+            if let Err(e) = prepare_brief(&app, &key, false) {
+                tracing::info!("calendar: no brief ({e})");
+            }
+        }
+    });
+}
+
+/// A meeting's brief (the Meetings view): the one kept, or made now; with
+/// `refresh`, made again. Its "In short" may follow (`yap-meeting-brief`).
+#[tauri::command]
+pub async fn calendar_brief(app: AppHandle, key: String, refresh: Option<bool>) -> Result<brief::Brief, String> {
+    tauri::async_runtime::spawn_blocking(move || prepare_brief(&app, &key, refresh.unwrap_or(false)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The brief of the meeting note `note_id` was made for (the notepad): the
+/// one kept, else — its meeting still on the calendar — made now. `None`
+/// with briefs off, or for a note no calendar meeting made.
+#[tauri::command]
+pub async fn calendar_brief_for_note(app: AppHandle, note_id: u64) -> Result<Option<brief::Brief>, String> {
+    if !crate::config::load().meeting_brief {
+        return Ok(None);
+    }
+    let Some(key) = crate::notes::event_of(note_id).map(|e| e.key) else { return Ok(None) };
+    let (kept, known) = {
+        let s = lock();
+        (s.store.briefs.get(&key).cloned(), s.store.events.iter().any(|e| e.key == key))
+    };
+    if kept.is_some() || !known {
+        return Ok(kept);
+    }
+    tauri::async_runtime::spawn_blocking(move || prepare_brief(&app, &key, false).ok())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// A brief's citation `n` opened (any window): its note in the main window's
+/// Notes, Settings → Memory, or — the invite — the meeting's own note (made
+/// ahead if need be).
+#[tauri::command]
+pub async fn calendar_brief_open(app: AppHandle, key: String, n: usize) -> Result<(), String> {
+    let source = lock()
+        .store
+        .briefs
+        .get(&key)
+        .and_then(|b| b.sources.iter().find(|s| s.n == n).cloned())
+        .ok_or("That brief has changed. Open it again.")?;
+    let note_id = match source.kind.as_str() {
+        "note" => source.note_id,
+        "invite" => {
+            let event = event_by_key(&key)?;
+            let ahead = event.start > now_secs();
+            let (id, made) = tauri::async_runtime::spawn_blocking(move || note_for(&event, ahead))
+                .await
+                .map_err(|e| e.to_string())??;
+            if made {
+                let _ = app.emit("yap-notes-changed", ());
+            }
+            Some(id)
+        }
+        _ => None,
+    };
+    crate::commands::show_settings(&app)?;
+    match note_id {
+        Some(id) => {
+            let _ = app.emit(EVENT_OPEN, json!({ "noteId": id, "stop": false }));
+        }
+        None => {
+            let _ = app.emit("yap-open-settings", "memory");
+        }
+    }
+    Ok(())
 }
 
 // ---- past meeting notes -------------------------------------------------------------------------

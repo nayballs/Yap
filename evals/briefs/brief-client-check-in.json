@@ -1,0 +1,31 @@
+{
+  "name": "brief-client-check-in",
+  "description": "Added for the third run (unseen until then): a monthly client check-in, dates as numbers, a decision, an open question, the client in memory.",
+  "meeting": {
+    "title": "Brightwater monthly check-in",
+    "series": "brightwater-monthly@example.com",
+    "in_minutes": 12,
+    "attendees": ["Sam Lee"],
+    "description": "Agenda: contract renewal\nThe Q1 roadmap"
+  },
+  "notes": [
+    {
+      "title": "Brightwater monthly check-in",
+      "days_ago": 28,
+      "series": "brightwater-monthly@example.com",
+      "participants": ["Sam Lee"],
+      "plan": "Sam walked through Brightwater's usage and asked about the Q1 roadmap.\n\n## Action plan\n### You\n- [ ] Send Sam the renewal quote (due: 30 October)\n- [ ] Share the Q1 roadmap draft\n### Sam\n- [ ] Confirm how many seats Brightwater needs next year\n\n## Decisions\n- Brightwater moves to annual billing from January.\n\n## Open questions\n- Will Brightwater need single sign-on?"
+    }
+  ],
+  "memory": [
+    { "section": "people", "title": "Sam Lee", "summary": "Operations lead at Brightwater, a client", "details": ["Prefers calls on Tuesdays"] }
+  ],
+  "expect": {
+    "first": false,
+    "cites": ["Brightwater monthly check-in"],
+    "contains": ["Operations lead at Brightwater"],
+    "open_items": ["renewal quote", "roadmap draft", "seats"],
+    "owners": ["You", "Sam"],
+    "not_contains": ["Okonkwo", "lighting", "31 October", "February", "single sign-on is"]
+  }
+}

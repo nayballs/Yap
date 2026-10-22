@@ -171,6 +171,10 @@ const MEMORY = "You keep Yap's memory of the user";
 // Who a meeting's voice is (speakers/naming.rs ASK_PROMPT), when a meeting
 // ends: "unknown" unless a spec says otherwise (`reply('speakerName', fn)`).
 const SPEAKER_NAME = 'You identify one voice in a meeting transcript';
+// A pre-meeting brief's "In short" (llm.rs MEETING_BRIEF_PROMPT,
+// calendar/brief.rs). "Nothing to add." unless a spec scripts it
+// (`reply('brief', fn)`; brief.spec.js).
+const BRIEF = 'You write a short brief for someone about to go into a meeting';
 
 const KINDS = [
   [DIGEST, 'digest'],
@@ -184,6 +188,7 @@ const KINDS = [
   [CLEANUP, 'cleanup'],
   [MEMORY, 'memory'],
   [SPEAKER_NAME, 'speakerName'],
+  [BRIEF, 'brief'],
 ];
 
 /**
@@ -535,6 +540,7 @@ export async function startFakeLlm() {
         blindSpots: blindSpotsReply,
         memory: () => '{"changes": []}',
         speakerName: () => '{"quote": "", "name": "unknown"}',
+        brief: () => 'Nothing to add.',
       };
       const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user);
       res.writeHead(200, { 'content-type': 'application/json' });

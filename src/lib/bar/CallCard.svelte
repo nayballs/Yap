@@ -19,9 +19,17 @@
   // "Connect your calendar" dialog's band), drawn from sample data by this
   // same component so it always matches the bar: inert (nothing to click
   // or focus), hidden from screen readers, no regions reported to the bar.
+  //
+  // A calendar reminder with the meeting's pre-meeting brief (`card.brief`,
+  // calendar/brief.rs) gets one slim line under its row — "Brief · Last met
+  // Thu 16 Oct · 2 open items ⌄" — that unfolds the brief inside the card
+  // (BriefView, at most 260 px, scrolling); its source pills open the notes
+  // in Yap's main window.
   import yapLogo from '../../assets/yap-logo.svg';
   import { callAppIcon } from './callApps.js';
   import CallAppIcon from '../CallAppIcon.svelte';
+  import BriefView from '../BriefView.svelte';
+  import { briefTeaser } from '../brief.js';
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
 
   /** @type {{ card: any, paused?: boolean, hovered?: boolean, preview?: boolean, onaction?: (action: string) => void }} */
@@ -35,6 +43,8 @@
   const RING = 2 * Math.PI * 12;
 
   let menuOpen = $state(false);
+  // The brief unfolded under the row.
+  let briefOpen = $state(false);
   // The menu closes once the pointer has left the card for a moment.
   let menuTimer = null;
   $effect(() => {
@@ -76,70 +86,86 @@
     </button>
   {/if}
 
-  <span class="mark" aria-hidden="true">
-    {#if icon.kind === 'phone' && card.icon === 'calendar'}
-      <!-- A calendar meeting with no call app's mark (calendar.rs). -->
-      <svg viewBox="0 0 24 24" fill="none" stroke="#26231c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="3" /><path d="M3.5 9.5h17M8 2.8v3.4M16 2.8v3.4" /></svg>
-    {:else}
-      <!-- The app's own icon as installed here, else its mark (CallAppIcon). -->
-      <CallAppIcon app={card.app} />
-    {/if}
-  </span>
-
-  <div class="text">
-    <div class="title">{card.title}</div>
-    <div class="status">
-      {#if card.countdown}
-        <span class="count">{clock.secs > 0 ? `${card.countdown.label} ${clock.secs}…` : 'Starting notes…'}</span>
-        <span class="esc" title="Esc to cancel">Esc</span>
-      {:else if card.status}
-        {#if card.dot}<span class="dot {card.dot}" aria-hidden="true"></span>{/if}
-        <span class="line">{card.status}</span>
+  <div class="row">
+    <span class="mark" aria-hidden="true">
+      {#if icon.kind === 'phone' && card.icon === 'calendar'}
+        <!-- A calendar meeting with no call app's mark (calendar.rs). -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="#26231c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="3" /><path d="M3.5 9.5h17M8 2.8v3.4M16 2.8v3.4" /></svg>
+      {:else}
+        <!-- The app's own icon as installed here, else its mark (CallAppIcon). -->
+        <CallAppIcon app={card.app} />
       {/if}
+    </span>
+
+    <div class="text">
+      <div class="title">{card.title}</div>
+      <div class="status">
+        {#if card.countdown}
+          <span class="count">{clock.secs > 0 ? `${card.countdown.label} ${clock.secs}…` : 'Starting notes…'}</span>
+          <span class="esc" title="Esc to cancel">Esc</span>
+        {:else if card.status}
+          {#if card.dot}<span class="dot {card.dot}" aria-hidden="true"></span>{/if}
+          <span class="line">{card.status}</span>
+        {/if}
+      </div>
     </div>
+
+    {#if card.primary}
+      <div class="split">
+        <button class="go" onclick={() => answer(card.primary.id)}>
+          <span class="logo">
+            <img src={yapLogo} alt="" />
+            {#if card.countdown}
+              <svg class="ring" viewBox="0 0 28 28" aria-hidden="true">
+                <circle cx="14" cy="14" r="12" class="track" />
+                <circle cx="14" cy="14" r="12" class="run" stroke-dasharray={RING} stroke-dashoffset={RING * (1 - clock.fraction)} />
+              </svg>
+            {/if}
+          </span>
+          <span class="label" class:two={!!label.sub}>
+            <span class="main">{label.main}</span>
+            {#if label.sub}<span class="sub">{label.sub}</span>{/if}
+          </span>
+        </button>
+        {#if card.secondary || card.link}
+          <span class="divider" aria-hidden="true"></span>
+          <button
+            class="more"
+            class:on={menuOpen}
+            aria-label="More answers"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onclick={() => (menuOpen = !menuOpen)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 14.5l5-5 5 5" /></svg>
+          </button>
+        {/if}
+        {#if menuOpen}
+          <div class="menu" role="menu" data-region={region}>
+            {#if card.secondary}
+              <button role="menuitem" onclick={() => answer(card.secondary.id)}>{card.secondary.label}</button>
+            {/if}
+            {#if card.link}
+              <button role="menuitem" onclick={() => answer(card.link.id)}>{card.link.label}</button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
   </div>
 
-  {#if card.primary}
-    <div class="split">
-      <button class="go" onclick={() => answer(card.primary.id)}>
-        <span class="logo">
-          <img src={yapLogo} alt="" />
-          {#if card.countdown}
-            <svg class="ring" viewBox="0 0 28 28" aria-hidden="true">
-              <circle cx="14" cy="14" r="12" class="track" />
-              <circle cx="14" cy="14" r="12" class="run" stroke-dasharray={RING} stroke-dashoffset={RING * (1 - clock.fraction)} />
-            </svg>
-          {/if}
-        </span>
-        <span class="label" class:two={!!label.sub}>
-          <span class="main">{label.main}</span>
-          {#if label.sub}<span class="sub">{label.sub}</span>{/if}
-        </span>
-      </button>
-      {#if card.secondary || card.link}
-        <span class="divider" aria-hidden="true"></span>
-        <button
-          class="more"
-          class:on={menuOpen}
-          aria-label="More answers"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          onclick={() => (menuOpen = !menuOpen)}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 14.5l5-5 5 5" /></svg>
-        </button>
-      {/if}
-      {#if menuOpen}
-        <div class="menu" role="menu" data-region={region}>
-          {#if card.secondary}
-            <button role="menuitem" onclick={() => answer(card.secondary.id)}>{card.secondary.label}</button>
-          {/if}
-          {#if card.link}
-            <button role="menuitem" onclick={() => answer(card.link.id)}>{card.link.label}</button>
-          {/if}
-        </div>
-      {/if}
-    </div>
+  {#if card.brief && !preview}
+    <button class="briefline" aria-expanded={briefOpen} onclick={() => (briefOpen = !briefOpen)}>
+      <svg class="briefico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h4" /></svg>
+      <span class="briefword">Brief</span>
+      <span class="briefteaser">{briefTeaser(card.brief)}</span>
+      <svg class="briefchev" class:up={briefOpen} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+    </button>
+    {#if briefOpen}
+      <div class="briefpanel">
+        <BriefView brief={card.brief} tone="bar" compact />
+      </div>
+    {/if}
   {/if}
 
   {#if card.timeoutMs && !card.countdown}
@@ -158,8 +184,7 @@
   .call {
     position: relative;
     display: flex;
-    align-items: center;
-    gap: 12px;
+    flex-direction: column;
     width: 400px;
     box-sizing: border-box;
     padding: 12px 12px 12px 14px;
@@ -173,6 +198,73 @@
   /* A picture of the card (`preview`): nothing on it reacts to the pointer. */
   .call.preview {
     pointer-events: none;
+  }
+  /* The one row: mark, text, split button. */
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  /* The brief's line under the row, and the brief it unfolds. */
+  .briefline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    margin-top: 10px;
+    padding: 7px 8px;
+    border: none;
+    border-top: 1px solid var(--bar-border);
+    border-radius: 0 0 8px 8px;
+    background: none;
+    color: var(--bar-text-muted);
+    font: inherit;
+    font-size: 12.5px;
+    line-height: 16px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .briefline:hover {
+    background: var(--bar-hover);
+    color: var(--bar-text-soft);
+  }
+  .briefico {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    color: var(--bar-accent);
+  }
+  .briefword {
+    font-weight: 650;
+    color: var(--bar-text);
+  }
+  .briefteaser {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .briefteaser::before {
+    content: '·';
+    margin-right: 6px;
+  }
+  .briefchev {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    transition: transform 160ms ease;
+  }
+  .briefchev.up {
+    transform: rotate(180deg);
+  }
+  .briefpanel {
+    max-height: 260px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    margin-top: 4px;
+    padding: 6px 8px 4px;
+    user-select: text;
   }
   /* The ✕ sits on the top-left corner (screenshot 25). */
   .x {

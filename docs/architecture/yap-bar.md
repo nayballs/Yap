@@ -171,7 +171,13 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   countdown ring; also the calendar's reminder, "Design review" over "● In
   1 min · with Tanay +1": a calendar glyph when there's no call app, an amber
   "soon" dot, a long line ending in "…", and a two-line answer "Join / &
-  take notes", as on Wispr's pre-meeting card; `preview` draws it as a
+  take notes", as on Wispr's pre-meeting card, and — with the meeting's
+  pre-meeting brief made (`Card.brief`, [calendar.md](./calendar.md#pre-meeting-briefs)) —
+  one slim line under the row, "Brief · Last met Thu 16 Oct · 3 open
+  items ⌄", that unfolds `BriefView` inside the card (≤ 260 px, scrolling;
+  its pills open notes in the main window, where the card then follows);
+  the card's row is now a `.row` inside a column, unchanged without a
+  brief; `preview` draws it as a
   static, inert, aria-hidden picture with no regions, for the connect
   dialog's band); shared fade and countdown timers in
   `bar/cardTimers.svelte.js`. Every `data-region` element is

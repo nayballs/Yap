@@ -76,6 +76,10 @@ Dictation cleanup:
 Speaker names (speakers/naming.rs; instead of the scenarios; speakers.md):
   --speakers               score Rust alone, then Rust + each --model's answers, on
                            evals/speakers/*.json: correct / wrong / missed names per voice
+Pre-meeting briefs:
+  --brief                  instead of the scenarios: write the brief of each meeting in
+                           evals/briefs/*.json (--only picks them) through calendar/brief.rs, and
+                           score the model's reply as written and the brief as shown; brief.md
 Serving benches (local servers; instead of the scenarios; serving.md):
   --bench stream           time to the first token, streamed vs not, on Chat-shaped requests
                            (a short answer, a long one, a web answer, a tool call)
@@ -127,6 +131,7 @@ struct Args {
     cleanup_layout: Option<&'static str>,
     cleanup_quick: bool,
     cleanup_limit: Option<usize>,
+    brief: bool,
     bench: Option<String>,
     bench_rounds: u32,
     bench_history: usize,
@@ -202,6 +207,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--cleanup-quick" => a.cleanup_quick = true,
             "--cleanup-limit" => a.cleanup_limit = Some(num(value()?, &flag)?.max(1) as usize),
+            "--brief" => a.brief = true,
             "--bench" => {
                 let b = value()?;
                 if !super::serving::BENCHES.contains(&b.as_str()) {
@@ -244,7 +250,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         return dump_apps(p);
     }
     // Raw requests alone need no scenarios (and --only then names requests).
-    let scenarios = if (args.models.is_empty() || args.cleanup || args.speakers || args.bench.is_some()) && !args.list {
+    let scenarios = if (args.models.is_empty() || args.cleanup || args.speakers || args.brief || args.bench.is_some()) && !args.list {
         Vec::new()
     } else {
         match load_scenarios(&args) {
@@ -1146,6 +1152,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         println!("\n=== Speaker names: Rust alone, {} meetings ===", meetings.len());
         speaker_runs.push(("Rust only".to_string(), super::speakers::run_rust(meetings)));
     }
+    let briefs = if args.brief {
+        let dir = scenarios_dir(args).join("..").join("briefs");
+        match super::brief::load(&dir, &args.only) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let mut brief_results: Vec<(String, Value)> = Vec::new();
     let mut cleanups: Vec<(String, Value)> = Vec::new();
     let mut benches: Vec<(String, Value)> = Vec::new();
     let mut rows: Vec<Value> = Vec::new();
@@ -1213,6 +1232,17 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             speakers_result = super::speakers::run_model(meetings, &ep).await;
             speaker_runs.push((format!("Rust + {}", m.label), speakers_result.clone()));
         }
+        let mut brief_result = Value::Null;
+        if !briefs.is_empty() {
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::brief::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            brief_result = super::brief::run(&briefs, &ep, args.repeat).await;
+            if brief_result["passed"] != brief_result["scenarios"] {
+                failed = true;
+            }
+            brief_results.push((m.label.clone(), brief_result.clone()));
+        }
         let mut bench_result = Value::Null;
         if let Some(kind) = &args.bench {
             record::set_context(json!({ "model": m.label, "scenario": format!("bench-{kind}") }));
@@ -1237,6 +1267,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "cleanup": cleanup,
             "speakers": speakers_result,
             "bench": bench_result,
+            "brief": brief_result,
         });
         let (drafted, kept) = (sum("draft_tokens"), sum("draft_accepted"));
         if drafted > 0.0 {
@@ -1273,6 +1304,9 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
     summary["paced_ms"] = json!(record::paced_ms());
     let totals = totals(&rows);
     summary["totals"] = json!(totals);
+    if !speaker_runs.is_empty() {
+        summary["speakers"] = json!(speaker_runs.iter().map(|(l, v)| json!({ "run": l, "result": v })).collect::<Vec<_>>());
+    }
     let text = record::redact(&serde_json::to_string_pretty(&summary).unwrap_or_default());
     let _ = std::fs::write(run_dir.join("summary.json"), text);
     if !cleanups.is_empty() {
@@ -1280,10 +1314,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         let _ = std::fs::write(run_dir.join("cleanup.md"), &md);
     }
     if !speaker_runs.is_empty() {
-        summary["speakers"] = json!(speaker_runs.iter().map(|(l, v)| json!({ "run": l, "result": v })).collect::<Vec<_>>());
         let md = record::redact(&super::speakers::markdown(&speaker_runs));
         let _ = std::fs::write(run_dir.join("speakers.md"), &md);
         println!("\n{}", md.split("\n## ").next().unwrap_or(""));
+    }
+    if !brief_results.is_empty() {
+        let md = record::redact(&super::brief::markdown(&brief_results));
+        let _ = std::fs::write(run_dir.join("brief.md"), &md);
+        for (label, r) in &brief_results {
+            println!(
+                "\n{label}: {}/{} briefs pass; the model wrote {} lines: {} uncited, {} not in their sources, {} with the wrong owner, {} saying an open task was done or a question settled, {} never-say words; {} kept",
+                r["passed"], r["scenarios"], r["claims"], r["uncited"], r["ungrounded"], r["swapped"], r["done"], r["planted"], r["kept"]
+            );
+        }
     }
     if !benches.is_empty() {
         let md = record::redact(&super::serving::markdown(&benches));

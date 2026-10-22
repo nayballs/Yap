@@ -1,0 +1,41 @@
+{
+  "name": "brief-long-history",
+  "description": "Three long meetings with Rochelle, long plans, two memory entries and a long invite: the brief still fits in 150 words.",
+  "meeting": {
+    "title": "Partner programme planning",
+    "in_minutes": 14,
+    "attendees": ["Rochelle Adams", "Daniel Moss"],
+    "description": "Agenda: partner tiers and what each tier gets\nThe onboarding checklist for new partners and the training schedule\nRegional launch timeline across the three regions\nBudget for partner marketing and the co-branded materials\nAny other business"
+  },
+  "notes": [
+    {
+      "title": "Partner programme planning",
+      "days_ago": 3,
+      "participants": ["Rochelle Adams", "Daniel Moss"],
+      "plan": "A long session on the partner tiers, the onboarding and the regional launch.\n\n## Action plan\n### Rochelle\n- [ ] Draft the description of the three partner tiers and what each gets\n- [ ] Collect feedback from the five pilot partners on the onboarding checklist\n### Daniel\n- [ ] Prepare the regional launch timeline with dates for each region\n### You\n- [ ] Get the partner marketing budget approved by the leadership team\n- [ ] Book the venue for the partner training day\n\n## Decisions\n- Three tiers: registered, select and premier.\n- The pilot partners get premier for the first year.\n\n## Open questions\n- Does the premier tier include co-branded materials?"
+    },
+    {
+      "title": "Partner programme kick-off",
+      "days_ago": 10,
+      "participants": ["Rochelle Adams"],
+      "plan": "Kick-off for the partner programme.\n\n## Action plan\n### Rochelle\n- [ ] List the pilot partners and their contacts\n### You\n- [ ] Write the programme's one-page summary for the leadership team\n\n## Decisions\n- Start with five pilot partners."
+    },
+    {
+      "title": "Regional launch catch-up",
+      "days_ago": 17,
+      "participants": ["Daniel Moss"],
+      "plan": "Where each region stands for the launch.\n\n## Action plan\n### Daniel\n- [ ] Check the translation status for the regional pages\n### You\n- [ ] Ask finance which region pays for the partner events\n\n## Decisions\n- The northern region launches first."
+    }
+  ],
+  "memory": [
+    { "section": "people", "title": "Rochelle Adams", "summary": "Runs partnerships", "details": ["Works part-time on Fridays", "Prefers written agendas"] },
+    { "section": "people", "title": "Daniel Moss", "summary": "Regional marketing lead", "details": ["Based in the Leeds office"] }
+  ],
+  "expect": {
+    "first": false,
+    "cites": ["Partner programme planning"],
+    "owners": ["You", "Rochelle", "Daniel"],
+    "not_contains": ["Okonkwo", "lighting"],
+    "max_words": 150
+  }
+}

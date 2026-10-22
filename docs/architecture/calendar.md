@@ -1,6 +1,6 @@
 # Calendar
 
-Connecting Google Calendar or an iCal link, sync, parsing, the reminder card and tying recordings to meetings, plus the "Connect your calendar" dialog. The full guide is [`docs/calendar.md`](../calendar.md); the Meetings view is in [meetings.md](./meetings.md).
+Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pre-meeting briefs and tying recordings to meetings, plus the "Connect your calendar" dialog. The full guide is [`docs/calendar.md`](../calendar.md); the Meetings view is in [meetings.md](./meetings.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -71,6 +71,76 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card and
   `calendar_e2e_opened` (test mode records links instead of opening them).
   Lock rule: never hold its state lock while touching windows, the network,
   notes or call detection.
+
+## Pre-meeting briefs
+
+- **`calendar/brief.rs`** (pure, unit-tested, run as is by `yap.exe eval
+  --brief`) — what to know going into a meeting (Granola's "Briefs", local),
+  ≤ 150 words (`MAX_WORDS`): `gather(meeting, notes, memory, now)` →
+  `Facts`: **Last time** (≤ 3 earlier meeting notes, newest first, with an
+  attendee in common — `same_person`: full names agree, a lone first name
+  only while one attendee has it — or of the same series, `series_of(key)`:
+  the iCal UID before `:<original start>`, Google's id before
+  `_YYYYMMDDTHHMMSSZ`, without the connection; notes with nothing in them,
+  this meeting's own and anything later left out; "First meeting with X"
+  for someone new, "First meeting with these people" with nobody known),
+  **Open items** (`plan_tasks`: unticked `- [ ]` under "### Name" in the
+  action plan, or "Name: task" lines, else the digests' actions; You's or an
+  attendee's, ≤ 4, once each, deadline kept), **From memory** (People items
+  for the attendees, Projects the title or invite name; ≤ 3), **On the
+  invite** (≤ 30 words of the cleaned description); each line cites
+  numbered `Source`s (note id + date, memory id, the invite). `messages`:
+  `llm::MEETING_BRIEF_PROMPT` + a worked example (people no real brief has)
+  + `model_input` (the meeting, each source as the model reads it — a note's
+  plan, else digests, else typed notes + transcript, ≤ 600 tokens each — and
+  "Yap lists these open tasks… don't repeat them"); none when only an
+  invite (nothing to add). `check_summary` keeps a bullet only when it
+  cites real sources, is grounded (`ungrounded`: capitalised words — not a
+  sentence's everyday first word, `learn::is_frequent`, unless a name-word
+  — numbers, days, months, relative days and deadline phrases must be in
+  its cited sources, the meeting's title or attendees; ≥ 40 % of its
+  content words and ≥ 50 % of each clause's; an "on the agenda" clause
+  needs the invite, which Yap adds to the citation), keeps owners
+  (`swaps_owner`, per clause, over the cited sources' tasks else any's,
+  including in a plan-less 1:1 what each side said they'd do), says no
+  open task was done (`claims_done`: the task's verb in the past, "already",
+  or a "will/I'll X" of its sources in the past) and no open question
+  settled (`settles_question`); ≤ 3 bullets, ≤ 55 words; "the user" → "you".
+  `assemble` fits the parts under 150 words (the invite gives way first,
+  then memory, open items past two, summary bullets past one) and keeps only
+  cited sources. `writes_summary(local, model)`: a local model under 3.5B
+  (`SUMMARY_MIN_PARAMS_B`) writes no "In short". `write(app?, facts, ep)`:
+  the call (`chat_beside_dictation` in the app, straight in an evaluation)
+  + the checks. `Facts::fingerprint(ai)`: SHA-256 of the meeting, the notes'
+  and memory items' ids + edit times and the model.
+- **In `calendar.rs`**: `prepare_brief(key, force)` (blocking: reads
+  notes and memory outside the lock) returns the kept brief when its
+  fingerprint matches, else stores Yap's part at once (`writing` while a
+  summary is due) and spawns `write_brief` (one at a time,
+  `brief_job`/`brief_waiting`; a failure waits `BRIEF_RETRY`); `BriefAi::of`
+  = the meeting's endpoint (`meeting_summary::resolve_endpoint`), or why
+  not (no model, the on-device model stopped — never started for a brief —,
+  too small). `tick_briefs` (each scheduler turn): meetings from
+  `BRIEF_AHEAD` (15 min) before their start until 5 min after, with no brief
+  or `briefs_dirty` (notes/memory/settings changed); emits the snapshot when
+  the setting flips. `store_brief` → `calendar.json` `briefs` (pruned:
+  `BRIEF_KEEP` 2 days after the start, `BRIEF_MAX` 40), `yap-meeting-brief`,
+  the snapshot (`card.brief`, `briefs`) and the bar card
+  (`bar::update_card` → `Card.brief`). Commands `calendar_brief(key,
+  refresh?)`, `calendar_brief_for_note(noteId)`, `calendar_brief_open(key,
+  n)` (a citation: the note in the main window's Notes via
+  `yap-meeting-open-note`, memory → `yap-open-settings` "memory", the
+  invite → the meeting's own note, `note_for`). Logs counts at info, the
+  brief's text at debug only.
+- **Pages**: `BriefView.svelte` (one renderer: parts, `who` / `due`,
+  source pills with their titles, tones paper / dark / bar), `brief.js`
+  (`briefTeaser`, "Last met Thu 16 Oct · 3 open items"); the card toast's
+  `expand.brief` (`calendar.svelte.js`, kept current as the summary
+  lands), the bar call card's brief line (`bar/CallCard.svelte`), the
+  Meetings view's Brief button (`loadBrief`, `briefs.byKey`), the notepad's
+  Summary card and My thoughts line ([meetings.md](./meetings.md)).
+  Settings → Meetings → Calendar → "Prepare a brief before meetings"
+  (`meeting_brief`, on; `settingsIndex.js` anchor `meeting-brief`).
 
 ## The "Connect your calendar" dialog
 

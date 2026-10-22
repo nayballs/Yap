@@ -1,0 +1,25 @@
+{
+  "name": "brief-hiring-debrief",
+  "description": "Held out (written before the final run, never tuned on): a hiring debrief, three owners, a deadline, a decision and an open question.",
+  "meeting": {
+    "title": "Hiring panel debrief",
+    "in_minutes": 11,
+    "attendees": ["Tanay Kothari", "Priya Shah"],
+    "description": "Agenda: final round plan, salary band"
+  },
+  "notes": [
+    {
+      "title": "Hiring panel: support engineer",
+      "days_ago": 4,
+      "participants": ["Tanay Kothari", "Priya Shah"],
+      "plan": "The panel compared the three candidates for the support engineer role.\n\n## Action plan\n### Tanay\n- [ ] Write up the technical interview feedback (due: Friday)\n### Priya\n- [ ] Schedule the final round with the second candidate\n### You\n- [ ] Check the salary band with HR\n\n## Decisions\n- Move the second candidate to the final round.\n\n## Open questions\n- Do we need a take-home task for the final round?"
+    }
+  ],
+  "expect": {
+    "first": false,
+    "cites": ["Hiring panel: support engineer"],
+    "open_items": ["interview feedback", "final round", "salary band"],
+    "owners": ["You", "Tanay", "Priya"],
+    "not_contains": ["Okonkwo", "lighting", "Rochelle", "offer", "Monday", "take-home task is required", "no take-home"]
+  }
+}

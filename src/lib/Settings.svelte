@@ -420,6 +420,7 @@
     meetingDiarization: false,
     diarizationModel: 'nemotron-3-diarization',
     meetingReminder: '15s',
+    meetingBrief: true,
     // Memory (MemorySection.svelte, memory.rs): the switches only.
     memorySearchChats: true,
     memoryLearnChats: true,

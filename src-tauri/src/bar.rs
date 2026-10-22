@@ -152,6 +152,10 @@ pub struct Card {
     /// `{key}` in the title and body (`lib/hotkeys.js`, as the tooltips'):
     /// the push-to-talk coaching hints.
     pub hotkey: Option<String>,
+    /// A calendar reminder's pre-meeting brief (`calendar/brief.rs`), which
+    /// the call card unfolds under its row ("Brief").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub brief: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
