@@ -109,6 +109,8 @@ pub struct Context<'a> {
 
 impl Context<'_> {
     /// No extra sources: the transcript, the invite and the map only.
+    /// (The speaker evaluations and tests.)
+    #[cfg(any(test, debug_assertions))]
     pub fn bare(ordinary: &dyn Fn(&str) -> bool) -> Context<'_> {
         Context {
             me: String::new(),

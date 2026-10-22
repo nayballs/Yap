@@ -71,3 +71,12 @@ jobs:
       - name: Cargo clippy (stub build, deny warnings)
         working-directory: src-tauri
         run: cargo clippy --locked --all-targets -- -D warnings
+
+      # The release profile too (lib + exe, what the installers build): code
+      # only debug builds call (the e2e hooks, the model evaluations) is dead
+      # there, and that showed up as warnings nobody saw until a release.
+      # Checking only, no code generation: ~1.5 min cold on a 16-thread PC,
+      # less with the Rust cache warm.
+      - name: Cargo clippy (release profile, deny warnings)
+        working-directory: src-tauri
+        run: cargo clippy --locked --release -- -D warnings

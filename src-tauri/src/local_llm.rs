@@ -155,6 +155,8 @@ impl Marker {
 pub const REFUSE_AFTER: u32 = 3;
 
 /// Write the marker for the runtime in `dir` (after a verified download).
+/// (The model evaluations' own runtime, `eval/local.rs`: debug builds.)
+#[cfg(debug_assertions)]
 pub fn write_marker(dir: &Path, m: &Marker) -> std::io::Result<()> {
     write_marker_at(&dir.join(RUNTIME_MARKER), m)
 }
@@ -2692,7 +2694,9 @@ pub async fn install_curated(
 
 /// Stream `url` → `dest.partial`, emit progress, verify SHA-256, then rename into
 /// place. A verification failure deletes the partial and errors (safe: a corrupt
-/// download can never be used).
+/// download can never be used). (The model evaluations' downloads,
+/// `eval/local.rs`: debug builds.)
+#[cfg(debug_assertions)]
 pub(crate) async fn download_verified(
     url: &str,
     dest: &Path,
@@ -2711,7 +2715,7 @@ const DOWNLOAD_STALL: Duration = Duration::from_secs(60);
 /// Room left on the disk beside a download, past its own size.
 const DOWNLOAD_SPARE: u64 = 64 * 1_048_576;
 
-/// [`download_verified`], its progress naming the curated model `model`.
+/// A verified download, its progress naming the curated model `model`.
 /// Whatever goes wrong — the server, a stalled connection, a full disk, a
 /// bad hash — the partial file goes too.
 async fn download_for(

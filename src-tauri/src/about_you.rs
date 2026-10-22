@@ -377,7 +377,8 @@ fn stand_in() -> Detected {
 
 /// `YAP_E2E_LOCALE`'s value: a tag, its region's currency and units
 /// derived; or JSON `{locale, country, currency, symbol, metric, timeZone}`.
-/// Pure.
+/// Pure. (Test runs only: a release build has no stand-in.)
+#[cfg(any(test, debug_assertions))]
 pub fn parse_stand_in(v: &str) -> Detected {
     let v = v.trim();
     if v.starts_with('{') {
