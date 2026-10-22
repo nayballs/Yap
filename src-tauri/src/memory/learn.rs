@@ -856,7 +856,7 @@ fn keep_proposal(changes: Vec<Change>, kind: Kind, sensitive_ok: bool, text: &st
 /// with what the person asked ("Works at Acme as a nurse"), or nothing.
 /// For a "forget …" request, an update that only takes Profile or
 /// Preferences facts out keeps the ones sharing a word with it too (the 4B
-/// took "Lives in Leeds" and the dog out with the job, 2026-10-22); a
+/// took "Lives in Norwich" and the dog out with the job, 2026-10-22); a
 /// request with no such word ("Forget it") narrows nothing there.
 /// Pure.
 pub fn narrow_you_removals(changes: Vec<Change>, items: &[Item], asked: &str) -> Vec<Change> {
@@ -1150,7 +1150,7 @@ mod tests {
     #[test]
     fn forget_takes_out_what_it_names() {
         let items = vec![
-            item(1, Section::Profile, "Profile", &["Works at Acme as a nurse", "Lives in Leeds"]),
+            item(1, Section::Profile, "Profile", &["Works at Acme as a nurse", "Lives in Norwich"]),
             item(2, Section::People, "Sam Patel", &["Colleague at Acme"]),
             item(3, Section::People, "Rochelle", &["Lives in York"]),
         ];
@@ -1171,7 +1171,7 @@ mod tests {
     #[test]
     fn forgetting_a_job_never_takes_the_whole_profile() {
         let items = vec![
-            item(1, Section::Profile, "Profile", &["Works at Acme as a nurse", "Lives in Leeds", "Has a dog called Beans"]),
+            item(1, Section::Profile, "Profile", &["Works at Acme as a nurse", "Lives in Norwich", "Has a dog called Beans"]),
             item(2, Section::People, "Sam Patel", &["Colleague at Acme"]),
         ];
         let remove = |id| Change { action: Action::Remove, id: Some(id), section: None, name: String::new(), about: None, facts: vec![], remove_facts: vec![], say: String::new() };
@@ -1188,15 +1188,15 @@ mod tests {
             ..remove(1)
         };
         let asked = "Forget everything about my old job at Acme";
-        let out = narrow_you_removals(vec![take_out(&["Works at Acme as a nurse"]), take_out(&["Lives in Leeds"]), take_out(&["Has a dog called Beans"])], &items, asked);
+        let out = narrow_you_removals(vec![take_out(&["Works at Acme as a nurse"]), take_out(&["Lives in Norwich"]), take_out(&["Has a dog called Beans"])], &items, asked);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].remove_facts, ["Works at Acme as a nurse"]);
         // "Forget that I have a dog": the dog goes (a short everyday word counts here).
-        let out = narrow_you_removals(vec![take_out(&["Has a dog called Beans", "Lives in Leeds"])], &items, "Forget that I have a dog");
+        let out = narrow_you_removals(vec![take_out(&["Has a dog called Beans", "Lives in Norwich"])], &items, "Forget that I have a dog");
         assert_eq!(out[0].remove_facts, ["Has a dog called Beans"]);
         // Not a "forget": a correction's removal stays as the model wrote it.
-        let out = narrow_you_removals(vec![take_out(&["Lives in Leeds"])], &items, "Actually I moved to York last month");
-        assert_eq!(out[0].remove_facts, ["Lives in Leeds"]);
+        let out = narrow_you_removals(vec![take_out(&["Lives in Norwich"])], &items, "Actually I moved to York last month");
+        assert_eq!(out[0].remove_facts, ["Lives in Norwich"]);
     }
 
     #[test]
@@ -1209,7 +1209,7 @@ mod tests {
         assert_eq!(found.left, ["Acme"]);
         // The model skipped the manager's sentence; the preference had no call.
         let answers = vec![small::Extracted::default(); found.candidates.len()];
-        let items = vec![item(1, Section::Profile, "Profile", &["Works at Acme as a nurse", "Lives in Leeds"])];
+        let items = vec![item(1, Section::Profile, "Profile", &["Works at Acme as a nurse", "Lives in Norwich"])];
         let (changes, dropped) = small_changes(&found.candidates, &answers, &found.left, &items);
         assert_eq!(dropped, 1);
         // Acme's fact out; the preference in the person's words; Mr Okafor, found by Yap.

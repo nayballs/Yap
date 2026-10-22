@@ -20,7 +20,7 @@
 //! apps on screen keep ~0.5–1 GB. A "6 GB" card (which reports 5.9–6 GiB)
 //! holds all of it; a 4 GB one would leave layers on the processor, where
 //! the 4B takes ~25 s a Chat turn. Integrated graphics report little of
-//! their own (they borrow the PC's memory: Nathan's Ryzen's Radeon reports
+//! their own (they borrow the PC's memory: the test PC's Ryzen's Radeon reports
 //! 2 GiB) and don't pass. The sidecar's log says afterwards where the
 //! layers really went (`local_llm::placement`), and Settings says so when
 //! it was the processor.
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn a_card_with_six_gigabytes_of_its_own_runs_the_bigger_model() {
-        // Nathan's RTX 5070 Ti (16 GB), and "6 GB" cards as DXGI reports them.
+        // The test PC's RTX 5070 Ti (16 GB), and "6 GB" cards as DXGI reports them.
         assert!(can_run_big_model(Some(&gpu("NVIDIA GeForce RTX 5070 Ti", 15_907, 0x10DE))));
         assert!(can_run_big_model(Some(&gpu("NVIDIA GeForce GTX 1660", 5_966, 0x10DE))));
         assert!(can_run_big_model(Some(&gpu("AMD Radeon RX 7600", 8_176, 0x1002))));

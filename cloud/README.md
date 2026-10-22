@@ -48,7 +48,7 @@ phone (its password manager, 2FA, mail app).
    through the usual two code calls. Signed in, it shows the account, the
    code to compare with the PC's screen and who asked for it
    (`GET /api/account/device-origin`: "Requested 2 min ago by Yap 0.1.1 on
-   Windows, near Leeds, United Kingdom", then a green "same network as this
+   Windows, near Norwich, United Kingdom", then a green "same network as this
    phone", an amber "different network" note, or a red "another country"
    warning; RFC 8628 §5.4), and warns off links someone else sent. Approve
    and Deny carry equal weight.

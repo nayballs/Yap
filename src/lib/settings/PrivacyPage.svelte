@@ -212,7 +212,7 @@
       bind:checked={cfg.debugLogging}
       label="Debug logging"
       desc={cfg.debugLogging ? 'Writing extra detail: turn it off when you’re done' : 'More detail in the log, for a bug report'}
-      hint="Logs never hold API keys, but what you dictate can appear in them: skim one before sharing it."
+      hint="Logs never hold API keys or what you dictate, type or ask. With Debug logging on they also hold your dictations and the AI’s text: turn it off, or skim the log, before sharing one."
     />
   </Row>
   <Row label="Log file" desc={logName || 'No log yet'} setting="logs">

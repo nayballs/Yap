@@ -1108,7 +1108,7 @@ mod tests {
         assert_eq!(terminal_text("First line.\nSecond line.", false), "First line. Second line.");
         assert_eq!(terminal_text("First line.\r\n\r\nSecond line.\r", false), "First line. Second line.");
         assert_eq!(terminal_text("Hi Sam,\n\nThanks for this.", false), "Hi Sam, Thanks for this.");
-        assert_eq!(terminal_text("Best\nNathan", false), "Best Nathan");
+        assert_eq!(terminal_text("Best\nImogen", false), "Best Imogen");
         assert_eq!(terminal_text("one\u{2028}two\u{2029}three", false), "one two three");
     }
 

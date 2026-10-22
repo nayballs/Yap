@@ -63,9 +63,9 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   Preferences. `drop_about_you` leaves out of a chat pass's or an import's
   Profile and Preferences what About you already says (it goes to the AI with
   every question): a short fact naming the person ("Name is Declan", ≤ 5
-  words) or one whose meaningful words are nearly all the note's ("Works day
-  shifts at a warehouse in Leeds" next to "I work day shifts at a warehouse
-  in Leeds."), never something new or more specific; a Tell is the person's
+  words) or one whose meaningful words are nearly all the note's ("Works
+  weekends at a bakery in Norwich" next to "I work weekends at a bakery in
+  Norwich."), never something new or more specific; a Tell is the person's
   own ask and keeps it. `say_for` writes the toast's words when the model gave none
   ("Rochelle, your sister", "your project Yap").
 - **`memory/guard.rs`** — the backstops, pure: `secret_in` (keys and tokens by
@@ -147,7 +147,7 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   was asked, and for a "forget …" an update that only takes Profile or
   Preferences facts out keeps the ones sharing a word with it — "Forget
   everything about my old job at Acme" takes "Works at Acme as a nurse", not
-  "Lives in Leeds" or the dog (`narrow_you_removals`). Told by the person, sensitive topics
+  "Lives in Norwich" or the dog (`narrow_you_removals`). Told by the person, sensitive topics
   are theirs to keep; an import follows the setting. **Remember / forget in
   a chat**: `tool(name, args)` for the tool loop (`remember {fact, section,
   name?}` — a new person's fact becomes who they are; `forget {what}` —
@@ -169,7 +169,7 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
      or quotes, ≤ 1,200 characters each) in sentences and clauses
      (`sentences` — "Mr." and decimals don't end one — and `clauses`, cut
      where a new first-person subject or a question starts: "I'm a nurse
-     in Leeds and I work nights, so I need…" is three; "Daniel, my
+     in Norwich and I work nights, so I need…" is three; "Daniel, my
      flatmate, …" stays one). A clause counts when it's in the first person
      ("I", "I'm", "my", "we", "our"; "me" alone isn't) or its subject is
      someone memory has ("Rochelle's birthday is…"), and isn't a question,

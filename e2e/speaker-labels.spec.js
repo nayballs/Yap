@@ -284,12 +284,12 @@ test('an engine that stops early leaves You and Them, and the notepad says so', 
 
 test('a 1:1 invite names the one voice, and not a second one who joins', async ({ yap, fakeLlm, shot }) => {
   const feed = await startCalendarFeed();
-  const owner = { name: 'Nathan', email: 'nathan@example.com' };
+  const owner = { name: 'Imogen', email: 'imogen@example.com' };
   feed.set(
     calendarFile(owner.email, [
       vevent({
         uid: 'labels-one-to-one@e2e',
-        summary: 'Alice and Nathan weekly',
+        summary: 'Alice and Imogen weekly',
         start: new Date(Date.now() - 60_000),
         end: new Date(Date.now() + 30 * 60_000),
         attendees: [{ name: 'Alice Moreau', email: 'alice@example.com' }, owner],
@@ -299,7 +299,7 @@ test('a 1:1 invite names the one voice, and not a second one who joins', async (
   try {
     await yap.invoke('calendar_add_link', { link: feed.url, kind: 'ics' });
     const synced = await yap.invoke('calendar_sync');
-    const event = synced.events.find((e) => e.title === 'Alice and Nathan weekly');
+    const event = synced.events.find((e) => e.title === 'Alice and Imogen weekly');
     const id = await yap.invoke('calendar_event', { key: event.key, action: 'start' });
     await expect.poll(() => visible(yap, 'notepad')).toBe(true);
     await expect.poll(() => recording(yap)).toBe(true);
@@ -310,7 +310,7 @@ test('a 1:1 invite names the one voice, and not a second one who joins', async (
     await say(
       yap,
       base,
-      ['them', 'Hi Nathan, the launch is going well so far.', 0],
+      ['them', 'Hi Imogen, the launch is going well so far.', 0],
       ['you', 'Great to hear, anything blocking you?', 6_000],
       ['them', 'I still need to send the slides to legal.', 10_000]
     );

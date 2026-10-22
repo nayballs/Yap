@@ -781,7 +781,7 @@ pub mod tests {
     const NEW: Server = Server { current: true, mtp: false };
     const MTP: Server = Server { current: true, mtp: true };
 
-    /// The real files' sizes (Nathan's %APPDATA%\yap\llm, 2026-10-20).
+    /// The real files' sizes (the test PC's %APPDATA%\yap\llm, 2026-10-20).
     const QWEN35_4B_FILE: u64 = 3_013_027_808;
     const QWEN25_1_5B_FILE: u64 = 1_117_320_736;
 

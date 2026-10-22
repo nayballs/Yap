@@ -27,7 +27,7 @@ Use **`scripts/dev.bat`** ("yap.dev") — it runs `npm run tauri dev -- --featur
 (the **real** GPU pipeline; needs the Vulkan SDK installed). A commented line switches to the
 fast no-GPU stub for pure UI work. Dev hot-reloads the frontend on every edit (Vite on **:51437**).
 A **"Yap - Dev"** desktop shortcut launches it; the plain **"Yap"** desktop shortcut is the
-*installed* app (`D:\Hobby Project\Yap`, follows the nightly channel).
+*installed* app (it follows the nightly channel).
 **It always runs the latest main** (2026-10-17): before starting, dev.bat runs
 `scripts/dev-update.ps1`, which fast-forwards the checkout to `origin/main` (putting back
 files whose only change is line endings — the Tauri CLI rewrites `src-tauri/Cargo.toml` —
@@ -38,8 +38,8 @@ branch, with real local edits, offline, or when it isn't a fast-forward — Yap 
 It then stops any AI app's `yap.exe mcp` helper running from the dev build's own exe
 (`<drive>:\t\debug\yap.exe`), which would otherwise make the build fail with "Access is
 denied" (see `mcp_clients.rs`).
-So merged work reaches Nathan by pushing to main; never fast-forward his checkout by hand
-while Yap - Dev runs.
+So merged work reaches the maintainer's dev build by pushing to main; never fast-forward
+that checkout by hand while Yap - Dev runs.
 
 ```bash
 # real GPU pipeline (default in dev.bat) — requires the Vulkan SDK
@@ -71,6 +71,37 @@ failures.)
 
 `.github/workflows/e2e.yml` runs the **end-to-end UI suite** on the same triggers
 (plus `workflow_dispatch`), separately so `ci.yml` stays quick — see below.
+
+## The privacy guard (`scripts/privacy-guard.mjs`)
+The repo is public, so nothing personal or secret may land in it (2026-10-22).
+**Before a push** (`.githooks/pre-push`; `npm run hooks:install` once per clone =
+`git config core.hooksPath .githooks`, which every worktree shares) it reads the
+commits about to go out — the remote's tip..the new one, or for a new branch
+whatever no remote branch has — and checks the lines their diffs add (a merge:
+the lines its resolution adds), their messages and the paths they touch, never
+the author/committer headers, for:
+- **the private terms**: names and details listed one per line in a file outside
+  every repo, `%USERPROFILE%\.yap-private\terms.txt` (or `YAP_PRIVATE_TERMS`),
+  matched case-insensitively as whole words (a phrase's spaces match any
+  whitespace). No file: skipped with one warning. A hit prints the line with the
+  term masked as `[private term]`, never the term (terminal output ends up in logs);
+- **API-key shapes** (Groq, OpenAI, Anthropic, xAI, Tavily, ElevenLabs, AWS,
+  GitHub, Google, Stripe, Slack, Resend, private-key PEM headers) unless plainly a
+  fake (a test word, a run like `abcdef` or `aaaaaa`, too few distinct
+  characters) — printed cut short;
+- **email addresses** except documentation domains (`example.com/.org/.net`,
+  `*.example.*`, `.test`…), GitHub's noreply, Google Calendar ids and the
+  product's own (`no-reply@mail.contextmirror.com`, `contextmirror@proton.me`);
+- **UK phone numbers** except Ofcom's drama ranges (07700 900xxx, 020 7946 0xxx…).
+
+A finding blocks the push with the commit, file, line and rule. Only for a false
+positive, after checking it really is one: `git push --no-verify`. `npm run
+privacy:scan` (`--scan-tree`) checks every tracked file as it is now;
+`--range A..B` a range of commits. CI (`ci.yml`, first step) runs the tree scan
+and the pushed range without private terms (it has no file), then the guard's
+own tests (`npm run test:privacy`: a throwaway repo, terms file and commits,
+the real hook through `git push`). Fixtures use fictional people and details
+(Imogen, Declan, Rochelle; Bristol, Norwich; example.com; 07700 900xxx).
 
 ## End-to-end UI tests (`npm run test:app`)
 Playwright drives a real **stub** debug build (frontend embedded) over WebView2's
@@ -125,7 +156,7 @@ naming the process). Silencing and pausing other apps follow the same rule
 (sessions of the test's processes, or of a process whose windows all carry
 the nonce; media titled with the nonce): your own music is never touched.
 ⚠ **It takes the keyboard focus for ~2 min** (runs locally
-only, not on CI): say so before running it while Nathan's at the PC; another app
+only, not on CI): say so before running it while the maintainer is at the PC; another app
 grabbing the focus mid-run makes Yap refuse (the harness retries a refused paste
 twice). A gap it finds becomes a "known gap: …" test pinning today's result
 until it's fixed (none open now). Guide: [`docs/e2e-tests.md`](../e2e-tests.md) "Real-app robot tests".

@@ -137,19 +137,22 @@ pub fn sentences(text: &str) -> Vec<(String, bool)> {
 }
 
 /// A sentence cut where a new subject in the first person starts ("I'm a
-/// nurse in Leeds and I work nights, so I need…" → three) or a question
+/// nurse in Norwich and I work nights, so I need…" → three) or a question
 /// does ("…called Yap, how does Tauri work?"). Each clause with whether
 /// it's asked: only the sentence's last part carries its "?".
 pub fn clauses(sentence: &str, asked: bool) -> Vec<(String, bool)> {
     static CUT: LazyLock<Regex> = LazyLock::new(|| {
-        re(r"(?i)(?:,\s*(?:(?:and|but|so|because|as|since|though|although|plus|also|then)\s+)?|;\s*|\s+(?:and|but|so|because|since|though|although|plus|while|whereas)\s+|\s+-\s+|\s+—\s+)(?:i|i'm|im|i've|ive|i'd|i'll|we|we're|we've|my|our|how|what|where|when|why|which|who|can you|could you|would you|will you|any|is there|are there|do you|does|should i|is it|is that|are they)\b")
+        re(r"(?i)(?:,\s*(?:(?:and|but|so|because|as|since|though|although|plus|also|then)\s+)?|;\s*|\s+(?:and|but|so|because|since|though|although|plus|while|whereas)\s+|\s+-\s+|\s+—\s+)((?:i|i'm|im|i've|ive|i'd|i'll|we|we're|we've|my|our|how|what|where|when|why|which|who|can you|could you|would you|will you|any|is there|are there|do you|does|should i|is it|is that|are they)\b)")
     });
     // Each part runs from the start of its subject to where the joining
     // words (", and", " so") before the next subject begin. A name before
     // ", my flatmate," isn't a part of its own.
     let mut spans: Vec<(usize, usize)> = Vec::new();
     let mut start = 0;
-    for m in CUT.find_iter(sentence) {
+    for c in CUT.captures_iter(sentence) {
+        let (Some(m), Some(subject)) = (c.get(0), c.get(1)) else {
+            continue;
+        };
         let before = sentence[start..m.start()].trim();
         let only_a_name = !before.is_empty()
             && before.split_whitespace().count() <= 3
@@ -157,15 +160,8 @@ pub fn clauses(sentence: &str, asked: bool) -> Vec<(String, bool)> {
         if only_a_name {
             continue;
         }
-        let joined = m.as_str();
-        let subject_at = joined
-            .char_indices()
-            .rev()
-            .find(|(_, c)| c.is_whitespace() || *c == ',' || *c == ';')
-            .map(|(i, c)| i + c.len_utf8())
-            .unwrap_or(0);
         spans.push((start, m.start()));
-        start = m.start() + subject_at;
+        start = subject.start();
     }
     spans.push((start, sentence.len()));
     let parts: Vec<String> = spans
@@ -500,21 +496,24 @@ fn assistant_talk(line: &str) -> bool {
     line.trim_end().ends_with(':') || TALK.is_match(line)
 }
 
-/// An import line with several memories ("Name is Kit, lives in Leeds, UK";
+/// An import line with several memories ("Name is Kit, lives in Norwich, UK";
 /// "Works as a developer, building an app called Yap") in parts, cut only
 /// where a new verb starts so a part never loses its subject.
 fn import_parts(line: &str) -> Vec<String> {
     static CUT: LazyLock<Regex> = LazyLock::new(|| {
-        re(r"(?i)(?:,\s*(?:and\s+)?|;\s*|\s+and\s+)(?:lives|works|has|plays|likes|loves|enjoys|prefers|uses|speaks|studies|owns|runs|is building|is making|is writing|building|making|writing|learning|working on|developing)\b")
+        re(r"(?i)(?:,\s*(?:and\s+)?|;\s*|\s+and\s+)((?:lives|works|has|plays|likes|loves|enjoys|prefers|uses|speaks|studies|owns|runs|is building|is making|is writing|building|making|writing|learning|working on|developing)\b)")
     });
-    let mut cuts = vec![0];
-    for m in CUT.find_iter(line) {
-        let s = m.as_str();
-        let at = s.char_indices().rev().find(|(_, c)| c.is_whitespace() || *c == ',' || *c == ';').map(|(i, c)| i + c.len_utf8()).unwrap_or(0);
-        cuts.push(m.start() + at);
+    // Each part from its verb to the joining words before the next.
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut start = 0;
+    for c in CUT.captures_iter(line) {
+        if let (Some(m), Some(verb)) = (c.get(0), c.get(1)) {
+            spans.push((start, m.start()));
+            start = verb.start();
+        }
     }
-    cuts.push(line.len());
-    cuts.windows(2).map(|w| line[w[0]..w[1]].trim().trim_end_matches([',', ';']).trim().to_string()).filter(|p| !p.is_empty()).collect()
+    spans.push((start, line.len()));
+    spans.into_iter().map(|(a, b)| line[a..b].trim().trim_end_matches([',', ';']).trim().to_string()).filter(|p| !p.is_empty()).collect()
 }
 
 // ---- people, projects, topics: what the sentence must say --------------------------------------
@@ -786,8 +785,8 @@ pub fn people_changes(c: &Candidate) -> Vec<Change> {
 }
 
 /// **A project the person owns, named in their words** ("I'm writing a
-/// fantasy novel called The Salt Road", "building a voice dictation app
-/// called Yap"): `(name, what it is)`, found by Yap. Needs ownership and a
+/// fantasy novel called The Salt Road", "is writing a cookbook
+/// called Small Plates"): `(name, what it is)`, found by Yap. Needs ownership and a
 /// capitalised name after "called" / "named" / "titled". Pure.
 pub fn project_in(text: &str) -> Option<(String, String)> {
     static NAMED: LazyLock<Regex> = LazyLock::new(|| {
@@ -1109,9 +1108,9 @@ fn who_they_are(fact: &str) -> bool {
 }
 
 /// What the person said about themselves, as memory keeps it: their own
-/// clause in the third person ("I'm a nurse at St James's in Leeds" →
-/// "Nurse at St James's in Leeds"). A small model's paraphrase can lose
-/// the point ("Works at St James's in Leeds", no nurse) or add to it.
+/// clause in the third person ("I'm a nurse at St James's in Norwich" →
+/// "Nurse at St James's in Norwich"). A small model's paraphrase can lose
+/// the point ("Works at St James's in Norwich", no nurse) or add to it.
 /// `None` when it's too long to be one fact.
 fn own_words(c: &Candidate) -> Option<String> {
     static TAIL: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)[,;]?\s+(?:by the way|btw|lol|haha|though|thanks|thank you|if that helps|for context|fyi)\s*[.!]*$"));
@@ -1144,7 +1143,7 @@ fn someone_else_first(text: &str) -> bool {
 }
 
 /// The person themselves is the clause's subject ("I play chess…", "I'm a
-/// nurse…"; told: a line starting with what they do, "Lives in Leeds").
+/// nurse…"; told: a line starting with what they do, "Lives in Norwich").
 fn the_person_speaks(c: &Candidate) -> bool {
     static SUBJECT: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)^(?:i|i'm|im|i've|ive|i'd|we|we're|we've)\b"));
     static TOLD: LazyLock<Regex> = LazyLock::new(|| {
@@ -1448,14 +1447,17 @@ mod tests {
 
     #[test]
     fn sentences_and_clauses_are_cut_where_a_new_subject_starts() {
-        let s = sentences("I'm a nurse at St James's in Leeds and I work night shifts, so I need easy meals. Any ideas?");
+        let s = sentences("I'm a nurse at St James's in Norwich and I work night shifts, so I need easy meals. Any ideas?");
         assert_eq!(s.len(), 2);
         assert!(s[1].1, "a question");
         let c: Vec<String> = clauses(&s[0].0, s[0].1).into_iter().map(|(c, _)| c).collect();
-        assert_eq!(c, ["I'm a nurse at St James's in Leeds", "I work night shifts", "I need easy meals"]);
+        assert_eq!(c, ["I'm a nurse at St James's in Norwich", "I work night shifts", "I need easy meals"]);
         // A question after a statement, in one sentence.
         let c = clauses("I'm building a dictation app called Yap, how does Tauri's event system work", true);
         assert_eq!(c, [("I'm building a dictation app called Yap".to_string(), false), ("how does Tauri's event system work".to_string(), true)]);
+        // A two-word start stays whole.
+        let c: Vec<String> = clauses("The page says it's £58 return, is that per day", true).into_iter().map(|(c, _)| c).collect();
+        assert_eq!(c, ["The page says it's £58 return", "is that per day"]);
         // "Mr." and decimals don't end a sentence.
         assert_eq!(sentences("My boss is Mr. Okafor. It costs 2.50 a day.").len(), 2);
     }
@@ -1536,8 +1538,8 @@ mod tests {
 
     #[test]
     fn what_the_person_says_about_themselves_is() {
-        let f = candidates(&["I'm a nurse at St James's in Leeds and I work night shifts, so I need easy meals I can take to work. Any ideas?"], false, &[]);
-        assert_eq!(texts(&f), ["I'm a nurse at St James's in Leeds", "I work night shifts"]);
+        let f = candidates(&["I'm a nurse at St James's in Norwich and I work night shifts, so I need easy meals I can take to work. Any ideas?"], false, &[]);
+        assert_eq!(texts(&f), ["I'm a nurse at St James's in Norwich", "I work night shifts"]);
         let f = candidates(&["Thanks! Oh and they need to be quick, I have to walk my dog Beans before every shift."], false, &[]);
         assert_eq!(texts(&f), ["I have to walk my dog Beans before every shift"]);
         // Someone in their life, this weekend: the person is the candidate.
@@ -1550,7 +1552,7 @@ mod tests {
         assert_eq!(texts(&candidates(&["I'm building a dictation app called Yap in Rust and Svelte. How does Tauri's event system work?"], false, &[])), ["I'm building a dictation app called Yap in Rust and Svelte"]);
         assert_eq!(texts(&candidates(&["I play chess at a club every Thursday and I'm trying to get better at endgames."], false, &[])), ["I play chess at a club every Thursday"]);
         // Secrets and (with the setting off) sensitive topics: not even asked.
-        assert!(candidates(&["The wifi password is tulip-99-garden, we live at 14 Elm Road, Leeds LS6 2AB."], false, &[]).candidates.is_empty());
+        assert!(candidates(&["The wifi password is tulip-99-garden, we live at 14 Elm Road, Norwich NR6 2AB."], false, &[]).candidates.is_empty());
         assert!(candidates(&["I've just been diagnosed with type 2 diabetes."], false, &[]).candidates.is_empty());
         assert_eq!(candidates(&["I've just been diagnosed with type 2 diabetes."], true, &[]).candidates.len(), 1);
         // Leaving: Yap's own; the new job is a candidate.
@@ -1607,7 +1609,7 @@ mod tests {
     fn yap_finds_projects_and_birthdays_in_the_persons_words() {
         assert_eq!(project_in("I'm writing a fantasy novel called The Salt Road in the evenings"), Some(("The Salt Road".into(), "Fantasy novel".into())));
         assert_eq!(project_in("I'm building a dictation app called Yap in Rust and Svelte"), Some(("Yap".into(), "Dictation app".into())));
-        assert_eq!(project_in("building a voice dictation app called Yap (Rust, Tauri, Svelte)"), Some(("Yap".into(), "Voice dictation app".into())));
+        assert_eq!(project_in("is writing a cookbook called Small Plates"), Some(("Small Plates".into(), "Cookbook".into())));
         // No ownership, or a person: none.
         assert_eq!(project_in("My friend made an app called Bloop"), None);
         assert_eq!(project_in("Has a sister called Rochelle"), None);
@@ -1666,10 +1668,10 @@ mod tests {
         assert_eq!((c.name.as_str(), c.about.as_deref(), c.facts.len()), ("Rochelle", Some("Sister"), 0));
         let c = validate(&cand("My best friend Imogen is a vet in Bristol"), &x(Section::People, "Imogen", "Vet in Bristol"), &none).unwrap();
         assert_eq!((c.about.as_deref(), c.facts.clone()), (Some("Best friend"), vec!["Vet in Bristol".to_string()]));
-        // The 1.5B's "Nurse at St James's in Leeds" as a person: what the
+        // The 1.5B's "Nurse at St James's in Norwich" as a person: what the
         // person said of themselves, in their words, under Profile.
-        let c = validate(&cand("I'm a nurse at St James's in Leeds"), &x(Section::People, "Nurse at St James's in Leeds", ""), &none).unwrap();
-        assert_eq!((c.section, c.name.as_str(), c.facts.clone()), (Some(Section::Profile), "", vec!["Nurse at St James's in Leeds".to_string()]));
+        let c = validate(&cand("I'm a nurse at St James's in Norwich"), &x(Section::People, "Nurse at St James's in Norwich", ""), &none).unwrap();
+        assert_eq!((c.section, c.name.as_str(), c.facts.clone()), (Some(Section::Profile), "", vec!["Nurse at St James's in Norwich".to_string()]));
         // "I'm Declan, by the way" with a nonsense title: the name, said plainly.
         let c = validate(&cand("I'm Declan, by the way"), &x(Section::People, "the name as written", "My name is Declan"), &none).unwrap();
         assert_eq!(c.facts, ["Name is Declan"]);
@@ -1721,7 +1723,7 @@ mod tests {
     #[test]
     fn a_move_or_a_job_left_replaces_what_memory_had() {
         let items = vec![
-            item(1, Section::Profile, "Profile", "", &["Works at Acme as a nurse", "Lives in Leeds"]),
+            item(1, Section::Profile, "Profile", "", &["Works at Acme as a nurse", "Lives in Norwich"]),
             item(2, Section::People, "Rochelle", "Sister", &["Lives in York", "Loves gardening"]),
         ];
         let c = left_changes(&["Acme".into()], &items);
@@ -1749,22 +1751,22 @@ mod tests {
     fn told_text_and_imports_come_in_parts() {
         let f = told("My dog's name is Beans", false);
         assert_eq!(texts(&f), ["My dog's name is Beans"]);
-        let import = "```\n- Prefers concise answers with British spelling\n- Name is Kit, lives in Leeds, UK\n- Works as a software developer, building a voice dictation app called Yap (Rust, Tauri, Svelte)\n- Saved password hint: tulip99\n- Wanted a recipe for lasagne on 3 March\n```\nThat's everything I have stored.";
+        let import = "```\n- Prefers concise answers with British spelling\n- Name is Kit, lives in Norwich, UK\n- Works as a pharmacist, and is writing a cookbook called Small Plates\n- Saved password hint: tulip99\n- Wanted a recipe for lasagne on 3 March\n```\nThat's everything I have stored.";
         let t = texts(&told(import, true));
         assert_eq!(
             t,
             [
                 "Prefers concise answers with British spelling",
                 "Name is Kit",
-                "lives in Leeds, UK",
-                "Works as a software developer",
-                "building a voice dictation app called Yap (Rust, Tauri, Svelte)"
+                "lives in Norwich, UK",
+                "Works as a pharmacist",
+                "is writing a cookbook called Small Plates"
             ]
         );
         // Without a code block: the assistant's own talk isn't the person.
-        let t = texts(&told("Here's what I remember about you:\n- Lives in Leeds\n- Plays chess\nThat's everything I have stored.", true));
-        assert_eq!(t, ["Lives in Leeds", "Plays chess"]);
-        assert!(owns_project("building a voice dictation app called Yap"));
+        let t = texts(&told("Here's what I remember about you:\n- Lives in Norwich\n- Plays chess\nThat's everything I have stored.", true));
+        assert_eq!(t, ["Lives in Norwich", "Plays chess"]);
+        assert!(owns_project("is writing a cookbook called Small Plates"));
         assert!(keeps_up("Plays Baldur's Gate 3 and World of Warcraft"));
     }
 
@@ -1779,7 +1781,7 @@ mod tests {
         // The prompt stays within ~300 tokens with a sentence (its texts and
         // ~4 tokens of chat template a message; Yap's estimate runs ~15 %
         // high, so ≤ 350 of it).
-        let m = messages(&cand("I'm a nurse at St James's in Leeds and I work night shifts at the hospital"));
+        let m = messages(&cand("I'm a nurse at St James's in Norwich and I work night shifts at the hospital"));
         let tokens: usize = m.as_array().unwrap().iter().map(|x| crate::meeting_summary::estimate_tokens(x["content"].as_str().unwrap()) + 4).sum();
         assert!(tokens <= 350, "{tokens}");
     }

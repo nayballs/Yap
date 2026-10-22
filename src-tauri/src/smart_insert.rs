@@ -271,7 +271,7 @@ fn may_lower(body: &str, ctx: &FieldContext, names: &[&str]) -> bool {
     if case_of(word) != Case::Sentence || is_i_word(word) {
         return false;
     }
-    // One of the dictionary's spellings ("Yap", "Parakeet", "Nathan"), or the
+    // One of the dictionary's spellings ("Yap", "Parakeet", "Imogen"), or the
     // first word of one ("Yap Notes").
     if names.iter().any(|n| n.split_whitespace().next() == Some(word)) {
         return false;

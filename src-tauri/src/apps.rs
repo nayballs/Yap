@@ -2564,7 +2564,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// Games as Nathan's PC indexes them (2026-10-18): Blizzard's shortcuts
+    /// Games as a test PC indexes them (2026-10-18): Blizzard's shortcuts
     /// run one launcher with a product code; Steam's are `.url` links.
     fn games() -> Vec<App> {
         const WOW: &str = r"D:\Program Files (x86)\World of Warcraft\World of Warcraft Launcher.exe";

@@ -909,7 +909,7 @@ mod tests {
         assert_eq!(rename(&mut n, THEM, "Tom Baker"), Ok(false));
         assert!(rename(&mut n, THEM, "  ").is_err());
         // You is you.
-        assert!(rename(&mut n, YOU, "Nathan").is_err());
+        assert!(rename(&mut n, YOU, "Imogen").is_err());
     }
 
     #[test]
@@ -1020,9 +1020,9 @@ mod tests {
         assert_eq!(back["transcript"][0], json!({ "source": "them", "text": "hi", "ts": 5 }));
         // A map round-trips in its own shape.
         let mut n = note(&[("them", "x")]);
-        calendar_guess(&mut n, &[("Priya".into(), "p@x.com".into())]);
+        calendar_guess(&mut n, &[("Priya".into(), "p@example.com".into())]);
         let v = serde_json::to_value(&n.speakers).unwrap();
-        assert_eq!(v, json!({ "them": { "name": "Priya", "email": "p@x.com", "source": "calendar" } }));
+        assert_eq!(v, json!({ "them": { "name": "Priya", "email": "p@example.com", "source": "calendar" } }));
         let again: Speakers = serde_json::from_value(v).unwrap();
         assert_eq!(again, n.speakers);
     }

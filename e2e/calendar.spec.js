@@ -32,7 +32,7 @@ import { startCalendarFeed, calendarFile, vevent } from './support/calendar-feed
 import { startFakeGoogle } from './support/fake-google.js';
 
 const CLIENT_ID = 'e2e-client.apps.googleusercontent.com';
-const OWNER = { name: 'Nathan', email: 'nathan@example.com' };
+const OWNER = { name: 'Imogen', email: 'imogen@example.com' };
 const TANAY = { name: 'Tanay Kothari', email: 'tanay@example.com' };
 const PRIYA = { name: 'Priya Shah', email: 'priya@example.com', partstat: 'NEEDS-ACTION' };
 const SAM = { name: 'Sam Lee', email: 'sam@example.com' };
@@ -253,7 +253,7 @@ test('Settings → Connectors: what to connect, a link that was reset, and one t
   feed.set(baseFeed());
   await input.fill(feed.url);
   await other.getByRole('button', { name: 'Add calendar' }).click();
-  await expect(other.getByText('nathan@example.com')).toBeVisible();
+  await expect(other.getByText('imogen@example.com')).toBeVisible();
   await expect(other).toContainText('127.0.0.1 · Synced just now');
   await shot(main, '04-link-connected');
 
@@ -610,9 +610,9 @@ test('Google Calendar in one click (a local fake of Google), read-only, then dis
   // The link too (a right-click on its row is the same menu): nothing
   // left, and the secrets are gone.
   const other = settings.getByRole('group', { name: 'Other calendar' });
-  await other.getByText('nathan@example.com', { exact: true }).click({ button: 'right' });
-  await main.getByRole('menu', { name: 'nathan@example.com options' }).getByRole('menuitem', { name: 'Disconnect…' }).click();
-  await main.getByRole('alertdialog', { name: 'Disconnect nathan@example.com?' }).getByRole('button', { name: 'Disconnect' }).click();
+  await other.getByText('imogen@example.com', { exact: true }).click({ button: 'right' });
+  await main.getByRole('menu', { name: 'imogen@example.com options' }).getByRole('menuitem', { name: 'Disconnect…' }).click();
+  await main.getByRole('alertdialog', { name: 'Disconnect imogen@example.com?' }).getByRole('button', { name: 'Disconnect' }).click();
   await expect.poll(() => status(yap).then((s) => s.connections.length)).toBe(0);
   expect((await status(yap)).events).toEqual([]);
   expect(Object.keys(yap.readJson('calendar-secrets.e2e.json'))).toEqual([]);

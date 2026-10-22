@@ -2023,8 +2023,8 @@ mod tests {
 
     #[test]
     fn session_from_requires_token_and_user() {
-        let ok = json!({ "token": "t", "user": { "id": "u", "email": "e@x.io", "name": "", "image": null } });
-        assert_eq!(session_from(&ok).unwrap().1.email, "e@x.io");
+        let ok = json!({ "token": "t", "user": { "id": "u", "email": "e@example.com", "name": "", "image": null } });
+        assert_eq!(session_from(&ok).unwrap().1.email, "e@example.com");
         assert!(session_from(&json!({ "token": "", "user": ok["user"] })).is_none());
         assert!(session_from(&json!({ "user": ok["user"] })).is_none());
     }

@@ -566,7 +566,7 @@ mod real {
         /// a name, a time, money, a date, "Q3" and a spoken list.
         const ANSWER: &str = "Sure! Your meeting with Priya Shah is on Thursday at 2:30 pm, for about 45 minutes. Before then, three things. One, send her the Q3 budget, which came to £12,400. Two, book a room for four people. Three, reread your notes from October 14th. Want me to draft the email?";
         /// Names and jargon a chat answer about work has, for the G2P.
-        const NAMES: &str = "Siobhan and Priya moved the Kubernetes migration to Friday. Ask Nathan about GitHub access, and check the WhatsApp group for Tauri questions.";
+        const NAMES: &str = "Siobhan and Priya moved the Kubernetes migration to Friday. Ask Imogen about GitHub access, and check the WhatsApp group for Tauri questions.";
         /// The research's first sentence (about 5 s of speech).
         const FIRST: &str = "Your meeting with Priya Shah is on Thursday at two thirty p.m., for about forty-five minutes.";
 
@@ -740,7 +740,7 @@ mod real {
                 assert!(r.is_err(), "the run should have been terminated");
             }
 
-            // The samples: Yap's own output for Nathan to compare, and the G2P
+            // The samples: Yap's own output for the maintainer to compare, and the G2P
             // comparison ((a) eSpeak NG for everything, (b) the lexicon with
             // eSpeak NG for the words it lacks), raw and written-for-the-ear.
             let cases: Vec<(&str, &str, Phonemizer, &str, bool)> = vec![

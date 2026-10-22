@@ -482,7 +482,7 @@ const REPLAYED: &str = "yap-earlier-search";
 /// ("did you look that up?") without a note in the answer's text — a note
 /// there ("(Yap searched the web for this answer. Its sources: …)") was
 /// copied word for word into an answer that searched nothing (Qwen3.5-4B,
-/// Nathan's chat, 2026-10-21). Pure.
+/// a tester's chat, 2026-10-21). Pure.
 pub fn history_messages(messages: &[ChatMessage]) -> Vec<Value> {
     let mut out = Vec::new();
     for (i, m) in messages.iter().enumerate() {
@@ -644,7 +644,7 @@ pub fn web_history_note(messages: &[ChatMessage]) -> Option<String> {
 ///   follow-up, the latest earlier answer's ([`earlier_source_numbers`]) —
 ///   but not for a new question that needs the web (`web::needs_web`, and
 ///   not pointing back at an answer, `web::refers_back`): its "[1]" would
-///   point at another answer's pages (Nathan's RPG question citing the indie
+///   point at another answer's pages (a tester's RPG question citing the indie
 ///   games' sources, 2026-10-21).
 ///
 /// `looked`: a search or page read ran this turn; `earlier`: the
@@ -920,7 +920,7 @@ mod tests {
     fn an_earlier_web_answer_goes_to_the_model_with_its_search_replayed() {
         // Never a note in the answer's own text (Qwen3.5-4B copied "(Yap
         // searched the web for this answer. Its sources: …)" into an answer
-        // that searched nothing, Nathan's chat 2026-10-21).
+        // that searched nothing, a tester's chat 2026-10-21).
         let msgs = vec![
             said("user", "When do Arsenal play tonight?"),
             web_answer("They play Bayern at 8 pm [1].", "Arsenal tonight"),
@@ -957,7 +957,7 @@ mod tests {
     #[test]
     fn answers_are_checked_before_they_are_shown() {
         let indie = vec![said("user", "best indie games 2026"), web_answer("Hollow Lantern [1], Glasswing [2].", "best indie games 2026")];
-        // Nathan's RPG answer (no search that turn): the made-up note goes,
+        // A tester's RPG answer (no search that turn): the made-up note goes,
         // and so do its citations — they'd point at the indie games' pages.
         let rpg = "Black Myth: Wukong [1] and Dragon's Dogma 2 [5].\n\n(Yap searched the web for this answer. Its sources: [1] Black Myth: Wukong - Wikipedia; [5] Dragon's Dogma 2 - IGN.)";
         let (out, fixed) = checked_answer(rpg, "What are some of the best RPG games coming out in 2026", false, &indie, &[]);

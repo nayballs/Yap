@@ -409,7 +409,7 @@ test('■ stops the answer, and a press while Yap speaks cuts it off to listen (
   await setConfig(yap, main, { assistantHotkey: '' });
 });
 
-// Nathan (2026-10-18): "We do not want this feature enabled during meetings,
+// The maintainer (2026-10-18): "We do not want this feature enabled during meetings,
 // we don't want Bella to talk … this would be too much". While a meeting
 // records or a call is on, the shortcut doesn't listen and Yap doesn't talk.
 const offCard = (yap) =>
@@ -985,7 +985,7 @@ test('a test run never downloads Kokoro from the internet', async ({ yap, kokoro
   }
 });
 
-// Nathan (2026-10-18): "this bubble I do like it, but we need a setting that
+// The maintainer (2026-10-18): "this bubble I do like it, but we need a setting that
 // can turn that off". Settings → Voice Assistant → "Show the answer on the
 // Yap bar": off, a spoken answer has no card (■ stays on the capsule). (An
 // answer that isn't read aloud still shows: assistant::card_on_bar, unit-tested.)
@@ -1023,7 +1023,7 @@ test('"Show the answer on the Yap bar" off: just the voice, with ■ on the bar'
   }
 });
 
-// Nathan (2026-10-18): "I turned off the voice yet heard the voice still".
+// The maintainer (2026-10-18): "I turned off the voice yet heard the voice still".
 // Speak replies (Chat's Voice replies) is the one voice switch: off, the
 // shortcut's answer is shown on the bar and nothing is said.
 test('voice off: the assistant shortcut answers on the bar and says nothing', async ({ yap, main, fakeLlm }) => {
@@ -1039,7 +1039,7 @@ test('voice off: the assistant shortcut answers on the bar and says nothing', as
   await card.getByRole('button', { name: 'Close' }).click();
 });
 
-// Nathan (2026-10-20): "the voice that gets spoken back is so loud, even at
+// The maintainer (2026-10-20): "the voice that gets spoken back is so loud, even at
 // 1% on the volume mixer". Yap's own volume for it (tts.rs `gain`, squared):
 // Settings → Voice Assistant → Volume, and the slider next to Voice replies
 // in Chat; either one moves the other.

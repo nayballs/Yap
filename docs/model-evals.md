@@ -18,12 +18,12 @@ npm run eval -- --model local:installed --model local:qwen2.5-3b --tools on
 npm run eval -- --raw evals/raw/groq-browser-search.json --keys-from-yap
 
 # or the binary directly, from the repo root (it finds evals/scenarios there)
-E:/yap-builds/evals/debug/yap.exe eval --model groq:openai/gpt-oss-20b --keys-from-yap --only apps
+$YAP_EVAL_TARGET_DIR/debug/yap.exe eval --model groq:openai/gpt-oss-20b --keys-from-yap --only apps
 ```
 
 `npm run eval` builds into `$YAP_EVAL_TARGET_DIR` (default `src-tauri/target/eval`) and
-writes run folders to `$YAP_EVAL_OUT` (default `test-results/evals/`, git-ignored). On
-Nathan's PC: `YAP_EVAL_TARGET_DIR=E:/yap-builds/evals`, `--out E:/yap-builds/eval-runs`.
+writes run folders to `$YAP_EVAL_OUT` (default `test-results/evals/`, git-ignored). To keep
+builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--out <builds>/eval-runs`.
 `yap.exe eval --help` lists every option; the main ones:
 
 | Option | |
@@ -233,7 +233,7 @@ isn't logged.
     "memory_sensitive": false,                // "Include sensitive topics in memory" (memory.rs)
     "memory_search_chats": true,              // "Search and reference past chats"
     "about_name": "Declan",                   // About you's name and note (about_you.rs; the region is --locale)
-    "about_me": "I work day shifts in Leeds."
+    "about_me": "I work weekends in Norwich."
   },
   "apps": "standard",                         // evals/apps/standard.json, an inline [{id, name}] list, or "this_pc"
   "seed": {
@@ -331,7 +331,7 @@ server-side tool ran (`executed_tools`: its queries, and the pages' titles and U
 
 ## Adding a scenario
 
-1. Write `evals/scenarios/<area>-<what>.json`: a realistic message (as Nathan would say or
+1. Write `evals/scenarios/<area>-<what>.json`: a realistic message (as a real user would say or
    type it), the seed it needs, and the checks that say "this went right". Prefer checking
    what *happened* (`opened`, `notes`, `tools_called`) over wording.
 2. `cargo test eval::` (it parses), then run it on one model with `--only <name>`.
@@ -340,7 +340,7 @@ server-side tool ran (`executed_tools`: its queries, and the pages' titles and U
 
 ## Findings so far (18 Oct 2026)
 
-Run folders under `E:/yap-builds/eval-runs/` on Nathan's PC (Ryzen 7 9800X3D, llama.cpp's
+Run folders under `<builds>/eval-runs/` on the test PC (RTX 5070 Ti, Ryzen 7 9800X3D, llama.cpp's
 8 threads, 64 GB; local models on the **CPU** unless said). 24 scenarios (20 + 4 web).
 
 | Model | Pass | Mean turn | Calls over Chat's 20 s | Memory (llama.cpp's projection / peak) |
@@ -400,7 +400,7 @@ What the logs showed (each with the transcript to prove it):
 
 ### After the fixes (18–19 Oct 2026)
 
-Decision (Nathan): **Qwen3.5-4B, thinking off, on the graphics card** is the on-device model
+Decision (the maintainer): **Qwen3.5-4B, thinking off, on the graphics card** is the on-device model
 where the card can run it (`gpu.rs`: ≥ 5.5 GiB of its own memory), Qwen2.5-1.5B elsewhere
 (and the default an empty pick means). Same PC, same 24 scenarios × 2, the sidecar's own
 arguments (`server_args`), Chat's own timeouts; "before" = the build at `1384802` with
@@ -462,7 +462,7 @@ answer; a local tool model is told to search when `web::needs_web` says the ques
 it (since 21 Oct 2026 made to: "Honest web answers" below); Chat gives a model on this PC 2
 minutes a call.
 
-**Groq's `browser_search` spike** (`--raw evals/raw/groq-browser-search.json`, Nathan's free
+**Groq's `browser_search` spike** (`--raw evals/raw/groq-browser-search.json`, the maintainer's free
 key): on its own it works (HTTP 200; Exa-powered; one searched answer 3.6–4.5k tokens, ~0.4 s
 of Groq time, 2.5–3 s wall), with `message.executed_tools[]` = a `browser.search` entry
 (`arguments` = the query, `search_results.results[]` = 5–10 `{title, url, score, content:
@@ -529,7 +529,7 @@ budgets.
 
 ## Honest web answers (21 Oct 2026)
 
-Nathan's chat on Qwen3.5-4B (thinking off, on the card, web search on): after two web answers,
+A tester's chat on Qwen3.5-4B (thinking off, on the card, web search on): after two web answers,
 "What are some of the best RPG games coming out in 2026" got **no search** — the answer listed
 games from 2023–24 as 2026, cited `[1][4][5]` (drawn as the *indie* answer's sources) and ended
 with "(Yap searched the web for this answer. Its sources: …)", made up word for word after the
@@ -537,7 +537,7 @@ note `chats::history_text` had just started adding to earlier web answers in the
 "Did you look up that information or did you just guess?", it said "I did look it up on the
 web". (`web::needs_web` didn't fire either: nothing in it said "latest" or "look up".)
 
-Five new scenarios: `web-nathans-chat` (his chat replayed, live: Exa with his key, real pages),
+Five new scenarios: `web-tester-chat` (that chat replayed, live: Exa with the run's key, real pages),
 `web-new-question-searches`, `honesty-did-you-look-it-up`, `web-follow-up-keeps-sources` and
 `web-no-sources-list` (stand-in webs with made-up games, so an answer from memory can't name
 them; `searches` gives each query its own results). Two checks came with them,
@@ -548,7 +548,7 @@ them; `searches` gives each query its own results). Two checks came with them,
 **Which way, measured** (the five new scenarios ×3, 8K context, the variants through
 `YAP_EVAL_WEB_HISTORY` / `YAP_EVAL_FIRST`):
 
-| Variant | Pass | RPG turn of Nathan's chat searched | Its "Did you look it up?" honest |
+| Variant | Pass | RPG turn of the tester's chat searched | Its "Did you look it up?" honest |
 |---|---|---|---|
 | Before | 9/15 | 0/2 (one run overflowed 8K before it) | 1/3 |
 | Note in the system prompt, the model decides | 12/15 | 0/3 | 2/3 |
@@ -557,8 +557,8 @@ them; `searches` gives each query its own results). Two checks came with them,
 | **Replayed, must search first** (what ships) | 14/15 | 3/3 | 3/3 |
 | Replayed, Yap searches first (the question as the query) | 14/15 | 3/3 | 3/3 |
 
-Every failure after is one also seen before: Nathan's Arsenal turn (three searches and up to
-three page reads) passing the 8K context (`exceed_context_size_error`); he runs 64K.
+Every failure after is one also seen before: the tester's Arsenal turn (three searches and up to
+three page reads) passing the 8K context (`exceed_context_size_error`); the maintainer runs 64K.
 
 - **A — the history.** Replaying an earlier answer's search as the `web_search` call it was
   (`chats::history_messages`) beat the system-prompt line (`web_history_note`): with it the
@@ -579,8 +579,8 @@ three page reads) passing the 8K context (`exceed_context_size_error`); he runs 
   search" about an answer from memory in 2 of 4 runs (before and after alike), now flagged
   ("*Yap didn't search the web for that answer…*").
 
-**Before → after, every web scenario ×3 at a 32K context** (Nathan runs 64K): **20/27 (74%) →
-27/27 (100%)**. Nathan's chat: 0/3 → 3/3 (the RPG turn searched 0/3 → 3/3; the made-up sources
+**Before → after, every web scenario ×3 at a 32K context** (the maintainer runs 64K): **20/27 (74%) →
+27/27 (100%)**. The tester's chat: 0/3 → 3/3 (the RPG turn searched 0/3 → 3/3; the made-up sources
 note 3/3 → 0/3; "did you look it up?" honest 0/3 → 3/3). The four older web scenarios: 12/12
 before and after. The whole suite ×2 (8K) after: 53/58, the five being the Gale question (2: a
 bug in `about_the_answer` — "Where do *you* find Gale…?" read as a question about the answer —
@@ -595,16 +595,16 @@ results decided. It writes markdown **tables**, which Chat's renderer shows as r
 
 ## About you: the user's region (21 Oct 2026)
 
-Nathan's chat on Qwen3.5-4B (on the card, web search on, Exa): "Can you check the Grok
+A tester's chat on Qwen3.5-4B (on the card, web search on, Exa): "Can you check the Grok
 subscriptions please, for me?" got two notes searches and "I don't see any notes"; "Can you look
 up Groc subscriptions for me, please?" searched "Grok subscriptions check billing" and explained
-how to check a bill; "…how much it costs" gave the plans in US $ with nothing saying he's in the
+how to check a bill; "…how much it costs" gave the plans in US $ with nothing saying they're in the
 UK. Settings → General → **About you** (`about_you.rs`) now tells every model where the user is
 (Windows' region: en-GB, United Kingdom, £ GBP, metric, UK time), and the routing changed:
 price words make a question need the web, an empty notes search leads to the web, a forced
 search's query keeps to the current question (`web::fresh_query`), Exa gets `userLocation`.
 
-New scenarios: `web-grok-subscriptions` (his chat, live), `web-price-local-currency` ("How much
+New scenarios: `web-grok-subscriptions` (that chat, live), `web-price-local-currency` ("How much
 does Spotify Premium cost a month?", no place said), `web-price-in-the-uk`,
 `web-empty-notes-then-web` and `web-own-notes-stay-local`; the `--locale` option; the
 `prices_keep_their_sign` check; the cleanup bench's `spelling` dictations. **A harness bug found
@@ -613,7 +613,7 @@ an Exa key — `WebSpec`'s derived `Default` had `key: false` —, so the live s
 web answers" above ran on Wikipedia; they run with the run's key now. The "before" numbers below
 were taken with `"web": {"service": "exa"}` added, so both sides used Exa.
 
-Qwen3.5-4B, RTX 5070 Ti, 32K context, ×3, "after" with `--locale` = Nathan's region. (The card
+Qwen3.5-4B, RTX 5070 Ti, 32K context, ×3, "after" with `--locale` = the tester's region. (The card
 was busy with other work for part of the evening: some turns took 60–130 s; pass and fail are
 unaffected, and latencies are only compared between runs made back to back.) The totals are the
 last full run's; the Grok turns count the three runs since the query fix, the price rows every
@@ -633,9 +633,9 @@ run since the region reached the prompt.
 
 What each change did:
 
-- **Prices need the web** (`web::asks_about_prices`): Nathan's first question now gets the forced
+- **Prices need the web** (`web::asks_about_prices`): the tester's first question now gets the forced
   first search, which found the plans every time.
-- **An empty notes search leads to the web** (`tools::EmptyNotes`): measured on his exact first
+- **An empty notes search leads to the web** (`tools::EmptyNotes`): measured on the tester's exact first
   question with the forced search switched off (`YAP_EVAL_FIRST=model`, ×3): nothing, 0/3
   searched the web; the hint in the result alone, 1/3; the hint + Yap's search for a model on
   this PC, 3/3 — so that ships (cloud models get the hint).
@@ -687,7 +687,7 @@ PC without a capable card cleanup stays American-spelt.
 ## Serving measurements (22 Oct 2026)
 
 What the serving benches and the cleanup bench measured on the RTX 5070 Ti (Qwen3.5 Q4_K_M,
-llamafile 0.10.3 unless said; run folders `E:/yap-builds/eval-runs/2026102[12]-*-lair-*`; the
+llamafile 0.10.3 unless said; run folders `<builds>/eval-runs/2026102[12]-*-lair-*`; the
 write-up with sources and what to build is in the private repo, `docs/local-ai-research.md`):
 
 - **Chat re-reads its whole prompt every turn.** Qwen3.5 resumes a slot only from a context
@@ -735,10 +735,10 @@ write-up with sources and what to build is in the private repo, `docs/local-ai-r
 ## Local AI, phase 1 (22 Oct 2026)
 
 The research's top four, built and measured step by step on the RTX 5070 Ti (Ryzen 7 9800X3D,
-llama.cpp's 8 threads), Qwen3.5-4B Q4_K_M unless said, `--locale en-GB` (Nathan's region: the
+llama.cpp's 8 threads), Qwen3.5-4B Q4_K_M unless said, `--locale en-GB` (the tester's region: the
 cleanup's spelling line, About you), `--temperature 0` for the cleanup benches. Each before/after
 is the same session, interleaved where it's a timing (medians); run folders
-`E:/yap-builds/eval-runs/20261022-0[1-3]*-lap1-*`.
+`<builds>/eval-runs/20261022-0[1-3]*-lap1-*`.
 
 **1. llamafile 0.10.3 → 0.10.6** (`local_llm::RUNTIME_*`; the background upgrade for existing
 installs, the warm-up, `gguf::estimate` recalibrated). Cleanup, twelve dictations × 3, two runs
@@ -880,7 +880,7 @@ own list stays. Unit-tested on the answer the suite failed on and on the review'
 ### Review fixes (22 Oct 2026)
 
 An independent review of the branch found bugs, mostly in the runtime upgrade; the fixes, and
-what was measured again (run folders `E:/yap-builds/eval-runs/20261022-04*-lap1-fix-*`):
+what was measured again (run folders `<builds>/eval-runs/20261022-04*-lap1-fix-*`):
 
 - **`tool_choice`**: llamafile 0.10.6 doesn't take the named form — "Wrong type supplied for
   parameter 'tool_choice'. Expected 'string', using default value" 34 times in the final suite —
@@ -923,7 +923,7 @@ memory, a gift fitting what Yap knows, an unrelated question that must not drag 
 remembered preference shaping an answer), **"Tell Yap what to change"** (3: add, correct,
 "forget everything about my old job"), an **import** from another assistant, "Remember that…" /
 "Forget that…" typed in Chat, and **past chats** ("that small-plates place in Lisbon we talked
-about last time"). Run folders `E:/yap-builds/eval-runs/20261022-07*` and `-08*`.
+about last time"). Run folders `<builds>/eval-runs/20261022-07*` and `-08*`.
 
 | Model | Pass | Notes |
 |---|---|---|
@@ -942,7 +942,7 @@ about last time"). Run folders `E:/yap-builds/eval-runs/20261022-07*` and `-08*`
   or not, `ops::parse_changes`). So the schema goes only to a model **without** tools
   (`learn::ask`; `YAP_EVAL_MEMORY_JSON` = schema | object | off compares).
 - **Yap's rules over what the model writes** (`memory/ops.rs`): an "about" or `A | B` facts on
-  Profile become facts (the 4B wrote "Nurse at St James's in Leeds" there); a pass never removes
+  Profile become facts (the 4B wrote "Nurse at St James's in Norwich" there); a pass never removes
   the whole Profile (it did, for "forget my old job", taking where they live and their dog with
   it), and a Tell that tries is narrowed to the facts sharing a word with the request;
   preference-like facts headed for Profile go to Preferences; a nameless add goes to Profile.
@@ -961,7 +961,7 @@ about last time"). Run folders `E:/yap-builds/eval-runs/20261022-07*` and `-08*`
 
 **Qwen2.5-1.5B**: using memory is easy for it (the "You" block and the relevant items come in
 the prompt: 4/4); learning isn't. Even under the strict grammar it kept what the person only
-asked about ("Australia: capital is Canberra"), filed "Nurse at St James's in Leeds" as a person,
+asked about ("Australia: capital is Canberra"), filed "Nurse at St James's in Norwich" as a person,
 wrote nothing for a job change, and took 10–124 s of the processor a pass (the import's 124 s).
 So **a model that can't call tools didn't learn by itself** at first (Settings → Memory said
 so); later that day it got its own careful path — "Memory on small models" below
@@ -977,18 +977,18 @@ tool wasn't added: the relevant people, projects and topics already come with th
 (`memory-use-*` 8/8 on the 4B, 4/4 on the 1.5B).
 
 **After merging `integration/next` and wiring in About you** (later on 22 Oct, 22 scenarios with
-`memory-learn-about-you`: About you holds the name and "I work day shifts at a warehouse in
-Leeds."; a chat says both again and that they've started learning Spanish). Qwen3.5-4B on the
+`memory-learn-about-you`: About you holds the name and "I work weekends at a bakery in
+Norwich."; a chat says both again and that they've started learning Spanish). Qwen3.5-4B on the
 GPU, ×2: 20/22, 41/44, 42/44, then **43/44 and 43/44** (run folders
-`E:/yap-builds/eval-runs/20261022-0908*` to `-0920*`). What changed on the way:
+`<builds>/eval-runs/20261022-0908*` to `-0920*`). What changed on the way:
 
 - **About you in the pass's input made it worse.** Told "these are the user's own settings,
-  don't add them", the 4B wrote About you back (`name: "Declan"`, the warehouse) and left
+  don't add them", the 4B wrote About you back (`name: "Declan"`, the bakery) and left
   Spanish out; without it, it keeps both. So the input doesn't carry About you, and
   `ops::drop_about_you` takes the repeats out afterwards (a short fact naming the person, or one
   whose meaningful words are nearly all the note's): 4/4 since.
 - **"Forget everything about my old job at Acme"** failed 4 times in a row: the 4B took out
-  "Lives in Leeds" and the dog as separate fact removals (now narrowed to the facts sharing a
+  "Lives in Norwich" and the dog as separate fact removals (now narrowed to the facts sharing a
   word with the request, like a whole-Profile removal), and removed Sam's "Colleague at Acme"
   as a fact, though it's who he is (the listing shows both alike); `remove_facts` now takes
   that out too. 4/4 since.
@@ -998,8 +998,8 @@ GPU, ×2: 20/22, 41/44, 42/44, then **43/44 and 43/44** (run folders
 
 ## Prices where the user is (22 Oct 2026)
 
-Nathan, on Qwen3.5-4B with his region the UK (from Windows), asked Chat "Can you lookup the Grok
-subscription price for me I am thinking of buying it". His chat (`chats.json`, read-only) shows
+A tester, on Qwen3.5-4B with their region the UK (from Windows), asked Chat "Can you lookup the Grok
+subscription price for me I am thinking of buying it". The chat (`chats.json`, read-only) shows
 the search Yap made — "Grok subscription price 2026", Exa with `userLocation` GB — and what it
 found: x.ai's pricing page and news post, a pricing guide, a US price list
 (pricebugalerts.com, "(US)") and TechCrunch: no UK page, no £. The answer listed x.ai's US
@@ -1018,18 +1018,18 @@ written in £ gets its page's sign back, with a note (`restore_price_signs`); "b
 distances and speeds" for the UK (the Region's summary says "miles and °C").
 
 New scenarios (`--locale en-GB`): stand-in web — `web-price-uk-grok-us-only` (only US prices
-whatever the search: Nathan's case; right = the search names the UK, one plain "couldn't find
+whatever the search: the tester's case; right = the search names the UK, one plain "couldn't find
 UK prices" line, the US prices as they are, no £ made up, no offer), `web-price-uk-netflix-both`
 ($ and £ in the same results), `web-price-uk-game-pass-query` and `web-price-uk-iphone-buying`
 (UK pages only for a search that names the UK; the iPhone question has no price word: "I'm
 thinking of buying an iPhone 17 Pro, what does it go for?"), `web-price-uk-spotify-search-again`
-(UK page only for a search in pounds); live (Exa) — `web-price-live-grok` (Nathan's exact
+(UK page only for a search in pounds); live (Exa) — `web-price-live-grok` (the tester's exact
 question: £ prices if the web has them, else the plain line), `-netflix`, `-iphone`,
 `-game-pass`. With the older `web-price-in-the-uk`, `web-price-local-currency` and
 `web-grok-subscriptions`: 12 scenarios. A soft `min_searches` check counts searches.
 
 **Qwen3.5-4B**, RTX 5070 Ti, llamafile 0.10.6 (MTP on), 8K, ×3 each (run folders
-`E:/yap-builds/eval-runs/20261022-07*-region-*`):
+`<builds>/eval-runs/20261022-07*-region-*`):
 
 | Scenario | Before | After |
 |---|---|---|
@@ -1056,7 +1056,7 @@ x.ai's $8 as "£8") and, with `restore_price_signs`, 36/36: that run's one such 
 put back, though its £30 / £100 / £200 stayed — those amounts were also on a UK page ("≈ £30",
 "~£100 credits"), so they can't be shown to be swapped.
 
-The 11 older web scenarios ×2 (Gale, the latest Python, Nathan's RPG chat, follow-ups, the
+The 11 older web scenarios ×2 (Gale, the latest Python, the tester's RPG chat, follow-ups, the
 injection page, Wikipedia without a key, own notes, "did you look it up?"…): **21/22 before,
 21/22 after** — before, one Wikipedia answer overflowed the 8K context; after, one answer's
 "launching 12 March 2026" read as an app opened (the scenario check's own bug, fixed: a day

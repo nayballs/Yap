@@ -5,7 +5,7 @@
   "apps": "standard",
   "turns": [
     {
-      "user": "I'm a nurse at St James's in Leeds and I work night shifts, so I need easy meals I can take to work. Any ideas?",
+      "user": "I'm a nurse at St James's in Norwich and I work night shifts, so I need easy meals I can take to work. Any ideas?",
       "expect": {}
     },
     {
@@ -19,7 +19,7 @@
           { "has": "curry", "exists": false }
         ],
         "memory_changes_max": 5,
-        "memory_allowed": ["nurse", "St James", "Leeds", "night", "shift", "Beans", "dog"]
+        "memory_allowed": ["nurse", "St James", "Norwich", "night", "shift", "Beans", "dog"]
       },
       "soft": { "memory": [{ "has": "night", "section": "profile" }] }
     }

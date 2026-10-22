@@ -843,8 +843,8 @@ mod tests {
     #[test]
     fn the_installed_exe_comes_from_the_uninstall_entrys_icon() {
         assert_eq!(
-            exe_from_display_icon(r#""D:\Hobby Project\Yap\yap.exe""#).as_deref(),
-            Some(r"D:\Hobby Project\Yap\yap.exe")
+            exe_from_display_icon(r#""D:\My Apps\Yap\yap.exe""#).as_deref(),
+            Some(r"D:\My Apps\Yap\yap.exe")
         );
         assert_eq!(
             exe_from_display_icon(r"C:\Program Files\Yap\yap.exe,0").as_deref(),

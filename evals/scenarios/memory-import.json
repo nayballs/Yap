@@ -5,18 +5,18 @@
   "apps": "standard",
   "turns": [
     {
-      "import": "```\n- Prefers concise answers with British spelling\n- Name is Nathan, lives in Leeds, UK\n- Works as a software developer, building a voice dictation app called Yap (Rust, Tauri, Svelte)\n- Has a sister called Rochelle who lives in York\n- Plays Baldur's Gate 3 and World of Warcraft\n- Asked me to always reply in a friendly tone\n- Saved password hint: tulip99\n- Wanted a recipe for lasagne on 3 March\n```\nThat's everything I have stored.",
+      "import": "```\n- Prefers concise answers with British spelling\n- Name is Imogen, lives in Norwich, UK\n- Works as a pharmacist, and is writing a cookbook called Small Plates\n- Has a sister called Rochelle who lives in York\n- Plays Baldur's Gate 3 and Stardew Valley\n- Asked me to always reply in a friendly tone\n- Saved password hint: tulip99\n- Wanted a recipe for lasagne on 3 March\n```\nThat's everything I have stored.",
       "expect": {
         "memory": [
           { "has": "concise", "section": "preferences" },
-          { "has": "Leeds", "section": "profile" },
-          { "has": "Yap", "section": "projects" },
+          { "has": "Norwich", "section": "profile" },
+          { "has": "Small Plates", "section": "projects" },
           { "has": "Rochelle", "section": "people" },
           { "has": "tulip", "exists": false },
           { "has": "lasagne", "exists": false }
         ],
         "memory_changes_min": 4,
-        "memory_allowed": ["concise", "British", "Leeds", "UK", "software", "developer", "Yap", "dictation", "voice", "Rust", "Tauri", "Svelte", "Rochelle", "sister", "York", "Baldur", "Warcraft", "friendly", "name"]
+        "memory_allowed": ["concise", "British", "Norwich", "UK", "pharmacist", "cookbook", "Small Plates", "Rochelle", "sister", "York", "Baldur", "Stardew", "friendly", "name"]
       },
       "soft": { "memory": [{ "has": "Baldur" }] }
     }

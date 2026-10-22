@@ -5,7 +5,7 @@
   "apps": "standard",
   "seed": {
     "memory": [
-      { "section": "profile", "details": ["Works at Acme as a nurse", "Lives in Leeds", "Has a dog called Beans"] },
+      { "section": "profile", "details": ["Works at Acme as a nurse", "Lives in Norwich", "Has a dog called Beans"] },
       { "section": "people", "title": "Sam Patel", "summary": "Colleague at Acme", "details": ["Product manager"] },
       { "section": "projects", "title": "Acme ward rota", "summary": "Their rota spreadsheet at Acme" },
       { "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York"] }
@@ -17,7 +17,7 @@
       "expect": {
         "memory": [
           { "has": "Acme", "exists": false },
-          { "has": "Leeds", "section": "profile" },
+          { "has": "Norwich", "section": "profile" },
           { "has": "Rochelle", "section": "people" }
         ],
         "memory_allowed": []

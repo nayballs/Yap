@@ -5,12 +5,15 @@
 ; is stable across these versions; the only Yap-specific edits are the
 ; portable magic string ("Yap Portable Mode"), the comments, and the
 ; uninstaller's "Delete app data" removing Yap's own data dirs and its saved
-; sign-in (Windows Credential Manager).
+; sign-in (Windows Credential Manager), and finding the previous install's
+; folder after a publisher rename.
 ; Portable changes are marked with "; --- PORTABLE MODE ---" comments, the
-; data-dir and sign-in removal with "; --- YAP DATA ---".
+; data-dir and sign-in removal with "; --- YAP DATA ---", the previous folder
+; with "; --- YAP: PREVIOUS INSTALL DIR ---" (and its two callers).
 ;
 ; When upgrading Tauri, diff this file against the new upstream template and
-; merge changes while preserving the portable and YAP DATA sections.
+; merge changes while preserving the portable, YAP DATA and PREVIOUS INSTALL
+; DIR sections.
 
 Unicode true
 ManifestDPIAware true
@@ -415,7 +418,7 @@ Function PageLeaveReinstall
       ReadRegStr $R1 HKLM "$R6" "UninstallString"
       ExecWait '$R1' $0
     ${Else}
-      ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
+      Call ReadPreviousInstallDir
       ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
       ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
       ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
@@ -1050,8 +1053,32 @@ Section Uninstall
   ${EndIf}
 SectionEnd
 
-Function RestorePreviousInstallLocation
+; --- YAP: PREVIOUS INSTALL DIR --- The folder of the install this one
+; replaces, into $4. Tauri keeps it under the publisher's key
+; (Software\<publisher>\Yap); an install made while the publisher had another
+; name has it only in its uninstall entry (InstallLocation, quoted), so that's
+; read next — otherwise an update would land in the default folder beside it.
+; The missing publisher key sets the error flag, which PageLeaveReinstall reads
+; after running the old uninstaller as "it couldn't run" ("Unable to
+; uninstall!", though it did): the flag stays set only when no folder was found.
+Function ReadPreviousInstallDir
   ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
+  ${If} $4 == ""
+    ReadRegStr $4 SHCTX "${UNINSTKEY}" "InstallLocation"
+    Push $0
+    StrCpy $0 $4 1
+    ${If} $0 == "$\""
+      StrCpy $4 $4 "" 1
+      StrCpy $4 $4 -1
+    ${EndIf}
+    Pop $0
+  ${EndIf}
+  ClearErrors
+  ${IfThen} $4 == "" ${|} SetErrors ${|}
+FunctionEnd
+
+Function RestorePreviousInstallLocation
+  Call ReadPreviousInstallDir
   StrCmp $4 "" +2 0
     StrCpy $INSTDIR $4
 FunctionEnd

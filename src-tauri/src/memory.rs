@@ -1,5 +1,5 @@
 //! **Memory** (Settings → Memory, 2026-10-22): what Yap remembers about the
-//! person, kept on this PC, after Claude's memory — Nathan's ask.
+//! person, kept on this PC, after Claude's memory — the maintainer's ask.
 //!
 //! - **The store** (`<data>/memory.json`, atomic writes, a corrupt file
 //!   quarantined, never config.json): items in five sections — Profile and
@@ -811,12 +811,12 @@ mod tests {
         .unwrap_err();
         assert!(err.contains("a phone number"), "{err}");
         // Profile lines go into the one Profile item.
-        for d in ["Works as a nurse", "Lives in Leeds"] {
+        for d in ["Works as a nurse", "Lives in Norwich"] {
             save_item(ItemInput { id: None, section: Section::Profile, title: String::new(), summary: String::new(), details: vec![d.into()], dictation: true }).unwrap();
         }
         let profile: Vec<Item> = items().into_iter().filter(|i| i.section == Section::Profile).collect();
         assert_eq!(profile.len(), 1);
-        assert_eq!(profile[0].details, ["Works as a nurse", "Lives in Leeds"]);
+        assert_eq!(profile[0].details, ["Works as a nurse", "Lives in Norwich"]);
         // Delete, clear, undo the clear.
         delete_item(i.id).unwrap();
         let cleared = clear();

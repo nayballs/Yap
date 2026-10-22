@@ -69,7 +69,7 @@ export async function startFakeElevenLabs() {
   const voices = () => [
     {
       voice_id: OWN,
-      name: 'Nathan (cloned)',
+      name: 'Imogen (cloned)',
       category: 'cloned',
       labels: { accent: 'british', gender: 'male' },
       preview_url: null,
