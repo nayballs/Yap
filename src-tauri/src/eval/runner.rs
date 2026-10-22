@@ -50,6 +50,9 @@ Local models (Yap's llamafile, like local_llm.rs, on a free port, stopped after)
   --ngl <n>                GPU layers (default 0: CPU only)   --ctx <n> (default 8192, as Yap)
   --llamafile <path>       the runtime (default: the installed one, else downloaded)
   --llamafile-arg <arg>    extra server argument (repeatable)
+  --mtp on|off             MTP speculative decoding (default: as Yap's sidecar decides on this PC;
+                           never with --ngl 0)
+  --no-warm-up             skip the warm-up request Yap's sidecar sends once the model is loaded
   --models-dir <dir>       downloads go here (default <out>/../eval-models)
 Output:
   --out <dir>              run folders go here (default $YAP_EVAL_OUT, else test-results/evals)
@@ -99,6 +102,8 @@ struct Args {
     ctx: u32,
     llamafile: Option<PathBuf>,
     llamafile_args: Vec<String>,
+    mtp: Option<bool>,
+    no_warm_up: bool,
     models_dir: Option<PathBuf>,
     raw: Option<PathBuf>,
     repeat: u32,
@@ -152,6 +157,15 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--ctx" => a.ctx = num(value()?, &flag)? as u32,
             "--llamafile" => a.llamafile = Some(PathBuf::from(value()?)),
             "--llamafile-arg" => a.llamafile_args.push(value()?),
+            "--mtp" => {
+                a.mtp = match value()?.as_str() {
+                    "on" | "true" | "yes" => Some(true),
+                    "off" | "false" | "no" => Some(false),
+                    "auto" => None,
+                    other => return Err(format!("--mtp on|off|auto, not {other}")),
+                }
+            }
+            "--no-warm-up" => a.no_warm_up = true,
             "--models-dir" => a.models_dir = Some(PathBuf::from(value()?)),
             "--raw" => a.raw = Some(PathBuf::from(value()?)),
             "--repeat" => a.repeat = num(value()?, &flag)?.max(1) as u32,
@@ -505,9 +519,21 @@ async fn prepare(spec: &str, args: &Args, keys: &HashMap<String, String>, run_di
         "local" => {
             let runtime = local::runtime(args.llamafile.as_deref(), models_dir).await?;
             let gguf = local::model(rest, models_dir).await?;
-            println!("Starting llamafile ({}) with {} (ngl {}, ctx {}) …", runtime.display(), gguf.display(), args.ngl, args.ctx);
-            let server = local::start(&runtime, &gguf, args.ngl, args.ctx, &args.llamafile_args, run_dir).await?;
+            let plan = local::plan(&runtime, &gguf, args.ngl, args.ctx, args.mtp).await;
+            println!(
+                "Starting llamafile {} ({}) with {} (ngl {}, ctx {}, MTP {}) …",
+                plan.runtime,
+                runtime.display(),
+                gguf.display(),
+                args.ngl,
+                args.ctx,
+                if plan.server().mtp { "on" } else { "off" }
+            );
+            let server = local::start(&runtime, &gguf, args.ngl, args.ctx, plan, &args.llamafile_args, run_dir, !args.no_warm_up).await?;
             println!("  ready in {:.1} s", server.load_ms as f64 / 1000.0);
+            if let Some(w) = &server.warm_up {
+                println!("  warm-up: {} ms{}{}", w.ms, if w.cancelled { " (cancelled)" } else { "" }, w.error.as_deref().map(|e| format!(" — {e}")).unwrap_or_default());
+            }
             m.provider = "local".into();
             m.base_url = server.base_url.clone();
             // The id Yap would send for this file; its size ("-1.5b") is
@@ -930,7 +956,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         "args": {
             "models": args.models, "tools": args.tools, "tokens_per_minute": args.tokens_per_minute,
             "max_total_tokens": args.max_total_tokens, "timeout_s": args.timeout, "ngl": args.ngl, "ctx": args.ctx,
-            "llamafile_args": args.llamafile_args, "repeat": args.repeat, "no_web": args.no_web,
+            "llamafile_args": args.llamafile_args, "mtp": args.mtp, "no_warm_up": args.no_warm_up, "repeat": args.repeat, "no_web": args.no_web,
         },
     });
     let mut failed = false;
@@ -1057,6 +1083,9 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             info["load_ms"] = json!(server.load_ms);
             info["peak_ram_mb"] = json!(server.peak_ram_mb());
             info["server_args"] = json!(server.args);
+            info["runtime_version"] = json!(server.plan.runtime.to_string());
+            info["mtp"] = json!(server.plan.server().mtp);
+            info["warm_up"] = json!(server.warm_up);
             info["server_log"] = json!(server.log);
             info["log_facts"] = server.log_facts();
             server.stop();

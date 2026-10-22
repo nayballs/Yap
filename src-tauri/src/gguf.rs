@@ -25,26 +25,44 @@
 //! whether there's an `output.weight` of its own.
 //!
 //! **The memory estimate** ([`estimate`]), calibrated against llamafile's
-//! own log (`… CUDA0 model / KV / RS / compute buffer size = …`) for
-//! Qwen3.5-4B and Qwen2.5-1.5B at 8K and 32K on an RTX 5070 Ti, all within
-//! 1% (64K: 2% high; docs/model-evals.md "Context length"):
+//! own log (`… CUDA0 model / KV / RS / compute buffer size = …`) on an RTX
+//! 5070 Ti (docs/model-evals.md "Context length" and "llamafile 0.10.6"),
+//! for the runtime the sidecar runs ([`Server`]):
 //! - the model on the card: the tensors' data, less the token embedding
 //!   (llama.cpp keeps it in the processor's memory) — unless the output
-//!   shares it (no `output.weight`: then a copy goes to the card);
+//!   shares it (no `output.weight`: then a copy goes to the card). From
+//!   llamafile 0.10.6 the multi-token-prediction layer (Qwen3.5's last
+//!   block) is only loaded when MTP drafting is on (the 4B: 2,741 MiB
+//!   without it, 2,863 with);
 //! - the KV cache: per attention layer, K + V = `head_count_kv` ×
 //!   (`key_length` + `value_length`) × 2 bytes (f16) per token of context;
 //!   one cache for the server's 4 slots (llama.cpp's unified KV);
 //! - the recurrent state (hybrid / Mamba layers), per slot: conv
 //!   (`conv_kernel` − 1) × (`inner` + 2 × `groups` × `state`) + state
 //!   `state` × `inner`, f32, whatever the context;
-//! - the compute buffer: the logits of one 512-token batch (`vocab` × 512 ×
-//!   4 bytes) + 2 KiB per token of context (the attention mask: Qwen3.5-4B
-//!   495 → 554 MiB on the card from 8K to 32K, the 1.5B 322 → 355; at 64K
-//!   the growth went to the host's buffer instead, so this errs high, ≤ 2%).
+//! - the compute buffer. **llamafile 0.10.3**: the logits of one 512-token
+//!   batch (`vocab` × 512 × 4 bytes) + 2 KiB per token of context (the
+//!   attention mask: Qwen3.5-4B 495 → 554 MiB on the card from 8K to 32K,
+//!   the 1.5B 322 → 355; at 64K the growth went to the host's buffer
+//!   instead, so this errs high, ≤ 2%). **0.10.6** no longer reserves a
+//!   whole batch's logits: one batch's feed-forward (2 × `feed_forward_length`
+//!   × 512 × 4 bytes) and hidden states (`embedding_length` × 512 × 20
+//!   bytes) + 12 MiB + 1 KiB per token of context — the 4B 72 / 96 / 128
+//!   MiB at 8K / 32K / 64K (estimated 81 / 105 / 137), Qwen3.5-9B 96 / 120,
+//!   Qwen3.5-2B 53, Qwen2.5-1.5B 70 / 94 (estimated 70 / 94);
+//! - **MTP** (0.10.6, `--spec-type draft-mtp`, [`Server::mtp`]): the
+//!   prediction layer's weights, the recurrent state three times more (a
+//!   copy per drafted token to roll back), 36 MiB more compute, and the
+//!   draft context: one attention layer's KV at the full context and its
+//!   own compute buffer (≤ the main one's) — +864 MiB on the 4B at 8K
+//!   (estimated 865), +962 at 32K (985), +1,122 at 64K (1,145), +994 on
+//!   the 9B at 8K (1,014).
 //!
 //! On the processor (no card) the model is all of the tensors' data.
 //! Sliding-window layers (Gemma) are counted at the full context: the
-//! estimate errs high there, never low.
+//! estimate errs high there, never low. Not counted: the CUDA context
+//! itself (~230–250 MiB more in `nvidia-smi` than the log's buffers), which
+//! the pickers' room for the model leaves aside (`local_llm::card_room`).
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -57,8 +75,30 @@ use std::time::SystemTime;
 pub const SLOTS: u64 = 4;
 /// The batch llama.cpp reserves its compute buffer for (`n_ubatch`).
 const UBATCH: u64 = 512;
-/// The compute buffer's growth per token of context (measured, above).
-const COMPUTE_PER_TOKEN: u64 = 2_048;
+/// The compute buffer's growth per token of context (measured, above):
+/// llamafile 0.10.3's, and 0.10.6's.
+const COMPUTE_PER_TOKEN_OLD: u64 = 2_048;
+const COMPUTE_PER_TOKEN: u64 = 1_024;
+/// 0.10.6's compute buffer beyond its feed-forward and hidden states.
+const COMPUTE_SLACK: u64 = 12 << 20;
+/// MTP's extra compute in the main context (the 4B 34.75 MiB, the 9B
+/// 16.75, the 2B 20: the most of them, rounded up).
+const MTP_COMPUTE: u64 = 36 << 20;
+/// Tokens MTP drafts at a time (llama.cpp's default `n_max`): the recurrent
+/// state is kept once more for each, to roll a rejected draft back.
+const MTP_DRAFT: u64 = 3;
+
+/// The server a memory estimate is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Server {
+    /// llamafile 0.10.6 or newer (llama.cpp b10441): a smaller compute
+    /// buffer, and the multi-token-prediction layer left off the card
+    /// unless MTP is on. Else 0.10.3's buffers.
+    pub current: bool,
+    /// MTP speculative decoding on (`--spec-type draft-mtp`, current
+    /// runtime only).
+    pub mtp: bool,
+}
 
 /// What the header says about a model's size and shape.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -68,6 +108,8 @@ pub struct Shape {
     pub context_length: Option<u64>,
     pub block_count: u64,
     pub embedding_length: u64,
+    /// The feed-forward layers' width (`feed_forward_length`; 0 = unknown).
+    pub feed_forward_length: u64,
     pub head_count: u64,
     /// One for every layer, or one per layer (0 = no attention there).
     pub head_count_kv: Vec<u64>,
@@ -87,6 +129,9 @@ pub struct Shape {
     pub embd_bytes: Option<u64>,
     /// An `output.weight` of its own (else the output shares the embedding).
     pub has_output: bool,
+    /// The multi-token-prediction layers' bytes (the last
+    /// `nextn_predict_layers` blocks' tensors: Qwen3.5-4B's `blk.32.*`).
+    pub nextn_bytes: u64,
 }
 
 /// MiB a model takes at one context.
@@ -97,6 +142,8 @@ pub struct Estimate {
     pub kv_mib: u64,
     pub state_mib: u64,
     pub compute_mib: u64,
+    /// MTP drafting's share (0 without it): included in the others' sum.
+    pub mtp_mib: u64,
     pub total_mib: u64,
 }
 
@@ -154,34 +201,77 @@ impl Shape {
         self.recurrent_layers() * (conv + state) * 4 * SLOTS
     }
 
-    /// llama.cpp's compute buffer at `ctx`: one batch's logits, and what
-    /// grows with the context.
-    pub fn compute_bytes(&self, ctx: u64) -> u64 {
-        self.vocab_size * UBATCH * 4 + ctx * COMPUTE_PER_TOKEN
+    /// llama.cpp's compute buffer at `ctx` on `server`'s runtime: 0.10.3's
+    /// is one batch's logits and what grows with the context; 0.10.6's one
+    /// batch's feed-forward and hidden states (module docs).
+    pub fn compute_bytes(&self, ctx: u64, server: Server) -> u64 {
+        if !server.current {
+            return self.vocab_size * UBATCH * 4 + ctx * COMPUTE_PER_TOKEN_OLD;
+        }
+        2 * self.feed_forward_length * UBATCH * 4 + self.embedding_length * UBATCH * 20 + COMPUTE_SLACK + ctx * COMPUTE_PER_TOKEN
+    }
+
+    /// Can llama.cpp draft with this model's own multi-token-prediction
+    /// layer (`--spec-type draft-mtp`)? Qwen3.5 (dense and MoE) carries one
+    /// in the GGUFs Yap offers; another architecture with such a layer
+    /// isn't counted on.
+    pub fn has_mtp(&self) -> bool {
+        self.nextn_layers > 0 && self.nextn_bytes > 0 && self.arch.starts_with("qwen35")
     }
 
     /// The model's bytes on the card (`on_card`) or in the processor's
-    /// memory, from a file of `file_bytes`.
-    pub fn model_bytes(&self, file_bytes: u64, on_card: bool) -> u64 {
+    /// memory, from a file of `file_bytes`, on `server`'s runtime.
+    pub fn model_bytes(&self, file_bytes: u64, on_card: bool, server: Server) -> u64 {
         let data = file_bytes.saturating_sub(self.data_start);
-        match (on_card, self.embd_bytes) {
+        let on = match (on_card, self.embd_bytes) {
             (true, Some(embd)) if self.has_output => data.saturating_sub(embd),
             _ => data,
+        };
+        // 0.10.6 leaves the prediction layer off the card unless it drafts.
+        if on_card && server.current && !server.mtp {
+            on.saturating_sub(self.nextn_bytes)
+        } else {
+            on
         }
+    }
+
+    /// What MTP drafting adds (module docs): the prediction layer's
+    /// weights, the recurrent state again per drafted token, its compute,
+    /// and the draft context — one attention layer's KV at `ctx` and a
+    /// compute buffer like the main one's. 0 when it can't draft.
+    pub fn mtp_bytes(&self, ctx: u64) -> u64 {
+        if !self.has_mtp() {
+            return 0;
+        }
+        let attention_layers = (0..self.layers()).filter(|&i| self.kv_heads(i) > 0).count() as u64;
+        let kv_one_layer = self.kv_bytes_per_token().checked_div(attention_layers).unwrap_or(0) * ctx;
+        let draft_compute = self.compute_bytes(ctx, Server { current: true, mtp: false });
+        self.nextn_bytes + MTP_DRAFT * self.state_bytes() + MTP_COMPUTE + kv_one_layer + draft_compute
     }
 }
 
 const MIB: u64 = 1 << 20;
 
 /// What `shape` in a file of `file_bytes` takes at a context of `ctx`
-/// tokens, on the graphics card (`on_card`) or the processor. Pure.
-pub fn estimate(shape: &Shape, file_bytes: u64, ctx: u64, on_card: bool) -> Estimate {
+/// tokens, on the graphics card (`on_card`) or the processor, run by
+/// `server`. Pure.
+pub fn estimate(shape: &Shape, file_bytes: u64, ctx: u64, on_card: bool, server: Server) -> Estimate {
     let mib = |b: u64| b.div_ceil(MIB);
-    let model = mib(shape.model_bytes(file_bytes, on_card));
+    let mtp_on = server.current && server.mtp && shape.has_mtp();
+    let model = mib(shape.model_bytes(file_bytes, on_card, server));
     let kv = mib(shape.kv_bytes_per_token() * ctx);
     let state = mib(shape.state_bytes());
-    let compute = mib(shape.compute_bytes(ctx));
-    Estimate { model_mib: model, kv_mib: kv, state_mib: state, compute_mib: compute, total_mib: model + kv + state + compute }
+    let compute = mib(shape.compute_bytes(ctx, server));
+    // MTP's share past the weights the model already counts.
+    let mtp = if mtp_on { mib(shape.mtp_bytes(ctx).saturating_sub(shape.nextn_bytes)) } else { 0 };
+    Estimate {
+        model_mib: model,
+        kv_mib: kv,
+        state_mib: state,
+        compute_mib: compute,
+        mtp_mib: mtp,
+        total_mib: model + kv + state + compute + mtp,
+    }
 }
 
 // ------------------------------------------------------------ reading
@@ -204,6 +294,13 @@ struct Tensors {
     data_start: u64,
     embd_bytes: Option<u64>,
     has_output: bool,
+    /// The bytes of the blocks from `nextn_from` on (the prediction layers).
+    nextn_bytes: u64,
+}
+
+/// The block a tensor belongs to: `blk.32.attn_norm.weight` → 32. Pure.
+fn block_of(name: &str) -> Option<u64> {
+    name.strip_prefix("blk.")?.split('.').next()?.parse().ok()
 }
 
 const MAX_KEYS: u64 = 100_000;
@@ -308,14 +405,16 @@ impl<R: BufRead + Seek> Reader<R> {
     }
 
     /// The tensor list: each name, dimensions, type and offset into the
-    /// data; the embedding's size is the gap to the next tensor's offset.
-    fn tensors(&mut self, count: u64, alignment: u64) -> Result<Tensors, String> {
+    /// data; a tensor's size is the gap to the next tensor's offset (the
+    /// embedding's, and the prediction blocks' from `nextn_from` on).
+    fn tensors(&mut self, count: u64, alignment: u64, nextn_from: Option<u64>) -> Result<Tensors, String> {
         if count > MAX_TENSORS {
             return Err("the header claims an impossible number of tensors".to_string());
         }
         let mut offsets = Vec::with_capacity(count.min(4_096) as usize);
         let mut embd: Option<u64> = None;
         let mut has_output = false;
+        let mut nextn: Vec<u64> = Vec::new();
         for _ in 0..count {
             let name = self.text(256)?.unwrap_or_default();
             let dims = self.u32()?;
@@ -330,17 +429,24 @@ impl<R: BufRead + Seek> Reader<R> {
                 "output.weight" => has_output = true,
                 _ => {}
             }
+            if nextn_from.is_some_and(|from| block_of(&name).is_some_and(|b| b >= from)) {
+                nextn.push(offset);
+            }
             offsets.push(offset);
         }
         let here = self.r.stream_position().map_err(|e| e.to_string())?;
         let align = alignment.max(1);
         let data_start = here.div_ceil(align) * align;
         let file_len = self.r.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
-        let embd_bytes = embd.map(|at| {
-            let next = offsets.iter().copied().filter(|&o| o > at).min();
+        let mut sorted = offsets.clone();
+        sorted.sort_unstable();
+        let size_at = |at: u64| {
+            let next = sorted.iter().copied().find(|&o| o > at);
             next.unwrap_or_else(|| file_len.saturating_sub(data_start)).saturating_sub(at)
-        });
-        Ok(Tensors { data_start, embd_bytes, has_output })
+        };
+        let embd_bytes = embd.map(size_at);
+        let nextn_bytes = nextn.iter().map(|&at| size_at(at)).sum();
+        Ok(Tensors { data_start, embd_bytes, has_output, nextn_bytes })
     }
 }
 
@@ -376,7 +482,20 @@ fn read_header<R: BufRead + Seek>(r: R) -> Result<(HashMap<String, Val>, Tensors
         Some(Val::Uint(a)) if *a > 0 => *a,
         _ => 32,
     };
-    let t = rd.tensors(tensors, alignment)?;
+    // The prediction layers are the last `nextn_predict_layers` blocks.
+    let arch = match meta.get("general.architecture") {
+        Some(Val::Text(a)) => a.clone(),
+        _ => String::new(),
+    };
+    let scalar = |k: &str| match meta.get(&format!("{arch}.{k}")) {
+        Some(Val::Uint(v)) => Some(*v),
+        _ => None,
+    };
+    let nextn_from = match (scalar("block_count"), scalar("nextn_predict_layers")) {
+        (Some(blocks), Some(n)) if n > 0 && n <= blocks => Some(blocks - n),
+        _ => None,
+    };
+    let t = rd.tensors(tensors, alignment, nextn_from)?;
     Ok((meta, t))
 }
 
@@ -406,6 +525,7 @@ pub fn read_shape<R: BufRead + Seek>(r: R) -> Result<Shape, String> {
         context_length: uint("context_length").filter(|&c| c > 0),
         block_count: uint("block_count").unwrap_or(0),
         embedding_length: uint("embedding_length").unwrap_or(0),
+        feed_forward_length: uint("feed_forward_length").unwrap_or(0),
         head_count: uint("attention.head_count").unwrap_or(0),
         head_count_kv,
         key_length: uint("attention.key_length"),
@@ -420,6 +540,7 @@ pub fn read_shape<R: BufRead + Seek>(r: R) -> Result<Shape, String> {
         data_start: tensors.data_start,
         embd_bytes: tensors.embd_bytes,
         has_output: tensors.has_output,
+        nextn_bytes: tensors.nextn_bytes,
         arch,
     })
 }
@@ -558,6 +679,7 @@ pub mod tests {
             .u32("qwen35.block_count", 33)
             .u32("qwen35.context_length", 262_144)
             .u32("qwen35.embedding_length", 2560)
+            .u32("qwen35.feed_forward_length", 9216)
             .u32("qwen35.attention.head_count", 16)
             .u32("qwen35.attention.head_count_kv", 4)
             .i32s("qwen35.rope.dimension_sections", &[11, 11, 10, 0])
@@ -574,8 +696,12 @@ pub mod tests {
             .text("tokenizer.ggml.model", "gpt2")
             .texts("tokenizer.ggml.tokens", vocab)
             .text("tokenizer.chat_template", &"{{ x }}".repeat(2_000))
-            .tensor("token_embd.weight", 521_471_000)
+            .tensor("token_embd.weight", 521_472_000)
             .tensor("blk.0.attn_norm.weight", 10_240)
+            // The multi-token-prediction block (its real size, all of
+            // blk.32's tensors as one here).
+            .tensor("blk.32.nextn.eh_proj.weight", 128_176_128)
+            .tensor("output_norm.weight", 10_240)
     }
 
     /// Qwen2.5-1.5B-Instruct's header (Qwen's own Q4_K_M, with an
@@ -586,6 +712,7 @@ pub mod tests {
             .u32("qwen2.block_count", 28)
             .u32("qwen2.context_length", 32_768)
             .u32("qwen2.embedding_length", 1536)
+            .u32("qwen2.feed_forward_length", 8960)
             .u32("qwen2.attention.head_count", 12)
             .u32("qwen2.attention.head_count_kv", 2)
             .texts("tokenizer.ggml.tokens", vocab)
@@ -602,7 +729,7 @@ pub mod tests {
         assert_eq!((s.block_count, s.nextn_layers, s.head_count, s.head_count_kv.clone()), (33, 1, 16, vec![4]));
         assert_eq!(s.vocab_size, 1_000);
         assert_eq!(s.full_attention_interval, Some(4));
-        assert_eq!((s.embd_bytes, s.has_output), (Some(521_471_000), false));
+        assert_eq!((s.embd_bytes, s.has_output, s.nextn_bytes), (Some(521_472_000), false, 128_176_128));
         assert!(s.data_start > 0 && s.data_start.is_multiple_of(32));
         let small = read_shape(Cursor::new(qwen25_1_5b(500).bytes())).unwrap();
         assert_eq!((small.arch.as_str(), small.context_length, small.vocab_size), ("qwen2", Some(32_768), 500));
@@ -642,6 +769,11 @@ pub mod tests {
         assert!(read_shape(Cursor::new(none)).is_err());
     }
 
+    /// llamafile 0.10.3's buffers; 0.10.6's, without and with MTP.
+    const OLD: Server = Server { current: false, mtp: false };
+    const NEW: Server = Server { current: true, mtp: false };
+    const MTP: Server = Server { current: true, mtp: true };
+
     /// The real files' sizes (Nathan's %APPDATA%\yap\llm, 2026-10-20).
     const QWEN35_4B_FILE: u64 = 3_013_027_808;
     const QWEN25_1_5B_FILE: u64 = 1_117_320_736;
@@ -661,12 +793,12 @@ pub mod tests {
         // 3,815 MiB in all at 8K, 4,641 at 32K.
         let s = as_real(read_shape(Cursor::new(qwen35_4b(248_320).bytes())).unwrap(), 10_970_112);
         assert_eq!(s.kv_bytes_per_token(), 8 * 4 * 512 * 2, "8 attention layers of 32");
-        let e = estimate(&s, QWEN35_4B_FILE, 8_192, true);
+        let e = estimate(&s, QWEN35_4B_FILE, 8_192, true, OLD);
         assert_eq!(e.model_mib, 2_863, "the whole file: the embedding is copied to the card for the output");
         assert_eq!((e.kv_mib, e.state_mib), (256, 201));
         assert!(e.compute_mib.abs_diff(495) <= 8, "{e:?}");
         assert!(e.total_mib.abs_diff(3_815) <= 20, "{e:?}");
-        let big = estimate(&s, QWEN35_4B_FILE, 32_768, true);
+        let big = estimate(&s, QWEN35_4B_FILE, 32_768, true, OLD);
         assert_eq!((big.kv_mib, big.state_mib), (1_024, 201));
         assert!(big.compute_mib.abs_diff(554) <= 8, "{big:?}");
         assert!(big.total_mib.abs_diff(4_641) <= 20, "{big:?}");
@@ -676,16 +808,59 @@ pub mod tests {
         // (896 at 32K: 28 KiB a token), compute 322 (355); no recurrent
         // state; 1,480 MiB in all at 8K, 2,186 at 32K.
         let q = as_real(read_shape(Cursor::new(qwen25_1_5b(151_936).bytes())).unwrap(), 5_931_200);
-        let e = estimate(&q, QWEN25_1_5B_FILE, 8_192, true);
+        let e = estimate(&q, QWEN25_1_5B_FILE, 8_192, true, OLD);
         assert!(e.model_mib.abs_diff(935) <= 2, "{e:?}");
         assert_eq!((e.kv_mib, e.state_mib), (224, 0));
         assert!(e.compute_mib.abs_diff(322) <= 10, "{e:?}");
         assert!(e.total_mib.abs_diff(1_480) <= 20, "{e:?}");
-        let big = estimate(&q, QWEN25_1_5B_FILE, 32_768, true);
+        let big = estimate(&q, QWEN25_1_5B_FILE, 32_768, true, OLD);
         assert_eq!(big.kv_mib, 896);
         assert!(big.total_mib.abs_diff(2_186) <= 20, "{big:?}");
         // On the processor all of it is in the PC's memory.
-        assert!(estimate(&q, QWEN25_1_5B_FILE, 8_192, false).model_mib > e.model_mib + 100);
+        assert!(estimate(&q, QWEN25_1_5B_FILE, 8_192, false, OLD).model_mib > e.model_mib + 100);
+    }
+
+    #[test]
+    fn the_estimate_matches_what_llamafile_0_10_6_reported() {
+        // llamafile 0.10.6 on the same card (2026-10-22): the 4B's
+        // prediction block (blk.32, 122.24 MiB) stays off the card without
+        // MTP — 2,740.75 MiB of model —, compute 72 / 96 / 128 MiB at 8K /
+        // 32K / 64K: 3,270 / 4,062 / 5,118 MiB in all.
+        let s = as_real(read_shape(Cursor::new(qwen35_4b(248_320).bytes())).unwrap(), 10_969_056);
+        assert_eq!((s.nextn_bytes, s.feed_forward_length), (128_176_128, 9_216));
+        assert!(s.has_mtp());
+        for (ctx, log, compute) in [(8_192, 3_270, 72), (32_768, 4_062, 96), (65_536, 5_118, 128)] {
+            let e = estimate(&s, QWEN35_4B_FILE, ctx, true, NEW);
+            assert_eq!(e.model_mib, 2_741, "{e:?}");
+            assert_eq!((e.state_mib, e.mtp_mib), (201, 0));
+            // Errs high, by little.
+            assert!((compute..=compute + 12).contains(&e.compute_mib), "{ctx}: {e:?}");
+            assert!((log..=log + 20).contains(&e.total_mib), "{ctx}: {e:?}");
+        }
+        // With MTP: the block on the card, the recurrent state x4 (804
+        // MiB), 35 MiB more compute, the draft context's KV and compute —
+        // 4,134 / 5,024 / 6,240 MiB in the log (+864 / +962 / +1,122).
+        for (ctx, log) in [(8_192, 4_134), (32_768, 5_024), (65_536, 6_240)] {
+            let e = estimate(&s, QWEN35_4B_FILE, ctx, true, MTP);
+            assert_eq!(e.model_mib, 2_863, "{e:?}");
+            assert!((log..=log + 50).contains(&e.total_mib), "{ctx}: {e:?}");
+        }
+        // MTP only on the runtime it's measured on, and only for a model
+        // that can draft (the 1.5B can't).
+        assert_eq!(
+            estimate(&s, QWEN35_4B_FILE, 8_192, true, Server { current: false, mtp: true }),
+            estimate(&s, QWEN35_4B_FILE, 8_192, true, OLD)
+        );
+
+        // Qwen2.5-1.5B: compute 69.5 / 93.5 MiB at 8K / 32K: 1,228 / 1,920
+        // MiB in all; no MTP.
+        let q = as_real(read_shape(Cursor::new(qwen25_1_5b(151_936).bytes())).unwrap(), 5_931_200);
+        assert!(!q.has_mtp());
+        for (ctx, log) in [(8_192, 1_228), (32_768, 1_920)] {
+            let e = estimate(&q, QWEN25_1_5B_FILE, ctx, true, NEW);
+            assert!((log..=log + 10).contains(&e.total_mib), "{ctx}: {e:?}");
+            assert_eq!(estimate(&q, QWEN25_1_5B_FILE, ctx, true, MTP), e);
+        }
     }
 
     #[test]
@@ -702,23 +877,30 @@ pub mod tests {
         assert_eq!(s.kv_bytes_per_token(), 2 * 8 * (64 + 64) * 2);
         assert_eq!(s.state_bytes(), 0, "no ssm sizes, no state");
         // No tensor list: the model is the whole file.
-        assert_eq!(s.model_bytes(1_000, true), 1_000);
+        assert_eq!(s.model_bytes(1_000, true, OLD), 1_000);
     }
 
     /// This PC's on-device models, read-only (`cargo test gguf -- --ignored
-    /// --nocapture`): each header and what it would take at each context.
+    /// --nocapture`; `YAP_GGUF_DIR` for another folder): each header and
+    /// what it would take at each context, on llamafile 0.10.3 and 0.10.6
+    /// (with MTP where it can draft).
     #[test]
     #[ignore]
     fn this_pcs_models() {
-        let dir = dirs::data_dir().unwrap().join("yap").join("llm");
+        let dir = std::env::var_os("YAP_GGUF_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| dirs::data_dir().unwrap().join("yap").join("llm"));
         for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
             let p = e.path();
             if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("gguf")) {
                 let started = std::time::Instant::now();
-                let f = model_file(&p).unwrap();
+                let Some(f) = model_file(&p) else { continue };
                 println!("{} ({} ms): {:?}", p.display(), started.elapsed().as_millis(), f.shape);
                 for ctx in [4_096u64, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144] {
-                    println!("  {ctx}: card {:?}", estimate(&f.shape, f.bytes, ctx, true));
+                    let old = estimate(&f.shape, f.bytes, ctx, true, Server::default());
+                    let new = estimate(&f.shape, f.bytes, ctx, true, Server { current: true, mtp: false });
+                    let mtp = estimate(&f.shape, f.bytes, ctx, true, Server { current: true, mtp: true });
+                    println!("  {ctx}: 0.10.3 {} · 0.10.6 {} · +MTP {} ({:?})", old.total_mib, new.total_mib, mtp.total_mib, mtp);
                 }
             }
         }

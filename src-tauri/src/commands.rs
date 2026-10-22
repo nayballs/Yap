@@ -1687,6 +1687,14 @@ pub fn local_llm_status() -> serde_json::Value {
         "modelFile": crate::local_llm::MODEL_FILENAME,
         "model": crate::local_llm::active_model_display(&cfg),
         "engine": crate::local_llm::ENGINE_DISPLAY,
+        // The llamafile on disk, the one Yap pins, the background upgrade
+        // ("downloading" | "waiting" | ""), and the running server's MTP.
+        "runtime": {
+            "version": crate::local_llm::runtime_version().map(|v| v.to_string()),
+            "pinned": crate::local_llm::RUNTIME_VERSION,
+            "upgrade": crate::local_llm::upgrade_phase(),
+            "mtp": crate::local_llm::serving_plan().map(|p| p.server().mtp),
+        },
         "activeModel": cfg.pp_local_model,
         "activeFile": active_file,
         "models": on_disk,

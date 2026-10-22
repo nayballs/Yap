@@ -702,6 +702,9 @@ pub fn run() {
                     local_llm::autostart_if_configured(&cfg2).await;
                 });
             }
+            // An older llamafile runtime (installs before 22 Oct 2026) is
+            // replaced in the background, never under a dictation.
+            local_llm::spawn_runtime_upgrade(handle.clone());
 
             // Local API bridge (Integrations): loopback server for CLIs/agents.
             bridge::sync(&handle, cfg.bridge_enabled);

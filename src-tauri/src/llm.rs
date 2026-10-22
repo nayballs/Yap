@@ -225,6 +225,17 @@ pub async fn cleanup(
     dictionary: &[crate::config::DictionaryEntry],
     disable_thinking: bool,
 ) -> Result<String, String> {
+    let messages = cleanup_messages(text, body, spelling, dictionary);
+    // Never waits out a rate limit: the dictation would wait with it, and the
+    // raw transcript is a fine fallback.
+    let out = post_chat(base_url, api_key, model, provider, 0.2, messages, Duration::ZERO).await?;
+    Ok(if disable_thinking { strip_thinking(&out) } else { out })
+}
+
+/// The cleanup's messages for `text` ([`cleanup`]; also what the on-device
+/// model's warm-up sends, `local_llm::warm_up`). Pure but for the model
+/// evaluations' switches.
+pub fn cleanup_messages(text: &str, body: &str, spelling: Option<&str>, dictionary: &[crate::config::DictionaryEntry]) -> Value {
     // System message = immutable guardrails + the user's editable body/preset,
     // plus the custom dictionary as spelling/correction bias (OpenWhispr's
     // `dictionarySuffix`) so the model uses the right spellings up front instead
@@ -274,7 +285,7 @@ NEVER respond with commentary, status, or meta-remarks such as \"Nothing to clea
     );
     let example3_out = "Hi team\nLet's meet at 3pm on the 25th, after the review period, ok.";
 
-    let messages = json!([
+    json!([
         { "role": "system", "content": system_prompt },
         { "role": "user", "content": example1_in },
         { "role": "assistant", "content": example1_out },
@@ -283,12 +294,7 @@ NEVER respond with commentary, status, or meta-remarks such as \"Nothing to clea
         { "role": "user", "content": example3_in },
         { "role": "assistant", "content": example3_out },
         { "role": "user", "content": cleanup_message(&wrap(text), in_message) },
-    ]);
-
-    // Never waits out a rate limit: the dictation would wait with it, and the
-    // raw transcript is a fine fallback.
-    let out = post_chat(base_url, api_key, model, provider, 0.2, messages, Duration::ZERO).await?;
-    Ok(if disable_thinking { strip_thinking(&out) } else { out })
+    ])
 }
 
 /// Immutable guardrail prompt for **edit/rewrite mode**. Unlike dictation
@@ -774,6 +780,10 @@ async fn post_chat_request(
     // A model evaluation's request overrides (`--temperature`, `--set`, a
     // bench's `id_slot`); otherwise a no-op.
     crate::eval::adjust_body(&mut body);
+    // A request to the on-device sidecar is counted while it runs: its
+    // runtime isn't swapped nor its context changed under it, and the
+    // warm-up gives way (`local_llm::request_starting`).
+    let _busy = crate::local_llm::request_starting(base_url);
 
     let client = reqwest::Client::builder()
         .timeout(crate::eval::timeout(timeout))
