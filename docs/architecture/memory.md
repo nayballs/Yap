@@ -96,23 +96,39 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   birthday?" finds Rochelle — at most 3). `IMPORT_ASK`: the prompt to copy
   into ChatGPT / Claude / Gemini.
 - **`memory/learn.rs`** — the passes, through the person's **Chat model**
-  (`commands::resolve_chat_endpoint`): temperature 0.2; a model on this PC
-  that can't call tools answers under the changes' JSON schema as llama.cpp's
-  grammar, every field required (`prompt::schema`; retried without it if a
-  server refuses), one that can writes freely (the 4B did worse under any
+  (`commands::resolve_chat_endpoint`), on one of **two paths** (`path`):
+  a model that can call tools (a cloud model, Qwen3.5-4B and up) takes
+  **the full path** — it reads the chat with memory's listing and writes the
+  changes itself, temperature 0.2, freely (the 4B did worse under any
   grammar, and llamafile ignores a bare `json_object` — model-evals.md
-  "Memory"). **Only a model that can call tools learns by itself**
-  (`learns_by_itself`: Qwen2.5-1.5B kept junk and took up to two minutes of
-  a processor a pass); a small one still does Tell, imports and "Remember
-  that…". **The sidecar's rules**:
-  the pass holds `local_llm::hold`, waits out a dictation and is dropped if one
-  starts (`meeting_summary::wait_idle` / `unless_busy` / `dictation_busy`);
-  a background pass never starts a stopped on-device model (it waits for the
-  next). **Learning from a chat** (`learn_from_chat`, "Learn from my chats",
+  "Memory"; forced onto a small model, `YAP_EVAL_MEMORY_PATH=full`, the
+  changes' schema is its grammar, `prompt::schema`); a smaller one
+  (Qwen2.5-1.5B, Qwen3.5-2B / 0.8B) takes **the small path** (`small.rs`,
+  below; `extract`, `small_changes`, `learn_small`, `propose_small`).
+  Given the whole chat, the 1.5B kept what the person only asked about, a
+  wifi password as a "preference" and "Nurse at St James's" as a person,
+  and took up to two minutes of a processor; on the small path it learns
+  with no false memory measured (model-evals.md "Memory on small models").
+  **The sidecar's rules**:
+  a pass holds `local_llm::hold` (the small path: for all its calls),
+  waits out a dictation and is dropped if one starts
+  (`beside_dictation`: `meeting_summary::wait_idle` / `unless_busy` /
+  `dictation_busy`; a background small pass dropped applies nothing and
+  reads the chat again later); a background pass never starts a stopped
+  on-device model (it waits for the next). **On this PC's processor**
+  (`on_processor`: not the sidecar on a graphics card — `local_llm::
+  placement` — nor the cloud; another local server counts as the
+  processor) the small path reads at most 3 sentences a pass (6 otherwise,
+  `small_cap`) and runs at most 12 passes with a model call a day
+  (`take_processor_pass`; then `USED_UP`, tried again an hour later), and a
+  chat must be quiet 10 minutes instead of 5 (`quiet_for`) — on a graphics
+  card it runs sooner. Logs counts and times, never text. **Learning from a
+  chat** (`learn_from_chat`, "Learn from my chats",
   on): only the messages since the last pass (`read`), only when the person
   said something about themselves; then `mark_read`. **The scheduler**
   (`after_turn`, from every `chat_turn`, Voice Assistant included; `start`):
-  a chat is read once it's been quiet 5 minutes; another chat starting makes
+  a chat is read once it's been quiet 5 minutes (10 for a small model on the
+  processor); another chat starting makes
   the others due now; a pass put off (a dictation, the model stopped, a rate
   limit) is tried again 2 minutes later; what's waiting is kept in
   memory.json (`pending`) so a quit doesn't lose it — read a minute after the
@@ -120,7 +136,9 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   e2e suite and the runner call the passes). **Learning from a meeting**
   (`meeting_ended`, from `meeting_end.rs` when an action plan is written;
   "Learn from meetings", off): its title, attendees and action plan (≤ 1,500
-  tokens), people and projects only, once a note. **Proposals** (`propose`
+  tokens), people and projects only, once a note — the full path only (a
+  meeting is other people's words in the third person: the small path has
+  nothing to go on). **Proposals** (`propose`
   for "Tell Yap what to change" and imports — an import cut in parts an 8k
   model can read, each seeing the earlier parts' changes): the model's
   changes previewed on a copy (`Proposal {id, kind, changes: [Done]}` — the
@@ -137,7 +155,66 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   the person, project or topic by name), and for a model without tools
   `spoken(text)` — "Remember that…" / "Forget that…" as a whole message
   (`spoken_request`; not "Remember when…?" nor "Don't forget to…") runs the
-  Tell pass and Yap answers itself ("Got it: I'll remember that.").
+  Tell pass and Yap answers itself ("Got it: I'll remember that."). With a
+  small model, Tell and imports take the small path too (`propose_small`):
+  **"Forget …" needs no model** (`small::forget_request` → `small::forget`:
+  every fact naming what's to go — a capitalised name in the request — and
+  the people, projects and topics whose name or "about" has it; Profile and
+  Preferences lose facts only; no name: `forget_changes`), anything else is
+  read a sentence (an import: a line, inside its code block, cut where a new
+  verb starts — `small::told`) at a time like a chat, ≤ 8 / ≤ 30.
+- **`memory/small.rs`** — **the small path**, pure. **A wrong memory is
+  worse than a missed one**, so most of it is Yap's own:
+  1. **Candidates** (`candidates`): the person's messages (not pasted code
+     or quotes, ≤ 1,200 characters each) in sentences and clauses
+     (`sentences` — "Mr." and decimals don't end one — and `clauses`, cut
+     where a new first-person subject or a question starts: "I'm a nurse
+     in Leeds and I work nights, so I need…" is three; "Daniel, my
+     flatmate, …" stays one). A clause counts when it's in the first person
+     ("I", "I'm", "my", "we", "our"; "me" alone isn't) or its subject is
+     someone memory has ("Rochelle's birthday is…"), and isn't a question,
+     a request ("Can you…", "Give me…"), something read or heard ("I read
+     that…", "the page says…"), a want or plan ("I need…", "I'm meeting
+     Ingrid tomorrow"), a one-off thing done ("I sent…", "we went…"), today's
+     plans (tonight, this weekend, by Friday — unless it names someone in
+     their life: "My sister Rochelle is coming this weekend"), a secret, or
+     — sensitive topics off — one of those. Plus **how they want answers**
+     (an answer word and "from now on" / "always" / "keep…", not "this
+     time": `Kind::Preference`) and "remember that…" inside a message.
+     "I've left Acme" is Yap's own: `left_names` → `left_changes` takes
+     the Profile facts naming it out. Most chats have no candidate: no call.
+  2. **One short call a candidate** (`messages`: a ≈ 140-token system prompt
+     starting "You keep Yap's memory of the user", four one-shots as earlier
+     turns — ~300 tokens with the sentence, the shared part cached by
+     llama.cpp between calls; `schema`: `{fact, section: skip | profile |
+     preferences | people | projects | topics, title}` as llama.cpp's
+     grammar — serde_json sorts the keys, so the model writes the fact first;
+     temperature 0, ≤ 80 tokens). A preference needs no call: the person's
+     own words are the memory (`preference_of`: "Keep your answers short").
+  3. **Yap checks the answer** (`validate`) before `ops::apply`'s guards:
+     the fact in the third person (`as_memory`: "I work nights" → "Works
+     nights", "Moved to Bristol" → "Lives in Bristol", "my" → "their"); every
+     word of it the sentence has (`said_in`, but for memory's own phrasing:
+     the 1.5B added "at the hospital" from a one-shot); never a question, a
+     request, a passing moment, a change ("Left…") or a fact about the world
+     (`about_the_world`: a capital, a price, "X is the…"); **people** only
+     named as written with a relationship or role word next to the name in
+     the sentence (`relation_of` — and who they are comes from those words,
+     not the model), or someone memory has who's the sentence's subject or
+     told about; their facts without their name (`their_fact`); **projects**
+     only with ownership ("I'm building", "my novel": `owns_project`) and a
+     capitalised name as written; **topics** only with a lasting interest
+     ("I play", "I'm learning": `keeps_up`); **preferences** only from a
+     sentence about answers. A person, project or topic whose "name" isn't one
+     the sentence has ("I", "The name as written"), when the person is the
+     sentence's subject, is kept as what they said about themselves
+     (Profile), if it passes. A new "Lives in X" replaces the item's other
+     "Lives in …" (`replaced`).
+  **People are found by Yap too** (`people_in`, `people_changes`): "my
+  sister Rochelle", "my manager, Mr Okafor", "my sister's name is
+  Rochelle", "Daniel, my flatmate", "Rochelle is my sister", an import's
+  "has a sister called Rochelle" — added with who they are whatever the
+  model wrote (its fact for them still goes through `validate`).
 - **`memory/vocab.rs`** — **memory feeds dictation**, conservatively.
   `entries(items, dictionary, is_word)`: the people and projects whose
   "Spell this name in dictation" is on (the newest 40), as dictionary entries
@@ -214,8 +291,10 @@ search (`settingsIndex.js`, anchors `memory-search-chats` … `memory-clear`):
   "Learn from my chats" (`memoryLearnChats`, on), "Learn from meetings"
   (`memoryLearnMeetings`, off: other people's words), "Include sensitive
   topics in memory" (`memorySensitive`, off) — config.json switches, saved by
-  Settings' auto-save. With a Chat model too small to learn by itself
-  (`memory_list`'s `ai.learns`), a note says so and points at Language Models.
+  Settings' auto-save. With a small Chat model (`memory_list`'s `ai.small`:
+  the small path), a note says Yap learns carefully with it — only what the
+  person says about themselves, a sentence at a time, checked against their
+  words; less, and nothing from meetings — and points at Language Models.
 - With no AI model, a note at the top says so ("Yap needs an AI model for
   memory") with **Language Models** (→ `cleanup#chat`); hand edits still
   work.
@@ -259,17 +338,27 @@ search (`settingsIndex.js`, anchors `memory-search-chats` … `memory-clear`):
   sentences × 90 names, with this PC's spell checker; it showed that names
   alone don't protect ordinary words: without the heard-side check "a rescue"
   became "Archie" and "olive oil" "Olivia oil") — the memory tools through the
-  real loop, `search_chats`.
+  real loop, `search_chats`; the small path (`memory::small`): what is and
+  isn't a candidate (questions, requests, things read, plans, one-off
+  events, secrets, sensitive topics), the people Yap finds itself and the
+  relationship words a person needs, every check of a model's answer, the
+  profile fallback, "Forget …" without a model, import lines, the prompt's
+  size.
 - e2e (`e2e/memory.spec.js`, `memory-no-ai.spec.js`,
   `memory-small-model.spec.js`): the switches, hand edits (a secret refused,
   dictation switch, delete + Undo), Tell's diff + Apply + Undo against the
   fake model, an import reviewed change by change, export, Clear all, a
   learned chat's toast with Undo and Manage, About you's rows under You (set
   there, followed here, not kept twice from an import, at the top of You.md); no AI model; a
-  model too small to learn by itself.
+  small model: Settings' note, no call for a chat of questions, one call a
+  sentence under the small form's schema, a person the sentence never names
+  refused, Tell through the same call, "Forget …" with no call.
 - Model evaluations (`evals/scenarios/memory-*.json`, tag `memory`; the
-  scenario format's memory fields and the results — Qwen3.5-4B 42/42, then 43/44 with About you, on the
-  GPU, Groq gpt-oss-20b 8/8, Qwen2.5-1.5B — are in
-  [`docs/model-evals.md`](../model-evals.md) "Memory").
+  small-model cases also `memory-small`; the scenario format's memory fields
+  — `memory_allowed` counts false memories — and the results: Qwen3.5-4B
+  42/42, then 43/44 with About you, on the GPU, Groq gpt-oss-20b 8/8;
+  Qwen2.5-1.5B, Qwen3.5-2B and 0.8B on the small path — are in
+  [`docs/model-evals.md`](../model-evals.md) "Memory" and "Memory on small
+  models").
 - Real-app robot tests (`e2e-real/memory.real.js`): names Yap remembers fixed in a
   real dictation, everyday sentences untouched.

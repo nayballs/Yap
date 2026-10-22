@@ -143,7 +143,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `assistant.rs` — the Voice Assistant: ask Chat out loud from any app; off during meetings.
 
 **Memory** — [memory.md](./docs/architecture/memory.md)
-- `memory.rs` (+ `memory/`) — what Yap remembers about you (`memory.json`): learned from quiet chats and meetings, sent with questions, remember/forget/search_chats tools, names for dictation, export, Undo.
+- `memory.rs` (+ `memory/`) — what Yap remembers about you (`memory.json`): learned from quiet chats and meetings (a model without tools by the careful small path, `memory/small.rs`), sent with questions, remember/forget/search_chats tools, names for dictation, export, Undo.
 
 **Web search and apps** — [web-and-apps.md](./docs/architecture/web-and-apps.md)
 - `web.rs` (+ `web/native.rs`) — web search (Exa/Tavily/wikis, or the provider's own), guarded page reads.

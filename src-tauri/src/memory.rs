@@ -38,6 +38,7 @@ pub mod guard;
 pub mod learn;
 pub mod ops;
 pub mod prompt;
+pub mod small;
 pub mod vocab;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -654,8 +655,10 @@ fn item_view(i: &Item, words: &Words) -> Value {
 pub async fn memory_list() -> Value {
     let cfg = crate::config::load();
     let ai = match learn::endpoint(&cfg) {
-        Ok(ep) => json!({ "ready": true, "learns": learn::learns_by_itself(&ep) }),
-        Err(e) => json!({ "ready": false, "learns": false, "why": e }),
+        // `small`: the Chat model can't call tools, so it learns by the
+        // small path (Settings says what that changes).
+        Ok(ep) => json!({ "ready": true, "learns": true, "small": learn::path(&ep) == learn::Path::Small }),
+        Err(e) => json!({ "ready": false, "learns": false, "small": false, "why": e }),
     };
     let list = tauri::async_runtime::spawn_blocking(move || {
         let words = Words::new();

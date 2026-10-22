@@ -231,7 +231,7 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   `yap-voice-replies` and `yap-voice-volume` (Chat's) are adopted.
 - **Memory** (`memory`, `MemorySection.svelte`, [memory.md](./memory.md#settings--memory)):
   **What Yap learns from** (the four switches, flat; a note when the Chat
-  model is too small to learn by itself), **You** (Profile and Preferences
+  model is small: Yap learns carefully with it, by the small path), **You** (Profile and Preferences
   as rows that open in place, then About you's name, region and note as link
   rows to their rows in General), **People / Projects / Topics** (a card of
   objects each: a row per item opening to edit, "Add a person"), **Tell Yap
