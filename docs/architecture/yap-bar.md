@@ -29,7 +29,11 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   from the press until it locks hands-free), as Wispr's bar draws them only
   hands-free; and after a cancel "Dictation
   cancelled · Undo" (`yap-state` "cancelled", `dictation-undo`, whatever the
-  setting) while the audio is kept;
+  setting) while the audio is kept; and after a dictation whose words AI
+  cleanup changed, "Cleaned up · Use what I said" (`yap-state` "cleaned",
+  `Dictation::Cleaned`, for `as_said::OFFER_MS`; `bar_action "as-said"`:
+  the paste swapped for the words as said, `as_said.rs`) — a region of its
+  own like Undo, shown with the bar off too;
   **meeting** = a 69×30 recording pill at half opacity (5 bars, the stop
   circle; hovered, full opacity and the timer; body → `notepad::open`, ■ →
   `meeting_end::end`). **Click-through except over what
@@ -149,7 +153,8 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   the capsule's ends are kept (39 px padding) and they only fade (and
   settle from 0.82×) in and out there, `visibility: hidden` at rest, so
   pointing never changes the width or moves the words; cancelled,
-  "Dictation cancelled" + Undo with a hairline running down the kept time.
+  "Dictation cancelled" + Undo with a hairline running down the kept time;
+  cleaned, "Cleaned up" + **Use what I said** the same way (`offerMs`).
   It's a `data-region` ("dictation") whenever it has a button to offer, so
   the click-through bar takes clicks on it, never focused). **Cards** sit 26 px above the pill whatever it
   shows (positioned from the dock's height, gliding 0.16 s when it grows),

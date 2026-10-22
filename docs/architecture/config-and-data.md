@@ -6,7 +6,14 @@
 
 ## `config.rs`
 
-- **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu, input_device, sound +
+- **`config.rs`** — `YapConfig` (hotkey, model_size, use_gpu (since
+  2026-10-22 it mirrors stt_device: `save` sets it to stt_device != "cpu",
+  `load` turns an old `false` into "cpu"), stt_device (Settings →
+  Speech-to-Text → Runs on: "auto" — the graphics card unless the processor
+  measured clearly faster on this PC, `stt_speed.rs` — | "gpu" | "cpu"), keep_recent_audio (a day of dictation
+  audio to run one again, on; `recent_audio.rs`), as_said_hotkey ("Use what I
+  said", "" = unbound) + as_said_offer (the bar's offer after AI cleanup,
+  on; both `as_said.rs`), input_device, sound +
   volume, output_device, quiet_other_apps ("Silence other apps while you
   dictate", off; reads old configs' `muteWhileRecording`) + pause_media
   ("Pause music and videos while you dictate", off; both `mute.rs`), recording_mode,
@@ -136,6 +143,18 @@
   verified). Attribution: Settings → Voice Assistant → Voice. Deleted from the
   Kokoro row; ~352 MB.
 - Groq usage: `%APPDATA%/yap/groq_usage.json`.
+- Speech engine timings: `%APPDATA%/yap/stt_speed.json` — per model id, the
+  benchmark of each device on this PC (load, the first run after loading,
+  the warm ms at three dictation lengths, its time for your dictations,
+  whether its words matched), the pick, when, the processor's load before,
+  how this person's dictations weigh the lengths (`shortShare`), and what it was measured on
+  (the method, the model's files, the graphics adapters and drivers): a
+  stale one is measured again (`stt_speed.rs`). Safe to delete (the graphics card until measured again).
+- Recent dictation audio: `%APPDATA%/yap/recent-audio/` — `<id>.wav` (16 kHz
+  mono) for each dictation of the last 24 h (≤ 500, ≤ 200 MB), and
+  `<id>.pending` while one is being transcribed (`recent_audio.rs`). Never
+  leaves the PC; deleted on schedule, with its history entry, by clearing
+  history and by Settings → Privacy & data → Clear recent audio.
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History).
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
   participants, meeting transcripts).
@@ -200,6 +219,10 @@
   fullscreen apps (`bar_hide_fullscreen`), the dictation overlay always shown
   while recording/transcribing (no off switch — it's the hot-mic indicator),
   without ✕ / ✓ (`bar_dictation_buttons` "off": Cancel is in the tray),
+  speech models on the graphics card unless the processor measured clearly
+  faster on this PC (`stt_device` "auto"; the graphics card until measured), a day of dictation audio kept
+  (`keep_recent_audio`), "Use what I said" offered on the bar after AI cleanup
+  (`as_said_offer`) with no shortcut (`as_said_hotkey` ""),
   live transcription preview **on**
   (`streaming_partials`), AI cleanup **off** (turned on locally, the model
   recommended for this PC: Qwen3.5 4B on a graphics card with ≥ 5.5 GiB of its

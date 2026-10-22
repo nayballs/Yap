@@ -145,6 +145,14 @@
   <Row setting="live-preview">
     <Toggle bind:checked={cfg.streamingPartials} label="Live preview on the Yap bar" desc="Your words show as you speak. What's pasted is always the final text" />
   </Row>
+  <Row setting="as-said-offer">
+    <Toggle
+      bind:checked={cfg.asSaidOffer}
+      label="Offer what you said after AI cleanup"
+      desc="When cleanup changes your words, the Yap bar offers Use what I said for a few seconds"
+      hint="It swaps the paste for your words before cleanup (corrections and snippets kept). Give it a shortcut in Shortcuts; the tray has Paste last transcript (as said)."
+    />
+  </Row>
   <Row
     label="Cancel and finish buttons"
     desc={BUTTONS_DESC[cfg.barDictationButtons] ?? BUTTONS_DESC.off}

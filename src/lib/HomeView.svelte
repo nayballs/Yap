@@ -3,6 +3,10 @@
   // time-of-day greeting with the hotkey rendered as keycaps, a dark hero
   // card teaching voice editing, the day-grouped history feed with hover
   // actions, and a right-rail stats card with serif display numerals.
+  // A dictation whose audio Yap still keeps (recent_audio.rs: a day) can be
+  // **run again** (on the same model or another) and **played**; one that
+  // failed (never transcribed, or its paste didn't land) says so, with Run
+  // again at hand.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
@@ -10,6 +14,8 @@
   import { appLabel } from './appNames.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
   import { copyText } from './itemMenus.js';
+  import { toast, dismiss } from './ui/toast.svelte.js';
+  import { MODELS } from './models.js';
   import { attention } from './attention.svelte.js';
 
   let { onopensettings = null, onnavigate = null } = $props();
@@ -25,6 +31,12 @@
   let assistantHotkeyLabel = $state('');
   let cleanupEnabled = $state(false);
   let copiedTs = $state(null);
+  // Run again / Play (recent_audio.rs).
+  let installed = $state([]);
+  let activeModel = $state('');
+  let running = $state(null);
+  let playing = $state(null);
+  let player = null;
 
   // Rotating hero tips: a different card each day (dots to browse). Each tip
   // teaches one feature that already exists — the hero is onboarding forever:
@@ -100,18 +112,95 @@
       .then((cfg) => {
         historyEnabled = cfg?.historyEnabled !== false;
         cleanupEnabled = cfg?.postProcessEnabled === true;
+        activeModel = cfg?.modelSize || '';
         if (cfg?.hotkey) hotkeyLabel = formatHotkeySpec(cfg.hotkey);
         if (cfg?.editHotkey) editHotkeyLabel = formatHotkeySpec(cfg.editHotkey);
         if (cfg?.assistantHotkey) assistantHotkeyLabel = formatHotkeySpec(cfg.assistantHotkey);
       })
+      .catch(() => {});
+    invoke('installed_models')
+      .then((m) => (installed = Array.isArray(m) ? m : []))
       .catch(() => {});
     // History changed (a dictation or upload saved, an entry deleted, all
     // cleared) → re-pull. Not `yap-transcript`: a dictation emits that before
     // it pastes and saves, so a re-pull on it could miss the new entry.
     let un;
     listen('yap-history-changed', () => refresh()).then((u) => (un = u));
-    return () => un && un();
+    return () => {
+      un && un();
+      stopPlaying();
+    };
   });
+
+  const modelName = (id) => MODELS.find((m) => m.id === id)?.name || id;
+
+  /** Run a kept dictation again (`history_rerun`): `model` null = the one in use. */
+  async function rerun(e, model = null) {
+    if (running) return;
+    running = rowKey(e);
+    const busy = toast({ title: 'Running it again…', description: modelName(model || activeModel), busy: true, duration: 0, chip: 'Dictation' });
+    try {
+      const r = await invoke('history_rerun', { ts: e.ts, audio: e.audio, model });
+      dismiss(busy);
+      const preview = r.text.length > 90 ? `${r.text.slice(0, 87).trimEnd()}…` : r.text;
+      toast({
+        title: 'Transcribed again',
+        description: `${r.modelName}: “${preview}”`,
+        variant: 'success',
+        action: { label: 'Copy', onClick: () => copyText(r.text) },
+      });
+    } catch (err) {
+      dismiss(busy);
+      toast({ title: "Couldn't run it again", description: String(err), variant: 'destructive' });
+    } finally {
+      running = null;
+      refresh();
+    }
+  }
+
+  /** Run again on the model in use, or — with others installed — pick one. */
+  function rerunMenu(ev, e) {
+    const others = installed.filter((m) => m !== activeModel);
+    if (!others.length) return rerun(e);
+    openContextMenu(
+      ev,
+      [
+        { label: `Run again with ${modelName(activeModel)}`, icon: 'sync', onselect: () => rerun(e) },
+        { separator: true },
+        ...others.map((m) => ({ label: `With ${modelName(m)}`, onselect: () => rerun(e, m) })),
+      ],
+      { label: 'Run again' }
+    );
+  }
+
+  function stopPlaying() {
+    if (player) {
+      player.pause();
+      URL.revokeObjectURL(player.src);
+      player = null;
+    }
+    playing = null;
+  }
+
+  /** Play (or stop) a kept dictation's audio. */
+  async function play(e) {
+    const key = rowKey(e);
+    const again = playing === key;
+    stopPlaying();
+    if (again) return;
+    try {
+      const bytes = await invoke('recent_audio_wav', { id: e.audio });
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+      const a = new Audio(url);
+      a.onended = () => player === a && stopPlaying();
+      player = a;
+      playing = key;
+      await a.play();
+    } catch (err) {
+      stopPlaying();
+      toast({ title: "Couldn't play it", description: String(err), variant: 'destructive' });
+    }
+  }
 
   // Group entries (newest first) into local-day buckets with friendly labels,
   // after applying the search filter (text, app, or model).
@@ -182,7 +271,9 @@
   // Copy raw transcript (the words before cleanup and the dictionary, when
   // they differ), Delete… — also from the row's hover buttons' place via the
   // ContextMenu key / Shift+F10 on the focused row. ----
-  const rowKey = (e) => `${e.ts}:${e.text}`;
+  // (Two dictations can share a second and their words: the audio id tells
+  // them apart, and the feed keys rows by their place too.)
+  const rowKey = (e) => `${e.ts}:${e.audio ?? ''}:${e.text}`;
   let rowEls = $state({});
 
   /** The trash button and the menu's Delete… both ask first. */
@@ -190,7 +281,9 @@
     const preview = e.text.length > 60 ? `${e.text.slice(0, 57).trimEnd()}…` : e.text;
     askConfirm({
       title: 'Delete this dictation?',
-      body: `“${preview}” leaves your history and stats. The text you dictated stays where Yap typed it.`,
+      body: e.text
+        ? `“${preview}” leaves your history and stats.${e.audio ? ' Its audio goes too.' : ''} The text you dictated stays where Yap typed it.`
+        : 'It leaves your history, and its audio goes too.',
       run: () => remove(e),
       returnFocus: rowEls[rowKey(e)],
     });
@@ -201,10 +294,15 @@
     openContextMenu(
       ev,
       [
-        { label: 'Copy', icon: 'copy', onselect: () => copyText(e.text) },
+        e.text ? { label: 'Copy', icon: 'copy', onselect: () => copyText(e.text) } : null,
         raw && raw !== e.text.trim()
           ? { label: 'Copy raw transcript', icon: 'copy', onselect: () => copyText(raw, 'Copied the raw transcript') }
           : null,
+        e.audio ? { label: 'Run again', icon: 'sync', onselect: () => rerun(e) } : null,
+        e.audio && installed.some((m) => m !== activeModel)
+          ? { label: 'Run again with', items: installed.filter((m) => m !== activeModel).map((m) => ({ label: modelName(m), onselect: () => rerun(e, m) })) }
+          : null,
+        e.audio ? { label: playing === rowKey(e) ? 'Stop playing' : 'Play', icon: playing === rowKey(e) ? 'stop' : 'play', onselect: () => play(e) } : null,
         { separator: true },
         { label: 'Delete…', icon: 'trash', danger: true, onselect: () => askRemove(e) },
       ],
@@ -378,11 +476,12 @@
           {#each groups as g (g.label)}
             <div class="daycap">{g.label}</div>
             <div class="daylist">
-              {#each g.items as e (e.ts + e.text)}
+              {#each g.items as e, i (`${rowKey(e)}:${i}`)}
                 <!-- Focusable for its menu from the keyboard (the ContextMenu key, Shift+F10). -->
                 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
                 <div
                   class="item"
+                  class:failed={e.status === 'failed' || e.status === 'notPasted'}
                   class:menuopen={menuOpenFor(rowEls[rowKey(e)])}
                   bind:this={rowEls[rowKey(e)]}
                   role="article"
@@ -393,14 +492,41 @@
                 >
                   <span class="time">{timeOf(e.ts)}</span>
                   <div class="body">
-                    <p class="text">{e.text}</p>
+                    {#if e.status === 'failed'}
+                      <p class="text failedtext">Not transcribed{e.error ? ` · ${e.error}` : ''}</p>
+                    {:else}
+                      <p class="text">{e.text}</p>
+                    {/if}
+                    {#if e.status}
+                      <p class="failline">
+                        {#if e.status === 'notPasted'}<span class="flag">Didn't paste</span><span class="why">{e.error}</span>{/if}
+                        {#if e.audio}
+                          <button class="retry" disabled={!!running} onclick={() => rerun(e)}>
+                            {running === rowKey(e) ? 'Running…' : 'Run again'}
+                          </button>
+                        {/if}
+                      </p>
+                    {/if}
                     <p class="meta">
                       {#if e.app}{appName(e.app)} · {/if}{e.words}
                       {e.words === 1 ? 'word' : 'words'}{#if e.model}
-                        · {e.model}{/if}
+                        · {modelName(e.model)}{/if}
                     </p>
                   </div>
                   <div class="actions">
+                    {#if e.audio}
+                      <button class="act" class:on={playing === rowKey(e)} title={playing === rowKey(e) ? 'Stop' : 'Play'} aria-label={playing === rowKey(e) ? 'Stop playing' : 'Play'} onclick={() => play(e)}>
+                        {#if playing === rowKey(e)}
+                          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
+                        {:else}
+                          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" /></svg>
+                        {/if}
+                      </button>
+                      <button class="act" data-more title="Run again" aria-label="Run again" disabled={!!running} onclick={(ev) => rerunMenu(ev, e)}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></svg>
+                      </button>
+                    {/if}
+                    {#if e.text}
                     <button class="act" title={copiedTs === e.ts ? 'Copied!' : 'Copy'} aria-label="Copy" onclick={() => copy(e)}>
                       {#if copiedTs === e.ts}
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6" /></svg>
@@ -408,6 +534,7 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
                       {/if}
                     </button>
+                    {/if}
                     <button class="act danger" title="Delete" aria-label="Delete" onclick={() => askRemove(e)}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
                     </button>
@@ -778,6 +905,48 @@
   .item:hover .actions,
   .item:focus-within .actions {
     opacity: 1;
+  }
+  /* A dictation that failed (never transcribed, or its paste didn't land):
+     said in the row, with Run again at hand (recent_audio.rs). */
+  .failedtext {
+    color: var(--yap-muted);
+    font-style: italic;
+  }
+  .failline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 5px 0 0;
+    font-size: 11.5px;
+    color: var(--yap-muted);
+  }
+  .flag {
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--yap-danger) 12%, transparent);
+    color: var(--yap-danger);
+    font-weight: 650;
+  }
+  .retry {
+    padding: 2px 10px;
+    border: 1px solid var(--yap-border);
+    border-radius: 999px;
+    background: var(--yap-s1, transparent);
+    color: var(--yap-fg);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .retry:hover:not(:disabled) {
+    background: var(--yap-s3);
+  }
+  .retry:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .act.on {
+    color: var(--yap-fg);
   }
   .act {
     display: inline-flex;

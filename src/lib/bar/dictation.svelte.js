@@ -11,7 +11,9 @@ const AMP_GAIN = 3.5;
 
 export const dictation = $state({
   // idle | recording | processing | processing-slow | needs-model | error |
-  // cancelled ("Dictation cancelled · Undo" while the audio is kept)
+  // cancelled ("Dictation cancelled · Undo" while the audio is kept) |
+  // cleaned ("Cleaned up · Use what I said" a few seconds after a dictation
+  // AI cleanup changed: as_said.rs)
   state: 'idle',
   errorMsg: 'Transcription failed',
   history: [],
@@ -32,6 +34,8 @@ export const dictation = $state({
   micSilentFull: '',
   // How long a cancelled dictation can be undone (`yap-dictation-cancelled`).
   undoMs: 10_000,
+  // How long "Use what I said" is offered (as_said.rs `OFFER_MS`).
+  offerMs: 6_000,
   // A question to the Voice Assistant (assistant.rs, `yap-assistant`):
   // 'idle' | 'listening' | 'thinking' | 'speaking'. Not idle, the capsule is
   // the assistant's ("Ask Yap…", "Thinking…", "Speaking…" with ■).
@@ -104,7 +108,7 @@ export function initDictation() {
     }
     // Keep the partial visible through the brief "processing" state, then
     // drop it once we're idle/needs-model/error so it never lingers.
-    if (state === 'idle' || state === 'needs-model' || state === 'error' || state === 'recording' || state === 'cancelled') {
+    if (state === 'idle' || state === 'needs-model' || state === 'error' || state === 'recording' || state === 'cancelled' || state === 'cleaned') {
       clearPartial();
     }
   });

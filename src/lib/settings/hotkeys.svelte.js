@@ -1,4 +1,4 @@
-// Settings' five global shortcuts (input_hook.rs): which command applies
+// Settings' six global shortcuts (input_hook.rs): which command applies
 // each, their names for clash messages, and whether one is being picked
 // right now (Settings' in-page hotkey fallback stands down meanwhile, so
 // pressing the current hotkey to replace it doesn't start a dictation).
@@ -13,6 +13,7 @@ export const HOTKEY_CMD = {
   meetingHotkey: 'configure_meeting_hotkey',
   assistantHotkey: 'configure_assistant_hotkey',
   readHotkey: 'configure_read_hotkey',
+  asSaidHotkey: 'configure_as_said_hotkey',
 };
 
 export const HOTKEY_NAMES = {
@@ -21,6 +22,7 @@ export const HOTKEY_NAMES = {
   meetingHotkey: 'meeting shortcut',
   assistantHotkey: 'assistant shortcut',
   readHotkey: 'read-aloud shortcut',
+  asSaidHotkey: 'Use-what-I-said shortcut',
 };
 
 /** True while any <SettingsHotkey> is capturing a new key. */
@@ -38,7 +40,7 @@ export function onHotkeyCapturing(cfg, target, on) {
 }
 
 /**
- * The five never fire on one press (`hotkeysClash`, input_hook.rs
+ * The six never fire on one press (`hotkeysClash`, input_hook.rs
  * `clashes`): the message for a refused spec, else null.
  */
 export function validateHotkey(cfg, target, spec) {

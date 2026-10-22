@@ -16,11 +16,43 @@
 //!   `engines` feature (GPU whisper via Vulkan), plus a stub fallback for
 //!   the default build so `cargo check` stays fast and the pipeline is testable
 //!   without compiling whisper.cpp / ONNX Runtime.
+//!
+//! Each engine is loaded on a [`Device`] — the graphics card (Whisper on
+//! Vulkan, the ONNX models on DirectML) or the processor — chosen per model
+//! and per PC by `stt_speed.rs` (a one-time background benchmark, or the
+//! person's choice in Settings → Speech-to-Text → Runs on).
 
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
+
+/// Where a speech model runs: the **graphics card** (Whisper through Vulkan,
+/// the ONNX models — Parakeet… — through DirectML) or the **processor**.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Device {
+    Gpu,
+    Cpu,
+}
+
+impl Device {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Device::Gpu => "gpu",
+            Device::Cpu => "cpu",
+        }
+    }
+
+    /// What the log calls it for a model: "DirectML", "Vulkan" or "CPU".
+    pub fn runtime(self, model_id: &str) -> &'static str {
+        match (self, is_whisper_model(model_id)) {
+            (Device::Cpu, _) => "CPU",
+            (Device::Gpu, true) => "Vulkan",
+            (Device::Gpu, false) => "DirectML",
+        }
+    }
+}
 
 // ── STT Error ───────────────────────────────────────────────────────
 
@@ -825,13 +857,17 @@ mod engine_real {
         name: &'static str,
     }
 
+    /// transcribe-rs reads ONNX Runtime's execution provider from a global
+    /// while a model's sessions are built: one load at a time, each setting
+    /// it for its own device first.
+    static ORT_LOAD: Mutex<()> = Mutex::new(());
+
     impl RealEngine {
         /// Load `model_path` (a `.bin` file for Whisper, an extracted directory
-        /// for ONNX models) using the engine implied by `engine_type`.
-        ///
-        /// Whisper reads the global accelerator atomics set by
-        /// [`super::apply_accelerator_settings`]; ONNX models load at INT8.
-        pub fn load(model_path: &Path, engine_type: EngineType) -> Result<Self, SttError> {
+        /// for ONNX models) using the engine implied by `engine_type`, on
+        /// `device`: Whisper through Vulkan or on the processor, the ONNX
+        /// models (at INT8) through DirectML or on the processor.
+        pub fn load(model_path: &Path, engine_type: EngineType, device: Device) -> Result<Self, SttError> {
             if !model_path.exists() {
                 return Err(SttError::ModelNotFound(model_path.to_path_buf()));
             }
@@ -840,10 +876,29 @@ mod engine_real {
                 SttError::ModelLoadError(format!("Failed to load {} model: {}", engine_type_name(engine_type), e))
             };
 
+            // ONNX models: the execution provider for this load, held until
+            // its sessions are built.
+            let _ort = (engine_type != EngineType::Whisper).then(|| {
+                let guard = ORT_LOAD.lock().unwrap_or_else(|p| p.into_inner());
+                transcribe_rs::accel::set_ort_accelerator(match device {
+                    Device::Gpu => transcribe_rs::accel::OrtAccelerator::DirectMl,
+                    Device::Cpu => transcribe_rs::accel::OrtAccelerator::CpuOnly,
+                });
+                guard
+            });
+
             let loaded = match engine_type {
-                EngineType::Whisper => {
-                    LoadedEngine::Whisper(WhisperEngine::load(model_path).map_err(load_err)?)
-                }
+                EngineType::Whisper => LoadedEngine::Whisper(
+                    WhisperEngine::load_with_params(
+                        model_path,
+                        transcribe_rs::whisper_cpp::WhisperLoadParams {
+                            use_gpu: device == Device::Gpu,
+                            gpu_device: transcribe_rs::accel::get_whisper_gpu_device(),
+                            ..Default::default()
+                        },
+                    )
+                    .map_err(load_err)?,
+                ),
                 EngineType::Parakeet => LoadedEngine::Parakeet(
                     ParakeetModel::load(model_path, &Quantization::Int8).map_err(load_err)?,
                 ),
@@ -871,6 +926,7 @@ mod engine_real {
             tracing::info!(
                 model_path = %model_path.display(),
                 engine = engine_type_name(engine_type),
+                device = device.as_str(),
                 "STT engine loaded (transcribe-rs)"
             );
 
@@ -1096,10 +1152,11 @@ mod engine_stub {
     }
 
     impl StubEngine {
-        pub fn load(model_path: &Path, engine_type: EngineType) -> Result<Self, SttError> {
+        pub fn load(model_path: &Path, engine_type: EngineType, device: Device) -> Result<Self, SttError> {
             tracing::info!(
                 model_path = %model_path.display(),
                 engine = engine_type_name(engine_type),
+                device = device.as_str(),
                 "STT engine created (STUB — no real inference)"
             );
             Ok(Self {
@@ -1160,9 +1217,23 @@ use engine_stub::StubEngine as ActiveEngine;
 /// Wrapper over the active (real or stub) engine that the pipeline holds warm.
 pub struct SttAdapter {
     engine: ActiveEngine,
+    /// Where it runs (the graphics card or the processor).
+    device: Device,
+    /// The model it is (a registry id).
+    model: String,
 }
 
 impl SttAdapter {
+    /// Where this engine runs.
+    pub fn device(&self) -> Device {
+        self.device
+    }
+
+    /// The model id it was loaded for.
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
     /// Transcribe audio using the underlying engine. `language` (`None` =
     /// auto-detect), `translate`, and the `initial_prompt` vocabulary bias
     /// are applied per engine; see [`SttEngine::transcribe`].
@@ -1204,22 +1275,61 @@ impl SttAdapter {
     }
 }
 
-/// Build an STT engine for `model_id`, resolving its artifact under `data_dir`.
+/// Build an STT engine for `model_id`, resolving its artifact under `data_dir`,
+/// on the device this PC runs it fastest on (`stt_speed::device_for`: the
+/// benchmark's pick, or Settings' "Runs on"; `use_gpu` off = the processor).
 ///
 /// Errors with [`SttError::ModelNotFound`] if the artifact isn't on disk yet
 /// (the caller downloads first via [`ensure_model_exists`]).
-///
-/// `use_gpu` is currently advisory: GPU selection is driven by the global
-/// transcribe-rs accelerator atomics set in [`apply_accelerator_settings`].
 pub fn create_stt_engine(
     data_dir: &Path,
     model_id: &str,
-    _use_gpu: bool,
+    use_gpu: bool,
 ) -> Result<SttAdapter, SttError> {
+    create_stt_engine_on(data_dir, model_id, crate::stt_speed::device_for(model_id, use_gpu))
+}
+
+/// [`create_stt_engine`] on a given device (the benchmark measures each).
+pub fn create_stt_engine_on(data_dir: &Path, model_id: &str, device: Device) -> Result<SttAdapter, SttError> {
     let resolved = resolve_model(model_id);
     let model_path = data_dir.join("models").join(&resolved.filename);
-    let engine = ActiveEngine::load(&model_path, resolved.engine_type)?;
-    Ok(SttAdapter { engine })
+    let engine = ActiveEngine::load(&model_path, resolved.engine_type, device)?;
+    Ok(SttAdapter { engine, device, model: model_id.to_string() })
+}
+
+/// What a model's files are on disk now — their total size and the newest
+/// change — so a benchmark of it can tell when it was replaced (a new
+/// download). `None` when it isn't installed.
+pub fn model_fingerprint(data_dir: &Path, model_id: &str) -> Option<String> {
+    let resolved = resolve_model(model_id);
+    let path = data_dir.join("models").join(&resolved.filename);
+    let stamp = |m: &std::fs::Metadata| {
+        m.modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    };
+    if resolved.is_directory {
+        let mut size = 0u64;
+        let mut newest = 0u64;
+        for entry in std::fs::read_dir(&path).ok()?.flatten() {
+            // (Tarballs made on a Mac carry "._" files; they're no part of it.)
+            if entry.file_name().to_string_lossy().starts_with("._") {
+                continue;
+            }
+            if let Ok(m) = entry.metadata() {
+                if m.is_file() {
+                    size += m.len();
+                    newest = newest.max(stamp(&m));
+                }
+            }
+        }
+        (size > 0).then(|| format!("{size}:{newest}"))
+    } else {
+        let m = std::fs::metadata(&path).ok()?;
+        m.is_file().then(|| format!("{}:{}", m.len(), stamp(&m)))
+    }
 }
 
 /// Whether `model_id` resolves to a whisper.cpp model. Drives the dictionary
@@ -1231,11 +1341,12 @@ pub fn is_whisper_model(model_id: &str) -> bool {
 
 // ── Accelerator setup ───────────────────────────────────────────────
 
-/// Apply Yap's fixed accelerator policy to the transcribe-rs global atomics:
-/// **whisper → Vulkan** (Auto picks the Vulkan GPU backend, any GPU), **ONNX → DirectML**.
-///
-/// Must be called once on startup, before any model loads. No-op (compiled
-/// away) in the stub build.
+/// The transcribe-rs global atomics' defaults, before any model loads:
+/// **whisper → Vulkan** (Auto picks the Vulkan GPU backend, any GPU),
+/// **ONNX → DirectML**. Every load then says its own device
+/// ([`create_stt_engine_on`]: the graphics card or the processor, as
+/// `stt_speed.rs` chose for this model on this PC), so these only matter to
+/// a load that doesn't. No-op (compiled away) in the stub build.
 #[cfg(feature = "engines")]
 pub fn apply_accelerator_settings(use_gpu: bool) {
     use transcribe_rs::accel;
@@ -1247,11 +1358,11 @@ pub fn apply_accelerator_settings(use_gpu: bool) {
     };
     accel::set_whisper_accelerator(whisper);
 
-    // ONNX always targets DirectML on Windows (GPU via DX12, no CUDA-version
-    // matching). transcribe-rs falls back to CPU if DirectML is unavailable.
+    // DirectML on Windows (GPU via DX12, no CUDA-version matching).
+    // transcribe-rs falls back to CPU if DirectML is unavailable.
     accel::set_ort_accelerator(accel::OrtAccelerator::DirectMl);
 
-    tracing::info!(use_gpu, "transcribe-rs accelerators set (whisper=Auto/Cpu, ort=DirectMl)");
+    tracing::info!(use_gpu, "transcribe-rs accelerator defaults set; each model loads on its own device (stt_speed)");
 }
 
 #[cfg(not(feature = "engines"))]
@@ -1415,9 +1526,11 @@ mod tests {
 
         #[test]
         fn stub_transcribe_returns_placeholder() {
-            let engine = ActiveEngine::load(Path::new("models/whatever"), EngineType::Parakeet)
+            let engine = ActiveEngine::load(Path::new("models/whatever"), EngineType::Parakeet, Device::Cpu)
                 .unwrap();
-            let adapter = SttAdapter { engine };
+            let adapter = SttAdapter { engine, device: Device::Cpu, model: "parakeet-tdt-0.6b-v3".into() };
+            assert_eq!(adapter.device(), Device::Cpu);
+            assert_eq!(adapter.model(), "parakeet-tdt-0.6b-v3");
             let audio = vec![0.1f32; 16_000];
             let out = adapter.transcribe(&audio, None, false, None).unwrap();
             assert!(out.contains("STT stub"));
@@ -1428,16 +1541,16 @@ mod tests {
         #[test]
         fn stub_empty_audio_is_empty() {
             let engine =
-                ActiveEngine::load(Path::new("models/whatever"), EngineType::Whisper).unwrap();
-            let adapter = SttAdapter { engine };
+                ActiveEngine::load(Path::new("models/whatever"), EngineType::Whisper, Device::Gpu).unwrap();
+            let adapter = SttAdapter { engine, device: Device::Gpu, model: "large".into() };
             assert!(adapter.transcribe(&[], None, false, None).unwrap().is_empty());
         }
 
         #[test]
         fn stub_short_audio_errors() {
             let engine =
-                ActiveEngine::load(Path::new("models/whatever"), EngineType::Whisper).unwrap();
-            let adapter = SttAdapter { engine };
+                ActiveEngine::load(Path::new("models/whatever"), EngineType::Whisper, Device::Gpu).unwrap();
+            let adapter = SttAdapter { engine, device: Device::Gpu, model: "large".into() };
             assert!(adapter.transcribe(&[0.1f32; 100], None, false, None).is_err());
         }
     }

@@ -22,6 +22,40 @@ Ryzen 7 9800X3D, RTX 5070 Ti, Windows 11, Parakeet V3; memory = private working 
 
 ## What works
 
+**Trusting a dictation** (2026-10-22): **the speech engine's device on each
+PC** (`stt_speed.rs`: a one-time background benchmark per model at three
+dictation lengths, Settings → Speech-to-Text → Speed "Runs on: graphics card
+— fastest for your dictations on this PC (150 ms vs 280 ms)" with Automatic
+/ Graphics card / Processor; everyday lengths decide: the graphics card
+unless the processor takes ≥ 20 % less time at both 3 and 11 s, weighed by
+the person's own dictation lengths for the line). **Parakeet on DirectML
+made ~3× faster** (vendored transcribe-rs, `vendor/transcribe-rs/YAP.md`):
+the decoder loop and preprocessor on the CPU, the encoder's input padded to
+the one length it planned for at load. On this PC (RTX 5070 Ti, Ryzen 7
+9800X3D, the processor ~35–40 % busy with the owner's apps; release build,
+the call a dictation makes, devices interleaved, medians of 7 warm runs,
+each a new length), at 2.9 / 11.1 / 35.6 s of speech: V3 on DirectML
+441 / 630 / 1,244 ms before → 133 / 158 / 578 ms after, the processor
+140 / 424 / 1,743 ms; V2 128 / 161 / 564 ms vs 125 / 421 / 1,749 ms. The
+words are the same (V3 identical on every clip; V2's 11-second clip varies
+a comma between runs, as it did before and on the processor). The first
+dictation after a load: ~0.17 s on DirectML (was ~0.8 s, and ~2.6 s for
+the process's first) — the load takes ~0.8 s longer for it (~3.3 s, the
+encoder planning at load). Automatic picks the graphics card for both;
+Whisper large-v3 (q5_0) stays on Vulkan (345 / 805 / 2,279 ms warm; on the
+processor one 11-second dictation took 16 minutes, so it isn't tried beside
+a graphics card that's quick warm). Processor load slows the processor path
+only: the benchmark waits for a processor under 50 % busy, and a narrow win
+never moves a model off the graphics card. **"Use what
+I said"** (`as_said.rs`: the shortcut, the bar's offer, the tray's paste as
+said), checked by the robot in the test pad, Notepad, an Edge box, a chat
+app and its contenteditable (swapped) and in a terminal, after an edit and
+with another window in front (refused, copied). **A day of dictation audio**
+(`recent_audio.rs`): failed dictations listed, Run again (any installed
+model) and Play in Home, a crash mid-dictation recovered at the next start —
+e2e-tested on the stub engine (`dictation-trust.spec.js`), Run again on real
+speech not yet tried by a person.
+
 **Transcription is REAL and GPU-accelerated** (no longer a stub in `engines`
 builds), and the dictation pipeline around it is complete: multi-engine STT
 (Whisper/Vulkan + ONNX/DirectML), the 14-model registry + manager, recording modes

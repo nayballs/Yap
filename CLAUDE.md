@@ -52,7 +52,7 @@ Full list with versions and details: [app-shell.md](./docs/architecture/app-shel
 - **Shell:** Tauri 2 — Rust backend (`src-tauri/src/`) + Svelte 5 / Vite 6 frontend (`src/`).
 - **Windows:** `settings` (the main window), `onboarding`, `notepad` (meeting notes), `overlay` (the Yap bar).
 - **Audio:** `cpal` capture, `rodio` playback (chimes, spoken replies).
-- **STT:** `transcribe-rs` — whisper.cpp on Vulkan + ONNX models (Parakeet…) on DirectML; `engines` feature.
+- **STT:** `transcribe-rs` — whisper.cpp on Vulkan + ONNX models (Parakeet…) on DirectML; `engines` feature. Vendored (`src-tauri/vendor/transcribe-rs`, `[patch.crates-io]`) with two DirectML fixes for Parakeet — see its `YAP.md`.
 - **AI:** `reqwest` → any OpenAI-compatible endpoint, or the on-device llamafile sidecar (`local_llm.rs`).
 - **Spoken replies:** Kokoro-82M (ONNX on `ort`, CPU; eSpeak NG run separately) or Windows' voices; or ElevenLabs (cloud, the user's own key, streamed PCM).
 - **Speaker diarization (beta):** Nemotron-3-Diarization on NeMo-Speech.cpp, in a `yap.exe diarize` child.
@@ -101,18 +101,21 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `pipeline.rs` — the heart: mic stream, pre-roll, modes, `run_stt` → `deliver`, Undo, chat/assistant routing.
 - `gesture.rs` — push-to-talk's pure state machine: hold, double-tap hands-free, lone tap.
 - `coaching.rs` — push-to-talk coaching hints (≤ 3 each; counts in `hints.json`).
-- `input_hook.rs` — low-level keyboard/mouse hooks: five bindings (Read aloud's the fifth), combo rules, `clashes`, menu-mask key.
+- `input_hook.rs` — low-level keyboard/mouse hooks: six bindings (Read aloud's the fifth, Use what I said's the sixth), combo rules, `clashes`, menu-mask key.
 - `partials.rs` / `agent_detect.rs` — live partials' sliding window; Commands by name (see `pipeline.rs`).
 - `mic_watch.rs` — dead-mic watchdog: reopen the stream, then "No sound from <mic>".
 - `mic_privacy.rs` — reads Windows' microphone privacy switches; names the one blocking Yap.
-- `stt.rs` — `SttEngine` over transcribe-rs, the 14-model registry, download + verify, word times.
+- `stt.rs` — `SttEngine` over transcribe-rs, the 14-model registry, download + verify, word times; each engine loads on a `Device` (graphics card or processor).
+- `stt_speed.rs` — the speech engine's device on this PC: a one-time background benchmark per model and PC at three dictation lengths (new driver, new download → again); everyday lengths (3 and 11 s) decide: the graphics card unless the processor takes ≥ 20 % less time at both; Settings' "Runs on" says what it chose and why.
+- `recent_audio.rs` — a day of dictation audio (`recent-audio/`): failed dictations listed, Home's Run again and Play.
 - `media.rs` — Upload's audio-file decoding (Symphonia) and chunking.
 - `sound.rs` — start/stop chimes; the output device shared with spoken replies.
 - `mute.rs` / `media_pause.rs` — silence other apps / pause media while dictating; exact restore.
-- `history.rs` — local dictation history and the stats dashboard.
+- `history.rs` — local dictation history (with its audio's id; failed / not pasted) and the stats dashboard.
 
 **Pasting** — [pasting.md](./docs/architecture/pasting.md)
-- `text_injector.rs` — private, verified clipboard paste with each app's paste keys, a lost paste typed, submit key, re-focus, Paste last transcript.
+- `text_injector.rs` — private, verified clipboard paste with each app's paste keys, a lost paste typed, submit key, re-focus, Paste last transcript (and as said).
+- `as_said.rs` — "Use what I said": swap a cleaned paste for the words as said (shortcut, bar, tray), only where it can select exactly what it pasted; else copied.
 - `elevated.rs` — apps running as administrator: the text is left on the clipboard.
 - `selection.rs` — UI Automation reads: text around the cursor, edit-mode selection, read aloud's selection (read-only text too), post-paste watch; did a paste land.
 - `smart_insert.rs` — fits a dictation to the text around the cursor (case, spaces, full stop).
@@ -356,12 +359,13 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 `notes.json`, `chats.json`, `calendar.json`, `updates.json`, `model_catalog.json`,
 `groq_usage.json`, `dictionary_usage.json`, `hints.json`, `word_suggestions.json`,
 `notices.json`, `memory.json` (what Yap remembers about you), `quieted_apps.json`
-(only mid-dictation), `icons/`, `logs/`. Every JSON
+(only mid-dictation), `stt_speed.json` (each model's device timings),
+`recent-audio/` (a day of dictation audio), `icons/`, `logs/`. Every JSON
 store writes atomically and quarantines a corrupt file instead of crashing. Secrets
 never go in files: the account session and calendar tokens live in Windows Credential
 Manager. The local API's discovery file is `~/.yap/cli-bridge.json`.
 
-Notable defaults: F9 in toggle mode, **Parakeet TDT 0.6B v3**, GPU on, AI cleanup off,
+Notable defaults: F9 in toggle mode, **Parakeet TDT 0.6B v3** on the device measured fastest here, AI cleanup off,
 smart spacing / terminal mode / no full stop in chats on, the Yap bar on, call
 detection on (it only asks), a 2-hour meeting limit, Win+Alt+M, web search and spoken
 replies off. Every setting, file and default: [config-and-data.md](./docs/architecture/config-and-data.md).
@@ -370,7 +374,7 @@ replies off. Every setting, file and default: [config-and-data.md](./docs/archit
 
 ## Current status
 
-- **Dictation is complete and real**: GPU transcription (Whisper/Vulkan + ONNX/DirectML), push-to-talk, AI cleanup (cloud or on-device Qwen), Commands, smart pasting into terminals and chat apps, dictionary learning, Undo.
+- **Dictation is complete and real**: local transcription (Whisper/Vulkan + ONNX/DirectML, or the processor where that's faster on the PC), push-to-talk, AI cleanup (cloud or on-device Qwen) with "Use what I said", Commands, smart pasting into terminals and chat apps, dictionary learning, Undo, a day of audio to run a dictation again.
 - **Meetings**: recorder (You/Them), rolling digests + action plan, the notepad, call detection, guard rails, the calendar, beta speaker separation.
 - **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation).
 - **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly.

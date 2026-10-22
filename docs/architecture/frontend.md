@@ -211,6 +211,14 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   App names are the ones people know (`lib/appNames.js` `appLabel`:
   "ms-teams.exe" → "Teams", "WINWORD.EXE" → "Word"; history keeps the
   process name) — Home's rows, Insights and Settings' per-app rules.
+  A dictation whose audio is still kept
+  (`recent_audio.rs`, a day) has **Play** (▶/■: `recent_audio_wav` as a blob)
+  and **Run again** (↻: `history_rerun` on the model in use, or — with others
+  installed — a menu of them; also in the row's right-click menu, with "Run
+  again with ›"), answered by a "Transcribed again" toast with Copy. A failed
+  one (`status`: `failed` — "Not transcribed · Yap closed before it was
+  transcribed" — or `notPasted` — a "Didn't paste" flag and why) says so in the
+  row, with a Run again button in view.
 - **`InsightsView.svelte`** = the stats
   dashboard promoted out of Settings→History (serif hero number, stat grid,
   30-day amber heatmap, top-apps-by-words bars from `get_history`, grouped by

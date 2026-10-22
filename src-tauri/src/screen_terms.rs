@@ -956,6 +956,27 @@ mod tests {
     }
 
     #[test]
+    fn the_words_as_said_get_the_names_on_screen_too_but_no_cleanup() {
+        // "Use what I said" (pipeline::as_said_text): the transcript through
+        // the corrections and the names this dictation read, nothing else.
+        let s = screen(SCREEN);
+        let cfg = crate::config::YapConfig::default();
+        let heard = "The Zentrics pilot starts Monday";
+        assert_eq!(crate::pipeline::as_said_text(heard, &cfg, None), heard);
+        let said = crate::pipeline::as_said_text(heard, &cfg, Some(&s));
+        // (Names are near-miss targets only with a spell checker to tell
+        // them from words, as on every Windows PC.)
+        if crate::learn::Ordinary::new().has_spell_checker() {
+            assert_eq!(said, "The Zentrix pilot starts Monday");
+        } else {
+            assert_eq!(said, heard);
+        }
+        // The setting off: as heard.
+        let off = crate::config::YapConfig { screen_names: false, ..cfg };
+        assert_eq!(crate::pipeline::as_said_text(heard, &off, Some(&s)), heard);
+    }
+
+    #[test]
     fn ordinary_words_near_a_name_are_never_changed() {
         let s = screen(SCREEN);
         let keep = |_: &str| false;

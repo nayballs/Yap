@@ -133,8 +133,16 @@ pub(crate) fn destination(edit: bool, assistant: bool, chat_armed: bool, chat_fo
 /// afterwards, [`finish_dictation`]). The dictionary words in the result
 /// count as used, for the Whisper prompt's ranking (`dict_usage`).
 pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
+    let corrected = corrections(text, cfg);
+    crate::dict_usage::record(&crate::memory::with_names(&cfg.dictionary), &corrected);
+    corrected
+}
+
+/// [`apply_corrections`] without counting the words as used (the words as
+/// said, beside the cleaned text that already counted them).
+fn corrections(text: &str, cfg: &YapConfig) -> String {
     let corrected = config::apply_dictionary(text, &cfg.dictionary);
-    let corrected = if cfg.dictionary_fuzzy && !stt::is_whisper_model(&cfg.model_size) {
+    if cfg.dictionary_fuzzy && !stt::is_whisper_model(&cfg.model_size) {
         let fixed = crate::fuzzy::apply_fuzzy(&corrected, &cfg.dictionary);
         // The names Yap remembers (memory/vocab.rs), more carefully: only
         // where what was heard isn't an ordinary word itself.
@@ -147,9 +155,18 @@ pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
         }
     } else {
         corrected
-    };
-    crate::dict_usage::record(&crate::memory::with_names(&cfg.dictionary), &corrected);
-    corrected
+    }
+}
+
+/// A dictation's words **as said** ("Use what I said", `as_said.rs`): the
+/// transcript (`raw`) through the corrections, the names on screen
+/// (`screen`, when the dictation read them), the "press enter" command and
+/// snippets — everything [`finish_dictation_with`] does but the AI cleanup
+/// before it.
+pub(crate) fn as_said_text(raw: &str, cfg: &YapConfig, screen: Option<&crate::screen_terms::ScreenTerms>) -> String {
+    let corrected = crate::screen_terms::correct(&corrections(raw.trim(), cfg), screen, cfg);
+    let text = cfg.voice_enter.then(|| take_voice_enter(&corrected, raw)).flatten().unwrap_or(corrected);
+    config::apply_snippets(&text, &cfg.dictionary)
 }
 
 /// A dictation's text after AI cleanup (`cleaned`; `raw` = the transcript
@@ -158,7 +175,8 @@ pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
 /// then snippets (`config::apply_snippets` — after the command is off, so
 /// "my address, press enter" still gives exactly the address). Returns the
 /// text to paste and whether the voice command asked for the submit key.
-#[cfg_attr(not(test), allow(dead_code))] // a dictation goes through finish_dictation_with
+/// (A dictation goes through [`finish_dictation_with`]; a dictation run
+/// again from its kept audio comes here, its screen long gone.)
 pub(crate) fn finish_dictation(cleaned: &str, raw: &str, cfg: &YapConfig) -> (String, bool) {
     finish_dictation_with(cleaned, raw, cfg, None)
 }
@@ -312,6 +330,12 @@ pub(crate) struct Delivered {
     /// The paste didn't reach the field (a Win32 edit control stayed as it
     /// was), so the text was typed into it instead.
     pub typed: bool,
+    /// The words as said, fitted to the same place, when AI cleanup changed
+    /// them: what "Use what I said" swaps the paste for (`as_said.rs`).
+    pub as_said: Option<String>,
+    /// The bar offers "Use what I said" for this one (its number).
+    #[serde(skip)]
+    pub offer: Option<u64>,
 }
 
 /// How long a cancelled dictation's audio is kept for **Undo** ("Dictation
@@ -472,6 +496,9 @@ struct Shared {
     /// The dictation being delivered is an Undo: its paste goes back to its
     /// own window or nowhere (`inject_text`'s `strict`).
     undoing: AtomicBool,
+    /// The transcribing dictation's audio, kept a day to run it again
+    /// (`recent_audio.rs`): taken by its history entry, else dropped.
+    audio_id: Mutex<Option<String>>,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -1563,31 +1590,67 @@ impl Shared {
         };
         let target_app = crate::text_injector::app_name_for(target_hwnd);
 
-        // Snapshot the injection- and cleanup-related config under
-        // one read lock. `pp_body` is the routed cleanup body:
-        // `Some(body)` to clean with, `None` to skip cleanup
-        // (selected-apps-only scope + no matching rule). The
-        // endpoint comes from the matched profile's LLM override
-        // when it has one, else the global settings — either way
-        // "ondevice" routes through the sidecar when it's up.
-        let (
-            dict,
-            append_space,
-            auto_submit,
-            auto_submit_key,
-            restore_clipboard,
-            pp_enabled,
-            pp_base_url,
-            pp_api_key,
-            pp_model,
-            pp_provider,
-            pp_body,
-            pp_disable_thinking,
-        ) = self
+        let (dict, append_space, auto_submit, auto_submit_key, restore_clipboard) = self
             .config
             .read()
             .map(|c| {
-                let plan = c.resolve_cleanup(target_app.as_deref());
+                (
+                    c.dictionary.clone(),
+                    c.append_trailing_space,
+                    c.auto_submit,
+                    c.auto_submit_key.clone(),
+                    c.restore_clipboard,
+                )
+            })
+            .unwrap_or_else(|_| (Vec::new(), false, false, "enter".to_string(), true));
+
+        // Optional AI cleanup pass (best-effort, `clean_up`). Runs
+        // before the dictionary so the user's corrections always have
+        // the final say. The state stays `processing` meanwhile.
+        let raw = text.trim().to_string();
+        // The names on screen, read at record start (`screen_terms`): this
+        // dictation's only, and only if the read is done. Taken once, for
+        // the cleanup, the corrections and the words as said alike.
+        let screen = crate::screen_terms::take();
+        let cleaned = self.clean_up(&raw, target_app.as_deref(), screen.as_deref()).await;
+
+        // The correction dictionary (exact, then fuzzy for
+        // ONNX models), exactly as meetings and Upload get it,
+        // then the names on screen, the "press enter" voice command
+        // and snippets (dictations only).
+        let (corrected, voice_enter) = self
+            .config
+            .read()
+            .map(|c| finish_dictation_with(cleaned.trim(), &raw, &c, screen.as_deref()))
+            .unwrap_or_else(|_| (config::apply_dictionary(cleaned.trim(), &dict), false));
+        // …and the words as said, when cleanup changed them: what "Use
+        // what I said" swaps the paste for (`as_said.rs`) — the same
+        // corrections and names on screen, no cleanup.
+        let said = (cleaned.trim() != raw)
+            .then(|| self.config.read().ok().map(|c| as_said_text(&raw, &c, screen.as_deref())))
+            .flatten()
+            .filter(|s| !s.trim().is_empty() && *s != corrected);
+        self.deliver_text(raw, corrected, voice_enter, said, dict, append_space, auto_submit, auto_submit_key, restore_clipboard)
+            .await
+    }
+
+    /// AI cleanup of a transcript (`raw`) for `target_app`, best-effort:
+    /// any error or timeout gives the transcript back, so dictation is
+    /// never blocked; an empty answer is a deliberate one (filler only).
+    /// `screen`: the names on screen the dictation read (`screen_terms`),
+    /// for the line telling the model how they're spelled.
+    async fn clean_up(&self, raw: &str, target_app: Option<&str>, screen: Option<&crate::screen_terms::ScreenTerms>) -> String {
+        // Snapshot the cleanup-related config under one read lock.
+        // `pp_body` is the routed cleanup body: `Some(body)` to clean
+        // with, `None` to skip cleanup (selected-apps-only scope + no
+        // matching rule). The endpoint comes from the matched profile's
+        // LLM override when it has one, else the global settings —
+        // either way "ondevice" routes through the sidecar when it's up.
+        let (dict, pp_enabled, pp_base_url, pp_api_key, pp_model, pp_provider, pp_body, pp_disable_thinking) = self
+            .config
+            .read()
+            .map(|c| {
+                let plan = c.resolve_cleanup(target_app);
                 let (pp_base_url, pp_api_key, pp_model, pp_provider) =
                     match plan.as_ref().and_then(|p| p.endpoint.as_ref()) {
                         Some((provider, base_url, api_key, model)) => {
@@ -1602,10 +1665,6 @@ impl Shared {
                     };
                 (
                     c.dictionary.clone(),
-                    c.append_trailing_space,
-                    c.auto_submit,
-                    c.auto_submit_key.clone(),
-                    c.restore_clipboard,
                     c.post_process_enabled,
                     pp_base_url,
                     pp_api_key,
@@ -1615,44 +1674,19 @@ impl Shared {
                     c.pp_disable_thinking,
                 )
             })
-            .unwrap_or_else(|_| {
-                (
-                    Vec::new(),
-                    false,
-                    false,
-                    "enter".to_string(),
-                    true,
-                    false,
-                    String::new(),
-                    String::new(),
-                    String::new(),
-                    String::new(),
-                    None,
-                    false,
-                )
-            });
+            .unwrap_or_else(|_| (Vec::new(), false, String::new(), String::new(), String::new(), String::new(), None, false));
 
-        // Optional AI cleanup pass (best-effort). Runs before the
-        // dictionary so the user's corrections always have the
-        // final say. Any error/timeout falls back to the raw
-        // transcript — dictation is never blocked. The state stays
-        // `processing` for the extra latency.
-        let raw = text.trim().to_string();
-        // The names on screen, read at record start (`screen_terms`): this
-        // dictation's only, and only if the read is done.
-        let screen = crate::screen_terms::take();
         // `pp_body` is `None` when smart routing says "skip cleanup
         // for this app" (selected-apps-only scope, unbound app).
-        let cleaned = match (&pp_body, pp_enabled && !pp_base_url.is_empty() && !raw.is_empty())
-        {
+        match (&pp_body, pp_enabled && !pp_base_url.is_empty() && !raw.is_empty()) {
             (Some(body), true) => {
                 // "Write in my region's spelling" (Dictation cleanup): British "colour"
                 // for en-GB, American "color" for en-US.
                 let spelling = self.config.read().ok().and_then(|c| crate::about_you::cleanup_spelling(&c));
                 // The names on screen the transcript seems to hold.
-                let names = crate::screen_terms::cleanup_line(screen.as_deref(), &raw, &dict);
+                let names = crate::screen_terms::cleanup_line(screen, raw, &dict);
                 match crate::llm::cleanup_with_names(
-                    &raw,
+                    raw,
                     &pp_base_url,
                     &pp_api_key,
                     &pp_model,
@@ -1671,22 +1705,30 @@ impl Shared {
                     Ok(c) => c,
                     Err(e) => {
                         tracing::warn!("AI cleanup failed, using raw: {}", e);
-                        raw.clone()
+                        raw.to_string()
                     }
                 }
             }
-            _ => raw.clone(),
-        };
+            _ => raw.to_string(),
+        }
+    }
 
-        // The correction dictionary (exact, then fuzzy for
-        // ONNX models), exactly as meetings and Upload get it,
-        // then the "press enter" voice command and snippets
-        // (dictations only).
-        let (mut corrected, voice_enter) = self
-            .config
-            .read()
-            .map(|c| finish_dictation_with(cleaned.trim(), &raw, &c, screen.as_deref()))
-            .unwrap_or_else(|_| (config::apply_dictionary(cleaned.trim(), &dict), false));
+    /// The rest of [`Shared::deliver`]: a finished dictation (`corrected`,
+    /// and its words as said when cleanup changed them) to the Chat view's
+    /// box, or fitted and pasted, the submit key, history.
+    #[allow(clippy::too_many_arguments)]
+    async fn deliver_text(
+        self: &Arc<Self>,
+        raw: String,
+        mut corrected: String,
+        voice_enter: bool,
+        said: Option<String>,
+        dict: Vec<config::DictionaryEntry>,
+        append_space: bool,
+        auto_submit: bool,
+        auto_submit_key: String,
+        restore_clipboard: bool,
+    ) -> Delivered {
         // A question for the Chat view: its page puts the text in the box
         // (and sends it, hands-free or after "press enter"); nothing is
         // pasted, no key pressed.
@@ -1718,10 +1760,24 @@ impl Shared {
         if !corrected.is_empty() {
             // Fitted to the kind of app and the text around
             // the cursor (smart spacing), else the trailing
-            // space as before.
-            corrected =
-                crate::text_injector::prepare_dictation(&corrected, append_space, &dict, kind);
+            // space as before — the words as said too, to the
+            // same place.
+            let said = match said {
+                Some(said) => {
+                    let (text, said) = crate::text_injector::prepare_dictation_as_said(&corrected, &said, append_space, &dict, kind);
+                    corrected = text;
+                    Some(said)
+                }
+                None => {
+                    corrected = crate::text_injector::prepare_dictation(&corrected, append_space, &dict, kind);
+                    None
+                }
+            };
             report.text = corrected.clone();
+            report.as_said = said.clone();
+            // Why the paste didn't land, for history (a failed paste is
+            // listed so it can be copied or run again).
+            let mut not_pasted: Option<&'static str> = None;
             // The log says how much, never what (the text only in Debug logging).
             tracing::info!(chars = corrected.chars().count(), "Transcript");
             tracing::debug!(text = %corrected, "Transcript text");
@@ -1744,6 +1800,7 @@ impl Shared {
                 // to paste it (no submit key, no correction watch).
                 Ok(crate::text_injector::Delivery::LeftOnClipboard) => {
                     report.left_on_clipboard = true;
+                    not_pasted = Some("Left on the clipboard: the app runs as administrator");
                     if submit.is_some() {
                         tracing::info!("Not pressing the submit key: the app runs as administrator");
                     }
@@ -1754,6 +1811,7 @@ impl Shared {
                 Ok(crate::text_injector::Delivery::WindowGone) => {
                     report.left_on_clipboard = true;
                     report.error = Some("the dictation's window is gone".into());
+                    not_pasted = Some("Left on the clipboard: its window was gone");
                     crate::alert::show_soon(&self.app, undo_window_gone());
                 }
                 Ok(delivery @ (crate::text_injector::Delivery::Pasted | crate::text_injector::Delivery::Typed)) => {
@@ -1766,7 +1824,17 @@ impl Shared {
                             tracing::warn!("Auto-submit failed: {}", e);
                             report.error = Some(e);
                         }
+                        // Sent: nothing left in the field to swap.
+                        crate::as_said::remember(None, read, &corrected, None, restore_clipboard);
                     } else {
+                        // "Use what I said" (as_said.rs): this paste can be
+                        // swapped for the words as said, and the bar offers
+                        // it when cleanup changed the words.
+                        let seq = crate::as_said::remember(target, read, &corrected, said.as_deref(), restore_clipboard);
+                        let offer = self.config.read().map(|c| c.as_said_offer).unwrap_or(false);
+                        report.offer = seq.filter(|_| {
+                            offer && said.as_deref().is_some_and(|s| crate::as_said::words_differ(&corrected, s))
+                        });
                         // "Suggest words from your corrections":
                         // watch the field for a fix (learn.rs).
                         // Not a terminal's: its text is the
@@ -1781,29 +1849,43 @@ impl Shared {
                 Err(e) => {
                     tracing::warn!("Inject failed: {}", e);
                     report.error = Some(e);
+                    not_pasted = Some("The paste didn't go through");
+                    crate::as_said::remember(None, read, &corrected, None, restore_clipboard);
                 }
             }
 
             // Local-only history for the stats dashboard
-            // (best-effort, gated by `history_enabled`).
+            // (best-effort, gated by `history_enabled`), with the
+            // dictation's audio (recent_audio.rs) — and why the paste
+            // didn't land, if it didn't.
             let (history_enabled, model) = self
                 .config
                 .read()
                 .map(|c| (c.history_enabled, c.model_size.clone()))
                 .unwrap_or((false, String::new()));
+            let audio = self.audio_id.lock().ok().and_then(|mut a| a.take());
             if history_enabled {
                 let app_name =
                     crate::text_injector::app_name_for(target).unwrap_or_default();
-                crate::history::record(
+                crate::history::record_with(
                     &raw,
                     corrected.trim(),
                     &model,
                     &app_name,
+                    audio.as_deref(),
+                    not_pasted.map(|_| crate::history::NOT_PASTED),
+                    not_pasted,
                 );
+                // Its audio written (Home lists it with Run again).
+                if let Some(id) = &audio {
+                    crate::recent_audio::finished(id);
+                }
                 // After the save: `yap-transcript` went out
                 // before the paste, so a view that re-pulled
                 // history on it could miss this dictation.
                 let _ = self.app.emit("yap-history-changed", ());
+            } else if let Some(id) = audio {
+                crate::recent_audio::discard(&id);
             }
         } else if voice_enter {
             // Only "press enter" was said: nothing to paste
@@ -1855,7 +1937,11 @@ impl Shared {
                 .map(|c| (c.history_enabled, c.model_size.clone()))
                 .unwrap_or((false, String::new()));
             if history_enabled {
-                crate::history::record(&raw, &text, &model, "yap.exe");
+                let audio = self.audio_id.lock().ok().and_then(|mut a| a.take());
+                crate::history::record_with(&raw, &text, &model, "yap.exe", audio.as_deref(), None, None);
+                if let Some(id) = audio {
+                    crate::recent_audio::finished(&id);
+                }
                 let _ = self.app.emit("yap-history-changed", ());
             }
         }
@@ -1907,6 +1993,16 @@ impl Shared {
         // returning to idle (kept short so it fits the overlay capsule).
         let mut error_msg: Option<&'static str> = None;
 
+        // Its audio, kept a day so it can be run again (recent_audio.rs) —
+        // not a rewrite's instruction or a question for the assistant.
+        // Written off this thread; its history entry takes it.
+        if !self.edit_mode.load(Ordering::SeqCst) && !self.assistant.load(Ordering::SeqCst) {
+            let id = self.config.read().ok().and_then(|c| crate::recent_audio::keep(&audio, &c));
+            if let Ok(mut a) = self.audio_id.lock() {
+                *a = id;
+            }
+        }
+
         // Take the engine out so the mutex isn't held across the await.
         let engine = self.engine.lock().ok().and_then(|mut g| g.take());
         let engine = match engine {
@@ -1930,6 +2026,8 @@ impl Shared {
                         if self.assistant.swap(false, Ordering::SeqCst) {
                             crate::assistant::nothing(&self.app);
                         }
+                        // Listed with its audio: run it again once a model is in.
+                        self.list_failed("No speech model was ready");
                         let _ = self.app.emit("yap-state", "needs-model");
                         return;
                     }
@@ -1981,6 +2079,9 @@ impl Shared {
         // Mark activity so the idle watcher counts from end-of-transcription.
         self.touch_activity();
 
+        // The bar's "Cleaned up · Use what I said", for a dictation whose
+        // words AI cleanup changed (`as_said.rs`).
+        let mut offer: Option<u64> = None;
         match outcome {
             Ok((engine, transcription)) => {
                 // Put the (warm) engine back for next time — but only if the
@@ -2004,6 +2105,7 @@ impl Shared {
                         // Edit/rewrite mode: the transcript is an INSTRUCTION, not
                         // dictation. Apply it to the captured selection and paste
                         // the result back. Emits its own final state.
+                        self.drop_kept_audio();
                         self.run_rewrite(text.trim().to_string()).await;
                         return;
                     }
@@ -2017,24 +2119,30 @@ impl Shared {
                     // the AI, name or no name.)
                     Ok(text) if !self.to_chat.load(Ordering::SeqCst) && self.wake_word_hit(text.trim()) => {
                         tracing::info!("Agent's name heard — running the dictation as a Command");
+                        self.drop_kept_audio();
                         self.run_agent(text.trim().to_string(), String::new()).await;
                         return;
                     }
                     Ok(text) => {
-                        self.deliver(text).await;
+                        offer = self.deliver(text).await.offer;
                     }
                     Err(e) => {
                         tracing::error!("Transcription failed: {}", e);
                         error_msg = Some("Transcription failed — check your model");
+                        // Listed with its audio: run it again (another model?).
+                        self.list_failed("The transcription failed");
                     }
                 }
             }
             Err(e) => {
                 tracing::error!("STT task panicked: {}", e);
                 error_msg = Some("Transcription crashed — try another model");
+                self.list_failed("The transcription crashed");
             }
         }
 
+        // Audio nothing took (nothing was heard): not kept.
+        self.drop_kept_audio();
         // A question for the assistant that never got transcribed.
         if self.assistant.swap(false, Ordering::SeqCst) {
             crate::assistant::nothing(&self.app);
@@ -2046,9 +2154,113 @@ impl Shared {
                 let _ = self.app.emit(DICTATION_ERROR, msg);
                 let _ = self.app.emit("yap-state", "error");
             }
-            None => {
-                let _ = self.app.emit("yap-state", "idle");
+            None => self.end_state(offer),
+        }
+    }
+
+    /// The dictation's last state: "idle", or "cleaned" — the bar's "Cleaned
+    /// up · Use what I said" — for [`as_said::OFFER_MS`] when it offers the
+    /// swap (`offer`), then "idle" unless something came after it.
+    fn end_state(self: &Arc<Self>, offer: Option<u64>) {
+        let Some(seq) = offer else {
+            let _ = self.app.emit("yap-state", "idle");
+            return;
+        };
+        let _ = self.app.emit("yap-state", "cleaned");
+        let shared = Arc::clone(self);
+        let _ = std::thread::Builder::new().name("as-said-offer".into()).spawn(move || {
+            std::thread::sleep(Duration::from_millis(crate::as_said::OFFER_MS));
+            // Still this dictation's offer (not swapped, no newer one) and
+            // nothing recording or transcribing: the capsule goes.
+            let quiet = !shared.recording.load(Ordering::SeqCst) && !shared.processing.load(Ordering::SeqCst);
+            if crate::as_said::offered(seq) && quiet {
+                let _ = shared.app.emit("yap-state", "idle");
             }
+        });
+    }
+
+    /// The dictation never got transcribed (no model, the model failed):
+    /// listed in history as failed with its audio, so it can be run again.
+    fn list_failed(&self, why: &str) {
+        let Some(id) = self.audio_id.lock().ok().and_then(|mut a| a.take()) else {
+            return;
+        };
+        let (history, model) = self
+            .config
+            .read()
+            .map(|c| (c.history_enabled, c.model_size.clone()))
+            .unwrap_or((false, String::new()));
+        if !history {
+            crate::recent_audio::discard(&id);
+            return;
+        }
+        let target = match self.target_hwnd.load(Ordering::Relaxed) {
+            0 => None,
+            h => Some(h),
+        };
+        let app_name = crate::text_injector::app_name_for(target).unwrap_or_default();
+        crate::history::record_failed(None, &model, &app_name, &id, why);
+        crate::recent_audio::finished(&id);
+        tracing::info!(id = %id, "A dictation that failed is in history with its audio (Run again)");
+        let _ = self.app.emit("yap-history-changed", ());
+    }
+
+    /// **Run again** (Home's feed, `recent_audio::history_rerun`): a kept
+    /// dictation's `audio` transcribed afresh — on `model` (an installed
+    /// one; `None` = the one in use: the warm engine, else loaded for this
+    /// and dropped) — then AI cleanup as for its app, the corrections and
+    /// snippets. Nothing is pasted. Returns (transcript, text, model id).
+    async fn rerun(self: &Arc<Self>, audio: Vec<f32>, model: Option<String>, app_name: &str) -> Result<(String, String, String), String> {
+        let cfg = self.config.read().map(|c| c.clone()).map_err(|_| "Yap's settings couldn't be read")?;
+        let model_id = model.filter(|m| !m.trim().is_empty()).unwrap_or_else(|| cfg.model_size.clone());
+        let data_dir = config::data_dir();
+        if !stt::is_model_installed(&data_dir, &model_id) {
+            return Err(format!("{} isn't installed", stt::model_name(&model_id)));
+        }
+        let warm = model_id == cfg.model_size;
+        let engine = if warm { self.engine.lock().ok().and_then(|mut g| g.take()) } else { None };
+        let engine = match engine {
+            Some(e) => e,
+            None => stt::create_stt_engine(&data_dir, &model_id, cfg.use_gpu)
+                .map_err(|e| format!("Couldn't load {}: {e}", stt::model_name(&model_id)))?,
+        };
+        let (language, translate) = self.language_settings();
+        let prompt = if stt::is_whisper_model(&model_id) { self.dictionary_prompt() } else { None };
+        tracing::info!(samples = audio.len(), model = %model_id, warm, "Running a dictation again");
+        let (engine, result) = tokio::task::spawn_blocking(move || {
+            let r = engine.transcribe(&audio, language.as_deref(), translate, prompt.as_deref());
+            (engine, r)
+        })
+        .await
+        .map_err(|e| format!("The transcription crashed: {e}"))?;
+        if warm {
+            if let Ok(mut g) = self.engine.lock() {
+                if g.is_none() {
+                    *g = Some(engine);
+                }
+            }
+        }
+        self.touch_activity();
+        let raw = result.map_err(|e| format!("The transcription failed: {e}"))?.trim().to_string();
+        if raw.is_empty() {
+            return Err("Nothing was heard in it".into());
+        }
+        let cleaned = self.clean_up(&raw, Some(app_name).filter(|a| !a.is_empty()), None).await;
+        let mut c = cfg;
+        c.model_size = model_id.clone();
+        let (text, _) = finish_dictation(cleaned.trim(), &raw, &c);
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            return Err("Nothing was left after the cleanup".into());
+        }
+        Ok((raw, text, model_id))
+    }
+
+    /// Audio kept for a dictation that ended up nowhere (a Command, nothing
+    /// heard): deleted now.
+    fn drop_kept_audio(&self) {
+        if let Some(id) = self.audio_id.lock().ok().and_then(|mut a| a.take()) {
+            crate::recent_audio::discard(&id);
         }
     }
 }
@@ -2115,6 +2327,7 @@ impl Pipeline {
             kept: Mutex::new(None),
             kept_seq: AtomicU64::new(0),
             undoing: AtomicBool::new(false),
+            audio_id: Mutex::new(None),
         });
 
         spawn_idle_watcher(&shared);
@@ -2250,11 +2463,41 @@ impl Pipeline {
     }
 
     /// Install a freshly-created STT engine (e.g. after a model download).
+    /// A model new to this PC gets its devices timed soon (`stt_speed`).
     pub fn set_engine(&self, engine: SttAdapter) {
         if let Ok(mut g) = self.shared.engine.lock() {
             *g = Some(engine);
         }
         let _ = self.shared.app.emit("yap-state", "idle");
+        crate::stt_speed::schedule(&self.shared.app, crate::stt_speed::AFTER_CHANGE);
+    }
+
+    /// The same model on another device (`stt_speed`: a new pick, or "Runs
+    /// on" changed), swapped in without a word.
+    pub(crate) fn replace_engine(&self, engine: SttAdapter) {
+        if let Ok(mut g) = self.shared.engine.lock() {
+            *g = Some(engine);
+        }
+    }
+
+    /// The warm engine's model and device, if one is loaded.
+    pub(crate) fn engine_info(&self) -> Option<(String, stt::Device)> {
+        let g = self.shared.engine.lock().ok()?;
+        g.as_ref().map(|e| (e.model().to_string(), e.device()))
+    }
+
+    /// What a dictation passes the engine besides its audio — the language,
+    /// translate, and the Whisper vocabulary prompt — so the speech-engine
+    /// timing makes the same call (`stt_speed`).
+    pub(crate) fn transcribe_options(&self) -> (Option<String>, bool, Option<String>) {
+        let (language, translate) = self.shared.language_settings();
+        (language, translate, self.shared.dictionary_prompt())
+    }
+
+    /// How long since a dictation last did anything (ms): the speech-engine
+    /// timing waits for a quiet moment.
+    pub(crate) fn idle_ms(&self) -> u64 {
+        now_ms().saturating_sub(self.shared.last_activity.load(Ordering::Relaxed))
     }
 
     /// Clone of the shared warm-engine slot for the meeting recorder (see
@@ -2318,6 +2561,28 @@ impl Pipeline {
     pub(crate) fn robot(&self) -> Robot {
         Robot(Arc::clone(&self.shared))
     }
+
+    /// Home's Run again (`recent_audio::history_rerun`).
+    pub(crate) fn rerunner(&self) -> Rerun {
+        Rerun(Arc::clone(&self.shared))
+    }
+}
+
+/// Runs a kept dictation's audio again ([`Pipeline::rerunner`]), never
+/// beside a dictation: it holds the `processing` guard meanwhile.
+pub(crate) struct Rerun(Arc<Shared>);
+
+impl Rerun {
+    /// (transcript, text, model id) — see `Shared::rerun`.
+    pub(crate) async fn run(&self, audio: Vec<f32>, model: Option<String>, app_name: &str) -> Result<(String, String, String), String> {
+        let shared = &self.0;
+        if shared.recording.load(Ordering::SeqCst) || shared.processing.swap(true, Ordering::SeqCst) {
+            return Err("Yap is busy with a dictation — try again in a moment".into());
+        }
+        let out = shared.rerun(audio, model, app_name).await;
+        shared.processing.store(false, Ordering::SeqCst);
+        out
+    }
 }
 
 /// Robot mode's dictations (`realtest.rs`, debug builds only): without a
@@ -2372,7 +2637,7 @@ impl Robot {
         tracing::info!(len = text.len(), "e2e: robot dictation from a transcript");
         let report = shared.deliver(text).await;
         shared.processing.store(false, Ordering::SeqCst);
-        let _ = shared.app.emit("yap-state", "idle");
+        shared.end_state(report.offer);
         Ok(report)
     }
 

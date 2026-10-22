@@ -24,6 +24,8 @@
   let portable = $state(false);
   let logInfo = $state(null); // { dir, file } from log_info
   let historyCount = $state(null);
+  // Recent dictation audio (recent_audio.rs): { count, bytes }.
+  let audio = $state(null);
   onMount(() => {
     invoke('is_portable')
       .then((p) => (portable = !!p))
@@ -36,7 +38,15 @@
     const un = listen('yap-history-changed', loadCount);
     return () => un.then((f) => f());
   });
+  async function loadAudio() {
+    try {
+      audio = await invoke('recent_audio_status');
+    } catch {
+      audio = null;
+    }
+  }
   async function loadCount() {
+    loadAudio();
     try {
       const s = await invoke('get_stats');
       historyCount = typeof s?.totalTranscriptions === 'number' ? s.totalTranscriptions : null;
@@ -64,6 +74,15 @@
   const chat = $derived(cfg.llmScopes?.chat?.enabled ? cfg.llmScopes.chat : { provider: cfg.ppProvider });
   const leaves = $derived([
     { what: 'Your voice', where: 'Never leaves this PC: speech-to-text runs here', page: 'models' },
+    {
+      // recent_audio.rs: a day of dictation audio, on this PC only.
+      what: 'Recent dictation audio',
+      where:
+        cfg.keepRecentAudio !== false && cfg.historyEnabled !== false
+          ? 'Never leaves this PC: kept here for 24 hours, to run a dictation again'
+          : 'Not kept: gone once a dictation is transcribed',
+      page: 'privacy#recent-audio',
+    },
     {
       what: 'AI cleanup',
       where: cfg.postProcessEnabled ? goes(cfg.ppProvider, 'Your dictations, as text,') : 'Off',
@@ -147,6 +166,33 @@
     });
   }
 
+  function clearAudio(e) {
+    const btn = e?.currentTarget;
+    askConfirm({
+      title: 'Clear recent dictation audio?',
+      body: 'The audio Yap kept to run dictations again goes from this PC. Your history stays.',
+      confirmLabel: 'Clear audio',
+      busyLabel: 'Clearing…',
+      returnFocus: btn,
+      run: async () => {
+        try {
+          await invoke('recent_audio_clear');
+          await loadAudio();
+        } catch (err) {
+          toast({ title: "Couldn't clear the audio", description: String(err), variant: 'destructive' });
+          return false;
+        }
+      },
+    });
+  }
+  const audioDesc = $derived.by(() => {
+    if (!audio) return 'Deletes the audio Yap kept';
+    if (!audio.count) return 'Nothing kept right now';
+    const mb = audio.bytes / (1024 * 1024);
+    const size = mb >= 1 ? `${mb.toFixed(mb >= 10 ? 0 : 1)} MB` : `${Math.max(1, Math.round(audio.bytes / 1024))} KB`;
+    return `${audio.count} ${audio.count === 1 ? 'dictation' : 'dictations'} · ${size}`;
+  });
+
   // The Integrations view keeps its own copy of the Local API's switch.
   function onBridge(on) {
     window.dispatchEvent(new CustomEvent('yap-bridge-changed', { detail: { enabled: on } }));
@@ -203,6 +249,19 @@
     setting="clear-history"
   >
     <Button variant="danger" size="sm" onclick={clearHistory}>Clear history…</Button>
+  </Row>
+  <Row setting="recent-audio">
+    <Toggle
+      bind:checked={cfg.keepRecentAudio}
+      label="Keep recent dictation audio"
+      desc="The last 24 hours, on this PC only, so you can run a dictation again from Home"
+      hint="For a paste that didn't land, a dictation Yap couldn't transcribe, or one that came out wrong. Deleting a dictation deletes its audio. Only while history is on."
+      disabled={cfg.historyEnabled === false}
+      onchange={loadAudio}
+    />
+  </Row>
+  <Row label="Clear recent audio" desc={audioDesc} setting="clear-recent-audio">
+    <Button variant="secondary" size="sm" disabled={!audio?.count} onclick={clearAudio}>Clear audio…</Button>
   </Row>
 </Group>
 

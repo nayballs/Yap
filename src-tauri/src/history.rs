@@ -40,6 +40,29 @@ pub struct HistoryEntry {
     /// Foreground app (process base name, e.g. "chrome.exe"), best-effort.
     #[serde(default)]
     pub app: String,
+    /// Its audio in `recent-audio/` (`recent_audio.rs`), kept a day so it
+    /// can be run again; the list says whether it's still there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<String>,
+    /// `None`: transcribed and pasted. "failed": never transcribed (no
+    /// model, the model failed, Yap closed mid-way). "notPasted":
+    /// transcribed, but the paste couldn't land.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// What went wrong, in a few words, for those.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// A dictation that never got transcribed.
+pub const FAILED: &str = "failed";
+/// A dictation transcribed whose paste couldn't land.
+pub const NOT_PASTED: &str = "notPasted";
+
+impl HistoryEntry {
+    fn failed(&self) -> bool {
+        self.status.as_deref() == Some(FAILED)
+    }
 }
 
 /// In-memory cache of the on-disk history (loaded lazily on first access).
@@ -61,6 +84,10 @@ fn history_path() -> PathBuf {
 }
 
 fn load_from_disk() -> Vec<HistoryEntry> {
+    // Unit tests never read or write the real history.
+    if cfg!(test) {
+        return Vec::new();
+    }
     let path = history_path();
     match std::fs::read_to_string(&path) {
         Ok(s) => match serde_json::from_str(&s) {
@@ -76,6 +103,9 @@ fn load_from_disk() -> Vec<HistoryEntry> {
 }
 
 fn save_to_disk(entries: &[HistoryEntry]) {
+    if cfg!(test) {
+        return;
+    }
     match serde_json::to_string(entries) {
         Ok(json) => {
             let _ = std::fs::create_dir_all(crate::config::data_dir());
@@ -94,27 +124,98 @@ fn word_count(text: &str) -> usize {
 /// Record one dictation. Best-effort: errors are logged, never propagated, so a
 /// dictation is never failed by history bookkeeping. Empty text is ignored.
 pub fn record(raw: &str, text: &str, model: &str, app: &str) {
+    record_with(raw, text, model, app, None, None, None);
+}
+
+/// [`record`] with the dictation's audio (`recent_audio.rs`) and, when its
+/// paste couldn't land, why (`status` [`NOT_PASTED`], `error`).
+pub fn record_with(
+    raw: &str,
+    text: &str,
+    model: &str,
+    app: &str,
+    audio: Option<&str>,
+    status: Option<&str>,
+    error: Option<&str>,
+) {
     if text.trim().is_empty() {
         return;
     }
-    let mut guard = match STATE.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let entries = guard.get_or_insert_with(load_from_disk);
-    entries.push(HistoryEntry {
+    push(HistoryEntry {
         ts: now_secs(),
         raw: raw.to_string(),
         text: text.to_string(),
         model: model.to_string(),
         app: app.to_string(),
+        audio: audio.map(str::to_string),
+        status: status.map(str::to_string),
+        error: error.map(str::to_string),
     });
+}
+
+/// A dictation that never got transcribed ([`FAILED`]): listed with its
+/// audio so it can be run again. `ts` (unix seconds) is when it was
+/// recorded (`None`: now). Needs its audio: without it there's nothing to
+/// list.
+pub fn record_failed(ts: Option<u64>, model: &str, app: &str, audio: &str, error: &str) {
+    push(HistoryEntry {
+        ts: ts.unwrap_or_else(now_secs),
+        raw: String::new(),
+        text: String::new(),
+        model: model.to_string(),
+        app: app.to_string(),
+        audio: Some(audio.to_string()),
+        status: Some(FAILED.to_string()),
+        error: Some(error.to_string()),
+    });
+}
+
+fn push(entry: HistoryEntry) {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    // Kept in time order (a failed one from before a crash is dated when it
+    // was recorded).
+    let at = entries.iter().rposition(|e| e.ts <= entry.ts).map_or(0, |i| i + 1);
+    entries.insert(at, entry);
     // Trim oldest first if over the cap.
     if entries.len() > MAX_ENTRIES {
         let drop = entries.len() - MAX_ENTRIES;
         entries.drain(0..drop);
     }
     save_to_disk(entries);
+}
+
+/// The entry at `ts` whose audio is `audio`, as Home lists it (for Run again).
+pub fn find_audio(ts: u64, audio: &str) -> Option<HistoryEntry> {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    entries.iter().find(|e| e.ts == ts && e.audio.as_deref() == Some(audio)).cloned()
+}
+
+/// Run again: the entry with `audio` gets the new transcript (`raw`, `text`,
+/// `model`) and is no longer a failure. `false` when it's gone.
+pub fn rerun_result(audio: &str, raw: &str, text: &str, model: &str) -> bool {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    let Some(e) = entries.iter_mut().find(|e| e.audio.as_deref() == Some(audio)) else {
+        return false;
+    };
+    e.raw = raw.to_string();
+    e.text = text.to_string();
+    e.model = model.to_string();
+    e.status = None;
+    e.error = None;
+    save_to_disk(entries);
+    true
 }
 
 /// Recent entries, newest first, capped at `limit`.
@@ -129,14 +230,23 @@ pub fn list(limit: usize) -> Value {
         .rev()
         .take(limit)
         .map(|e| {
-            json!({
+            let mut item = json!({
                 "ts": e.ts,
                 "raw": e.raw,
                 "text": e.text,
                 "model": e.model,
                 "app": e.app,
                 "words": word_count(&e.text),
-            })
+            });
+            // Its audio, while it's kept (Run again, Play).
+            if let Some(id) = e.audio.as_deref().filter(|id| crate::recent_audio::has(id)) {
+                item["audio"] = json!(id);
+            }
+            if let Some(status) = &e.status {
+                item["status"] = json!(status);
+                item["error"] = json!(e.error.clone().unwrap_or_default());
+            }
+            item
         })
         .collect();
     json!(items)
@@ -154,8 +264,44 @@ pub fn latest_dictation() -> Option<String> {
     entries
         .iter()
         .rev()
-        .find(|e| is_dictation_app(&e.app))
+        .find(|e| is_dictation_app(&e.app) && !e.text.trim().is_empty())
         .map(|e| e.text.clone())
+}
+
+/// The newest dictation's transcript before cleanup ([`latest_dictation`]'s
+/// `raw`): "Paste last transcript (as said)" after a restart.
+pub fn latest_dictation_raw() -> Option<String> {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    entries
+        .iter()
+        .rev()
+        .find(|e| is_dictation_app(&e.app) && !e.text.trim().is_empty())
+        .map(|e| if e.raw.trim().is_empty() { e.text.clone() } else { e.raw.clone() })
+}
+
+/// How long each of the latest `limit` dictations was spoken for (seconds),
+/// estimated from its words at [`SPEAKING_WPM`], newest first — uploads and
+/// dictations that never transcribed aside (`stt_speed.rs`: how this person's
+/// dictations weigh the speed check's lengths).
+pub fn recent_dictation_secs(limit: usize) -> Vec<f32> {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    entries
+        .iter()
+        .rev()
+        .filter(|e| is_dictation_app(&e.app) && e.status.as_deref() != Some(FAILED))
+        .map(|e| if e.raw.trim().is_empty() { &e.text } else { &e.raw })
+        .map(|t| t.split_whitespace().count() as f32 * 60.0 / SPEAKING_WPM as f32)
+        .filter(|secs| *secs > 0.0)
+        .take(limit)
+        .collect()
 }
 
 fn is_dictation_app(app: &str) -> bool {
@@ -183,8 +329,12 @@ pub fn delete_by_ts(ts: u64) -> bool {
     };
     let entries = guard.get_or_insert_with(load_from_disk);
     if let Some(pos) = entries.iter().position(|e| e.ts == ts) {
-        entries.remove(pos);
+        let gone = entries.remove(pos);
         save_to_disk(entries);
+        // Its audio goes with it.
+        if let Some(id) = gone.audio {
+            crate::recent_audio::discard(&id);
+        }
         true
     } else {
         false
@@ -201,12 +351,16 @@ pub fn delete(ts: u64, text: &str) {
     };
     let entries = guard.get_or_insert_with(load_from_disk);
     if let Some(pos) = entries.iter().position(|e| e.ts == ts && e.text == text) {
-        entries.remove(pos);
+        let gone = entries.remove(pos);
         save_to_disk(entries);
+        // Its audio goes with it.
+        if let Some(id) = gone.audio {
+            crate::recent_audio::discard(&id);
+        }
     }
 }
 
-/// Delete all history (and the on-disk file).
+/// Delete all history (and the on-disk file), and the recent audio with it.
 pub fn clear() {
     crate::text_injector::forget_last_transcript();
     let mut guard = match STATE.lock() {
@@ -215,6 +369,8 @@ pub fn clear() {
     };
     *guard = Some(Vec::new());
     let _ = std::fs::remove_file(history_path());
+    drop(guard);
+    crate::recent_audio::clear();
 }
 
 /// Derived dashboard stats (camelCase JSON for the Settings panel).
@@ -223,7 +379,9 @@ pub fn stats() -> Value {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let all = guard.get_or_insert_with(load_from_disk);
+    // A dictation that never got transcribed isn't one in the stats.
+    let entries: Vec<&HistoryEntry> = all.iter().filter(|e| !e.failed()).collect();
 
     let today = day_of(now_secs());
     let total = entries.len() as u64;
@@ -296,5 +454,29 @@ mod tests {
         assert_eq!(day_of(0), 0);
         assert_eq!(day_of(86_399), 0);
         assert_eq!(day_of(86_400), 1);
+    }
+
+    /// (In unit tests the history lives in memory only.)
+    #[test]
+    fn a_failed_dictation_is_listed_in_its_place_and_run_again_fixes_it() {
+        let now = now_secs();
+        record_with("hello there", "Hello there.", "parakeet-tdt-0.6b-v3", "notepad.exe", Some("t-ok"), None, None);
+        // From before a crash: dated when it was recorded, so before it.
+        record_failed(Some(now - 600), "parakeet-tdt-0.6b-v3", "notepad.exe", "t-failed", "Yap closed before it was transcribed");
+        let failed = find_audio(now - 600, "t-failed").expect("listed");
+        assert_eq!(failed.status.as_deref(), Some(FAILED));
+        assert!(failed.text.is_empty());
+        {
+            let guard = STATE.lock().unwrap();
+            let entries = guard.as_ref().unwrap();
+            let at = |id: &str| entries.iter().position(|e| e.audio.as_deref() == Some(id)).unwrap();
+            assert!(at("t-failed") < at("t-ok"), "in time order");
+        }
+        // A failed one isn't the last dictation to paste.
+        assert_ne!(latest_dictation().as_deref(), Some(""));
+        assert!(rerun_result("t-failed", "the plan is ready", "The plan is ready.", "large"));
+        let fixed = find_audio(now - 600, "t-failed").unwrap();
+        assert_eq!((fixed.status, fixed.text.as_str(), fixed.model.as_str()), (None, "The plan is ready.", "large"));
+        assert!(!rerun_result("t-gone", "x", "x", "large"));
     }
 }

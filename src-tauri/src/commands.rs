@@ -245,6 +245,30 @@ pub fn configure_read_hotkey(spec: String) {
     let _ = crate::input_hook::configure_read(&spec);
 }
 
+/// Live-apply the "Use what I said" shortcut (`as_said.rs`; paused while
+/// Settings picks a key, as for the others).
+#[tauri::command]
+pub fn configure_as_said_hotkey(spec: String) {
+    let _ = crate::input_hook::configure_as_said(&spec);
+}
+
+/// Debug-only, test mode: `text` as if a dictation had just heard it —
+/// the dictation's own steps from cleanup on (nothing is pasted in a test
+/// run), the bar's "Use what I said" offer included. Stands in for a
+/// microphone.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn e2e_dictation(state: State<'_, AppState>, text: String) -> Result<crate::pipeline::Delivered, String> {
+    if !crate::e2e::active() {
+        return Err("e2e_dictation is for test runs".into());
+    }
+    let robot = {
+        let guard = state.pipeline.lock().map_err(|_| "the pipeline lock is poisoned")?;
+        guard.as_ref().ok_or("no pipeline")?.robot()
+    };
+    robot.dictate_text(text).await
+}
+
 /// The assistant shortcut went down (`pressed`) or up in one of Yap's own
 /// windows (their in-page fallback: the global hook never sees keys while a
 /// Yap webview has the focus). The hook's own path, so push-to-talk's hold
@@ -1673,6 +1697,9 @@ pub fn save_config(
     // env override isn't clobbered by unrelated saves).
     let prev = config::load();
     let prev_debug = prev.debug_logging;
+    // "Runs on" is what's chosen; the old GPU switch follows it (as saved).
+    let mut cfg = cfg;
+    cfg.use_gpu = cfg.stt_device != "cpu";
     config::save(&cfg)?;
     // Words taken out of the dictionary (from any surface) are never
     // suggested again (learn.rs; its own store, not config.json).
@@ -1693,6 +1720,13 @@ pub fn save_config(
     }
     crate::input_hook::configure_assistant_from(&cfg);
     crate::input_hook::configure_read_from(&cfg);
+    crate::input_hook::configure_as_said_from(&cfg);
+    // Settings → Speech-to-Text → Runs on (stt_speed.rs): the warm engine
+    // moves to the device chosen now, at a quiet moment.
+    crate::stt_speed::sync(&cfg);
+    if cfg.stt_device != prev.stt_device {
+        crate::stt_speed::reload_if_needed(&app);
+    }
     crate::tts::set_volume(cfg.tts_volume);
     // The tray is reconciled on every save (always-on since the pill retired) —
     // reconcile it live instead of waiting for the next app restart.

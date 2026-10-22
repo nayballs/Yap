@@ -44,7 +44,13 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   no-activate, cloaked, untitled or a shell window), classifying it
   (`app_kind::of_window`) and re-reading the cursor's context there
   (`selection::read_context`, not in a terminal). Test mode returns the text without pasting
-  ("e2e: not pasting the last transcript"). No hotkey for it yet.
+  ("e2e: not pasting the last transcript"). No hotkey for it yet. **"Paste
+  last transcript (as said)"** (the tray's next item; `paste_last_transcript
+  {asSaid: true}`): the same with the words before AI cleanup
+  (`last_said_transcript`: this session's, kept by
+  `prepare_dictation_as_said`, else history's newest transcript through
+  `pipeline::as_said_text`). `copy_privately` puts text on the clipboard
+  as a paste would and leaves it (Use what I said's refusals).
   `app_window()` / `focus(hwnd)`: the same window-finding and re-focusing
   for the tray's "Read selection aloud" (`read_aloud.rs`). **The paste
   keys** (`simulate_paste(target, key)`; `inject_text`'s `kind` is the window's
@@ -69,6 +75,41 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   moves the caret). The clipboard restore still waits its 500 ms from the
   keys. `#[ignore]`d `private_clipboard_round_trip` runs
   the real clipboard code on a private window station (never the person's clipboard).
+- **`as_said.rs`** — **"Use what I said"** (2026-10-22; Windows' fluid
+  dictation's Revert, TypeWhisper's Restore Raw Transcript): right after a
+  dictation AI cleanup changed, swap what Yap pasted for the words as said
+  (the transcript with corrections, the voice command and snippets, no
+  cleanup — `pipeline::as_said_text` — fitted to the same place). `deliver`
+  `remember`s the paste (window, kind, both texts) unless a submit key sent
+  it; three ways in: the shortcut (`as_said_hotkey`, unbound by default —
+  `input_hook`'s sixth binding, `as-said-key-pressed`), the Yap bar's
+  "Cleaned up · Use what I said" for `OFFER_MS` (6 s; `as_said_offer`, on;
+  only when the words differ, `words_differ`), the command `as_said_swap`.
+  **The swap** (`swap`, within `SWAP_WITHIN` = 2 min, once): the dictation's
+  window must still be in front; never a terminal (its line can't be
+  selected), an app running as administrator, a password box or a read-only
+  field. Then Yap **selects exactly what it pasted**: in a **Win32 edit
+  control** whose ValuePattern gives its text (WinForms, EDIT) the pasted text
+  must end at the caret (`EM_GETSEL`) — else be in the field exactly once —
+  and `EM_SETSEL` selects it, `EM_GETSEL` confirming; in a **TextPattern**
+  field (Edge/Chrome, Windows 11 Notepad, Word…) the text just before the
+  caret must end with it (else `FindText` must find it exactly once), a range
+  is built back from the caret counting the field's own characters
+  (`unit_counts`: code points, "\r\n" as one, UTF-16 — the one whose range
+  reads back exactly the paste), `Select()`ed, and the field's selection must
+  read back the same. Line breaks, no-break spaces and the trailing space Yap
+  added compare loosely (`match_before`, pure, unit-tested). The words as
+  said are then pasted over the selection (the dictation's own private,
+  verified paste: back into its window or nowhere) and the field read again
+  (`Outcome::Swapped { checked }`). It never uses the app's Undo: Yap can't
+  tell what that would take back. **Where it refuses** (`Err(why)` from
+  `replace`): nothing in the app is touched — the words as said go on the
+  clipboard (`copy_privately`) and the person is told "Couldn't replace it
+  here — copied the raw text instead" (an `alert.rs` "pasteBlocked" alert,
+  with why). Test runs only log ("e2e: not swapping the paste for the words
+  as said"); robot mode only in the test's windows (`e2e-real/as-said.real.js`:
+  the test pad, Notepad, an Edge box, a chat app and its contenteditable,
+  swapped; a terminal, an edited paste and another window in front, refused).
 - **`elevated.rs`** — apps running as administrator: Windows (UIPI) drops keys
   sent to a higher integrity level, and `SendInput` doesn't say so. The target's
   level is compared with Yap's (`OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`
