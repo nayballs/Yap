@@ -2,16 +2,17 @@
 # Yap's pre-push privacy guard: blocks a push that would publish a private
 # term (the maintainer's list, kept outside every repo), an API key, a real
 # email address or a UK phone number. See scripts/privacy-guard.mjs.
-# Installed with `npm run hooks:install` (git config core.hooksPath .githooks).
+# Installed into the repository's shared hooks folder by `npm run hooks:install`
+# (scripts/install-hooks.mjs), so every worktree runs it.
 # Only for a false positive, after checking it really is one: git push --no-verify
 guard="$(git rev-parse --show-toplevel)/scripts/privacy-guard.mjs"
 if [ ! -f "$guard" ]; then
-  # A worktree on an older branch: the main checkout's copy.
-  common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
-  guard="$(dirname "$common")/scripts/privacy-guard.mjs"
+  # A worktree on a branch from before the guard: the copy hooks:install keeps.
+  guard="$HOME/.yap-private/privacy-guard.mjs"
 fi
 if [ ! -f "$guard" ]; then
-  echo "privacy-guard: scripts/privacy-guard.mjs not found; this push wasn't checked" >&2
-  exit 0
+  echo "privacy-guard: the guard script isn't here or in ~/.yap-private; refusing to push unchecked." >&2
+  echo "privacy-guard: run 'npm run hooks:install' in a checkout that has it." >&2
+  exit 1
 fi
 exec node "$guard" "$@"

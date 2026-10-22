@@ -74,8 +74,11 @@ failures.)
 
 ## The privacy guard (`scripts/privacy-guard.mjs`)
 The repo is public, so nothing personal or secret may land in it (2026-10-22).
-**Before a push** (`.githooks/pre-push`; `npm run hooks:install` once per clone =
-`git config core.hooksPath .githooks`, which every worktree shares) it reads the
+**Before a push** (`.githooks/pre-push`, which `npm run hooks:install`, once per
+clone, copies into the repository's shared hooks folder so every worktree runs it,
+and removes any `core.hooksPath`; the guard itself is also copied to
+`%USERPROFILE%\.yap-private\` for worktrees on branches older than it, and the
+hook refuses the push when it finds neither) it reads the
 commits about to go out — the remote's tip..the new one, or for a new branch
 whatever no remote branch has — and checks the lines their diffs add (a merge:
 the lines its resolution adds), their messages and the paths they touch, never
