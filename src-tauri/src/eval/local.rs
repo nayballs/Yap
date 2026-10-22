@@ -5,7 +5,7 @@
 //! there, **read-only** (run in place, nothing written next to them: the
 //! server's log and working folder are the run's), else they're downloaded
 //! as `local_llm.rs` does (SHA-256 verified) into the models folder
-//! (`--models-dir`, default `E:/yap-builds/eval-models` style: next to the
+//! (`--models-dir`, by default a folder like `<builds>/eval-models`: next to the
 //! runs).
 
 use std::path::{Path, PathBuf};

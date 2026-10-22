@@ -139,8 +139,15 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   section port): `config.debug_logging` raises `yap_lib` to `debug` live via a
   `reload::Layer` handle (`set_debug_logging`, applied on config save; RUST_LOG
   env always wins). `log_info`/`open_logs_folder` commands back the UI (current
-  log file + copy path + open folder). ⚠ transcripts DO appear in logs at
-  `info` — the UI warns users to skim before sharing.
+  log file + copy path + open folder). **No user content at `info` and
+  above** (since 2026-10-22): no transcripts or cleaned text, chat messages or
+  answers, memory items, notes, meeting lines, About you, calendar titles,
+  search queries or clipboard contents — only lengths, counts, ids and
+  outcomes (`Transcript chars=42`). The text may go to `debug!` (Debug
+  logging, whose hint says so), never an API key or a token at any level.
+  `log_privacy.rs` is a lint-style test that fails on an `info!`/`warn!`/
+  `error!` formatting a content-named variable (`text = %…`, `{answer}`); the
+  webviews' `frontend_log` lines follow the same rule.
 - **`commands.rs`** — Tauri commands: recording (`toggle_recording`, `cancel_recording`,
   `dictation_key` — the in-page fallbacks' hotkey down/up),
   config (`get_config`/`save_config`), models (`installed_models`, `download_model`,

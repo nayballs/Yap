@@ -1334,7 +1334,9 @@ impl Shared {
                 if let AppKind::Terminal(t) = self.paste_kind() {
                     out = crate::app_kind::terminal_text(&out, t.keeps_lines());
                 }
-                tracing::info!(text = %out, "Rewrite");
+                // The log says how much, never what (the text only in Debug logging).
+                tracing::info!(chars = out.chars().count(), "Rewrite");
+                tracing::debug!(text = %out, "Rewrite text");
                 let _ = self.app.emit("yap-transcript", out.clone());
                 let strict = self.undoing.load(Ordering::SeqCst);
                 let read = self.read_kind();
@@ -1683,7 +1685,9 @@ impl Shared {
             corrected =
                 crate::text_injector::prepare_dictation(&corrected, append_space, &dict, kind);
             report.text = corrected.clone();
-            tracing::info!(text = %corrected, "Transcript");
+            // The log says how much, never what (the text only in Debug logging).
+            tracing::info!(chars = corrected.chars().count(), "Transcript");
+            tracing::debug!(text = %corrected, "Transcript text");
             let _ = self.app.emit("yap-transcript", corrected.clone());
             let target = match self.target_hwnd.load(Ordering::Relaxed) {
                 0 => None,
@@ -2839,7 +2843,7 @@ mod tests {
         dict.push(DictionaryEntry { snippet: true, ..entry("my address", "1 Long Lane\nLeeds", true) });
         let mut c = cfg("parakeet-tdt-0.6b-v3", true, dict);
         // A snippet of several lines ending the dictation ends where its own
-        // text does (no "Leeds.").
+        // text does (no "Norwich.").
         assert_eq!(
             finish_dictation("The jaison is at my address, press enter.", "x", &c),
             ("The JSON is at 1 Long Lane\nLeeds".to_string(), true)

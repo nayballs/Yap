@@ -136,7 +136,7 @@ pub enum Reply {
 
 /// The assistant shortcut's answers are read aloud while **"Speak
 /// replies"** is on — the one voice switch (Chat's Voice replies too):
-/// with it off Yap never talks, and the answer is shown (Nathan,
+/// with it off Yap never talks, and the answer is shown (the maintainer,
 /// 2026-10-18: "I turned off the voice yet heard the voice still"). Not
 /// "When to speak" (that's for Chat's typed questions: the shortcut is
 /// always asked by voice). Never while a meeting records or a call is on,
@@ -310,7 +310,7 @@ fn current(generation: u64) -> bool {
 
 /// The Voice Assistant is **off during meetings**: while a meeting records
 /// or a call is on (`tts::meeting_quiet`), its shortcut doesn't listen and
-/// Yap doesn't talk — a voice over a meeting is too much (Nathan,
+/// Yap doesn't talk — a voice over a meeting is too much (the maintainer,
 /// 2026-10-18). A short note on the bar (or in the window) says so. `true`:
 /// off now, nothing started.
 pub fn off_for_meeting(app: &AppHandle) -> bool {

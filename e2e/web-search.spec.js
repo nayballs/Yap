@@ -303,7 +303,7 @@ test('a chat answer cites its web sources: pills, a Sources row, kept with the a
   await expect(sourcesOfLast(main).getByRole('button')).toHaveCount(2);
   await expect(lastAnswer(main).locator('a.md-cite')).toHaveCount(3);
 
-  // A follow-up citing that answer without searching again (Nathan's "the
+  // A follow-up citing that answer without searching again (a tester's "the
   // top five in that list"): its "[1]" is that answer's pill, not raw text,
   // and it has no Sources row of its own.
   const followUp = fakeLlm.requests.length;
@@ -731,7 +731,7 @@ test('a model on this PC: it must search first, and Yap checks what the answer c
   await setConfig(yap, main, { webSearch: true, webSearchKeys: { exa: EXA_KEY }, llmScopes: chatScope(fakeLlm) });
   const from = fakeLlm.requests.length;
   const webFrom = fakeWeb.requests.length;
-  // A question that needs the web (Nathan's, 2026-10-21): Qwen3.5-4B left to
+  // A question that needs the web (a tester's, 2026-10-21): Qwen3.5-4B left to
   // decide answered it from memory. Its first step must be a web search
   // (tool_choice "required" over all the tools), its own query.
   // (Its list has blank lines between the items, as models write them: one

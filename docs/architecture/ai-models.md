@@ -7,9 +7,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
 ## Modules
 
 - **`about_you.rs`** — **what every model is told about the person**
-  (2026-10-21, Settings → General → About you; Nathan: "It keeps finding
+  (2026-10-21, Settings → General → About you; a tester: "It keeps finding
   things in dollars… a better way to give the model better context on the
-  user"). **One Region** (2026-10-22, Nathan: "all of that should be
+  user"). **One Region** (2026-10-22, the maintainer: "all of that should be
   covered in the region selector only"): **Automatic** = Windows' home
   location (`detected`: `GetUserDefaultGeoName`, else `GetUserGeoID` →
   `GEO_ISO2`; no home location → the regional format's region), or a
@@ -42,7 +42,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   time (UTC+01:00). Give times in UK time and metric units, but miles for
   distances and speeds. Prices: in £ (GBP) when you have them in £; never
   change a price's currency sign — a price in another currency stays as it
-  is, labelled, like "$15 a month (US price)". Their name is Nathan. They
+  is, labelled, like "$15 a month (US price)". Their name is Imogen. They
   told Yap: "…"" (the example is "£15 a month (UK price)" for a US user,
   and no real plan's price: with "$8 a month" as the example and "Give
   prices in £", Qwen3.5-4B wrote x.ai's "$8/month" as "£8/month" 2 times in
@@ -276,7 +276,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   `"<runtime>/<GGUF file>"` in the marker's `mtp_failed` (`mtp_key`) —
   never with MTP again on that runtime; a newer runtime tries again. Never
   on the processor. **The context**
-  (2026-10-20, Nathan's ask: "show what context length it's set at, and let
+  (2026-10-20, the maintainer's ask: "show what context length it's set at, and let
   me set my own"): `config.local_context` (tokens; 0 = `DEFAULT_CONTEXT`
   8,192, today's behaviour) — one setting for the one sidecar, so Chat,
   dictation cleanup and the meeting notes share it. `effective_context`
@@ -537,6 +537,6 @@ logged: `npm run eval -- --model groq:openai/gpt-oss-20b --keys-from-yap`,
 `--cleanup` (dictation cleanup latency per model). Nothing launches, no window, the
 installed app's data and `%APPDATA%\yap` are never written (keys are read from
 its config.json read-only). Builds a debug stub into `$YAP_EVAL_TARGET_DIR`;
-runs land in `$YAP_EVAL_OUT` / `--out` (Nathan's PC: `E:/yap-builds/evals`,
-`E:/yap-builds/eval-runs`). Use it before changing a prompt, a tool or the
+runs land in `$YAP_EVAL_OUT` / `--out` (best outside the
+checkout, e.g. `<builds>/evals` and `<builds>/eval-runs`). Use it before changing a prompt, a tool or the
 default local model. Guide: [`docs/model-evals.md`](../model-evals.md).

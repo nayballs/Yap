@@ -99,7 +99,7 @@ struct Connection {
     id: String,
     /// "google" | "outlook" | "ics" (a link from the Outlook card, or any other).
     kind: String,
-    /// The account ("nathan@gmail.com") or the calendar's name.
+    /// The account ("imogen@example.com") or the calendar's name.
     label: String,
     /// Where it comes from, for a link: its host, never the link itself.
     #[serde(default)]
@@ -1941,16 +1941,16 @@ mod tests {
 
     #[test]
     fn a_feed_becomes_meetings_with_wisprs_filters() {
-        let feed = b"BEGIN:VCALENDAR\r\nX-WR-CALNAME:nathan@example.com\r\n\
+        let feed = b"BEGIN:VCALENDAR\r\nX-WR-CALNAME:imogen@example.com\r\n\
             BEGIN:VEVENT\r\nUID:a\r\nSUMMARY:Design review\r\nDTSTART:20261005T140000Z\r\nDTEND:20261005T143000Z\r\n\
-            ATTENDEE;CN=Tanay Kothari:mailto:tanay@example.com\r\nATTENDEE;CN=Nathan:mailto:nathan@example.com\r\nEND:VEVENT\r\n\
+            ATTENDEE;CN=Tanay Kothari:mailto:tanay@example.com\r\nATTENDEE;CN=Imogen:mailto:imogen@example.com\r\nEND:VEVENT\r\n\
             BEGIN:VEVENT\r\nUID:b\r\nSUMMARY:Focus\r\nDTSTART:20261005T150000Z\r\nDTEND:20261005T160000Z\r\nEND:VEVENT\r\n\
             BEGIN:VEVENT\r\nUID:c\r\nSUMMARY:Offsite\r\nDTSTART;VALUE=DATE:20261005\r\nDTEND;VALUE=DATE:20261006\r\n\
             ATTENDEE:mailto:tanay@example.com\r\nEND:VEVENT\r\n\
             BEGIN:VEVENT\r\nUID:d\r\nSUMMARY:Workshop\r\nDTSTART:20261005T080000Z\r\nDTEND:20261005T150000Z\r\n\
             ATTENDEE:mailto:tanay@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let (events, name) = events_from_feed("1", feed, 1_791_000_000, 1_792_000_000).unwrap();
-        assert_eq!(name.as_deref(), Some("nathan@example.com"));
+        assert_eq!(name.as_deref(), Some("imogen@example.com"));
         assert_eq!(events.iter().map(|e| e.title.as_str()).collect::<Vec<_>>(), ["Design review"]);
         assert!(events_from_feed("1", b"<html>nope</html>", 0, 1).is_err());
     }

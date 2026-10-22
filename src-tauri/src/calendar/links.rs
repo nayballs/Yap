@@ -337,11 +337,11 @@ mod tests {
             ("https://meet.google.com/", None),
             ("https://support.google.com/a/users/answer/9282720", None),
             ("https://us02web.zoom.us/j/81234567890?pwd=abc", Some("zoom")),
-            ("https://zoom.us/my/nathan", Some("zoom")),
+            ("https://zoom.us/my/imogen", Some("zoom")),
             ("https://us02web.zoom.us/u/kdXyZ", None),
             ("https://acme.zoomgov.com/j/1601234567", Some("zoom")),
             ("https://acme.webex.com/acme/j.php?MTID=m123", Some("webex")),
-            ("https://acme.webex.com/meet/nathan", Some("webex")),
+            ("https://acme.webex.com/meet/imogen", Some("webex")),
             ("https://help.webex.com/en-us/article/nkzs6f1/Join-a-meeting", None),
             ("https://app.slack.com/huddle/T012/C034", Some("slack")),
             ("https://meet.goto.com/123456789", Some("goto")),
@@ -412,7 +412,7 @@ mod tests {
             Passcode: Ab3dEf\n\
             Download Teams<https://www.microsoft.com/microsoft-teams/download-app> | Join on the web\n\
             Or call in (audio only)\n\
-            +44 20 3443 0000,,123456789# United Kingdom, London\n\
+            +44 20 7946 0000,,123456789# United Kingdom, London\n\
             Phone Conference ID: 123 456 789#\n\
             Learn More<https://aka.ms/JoinTeamsMeeting> | Meeting options<https://teams.microsoft.com/meetingOptions/>\n\
             ________________________________________________________________________________";

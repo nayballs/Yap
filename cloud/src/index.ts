@@ -233,7 +233,7 @@ app.get("/api/health", (c) => c.json({ ok: true }));
 app.get("/api/providers", (c) => c.json(signInMethods()));
 
 // The phone page's "Requested 2 min ago by Yap 0.1.1 on Windows, near
-// Leeds, United Kingdom" (public/device.js), plus whether the phone is on
+// Norwich, United Kingdom" (public/device.js), plus whether the phone is on
 // the same network, or in the same country, as the PC that asked. Only for
 // a signed-in browser (the page signs in first) and a code still pending
 // that no other account has claimed, and limited per IP. No IPs in or out:

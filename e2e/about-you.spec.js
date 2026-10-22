@@ -104,12 +104,12 @@ test('About you: one Region picker — Automatic from Windows, a country picked 
   );
 
   // The name and the note, counted and capped.
-  await group.getByRole('textbox', { name: 'What should Yap call you?' }).fill('Nathan');
+  await group.getByRole('textbox', { name: 'What should Yap call you?' }).fill('Imogen');
   const about = group.getByRole('textbox', { name: 'Anything the AI should know about you' });
-  await about.fill("I'm in Manchester, I play PC games, I work day shifts");
-  await expect(group.getByText('53/300')).toBeVisible();
+  await about.fill("I'm a teacher in Bristol and I run at weekends");
+  await expect(group.getByText('46/300')).toBeVisible();
   await expect(about).toHaveAttribute('maxlength', '300');
-  await expectStore(yap, 'config.json', (c) => c.aboutName === 'Nathan' && c.aboutMe.startsWith("I'm in Manchester"));
+  await expectStore(yap, 'config.json', (c) => c.aboutName === 'Imogen' && c.aboutMe.startsWith("I'm a teacher"));
 
   // What the AI is told, as it reads now.
   await group.getByRole('button', { name: 'See what the AI is told' }).click();
@@ -118,8 +118,8 @@ test('About you: one Region picker — Automatic from Windows, a country picked 
   await expect(told).toContainText(
     'Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £'
   );
-  await expect(told).toContainText('Their name is Nathan.');
-  await expect(told).toContainText("They told Yap: \"I'm in Manchester, I play PC games, I work day shifts\"");
+  await expect(told).toContainText('Their name is Imogen.');
+  await expect(told).toContainText("They told Yap: \"I'm a teacher in Bristol and I run at weekends\"");
   await expect(group.getByText('never sent to Yap', { exact: false })).toBeVisible();
   await group.scrollIntoViewIfNeeded();
   await shot(main, '03-about-you-filled');
@@ -167,11 +167,11 @@ test("Chat: the model is told about the user, and Exa searches the user's countr
   // too so this test stands alone; web search on with an Exa key.
   const cfg = await yap.invoke('get_config');
   await yap.invoke('save_config', {
-    cfg: { ...cfg, aboutName: 'Nathan', aboutMe: 'I work day shifts', webSearch: true, webSearchService: 'exa', webSearchKeys: { exa: EXA_KEY } },
+    cfg: { ...cfg, aboutName: 'Imogen', aboutMe: 'I run at weekends', webSearch: true, webSearchService: 'exa', webSearchKeys: { exa: EXA_KEY } },
   });
   await main.evaluate(
     (p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })),
-    { aboutName: 'Nathan', aboutMe: 'I work day shifts', webSearch: true, webSearchService: 'exa', webSearchKeys: { exa: EXA_KEY } }
+    { aboutName: 'Imogen', aboutMe: 'I run at weekends', webSearch: true, webSearchService: 'exa', webSearchKeys: { exa: EXA_KEY } }
   );
   await main.waitForTimeout(500);
 
@@ -202,8 +202,8 @@ test("Chat: the model is told about the user, and Exa searches the user's countr
   expect(block).toContain(
     `Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like "$15 a month (US price)".`
   );
-  expect(block).toContain('Their name is Nathan.');
-  expect(block).toContain('They told Yap: "I work day shifts"');
+  expect(block).toContain('Their name is Imogen.');
+  expect(block).toContain('They told Yap: "I run at weekends"');
   // …and the clock with the question, in its context.
   expect(steps[0].user).toMatch(/^<context>\nIt's \w+day \d{1,2} \w+ \d{4}, \d\d:\d\d UK time \(UTC\+0[01]:00\)\./);
   expect(steps[0].user).toMatch(/<\/context>\n\nHow much is a Grok subscription\?$/);

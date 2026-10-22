@@ -1,5 +1,5 @@
 //! The **Yap bar** — Yap's always-there pill, after Wispr Flow's Flow Bar
-//! (traced 2026-10-05; `E:\Projects\references\wispr-flow\README.md`). It's
+//! (traced 2026-10-05; `references/wispr-flow/README.md`, beside this repo). It's
 //! the `overlay` window (`overlay.rs` holds its Win32 side and the maths):
 //!
 //! - **Idle** it's a tiny dark pill above the taskbar (Wispr's measured

@@ -190,7 +190,7 @@ const FORMAT: &str = r#"Reply with JSON only: {"changes": [ ... ]}, where each c
 {"action": "update", "id": 12, "about": "...", "facts": ["..."], "remove_facts": ["..."], "say": "..."}
 {"action": "remove", "id": 12, "say": "..."}
 - profile: who the user is: their work, where they live, their pets, what they do (facts only, no name or about). preferences: how they want answers (facts only). people: someone in their life (name = that person's name; about = who they are to the user, like "Sister" or "Colleague at Acme"). projects: something they're working on or building (name = its name, like "Yap"). topics: a lasting interest.
-- facts: short, a few words each, without "the user": "Lives in Leeds", "Works night shifts".
+- facts: short, a few words each, without "the user": "Lives in Norwich", "Works night shifts".
 - update: an item Yap already has, by its [id] in "What Yap remembers now" (never any other number): "facts" adds facts, "remove_facts" takes out facts as written. When something changed, take the old fact out and put the new one in, in the same update. Never add a second item for someone or something Yap has.
 - remove: a whole person, project or topic. Profile and preferences are never removed: take out their facts with remove_facts.
 - say: the change in a few words for the user, in the second person: "your sister is Rochelle".
@@ -198,8 +198,8 @@ const FORMAT: &str = r#"Reply with JSON only: {"changes": [ ... ]}, where each c
 Examples:
 Chat: "User: My brother Tom is visiting from Glasgow, where should we eat tonight?"
 {"changes": [{"action": "add", "section": "people", "name": "Tom", "about": "Brother", "facts": ["Lives in Glasgow"], "say": "your brother Tom lives in Glasgow"}]}
-Memory has [3] person "Tom": Brother | Lives in Glasgow. Chat: "User: Tom just moved to Leeds and starts at the BBC next week."
-{"changes": [{"action": "update", "id": 3, "facts": ["Lives in Leeds", "Works at the BBC"], "remove_facts": ["Lives in Glasgow"], "say": "Tom lives in Leeds now"}]}
+Memory has [3] person "Tom": Brother | Lives in Glasgow. Chat: "User: Tom just moved to Norwich and starts at the BBC next week."
+{"changes": [{"action": "update", "id": 3, "facts": ["Lives in Norwich", "Works at the BBC"], "remove_facts": ["Lives in Glasgow"], "say": "Tom lives in Norwich now"}]}
 Chat: "User: What's a good film for tonight?"
 {"changes": []}"#;
 
@@ -353,7 +353,7 @@ mod tests {
 
     fn sample() -> Vec<Item> {
         vec![
-            item(1, Section::Profile, "Profile", "", &["Works as a nurse", "Lives in Leeds"]),
+            item(1, Section::Profile, "Profile", "", &["Works as a nurse", "Lives in Norwich"]),
             item(2, Section::Preferences, "Preferences", "", &["Short answers"]),
             item(3, Section::People, "Rochelle", "Sister", &["Lives in York", "Birthday 3 May"]),
             item(4, Section::People, "Sam Patel", "Colleague at St James's", &["Product manager"]),
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn the_you_block_goes_with_every_answer() {
         let block = you_block(&sample());
-        assert!(block.contains("About them: Works as a nurse; Lives in Leeds."), "{block}");
+        assert!(block.contains("About them: Works as a nurse; Lives in Norwich."), "{block}");
         assert!(block.contains("How they want answers (follow it): Short answers."), "{block}");
         assert!(!block.contains("Rochelle"), "people only when relevant: {block}");
         assert_eq!(you_block(&[]), "");
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn a_pass_reads_memory_with_ids_and_the_chat_short() {
         let l = listing(&sample(), 1_000);
-        assert!(l.starts_with("[1] profile: Works as a nurse | Lives in Leeds\n[2] preferences: Short answers"), "{l}");
+        assert!(l.starts_with("[1] profile: Works as a nurse | Lives in Norwich\n[2] preferences: Short answers"), "{l}");
         assert!(l.contains("[3] person \"Rochelle\": Sister | Lives in York | Birthday 3 May"), "{l}");
         assert_eq!(listing(&[], 100), "Nothing yet.");
         let ex = chat_excerpt(
@@ -411,7 +411,7 @@ mod tests {
         assert!(worth_a_pass(&["My sister's coming over"]));
         assert!(worth_a_pass(&["I’m a nurse"]));
         assert!(worth_a_pass(&["Remember that the code freeze is Friday"]));
-        assert!(worth_a_pass(&["we just moved to Leeds"]));
+        assert!(worth_a_pass(&["we just moved to Norwich"]));
     }
 
     #[test]

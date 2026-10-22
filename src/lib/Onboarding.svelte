@@ -288,7 +288,7 @@
         const e = Array.isArray(h) ? h[0] : null;
         if (e && e.ts >= enteredAt && e.ts > shownTs && (e.text || '').trim()) {
           const t = e.text.trim();
-          flog(`poll: filling box with "${t.slice(0, 40)}"`);
+          flog(`poll: filling box (${t.length} chars)`); // never the text: it's in the log file
           shownTs = e.ts;
           showTranscript(t);
         }
@@ -421,7 +421,7 @@
       // (when it does win the race) can't double-write. (Plus the history poll
       // above as belt-and-braces.)
       rawListen('yap-transcript', (e) => {
-        flog(`event yap-transcript (step=${step}): "${String(e && e.payload).slice(0, 40)}"`);
+        flog(`event yap-transcript (step=${step}): ${String((e && e.payload) || '').length} chars`);
         if (step === STEPS.length - 1) {
           const t = (e.payload || '').trim();
           if (t) {

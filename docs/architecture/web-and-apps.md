@@ -56,7 +56,7 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   **prices** (`asks_about_prices`: price, cost, subscription, fees,
   cheapest, deals, discount, on sale, in stock, sold out, buy, buying,
   purchase, "how much is / does / for…" — not "how much is 15% of 80";
-  Nathan's "Can you check the Grok subscriptions please, for me?",
+  a tester's "Can you check the Grok subscriptions please, for me?",
   2026-10-21; "…I am thinking of buying it", 2026-10-22), or names a known
   game; never a question about their own things (`about_own_stuff`: "my
   notes", "the meeting", "what did I note / write / say…", "we decided",
@@ -83,17 +83,17 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   look up / web search", "please", "for me" — left out sentence by sentence,
   a sentence of nothing else dropped; handed over as the call the
   model would have made: chip, sources, safety rule, 3-search cap). Left to
-  decide, Qwen3.5-4B answered Nathan's "best RPG games coming out in 2026"
+  decide, Qwen3.5-4B answered a tester's "best RPG games coming out in 2026"
   from memory (2026-10-21). Cloud models decide for themselves. **Nothing
   in the notes** (`tools::EmptyNotes`, web search on, a question not about
   the person's own things): a `search_notes` that found nothing carries
   `NOTHING_IN_NOTES_HINT` ("search the web for it next (web_search) instead
   of saying there are no notes"), and for a model on this PC a step of
   nothing but empty notes searches is followed by Yap's search for it (once
-  a turn) — Qwen3.5-4B searched Nathan's notes twice for "Grok
+  a turn) — Qwen3.5-4B searched a tester's notes twice for "Grok
   subscriptions" and stopped. **Prices where the person is** (2026-10-22,
   someone outside the US — About you's region, `about_you::LocalPrices`;
-  Nathan's "Can you lookup the Grok subscription price for me I am thinking
+  a tester's "Can you lookup the Grok subscription price for me I am thinking
   of buying it" from a UK PC searched "Grok subscription price 2026": Exa,
   with `userLocation` GB, found x.ai's US page, a US price list and a guide
   in $, and the answer gave the US tiers and offered to "help finding the
@@ -147,7 +147,7 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   user's time (UK time)…"); the date, the user's time and its UTC offset are
   in the About you block, last in the prompt (`about_you::prompt_block`).
   Chips `Searched the web…` + `Answered from 1 web
-  page`. **The AI's own search** (`web/native.rs`, 2026-10-18, Nathan's
+  page`. **The AI's own search** (`web/native.rs`, 2026-10-18, the maintainer's
   call: "let the cloud models use their own search tools, and only give
   local models Yap's"; `web_search_native`, on by default): a cloud chat
   model (`Settings::for_chat(cfg, provider, model, base_url, key)` →
@@ -223,7 +223,7 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   (`System.AppUserModel.BestShortcut`, an ID list → a `.lnk`/`.url` path
   in one of the Start menu's Programs folders) plus its target and
   arguments (`System.Link.*`, read for the launcher label, never passed);
-  ~240 entries → ~190 apps in ~300 ms on Nathan's PC (204 of 205 desktop
+  ~240 entries → ~190 apps in ~300 ms on the test PC (204 of 205 desktop
   entries have a shortcut). Fallback: the Start menu `.lnk`s (ProgramData
   + AppData; a `.url` only with a game store's link) + App Paths. `tidy`:
   junk out (`junk` → `is_junk`: "Uninstall …"/`unins*.exe`, read-mes,
@@ -298,7 +298,7 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   "Are you struggling?"), so a note saying "open X" can't (chip `Didn't
   open "X": you didn't ask to open an app`). `list_apps` takes a query
   and gives ≤ 15 names (`LIST_MAX`; no query: the count, 15, "pass a
-  query" — 840 → 135 est. tokens on Nathan's PC). **A model without
+  query" — 840 → 135 est. tokens on the test PC). **A model without
   tools** gets `NO_TOOLS_NOTE` (+ `NO_TOOLS_OPEN`: say "open" and the
   name), and an answer that claims an open the person asked for
   (`claims_unasked`: "Opening …", "I'm trying to open …", "I've
@@ -312,7 +312,7 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   (recorded, debug-only `e2e_opened_apps {clear}`), index =
   `YAP_E2E_APPS` (a JSON `[{id, name, target?, args?}]`, read each call),
   no icons; unit tests never read `config.json` or this PC's apps
-  (`run_tool`, a thread-local stand-in index; `games()` = Nathan's WoW /
+  (`run_tool`, a thread-local stand-in index; `games()` = the test PC's WoW /
   Classic / Battle.net / Baldur's Gate 3 / Steam entries). `#[ignore]`d
   `this_pcs_apps` (read-only: names, junk, the games' shortcuts and
   launchers, sample matches, `list_apps`' size, icons),

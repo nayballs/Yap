@@ -161,7 +161,7 @@ function formatWhen(at: Date, timeZone: string | undefined): string {
 }
 
 /** Sent when a phone approves a sign-in to Yap (src/index.ts, after
- *  /device/approve). `place` is like "near Leeds, United Kingdom" ("" when
+ *  /device/approve). `place` is like "near Norwich, United Kingdom" ("" when
  *  unknown); `device` like "Yap 0.1.1 on Windows". */
 export function newSignInEmail(s: { to: string; device: string; place: string; at: Date; timeZone?: string }): Mail {
   const when = formatWhen(s.at, s.timeZone);

@@ -22,11 +22,31 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # The privacy guard reads the commits a push adds, not only the tip.
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      # Quick, and first: nothing secret or personal in what was pushed. CI has
+      # no private terms file (it stays on the maintainer's PC; the pre-push
+      # hook checks those), so this is the generic part — API keys, email
+      # addresses, UK phone numbers — over the whole tree and over the commits
+      # this push or PR adds; then the guard's own tests.
+      - name: Privacy guard (keys, emails, phone numbers)
+        shell: bash
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          node scripts/privacy-guard.mjs --scan-tree
+          if [ -n "$BASE" ] && ! echo "$BASE" | grep -qE '^0+$' && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            node scripts/privacy-guard.mjs --range "$BASE..$HEAD_SHA" --no-private
+          fi
+          node --test scripts/privacy-guard.test.mjs
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable

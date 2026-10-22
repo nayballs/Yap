@@ -226,7 +226,7 @@ test('with no AI model set up the chip says so, and the picker opens on the prov
   await closeSettings(main);
 });
 
-// Found by Nathan (2026-10-18): Enter sent the message and threw the caret out
+// Found by the maintainer (2026-10-18): Enter sent the message and threw the caret out
 // of the box (it was disabled while the answer came), so every next message
 // needed a click back in. Now the caret stays and you can type straight on.
 test('Enter sends and the caret stays in the box for the next message', async ({ yap, main, fakeLlm }) => {

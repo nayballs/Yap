@@ -1122,7 +1122,7 @@ pub fn check_in_answer(app: &AppHandle, id: u64, answer: &str) -> Result<(), Str
             _ => return Ok(()), // answered already, on another surface
         }
     };
-    tracing::info!(note_id, answer, "meeting guard: check-in answered");
+    tracing::info!(note_id, choice = answer, "meeting guard: check-in answered");
     match answer {
         "keep" => {
             if let Some(w) = watch_lock().as_mut() {

@@ -1,6 +1,6 @@
 <script>
   // "Switch the Chat model": the Chat model chip's popover, a provider rail
-  // (Nathan's pick of the three concepts, 2026-10-19). Two panes: on the
+  // (the maintainer's pick of the three concepts, 2026-10-19). Two panes: on the
   // left Recent, every cloud provider Yap supports (a green dot when it has
   // a key, hollow when not), Custom when a server elsewhere is set up, and
   // On this PC; on the right that one's models, exactly as Settings lists

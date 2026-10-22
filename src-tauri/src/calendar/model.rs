@@ -412,7 +412,7 @@ mod tests {
     }
 
     fn me(reply: Reply) -> Person {
-        Person { is_self: true, reply, ..person("Nathan", "nathan@example.com") }
+        Person { is_self: true, reply, ..person("Imogen", "imogen@example.com") }
     }
 
     fn draft(people: Vec<Person>) -> Draft {
@@ -509,12 +509,12 @@ mod tests {
     #[test]
     fn the_feeds_owner_is_found() {
         let cal = ics::parse_text(
-            "BEGIN:VCALENDAR\r\nX-WR-CALNAME:Nathan@Example.com\r\n\
-             BEGIN:VEVENT\r\nUID:1\r\nATTENDEE:mailto:nathan@example.com\r\nATTENDEE:mailto:a@example.com\r\nEND:VEVENT\r\n\
+            "BEGIN:VCALENDAR\r\nX-WR-CALNAME:Imogen@Example.com\r\n\
+             BEGIN:VEVENT\r\nUID:1\r\nATTENDEE:mailto:imogen@example.com\r\nATTENDEE:mailto:a@example.com\r\nEND:VEVENT\r\n\
              END:VCALENDAR\r\n",
         )
         .unwrap();
-        assert!(self_addresses(&cal).contains("nathan@example.com"));
+        assert!(self_addresses(&cal).contains("imogen@example.com"));
         // No name: whoever is on every meeting.
         let mut body = String::from("BEGIN:VCALENDAR\r\nX-WR-CALNAME:Calendar\r\n");
         for (i, other) in ["a", "b", "c", "d"].iter().enumerate() {
@@ -602,12 +602,12 @@ mod tests {
     #[test]
     fn ics_occurrences_become_events() {
         let cal = ics::parse_text(
-            "BEGIN:VCALENDAR\r\nX-WR-CALNAME:nathan@example.com\r\nBEGIN:VEVENT\r\nUID:dr-1\r\n\
+            "BEGIN:VCALENDAR\r\nX-WR-CALNAME:imogen@example.com\r\nBEGIN:VEVENT\r\nUID:dr-1\r\n\
              SUMMARY:Design review\r\nDTSTART:20261005T140000Z\r\nDTEND:20261005T143000Z\r\n\
              ORGANIZER;CN=Tanay Kothari:mailto:tanay@example.com\r\n\
              ATTENDEE;CN=Tanay Kothari;PARTSTAT=ACCEPTED:mailto:tanay@example.com\r\n\
              ATTENDEE;CN=Priya Shah;PARTSTAT=NEEDS-ACTION:mailto:priya@example.com\r\n\
-             ATTENDEE;CN=Nathan;PARTSTAT=TENTATIVE:mailto:nathan@example.com\r\n\
+             ATTENDEE;CN=Imogen;PARTSTAT=TENTATIVE:mailto:imogen@example.com\r\n\
              ATTENDEE;CUTYPE=ROOM;CN=Room 4:mailto:room4@example.com\r\n\
              DESCRIPTION:Agenda: the Q4 plan\\n\\nJoin: https://teams.microsoft.com/l/meetup-join/19%3a1\r\n\
              END:VEVENT\r\nEND:VCALENDAR\r\n",

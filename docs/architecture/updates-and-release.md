@@ -81,6 +81,11 @@ removes Yap's real data (`%APPDATA%\yap`, `~\.yap`) **and the saved sign-in**
 (`CredDeleteW` on the `yap-account.com.yap.dictation` credential) **and the
 calendars' tokens/links** (`yap-calendar-1…8.com.yap.dictation`); never on `/UPDATE`
 runs (the updater always passes it), and unticked keeps both — a reinstall stays signed in.
+The bundle's **publisher** is "Context Mirror" (2026-10-22, no person's name). Tauri's
+installer keeps the install folder under `Software\<publisher>\Yap`, so an install
+made under the old publisher has none there: `ReadPreviousInstallDir`
+(`; --- YAP: PREVIOUS INSTALL DIR ---`) falls back to the uninstall entry's
+`InstallLocation`, and an update still lands in the folder it replaces.
 Google Calendar needs the build to carry an OAuth client: the optional
 `YAP_GOOGLE_CALENDAR_CLIENT_ID` / `_SECRET` repository secrets, passed to the
 build by both workflows (unset = the Connectors page says this build can't

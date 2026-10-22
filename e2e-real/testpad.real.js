@@ -140,20 +140,20 @@ test('snippets: a sign-off on its lines, its full stop dropped; a link mid-sente
   const { pad } = robot;
   await robot.configure({
     dictionary: [
-      { from: 'my sign off', to: 'Best regards,\nNathan', fuzzy: false, snippet: true },
+      { from: 'my sign off', to: 'Best regards,\nImogen', fuzzy: false, snippet: true },
       { from: 'the docs link', to: 'https://example.com/docs', fuzzy: false, snippet: true },
     ],
   });
   try {
     await pad.set('rich', '');
     let r = await robot.dictate(pad, 'Thanks for the update. My sign off.');
-    expect(r.text).toBe('Thanks for the update. Best regards,\nNathan');
-    await expect.poll(async () => lf(await pad.text('rich'))).toBe('Thanks for the update. Best regards,\nNathan');
+    expect(r.text).toBe('Thanks for the update. Best regards,\nImogen');
+    await expect.poll(async () => lf(await pad.text('rich'))).toBe('Thanks for the update. Best regards,\nImogen');
 
     // Said on its own: exactly the saved text.
     await pad.set('rich', '');
     r = await robot.dictate(pad, 'My sign off.');
-    await expect.poll(async () => lf(await pad.text('rich'))).toBe('Best regards,\nNathan');
+    await expect.poll(async () => lf(await pad.text('rich'))).toBe('Best regards,\nImogen');
 
     // A one-line snippet mid-sentence: the sentence keeps its full stop.
     await pad.set('box', '');

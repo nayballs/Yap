@@ -2301,7 +2301,7 @@ mod tests {
     #[test]
     fn yap_and_other_mic_users_are_never_calls() {
         for key in [
-            "D:#Hobby Project#Yap#yap.exe",
+            "D:#My Apps#Yap#yap.exe",
             "E:#Projects#Yap#src-tauri#target#debug#yap.exe",
             "C:#Users#me#AppData#Local#WisprFlow#app-1.6.447#Wispr Flow.exe",
             "E:#Users#me#AppData#Local#Handy#handy.exe",

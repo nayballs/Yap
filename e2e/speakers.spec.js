@@ -281,12 +281,12 @@ test('a 1:1 meeting names "Them" after the other invitee, as a guess; "Not Alice
   shot,
 }) => {
   const feed = await startCalendarFeed();
-  const owner = { name: 'Nathan', email: 'nathan@example.com' };
+  const owner = { name: 'Imogen', email: 'imogen@example.com' };
   feed.set(
     calendarFile(owner.email, [
       vevent({
         uid: 'one-to-one@e2e',
-        summary: 'Alice and Nathan 1:1',
+        summary: 'Alice and Imogen 1:1',
         start: new Date(Date.now() - 60_000),
         end: new Date(Date.now() + 30 * 60_000),
         attendees: [{ name: 'Alice Moreau', email: 'alice@example.com' }, owner],
@@ -296,7 +296,7 @@ test('a 1:1 meeting names "Them" after the other invitee, as a guess; "Not Alice
   try {
     await yap.invoke('calendar_add_link', { link: feed.url, kind: 'ics' });
     const synced = await yap.invoke('calendar_sync');
-    const event = synced.events.find((e) => e.title === 'Alice and Nathan 1:1');
+    const event = synced.events.find((e) => e.title === 'Alice and Imogen 1:1');
     const noteId = await yap.invoke('calendar_event', { key: event.key, action: 'start' });
     await expect.poll(() => visible(yap, 'notepad')).toBe(true);
     const pad = yap.notepad;

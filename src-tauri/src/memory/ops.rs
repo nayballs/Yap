@@ -146,7 +146,7 @@ pub struct Item {
     /// Who or what it is to the person ("Sister", "Colleague at Acme").
     #[serde(default)]
     pub summary: String,
-    /// Short facts ("Lives in Leeds"), oldest first.
+    /// Short facts ("Lives in Norwich"), oldest first.
     #[serde(default)]
     pub details: Vec<String>,
     #[serde(default)]
@@ -355,13 +355,13 @@ pub fn route_preferences(changes: Vec<Change>, items: &[Item]) -> Vec<Change> {
 /// **What About you already says, left out** of a pass's or an import's
 /// changes to Profile and Preferences: About you's `name` and `note` go to
 /// the AI with every question, so memory keeps no second copy (Qwen3.5-4B
-/// kept "Works day shifts at a warehouse in Leeds" from a chat that
+/// kept "Works weekends at a bakery in Norwich" from a chat that
 /// repeated the note, though its input said About you had it, 2026-10-22).
 /// A fact goes when it's a short one naming the person (≤ 5 words with the
 /// name: "Name is Declan") or nearly all its words are the note's ("I work
-/// day shifts at a warehouse in Leeds." ⊇ "Works day shifts at a warehouse
-/// in Leeds"); anything new or more specific stays ("Plays PC games on a
-/// Steam Deck" next to "I play PC games"). A change left with nothing goes.
+/// weekends at a bakery in Norwich." ⊇ "Works weekends at a bakery in
+/// Norwich"); anything new or more specific stays ("Plays chess online with
+/// friends" next to "I play chess"). A change left with nothing goes.
 /// Pure.
 pub fn drop_about_you(changes: Vec<Change>, items: &[Item], name: &str, note: &str) -> Vec<Change> {
     let name = norm(name);
@@ -457,7 +457,7 @@ pub fn clean_fact(s: &str) -> String {
 }
 
 /// Could `name` be a person's name? At most four words, none of them a
-/// small joining word ("Nurse at St James's in Leeds" isn't one: Qwen2.5-1.5B
+/// small joining word ("Nurse at St James's in Norwich" isn't one: Qwen2.5-1.5B
 /// filed that under people, 2026-10-22), and not a role alone. Pure.
 pub fn looks_like_a_name(name: &str) -> bool {
     const JOINING: &[&str] = &["at", "in", "on", "from", "the", "a", "an", "who", "with", "for", "and", "of", "is", "my", "your", "their", "to"];
@@ -822,9 +822,9 @@ pub fn apply(items: &mut Vec<Item>, next_id: &mut u64, changes: &[Change], rules
                 if c.action == Action::Add && !section.is_you() && name.is_empty() && !c.facts.is_empty() && by_id.is_none() {
                     section = Section::Profile;
                 }
-                // Facts written as one ("Nurse | Lives in Leeds"), and for
+                // Facts written as one ("Nurse | Lives in Norwich"), and for
                 // Profile and Preferences an "about", are facts each: the 4B
-                // put "Nurse at St James's in Leeds" there (2026-10-22).
+                // put "Nurse at St James's in Norwich" there (2026-10-22).
                 let split = |f: &String| f.split(" | ").flat_map(|p| p.split("; ")).map(str::to_string).collect::<Vec<_>>();
                 let mut facts: Vec<String> = c.facts.iter().flat_map(split).collect();
                 let about_text = c.about.clone().filter(|a| !a.trim().is_empty());
@@ -1041,7 +1041,7 @@ mod tests {
     fn facts_are_kept_short_and_about_the_person() {
         assert_eq!(clean_fact("The user works night shifts."), "Works night shifts");
         assert_eq!(clean_fact("- the user's sister lives in York"), "Sister lives in York");
-        assert_eq!(clean_fact("  lives   in Leeds "), "Lives in Leeds");
+        assert_eq!(clean_fact("  lives   in Norwich "), "Lives in Norwich");
         assert!(clean_fact(&"word ".repeat(80)).chars().count() <= MAX_FACT);
     }
 
@@ -1082,11 +1082,11 @@ mod tests {
         assert!(o.done.is_empty());
         // Profile facts go into the one Profile item.
         apply(&mut items, &mut next, &[add(Section::Profile, "", "", &["Works as a nurse"])], &rules("chat"));
-        apply(&mut items, &mut next, &[add(Section::Profile, "Nathan", "", &["Lives in Leeds"])], &rules("chat"));
+        apply(&mut items, &mut next, &[add(Section::Profile, "Imogen", "", &["Lives in Norwich"])], &rules("chat"));
         let profile: Vec<&Item> = items.iter().filter(|i| i.section == Section::Profile).collect();
         assert_eq!(profile.len(), 1);
         assert_eq!(profile[0].title, "Profile");
-        assert_eq!(profile[0].details, ["Works as a nurse", "Lives in Leeds"]);
+        assert_eq!(profile[0].details, ["Works as a nurse", "Lives in Norwich"]);
     }
 
     #[test]
@@ -1115,7 +1115,7 @@ mod tests {
     fn updates_and_removals_change_only_what_they_name() {
         let mut items = Vec::new();
         let mut next = 0;
-        apply(&mut items, &mut next, &[add(Section::Profile, "", "", &["Works at Acme as a nurse", "Lives in Leeds"])], &rules("chat"));
+        apply(&mut items, &mut next, &[add(Section::Profile, "", "", &["Works at Acme as a nurse", "Lives in Norwich"])], &rules("chat"));
         apply(&mut items, &mut next, &[add(Section::People, "Sam", "Colleague at Acme", &[])], &rules("chat"));
         let profile = items[0].id;
         let sam = items[1].id;
@@ -1139,7 +1139,7 @@ mod tests {
             &rules("tell"),
         );
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].details, ["Lives in Leeds", "Works at St James's as a nurse"]);
+        assert_eq!(items[0].details, ["Lives in Norwich", "Works at St James's as a nurse"]);
         assert_eq!(o.done.len(), 2);
         assert_eq!(o.done[0].facts_removed, ["Works at Acme as a nurse"]);
         assert_eq!(o.done[1].kind, "removed");
@@ -1190,7 +1190,7 @@ mod tests {
         assert!(looks_like_preference("Prefers concise answers with British spelling"));
         assert!(looks_like_preference("Always use metric units"));
         assert!(looks_like_preference("Likes short replies"));
-        assert!(!looks_like_preference("Lives in Leeds"));
+        assert!(!looks_like_preference("Lives in Norwich"));
         assert!(!looks_like_preference("Likes gardening"));
         assert!(!looks_like_preference("Works as a nurse"));
         assert!(looks_like_preference("Asked me to always reply in a friendly tone"));
@@ -1198,10 +1198,10 @@ mod tests {
         assert!(passing("Asked about flights to Rome"));
         assert!(!passing("Works as a nurse"));
         assert!(!passing("Wants short answers"));
-        let mut c = add(Section::Profile, "", "", &["Lives in Leeds", "Prefers concise answers"]);
+        let mut c = add(Section::Profile, "", "", &["Lives in Norwich", "Prefers concise answers"]);
         let out = route_preferences(vec![c.clone()], &[]);
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0].facts, ["Lives in Leeds"]);
+        assert_eq!(out[0].facts, ["Lives in Norwich"]);
         assert_eq!((out[1].section, out[1].facts.clone()), (Some(Section::Preferences), vec!["Prefers concise answers".to_string()]));
         // An update of an item that isn't there, preferences only: one add.
         c = Change { action: Action::Update, id: Some(42), section: None, facts: vec!["Wants a friendly tone".into()], ..c };
@@ -1211,21 +1211,21 @@ mod tests {
 
     #[test]
     fn what_about_you_says_is_not_kept_twice() {
-        let (name, note) = ("Declan", "I work day shifts at a warehouse in Leeds. I play PC games.");
+        let (name, note) = ("Declan", "I work weekends at a bakery in Norwich. I play chess.");
         // Qwen3.5-4B's Profile from a chat that repeated the note.
-        let c = add(Section::Profile, "", "", &["Works day shifts at a warehouse in Leeds", "Learning Spanish for a trip to Seville", "Name is Declan"]);
+        let c = add(Section::Profile, "", "", &["Works weekends at a bakery in Norwich", "Learning Spanish for a trip to Seville", "Name is Declan"]);
         let out = drop_about_you(vec![c], &[], name, note);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].facts, ["Learning Spanish for a trip to Seville"]);
         // More specific than the note: kept. A longer fact with the name: kept.
-        let c = add(Section::Profile, "", "", &["Plays PC games on a Steam Deck", "Declan is saving up for a car next year"]);
+        let c = add(Section::Profile, "", "", &["Plays chess online with friends", "Declan is saving up for a car next year"]);
         assert_eq!(drop_about_you(vec![c.clone()], &[], name, note)[0].facts.len(), 2);
         // Nothing left: the change goes. People, and removals, untouched.
-        let only = add(Section::Profile, "", "", &["Plays PC games"]);
+        let only = add(Section::Profile, "", "", &["Plays chess"]);
         assert!(drop_about_you(vec![only], &[], name, note).is_empty());
-        let person = add(Section::People, "Sam Patel", "Colleague at the warehouse", &["Works day shifts at a warehouse in Leeds"]);
+        let person = add(Section::People, "Sam Patel", "Colleague at the bakery", &["Works weekends at a bakery in Norwich"]);
         assert_eq!(drop_about_you(vec![person.clone()], &[], name, note)[0].facts.len(), 1);
-        let remove = Change { action: Action::Remove, id: Some(1), section: None, remove_facts: vec!["Works day shifts".into()], ..c.clone() };
+        let remove = Change { action: Action::Remove, id: Some(1), section: None, remove_facts: vec!["Works weekends".into()], ..c.clone() };
         assert_eq!(drop_about_you(vec![remove], &[], name, note).len(), 1);
         // An update of the Profile item by id is checked like an add.
         let profile = Item {
@@ -1239,7 +1239,7 @@ mod tests {
             updated_ts: 1,
             dictation: true,
         };
-        let update = Change { action: Action::Update, id: Some(7), section: None, facts: vec!["Works day shifts in Leeds".into()], ..c };
+        let update = Change { action: Action::Update, id: Some(7), section: None, facts: vec!["Works weekends in Norwich".into()], ..c };
         assert!(drop_about_you(vec![update], &[profile], name, note).is_empty());
         // About you empty: everything as it was.
         assert_eq!(drop_about_you(vec![person], &[], "", "").len(), 1);
@@ -1275,7 +1275,7 @@ mod tests {
         for ok in ["Rochelle", "Sam Patel", "Dr Patel", "Ana Sofia Ruiz", "Mum"] {
             assert!(looks_like_a_name(ok), "{ok}");
         }
-        for not in ["Nurse at St James's in Leeds", "Sister", "Dog", "User", "my colleague", "The guy from the gym who"] {
+        for not in ["Nurse at St James's in Norwich", "Sister", "Dog", "User", "my colleague", "The guy from the gym who"] {
             assert!(!looks_like_a_name(not), "{not}");
         }
     }
@@ -1284,7 +1284,7 @@ mod tests {
     fn what_the_toast_says() {
         assert_eq!(say_for("added", Section::People, "Rochelle", "Sister", &[]), "Rochelle, your sister");
         assert_eq!(say_for("added", Section::People, "Sam", "Colleague at Acme, product manager", &[]), "Sam, your colleague at Acme, product manager");
-        assert_eq!(say_for("added", Section::People, "Dr Patel", "GP at the Leeds practice", &[]), "Dr Patel, GP at the Leeds practice");
+        assert_eq!(say_for("added", Section::People, "Dr Patel", "GP at the Norwich practice", &[]), "Dr Patel, GP at the Norwich practice");
         assert_eq!(say_for("added", Section::Profile, "Profile", "", &["Works night shifts".into()]), "works night shifts");
         assert_eq!(say_for("added", Section::Projects, "Yap", "", &[]), "your project Yap");
         assert_eq!(say_for("removed", Section::People, "Sam", "Colleague", &[]), "Sam");

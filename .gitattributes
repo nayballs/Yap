@@ -1,3 +1,6 @@
 # Cloudflare parses this file line by line; with CRLF (core.autocrlf on
 # Windows) every header value would end in a stray \r.
 cloud/public/_headers text eol=lf
+
+# Git runs hooks with sh, which chokes on a CRLF line.
+.githooks/* text eol=lf

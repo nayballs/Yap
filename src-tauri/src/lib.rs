@@ -52,6 +52,8 @@ mod history;
 mod input_hook;
 mod learn;
 mod llm;
+#[cfg(test)]
+mod log_privacy;
 mod local_llm;
 mod mcp;
 mod mcp_clients;

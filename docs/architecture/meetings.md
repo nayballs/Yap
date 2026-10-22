@@ -198,7 +198,7 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
 
 - **`lib/Notepad.svelte`** — the **meeting notepad** (window `notepad`,
   `notepad.rs`), **Wispr Flow's notepad, measured** (2026-10-05, from its DOM
-  over CDP: `E:\Projects\references\wispr-flow\notepad-spec.md`; sizes, type,
+  over CDP: `references/wispr-flow/notepad-spec.md` (beside this repo); sizes, type,
   motion matched in Yap's own code, wording and icons; the colours are Yap's
   own since 2026-10-06). Palette = the `--yap-paper-*` tokens in app.css
   (paper `#faf9f6`, ink `#26231c`, surfaces s1/s2, the burnt-orange

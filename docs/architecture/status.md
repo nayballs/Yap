@@ -116,7 +116,7 @@ meeting against a fake AI, and once with real speech through Parakeet
 call ending → "Stop and summarise?"; per-app choice (work apps on, Discord &
 co. off, "Don't ask for X" on the prompt), a pop-up or quiet style, a 30 s
 fade, and a tray item; e2e-tested via a simulation hook, the
-registry signal checked read-only on Nathan's PC, no real call yet),
+registry signal checked read-only on the test PC, no real call yet),
 **guard rails** (`meeting_guard.rs` + `capture.rs`, Wispr Flow's Notetaker
 settings: meeting windows hidden from screen capture while recording, a
 2-hour maximum length with a "Keep going" warning, an optional auto-stop
@@ -219,8 +219,8 @@ microphone privacy switches named with Open settings (`mic_privacy.rs`).
 Unit-tested, e2e-tested (`bar.spec.js`, `dictation-alerts.spec.js`,
 `no-mic.spec.js`) and robot-tested (`dictation-extras.real.js`, the label
 case in `browser.real.js`); a real elevated window and a privacy switch
-really flipped in Windows are still untried (a UAC prompt; Nathan's
-settings).
+really flipped in Windows are still untried (a UAC prompt; the test
+PC's settings).
 **Calmer notices** (2026-10-17, after Wispr Flow's rules by behaviour):
 one notice policy in Rust and on the page (`notice.rs`,
 `ui/noticePolicy.js`): one place per notice (the window while it's focused,
@@ -246,7 +246,7 @@ or Tavily key. **The AI's own search** (`web/native.rs`, 2026-10-18): cloud
 models search with their provider's own search as a sub-call, local ones
 with Yap's. Parsers unit-tested on each provider's documented shape (Groq's
 recorded), the Groq and Gemini paths and the fallback e2e-tested against
-the fake AI; for real, through the eval harness on Nathan's keys: Groq
+the fake AI; for real, through the eval harness on the maintainer's keys: Groq
 gpt-oss-20b passed all 4 web scenarios (its search sub-call 3.9–4.8k
 tokens, ~2.4 s; a searched answer ~8k tokens over 3 calls, so the free
 plan's 8,000 a minute makes the next answer wait), Gemini 3.5 Flash on a
