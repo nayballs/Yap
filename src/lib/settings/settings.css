@@ -1,0 +1,207 @@
+/* Settings' shared page styles (Settings.svelte and its page components in
+ * src/lib/settings/). Everything is under .settings-shell, so nothing here
+ * reaches the rest of the window. The rows and headings themselves are the
+ * ui/ primitives (Group, Row, Toggle, LinkRow…). */
+
+/* Thin, quiet scrollbars: the content pane, the prompt box, code blocks. */
+.settings-shell,
+.settings-shell * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--yap-border-hover) transparent;
+}
+
+/* ---- the page header: a serif title and one grey line ---- */
+.settings-shell .page-h {
+  margin: 0 0 26px;
+}
+.settings-shell .page-h h1 {
+  margin: 0;
+  font-family: var(--yap-font-display);
+  font-size: 28px;
+  font-weight: 560;
+  letter-spacing: -0.005em;
+  line-height: 1.2;
+  color: var(--yap-fg);
+}
+.settings-shell .page-h p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--yap-muted);
+}
+/* A page inside a page ("Meetings › Ask about calls in"). */
+.settings-shell .page-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 8px -6px;
+  padding: 3px 8px 3px 4px;
+  border: none;
+  border-radius: var(--yap-r);
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--yap-fg-62);
+  cursor: pointer;
+}
+.settings-shell .page-back:hover {
+  background: var(--yap-raised-soft);
+  color: var(--yap-fg);
+}
+.settings-shell .page-back:focus-visible {
+  outline: none;
+  box-shadow: var(--yap-focus);
+}
+.settings-shell .page-back svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ---- an inline link (a button that reads as a link) ---- */
+.settings-shell .set-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--yap-link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--yap-link) 40%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.settings-shell .set-link:hover {
+  text-decoration-color: currentColor;
+}
+.settings-shell .set-link:focus-visible {
+  outline: none;
+  border-radius: 2px;
+  box-shadow: var(--yap-focus);
+}
+
+/* ---- a quiet line in a row of its own (consent, where things go) ---- */
+.settings-shell .set-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--yap-muted);
+}
+
+/* ---- the red badge's reason, said on the page (review #9) ---- */
+.settings-shell .set-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: -8px 0 24px;
+  padding: 11px 12px 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--yap-danger) 28%, var(--yap-border));
+  border-radius: var(--yap-r-lg);
+  background: color-mix(in srgb, var(--yap-danger) 5%, var(--yap-s2));
+}
+.settings-shell .set-banner .dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e5484d;
+}
+.settings-shell .set-banner .text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--yap-fg);
+}
+.settings-shell .set-banner .text span {
+  display: block;
+  font-size: 12.5px;
+  color: var(--yap-muted);
+}
+
+/* ---- details on demand: "What each provider charges ›" ---- */
+.settings-shell details.set-more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--yap-link);
+  cursor: pointer;
+  border-radius: 3px;
+}
+.settings-shell details.set-more > summary::-webkit-details-marker {
+  display: none;
+}
+.settings-shell details.set-more > summary::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin-left: 3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--yap-dur) ease;
+}
+.settings-shell details.set-more[open] > summary::after {
+  transform: rotate(45deg) translate(-2px, -1px);
+}
+.settings-shell details.set-more > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--yap-focus);
+}
+.settings-shell details.set-more > .more-body {
+  margin-top: 10px;
+}
+
+/* ---- a card, only for things that are objects (a model, a calendar
+   connection, an AI app) ---- */
+.settings-shell .set-card {
+  border: 1px solid var(--yap-border);
+  border-radius: var(--yap-r-lg);
+  background: var(--yap-s2);
+  box-shadow: var(--yap-shadow-sm);
+}
+
+/* ---- keycaps outside the hotkey control (the Shortcuts page's notes) ---- */
+.settings-shell kbd.set-key {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--yap-key-fg);
+  background: var(--yap-key-bg);
+  border: 1px solid var(--yap-key-border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+}
+
+/* ---- a row a search result or a deep link landed on: a short wash ---- */
+.settings-shell .set-flash {
+  animation: set-flash 1.8s ease-out 1;
+}
+/* Reduced motion: the wash without the fade (the class comes off after). */
+:root[data-motion='reduced'] .settings-shell .set-flash {
+  background: var(--yap-primary-wash);
+}
+@keyframes set-flash {
+  0%,
+  35% {
+    background: var(--yap-primary-wash);
+    box-shadow:
+      -10px 0 0 var(--yap-primary-wash),
+      10px 0 0 var(--yap-primary-wash);
+  }
+  100% {
+    background: transparent;
+    box-shadow:
+      -10px 0 0 transparent,
+      10px 0 0 transparent;
+  }
+}

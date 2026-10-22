@@ -618,8 +618,8 @@ pub struct Status {
     enabled: bool,
     /// "popup" | "quiet" (`meeting_detect_style`).
     style: &'static str,
-    /// Every call app and whether Yap asks about it (Settings → General →
-    /// Meetings): the ones asked about by default first, each in table order.
+    /// Every call app and whether Yap asks about it (Settings → Meetings →
+    /// Ask about calls in): the ones asked about by default first, each in table order.
     apps: Vec<AppView>,
     calls: Vec<CallView>,
     prompt: Option<PromptView>,
@@ -1514,9 +1514,9 @@ fn ever_recorded() -> bool {
 /// ✕ or leaving it keeps asking.
 fn offer_to_stop(app: &AppHandle, call_app: &'static App, ignored: bool) {
     let body = if ignored {
-        "You've let the last few call prompts go by. Yap can stop asking; you can turn it back on in Settings → General → Meetings."
+        "You've let the last few call prompts go by. Yap can stop asking; you can turn it back on in Settings → Meetings."
     } else {
-        "You've said Not now to the last few calls. Yap can stop asking; you can turn it back on in Settings → General → Meetings."
+        "You've said Not now to the last few calls. Yap can stop asking; you can turn it back on in Settings → Meetings."
     };
     tracing::info!(app = call_app.id, ignored, "meeting detect: offering to stop asking about calls");
     crate::alert::show_soon(
@@ -1543,7 +1543,7 @@ fn stopped_asking(app: &AppHandle) {
             kind: "calls-fatigue",
             icon: "call",
             title: "Yap stopped asking about calls".into(),
-            body: "It asked about many calls and you didn't take notes on any. Turn it back on any time in Settings → General → Meetings.".into(),
+            body: "It asked about many calls and you didn't take notes on any. Turn it back on any time in Settings → Meetings.".into(),
             action: Some(crate::alert::Action { id: crate::alert::ASK_ABOUT_CALLS, label: "Turn back on" }),
             timeout_ms: 30_000,
         },

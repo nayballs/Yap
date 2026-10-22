@@ -1,7 +1,9 @@
 <script>
-  // Settings → Memory (src-tauri/src/memory.rs, 2026-10-22): what Yap
-  // remembers about the person, laid out like Claude's Settings → Memory in
-  // Yap's own look.
+  // Settings → Assistant → Memory (src-tauri/src/memory.rs, 2026-10-22):
+  // what Yap remembers about the person, laid out like Claude's Settings →
+  // Memory in Settings' one row style (2026-10-22 review): the switches, You,
+  // "Tell Yap what to change" and import / export / clear are flat rows; the
+  // people, projects and topics are a list of real objects (a card each).
   // - The switches (cfg, Settings' auto-save): "Search and reference past
   //   chats", "Learn from my chats", "Learn from meetings", "Include
   //   sensitive topics in memory".
@@ -18,7 +20,8 @@
   //   pasted back, the changes reviewed one by one) and Export (a .zip of
   //   Markdown, one file per section, through the save dialog).
   // - "Clear all memory" (asked first), and the privacy line.
-  //   cfg: Settings' config $state.
+  //   cfg:  Settings' config $state.
+  //   goto: Settings' link to another page ("general#about-name").
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import Group from './ui/Group.svelte';
@@ -27,15 +30,14 @@
   import Button from './ui/Button.svelte';
   import Input from './ui/Input.svelte';
   import Textarea from './ui/Textarea.svelte';
+  import LinkRow from './ui/LinkRow.svelte';
   import { toast } from './ui/toast.svelte.js';
   import { askConfirm } from './ui/contextMenu.svelte.js';
   import { memory, loadMemory, changedToast } from './memory.svelte.js';
 
-  let { cfg } = $props();
+  let { cfg, goto = (where) => window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: where })) } = $props();
 
   onMount(loadMemory);
-
-  const goto = (where) => window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: where }));
 
   // ---- the sections ---------------------------------------------------------------------------
   const YOU = [
@@ -43,9 +45,9 @@
     { section: 'preferences', title: 'Preferences', line: 'How you want Yap’s AI to answer you' },
   ];
   const LISTS = [
-    { section: 'people', title: 'People', one: 'person', add: 'Add a person', aboutLabel: 'Who they are to you', aboutHint: 'Sister, colleague at Acme…' },
-    { section: 'projects', title: 'Projects', one: 'project', add: 'Add a project', aboutLabel: 'What it is', aboutHint: 'My dictation app…' },
-    { section: 'topics', title: 'Topics', one: 'topic', add: 'Add a topic', aboutLabel: 'What it is to you', aboutHint: 'A game I play…' },
+    { section: 'people', title: 'People', desc: 'The people you mention, and who they are to you.', one: 'person', add: 'Add a person', aboutLabel: 'Who they are to you', aboutHint: 'Sister, colleague at Acme…' },
+    { section: 'projects', title: 'Projects', desc: 'What you’re working on.', one: 'project', add: 'Add a project', aboutLabel: 'What it is', aboutHint: 'My dictation app…' },
+    { section: 'topics', title: 'Topics', desc: 'Games, hobbies and things you keep coming back to.', one: 'topic', add: 'Add a topic', aboutLabel: 'What it is to you', aboutHint: 'A game I play…' },
   ];
   const bySection = (s) =>
     memory.items.filter((i) => i.section === s).sort((a, b) => (b.updatedTs ?? 0) - (a.updatedTs ?? 0));
@@ -81,10 +83,11 @@
       : country
         ? [region.automatic ? `${country} (from Windows)` : country, about.summary].filter(Boolean).join(' · ')
         : 'Not set: answers come without your prices and units';
+    // Each lands on its own row in General → About you, the keyboard on it.
     return [
-      { key: 'name', title: 'Name', set: !!name, line: name || 'Not set: what Yap should call you' },
-      { key: 'region', title: 'Region', set: !!country, line: regionLine },
-      { key: 'note', title: 'Note', set: !!note, line: note ? `“${note}”` : 'Not set: anything the AI should know about you' },
+      { key: 'name', title: 'Name', set: !!name, line: name || 'Not set: what Yap should call you', anchor: 'about-name' },
+      { key: 'region', title: 'Region', set: !!country, line: regionLine, anchor: 'region' },
+      { key: 'note', title: 'Note', set: !!note, line: note ? `“${note}”` : 'Not set: anything the AI should know about you', anchor: 'about-me' },
     ];
   });
 
@@ -361,130 +364,141 @@
   </div>
 {/snippet}
 
+{#snippet chevron(isOpen)}
+  <svg class="chev" class:open={isOpen} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+{/snippet}
+
 <div class="memory">
   {#if memory.loaded && !memory.ai?.ready}
-    <div class="noai" role="note">
-      <div>
-        <strong>Yap needs an AI model for memory</strong>
-        <p>Learning from your chats, “Tell Yap what to change” and imports use your Chat model. Memory you add yourself works without one.</p>
-      </div>
-      <span class="go"><Button variant="secondary" size="sm" onclick={() => goto('cleanup#chat')}>Language Models</Button></span>
+    <!-- What the page can't do yet, said once at the top (review #9). -->
+    <div class="notice" role="note">
+      <span class="text">
+        Yap needs an AI model for memory
+        <span>Learning from your chats, “Tell Yap what to change” and imports use your Chat model. What you add yourself works without one.</span>
+      </span>
+      <Button variant="secondary" size="sm" onclick={() => goto('cleanup#chat')}>Language Models</Button>
     </div>
   {/if}
 
-  <Group title="Memory">
-    <Row>
+  <Group title="What Yap learns from" id="settings-memory-learning">
+    <Row setting="memory-search-chats">
       <Toggle
         bind:checked={cfg.memorySearchChats}
         label="Search and reference past chats"
-        desc="Yap’s AI can look through your earlier chats when you mention one."
+        desc="Yap’s AI looks through your earlier chats when you mention one"
       />
     </Row>
-    <Row>
+    <Row setting="memory-learn-chats">
       <Toggle
         bind:checked={cfg.memoryLearnChats}
         label="Learn from my chats"
-        desc="When a chat goes quiet, Yap keeps lasting facts about you from it: never passwords, numbers or addresses."
+        desc="When a chat goes quiet, Yap keeps lasting facts about you. Never passwords, numbers or addresses"
       />
     </Row>
     {#if memory.loaded && memory.ai?.ready && memory.ai?.learns === false && (cfg.memoryLearnChats || cfg.memoryLearnMeetings)}
       <Row>
-        <p class="small-model" role="note">
+        <p class="set-note" role="note">
           Your Chat model is too small to pick out what to remember reliably, so Yap doesn’t learn by itself with it.
-          It does with Qwen3.5 4B on this PC or a cloud model. “Tell Yap what to change”, imports and
-          “Remember that…” in Chat still work.
-          <button type="button" class="link" onclick={() => goto('cleanup#chat')}>Language Models</button>
+          Qwen3.5 4B on this PC or a cloud model does. “Tell Yap what to change”, imports and “Remember that…” in
+          Chat work with any model.
+          <button type="button" class="set-link" onclick={() => goto('cleanup#chat')}>Language Models</button>
         </p>
       </Row>
     {/if}
-    <Row>
+    <Row setting="memory-learn-meetings">
       <Toggle
         bind:checked={cfg.memoryLearnMeetings}
         label="Learn from meetings"
-        desc="Who your attendees are and the projects you work on, from finished meetings’ action plans. Off by default: it’s other people’s words."
+        desc="Your attendees and projects, from finished meetings’ action plans. Off at first: it’s other people’s words"
       />
     </Row>
-    <Row>
+    <Row setting="memory-sensitive">
       <Toggle
         bind:checked={cfg.memorySensitive}
         label="Include sensitive topics in memory"
-        desc="Health, religion, politics, sexuality and the like. Off: Yap leaves them out of what it learns by itself."
+        desc="Health, religion, politics and the like. Off: Yap leaves them out of what it learns by itself"
       />
     </Row>
   </Group>
 
-  <Group title="You">
+  <Group title="You" id="settings-memory-you" desc="What the AI keeps in mind about you in every answer.">
     {#each YOU as y (y.section)}
       {@const item = youItem(y.section)}
-      <div class="item">
-        <button
-          type="button"
-          class="row"
-          aria-expanded={open === (item?.id ?? `new:${y.section}`)}
-          onclick={() => edit(item, y.section)}
-        >
-          <span class="name">{y.title}</span>
-          <span class="line">{item?.details?.length ? item.details.join(' · ') : y.line}</span>
-          <span class="when">{item ? updated(item.updatedTs) : 'Nothing yet'}</span>
+      {@const key = item?.id ?? `new:${y.section}`}
+      <div class="flat" data-setting={`memory-${y.section}`}>
+        <button type="button" class="mrow" aria-expanded={open === key} onclick={() => edit(item, y.section)}>
+          <span class="lhs">
+            <span class="label">{y.title}</span>
+            <span class="desc">{item?.details?.length ? item.details.join(' · ') : y.line}</span>
+          </span>
+          <span class="rhs">
+            <span class="value">{item ? updated(item.updatedTs) : 'Nothing yet'}</span>
+            {@render chevron(open === key)}
+          </span>
         </button>
-        {#if open === (item?.id ?? `new:${y.section}`)}
+        {#if open === key}
           {@render editor(item, y.section, null)}
         {/if}
       </div>
     {/each}
+    <!-- About you's name, region and note (General → About you, kept there:
+         memory keeps no second copy of them). Each lands on its own row. -->
     {#each aboutRows as a (a.key)}
-      <div class="item">
-        <button
-          type="button"
-          class="row"
-          data-about={a.key}
-          aria-label={`${a.title}: ${a.line}. Change it in About you`}
-          onclick={() => goto('general#about-you')}
-        >
-          <span class="name">{a.title}</span>
-          <span class="line" class:unset={!a.set}>{a.line}</span>
-          <span class="when link">In About you</span>
-        </button>
+      <div data-about={a.key}>
+        <LinkRow
+          label={a.title}
+          desc={a.line}
+          value="In About you"
+          onclick={() => goto({ page: 'general', anchor: a.anchor, focus: true })}
+        />
       </div>
     {/each}
   </Group>
 
   {#each LISTS as list (list.section)}
     {@const rows = bySection(list.section)}
-    <Group title={list.title}>
-      {#each rows as item (item.id)}
-        <div class="item">
-          <button type="button" class="row" aria-expanded={open === item.id} onclick={() => edit(item, list.section)}>
-            <span class="name">{item.title}</span>
-            <span class="line">{item.summary || item.details?.[0] || ''}</span>
-            <span class="when">{updated(item.updatedTs)}</span>
+    <Group title={list.title} id={`settings-memory-${list.section}`} desc={list.desc} bare>
+      <!-- Real objects: a card, a row each, opening to edit in place. -->
+      <div class="objects" data-setting={`memory-${list.section}`}>
+        {#each rows as item (item.id)}
+          <div class="obj">
+            <button type="button" class="orow" aria-expanded={open === item.id} onclick={() => edit(item, list.section)}>
+              <span class="lhs">
+                <span class="label">{item.title}</span>
+                <span class="desc">{item.summary || item.details?.[0] || ''}</span>
+              </span>
+              <span class="rhs">
+                <span class="value">{updated(item.updatedTs)}</span>
+                {@render chevron(open === item.id)}
+              </span>
+            </button>
+            {#if open === item.id}
+              {@render editor(item, list.section, list)}
+            {/if}
+          </div>
+        {:else}
+          <p class="empty">Nothing yet.</p>
+        {/each}
+        <div class="obj">
+          <button
+            type="button"
+            class="orow add"
+            aria-expanded={open === `new:${list.section}`}
+            onclick={() => edit(null, list.section)}
+          >
+            <span class="plus" aria-hidden="true">+</span>
+            <span class="label">{list.add}</span>
           </button>
-          {#if open === item.id}
-            {@render editor(item, list.section, list)}
+          {#if open === `new:${list.section}`}
+            {@render editor(null, list.section, list)}
           {/if}
         </div>
-      {:else}
-        <p class="empty">Nothing yet.</p>
-      {/each}
-      <div class="item">
-        <button
-          type="button"
-          class="row add"
-          aria-expanded={open === `new:${list.section}`}
-          onclick={() => edit(null, list.section)}
-        >
-          <span class="plus" aria-hidden="true">+</span>
-          <span class="name">{list.add}</span>
-        </button>
-        {#if open === `new:${list.section}`}
-          {@render editor(null, list.section, list)}
-        {/if}
       </div>
     </Group>
   {/each}
 
-  <Group title="Tell Yap what to change">
-    <Row>
+  <Group title="Tell Yap what to change" desc="Yap’s AI turns it into changes you check before anything is kept.">
+    <Row setting="memory-tell">
       <div class="tell">
         <Textarea
           bind:value={tellText}
@@ -494,7 +508,6 @@
           placeholder="My dog's name is Beans · Forget everything about my old job"
         />
         <div class="actions">
-          <span class="hint">Yap’s AI turns it into changes you can check first.</span>
           <span class="grow"></span>
           <Button size="sm" disabled={tellBusy || !tellText.trim() || !memory.ai?.ready} onclick={tell}>
             {tellBusy ? 'Working it out…' : 'Suggest changes'}
@@ -516,15 +529,15 @@
               >
             </div>
           {:else}
-            <p class="none" role="status">Nothing in memory changes for that.</p>
+            <p class="set-note" role="status">Nothing in memory changes for that.</p>
           {/if}
         {/if}
       </div>
     </Row>
   </Group>
 
-  <Group title="Bring it in, take it out">
-    <Row label="Import memory from other AI providers" desc="Bring in what ChatGPT, Claude or Gemini remembers about you.">
+  <Group title="Import, export and clear" id="settings-memory-data">
+    <Row label="Import memory from other AI providers" desc="Bring in what ChatGPT, Claude or Gemini remembers about you" setting="memory-import">
       <Button variant="secondary" size="sm" onclick={openImport}>{importOpen ? 'Close' : 'Import'}</Button>
     </Row>
     {#if importOpen}
@@ -560,22 +573,24 @@
                 >
               </div>
             {:else}
-              <p class="none" role="status">Yap found nothing to keep in that.</p>
+              <p class="set-note" role="status">Yap found nothing to keep in that.</p>
             {/if}
           {/if}
         </div>
       </Row>
     {/if}
-    <Row label="Export memory" desc="A .zip with a Markdown file for each section.">
+    <Row label="Export memory" desc="A .zip with a Markdown file for each section" setting="memory-export">
       <Button variant="secondary" size="sm" onclick={exportMemory}>Export</Button>
     </Row>
-    <Row label="Clear all memory" desc={total ? `${total} ${total === 1 ? 'thing' : 'things'} Yap remembers` : 'Memory is empty'}>
+    <Row label="Clear all memory" desc={total ? `${total} ${total === 1 ? 'thing' : 'things'} Yap remembers` : 'Memory is empty'} setting="memory-clear">
       <Button variant="danger" size="sm" disabled={!total} onclick={clearAll}>Clear all</Button>
     </Row>
   </Group>
 
-  <p class="privacy">
-    Memory is kept on this PC. It goes with your questions to the AI model you use (a cloud provider sees it; a model on this PC keeps it here) and is never sent to Yap.
+  <p class="set-note">
+    Memory is kept on this PC. It goes with your questions to the AI model you use (a cloud provider sees it; a model on
+    this PC keeps it here) and is never sent to Yap.
+    <button type="button" class="set-link" onclick={() => goto('privacy#leaves')}>Privacy & data</button>
   </p>
 </div>
 
@@ -584,109 +599,150 @@
     display: flex;
     flex-direction: column;
   }
-  .noai {
+  .notice {
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 14px 16px;
-    margin-bottom: 22px;
-    border: 1px solid var(--yap-primary-line);
-    background: var(--yap-primary-wash);
+    gap: 14px;
+    margin: -8px 0 24px;
+    padding: 12px 14px;
     border-radius: var(--yap-r-lg);
+    background: color-mix(in srgb, var(--yap-warning) 9%, var(--yap-s2));
+    border: 1px solid color-mix(in srgb, var(--yap-warning) 28%, transparent);
   }
-  .small-model {
-    margin: 0;
-    font-size: 12px;
-    line-height: 1.55;
-    color: var(--yap-fg-62);
-  }
-  .link {
-    background: none;
-    border: 0;
-    padding: 0;
-    font: inherit;
-    font-weight: 600;
-    color: var(--yap-primary);
-    cursor: pointer;
-  }
-  .link:hover {
-    text-decoration: underline;
-  }
-  .noai .go {
-    flex: 0 0 auto;
-    white-space: nowrap;
-  }
-  .noai strong {
+  .notice .text {
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 13px;
+    font-weight: 560;
+    line-height: 1.45;
     color: var(--yap-fg);
   }
-  .noai p {
-    margin: 3px 0 0;
-    font-size: 12px;
-    color: var(--yap-fg-62);
-    line-height: 1.5;
-  }
-  .item {
+  .notice .text span {
     display: block;
+    font-weight: 400;
+    font-size: 12.5px;
+    color: var(--yap-muted);
   }
-  .row {
-    width: 100%;
+
+  /* ---- a row that opens to edit: You's Profile and Preferences (flat, as
+     a LinkRow), and each person, project or topic (in its card) ---- */
+  .mrow,
+  .orow {
     display: grid;
-    /* Fixed outer columns, so every row's line starts at the same place. */
-    grid-template-columns: 150px minmax(0, 1fr) 112px;
-    align-items: baseline;
-    gap: 14px;
-    padding: 12px 16px;
-    background: transparent;
-    border: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 24px;
+    width: 100%;
+    margin: 0;
+    box-sizing: border-box;
+    border: none;
+    border-radius: 0;
+    background: none;
     font: inherit;
     text-align: left;
-    cursor: pointer;
     color: var(--yap-fg);
+    cursor: pointer;
     transition: background var(--yap-dur) ease;
   }
-  .row:hover,
-  .row[aria-expanded='true'] {
-    background: var(--yap-s3);
+  .mrow {
+    min-height: 54px;
+    padding: 12px 0;
   }
-  .row:focus-visible {
-    outline: 2px solid var(--yap-primary);
-    outline-offset: -2px;
+  .mrow:hover,
+  .mrow[aria-expanded='true'] {
+    background: var(--yap-raised-soft);
+    box-shadow:
+      -8px 0 0 var(--yap-raised-soft),
+      8px 0 0 var(--yap-raised-soft);
   }
-  .name {
-    font-size: 13px;
-    font-weight: 650;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .mrow:focus-visible {
+    outline: none;
+    border-radius: 2px;
+    box-shadow: var(--yap-focus);
   }
-  .line {
-    font-size: 12.5px;
-    color: var(--yap-fg-62);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .orow {
+    min-height: 52px;
+    padding: 10px 16px;
+  }
+  .orow:hover,
+  .orow[aria-expanded='true'] {
+    background: var(--yap-raised-soft);
+  }
+  /* Inside the card (which clips its corners): the ring drawn inward. */
+  .orow:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--yap-focus-ring);
+  }
+  .lhs {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
     min-width: 0;
   }
-  .when {
-    font-size: 11.5px;
-    color: var(--yap-muted-70);
+  .label {
+    font-size: 13.5px;
+    font-weight: 560;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
-    text-align: right;
   }
-  .when.link {
-    color: var(--yap-primary);
-    font-weight: 600;
+  .desc {
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--yap-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .line.unset {
-    color: var(--yap-muted-70);
+  .desc:empty {
+    display: none;
   }
-  .row.add {
-    grid-template-columns: auto 1fr;
+  .rhs {
+    display: inline-flex;
+    align-items: center;
     gap: 8px;
   }
-  .row.add .name {
-    font-weight: 600;
+  .value {
+    font-size: 12.5px;
+    color: var(--yap-muted);
+    white-space: nowrap;
+  }
+  .chev {
+    flex: 0 0 auto;
+    width: 15px;
+    height: 15px;
+    color: var(--yap-fg-62);
+    transition: transform var(--yap-dur) ease;
+  }
+  .chev.open {
+    transform: rotate(90deg);
+  }
+
+  /* ---- the people, projects and topics: a card of objects ---- */
+  .objects {
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-sm);
+    overflow: hidden;
+  }
+  .obj + .obj,
+  .empty + .obj {
+    border-top: 1px solid var(--yap-border-subtle);
+  }
+  .empty {
+    margin: 0;
+    padding: 14px 16px;
+    font-size: 12.5px;
+    color: var(--yap-muted);
+  }
+  .orow.add {
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 10px;
+    min-height: 46px;
+  }
+  .orow.add .label {
     color: var(--yap-fg-80);
   }
   .plus {
@@ -701,18 +757,21 @@
     font-size: 13px;
     line-height: 1;
   }
-  .empty {
-    margin: 0;
-    padding: 12px 16px;
-    font-size: 12.5px;
-    color: var(--yap-muted-70);
-  }
+
+  /* ---- editing one ---- */
   .editor {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: 4px 16px 14px;
-    background: var(--yap-s3);
+    padding: 14px 16px 16px;
+    background: var(--yap-s1);
+    border-top: 1px solid var(--yap-border-subtle);
+  }
+  .flat .editor {
+    margin: 4px 0 14px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s2);
   }
   .field {
     display: flex;
@@ -720,17 +779,17 @@
     gap: 5px;
   }
   .field > span {
-    font-size: 11.5px;
-    font-weight: 600;
-    color: var(--yap-fg-62);
+    font-size: 12.5px;
+    font-weight: 560;
+    color: var(--yap-fg);
   }
   .spell :global(.toggle-row) {
     padding: 0;
   }
   .from {
     margin: 0;
-    font-size: 11.5px;
-    color: var(--yap-muted-70);
+    font-size: 12px;
+    color: var(--yap-muted);
   }
   .actions {
     display: flex;
@@ -746,17 +805,15 @@
     flex-direction: column;
     gap: 10px;
   }
-  .hint {
-    font-size: 11.5px;
-    color: var(--yap-muted-70);
-  }
+
+  /* ---- a proposal, as a diff ---- */
   .diff {
     list-style: none;
     margin: 0;
     padding: 6px 0;
     border: 1px solid var(--yap-border-subtle);
     border-radius: var(--yap-r);
-    background: var(--yap-s1);
+    background: var(--yap-s2);
   }
   .change {
     display: flex;
@@ -767,7 +824,7 @@
     line-height: 1.5;
   }
   .change input {
-    accent-color: var(--yap-primary);
+    accent-color: var(--yap-ink);
     margin: 0;
     align-self: center;
   }
@@ -778,13 +835,13 @@
     color: var(--yap-muted);
   }
   .change.added .mark {
-    color: var(--yap-success);
+    color: var(--yap-success-text);
   }
   .change.removed .mark {
     color: var(--yap-danger);
   }
   .change.updated .mark {
-    color: var(--yap-primary);
+    color: var(--yap-link);
   }
   .what {
     display: flex;
@@ -798,7 +855,7 @@
     font-weight: 650;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--yap-muted-70);
+    color: var(--yap-muted);
   }
   ins,
   del {
@@ -820,18 +877,15 @@
     color: var(--yap-danger);
     font-size: 12px;
   }
-  .none {
-    margin: 0;
-    font-size: 12.5px;
-    color: var(--yap-fg-62);
-  }
+
+  /* ---- importing ---- */
   .step {
     margin: 0;
     display: flex;
     align-items: center;
     gap: 8px;
     font-size: 12.5px;
-    color: var(--yap-fg-80);
+    color: var(--yap-fg);
   }
   .step span {
     width: 18px;
@@ -851,7 +905,7 @@
     padding: 10px 12px;
     border: 1px dashed var(--yap-border);
     border-radius: var(--yap-r);
-    background: var(--yap-s1);
+    background: var(--yap-s2);
   }
   .prompt p {
     margin: 0;
@@ -859,11 +913,5 @@
     font-size: 12px;
     line-height: 1.55;
     color: var(--yap-fg-80);
-  }
-  .privacy {
-    margin: 4px 2px 0;
-    font-size: 11.5px;
-    line-height: 1.55;
-    color: var(--yap-muted-70);
   }
 </style>

@@ -1,24 +1,59 @@
 <script>
-  // A setting row inside a Group. If `children` (the control) is provided it
-  // renders on the right of the label; otherwise the whole row is the slot
-  // (e.g. a Toggle/Slider that draws its own label). The `hint` shows as a ⓘ
-  // tooltip next to the label rather than always-on text underneath.
+  // A setting row inside a Group: its label and one grey line on the left,
+  // the control right-aligned in one column. Without `label` the whole row
+  // is the slot (a Toggle or Slider that draws its own label).
+  //
+  // When the control is wider than ~40% of the row (a long segmented
+  // control, a select with a button, a narrow window), it goes on its own
+  // line under the label (OpenWhispr's isCompact, per row): measured, so it
+  // follows the window and the control's own width. `stack` forces it.
+  //
+  //   desc:    a string, or a snippet (for a line that's more than text).
+  //   setting: the row's search/deep-link anchor ([data-setting]).
+  //   hint:    an ⓘ tooltip, only where it changes a decision.
+  //   badge:   a small chip after the label ("Beta").
   import Tooltip from './Tooltip.svelte';
-  // `desc` renders as a muted line under the label (nicer than a tooltip for
-  // short explanations); `hint` keeps the ⓘ tooltip for longer help text.
-  let { label = '', hint = '', desc = '', children } = $props();
+  let { label = '', hint = '', desc = '', badge = '', setting = undefined, stack = false, children } = $props();
+
+  let rowEl = $state(null);
+  let ctlEl = $state(null);
+  let narrow = $state(false);
+
+  $effect(() => {
+    if (!label || stack || !rowEl || !ctlEl || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const row = rowEl?.clientWidth ?? 0;
+        const ctl = ctlEl?.scrollWidth ?? 0;
+        narrow = row > 0 && ctl > row * 0.42;
+      });
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(rowEl);
+    ro.observe(ctlEl);
+    measure();
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
+  });
 </script>
 
-<div class="row" class:bare={!label}>
+<div class="row" class:bare={!label} class:stacked={!!label && (stack || narrow)} data-setting={setting} bind:this={rowEl}>
   {#if label}
-    <span class="lhs">
-      <span class="ldesc">
+    <div class="lhs">
+      <div class="ldesc">
         <span class="label">{label}</span>
+        {#if badge}<span class="badge">{badge}</span>{/if}
         {#if hint}<Tooltip text={hint} />{/if}
-      </span>
-      {#if desc}<span class="desc">{desc}</span>{/if}
-    </span>
-    <span class="control">{@render children?.()}</span>
+      </div>
+      {#if desc}<div class="desc">{#if typeof desc === 'function'}{@render desc()}{:else}{desc}{/if}</div>{/if}
+    </div>
+    <div class="control">
+      <div class="ctl-in" bind:this={ctlEl}>{@render children?.()}</div>
+    </div>
   {:else}
     {@render children?.()}
   {/if}
@@ -26,14 +61,24 @@
 
 <style>
   .row {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 12px 16px;
+    column-gap: 28px;
+    row-gap: 10px;
+    min-height: 54px;
+    padding: 12px 0;
+    box-sizing: border-box;
+    scroll-margin-top: 16px;
   }
   .row.bare {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: stretch;
+  }
+  .row.stacked {
+    grid-template-columns: minmax(0, 1fr);
   }
   .lhs {
     display: flex;
@@ -44,20 +89,43 @@
   .ldesc {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     min-width: 0;
   }
   .label {
     color: var(--yap-fg);
-    font-size: 13px;
-    font-weight: 650;
+    font-size: 13.5px;
+    font-weight: 560;
+    line-height: 1.4;
+  }
+  .badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--yap-link);
+    background: var(--yap-primary-wash);
+    padding: 1px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
   }
   .desc {
-    color: var(--yap-muted-70);
-    font-size: 11.5px;
-    line-height: 1.5;
+    color: var(--yap-muted);
+    font-size: 12.5px;
+    line-height: 1.45;
   }
   .control {
-    flex: 0 0 auto;
+    display: flex;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+  .stacked .control {
+    justify-content: flex-start;
+  }
+  .ctl-in {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
   }
 </style>

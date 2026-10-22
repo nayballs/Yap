@@ -177,17 +177,17 @@ test('three "Not now"s in a row: Yap offers once to stop asking about calls', as
   }
   const offer = toast(main, 'Stop asking about calls?');
   await expect(offer).toBeVisible();
-  await expect(offer).toContainText('Settings → General → Meetings');
+  await expect(offer).toContainText('Settings → Meetings');
   await shot(main, '05-stop-asking-about-calls');
   await offer.getByRole('button', { name: 'Stop asking' }).click();
   await expectStore(yap, 'config.json', (c) => c.meetingDetection === false);
   expect((await yap.invoke('meeting_detect_status')).enabled).toBe(false);
   // Settings' copy follows (its auto-save won't switch it back on).
-  const dialog = await openSettings(main, 'General');
+  const dialog = await openSettings(main, 'Meetings');
   await expect(
-    dialog.getByRole('group', { name: 'Meetings' }).getByRole('button', { name: 'Detect calls and offer to take notes' })
+    dialog.getByRole('group', { name: 'Call detection' }).getByRole('button', { name: 'Detect calls and offer to take notes' })
   ).toHaveAttribute('aria-pressed', 'false');
-  await dialog.getByRole('group', { name: 'Meetings' }).getByRole('button', { name: 'Detect calls and offer to take notes' }).click();
+  await dialog.getByRole('group', { name: 'Call detection' }).getByRole('button', { name: 'Detect calls and offer to take notes' }).click();
   await expectStore(yap, 'config.json', (c) => c.meetingDetection === true);
   await closeSettings(main);
 });

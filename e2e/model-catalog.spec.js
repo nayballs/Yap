@@ -280,7 +280,7 @@ test('a key saved for Gemini checks its list at once, the key in a header, never
 
 test("a self-hosted server's models are the Model field's suggestions", async ({ yap, main, fakeLlm, shot }) => {
   const dialog = await languageModels(main, 'Dictation Cleanup');
-  await dialog.locator('.mode').filter({ hasText: 'Self-Hosted' }).click();
+  await dialog.locator('.mode').filter({ hasText: 'Self-hosted' }).click();
   const baseUrl = dialog.getByPlaceholder('http://localhost:11434/v1');
   await baseUrl.fill(fakeLlm.base);
   const line = dialog.getByTestId('server-models');
@@ -297,7 +297,7 @@ test("a self-hosted server's models are the Model field's suggestions", async ({
   await expect(fakeLlm.modelRequests.some((r) => r.provider === 'server' && r.path === '/v1/models')).toBe(true);
 
   // Back to the cloud for the next test.
-  await dialog.locator('.mode').filter({ hasText: 'Cloud Providers' }).click();
+  await dialog.locator('.mode').filter({ hasText: 'Cloud providers' }).click();
   await expectStore(yap, 'config.json', (c) => c.ppProvider === 'groq');
   await closeSettings(main);
 });

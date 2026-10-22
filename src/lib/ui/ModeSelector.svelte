@@ -45,7 +45,7 @@
     display: flex;
     align-items: center;
     gap: 13px;
-    padding: 13px 16px;
+    padding: 12px 10px;
     border: 0;
     background: transparent;
     width: 100%;
@@ -55,10 +55,14 @@
     transition: background var(--yap-dur) ease;
   }
   .mode + .mode {
-    border-top: 1px solid var(--yap-border-subtle);
+    border-top: 1px solid var(--yap-rule);
   }
   .mode:hover {
     background: var(--yap-s3);
+  }
+  .mode:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--yap-focus-ring);
   }
   .chip {
     width: 34px;
@@ -90,20 +94,20 @@
     gap: 8px;
   }
   .m-name {
-    font-size: 12.5px;
-    font-weight: 500;
+    font-size: 13.5px;
+    font-weight: 560;
     color: var(--yap-fg);
   }
   .m-desc {
-    font-size: 11.5px;
-    color: var(--yap-muted-70);
-    line-height: 1.5;
+    font-size: 12.5px;
+    color: var(--yap-muted);
+    line-height: 1.45;
   }
   .tag {
     font-size: 10.5px;
     font-weight: 600;
-    color: var(--yap-primary);
-    background: var(--yap-primary-tint);
+    color: var(--yap-fg-80);
+    background: var(--yap-raised);
     padding: 1px 7px;
     border-radius: var(--yap-r-sm);
     letter-spacing: 0.02em;
@@ -113,17 +117,18 @@
     height: 17px;
     flex: 0 0 17px;
     border-radius: var(--yap-r-full);
-    border: 2px solid var(--yap-border-hover);
+    border: 2px solid var(--yap-switch-edge);
     position: relative;
     transition: border-color var(--yap-dur) ease, background var(--yap-dur) ease;
   }
   .mode.sel .chip {
-    background: var(--yap-primary-tint);
-    color: var(--yap-primary);
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+    box-shadow: inset 0 0 0 1px var(--yap-border);
   }
   .mode.sel .radio {
-    border-color: var(--yap-primary);
-    background: var(--yap-primary);
+    border-color: var(--yap-ink);
+    background: var(--yap-ink);
   }
   .mode.sel .radio::after {
     content: '';

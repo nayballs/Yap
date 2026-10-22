@@ -46,7 +46,7 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   (`never`: saves the override, withdraws the prompt everywhere, emits
   `yap-meeting-detect-choice {app, asks, confirm}` so Settings adopts it and,
   window on screen, a "Won't ask about Teams calls" toast links to Settings →
-  General → Meetings); the end prompt follows the style. Prompts wait for a
+  Meetings → Ask about calls in); the end prompt follows the style. Prompts wait for a
   dictation to finish (+2.5 s); "Not now" snoozes that app for 5 min
   (OpenWhispr's cooldown). Opt-in **"Start notes automatically after 10
   seconds"** (`meeting_auto_start`, Wispr's countdown; off by default because
@@ -204,5 +204,6 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   `on_page_load` (lib.rs: a window created mid-recording; `sync_window`).
   Off + a meeting starting → the screen-share tip once per note ("Your
   meeting notes show up in screen shares and screenshots" + **Update
-  settings** → `general#screen-sharing`). Debug-only `capture_affinity` reads
+  settings** → `meetings#screen-sharing`; a notification still carrying the
+  old `general#screen-sharing` lands there too, settings/nav.js). Debug-only `capture_affinity` reads
   each window's affinity back (`GetWindowDisplayAffinity`) for the e2e suite.

@@ -43,32 +43,39 @@ test('every sidebar view renders', async ({ main, shot }) => {
   }
 });
 
+// The nav's pages, in its order (src/lib/settings/nav.js).
 const SECTIONS = [
   'General',
+  'Dictation',
+  'Shortcuts',
+  'Meetings',
   'Commands',
   'Voice Assistant',
+  'Memory',
   'Speech-to-Text',
   'Language Models',
-  'History',
   'Connectors',
-  'MCP',
-  'Advanced',
+  'AI apps (MCP)',
+  'Privacy & data',
   'About',
 ];
 
 test('every Settings section renders', async ({ main, shot }) => {
+  const nav = settingsDialog(main).getByRole('navigation', { name: 'Settings sections' });
   for (const [i, section] of SECTIONS.entries()) {
     const dialog = await openSettings(main, section);
     await expect(dialog.getByRole('heading', { level: 1, name: section })).toBeVisible();
     const slug = section.toLowerCase().replace(/[^a-z]+/g, '-');
     await shot(main, `03-settings-${String(i + 1).padStart(2, '0')}-${slug}`);
   }
+  // The groups, by scope, sentence case (2026-10-22 review).
+  await expect(nav.locator('.navcap')).toHaveText(['Assistant', 'AI models', 'Connections', 'This PC']);
   await closeSettings(main);
 });
 
 test('a settings change is saved and survives a reload', async ({ yap, main, shot }) => {
   const toggle = (dialog) => dialog.getByRole('button', { name: 'Append trailing space' });
-  let dialog = await openSettings(main, 'Advanced');
+  let dialog = await openSettings(main, 'Dictation');
   await expect(toggle(dialog)).toHaveAttribute('aria-pressed', 'false');
   await toggle(dialog).click();
   await expect(toggle(dialog)).toHaveAttribute('aria-pressed', 'true');
@@ -76,7 +83,7 @@ test('a settings change is saved and survives a reload', async ({ yap, main, sho
 
   // A fresh page load reads the setting back from disk.
   await main.reload({ waitUntil: 'load' });
-  dialog = await openSettings(main, 'Advanced');
+  dialog = await openSettings(main, 'Dictation');
   await expect(toggle(dialog)).toHaveAttribute('aria-pressed', 'true');
   await shot(main, '04-settings-saved');
 
@@ -155,7 +162,7 @@ test('dictionary: a snippet is added, kept, edited and removed', async ({ yap, m
 
   // Settings auto-saves its own copy of the config (with the dictionary):
   // that must keep the snippet a snippet.
-  const dialog = await openSettings(main, 'Advanced');
+  const dialog = await openSettings(main, 'Dictation');
   const space = dialog.getByRole('button', { name: 'Append trailing space' });
   const before = await space.getAttribute('aria-pressed');
   await space.click();
@@ -178,16 +185,16 @@ test('dictionary: a snippet is added, kept, edited and removed', async ({ yap, m
 
 test('settings: "press enter" to send is on by default and can be switched off', async ({ yap, main, shot }) => {
   const toggle = (dialog) => dialog.getByRole('button', { name: /^Say “press enter” to send/ });
-  const dialog = await openSettings(main, 'Advanced');
+  const dialog = await openSettings(main, 'Dictation');
   await expect(toggle(dialog)).toHaveAttribute('aria-pressed', 'true');
-  // It presses the auto-submit key, so that choice shows with it on.
-  await expect(dialog.getByText('Auto-submit key')).toBeVisible();
+  // It presses the send key, so that choice shows with it on.
+  await expect(dialog.getByRole('combobox', { name: 'Send key' })).toBeVisible();
   await shot(main, '04b-settings-press-enter');
 
   await toggle(dialog).click();
   await expect(toggle(dialog)).toHaveAttribute('aria-pressed', 'false');
   await expectStore(yap, 'config.json', (c) => c.voiceEnter === false);
-  if (!yap.readConfig().autoSubmit) await expect(dialog.getByText('Auto-submit key')).toBeHidden();
+  if (!yap.readConfig().autoSubmit) await expect(dialog.getByRole('combobox', { name: 'Send key' })).toBeHidden();
 
   await toggle(dialog).click();
   await expectStore(yap, 'config.json', (c) => c.voiceEnter === true);

@@ -33,7 +33,7 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   transcript lines + page), `get_meeting` (AI summary/action plan, typed notes,
   digests when there's no summary, transcript in ~6k-token pages via
   `transcript_page`), `search_notes`, `get_note`, `list_folders`, and `create_note`
-  only when `config.mcp_allow_writes` (Settings → MCP; source `"mcp"`). Markdown
+  only when `config.mcp_allow_writes` (Settings → AI apps (MCP); source `"mcp"`). Markdown
   for the model, local-time dates (chrono). Transcript lines carry the
   speaker map's names (`speakers::display_line`: "You", "Them", "Priya",
   "Priya?" for a guess, "Speaker 2"), and the instructions/page explain the
@@ -68,7 +68,7 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   a **Calendar** card (`CalendarLinkCard.svelte`: Connect → the "Connect
   your calendar" dialog, Manage → Settings → Connectors),
   an **AI apps (MCP)** card (`McpLinkCard.svelte`, Wispr's "Go to MCP" row:
-  opens Settings → MCP via ControlPanel's `openSettings`), the Local API card
+  opens Settings → AI apps (MCP) via ControlPanel's `openSettings`), the Local API card
   (enable toggle + live status/port via `bridge_status`, discovery-file path +
   curl example with copy; the toggle tells Settings' copy via
   `yap-config-patched` so its auto-save can't switch it back), a

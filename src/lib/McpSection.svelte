@@ -18,7 +18,8 @@
 
   // Settings' own config copy, which Settings auto-saves: the "save notes"
   // switch and "Turn on the Local API" edit it (saving starts the API).
-  let { cfg = $bindable() } = $props();
+  // goto: opens another Settings page (Privacy & data).
+  let { cfg = $bindable(), goto = null } = $props();
 
   // Wispr's four cards, in its order; every other app goes under "All other apps".
   const FEATURED = ['claude', 'chatgpt', 'gemini', 'cursor'];
@@ -154,7 +155,7 @@
   {/if}
 {/snippet}
 
-<div class="mcp" bind:this={root}>
+<div class="mcp" bind:this={root} data-setting="mcp-apps">
 {#if bridge.known && !bridge.running}
   <div class="warn" role="note">
     <span>Your AI apps reach Yap through its Local API, which is off.</span>
@@ -190,8 +191,8 @@
     {/each}
   </ul>
 
-  <section class="other" aria-labelledby="mcp-other-apps">
-    <h2 id="mcp-other-apps">All other apps:</h2>
+  <section class="other" aria-labelledby="mcp-other-apps" data-setting="mcp-other">
+    <h2 id="mcp-other-apps">All other apps</h2>
     <ul class="rows" aria-label="Other AI apps">
       {#each others as c (c.id)}
         <li class="row" aria-label={c.name}>
@@ -229,18 +230,18 @@
     {/if}
   </section>
 
-  <div class="writes">
+  <div class="writes" data-setting="mcp-writes">
     <Toggle
       label="Let AI apps save notes to Yap"
-      desc="Adds a tool for saving notes (“save this summary to Yap”). Off: they can only read. Restart the AI app after changing this."
+      desc="“Save this summary to Yap”. Off, they can only read. Restart the AI app after changing it"
       bind:checked={cfg.mcpAllowWrites}
     />
   </div>
 
   <p class="privacy">
-    Your AI apps read your notes through Yap on this PC, with no Yap server in between. What an app
-    reads, it sends to its own AI service (Anthropic, OpenAI, Google…) like anything else you ask
-    it.
+    They read your notes through Yap on this PC, with no Yap server in between, and send what they
+    read to their own AI service, like anything else you ask them.
+    {#if goto}<button type="button" class="set-link" onclick={() => goto('privacy#leaves')}>Privacy & data</button>{/if}
   </p>
 {/if}
 </div>
@@ -268,7 +269,7 @@
   }
   .loading {
     font-size: 12.5px;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
   }
 
   /* Wispr's MCP cards: light, rounded, a white button on the right. */
@@ -287,8 +288,9 @@
     gap: 16px;
     padding: 18px 20px;
     border-radius: var(--yap-r-lg);
-    background: var(--yap-raised-soft);
-    border: 1px solid var(--yap-border-subtle);
+    background: var(--yap-s2);
+    border: 1px solid var(--yap-border);
+    box-shadow: var(--yap-shadow-sm);
   }
   .who {
     display: flex;
@@ -320,12 +322,12 @@
   }
   .note,
   .detail {
-    font-size: 11.5px;
-    color: var(--yap-muted-70);
+    font-size: 12px;
+    color: var(--yap-muted);
   }
   .problem {
-    font-size: 11.5px;
-    color: var(--yap-warning);
+    font-size: 12px;
+    color: var(--yap-danger);
     overflow-wrap: anywhere;
     line-height: 1.45;
   }
@@ -337,15 +339,16 @@
     white-space: nowrap;
   }
   .add {
-    height: 34px;
-    padding: 0 16px;
+    height: 30px;
+    padding: 0 12px;
     font: inherit;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--yap-fg);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--yap-fg-80);
     background: var(--yap-s2);
     border: 1px solid var(--yap-border);
     border-radius: var(--yap-r);
+    box-shadow: var(--yap-shadow-sm);
     cursor: pointer;
     transition:
       background var(--yap-dur) ease,
@@ -353,19 +356,28 @@
   }
   .add:hover:not(:disabled) {
     border-color: var(--yap-border-hover);
-    background: var(--yap-s1);
+    background: var(--yap-s3);
+    color: var(--yap-fg);
+  }
+  .add:focus-visible,
+  .remove:focus-visible,
+  .mini:focus-visible,
+  .ink:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
   }
   .added {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
-    color: var(--yap-success);
+    color: var(--yap-success-text);
   }
   .remove {
     background: none;
     border: none;
+    border-radius: 3px;
     padding: 2px 0;
     font: inherit;
-    font-size: 12px;
+    font-size: 12.5px;
     color: var(--yap-muted);
     text-decoration: underline;
     text-underline-offset: 2px;
@@ -375,8 +387,8 @@
     color: var(--yap-danger);
   }
   .muted {
-    font-size: 12px;
-    color: var(--yap-muted-55);
+    font-size: 12.5px;
+    color: var(--yap-muted);
   }
   .add:disabled,
   .remove:disabled,
@@ -403,12 +415,12 @@
 
   /* All other apps */
   .other {
-    margin-top: 26px;
+    margin-top: 30px;
   }
   .other h2 {
     margin: 0 0 10px;
-    font-size: 13.5px;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 640;
     color: var(--yap-fg);
   }
   .rows {
@@ -439,8 +451,8 @@
   }
   .hint {
     margin: 14px 0 0;
-    font-size: 12px;
-    color: var(--yap-muted-70);
+    font-size: 12.5px;
+    color: var(--yap-muted);
     line-height: 1.5;
   }
   .kv {
@@ -454,10 +466,9 @@
   }
   .k {
     flex: 0 0 62px;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    color: var(--yap-muted-55);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--yap-muted);
     padding-top: 2px;
   }
   .v,
@@ -486,13 +497,14 @@
   }
   .mini {
     flex: 0 0 auto;
-    background: none;
+    background: var(--yap-s2);
     border: 1px solid var(--yap-border);
-    color: var(--yap-muted);
-    border-radius: 6px;
+    color: var(--yap-fg-80);
+    border-radius: var(--yap-r);
     padding: 4px 10px;
     font: inherit;
-    font-size: 11px;
+    font-size: 12px;
+    font-weight: 600;
     cursor: pointer;
   }
   .mini:hover {
@@ -501,21 +513,22 @@
   }
   .dev {
     margin: 10px 0 0;
-    font-size: 11.5px;
-    color: var(--yap-warning);
+    font-size: 12px;
+    color: var(--yap-muted);
   }
 
+  /* A setting, not an object: a flat row like every other page's. */
   .writes {
-    margin-top: 26px;
-    padding: 14px 16px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-lg);
-    background: var(--yap-s2);
+    margin-top: 30px;
+    padding: 12px 0;
+    border-top: 1px solid var(--yap-rule);
+    border-bottom: 1px solid var(--yap-rule);
+    scroll-margin-top: 16px;
   }
   .privacy {
-    margin: 14px 2px 0;
-    font-size: 11.5px;
-    color: var(--yap-muted-70);
+    margin: 14px 0 0;
+    font-size: 12.5px;
+    color: var(--yap-muted);
     line-height: 1.55;
   }
 </style>

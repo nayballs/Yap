@@ -53,15 +53,18 @@
     padding: 0;
     background: none;
     border: none;
-    color: var(--yap-fg-45);
+    color: var(--yap-fg-62);
     cursor: help;
     border-radius: 50%;
     transition: color var(--yap-dur) ease;
   }
   .tip:hover,
   .tip:focus-visible {
-    color: var(--yap-primary);
+    color: var(--yap-fg);
     outline: none;
+  }
+  .tip:focus-visible {
+    box-shadow: var(--yap-focus);
   }
   .bubble {
     position: fixed;
@@ -69,14 +72,14 @@
     z-index: 9999;
     max-width: 240px;
     padding: 8px 10px;
-    background: var(--yap-s3);
-    border: 1px solid var(--yap-border);
-    border-radius: var(--yap-r-lg);
+    background: var(--yap-ink);
+    border: none;
+    border-radius: var(--yap-r);
     box-shadow: var(--yap-shadow-menu);
-    color: var(--yap-fg);
+    color: var(--yap-ink-fg);
     font-size: 12px;
     line-height: 1.45;
-    text-align: center;
+    text-align: left;
     white-space: normal;
     pointer-events: none;
   }

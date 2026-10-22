@@ -170,7 +170,7 @@
     <div class="keyhead">
       <span class="klabel">ElevenLabs API key</span>
       <a class="keylink" href={keysPage} onclick={createExternalLinkHandler(keysPage)} target="_blank" rel="noreferrer">
-        Get your API key →
+        Get your API key
       </a>
     </div>
     {#if masked && !editing}
@@ -296,7 +296,7 @@
   }
   .keylink {
     font-size: 11.5px;
-    color: var(--yap-primary);
+    color: var(--yap-link);
     text-decoration: none;
     white-space: nowrap;
   }
@@ -335,7 +335,7 @@
     padding: 2px 6px;
     border: none;
     background: none;
-    color: var(--yap-primary);
+    color: var(--yap-link);
     font: inherit;
     font-size: 11.5px;
     font-weight: 600;
@@ -385,7 +385,7 @@
     border-top: none;
   }
   .vrow.sel {
-    background: var(--yap-primary-wash);
+    background: var(--yap-raised-soft);
   }
   .vpick {
     display: flex;
@@ -403,8 +403,8 @@
   }
   .vpick:focus-visible,
   .vplay:focus-visible {
-    outline: 2px solid var(--yap-primary);
-    outline-offset: -2px;
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--yap-focus-ring);
   }
   .dot {
     flex: 0 0 auto;
@@ -415,7 +415,7 @@
     transform: translateY(-1px);
   }
   .vrow.sel .dot {
-    background: var(--yap-primary);
+    background: var(--yap-ink);
   }
   .vname {
     font-size: 12.5px;
@@ -447,7 +447,7 @@
     color: var(--yap-fg);
   }
   .vplay.on {
-    color: var(--yap-primary);
+    color: var(--yap-link);
     background: var(--yap-primary-wash);
   }
   .vplay svg {
@@ -472,7 +472,7 @@
   .ubar span {
     display: block;
     height: 100%;
-    background: var(--yap-primary);
+    background: var(--yap-ink);
   }
   .fallback {
     margin: 0;

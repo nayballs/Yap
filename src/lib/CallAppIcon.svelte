@@ -1,5 +1,5 @@
 <script>
-  // A call app's icon, for Settings → General → Meetings ("Ask about calls
+  // A call app's icon, for Settings → Meetings ("Ask about calls
   // in") and the Yap bar's call card: the app's own icon as installed on
   // this PC (app_icons.rs, through callAppIcons.svelte.js), else its bundled
   // mark (bar/callApps.js: Simple Icons, CC0), else a letter badge in its

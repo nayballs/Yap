@@ -229,7 +229,7 @@ test('Settings → Connectors: what to connect, a link that was reset, and one t
   }
   await expect(dialog.getByText('Reminders for Google meetings before they begin')).toBeVisible();
   await expect(dialog.getByText('Give your AI access to your meeting transcripts and notes')).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Go to MCP' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /^AI apps \(MCP\) Give your AI/ })).toBeVisible();
   await shot(main, '01-connectors');
 
   // Outlook: no Microsoft app, so a guided ICS link.
@@ -327,8 +327,8 @@ test('the reminder card: Join & take notes records into a note with the meeting\
   shot,
 }) => {
   await serve(yap, feed, baseFeed()); // "Design review" starts in 80 s
-  const dialog = await openSettings(main, 'General');
-  const notify = dialog.getByRole('combobox', { name: 'Notify before scheduled meetings start' });
+  const dialog = await openSettings(main, 'Meetings');
+  const notify = dialog.getByRole('group', { name: 'Calendar' }).getByRole('combobox', { name: 'Notify before scheduled meetings start' });
   await notify.scrollIntoViewIfNeeded();
   await expect(notify).toHaveValue('never');
   await notify.selectOption('2min');

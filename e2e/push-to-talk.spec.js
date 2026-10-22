@@ -45,8 +45,8 @@ test.beforeEach(async ({ yap }) => {
   await yap.invoke('e2e_dictation_mic', { silent: false });
 });
 
-test('Settings → General says how push-to-talk works, double-tap included', async ({ main, shot }) => {
-  await openSettings(main, 'General');
+test('Settings → Dictation says how push-to-talk works, double-tap included', async ({ main, shot }) => {
+  await openSettings(main, 'Dictation');
   await expect(
     settingsDialog(main).getByText(
       'Hold F24 while you talk. Double-tap it to keep recording hands-free, then press it once more to stop.'

@@ -211,13 +211,12 @@ test('"Turn off the bar" saves it off; Settings turns it back on', async ({ yap,
   await closeSettings(main);
 });
 
-test('Settings → General → Yap bar', async ({ yap, main, shot }) => {
+test('Settings → General → Yap bar, and Dictation → While you dictate', async ({ yap, main, shot }) => {
   await openSettings(main, 'General');
   const group = barGroup(main);
   await group.scrollIntoViewIfNeeded();
   await expect(group.getByRole('button', { name: 'Show the Yap bar', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(group.getByRole('button', { name: 'Hide in fullscreen apps' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(group.getByRole('button', { name: 'Live transcription preview' })).toBeVisible();
   await expect(group).toContainText('Position');
   await shot(main, '07-settings-yap-bar');
 
@@ -238,27 +237,32 @@ test('Settings → General → Yap bar', async ({ yap, main, shot }) => {
   await expectStore(yap, 'config.json', (c) => c.barTheme === 'light');
   await expect.poll(theme).toBe('light');
 
-  // The capsule's ✕ / ✓: Off by default; a choice is saved and reaches the
-  // bar at once, its line saying what it means.
-  const buttons = group.getByRole('tablist', { name: 'Cancel and finish buttons while dictating' });
+  // What shows while you dictate is on the Dictation page now: the live
+  // preview, and the capsule's ✕ / ✓ — Off by default; a choice is saved and
+  // reaches the bar at once, its line saying what it means.
+  await openSettings(main, 'Dictation');
+  const dictating = settingsDialog(main).getByRole('group', { name: 'While you dictate' });
+  await expect(dictating.getByRole('button', { name: 'Live preview on the Yap bar' })).toBeVisible();
+  const buttons = dictating.getByRole('combobox', { name: 'Cancel and finish buttons' });
   const barButtons = () => yap.invoke('bar_status').then((s) => s.dictationButtons);
   await buttons.scrollIntoViewIfNeeded();
-  await expect(buttons.getByRole('tab', { name: 'Off' })).toHaveAttribute('aria-selected', 'true');
+  await expect(buttons).toHaveValue('off');
   expect(await barButtons()).toBe('off');
-  await expect(group).toContainText('Cancel from the tray icon instead; Undo still shows after a cancel');
-  await buttons.getByRole('tab', { name: 'When you point at it' }).click();
+  await expect(dictating).toContainText('Cancel from the tray icon instead. Undo still shows after a cancel');
+  await buttons.selectOption('hover');
   await expectStore(yap, 'config.json', (c) => c.barDictationButtons === 'hover');
   await expect.poll(barButtons).toBe('hover');
-  await expect(group).toContainText('✕ to cancel and ✓ to paste appear when you point at the bar');
+  await expect(dictating).toContainText('✕ to cancel and ✓ to paste appear when you point at the bar');
   await shot(main, '07-settings-yap-bar-buttons');
-  await buttons.getByRole('tab', { name: 'Always' }).click();
+  await buttons.selectOption('always');
   await expectStore(yap, 'config.json', (c) => c.barDictationButtons === 'always');
   await expect.poll(barButtons).toBe('always');
-  await buttons.getByRole('tab', { name: 'Off' }).click();
+  await buttons.selectOption('off');
   await expectStore(yap, 'config.json', (c) => c.barDictationButtons === 'off');
   await expect.poll(barButtons).toBe('off');
 
-  const meetings = settingsDialog(main).getByRole('group', { name: 'Meetings' });
+  await openSettings(main, 'Meetings');
+  const meetings = settingsDialog(main).getByRole('group', { name: 'Call detection' });
   await meetings.scrollIntoViewIfNeeded();
   await expect(
     meetings.getByRole('button', { name: 'Start notes automatically after 10 seconds' })
@@ -481,8 +485,8 @@ test('◉ starts meeting notes: the recording pill opens the notepad and ends th
 
 test('the opt-in countdown starts notes by itself; Esc cancels it', async ({ yap, main, shot }) => {
   const bar = yap.overlay;
-  await openSettings(main, 'General');
-  const meetings = settingsDialog(main).getByRole('group', { name: 'Meetings' });
+  await openSettings(main, 'Meetings');
+  const meetings = settingsDialog(main).getByRole('group', { name: 'Call detection' });
   await meetings.getByRole('button', { name: 'Start notes automatically after 10 seconds' }).click();
   await expectStore(yap, 'config.json', (c) => c.meetingAutoStart === true);
   await closeSettings(main);
@@ -522,7 +526,7 @@ test('the opt-in countdown starts notes by itself; Esc cancels it', async ({ yap
   await expect.poll(() => yap.invoke('meeting_state').then((m) => m.recording), { timeout: 20_000 }).toBe(false);
   await yap.invoke('e2e_focus', { focused: true });
 
-  await openSettings(main, 'General');
+  await openSettings(main, 'Meetings');
   await meetings.getByRole('button', { name: 'Start notes automatically after 10 seconds' }).click();
   await expectStore(yap, 'config.json', (c) => c.meetingAutoStart === false);
   await closeSettings(main);

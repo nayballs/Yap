@@ -677,10 +677,10 @@ test('the header: back to Notes, the ⋯ menu, Share, split screen, delete', asy
   await expect.poll(copied).toContain('Them: Looks fine from here.');
   expect(await copied()).not.toContain('**');
 
-  // Audio settings: Settings → General in Yap's main window.
+  // Audio settings: Settings → Dictation's microphone, in Yap's main window.
   await more.click();
   await menu.getByRole('menuitem', { name: 'Audio settings' }).click();
-  await expect(settingsDialog(main).getByRole('group', { name: 'Meetings' })).toBeVisible();
+  await expect(settingsDialog(main).getByRole('group', { name: 'Microphone and sound' })).toBeInViewport();
   await closeSettings(main);
 
   // Share: a local popover; the link half copies the notes in one click.
@@ -775,8 +775,8 @@ test('the consent line: Learn more offers a message for the chat, editable; ⋯ 
   await expect(pop).toHaveCount(0);
   await expectStore(yap, 'config.json', (c) => c.meetingConsentMessage === mine);
   // …Settings' copy of the config takes it (its next save keeps it)…
-  const dialog = await openSettings(main, 'General');
-  const split = dialog.getByRole('group', { name: 'Meetings' }).getByRole('button', { name: 'Split the screen when joining' });
+  const dialog = await openSettings(main, 'Meetings');
+  const split = dialog.getByRole('group', { name: 'Notepad' }).getByRole('button', { name: 'Split the screen when joining' });
   await split.click();
   await expectStore(yap, 'config.json', (c) => c.meetingSplitScreen === true && c.meetingConsentMessage === mine);
   await split.click();
@@ -1121,9 +1121,9 @@ test('the meeting shortcut works with the notepad focused (in-page fallback)', a
   await shot(pad, '31-shortcut-stopped-in-notepad');
 });
 
-test('Settings → General → Meetings: open the notepad, split the screen', async ({ yap, main, shot }) => {
-  const dialog = await openSettings(main, 'General');
-  const meetings = dialog.getByRole('group', { name: 'Meetings' });
+test('Settings → Meetings → Notepad: open the notepad, split the screen', async ({ yap, main, shot }) => {
+  const dialog = await openSettings(main, 'Meetings');
+  const meetings = dialog.getByRole('group', { name: 'Notepad' });
   const open = meetings.getByRole('button', { name: 'Open the notepad when a meeting starts' });
   const split = meetings.getByRole('button', { name: 'Split the screen when joining' });
   await expect(open).toHaveAttribute('aria-pressed', 'true');
@@ -1148,14 +1148,14 @@ test('Settings → General → Meetings: open the notepad, split the screen', as
   expect(await visible(yap, 'notepad')).toBe(false);
   await pauseAll(yap);
 
-  await openSettings(main, 'General');
+  await openSettings(main, 'Meetings');
   await open.click();
   await expectStore(yap, 'config.json', (c) => c.meetingOpenNotepad === true);
 
   // "Show live transcript" off: the Transcript tab stays quiet until the
   // meeting stops (it's still transcribed).
   const live = settingsDialog(main)
-    .getByRole('group', { name: 'Meetings' })
+    .getByRole('group', { name: 'Notepad' })
     .getByRole('button', { name: 'Show live transcript' });
   await expect(live).toHaveAttribute('aria-pressed', 'true');
   await live.click();
@@ -1171,7 +1171,7 @@ test('Settings → General → Meetings: open the notepad, split the screen', as
   await pauseAll(yap);
   await expect(transcript(pad)).toContainText('QUIET-LINE');
 
-  await openSettings(main, 'General');
+  await openSettings(main, 'Meetings');
   await live.click();
   await expectStore(yap, 'config.json', (c) => c.meetingLiveTranscript === true);
   await expect(settingsDialog(main)).toBeVisible();

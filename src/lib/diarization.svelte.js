@@ -1,6 +1,6 @@
 // Speaker diarization's models (diarize.rs): what's installed, a download in
 // progress, and the actions, shared by Settings → Speech-to-Text's "Speakers
-// in meetings" section and the same switch in General → Meetings.
+// in meetings" section and the same switch in Settings → Meetings.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 

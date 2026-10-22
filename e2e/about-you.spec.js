@@ -60,6 +60,8 @@ const test = base.extend({
   ],
 });
 
+// General → Language and region (the Region) and About you (the name and note).
+const regionGroup = (dialog) => dialog.getByRole('group', { name: 'Language and region' });
 const aboutGroup = (dialog) => dialog.getByRole('group', { name: 'About you' });
 
 test('About you: one Region picker — Automatic from Windows, a country picked and put back — and the name and note saved', async ({
@@ -68,18 +70,19 @@ test('About you: one Region picker — Automatic from Windows, a country picked 
   shot,
 }) => {
   const dialog = await openSettings(main, 'General');
-  const group = aboutGroup(dialog);
-  await expect(group).toBeVisible();
+  const regionG = regionGroup(dialog);
+  await expect(regionG).toBeVisible();
   // One picker, Automatic: Windows' country; what follows from it, in a line.
-  const region = group.getByRole('combobox', { name: 'Region' });
+  const region = regionG.getByRole('combobox', { name: 'Region' });
   await expect(region).toHaveValue('');
   await expect(region.locator('option').first()).toHaveText('Automatic: United Kingdom (from Windows)');
   await expect(region.locator('option[value="FR"]')).toHaveText('France');
-  const follows = group.getByTestId('region-follows');
+  const follows = regionG.getByTestId('region-follows');
   await expect(follows).toHaveText(UK_FOLLOWS);
   // No other region pickers, and the spelling switch isn't here any more.
-  await expect(group.getByRole('combobox')).toHaveCount(1);
-  await expect(group.getByRole('button', { name: /spelling/i })).toHaveCount(0);
+  await expect(regionG.getByRole('combobox')).toHaveCount(1);
+  await expect(dialog.getByRole('button', { name: /spelling/i })).toHaveCount(0);
+  const group = aboutGroup(dialog);
   await region.scrollIntoViewIfNeeded();
   await shot(main, '01-about-you');
 
@@ -132,7 +135,7 @@ test("Dictation Cleanup: the one spelling switch, named for the region's variety
   await expect(spelling).toHaveAttribute('aria-pressed', 'true');
   // It works with cleanup: off with it.
   await expect(spelling).toBeDisabled();
-  await dialog.getByRole('button', { name: 'Enable text cleanup', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Clean up dictations with AI', exact: true }).click();
   await expect(spelling).toBeEnabled();
   await expect(spellingGroup).toContainText(
     'British spelling, from your region (United Kingdom): honour, recognise, paralyse, metre, cancelled, catalogue, defence. Only the spelling changes, never your words.'
@@ -147,14 +150,14 @@ test("Dictation Cleanup: the one spelling switch, named for the region's variety
 
   // The region picked in About you: the line follows it.
   await openSettings(main, 'General');
-  await aboutGroup(dialog).getByRole('combobox', { name: 'Region' }).selectOption('US');
+  await regionGroup(dialog).getByRole('combobox', { name: 'Region' }).selectOption('US');
   await openSettings(main, 'Language Models');
   await dialog.getByRole('tab', { name: 'Dictation Cleanup' }).click();
   await expect(spellingGroup).toContainText('American spelling, from your region (United States): honor, recognize');
   // Cleanup off and the region Automatic again, for the next test.
-  await dialog.getByRole('button', { name: 'Enable text cleanup', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Clean up dictations with AI', exact: true }).click();
   await openSettings(main, 'General');
-  await aboutGroup(dialog).getByRole('combobox', { name: 'Region' }).selectOption('');
+  await regionGroup(dialog).getByRole('combobox', { name: 'Region' }).selectOption('');
   await expectStore(yap, 'config.json', (c) => c.regionCountry === '' && c.postProcessEnabled === false);
   await closeSettings(main);
 });

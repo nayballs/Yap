@@ -33,7 +33,7 @@
       return `${spelling} spelling, from your region (${country}): ${status.spellingExamples}. Only the spelling changes, never your words.`;
     }
     if (country) return `Your region (${country}) doesn't set an English spelling: cleanup keeps yours as it is.`;
-    return 'Pick your region in General → About you, and cleanup spells English its way.';
+    return 'Pick your region in General → Language and region, and cleanup spells English its way.';
   });
 </script>
 
@@ -41,6 +41,6 @@
   bind:checked={cfg.regionSpelling}
   label="Write in my region's spelling"
   {desc}
-  hint="Your region is in General → About you. Turn this off if you write another kind of English than your region's."
+  hint="Your region is in General → Language and region. Turn this off if you write another kind of English than your region's."
   {disabled}
 />

@@ -144,7 +144,7 @@ test('Settings: pick ElevenLabs, paste a key, its voices load, ▶ plays a sampl
   await shot(main, '00-elevenlabs-picked-no-key');
 
   // "Get your API key" opens their API-keys page in the browser.
-  await dialog.getByRole('link', { name: 'Get your API key →' }).click();
+  await dialog.getByRole('link', { name: 'Get your API key' }).click();
   await expect.poll(() => yap.invoke('e2e_opened_urls')).toContain('https://elevenlabs.io/app/settings/api-keys');
 
   // A key ElevenLabs won't take says so.

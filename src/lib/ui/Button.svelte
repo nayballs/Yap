@@ -35,6 +35,10 @@
   .btn:active:not(:disabled) {
     transform: scale(0.985);
   }
+  .btn:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
+  }
   .btn:disabled {
     opacity: 0.5;
     cursor: default;
@@ -84,7 +88,7 @@
 
   .ghost {
     background: transparent;
-    color: var(--yap-muted);
+    color: var(--yap-fg-62);
   }
   .ghost:hover:not(:disabled) {
     color: var(--yap-fg);

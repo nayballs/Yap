@@ -44,11 +44,13 @@
   .srow {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 8px 10px;
+    gap: 8px;
+    min-height: 40px;
+    box-sizing: border-box;
+    padding: 7px 12px;
     border: 1px solid var(--yap-border-subtle);
     border-radius: var(--yap-r);
-    background: var(--yap-s1);
+    background: var(--yap-s2);
     font: inherit;
     text-align: left;
     cursor: pointer;
@@ -57,12 +59,17 @@
       border-color var(--yap-dur) ease;
   }
   .srow:hover {
-    background: var(--yap-s2);
+    background: var(--yap-s3);
     border-color: var(--yap-border-hover);
   }
+  .srow:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
+  }
+  /* The picked one: the same quiet "Active" as the speech models'. */
   .srow.sel {
-    border-color: var(--yap-primary-line);
-    background: var(--yap-primary-wash);
+    border-color: var(--yap-border-hover);
+    background: var(--yap-s2);
     cursor: default;
   }
 
@@ -74,9 +81,8 @@
     background: var(--yap-raised);
   }
   .srow.sel .dot {
-    background: var(--yap-primary);
-    box-shadow: 0 0 6px var(--yap-primary-tint);
-    animation: pulse-glow 2s ease-in-out infinite;
+    background: var(--yap-success);
+    box-shadow: 0 0 4px color-mix(in srgb, var(--yap-success) 50%, transparent);
   }
 
   .sicon {
@@ -92,15 +98,15 @@
   }
 
   .slabel {
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 600;
     letter-spacing: -0.01em;
     color: var(--yap-fg);
     white-space: nowrap;
   }
   .sdesc {
-    font-size: 11px;
-    color: var(--yap-fg-45);
+    font-size: 12px;
+    color: var(--yap-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -122,8 +128,8 @@
     white-space: nowrap;
   }
   .snew {
-    color: var(--yap-primary);
-    background: var(--yap-primary-tint);
+    color: var(--yap-link);
+    background: var(--yap-primary-wash);
   }
   .sgone {
     color: var(--yap-warning);
@@ -132,22 +138,12 @@
   .stag {
     font-size: 10.5px;
     font-weight: 600;
-    color: var(--yap-primary);
-    background: var(--yap-primary-tint);
+    color: var(--yap-success-text);
+    background: color-mix(in srgb, var(--yap-success) 12%, var(--yap-s2));
     padding: 1px 7px;
     border-radius: var(--yap-r-sm);
     letter-spacing: 0.02em;
     white-space: nowrap;
     flex: 0 0 auto;
-  }
-
-  @keyframes pulse-glow {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.55;
-    }
   }
 </style>

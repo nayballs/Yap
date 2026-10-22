@@ -181,7 +181,7 @@ fn log_directives(debug: bool) -> &'static str {
     }
 }
 
-/// Live-switch the log verbosity (the Settings → Advanced → Debug Logging
+/// Live-switch the log verbosity (the Settings → Privacy & data → Debug logging
 /// toggle; persisted as `config.debug_logging` and re-applied on save/startup).
 /// An explicit RUST_LOG env var always wins (it was applied at init and this
 /// is only called from config paths when the value CHANGES).

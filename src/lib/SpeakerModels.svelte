@@ -89,7 +89,9 @@
   {/if}
 
   {#if credited}
-    <p class="credit">
+    <details class="set-more">
+    <summary>Credits</summary>
+    <p class="credit more-body">
       {credited.name} by {credited.vendor},
       <a href={credited.licenseUrl} onclick={link(credited.licenseUrl)}>{credited.license}</a>, on
       <a href="https://github.com/NVIDIA/NeMo-Speech.cpp" onclick={link('https://github.com/NVIDIA/NeMo-Speech.cpp')}>{credited.runtimeName}</a>
@@ -97,6 +99,7 @@
       <a href={credited.sourceUrl} onclick={link(credited.sourceUrl)}>Hugging Face</a> and GitHub, checked against pinned
       checksums; their licences are saved with them.
     </p>
+    </details>
   {/if}
 </div>
 
@@ -129,9 +132,9 @@
   }
   .credit {
     margin: 0;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.55;
-    color: var(--yap-muted-55);
+    color: var(--yap-muted);
   }
   .credit a {
     color: inherit;

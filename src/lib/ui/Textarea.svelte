@@ -25,7 +25,7 @@
   .textarea {
     width: 100%;
     box-sizing: border-box;
-    background: var(--yap-s1);
+    background: var(--yap-s2);
     border: 1px solid var(--yap-border);
     border-radius: var(--yap-r);
     color: var(--yap-fg);
@@ -37,7 +37,9 @@
   }
   .textarea:focus {
     outline: none;
-    border-color: var(--yap-primary);
+  }
+  .textarea:focus-visible {
+    box-shadow: var(--yap-focus);
   }
   .textarea:disabled {
     opacity: 0.5;

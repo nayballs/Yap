@@ -1,6 +1,6 @@
 //! Hide Yap's meeting windows from screen capture and screen sharing.
 //!
-//! While a meeting records, and Settings → General → Meetings → "Hide Yap's
+//! While a meeting records, and Settings → Meetings → "Hide Yap's
 //! meeting windows from screen sharing" is on (the default), the windows that
 //! show the meeting get Windows' `WDA_EXCLUDEFROMCAPTURE` display affinity:
 //! the docked notepad (`notepad`, and `split-preview`, the glass outline its
@@ -23,7 +23,7 @@
 //!
 //! With the setting off, a meeting starting warns once per note, as Wispr's
 //! screen-share tip does: "Your meeting notes show up in screen shares and
-//! screenshots", with **Update settings** (Settings → General → Meetings).
+//! screenshots", with **Update settings** (Settings → Meetings).
 //!
 //! The debug-only `capture_affinity` command reads each window's affinity
 //! back (`GetWindowDisplayAffinity`) for the e2e suite.

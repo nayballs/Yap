@@ -73,13 +73,15 @@
   <span class="spacer"></span>
 
   {#if status === 'active'}
-    <span class="mtag">Active</span>
+    <span class="mtag active">Active</span>
   {:else if status === 'switching'}
     <span class="mpct">Switching…</span>
   {:else if status === 'downloading'}
     <span class="mpct">{percent}%</span>
   {:else if status === 'unavailable'}
     <span class="msoon">{model.note || 'Coming later'}</span>
+  {:else if status === 'available'}
+    <button class="dl" onclick={(e) => { e.stopPropagation(); onclick?.(model); }}>Use</button>
   {:else if status === 'downloadable'}
     <button class="dl" onclick={(e) => { e.stopPropagation(); onclick?.(model); }}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -107,11 +109,13 @@
   .mrow {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 8px 10px;
+    gap: 8px;
+    min-height: 44px;
+    box-sizing: border-box;
+    padding: 6px 8px 6px 12px;
     border: 1px solid var(--yap-border-subtle);
     border-radius: var(--yap-r);
-    background: var(--yap-s1);
+    background: var(--yap-s2);
     transition:
       background var(--yap-dur) ease,
       border-color var(--yap-dur) ease;
@@ -120,12 +124,11 @@
     cursor: pointer;
   }
   .mrow.clickable:hover {
-    background: var(--yap-s2);
+    background: var(--yap-s3);
     border-color: var(--yap-border-hover);
   }
   .mrow.active {
-    border-color: var(--yap-primary-line);
-    background: var(--yap-primary-wash);
+    border-color: var(--yap-border-hover);
   }
 
   .dot {
@@ -136,13 +139,11 @@
     background: var(--yap-raised);
   }
   .mrow.active .dot {
-    background: var(--yap-primary);
-    box-shadow: 0 0 6px var(--yap-primary-tint);
-    animation: pulse-glow 2s ease-in-out infinite;
-  }
-  .mrow.available .dot {
     background: var(--yap-success);
     box-shadow: 0 0 4px color-mix(in srgb, var(--yap-success) 50%, transparent);
+  }
+  .mrow.available .dot {
+    background: var(--yap-switch-edge);
   }
   .mrow.downloading .dot,
   .mrow.switching .dot {
@@ -169,15 +170,15 @@
   }
 
   .mname {
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 600;
     letter-spacing: -0.01em;
     color: var(--yap-fg);
     white-space: nowrap;
   }
   .mmeta {
-    font-size: 11px;
-    color: var(--yap-fg-45);
+    font-size: 12px;
+    color: var(--yap-muted);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
@@ -190,16 +191,20 @@
   .mtag {
     font-size: 10.5px;
     font-weight: 600;
-    color: var(--yap-primary);
-    background: var(--yap-primary-tint);
+    color: var(--yap-link);
+    background: var(--yap-primary-wash);
     padding: 1px 7px;
     border-radius: var(--yap-r-sm);
     letter-spacing: 0.02em;
     white-space: nowrap;
     flex: 0 0 auto;
   }
+  .mtag.active {
+    color: var(--yap-success-text);
+    background: color-mix(in srgb, var(--yap-success) 12%, var(--yap-s2));
+  }
   .mpct {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--yap-muted);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -209,8 +214,8 @@
     opacity: 0.6;
   }
   .msoon {
-    font-size: 11px;
-    color: var(--yap-fg-45);
+    font-size: 12px;
+    color: var(--yap-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -221,29 +226,42 @@
     flex: 1 1 auto;
   }
 
+  /* One Download (and Use) for every model list: speech models, Kokoro,
+     the speaker models, the local language models. Quiet: ink is for the
+     one recommended action on a page. */
   .dl {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    height: 24px;
-    padding: 0 10px;
-    border: none;
-    border-radius: var(--yap-r-sm);
-    background: var(--yap-ink, var(--yap-primary));
-    color: var(--yap-ink-fg, var(--yap-primary-fg));
+    height: 28px;
+    padding: 0 11px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+    color: var(--yap-fg-80);
     font: inherit;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     white-space: nowrap;
     cursor: pointer;
-    transition: background var(--yap-dur) ease;
+    transition:
+      background var(--yap-dur) ease,
+      border-color var(--yap-dur) ease,
+      color var(--yap-dur) ease;
   }
   .dl:hover {
-    background: var(--yap-ink-hover, var(--yap-primary-hover));
+    background: var(--yap-s3);
+    border-color: var(--yap-border-hover);
+    color: var(--yap-fg);
+  }
+  .dl:focus-visible,
+  .trash:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
   }
   .dl svg {
-    width: 11px;
-    height: 11px;
+    width: 12px;
+    height: 12px;
   }
 
   .trash {
@@ -255,7 +273,7 @@
     border: none;
     border-radius: var(--yap-r-sm);
     background: transparent;
-    color: var(--yap-fg-45);
+    color: var(--yap-fg-62);
     opacity: 0;
     cursor: pointer;
     transition:
@@ -272,8 +290,8 @@
     border-color: var(--yap-border-hover);
   }
   .mrow:focus-visible {
-    outline: 1.5px solid var(--yap-primary-line);
-    outline-offset: -1px;
+    outline: none;
+    box-shadow: var(--yap-focus);
   }
   .trash:hover {
     color: var(--yap-danger);

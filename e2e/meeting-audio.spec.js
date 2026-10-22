@@ -262,7 +262,7 @@ test('a side gone quiet while the other talks says so, and the recording carries
   meetingAudio({ seconds: 20, you: [[0, 20]], them: [[16.8, 17.2]] });
   await main.getByRole('button', { name: 'Resume' }).click();
   await expect(warning).toContainText("Yap hasn't heard your mic for 6 seconds.", { timeout: 15_000 });
-  await expect(warning).toContainText('Settings → General');
+  await expect(warning).toContainText('Settings → Dictation');
   await shot(main, '07-quiet-mic-warning');
   await expect(transcriptLog(main).locator('.bubble.them')).toHaveCount(1, { timeout: 20_000 });
   expect(await recording(yap)).toBe(true);

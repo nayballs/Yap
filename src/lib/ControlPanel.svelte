@@ -51,7 +51,7 @@
   let settingsOpen = $state(false);
   // Call detection (meeting_detect.rs via meetingDetect.svelte.js): "call
   // detected — Record notes?" toasts, opening the meeting note in Notes, and
-  // "Won't ask about Teams calls" → Settings → General → Meetings.
+  // "Won't ask about Teams calls" → Settings → Meetings.
   initMeetingDetect({
     showNotes: () => {
       settingsOpen = false;
@@ -64,7 +64,7 @@
   initMeetingSummary();
   // Meeting guard rails (meeting_guard.rs, capture.rs via meetingGuard.js):
   // "Notes stop in 5 minutes · Keep going", the screen-share tip → Settings
-  // → General → Meetings, and the stops Yap makes itself.
+  // → Meetings, and the stops Yap makes itself.
   initMeetingGuard({ openSettings: (section) => openSettings(section) });
   // The calendar (calendar.rs via calendar.svelte.js): the reminder card
   // before a meeting, the "Connect your calendar" nudge and dialog, and the
@@ -377,7 +377,15 @@
   role="presentation"
 >
   <div class="card" role="dialog" aria-modal="true" aria-label="Settings">
-    <Settings embedded onclose={() => (settingsOpen = false)} />
+    <Settings
+      embedded
+      open={settingsOpen}
+      onclose={() => (settingsOpen = false)}
+      onshowview={(v) => {
+        settingsOpen = false;
+        activeView = v;
+      }}
+    />
   </div>
 </div>
 

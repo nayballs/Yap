@@ -136,7 +136,7 @@
     border: none;
     background: none;
     padding: 2px 0;
-    color: var(--yap-primary);
+    color: var(--yap-link);
     font: inherit;
     font-size: 11.5px;
     cursor: pointer;
@@ -168,7 +168,7 @@
     border: none;
     background: none;
     padding: 0;
-    color: var(--yap-primary);
+    color: var(--yap-link);
     font: inherit;
     cursor: pointer;
   }

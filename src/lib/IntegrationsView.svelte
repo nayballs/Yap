@@ -37,6 +37,22 @@
     await refresh();
     loaded = true;
   });
+  // Settings → Privacy & data has the same switch: follow it (Settings saves
+  // it a moment later; the bridge starts or stops with the save).
+  onMount(() => {
+    let timer = 0;
+    const on = (e) => {
+      if (typeof e.detail?.enabled !== 'boolean') return;
+      enabled = e.detail.enabled;
+      clearTimeout(timer);
+      timer = setTimeout(refresh, 1200);
+    };
+    window.addEventListener('yap-bridge-changed', on);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('yap-bridge-changed', on);
+    };
+  });
 
   // Patch-save onto a FRESH config (same pattern as DictionaryView) so this
   // toggle can never clobber settings changed elsewhere.

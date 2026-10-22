@@ -83,9 +83,9 @@ const EVENT_CHECKIN: &str = "yap-meeting-checkin";
 /// Open a note in the main window's Notes view: `{ noteId, stop }` (the
 /// event `meeting_detect.rs` uses for the same).
 const EVENT_OPEN: &str = "yap-meeting-open-note";
-/// Settings → General → Meetings, at "Hide Yap's meeting windows from
+/// Settings → Meetings, at "Hide Yap's meeting windows from
 /// screen sharing" (`yap-settings-goto`: a section, then the card's id).
-const SCREEN_SHARE_SETTINGS: &str = "general#screen-sharing";
+const SCREEN_SHARE_SETTINGS: &str = "meetings#screen-sharing";
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -1718,7 +1718,7 @@ mod tests {
         let n = Notice::screen_share();
         assert_eq!(n.body, "Your meeting notes show up in screen shares and screenshots.");
         // Settings → General, at the switch (Settings.svelte's `settings-screen-sharing`).
-        assert_eq!(n.settings, Some("general#screen-sharing"));
+        assert_eq!(n.settings, Some("meetings#screen-sharing"));
         assert_eq!(Notice::call_ended("Teams call").title, "Teams call ended");
         assert_eq!(Notice::stopped_at_limit(2 * HOUR).title, "Stopped at 2 hours");
         let n = Notice::taking_notes(None, Some("Win + Alt + M"), 3);
@@ -1971,7 +1971,7 @@ mod tests {
         assert!(xml.contains("launch=\"guard:open:7\""));
         crate::win_toast::build("meeting-limit", &xml, false).unwrap();
         let xml = native::notice_xml(&Notice::screen_share(), "");
-        assert!(xml.contains("content=\"Update settings\" arguments=\"guard:settings:general#screen-sharing\""));
+        assert!(xml.contains("content=\"Update settings\" arguments=\"guard:settings:meetings#screen-sharing\""));
         crate::win_toast::build("meeting-notice", &xml, false).unwrap();
         let xml = native::notice_xml(&Notice::taking_notes(None, None, 4), "");
         assert!(xml.contains("content=\"Open note\" arguments=\"guard:open:4\""));

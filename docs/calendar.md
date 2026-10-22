@@ -210,7 +210,7 @@ view), and **Not now** means never.
 
 ### The reminder card
 
-**Settings → General → Meetings → Notify before scheduled meetings start**:
+**Settings → Meetings → Notify before scheduled meetings start**:
 Right before (15 s, the default), 1 minute, 2 minutes, Never
 (`meeting_reminder`: `15s` | `1min` | `2min` | `never`), with a **Calendar**
 row under it that opens Connectors. The card, "Design review · In 1 min ·

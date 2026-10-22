@@ -33,7 +33,7 @@ let shown = null;
 
 /**
  * Follow the guard rails. Idempotent; the main window calls it with
- * `openSettings` (a Settings section, e.g. 'general#meetings').
+ * `openSettings` (a Settings section, e.g. 'meetings').
  */
 export function initMeetingGuard(opts = {}) {
   if (opts.openSettings) openSettings = opts.openSettings;

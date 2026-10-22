@@ -138,7 +138,7 @@ test('the chip names the chat model, switches it, and every answer keeps its own
   await expect(dialog.locator('.srow.sel')).toContainText('GPT-OSS 120B');
   await shot(main, '04-settings-chat-scope');
 
-  const general = await openSettings(main, 'General');
+  const general = await openSettings(main, 'Meetings');
   const live = general.getByRole('button', { name: 'Show live transcript' });
   const was = (await live.getAttribute('aria-pressed')) === 'true';
   await live.click();
