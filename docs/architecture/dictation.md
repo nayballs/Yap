@@ -228,7 +228,21 @@ dropped it) loses them and presses `auto_submit_key` after the paste.
   keyup → `dictation_key { pressed }`, the hook's own path into `on_key`, so
   push-to-talk's gestures work there too; Settings and the notepad also catch the meeting shortcut →
   `meeting_shortcut`, and the assistant shortcut → `assistant_key { pressed }`). Any new Yap window with focusable UI needs the
-  same fallback.
+  same fallback. **The Copilot key** (new Windows 11 laptops; the keyboard
+  sends Win + Shift + F23) is the combo `kb:shift+win+134` (`COPILOT_KEY` in
+  `lib/hotkeys.js`, shown as one key, "Copilot", "the Copilot key" in
+  hints). Nothing tells a PC that has one apart, and Windows may act on it
+  before a focused Yap window sees F23, so the shortcut picker offers a
+  **Copilot key** button while it captures (Settings, onboarding). Checked
+  on a release build's real hook (2026-10-22, injected with `SendInput`,
+  both as one burst of all six events and spaced 30 ms apart, with an
+  observing LL hook installed behind Yap's): the press starts and the next
+  stops a dictation, F23 never reaches the next hook, the menu-mask key
+  goes down before Win comes up, and nothing else takes the front. Without
+  Yap the same keys opened Windows Settings on that PC (a desktop with no
+  Copilot app). Many laptops send the key's press and release together, so
+  holding it can't keep push-to-talk going: Settings → Dictation says so
+  (double-tap for hands-free, or Toggle).
 - **`mic_watch.rs`** — the dictation's dead-mic watchdog, pure: `MicTally`
   (lock-free, fed by the audio callback), `DeadMicWatch::poll(elapsed, samples,
   heard)` → Wait / Reopen / Report / Recovered / Fine, the messages (the full one

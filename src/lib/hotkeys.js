@@ -114,6 +114,22 @@ export function hotkeysClash(a, b) {
   return within(c, m);
 }
 
+/// The Copilot key on new Windows 11 laptops: the keyboard sends Win + Shift
+/// + F23 (Microsoft's spec), which the input hook binds like any combo — F23
+/// is swallowed, so Copilot doesn't open, and the menu-mask tap keeps the
+/// Start menu shut. Shown as one key, "Copilot". Nothing tells a PC that has
+/// one apart, and Windows may take the key before Yap's window sees it, so
+/// the shortcut picker offers it as a button too (HotkeyInput).
+export const COPILOT_KEY = 'kb:shift+win+134';
+
+/// Is this spec the Copilot key (Win + Shift + F23, however it's written)?
+export function isCopilotKey(spec) {
+  const p = parseHotkeySpec((spec || '').trim());
+  if (p.kind !== 'kb' || p.vk !== 134) return false;
+  const m = modSet(p.mods);
+  return m.size === 2 && m.has('shift') && m.has('win');
+}
+
 export function vkeyName(v) {
   if (v >= 112 && v <= 135) return `F${v - 111}`;
   if ((v >= 48 && v <= 57) || (v >= 65 && v <= 90)) return String.fromCharCode(v);
@@ -162,6 +178,7 @@ export function vkeyName(v) {
 
 /// The display pieces of a spec, e.g. ['Ctrl','Shift','Space'] — chips-ready.
 export function hotkeyParts(spec) {
+  if (isCopilotKey(spec)) return ['Copilot'];
   const p = parseHotkeySpec(spec);
   if (p.kind === 'mouse') return [`Mouse ${p.button}`];
   if (p.kind === 'mods') return byDisplayOrder(p.mods).map((m) => MOD_LABELS[m] || m);
@@ -170,6 +187,7 @@ export function hotkeyParts(spec) {
 }
 
 export function formatHotkeySpec(spec) {
+  if (isCopilotKey(spec)) return 'Copilot';
   const parts = hotkeyParts(spec);
   if (!parts.length) return 'None';
   const p = parseHotkeySpec(spec);
@@ -181,6 +199,7 @@ export function formatHotkeySpec(spec) {
 /// naming to the page. ("Hold Right Alt while you talk", no "(hold)".)
 export function fillHotkey(text, spec) {
   if (!text) return '';
+  if (isCopilotKey(spec)) return text.replaceAll('{key}', 'the Copilot key');
   const parts = hotkeyParts(spec);
   return text.replaceAll('{key}', parts.length ? parts.join(' + ') : 'the hotkey');
 }

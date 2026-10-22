@@ -6,6 +6,7 @@
   // Esc cancels, Backspace clears when `clearable`, mouse extra buttons bind
   // as before. Emits Yap's spec format (see lib/hotkeys.js).
   import {
+    COPILOT_KEY,
     MOD_LABELS,
     MOD_CODE_TO_VK,
     eventModifierFamily,
@@ -167,6 +168,12 @@
         <span class="hint">+ a key, or let go to set</span>
       {:else}
         <span class="hint">Press a key or hold modifiers <span class="dim">· Esc cancels{clearable ? ' · Backspace clears' : ''}</span></span>
+        <!-- Windows may open Copilot before Yap's window sees the key, so
+             it's offered as a button too (hotkeys.js COPILOT_KEY). -->
+        <button
+          class="copilot"
+          onclick={() => finalize(COPILOT_KEY)}
+          title="The Copilot key on new Windows laptops (it sends Win + Shift + F23)">Copilot key</button>
       {/if}
     </div>
   {:else}
@@ -307,6 +314,28 @@
     border: 1px solid var(--yap-primary-line);
     border-radius: var(--yap-r);
     background: var(--yap-primary-wash);
+  }
+  .copilot {
+    margin-left: 4px;
+    height: 24px;
+    padding: 0 9px;
+    border: 1px solid var(--yap-border);
+    border-radius: 6px;
+    background: var(--yap-s2);
+    color: var(--yap-fg-80);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .copilot:hover {
+    border-color: var(--yap-border-hover);
+    color: var(--yap-fg);
+  }
+  .copilot:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
   }
   .holdtag {
     font-size: 9.5px;
