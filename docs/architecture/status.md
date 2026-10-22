@@ -4,6 +4,22 @@ What works today, how it was tested, and what's not done yet. `ROADMAP.md` is in
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
+## Measured (2026-10-22, a release `engines` build, run portable)
+
+Ryzen 7 9800X3D, RTX 5070 Ti, Windows 11, Parakeet V3; memory = private working set
+(Task Manager's "Memory") summed over `yap.exe` + its WebView2 processes:
+- **Idle in the tray: ~290 MB** (321–325 MB before one chunk per window and the
+  hidden webviews' low memory target), **0.7 % of one core**.
+- **A 10-minute meeting** (real mic + loopback): flat at ~535 MB, 23 % of one core;
+  ~200 MB isn't given back after it ends.
+- **Hotkey → recording: 1–3 ms**; stop → transcript 0.30–0.45 s for 3.4 s of audio.
+- **Cold start → tray and bar: ~2.5 s**, nearly all of it loading the speech model on
+  the setup thread (7.4 s on the very first launch); the main window comes up then on a
+  launch by the person (`app-shell.md`).
+- **Installer 20.7 MB** (NSIS) + the 456 MB model on first run.
+- For comparison, Wispr Flow's Windows app is reported at ~800 MB and ~8 % CPU idle
+  (user reports, no official figure); its own package is 221–316 MB.
+
 ## What works
 
 **Transcription is REAL and GPU-accelerated** (no longer a stub in `engines`

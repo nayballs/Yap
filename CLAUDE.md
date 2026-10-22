@@ -198,6 +198,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `tray.rs` — tray icon and menu (models, Paste last transcript, Record this call, updates).
 - `context_menu.rs` — WebView2's context menu cut to editing commands (Inspect: debug + Shift).
 - `procs.rs` — process lineage; the kill-on-close job so helpers never outlive Yap.
+- `webview_memory.rs` — hidden windows' webviews get WebView2's low memory target; back to normal on screen.
 - `portable.rs` — portable mode (a `portable` marker → `<exe>/Data`).
 - `commands.rs` — the Tauri commands; logging is `lib.rs init_logging` (app-shell.md).
 - `config.rs` — `YapConfig`, load/save, migrations, dictionary helpers (config-and-data.md).
@@ -211,7 +212,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `lib/appearance.js` — General → Appearance in every window: reading font/size tokens (`--yap-font-reading`, `--yap-reading-scale`) for chats/notes/notepad only, and reduced Motion.
 - `lib/ControlPanel.svelte` — the main window (label `settings`): sidebar, Settings modal, title bar.
 - `ui/toast.svelte.js` + `ui/noticePolicy.js` — app-wide toasts running the page's notice policy.
-- `HomeView` / `InsightsView` / `UploadView` — dictation feed, stats, audio-file transcription.
+- `HomeView` / `InsightsView` / `UploadView` — dictation feed, stats, audio-file transcription; `lib/appNames.js` (apps by their names), `lib/aiErrors.js` (AI failures in plain words).
+- `App.svelte` — one chunk per window: each loads only its own view (the Yap bar ~150 KB, not the whole app).
 - `DictionaryView.svelte` — corrections and snippets ([dictionary.md](./docs/architecture/dictionary.md)).
 - `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)).
 - `lib/markdown.js` — every rendered answer/note: markdown-it + DOMPurify, citation pills ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
