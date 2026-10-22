@@ -1,6 +1,6 @@
 <script>
   import { formatSize } from './models.js';
-  import { ENGINE_PROVIDER, PROVIDER_ICONS } from './providerIcons.js';
+  import { ENGINE_PROVIDER, PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
 
   // status: downloadable | downloading | available | active | switching
   let {
@@ -36,7 +36,7 @@
       <div class="info">
         <div class="titleline">
           {#if icon}
-            <img class="micon" src={icon} alt="" aria-hidden="true" />
+            <img class="micon" class:mono={MONOCHROME_PROVIDERS.has(prov)} src={icon} alt="" aria-hidden="true" />
           {:else}
             <svg class="micon gen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h2l2-6 3 12 3-9 2 3h6" /></svg>
           {/if}
@@ -197,6 +197,11 @@
   }
   .micon.gen {
     color: var(--yap-muted);
+  }
+  /* Black brand marks (OpenAI's for Whisper) turn white on the dark theme,
+     as in Settings' model rows. */
+  :global([data-yap-theme='dark']) .micon.mono {
+    filter: invert(1);
   }
 
   .scores {
