@@ -16,7 +16,8 @@
           { "has": "Acme", "exists": false },
           { "has": "Norwich", "section": "profile" },
           { "has": "Beans", "section": "profile" }
-        ]
+        ],
+        "memory_allowed": []
       }
     }
   ]

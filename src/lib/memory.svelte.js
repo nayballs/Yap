@@ -12,11 +12,21 @@ export const memory = $state({ items: [], ai: { ready: true }, loaded: false });
 
 let started = false;
 let openSettings = () => {};
+// Loads overlap (the section opening, a save's own re-read, the change
+// event) and `memory_list` takes a variable time (each name's dictation
+// hint asks Windows' spell checker), so an older load can answer after a
+// newer one: only an answer at least as new as the one shown is applied,
+// never a stale snapshot over a fresh one.
+let requested = 0;
+let shown = 0;
 
 /** Re-read memory (after any change, or when the section opens). */
 export async function loadMemory() {
+  const mine = ++requested;
   try {
     const r = await invoke('memory_list');
+    if (mine < shown) return;
+    shown = mine;
     memory.items = r?.items ?? [];
     memory.ai = r?.ai ?? { ready: true };
     memory.loaded = true;
@@ -56,7 +66,12 @@ export function initMemory(opts = {}) {
   if (opts.openSettings) openSettings = opts.openSettings;
   if (started) return;
   started = true;
-  listen('yap-memory-changed', () => loadMemory()).catch(() => {});
+  // `listen` registers asynchronously: a change made before it's in place
+  // sends an event nobody hears, so memory is read once more as soon as it
+  // is (a load that started earlier may predate that change).
+  listen('yap-memory-changed', () => loadMemory())
+    .then(() => loadMemory())
+    .catch(() => {});
   listen('yap-memory-learned', (e) => {
     const p = e.payload;
     if (!p?.title) return;

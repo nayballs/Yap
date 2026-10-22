@@ -15,7 +15,8 @@
           { "has": "tulip", "exists": false },
           { "has": "lasagne", "exists": false }
         ],
-        "memory_changes_min": 4
+        "memory_changes_min": 4,
+        "memory_allowed": ["concise", "British", "Norwich", "UK", "pharmacist", "cookbook", "Small Plates", "Rochelle", "sister", "York", "Baldur", "Stardew", "friendly", "name"]
       },
       "soft": { "memory": [{ "has": "Baldur" }] }
     }

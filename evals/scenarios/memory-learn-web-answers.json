@@ -1,0 +1,32 @@
+{
+  "name": "memory-learn-web-answers",
+  "description": "Questions answered from the web (a stand-in: nothing goes on the internet), and the user repeating what a page said: memory keeps none of it. What's true of the world isn't a fact about the user.",
+  "tags": ["memory", "memory-learn", "memory-small", "web"],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Ferry timetable: Oban to Mull",
+        "url": "https://ferries.example/oban-mull",
+        "text": "Ferries from Oban to Craignure on Mull run every two hours from 07:00 to 19:00 in summer. The crossing takes 46 minutes. A car and two adults costs £58 return.",
+        "published": "2026-09-30"
+      }
+    ],
+    "pages": {
+      "https://ferries.example/oban-mull": "<!doctype html><html><head><title>Ferry timetable: Oban to Mull</title></head><body><article><h1>Oban to Craignure</h1><p>Ferries run every two hours from 07:00 to 19:00 in summer. The crossing takes 46 minutes.</p><p>A car and two adults costs £58 return. Book ahead in August.</p></article></body></html>"
+    }
+  },
+  "apps": "standard",
+  "turns": [
+    { "user": "Look up how often the ferry from Oban to Mull runs.", "expect": {} },
+    {
+      "user": "The page says a car and two adults is £58 return, is that per day? And how long is the crossing?",
+      "learn": true,
+      "expect": {
+        "memory_changes_max": 0,
+        "memory_allowed": [],
+        "memory": [{ "has": "Mull", "exists": false }, { "has": "Oban", "exists": false }, { "has": "58", "exists": false }]
+      }
+    }
+  ]
+}

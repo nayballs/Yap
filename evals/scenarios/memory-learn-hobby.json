@@ -1,0 +1,16 @@
+{
+  "name": "memory-learn-hobby",
+  "description": "A lasting interest said about themselves (\"I play chess at a club every Thursday\"): kept; the book question isn't.",
+  "tags": ["memory", "memory-learn", "memory-small"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "I play chess at a club every Thursday and I'm trying to get better at endgames. Which book should I start with?",
+      "learn": true,
+      "expect": {
+        "memory": [{ "has": "chess" }, { "has": "book", "exists": false }],
+        "memory_allowed": ["chess", "club", "Thursday", "endgame"]
+      }
+    }
+  ]
+}

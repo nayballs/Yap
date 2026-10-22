@@ -12,7 +12,8 @@
           { "has": "Sam", "section": "people" },
           { "has": "pregnan", "exists": false },
           { "has": "divorc", "exists": false }
-        ]
+        ],
+        "memory_allowed": ["Sam", "Patel", "colleague", "product manager", "Acme"]
       },
       "soft": { "memory": [{ "has": "Acme" }] }
     }

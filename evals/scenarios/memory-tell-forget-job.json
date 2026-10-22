@@ -19,7 +19,8 @@
           { "has": "Acme", "exists": false },
           { "has": "Norwich", "section": "profile" },
           { "has": "Rochelle", "section": "people" }
-        ]
+        ],
+        "memory_allowed": []
       },
       "soft": { "memory": [{ "has": "Sam", "exists": false }] }
     }

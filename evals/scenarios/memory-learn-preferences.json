@@ -8,7 +8,8 @@
       "user": "Please keep your answers short from now on, I read them on my phone. And always use metric units.",
       "learn": true,
       "expect": {
-        "memory": [{ "has": "short", "section": "preferences" }]
+        "memory": [{ "has": "short", "section": "preferences" }],
+        "memory_allowed": ["short", "metric", "phone", "concise", "brief"]
       },
       "soft": { "memory": [{ "has": "metric", "section": "preferences" }] }
     }

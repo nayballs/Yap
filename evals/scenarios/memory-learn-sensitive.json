@@ -11,7 +11,8 @@
         "memory": [
           { "has": "diabet", "exists": false },
           { "has": "diagnos", "exists": false }
-        ]
+        ],
+        "memory_allowed": ["librar", "shift", "9am", "9 am"]
       },
       "soft": { "memory": [{ "has": "librar" }] }
     }

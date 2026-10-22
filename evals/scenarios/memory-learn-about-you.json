@@ -16,7 +16,8 @@
           { "has": "Spanish" },
           { "has": "Declan", "exists": false },
           { "has": "bakery", "exists": false }
-        ]
+        ],
+        "memory_allowed": ["Spanish", "Seville"]
       },
       "soft": { "memory": [{ "has": "Seville" }] }
     }

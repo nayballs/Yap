@@ -18,7 +18,8 @@
           { "has": "pasta", "exists": false },
           { "has": "curry", "exists": false }
         ],
-        "memory_changes_max": 5
+        "memory_changes_max": 5,
+        "memory_allowed": ["nurse", "St James", "Norwich", "night", "shift", "Beans", "dog"]
       },
       "soft": { "memory": [{ "has": "night", "section": "profile" }] }
     }

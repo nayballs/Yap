@@ -6,7 +6,7 @@
   "turns": [
     {
       "tell": "My dog's name is Beans",
-      "expect": { "memory": [{ "has": "Beans" }], "memory_changes_min": 1, "memory_changes_max": 2 }
+      "expect": { "memory": [{ "has": "Beans" }], "memory_changes_min": 1, "memory_changes_max": 2, "memory_allowed": ["Beans", "dog"] }
     }
   ]
 }

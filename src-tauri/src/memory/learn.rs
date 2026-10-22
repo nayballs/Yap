@@ -12,11 +12,20 @@
 //!
 //! A model on this PC follows the sidecar's rules: its work counts as busy
 //! (`local_llm::hold`), it never runs during a dictation, and a dictation
-//! starting drops the call (asked again after it). A model on this PC also
-//! answers under llama.cpp's JSON grammar (`response_format: json_object`),
-//! so it always writes JSON Yap can read. A pass that finds the on-device
-//! model stopped waits for the next one rather than starting it in the
-//! background.
+//! starting drops the call (asked again after it). A pass that finds the
+//! on-device model stopped waits for the next one rather than starting it
+//! in the background.
+//!
+//! **Two paths** ([`path`], [`chat_path`]): the full path — the model reads
+//! the chat and writes memory's changes itself — for a model that can call
+//! tools (a cloud model; on this PC, Qwen3.5-4B for meetings, Tell and
+//! imports); **the small path** (`small.rs`) — Yap picks out what the
+//! person said about themselves, the model fills one small form a sentence
+//! under llama.cpp's JSON grammar, and Yap checks every answer — for a
+//! model that can't (Qwen2.5-1.5B, Qwen3.5-2B / 0.8B), and for learning
+//! from chats with any local model (it measured better on the 4B too). On
+//! this PC's processor it reads at most 3 sentences a pass and 12 passes a
+//! day.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -27,7 +36,7 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use super::ops::{self, Action, Change, Done, Item, Origin, Rules, Section};
-use super::{prompt, Applied};
+use super::{prompt, small, Applied};
 
 /// The Chat model's endpoint, as a pass uses it.
 pub struct Endpoint {
@@ -101,38 +110,138 @@ async fn ask(ep: &Endpoint, system: &str, user: &str, max_changes: usize, backgr
             _ => {}
         }
     }
-    let call = |extra: serde_json::Map<String, Value>| {
-        let messages = messages.clone();
-        let opts = &opts;
-        async move {
-            let out = crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages.clone(), opts, extra.clone()).await;
-            // A server that won't take the schema: once more without it.
-            match out {
-                Err(e) if !extra.is_empty() && (e.contains("response_format") || e.contains("400") || e.contains("schema")) => {
-                    tracing::info!("Memory: the model's server refused the JSON schema; asking without it");
-                    crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, opts, serde_json::Map::new()).await
-                }
-                other => other,
-            }
-        }
-    };
     if !local {
-        return call(serde_json::Map::new()).await;
+        return call(ep, &messages, &opts, serde_json::Map::new()).await;
     }
     // The on-device model is busy for the whole pass, waits included.
     let _sidecar = crate::local_llm::hold(&ep.base_url);
+    beside_dictation(background, || call(ep, &messages, &opts, schema.clone())).await
+}
+
+/// One call to the Chat model with `extra` laid over the body (a
+/// `response_format`); a server that won't take the schema is asked once
+/// more without it.
+async fn call(ep: &Endpoint, messages: &Value, opts: &crate::llm::ChatOptions, extra: serde_json::Map<String, Value>) -> Result<String, String> {
+    let out = crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages.clone(), opts, extra.clone()).await;
+    match out {
+        Err(e) if !extra.is_empty() && (e.contains("response_format") || e.contains("400") || e.contains("schema")) => {
+            tracing::info!("Memory: the model's server refused the JSON schema; asking without it");
+            crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages.clone(), opts, serde_json::Map::new()).await
+        }
+        other => other,
+    }
+}
+
+/// A call to a model on this PC, by the sidecar's rules: it waits out a
+/// dictation, and a dictation starting drops it (asked again after it; a
+/// `background` pass gives up after the second time: [`DEFERRED`]). No
+/// app (a model evaluation): just the call.
+async fn beside_dictation<F, Fut>(background: bool, make: F) -> Result<String, String>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<String, String>>,
+{
     let Some(app) = super::app() else {
-        return call(schema).await; // a model evaluation: no dictations
+        return make().await;
     };
     let tries = if background { 2 } else { 5 };
     for _ in 0..tries {
         crate::meeting_summary::wait_idle(|| dictation_busy(app), || true).await;
-        match crate::meeting_summary::unless_busy(call(schema.clone()), || dictation_busy(app)).await {
+        match crate::meeting_summary::unless_busy(make(), || dictation_busy(app)).await {
             Some(out) => return out,
             None => tracing::info!("Memory pass set aside for a dictation"),
         }
     }
     Err(DEFERRED.to_string())
+}
+
+/// **The small path's calls**: one short extraction a candidate (`small.rs`:
+/// ~300 tokens, the reply ≤ 80, temperature 0, under its JSON schema as
+/// llama.cpp's grammar). A model on this PC is held busy for all of them;
+/// a dictation starting drops the pass ([`DEFERRED`] for a background one:
+/// nothing is applied, and the chat is read again later).
+async fn extract(ep: &Endpoint, candidates: &[small::Candidate], background: bool) -> Result<Vec<small::Extracted>, String> {
+    let local = ep.local();
+    let opts = crate::llm::ChatOptions {
+        temperature: 0.0,
+        max_tokens: Some(80),
+        timeout: Duration::from_secs(if local { 60 } else { 30 }),
+        disable_thinking: ep.disable_thinking,
+    };
+    let mut schema = serde_json::Map::new();
+    schema.insert("response_format".into(), json!({ "type": "json_schema", "json_schema": { "name": "memory_item", "schema": small::schema() } }));
+    let _sidecar = (local && candidates.iter().any(small::needs_model)).then(|| crate::local_llm::hold(&ep.base_url));
+    let mut out = Vec::new();
+    for c in candidates {
+        // A preference is the person's own words: no call.
+        if !small::needs_model(c) {
+            out.push(small::Extracted::default());
+            continue;
+        }
+        let messages = small::messages(c);
+        let reply = if local {
+            beside_dictation(background, || call(ep, &messages, &opts, schema.clone())).await?
+        } else {
+            call(ep, &messages, &opts, schema.clone()).await?
+        };
+        out.push(small::parse(&reply));
+    }
+    Ok(out)
+}
+
+/// The changes the small path makes: what the person left taken out of
+/// Profile (`small::left_changes`); for each candidate, a preference in
+/// their own words (`small::preference_of`), or the model's answer checked
+/// (`small::validate`), and the people the sentence names with who they
+/// are (`small::people_changes`, found by Yap). Also how many answers were
+/// left out, for the log. Pure.
+fn small_changes(candidates: &[small::Candidate], answers: &[small::Extracted], left: &[String], items: &[Item]) -> (Vec<Change>, usize) {
+    let mut changes = small::left_changes(left, items);
+    let mut dropped = 0;
+    for (c, x) in candidates.iter().zip(answers) {
+        if let Some(p) = small::preference_of(c) {
+            changes.push(p);
+            continue;
+        }
+        // What Yap finds in the person's words by itself: a project named
+        // with ownership, a birthday, the people named with who they are.
+        let projects = small::project_changes(c);
+        let birthdays = small::birthday_changes(c, items);
+        let people = small::people_changes(c);
+        // A Profile line naming someone Yap found ("Dog's name is Beans" next
+        // to Beans, Dog) says nothing more.
+        let names_found = |f: &String| people.iter().any(|p| ops::norm(f).split(' ').any(|w| ops::norm(&p.name).split(' ').any(|n| n == w)));
+        if small::needs_model(c) {
+            match small::validate(c, x, items) {
+                // The project Yap found is the memory, not the model's
+                // Profile line about building it; a birthday Yap read is
+                // the one kept.
+                Ok(change)
+                    if !projects.is_empty() && change.section != Some(Section::People)
+                        || !birthdays.is_empty() && change.facts.iter().any(|f| f.to_lowercase().contains("birthday"))
+                        || change.section.is_some_and(|s| s.is_you()) && change.facts.iter().any(names_found) => {}
+                Ok(change) => changes.push(change),
+                Err(why) => {
+                    dropped += 1;
+                    tracing::debug!(kind = ?c.kind, "Memory (small model): left out: {why}");
+                }
+            }
+        }
+        let found = projects.into_iter().chain(birthdays).chain(people);
+        for p in found {
+            // Once: a person or project already in the batch, or the same
+            // fact for them.
+            let have = changes.iter().any(|x| {
+                x.section == p.section
+                    && x.section.is_some_and(|s| ops::same_thing(s, &x.name, &p.name))
+                    && (p.facts.is_empty() || x.facts == p.facts)
+            });
+            if !have {
+                changes.push(p);
+            }
+        }
+    }
+    (changes, dropped)
 }
 
 /// How a model on this PC is held to JSON: "auto" (the changes' schema as
@@ -156,17 +265,103 @@ fn nothing() -> Applied {
     Applied { batch: 0, done: Vec::new() }
 }
 
-/// Can this Chat model learn from chats and meetings by itself? A model
-/// that can call tools (a cloud model, Qwen3.5-4B…) yes; a small one
-/// (Qwen2.5-1.5B) no: in the model evaluations it kept what the person
-/// only asked about ("Australia: capital is Canberra") and filed "Nurse at
-/// St James's" as a person, on 6 of 12 learning scenarios, and a pass
-/// took 10–120 s of a processor (2026-10-22). "Tell Yap what to change",
-/// imports and "Remember that…" — reviewed or asked for — still use it.
-/// (A model evaluation may make it learn anyway: `YAP_EVAL_MEMORY_SMALL=learn`.)
-pub fn learns_by_itself(ep: &Endpoint) -> bool {
-    crate::tools::supports_tools(&ep.provider, &ep.model)
-        || (crate::eval::active() && std::env::var("YAP_EVAL_MEMORY_SMALL").as_deref() == Ok("learn"))
+/// How a Chat model changes memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Path {
+    /// It reads the chat and writes memory's changes itself (a model that
+    /// can call tools: a cloud model, Qwen3.5-4B…).
+    Full,
+    /// **The small path** (`small.rs`): Yap picks the sentences, the model
+    /// fills one small form each, Yap checks it. Given the whole chat,
+    /// Qwen2.5-1.5B kept what the person only asked about ("Australia:
+    /// capital is Canberra"), filed "Nurse at St James's" as a person and a
+    /// wifi password as a preference, and took up to two minutes of a
+    /// processor a pass (2026-10-22).
+    Small,
+}
+
+/// The path this Chat model takes: [`Path::Full`] when it can call tools,
+/// else [`Path::Small`]. A model evaluation may choose
+/// (`YAP_EVAL_MEMORY_PATH=full|small`).
+pub fn path(ep: &Endpoint) -> Path {
+    if crate::eval::active() {
+        match std::env::var("YAP_EVAL_MEMORY_PATH").as_deref() {
+            Ok("full") => return Path::Full,
+            Ok("small") => return Path::Small,
+            _ => {}
+        }
+    }
+    if crate::tools::supports_tools(&ep.provider, &ep.model) {
+        Path::Full
+    } else {
+        Path::Small
+    }
+}
+
+/// The path **learning from a chat** takes: the small path for a local
+/// model (Yap's on-device model, or a self-hosted one — Ollama, LM Studio),
+/// whatever its size — on Qwen3.5-4B (GPU, ×2) it kept no false memory
+/// where the full path kept 15 (people named in passing, "Coming to stay
+/// this weekend"…), and it missed less (42 of 44 checks against 38),
+/// 2026-10-22. A cloud model or a custom endpoint keeps [`path`] (not
+/// measured), and so do meetings, Tell and imports. A model evaluation may
+/// choose (`YAP_EVAL_MEMORY_PATH`).
+pub fn chat_path(ep: &Endpoint) -> Path {
+    let forced = crate::eval::active() && matches!(std::env::var("YAP_EVAL_MEMORY_PATH").as_deref(), Ok("full" | "small"));
+    if !forced && matches!(ep.provider.as_str(), crate::local_llm::PROVIDER_ONDEVICE | "local") {
+        return Path::Small;
+    }
+    path(ep)
+}
+
+/// Does the model run on this PC's processor (not its graphics card, not
+/// in the cloud)? Then the small path reads less a pass and passes a day
+/// are capped. Another server on this PC (Ollama, LM Studio) counts as
+/// the processor: Yap can't tell.
+fn on_processor(ep: &Endpoint) -> bool {
+    if !ep.local() {
+        return false;
+    }
+    if let Some(gpu) = crate::eval::local_on_gpu() {
+        return !gpu;
+    }
+    !(ep.provider == crate::local_llm::PROVIDER_ONDEVICE && crate::local_llm::placement().is_some_and(|p| p.kind() == "gpu"))
+}
+
+/// The small path's sentences a pass: on the processor 3 (each ~1–3 s of it
+/// for a 1.5B model), else 6.
+fn small_cap(on_processor: bool) -> usize {
+    if on_processor {
+        3
+    } else {
+        6
+    }
+}
+
+/// Small-path passes with a model call a day on the processor.
+const PROCESSOR_PASSES_A_DAY: u32 = 12;
+/// A pass that found today's passes used up.
+pub const USED_UP: &str = "Memory: today's passes on the processor are used up";
+
+/// (day number, passes) on the processor today.
+static PROCESSOR_TODAY: Mutex<(u64, u32)> = Mutex::new((0, 0));
+
+/// Take one of today's processor passes (`false`: none left). Not counted
+/// in a model evaluation.
+fn take_processor_pass() -> bool {
+    if crate::eval::active() {
+        return true;
+    }
+    let day = super::now_secs() / 86_400;
+    let mut g = PROCESSOR_TODAY.lock().unwrap_or_else(|p| p.into_inner());
+    if g.0 != day {
+        *g = (day, 0);
+    }
+    if g.1 >= PROCESSOR_PASSES_A_DAY {
+        return false;
+    }
+    g.1 += 1;
+    true
 }
 
 /// Is the on-device model the Chat model, and stopped? A background pass
@@ -186,14 +381,15 @@ pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applie
     let start = super::read_upto(conversation).min(len);
     let new = &conv.messages[start..];
     let user_texts: Vec<&str> = new.iter().filter(|m| m.role == "user").map(|m| m.text.as_str()).collect();
-    if user_texts.is_empty() || !prompt::worth_a_pass(&user_texts) {
+    let ep = endpoint(&cfg);
+    let small = ep.as_ref().is_ok_and(|ep| chat_path(ep) == Path::Small);
+    if user_texts.is_empty() || !small && !prompt::worth_a_pass(&user_texts) {
         super::mark_read(conversation, len);
         return Ok(nothing());
     }
-    let ep = endpoint(&cfg)?;
-    if !learns_by_itself(&ep) {
-        super::mark_read(conversation, len);
-        return Ok(nothing());
+    let ep = ep?;
+    if small {
+        return learn_small(conversation, &conv.title, &user_texts, len, announce, &cfg, &ep).await;
     }
     if on_device_stopped(&ep) && !crate::eval::active() {
         return Err(DEFERRED.to_string());
@@ -230,6 +426,78 @@ pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applie
     Ok(applied)
 }
 
+/// **The small path over a chat's new messages** (`small.rs`): the
+/// sentences the person wrote about themselves (none: no model call), the
+/// newest 3 on the processor (6 on a graphics card or in the cloud), one
+/// short call each, every answer checked, then memory's own rules. Logs
+/// counts and time only.
+async fn learn_small(
+    conversation: u64,
+    title: &str,
+    user_texts: &[&str],
+    len: usize,
+    announce: bool,
+    cfg: &crate::config::YapConfig,
+    ep: &Endpoint,
+) -> Result<Applied, String> {
+    // "Remember that…" as a whole message was done when it was said (`spoken`).
+    let texts: Vec<&str> = user_texts.iter().copied().filter(|t| spoken_request(t).is_none()).collect();
+    let known: Vec<String> = super::items().into_iter().filter(|i| i.section == Section::People).map(|i| i.title).collect();
+    let found = small::candidates(&texts, cfg.memory_sensitive, &known);
+    if found.is_empty() {
+        super::mark_read(conversation, len);
+        return Ok(nothing());
+    }
+    let processor = on_processor(ep);
+    let mut candidates = found.candidates.clone();
+    let cap = small_cap(processor);
+    if candidates.len() > cap {
+        candidates.drain(..candidates.len() - cap);
+    }
+    if !candidates.is_empty() {
+        if on_device_stopped(ep) && !crate::eval::active() {
+            return Err(DEFERRED.to_string());
+        }
+        if processor && !take_processor_pass() {
+            return Err(USED_UP.to_string());
+        }
+    }
+    let t0 = Instant::now();
+    let answers = extract(ep, &candidates, !crate::eval::active()).await?;
+    let items = super::items();
+    let (changes, dropped) = small_changes(&candidates, &answers, &found.left, &items);
+    let changes = ops::route_preferences(changes, &items);
+    let about_you = crate::about_you::profile(cfg);
+    let changes = ops::drop_about_you(changes, &items, &about_you.name, &about_you.about);
+    let mut grounding: Vec<String> = candidates.iter().map(|c| c.text.clone()).collect();
+    grounding.extend(found.left.iter().cloned());
+    let applied = super::change(
+        &changes,
+        &Rules {
+            sensitive_ok: cfg.memory_sensitive,
+            origin: Origin::new("chat", Some(conversation), title),
+            now: super::now_secs(),
+            max_changes: 6,
+            grounding: Some(grounding.join("\n")),
+        },
+    );
+    tracing::info!(
+        conversation,
+        sentences = found.candidates.len(),
+        asked = candidates.len(),
+        left_out = dropped,
+        changes = applied.done.len(),
+        ms = t0.elapsed().as_millis() as u64,
+        processor,
+        "Memory (small model): read a chat"
+    );
+    super::mark_read(conversation, len);
+    if announce {
+        super::announce(&applied);
+    }
+    Ok(applied)
+}
+
 /// **Read a finished meeting** — its title, attendees and action plan — for
 /// who the attendees are to the person and the projects they work on
 /// ("Learn from meetings", off by default: other people's words).
@@ -240,7 +508,10 @@ pub async fn learn_from_meeting(note_id: u64) -> Result<Applied, String> {
         return Ok(nothing());
     }
     let ep = endpoint(&cfg)?;
-    if !learns_by_itself(&ep) {
+    // A meeting is other people's words in the third person: the small
+    // path, which reads only what the person said about themselves, has
+    // nothing to go on.
+    if path(&ep) == Path::Small {
         super::meeting_read(note_id, true);
         return Ok(nothing());
     }
@@ -294,9 +565,22 @@ pub fn meeting_ended(note_id: u64) {
 
 /// A chat is read this long after its last message.
 const QUIET: Duration = Duration::from_secs(5 * 60);
+/// … and this long when a small model on the processor reads it: the
+/// person is more likely done with the PC by then.
+const QUIET_PROCESSOR: Duration = Duration::from_secs(10 * 60);
 /// A pass put off (a dictation, the model stopped, a rate limit) is tried
 /// again this much later.
 const RETRY: Duration = Duration::from_secs(2 * 60);
+/// A pass that found today's processor passes used up: an hour later.
+const RETRY_USED_UP: Duration = Duration::from_secs(60 * 60);
+
+/// How long a chat must be quiet before the Chat model reads it.
+fn quiet_for(cfg: &crate::config::YapConfig) -> Duration {
+    match endpoint(cfg) {
+        Ok(ep) if chat_path(&ep) == Path::Small && on_processor(&ep) => QUIET_PROCESSOR,
+        _ => QUIET,
+    }
+}
 
 /// Conversations waiting for a pass, and when each was last active (or
 /// when it's due, back-dated by [`QUIET`]).
@@ -321,7 +605,8 @@ pub fn after_turn(conversation: u64) {
         return;
     }
     let now = Instant::now();
-    let due_now = now.checked_sub(QUIET).unwrap_or(now);
+    // Due now, however long the quiet time is.
+    let due_now = now.checked_sub(QUIET_PROCESSOR.max(QUIET)).unwrap_or(now);
     let waiting: Vec<u64> = activity(|a| {
         for (id, t) in a.iter_mut() {
             if *id != conversation {
@@ -342,7 +627,8 @@ pub fn start(_app: &AppHandle) {
     }
     let left = super::pending();
     if !left.is_empty() {
-        let due = Instant::now().checked_sub(QUIET).map(|t| t + Duration::from_secs(60)).unwrap_or_else(Instant::now);
+        let quiet = quiet_for(&crate::config::load());
+        let due = Instant::now().checked_sub(quiet).map(|t| t + Duration::from_secs(60)).unwrap_or_else(Instant::now);
         activity(|a| {
             for id in left {
                 a.insert(id, due);
@@ -358,20 +644,27 @@ pub fn start(_app: &AppHandle) {
 }
 
 async fn tick() {
-    if !crate::config::load().memory_learn_chats {
+    let cfg = crate::config::load();
+    if !cfg.memory_learn_chats {
         return;
     }
+    let quiet = quiet_for(&cfg);
     let now = Instant::now();
-    let due: Vec<u64> = activity(|a| a.iter().filter(|(_, t)| now.duration_since(**t) >= QUIET).map(|(id, _)| *id).collect());
+    let due: Vec<u64> = activity(|a| a.iter().filter(|(_, t)| now.duration_since(**t) >= quiet).map(|(id, _)| *id).collect());
     for id in due {
         match learn_from_chat(id, true).await {
             Ok(a) => {
                 tracing::info!(conversation = id, changes = a.done.len(), "Memory: read a quiet chat");
                 activity(|m| m.remove(&id));
             }
+            Err(e) if e == USED_UP => {
+                tracing::info!(conversation = id, "Memory: chat pass put off: {e}");
+                let later = Instant::now().checked_sub(quiet).map(|t| t + RETRY_USED_UP).unwrap_or_else(Instant::now);
+                activity(|m| m.insert(id, later));
+            }
             Err(e) if e == DEFERRED || e.contains("limit") || e.contains("timed out") || e.contains("didn't start") => {
                 tracing::info!(conversation = id, "Memory: chat pass put off: {e}");
-                let later = Instant::now().checked_sub(QUIET).map(|t| t + RETRY).unwrap_or_else(Instant::now);
+                let later = Instant::now().checked_sub(quiet).map(|t| t + RETRY).unwrap_or_else(Instant::now);
                 activity(|m| m.insert(id, later));
             }
             Err(e) => {
@@ -479,6 +772,20 @@ pub async fn propose(text: &str, kind: Kind) -> Result<Proposal, String> {
     // Told by the person themselves: theirs to keep. An import, reviewed,
     // follows the setting.
     let sensitive_ok = kind == Kind::Tell || cfg.memory_sensitive;
+    // "Forget …" naming what's to go is Yap's own, for every model: the 4B's
+    // full path took the sister out with "my old job at Acme" in 2 of 4
+    // runs (2026-10-22), Yap's never. Nothing found by name: the model's.
+    if kind == Kind::Tell {
+        if let Some(what) = small::forget_request(text) {
+            let changes = small::forget(&super::items(), &what);
+            if !changes.is_empty() || path(&ep) == Path::Small {
+                return Ok(keep_proposal(changes, kind, sensitive_ok, text));
+            }
+        }
+    }
+    if path(&ep) == Path::Small {
+        return propose_small(text, kind, sensitive_ok, &cfg, &ep).await;
+    }
     let (system, heading, chunks) = match kind {
         Kind::Tell => (prompt::tell_system(), "What the user wants changed", vec![super::ops::one_line(text, 1_500)]),
         Kind::Import => (
@@ -505,6 +812,36 @@ pub async fn propose(text: &str, kind: Kind) -> Result<Proposal, String> {
         let about_you = crate::about_you::profile(&cfg);
         changes = ops::drop_about_you(changes, &super::items(), &about_you.name, &about_you.about);
     }
+    Ok(keep_proposal(changes, kind, sensitive_ok, text))
+}
+
+/// "Tell Yap what to change" and imports with a small model (`small.rs`),
+/// "Forget …" aside (`propose`: Yap's own for every model): read a
+/// sentence (an import: a line) at a time like a chat, each answer checked.
+/// ≤ 8 sentences for a Tell, ≤ 30 lines for an import.
+async fn propose_small(text: &str, kind: Kind, sensitive_ok: bool, cfg: &crate::config::YapConfig, ep: &Endpoint) -> Result<Proposal, String> {
+    static REMEMBER: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"(?i)^\s*remember\s*[:,]?\s*(?:that\s+)?").expect("static regex"));
+    // ("Forget …" was Yap's own already: `propose`.)
+    let items = super::items();
+    let asked = REMEMBER.replace(text, "").to_string();
+    let found = small::told(&asked, kind == Kind::Import);
+    let candidates: Vec<small::Candidate> = found.candidates.into_iter().take(max_changes(kind)).collect();
+    let t0 = Instant::now();
+    let answers = extract(ep, &candidates, false).await?;
+    let (changes, dropped) = small_changes(&candidates, &answers, &found.left, &items);
+    let mut changes = ops::route_preferences(changes, &items);
+    if kind == Kind::Import {
+        let about_you = crate::about_you::profile(cfg);
+        changes = ops::drop_about_you(changes, &items, &about_you.name, &about_you.about);
+    }
+    tracing::info!(kind = ?kind, asked = candidates.len(), left_out = dropped, changes = changes.len(), ms = t0.elapsed().as_millis() as u64, "Memory (small model): proposed changes");
+    Ok(keep_proposal(changes, kind, sensitive_ok, text))
+}
+
+/// Keep `changes` as a proposal for the person to confirm, and say what
+/// they would do (the diff).
+fn keep_proposal(changes: Vec<Change>, kind: Kind, sensitive_ok: bool, text: &str) -> Proposal {
     let (_, done) = preview(&changes, kind, sensitive_ok, text);
     let id = PROPOSAL_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     proposals(|p| {
@@ -516,7 +853,7 @@ pub async fn propose(text: &str, kind: Kind) -> Result<Proposal, String> {
             }
         }
     });
-    Ok(Proposal { id, kind: if kind == Kind::Tell { "tell" } else { "import" }, changes: done })
+    Proposal { id, kind: if kind == Kind::Tell { "tell" } else { "import" }, changes: done }
 }
 
 /// A model asked to "forget everything about my old job at Acme" removed
@@ -675,7 +1012,14 @@ pub fn tool(name: &str, args: &Value) -> Value {
     match name {
         "remember" => {
             let fact = text("fact");
-            let name = text("name");
+            let mut name = text("name");
+            // Not a name ("user", "me", "dog": Qwen3.5-4B, 2026-10-22): a
+            // fact about the person themselves.
+            if !name.is_empty()
+                && (!ops::looks_like_a_name(&name) || matches!(ops::norm(&name).as_str(), "me" | "myself" | "i" | "the user" | "yourself" | "them" | "him" | "her"))
+            {
+                name.clear();
+            }
             let mut section = Section::parse(&text("section")).unwrap_or(if name.is_empty() { Section::Profile } else { Section::People });
             // A fact about someone with no name given: about the person.
             if !section.is_you() && name.is_empty() {
@@ -866,6 +1210,40 @@ mod tests {
         // Not a "forget": a correction's removal stays as the model wrote it.
         let out = narrow_you_removals(vec![take_out(&["Lives in Norwich"])], &items, "Actually I moved to York last month");
         assert_eq!(out[0].remove_facts, ["Lives in Norwich"]);
+    }
+
+    #[test]
+    fn remember_with_a_name_that_isnt_one_is_about_the_person() {
+        // Qwen3.5-4B's remember calls for "Remember that my dog's name is Beans".
+        tool("remember", &json!({ "fact": "Dog's name is Beans", "name": "user", "section": "people" }));
+        tool("remember", &json!({ "fact": "Dog's name is Beans", "name": "dog", "section": "people" }));
+        let items = super::super::items();
+        assert!(!items.iter().any(|i| i.section == Section::People), "{items:?}");
+        assert_eq!(items.iter().find(|i| i.section == Section::Profile).map(|i| i.details.clone()), Some(vec!["Dog's name is Beans".to_string()]));
+    }
+
+    #[test]
+    fn the_small_path_adds_what_yap_finds_to_what_the_model_says() {
+        let found = small::candidates(
+            &["My manager, Mr Okafor, wants a report by Friday. Please keep your answers short from now on. I've left Acme!"],
+            false,
+            &[],
+        );
+        assert_eq!(found.left, ["Acme"]);
+        // The model skipped the manager's sentence; the preference had no call.
+        let answers = vec![small::Extracted::default(); found.candidates.len()];
+        let items = vec![item(1, Section::Profile, "Profile", &["Works at Acme as a nurse", "Lives in Norwich"])];
+        let (changes, dropped) = small_changes(&found.candidates, &answers, &found.left, &items);
+        assert_eq!(dropped, 1);
+        // Acme's fact out; the preference in the person's words; Mr Okafor, found by Yap.
+        assert_eq!((changes[0].id, changes[0].remove_facts.clone()), (Some(1), vec!["Works at Acme as a nurse".to_string()]));
+        assert!(changes.iter().any(|c| c.section == Some(Section::Preferences) && c.facts == ["Keep your answers short"]));
+        assert!(changes.iter().any(|c| c.name == "Mr Okafor" && c.about.as_deref() == Some("Manager")));
+        // The model naming the same person: once.
+        let mut answers = answers;
+        answers[0] = small::Extracted { section: Some(Section::People), title: "Mr Okafor".into(), fact: String::new() };
+        let (changes, _) = small_changes(&found.candidates, &answers, &found.left, &items);
+        assert_eq!(changes.iter().filter(|c| c.name == "Mr Okafor").count(), 1);
     }
 
     #[test]

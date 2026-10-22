@@ -1,0 +1,17 @@
+{
+  "name": "memory-learn-reported-facts",
+  "description": "The user says \"I read that…\" and \"I heard…\" about the world, in the first person: still nothing about them. Memory learns nothing.",
+  "tags": ["memory", "memory-learn", "memory-small"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "I read that Canberra is the capital of Australia, not Sydney. I also heard the Great Wall isn't visible from space. Are both of those true?",
+      "learn": true,
+      "expect": {
+        "memory_changes_max": 0,
+        "memory_allowed": [],
+        "memory": [{ "has": "Canberra", "exists": false }, { "has": "Great Wall", "exists": false }]
+      }
+    }
+  ]
+}

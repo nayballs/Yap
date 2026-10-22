@@ -14,7 +14,8 @@
         "memory": [
           { "has": "Rochelle", "section": "people", "count": 1 },
           { "has": "May", "section": "people" }
-        ]
+        ],
+        "memory_allowed": ["Rochelle", "sister", "May", "garden"]
       }
     }
   ]

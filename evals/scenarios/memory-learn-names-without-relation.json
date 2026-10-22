@@ -1,0 +1,22 @@
+{
+  "name": "memory-learn-names-without-relation",
+  "description": "Names with nothing to say who they are to the user (a message to draft, a coffee tomorrow, what someone said): no one goes into People.",
+  "tags": ["memory", "memory-learn", "memory-small"],
+  "apps": "standard",
+  "turns": [
+    { "user": "Can you draft a short message to Marco saying the invoice will be a week late?", "expect": {} },
+    {
+      "user": "Thanks. I'm meeting Ingrid for coffee tomorrow near the station. Tobias said the new Zelda game is brilliant, is it worth buying?",
+      "learn": true,
+      "expect": {
+        "memory_changes_max": 0,
+        "memory_allowed": [],
+        "memory": [
+          { "has": "Marco", "exists": false },
+          { "has": "Ingrid", "exists": false },
+          { "has": "Tobias", "exists": false }
+        ]
+      }
+    }
+  ]
+}

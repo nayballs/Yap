@@ -1,0 +1,19 @@
+{
+  "name": "memory-learn-questions-only",
+  "description": "A chat of questions and a one-off request, nothing about the user: memory learns nothing (and a small model's pass makes no model call at all).",
+  "tags": ["memory", "memory-learn", "memory-small"],
+  "apps": "standard",
+  "turns": [
+    { "user": "What's the capital of Canada?", "expect": {} },
+    { "user": "How many tablespoons are in a cup?", "expect": {} },
+    {
+      "user": "Can you recommend a good sci-fi film for tonight?",
+      "learn": true,
+      "expect": {
+        "memory_changes_max": 0,
+        "memory_allowed": [],
+        "memory": [{ "has": "Canada", "exists": false }, { "has": "Ottawa", "exists": false }, { "has": "film", "exists": false }]
+      }
+    }
+  ]
+}

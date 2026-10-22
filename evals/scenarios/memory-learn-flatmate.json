@@ -1,0 +1,16 @@
+{
+  "name": "memory-learn-flatmate",
+  "description": "A person named first and then who they are (\"Daniel, my flatmate, …\"): kept as the user's flatmate, not what he keeps doing.",
+  "tags": ["memory", "memory-learn", "memory-small"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Daniel, my flatmate, keeps leaving the heating on all day. How can I bring it up without an argument?",
+      "learn": true,
+      "expect": {
+        "memory": [{ "has": "Daniel", "section": "people" }, { "has": "heating", "exists": false }],
+        "memory_allowed": ["Daniel", "flatmate", "roommate", "housemate"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "memory-learn-everyday-first-person",
+  "description": "Everyday chat in the first person that says nothing lasting about the user (confused, stuck, a late train): memory learns nothing.",
+  "tags": ["memory", "memory-learn", "memory-small"],
+  "apps": "standard",
+  "turns": [
+    { "user": "I'm so confused about how VAT works. Can you explain it simply?", "expect": {} },
+    { "user": "I can't get my Python script to run, it says ModuleNotFoundError.", "expect": {} },
+    {
+      "user": "My train is late again. How do I claim a refund?",
+      "learn": true,
+      "expect": {
+        "memory_changes_max": 0,
+        "memory_allowed": [],
+        "memory": [{ "has": "VAT", "exists": false }, { "has": "Python", "exists": false }, { "has": "train", "exists": false }]
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "memory-learn-no-project",
+  "description": "Tools and products asked about, nothing the user owns or builds: no project, no topic.",
+  "tags": ["memory", "memory-learn", "memory-small"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Have you heard of the Zed editor? Is it faster than VS Code for Rust? And what's Godot like for making 2D games?",
+      "learn": true,
+      "expect": {
+        "memory_changes_max": 0,
+        "memory_allowed": [],
+        "memory": [{ "has": "Zed", "exists": false }, { "has": "Godot", "exists": false }]
+      }
+    }
+  ]
+}

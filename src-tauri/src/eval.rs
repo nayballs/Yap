@@ -118,6 +118,39 @@ pub fn tools_forced() -> Option<bool> {
     None
 }
 
+/// 0: no local model in this run (or not known), 1: on the processor, 2: on
+/// the graphics card (`--ngl`).
+#[cfg(debug_assertions)]
+static LOCAL_ON_GPU: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// A run's local model: on the graphics card (`Some(true)`, `--ngl` > 0) or
+/// the processor; `None` outside a run or for a cloud model. (The app reads
+/// the sidecar's placement instead: `local_llm::placement`.)
+pub fn local_on_gpu() -> Option<bool> {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            return match LOCAL_ON_GPU.load(std::sync::atomic::Ordering::SeqCst) {
+                1 => Some(false),
+                2 => Some(true),
+                _ => None,
+            };
+        }
+    }
+    None
+}
+
+/// The runner, when a local model starts.
+#[cfg(debug_assertions)]
+pub(crate) fn set_local_on_gpu(on_gpu: Option<bool>) {
+    let v = match on_gpu {
+        None => 0,
+        Some(false) => 1,
+        Some(true) => 2,
+    };
+    LOCAL_ON_GPU.store(v, std::sync::atomic::Ordering::SeqCst);
+}
+
 /// `--timeout <secs>`: how long a model call may take in this run, instead
 /// of the caller's own `timeout` (a slow local model on a CPU would
 /// otherwise just time out, which a run can also measure by leaving it).

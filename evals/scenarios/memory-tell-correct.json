@@ -15,7 +15,8 @@
           { "has": "York", "exists": false },
           { "has": "gardening", "section": "people" },
           { "has": "Rochelle", "count": 1 }
-        ]
+        ],
+        "memory_allowed": ["Bristol"]
       }
     }
   ]

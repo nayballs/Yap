@@ -395,12 +395,12 @@
         desc="When a chat goes quiet, Yap keeps lasting facts about you. Never passwords, numbers or addresses"
       />
     </Row>
-    {#if memory.loaded && memory.ai?.ready && memory.ai?.learns === false && (cfg.memoryLearnChats || cfg.memoryLearnMeetings)}
+    {#if memory.loaded && memory.ai?.ready && memory.ai?.small && (cfg.memoryLearnChats || cfg.memoryLearnMeetings)}
       <Row>
         <p class="set-note" role="note">
-          Your Chat model is too small to pick out what to remember reliably, so Yap doesn’t learn by itself with it.
-          Qwen3.5 4B on this PC or a cloud model does. “Tell Yap what to change”, imports and “Remember that…” in
-          Chat work with any model.
+          Your Chat model is small, so Yap learns carefully with it: only what you say about yourself, a sentence at a
+          time, and only what it can check against your own words. It learns less, and nothing from meetings. Qwen3.5 4B
+          on this PC or a cloud model learns more.
           <button type="button" class="set-link" onclick={() => goto('cleanup#chat')}>Language Models</button>
         </p>
       </Row>
