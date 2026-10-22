@@ -19,6 +19,38 @@ export const MODEL_DIR = 'parakeet-tdt-0.6b-v3-int8';
 export const MODEL_SRC =
   process.env.YAP_REAL_MODEL_DIR || path.join(process.env.APPDATA || '', 'yap', 'models', MODEL_DIR);
 
+/**
+ * A Whisper model for the specs that compare (screen-names.real.js): stt.rs'
+ * "large" (large-v3, q5_0), from the same folder, if it's there.
+ */
+export const WHISPER_ID = 'large';
+export const WHISPER_FILE = 'ggml-large-v3-q5_0.bin';
+export const WHISPER_SRC =
+  process.env.YAP_REAL_WHISPER_FILE || path.join(process.env.APPDATA || '', 'yap', 'models', WHISPER_FILE);
+
+/** Whether the Whisper model is there to link. */
+export const hasWhisper = () => fs.existsSync(WHISPER_SRC);
+
+/**
+ * Put the Whisper model in a robot's data dir as `linkModel` does Parakeet:
+ * copied once into the cache (reading the source only), then hard-linked.
+ */
+export function linkWhisper(dataDir) {
+  const cache = path.join(CACHE, 'models');
+  fs.mkdirSync(cache, { recursive: true });
+  const cached = path.join(cache, WHISPER_FILE);
+  if (!fs.existsSync(cached) || fs.statSync(cached).size !== fs.statSync(WHISPER_SRC).size) {
+    fs.copyFileSync(WHISPER_SRC, cached);
+  }
+  const target = path.join(dataDir, 'models', WHISPER_FILE);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  try {
+    fs.linkSync(cached, target);
+  } catch {
+    fs.copyFileSync(cached, target);
+  }
+}
+
 /** The model's files (not the "._*" tarball leftovers some folders carry). */
 function modelFiles(dir) {
   return fs.readdirSync(dir).filter((f) => !f.startsWith('._') && fs.statSync(path.join(dir, f)).isFile());

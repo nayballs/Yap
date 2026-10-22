@@ -234,6 +234,26 @@ window test, and robot-tested: Shift+Insert into the real Git Bash
 breaks, now handled), the pad's "nopaste" box typed into once, and no
 other paste in the full run typed twice. VS Code itself isn't installed
 here, and Alacritty, WezTerm, PuTTY & co. are untried.
+**Names as written on screen** (`screen_terms.rs`, 2026-10-22;
+[dictionary.md](./dictionary.md)): the target window's visible text read
+over UI Automation at record start (in the background, never waited for),
+its names and terms used for that dictation only — a strict near-miss pass
+for every model and cleanup's "Spell these names as written" line, not the
+Whisper prompt (measured: it made Whisper hear "row shell" as "Rochelle").
+Extraction, the guards (≈ 50 everyday sentences against a busy screen's
+~60 terms with this PC's spell checker), the session and the cleanup line
+unit-tested; robot-tested on an Edge page and the test pad, with the
+stand-in cleanup model, a read delayed 8 s (the paste doesn't wait), and
+real speech (`screen-names-stt.real.js`: Parakeet 4 → 5 of 7 names right,
+Whisper large-v3 6 → 7, no everyday sentence changed). The read: 18–107 ms,
+median 39, over the robot suite's 94 reads (debug build, a busy PC), ~50–100
+ms on a 3,000-paragraph Edge
+page and a 5,000-line code view (a VS Code stand-in: VS Code isn't
+installed here), 30–80 ms on the WinForms pad. Gaps: a name a model spells
+far from the screen ("Shivon" for Siobhan with Parakeet) isn't fixed, nor a
+name heard as everyday words or in lower case; the walk over a big native
+app's tree is bounded, not timed in a real one (Outlook, Teams); WebView2
+apps' content (another process) isn't read, as for the cursor's context.
 **Dictation extras** (2026-10-17): a paste into an app running as
 administrator is spotted (its integrity level) and left on the clipboard
 with "Your text is copied: press Ctrl+V" (`elevated.rs`, `alert.rs`); text

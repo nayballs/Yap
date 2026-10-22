@@ -7,7 +7,9 @@ How a dictation runs: the hotkey and push-to-talk gestures, the mic, speech-to-t
 ## The pipeline order
 
 Pipeline order after transcription: **AI cleanup → dictionary (exact, then a
-fuzzy near-miss pass) → the "press enter" voice command → snippets → fit to the
+fuzzy near-miss pass) → names on screen (`screen_terms.rs`: a name heard a
+little wrong spelled as the window shows it) → the "press enter" voice
+command → snippets → fit to the
 kind of app (`app_kind.rs`: a terminal gets one line and no trailing space; a
 chat app's short message loses its full stop) and to the text around the
 cursor (smart spacing; where the field couldn't be read, append-space as
@@ -19,7 +21,8 @@ submit key (auto-submit or the voice command, once; in a
 terminal Enter, only for the voice command or a coding CLI's auto-submit) —
 or, with no submit key, the correction watch (`learn.rs`: fix a word Yap
 typed and it offers to add it to the dictionary)**
-(`pipeline::finish_dictation` does the dictionary, the command and snippets;
+(`pipeline::finish_dictation_with` does the dictionary, the names on screen,
+the command and snippets;
 `text_injector::prepare_dictation` the fitting; `app_kind::submit_key` the
 key). Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation
@@ -59,6 +62,18 @@ enter" voice command** (`voice_enter`, default on;
 `pipeline::take_voice_enter`): a dictation whose LAST words are "press
 enter"/"press return" (final text, else the raw transcript in case cleanup
 dropped it) loses them and presses `auto_submit_key` after the paste.
+**Names on screen** ("Spell names the way they're written on screen",
+`screen_names`, on; [dictionary.md](./dictionary.md), `screen_terms.rs`):
+`capture_target` starts a background read of the target window's visible
+text beside the cursor read (a pasted dictation only: not a rewrite, the
+assistant or the Chat box); `deliver` takes them once
+(`screen_terms::take`) for cleanup's "Spell these names as written: …"
+line and the near-miss pass (`finish_dictation_with`); a cancel forgets
+them. Never waited for: still reading = not used (a robot test delays the
+read 8 s: the dictation pastes as fast as without it). `run_stt`'s Whisper
+prompt goes through `screen_terms::whisper_prompt` (`dictation_prompt`),
+which leaves the names out — measured, see dictionary.md. Upload and
+meetings never get them.
 
 ## Modules
 

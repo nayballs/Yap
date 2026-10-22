@@ -68,6 +68,7 @@ mod portable;
 mod procs;
 mod read_aloud;
 mod realtest;
+mod screen_terms;
 mod selection;
 mod smart_insert;
 mod sound;
