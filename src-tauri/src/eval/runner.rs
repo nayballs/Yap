@@ -68,8 +68,11 @@ Dictation cleanup:
                            cleanup.md   --cleanup-rounds <n> (default 3)
   --cleanup-slot <n>       send the cleanup to llama.cpp slot n (`id_slot`), and with
   --chat-slot <n>          the Chat turns between them to slot n (measures pinned slots)
-  --cleanup-layout <l>     the same cleanup prompt laid out another way: split (the restated
-                           instruction its own user message) | system (in the system prompt)
+  --cleanup-layout <l>     the same cleanup prompt laid out another way: combined (the restated
+                           instruction and the transcript in one message, as until 22 Oct 2026)
+                           | system (the instruction in the system prompt)
+  --cleanup-quick          only the back-to-back rounds (no first call, Chat turns or spelling):
+                           a cloud model's tokens   --cleanup-limit <n>  only the first n dictations
 Serving benches (local servers; instead of the scenarios; serving.md):
   --bench stream           time to the first token, streamed vs not, on Chat-shaped requests
                            (a short answer, a long one, a web answer, a tool call)
@@ -118,6 +121,8 @@ struct Args {
     cleanup_slot: Option<u64>,
     chat_slot: Option<u64>,
     cleanup_layout: Option<&'static str>,
+    cleanup_quick: bool,
+    cleanup_limit: Option<usize>,
     bench: Option<String>,
     bench_rounds: u32,
     bench_history: usize,
@@ -190,6 +195,8 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                         .ok_or_else(|| format!("--cleanup-layout {}, not {l}", super::cleanup::LAYOUTS.join("|")))?,
                 );
             }
+            "--cleanup-quick" => a.cleanup_quick = true,
+            "--cleanup-limit" => a.cleanup_limit = Some(num(value()?, &flag)?.max(1) as usize),
             "--bench" => {
                 let b = value()?;
                 if !super::serving::BENCHES.contains(&b.as_str()) {
@@ -1045,7 +1052,13 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             record::set_config(Some(crate::config::YapConfig::default()));
             record::set_tools_forced(None);
             let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
-            let setup = super::cleanup::Setup { cleanup: args.cleanup_slot, chat: args.chat_slot, layout: args.cleanup_layout };
+            let setup = super::cleanup::Setup {
+                cleanup: args.cleanup_slot,
+                chat: args.chat_slot,
+                layout: args.cleanup_layout,
+                quick: args.cleanup_quick,
+                limit: args.cleanup_limit,
+            };
             cleanup = super::cleanup::run(b, &ep, args.cleanup_rounds, setup).await;
             cleanups.push((m.label.clone(), cleanup.clone()));
         }

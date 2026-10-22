@@ -285,16 +285,39 @@ NEVER respond with commentary, status, or meta-remarks such as \"Nothing to clea
     );
     let example3_out = "Hi team\nLet's meet at 3pm on the 25th, after the review period, ok.";
 
-    json!([
-        { "role": "system", "content": system_prompt },
-        { "role": "user", "content": example1_in },
-        { "role": "assistant", "content": example1_out },
-        { "role": "user", "content": example2_in },
-        { "role": "assistant", "content": example2_out },
-        { "role": "user", "content": example3_in },
-        { "role": "assistant", "content": example3_out },
-        { "role": "user", "content": cleanup_message(&wrap(text), in_message) },
-    ])
+    // The dictation: the restated instruction (with the spelling line) as a
+    // message of its own, then the transcript ([`split_dictation`]).
+    let (instruction_msg, transcript_msg) = split_dictation(&cleanup_message(&wrap(text), in_message));
+    let mut messages = vec![
+        json!({ "role": "system", "content": system_prompt }),
+        json!({ "role": "user", "content": example1_in }),
+        json!({ "role": "assistant", "content": example1_out }),
+        json!({ "role": "user", "content": example2_in }),
+        json!({ "role": "assistant", "content": example2_out }),
+        json!({ "role": "user", "content": example3_in }),
+        json!({ "role": "assistant", "content": example3_out }),
+    ];
+    if !instruction_msg.is_empty() {
+        messages.push(json!({ "role": "user", "content": instruction_msg }));
+    }
+    messages.push(json!({ "role": "user", "content": transcript_msg }));
+    Value::Array(messages)
+}
+
+/// **The dictation's message as two** (2026-10-22): the restated
+/// instruction, then "Transcript: …" on its own. A hybrid model like
+/// Qwen3.5 resumes its cache only from a checkpoint before the last user
+/// message, so with the ~370-token instruction in the same message as the
+/// transcript it read the instruction again for every dictation: 393 → 38
+/// prompt tokens read a dictation, Qwen3.5-4B's cleanup ~245 → ~200 ms on
+/// an RTX 5070 Ti and ~2.9 s → … on a processor (the model evaluations,
+/// docs/model-evals.md; the words are the same as before, only where the
+/// message breaks). The one-shots keep the joined form. Pure.
+pub fn split_dictation(message: &str) -> (String, String) {
+    match message.split_once("\n\nTranscript:\n") {
+        Some((instruction, rest)) => (instruction.to_string(), format!("Transcript:\n{rest}")),
+        None => (String::new(), message.to_string()),
+    }
 }
 
 /// Immutable guardrail prompt for **edit/rewrite mode**. Unlike dictation
@@ -1053,6 +1076,29 @@ mod tests {
             format!("Clean up this dictation. {line}\n\nTranscript:\n\"\"\"\nthe color\n\"\"\"")
         );
         assert_eq!(cleanup_message(wrapped, None), wrapped);
+    }
+
+    #[test]
+    fn the_dictation_comes_after_its_instruction_in_a_message_of_its_own() {
+        let line = "When the transcript is in English, spell it the British way (honour, recognise), without changing any words.";
+        let m = cleanup_messages("so the color is fine", "Keep it casual.", Some(line), &[]);
+        let m = m.as_array().unwrap();
+        // System, three one-shots (question, answer), the instruction, the transcript.
+        assert_eq!(m.len(), 9);
+        let (ins, tr) = (m[7]["content"].as_str().unwrap(), m[8]["content"].as_str().unwrap());
+        assert_eq!((m[7]["role"].as_str(), m[8]["role"].as_str()), (Some("user"), Some("user")));
+        assert!(ins.starts_with("Clean up this dictation transcript") && ins.ends_with(line), "{ins}");
+        assert_eq!(tr, "Transcript:\n\"\"\"\nso the color is fine\n\"\"\"");
+        // The same words as the one message it used to be.
+        let joined = format!("{ins}\n\n{tr}");
+        assert_eq!(split_dictation(&joined), (ins.to_string(), tr.to_string()));
+        // The one-shots keep theirs whole; the prefix up to the dictation is
+        // the same for every dictation (a local model re-uses all of it).
+        assert!(m[1]["content"].as_str().unwrap().contains("\n\nTranscript:\n\"\"\"\nso um how much api"));
+        let other = cleanup_messages("something else entirely", "Keep it casual.", Some(line), &[]);
+        assert_eq!(&other.as_array().unwrap()[..8], &m[..8]);
+        // No transcript mark (never, from `cleanup`): one message.
+        assert_eq!(split_dictation("just text"), (String::new(), "just text".to_string()));
     }
 
     #[test]
