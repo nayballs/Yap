@@ -1,0 +1,43 @@
+{
+  "name": "web-price-live-grok",
+  "description": "Nathan's question of 2026-10-22, live (Exa with the run's key, real pages), from a UK PC: \"Can you lookup the Grok subscription price for me I am thinking of buying it\". That day Yap searched \"Grok subscription price 2026\" with Exa's userLocation GB and found x.ai's US page, a US price list and a guide in $; the answer gave the US tiers and offered to look for UK pricing. Right: UK prices in £ if the web has them; else one plain line saying there are none, then the US prices as they are, and no offer to look further. Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "prices",
+    "locale",
+    "live"
+  ],
+  "needs_web": true,
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Can you lookup the Grok subscription price for me I am thinking of buying it",
+      "expect": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "min_sources": 1,
+        "answer_matches": "£\\s?\\d|(?:couldn't|could not|can't|cannot|didn't|did not|unable to|wasn't able to|no)\\s+(?:find\\s+|see\\s+)?(?:any\\s+)?(?:official\\s+)?(?:uk|british|£|gbp|sterling)[^.\\n]{0,40}(?:pric|cost|plan)",
+        "answer_not_matches": "\\b(?:let me know|would you like|do you want|want me to|i can|i could|happy to|shall i|if you(?:'d| would)? like)\\b[^.!?\\n]{0,80}(?:uk|british|£|gbp|local|your (?:country|region|currency))[^.!?\\n]{0,60}(?:pric|cost)",
+        "no_false_claims": true,
+        "opened_none": true,
+        "prices_keep_their_sign": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search",
+            "args": {
+              "query": {
+                "matches": "\\buk\\b|united kingdom|britain|£|\\bgbp\\b|pounds"
+              }
+            }
+          }
+        ],
+        "answer_matches": "£\\s?\\d"
+      }
+    }
+  ]
+}

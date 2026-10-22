@@ -279,6 +279,8 @@ pub struct Expect {
     pub notes_count: Option<usize>,
     /// The answer came with at least this many web sources (Chat's Sources row).
     pub min_sources: Option<usize>,
+    /// At least this many web searches ran (the model's and Yap's own).
+    pub min_searches: Option<usize>,
     /// One of the sources' addresses holds one of these ("bg3.wiki").
     #[serde(default)]
     pub sources_any: Vec<String>,
@@ -763,10 +765,15 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
             }
         }
     }
-    // (A search Yap ran first, or a query it freed of earlier words, isn't a
-    // fix of the answer.)
-    let fixes: Vec<&str> =
-        o.stats.post_fixes.iter().map(String::as_str).filter(|f| !matches!(*f, "yap_search" | "fresh_query")).collect();
+    // (A search Yap ran first, or a query it freed of earlier words or aimed
+    // at the user's country, isn't a fix of the answer.)
+    let fixes: Vec<&str> = o
+        .stats
+        .post_fixes
+        .iter()
+        .map(String::as_str)
+        .filter(|f| !matches!(*f, "yap_search" | "fresh_query" | "local_query"))
+        .collect();
     if e.no_post_fixes && !fixes.is_empty() {
         fails.push(format!("Yap had to fix the answer: {}", fixes.join(", ")));
     }
@@ -797,6 +804,12 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
     if let Some(min) = e.min_sources {
         if o.sources.len() < min {
             fails.push(format!("{} web sources (expected at least {min})", o.sources.len()));
+        }
+    }
+    if let Some(min) = e.min_searches {
+        let n = calls.iter().filter(|c| c.name == "web_search").count();
+        if n < min {
+            fails.push(format!("{n} web searches (expected at least {min})"));
         }
     }
     if !e.sources_any.is_empty()

@@ -1,0 +1,62 @@
+{
+  "name": "web-price-uk-grok-us-only",
+  "description": "Nathan's question of 2026-10-22 on Qwen3.5-4B, from a UK PC: \"Can you lookup the Grok subscription price for me I am thinking of buying it\". Yap searched \"Grok subscription price 2026\" (Exa, userLocation GB) and found x.ai's US tiers; the answer listed them in $ and ended \"Note: These are US prices. Let me know if you need help finding the UK pricing…\". Stand-in web: every search finds only US prices, whatever it asks. Right: the search names the UK, it looks once more for a UK price, then says in one plain line that it couldn't find UK prices and gives the US ones as they are: no £ price made up, no offer to look further. Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "prices",
+    "locale",
+    "standin"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Pricing: Compare Grok Plans | xAI",
+        "url": "https://x.ai/pricing",
+        "published": "2026-10-14",
+        "text": "Choose your Grok plan. Free: $0/month, limited usage. Plus: $8/month or $80/year, a shared usage pool, Grok Chat, Voice and Imagine. Premium: $30/month or $300/year, 4x the usage of Plus and the latest models. Super: $100/month. Ultra: $200/month, maximum usage. Prices in USD, before tax."
+      },
+      {
+        "title": "AI Subscription Prices 2026: ChatGPT, Claude, Gemini, Grok (US) | Price Bug Alerts",
+        "url": "https://pricebugalerts.example/ai-subscription-prices-2026",
+        "published": "2026-10-02",
+        "text": "Every AI plan's US price, checked monthly. Grok Plus $8 a month, Grok Premium $30 a month, Grok Ultra $200 a month. ChatGPT Plus $20, Claude Pro $20. All prices are for the United States."
+      },
+      {
+        "title": "Grok pricing in 2026: every plan and what you get",
+        "url": "https://fluxgravity.example/guides/grok-pricing",
+        "published": "2026-10-09",
+        "text": "Grok's five tiers in 2026: Free ($0), Plus ($8), Premium ($30), Super ($100) and Ultra ($200), each a month in US dollars; paying yearly saves about 10%."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Can you lookup the Grok subscription price for me I am thinking of buying it",
+      "expect": {
+        "tools_called": [
+          {
+            "name": "web_search",
+            "args": {
+              "query": {
+                "matches": "\\buk\\b|united kingdom|britain|£|\\bgbp\\b"
+              }
+            }
+          }
+        ],
+        "min_sources": 1,
+        "answer_matches": "(?:couldn't|could not|can't|cannot|didn't|did not|unable to|wasn't able to|no)\\s+(?:find\\s+|see\\s+)?(?:any\\s+)?(?:official\\s+)?(?:uk|british|£|gbp|sterling)[^.\\n]{0,40}(?:pric|cost|plan)|(?:uk|british) (?:pric\\w*|costs?)[^.\\n]{0,40}(?:aren't|are not|isn't|is not|weren't|were not|not)\\s+(?:listed|available|published|shown|given|found)",
+        "answer_not_matches": "\\b(?:let me know|would you like|do you want|want me to|i can|i could|happy to|shall i|if you(?:'d| would)? like)\\b[^.!?\\n]{0,80}(?:uk|british|£|gbp|local|your (?:country|region|currency))[^.!?\\n]{0,60}(?:pric|cost)",
+        "no_false_claims": true,
+        "opened_none": true,
+        "prices_keep_their_sign": true
+      },
+      "soft": {
+        "min_searches": 2,
+        "answer_matches": "\\$\\s?(?:8|30)\\b",
+        "answer_not_matches": "£\\s?\\d"
+      }
+    }
+  ]
+}
