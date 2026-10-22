@@ -1,0 +1,40 @@
+{
+  "name": "merged-voices",
+  "description": "The speaker engine merged two people into one voice: it must stay unnamed.",
+  "tags": [
+    "diarization-error",
+    "trap"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Sam Patel",
+    "Siobhan Kelly",
+    "Priya Shah"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Sam, how are the numbers looking?"
+    ],
+    [
+      "them-2",
+      "Fine, we're on budget for the quarter."
+    ],
+    [
+      "them-1",
+      "Thanks Sam. Siobhan, how's hiring?"
+    ],
+    [
+      "them-2",
+      "Two offers out, and one already accepted."
+    ],
+    [
+      "them-1",
+      "Thanks Siobhan, that's great news."
+    ]
+  ],
+  "truth": {
+    "them-1": "Priya Shah",
+    "them-2": null
+  }
+}

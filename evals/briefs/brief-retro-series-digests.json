@@ -1,0 +1,41 @@
+{
+  "name": "brief-retro-series-digests",
+  "description": "A fortnightly retro: the last one (same series) had different people and only rolling digests, no action plan. Only Sam's task is an open item.",
+  "meeting": {
+    "title": "Fortnightly retro",
+    "series": "retro@example.com",
+    "in_minutes": 8,
+    "attendees": ["Sam Lee", "Tanay Kothari", "Rochelle Adams"],
+    "description": ""
+  },
+  "notes": [
+    {
+      "title": "Fortnightly retro",
+      "days_ago": 14,
+      "series": "retro@example.com",
+      "participants": ["Sam Lee", "Daniel Moss"],
+      "digests": [
+        {
+          "fromSeg": 0, "toSeg": 40, "startTs": 1, "endTs": 2,
+          "keyPoints": ["The deploy failed twice last sprint", "On-call handovers were missed"],
+          "decisions": ["Move the release to Tuesdays"],
+          "actions": [
+            { "owner": "Sam", "task": "fix the flaky deploy step", "due": "" },
+            { "owner": "Daniel", "task": "write the incident summary", "due": "Friday" },
+            { "owner": "Unassigned", "task": "clean up the old dashboards", "due": "" }
+          ],
+          "questions": ["Who covers on-call over the holidays?"]
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "first": false,
+    "cites": ["Fortnightly retro"],
+    "contains": ["First meeting with Tanay Kothari and Rochelle Adams"],
+    "open_items": ["flaky deploy"],
+    "no_open_items": ["incident summary", "old dashboards"],
+    "owners": ["Sam"],
+    "not_contains": ["Okonkwo", "lighting", "Monday"]
+  }
+}

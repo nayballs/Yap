@@ -101,7 +101,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `pipeline.rs` — the heart: mic stream, pre-roll, modes, `run_stt` → `deliver`, Undo, chat/assistant routing.
 - `gesture.rs` — push-to-talk's pure state machine: hold, double-tap hands-free, lone tap.
 - `coaching.rs` — push-to-talk coaching hints (≤ 3 each; counts in `hints.json`).
-- `input_hook.rs` — low-level keyboard/mouse hooks: five bindings, combo rules, `clashes`, menu-mask key.
+- `input_hook.rs` — low-level keyboard/mouse hooks: six bindings (Read aloud's the fifth, Use what I said's the sixth), combo rules, `clashes`, menu-mask key.
 - `partials.rs` / `agent_detect.rs` — live partials' sliding window; Commands by name (see `pipeline.rs`).
 - `mic_watch.rs` — dead-mic watchdog: reopen the stream, then "No sound from <mic>".
 - `mic_privacy.rs` — reads Windows' microphone privacy switches; names the one blocking Yap.
@@ -117,7 +117,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `text_injector.rs` — private, verified clipboard paste with each app's paste keys, a lost paste typed, submit key, re-focus, Paste last transcript (and as said).
 - `as_said.rs` — "Use what I said": swap a cleaned paste for the words as said (shortcut, bar, tray), only where it can select exactly what it pasted; else copied.
 - `elevated.rs` — apps running as administrator: the text is left on the clipboard.
-- `selection.rs` — UI Automation reads: text around the cursor, edit-mode selection, post-paste watch; did a paste land.
+- `selection.rs` — UI Automation reads: text around the cursor, edit-mode selection, read aloud's selection (read-only text too), post-paste watch; did a paste land.
 - `smart_insert.rs` — fits a dictation to the text around the cursor (case, spaces, full stop).
 - `app_kind.rs` — terminal (which one, its paste keys; an editor's terminal) / coding CLI / chat app / other, and what each changes.
 
@@ -150,7 +150,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `apps.rs` — opens Start-menu apps on request: index, matching, fast path, consent.
 
 **Spoken replies** — [spoken-replies.md](./docs/architecture/spoken-replies.md)
-- `tts.rs` (+ `tts/`) — Kokoro / Windows voices / ElevenLabs (cloud, own key, local voice as fallback), text normalisation, the speaker queue, Kokoro's download.
+- `tts.rs` (+ `tts/`) — Kokoro / Windows voices / ElevenLabs (cloud, own key, local voice as fallback), text normalisation, the speaker queue (a read-aloud paced a sentence ahead, its position, pause), Kokoro's download; `tts/marks.rs` word timing (Windows' word cues, ElevenLabs' timestamps, else from Kokoro's audio).
+- `read_aloud.rs` — Read aloud, anywhere: the selection in any app (shortcut, 🔊 on the bar, tray), notes and Chat answers read with a karaoke reading card on the Yap bar; ⏮ ⏯ ⏭, speed, Stop, Esc.
 
 **Notes** — [notes.md](./docs/architecture/notes.md)
 - `notes.rs` — the notes store (`notes.json`), folders, the Actions engine, transcript fields.
@@ -165,6 +166,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 **Speakers** — [speakers.md](./docs/architecture/speakers.md)
 - `diarize.rs` (+ `diarize/`) — the beta speaker engine: the `yap.exe diarize` child, its wire, models.
 - `speakers.rs` (+ `speakers/labels.rs`) — the speaker map, names on lines, lines split by voice.
+- `speakers/naming.rs` — who each voice is: names suggested from what's said and the invite (+ the AI's checked answers), "Speaker 2 is Priya?" cards, "It was me".
+- `speakers/call_ui.rs` — who the call app shows talking (experimental, off): UI Automation reads on the meeting's clock; `yap.exe call-dump`.
 
 **Call detection and guard rails** — [call-detection-and-guards.md](./docs/architecture/call-detection-and-guards.md)
 - `meeting_detect.rs` — notices calls (mic consent store), prompts, per-app choice, fatigue, tray item.
@@ -173,7 +176,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `capture.rs` — hides meeting windows from screen capture while recording.
 
 **Calendar** — [calendar.md](./docs/architecture/calendar.md) (guide: [`docs/calendar.md`](./docs/calendar.md))
-- `calendar.rs` (+ `calendar/`) — Google/iCal connections, sync, parsing, reminder cards, notes tie-in.
+- `calendar.rs` (+ `calendar/`) — Google/iCal connections, sync, parsing, reminder cards, notes tie-in, pre-meeting briefs (`calendar/brief.rs`: last time, open items, memory, the agenda, every line cited; the AI's lines checked).
 
 **Yap bar** — [yap-bar.md](./docs/architecture/yap-bar.md)
 - `bar.rs` — the bar: regions, click-through, never focused, placement, one card at a time.
@@ -196,11 +199,12 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `updates.rs` — background update checks and downloads, announcements, safe install.
 
 **App shell, config, tests** — [app-shell.md](./docs/architecture/app-shell.md), [config-and-data.md](./docs/architecture/config-and-data.md), [build-and-test.md](./docs/architecture/build-and-test.md)
-- `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` run before the app starts.
+- `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` / `call-dump` run before the app starts.
 - `lib.rs` — Tauri setup: plugins, hook + pipeline, tray, shutdown cleanup, DWM-cloak init.
-- `tray.rs` — tray icon and menu (models, Paste last transcript, Record this call, updates).
+- `tray.rs` — tray icon and menu (models, Paste last transcript, Read selection aloud, Record this call, updates).
 - `context_menu.rs` — WebView2's context menu cut to editing commands (Inspect: debug + Shift).
 - `procs.rs` — process lineage; the kill-on-close job so helpers never outlive Yap.
+- `webview_memory.rs` — hidden windows' webviews get WebView2's low memory target; back to normal on screen.
 - `portable.rs` — portable mode (a `portable` marker → `<exe>/Data`).
 - `commands.rs` — the Tauri commands; logging is `lib.rs init_logging` (app-shell.md).
 - `config.rs` — `YapConfig`, load/save, migrations, dictionary helpers (config-and-data.md).
@@ -214,15 +218,16 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `lib/appearance.js` — General → Appearance in every window: reading font/size tokens (`--yap-font-reading`, `--yap-reading-scale`) for chats/notes/notepad only, and reduced Motion.
 - `lib/ControlPanel.svelte` — the main window (label `settings`): sidebar, Settings modal, title bar.
 - `ui/toast.svelte.js` + `ui/noticePolicy.js` — app-wide toasts running the page's notice policy.
-- `HomeView` / `InsightsView` / `UploadView` — dictation feed, stats, audio-file transcription.
+- `HomeView` / `InsightsView` / `UploadView` — dictation feed, stats, audio-file transcription; `lib/appNames.js` (apps by their names), `lib/aiErrors.js` (AI failures in plain words).
+- `App.svelte` — one chunk per window: each loads only its own view (the Yap bar ~150 KB, not the whole app).
 - `DictionaryView.svelte` — corrections and snippets ([dictionary.md](./docs/architecture/dictionary.md)).
 - `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)).
 - `lib/markdown.js` — every rendered answer/note: markdown-it + DOMPurify, citation pills ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
 - `ChatView.svelte` + `ChatModelPicker.svelte` — Chat and its model picker ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)).
-- `MeetingsView` / `Notepad` / `SplitPreview` — meetings and the notepad ([meetings.md](./docs/architecture/meetings.md)).
+- `MeetingsView` / `Notepad` / `SplitPreview` — meetings and the notepad ([meetings.md](./docs/architecture/meetings.md)); `BriefView.svelte` + `brief.js` — a meeting's pre-meeting brief everywhere it shows ([calendar.md](./docs/architecture/calendar.md#pre-meeting-briefs)); `SpeakerMenu` / `SpeakerCard` — a speaker's menu and the name cards ([speakers.md](./docs/architecture/speakers.md)).
 - `ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
-- `Overlay.svelte` + `bar/` — the Yap bar's page ([yap-bar.md](./docs/architecture/yap-bar.md)).
+- `Overlay.svelte` + `bar/` — the Yap bar's page, the reading card `bar/ReadingCard.svelte` ([yap-bar.md](./docs/architecture/yap-bar.md)).
 - `Settings.svelte` + `settings/` — Settings, always mounted in the modal: the nav by scope with search (`settingsIndex.js`; old links land via `nav.js` aliases), General / Dictation / Shortcuts / Meetings / Privacy & data / About as page components, one row style in `lib/ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch.
 - `MemorySection.svelte` + `memory.svelte.js` — Settings → Assistant → Memory and the "Yap remembered…" toast ([memory.md](./docs/architecture/memory.md)).
 - `AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
@@ -370,10 +375,10 @@ replies off. Every setting, file and default: [config-and-data.md](./docs/archit
 
 - **Dictation is complete and real**: local transcription (Whisper/Vulkan + ONNX/DirectML, or the processor where that's faster on the PC), push-to-talk, AI cleanup (cloud or on-device Qwen) with "Use what I said", Commands, smart pasting into terminals and chat apps, dictionary learning, Undo, a day of audio to run a dictation again.
 - **Meetings**: recorder (You/Them), rolling digests + action plan, the notepad, call detection, guard rails, the calendar, beta speaker separation.
-- **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation).
+- **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation).
 - **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly.
 - Much is unit-, e2e- and robot-tested but not yet tried in real use (a real call, real AI apps, answers heard on speakers…).
-- **Not yet done**: Chat streaming and semantic search, a rich notes editor, naming voices by themselves, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.
+- **Not yet done**: Chat streaming and semantic search, a rich notes editor, the call app's speaker names checked in a real call, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.
 
 What was tested how, and every gap: [status.md](./docs/architecture/status.md).
 

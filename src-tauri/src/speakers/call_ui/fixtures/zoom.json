@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "app": "zoom",
+  "source": "synthetic, not a capture: built from public descriptions of the app and Wispr Flow's marker defaults; replace with a real `yap.exe call-dump` capture",
+  "snapshots": [
+    {
+      "atMs": 0,
+      "readMs": 25,
+      "root": {
+        "type": "Window",
+        "name": "Zoom Meeting",
+        "class": "ZPContentViewWndClass",
+        "children": [
+          {
+            "type": "Pane",
+            "name": "Sam Patel (Host), Active speaker",
+            "class": "VideoContainerWnd"
+          },
+          {
+            "type": "List",
+            "name": "Participants",
+            "class": "ZPPlistWndClass",
+            "children": [
+              {
+                "type": "ListItem",
+                "name": "Sam Patel (Host), Computer audio unmuted, Video on"
+              },
+              {
+                "type": "ListItem",
+                "name": "Imogen Hart (Me)"
+              }
+            ]
+          },
+          {
+            "type": "ToolBar",
+            "name": "Meeting controls",
+            "children": [
+              {
+                "type": "Button",
+                "name": "Mute"
+              },
+              {
+                "type": "Button",
+                "name": "Stop Video"
+              },
+              {
+                "type": "Button",
+                "name": "End"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "speaking": [
+          "Sam Patel"
+        ],
+        "selfSpeaking": false,
+        "selfName": "Imogen Hart"
+      }
+    },
+    {
+      "atMs": 1000,
+      "readMs": 24,
+      "root": {
+        "type": "Window",
+        "name": "Zoom Meeting",
+        "class": "ZPContentViewWndClass",
+        "children": [
+          {
+            "type": "Text",
+            "name": "You are speaking",
+            "class": "ZPContentViewWndClass"
+          },
+          {
+            "type": "List",
+            "name": "Participants",
+            "class": "ZPPlistWndClass",
+            "children": [
+              {
+                "type": "ListItem",
+                "name": "Sam Patel (Host)"
+              },
+              {
+                "type": "ListItem",
+                "name": "Imogen Hart (Me)"
+              }
+            ]
+          },
+          {
+            "type": "ToolBar",
+            "name": "Meeting controls",
+            "children": [
+              {
+                "type": "Button",
+                "name": "Mute"
+              },
+              {
+                "type": "Button",
+                "name": "Stop Video"
+              },
+              {
+                "type": "Button",
+                "name": "End"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "speaking": [],
+        "selfSpeaking": true,
+        "selfName": "Imogen Hart"
+      }
+    },
+    {
+      "atMs": 2000,
+      "readMs": 26,
+      "root": {
+        "type": "Window",
+        "name": "Zoom Meeting",
+        "class": "ZPContentViewWndClass",
+        "children": [
+          {
+            "type": "Pane",
+            "name": "Siobhan Kelly, Active speaker",
+            "class": "VideoContainerWnd"
+          },
+          {
+            "type": "List",
+            "name": "Participants",
+            "class": "ZPPlistWndClass",
+            "children": [
+              {
+                "type": "ListItem",
+                "name": "Sam Patel (Host)"
+              },
+              {
+                "type": "ListItem",
+                "name": "Siobhan Kelly"
+              },
+              {
+                "type": "ListItem",
+                "name": "Imogen Hart (Me)"
+              }
+            ]
+          },
+          {
+            "type": "ToolBar",
+            "name": "Meeting controls",
+            "children": [
+              {
+                "type": "Button",
+                "name": "Mute"
+              },
+              {
+                "type": "Button",
+                "name": "Stop Video"
+              },
+              {
+                "type": "Button",
+                "name": "End"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "speaking": [
+          "Siobhan Kelly"
+        ],
+        "selfSpeaking": false
+      }
+    },
+    {
+      "atMs": 3000,
+      "readMs": 23,
+      "root": {
+        "type": "Window",
+        "name": "Zoom Meeting",
+        "class": "ZPContentViewWndClass",
+        "children": [
+          {
+            "type": "List",
+            "name": "Participants",
+            "class": "ZPPlistWndClass",
+            "children": [
+              {
+                "type": "ListItem",
+                "name": "Sam Patel (Host)"
+              },
+              {
+                "type": "ListItem",
+                "name": "Imogen Hart (Me)"
+              }
+            ]
+          },
+          {
+            "type": "ToolBar",
+            "name": "Meeting controls",
+            "children": [
+              {
+                "type": "Button",
+                "name": "Mute"
+              },
+              {
+                "type": "Button",
+                "name": "Stop Video"
+              },
+              {
+                "type": "Button",
+                "name": "End"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "speaking": [],
+        "selfSpeaking": false
+      }
+    }
+  ]
+}

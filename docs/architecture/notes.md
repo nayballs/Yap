@@ -80,13 +80,17 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   will move to Personal."; the view goes to Personal if it was on it),
   Personal and Meetings showing both off with the reason; a note's
   **Rename** (its title, focused), **Move to ▸** (the folders, this one
-  ticked), **Copy as Markdown** (`noteMarkdown`), **Export…**, **Delete…**
+  ticked), **Read aloud** / Stop reading (`readNote`), **Copy as Markdown** (`noteMarkdown`), **Export…**, **Delete…**
   (asked first; a meeting note goes through `meeting_delete`, which stops its
   recording first and makes the notepad let go, any other through
   `note_delete`); meta chip row shows date + attendees popover
   → add/remove participants, folder-move menu w/ New folder option, meeting
   **Record / ● 12:34 · Pause / Resume** chip (Pause = `meeting_pause`) and,
-  on meeting notes, a **Notepad** chip (`notepad_open`), export-to-markdown;
+  on meeting notes, a **Notepad** chip (`notepad_open`), **🔊 Read aloud**
+  (■ while it reads: the note as shown — its title, then the Enhanced
+  summary on that tab, else the note — read with the reading card on the Yap
+  bar, `read_aloud.rs`; id `note:<id>`; it reads on if you leave Notes),
+  export-to-markdown;
   ActionPicker split button + ActionManager dialog for custom actions +
   protected built-ins — while recording it becomes **End meeting &
   summarise** (`meeting_end` → Rust writes the Action Plan, shown here as it
@@ -97,7 +101,7 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   title shows muted); **Raw ↔ Enhanced dual-view + staleness dot** (the safe
   renderer in `lib/markdown.js`, shared with chat answers, the notepad, the
   Voice Assistant's card and update notes — see "The markdown renderer"
-  below) with **Copy markdown / Copy text** (`markdownToText`:
+  below) with **Copy as Markdown / Copy as text** (`markdownToText`:
   ☐ tasks, plain headings); embedded per-note **"Ask anything…" bar** = Chat
   scope grounded in the note, with mic button for in-box dictation, and on a
   meeting note the **one-tap helper chips** over it (`meetingHelpers` from
@@ -163,7 +167,7 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   `a.md-link`, `.md-quote`, `.md-rule` live in app.css (quotes and rules in
   the text's own colour, for light views, dark toasts and the bar alike);
   each view sets its own paragraph, list and heading spacing, and Chat its
-  pills. `markdownToText` (Copy text) is line-based: ☐ / ☑ tasks, • bullets,
+  pills. `markdownToText` (Copy as text) is line-based: ☐ / ☑ tasks, • bullets,
   plain headings, no bold or code marks. Tests: `e2e/markdown.spec.js`
   (Node + jsdom: lists, tables, links, raw HTML, hostile input against the
   allowlist, citations), plus the rendered views in chat-model, web-search

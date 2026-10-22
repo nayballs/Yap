@@ -1,0 +1,38 @@
+{
+  "name": "brief-overlapping-names",
+  "description": "Two Priyas: the meeting is with Priya Patel; a pricing review with Priya Shah, and Priya Shah in memory, must stay out.",
+  "meeting": {
+    "title": "Budget check-in",
+    "in_minutes": 10,
+    "attendees": ["Priya Patel"],
+    "description": ""
+  },
+  "notes": [
+    {
+      "title": "Pricing review",
+      "days_ago": 4,
+      "participants": ["Priya Shah"],
+      "plan": "## Action plan\n### Priya\n- [ ] Send the competitor analysis\n\n## Decisions\n- Raise the team plan price in January."
+    },
+    {
+      "title": "Budget planning",
+      "days_ago": 9,
+      "participants": ["Priya Patel", "Daniel Moss"],
+      "plan": "The quarter's budget, travel and the forecast.\n\n## Action plan\n### Priya\n- [ ] Confirm the travel budget (due: end of the month)\n### Daniel\n- [ ] Collect the conference receipts\n### You\n- [ ] Update the forecast spreadsheet\n\n## Decisions\n- Freeze new software subscriptions until the next quarter."
+    }
+  ],
+  "memory": [
+    { "section": "people", "title": "Priya Shah", "summary": "Product lead at Acme", "details": [] },
+    { "section": "people", "title": "Priya Patel", "summary": "Finance manager", "details": ["Approves travel"] }
+  ],
+  "expect": {
+    "first": false,
+    "cites": ["Budget planning"],
+    "not_cited": ["Pricing review"],
+    "contains": ["Finance manager"],
+    "open_items": ["travel budget", "forecast spreadsheet"],
+    "no_open_items": ["competitor analysis", "receipts"],
+    "owners": ["You", "Priya Patel"],
+    "not_contains": ["Product lead", "competitor", "team plan price", "January"]
+  }
+}

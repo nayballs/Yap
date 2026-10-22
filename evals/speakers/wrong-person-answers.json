@@ -1,0 +1,40 @@
+{
+  "name": "wrong-person-answers",
+  "description": "Someone asked by name has dropped off; another person answers for him.",
+  "tags": [
+    "handover",
+    "trap"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Sam Patel",
+    "Ola Nowak",
+    "Grace Okafor"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Next item is the quarterly numbers. Sam, can you share those?"
+    ],
+    [
+      "them-2",
+      "Sam's just dropped off, his connection went. I have the same sheet, I can talk to it."
+    ],
+    [
+      "them-1",
+      "Please do, thanks Ola."
+    ],
+    [
+      "them-2",
+      "Revenue is up six percent on last quarter, mostly from the new enterprise deals, and costs are flat."
+    ],
+    [
+      "them-1",
+      "Great, that's a good result."
+    ]
+  ],
+  "truth": {
+    "them-1": "Grace Okafor",
+    "them-2": "Ola Nowak"
+  }
+}

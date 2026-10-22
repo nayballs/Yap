@@ -301,6 +301,7 @@ static class Program {
             case "ctrl+w": mod = 0x11; vk = 0x57; break;
             case "ctrl+end": mod = 0x11; vk = 0x23; break;
             case "ctrl+v": mod = 0x11; vk = 0x56; break;
+            case "ctrl+a": mod = 0x11; vk = 0x41; break;
             default: return Obj("ok", false, "error", "unknown key " + key);
         }
         var inputs = new List<Native.INPUT>();

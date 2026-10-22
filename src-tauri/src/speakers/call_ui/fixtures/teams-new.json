@@ -1,0 +1,412 @@
+{
+  "version": 1,
+  "app": "teams",
+  "source": "synthetic, not a capture: built from public descriptions of the app and Wispr Flow's marker defaults; replace with a real `yap.exe call-dump` capture",
+  "snapshots": [
+    {
+      "atMs": 0,
+      "readMs": 120,
+      "root": {
+        "type": "Window",
+        "name": "Weekly sync | Microsoft Teams",
+        "class": "TeamsWebView",
+        "children": [
+          {
+            "type": "Pane",
+            "name": "Weekly sync | Microsoft Teams",
+            "class": "Chrome_WidgetWin_1",
+            "children": [
+              {
+                "type": "Document",
+                "name": "Microsoft Teams",
+                "children": [
+                  {
+                    "type": "Group",
+                    "name": "Video gallery",
+                    "class": "fui-Flex",
+                    "children": [
+                      {
+                        "type": "Group",
+                        "name": "Priya Shah",
+                        "class": "fui-Flex ___1x8ln6p",
+                        "children": [
+                          {
+                            "type": "Text",
+                            "name": "Priya Shah",
+                            "class": "ui-text"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "fui-Primitive vdi-frame-occlusion"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "name": "Shah, Rochelle, Muted",
+                        "class": "fui-Flex ___1x8ln6p",
+                        "children": [
+                          {
+                            "type": "Text",
+                            "name": "Shah, Rochelle",
+                            "class": "ui-text"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "name": "Imogen Hart (You)",
+                        "class": "fui-Flex ___1x8ln6p",
+                        "children": [
+                          {
+                            "type": "Text",
+                            "name": "Imogen Hart (You)",
+                            "class": "ui-text"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "List",
+                    "name": "Participants"
+                  },
+                  {
+                    "type": "ToolBar",
+                    "name": "Meeting controls",
+                    "children": [
+                      {
+                        "type": "Button",
+                        "name": "Mic"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Camera"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Leave"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "speaking": [
+          "Priya Shah"
+        ],
+        "selfSpeaking": false,
+        "selfName": "Imogen Hart"
+      }
+    },
+    {
+      "atMs": 1000,
+      "readMs": 118,
+      "root": {
+        "type": "Window",
+        "name": "Weekly sync | Microsoft Teams",
+        "class": "TeamsWebView",
+        "children": [
+          {
+            "type": "Pane",
+            "name": "Weekly sync | Microsoft Teams",
+            "class": "Chrome_WidgetWin_1",
+            "children": [
+              {
+                "type": "Document",
+                "name": "Microsoft Teams",
+                "children": [
+                  {
+                    "type": "Group",
+                    "name": "Video gallery",
+                    "class": "fui-Flex",
+                    "children": [
+                      {
+                        "type": "Group",
+                        "name": "Priya Shah",
+                        "class": "fui-Flex ___1x8ln6p",
+                        "children": [
+                          {
+                            "type": "Text",
+                            "name": "Priya Shah",
+                            "class": "ui-text"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "name": "Shah, Rochelle",
+                        "class": "fui-Flex ___1x8ln6p",
+                        "children": [
+                          {
+                            "type": "Text",
+                            "name": "Shah, Rochelle",
+                            "class": "ui-text"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "fui-Primitive vdi-frame-occlusion"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "name": "Imogen Hart (You)",
+                        "class": "fui-Flex ___1x8ln6p",
+                        "children": [
+                          {
+                            "type": "Text",
+                            "name": "Imogen Hart (You)",
+                            "class": "ui-text"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "List",
+                    "name": "Participants"
+                  },
+                  {
+                    "type": "ToolBar",
+                    "name": "Meeting controls",
+                    "children": [
+                      {
+                        "type": "Button",
+                        "name": "Mic"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Camera"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Leave"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "speaking": [
+          "Rochelle Shah"
+        ],
+        "selfSpeaking": false,
+        "selfName": "Imogen Hart"
+      }
+    },
+    {
+      "atMs": 2000,
+      "readMs": 125,
+      "root": {
+        "type": "Window",
+        "name": "Weekly sync | Microsoft Teams",
+        "class": "TeamsWebView",
+        "children": [
+          {
+            "type": "Pane",
+            "name": "Weekly sync | Microsoft Teams",
+            "class": "Chrome_WidgetWin_1",
+            "children": [
+              {
+                "type": "Document",
+                "name": "Microsoft Teams",
+                "children": [
+                  {
+                    "type": "Group",
+                    "name": "Video gallery",
+                    "class": "fui-Flex",
+                    "children": [
+                      {
+                        "type": "Group",
+                        "name": "Priya Shah",
+                        "class": "fui-Flex ___1x8ln6p",
+                        "children": [
+                          {
+                            "type": "Text",
+                            "name": "Priya Shah",
+                            "class": "ui-text"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "name": "Shah, Rochelle",
+                        "class": "fui-Flex ___1x8ln6p",
+                        "children": [
+                          {
+                            "type": "Text",
+                            "name": "Shah, Rochelle",
+                            "class": "ui-text"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "name": "Imogen Hart (You)",
+                        "class": "fui-Flex ___1x8ln6p",
+                        "children": [
+                          {
+                            "type": "Text",
+                            "name": "Imogen Hart (You)",
+                            "class": "ui-text"
+                          },
+                          {
+                            "type": "Group",
+                            "class": "fui-Primitive vdi-frame-occlusion"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "List",
+                    "name": "Participants"
+                  },
+                  {
+                    "type": "ToolBar",
+                    "name": "Meeting controls",
+                    "children": [
+                      {
+                        "type": "Button",
+                        "name": "Mic"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Camera"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Leave"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "speaking": [],
+        "selfSpeaking": true,
+        "selfName": "Imogen Hart"
+      }
+    },
+    {
+      "atMs": 3000,
+      "readMs": 130,
+      "root": {
+        "type": "Window",
+        "name": "Weekly sync | Microsoft Teams",
+        "class": "TeamsWebView",
+        "children": [
+          {
+            "type": "Pane",
+            "name": "Weekly sync | Microsoft Teams",
+            "class": "Chrome_WidgetWin_1",
+            "children": [
+              {
+                "type": "Document",
+                "name": "Microsoft Teams",
+                "children": [
+                  {
+                    "type": "Group",
+                    "name": "Video gallery",
+                    "class": "fui-Flex",
+                    "children": [
+                      {
+                        "type": "Group",
+                        "name": "Priya Shah",
+                        "class": "fui-Flex ___1x8ln6p",
+                        "children": [
+                          {
+                            "type": "Text",
+                            "name": "Priya Shah",
+                            "class": "ui-text"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "name": "Sam Patel",
+                        "class": "fui-Flex ___1x8ln6p",
+                        "children": [
+                          {
+                            "type": "Text",
+                            "name": "Sam Patel",
+                            "class": "ui-text"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Group",
+                        "name": "Imogen Hart (You)",
+                        "class": "fui-Flex ___1x8ln6p",
+                        "children": [
+                          {
+                            "type": "Text",
+                            "name": "Imogen Hart (You)",
+                            "class": "ui-text"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "List",
+                    "name": "Participants",
+                    "children": [
+                      {
+                        "type": "ListItem",
+                        "name": "Sam Patel, speaking",
+                        "status": ""
+                      },
+                      {
+                        "type": "ListItem",
+                        "name": "Priya Shah",
+                        "status": ""
+                      }
+                    ]
+                  },
+                  {
+                    "type": "ToolBar",
+                    "name": "Meeting controls",
+                    "children": [
+                      {
+                        "type": "Button",
+                        "name": "Mic"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Camera"
+                      },
+                      {
+                        "type": "Button",
+                        "name": "Leave"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "speaking": [
+          "Sam Patel"
+        ],
+        "selfSpeaking": false
+      }
+    }
+  ]
+}

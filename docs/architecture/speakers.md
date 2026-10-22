@@ -70,8 +70,8 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   from two (as the spike), ~50% on phone-only audio (the fallback's job).
 - **`speakers.rs`** — **who said what** in a meeting: the note's speaker map
   (`Note::speakers`: voice id → `Speaker {name, email, source: user |
-  platform | voice | calendar | ai, locked, mergedInto, not}`) and the names
-  it puts on lines everywhere. Voices: "you", "them" (the call, not told
+  platform | voice | calendar | ai, locked, mergedInto, not, suggestion}`)
+  and the names it puts on lines everywhere. Voices: "you", "them" (the call, not told
   apart), later "them-1"… (the voice separation), "p-1"… (a person the user
   named on some lines). **Precedence** (OpenWhispr's `speakerAssignmentPolicy`
   by behaviour): the user's name is locked against every automatic relabel,
@@ -84,9 +84,14 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   locked; naming a line after a guess confirms it; `merge` — the more trusted
   name wins, later lines of the merged id follow; `not`; "You" never renamed
   or merged) are the commands `speaker_rename` / `speaker_rename_lines` /
-  `speaker_merge` / `speaker_not` (return the note, emit `yap-note-changed`
-  with `lineSpeakers` + `yap-notes-changed`); `suggest` is the automatic
-  path. **1:1 calls** (`calendar_guess`, from `notes::link_event`): exactly
+  `speaker_merge` / `speaker_not`, plus the name cards' `speaker_suggestion
+  {answer: yes | no | later}` and "It was me" (`speaker_is_me` /
+  `speaker_not_me`) — each returns the note, suggests names again from
+  what's left (`naming::refresh`), and emits `yap-note-changed` with
+  `lineSpeakers` (`[voice, locked, echo]` per line) and `enhancedContent`,
+  + `yap-notes-changed`; a name put on a voice that a summary already
+  called "Speaker 2" is written into the summary and the digests' owners
+  too (`naming::rename_in_summary`). `suggest` is the automatic path. **1:1 calls** (`calendar_guess`, from `notes::link_event`): exactly
   one other invitee (no you, rooms or declines) → "Them" named after them,
   source calendar. `known_people` (attendees + map names) is what owner
   checks accept. **Line timing**: `word_times(text,
@@ -130,7 +135,107 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   timelines; measured with the real engine + Parakeet on the spike's TTS
   meetings (`diarization-real.spec.js`, 2026-10-18): 93.6–99.5% of words on
   the right person, every call line labelled, a name ~15 s (≤ ~23 s) after
-  the words.
+  the words. Each pass ends with the names (`naming::refresh`, with the call
+  app's readings once the pass gave its voices ids); a voice that repeats
+  yours never takes "Them"'s 1:1 guess (`naming::repeats_you`).
+- **`speakers/naming.rs`** — **who each voice is**: names suggested for a
+  meeting's voices from what the meeting says and who was invited, for the
+  person to confirm ("Speaker 2 is Priya?" — Yes / Someone else / Not
+  now). No voiceprints. **Utterances**: every talk line split at its
+  sentences, placed by its word times (in proportion without), in time
+  order across both sides; **turns** = runs of one voice (backchannels —
+  "Yeah.", "Mm-hmm." — skipped when looking for the turn before or after).
+  **Names** (`Roster`): the note's participants (the invite's attendees and
+  any added), names the map already has (the person's or the call app's are
+  *taken*: never suggested for another voice), Memory's People, the call
+  app's readings, and names *said* in the meeting that no list has — in an
+  introduction ("I'm Rochelle", "Ben here", "Declan from legal here"), or
+  twice where someone is handed over to or thanked, a word Windows' spell
+  checker knows in lower case never counting (`memory::Words`); first
+  names and usual short forms ("Kate" → Katherine, "Rob" → Robert,
+  `short_forms`) as aliases where only one person has them; the person's
+  own name (About you) is "You", never a call voice. **Cues** (a weight per
+  (voice, person)): an introduction +1.3–1.8 for the voice saying it
+  ("introducing someone else" — "this is Sam, our new analyst" — is −1);
+  a handover at the end of a turn ("Priya, can you…?", "…, Sam?", "over
+  to you, Siobhan", "the floor's yours", "Hi Sam, can you hear me?") +1.0
+  (+1.2 explicit; ×0.6 / ×0.3 a sentence or two before the turn's end) for
+  the next turn's voice; thanks at the start of a turn ("Thanks, Priya",
+  "Please do, thanks Ola"; "Great point, Sam" +0.7; a greeting right before
+  the name +0.3; split between several names) for the turn before; the
+  voice saying it gets −2 (nobody hands over to or thanks themselves), and
+  any other mention −1 ("Priya will send it", "Sam's dropped off"); the 1:1
+  invite's guess +1.2; the AI's checked answer +1.0; the call app +3 × its
+  share. **Deciding** (`propose`): net ≥ `SUGGEST` (1.0) and a lead of
+  `MARGIN` (0.6) over the voice's next name and the name's next voice; one
+  name a voice, strongest first. **Applied** as Yap's guess (shown "Priya?",
+  the AI told it's a guess, so the action plan reads it) only at net ≥
+  `APPLY` (2.0), lead ≥ 1.5, nothing against it, two separate cues or an
+  introduction, and a name from a list (or said twice); the call app's firm
+  word (≥ 3 readings, ≥ 75% of the voice's) as the call app's name, no
+  card. Never "the one invitee left" — measured wrong when an invitee is
+  away and someone uninvited speaks. **"It was me"**: a voice ≥ 60% of
+  whose words (≥ 8) repeat one of your lines within 6 s (`echo_lines`, LCS)
+  is asked "Speaker 3 is you?"; `is_me` merges it into You (the one way a
+  voice merges into You) and marks its repeats `echo` (hidden, out of the
+  summaries); `not_me` undoes it and never asks again. **`refresh`** writes
+  the proposals into the map (`Speaker::suggestion {name, email, me,
+  confidence, why: {kind, by, quote}, later}`): new or changed cards
+  (`later` survives while the name stays), stale ones gone with the guess
+  they put on; one from the AI or the call app stays while nothing
+  contradicts it. Runs after each labelling pass, after the person's own
+  speaker edits, every 10 s of a recording with no speaker engine
+  (`labels::after_ingest`, "Them" only), and at its end. **The AI step**
+  (`ask_model`, from `meeting_end::write_action_plan` before the plan; only
+  a model `tools::supports_tools` passes — cloud, or ≥ 4B on this PC): one
+  question per voice told apart that said ≥ 10 words and has no firm name
+  (≤ `ASK_MAX` 4), with the names still open and an excerpt of ≤ 650 words
+  (the lines around where a name is said near that voice, then its first
+  lines; one line per run of a voice), `ASK_PROMPT` (only addressed then
+  answers / thanked after / introduces itself; never topic or style; else
+  "unknown"); a model on this PC answers under the JSON schema as
+  llama.cpp's grammar, `evidence` before `name` (the properties go out in
+  alphabetical order, and the grammar follows them), inside the sidecar's
+  Busy guard and never during a dictation (`meeting_summary::
+  chat_beside_dictation_with`); `check_answer` keeps an answer only when
+  its evidence, labels off, is in the excerpt word for word (or nearly),
+  says the name, and isn't the voice itself naming that person (unless an
+  introduction). Settings → Meetings → "Suggest who's speaking"
+  (`config.meeting_speaker_names`, on) switches all of it. Logs: counts.
+- **`speakers/call_ui.rs`** — **who the call app shows talking**
+  (experimental, `config.meeting_call_names`, off; no setting shows it).
+  `begin` (from `labels::begin`) watches each recording; with the flag on
+  (never in a test run) a `call-ui` thread finds the live call's window
+  (`meeting_detect::call_window_exes` + `notepad::call_window_quiet`, again
+  every 10 s until found) and reads it every 800 ms (slower if a read is
+  slow, nothing while it's minimised): `win::snapshot` — one cached UI
+  Automation request (`ElementFromHandleBuildCache`, `TreeScope_Subtree`,
+  the raw view, ≤ 30,000 elements, 2 s timeouts) of control type, name,
+  class (a Chromium page's DOM `class`), automation id, item status, help
+  text, ARIA role and properties, offscreen; nothing invoked, focused or
+  moved, no screenshot. `read` applies the app's `Profile`
+  (`call_ui/profiles.json`, built from Wispr Flow's defaults — Meet's
+  speaking class `kssMZb` on a tile `oZRSLe`, Teams' `vdi-frame-occlusion`,
+  Zoom's "Active speaker" texts; an app's entry in
+  `<data>/call_speakers.json` wins, no rebuild): a speaking class → the
+  tile's name (its tile class, else the nearest named element); a speaking
+  text ("{name}, speaking", "Active speaker: {name}"); self marks ("(You)",
+  "(Me)", "you are speaking"); names cleaned (`clean_name`: marks and
+  states off, "Shah, Priya" → "Priya Shah", control words never a name).
+  Readings go on the recording's clock (`meeting::them_clock_ms`, the
+  engine's clock) as spans; `align` gives each voice the name shown alone
+  (one person, not you) for most of its speech (≥ 3 readings' worth, ≥ 60%;
+  the highlight counted from 0.3 s after a stretch begins to 1.2 s after it
+  ends): `votes_for` (voices told apart) / `votes` ("Them" with no engine:
+  only a name shown ≥ 90% of the time) → `naming`. `finish` once the
+  recording's final labels are in. Debug-only `e2e_call_readings {spans,
+  selfName}` stands in for the window. **`yap.exe call-dump`** (`dump_main`,
+  any build; a release exe prints nothing but still writes the file): the
+  call window (by `--window` title text, else the live call app's or a
+  browser showing a meeting) read `--count` times every `--every` ms into a
+  `Dump` JSON (each read with what the rules found), `--names
+  "Real=Stand-in;…"` swapping names for sharing. The fixtures in
+  `call_ui/fixtures/` are synthetic, not captures.
 
 ## Testing the speaker engine
 
@@ -151,3 +256,158 @@ lines without a model: `speaker-labels.spec.js` (scripted timelines,
 `e2e_diarize_timeline`). The real download once:
 `cargo test real_download -- --ignored --nocapture`
 (`YAP_DIARIZATION_DOWNLOAD_DIR`, ~112 MB).
+The names: `cargo test speakers::` (the rules, the cards' answers, "It was
+me", the AI step's checks, the call reader's fixtures and alignment),
+`cargo test eval::speakers` (Rust alone over every meeting in
+`evals/speakers/`: **no wrong name allowed**, coverage ≥ 55%),
+`cargo test --lib -- --ignored reads_a_real_window` (the real UI
+Automation read, on a window of the test's own far off screen), and the e2e
+`speaker-names.spec.js` (the card in the notepad and the Notes view, Yes /
+Someone else / Not now, the names in the action plan's input, the AI's
+checked answer at the end of a meeting, "It was me" and Undo, the call
+app's readings naming voices through `e2e_call_readings`).
+
+## Names for the voices: evaluations
+
+`yap.exe eval --speakers [--model …]` (`eval/speakers.rs`,
+[`docs/model-evals.md`](../model-evals.md)) scores Rust alone, then Rust +
+each model, on `evals/speakers/*.json`: 31 fictional meetings whose call
+lines are already told apart as the engine would (`them-1`…), their
+attendees, what Memory knows, and the truth per voice (`null`: nobody to
+name — two people the engine merged, a chair nobody names). Traps on
+purpose: an invitee off sick and talked about, someone asked by name who
+dropped off and another answering, "Will" and "Mark" used as words, two
+Sams, "Thanks Priya and Sam", greetings while people join, your voice on
+the call side (with and without a 1:1 invite), an invitee away and someone
+uninvited chairing, a voice split in two, two merged; five written after
+the rules were tuned (`holdout-*`). Per voice: **correct**, **wrong** (a
+name that isn't theirs — worse than "Speaker 2"), **missed**; *named* = put
+on the voice as Yap's guess (what the action plan reads before anyone
+answers), *suggested* = every card. 73 voices have a name to find.
+
+| Run (2026-10-22) | Named correct | Named wrong | Suggested correct | Suggested wrong | AI questions (kept / thrown out by Rust) | Per question |
+|---|---|---|---|---|---|---|
+| Rust only | 25 (34%) | 0 | 44 (60%) | 0 | — | — |
+| Rust + Qwen3.5-4B, graphics card (`--ngl 999`) | 27 (37%) | 0 | 46 (63%) | 0 | 45 (4 / 4) | ~0.2 s |
+| Rust + Qwen2.5-1.5B, processor | 25 (34%) | 0 | 44 (60%) | 0 | 45 (0 / 37) | ~11 s |
+
+What the numbers say: the transcript's own cues carry it (names said where
+the meeting hands over, thanks and introduces); the 4B adds a little
+(it read "I'm joined by my colleague Ben" before Ben spoke; two of its
+four kept answers were names Rust had already); the 1.5B answered with
+names it couldn't back 37 times out of 45 and Rust threw every one out —
+so the AI step only asks a model that can call tools. Misses are mostly
+voices nobody names (a chair), and voices the engine split or merged. The
+holdouts, before three general fixes ("Sorry Hannah, go on" isn't thanks;
+"the floor's yours"; short forms like Kate / Rob), had one name that was
+right but in another form ("Kate" for Katherine) and more misses; after,
+none wrong. Coverage on real meetings will be lower than this: these are
+written to have names in them.
+
+Before the 4B's numbers counted, two things were fixed from its
+transcripts: its schema put `name` before `quote` (alphabetical), so it
+named before it found the words, and said "unknown" to all 45; and it
+quoted lines with their labels ("Speaker 1: Thanks, Priya…"), which the
+first check threw out.
+
+## Reading the call app: what a real call has to show
+
+Nobody can join a call from the build machine, so `call_ui.rs`'s rules are
+untested against a real Teams, Zoom or Meet window: the markers in
+`call_ui/profiles.json` are Wispr Flow's remote defaults and what's public
+(Wispr's own notes say Teams on Windows stays anonymous for them, and Zoom
+names only in English). One capture per app settles it. **Steps**
+(maintainer, in a real call with at least two other people, cameras on
+for some and off for others):
+
+1. Use a debug build's `yap.exe` (Yap - Dev's, or `cargo build` in
+   `src-tauri/`): it prints as it reads. The installed (release) exe writes
+   the same file but prints nothing.
+2. Start the call and leave its window **on screen, not minimised** (a
+   minimised window shows nothing). Gallery view first.
+3. In a terminal: `yap.exe call-dump --app teams --count 90 --every 1000
+   --out teams-gallery.json --names "Their Real Name=Priya Shah;Other Real
+   Name=Sam Patel;Your Name=Imogen Hart"` (`--app zoom`, `--app meet`; for a
+   browser meeting add `--window "Meet -"` or `--window "Microsoft
+   Teams"`). It reads the window 90 times, once a second — read only.
+4. While it runs, **talk in turns and note the times**: person A ~10 s,
+   person B ~10 s, you ~10 s, A and B at once ~5 s, silence ~5 s. The file's
+   `atMs` is from the start; each read's `found` is what the current rules
+   saw.
+5. Again for: speaker view (Teams "Speaker", Zoom "Speaker view"), with
+   someone sharing a screen, with the participants list open. One file each.
+6. Apps: the new Teams app, Zoom's desktop app, Google Meet in Edge and in
+   Chrome, Teams in a browser — whichever calls come up.
+7. **Check each file before it leaves the PC**: search it for the real
+   names (the `--names` swap misses nicknames and email addresses) and for
+   chat messages; it holds whatever the window showed. Keep the raw files
+   in the private repo or `references/`, never this one.
+8. With a file: where `found` stays empty, compare a read where someone
+   talks with one where nobody does (an element whose `class`, `name`,
+   `status` or `aria` changes), put that marker in
+   `<data>/call_speakers.json` (the same shape as `profiles.json`; an app's
+   entry there wins), re-run `call-dump` (or point a unit test at the
+   file) until `found` matches who talked; then move it into
+   `profiles.json`, and add the cut-down, renamed dump to
+   `call_ui/fixtures/` with `expect` set on its reads.
+9. Then try it whole: Yap - Dev with `"meetingCallNames": true` in
+   config.json and "Tell speakers apart" on, record a meeting during a real
+   call: the voices should take the people's names, no "?", within ~15 s
+   of the labels.
+
+## The speaker engine measured (2026-10-22), and why it stays in beta
+
+`cargo test --test diarize_child -- --ignored --nocapture` (the real child,
+started as Yap starts it, frame-level error with a 0.25 s collar and the
+best speaker mapping, overlap scored) on the spike's Windows-voice meetings
+and on new ones made from **Kokoro** voices (eight distinct US/UK voices
+reading the spike's 70 meeting sentences, mixed by the spike's composer;
+the scripts and WAVs are in `references/diarization-spike/` —
+`scripts/kokoro_utts.py`, `scripts/compose_kokoro.py`,
+`audio/conv-kokoro/`). The PC was busy (other builds and benchmarks), so the
+times are high; the error isn't affected.
+
+| Meeting | People | Found | Error |
+|---|---|---|---|
+| Kokoro, 2 / 3 / 4 voices, clean | 2 / 3 / 4 | all | 0.4% / 3.0% / 1.6% |
+| Kokoro, 5 / 6 voices, clean | 5 / 6 | all | 7.7% / 10.0% |
+| Kokoro, 4 / 6 voices, overlaps, levels −9…0 dB, noise at 15 dB | 4 / 6 | all | 0.3% / 5.5% |
+| Kokoro, crosstalk (half the turns start 0.5–2.5 s early, backchannels over most long turns), 3 / 4 voices | 3 / 4 | all | 0.6% / 0.8% |
+| Kokoro + Windows voices mixed, 5, overlaps, noise at 20 dB | 5 | 5 | 1.6% |
+| Kokoro, 4 voices, 30 min | 4 | 4 | 0.3% |
+| **Three similar voices** (three US women) | 3 | **2** | **32.9%** |
+| Spike: 2 / 3 voices clean, 3 noisy, 3 / 4 dial-ins, 4 hard (Opus) | — | all | 2.7% / 1.5% / 0.7% / 0.4% / 8.0% / 2.3% |
+| Spike: 4–6 voices made from three (pitch-shifted copies) | 4–6 | 5–6 | 12.5–21.0% |
+| Spike: 30 / 60 min, Opus | 4 | 4 | 0.3% / 0.7% |
+| Spike: everyone on a phone line | 2 / 3 | 1 / 2 | 48.0% / 50.9% |
+
+**CPU and memory over a one-hour meeting** (`long60_opus`, the engine as
+Yap runs it — 4 OpenMP threads, a timeline every 5 s of audio, below-normal
+priority — CPU time read by psutil, `scripts/cpu_cost.py` beside the others): **391 CPU seconds an hour of meeting**,
+on average **~11% of one core** while it records (0.7% of this 16-thread
+PC), **148 MB** at most; the same hour fed as fast as it would take it ran in
+122 s. **A resumed meeting** (`diarization-real.spec.js`, the real engine
+on the spike's 3-voice meeting recorded twice into one note): a second
+engine for the second recording, its voices Speaker 4–6 after the first's
+1–3, the first recording's lines untouched. **The download** (`cargo test
+diarize::registry::tests::real_download -- --ignored`, the pinned NVIDIA
+release + Hugging Face commit): 112.5 MB in all downloaded, SHA-256 checked,
+unpacked into place with its licences and NOTICE files, passed.
+
+**Verdict: "Tell speakers apart" stays beta and off by default.** Distinct
+voices are told apart well (≤ 3% for 2–4 people, overlap and crosstalk
+included, steady over an hour) and it's cheap. But: every number above is
+synthetic speech — not one real call has been measured; voices that sound
+alike merge (three similar women came out as two, 33% error), and that is
+the failure that hurts most, because one "Speaker 2" then holds two people
+(name suggestions abstain on such a voice, but its lines are mixed); 5–6
+people climb to 8–10%; phone-only calls are ~50% wrong; and the runtime is
+NeMo-Speech.cpp 0.2.0, whose asserts abort the child (Yap restarts it, ≤
+2). The Settings hint now says so plainly ("measured on test meetings, not
+yet on real calls; voices that sound alike can come out as one"). What
+would take it out of beta: one real multi-person call measured (the
+`diarization-real.spec.js` path with a recording of it, or the maintainer's
+own meeting with the call app's names as the truth once `call_ui.rs` is
+checked), and the similar-voices case improved or at least flagged in the
+notepad.
+

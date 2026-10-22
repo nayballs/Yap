@@ -67,6 +67,7 @@ mod partials;
 mod pipeline;
 mod portable;
 mod procs;
+mod read_aloud;
 mod realtest;
 mod recent_audio;
 mod selection;
@@ -81,6 +82,7 @@ mod tts;
 mod updates;
 mod usage;
 mod web;
+mod webview_memory;
 #[cfg(windows)]
 mod win_toast;
 
@@ -121,6 +123,43 @@ pub fn set_autostart_enabled(app: &AppHandle, enabled: bool) -> Result<(), Strin
         manager.disable()
     };
     res.map_err(|e| format!("Failed to set autostart: {}", e))
+}
+
+/// The argument the sign-in launch carries (the autostart Run entry).
+const AUTOSTART_ARG: &str = "--autostart";
+
+/// Does this launch bring Yap's main window up? A launch by the person (the
+/// Start menu, a shortcut, the installer's "Run Yap") does — before
+/// 2026-10-22 a release build started to the tray with nothing on screen
+/// but the Yap bar, so opening Yap seemed to do nothing. Not: a launch at
+/// sign-in, "Start hidden", the first run (onboarding comes up instead) or
+/// the updater's relaunch (`updates::init` brings the window back if it was
+/// open). Pure.
+#[cfg_attr(debug_assertions, allow(dead_code))] // dev builds always show Settings
+fn launch_shows_window(at_sign_in: bool, start_hidden: bool, has_model: bool, after_update: bool) -> bool {
+    !at_sign_in && !start_hidden && has_model && !after_update
+}
+
+/// Was Yap started by the sign-in entry? Its `--autostart`, or — for an
+/// entry written before the argument existed, until the launch below writes
+/// it again — autostart on and Windows up for under ten minutes (with
+/// autostart on, a launch by hand later finds Yap running already and just
+/// brings its window up through single-instance).
+#[cfg_attr(debug_assertions, allow(dead_code))]
+fn launched_at_sign_in(autostart: bool) -> bool {
+    if std::env::args().any(|a| a == AUTOSTART_ARG) {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        let up_ms = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() };
+        autostart && up_ms < 10 * 60 * 1000
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = autostart;
+        false
+    }
 }
 
 /// What the window-state plugin remembers for the main window (see `run`).
@@ -165,6 +204,12 @@ pub fn run_eval() -> i32 {
     eval::run(std::env::args().skip(2).collect())
 }
 
+/// `yap.exe call-dump …` (main.rs): a call window's UI Automation tree,
+/// read only, to a file (`speakers/call_ui.rs`).
+pub fn run_call_dump() -> i32 {
+    speakers::call_ui::dump_main(std::env::args().skip(2).collect())
+}
+
 /// Reload handle for the global log filter — lets the Settings "Debug mode"
 /// toggle (OpenWhispr's Debug Logging section) bump verbosity at runtime
 /// without a restart. See `set_debug_logging`.
@@ -177,12 +222,14 @@ static LOG_RELOAD: std::sync::OnceLock<
 
 /// The filter directives for normal vs debug mode. Debug raises YAP's own
 /// crate to `debug` while keeping dependencies at `info` (whisper/ort/reqwest
-/// at debug would drown the file).
+/// at debug would drown the file). ONNX Runtime's own log (`ort`) stays at
+/// `warn` either way: at `info` every model load wrote ~1,000 lines of graph
+/// optimisation notes, 96% of a release build's log at startup.
 fn log_directives(debug: bool) -> &'static str {
     if debug {
-        "info,yap_lib=debug"
+        "info,ort=warn,yap_lib=debug"
     } else {
-        "info"
+        "info,ort=warn"
     }
 }
 
@@ -350,9 +397,11 @@ pub fn run() {
         // Yap accounts: com.contextmirror.yap:// sign-in links (auth.rs). Must
         // come after single-instance, which forwards links from a second launch.
         .plugin(tauri_plugin_deep_link::init())
+        // A launch at sign-in carries `--autostart`, so it stays in the tray
+        // while a launch by the person brings the window up (`launch_shows_window`).
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            Some(vec![AUTOSTART_ARG]),
         ))
         // Auto-update from GitHub Releases. Driven Rust-side by updates.rs
         // (background checks, download, install-on-request); the plugin's JS
@@ -476,7 +525,12 @@ pub fn run() {
             commands::chat_dictate,
             commands::chat_input_focus,
             commands::configure_assistant_hotkey,
+            commands::configure_read_hotkey,
             commands::assistant_key,
+            read_aloud::read_aloud_text,
+            read_aloud::read_aloud_selection,
+            read_aloud::read_aloud_action,
+            read_aloud::read_aloud_state,
             assistant::chat_view_state,
             assistant::assistant_stop,
             tts::tts_voices,
@@ -536,6 +590,9 @@ pub fn run() {
             speakers::speaker_rename_lines,
             speakers::speaker_merge,
             speakers::speaker_not,
+            speakers::speaker_suggestion,
+            speakers::speaker_is_me,
+            speakers::speaker_not_me,
             notepad::notepad_open,
             notepad::notepad_state,
             notepad::notepad_split,
@@ -559,6 +616,9 @@ pub fn run() {
             calendar::calendar_card,
             calendar::calendar_nudge,
             calendar::calendar_meeting_notes,
+            calendar::calendar_brief,
+            calendar::calendar_brief_for_note,
+            calendar::calendar_brief_open,
             bar::bar_status,
             bar::bar_regions,
             bar::bar_pointer_left,
@@ -579,6 +639,8 @@ pub fn run() {
             diarize::diarization_timeline,
             #[cfg(debug_assertions)]
             diarize::e2e_diarize_timeline,
+            #[cfg(debug_assertions)]
+            speakers::call_ui::e2e_call_readings,
             // Test mode only (e2e.rs); not in release builds at all.
             memory::memory_list,
             memory::memory_save_item,
@@ -611,6 +673,8 @@ pub fn run() {
             elevated::e2e_paste_elevated,
             #[cfg(debug_assertions)]
             context_menu::e2e_context_menus,
+            #[cfg(debug_assertions)]
+            webview_memory::e2e_webview_memory,
             #[cfg(debug_assertions)]
             coaching::e2e_coaching_reset,
             #[cfg(debug_assertions)]
@@ -660,6 +724,8 @@ pub fn run() {
             realtest::commands::realtest_other_apps,
             #[cfg(debug_assertions)]
             realtest::commands::realtest_delivered,
+            #[cfg(debug_assertions)]
+            realtest::commands::realtest_read_selection,
         ])
         .on_page_load(|webview, payload| {
             // No browser context menu (Back, Refresh, Print, Inspect…) in any
@@ -706,6 +772,8 @@ pub fn run() {
             // The Voice Assistant's shortcut (assistant.rs; unbound by
             // default, and never one that clashes with the other three).
             input_hook::configure_assistant_from(&cfg);
+            // Read aloud's (read_aloud.rs; unbound by default, never a clash).
+            input_hook::configure_read_from(&cfg);
             // "Use what I said" (as_said.rs; unbound by default).
             input_hook::configure_as_said_from(&cfg);
 
@@ -772,6 +840,20 @@ pub fn run() {
             #[cfg(debug_assertions)]
             if let Some(settings) = app.get_webview_window("settings") {
                 let _ = settings.show();
+            }
+            // Release builds: a launch by the person brings the main window
+            // up (`launch_shows_window`); sign-in and "Start hidden" stay in
+            // the tray.
+            #[cfg(not(debug_assertions))]
+            if launch_shows_window(
+                launched_at_sign_in(cfg.autostart),
+                cfg.start_hidden,
+                !commands::installed_models().is_empty(),
+                updates::relaunch_after_update(),
+            ) {
+                if let Err(e) = commands::show_settings(&handle) {
+                    tracing::warn!("Could not show the main window: {}", e);
+                }
             }
 
             // Route hotkey press/release into the pipeline. Done Rust-side so the
@@ -853,6 +935,13 @@ pub fn run() {
                 }
             });
 
+            // …and Read aloud's: the selection in the app you're in, read
+            // aloud (read_aloud.rs). Only its press.
+            let read_handle = handle.clone();
+            handle.listen("read-key-pressed", move |_| {
+                read_aloud::read_selection(&read_handle, read_aloud::Origin::Shortcut);
+            });
+
             // "Use what I said": the last cleaned dictation's paste swapped
             // for the words as said (as_said.rs), on its own thread.
             let as_said_handle = handle.clone();
@@ -920,6 +1009,14 @@ pub fn run() {
             if autostart_now != cfg.autostart {
                 if let Err(e) = set_autostart_enabled(&handle, cfg.autostart) {
                     tracing::debug!("autostart reconcile skipped: {}", e);
+                }
+            } else if cfg.autostart && !std::env::args().any(|a| a == AUTOSTART_ARG) {
+                // An entry written before `--autostart` existed starts Yap
+                // without it, which would now open the window at every
+                // sign-in: written again, with it. (A launch that carries
+                // the argument proves the entry already has it.)
+                if let Err(e) = set_autostart_enabled(&handle, true) {
+                    tracing::debug!("autostart entry not rewritten: {}", e);
                 }
             }
 
@@ -1008,6 +1105,11 @@ pub fn run() {
             // Other apps' sound a crash left silenced mid-dictation comes back.
             mute::recover();
 
+            // Windows off screen (the main window in the tray, onboarding,
+            // the notepad between meetings) ask WebView2 to keep less in
+            // memory (webview_memory.rs).
+            webview_memory::init(&handle);
+
             // Calendar: the connected calendars' meetings, reminders before
             // them, and their titles and attendees for meeting notes (talks
             // to Google or the person's iCal link only; calendar.rs).
@@ -1027,4 +1129,35 @@ pub fn run() {
                 shutdown_cleanup();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{launch_shows_window, log_directives};
+
+    #[test]
+    fn a_launch_by_the_person_brings_the_window_up() {
+        // (at sign-in, start hidden, a model installed, the updater's relaunch)
+        assert!(launch_shows_window(false, false, true, false));
+        // Sign-in and "Start hidden" stay in the tray.
+        assert!(!launch_shows_window(true, false, true, false));
+        assert!(!launch_shows_window(false, true, true, false));
+        // The first run shows onboarding instead.
+        assert!(!launch_shows_window(false, false, false, false));
+        // After "Restart to update", updates.rs decides.
+        assert!(!launch_shows_window(false, false, true, true));
+    }
+
+    #[test]
+    fn onnx_runtime_logs_warnings_only() {
+        // Its graph-optimisation notes at `info` were ~1,000 lines per model
+        // load; Yap's own debug mode doesn't bring them back.
+        for debug in [false, true] {
+            let d = log_directives(debug);
+            assert!(d.contains("ort=warn"), "{d}");
+            tracing_subscriber::EnvFilter::try_new(d).expect("valid directives");
+        }
+        assert!(log_directives(true).contains("yap_lib=debug"));
+        assert!(!log_directives(false).contains("yap_lib=debug"));
+    }
 }

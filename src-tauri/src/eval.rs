@@ -26,6 +26,8 @@ use std::time::Duration;
 use serde_json::Value;
 
 #[cfg(debug_assertions)]
+mod brief;
+#[cfg(debug_assertions)]
 mod cleanup;
 #[cfg(debug_assertions)]
 mod local;
@@ -37,6 +39,8 @@ mod runner;
 mod scenario;
 #[cfg(debug_assertions)]
 mod serving;
+#[cfg(debug_assertions)]
+mod speakers;
 #[cfg(debug_assertions)]
 mod spike;
 #[cfg(debug_assertions)]

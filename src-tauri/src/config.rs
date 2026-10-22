@@ -193,6 +193,13 @@ pub struct YapConfig {
     /// a key with the other three (`input_hook::clashes`).
     #[serde(default)]
     pub assistant_hotkey: String,
+    /// The **Read aloud** shortcut (Settings → Shortcuts / Voice Assistant,
+    /// `read_aloud.rs`): select text in any app, press it, and Yap reads the
+    /// selection aloud in the chosen voice, with a reading card on the Yap
+    /// bar. Empty = unbound (the default: the bar's 🔊 and the tray work
+    /// without it). Never shares a key with the others.
+    #[serde(default)]
+    pub read_hotkey: String,
     /// "Use what I said" (Settings → Shortcuts, `as_said.rs`): right after a
     /// dictation AI cleanup changed, swap what Yap pasted for the words as
     /// said (corrections and snippets still applied). Empty = unbound (the
@@ -639,6 +646,19 @@ pub struct YapConfig {
     /// Which diarization model (`diarize/registry.rs` id) it uses.
     #[serde(default = "default_diarization_model")]
     pub diarization_model: String,
+    /// "Suggest who's speaking" (Settings → Meetings): names for a
+    /// meeting's voices from what's said and who was invited, on cards to
+    /// confirm, a strong one put on as Yap's guess; and, when a meeting
+    /// ends, one short question per voice still unnamed to the meeting's
+    /// model (one that can call tools), each answer checked against the
+    /// transcript (`speakers/naming.rs`). On.
+    #[serde(default = "default_true")]
+    pub meeting_speaker_names: bool,
+    /// Read who's talking from the call app's window (Teams, Zoom, Meet in
+    /// a browser) while a meeting records, through UI Automation, read
+    /// only (`speakers/call_ui.rs`). Experimental, off: no setting shows it.
+    #[serde(default)]
+    pub meeting_call_names: bool,
 
     /// Call detection (`meeting_detect.rs`): when Teams, Zoom, Meet, Slack,
     /// Discord, Webex… start using the mic, offer to take notes, and offer to
@@ -701,6 +721,14 @@ pub struct YapConfig {
     /// Credential Manager, never here.
     #[serde(default = "default_meeting_reminder")]
     pub meeting_reminder: String,
+    /// "Prepare a brief before meetings" (`calendar/brief.rs`): before a
+    /// calendar meeting, last time with these people, their open items, what
+    /// memory knows about them and the invite's agenda, every line citing its
+    /// note — on the reminder card, the Meetings view and the notepad. Its
+    /// "In short" comes from the meeting's AI model when there is one. On by
+    /// default.
+    #[serde(default = "default_true")]
+    pub meeting_brief: bool,
 
     // ---- Memory (Settings → Memory; `memory.rs`) ----
     // The switches only: what Yap remembers lives in memory.json, never
@@ -871,6 +899,7 @@ impl Default for YapConfig {
             hotkey: default_hotkey(),
             edit_hotkey: String::new(),
             assistant_hotkey: String::new(),
+            read_hotkey: String::new(),
             as_said_hotkey: String::new(),
             as_said_offer: true,
             model_size: default_model_size(),
@@ -959,6 +988,8 @@ impl Default for YapConfig {
             meeting_consent_message: String::new(),
             meeting_diarization: false,
             diarization_model: default_diarization_model(),
+            meeting_speaker_names: true,
+            meeting_call_names: false,
             meeting_detection: true,
             meeting_auto_start: false,
             meeting_detect_apps: std::collections::BTreeMap::new(),
@@ -969,6 +1000,7 @@ impl Default for YapConfig {
             meeting_end_when_quiet: true,
             meeting_hotkey: default_meeting_hotkey(),
             meeting_reminder: default_meeting_reminder(),
+            meeting_brief: true,
             memory_search_chats: true,
             memory_learn_chats: true,
             memory_learn_meetings: false,

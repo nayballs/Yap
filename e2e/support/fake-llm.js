@@ -6,7 +6,7 @@
 // It knows Yap's meeting calls by their system prompts (src-tauri/src/llm.rs):
 // a rolling DIGEST of one part of a meeting, the final ACTION PLAN, and the
 // meeting notepad's helpers: the meeting TITLE, "What did I miss?" (CATCH UP),
-// a follow-up question (MEETING ASK) and the one-tap chips (QUESTIONS to ask,
+// a follow-up question (MEETING ASK), who a voice is (SPEAKER NAME), and the one-tap chips (QUESTIONS to ask,
 // the FOLLOW-UP email — in markdown, with a preamble, for Yap to clean up —
 // and BLIND SPOTS, "Gaps and risks"). Replies are built from the trigger
 // phrases the specs put in their synthetic meetings — and, to prove Yap's
@@ -168,6 +168,13 @@ const CLEANUP = 'You are a dictation cleanup engine';
 // "Tell Yap what to change", an import. Answered `{"changes": []}` unless a
 // spec says otherwise (`reply('memory', fn)`).
 const MEMORY = "You keep Yap's memory of the user";
+// Who a meeting's voice is (speakers/naming.rs ASK_PROMPT), when a meeting
+// ends: "unknown" unless a spec says otherwise (`reply('speakerName', fn)`).
+const SPEAKER_NAME = 'You identify one voice in a meeting transcript';
+// A pre-meeting brief's "In short" (llm.rs MEETING_BRIEF_PROMPT,
+// calendar/brief.rs). "Nothing to add." unless a spec scripts it
+// (`reply('brief', fn)`; brief.spec.js).
+const BRIEF = 'You write a short brief for someone about to go into a meeting';
 
 const KINDS = [
   [DIGEST, 'digest'],
@@ -180,6 +187,8 @@ const KINDS = [
   [BLIND_SPOTS, 'blindSpots'],
   [CLEANUP, 'cleanup'],
   [MEMORY, 'memory'],
+  [SPEAKER_NAME, 'speakerName'],
+  [BRIEF, 'brief'],
 ];
 
 /**
@@ -530,6 +539,8 @@ export async function startFakeLlm() {
         followUpEmail: followUpReply,
         blindSpots: blindSpotsReply,
         memory: () => '{"changes": []}',
+        speakerName: () => '{"quote": "", "name": "unknown"}',
+        brief: () => 'Nothing to add.',
       };
       const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user);
       res.writeHead(200, { 'content-type': 'application/json' });

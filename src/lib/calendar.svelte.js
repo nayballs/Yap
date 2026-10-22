@@ -7,12 +7,15 @@
 //                serviceLabel, hasLink, tentative, conflict, noteId }],
 //     syncing, google: { available, waiting },
 //     card: { id, kind: 'remind'|'switch', key, title, start, end, with,
-//             serviceLabel, hasLink } | null,
-//     nudge: { afterMeeting }, maxConnections }
+//             serviceLabel, hasLink, brief } | null,
+//     nudge: { afterMeeting }, maxConnections, briefs }
 //
 // The card ("Design review · In 1 min") shows as a sticky toast that counts
 // down: Join & take notes / Start notes / Snooze; ✕ or Esc dismisses it. A
 // `switch` card (recording another meeting) offers to switch notes instead.
+// With the meeting's pre-meeting brief made ("Prepare a brief before
+// meetings", calendar/brief.rs), the card unfolds it ("Brief"), and follows
+// it as its summary is written.
 // Rust takes it back when it's answered elsewhere (the Windows notification)
 // or runs out, 5 minutes after the start.
 //
@@ -27,6 +30,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast, dismiss, isToastLive, updateToast } from './ui/toast.svelte.js';
 import { noteRequest } from './meetingDetect.svelte.js';
+import { briefStamp } from './brief.js';
 
 export const calendar = $state({
   loaded: false,
@@ -37,6 +41,7 @@ export const calendar = $state({
   card: null,
   nudge: { afterMeeting: false },
   maxConnections: 8,
+  briefs: true,
 });
 
 /**
@@ -96,6 +101,16 @@ function apply(s) {
   const c = s.card?.inApp ? s.card : null;
   if (shown && shown.id !== c?.id) clearShown();
   if (c && !shown) showCard(c);
+  // Its brief was made, or its summary written, while it's up.
+  else if (c && shown && briefStamp(c.brief) !== shown.brief) {
+    shown.brief = briefStamp(c.brief);
+    updateToast(shown.toastId, { expand: briefExpand(c) });
+  }
+}
+
+/** The card's "Brief" fold, once its brief is made. */
+function briefExpand(c) {
+  return c.brief ? { label: 'Brief', brief: c.brief } : undefined;
 }
 
 /** "In 2 min", "In 1 min", "Starting now", "Started 3 min ago". */
@@ -139,12 +154,37 @@ function showCard(c) {
       : null,
     tertiary: { label: 'Snooze 2 min', onClick: () => answer(c, 'snooze') },
     onClose: () => answer(c, 'dismiss'),
+    expand: briefExpand(c),
   });
   // Keep "In 1 min" true while it's up.
   const timer = setInterval(() => {
     if (!updateToast(toastId, { description: cardText(c) })) clearInterval(timer);
   }, 1000);
-  shown = { id: c.id, toastId, timer };
+  shown = { id: c.id, toastId, timer, brief: briefStamp(c.brief) };
+}
+
+// ---- briefs -------------------------------------------------------------------------------
+
+/** Briefs the Meetings view asked for, by meeting key (kept current by `yap-meeting-brief`). */
+export const briefs = $state({ byKey: {} });
+let briefsFollowed = false;
+
+/** Follow briefs as they're made and their summaries written (once). */
+function followBriefs() {
+  if (briefsFollowed) return;
+  briefsFollowed = true;
+  listen('yap-meeting-brief', (e) => {
+    const b = e.payload;
+    if (b?.key) briefs.byKey[b.key] = b;
+  });
+}
+
+/** Meeting `key`'s brief (kept, or made now; `refresh`: made again). */
+export async function loadBrief(key, refresh = false) {
+  followBriefs();
+  const b = await invoke('calendar_brief', { key, refresh });
+  if (b?.key) briefs.byKey[b.key] = b;
+  return b;
 }
 
 function clearShown() {

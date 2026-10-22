@@ -39,7 +39,9 @@
 //! ("Speaker 1"…) on the "Them" lines as the labels settle, and in full
 //! when the recording stops, before the summary is written.
 
+pub mod call_ui;
 pub mod labels;
+pub mod naming;
 
 use std::collections::BTreeMap;
 
@@ -120,6 +122,51 @@ pub struct Speaker {
     /// Names the user said this voice isn't ("Not Priya"): never guessed again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub not: Vec<String>,
+    /// Who Yap thinks this voice is, for the person to confirm ("Speaker 2
+    /// is Priya?": [`naming`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<Suggestion>,
+}
+
+/// A name Yap suggests for a voice ([`naming`]): the notepad and the Notes
+/// view ask "Speaker 2 is Priya?" — Yes / Someone else / Not now.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Suggestion {
+    /// The person ("" when `me`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub email: String,
+    /// The voice is the person using Yap (theirs reached the call side).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub me: bool,
+    /// How sure, 0–1.
+    pub confidence: f32,
+    /// The best reason, for the card.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub why: Option<Why>,
+    /// "Not now": not asked again in this meeting (until the name changes).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub later: bool,
+}
+
+/// Why Yap suggests a name: what the card says under the question.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Why {
+    /// "introduced" (the voice said it), "asked" (`by` asked them, this
+    /// voice answered), "thanked" (`by` thanked them after this voice
+    /// spoke), "invite" (the only other invitee), "app" (the call app
+    /// showed them talking), "model" (the AI matched it), "echo" (it
+    /// repeats what you said).
+    pub kind: String,
+    /// The voice whose words show it ("asked", "thanked").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub by: String,
+    /// Those words, short.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub quote: String,
 }
 
 impl Speaker {
@@ -343,6 +390,7 @@ fn set_user_name(map: &mut Speakers, id: &str, name: &str) -> bool {
     entry.source = Some(NameSource::User);
     entry.locked = true;
     entry.not.retain(|n| !n.eq_ignore_ascii_case(name));
+    entry.suggestion = None;
     true
 }
 
@@ -362,6 +410,8 @@ fn merge_into(map: &mut Speakers, from: &str, into: &str) {
             target.not.push(n);
         }
     }
+    // Who either was is asked again from the merged voice's evidence.
+    target.suggestion = None;
     map.insert(
         from.to_string(),
         Speaker {
@@ -457,6 +507,9 @@ pub fn not(note: &mut Note, id: &str) -> Result<bool, String> {
     let name = std::mem::take(&mut entry.name).trim().to_string();
     entry.email.clear();
     entry.source = None;
+    if entry.suggestion.as_ref().is_some_and(|s| s.name.eq_ignore_ascii_case(&name)) {
+        entry.suggestion = None;
+    }
     if !entry.refuses(&name) {
         entry.not.push(name);
     }
@@ -761,18 +814,26 @@ pub fn split_line(seg: &TranscriptSegment, turns: &[Turn]) -> Vec<TranscriptSegm
         .collect()
 }
 
-// ---- commands: the menu on a speaker's name ----
+// ---- commands: the menu on a speaker's name, and the name cards ----
 
-/// Every line's voice id and lock, for the windows to follow an edit.
-fn line_speakers(note: &Note) -> Vec<Value> {
+/// Every line's voice, lock and echo flag, for the windows to follow an edit.
+pub(crate) fn line_speakers(note: &Note) -> Vec<Value> {
     note.transcript
         .iter()
-        .map(|s| json!([s.speaker_id(), s.speaker_locked]))
+        .map(|s| json!([s.speaker_id(), s.speaker_locked, s.echo]))
         .collect()
 }
 
-/// Apply a speaker edit to note `note_id`, tell every window (the notepad,
-/// the Notes view: `yap-note-changed` with the map and each line's voice),
+/// After voice `id` was named (it was `before`, "Speaker 2"): a summary
+/// already written says the name too ([`naming::rename_in_summary`]).
+fn relabel_summary(note: &mut Note, id: &str, before: &str) -> bool {
+    let after = name_of(&note.speakers, resolve(&note.speakers, id)).0;
+    naming::rename_in_summary(note, before, &after)
+}
+
+/// Apply a speaker edit to note `note_id`, suggest names again from what's
+/// left, tell every window (the notepad, the Notes view: `yap-note-changed`
+/// with the map and each line's voice, and the summary when it changed),
 /// and hand back the note.
 fn edit(
     app: &AppHandle,
@@ -780,11 +841,22 @@ fn edit(
     origin: Option<String>,
     f: impl FnOnce(&mut Note) -> Result<bool, String>,
 ) -> Result<Note, String> {
-    let changed = crate::notes::modify(note_id, |n| f(n).map(|c| (c, c)))?;
+    let sources = naming::Sources::now();
+    let words = crate::memory::Words::new();
+    let ordinary = |w: &str| words.is(w);
+    let ctx = sources.context(&ordinary, Vec::new());
+    let changed = crate::notes::modify(note_id, |n| {
+        let edited = f(n)?;
+        let named = edited && sources.enabled && naming::refresh(n, &ctx);
+        Ok((edited, edited || named))
+    })?;
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
     if changed {
         use tauri::Emitter;
-        crate::commands::note_changed_with(app, note_id, origin.as_deref().unwrap_or(""), Some(line_speakers(&note)));
+        let mut payload = crate::commands::note_changed_payload(&note, origin.as_deref().unwrap_or(""));
+        payload["lineSpeakers"] = json!(line_speakers(&note));
+        payload["enhancedContent"] = json!(note.enhanced_content);
+        let _ = app.emit("yap-note-changed", payload);
         let _ = app.emit("yap-notes-changed", ());
     }
     Ok(note)
@@ -793,7 +865,12 @@ fn edit(
 /// Rename voice `speaker` of a meeting note everywhere.
 #[tauri::command]
 pub fn speaker_rename(app: AppHandle, note_id: u64, speaker: String, name: String, origin: Option<String>) -> Result<Note, String> {
-    edit(&app, note_id, origin, |n| rename(n, &speaker, &name))
+    edit(&app, note_id, origin, |n| {
+        let id = resolve(&n.speakers, &speaker).to_string();
+        let before = name_of(&n.speakers, &id).0;
+        let changed = rename(n, &id, &name)?;
+        Ok(relabel_summary(n, &id, &before) || changed)
+    })
 }
 
 /// Say who said these lines (indices into the transcript) only.
@@ -811,13 +888,43 @@ pub fn speaker_rename_lines(
 /// Merge voice `from` into voice `into`.
 #[tauri::command]
 pub fn speaker_merge(app: AppHandle, note_id: u64, from: String, into: String, origin: Option<String>) -> Result<Note, String> {
-    edit(&app, note_id, origin, |n| merge(n, &from, &into))
+    edit(&app, note_id, origin, |n| {
+        let id = resolve(&n.speakers, &from).to_string();
+        let before = name_of(&n.speakers, &id).0;
+        let changed = merge(n, &id, &into)?;
+        Ok(relabel_summary(n, &id, &before) || changed)
+    })
 }
 
 /// "Not Priya": take a guessed name off voice `speaker`.
 #[tauri::command]
 pub fn speaker_not(app: AppHandle, note_id: u64, speaker: String, origin: Option<String>) -> Result<Note, String> {
     edit(&app, note_id, origin, |n| not(n, &speaker))
+}
+
+/// The answer to a name card ("Speaker 2 is Priya?"): `answer` = "yes" |
+/// "no" (Someone else) | "later" (Not now).
+#[tauri::command]
+pub fn speaker_suggestion(app: AppHandle, note_id: u64, speaker: String, answer: String, origin: Option<String>) -> Result<Note, String> {
+    edit(&app, note_id, origin, |n| {
+        let id = resolve(&n.speakers, &speaker).to_string();
+        let before = name_of(&n.speakers, &id).0;
+        let changed = naming::answer(n, &id, &answer)?;
+        Ok(relabel_summary(n, &id, &before) || changed)
+    })
+}
+
+/// "It was me": voice `speaker`'s lines are the person's own (their voice
+/// reached the call side).
+#[tauri::command]
+pub fn speaker_is_me(app: AppHandle, note_id: u64, speaker: String, origin: Option<String>) -> Result<Note, String> {
+    edit(&app, note_id, origin, |n| naming::is_me(n, &speaker))
+}
+
+/// Undo "It was me" on voice `speaker`.
+#[tauri::command]
+pub fn speaker_not_me(app: AppHandle, note_id: u64, speaker: String, origin: Option<String>) -> Result<Note, String> {
+    edit(&app, note_id, origin, |n| naming::not_me(n, &speaker))
 }
 
 #[cfg(test)]

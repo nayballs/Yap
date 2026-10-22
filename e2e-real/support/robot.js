@@ -30,6 +30,7 @@ import {
   startMediaPage,
   startMintty,
   startNotepad,
+  startReadingPage,
 } from './targets.js';
 
 export { expect };
@@ -184,6 +185,22 @@ export class Robot {
   /** Other apps' sound as Yap's robot mode may see it (only the test's own). */
   otherApps() {
     return this.yap.invoke('realtest_other_apps');
+  }
+
+  /** An Edge app window on a page of text to select and read aloud. */
+  async readingPage(paragraphs) {
+    return this.track(
+      await startReadingPage({ nonce: this.nonce, dir: path.join(this.dir, `reading-${this.targets.length}`), paragraphs }),
+    );
+  }
+
+  /**
+   * What the Read aloud shortcut does with `target` in front: its
+   * selection read and read aloud (`realtest_read_selection`). Returns
+   * `{ via, chars, terminal, copyAllowed, outcome, text }`.
+   */
+  async readSelection(target, { retry = true } = {}) {
+    return this.withFocus(target, retry, () => this.yap.invoke('realtest_read_selection', { hwnd: target.hwnd }));
   }
 
   /** Notepad on an empty temp file. */

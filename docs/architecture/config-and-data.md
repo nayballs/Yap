@@ -41,7 +41,12 @@
   notepad's "Copy consent message" text; empty = the default), speaker
   diarization: meeting_diarization ("Tell speakers apart in meetings", beta,
   off) + diarization_model (a `diarize/registry.rs` id, default
-  `nemotron-3-diarization`), call detection:
+  `nemotron-3-diarization`), speaker names: meeting_speaker_names ("Suggest
+  who's speaking", on: the name cards, Yap's strong guesses, the AI step at a
+  meeting's end; `speakers/naming.rs`) + meeting_call_names (read who's
+  talking from the call app's window, experimental, off, no setting;
+  `speakers/call_ui.rs`, whose rules a `<data>/call_speakers.json` can
+  override per app), call detection:
   meeting_detection + meeting_detect_style ("popup"|"quiet") +
   meeting_detect_apps (app id → bool overrides of `meeting_detect::APPS`'
   defaults) + meeting_auto_start (the opt-in 10-second countdown, off),
@@ -49,7 +54,8 @@
   meeting_max_minutes (120; 0 = no limit), meeting_call_end ("ask"|"stop"),
   meeting_end_when_quiet ("End notes when the meeting goes quiet", true),
   meeting_hotkey (`kb:alt+win+77`), meeting_reminder (the calendar's card:
-  "15s" | "1min" | "2min" | "never"), bridge_enabled, mcp_allow_writes (AI apps
+  "15s" | "1min" | "2min" | "never"), meeting_brief ("Prepare a brief before
+  meetings", true; `calendar/brief.rs`), bridge_enabled, mcp_allow_writes (AI apps
   may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
   bar_hide_fullscreen (true) + bar_theme ("light" | "dark", light) +
   bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
@@ -72,7 +78,9 @@
   and `eleven_flash_v2_5`); config v2 moved a saved
   Windows voice from tts_voice to tts_windows_voice and "windows" (never a
   choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
-  = unbound, the default), opening apps (`apps.rs`): open_apps (true) +
+  = unbound, the default), Read aloud's read_hotkey ("" = unbound, the
+  default; `read_aloud.rs`: the selection in any app read aloud, its speed
+  the card's − / +, saved as tts_rate), opening apps (`apps.rs`): open_apps (true) +
   apps_blocked (app ids, "Don't open this one") + app_nicknames
   (`AppNickname {say, app, name}`), the web (`web.rs`): web_search (false) +
   web_search_native (true: cloud models use their provider's own search) +
@@ -156,7 +164,9 @@
   the last check time, and the restart marker (`updates.rs`).
 - Calendar: `%APPDATA%/yap/calendar.json` — connected calendars (name, kind,
   last sync, error), meetings from 12 h ago to 7 days ahead, answered reminders,
-  the nudge (`calendar.rs`). Never a token or a link: those are Credential
+  the nudge, and meetings' pre-meeting briefs (`briefs`, by event key, until
+  2 days after the meeting, ≤ 40: their lines, sources — note and memory ids,
+  titles, dates — and a fingerprint) (`calendar.rs`). Never a token or a link: those are Credential
   Manager generic credentials `yap-calendar-<1-8>.com.yap.dictation` (Local
   persistence; portable adds a data-dir hash), deleted on Disconnect and, for
   an installed copy, by the uninstaller's "Delete the application data".
@@ -236,7 +246,8 @@
   its live transcript (`meeting_live_transcript`), but **not** splitting the
   screen (`meeting_split_screen` off: it moves another app's window); with a
   calendar connected, the reminder card **right before** a meeting (15 s,
-  `meeting_reminder`); spoken replies **off** (`speak_replies`; once on, only
+  `meeting_reminder`) and a **brief** of what to know going in
+  (`meeting_brief`, on); spoken replies **off** (`speak_replies`; once on, only
   for questions asked by voice, `speak_when`, and a dictated question is sent
   by itself, `talk_back_hands_free`) in **Kokoro's af_bella** at 1× once
   Kokoro is downloaded (`tts_engine` "kokoro"), Windows' default voice

@@ -1,0 +1,45 @@
+{
+  "name": "invitee-left-over",
+  "description": "Three invitees, three voices: two are named in the meeting, the chair never is.",
+  "tags": [
+    "invite",
+    "handover"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah",
+    "Sam Patel",
+    "Siobhan Kelly"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Thanks for joining, everyone. The goal today is to agree what goes into the next quarter, so I'd like to hear the research first and then the roadmap implications."
+    ],
+    [
+      "them-1",
+      "Priya, do you want to start with the research findings?"
+    ],
+    [
+      "them-2",
+      "Sure. We spoke to twelve customers, and the clearest theme was onboarding: people get stuck connecting their bank, and about a third give up before they finish. The second theme was reporting, but it was much weaker."
+    ],
+    [
+      "them-1",
+      "Thanks Priya. Sam, what does that mean for the roadmap?"
+    ],
+    [
+      "them-3",
+      "It means we should pull the bank connection work forward. It's currently pencilled in for the third quarter, but we could start it next sprint if we pause the reporting dashboard, which nobody is waiting on."
+    ],
+    [
+      "them-1",
+      "Okay, thanks Sam. I think we should prioritise the onboarding work, and I'll write up the proposal for the leadership meeting on Thursday."
+    ]
+  ],
+  "truth": {
+    "them-1": "Siobhan Kelly",
+    "them-2": "Priya Shah",
+    "them-3": "Sam Patel"
+  }
+}

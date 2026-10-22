@@ -1,0 +1,31 @@
+{
+  "name": "brief-transcript-only",
+  "description": "The last meeting has a transcript and typed notes but no action plan: no open items to list, and the model must stay with what was said.",
+  "meeting": {
+    "title": "Offsite planning",
+    "in_minutes": 10,
+    "attendees": ["Rochelle Adams"],
+    "description": "Agenda: pick the venue"
+  },
+  "notes": [
+    {
+      "title": "Offsite chat",
+      "days_ago": 2,
+      "participants": ["Rochelle Adams"],
+      "content": "Two venues shortlisted. Budget is the question.",
+      "transcript": [
+        "you: Thanks for jumping on. Where are we with the offsite venues?",
+        "them: I have two options, the lakeside hotel and the old mill. The mill is cheaper but has no breakout rooms.",
+        "you: Can you send me both quotes by Thursday so I can check them against the budget?",
+        "them: Sure, I'll send both quotes by Thursday.",
+        "you: Great. I'll ask the team which dates in June work for them.",
+        "them: Perfect, then we can decide at the next planning call."
+      ]
+    }
+  ],
+  "expect": {
+    "first": false,
+    "cites": ["Offsite chat"],
+    "not_contains": ["Okonkwo", "lighting", "Friday", "conference centre", "booked"]
+  }
+}

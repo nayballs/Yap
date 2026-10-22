@@ -41,10 +41,13 @@
   import { onMount, tick } from 'svelte';
   import ToastHost from './ui/ToastHost.svelte';
   import SpeakerMenu from './SpeakerMenu.svelte';
+  import SpeakerCard from './SpeakerCard.svelte';
+  import BriefView from './BriefView.svelte';
+  import { briefTeaser } from './brief.js';
   import { toast } from './ui/toast.svelte.js';
   import { renderMarkdown } from './markdown.js';
   import { nextModel, modelLine, whereItRuns } from './aiModel.js';
-  import { speech, initSpeech, readAloud } from './speech.svelte.js';
+  import { speech, initSpeech, readAloud, readPageSelection } from './speech.svelte.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
   import { openExternalLink } from './externalLinks.js';
   import { initMeetingCheckIns } from './meetingCheckIn.js';
@@ -146,9 +149,47 @@
       note.digests = n.digests;
       note.enhancedContent = n.enhancedContent;
       note.participants = n.participants;
+      // Tied to its calendar meeting as the recording started (its brief follows).
+      note.event = n.event;
     } catch {
       note = null; // gone (deleted)
     }
+  }
+
+  // ---- the meeting's pre-meeting brief (calendar/brief.rs) ----
+  // At the top of the Summary tab: unfolded until the meeting has its action
+  // plan, then folded under "Brief before the meeting". While the meeting
+  // records, a slim line over My thoughts says what's in it and opens it.
+  let brief = $state(null);
+  // null: as the meeting goes (open until there's an action plan); else the
+  // person's own choice.
+  let briefFold = $state(null);
+  let briefLineGone = $state(false);
+  let briefFor = '';
+  $effect(() => {
+    const id = note?.id ?? null;
+    const key = note?.event?.key ?? '';
+    if (`${id}:${key}` === briefFor) return;
+    if (!briefFor.startsWith(`${id}:`)) {
+      briefLineGone = false;
+      briefFold = null;
+    }
+    briefFor = `${id}:${key}`;
+    brief = null;
+    if (id == null || !key) return;
+    invoke('calendar_brief_for_note', { noteId: id })
+      .then((b) => {
+        if (note?.id === id) brief = b;
+      })
+      .catch(() => {});
+  });
+  const briefFolded = $derived(briefFold ?? hasSummary);
+  function onBrief(b) {
+    if (b?.key && note?.event?.key === b.key) brief = b;
+  }
+  function openBrief() {
+    tab = 'summary';
+    briefFold = false;
   }
 
   // Debounced autosave of whatever was typed. Only the edited fields are
@@ -187,6 +228,7 @@
       note.participants = p.participants;
     }
     if (p.speakers) note.speakers = p.speakers;
+    if (typeof p.enhancedContent === 'string') note.enhancedContent = p.enhancedContent;
     if (p.lineSplice) {
       // The voice separation labelled lines, splitting some where the
       // speaker changed: the stretch that changed.
@@ -335,14 +377,16 @@
   function toggleSpeakerMenu(key, voice, lines, start = 'menu') {
     speakerMenu = speakerMenu?.key === key ? null : { key, voice, lines, start };
   }
-  /** A speaker edit made here: the map, and each line's voice. */
+  /** A speaker edit made here: the map, each line's voice (and echo: "It
+   *  was me"), and the summary (a name put on "Speaker 2"). */
   function onSpeakerChanged(updated) {
     if (!note || updated?.id !== note.id) return;
     note.speakers = updated.speakers || {};
     const t = updated.transcript || [];
     note.transcript = (note.transcript || []).map((s, i) =>
-      t[i] ? { ...s, speaker: t[i].speaker || '', speakerLocked: !!t[i].speakerLocked } : s
+      t[i] ? { ...s, speaker: t[i].speaker || '', speakerLocked: !!t[i].speakerLocked, echo: !!t[i].echo } : s
     );
+    if (typeof updated.enhancedContent === 'string') note.enhancedContent = updated.enhancedContent;
   }
   const echoCount = $derived((note?.transcript || []).filter((s) => s.echo).length);
   const lineCount = $derived((note?.transcript || []).length);
@@ -829,6 +873,12 @@
       e.preventDefault();
       e.stopPropagation();
       invoke('assistant_key', { pressed: true }).catch(() => {});
+    } else if (cfg.readHotkey && hotkeyMatchesKeydown(e, cfg.readHotkey)) {
+      // Read aloud (read_aloud.rs): what's selected here. (During a meeting
+      // Yap keeps quiet, and the card says so.)
+      e.preventDefault();
+      e.stopPropagation();
+      readPageSelection();
     } else if (hotkeyMatchesKeydown(e, cfg.hotkey)) {
       e.preventDefault();
       e.stopPropagation();
@@ -881,6 +931,7 @@
     on('yap-meeting-breaks', onBreaks);
     on('yap-meeting-summary', onSummary);
     on('yap-note-changed', onNoteChanged);
+    on('yap-meeting-brief', onBrief);
     on('yap-meeting-speakers', onSpeakers);
     on('yap-note-deleted', (p) => p?.id === note?.id && (note = null));
     on('yap-notes-changed', () => note && reload());
@@ -948,6 +999,7 @@
     {:else if name === 'retry'}<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" /><path d="M19.5 4.5V9H15" />
     {:else if name === 'note'}<path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z" /><path d="M14 3.5v5h5" />
     {:else if name === 'chat'}<path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4.5 19.5l1.3-4.3A7.5 7.5 0 1 1 20 11.5z" />
+    {:else if name === 'chevron'}<path d="M6 9l6 6 6-6" />
     {/if}
   </svg>
 {/snippet}
@@ -1108,6 +1160,17 @@
     {#key tab}
       <main class="body">
         {#if tab === 'thoughts'}
+          {#if brief && recordingThis && !briefLineGone}
+            <!-- The meeting's brief, one line: opens it on the Summary tab. -->
+            <div class="briefline">
+              <button class="brieflink" onclick={openBrief}>
+                {@render icon('note')}
+                <span class="bw">Brief</span>
+                <span class="bt">{briefTeaser(brief)}</span>
+              </button>
+              <button class="briefx" aria-label="Hide the brief's line" onclick={() => (briefLineGone = true)}>{@render icon('x')}</button>
+            </div>
+          {/if}
           <textarea
             class="thoughts"
             aria-label="My thoughts"
@@ -1157,6 +1220,12 @@
             {/if}
           </div>
           {/if}
+          {#if note && !searchQuery}
+            <!-- "Speaker 2 is Priya?" (speakers/naming.rs) -->
+            <div class="namecardwrap">
+              <SpeakerCard {note} origin={LABEL} onchanged={onSpeakerChanged} />
+            </div>
+          {/if}
           {#if recordingThis && !liveTranscript}
             <div class="tempty">
               <p class="t1">Live transcript is off</p>
@@ -1197,7 +1266,7 @@
                           class:guess={item.guess}
                           aria-haspopup="menu"
                           aria-expanded={speakerMenu?.key === item.key}
-                          title={item.guess ? 'A guess from the calendar invite: click to confirm or change' : 'Rename, merge or correct this speaker'}
+                          title={item.guess ? 'A guess: click to confirm or change' : 'Rename, merge or correct this speaker'}
                           onclick={() => toggleSpeakerMenu(item.key, item.speaker, item.lines.map((l) => l.i))}
                         >{item.label}</button>
                         {#if speakerMenu?.key === item.key}
@@ -1279,6 +1348,24 @@
           {/if}
         {:else}
           <div class="summary" role="region" aria-label="Summary">
+            {#if note && !recordingThis}
+              <SpeakerCard {note} origin={LABEL} onchanged={onSpeakerChanged} />
+            {/if}
+            {#if brief}
+              <!-- What to know going in (calendar/brief.rs): open until the
+                   action plan is written, then folded above it. -->
+              <section class="briefcard" class:folded={briefFolded} aria-label="Brief before the meeting">
+                <button class="briefhead" aria-expanded={!briefFolded} onclick={() => (briefFold = !briefFolded)}>
+                  {@render icon('note')}
+                  <span class="bh">Brief before the meeting</span>
+                  {#if briefFolded}<span class="bt">{briefTeaser(brief)}</span>{/if}
+                  <span class="chev" class:up={!briefFolded} aria-hidden="true">{@render icon('chevron')}</span>
+                </button>
+                {#if !briefFolded}
+                  <div class="briefbody"><BriefView {brief} /></div>
+                {/if}
+              </section>
+            {/if}
             {#if writing}
               <div class="steps" aria-live="polite">
                 <span class="stepdot" aria-hidden="true"></span>
@@ -1938,6 +2025,72 @@
   .grow {
     flex: 1;
   }
+  /* While a meeting records: its brief in one line over My thoughts. */
+  .briefline {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin: 14px 32px 0;
+    border-radius: 10px;
+    background: var(--yap-paper-s1);
+  }
+  .brieflink {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 10px;
+    background: none;
+    color: var(--yap-paper-muted);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .brieflink:hover {
+    background: var(--yap-paper-s2);
+  }
+  .brieflink :global(svg) {
+    flex: 0 0 auto;
+    width: 15px;
+    height: 15px;
+  }
+  .brieflink .bw {
+    font-weight: 650;
+    color: var(--yap-paper-ink);
+  }
+  .brieflink .bt {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .briefx {
+    flex: 0 0 auto;
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
+    margin-right: 4px;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--yap-paper-faint);
+    cursor: pointer;
+  }
+  .briefx:hover {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-muted);
+  }
+  .briefx :global(svg) {
+    width: 13px;
+    height: 13px;
+  }
   .thoughts {
     flex: 1 1 auto;
     min-height: 0;
@@ -2087,6 +2240,13 @@
   }
 
   /* Speaker groups of chat bubbles (Wispr's grouped corners). */
+  .namecardwrap {
+    flex: 0 0 auto;
+    margin: 12px 40px 0 32px;
+  }
+  .namecardwrap :global(.namecard) {
+    margin: 0;
+  }
   .lines {
     flex: 1 1 auto;
     min-height: 0;
@@ -2317,6 +2477,59 @@
     min-height: 0;
     overflow-y: auto;
     padding: 24px 40px 180px 32px;
+  }
+  /* The meeting's brief, on top: a paper card, folded once there's a plan. */
+  .briefcard {
+    margin-bottom: 18px;
+    border-radius: 12px;
+    background: var(--yap-paper-s1);
+  }
+  .briefhead {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 12px;
+    border: none;
+    border-radius: 12px;
+    background: none;
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .briefhead:hover {
+    background: var(--yap-paper-s2);
+  }
+  .briefhead :global(svg) {
+    flex: 0 0 auto;
+    width: 15px;
+    height: 15px;
+    color: var(--yap-paper-muted);
+  }
+  .briefhead .bh {
+    font-weight: 650;
+  }
+  .briefhead .bt {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--yap-paper-muted);
+  }
+  .briefhead .chev {
+    margin-left: auto;
+    display: inline-flex;
+    transition: transform 160ms ease;
+  }
+  .briefhead .chev.up {
+    transform: rotate(180deg);
+  }
+  .briefbody {
+    padding: 2px 14px 14px 35px;
+    user-select: text;
   }
   .steps {
     display: flex;

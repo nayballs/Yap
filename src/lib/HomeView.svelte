@@ -11,12 +11,17 @@
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
   import { formatHotkeySpec } from './hotkeys.js';
+  import { appLabel } from './appNames.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
   import { copyText } from './itemMenus.js';
   import { toast, dismiss } from './ui/toast.svelte.js';
   import { MODELS } from './models.js';
+  import { attention } from './attention.svelte.js';
 
   let { onopensettings = null, onnavigate = null } = $props();
+  // Settings' live "needs attention" items: no speech model yet means the
+  // hotkey can't do anything, so the empty feed says that first.
+  const noSpeechModel = $derived(attention.items.some((i) => i.section === 'models'));
 
   let entries = $state([]);
   let stats = $state(null);
@@ -39,6 +44,10 @@
   // the Voice Assistant.
   const TIP_COUNT = 5;
   let tipIndex = $state(Math.floor(Date.now() / 86_400_000) % TIP_COUNT);
+  // The tip a new user sees first (Speak rough, send polished), and whether
+  // they've picked one with the dots since.
+  const FIRST_TIP = 1;
+  let tipBrowsed = false;
   // Feed search (OpenWhispr Ctrl+K): plain client-side text filter. Wispr
   // style: just an icon until opened.
   let query = $state('');
@@ -92,6 +101,9 @@
     } catch {
       stats = null;
     }
+    // Someone who hasn't dictated yet starts on the basics — AI cleanup —
+    // rather than the day's tip (per-app profiles, say), until they browse.
+    if (!tipBrowsed && stats && (stats.totalTranscriptions ?? 0) === 0) tipIndex = FIRST_TIP;
   }
 
   onMount(() => {
@@ -233,9 +245,7 @@
     });
   }
 
-  function appName(app) {
-    return (app || '').replace(/\.exe$/i, '');
-  }
+  const appName = appLabel;
 
   async function copy(e) {
     try {
@@ -399,7 +409,10 @@
                   role="tab"
                   aria-selected={i === tipIndex}
                   aria-label={`Tip ${i + 1}`}
-                  onclick={() => (tipIndex = i)}
+                  onclick={() => {
+                    tipIndex = i;
+                    tipBrowsed = true;
+                  }}
                 ></button>
               {/each}
             </div>
@@ -448,8 +461,16 @@
               <path d="M5 10v1a7 7 0 0 0 14 0v-1" />
               <path d="M12 18v4M8 22h8" />
             </svg>
-            <h2>Ready when you are</h2>
-            <p>Press {@render keycaps(hotkeyLabel)} in any app to dictate — your transcriptions appear here.</p>
+            {#if noSpeechModel}
+              <!-- The first thing a new install needs: the hotkey does
+                   nothing until a speech model is on this PC. -->
+              <h2>One step left: a speech model</h2>
+              <p>Yap turns your voice into text with a model that runs on this PC. Download it once, then press {@render keycaps(hotkeyLabel)} in any app.</p>
+              <button class="emptycta" onclick={() => onopensettings?.('models')}>Download a speech model</button>
+            {:else}
+              <h2>Ready when you are</h2>
+              <p>Press {@render keycaps(hotkeyLabel)} in any app to dictate — your transcriptions appear here.</p>
+            {/if}
           </div>
         {:else}
           {#each groups as g (g.label)}
@@ -545,7 +566,10 @@
               <span class="l">day streak</span>
             </div>
             <div class="statrule"></div>
-            <p class="statfoot">{fmtNum(stats.totalTranscriptions)} dictations, stored on this PC.</p>
+            <p class="statfoot">
+              {fmtNum(stats.totalTranscriptions)}
+              {stats.totalTranscriptions === 1 ? 'dictation' : 'dictations'}, stored on this PC.
+            </p>
           </div>
         </aside>
       {/if}
@@ -563,8 +587,8 @@
     max-width: 980px;
     margin: 0 auto;
     padding: 34px 36px 48px;
+    container-type: inline-size;
   }
-
   /* ---- greeting: the hotkey IS the interface, so it leads ---- */
   .hello {
     margin: 0 0 24px;
@@ -1019,7 +1043,75 @@
   }
   .empty p {
     margin: 0;
+    max-width: 460px;
     font-size: 13.5px;
     line-height: 1.8;
+  }
+  .emptycta {
+    margin-top: 10px;
+    padding: 9px 16px;
+    border: none;
+    border-radius: var(--yap-r);
+    background: var(--yap-ink);
+    color: var(--yap-ink-fg);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .emptycta:hover {
+    background: var(--yap-ink-hover);
+  }
+  .emptycta:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
+  }
+
+  /* A narrow window (the 860 px minimum, a laptop at 150 %): the stats go
+     above the feed as one row instead of squeezing the tip card into a
+     column of one word per line. Last in the sheet: a container query adds
+     no specificity, so these must come after the rules they change. */
+  @container (max-width: 760px) {
+    .cols {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 18px;
+    }
+    .rail {
+      order: -1;
+      position: static;
+      flex: none;
+    }
+    .statcard {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 4px 14px;
+      padding: 14px 18px;
+    }
+    .statcard .stat {
+      flex-wrap: wrap;
+      gap: 0 6px;
+    }
+    .statcard .stat .n {
+      font-size: 24px;
+    }
+    .statcard .stat .l {
+      font-size: 12.5px;
+    }
+    .statrule,
+    .statfoot {
+      display: none;
+    }
+  }
+  @container (max-width: 560px) {
+    .hero {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .heroside {
+      flex-direction: row;
+      align-items: center;
+      gap: 16px;
+    }
   }
 </style>

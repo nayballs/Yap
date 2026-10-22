@@ -32,6 +32,7 @@
     hasLine,
   } from './notepadText.js';
   import SpeakerMenu from './SpeakerMenu.svelte';
+  import SpeakerCard from './SpeakerCard.svelte';
   import { nextModel, modelLine, whereItRuns } from './aiModel.js';
   import { speech, initSpeech, readAloud, stopReading } from './speech.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
@@ -162,14 +163,16 @@
     );
   }
 
-  /** A speaker edit made here: the map, and each line's voice. */
+  /** A speaker edit made here: the map, each line's voice (and echo: "It
+   *  was me"), and the summary (a name put on "Speaker 2"). */
   function onSpeakerChanged(updated) {
     if (!selected || updated?.id !== selected.id) return;
     selected.speakers = updated.speakers || {};
     const t = updated.transcript || [];
     selected.transcript = (selected.transcript || []).map((s, i) =>
-      t[i] ? { ...s, speaker: t[i].speaker || '', speakerLocked: !!t[i].speakerLocked } : s
+      t[i] ? { ...s, speaker: t[i].speaker || '', speakerLocked: !!t[i].speakerLocked, echo: !!t[i].echo } : s
     );
+    if (typeof updated.enhancedContent === 'string') selected.enhancedContent = updated.enhancedContent;
   }
   // "AI notes up to 40:12": where the digests reach, from the meeting's start.
   const digestedUpTo = $derived.by(() => {
@@ -352,6 +355,7 @@
       selected.folder = p.folder;
     }
     if (p.speakers) selected.speakers = p.speakers;
+    if (typeof p.enhancedContent === 'string') selected.enhancedContent = p.enhancedContent;
     // The voice separation labelled lines (`lineSplice`, some split where
     // the speaker changed), or a speaker was renamed or merged in the
     // notepad (`lineSpeakers`): every line's voice.
@@ -626,6 +630,9 @@
           })),
         },
         { separator: true },
+        readingNote(n.id)
+          ? { label: 'Stop reading', icon: 'stop', onselect: () => readNote(n.id) }
+          : { label: 'Read aloud', icon: 'play', onselect: () => readNote(n.id) },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyNoteMarkdown(n.id) },
         { label: 'Export…', icon: 'download', onselect: () => exportNote(n.id) },
         { separator: true },
@@ -659,6 +666,24 @@
       titleEl?.select();
     }, 0);
   }
+  // Read a note aloud (read_aloud.rs: the reading card on the Yap bar, its
+  // words lit up as they're said; it reads on if you leave Notes): the open
+  // note as it's shown — the Enhanced summary on that tab, else the note —
+  // or note `id` (its row's menu). Again while it reads: Stop.
+  const readingNote = (id) => speech.speakingId === `note:${id}`;
+  async function readNote(id = selected?.id) {
+    if (id == null) return;
+    if (selected?.id === id) flushSave();
+    try {
+      const n = selected?.id === id ? selected : await invoke('note_get', { id });
+      const body = selected?.id === id && tab === 'enhanced' && n.enhancedContent ? n.enhancedContent : n.content || n.enhancedContent || '';
+      const title = displayTitle(n);
+      await readAloud(title && body.trim() ? `# ${title}\n\n${body}` : body, `note:${id}`);
+    } catch (e) {
+      toast({ title: "Couldn't read it aloud", description: String(e), variant: 'destructive' });
+    }
+  }
+
   async function copyNoteMarkdown(id) {
     if (selected?.id === id) flushSave();
     try {
@@ -873,8 +898,9 @@
   let chatThread = $state([]);
   let chatInput = $state('');
   let asking = $state(false);
-  // Each answer's id for ▶ Read aloud (speech.svelte.js / tts.rs).
-  initSpeech(['notes:']);
+  // Each answer's id for ▶ Read aloud (speech.svelte.js / tts.rs), and a
+  // note's own ("note:<id>").
+  initSpeech(['notes:', 'note:']);
   let turnSeq = 0;
   const turnId = () => `notes:${selected?.id ?? 0}:${++turnSeq}`;
 
@@ -1369,6 +1395,21 @@
             {selected.transcript?.length ? 'Resume' : 'Record'}
           </button>
         {/if}
+        <!-- Read aloud (read_aloud.rs): the reading card on the Yap bar. -->
+        <button
+          class="iconbtn"
+          class:on={readingNote(selected.id)}
+          title={readingNote(selected.id) ? 'Stop reading' : 'Read aloud'}
+          aria-label={readingNote(selected.id) ? 'Stop reading' : 'Read aloud'}
+          aria-pressed={readingNote(selected.id)}
+          onclick={() => readNote()}
+        >
+          {#if readingNote(selected.id)}
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
+          {:else}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z" /><path d="M15.5 9a4 4 0 0 1 0 6" /><path d="M18.5 6.5a7.5 7.5 0 0 1 0 11" /></svg>
+          {/if}
+        </button>
         <button class="iconbtn" title="Export as Markdown" aria-label="Export as Markdown" onclick={() => exportNote()}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
         </button>
@@ -1383,10 +1424,10 @@
           </button>
           <span class="tabspacer"></span>
           <button class="copy" onclick={() => copyEnhanced(false)}>
-            {copied === 'markdown' ? 'Copied!' : 'Copy markdown'}
+            {copied === 'markdown' ? 'Copied!' : 'Copy as Markdown'}
           </button>
           <button class="copy" onclick={() => copyEnhanced(true)}>
-            {copied === 'text' ? 'Copied!' : 'Copy text'}
+            {copied === 'text' ? 'Copied!' : 'Copy as text'}
           </button>
         </div>
       {/if}
@@ -1479,6 +1520,10 @@
               </button>
             {/if}
           </div>
+          {#if selected.transcript?.length}
+            <!-- "Speaker 2 is Priya?" (speakers/naming.rs) -->
+            <SpeakerCard note={selected} origin={LABEL} onchanged={onSpeakerChanged} />
+          {/if}
           {#if recordingThisNote && !selected.transcript?.length}
             <p class="thint">
               Your mic is <strong>You</strong>, the call audio is <strong>Them</strong>. Use
@@ -1541,7 +1586,7 @@
                               class:guess={run.guess}
                               aria-haspopup="menu"
                               aria-expanded={speakerMenu?.key === run.key}
-                              title={run.guess ? 'A guess from the calendar invite: click to confirm or change' : 'Rename, merge or correct this speaker'}
+                              title={run.guess ? 'A guess: click to confirm or change' : 'Rename, merge or correct this speaker'}
                               onclick={() => toggleSpeakerMenu(run.key, run.speaker, run.lines.map((l) => l.i))}
                             >{run.label}</button>
                             {#if speakerMenu?.key === run.key}
@@ -2918,6 +2963,11 @@
   .iconbtn:hover {
     background: var(--yap-s2);
     color: var(--yap-fg);
+  }
+  /* Reading this note aloud: ■ until it stops. */
+  .iconbtn.on {
+    color: var(--yap-fg);
+    background: var(--yap-s2);
   }
   .iconbtn svg {
     width: 14px;

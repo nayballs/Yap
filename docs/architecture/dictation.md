@@ -226,14 +226,16 @@ to **Run again** from Home.
   (press = key down w/ required modifiers held, release = key up OR required
   modifier up; chords fire on completion; suppressed keys are excluded from the
   GetAsyncKeyState self-heal — the hook eats them before the key-state table
-  updates). Five bindings: dictation, edit (`edit-key-*`, Commands' rewrite
+  updates). Six bindings: dictation, edit (`edit-key-*`, Commands' rewrite
   shortcut), the meeting
   shortcut (`meeting-key-*`, `configure_meeting`; only its press is used —
   `meeting_guard`) and the Voice Assistant's (`assistant-key-*`,
   `configure_assistant`; unbound by default; `configure_assistant_from`
-  leaves one that clashes unbound) and "Use what I said" (`as-said-key-*`,
-  `configure_as_said`/`_from`, unbound by default; only its press is used —
-  `as_said::swap_soon`). **`clashes(a, b)`** (pure, unit-tested;
+  leaves one that clashes unbound), Read aloud's (`read-key-*`,
+  `configure_read`/`_from`, unbound by default; only its press is used —
+  `read_aloud::read_selection`) and "Use what I said" (`as-said-key-*`,
+  `configure_as_said`/`_from`, unbound by default, giving way to any of the
+  other five; only its press is used — `as_said::swap_soon`). **`clashes(a, b)`** (pure, unit-tested;
   `hotkeysClash` in `lib/hotkeys.js` is the same rule, Settings refuses with
   it): the same key however written, combos on one key nesting (Ctrl+Space
   inside Ctrl+Shift+Space), a chord completing inside a combo or bigger
@@ -254,7 +256,21 @@ to **Run again** from Home.
   keyup → `dictation_key { pressed }`, the hook's own path into `on_key`, so
   push-to-talk's gestures work there too; Settings and the notepad also catch the meeting shortcut →
   `meeting_shortcut`, and the assistant shortcut → `assistant_key { pressed }`). Any new Yap window with focusable UI needs the
-  same fallback.
+  same fallback. **The Copilot key** (new Windows 11 laptops; the keyboard
+  sends Win + Shift + F23) is the combo `kb:shift+win+134` (`COPILOT_KEY` in
+  `lib/hotkeys.js`, shown as one key, "Copilot", "the Copilot key" in
+  hints). Nothing tells a PC that has one apart, and Windows may act on it
+  before a focused Yap window sees F23, so the shortcut picker offers a
+  **Copilot key** button while it captures (Settings, onboarding). Checked
+  on a release build's real hook (2026-10-22, injected with `SendInput`,
+  both as one burst of all six events and spaced 30 ms apart, with an
+  observing LL hook installed behind Yap's): the press starts and the next
+  stops a dictation, F23 never reaches the next hook, the menu-mask key
+  goes down before Win comes up, and nothing else takes the front. Without
+  Yap the same keys opened Windows Settings on that PC (a desktop with no
+  Copilot app). Many laptops send the key's press and release together, so
+  holding it can't keep push-to-talk going: Settings → Dictation says so
+  (double-tap for hands-free, or Toggle).
 - **`mic_watch.rs`** — the dictation's dead-mic watchdog, pure: `MicTally`
   (lock-free, fed by the audio callback), `DeadMicWatch::poll(elapsed, samples,
   heard)` → Wait / Reopen / Report / Recovered / Fine, the messages (the full one

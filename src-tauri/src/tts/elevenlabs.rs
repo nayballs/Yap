@@ -213,6 +213,15 @@ pub fn speech_request(base: &str, key: &Key, voice: &str, model: &str, rate: f32
     })
 }
 
+/// The same sentence from the endpoint that also says when each character
+/// is spoken (`/stream/with-timestamps`, reading aloud's karaoke): a stream
+/// of JSON lines, the audio base64 in each. Pure.
+pub fn timed_request(base: &str, key: &Key, voice: &str, model: &str, rate: f32, text: &str) -> Result<SpeechRequest, String> {
+    let mut req = speech_request(base, key, voice, model, rate, text)?;
+    req.url = req.url.replacen("/stream?", "/stream/with-timestamps?", 1);
+    Ok(req)
+}
+
 // ---- the audio -----------------------------------------------------------------------------
 
 /// Raw 16-bit little-endian PCM as it arrives: a byte left over at the end
@@ -412,6 +421,159 @@ pub async fn stream_speech(req: &SpeechRequest, out: &mut dyn FnMut(Pcm) -> bool
     Ok(done)
 }
 
+// ---- one sentence with its timing (`/stream/with-timestamps`) -----------------------------------
+
+/// `/stream/with-timestamps`' answer as it arrives: one JSON object a line,
+/// each with a piece of the audio (`audio_base64`, the same raw PCM) and
+/// when the characters in it start (`alignment`: `characters`,
+/// `character_start_times_seconds` — on the whole sentence's clock, as
+/// ElevenLabs' own example adds them up; a piece whose times start again
+/// near zero is put after the audio before it). A line may arrive in parts.
+#[derive(Debug, Default)]
+pub struct Timestamped {
+    buf: Vec<u8>,
+    pcm: S16Le,
+    /// Characters timed so far (the next piece's first is this one).
+    chars: usize,
+    /// Seconds of audio so far.
+    audio: f64,
+    /// When the last timed character ends.
+    last_end: f64,
+    pub times: Vec<super::marks::CharTime>,
+}
+
+impl Timestamped {
+    /// More of the answer: the audio in every line it completes.
+    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<f32>, Failure> {
+        self.buf.extend_from_slice(bytes);
+        let mut out = Vec::new();
+        while let Some(nl) = self.buf.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = self.buf.drain(..=nl).collect();
+            out.extend(self.line(&line)?);
+        }
+        Ok(out)
+    }
+
+    /// The answer ended: a last line without its line break.
+    pub fn finish(&mut self) -> Result<Vec<f32>, Failure> {
+        let rest = std::mem::take(&mut self.buf);
+        self.line(&rest)
+    }
+
+    fn line(&mut self, line: &[u8]) -> Result<Vec<f32>, Failure> {
+        use base64::Engine as _;
+        let line = line.trim_ascii();
+        if line.is_empty() {
+            return Ok(Vec::new());
+        }
+        let odd = || Failure::Rejected(format!("{NAME} answered with something unexpected"));
+        let v: Value = serde_json::from_slice(line).map_err(|_| odd())?;
+        let before = self.audio;
+        let samples = match v["audio_base64"].as_str() {
+            Some(b64) if !b64.is_empty() => {
+                let bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(|_| odd())?;
+                self.pcm.push(&bytes)
+            }
+            _ => Vec::new(),
+        };
+        self.audio += samples.len() as f64 / f64::from(SAMPLE_RATE);
+        let a = &v["alignment"];
+        if let (Some(chars), Some(starts)) = (a["characters"].as_array(), a["character_start_times_seconds"].as_array()) {
+            let starts: Vec<f64> = starts.iter().map(|s| s.as_f64().unwrap_or(0.0)).collect();
+            let ends: Vec<f64> = a["character_end_times_seconds"]
+                .as_array()
+                .map(|e| e.iter().map(|s| s.as_f64().unwrap_or(0.0)).collect())
+                .unwrap_or_default();
+            // Times starting again near zero after the first piece: this
+            // piece's own clock.
+            let offset = match starts.first() {
+                Some(&first) if !self.times.is_empty() && first + 0.05 < self.last_end => before,
+                _ => 0.0,
+            };
+            for (k, &s) in starts.iter().enumerate().take(chars.len()) {
+                self.times.push(super::marks::CharTime {
+                    at: self.chars + k,
+                    start: Duration::from_secs_f64((s + offset).max(0.0)),
+                });
+            }
+            if let Some(&end) = ends.last().or(starts.last()) {
+                self.last_end = self.last_end.max(end + offset);
+            }
+            self.chars += chars.len();
+        }
+        Ok(samples)
+    }
+}
+
+/// [`stream_speech`] from `/stream/with-timestamps` ([`timed_request`]):
+/// the audio handed on as it comes, and when each character starts.
+pub async fn stream_speech_timed(
+    req: &SpeechRequest,
+    out: &mut dyn FnMut(Pcm) -> bool,
+) -> Result<(Streamed, Vec<super::marks::CharTime>), Failure> {
+    let since = CANCELS.load(Ordering::SeqCst);
+    let started = Instant::now();
+    let stop = cancelled(since);
+    tokio::pin!(stop);
+    let mut done = Streamed::default();
+    let send = API_HTTP
+        .post(&req.url)
+        .header("xi-api-key", req.key.header())
+        .header("accept", "application/json")
+        .json(&req.body)
+        .send();
+    let resp = tokio::select! {
+        _ = &mut stop => return Ok((Streamed { stopped: true, ..done }, Vec::new())),
+        r = tokio::time::timeout(FIRST_AUDIO, send) => match r {
+            Err(_) => return Err(Failure::TimedOut),
+            Ok(Err(e)) => return Err(send_failure(&e)),
+            Ok(Ok(resp)) => resp,
+        },
+    };
+    if !resp.status().is_success() {
+        return Err(error_of(resp, &req.key).await);
+    }
+    let mut resp = resp;
+    let mut parse = Timestamped::default();
+    let mut piece: Vec<f32> = Vec::with_capacity(MIN_PIECE * 2);
+    let mut heard = false;
+    let mut hand_on = |samples: Vec<f32>, done: &mut Streamed| -> bool {
+        done.samples += samples.len();
+        if done.first_audio.is_none() {
+            done.first_audio = Some(started.elapsed());
+        }
+        out(Pcm { sample_rate: SAMPLE_RATE, channels: 1, samples })
+    };
+    loop {
+        let wait = if heard { GAP } else { FIRST_AUDIO.saturating_sub(started.elapsed()) };
+        let next = tokio::select! {
+            _ = &mut stop => return Ok((Streamed { stopped: true, ..done }, parse.times)),
+            r = tokio::time::timeout(wait, resp.chunk()) => r,
+        };
+        match next {
+            Err(_) => return Err(Failure::TimedOut),
+            Ok(Err(e)) => return Err(send_failure(&e)),
+            Ok(Ok(None)) => break,
+            Ok(Ok(Some(bytes))) => {
+                piece.extend(parse.push(&bytes)?);
+                heard |= !piece.is_empty();
+                if piece.len() >= MIN_PIECE && !hand_on(std::mem::take(&mut piece), &mut done) {
+                    return Ok((Streamed { stopped: true, ..done }, parse.times));
+                }
+            }
+        }
+    }
+    piece.extend(parse.finish()?);
+    if done.samples == 0 && piece.is_empty() {
+        return Err(Failure::Rejected(format!("{NAME} sent no audio")));
+    }
+    piece.extend(std::iter::repeat_n(0.0, SAMPLE_RATE as usize * SENTENCE_GAP_MS / 1000));
+    if !hand_on(piece, &mut done) {
+        done.stopped = true;
+    }
+    Ok((done, parse.times))
+}
+
 // ---- the engine ----------------------------------------------------------------------------
 
 /// ElevenLabs as a speech engine (`tts::Engine`): `key` and `model` from
@@ -424,6 +586,8 @@ pub struct ElevenLabs {
     keep_health: bool,
     /// Another API base than [`base`] (the unit tests' stand-in).
     at: Option<String>,
+    /// Ask for each character's time too (reading aloud: [`timed_request`]).
+    timed: bool,
 }
 
 impl ElevenLabs {
@@ -433,7 +597,13 @@ impl ElevenLabs {
 
     pub fn with_key(key: Key, model: &str, keep_health: bool) -> ElevenLabs {
         let model = if model.trim().is_empty() { DEFAULT_MODEL } else { model.trim() };
-        ElevenLabs { key, model: model.to_string(), keep_health, at: None }
+        ElevenLabs { key, model: model.to_string(), keep_health, at: None, timed: false }
+    }
+
+    /// Ask for the word timing too (`/stream/with-timestamps`), when `on`.
+    pub fn timed(mut self, on: bool) -> ElevenLabs {
+        self.timed = on;
+        self
     }
 
     /// The same, asking `base` instead (a unit test's stand-in).
@@ -475,6 +645,8 @@ impl Engine for ElevenLabs {
             rate,
             keep_health: self.keep_health,
             at: self.at.clone(),
+            timed: self.timed,
+            times: None,
         }))
     }
     /// Too-short sentences join the next, as for Kokoro: one request fewer,
@@ -495,6 +667,9 @@ struct ElevenSynth {
     choice: u64,
     keep_health: bool,
     at: Option<String>,
+    timed: bool,
+    /// The last sentence's character times (`marks`).
+    times: Option<Vec<super::marks::CharTime>>,
 }
 
 impl ElevenSynth {
@@ -525,8 +700,16 @@ impl Synth for ElevenSynth {
             Some(at) => at.clone(),
             None => base()?,
         };
-        let req = speech_request(&base, &self.key, &self.voice, &self.model, self.rate, text)?;
-        let result = tauri::async_runtime::block_on(stream_speech(&req, out));
+        let result = if self.timed {
+            let req = timed_request(&base, &self.key, &self.voice, &self.model, self.rate, text)?;
+            tauri::async_runtime::block_on(stream_speech_timed(&req, out)).map(|(done, times)| {
+                self.times = (!times.is_empty()).then_some(times);
+                done
+            })
+        } else {
+            let req = speech_request(&base, &self.key, &self.voice, &self.model, self.rate, text)?;
+            tauri::async_runtime::block_on(stream_speech(&req, out))
+        };
         self.record(&result);
         match result {
             Ok(_) => Ok(()),
@@ -535,6 +718,10 @@ impl Synth for ElevenSynth {
                 Err(format!("{NAME}: {}", f.reason()))
             }
         }
+    }
+
+    fn marks(&mut self) -> Option<Vec<super::marks::CharTime>> {
+        self.times.take()
     }
 }
 
@@ -858,6 +1045,9 @@ pub(crate) mod standin {
         Pcm { bytes: Vec<u8>, pieces: Vec<usize>, delay: Duration },
         /// Accept, then say nothing.
         Silent,
+        /// 200 with `/stream/with-timestamps`' JSON lines, each body cut in
+        /// these pieces (a line may arrive in parts).
+        Timed { body: String, pieces: Vec<usize> },
     }
 
     pub(crate) struct Stub {
@@ -919,6 +1109,23 @@ pub(crate) mod standin {
                     Reply::Silent => {
                         std::thread::sleep(Duration::from_secs(30));
                     }
+                    Reply::Timed { body, pieces } => {
+                        let bytes = body.into_bytes();
+                        let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n");
+                        let mut at = 0;
+                        for n in pieces.into_iter().chain([usize::MAX]) {
+                            let n = n.min(bytes.len() - at);
+                            if n == 0 {
+                                break;
+                            }
+                            let _ = write!(s, "{n:x}\r\n");
+                            let _ = s.write_all(&bytes[at..at + n]);
+                            let _ = write!(s, "\r\n");
+                            let _ = s.flush();
+                            at += n;
+                        }
+                        let _ = write!(s, "0\r\n\r\n");
+                    }
                 }
             }
         });
@@ -928,11 +1135,39 @@ pub(crate) mod standin {
     pub(crate) fn pcm_bytes(samples: usize) -> Vec<u8> {
         (0..samples).flat_map(|i| (((i % 200) as i16 - 100) * 50).to_le_bytes()).collect()
     }
+
+    /// `/stream/with-timestamps`' answer for `text`, as ElevenLabs sends it:
+    /// one JSON line per piece (`per_piece` characters each), its audio
+    /// base64, each character `char_ms` long on the whole sentence's clock
+    /// (or each piece's own clock, `piece_clock`).
+    pub(crate) fn timed_body(text: &str, per_piece: usize, char_ms: u64, piece_clock: bool) -> String {
+        use base64::Engine as _;
+        let chars: Vec<char> = text.chars().collect();
+        let mut out = String::new();
+        for (p, part) in chars.chunks(per_piece.max(1)).enumerate() {
+            let first = p * per_piece.max(1);
+            let samples = part.len() * char_ms as usize * 24;
+            let audio = base64::engine::general_purpose::STANDARD.encode(pcm_bytes(samples));
+            let clock = |k: usize| (if piece_clock { k } else { first + k }) as f64 * char_ms as f64 / 1000.0;
+            let line = serde_json::json!({
+                "audio_base64": audio,
+                "alignment": {
+                    "characters": part.iter().map(|c| c.to_string()).collect::<Vec<_>>(),
+                    "character_start_times_seconds": (0..part.len()).map(clock).collect::<Vec<_>>(),
+                    "character_end_times_seconds": (0..part.len()).map(|k| clock(k + 1)).collect::<Vec<_>>(),
+                },
+                "normalized_alignment": null,
+            });
+            out.push_str(&line.to_string());
+            out.push('\n');
+        }
+        out
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::standin::{pcm_bytes, serial, stub, Reply};
+    use super::standin::{pcm_bytes, serial, stub, timed_body, Reply};
     use super::*;
     use std::net::TcpListener;
 
@@ -1174,6 +1409,54 @@ mod tests {
         }));
         assert!(r.unwrap().stopped);
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn the_timed_endpoint_streams_audio_and_each_characters_time() {
+        let _one_at_a_time = serial();
+        let text = "Read this aloud";
+        // Pieces of 4 characters, cut mid-line on the wire.
+        let body = timed_body(text, 4, 60, false);
+        let s = stub(vec![Reply::Timed { body: body.clone(), pieces: vec![7, 300, 2, 5_000] }]);
+        let req = timed_request(&s.base, &Key::new(SECRET), "JBFqnCBsd6RMkjVDRZzb", "", 1.0, text).unwrap();
+        assert!(req.url.ends_with("/stream/with-timestamps?output_format=pcm_24000"), "{}", req.url);
+        let mut got = Vec::new();
+        let (done, times) = tauri::async_runtime::block_on(stream_speech_timed(&req, &mut |p| {
+            got.push(p);
+            true
+        }))
+        .unwrap();
+        assert!(!done.stopped);
+        // All the audio (15 characters × 60 ms), then the pause.
+        let all: usize = got.iter().map(|p| p.samples.len()).sum();
+        assert_eq!(all, 15 * 60 * 24 + 3_600);
+        // Every character, on one clock: "this" starts at 5 × 60 ms.
+        assert_eq!(times.len(), 15);
+        assert_eq!(times[5], super::super::marks::CharTime { at: 5, start: Duration::from_millis(300) });
+        let spans = super::super::marks::words(text);
+        let starts = super::super::marks::from_chars(&spans, &times).unwrap();
+        assert_eq!(starts, vec![Duration::ZERO, Duration::from_millis(300), Duration::from_millis(600)]);
+        let raw = s.requests.lock().unwrap()[0].clone();
+        assert!(raw.starts_with("POST /v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb/stream/with-timestamps?output_format=pcm_24000 HTTP/1.1"));
+        assert!(!raw.lines().next().unwrap().contains(SECRET));
+    }
+
+    #[test]
+    fn timing_on_each_pieces_own_clock_is_put_after_the_audio_before_it() {
+        let text = "Read this aloud";
+        let mut p = Timestamped::default();
+        let audio: usize = timed_body(text, 5, 60, true)
+            .lines()
+            .map(|l| p.push(format!("{l}\n").as_bytes()).unwrap().len())
+            .sum();
+        assert_eq!(audio, 15 * 60 * 24);
+        assert!(p.finish().unwrap().is_empty());
+        let starts: Vec<u64> = p.times.iter().map(|t| t.start.as_millis() as u64).collect();
+        assert_eq!(&starts[..7], &[0, 60, 120, 180, 240, 300, 360]);
+        assert!(starts.windows(2).all(|w| w[0] < w[1]), "{starts:?}");
+        // Something that isn't JSON: said so.
+        let mut bad = Timestamped::default();
+        assert!(bad.push(b"<html>oops</html>\n").is_err());
     }
 
     /// Yap's own share of the first-audio wait, against a local stand-in

@@ -1980,8 +1980,21 @@ pub(crate) async fn chat_beside_dictation(
     messages: Value,
     opts: &ChatOptions,
 ) -> Result<String, String> {
+    chat_beside_dictation_with(app, ep, messages, opts, serde_json::Map::new()).await
+}
+
+/// [`chat_beside_dictation`] with fields of the caller's own in the request
+/// body (the speaker names' JSON schema for a model on this PC,
+/// `speakers/naming.rs`).
+pub(crate) async fn chat_beside_dictation_with(
+    app: &AppHandle,
+    ep: &Endpoint,
+    messages: Value,
+    opts: &ChatOptions,
+    extra: serde_json::Map<String, Value>,
+) -> Result<String, String> {
     let call = move |messages: Value| {
-        crate::llm::chat(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, opts)
+        crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, opts, extra.clone())
     };
     if !ep.is_local() {
         return call(messages).await;

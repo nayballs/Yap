@@ -1,0 +1,41 @@
+{
+  "name": "greetings-as-people-join",
+  "description": "Hellos while people join: greeting someone who just joined isn't evidence about who spoke before.",
+  "tags": [
+    "greeting",
+    "trap"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah",
+    "Sam Patel",
+    "Siobhan Kelly"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Hi Sam, can you hear me okay?"
+    ],
+    [
+      "them-2",
+      "Yes, loud and clear. Hi Priya."
+    ],
+    [
+      "them-1",
+      "Great. Hi Siobhan, you've just joined."
+    ],
+    [
+      "them-3",
+      "Morning both, sorry I'm late, the last meeting overran."
+    ],
+    [
+      "them-1",
+      "No worries. Okay, let's get started with the roadmap."
+    ]
+  ],
+  "truth": {
+    "them-1": "Priya Shah",
+    "them-2": "Sam Patel",
+    "them-3": "Siobhan Kelly"
+  }
+}

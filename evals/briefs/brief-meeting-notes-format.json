@@ -1,0 +1,27 @@
+{
+  "name": "brief-meeting-notes-format",
+  "description": "Added for the third run (unseen until then): the last meeting was summarised by the Meeting Notes action (\"- [ ] Name: task\" lines, Follow-ups) and the person typed notes too.",
+  "meeting": {
+    "title": "Contract renewal call",
+    "in_minutes": 9,
+    "attendees": ["Siobhan Byrne"],
+    "description": ""
+  },
+  "notes": [
+    {
+      "title": "Usage review with Siobhan",
+      "days_ago": 6,
+      "participants": ["Siobhan Byrne"],
+      "content": "She sounded keen on the bigger plan.",
+      "plan": "Siobhan's team doubled its usage this quarter and wants to talk renewal.\n\n## Key Discussion Points\n- Usage doubled since the summer.\n- The bigger plan would cover the new team.\n\n## Decisions Made\n- Keep the current price until the renewal.\n\n## Action Items\n- [ ] You: draft the renewal contract (due: 5 November)\n- [ ] Siobhan: send the latest usage report\n- [x] You: share the plan comparison\n\n## Follow-ups\n- Check whether the new team needs its own admin."
+    }
+  ],
+  "expect": {
+    "first": false,
+    "cites": ["Usage review with Siobhan"],
+    "open_items": ["renewal contract", "usage report"],
+    "no_open_items": ["plan comparison"],
+    "owners": ["You", "Siobhan"],
+    "not_contains": ["Okonkwo", "lighting", "6 November", "discount", "tripled"]
+  }
+}

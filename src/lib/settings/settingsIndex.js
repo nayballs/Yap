@@ -32,7 +32,7 @@ export const SETTINGS_INDEX = [
   { page: 'general', section: 'Notifications', label: 'Show tips', desc: "Short tips, like push-to-talk's double-tap", keywords: 'tips hints coaching notifications nudge', anchor: 'tips', toggle: 'showTips' },
 
   // ---- Dictation ----
-  { page: 'dictation', section: 'Start and stop', label: 'Hotkey', desc: 'Press it in any app to start and stop dictating', keywords: 'shortcut key keyboard f9 dictation start stop', anchor: 'hotkey' },
+  { page: 'dictation', section: 'Start and stop', label: 'Hotkey', desc: 'Press it in any app to start and stop dictating', keywords: 'shortcut key keyboard f9 dictation start stop copilot key', anchor: 'hotkey' },
   { page: 'dictation', section: 'Start and stop', label: 'Recording mode', desc: 'Toggle, or hold the key while you talk', keywords: 'push-to-talk push to talk toggle hold hands-free double-tap', anchor: 'recording-mode' },
   { page: 'dictation', section: 'Microphone and sound', label: 'Microphone', desc: 'Changes apply straight away', keywords: 'mic input device audio headset', anchor: 'microphone' },
   { page: 'dictation', section: 'Microphone and sound', label: 'Chime when recording starts and stops', desc: 'A sound, and its volume', keywords: 'sound cue beep volume chime audio feedback', anchor: 'chime', toggle: 'soundEnabled' },
@@ -56,6 +56,7 @@ export const SETTINGS_INDEX = [
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Dictate', desc: 'Start and stop dictating where you are typing', keywords: 'shortcut shortcuts hotkey keyboard dictation key', anchor: 'shortcut-dictation' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Rewrite selected text', desc: 'Select text, press it and say how to change it', keywords: 'shortcut shortcuts hotkey edit rewrite commands', anchor: 'shortcut-rewrite' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Ask the Voice Assistant', desc: 'Ask out loud from any app', keywords: 'shortcut shortcuts hotkey assistant voice', anchor: 'shortcut-assistant' },
+  { page: 'shortcuts', section: 'Global shortcuts', label: 'Read aloud', desc: 'Select text in any app and press it to hear it', keywords: 'shortcut shortcuts hotkey read aloud speak selection text to speech tts dyslexia reading', anchor: 'shortcut-read' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Use what I said', desc: 'Swap what Yap pasted for your words before AI cleanup', keywords: 'shortcut shortcuts hotkey raw transcript revert undo cleanup as said', anchor: 'shortcut-as-said' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Meeting notes', desc: 'Take notes on a call, press again to stop', keywords: 'shortcut shortcuts hotkey meeting win alt m', anchor: 'shortcut-meeting' },
 
@@ -69,11 +70,13 @@ export const SETTINGS_INDEX = [
   { page: 'meetings', section: 'While a meeting records', label: 'End notes when the meeting goes quiet', desc: 'After 10 minutes with nobody speaking', keywords: 'quiet silence idle auto stop', anchor: 'end-when-quiet', toggle: 'meetingEndWhenQuiet' },
   { page: 'meetings', section: 'While a meeting records', label: 'Hide Yap from screen sharing', desc: 'The notepad and the bar stay out of every capture', keywords: 'screen share sharing capture screenshot recording obs privacy', anchor: 'hide-from-capture', toggle: 'meetingHideFromCapture' },
   { page: 'meetings', section: 'While a meeting records', label: 'Tell speakers apart in meetings', desc: 'Speaker 1, 2, 3… for each voice', keywords: 'speakers diarization voices who said', anchor: 'speakers' },
+  { page: 'meetings', section: 'While a meeting records', label: "Suggest who's speaking", desc: 'Names for the voices, for you to confirm', keywords: 'speaker names who said attendees identify', anchor: 'speaker-names', toggle: 'meetingSpeakerNames' },
   { page: 'meetings', section: 'Notepad', label: 'Open the notepad when a meeting starts', desc: 'Your notes, the live transcript and the summary', keywords: 'notepad notes window', anchor: 'open-notepad', toggle: 'meetingOpenNotepad' },
   { page: 'meetings', section: 'Notepad', label: 'Split the screen when joining', desc: "Moves the call's window left of the notepad", keywords: 'split screen window layout', anchor: 'split-screen' },
   { page: 'meetings', section: 'Notepad', label: 'Show live transcript', desc: 'The words appear in the notepad as people talk', keywords: 'live transcript notepad', anchor: 'live-transcript', toggle: 'meetingLiveTranscript' },
   { page: 'meetings', section: 'Notepad', label: 'Meeting shortcut', desc: 'Take notes on a call, and press again to stop', keywords: 'shortcut hotkey win alt m meeting', anchor: 'meeting-shortcut' },
   { page: 'meetings', section: 'Calendar', label: 'Remind me before scheduled meetings', desc: 'A card with Join & take notes', keywords: 'calendar reminder notify notification before meeting', anchor: 'meeting-reminder' },
+  { page: 'meetings', section: 'Calendar', label: 'Prepare a brief before meetings', desc: 'Last time with these people, open items and the agenda', keywords: 'brief briefing prepare prep before meeting last time open items action items agenda calendar', anchor: 'meeting-brief', toggle: 'meetingBrief' },
   { page: 'meetings', section: 'Calendar', label: 'Calendars', desc: 'Meeting names and attendees', keywords: 'calendar google outlook ical connect', anchor: 'calendars' },
 
   // ---- Commands ----
@@ -85,6 +88,7 @@ export const SETTINGS_INDEX = [
   // ---- Voice Assistant ----
   { page: 'voice', section: 'Assistant shortcut', label: 'Assistant shortcut', desc: 'Ask out loud from any app', keywords: 'shortcut hotkey assistant voice ask', anchor: 'assistant-shortcut' },
   { page: 'voice', section: 'Assistant shortcut', label: 'Show the answer on the Yap bar', desc: 'Your question and its answer above the bar', keywords: 'answer card bar', anchor: 'answer-card', toggle: 'assistantAnswerCard' },
+  { page: 'voice', section: 'Read aloud', label: 'Read aloud shortcut', desc: 'Select text in any app and hear it, word by word on the Yap bar', keywords: 'read aloud shortcut hotkey selection speak text to speech tts dyslexia reading karaoke', anchor: 'read-shortcut' },
   { page: 'voice', section: 'Opening apps', label: 'Let Yap open apps when you ask', desc: '“Open Spotify”', keywords: 'open apps launch start programs', anchor: 'open-apps', toggle: 'openApps' },
   { page: 'voice', section: 'Opening apps', label: 'Nicknames', desc: 'Say a nickname, and Yap opens that app', keywords: 'open apps alias nickname', anchor: 'app-nicknames' },
   { page: 'voice', section: 'Web search', label: 'Look things up on the web', desc: 'Chat and the Voice Assistant search when a question needs it', keywords: 'web search internet google exa tavily wikipedia', anchor: 'web-search', toggle: 'webSearch' },

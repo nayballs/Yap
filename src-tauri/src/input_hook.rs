@@ -1,5 +1,5 @@
-//! Unified input hook for the dictation, edit (Commands' rewrite), meeting
-//! and Voice Assistant key bindings.
+//! Unified input hook for the dictation, edit (Commands' rewrite), meeting,
+//! Voice Assistant and Read aloud key bindings.
 //!
 //! Installs both WH_KEYBOARD_LL and WH_MOUSE_LL hooks to capture:
 //! - Keyboard keys (including those sent by mouse side buttons via driver software)
@@ -11,9 +11,11 @@
 //! the pipeline's `recording_mode` decides toggle vs hold. The meeting
 //! shortcut (Win+Alt+M by default) only acts on its press (`meeting_guard`).
 //! The assistant shortcut (unbound by default) records like the dictation
-//! key, for a question to Yap's Chat (`assistant.rs`). No two bindings may
+//! key, for a question to Yap's Chat (`assistant.rs`). The Read aloud
+//! shortcut (unbound by default) only acts on its press: the selection in
+//! the app you're in is read aloud (`read_aloud.rs`). No two bindings may
 //! fire on one press ([`clashes`]: Settings refuses such a key, and setup /
-//! `save_config` leave a clashing assistant shortcut unbound).
+//! `save_config` leave a clashing assistant or read-aloud shortcut unbound).
 //!
 //! A combo holding **Alt or Win** whose main key is swallowed taps an
 //! unassigned "menu mask" key while the modifiers are still down
@@ -48,7 +50,7 @@ const MOD_ALT: u8 = 2;
 const MOD_SHIFT: u8 = 4;
 const MOD_WIN: u8 = 8;
 
-/// A configurable key binding (dictation, edit, meeting, assistant).
+/// A configurable key binding (dictation, edit, meeting, assistant, read).
 struct KeyBinding {
     /// 0=none, 1=keyboard vkey, 2=mouse button, 3=modifier-only chord
     key_type: AtomicU8,
@@ -105,6 +107,7 @@ static DICTATION_BINDING: KeyBinding = KeyBinding::new();
 static EDIT_BINDING: KeyBinding = KeyBinding::new();
 static MEETING_BINDING: KeyBinding = KeyBinding::new();
 static ASSISTANT_BINDING: KeyBinding = KeyBinding::new();
+static READ_BINDING: KeyBinding = KeyBinding::new();
 /// "Use what I said" (`as_said.rs`): swap the last cleaned dictation's
 /// paste for the words as said. Unbound by default.
 static AS_SAID_BINDING: KeyBinding = KeyBinding::new();
@@ -175,6 +178,40 @@ pub fn configure_assistant(key_spec: &str) -> Result<String, String> {
     Ok(desc)
 }
 
+/// Parse a key spec string and configure the **Read aloud** shortcut
+/// (`read_aloud.rs`: the selection in the app you're in, read aloud). An
+/// empty spec unbinds it (the default).
+pub fn configure_read(key_spec: &str) -> Result<String, String> {
+    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
+    READ_BINDING.configure(key_type, key_code, mods);
+    let desc = format_binding(key_type, key_code, mods);
+    info!("Read-aloud key configured: {} (spec: {:?})", desc, key_spec);
+    Ok(desc)
+}
+
+/// The read-aloud shortcut from config, unless it clashes with one of the
+/// others (a hand-edited config.json: Settings never saves one), in which
+/// case it stays unbound and the log says why.
+pub fn configure_read_from(cfg: &crate::config::YapConfig) {
+    let spec = cfg.read_hotkey.trim();
+    let others = [
+        ("dictation hotkey", cfg.hotkey.as_str()),
+        ("rewrite shortcut", cfg.edit_hotkey.as_str()),
+        ("meeting shortcut", cfg.meeting_hotkey.as_str()),
+        ("assistant shortcut", cfg.assistant_hotkey.as_str()),
+    ];
+    let spec = match others.iter().find(|(_, other)| clashes(spec, other)) {
+        Some((name, _)) => {
+            tracing::warn!("The read-aloud shortcut {spec:?} clashes with the {name}: left unbound");
+            ""
+        }
+        None => spec,
+    };
+    if let Err(e) = configure_read(spec) {
+        tracing::warn!("Failed to apply the read-aloud shortcut: {}", e);
+    }
+}
+
 /// The assistant shortcut from config, unless it clashes with one of the
 /// other three (a hand-edited config.json: Settings never saves one), in
 /// which case it stays unbound and the log says why.
@@ -208,7 +245,8 @@ pub fn configure_as_said(key_spec: &str) -> Result<String, String> {
 }
 
 /// The "Use what I said" shortcut from config, unless it clashes with one
-/// of the other four (a hand-edited config.json: Settings never saves one).
+/// of the other five (a hand-edited config.json: Settings never saves one;
+/// it gives way to Read aloud's, the older one).
 pub fn configure_as_said_from(cfg: &crate::config::YapConfig) {
     let spec = cfg.as_said_hotkey.trim();
     let others = [
@@ -216,6 +254,7 @@ pub fn configure_as_said_from(cfg: &crate::config::YapConfig) {
         ("rewrite shortcut", cfg.edit_hotkey.as_str()),
         ("meeting shortcut", cfg.meeting_hotkey.as_str()),
         ("assistant shortcut", cfg.assistant_hotkey.as_str()),
+        ("read-aloud shortcut", cfg.read_hotkey.as_str()),
     ];
     let spec = match others.iter().find(|(_, other)| clashes(spec, other)) {
         Some((name, _)) => {
@@ -761,6 +800,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
             (&EDIT_BINDING, "edit-key-pressed", "edit-key-released"),
             (&MEETING_BINDING, "meeting-key-pressed", "meeting-key-released"),
             (&ASSISTANT_BINDING, "assistant-key-pressed", "assistant-key-released"),
+            (&READ_BINDING, "read-key-pressed", "read-key-released"),
             (&AS_SAID_BINDING, "as-said-key-pressed", "as-said-key-released"),
         ] {
             suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
@@ -842,6 +882,12 @@ unsafe extern "system" fn low_level_mouse_proc(
                     "assistant-key-released",
                     is_press,
                 );
+                return 1;
+            }
+
+            // …and Read aloud's.
+            if READ_BINDING.matches_mouse(id) {
+                handle_binding_event(&READ_BINDING, "read-key-pressed", "read-key-released", is_press);
                 return 1;
             }
 

@@ -1,0 +1,42 @@
+{
+  "name": "quoting-others",
+  "description": "People talk about each other in the third person and agree with someone who isn't there.",
+  "tags": [
+    "third-person",
+    "trap"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah",
+    "Sam Patel",
+    "Lee Chen",
+    "Hannah Price"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "As Priya said in her email, we should hold the release until the security review is done."
+    ],
+    [
+      "them-2",
+      "I agree with Priya on that, and Lee's team can't start the review until Monday anyway."
+    ],
+    [
+      "them-3",
+      "That's right, we're fully booked this week. Monday is the earliest we can do."
+    ],
+    [
+      "them-1",
+      "Okay. Sam, can you move the release date in the plan?"
+    ],
+    [
+      "them-2",
+      "Yes, I'll update it after this."
+    ]
+  ],
+  "truth": {
+    "them-1": "Hannah Price",
+    "them-2": "Sam Patel",
+    "them-3": "Lee Chen"
+  }
+}

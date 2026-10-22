@@ -213,13 +213,14 @@ ${curlExample}
       </div>
     </div>
 
-    <!-- Endpoint reference -->
-    <div class="card">
-      <div class="card-top">
+    <!-- Endpoint reference: for developers, folded away from everyone else. -->
+    <details class="card endpoints">
+      <summary class="card-top">
         <div class="card-head">
           <div class="titlerow"><h2>Endpoints</h2></div>
+          <p class="endsub">For developers: the {ROUTES.length} routes of the local API</p>
         </div>
-      </div>
+      </summary>
       <div class="routes">
         {#each ROUTES as [method, path, desc] (path + method)}
           <div class="route">
@@ -229,7 +230,7 @@ ${curlExample}
           </div>
         {/each}
       </div>
-    </div>
+    </details>
   </div>
 </div>
 
@@ -247,10 +248,14 @@ ${curlExample}
   .page-h {
     margin: 0 0 22px;
   }
+  /* The serif display title, as Meetings and Settings have it. */
   .page-h h1 {
-    margin: 0 0 4px;
-    font-size: 19px;
-    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+    font-family: var(--yap-font-display);
+    font-size: 28px;
+    font-weight: 550;
+    letter-spacing: -0.005em;
+    line-height: 1.2;
   }
   .page-h p {
     margin: 0;
@@ -448,6 +453,42 @@ ${curlExample}
     filter: brightness(1.08);
   }
 
+  /* The endpoint list, folded: a summary row with a chevron. */
+  .endpoints > summary {
+    list-style: none;
+    cursor: pointer;
+    position: relative;
+    padding-right: 24px;
+  }
+  .endpoints > summary::-webkit-details-marker {
+    display: none;
+  }
+  .endpoints > summary::after {
+    content: '';
+    position: absolute;
+    right: 6px;
+    top: 8px;
+    width: 7px;
+    height: 7px;
+    border-right: 1.6px solid var(--yap-fg-62);
+    border-bottom: 1.6px solid var(--yap-fg-62);
+    transform: rotate(45deg);
+    transition: transform var(--yap-dur) ease;
+  }
+  .endpoints[open] > summary::after {
+    transform: rotate(-135deg);
+    top: 11px;
+  }
+  .endpoints > summary:focus-visible {
+    outline: none;
+    border-radius: var(--yap-r);
+    box-shadow: var(--yap-focus);
+  }
+  .endsub {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: var(--yap-muted);
+  }
   .routes {
     margin-top: 12px;
     padding-top: 6px;

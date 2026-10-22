@@ -2,6 +2,8 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { formatHotkeySpec, hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
+  import HotkeyInput from './ui/HotkeyInput.svelte';
+  import { validateHotkey } from './settings/hotkeys.svelte.js';
 
   // Diagnostics -> the backend's rolling yap.log (webview consoles are
   // invisible in normal runs; this made the event-delivery bug debuggable).
@@ -156,9 +158,21 @@
   // Qwen2.5 1.5B) until the person picks another.
   let localPick = $state('qwen2.5-1.5b');
   let localPicked = false;
-  // The recommended model first, then the rest in their order.
-  const localModels = $derived(
-    [...(llm.curated || [])].sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended))
+  // The recommended model first, then the light one that's quick without a
+  // graphics card (Qwen2.5 1.5B), then the rest in their order.
+  const localModels = $derived.by(() => {
+    const rank = (m) => (m.recommended ? 0 : m.id === 'qwen2.5-1.5b' ? 1 : 2);
+    return [...(llm.curated || [])].sort((a, b) => rank(a) - rank(b));
+  });
+  // A first run shows two (the one for this PC and one more), the rest
+  // behind "More models": twelve choices buried the Download button below
+  // the fold. A pick further down keeps the whole list open.
+  const SHORT_LIST = 2;
+  let allLocal = $state(false);
+  const shownLocal = $derived(
+    allLocal || localModels.findIndex((m) => m.id === localPick) >= SHORT_LIST
+      ? localModels
+      : localModels.slice(0, SHORT_LIST)
   );
 
   // Cloud (bring-your-own-key) fields. Base URLs/default models mirror the
@@ -302,30 +316,17 @@
   // Combo-aware display + matchers shared with Settings (lib/hotkeys.js).
   const formatHotkey = formatHotkeySpec;
 
-  // Mini hotkey recorder (same mechanics as Settings): pause the live binding,
-  // capture one keypress, re-apply + persist.
-  function startKeyRecord() {
-    if (recordingKey) return;
-    recordingKey = true;
-    invoke('configure_hotkey', { spec: '' }).catch(() => {});
-    window.addEventListener('keydown', onRecordKey, true);
-  }
-  function stopKeyRecord() {
-    recordingKey = false;
-    window.removeEventListener('keydown', onRecordKey, true);
-    if (cfg) {
-      cfgPatch.hotkey = cfg.hotkey; // set directly by onRecordKey
-      invoke('configure_hotkey', { spec: cfg.hotkey }).catch(() => {});
+  // The shortcut picker: Settings' own (combos, modifier chords, mouse
+  // buttons, the Copilot key), checked against the other shortcuts. The live
+  // binding is paused while a new one is picked, then applied and saved.
+  function onShortcutCapturing(on) {
+    recordingKey = on;
+    if (!cfg) return;
+    invoke('configure_hotkey', { spec: on ? '' : cfg.hotkey }).catch(() => {});
+    if (!on) {
+      cfgPatch.hotkey = cfg.hotkey;
       persistCfg();
     }
-  }
-  function onRecordKey(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.key === 'Escape') return stopKeyRecord();
-    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
-    cfg.hotkey = `kb:${e.keyCode}`;
-    stopKeyRecord();
   }
 
   // ---- Shared plumbing ----
@@ -357,9 +358,12 @@
   function back() {
     if (step > 0) step -= 1;
   }
-  function finish() {
+  // Done: Yap's main window comes up on Home, so the setup doesn't end on
+  // an empty screen (Yap otherwise lives in the tray and the Yap bar).
+  async function finish() {
     invoke('set_mic_test', { on: false }).catch(() => {});
-    invoke('close_onboarding');
+    await invoke('close_onboarding').catch(() => {});
+    invoke('open_settings').catch(() => {});
   }
 
   // Tauri event subscription — via the RAW internals bridge, not the bundled
@@ -489,7 +493,6 @@
       unsubs.forEach((p) => p.then((u) => u && u()));
       window.removeEventListener('keydown', onFallbackKeyDown, true);
       window.removeEventListener('keyup', onFallbackKeyUp, true);
-      window.removeEventListener('keydown', onRecordKey, true);
       document.removeEventListener('visibilitychange', onVis);
       invoke('set_mic_test', { on: false }).catch(() => {});
     };
@@ -517,7 +520,8 @@
       <h1>Welcome to Yap</h1>
       <p class="sub">
         Pick the speech model that turns your voice into text. It runs
-        <strong>locally on your GPU</strong> — your voice never leaves this machine.
+        <strong>on this PC</strong> (on its graphics card when it has one) — your
+        voice never leaves this machine.
         <strong>{recommended.name}</strong> is the fast, accurate default.
       </p>
     </header>
@@ -554,6 +558,12 @@
       <p class="mic-status">
         {#if micHeard}✓ Hearing you loud and clear{:else}Waiting for sound…{/if}
       </p>
+      {#if !devices.length}
+        <p class="mic-none" role="status">
+          No microphone found. Plug one in or connect a headset, and it shows up here.
+          Yap still transcribes audio files without one (Upload).
+        </p>
+      {/if}
     </div>
   {:else if step === 2}
     <header>
@@ -610,7 +620,7 @@
 
         {#if cleanupMode === 'local'}
           <div class="llm-list">
-            {#each localModels as m (m.id)}
+            {#each shownLocal as m (m.id)}
               {@const b = brandForModel(m.id)}
               <label class="llm-row" class:sel={localPick === m.id} data-model={m.id}>
                 <input type="radio" bind:group={localPick} value={m.id} name="llm" onchange={() => (localPicked = true)} />
@@ -627,6 +637,11 @@
                 <span class="llm-size">{m.installed ? '✓ installed' : fmtSize(m.sizeMb)}</span>
               </label>
             {/each}
+            {#if shownLocal.length < localModels.length}
+              <button class="more-models" onclick={() => (allLocal = true)}>
+                More models ({localModels.length - shownLocal.length})
+              </button>
+            {/if}
           </div>
           {@const pick = (llm.curated || []).find((m) => m.id === localPick)}
           <button class="start wide" onclick={enableLocalCleanup} disabled={!pick}>
@@ -684,7 +699,8 @@
       <h1>Yap lives in your tray</h1>
       <p class="sub">
         Close the main window any time — Yap keeps running in the corner of your
-        taskbar. A floating overlay appears whenever you're dictating.
+        taskbar. The <strong>Yap bar</strong>, a small pill just above the taskbar,
+        shows your words as you talk; hover it to dictate or take meeting notes.
       </p>
     </header>
 
@@ -700,17 +716,22 @@
       </div>
     </div>
     <ul class="tray-tips">
-      <li><strong>Left-click</strong> the icon → open Settings.</li>
-      <li><strong>Right-click</strong> → switch model, cancel a recording, check for updates.</li>
-      <li>The dot changes colour while recording &amp; transcribing.</li>
+      <li><strong>Click</strong> the icon to open Yap.</li>
+      <li><strong>Right-click</strong> it to paste your last dictation again, switch model or check for updates.</li>
+      <li>The icon turns red while Yap is listening.</li>
     </ul>
   {:else}
     <header>
       <h1>Try it</h1>
       <p class="sub">
-        Press <strong class="key">{formatHotkey(cfg?.hotkey)}</strong>, say something,
-        then press <strong class="key">{formatHotkey(cfg?.hotkey)}</strong> again —
-        your words appear below.
+        {#if cfg?.recordingMode === 'pushToTalk'}
+          Hold <strong class="key">{formatHotkey(cfg?.hotkey)}</strong>, say something,
+          then let go — your words appear below.
+        {:else}
+          Press <strong class="key">{formatHotkey(cfg?.hotkey)}</strong>, say something,
+          then press <strong class="key">{formatHotkey(cfg?.hotkey)}</strong> again —
+          your words appear below.
+        {/if}
       </p>
     </header>
 
@@ -736,9 +757,16 @@
           Waiting for {formatHotkey(cfg?.hotkey)}…
         {/if}
       </p>
-      <button class="skip" onclick={startKeyRecord} disabled={recordingKey}>
-        {#if recordingKey}Press the key you want… (Esc to cancel){:else}Change shortcut{/if}
-      </button>
+      {#if cfg}
+        <div class="shortcut" role="group" aria-label="Dictation shortcut">
+          <span class="shortcut-label">Your shortcut</span>
+          <HotkeyInput
+            bind:value={cfg.hotkey}
+            validate={(s) => validateHotkey(cfg, 'hotkey', s)}
+            oncapturingchange={onShortcutCapturing}
+          />
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -904,9 +932,9 @@
   }
   .meter {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     gap: 3px;
-    height: 90px;
+    height: 64px;
     width: 100%;
     max-width: 420px;
   }
@@ -926,6 +954,14 @@
   }
   .meter.live + .mic-status {
     color: var(--yap-success);
+  }
+  .mic-none {
+    max-width: 380px;
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    text-align: center;
+    color: var(--yap-fg-80);
   }
 
   /* Cleanup step */
@@ -1214,6 +1250,37 @@
   .tray-clock {
     font-variant-numeric: tabular-nums;
   }
+  .more-models {
+    align-self: flex-start;
+    margin: 2px 0 0 4px;
+    padding: 4px 6px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--yap-fg-62);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .more-models:hover {
+    color: var(--yap-fg);
+    background: var(--yap-s3);
+  }
+  .more-models:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
+  }
+  .shortcut {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 6px;
+  }
+  .shortcut-label {
+    font-size: 12.5px;
+    color: var(--yap-muted);
+  }
   .tray-tips {
     color: var(--yap-muted);
     font-size: 13px;
@@ -1270,12 +1337,15 @@
     margin: 12px 0 0;
   }
 
+  /* Pinned to the bottom on every step, short ones too (the tray step's
+     footer used to float up under its tips). */
   footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-top: 18px;
+    margin-top: auto;
+    padding-top: 18px;
   }
   .skip {
     background: none;

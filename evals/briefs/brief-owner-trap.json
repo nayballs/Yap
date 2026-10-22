@@ -1,0 +1,28 @@
+{
+  "name": "brief-owner-trap",
+  "description": "Three people's tasks side by side, one with a deadline, one unassigned: the model mustn't move a task or a date to someone else.",
+  "meeting": {
+    "title": "Supplier review",
+    "series": "supplier-review@example.com",
+    "in_minutes": 10,
+    "attendees": ["Imogen Hart", "Sam Lee"],
+    "description": "Agenda: late packaging order, freight quotes"
+  },
+  "notes": [
+    {
+      "title": "Supplier review",
+      "days_ago": 6,
+      "series": "supplier-review@example.com",
+      "participants": ["Imogen Hart", "Sam Lee"],
+      "plan": "The packaging order is two weeks late and freight costs went up.\n\n## Action plan\n### Imogen\n- [ ] Call the packaging supplier about the late order\n### Sam\n- [ ] Compare the two freight quotes (due: Wednesday)\n### You\n- [ ] Approve the new purchase order\n\n## Decisions\n- Stay with the current supplier for one more quarter.\n\n## Unassigned\n- [ ] Chase the customs paperwork"
+    }
+  ],
+  "expect": {
+    "first": false,
+    "cites": ["Supplier review"],
+    "open_items": ["packaging supplier", "freight quotes", "purchase order"],
+    "no_open_items": ["customs paperwork"],
+    "owners": ["You", "Imogen", "Sam"],
+    "not_contains": ["Imogen will compare", "Sam will call", "Okonkwo", "Thursday", "Friday"]
+  }
+}

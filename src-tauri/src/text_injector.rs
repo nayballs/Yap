@@ -1050,6 +1050,34 @@ pub fn current_foreground() -> Option<isize> {
     }
 }
 
+/// The app window the person is in, as "Paste last transcript" finds it:
+/// the foreground window when it's an app's, else — the tray menu just had
+/// the foreground — the app window on top. (Reading the selection aloud
+/// from the tray, `read_aloud.rs`.) `None` off Windows.
+pub fn app_window() -> Option<isize> {
+    #[cfg(target_os = "windows")]
+    {
+        platform::paste_target()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+/// Bring `hwnd` back to the front (best-effort; see `platform::focus_window`).
+pub fn focus(hwnd: isize) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        platform::focus_window(hwnd)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = hwnd;
+        false
+    }
+}
+
 /// Process base name (e.g. "chrome.exe") of the given window handle, or `None`.
 /// Used to tag history entries with the focused app. `None` off Windows.
 pub fn app_name_for(hwnd: Option<isize>) -> Option<String> {

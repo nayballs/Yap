@@ -58,8 +58,9 @@
   import { chatRequest } from './chatRequest.svelte.js';
   import ModelChip from './ModelChip.svelte';
   import { modelLine, whereItRuns } from './aiModel.js';
-  import { speech, initSpeech, readAloud as speakText, stopReading as stopSpeech } from './speech.svelte.js';
+  import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from './speech.svelte.js';
   import { formatHotkeySpec } from './hotkeys.js';
+  import { aiError } from './aiErrors.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
   import { copyText, messageItems, conversationMarkdown } from './itemMenus.js';
   import { openExternalLink } from './externalLinks.js';
@@ -124,6 +125,8 @@
   // ---- The Voice Assistant
   // Its shortcut ('' = none set: the empty thread offers to set one).
   let assistantHotkey = $state('');
+  // Chat's model is set up (ai_model_status; re-read on every config save).
+  let chatReady = $state(true);
   // The conversation whose spoken question is being answered ("Thinking…").
   let assistantPending = $state(null);
   // "New chat" was clicked: a spoken question starts a new conversation
@@ -169,6 +172,10 @@
     } catch {
       /* keep */
     }
+    // No AI model yet: the empty chat says so before a question fails.
+    invoke('ai_model_status', { scope: 'chat' })
+      .then((s) => (chatReady = s?.ready !== false))
+      .catch(() => {});
   }
 
   async function toggleVoiceReplies() {
@@ -557,14 +564,28 @@
       messages = [...messages.slice(0, -1), { ...asked, id: res.userMessageId ?? null }, answer];
       refreshList();
       scrollThread();
-      // Read out by itself ("When to speak", decided in Rust).
-      if (res.speak && answer.id) speakText(answer.text, answer.id);
+      // Read out by itself ("When to speak", decided in Rust): the voice
+      // alone, no reading card (that's ▶'s).
+      if (res.speak && answer.id) speakReply(answer.text, answer.id);
     } catch (e) {
       if (!alive) return;
       messages = messages.slice(0, -1);
       input = text; // give the message back
       byVoice = voice;
-      toast({ title: "Couldn't send", description: String(e), variant: 'destructive' });
+      // Said so it's clear what to do (aiErrors.js); the raw error is in the log.
+      // A sentence reads as a sentence; only an error Yap can't explain gets
+      // the copyable error box.
+      const why = aiError(e);
+      toast({
+        title: "Couldn't send",
+        description: why.text,
+        ...(why.known
+          ? { variant: 'default', kind: 'error', chip: 'Error', icon: 'alert' }
+          : { variant: 'destructive' }),
+        ...(why.settings && onopensettings
+          ? { action: { label: 'Open Language Models', onClick: () => onopensettings('cleanup#chat') } }
+          : {}),
+      });
     } finally {
       sending = false;
       if (alive && sendWhenFree) {
@@ -782,6 +803,13 @@
       <div class="empty">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8M8 13h5" /></svg>
         <p>Ask about your notes, transcripts, or anything else</p>
+        {#if !chatReady}
+          <!-- Before a first question fails: what Chat needs. -->
+          <p class="asknote needsai">
+            Chat needs an AI model: a free key from a cloud provider, or one that runs on this PC.
+            <button class="setkey" onclick={() => onopensettings?.('cleanup#chat')}>Set up an AI model</button>
+          </p>
+        {/if}
         <!-- The Voice Assistant: the same chat, asked out loud from any app. -->
         <p class="asknote">
           {#if assistantHotkey}
@@ -1255,6 +1283,10 @@
     max-width: 280px;
     margin-top: 6px;
     color: var(--yap-muted);
+  }
+  .empty .asknote.needsai {
+    max-width: 320px;
+    color: var(--yap-fg-80);
   }
   .asknote kbd {
     padding: 1px 6px;

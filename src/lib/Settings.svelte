@@ -19,7 +19,7 @@
   import PromptStudio from './PromptStudio.svelte';
   import VoiceAgentConfig from './VoiceAgentConfig.svelte';
   import AgentNameField from './AgentNameField.svelte';
-  import { initSpeech } from './speech.svelte.js';
+  import { initSpeech, readPageSelection } from './speech.svelte.js';
   import VoiceSettings from './VoiceSettings.svelte';
   import OpenAppsSettings from './OpenAppsSettings.svelte';
   import WebSearchSettings from './WebSearchSettings.svelte';
@@ -39,7 +39,8 @@
   import { createExternalLinkHandler } from './externalLinks.js';
   import { toast } from './ui/toast.svelte.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup, formatHotkeySpec, fillHotkey } from './hotkeys.js';
-  import { modelStore } from './modelStore.svelte.js';
+  import { appLabel } from './appNames.js';
+  import { modelStore, refreshModels } from './modelStore.svelte.js';
   import { attention, attentionCount } from './attention.svelte.js';
   import AccountSection from './AccountSection.svelte';
   import ConnectorsSection from './ConnectorsSection.svelte';
@@ -428,6 +429,7 @@
     meetingDiarization: false,
     diarizationModel: 'nemotron-3-diarization',
     meetingReminder: '15s',
+    meetingBrief: true,
     // Memory (MemorySection.svelte, memory.rs): the switches only.
     memorySearchChats: true,
     memoryLearnChats: true,
@@ -468,6 +470,7 @@
     agentName: '',
     editHotkey: '',
     assistantHotkey: '',
+    readHotkey: '',
     assistantAnswerCard: true,
     openApps: true,
     appsBlocked: [],
@@ -614,6 +617,13 @@
       e.preventDefault();
       e.stopPropagation();
       invoke('assistant_key', { pressed: true }).catch(() => {});
+      return;
+    }
+    // Read aloud: what's selected on this page (read_aloud.rs).
+    if (hotkeyMatchesKeydown(e, cfg?.readHotkey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      readPageSelection();
       return;
     }
     if (!hotkeyMatchesKeydown(e, cfg?.hotkey)) return;
@@ -861,6 +871,20 @@
   function setCallAppAsks(id, asks) {
     cfg.meetingDetectApps = { ...(cfg.meetingDetectApps || {}), [id]: asks };
   }
+  // The speech models on disk, for the "no model" attention item (and
+  // Home's first-step card): read at once, not only when the Speech-to-Text
+  // page first opens — a new install never showed the badge until then —
+  // and again when the pipeline says it needs one or has one (onboarding's
+  // download happens in its own window).
+  onMount(() => {
+    refreshModels();
+    const un = listen('yap-state', (e) => {
+      if (e.payload === 'needs-model' || (e.payload === 'idle' && modelStore.installed.length === 0)) {
+        refreshModels();
+      }
+    });
+    return () => un.then((f) => f());
+  });
   // "Don't ask for Teams" on a call prompt saves that in Rust: adopt it into
   // this config copy, or the next auto-save would switch Teams back on.
   onMount(() => {
@@ -947,9 +971,14 @@
     const unVolume = listen('yap-voice-volume', (e) => {
       if (cfg && Number.isFinite(e.payload?.volume)) cfg.ttsVolume = e.payload.volume;
     });
+    // The reading card's − / + (read_aloud.rs saved it already).
+    const unRate = listen('yap-voice-rate', (e) => {
+      if (cfg && Number.isFinite(e.payload?.rate)) cfg.ttsRate = e.payload.rate;
+    });
     return () => {
       un.then((f) => f());
       unVolume.then((f) => f());
+      unRate.then((f) => f());
     };
   });
   const SPEAK_WHEN = [
@@ -1339,10 +1368,10 @@
       recentApps = [];
     }
   }
-  // Strip the ".exe" for a friendlier default label (e.g. "slack.exe" → "Slack").
+  // The app's own name for a default label ("slack.exe" → "Slack",
+  // "winword.exe" → "Word"; appNames.js).
   function prettyAppLabel(app) {
-    const base = (app || '').replace(/\.exe$/i, '');
-    return base ? base.charAt(0).toUpperCase() + base.slice(1) : app;
+    return appLabel(app) || app;
   }
 
   let idSeq = 1;
@@ -1864,6 +1893,18 @@
                 desc="Your question and its answer, above the bar while Yap reads it out"
                 hint="Off: just the voice, with ■ on the bar to stop it. An answer Yap couldn't read aloud still shows."
               />
+            </Row>
+          </Group>
+          <!-- Read aloud, anywhere (read_aloud.rs): any selected text, in
+               the voice below, with the reading card on the Yap bar. -->
+          <Group title="Read aloud" id="settings-read-aloud">
+            <Row
+              label="Read aloud shortcut"
+              desc="Select text in any app and press it: Yap reads it in the voice below, each word lit up on the Yap bar as it's said"
+              hint="Press it again, or Esc, to stop. 🔊 on the Yap bar and the tray's Read selection aloud do the same, and notes and Chat answers have Read aloud too. The text is in your reading font (General → Appearance)."
+              setting="read-shortcut"
+            >
+              <SettingsHotkey {cfg} target="readHotkey" clearable />
             </Row>
           </Group>
           <!-- "Open Teams": apps installed on this PC (apps.rs). -->

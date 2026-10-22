@@ -549,6 +549,19 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Where the recording into `note_id` is on its clock (ms): the "Them"
+/// side's position, the speaker engine's clock (`diarize::Timeline`). What
+/// the call app shows is dated with it (`speakers/call_ui.rs`).
+pub fn them_clock_ms(note_id: u64) -> Option<u64> {
+    let them = {
+        let guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
+        let s = guard.as_ref().filter(|s| s.note_id == note_id)?;
+        Arc::clone(&s.them)
+    };
+    let end = them.lock().map(|c| c.levels().end).ok()?;
+    Some(end * 1000 / RATE as u64)
+}
+
 /// Whether a meeting is being recorded (the updater won't restart mid-meeting).
 pub fn is_recording() -> bool {
     SESSION.lock().unwrap_or_else(|p| p.into_inner()).is_some()

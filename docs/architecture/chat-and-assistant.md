@@ -394,8 +394,12 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   three bars while it's read; also on the Notes view's Ask bar answers and
   the notepad's Ask sheet, not while that meeting records), via the shared
   `speech.svelte.js` store (`speakingId` from `yap-tts-state`; each window
-  toasts failures for its own ids: `chat:` / `notes:` / `preview` /
-  `notepad:`). With replies on, chat_send's `speak` reads an answer out by
+  toasts failures for its own ids: `chat:` / `notes:` / `note:` / `preview` /
+  `notepad:`). ▶ is **Read aloud** (`read_aloud_text`, since 2026-10-22): the
+  answer read with the reading card on the Yap bar, its words lit up, ⏸ ⏭
+  and the speed there, as any selection is ([spoken-replies.md](./spoken-replies.md),
+  `read_aloud.rs`); an answer read out by itself (Voice replies) is the
+  voice alone (`speakReply` → `tts_speak`), no card. With replies on, chat_send's `speak` reads an answer out by
   itself. The **mic** is `chat_dictate`, and the box reports its focus
   (`chat_input_focus`), so a question dictated into it arrives as
   `yap-chat-dictation` (inserted at the caret, never pasted) and is sent at

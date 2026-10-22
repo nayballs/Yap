@@ -11,11 +11,15 @@
   // search and "Generate summary" on those without one; and an Ask bar that
   // cycles example questions and hands the question to Chat. Opening a
   // meeting that's still to come makes its note ahead of time (title,
-  // attendees, dated to the meeting).
+  // attendees, dated to the meeting). With "Prepare a brief before
+  // meetings" on, each meeting still to come has a Brief button that
+  // unfolds its pre-meeting brief under the row (calendar/brief.rs: made
+  // now if need be; its summary follows), every line linked to its note.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { calendar, clockTime, whenText, syncCalendar, eventAction, openConnectDialog } from './calendar.svelte.js';
+  import { calendar, clockTime, whenText, syncCalendar, eventAction, openConnectDialog, briefs, loadBrief } from './calendar.svelte.js';
+  import BriefView from './BriefView.svelte';
   import { noteRequest } from './meetingDetect.svelte.js';
   import { summarise } from './meetingSummary.svelte.js';
   import { chatRequest } from './chatRequest.svelte.js';
@@ -91,6 +95,22 @@
 
   function live(ev) {
     return now >= ev.start - EARLY && now < ev.end;
+  }
+
+  // ---- Briefs (calendar.svelte.js `loadBrief`) ----
+  // Which rows have their brief unfolded, and why one couldn't be made.
+  let briefOpen = $state({});
+  let briefError = $state({});
+  async function toggleBrief(ev) {
+    const open = !briefOpen[ev.key];
+    briefOpen = { ...briefOpen, [ev.key]: open };
+    if (!open) return;
+    try {
+      briefError = { ...briefError, [ev.key]: '' };
+      await loadBrief(ev.key);
+    } catch (e) {
+      briefError = { ...briefError, [ev.key]: String(e) };
+    }
   }
 
   async function refreshPast() {
@@ -324,6 +344,18 @@
         </span>
       </span>
     </button>
+    {#if calendar.briefs && ev.end > now}
+      <button
+        class="briefbtn"
+        class:on={briefOpen[ev.key]}
+        aria-expanded={!!briefOpen[ev.key]}
+        title="What to know going in: last time with these people, open items, the agenda"
+        onclick={() => toggleBrief(ev)}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h4" /></svg>
+        Brief
+      </button>
+    {/if}
     {#if recordingThis}
       <div class="mact">
         <span class="recpill"><span class="recdot" aria-hidden="true"></span>Recording</span>
@@ -342,6 +374,17 @@
           <button class="ink" onclick={() => eventAction(ev, 'joinStart')}>Join + Start</button>
         {:else}
           <button class="ink" onclick={() => eventAction(ev, 'start')}>Start</button>
+        {/if}
+      </div>
+    {/if}
+    {#if briefOpen[ev.key]}
+      <div class="mbrief" role="region" aria-label={`Brief for ${ev.title}`}>
+        {#if briefs.byKey[ev.key]}
+          <BriefView brief={briefs.byKey[ev.key]} />
+        {:else if briefError[ev.key]}
+          <p class="quiet">{briefError[ev.key]}</p>
+        {:else}
+          <p class="quiet">Preparing the brief…</p>
         {/if}
       </div>
     {/if}
@@ -675,6 +718,7 @@
   }
   .mrow {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
     padding: 4px 8px 4px 4px;
@@ -782,6 +826,41 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+  /* "Brief": a quiet button, its brief unfolded under the row. */
+  .briefbtn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 30px;
+    padding: 0 10px;
+    border: none;
+    border-radius: var(--yap-r);
+    background: none;
+    color: var(--yap-fg-62);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .briefbtn svg {
+    width: 14px;
+    height: 14px;
+  }
+  .briefbtn:hover,
+  .briefbtn.on {
+    background: var(--yap-s3);
+    color: var(--yap-fg);
+  }
+  .mbrief {
+    flex: 1 1 100%;
+    margin: 0 0 6px 6px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--yap-border-subtle);
+  }
+  .mbrief .quiet {
+    margin: 0;
   }
   .ink,
   .soft,

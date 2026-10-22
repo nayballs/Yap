@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "about": "How each call app shows who's talking, for speakers/call_ui.rs. Built from what's public and from Wispr Flow's remote defaults (Meet: speaking class kssMZb on tile oZRSLe; Teams: vdi-frame-occlusion; Zoom: 'Active speaker' / 'you are speaking'); NOT yet checked against a real call. Capture one with `yap.exe call-dump` (docs/architecture/speakers.md) and correct the markers here, or try them first in <data>/call_speakers.json (same shape; an app's entry there wins).",
+  "apps": {
+    "meet": {
+      "speakingClass": ["kssMZb"],
+      "tileClass": ["oZRSLe"],
+      "speakingText": ["{name} is speaking"],
+      "selfMark": ["(You)", "(you)"],
+      "selfSpeakingText": ["you are speaking"],
+      "strip": ["(Presentation)", "(Host)", ", presenting", "is presenting"]
+    },
+    "teams": {
+      "speakingClass": ["vdi-frame-occlusion"],
+      "tileClass": [],
+      "speakingText": ["{name}, speaking", "{name} is speaking", "{name}, Speaking"],
+      "selfMark": ["(You)", "(Me)"],
+      "selfSpeakingText": ["you are speaking", "You, speaking"],
+      "strip": ["(Guest)", "(External)", "(Unverified)", "(Organizer)", "(Organiser)", ", Muted", ", Unmuted", ", video is on", ", video is off", ", camera on", ", camera off", ", presenting"]
+    },
+    "zoom": {
+      "speakingClass": [],
+      "tileClass": [],
+      "speakingText": ["{name}, Active speaker", "Active speaker, {name}", "Active speaker: {name}", "{name} is talking", "{name}, talking"],
+      "selfMark": ["(Me)", "(me)"],
+      "selfSpeakingText": ["you are speaking"],
+      "strip": ["(Host)", "(Co-host)", "(Guest)", ", Computer audio unmuted", ", Computer audio muted", ", Video on", ", Video off", ", Audio muted", ", Audio unmuted"]
+    },
+    "generic": {
+      "speakingClass": [],
+      "tileClass": [],
+      "speakingText": ["{name} is speaking", "{name}, speaking", "{name} is talking", "{name}, active speaker", "Active speaker: {name}"],
+      "selfMark": ["(You)", "(Me)"],
+      "selfSpeakingText": ["you are speaking"],
+      "strip": ["(Guest)", "(Host)", "(External)", ", Muted", ", Unmuted"]
+    }
+  }
+}

@@ -2259,6 +2259,11 @@ pub fn call_audio() -> (Vec<String>, Vec<String>) {
     (names, browsers)
 }
 
+/// Whether `exe` (a file name, any case) is call app `app_id`'s own.
+pub fn exe_is(app_id: &str, exe: &str) -> bool {
+    app_by_id(app_id).is_some_and(|a| a.exes.iter().any(|e| e.eq_ignore_ascii_case(exe)))
+}
+
 /// The browsers' exe file names (lowercased).
 pub fn browser_exes() -> &'static [&'static str] {
     BROWSERS

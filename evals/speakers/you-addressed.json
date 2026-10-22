@@ -1,0 +1,39 @@
+{
+  "name": "you-addressed",
+  "description": "The chair asks you by name, then hands over to an engineer.",
+  "tags": [
+    "handover",
+    "you"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah",
+    "Tom Baker"
+  ],
+  "lines": [
+    [
+      "them-1",
+      "Imogen, what do you think about moving the launch?"
+    ],
+    [
+      "you",
+      "I'd rather keep the date and cut scope, the marketing is already booked."
+    ],
+    [
+      "them-1",
+      "Fair enough, thanks Imogen. Priya, does that work for engineering?"
+    ],
+    [
+      "them-2",
+      "It does if we drop the export feature, that's the riskiest piece."
+    ],
+    [
+      "them-1",
+      "Okay, let's drop it then."
+    ]
+  ],
+  "truth": {
+    "them-1": "Tom Baker",
+    "them-2": "Priya Shah"
+  }
+}

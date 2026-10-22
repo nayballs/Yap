@@ -1,6 +1,6 @@
 <script>
   // Settings → Shortcuts (2026-10-22 review; OpenWhispr's Hotkeys page): the
-  // five global shortcuts together (input_hook.rs), each in Yap's keycaps,
+  // six global shortcuts together (input_hook.rs), each in Yap's keycaps,
   // with a clash said where it happens. Their own pages show them too
   // (Dictation, Commands, Voice Assistant, Meetings): the same setting.
   //
@@ -27,6 +27,14 @@
   </Row>
   <Row label="Ask the Voice Assistant" desc="Ask out loud from any app and hear the answer" setting="shortcut-assistant">
     <SettingsHotkey {cfg} target="assistantHotkey" clearable />
+  </Row>
+  <Row
+    label="Read aloud"
+    desc="Select text in any app and press it: Yap reads it to you, word by word on the Yap bar"
+    hint="Press it again, or Esc, to stop. 🔊 on the Yap bar does the same."
+    setting="shortcut-read"
+  >
+    <SettingsHotkey {cfg} target="readHotkey" clearable />
   </Row>
   <Row label="Use what I said" desc="Right after a dictation, swap what Yap pasted for your words before AI cleanup" setting="shortcut-as-said">
     <SettingsHotkey {cfg} target="asSaidHotkey" clearable />

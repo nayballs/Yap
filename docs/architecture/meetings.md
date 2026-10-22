@@ -142,7 +142,10 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   Generate summary, Retry, the Notes view's Action plan). Commands
   `meeting_end(origin)`, `meeting_pause`, `meeting_summarise`,
   `meeting_summary_status`, `meeting_discard`, `meeting_delete`; Rust callers
-  use `end()` / `pause()`.
+  use `end()` / `pause()`. The job first asks the meeting's AI who each
+  voice still unnamed is (`speakers::naming::ask_model`, "Suggest who's
+  speaking" on, a model that can call tools; best-effort), so the plan
+  reads the names.
 - **`meeting_assist.rs`** — the notepad's AI helpers, on the meeting's model
   (Note Formatting scope, else cleanup), bounded for an 8k local model, via
   `chat_beside_dictation`: **"What did I miss?"** (`meeting_catch_up(noteId,
@@ -231,14 +234,29 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   **`SpeakerMenu.svelte`** (shared with the Notes view): "It's Priya" / "Not
   Priya" on a guess, Rename X everywhere…, Rename just this line / these N
   lines… (a name field with the attendees and known names as picks), Merge
-  with… (other voices; never You) → the `speaker_*` commands; other windows
+  with… (other voices; never You), It was me (a voice told apart) → the
+  `speaker_*` commands; over the lines (and over the Summary), the name
+  card **`SpeakerCard.svelte`** (shared with the Notes view): "Speaker 2 is
+  Priya Shah?" with why, Yes / Someone else (then "Who is Speaker 2?") /
+  Not now, "1 of 2", "Speaker 3 is you?" → It was me + Undo
+  (`speakers/naming.rs`, `notepadText.js` `pendingSuggestions`,
+  `suggestionQuestion`, `suggestionWhy`); other windows
   follow `yap-note-changed`'s `lineSpeakers` (`withLineSpeakers`); Escape
   closes just the menu; a dashed **⏸ divider** wherever a recording stopped
   (`note.breaks`, `yap-meeting-breaks`) and a "**You dictated here · left
   out of the notes**" divider (mic glyph) for a `dictated` marker; echo
   behind "Show N lines…"; "Yap is listening" / "No transcript yet" / "Live
   transcript is off" states (layout: `notepadText.js` `transcriptItems`,
-  `bubbleShape`, `highlightParts`). **Summary** (the Rust job: "• Turning 12
+  `bubbleShape`, `highlightParts`). **The meeting's brief**
+  (`calendar_brief_for_note`, followed by `yap-meeting-brief`; the
+  calendar's pre-meeting brief, [calendar.md](./calendar.md#pre-meeting-briefs)):
+  at the top of Summary as "Brief before the meeting" (`BriefView`), open
+  until the action plan is written, then folded above it with its teaser;
+  while the meeting records, one dismissible line over My thoughts —
+  "Brief · Last met Thu 16 Oct · 3 open items" — that opens it. On Summary
+  rather than in My thoughts: My thoughts is the person's own words (and
+  the action plan's input), Summary is Yap's, and empty while recording.
+  **Summary** (the Rust job: "• Turning 12
   minutes of talk into an action plan… · Step 2 of 3", "Catching up on the
   meeting: part 3 of 12…", the rendered plan, the AI-setup card, the digests
   so far while recording). **Bottom** (over the content, a 150 px fade):
@@ -289,6 +307,9 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   Show more; time, name, Conflict / Maybe tags, service, attendees, "In 1
   min", Note ready; from 10 min before: Join meeting / Start / Join +
   Start, or Switch notes while another records, or ● Recording · Open note;
+  with "Prepare a brief before meetings" on, a **Brief** button on every
+  meeting still to come that unfolds its pre-meeting brief under the row,
+  made now if need be (`loadBrief` → `calendar_brief`; its summary follows);
   opening a meeting makes or opens its note via `calendar_event`); with no
   calendar, one grey card (calendar icon, "No meetings found", ink Connect
   calendar → the dialog); **Past meeting notes** by day ("TODAY, 6 OCT",

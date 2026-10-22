@@ -5,8 +5,9 @@
   // Flow's Flow Bar (references/wispr-flow/flowbar-spec.md, beside this repo):
   //   idle      a 40 × 8 pill outline, its bottom 14 px above the work area,
   //             in a 60 × 20 hit wrapper;
-  //   hover     it opens into 🎤 Dictate, ◉ Meeting notes and a ^ menu, with
-  //             a tooltip naming each button's shortcut;
+  //   hover     it opens into 🎤 Dictate, ◉ Meeting notes, 🔊 Read aloud (the
+  //             selection in the app you're in; ■ while reading) and a ^
+  //             menu, with a tooltip naming each button's shortcut;
   //   dictating the dictation overlay (waveform, live text, Transcribing…,
   //             the error) in the pill's place, with ✕ / ✓ while it records
   //             (as Settings says: off by default, when pointed at, or
@@ -17,7 +18,9 @@
   //   meeting   a 69 × 30 recording pill at half opacity (5 bars, the stop
   //             circle) that shows its timer when hovered;
   //   cards     26 px above the pill: Yap's notices while its window isn't
-  //             focused, one at a time (notice.rs picks it; the rest wait).
+  //             focused, one at a time (notice.rs picks it; the rest wait);
+  //             the reading card (read_aloud.rs) nearest the pill while Yap
+  //             reads aloud, bar on or off, a notice above it.
   // The window is click-through except over what this page reports as
   // interactive (`data-region`: the pill's hover zone, cards, the menu):
   // Rust watches the cursor against those rects and makes the window
@@ -39,8 +42,11 @@
   import DictationCapsule from './bar/DictationCapsule.svelte';
   import BarCard from './bar/BarCard.svelte';
   import CallCard from './bar/CallCard.svelte';
+  import ReadingCard from './bar/ReadingCard.svelte';
+  import { reading, initReading } from './bar/reading.svelte.js';
 
   initDictation();
+  initReading();
 
   let bar = $state({
     enabled: true,
@@ -51,6 +57,7 @@
     fullscreen: 'none',
     hotkey: '',
     meetingHotkey: null,
+    readHotkey: null,
     meeting: { recording: false },
     call: null,
     cards: [],
@@ -71,7 +78,7 @@
   let domHover = $state(false);
   let expanded = $state(false);
   let menuOpen = $state(false);
-  /** The hovered button's tooltip: 'dictate' | 'notes' | 'open' | 'stop' | null. */
+  /** The hovered button's tooltip: 'dictate' | 'notes' | 'read' | 'open' | 'stop' | null. */
   let tip = $state(null);
   let popping = $state(false);
 
@@ -170,6 +177,7 @@
   const tips = $derived({
     dictate: { label: 'Dictate', keys: keys(bar.hotkey) },
     notes: { label: bar.call ?? 'New note', keys: keys(bar.meetingHotkey) },
+    read: { label: reading.phase === 'reading' || reading.phase === 'paused' ? 'Stop reading' : 'Read aloud', keys: keys(bar.readHotkey) },
     open: { label: 'Open notes', keys: '' },
     stop: { label: 'Stop and summarise', keys: keys(bar.meetingHotkey) },
   });
@@ -206,6 +214,10 @@
   }
   const dictate = () => act('dictate');
   const meetingNotes = () => act('meeting');
+  // 🔊: the selection in the app you're in (the bar never takes the focus,
+  // so it's still selected there); ■ while Yap reads.
+  const readingNow = $derived(reading.phase === 'reading' || reading.phase === 'paused');
+  const readAloud = () => act(readingNow ? 'read-stop' : 'read-aloud');
   const stopMeeting = () => act('stop-meeting');
   const openMeeting = () => act('open-note');
   function menuItem(action) {
@@ -296,6 +308,13 @@
 
 <div class="stage" class:top={bar.edge === 'top'} class:pop={popping} onpointermove={onStageMove} role="presentation">
   <div class="cards" style={`${bar.edge === 'top' ? 'top' : 'bottom'}:${8 + Math.max(dockH, 20) + 20}px`}>
+    {#if reading.active}
+      <!-- Reading aloud: nearest the pill, a notice above it. -->
+      <div class="cardwrap" in:fade={{ duration: motionMs(120) }} out:fade={{ duration: motionMs(120) }}>
+        <ReadingCard />
+        <span class="strip" data-region="reading" aria-hidden="true"></span>
+      </div>
+    {/if}
     {#each cards as card (card.id)}
       <div
         class="cardwrap"
@@ -391,6 +410,21 @@
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="7.5" /><circle cx="12" cy="12" r="3.4" fill="currentColor" stroke="none" /></svg>
             {#if bar.call}<span class="live" aria-hidden="true"></span>{/if}
+          </button>
+          <button
+            class="btn read"
+            class:on={readingNow}
+            aria-label={readingNow ? 'Stop reading' : 'Read aloud'}
+            tabindex={expanded ? 0 : -1}
+            onclick={readAloud}
+            onpointerenter={(e) => hoverTip('read', e)}
+            onpointerleave={() => hoverTip(null)}
+          >
+            {#if readingNow}
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2.2" /></svg>
+            {:else}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z" /><path d="M15.5 9a4 4 0 0 1 0 6" /><path d="M18.5 6.5a7.5 7.5 0 0 1 0 11" /></svg>
+            {/if}
           </button>
           <button
             class="btn more"
@@ -549,9 +583,10 @@
     border: 1px solid var(--bar-pill-border);
     transition: all 0.1s cubic-bezier(0.05, 0.6, 0.4, 0.95);
   }
-  /* (The open pill isn't measured yet: Yap's own until it is.) */
+  /* (The open pill isn't measured yet: Yap's own until it is — 128 px for
+     Wispr's two buttons and its menu, 34 more for 🔊.) */
   .pill.open {
-    width: 128px;
+    width: 162px;
     height: 38px;
     padding: 0 4px;
     border-radius: 19px;

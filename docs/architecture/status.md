@@ -4,6 +4,22 @@ What works today, how it was tested, and what's not done yet. `ROADMAP.md` is in
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
+## Measured (2026-10-22, a release `engines` build, run portable)
+
+Ryzen 7 9800X3D, RTX 5070 Ti, Windows 11, Parakeet V3; memory = private working set
+(Task Manager's "Memory") summed over `yap.exe` + its WebView2 processes:
+- **Idle in the tray: ~290 MB** (321–325 MB before one chunk per window and the
+  hidden webviews' low memory target), **0.7 % of one core**.
+- **A 10-minute meeting** (real mic + loopback): flat at ~535 MB, 23 % of one core;
+  ~200 MB isn't given back after it ends.
+- **Hotkey → recording: 1–3 ms**; stop → transcript 0.30–0.45 s for 3.4 s of audio.
+- **Cold start → tray and bar: ~2.5 s**, nearly all of it loading the speech model on
+  the setup thread (7.4 s on the very first launch); the main window comes up then on a
+  launch by the person (`app-shell.md`).
+- **Installer 20.7 MB** (NSIS) + the 456 MB model on first run.
+- For comparison, Wispr Flow's Windows app is reported at ~800 MB and ~8 % CPU idle
+  (user reports, no official figure); its own package is 221–316 MB.
+
 ## What works
 
 **Trusting a dictation** (2026-10-22): **the speech engine's device on each
@@ -88,7 +104,18 @@ the reply/fallback flows e2e-tested against `fake-elevenlabs.js`; first
 audio measured on this PC with `first_audio_latency`: Kokoro af_bella
 1.4 s cold / ~0.43 s warm for the preview sentence, ElevenLabs' path
 < 1 ms of Yap's own on top of the service's answer; not yet tried with a
-real key), combo hotkeys, the audio pre-roll (anti first-word clipping), **live
+real key), **Read aloud, anywhere** (`read_aloud.rs` + `tts/marks.rs`,
+2026-10-22: the selection in any app, a note or a Chat answer read in that
+voice with a karaoke reading card on the Yap bar; word timing from Windows'
+own word cues, ElevenLabs' `with-timestamps` alignment, else from Kokoro's
+audio — measured silently against Parakeet's word times (itself −21 ms from
+Windows' real cues): Kokoro's karaoke a median 100 ms off, 71 % of words
+within 150 ms;
+the selection read for real by the robot in the test pad, Notepad and an
+Edge page, a terminal never by Ctrl+C; the card, karaoke, ⏸ ⏭ ⏮, speed,
+Esc, a 30,000-character text made a sentence ahead, e2e-tested; not yet
+heard on speakers by a person, nor with a real ElevenLabs key or a PDF
+viewer), combo hotkeys, the audio pre-roll (anti first-word clipping), **live
 streaming partials** (sliding-window, on by default, word-paced overlay reveal —
 validated live 2026-07-10), transcription history + stats, cleanup presets,
 **other apps silenced or paused while you dictate** (`mute.rs` + `media_pause.rs`,
@@ -314,16 +341,21 @@ before the first sentence, don't listen again by themselves after an answer,
 and have no echo cancellation (a mic that hears the speakers during an
 answer is a later job); the AI Notepad has no rich markdown editor (plain textarea)
 or folder "add existing note" picker; meetings tell the call's voices apart
-only with the beta speaker engine on, and don't name them by themselves
-("Speaker 1"… until the user, a 1:1 invite or, later, the call app names
-them; voices of two recordings of one meeting aren't matched up; tasks are
-attributed from attendees, the speaker map and names said)
+only with the beta speaker engine on, and name them only from what's said
+and the invite (suggestions to confirm, a strong one as a guess; 0 wrong
+names but 34–60% found in the evaluation's fictional meetings; reading the
+call app's window is built behind a flag but untried in a real call; voices
+of two recordings of one meeting aren't matched up; tasks are attributed
+from attendees, the speaker map and names said)
 and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](../meetings.md) "Limits"), and a real call (live
 WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a
 hotkey dictation mid-call) still wants one hands-on pass;
-the calendar has no one-click Outlook (Microsoft Graph) and no pre-meeting
-brief;
+the calendar has no one-click Outlook (Microsoft Graph); the pre-meeting
+brief (2026-10-22: unit-, e2e- and model-evaluated, not yet seen before a
+real meeting) checks the AI's lines word by word, so a mix-up of two things
+its notes both say can pass (no "In short" from a small on-device model for
+that reason);
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see `ROADMAP.md` Phase 1);
 multi-phrase dictionary entries; verify-after-paste beyond Win32 edit

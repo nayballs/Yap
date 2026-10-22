@@ -74,5 +74,6 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   `yap-config-patched` so its auto-save can't switch it back), a
   Coding-agents card whose "Copy API guide" button copies a
   paste-into-your-agent endpoint cheat-sheet, and an endpoint reference
-  table. (OpenWhispr's Google-Calendar OAuth / cloud API-keys / hosted-MCP
+  table, folded into a "For developers" disclosure (2026-10-22: it was the
+  longest thing on the page for people who never use it). (OpenWhispr's Google-Calendar OAuth / cloud API-keys / hosted-MCP
   cards need their paid cloud and are not ported; Yap's MCP is local.)

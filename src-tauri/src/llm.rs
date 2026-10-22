@@ -456,6 +456,14 @@ pub const MEETING_BLIND_SPOTS_PROMPT: &str = concat!("You review a meeting for w
 /// "Teams call · 5 Oct, 14:30". Internal (no editable body).
 pub const MEETING_TITLE_PROMPT: &str = concat!("You name meetings. You receive the start of a meeting's transcript, where \"You:\" is the person who recorded it and ", other_speakers!(), ", sometimes with the attendees and the main points so far. Reply with ONE short title for the meeting: 3 to 7 words, in the language of the meeting, saying what it is about. Add who it is with only when a name or team is clear. Title Case. No quotes, no trailing period, no date or time, nothing else.");
 
+/// Immutable prompt for a **pre-meeting brief** (`calendar/brief.rs`): two or
+/// three bullets on what to know going into a calendar meeting, from
+/// numbered sources (earlier meetings' notes, memory, the invite), each
+/// citing its source. Internal (no editable body); `brief::check_summary`
+/// drops any bullet that doesn't cite, strays from its sources or moves a
+/// task to someone else.
+pub const MEETING_BRIEF_PROMPT: &str = "You write a short brief for someone about to go into a meeting. You receive the meeting (its title and who's coming) and numbered sources: notes from their earlier meetings, where \"You\" is the user; what Yap remembers about the people; and the meeting's invite.\n\nWrite 2 or 3 short \"- \" bullets, speaking to the user as \"you\", on what they should know going in: what was decided last time, what was left open, and how the invite's agenda connects to it. Tasks in the notes are still to do: never say one was done. End every bullet with the number of the source it comes from in square brackets: [1], or [1, 3] for two. Use only the sources: never invent names, owners, tasks, decisions, dates or numbers, and never give a task to someone other than the person the source gives it to. At most 50 words in all. If the sources say too little for a useful bullet, reply with exactly: Nothing to add. No preamble, no headings, no closing remarks.";
+
 /// Per-call knobs for the note and meeting-summary calls.
 pub(crate) struct ChatOptions {
     pub temperature: f32,

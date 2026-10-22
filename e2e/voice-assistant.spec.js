@@ -202,12 +202,13 @@ test('Commands and the Voice Assistant: two pages that say what they do, with li
   await dialog.getByRole('note').getByRole('button', { name: 'Commands' }).click();
   await expect(dialog.getByRole('heading', { level: 1, name: 'Commands' })).toBeVisible();
 
-  // Shortcuts has all five together, the unset ones saying so.
+  // Shortcuts has all six together, the unset ones saying so.
   dialog = await openSettings(main, 'Shortcuts');
   const all = dialog.getByRole('group', { name: 'Global shortcuts' });
   await expect(all.locator('[data-setting="shortcut-dictation"] kbd')).toHaveText(['F24']);
   await expect(all.locator('[data-setting="shortcut-rewrite"]').getByRole('button', { name: 'Set a shortcut' })).toBeVisible();
   await expect(all.locator('[data-setting="shortcut-assistant"]').getByRole('button', { name: 'Set a shortcut' })).toBeVisible();
+  await expect(all.locator('[data-setting="shortcut-read"]').getByRole('button', { name: 'Set a shortcut' })).toBeVisible();
   await expect(all.locator('[data-setting="shortcut-as-said"]').getByRole('button', { name: 'Set a shortcut' })).toBeVisible();
   await expect(all.locator('[data-setting="shortcut-meeting"] kbd')).toHaveText(['Win', 'Alt', 'M']);
   await shot(main, '12b-settings-shortcuts');

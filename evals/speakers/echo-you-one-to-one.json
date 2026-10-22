@@ -1,0 +1,45 @@
+{
+  "name": "echo-you-one-to-one",
+  "description": "A 1:1 invite and your voice reaching the call side: the echo voice says more than the real one, yet it mustn't take the invite's name.",
+  "tags": [
+    "echo",
+    "calendar",
+    "one-to-one",
+    "trap"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [
+    "Priya Shah"
+  ],
+  "calendar_guess": "Priya Shah",
+  "lines": [
+    [
+      "you",
+      "Thanks for joining. I wanted to go through the onboarding numbers from last month before the review."
+    ],
+    [
+      "them-2",
+      "Thanks for joining. I wanted to go through the onboarding numbers from last month before the review."
+    ],
+    [
+      "them-1",
+      "Sure, go ahead."
+    ],
+    [
+      "you",
+      "Activation is up from forty to forty eight percent, mostly from the shorter sign up form."
+    ],
+    [
+      "them-2",
+      "Activation is up from forty to forty eight percent, mostly from the shorter sign up form."
+    ],
+    [
+      "them-1",
+      "That's a big jump, nice."
+    ]
+  ],
+  "truth": {
+    "them-1": "Priya Shah",
+    "them-2": "you"
+  }
+}

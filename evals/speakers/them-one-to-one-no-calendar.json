@@ -1,0 +1,36 @@
+{
+  "name": "them-one-to-one-no-calendar",
+  "description": "No voices told apart and no calendar: a 1:1 call where you thank the other person by name.",
+  "tags": [
+    "them",
+    "thanks",
+    "said-names"
+  ],
+  "me": "Imogen Hart",
+  "attendees": [],
+  "lines": [
+    [
+      "you",
+      "Hi Sam, thanks for calling back."
+    ],
+    [
+      "them",
+      "No problem, I saw your email about the contract renewal."
+    ],
+    [
+      "you",
+      "Yes, we'd like to renew but at a lower volume this year."
+    ],
+    [
+      "them",
+      "That should be fine, I'll need the new numbers by the end of the month."
+    ],
+    [
+      "you",
+      "Great, thanks Sam, I'll send them over today."
+    ]
+  ],
+  "truth": {
+    "them": "Sam"
+  }
+}
