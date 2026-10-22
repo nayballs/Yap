@@ -195,18 +195,44 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
 - **`HomeView.svelte`** = the Wispr-style
   Home: time-of-day greeting with the hotkey as **amber keycaps**, a dark
   **rotating hero card** (5 tips — Commands (voice edit) / AI cleanup / meeting notes /
-  per-app profiles / the Voice Assistant — picked by day, dot nav, CTAs open the right Settings
+  per-app profiles / the Voice Assistant — picked by day, except that someone with no
+  dictations yet starts on AI cleanup until they browse; dot nav, CTAs open the right Settings
   section or view via `onnavigate`), the dictation feed (day-grouped flat rows
   w/ hover-revealed meta + copy/delete via `delete_history_entry`, live refresh
   on `yap-history-changed`, icon-expand search on Ctrl+K), and a right-rail stats
-  card with serif display numerals.
+  card with serif display numerals ("1 dictation" / "N dictations"). In a
+  narrow window (a container query on `.wrap` ≤ 760 px: the 860 px window
+  minimum, a laptop at 150 %) the stats go above the feed as one row of four
+  and the tip card keeps its width; ≤ 560 px its button goes under its text.
+  With no dictations yet and **no speech model** (Settings' attention item
+  `models`), the empty feed says "One step left: a speech model" with
+  **Download a speech model** (→ Settings → Speech-to-Text) instead of
+  "Ready when you are" — the hotkey does nothing until there's one.
+  App names are the ones people know (`lib/appNames.js` `appLabel`:
+  "ms-teams.exe" → "Teams", "WINWORD.EXE" → "Word"; history keeps the
+  process name) — Home's rows, Insights and Settings' per-app rules.
 - **`InsightsView.svelte`** = the stats
   dashboard promoted out of Settings→History (serif hero number, stat grid,
-  30-day amber heatmap, top-apps-by-words bars from `get_history`); Settings →
-  History keeps only the enable toggle + recent list + clear.
+  30-day amber heatmap, top-apps-by-words bars from `get_history`, grouped by
+  `appLabel`); Settings → History keeps only the enable toggle + recent list + clear.
 - **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
   Symphonia decode → chunked transcription on the warm engine with progress +
-  cancel — see `media.rs`);
+  cancel — see `media.rs`); its line names the model ("transcribes with
+  Parakeet V3", `models.js`), not its id.
+- **Page titles** — Insights, Upload, Dictionary, Integrations and Meetings
+  use the serif display title Settings' pages have (`--yap-font-display`,
+  28–30 px; `polish.spec.js` checks the face).
+- **One chunk per window** (`App.svelte`, 2026-10-22): each window imports
+  only its own view (`VIEWS[label]()`, a dynamic `import()` each — never a
+  ternary of imports, which Vite gave one preload list, the last one's, so
+  the main window lost its CSS). The Yap bar loads ~150 KB of script
+  instead of the whole ~1 MB app; the notepad ~310 KB.
+- **AI errors in plain words** (`lib/aiErrors.js` `aiError`): Chat's
+  "Couldn't send" says "Couldn't reach the AI model on this PC
+  (127.0.0.1:11434). Check that it's running (Ollama, LM Studio…)…", "…check
+  your internet connection…", a refused API key, a model the provider
+  dropped or a provider-side failure, with **Open Language Models** when
+  that's where it's fixed; anything else stays raw in the copyable error box.
 
 ## Shared components
 
@@ -224,8 +250,17 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   mic check (live level meter via `set_mic_test` idle-amp mode + live device switch)
   → one-click **local AI cleanup** install (the model recommended for this PC
   first and picked: Qwen3.5 4B with a graphics card that can run it, "Your
-  <card> runs Qwen3.5 4B quickly…", else Qwen2.5 1.5B) → tray pointer → "try
-  it here" live dictation test with a change-shortcut recorder.
+  <card> runs Qwen3.5 4B quickly…", else Qwen2.5 1.5B; then Qwen2.5 1.5B as
+  the light one; **two shown, the rest behind "More models (N)"** so the
+  Download button shows without scrolling — a pick further down keeps the
+  list open) → the tray (the Yap bar, click the icon to open Yap,
+  right-click to paste the last dictation; the footer pinned at the bottom
+  of every step) → "try it here" live dictation test with **Settings' own
+  shortcut picker** (`ui/HotkeyInput.svelte` + `validateHotkey`: combos,
+  chords, mouse buttons, the Copilot key; the old recorder kept only the
+  bare key; in push-to-talk it says "Hold …, then let go"). With no microphone the mic step says so. **Finish** opens
+  Yap's main window on Home (`open_settings`), so setup doesn't end on an
+  empty screen.
 - **`lib/ui/`** — primitives: Toggle, Select, Slider, Group, Row, Button, Input, Textarea,
   **ContextMenu** (at the pointer or under a ⋯ (`alignEnd`), clamped to the
   window; ↑/↓/Home/End/Enter, → into a submenu, ← / Esc back; Esc, Tab, a

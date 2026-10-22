@@ -1383,10 +1383,10 @@
           </button>
           <span class="tabspacer"></span>
           <button class="copy" onclick={() => copyEnhanced(false)}>
-            {copied === 'markdown' ? 'Copied!' : 'Copy markdown'}
+            {copied === 'markdown' ? 'Copied!' : 'Copy as Markdown'}
           </button>
           <button class="copy" onclick={() => copyEnhanced(true)}>
-            {copied === 'text' ? 'Copied!' : 'Copy text'}
+            {copied === 'text' ? 'Copied!' : 'Copy as text'}
           </button>
         </div>
       {/if}
