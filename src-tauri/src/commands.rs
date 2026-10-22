@@ -466,7 +466,7 @@ pub fn note_export(id: u64, path: String) -> Result<(), String> {
         out.push_str(note.enhanced_content.trim());
         out.push('\n');
         if !note.content.trim().is_empty() {
-            out.push_str(&format!("\n---\n\n## Raw notes\n\n{}\n", note.content.trim()));
+            out.push_str(&format!("\n---\n\n## My thoughts\n\n{}\n", note.content.trim()));
         }
     } else if !note.content.trim().is_empty() {
         out.push_str(note.content.trim());
@@ -694,6 +694,21 @@ pub fn meeting_start(
         p.engine_slot()
     };
     crate::meeting::start(app.clone(), engine_slot, note_id)?;
+    // A recording makes it a meeting note, filed in Meetings as "Take
+    // notes" files its own, unless the person chose its folder; the Notes
+    // view says so (`yap-note-filed`, with a way back).
+    match crate::notes::file_as_meeting(note_id) {
+        Ok(Some(from)) => {
+            use tauri::Emitter;
+            let _ = app.emit(
+                "yap-note-filed",
+                serde_json::json!({ "noteId": note_id, "from": from, "to": crate::notes::MEETINGS }),
+            );
+            let _ = app.emit("yap-notes-changed", ());
+        }
+        Ok(None) => {}
+        Err(e) => tracing::warn!(note_id, "Meeting note not filed: {e}"),
+    }
     // During a meeting on the calendar, the note becomes that meeting's
     // (title, attendees, invite), whichever way the recording started.
     crate::calendar::on_meeting_started(&app, note_id);

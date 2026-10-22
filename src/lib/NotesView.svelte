@@ -298,16 +298,31 @@
     }
   }
 
-  /** The open note as stored, keeping what's being typed. */
+  // What the events below changed on the open note, field by field: a reload
+  // keeps the fields an event changed while its read was out (a reply read
+  // before the notepad's edit and delivered after it would put the old text
+  // back, and the next keystroke here would save it). Notepad.svelte does
+  // the same.
+  const changed = {};
+  function changing(...fields) {
+    for (const f of fields) changed[f] = (changed[f] || 0) + 1;
+  }
+  let reloads = 0;
+
+  /** The open note as stored, keeping what's being typed and what arrived meanwhile. */
   async function reloadSelected() {
     if (!selected) return;
     const id = selected.id;
+    const asked = ++reloads;
+    const before = { ...changed };
     try {
       const n = await invoke('note_get', { id });
-      if (selected?.id !== id) return;
+      // Another note, or a newer reload on its way: that one says it.
+      if (selected?.id !== id || asked !== reloads) return;
       // Keep what's being typed (its save is on the way).
       if (dirty.title) n.title = selected.title;
       if (dirty.content) n.content = selected.content;
+      for (const f of Object.keys(changed)) if (changed[f] !== before[f]) n[f] = selected[f];
       selected = n;
     } catch {
       /* keep current */
@@ -346,6 +361,7 @@
     if (!labels) refreshList();
     if (selected?.id !== p.id) return;
     if (!labels) {
+      changing('title', 'titleAuto', 'content', 'participants', 'folder');
       if (!dirty.title) {
         selected.title = p.title;
         selected.titleAuto = p.titleAuto;
@@ -354,8 +370,14 @@
       selected.participants = p.participants;
       selected.folder = p.folder;
     }
-    if (p.speakers) selected.speakers = p.speakers;
-    if (typeof p.enhancedContent === 'string') selected.enhancedContent = p.enhancedContent;
+    if (p.speakers) {
+      changing('speakers');
+      selected.speakers = p.speakers;
+    }
+    if (typeof p.enhancedContent === 'string') {
+      changing('enhancedContent');
+      selected.enhancedContent = p.enhancedContent;
+    }
     // The voice separation labelled lines (`lineSplice`, some split where
     // the speaker changed), or a speaker was renamed or merged in the
     // notepad (`lineSpeakers`): every line's voice.
@@ -364,6 +386,7 @@
         ? withLineSplice(selected.transcript, p)
         : withLineSpeakers(selected.transcript, p.lineSpeakers);
       if (t) {
+        changing('transcript', 'breaks');
         selected.transcript = t;
         if (p.breaks) selected.breaks = p.breaks;
       } else {
@@ -395,6 +418,7 @@
     if (!seg) return;
     // Live-append to the open note's transcript view.
     if (selected && meeting.recording && meeting.noteId === selected.id && !hasLine(selected.transcript, seg)) {
+      changing('transcript', 'noteType');
       selected.transcript = [...(selected.transcript || []), seg];
       selected.noteType = 'meeting';
     }
@@ -402,6 +426,7 @@
 
   function onMeetingDigest(p) {
     if (p?.digest && selected?.id === p.noteId) {
+      changing('digests');
       selected.digests = [...(selected.digests || []), p.digest];
     }
   }
@@ -840,7 +865,10 @@
     const open = selected?.id === id ? selected : null;
     const from = open ? open.folder : notes.find((n) => n.id === id)?.folder;
     if ((from || 'Personal') === f) return;
-    if (open) open.folder = f;
+    if (open) {
+      changing('folder');
+      open.folder = f;
+    }
     try {
       await invoke('note_update', { id, folder: f });
       refreshList();
@@ -849,6 +877,41 @@
       toast({ title: "Couldn't move note", description: String(e), variant: 'destructive' });
     }
   }
+  // Recording from a note makes it a meeting note, filed in Meetings like
+  // every note "Take notes" makes, unless the person chose its folder
+  // (notes::file_as_meeting). The open note's list follows it there, and a
+  // notice says so, with the way back (a move that then sticks).
+  function onNoteFiled(p) {
+    if (p?.noteId == null || !p.to) return;
+    const open = selected?.id === p.noteId ? selected : null;
+    if (open) {
+      changing('folder', 'noteType');
+      open.folder = p.to;
+      open.noteType = 'meeting';
+      if (activeFolder === p.from) activeFolder = p.to;
+    }
+    refreshList();
+    if (!open) return;
+    // The answer to the click that started the recording (the feedback
+    // lane): never queued in front of what the meeting itself says, like
+    // its length warning.
+    toast({
+      kind: 'done',
+      key: `note-filed-${p.noteId}`,
+      chip: 'Notes',
+      title: `Moved to ${p.to}`,
+      description: `“${displayTitle(open)}” is a meeting note now, so it's with your other meetings.`,
+      duration: 10_000,
+      action: {
+        label: `Keep in ${p.from}`,
+        onClick: async () => {
+          await moveToFolder(p.from, p.noteId);
+          if (selected?.id === p.noteId && activeFolder === p.to) activeFolder = p.from;
+        },
+      },
+    });
+  }
+
   // Export the open note (the editor's button), or note `id` (its row's menu).
   async function exportNote(id = selected?.id) {
     if (id == null) return;
@@ -1035,6 +1098,9 @@
     // The local API bridge (Integrations) can create/update/delete notes from
     // outside the app — refresh the list so external edits show up live.
     listen('yap-notes-changed', () => refreshList()).then((u) => unlisteners.push(u));
+    // A recording made a note a meeting note and filed it in Meetings
+    // (commands.rs `meeting_start` → notes::file_as_meeting).
+    listen('yap-note-filed', (e) => onNoteFiled(e.payload)).then((u) => unlisteners.push(u));
     // "Started by mistake?" → Discard (here or in the notepad).
     listen('yap-note-deleted', (e) => {
       if (selected?.id === e.payload?.id) selected = null;
@@ -1219,12 +1285,12 @@
             <div class="itembody">
               <p class="ititle">
                 <span class="ittext">{displayTitle(n)}</span>
-                {#if n.stale}<span class="staledot" title="Note changed since enhancement"></span>{/if}
+                {#if n.stale}<span class="staledot" title="Your notes changed since this summary"></span>{/if}
                 <span class="reltime">{relTime(n.updatedTs)}</span>
               </p>
               <p class="imeta">
                 {#if n.noteType === 'meeting'}<span class="enhtag">meeting</span> · {/if}
-                {#if n.hasEnhanced}<span class="enhtag">enhanced</span>{:else}{dateOf(n.updatedTs)}{/if}
+                {#if n.hasEnhanced}<span class="enhtag">summary</span>{:else}{dateOf(n.updatedTs)}{/if}
               </p>
             </div>
             <button
@@ -1417,10 +1483,11 @@
 
       {#if selected.enhancedContent}
         <div class="tabs">
-          <button class="tab" class:active={tab === 'raw'} onclick={() => (tab = 'raw')}>Raw</button>
+          <!-- The meeting notepad's names for the same two things. -->
+          <button class="tab" class:active={tab === 'raw'} onclick={() => (tab = 'raw')}>My thoughts</button>
           <button class="tab" class:active={tab === 'enhanced'} onclick={() => (tab = 'enhanced')}>
-            Enhanced
-            {#if isStale}<span class="staledot" title="Note changed since enhancement — re-run Enhance"></span>{/if}
+            Summary
+            {#if isStale}<span class="staledot" title="Your notes changed since this summary: run the action again to update it"></span>{/if}
           </button>
           <span class="tabspacer"></span>
           <button class="copy" onclick={() => copyEnhanced(false)}>

@@ -495,8 +495,8 @@ for when it's wanted after all.
    Unassigned; a deadline whose words aren't in the input is removed; and any
    digest task the reply left out is put back under its owner. (Feeding a
    model summaries instead of the transcript is where tasks get lost.)
-5. The result is the note's Enhanced view, with **Copy markdown** and **Copy
-   text** (headings plain, tasks as ☐, for a chat message or an email).
+5. The result is the note's Summary tab, with **Copy as Markdown** and **Copy
+   as text** (headings plain, tasks as ☐, for a chat message or an email).
 
 The Action Plan is a built-in action like Meeting Notes: editable, not
 deletable. It's found by `kind: "actionPlan"`, so renaming it is fine. It's

@@ -187,7 +187,7 @@ export function noteMarkdown(note) {
   const typed = note?.content?.trim();
   if (summary) {
     out += `${summary}\n`;
-    if (typed) out += `\n---\n\n## Raw notes\n\n${typed}\n`;
+    if (typed) out += `\n---\n\n## My thoughts\n\n${typed}\n`;
   } else if (typed) {
     out += `${typed}\n`;
   }
