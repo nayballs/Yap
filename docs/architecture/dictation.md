@@ -295,41 +295,62 @@ to **Run again** from Home.
   audio's start): Parakeet's words (`TimestampGranularity::Word`), Whisper's
   segments (a phrase each), SenseVoice's tokens joined at "▁"; none for
   Moonshine/GigaAM/Canary/Cohere or the stub. Only meetings call it.
-- **`stt_speed.rs`** — **the fastest speech engine on this PC** (2026-10-22):
-  a one-time background benchmark per installed model and PC. The clip
-  (`assets/stt-speed-clip.wav`, 8 s of Kokoro's af_bella — Apache-2.0 —
-  reading a fictional line, made by the `--ignored` `make_clips` test) is
-  transcribed on each device (`measure`): the load and the first
-  transcription timed, then three rounds with the devices taking turns, each
-  round a new length of the clip (`RUN_LENGTHS`: DirectML plans its graph
-  again for every new length, as every real dictation is one — the same clip
-  repeated made it look twice as fast as it is), the median kept. A device
-  5× slower at its first go (and over 3 s) isn't timed further, and Whisper
-  on the processor isn't tried at all beside a graphics card whose first
+- **`stt_speed.rs`** — **the speech engine's device on this PC** (2026-10-22):
+  a one-time background benchmark per installed model and PC, **the
+  graphics card unless the processor is clearly faster**. The clip
+  (`assets/stt-speed-clip.wav`, ~36 s of Kokoro's af_bella — Apache-2.0 —
+  reading six fictional sentences with a pause between them, made by the
+  `--ignored` `make_clip` test) is cut at pauses (`cuts`) into three
+  dictation lengths (`LENGTHS`: short ~3 s, typical ~11 s, long = all
+  36 s) and transcribed on each device with **the call a dictation makes**
+  (`Call`: the language, translate and the Whisper vocabulary prompt, from
+  `Pipeline::transcribe_options`; `transcribe_timed`). Per device the load
+  and the **first transcription after it** (the typical length — DirectML
+  and Vulkan build their graphs here) are timed and shown but never part of
+  the choice; then three warm rounds of every length, the devices taking
+  turns, each run a length the engine hasn't had (300 ms of trailing
+  silence plus 160 ms more a round: a real dictation never repeats a
+  length, and a runtime that caches its plan per input shape would look
+  faster on a repeated clip than a dictation finds it — on this PC DirectML
+  didn't, its cost being a fixed ~0.4 s a call), each length's median kept
+  (`Timing`). The processor isn't timed further when its first
+  transcription took 5× the graphics card's (and over 3 s), and Whisper on
+  the processor isn't tried at all beside a graphics card whose first
   transcription took ≤ 3 s (`skip_cpu_whisper`: whisper.cpp's 4 processor
   threads need far longer for its 30-second window — large-v3 took minutes
-  on this PC, under load, against Vulkan's ~2 s — and would hold the
-  processor all that time). **The pick** (`pick`, pure): the fastest whose words match
-  the processor's, the graphics card on a near-tie (5 %). **When**
-  (`schedule`): 60 s after start and 15 s after a model is installed or
-  switched to (`Pipeline::set_engine`), only when the stored result doesn't
-  fit (`fits`: the model's files, and `pc_print` — each graphics adapter's
-  ids, name and driver version, from DXGI — so a new driver measures again),
-  and on demand (Settings' Measure again, `stt_speed_measure`). Never beside
-  a dictation (or an Upload, or within 20 s of one), a meeting recording or a
-  model download: it waits for a quiet moment, and one starting mid-way
+  on this PC, under load, against Vulkan's ~2 s); the graphics card is
+  always timed. **The pick** (`pick`, pure): the graphics card, unless the
+  processor took at most 70 % of its time at **every** length
+  (`clearly_faster`, `CPU_MARGIN` 0.3) — or the graphics card failed or got
+  the words wrong (the processor's are the reference, a word in twenty
+  aside: `agrees`). A narrow win leaves the processor to the person's apps:
+  a meeting recording or a busy app slows the processor path (the graphics
+  card's hardly), which the benchmark can't see. **When** (`schedule`): 60 s
+  after start and 15 s after a model is installed or switched to
+  (`Pipeline::set_engine`), only when the stored result doesn't fit
+  (`fits`: `METHOD` — 2, so the first version's one-clip results measure
+  again —, the model's files, and `pc_print` — each graphics adapter's ids,
+  name and driver version, from DXGI — so a new driver measures again), and
+  on demand (Settings' Measure again, `stt_speed_measure`). Never beside a
+  dictation (or an Upload, or within 20 s of one), a meeting recording, a
+  model download, or while the processor is over 50 % busy
+  (`cpu_load`, `GetSystemTimes` over a second; `wait_for_quiet`): it waits
+  for a quiet moment, and a dictation, meeting or download starting mid-way
   stops it (`Stopped::Interrupted`, retried in 2 min). Kept in
-  `<data>/stt_speed.json`; the numbers logged at `info` (ms, whether the
-  words matched — never the text). `device_for` / `device_choice`: Settings'
+  `<data>/stt_speed.json` (with the processor's load before it); the
+  numbers logged at `info` (ms per device and length, whether the words
+  matched — never the text). `device_for` / `device_choice`: Settings'
   "Runs on" (`config.stt_device`: auto | gpu | cpu; the old `use_gpu` off =
   the processor) else the measured pick, else the graphics card;
   `reload_if_needed` moves the warm engine to the device it should be on at
   the next quiet moment (`Pipeline::replace_engine`). Settings → Speech-to-
-  Text → Runs on (`stt_speed_status`, `yap-stt-speed`). Test runs: only on
+  Text → Speed (`stt_speed_status`, `yap-stt-speed`). Test runs: only on
   demand, on the stub engine, `YAP_E2E_STT_SPEED` ("gpu=450,cpu=150")
-  standing in for each device's cost. An `--ignored` `bench_this_pc` times
-  every model and device with three dictation-length clips (the numbers in
-  the 2026-10-22 commit).
+  standing in for each device's cost per run. An `--ignored`
+  `bench_this_pc` (release build) prints Yap's own benchmark and pick, then
+  per device the load and first dictation, and per length the warm median at
+  a new length and at the same length again (the numbers in
+  [status.md](./status.md)).
 - **`recent_audio.rs`** — **never lose a dictation** (2026-10-22, Wispr
   Flow's of Aug 2026): each dictation's audio (16 kHz mono 16-bit WAV) in
   `<data>/recent-audio/<id>.wav`, the id its time in unix ms, written on its

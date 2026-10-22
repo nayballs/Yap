@@ -106,7 +106,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `mic_watch.rs` — dead-mic watchdog: reopen the stream, then "No sound from <mic>".
 - `mic_privacy.rs` — reads Windows' microphone privacy switches; names the one blocking Yap.
 - `stt.rs` — `SttEngine` over transcribe-rs, the 14-model registry, download + verify, word times; each engine loads on a `Device` (graphics card or processor).
-- `stt_speed.rs` — the fastest speech engine on this PC: a one-time background benchmark per model and PC (new driver, new download → again), Settings' "Runs on".
+- `stt_speed.rs` — the speech engine's device on this PC: a one-time background benchmark per model and PC at three dictation lengths (new driver, new download → again); the graphics card unless the processor is ≥ 30 % faster at every length; Settings' "Runs on".
 - `recent_audio.rs` — a day of dictation audio (`recent-audio/`): failed dictations listed, Home's Run again and Play.
 - `media.rs` — Upload's audio-file decoding (Symphonia) and chunking.
 - `sound.rs` — start/stop chimes; the output device shared with spoken replies.

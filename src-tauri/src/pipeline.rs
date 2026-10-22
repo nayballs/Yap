@@ -2443,6 +2443,14 @@ impl Pipeline {
         g.as_ref().map(|e| (e.model().to_string(), e.device()))
     }
 
+    /// What a dictation passes the engine besides its audio — the language,
+    /// translate, and the Whisper vocabulary prompt — so the speech-engine
+    /// timing makes the same call (`stt_speed`).
+    pub(crate) fn transcribe_options(&self) -> (Option<String>, bool, Option<String>) {
+        let (language, translate) = self.shared.language_settings();
+        (language, translate, self.shared.dictionary_prompt())
+    }
+
     /// How long since a dictation last did anything (ms): the speech-engine
     /// timing waits for a quiet moment.
     pub(crate) fn idle_ms(&self) -> u64 {

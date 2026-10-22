@@ -213,8 +213,9 @@ pub struct YapConfig {
     #[serde(default = "default_true")]
     pub use_gpu: bool,
     /// Settings → Speech-to-Text → Runs on: "auto" (the default — the
-    /// fastest on this PC, measured per model by `stt_speed.rs`), "gpu" (the
-    /// graphics card) or "cpu" (the processor).
+    /// graphics card unless the processor measured clearly faster on this
+    /// PC, per model, by `stt_speed.rs`), "gpu" (the graphics card) or
+    /// "cpu" (the processor).
     #[serde(default = "default_stt_device")]
     pub stt_device: String,
     /// Keep the audio of recent dictations on this PC for 24 hours, so one

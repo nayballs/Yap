@@ -117,7 +117,7 @@ export const SETTINGS_INDEX = [
   { page: 'models', section: 'Speakers in meetings', label: 'Speaker models', desc: 'For telling speakers apart in meetings', keywords: 'diarization speakers model', anchor: 'speakers' },
   { page: 'models', section: 'Language', label: 'Language', desc: 'The language you speak', keywords: 'spoken language auto-detect', anchor: 'language' },
   { page: 'models', section: 'Language', label: 'Translate to English', desc: 'Output English whatever you speak', keywords: 'translation translate', anchor: 'translate' },
-  { page: 'models', section: 'Performance', label: 'Speed', desc: 'Runs on the graphics card or the processor: the fastest on this PC', keywords: 'runs on gpu cpu processor graphics card directml vulkan performance speed fast benchmark measure', anchor: 'runs-on' },
+  { page: 'models', section: 'Performance', label: 'Speed', desc: 'Runs on the graphics card, or the processor when it is clearly faster on this PC', keywords: 'runs on gpu cpu processor graphics card directml vulkan performance speed fast benchmark measure', anchor: 'runs-on' },
   { page: 'models', section: 'Performance', label: 'Unload model when idle', desc: 'Free memory when not dictating', keywords: 'memory ram idle unload performance', anchor: 'unload' },
 
   // ---- Language Models ----

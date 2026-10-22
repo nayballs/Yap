@@ -251,12 +251,15 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   (`#settings-speakers`, `SpeakerModels.svelte` + `diarization.svelte.js`: the
   switch, the speaker models' rows, credits behind a disclosure). **Language**
   (Language, Translate to English) and **Performance**: **Speed**, where the
-  model runs (`settings/RunsOn.svelte`, `stt_speed.rs`: "Runs on: processor (fastest on
-  this PC, 150 ms)" — or "(not measured on this PC yet)", "(your choice). The
-  graphics card was faster here (90 ms)" —, a Select Automatic / Graphics card /
-  Processor → `sttDevice`, with `useGpu` following it, and Measure now / Measure
-  again; the ⓘ has each device's numbers and the clip; it follows
-  `yap-stt-speed`) and Unload model when idle. (It replaced the GPU
+  model runs (`settings/RunsOn.svelte`, `stt_speed.rs`: "Runs on: graphics card
+  (180 ms for 11 s of speech on this PC)", "Runs on: processor (clearly faster on
+  this PC: 120 ms for 11 s of speech)" — or "(not measured on this PC yet)",
+  "(your choice). Automatic picks the processor here (…)" —, a Select Automatic /
+  Graphics card / Processor → `sttDevice`, with `useGpu` following it, and
+  Measure now / Measure again; the ⓘ has each device's warm time at the three
+  dictation lengths and its first run after loading, the rule — the graphics
+  card unless the processor takes 30 % less time at every length — and that a
+  meeting or a busy app slows the processor path; it follows `yap-stt-speed`) and Unload model when idle. (It replaced the GPU
   acceleration switch, 2026-10-22.)
 - **Language Models** (`cleanup`): tabs Dictation Cleanup / Commands /
   Note Formatting / Chat & Voice Assistant (scope keys `cleanup`,

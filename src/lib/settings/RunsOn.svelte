@@ -2,8 +2,10 @@
   // Settings → Speech-to-Text → Runs on (stt_speed.rs): where the speech
   // model runs — the graphics card (Parakeet and the other ONNX models
   // through DirectML, Whisper through Vulkan) or the processor. Automatic:
-  // whichever Yap measured fastest for this model on this PC (once, in the
-  // background); or chosen. "Runs on: processor (fastest on this PC, 150 ms)".
+  // the graphics card, unless Yap measured the processor clearly faster for
+  // this model on this PC at every dictation length (once, in the
+  // background); or chosen. "Runs on: graphics card (180 ms for 11 s of
+  // speech on this PC)".
   //
   //   cfg: Settings' config $state (auto-save does the saving; the old GPU
   //        switch follows: useGpu = not the processor).
@@ -46,10 +48,8 @@
     return () => offs.forEach((p) => p.then((f) => f()));
   });
 
-  let choice = $state(cfg.sttDevice || 'auto');
-  $effect(() => {
-    choice = cfg.sttDevice || 'auto';
-  });
+  // Follows the config (a reload, another window), and the Select writes it.
+  let choice = $derived(cfg.sttDevice || 'auto');
   function onchange(v) {
     cfg.sttDevice = v;
     cfg.useGpu = v !== 'cpu';
@@ -67,41 +67,50 @@
   const measuring = $derived(asking || !!status?.measuring);
   const measured = $derived(status?.measured || null);
   const run = (device) => measured?.runs?.find((r) => r.device === device) || null;
-  const ms = (r) => (r?.warmMs != null ? `${r.warmMs} ms` : null);
+  const secs = (ms) => `${Math.round((ms || 0) / 1000)} s`;
+  // The typical dictation length's warm time: "180 ms for 11 s of speech".
+  const typical = (r) => {
+    const t = r?.lengths?.[1];
+    return t?.warmMs != null ? `${t.warmMs} ms for ${secs(t.clipMs)} of speech` : null;
+  };
 
   // The line under "Runs on".
   const line = $derived.by(() => {
     if (!status) return '';
     const where = NAME[status.device] || 'graphics card';
-    if (measuring) return `Runs on: ${where}. Measuring which is fastest on this PC…`;
+    if (measuring) return `Runs on: ${where}. Measuring how fast each is on this PC…`;
     if (!status.hasGpu) return `Runs on: processor (no graphics card found)`;
     const setting = cfg.sttDevice || 'auto';
     if (setting === 'auto') {
       if (!measured) return `Runs on: ${where} (not measured on this PC yet)`;
-      const best = ms(run(measured.pick));
-      return `Runs on: ${NAME[measured.pick]} (fastest on this PC${best ? `, ${best}` : ''})`;
+      const time = typical(run(measured.pick));
+      if (measured.pick === 'cpu') return `Runs on: processor (clearly faster on this PC${time ? `: ${time}` : ''})`;
+      return `Runs on: ${NAME[measured.pick]}${time ? ` (${time} on this PC)` : ''}`;
     }
     const chosen = `Runs on: ${where} (your choice)`;
     if (!measured || measured.pick === setting) return chosen;
-    const faster = ms(run(measured.pick));
-    return `${chosen}. The ${NAME[measured.pick]} was faster here${faster ? ` (${faster})` : ''}`;
+    const time = typical(run(measured.pick));
+    return `${chosen}. Automatic picks the ${NAME[measured.pick]} here${time ? ` (${time})` : ''}`;
   });
 
   // What was measured, for the ⓘ.
+  const RULE =
+    'Automatic keeps the graphics card unless the processor takes at least 30% less time at every length. On the processor, dictation slows down while a meeting records or another app keeps it busy.';
   const hint = $derived.by(() => {
-    if (!measured) return 'Yap times each speech model on this PC once, in the background, and uses the faster of the two.';
+    if (!measured)
+      return `Yap times each speech model on this PC once, in the background, at three dictation lengths. ${RULE}`;
     const parts = (measured.runs || [])
       .map((r) => {
-        const name = NAME[r.device];
-        if (r.skipped) return `${name}: not tried (Whisper is far slower there)`;
-        if (r.error) return `${name}: didn't run`;
-        if (r.warmMs == null) return `${name}: much slower (${r.firstMs} ms at first)`;
-        return `${name}: ${r.warmMs} ms`;
+        const name = NAME[r.device].replace(/^./, (c) => c.toUpperCase());
+        if (r.skipped) return `${name}: not tried (Whisper is far slower there).`;
+        if (r.error) return `${name}: didn't run.`;
+        if (!r.lengths?.length) return `${name}: much slower (${r.firstMs} ms at first).`;
+        const warm = r.lengths.map((t) => `${secs(t.clipMs)} of speech ${t.warmMs ?? '–'} ms`).join(', ');
+        return `${name}: ${warm} (the first after loading ${r.firstMs} ms).`;
       })
-      .join(', ');
-    const secs = Math.round((measured.clipMs || 0) / 100) / 10;
+      .join(' ');
     const when = new Date((measured.at || 0) * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-    return `${status?.modelName || 'This model'} on a ${secs}-second clip, ${when}: ${parts}.`;
+    return `${status?.modelName || 'This model'}, measured ${when}. ${parts} ${RULE}`;
   });
 </script>
 
