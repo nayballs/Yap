@@ -44,6 +44,25 @@
     { value: 'shiftEnter', label: 'Shift + Enter' },
   ];
 
+  // "Spell names the way they're written on screen" (screen_terms.rs): what
+  // goes where, as cleanup is set up now.
+  const CLEANUP_PROVIDERS = {
+    groq: 'Groq',
+    anthropic: 'Anthropic',
+    openai: 'OpenAI',
+    gemini: 'Google Gemini',
+    openrouter: 'OpenRouter',
+    custom: 'your custom endpoint',
+    local: 'your own server',
+  };
+  const screenDesc = $derived.by(() => {
+    if (!cfg.postProcessEnabled || !cfg.ppProvider || cfg.ppProvider === 'ondevice') {
+      return "Names and terms in the window you're dictating into come out spelled as shown";
+    }
+    const to = CLEANUP_PROVIDERS[cfg.ppProvider] || cfg.ppProvider;
+    return `Names in the window come out spelled as shown. The ones a dictation seems to contain go to ${to} with it, for cleanup`;
+  });
+
   const dict = $derived.by(() => {
     const list = Array.isArray(cfg.dictionary) ? cfg.dictionary : [];
     const snippets = list.filter((e) => e?.snippet).length;
@@ -151,6 +170,14 @@
       label="Match the text around the cursor"
       desc="Spaces, capitals and full stops fit where you're typing"
       hint="Yap reads a little of the text beside your cursor, on this PC only."
+    />
+  </Row>
+  <Row setting="screen-names">
+    <Toggle
+      bind:checked={cfg.screenNames}
+      label="Spell names the way they're written on screen"
+      desc={screenDesc}
+      hint="Yap reads the window's text on this PC as you start, for that dictation only, and never keeps it. The screen's text never leaves this PC."
     />
   </Row>
   <Row setting="chat-full-stop">

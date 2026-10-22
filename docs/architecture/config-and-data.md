@@ -19,7 +19,9 @@
   ("Pause music and videos while you dictate", off; both `mute.rs`), recording_mode,
   overlay_position, dictionary (`DictionaryEntry`: from/to + `fuzzy` (default
   on) + `snippet` (default off)), append_trailing_space, smart_spacing ("Match
-  the text around the cursor", default on), chat_no_full_stop ("Leave the full
+  the text around the cursor", default on), screen_names ("Spell names the
+  way they're written on screen", default on; `screen_terms.rs`),
+  chat_no_full_stop ("Leave the full
   stop off chat messages", default on), auto_submit(+key),
   voice_enter (the "press enter" voice command, default on), terminal_mode
   ("Safer pasting into terminals", default on; both `app_kind.rs`),
@@ -209,7 +211,8 @@
 - Notable defaults: hotkey `kb:120` (F9, rebindable), **default model
   `parakeet-tdt-0.6b-v3`** (fast/accurate, ONNX→DirectML), `use_gpu = true`,
   recording mode `toggle`, dictations **fitted to the text around the cursor**
-  (`smart_spacing`) and kept out of clipboard history (always), **one line and
+  (`smart_spacing`) with **names spelled as the window shows them**
+  (`screen_names`) and kept out of clipboard history (always), **one line and
   no Enter of Yap's own in a terminal** (`terminal_mode`; Claude Code/Codex in
   Windows Terminal keep line breaks), **no full stop on a short chat message**
   (`chat_no_full_stop`), the **Yap bar on** (`bar_enabled`), hidden over

@@ -196,6 +196,10 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   `ES_PASSWORD`/`ES_READONLY`; its state = `WM_GETTEXTLENGTH` + `EM_GETSEL`
   (`SendMessageTimeoutW`, 200 ms, `SMTO_ABORTIFHUNG`), never its text;
   `paste_verdict` (pure, unit-tested) says landed / didn't / unknown.
+  Its COM set-up (`uia::Com`, `uia::automation` with timeouts) is shared
+  with `screen_terms.rs`, which reads the target window's visible text for
+  its names at the same moment (same refusals; see
+  [dictionary.md](./dictionary.md)).
   `#[ignore]`d `reads_real_text_fields` reads hidden
   EDIT and RichEdit controls end to end, through TextPattern and through the
   ValuePattern + `EM_GETSEL` path (mid-text, a selection, over a line break),

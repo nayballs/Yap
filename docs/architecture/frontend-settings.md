@@ -160,7 +160,10 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   (a Select When you point at it / Always / Off → `barDictationButtons`, Off
   by default, a line per choice). **Typing into apps** (`#settings-typing`,
   Advanced's old Output): "Match the text around the cursor"
-  (`smartSpacing`), "Leave the full stop off chat messages"
+  (`smartSpacing`), "Spell names the way they're written on screen"
+  (`screenNames`, `screen_terms.rs`; its line says, with AI cleanup on a
+  cloud provider, that the names a dictation seems to contain go there with
+  it — the ⓘ that the screen's text never leaves the PC), "Leave the full stop off chat messages"
   (`chatNoFullStop`), "Append trailing space" (its line "Only where Yap can't
   read the text around the cursor" while the first is on), "Press Enter after
   pasting" (`autoSubmit`; "In a terminal, only for coding tools like Claude
@@ -309,7 +312,9 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
 - **Privacy & data** (`settings/PrivacyPage.svelte`, OpenWhispr's Privacy &
   Data, Claude's Privacy; replaces History and gathers the scattered privacy
   notes): **What leaves this PC** — a table by feature as Yap is set up now
-  (your voice, recent dictation audio, AI cleanup, Chat and the Voice Assistant, About you, memory, web search,
+  (your voice, recent dictation audio, AI cleanup, names on screen — read on this PC for each
+  dictation, or with cleanup on a cloud provider the names a dictation seems
+  to contain go there with it —, Chat and the Voice Assistant, About you, memory, web search,
   spoken replies, AI apps, calendar, account), each row linking to its
   setting. **History** (`#settings-history`): "Keep dictation history"
   (`historyEnabled`) and Clear history… (asks first; the count from

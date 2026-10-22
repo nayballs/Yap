@@ -290,6 +290,16 @@ pub struct YapConfig {
     /// read, a dictation pastes exactly as without it.
     #[serde(default = "default_true")]
     pub smart_spacing: bool,
+    /// "Spell names the way they're written on screen" (Settings →
+    /// Dictation → Typing into apps): at record start Yap reads the visible
+    /// text of the window being dictated into over UI Automation, in the
+    /// background (`screen_terms.rs`), and keeps the names and terms in it
+    /// (capitalised names, CamelCase, acronyms, words with digits, handles),
+    /// in memory, for that dictation only: the Whisper prompt gets them, the
+    /// near-miss pass fixes a name heard a little wrong (ONNX models), and AI
+    /// cleanup is told the ones the transcript seems to contain.
+    #[serde(default = "default_true")]
+    pub screen_names: bool,
     /// "Leave the full stop off chat messages" (Settings → Dictation →
     /// Typing into apps): in a chat app (Slack, Discord, WhatsApp, Teams…, desktop or
     /// in a browser; `app_kind.rs`), a message of one or two sentences in one
@@ -917,6 +927,7 @@ impl Default for YapConfig {
             pause_media: false,
             append_trailing_space: false,
             smart_spacing: true,
+            screen_names: true,
             chat_no_full_stop: true,
             auto_submit: false,
             voice_enter: true,

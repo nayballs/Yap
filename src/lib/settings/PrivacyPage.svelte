@@ -89,6 +89,18 @@
       page: 'cleanup',
     },
     {
+      // screen_terms.rs: the window's text is read for each dictation and
+      // never kept; only names a dictation seems to contain go with it to
+      // a cleanup model.
+      what: 'Names on screen',
+      where: !cfg.screenNames
+        ? 'Off'
+        : cfg.postProcessEnabled && cfg.ppProvider && cfg.ppProvider !== 'ondevice'
+          ? `Read on this PC for each dictation. ${goes(cfg.ppProvider, 'The names a dictation seems to contain')} with it, for cleanup`
+          : 'Read on this PC for each dictation, never kept or sent',
+      page: 'dictation#screen-names',
+    },
+    {
       what: 'Chat and the Voice Assistant',
       where: chat.provider ? goes(chat.provider, 'Your questions, and the notes they need,') : 'Not set up',
       page: 'cleanup#chat',

@@ -395,6 +395,7 @@
     pauseMedia: false,
     appendTrailingSpace: false,
     smartSpacing: true,
+    screenNames: true,
     chatNoFullStop: true,
     autoSubmit: false,
     voiceEnter: true,

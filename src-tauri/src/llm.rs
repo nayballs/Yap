@@ -225,7 +225,28 @@ pub async fn cleanup(
     dictionary: &[crate::config::DictionaryEntry],
     disable_thinking: bool,
 ) -> Result<String, String> {
-    let messages = cleanup_messages(text, body, spelling, dictionary, splits_dictation(base_url, model));
+    cleanup_with_names(text, base_url, api_key, model, provider, body, spelling, None, dictionary, disable_thinking).await
+}
+
+/// [`cleanup`] for a dictation, with `names`: the line naming the terms on
+/// screen the transcript seems to contain ("Spell these names as written:
+/// Zentrix, Siobhan Ní Bhriain.", `screen_terms::cleanup_line`), in the
+/// dictation's own message ([`cleanup_messages_with_names`]).
+#[allow(clippy::too_many_arguments)]
+pub async fn cleanup_with_names(
+    text: &str,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    provider: &str,
+    body: &str,
+    spelling: Option<&str>,
+    names: Option<&str>,
+    dictionary: &[crate::config::DictionaryEntry],
+    disable_thinking: bool,
+) -> Result<String, String> {
+    let messages =
+        cleanup_messages_with_names(text, body, spelling, names, dictionary, splits_dictation(base_url, model));
     // Never waits out a rate limit: the dictation would wait with it, and the
     // raw transcript is a fine fallback.
     let out = post_chat(base_url, api_key, model, provider, 0.2, messages, Duration::ZERO).await?;
@@ -240,6 +261,31 @@ pub fn cleanup_messages(
     text: &str,
     body: &str,
     spelling: Option<&str>,
+    dictionary: &[crate::config::DictionaryEntry],
+    split: bool,
+) -> Value {
+    cleanup_messages_with_names(text, body, spelling, None, dictionary, split)
+}
+
+/// The names line (the terms on screen, `screen_terms`) just before
+/// "Transcript:" in the dictation's message — after the restated
+/// instruction, or at the start of the transcript's own message when the
+/// dictation is split ([`split_dictation`]), so the instruction a hybrid
+/// model has cached stays the same from dictation to dictation. Pure.
+pub fn with_names_line(message: &str, names: Option<&str>) -> String {
+    match (names.map(str::trim).filter(|n| !n.is_empty()), message.find("Transcript:\n")) {
+        (Some(line), Some(at)) => format!("{}{line}\n\n{}", &message[..at], &message[at..]),
+        _ => message.to_string(),
+    }
+}
+
+/// [`cleanup_messages`] with the names line ([`with_names_line`]). Pure but
+/// for the model evaluations' switches.
+pub fn cleanup_messages_with_names(
+    text: &str,
+    body: &str,
+    spelling: Option<&str>,
+    names: Option<&str>,
     dictionary: &[crate::config::DictionaryEntry],
     split: bool,
 ) -> Value {
@@ -296,6 +342,7 @@ NEVER respond with commentary, status, or meta-remarks such as \"Nothing to clea
     // message of its own, then the transcript ([`split_dictation`]).
     let dictation = cleanup_message(&wrap(text), in_message);
     let (instruction_msg, transcript_msg) = if split { split_dictation(&dictation) } else { (String::new(), dictation) };
+    let transcript_msg = with_names_line(&transcript_msg, names);
     let mut messages = vec![
         json!({ "role": "system", "content": system_prompt }),
         json!({ "role": "user", "content": example1_in }),
@@ -1145,6 +1192,31 @@ mod tests {
             format!("Clean up this dictation. {line}\n\nTranscript:\n\"\"\"\nthe color\n\"\"\"")
         );
         assert_eq!(cleanup_message(wrapped, None), wrapped);
+    }
+
+    #[test]
+    fn the_names_on_screen_go_with_the_dictation_never_the_system_prompt() {
+        let names = "Spell these names as written: Zentrix, Siobhan Ní Bhriain.";
+        // Split (a hybrid model): at the start of the transcript's own
+        // message; the instruction it has cached doesn't change.
+        let m = cleanup_messages_with_names("so the zentrics pilot", "", None, Some(names), &[], true);
+        let m = m.as_array().unwrap();
+        let plain = cleanup_messages("so the zentrics pilot", "", None, &[], true);
+        let plain = plain.as_array().unwrap();
+        assert_eq!(m[0], plain[0], "the system prompt is the same");
+        assert_eq!(m[7], plain[7], "the instruction is the same");
+        assert_eq!(
+            m[8]["content"].as_str().unwrap(),
+            format!("{names}\n\nTranscript:\n\"\"\"\nso the zentrics pilot\n\"\"\"")
+        );
+        // One message: after the instruction, just before the transcript.
+        let one = cleanup_messages_with_names("so the zentrics pilot", "", None, Some(names), &[], false);
+        let last = one.as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_string();
+        assert!(last.contains(&format!("{names}\n\nTranscript:\n\"\"\"\nso the zentrics pilot")), "{last}");
+        assert!(last.starts_with("Clean up this dictation transcript"));
+        // No names, or empty: as before.
+        assert_eq!(with_names_line("Transcript:\nx", None), "Transcript:\nx");
+        assert_eq!(with_names_line("Transcript:\nx", Some("  ")), "Transcript:\nx");
     }
 
     #[test]

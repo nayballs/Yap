@@ -70,6 +70,7 @@ mod procs;
 mod read_aloud;
 mod realtest;
 mod recent_audio;
+mod screen_terms;
 mod selection;
 mod smart_insert;
 mod sound;

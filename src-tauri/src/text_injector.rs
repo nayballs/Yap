@@ -1224,7 +1224,7 @@ pub fn last_said_transcript() -> Option<String> {
     remembered
         .or_else(|| {
             let raw = crate::history::latest_dictation_raw()?;
-            Some(crate::pipeline::as_said_text(&raw, &crate::config::load()))
+            Some(crate::pipeline::as_said_text(&raw, &crate::config::load(), None))
         })
         .filter(|t| !t.trim().is_empty())
 }
