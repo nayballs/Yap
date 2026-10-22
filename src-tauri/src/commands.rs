@@ -1139,7 +1139,7 @@ pub(crate) async fn chat_turn(
         }
     }
 
-    let (reply, tools_used, sources, looked) = if tools_supported {
+    let (reply, tools_used, sources, looked, pages) = if tools_supported {
         let notify = |id: u64| {
             use tauri::Emitter;
             if let Some(app) = app {
@@ -1182,13 +1182,14 @@ pub(crate) async fn chat_turn(
         // gpt-oss sometimes cites as "【1】" (its own browsing style): Yap's [1].
         let reply = if web.is_some() { crate::web::bracket_citations(&reply) } else { reply };
         let looked = web.as_ref().is_some_and(crate::web::Turn::looked);
-        let sources = web.map(|w| w.sources_for(&reply)).unwrap_or_default();
-        (reply, tools_used, sources, looked)
+        let sources = web.as_ref().map(|w| w.sources_for(&reply)).unwrap_or_default();
+        let pages = web.map(|w| w.texts).unwrap_or_default();
+        (reply, tools_used, sources, looked, pages)
     } else {
         // Small/local models: plain chat + eager RAG (their fallback), or
         // Yap's fixed web pipeline when the question needs the web.
         let endpoint = (base_url.as_str(), api_key.as_str(), model.as_str(), provider.as_str(), disable_thinking);
-        let (reply, chips, sources, looked) =
+        let SmallAnswer { reply, chips, sources, looked, pages } =
             small_model_answer(&cfg, &persona, &system, &about, &history, &text, endpoint, web_on, by_voice).await?;
         // "Opening Baldur's Gate 3." from a model that can't open anything:
         // said as it is instead (apps.rs).
@@ -1203,7 +1204,7 @@ pub(crate) async fn chat_turn(
         } else {
             None
         };
-        (corrected.unwrap_or(reply), chips, sources, looked)
+        (corrected.unwrap_or(reply), chips, sources, looked, pages)
     };
     // Every model's answer, checked before it's shown: no sources list or
     // "Yap searched…" note of its own, no search claimed that didn't
@@ -1225,11 +1226,24 @@ pub(crate) async fn chat_turn(
             reply = stripped;
         }
     }
+    // A price the web gave only in another money ("$8"), written in theirs
+    // ("£8"): its page's sign back, and a note saying so.
+    let mut restored_note = None;
+    if let Some(local) = crate::about_you::LocalPrices::for_region(&profile.region).filter(|_| !pages.is_empty()) {
+        if let Some((fixed, restored)) = crate::about_you::restore_price_signs(&reply, &pages, &local) {
+            tracing::info!(prices = restored.len(), "Chat: Yap gave prices back the currency their pages gave them");
+            crate::eval::post_fix("price_sign");
+            reply = fixed;
+            restored_note = Some(crate::about_you::restored_price_note(&restored, &local));
+        }
+    }
     // Prices in $ without saying whose, for someone who pays in £ (About
-    // you): Yap says so under the answer.
+    // you): Yap says so under the answer (one note at most).
     if let Some(note) = crate::about_you::foreign_price_note(&reply, &profile.region) {
         tracing::info!("Chat: Yap noted the answer's prices are in dollars");
         crate::eval::post_fix("foreign_price_note");
+        reply = format!("{}\n\n{note}", reply.trim_end());
+    } else if let Some(note) = restored_note {
         reply = format!("{}\n\n{note}", reply.trim_end());
     }
     let index = crate::chats::append_sourced(
@@ -1271,9 +1285,10 @@ async fn small_model_answer(
     (base_url, api_key, model, provider, disable_thinking): (&str, &str, &str, &str, bool),
     web_on: bool,
     by_voice: bool,
-) -> Result<(String, Vec<String>, Vec<crate::chats::Source>, bool), String> {
+) -> Result<SmallAnswer, String> {
     let mut chips = Vec::new();
     let mut sources = Vec::new();
+    let mut pages = Vec::new();
     let mut system = system.to_string();
     let mut history = history.to_vec();
     let looked = web_on && crate::web::needs_web(text);
@@ -1295,6 +1310,7 @@ async fn small_model_answer(
                 };
                 let (found_sources, block) = crate::web::grounded_sources(&found.hits, SMALL_WEB_TOKENS);
                 system = crate::web::grounded_prompt(persona, &block, &crate::web::today(), by_voice);
+                pages.push(block);
                 system.push(' ');
                 let zone = crate::about_you::profile(cfg).region.time_zone_label;
                 system.push_str(&crate::web::time_note(zone.as_deref()));
@@ -1331,7 +1347,17 @@ async fn small_model_answer(
     }
     let reply =
         crate::llm::note_chat(&system, &history, text, base_url, api_key, model, provider, disable_thinking).await?;
-    Ok((reply, chips, sources, looked))
+    Ok(SmallAnswer { reply, chips, sources, looked, pages })
+}
+
+/// A small model's answer ([`small_model_answer`]): the text, its chips and
+/// sources, whether a search ran, and the web text it was given.
+struct SmallAnswer {
+    reply: String,
+    chips: Vec<String>,
+    sources: Vec<crate::chats::Source>,
+    looked: bool,
+    pages: Vec<String>,
 }
 
 /// The fixed web pipeline's second search for a price where the person is

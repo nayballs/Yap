@@ -1038,6 +1038,80 @@ pub fn strip_price_offer(reply: &str, local: &LocalPrices) -> Option<String> {
     changed.then(|| paragraphs.join("\n\n").trim_end().to_string())
 }
 
+/// **A price never passed off as theirs**: an answer's price in the
+/// person's money ("£8") that the web gave this turn only in another
+/// ("$8", never "£8") gets its page's sign back ("$8") — Qwen3.5-4B, told
+/// about the UK, wrote x.ai's "$8/month" as "£8/month" about 1 time in 3 in
+/// a chat whose earlier turns found UK pages (the model evaluations,
+/// 2026-10-21/22). Not 0 (free is free), not an estimate said as one
+/// ("about £6", "~£6", "≈ £6"), and only the £, € and $ signs. `pages`: the
+/// web text the model was given (`web::Turn::texts`). Returns the answer
+/// and the prices put back ("$8"); `None` when nothing changes. Pure.
+pub fn restore_price_signs(reply: &str, pages: &[String], local: &LocalPrices) -> Option<(String, Vec<String>)> {
+    static PRICE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)(~|≈|\babout|\baround|\broughly|\bapprox\.?|\bapproximately|\bequivalent(?:\s+to)?|\best\.?)?(\s*)([£€$])(\s?)(\d[\d,]*(?:\.\d+)?)")
+            .expect("static regex")
+    });
+    if !["£", "€"].contains(&local.symbol.as_str()) {
+        return None;
+    }
+    let norm = |n: &str| {
+        let n = n.replace(',', "");
+        let n = n.strip_suffix(".00").unwrap_or(&n).to_string();
+        n.strip_suffix(".0").unwrap_or(&n).to_string()
+    };
+    let given: Vec<(String, String)> =
+        pages.iter().flat_map(|p| PRICE.captures_iter(p).map(|c| (c[3].to_string(), norm(&c[5]))).collect::<Vec<_>>()).collect();
+    let mut out = String::with_capacity(reply.len());
+    let mut last = 0;
+    let mut restored = Vec::new();
+    for c in PRICE.captures_iter(reply) {
+        let sign = c.get(3).expect("group 3");
+        let amount = norm(&c[5]);
+        let estimate = c.get(1).is_some();
+        if sign.as_str() != local.symbol || estimate || amount.parse::<f64>().map_or(true, |v| v <= 0.0) {
+            continue;
+        }
+        if given.iter().any(|(s, a)| *s == local.symbol && *a == amount) {
+            continue;
+        }
+        // The page's sign: the dollar first (the usual one), else another.
+        let Some(theirs) = ["$", "€", "£"].into_iter().filter(|s| *s != local.symbol).find(|s| given.iter().any(|(gs, a)| gs == s && *a == amount)) else {
+            continue;
+        };
+        out.push_str(&reply[last..sign.start()]);
+        out.push_str(theirs);
+        last = sign.end();
+        let price = format!("{theirs}{}", &c[5]);
+        if !restored.contains(&price) {
+            restored.push(price);
+        }
+    }
+    (last > 0).then(|| {
+        out.push_str(&reply[last..]);
+        (out, restored)
+    })
+}
+
+/// Yap's note under an answer whose prices it gave back their page's sign
+/// ([`restore_price_signs`]): "*$8 and $80 are as their pages give them, in
+/// dollars: not UK prices.*" Pure.
+pub fn restored_price_note(restored: &[String], local: &LocalPrices) -> String {
+    let money = |p: &str| match p.chars().next() {
+        Some('$') => "dollars",
+        Some('€') => "euros",
+        _ => "pounds",
+    };
+    let list = match restored {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    };
+    let (is, gives) = if restored.len() == 1 { ("is", "its page gives it") } else { ("are", "their pages give them") };
+    let currency = restored.first().map_or("dollars", |p| money(p));
+    format!("*{list} {is} as {gives}, in {currency}: not {} prices.*", local.place)
+}
+
 /// Dictation cleanup's spelling line ("Write in my region's spelling", on by
 /// default): keep the person's variety of English. `None` when it's off or
 /// the variety isn't known. Pure over the region.
@@ -1376,6 +1450,26 @@ mod tests {
         ] {
             assert_eq!(strip_price_offer(kept, &gb), None, "{kept}");
         }
+    }
+
+    #[test]
+    fn a_dollar_price_is_never_passed_off_as_pounds() {
+        let gb = LocalPrices::for_region(&resolve(&uk(), "")).unwrap();
+        let pages = ["Plus: $8/month or $80/year. Premium: $30.00 a month. Free $0.".to_string(), "SuperGrok ≈ £24/mo in the UK".to_string()];
+        // The 4B's turn of 2026-10-22: x.ai's $8 written as £8.
+        let (fixed, restored) = restore_price_signs("**Plus** - £8/month (£80/year), **Premium** £30.", &pages, &gb).unwrap();
+        assert_eq!(fixed, "**Plus** - $8/month ($80/year), **Premium** $30.");
+        assert_eq!(restored, ["$8", "$80", "$30"]);
+        assert_eq!(restored_price_note(&restored, &gb), "*$8, $80 and $30 are as their pages give them, in dollars: not UK prices.*");
+        assert_eq!(restored_price_note(&["$8".into()], &gb), "*$8 is as its page gives it, in dollars: not UK prices.*");
+        // A £ price a page gives, free, an estimate said as one, a price no
+        // page has, and dollars left as dollars: nothing changes.
+        for kept in ["SuperGrok is £24 a month.", "Free (£0)", "about £6, ~£6, ≈ £6.50", "Plus costs £9.", "Plus is $8 (US price)."] {
+            assert_eq!(restore_price_signs(kept, &pages, &gb), None, "{kept}");
+        }
+        // Someone who pays in dollars: never.
+        let ca = LocalPrices::for_region(&resolve(&parse_stand_in("en-CA"), "")).unwrap();
+        assert_eq!(restore_price_signs("$8", &pages, &ca), None);
     }
 
     #[test]

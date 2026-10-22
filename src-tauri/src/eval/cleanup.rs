@@ -160,7 +160,7 @@ fn pin(slot: Option<u64>) {
 
 async fn clean(phase: &'static str, text: &str, ep: &Endpoint<'_>, setup: Setup) -> Shot {
     let cfg = crate::config::YapConfig::default();
-    // "Use my region's spelling" (on by default) for the run's locale
+    // "Write in my region's spelling" (on by default) for the run's locale
     // (`--locale`; none = no spelling line, as before 2026-10-21).
     let spelling = crate::about_you::cleanup_spelling(&cfg);
     pin(setup.cleanup);

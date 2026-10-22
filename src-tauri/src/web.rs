@@ -1487,6 +1487,10 @@ pub struct Turn {
     retried: bool,
     yap_retries: bool,
     pending_retry: Option<String>,
+    /// The web text the model was given this turn (results, page parts):
+    /// what an answer's prices are checked against
+    /// (`about_you::restore_price_signs`).
+    pub texts: Vec<String>,
 }
 
 impl Turn {
@@ -1510,6 +1514,7 @@ impl Turn {
             retried: false,
             yap_retries: false,
             pending_retry: None,
+            texts: Vec::new(),
         }
     }
 
@@ -1670,9 +1675,11 @@ impl Turn {
                 }
                 let text: Vec<&str> =
                     found.hits.iter().flat_map(|h| [h.title.as_str(), h.text.as_str()]).chain(found.summary.as_deref()).collect();
-                if let Some(note) = self.local_note(&query, &text.join("\n")) {
+                let text = text.join("\n");
+                if let Some(note) = self.local_note(&query, &text) {
                     data["local_prices"] = json!(note);
                 }
+                self.texts.push(text);
                 ok(data, display)
             }
         }
@@ -1707,6 +1714,7 @@ impl Turn {
                 self.seen = true;
                 let n = self.number(&page.title, &url);
                 let (part, next) = page_part(&page.text, offset, PAGE_TOKENS);
+                self.texts.push(part.clone());
                 let mut data = json!({
                     "n": n,
                     "title": page.title,

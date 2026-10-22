@@ -164,7 +164,7 @@ fn dictionary_suffix(dictionary: &[crate::config::DictionaryEntry]) -> String {
 
 /// The cleanup's system prompt: the guardrails + the editable body, then —
 /// in Yap's own layer, never the person's preset text — the spelling line
-/// ("Use my region's spelling", `about_you::cleanup_spelling`: British
+/// ("Write in my region's spelling", `about_you::cleanup_spelling`: British
 /// "colour" for en-GB, American "color" for en-US) and the custom dictionary.
 /// Pure.
 pub fn cleanup_system_prompt(body: &str, spelling: Option<&str>, dictionary: &[crate::config::DictionaryEntry]) -> String {
