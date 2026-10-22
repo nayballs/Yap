@@ -4,6 +4,33 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Yap</title>
+    <script>
+      // Before the first paint (lib/appearance.js does the rest once the app
+      // loads): name the window, so app.css gives the opaque ones their
+      // background, and put on the theme the last page saw (Settings →
+      // General → Appearance → Theme, kept in this origin's localStorage by
+      // appearance.js; "system" = Windows' app mode). Without this a dark
+      // Yap would paint one light frame on a reload. Rust gives the opaque
+      // windows' webviews the same background (theme.rs).
+      (function () {
+        var root = document.documentElement;
+        try {
+          var label = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.metadata.currentWindow.label;
+          if (label) root.dataset.window = label;
+        } catch (e) {}
+        var theme = 'system';
+        var bar = 'app';
+        try {
+          theme = localStorage.getItem('yap.theme') || 'system';
+          bar = localStorage.getItem('yap.barTheme') || 'app';
+        } catch (e) {}
+        var dark =
+          theme === 'dark' ||
+          (theme !== 'light' && !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
+        root.dataset.yapTheme = dark ? 'dark' : 'light';
+        root.dataset.barTheme = bar === 'dark' || bar === 'light' ? bar : dark ? 'dark' : 'light';
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

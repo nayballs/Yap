@@ -156,6 +156,18 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   are left alone. Debug-only `e2e_webview_memory` reports each window's
   target (`polish.spec.js`). The main window, onboarding and the notepad
   are hidden most of the day, each a renderer process of its own.
+- **`theme.rs`** — the theme (Settings → General → Appearance → Theme,
+  2026-10-22) on the Rust side: `resolve` (pure: "dark" / "light" as
+  written, else Windows' app mode, `AppsUseLightTheme`), and `apply` gives
+  the opaque windows' webviews their page's background
+  (`set_background_color`: main and onboarding #f0ede7 / #161410, the
+  notepad #faf9f6 / #1c1a16 — a test keeps them equal to app.css) so
+  nothing shows WebView2's white before a page paints, plus onboarding's
+  Windows title bar dark or light (DWM immersive dark mode). Run at setup
+  (before the DWM-cloaked first show), from `save_config`, and on the main
+  window's `WindowEvent::ThemeChanged`. Debug-only `e2e_webview_background`
+  reads a webview's DefaultBackgroundColor back (`theme.spec.js`). The pages
+  themselves: [frontend.md](./frontend.md#the-dark-theme-2026-10-22).
 - **`portable.rs`** — portable-mode detection (a `portable` marker next to the exe
   redirects data to `<exe>/Data`).
 - **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling

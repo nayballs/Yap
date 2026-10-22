@@ -73,15 +73,19 @@
   let { embedded = false, open = true, onclose = null, onshowview = null } = $props();
 
   let cfg = $state(null);
-  // The main window draws the bar's cards too (the Connect calendar dialog's
-  // picture): in the colours chosen for the bar (`barTheme`, app.css).
+  // General → Appearance (the theme, the reading text, Motion) shows in this
+  // window as you pick (the other windows follow after the auto-save:
+  // lib/appearance.js). So do the bar's colours: the main window draws the
+  // bar's cards too (the Connect calendar dialog's picture).
   $effect(() => {
-    document.documentElement.dataset.barTheme = cfg?.barTheme === 'dark' ? 'dark' : 'light';
-  });
-  // General → Appearance shows in this window as you pick (the other
-  // windows follow after the auto-save: lib/appearance.js).
-  $effect(() => {
-    if (cfg) applyAppearance({ readingFont: cfg.readingFont, readingSize: cfg.readingSize, motion: cfg.motion });
+    if (cfg)
+      applyAppearance({
+        theme: cfg.theme,
+        barTheme: cfg.barTheme,
+        readingFont: cfg.readingFont,
+        readingSize: cfg.readingSize,
+        motion: cfg.motion,
+      });
   });
   let loaded = $state(false); // gates auto-save until the initial config loads
   let devices = $state([]);
@@ -438,9 +442,10 @@
     memorySensitive: false,
     barEnabled: true,
     barHideFullscreen: true,
-    barTheme: 'light',
+    barTheme: 'app',
     barDictationButtons: 'off',
     // General → Appearance (AppearanceSettings.svelte, lib/appearance.js).
+    theme: 'system',
     readingFont: 'default',
     readingSize: 'default',
     motion: 'system',

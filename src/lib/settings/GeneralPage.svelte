@@ -1,8 +1,8 @@
 <script>
   // Settings → General (2026-10-22 review: the hotkey, audio and meetings
   // went to Dictation and Meetings): language and region, what the AI knows
-  // about you, startup and updates, the Yap bar (bar.rs), the
-  // reading text (Appearance) and tips.
+  // about you, startup and updates, Appearance (the theme, the reading text,
+  // Motion), the Yap bar (bar.rs) and tips.
   //
   //   cfg:            Settings' config $state (auto-save does the saving).
   //   barHiddenUntil: ms the bar is hidden until ("Hide the bar for 1 hour"
@@ -17,13 +17,15 @@
   import Button from '../ui/Button.svelte';
   import AboutYouSettings from '../AboutYouSettings.svelte';
   import AppearanceSettings from '../AppearanceSettings.svelte';
+  import { BAR_THEME_OPTIONS } from '../appearance.js';
 
   let { cfg, barHiddenUntil = null, goto = null } = $props();
 
-  const BAR_THEMES = [
-    { value: 'light', label: 'Light' },
-    { value: 'dark', label: 'Dark' },
-  ];
+  const BAR_COLOURS_DESC = {
+    app: 'The same as Yap’s theme. Pick Dark to stand out on a bright screen',
+    light: 'Always light, whatever Yap’s theme',
+    dark: 'Always dark: stands out on a bright screen',
+  };
   const POSITIONS = [
     { value: 'bottom', label: 'Bottom' },
     { value: 'top', label: 'Top' },
@@ -63,6 +65,10 @@
   </Row>
 </Group>
 
+<!-- The theme, the reading font and size, and Motion, for every window
+     (AppearanceSettings.svelte, lib/appearance.js). -->
+<AppearanceSettings {cfg} />
+
 <Group title="Yap bar" id="settings-bar">
   <Row setting="bar">
     <Toggle
@@ -85,17 +91,13 @@
       disabled={!cfg.barEnabled}
     />
   </Row>
-  <Row label="Colours" desc="Dark stands out on a bright screen" setting="bar-colours">
-    <Segmented bind:value={cfg.barTheme} options={BAR_THEMES} label="Bar colours" disabled={!cfg.barEnabled} />
+  <Row label="Colours" desc={BAR_COLOURS_DESC[cfg.barTheme] ?? BAR_COLOURS_DESC.app} setting="bar-colours">
+    <Segmented bind:value={cfg.barTheme} options={BAR_THEME_OPTIONS} label="Bar colours" disabled={!cfg.barEnabled} />
   </Row>
   <Row label="Position" desc="Where the bar and the dictation overlay sit" setting="bar-position">
     <Select bind:value={cfg.overlayPosition} options={POSITIONS} ariaLabel="Position" />
   </Row>
 </Group>
-
-<!-- The reading font and size, and Motion, for every window
-     (AppearanceSettings.svelte, lib/appearance.js). -->
-<AppearanceSettings {cfg} />
 
 <!-- Yap's notice policy (notice.rs): one notice at a time, held while you
      dictate. Tips are the one kind you can switch off. -->

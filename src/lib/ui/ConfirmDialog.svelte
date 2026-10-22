@@ -97,7 +97,7 @@
     align-items: center;
     justify-content: center;
     padding: 16px;
-    background: rgba(26, 26, 26, 0.3);
+    background: var(--yap-paper-scrim);
     animation: scrim-in 0.15s ease-out;
   }
   @keyframes scrim-in {
@@ -149,7 +149,7 @@
     padding: 0 16px;
     border: 1px solid var(--yap-paper-s2);
     border-radius: 9999px;
-    background: #fff;
+    background: var(--yap-paper-card);
     color: var(--yap-paper-ink);
     font: inherit;
     font-size: 14px;
@@ -165,11 +165,11 @@
   }
   .btn.danger {
     border-color: transparent;
-    background: var(--yap-danger);
+    background: var(--yap-danger-fill);
     color: #fff;
   }
   .btn.danger:hover:not(:disabled) {
-    background: #a8322a;
+    background: var(--yap-danger-fill-hover);
   }
   .btn:disabled {
     opacity: 0.6;

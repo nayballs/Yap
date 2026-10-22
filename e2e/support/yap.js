@@ -38,6 +38,10 @@ export const BASE_CONFIG = {
   bridgeEnabled: false, // off unless a spec needs it (mcp.spec.js)
   soundEnabled: false,
   startHidden: true, // no first-run onboarding pop-up (tests open it themselves)
+  // Light, whatever this PC's Windows app mode (the theme's default is
+  // System): screenshots and measured colours stay the same everywhere.
+  // theme.spec.js covers Dark and System.
+  theme: 'light',
   configVersion: 1,
 };
 

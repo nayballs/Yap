@@ -1,8 +1,15 @@
-// Settings → General → Appearance (config `readingFont`, `readingSize`,
-// `motion`), applied to EVERY Yap window: the main window, onboarding, the
-// meeting notepad, the Yap bar and the split preview all call
-// `initAppearance()` (App.svelte). It marks <html> and app.css does the rest:
+// Settings → General → Appearance (config `theme`, `readingFont`,
+// `readingSize`, `motion`) and the Yap bar's colours (`barTheme`), applied to
+// EVERY Yap window: the main window, onboarding, the meeting notepad, the Yap
+// bar and the split preview all call `initAppearance()` (App.svelte). It
+// marks <html> and app.css does the rest:
 //
+//   data-yap-theme = light | dark (the Theme: System = Windows' app mode,
+//       `prefers-color-scheme`, followed live as Windows switches)
+//       → every --yap-* / --yap-paper-* token (app.css's dark block)
+//   data-bar-theme = light | dark (Bar colours: Match app = data-yap-theme)
+//       → the --bar-* tokens (the Yap bar, and its cards' picture in the
+//         Connect calendar dialog)
 //   data-reading-font = default | sans | serif | system | dyslexic
 //       → --yap-font-reading (+ --yap-reading-fit / --yap-reading-leading,
 //         so every font reads at about the same size)
@@ -21,9 +28,109 @@
 // Settings also applies its own copy at once (before the 400 ms auto-save),
 // so the main window changes as you pick. "System" motion follows Windows'
 // "Animation effects" (Settings → Accessibility → Visual effects), which
-// WebView2 reports as `prefers-reduced-motion`, as it changes.
+// WebView2 reports as `prefers-reduced-motion`, as it changes; "System"
+// theme follows Windows' app mode the same way (`prefers-color-scheme`).
+//
+// No flash of the wrong theme: the theme choice is kept in this origin's
+// localStorage (`yap.theme`, `yap.barTheme`; every Yap window shares it),
+// which index.html's head script reads before the first paint, and Rust
+// gives the opaque windows' webviews the same background (theme.rs).
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+
+/** Settings → General → Appearance → Theme. */
+export const THEME_OPTIONS = [
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
+
+/** Settings → General → Yap bar → Colours. */
+export const BAR_THEME_OPTIONS = [
+  { value: 'app', label: 'Match app' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
+
+const THEME_IDS = new Set(THEME_OPTIONS.map((t) => t.value));
+const BAR_THEME_IDS = new Set(BAR_THEME_OPTIONS.map((t) => t.value));
+const THEME_KEY = 'yap.theme';
+const BAR_THEME_KEY = 'yap.barTheme';
+
+function stored(key, ids, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    return ids.has(v) ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function store(key, value) {
+  try {
+    if (localStorage.getItem(key) !== value) localStorage.setItem(key, value);
+  } catch {
+    /* private storage off: the head script falls back to System */
+  }
+}
+
+// The choices in force in this window: the last config seen, else what the
+// head script used (so a window doesn't blink to the default while its
+// first get_config is on the way).
+let themeChoice = stored(THEME_KEY, THEME_IDS, 'system');
+let barChoice = stored(BAR_THEME_KEY, BAR_THEME_IDS, 'app');
+let osDark = null; // MediaQueryList, once initAppearance ran
+const themeListeners = new Set();
+
+/** 'light' | 'dark': the theme `choice` resolves to with Windows' app mode
+ *  dark (`systemDark`) or not. */
+export function resolveTheme(choice, systemDark) {
+  if (choice === 'dark' || choice === 'light') return choice;
+  return systemDark ? 'dark' : 'light';
+}
+
+/** 'light' | 'dark': the bar's colours for `barChoice` in an app theme. */
+export function resolveBarTheme(choice, appTheme) {
+  return choice === 'dark' || choice === 'light' ? choice : appTheme;
+}
+
+function systemDark() {
+  if (osDark) return osDark.matches;
+  if (typeof window === 'undefined') return false;
+  return !!window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+}
+
+/** The theme this window shows right now ('light' | 'dark'). */
+export function currentTheme() {
+  if (typeof document === 'undefined') return 'light';
+  return document.documentElement.dataset.yapTheme === 'dark' ? 'dark' : 'light';
+}
+
+/** Call `fn(theme)` whenever this window's theme changes (charts drawn in
+ *  script, say). Returns a function that stops. */
+export function onThemeChange(fn) {
+  themeListeners.add(fn);
+  return () => themeListeners.delete(fn);
+}
+
+function applyTheme() {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  const theme = resolveTheme(themeChoice, systemDark());
+  const bar = resolveBarTheme(barChoice, theme);
+  const changed = root.dataset.yapTheme !== theme;
+  if (changed) root.dataset.yapTheme = theme;
+  if (root.dataset.barTheme !== bar) root.dataset.barTheme = bar;
+  store(THEME_KEY, themeChoice);
+  store(BAR_THEME_KEY, barChoice);
+  if (changed) for (const fn of themeListeners) fn(theme);
+}
+
+/** The bar's colours as Rust's bar status says them ('app' | 'light' |
+ *  'dark'; Overlay.svelte), the same value as the config's `barTheme`. */
+export function setBarChoice(choice) {
+  barChoice = BAR_THEME_IDS.has(choice) ? choice : 'app';
+  applyTheme();
+}
 
 /** The reading fonts, in the order Settings lists them. `family` is what the
  *  option is drawn in (each shows its name in its own font). */
@@ -84,7 +191,9 @@ export function motionMs(ms) {
 }
 
 /** Mark this window's <html> for the config `cfg` (Settings' copy, or the
- *  saved config). Idempotent; cheap enough for a Svelte $effect. */
+ *  saved config). Idempotent; cheap enough for a Svelte $effect. A config
+ *  without `theme` / `barTheme` (null before the first read) leaves the
+ *  theme as it is. */
 export function applyAppearance(cfg) {
   if (typeof document === 'undefined') return;
   lastCfg = cfg;
@@ -95,6 +204,9 @@ export function applyAppearance(cfg) {
   const reduced = motion === 'reduced' || !!osReduced?.matches;
   if (reduced) root.dataset.motion = 'reduced';
   else delete root.dataset.motion;
+  if (cfg && 'theme' in cfg) themeChoice = THEME_IDS.has(cfg.theme) ? cfg.theme : 'system';
+  if (cfg && 'barTheme' in cfg) barChoice = BAR_THEME_IDS.has(cfg.barTheme) ? cfg.barTheme : 'app';
+  applyTheme();
 }
 
 /**
@@ -105,8 +217,11 @@ export function applyAppearance(cfg) {
 export function initAppearance() {
   if (typeof window === 'undefined') return () => {};
   osReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)') ?? null;
+  osDark = window.matchMedia?.('(prefers-color-scheme: dark)') ?? null;
   const onOs = () => applyAppearance(lastCfg);
   osReduced?.addEventListener?.('change', onOs);
+  // Windows switching app mode (light ↔ dark) while the theme follows it.
+  osDark?.addEventListener?.('change', applyTheme);
   applyAppearance(null);
   const reload = () =>
     invoke('get_config')
@@ -124,6 +239,7 @@ export function initAppearance() {
   return () => {
     stopped = true;
     osReduced?.removeEventListener?.('change', onOs);
+    osDark?.removeEventListener?.('change', applyTheme);
     unlisten?.();
   };
 }

@@ -43,7 +43,8 @@
     width: 26px;
     height: 26px;
     border-radius: 50%;
-    background: var(--yap-s2);
+    /* a light tile in both themes: the marks are black */
+    background: var(--yap-mark-tile);
     border: 1px solid var(--yap-border);
     display: flex;
     align-items: center;

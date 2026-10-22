@@ -479,8 +479,8 @@
     right: 4px;
     padding: 4px 9px;
     border-radius: 7px;
-    background: #1c1a16;
-    color: rgba(255, 255, 255, 0.95);
+    background: var(--yap-ink);
+    color: var(--yap-ink-fg);
     font-size: 11.5px;
     font-weight: 600;
     white-space: nowrap;
@@ -741,7 +741,7 @@
     display: none;
     align-items: center;
     justify-content: center;
-    background: rgba(45, 38, 25, 0.35);
+    background: var(--yap-scrim);
   }
   .backdrop.open {
     display: flex;

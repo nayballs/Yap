@@ -59,9 +59,12 @@
   "15s" | "1min" | "2min" | "never"), meeting_brief ("Prepare a brief before
   meetings", true; `calendar/brief.rs`), bridge_enabled, mcp_allow_writes (AI apps
   may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
-  bar_hide_fullscreen (true) + bar_theme ("light" | "dark", light) +
+  bar_hide_fullscreen (true) + bar_theme ("app" — Match app, the theme of
+  Yap's windows — | "light" | "dark", app) +
   bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
   off), General → Appearance (`src/lib/appearance.js`, every window):
+  theme ("system" — Windows' app mode, followed live — | "light" | "dark",
+  system; `theme.rs` gives the opaque windows' webviews its background) +
   reading_font ("default" Figtree | "sans" Geist | "serif" Literata |
   "system" Segoe UI | "dyslexic" OpenDyslexic, default) + reading_size
   ("small" | "default" | "large" | "larger", default) + motion ("system" |
@@ -116,8 +119,10 @@
   0, a pre-versioning file). `load()` saves straight after one runs, and `save()`
   stamps the current version, so a later user choice is never undone. v1
   (2026-10-05) turned live partials back on: `Default` said off until then, so
-  every install since July had saved `false`. A test keeps `Default` and the
-  serde defaults identical (bar `config_version`).
+  every install since July had saved `false`. v3 (2026-10-22, the dark
+  theme) turned a saved bar_theme "light" — the old default, saved by every
+  install — into "app" (Match app), once; a bar made dark stays dark. A test
+  keeps `Default` and the serde defaults identical (bar `config_version`).
 
 ## Config & data
 

@@ -29,13 +29,16 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   ControlPanel cog + the matching Settings nav rows show a red count chip
   (Wispr's Settings "1" pattern). **Onboarding is warm-light too** (2026-07-09
   redesign: same tokens as the main window, serif display headlines, ink CTA,
-  brand icons on the model cards via `providerIcons.js`); the
-  `:root[data-yap-theme='dark']` token block in app.css is currently unset
-  everywhere — kept only as the seed of a future dark mode. App.svelte sets
-  per-window `color-scheme`. **Brand mark** (2026-07-09):
+  brand icons on the model cards via `providerIcons.js`). Since 2026-10-22
+  there's a **warm dark theme** too (below): every token has a dark value in
+  `:root[data-yap-theme='dark']`, and no component hard-codes a surface or
+  text colour. **Brand mark** (2026-07-09):
   `src/assets/yap-logo.svg` — warm-ink rounded badge, amber yapping mouth,
   cream soundwaves (replaced the old blue `yap-icon.png` in the title bar +
   onboarding; `src-tauri/icons/*` regenerated from it via `npx tauri icon`).
+- **The theme** — Settings → General → Appearance → **Theme**: System (the
+  default: Windows' app mode, followed live) / Light / Dark; details in
+  [The dark theme](#the-dark-theme-2026-10-22) below.
 - **Reading text and Motion (2026-10-22, Settings → General → Appearance;
   after Claude desktop's own Appearance settings, in free fonts)** —
   `lib/appearance.js` marks `<html>` in **every** window (App.svelte calls
@@ -189,6 +192,71 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   your calendar" nudge after a real meeting ends (`yap-meeting-ended`, not a
   mistake) with Connect calendar (the dialog, over the Meetings view) / Not
   now; `connectDialog` + `openConnectDialog`/`closeConnectDialog`).
+
+## The dark theme (2026-10-22)
+
+Settings → General → Appearance → **Theme** (`config.theme`: "system" |
+"light" | "dark", default system; after Claude desktop's Theme, and Wispr
+Flow's dark mode of 19 Oct 2026), for every Yap window.
+
+- **The palette** — Yap's own warm dark, started from the Yap bar's dark
+  scheme, not a cold grey: the frame `--yap-bg` #161410, the content sheet
+  `--yap-s1` #1c1a16 (the toasts' card), cards/panels/inputs `--yap-s2`
+  #24211c, menus and hovers `--yap-s3` #2b2722, toggle tracks and chips
+  `--yap-raised` #36312a (elevation goes up in lightness, the frame darkest);
+  cream text `--yap-fg` #f2efe8 stepped by opacity, `--yap-muted` #a8a294;
+  Yap amber brightened (`--yap-primary` #e2982a, links and the focus ring
+  #f0b04a), keycaps a touch deeper (#e8a33f); filled buttons **cream**
+  (`--yap-ink` #ece8df with `--yap-ink-fg` #1c1a16 on it, the bar's dark
+  primary); warm hairlines (#3a352b / #2e2a23); danger #e5645e as text and
+  `--yap-danger-fill` #c0443c under white text (5.1:1); softer shadows (less
+  blur and opacity, a faint light ring on menus: dark surfaces show depth by
+  lightness). The notepad's `--yap-paper-*` roles all have dark values
+  (paper #1c1a16, white pills → `--yap-paper-card` #2a2621, "Them" in a
+  lighter teal). New tokens that hold in both themes: `--yap-scrim`
+  (behind Settings and the Actions manager), `--yap-paper-scrim` (behind the
+  paper dialogs), `--yap-feature*` (Home's tip card: ink on light, a raised
+  warm card with a hairline and a cream button on dark), `--yap-mark-tile`
+  (a light tile under black or coloured brand marks), `--yap-danger-fill*`.
+- **How it's applied** — `lib/appearance.js` (every window's App.svelte
+  calls `initAppearance()`) resolves the choice (System via
+  `matchMedia('(prefers-color-scheme: dark)')`, followed as Windows switches)
+  and marks `<html data-yap-theme="light|dark">`; Settings applies its copy
+  at once, the other windows on `yap-config-saved`; `onThemeChange` for
+  anything drawn in script. **No flash of light**: the choice is kept in the
+  origin's localStorage (`yap.theme`, `yap.barTheme`, shared by every Yap
+  window), which an inline head script in `index.html` reads before the
+  first paint, naming the window too (`data-window`, from
+  `__TAURI_INTERNALS__`); app.css gives the opaque windows — main,
+  onboarding, notepad — their background and `color-scheme` from
+  `[data-window]` (never the bar or the split preview: a transparent window
+  with a `color-scheme` paints the grey box). Rust (`theme.rs`) gives the
+  same three windows' **webviews** the theme's background
+  (`set_background_color`: what WebView2 shows before a page paints — a
+  window shown after a while hidden under the low memory target, a resize),
+  at startup before their cloaked first show, after every config save, and
+  on `WindowEvent::ThemeChanged` (Windows' app mode, read from
+  `AppsUseLightTheme`); a unit test keeps its colours equal to app.css's.
+- **What follows it** — the main window (title bar and its min / max /
+  close, every view, every Settings page, dialogs, toasts — lifted a step
+  lighter with a hairline on the dark page —, menus, tooltips, the model
+  picker), the meeting notepad, onboarding, and the Yap bar through **Bar
+  colours → Match app** (its own Light / Dark stay as overrides; `--bar-*`).
+  Brand marks stay legible: monochrome provider marks invert on dark
+  (`.micon.mono`, `.picon.mono`, `.sicon.mono`, Settings → MCP's), the AI
+  apps' logos sit on `--yap-mark-tile`, a near-black call-app letter badge
+  gets an edge, Google/GitHub sign-in buttons turn to their dark versions.
+  **Exceptions, on purpose**: the QR code stays dark on white; the toasts
+  and the onboarding's mock taskbar are dark in both; the split preview's
+  glass and the bar's recording dots are the same in both. Onboarding, the
+  one window with Windows' own title bar, gets it dark or light to match
+  (`theme.rs`, DWM's immersive dark mode).
+- **Contrast** (AA, `e2e/theme.spec.js` measures the lowest on each page):
+  body text 15:1, Settings descriptions 6.8:1, nav labels 11:1 (main window
+  14:1), nav group labels 7.2:1, links 9.1:1 (Chat's 6.7:1), keycaps 7.6:1,
+  the tip card 7.4:1, the Home feed 4.8:1; switches: an off edge 4.9:1, on
+  14:1; the focus ring 9.1:1; Insights' busiest heatmap cells 7.3:1, its
+  bars 5.4:1 on their tracks, their labels 4.8:1.
 
 ## Views
 

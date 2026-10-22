@@ -1612,6 +1612,10 @@
     font-size: 15px;
     overflow: hidden;
   }
+  /* "Them" in a lighter teal on the dark paper (7.2:1). */
+  :global(:root[data-yap-theme='dark']) .pad {
+    --them: rgb(110 175 204);
+  }
   /* A bare element selector, so every button's own class (its size and
      weight) wins over this. */
   button {
@@ -2270,7 +2274,7 @@
   .thread::-webkit-scrollbar-thumb,
   .thoughts::-webkit-scrollbar-thumb {
     border-radius: 4px;
-    background: rgb(35 33 27 / 0.14);
+    background: color-mix(in srgb, var(--yap-paper-ink) 16%, transparent);
   }
   .group {
     display: flex;
@@ -2840,7 +2844,7 @@
     padding: 8px 10px;
     border: 1px solid var(--yap-paper-s2);
     border-radius: 8px;
-    background: #fff;
+    background: var(--yap-paper-card);
     color: var(--yap-paper-ink);
     font: inherit;
     font-size: 14px;
@@ -3116,7 +3120,7 @@
     padding: 15px;
     border: 1px solid var(--yap-paper-s2);
     border-radius: 9999px;
-    background: #fff;
+    background: var(--yap-paper-card);
     color: var(--yap-paper-ink);
     font-size: 15px;
     font-weight: 600;
@@ -3166,7 +3170,7 @@
     padding: 0 10px 0 16px;
     border: 1px solid var(--yap-paper-s2);
     border-radius: 25px;
-    background: #fff;
+    background: var(--yap-paper-card);
     transition:
       border-color 0.15s,
       box-shadow 0.15s;
@@ -3257,7 +3261,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(35, 33, 27, 0.3);
+    background: var(--yap-paper-scrim);
     animation: bodyin 0.15s var(--yap-ease-spring);
   }
   .dialog {
@@ -3301,7 +3305,7 @@
     padding: 0 16px;
     border: 1px solid var(--yap-paper-s2);
     border-radius: 9999px;
-    background: #fff;
+    background: var(--yap-paper-card);
     color: var(--yap-paper-ink);
     font-size: 14px;
     font-weight: 600;
@@ -3311,11 +3315,11 @@
   }
   .dbtn.danger {
     border-color: transparent;
-    background: var(--yap-danger);
+    background: var(--yap-danger-fill);
     color: #fff;
   }
   .dbtn.danger:hover:not(:disabled) {
-    background: #a8322a;
+    background: var(--yap-danger-fill-hover);
   }
   .dbtn:disabled {
     opacity: 0.6;

@@ -57,7 +57,8 @@ test('search: words, their forms, ranking, grouping and highlights', () => {
   expect(searchSettings('teams calls').map((r) => r.label)).toContain('Ask about calls in');
   expect(searchSettings('win+v')[0].label).toBe('Restore clipboard after paste');
   expect(searchSettings('microphone')[0].label).toBe('Microphone');
-  expect(searchSettings('dark mode')[0].label).toBe('Colours');
+  expect(searchSettings('dark mode')[0].label).toBe('Theme');
+  expect(searchSettings('bar dark').map((r) => r.label)).toContain('Colours');
   expect(searchSettings('logs').map((r) => r.page)).toContain('privacy');
   expect(searchSettings('zzqx')).toEqual([]);
   expect(searchSettings('   ')).toEqual([]);

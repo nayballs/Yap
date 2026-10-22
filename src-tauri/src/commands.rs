@@ -1750,6 +1750,9 @@ pub fn save_config(
     crate::bar::sync(&app, &cfg);
     // …and "Show tips" (the notice policy).
     crate::notice::sync(&cfg);
+    // …and the theme: the opaque windows' webview backgrounds (theme.rs; the
+    // pages follow `yap-config-saved`).
+    crate::theme::apply(&app, &cfg);
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.update_config(cfg);

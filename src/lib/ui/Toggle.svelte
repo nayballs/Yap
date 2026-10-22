@@ -151,7 +151,8 @@
   .switch.on .knob {
     width: 13px;
     height: 13px;
-    background: #fff;
+    /* white on the ink track; dark on dark mode's cream one */
+    background: var(--yap-ink-fg);
     transform: translate(14px, -50%);
   }
 </style>

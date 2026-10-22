@@ -36,7 +36,7 @@
   import { cubicOut } from 'svelte/easing';
   // Motion: Reduced (Settings → General → Appearance) — the transitions
   // below take 0 ms; app.css stops the CSS ones.
-  import { motionMs } from './appearance.js';
+  import { motionMs, setBarChoice } from './appearance.js';
   import { formatHotkeySpec } from './hotkeys.js';
   import { dictation, initDictation } from './bar/dictation.svelte.js';
   import DictationCapsule from './bar/DictationCapsule.svelte';
@@ -63,14 +63,18 @@
     cards: [],
     // Ids of the cards waiting their turn.
     waiting: [],
-    // 'light' (the default) | 'dark': Settings → Yap bar → Colours.
-    theme: 'light',
+    // 'app' (Yap's own theme) | 'light' | 'dark': Settings → Yap bar →
+    // Colours. null until Rust's status arrives (the head script and the
+    // saved config have put the right colours on meanwhile).
+    theme: null,
     // The dictation capsule's ✕ / ✓: 'off' (the default) | 'hover' | 'always'.
     dictationButtons: 'off',
   });
-  // The --bar-* colours (app.css): light unless the page is marked dark.
+  // The --bar-* colours (app.css): `data-bar-theme`, Match app resolved with
+  // the theme of Yap's windows (lib/appearance.js, which also follows it as
+  // it changes).
   $effect(() => {
-    document.documentElement.dataset.barTheme = bar.theme === 'dark' ? 'dark' : 'light';
+    if (bar.theme) setBarChoice(bar.theme);
   });
   /** The region under the pointer, as Rust sees it ('pill' | 'menu' | 'card:…' | null). */
   let pointer = $state(null);

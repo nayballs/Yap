@@ -90,9 +90,11 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   ("Dictionary · 12 corrections · 3 snippets ›"). Content is one 700 px column
   (`--yap-settings-w`) on every page; cards only for objects (a speech model,
   a calendar connection, an AI app, Prompt Studio). Amber is kept for keycaps,
-  the active page, Recommended/Beta chips, links (`--yap-link` #a85a08) and
-  focus. **One focus ring** (`--yap-focus`: 2 px of page, 2 px of #c2690a) on
-  `:focus-visible` for every control. Thin scrollbars in Settings
+  the active page, Recommended/Beta chips, links (`--yap-link` #a85a08; dark
+  #f0b04a) and focus. **One focus ring** (`--yap-focus`: 2 px of page, 2 px of
+  `--yap-focus-ring`, #c2690a, dark #f0b04a) on `:focus-visible` for every
+  control. An on switch is ink with a `--yap-ink-fg` knob (white on ink in
+  light, dark on dark mode's cream). Thin scrollbars in Settings
   (`settings/settings.css`, the pages' shared styles under `.settings-shell`:
   page header, `.set-link`, `.set-note`, `.set-banner`, `details.set-more`
   disclosures, `.set-card`, `.set-flash`).
@@ -100,7 +102,11 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   and nav group labels `--yap-muted` 5.1:1 (4.6:1 on the nav), links 4.8:1,
   headings ink 15:1, the ✕ 4.8:1, an off switch's edge 3.4:1, the focus ring
   3.8:1. Before: descriptions 3.1:1, headings 2.4:1, nav labels 2.3:1, links
-  3.75:1, an off track 1.2:1. The suite measures them in the app.
+  3.75:1, an off track 1.2:1. The suite measures them in the app. **In
+  dark** (`e2e/theme.spec.js`, the lowest of each on the page): descriptions
+  and page lines 6.8:1, labels and headings 15:1, nav group labels 7.2:1,
+  nav labels 11:1, links 9.1:1, the ✕ 6.8:1, an off switch's edge 4.9:1, an
+  on switch 14:1 (its knob on it 14:1), the focus ring (`#f0b04a`) 9.1:1.
 - **The red badge says why** on the page: Speech-to-Text with no model (a
   banner over "Your model", whose own Download is the fix), Language Models
   with cleanup on a cloud provider and no key ("Add your Groq API key" + Add
@@ -132,18 +138,24 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   data; the status re-reads as the fields change. **Startup and updates**
   (`#settings-startup`): "Start Yap when you sign in" (`autostart`,
   `set_autostart` at once; the switch goes back if Windows says no), "Check
-  for updates automatically" (`updateChecksEnabled`). **Yap bar**
-  (`#settings-bar`, the bar menu's Settings → `general#bar`): Show the Yap bar
-  (`barEnabled`; "Turn off the bar" in its menu arrives as `yap-bar-changed`
-  and is adopted), a "Hidden until 15:40 · Show it now" row while hidden for
-  an hour, Hide in fullscreen apps, Colours (Light / Dark, `barTheme`),
-  Position (`overlayPosition`). **Appearance** (`#settings-appearance`,
-  `AppearanceSettings.svelte`): "Reading font" (each option and the closed box
+  for updates automatically" (`updateChecksEnabled`). **Appearance**
+  (`#settings-appearance`, `AppearanceSettings.svelte`; above the Yap bar
+  since the theme came): **"Theme"** (System / Light / Dark, a Segmented like
+  Motion → `theme`, data-setting `theme`; its line says what System means
+  right now — "Follows Windows' app mode, which is dark right now", live),
+  "Reading font" (each option and the closed box
   in its own font → `readingFont`), "Text size" (`readingSize`), a preview of
   the reading text, "Motion" (System / Reduced → `motion`; System's line says
   whether Windows' "Animation effects" is on). Settings applies its copy to
   the main window at once; the other windows follow the save
-  (`lib/appearance.js`, [frontend.md](./frontend.md#look-and-the-main-window)).
+  (`lib/appearance.js`, [frontend.md](./frontend.md#the-dark-theme-2026-10-22)).
+  **Yap bar** (`#settings-bar`, the bar menu's Settings → `general#bar`): Show
+  the Yap bar (`barEnabled`; "Turn off the bar" in its menu arrives as
+  `yap-bar-changed` and is adopted), a "Hidden until 15:40 · Show it now" row
+  while hidden for an hour, Hide in fullscreen apps, Colours (**Match app** /
+  Light / Dark, `barTheme`, default `app`; its line says what each means),
+  Position (`overlayPosition`). The search finds Theme for "dark mode"
+  (`settingsIndex.js`), Colours for "bar dark".
   **Notifications** (`#settings-notifications`): "Show tips" (`showTips`).
 - **Dictation** (`settings/DictationPage.svelte`): **Start and stop**
   (`#settings-hotkey`): Hotkey (`hotkey`), Recording mode (Toggle /

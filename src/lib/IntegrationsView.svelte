@@ -519,8 +519,12 @@ ${curlExample}
     padding: 1.5px 0;
   }
   .method.get {
-    color: #1a66b8;
-    background: color-mix(in srgb, #1a66b8 10%, transparent);
+    --get: #1a66b8;
+    color: var(--get);
+    background: color-mix(in srgb, var(--get) 10%, transparent);
+  }
+  :global([data-yap-theme='dark']) .method.get {
+    --get: #7ab3ee; /* 7.6:1 on a dark card */
   }
   .method.post {
     color: var(--yap-success);

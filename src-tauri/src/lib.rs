@@ -81,6 +81,7 @@ mod text_injector;
 mod tray;
 mod tts;
 mod updates;
+mod theme;
 mod usage;
 mod web;
 mod webview_memory;
@@ -677,6 +678,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             webview_memory::e2e_webview_memory,
             #[cfg(debug_assertions)]
+            theme::e2e_webview_background,
+            #[cfg(debug_assertions)]
             coaching::e2e_coaching_reset,
             #[cfg(debug_assertions)]
             local_llm::e2e_local_llm_serving,
@@ -1050,6 +1053,11 @@ pub fn run() {
                     });
                 }
             }
+
+            // The theme (Settings → General → Appearance): the opaque windows'
+            // webviews get their page's background before anything shows, so
+            // a dark Yap never flashes WebView2's white (theme.rs).
+            theme::init(&handle);
 
             // WebView2 subsystems initialized against a HIDDEN window can come
             // up permanently broken — most relevantly the Rust→JS event/eval
