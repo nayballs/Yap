@@ -332,14 +332,35 @@ pub fn split_dictation(message: &str) -> (String, String) {
 /// Does the cleanup send the dictation as two messages ([`split_dictation`])
 /// to `model` at `base_url`? Only for a **hybrid** model — the on-device
 /// model when it is one (`local_llm::serving_hybrid_at`: recurrent layers
-/// in its GGUF), else a Qwen3.5/3.6 or Qwen3-Next by name (on a self-hosted
-/// server). A dense model already re-uses its cache up to the transcript
-/// (Qwen2.5-1.5B read 24 prompt tokens a dictation either way), and split it
-/// wrote numbers as words more often (7 of 24 greedy outputs changed on the
-/// processor); Groq's gpt-oss-20b changed 2 of 6. Pure but for the sidecar's
-/// state.
+/// in its GGUF), else a Qwen3.5/3.6 or Qwen3-Next by name on a
+/// **self-hosted** server ([`self_hosted`]: llama.cpp, LM Studio, Ollama on
+/// this PC or the home network). A cloud provider serving one by name
+/// (OpenRouter's Qwen3.5) keeps the joined message: its cache isn't
+/// llama.cpp's, and nobody measured it. A dense model already re-uses its
+/// cache up to the transcript (Qwen2.5-1.5B read 24 prompt tokens a
+/// dictation either way), and split it wrote numbers as words more often
+/// (7 of 24 greedy outputs changed on the processor); Groq's gpt-oss-20b
+/// changed 2 of 6. Pure but for the sidecar's state.
 pub fn splits_dictation(base_url: &str, model: &str) -> bool {
-    crate::local_llm::serving_hybrid_at(base_url).unwrap_or_else(|| hybrid_by_name(model))
+    crate::local_llm::serving_hybrid_at(base_url).unwrap_or_else(|| self_hosted(base_url) && hybrid_by_name(model))
+}
+
+/// A server on this PC or the local network, by its URL: a loopback or
+/// private address, `localhost`, a `.local`/`.lan`/`.home.arpa` name, or a
+/// one-word host name. Pure.
+pub fn self_hosted(base_url: &str) -> bool {
+    let Ok(u) = url::Url::parse(base_url) else { return false };
+    match u.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback() || ip.is_private() || ip.is_link_local(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback() || (ip.segments()[0] & 0xfe00) == 0xfc00,
+        Some(url::Host::Domain(h)) => {
+            let h = h.to_ascii_lowercase();
+            h == "localhost"
+                || [".localhost", ".local", ".lan", ".home.arpa", ".internal"].iter().any(|s| h.ends_with(s))
+                || !h.contains('.')
+        }
+        None => false,
+    }
 }
 
 /// A model id naming a hybrid (recurrent + attention) family llama.cpp
@@ -1137,6 +1158,15 @@ mod tests {
         }
         for dense in ["qwen2.5-1.5b-instruct-q4_k_m", "openai/gpt-oss-20b", "Qwen3-4B-Instruct-2507", "llama-3.1-8b-instant"] {
             assert!(!splits_dictation("https://api.groq.com/openai/v1", dense), "{dense}");
+            assert!(!splits_dictation("http://127.0.0.1:1/v1", dense), "{dense}");
+        }
+        // A hybrid by name only on a server of one's own (this PC, the home
+        // network): a cloud provider's Qwen3.5 keeps the one message.
+        for own in ["http://localhost:11434/v1", "http://192.168.1.20:8080/v1", "http://homeserver:1234/v1", "http://nas.local:8080/v1", "http://[::1]:8080/v1", "http://10.0.0.5/v1"] {
+            assert!(self_hosted(own) && splits_dictation(own, "qwen3.5:9b"), "{own}");
+        }
+        for cloud in ["https://openrouter.ai/api/v1", "https://api.groq.com/openai/v1", "https://8.8.8.8/v1", "not a url"] {
+            assert!(!self_hosted(cloud) && !splits_dictation(cloud, "qwen/qwen3.5-35b-a3b"), "{cloud}");
         }
         // No transcript mark (never, from `cleanup`): one message.
         assert_eq!(split_dictation("just text"), (String::new(), "just text".to_string()));

@@ -730,7 +730,7 @@ test('a model on this PC: it must search first, and Yap checks what the answer c
   const webFrom = fakeWeb.requests.length;
   // A question that needs the web (Nathan's, 2026-10-21): Qwen3.5-4B left to
   // decide answered it from memory. Its first step must be a web search
-  // (only web_search offered, tool_choice "required"), its own query.
+  // (tool_choice "required" over all the tools), its own query.
   // (Its list has blank lines between the items, as models write them: one
   // list, numbered 1, 2, 3 — not "1." on every item.)
   fakeLlm.scriptChat([
@@ -744,10 +744,10 @@ test('a model on this PC: it must search first, and Yap checks what the answer c
   await expect(lastAnswer(main).locator('ol > li')).toHaveText([/Starfall Requiem/, /Ashen Crown II/, /Verdant Oath/]);
   await expect(chipsOfLast(main)).toHaveText(['Searched the web: "best RPG games 2026"']);
   const steps = fakeLlm.requests.slice(from).filter((r) => r.tools.length);
-  // The search made to come first: named in `tool_choice`, over all the
-  // tools — the next step offers the same ones — and the question's
-  // context says what to search for.
-  expect(steps[0].toolChoice).toEqual({ type: 'function', function: { name: 'web_search' } });
+  // The search made to come first: `tool_choice: "required"` (the string
+  // llama.cpp reads), over all the tools — the next step offers the same
+  // ones — and the question's context says what to search for.
+  expect(steps[0].toolChoice).toBe('required');
   expect(steps[0].tools).toEqual(expect.arrayContaining(['web_search', 'search_notes', 'open_app']));
   expect(steps[1].tools).toEqual(steps[0].tools);
   expect(steps[1].toolChoice).toBeNull();
@@ -771,7 +771,7 @@ test('a model on this PC: it must search first, and Yap checks what the answer c
   await expect(lastAnswer(main).locator('a.md-cite')).toHaveAttribute('href', RPG_URL);
   await expect(chipsOfLast(main)).toHaveText(['Searched the web: "When is Ashen Crown II coming out"']);
   const words = fakeLlm.requests.slice(before).filter((r) => r.tools.length);
-  expect(words[0].toolChoice).toEqual({ type: 'function', function: { name: 'web_search' } });
+  expect(words[0].toolChoice).toBe('required');
   expect(words[1].tools).toEqual(words[0].tools);
   expect(words[1].messages.at(-2).tool_calls[0].function.name).toBe('web_search');
 

@@ -26,7 +26,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   (`checked_answer`, in `chat_turn`, every model; each fix logged and, in a
   model evaluation, counted — `eval::post_fix`): a sources list or "(Yap
   searched the web for this answer…)" note the model wrote itself goes
-  (`web::strip_sources_note`: Yap shows the real sources); a search it claims
+  (`web::strip_sources_note`: Yap shows the real sources; a list the
+  question asked for — sources for an essay, references, reading — stays,
+  and the looser list shapes count only after a web search); a search it claims
   when none ran this turn ("I did look it up on the web",
   `web::claims_browsing`) gets "*Yap didn't search the web for this answer: it
   comes from the AI model's own knowledge, which may be out of date.*" — or
@@ -175,10 +177,11 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   OpenAI messages (`chats::history_messages`: earlier web answers' searches
   replayed), the question's context (`chats::with_context`) and a
   **`FirstStep`**: `Model` (it decides), `MustSearch` (a model on this PC
-  asked something that needs the web — a named `tool_choice`
-  (`must_search_choice`: `web_search`) over all the tools, and
-  `MUST_SEARCH_NOTE` in the question's context: search this message, not
-  earlier messages' words; no `web_search` made, or the server refuses →
+  asked something that needs the web — `tool_choice: "required"`
+  (`must_search_choice`; a named choice is ignored by llama.cpp) over all
+  the tools, and `MUST_SEARCH_NOTE` in the question's context: search this
+  message, not earlier messages' words; no `web_search` made (another
+  tool, or words), or the server refuses →
   Yap's own search for it, `search_for_the_model`; until 2026-10-22 only
   `web_search` was offered, so the next step's tools differed and a local
   model read the whole prompt again) or `YapSearches(query)`

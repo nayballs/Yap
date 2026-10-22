@@ -2000,13 +2000,36 @@ pub const NOT_SEARCHED_NOTE: &str =
 pub const NOT_SEARCHED_THAT_NOTE: &str =
     "*Yap didn't search the web for that answer: it came from the AI model's own knowledge, which may be out of date.*";
 
+/// Does the question ask for sources, references or reading — a list of
+/// them is then the answer itself ("What sources could I use for my
+/// essay?", "any further reading?")? Not when it asks the answer to show
+/// where it came from ("Include your sources", "with sources"): that's
+/// what Yap's Sources row under a web answer is for (`web-no-sources-list`).
+/// Pure.
+pub fn asks_for_sources(question: &str) -> bool {
+    static ASKS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(?:sources?|references?|citations?|cite|cited|citing|bibliograph\w*|reading|to\s+read|read\s+(?:more|up)|works\s+cited)\b")
+            .expect("static regex")
+    });
+    static CITE_YOURS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(?:your|its|with|include|including|add|cite)\s+(?:your\s+|the\s+|its\s+)?(?:sources?|references?|citations?)\b|\bwhere\s+(?:you|that|it)\s+(?:got|found|get|comes?)\b")
+            .expect("static regex")
+    });
+    ASKS.is_match(question) && !CITE_YOURS.is_match(question)
+}
+
 /// An answer without what a model may write in Yap's own voice: the "(Yap
 /// searched the web for this answer. Its sources: …)" note (Qwen3.5-4B
 /// copied it from the history, 2026-10-21, with sources it made up) and a
 /// list of sources at its end ("Sources:" then "[1] …" lines) — Yap shows an
-/// answer's real sources under it. `None` when there was nothing to take
-/// out. Pure.
-pub fn strip_sources_note(reply: &str) -> Option<String> {
+/// answer's real sources under it. The list stays when the `question` asks
+/// for sources, references or reading ([`asks_for_sources`]: it's the
+/// answer), and the looser kinds of item — a bullet ending in its number, a
+/// site and a quoted title, any bullets to the end of the answer — count
+/// only when the turn `looked` on the web (a list of books or reports under
+/// "References" from the model's own knowledge is what was asked for, not
+/// Yap's sources). `None` when there was nothing to take out. Pure.
+pub fn strip_sources_note(reply: &str, looked: bool, question: &str) -> Option<String> {
     // "(Yap searched the web … (espn.com) …)", nested brackets and all; or the
     // same words outside brackets, to the end of the line.
     static NOTE: LazyLock<Regex> = LazyLock::new(|| {
@@ -2019,18 +2042,29 @@ pub fn strip_sources_note(reply: &str) -> Option<String> {
         Regex::new(r"(?i)^\s*(?:#{1,4}\s*)?(?:\*\*|__|\*)?\s*(?:sources?|references?|citations?)(?:\s+used)?\s*(?:\*\*|__|\*)?\s*:?\s*(?:\*\*|__|\*)?\s*(.*)$")
             .expect("static regex")
     });
-    // One of them: "[1] Title", "1. Title — site", "- [2] …", "- Title (site.com)",
-    // "- IndieGames: "The best…" [1]" (a bullet ending in its number, or a
-    // site and a quoted title: Qwen3.5-4B's, web-no-sources-list, 2026-10-22).
+    // One of them: "[1] Title", "1. Title — site", "- [2] …", "- Title (site.com)".
     static ITEM: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"(?i)^\s*(?:[-*•]\s*)?(?:\[\d{1,2}\]|\d{1,2}[.)])\s*\S|^\s*[-*•]\s+.*(?:https?://|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b)|^\s*[-*•]\s+.*\[\d{1,2}\][\s.,;:)]*$|^\s*[-*•]\s+[^"“\n]{1,60}?[:—–-]\s*["“].+["”]"#)
+        Regex::new(r"(?i)^\s*(?:[-*•]\s*)?(?:\[\d{1,2}\]|\d{1,2}[.)])\s*\S|^\s*[-*•]\s+.*(?:https?://|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b)")
             .expect("static regex")
     });
-    // Any bullet or numbered line: under a sources heading with nothing but
-    // such lines to the end of the answer, they're its sources.
+    // After a web search, also: "- IndieGames: "The best…" [1]" (a bullet
+    // ending in its number, or a site and a quoted title: Qwen3.5-4B's,
+    // web-no-sources-list, 2026-10-22).
+    static WEB_ITEM: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)^\s*[-*•]\s+.*\[\d{1,2}\][\s.,;:)]*$|^\s*[-*•]\s+[^"“\n]{1,60}?[:—–-]\s*["“].+["”]"#)
+            .expect("static regex")
+    });
+    // Any bullet or numbered line: after a web search, under a sources
+    // heading with nothing but such lines to the end of the answer, they're
+    // its sources.
     static BULLET: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+\S").expect("static regex"));
     let noted = NOTE.replace_all(reply, "").into_owned();
+    if asks_for_sources(question) {
+        let out = noted.trim_end().to_string();
+        return (out != reply.trim_end()).then_some(out);
+    }
+    let item = |l: &str| ITEM.is_match(l) || (looked && WEB_ITEM.is_match(l));
     // A list of sources: its heading and the sources under it (blank lines
     // between them allowed) go; what follows ("Would you like more…?") stays.
     let lines: Vec<&str> = noted.lines().collect();
@@ -2038,14 +2072,14 @@ pub fn strip_sources_note(reply: &str) -> Option<String> {
     let mut i = 0;
     while i < lines.len() {
         let inline = HEAD.captures(lines[i]).and_then(|c| c.get(1)).map(|m| m.as_str().trim());
-        let Some(inline) = inline.filter(|t| t.is_empty() || t.starts_with('[') || ITEM.is_match(t) || t.contains("http")) else {
+        let Some(inline) = inline.filter(|t| t.is_empty() || t.starts_with('[') || item(t) || t.contains("http")) else {
             kept.push(lines[i]);
             i += 1;
             continue;
         };
         // The sources under the heading.
         let (mut end, mut j) = (i + 1, i + 1);
-        while j < lines.len() && (lines[j].trim().is_empty() || ITEM.is_match(lines[j])) {
+        while j < lines.len() && (lines[j].trim().is_empty() || item(lines[j])) {
             if !lines[j].trim().is_empty() {
                 end = j + 1;
             }
@@ -2054,7 +2088,7 @@ pub fn strip_sources_note(reply: &str) -> Option<String> {
         // Or a plain list to the very end ("- IndieGames — The best indie
         // games of 2026"): nothing after a sources heading but its items.
         let rest: Vec<&str> = lines[i + 1..].iter().copied().filter(|l| !l.trim().is_empty()).collect();
-        if !rest.is_empty() && rest.iter().all(|l| BULLET.is_match(l)) {
+        if looked && !rest.is_empty() && rest.iter().all(|l| BULLET.is_match(l)) {
             end = lines.len();
         }
         if end == i + 1 && inline.is_empty() {
@@ -2551,15 +2585,17 @@ mod tests {
 
     #[test]
     fn a_sources_note_or_list_the_model_wrote_is_taken_out() {
+        // After a web search, for a question that doesn't ask for sources.
+        let web = |reply: &str| strip_sources_note(reply, true, "What are the best indie games of 2026?");
         // Qwen3.5-4B's copy of the history note (Nathan's chat, 2026-10-21).
         let made_up = "Here are some RPGs:\n\n1. **Black Myth: Wukong** [1]\n2. **Dragon's Dogma 2** [5]\n\nWould you like more details?\n\n(Yap searched the web for this answer. Its sources: [1] Black Myth: Wukong - Wikipedia; Starfield: Bound by Honor - Microsoft Store; [5] Dragon's Dogma 2 - IGN.)";
         assert_eq!(
-            strip_sources_note(made_up).unwrap(),
+            web(made_up).unwrap(),
             "Here are some RPGs:\n\n1. **Black Myth: Wukong** [1]\n2. **Dragon's Dogma 2** [5]\n\nWould you like more details?"
         );
         // Nested brackets inside the note, and the note on its own line.
-        assert_eq!(strip_sources_note("8 pm [1]. (Yap searched the web for this answer. Its sources: [1] Bayern vs. Arsenal (espn.com).)").unwrap(), "8 pm [1].");
-        assert_eq!(strip_sources_note("8 pm.\nYap searched the web for this answer.").unwrap(), "8 pm.");
+        assert_eq!(web("8 pm [1]. (Yap searched the web for this answer. Its sources: [1] Bayern vs. Arsenal (espn.com).)").unwrap(), "8 pm [1].");
+        assert_eq!(web("8 pm.\nYap searched the web for this answer.").unwrap(), "8 pm.");
         // A list of sources at the end, in its usual shapes.
         for list in [
             "Hollow Lantern leads [1].\n\nSources:\n[1] The best indie games of 2026 — indiegames.example\n[2] GOTY contenders — gamecritic.example",
@@ -2568,11 +2604,11 @@ mod tests {
             "Hollow Lantern leads [1].\n\nSources: [1] The best indie games of 2026; [2] GOTY contenders",
             "Hollow Lantern leads [1].\n\nSources:\n- The best indie games of 2026 (indiegames.example)",
         ] {
-            assert_eq!(strip_sources_note(list).as_deref(), Some("Hollow Lantern leads [1]."), "{list}");
+            assert_eq!(web(list).as_deref(), Some("Hollow Lantern leads [1]."), "{list}");
         }
         // Qwen3.5-4B's, with its closing question after it (2026-10-21 runs).
         assert_eq!(
-            strip_sources_note("Top picks [1][2].\n\nSources:\n1. indiegames.example - \"The best indie games of 2026 so far\"\n\n2. gamecritic.example - \"Contenders\"\n\nWould you like more details?").as_deref(),
+            web("Top picks [1][2].\n\nSources:\n1. indiegames.example - \"The best indie games of 2026 so far\"\n\n2. gamecritic.example - \"Contenders\"\n\nWould you like more details?").as_deref(),
             Some("Top picks [1][2].\n\nWould you like more details?")
         );
         // Qwen3.5-4B's on llamafile 0.10.3 and 0.10.6 alike (web-no-sources-list,
@@ -2581,8 +2617,8 @@ mod tests {
         // stays.
         let answer = "Based on recent reviews and lists, the top indie games of 2026 include:\n\n1. **Hollow Lantern** – A hand-drawn metroidvania praised for its atmosphere and tight gameplay [1][2].\n2. **Pixel Tides** – A cozy fishing simulation that became a surprise hit of the summer [1][2][3].\n3. **Static Hearts** – A narrative mystery set in a 1990s radio station [1].\n\n**Hollow Lantern** currently leads in critical acclaim with a 94 average score, followed by Glasswing and Static Hearts [2].";
         let with_list = format!("{answer}\n\nSources:\n- Indie Games: \"The best indie games of 2026 so far\" [1]\n- GameCritic: \"Indie game of the year 2026: the contenders\" [2]\n- CozyGames: \"10 cozy indie games from 2026\" [3]");
-        assert_eq!(strip_sources_note(&with_list).as_deref(), Some(answer));
-        assert_eq!(strip_sources_note(answer), None, "a list of games is not a list of sources");
+        assert_eq!(web(&with_list).as_deref(), Some(answer));
+        assert_eq!(web(answer), None, "a list of games is not a list of sources");
         // The same with a closing question after it, without the numbers,
         // with dashes, or a bare list to the end.
         for list in [
@@ -2590,10 +2626,10 @@ mod tests {
             "**Sources**\n- IndieGames — “The best indie games of 2026 so far”\n- GameCritic — “The contenders”\n\nWant more?",
             "Sources:\n- The best indie games of 2026 so far [1].\n- The contenders [2]\n\nWant more?",
         ] {
-            assert_eq!(strip_sources_note(&format!("Hollow Lantern leads [1].\n\n{list}")).as_deref(), Some("Hollow Lantern leads [1].\n\nWant more?"), "{list}");
+            assert_eq!(web(&format!("Hollow Lantern leads [1].\n\n{list}")).as_deref(), Some("Hollow Lantern leads [1].\n\nWant more?"), "{list}");
         }
         assert_eq!(
-            strip_sources_note("Hollow Lantern leads [1].\n\nSources:\n- IndieGames, The best indie games of 2026 so far\n- GameCritic, The contenders").as_deref(),
+            web("Hollow Lantern leads [1].\n\nSources:\n- IndieGames, The best indie games of 2026 so far\n- GameCritic, The contenders").as_deref(),
             Some("Hollow Lantern leads [1].")
         );
         // Not a list of sources: left as it is.
@@ -2605,8 +2641,56 @@ mod tests {
             "Sources of fibre:\n- oats\n- beans\n- lentils",
             "Sources:\n- The page says Alt+2 opens scientific mode.\n\nThat's all it says about the calculator, and history keeps your sums.",
         ] {
-            assert_eq!(strip_sources_note(keep), None, "{keep}");
+            assert_eq!(web(keep), None, "{keep}");
         }
+    }
+
+    /// A list the person asked for is the answer, not Yap's sources: kept
+    /// whatever the turn did when the question asks for sources, references
+    /// or reading; and without a web search only the numbered, linked kind
+    /// counts as a list of sources (the review's essay example, 2026-10-22).
+    #[test]
+    fn a_list_of_sources_the_person_asked_for_stays() {
+        let essay = "Here are some sources you could use for your essay:\n\n### Sources\n- IPCC Sixth Assessment Report (2021)\n- NASA climate website";
+        let refs = "Good starting points:\n\n**References:**\n- Smith, The Climate Book (2020)\n- Jones, Warming World (2019)";
+        let reading = "Try these:\n\nSources:\n1. The Climate Book — Greta Thunberg\n2. How to Avoid a Climate Disaster — Bill Gates";
+        for asked in [
+            "What sources could I use for my climate essay?",
+            "Any references I should cite?",
+            "Can you suggest some further reading on climate change?",
+        ] {
+            for (looked, reply) in [(false, essay), (true, essay), (false, refs), (true, refs), (false, reading), (true, reading)] {
+                assert_eq!(strip_sources_note(reply, looked, asked), None, "{asked} / {looked}: {reply}");
+            }
+        }
+        // Not asked for, and no web search: a plain list stays (it's the
+        // model's own answer)…
+        let help = "Help me plan my climate essay.";
+        assert_eq!(strip_sources_note(essay, false, help), None);
+        assert_eq!(strip_sources_note(refs, false, help), None);
+        // …after one, it's the model's copy of what Yap shows under the answer.
+        assert_eq!(strip_sources_note(essay, true, help).as_deref(), Some("Here are some sources you could use for your essay:"));
+        assert_eq!(strip_sources_note(refs, true, help).as_deref(), Some("Good starting points:"));
+        // A numbered list of sources at the end goes either way (as before),
+        // unless it was asked for.
+        assert_eq!(strip_sources_note(reading, false, help).as_deref(), Some("Try these:"));
+        // Yap's own note never stays, asked or not.
+        assert_eq!(
+            strip_sources_note("Some sources [1]. (Yap searched the web for this answer.)", true, "What sources are there?").as_deref(),
+            Some("Some sources [1].")
+        );
+        assert!(asks_for_sources("Where can I read more about this?") && asks_for_sources("Give me a bibliography"));
+        assert!(asks_for_sources("Give me some sources for my essay"));
+        assert!(!asks_for_sources("What are the best indie games of 2026?"));
+        // "Show where it came from": Yap's Sources row does that — the
+        // model's own copy of it still goes (web-no-sources-list).
+        for cite in ["What are the best indie games of 2026? Include your sources.", "Answer with sources please", "Where did you get that?"] {
+            assert!(!asks_for_sources(cite), "{cite}");
+        }
+        assert_eq!(
+            strip_sources_note("Hollow Lantern leads [1].\n\n**Sources:**\n- Indie Games: \"The best indie games of 2026 so far\" [1]", true, "What are the best indie games of 2026? Include your sources.").as_deref(),
+            Some("Hollow Lantern leads [1].")
+        );
     }
 
     #[test]

@@ -151,8 +151,9 @@ test("Chat: the model is told about the user, and Exa searches the user's countr
   await expect(main.locator('.msgs .cbubble.assistant').last()).toContainText('SuperGrok is £24 a month');
 
   const steps = fakeLlm.requests.slice(from).filter((r) => r.tools.length);
-  // The search made to come first: named, over the same tools as the next step.
-  expect(steps[0].toolChoice).toEqual({ type: 'function', function: { name: 'web_search' } });
+  // The search made to come first: a tool call required, over the same
+  // tools as the next step.
+  expect(steps[0].toolChoice).toBe('required');
   expect(steps[1].tools).toEqual(steps[0].tools);
   const system = steps[0].system;
   // The block, last in the prompt — without the clock, so the prompt stays

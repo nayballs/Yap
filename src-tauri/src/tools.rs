@@ -1050,19 +1050,24 @@ pub enum FirstStep {
     /// The model decides what to call (a cloud model; a question that needs
     /// no search).
     Model,
-    /// **The model's first step must be a `web_search`** (a named
-    /// `tool_choice` over all the tools, which llamafile honours, and
-    /// [`MUST_SEARCH_NOTE`] in the message's context): a model on this PC
-    /// asked something that needs the web (`web::needs_web`) — left to
-    /// decide, Qwen3.5-4B answered a new current-information question from
-    /// memory (Nathan's chat, 2026-10-21). Its own query is better than the
-    /// question as one ("Arsenal Football Club match tonight 21 October 2026
-    /// time"). A server that refuses `tool_choice` or doesn't search anyway
-    /// gets Yap's search instead ([`search_for_the_model`], the question as
-    /// the query). Until 22 Oct 2026 the step offered `web_search` alone,
-    /// with `tool_choice: "required"`: the next step, offering all the
-    /// tools, then read the whole prompt again (0.63 s instead of 0.31 s on
-    /// the card, 40 s instead of 20 s on a processor, docs/model-evals.md).
+    /// **The model's first step must be a `web_search`**: `tool_choice:
+    /// "required"` over all the tools ([`must_search_choice`]: some tool
+    /// call, which llama.cpp enforces with a grammar) and
+    /// [`MUST_SEARCH_NOTE`] in the message's context saying which one. A
+    /// model on this PC asked something that needs the web
+    /// (`web::needs_web`) — left to decide, Qwen3.5-4B answered a new
+    /// current-information question from memory (Nathan's chat,
+    /// 2026-10-21). Its own query is better than the question as one
+    /// ("Arsenal Football Club match tonight 21 October 2026 time"). A
+    /// server that refuses `tool_choice`, or a step that calls another tool
+    /// or answers in words, gets Yap's search instead
+    /// ([`search_for_the_model`], the question as the query). Until 22 Oct
+    /// 2026 the step offered `web_search` alone: the next step, offering all
+    /// the tools, then read the whole prompt again (0.63 s instead of 0.31 s
+    /// on the card, 40 s instead of 20 s on a processor,
+    /// docs/model-evals.md). A named `tool_choice` (`{"type": "function",
+    /// …}`) isn't one llamafile 0.10.6 takes: "Wrong type supplied for
+    /// parameter 'tool_choice'", and it goes on as "auto".
     MustSearch,
     /// Yap searches first for this query and hands the model the results as
     /// the `web_search` call it would have made — chip, sources, citations,
@@ -1085,10 +1090,11 @@ const YAP_SEARCH_ID: &str = "yap-search-1";
 /// description; in the message, the tools stay the same on every step.
 pub const MUST_SEARCH_NOTE: &str = "First search the web (web_search) for what this message asks. The query: a few words from this message (names spelled right), plus a year or place when it matters; leave out words from earlier messages unless this one points back to them (\"it\", \"that one\").";
 
-/// The named `tool_choice` that makes a step call `web_search`
-/// ([`FirstStep::MustSearch`]).
+/// The `tool_choice` that makes a step call a tool — `web_search`, as the
+/// message's context says ([`FirstStep::MustSearch`]): `"required"`, the
+/// string llama.cpp's server reads (it ignores the named object form).
 pub fn must_search_choice() -> Value {
-    json!({ "type": "function", "function": { "name": "web_search" } })
+    json!("required")
 }
 
 /// What a `search_notes` that found nothing tells the model while web
@@ -1175,7 +1181,8 @@ async fn search_for_the_model(turn: &mut crate::web::Turn, query: &str, messages
 /// **The same prompt start on every step** (2026-10-22): `system` and the
 /// offered tools never change within a turn — not after web content (the
 /// action tools are refused instead of taken away), not for a search that
-/// must come first (a named `tool_choice` instead of `web_search` alone).
+/// must come first (`tool_choice: "required"` over all of them instead of
+/// `web_search` alone).
 /// A hybrid model like Qwen3.5 resumes its cache only from a checkpoint,
 /// so a step whose prompt starts otherwise is read again from the start
 /// (the model evaluations, docs/model-evals.md); cloud providers' prefix
@@ -1476,6 +1483,13 @@ mod tests {
         assert_eq!(titles("password").len(), 2);
         // Words like "what" and "and" never count.
         assert!(titles("what and the").is_empty());
+        // A note that answers from its body alone, under a title that says
+        // nothing about it (the review's example, 2026-10-22): two of the
+        // question's words in the body are enough.
+        crate::notes::create("Finance sync", "Agreed the kitchen budget at £15,000; Sam checks the quotes.", "manual", "");
+        assert!(titles("What's the budget for the kitchen?").contains(&"Finance sync".to_string()));
+        assert!(titles("How much did we agree to spend on the kitchen?").contains(&"Finance sync".to_string()));
+        assert_eq!(titles("What's the budget?"), ["Finance sync"]);
     }
 
     #[test]
@@ -2237,12 +2251,12 @@ mod tests {
         assert!(!last.to_string().contains("search the web for it next"));
     }
 
-    /// A search that must come first: named in `tool_choice` over all the
-    /// tools — the next step offers the same ones — and the message's
+    /// A search that must come first: `tool_choice: "required"` over all
+    /// the tools — the next step offers the same ones — and the message's
     /// context says to search this message only ("Grok subscriptions check
     /// account" carried "check" from the question before, Nathan's chat).
     #[tokio::test]
-    async fn a_search_that_must_come_first_is_named_over_the_same_tools() {
+    async fn a_search_that_must_come_first_is_required_over_the_same_tools() {
         assert!(MUST_SEARCH_NOTE.contains("this message") && MUST_SEARCH_NOTE.contains("leave out words from earlier messages"));
         let exa = json!({ "results": [{ "title": "Python 3.15", "url": "https://python.example/3.15", "highlights": ["Python 3.15 came out on 1 October."] }] });
         let fake = fake_server(
@@ -2279,7 +2293,7 @@ mod tests {
         let requests = fake.requests.lock().unwrap().clone();
         let chat: Vec<&Value> = requests.iter().filter(|(u, _)| u.ends_with("/chat/completions")).map(|(_, b)| b).collect();
         assert_eq!(chat.len(), 2);
-        assert_eq!(chat[0]["tool_choice"], must_search_choice());
+        assert_eq!(chat[0]["tool_choice"], "required", "the string llama.cpp reads, not a named function");
         assert!(chat[1].get("tool_choice").is_none(), "only the first step is made to search");
         assert_eq!(chat[1]["tools"], chat[0]["tools"], "the same tools on both steps");
         assert!(tool_names(&chat[0]["tools"]).len() > 5, "all of them, not web_search alone");

@@ -513,7 +513,7 @@ pub fn checked_answer(
 ) -> (String, Vec<&'static str>) {
     let mut fixed = Vec::new();
     let mut out = reply.to_string();
-    if let Some(s) = crate::web::strip_sources_note(&out).filter(|s| !s.trim().is_empty()) {
+    if let Some(s) = crate::web::strip_sources_note(&out, looked, question).filter(|s| !s.trim().is_empty()) {
         out = s;
         fixed.push("stripped_sources_note");
     }
