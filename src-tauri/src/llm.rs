@@ -761,6 +761,9 @@ async fn post_chat(
 /// is just what runs into a free plan's tokens-per-minute cap. `tool_choice`:
 /// OpenAI's `tool_choice` ("required": the model must call one of `tools`;
 /// `{"type": "function", "function": {"name": …}}`: that one).
+/// Chat streams its steps now (`stream.rs`); only the eval harness, a debug
+/// build's, still asks for whole messages.
+#[cfg(debug_assertions)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn post_chat_message(
     base_url: &str,
