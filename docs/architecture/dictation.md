@@ -23,9 +23,10 @@ typed and it offers to add it to the dictionary)**
 `text_injector::prepare_dictation` the fitting; `app_kind::submit_key` the
 key). Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation
-never blocks. It keeps the person's **English spelling** ("Use my region's
-spelling", on, Settings → General → About you; 2026-10-21): an en-GB user's
-"color" comes out "colour", an en-US user's "colour" "color" — one line in
+never blocks. It keeps the person's **English spelling** ("Write in my
+region's spelling", on, Settings → Language Models → Dictation Cleanup;
+the region is About you's; 2026-10-21): a UK user's
+"color" comes out "colour", a US user's "colour" "color" — one line in
 Yap's own layer of the cleanup prompt (the system prompt's end and the
 dictation's restated instruction: `llm::cleanup_system_prompt`,
 `cleanup_message`, `about_you::cleanup_spelling`), never in the editable
