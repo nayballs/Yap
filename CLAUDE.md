@@ -57,7 +57,7 @@ Full list with versions and details: [app-shell.md](./docs/architecture/app-shel
 - **Audio:** `cpal` capture, `rodio` playback (chimes, spoken replies).
 - **STT:** `transcribe-rs` — whisper.cpp on Vulkan + ONNX models (Parakeet…) on DirectML; `engines` feature.
 - **AI:** `reqwest` → any OpenAI-compatible endpoint, or the on-device llamafile sidecar (`local_llm.rs`).
-- **Spoken replies:** Kokoro-82M (ONNX on `ort`, CPU; eSpeak NG run separately) or Windows' voices.
+- **Spoken replies:** Kokoro-82M (ONNX on `ort`, CPU; eSpeak NG run separately) or Windows' voices; or ElevenLabs (cloud, the user's own key, streamed PCM).
 - **Speaker diarization (beta):** Nemotron-3-Diarization on NeMo-Speech.cpp, in a `yap.exe diarize` child.
 - **Text injection:** Win32 clipboard (private formats, verified) + `SendInput`; UI Automation reads the field.
 - **Updates/install:** `tauri-plugin-updater` (GitHub Releases) driven by `updates.rs` + a custom NSIS installer.
@@ -147,7 +147,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `apps.rs` — opens Start-menu apps on request: index, matching, fast path, consent.
 
 **Spoken replies** — [spoken-replies.md](./docs/architecture/spoken-replies.md)
-- `tts.rs` (+ `tts/`) — Kokoro / Windows voices, text normalisation, the speaker queue, Kokoro's download.
+- `tts.rs` (+ `tts/`) — Kokoro / Windows voices / ElevenLabs (cloud, own key, local voice as fallback), text normalisation, the speaker queue, Kokoro's download.
 
 **Notes** — [notes.md](./docs/architecture/notes.md)
 - `notes.rs` — the notes store (`notes.json`), folders, the Actions engine, transcript fields.
@@ -372,7 +372,7 @@ replies off. Every setting, file and default: [config-and-data.md](./docs/archit
 
 - **Dictation is complete and real**: GPU transcription (Whisper/Vulkan + ONNX/DirectML), push-to-talk, AI cleanup (cloud or on-device Qwen), Commands, smart pasting into terminals and chat apps, dictionary learning, Undo.
 - **Meetings**: recorder (You/Them), rolling digests + action plan, the notepad, call detection, guard rails, the calendar, beta speaker separation.
-- **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro), web search, opening apps.
+- **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), web search, opening apps.
 - **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly.
 - Much is unit-, e2e- and robot-tested but not yet tried in real use (a real call, real AI apps, answers heard on speakers…).
 - **Not yet done**: Chat streaming and semantic search, a rich notes editor, naming voices by themselves, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.

@@ -54,8 +54,25 @@
   "Talk back hands-free" `talkBackHandsFree`, greyed while replies are off),
   switching "Speak replies" on while Kokoro isn't downloaded offers it
   under the switch (`KokoroOffer.svelte`, "Download Kokoro (379 MB)" / Not
-  now; replies stay on, Windows voices meanwhile), **Voice**
-  (`VoiceSettings.svelte`: **Engine** Segmented Kokoro / Windows voices
+  now; replies stay on, Windows voices meanwhile; not offered while
+  ElevenLabs speaks), **Voice**
+  (`VoiceSettings.svelte`: **Speaks with** Segmented On this PC /
+  ElevenLabs `ttsProvider` (`#settings-voice-provider`, the fallback
+  notice's Open settings target); with **ElevenLabs** picked, the plain
+  line "The words Yap speaks are sent to ElevenLabs." under it, then
+  `ElevenLabsSettings.svelte`: the masked API key `ttsCloudKeys.elevenlabs`
+  (edit / done, as the web search keys) with "Get your API key →" (their
+  API-keys page via the opener) and a status line ("Key works · 37
+  voices", "ElevenLabs didn't accept it: …"); the account's voices as a
+  radio list — Your voices, then ElevenLabs voices; name + accent ·
+  gender · age; a ▶ / ■ per voice (`tts_cloud_preview`, its sample) —
+  saved as `ttsCloud.elevenlabs {voice, voiceName}`; **Model** Select
+  (Flash v2.5 · Recommended first; `ttsCloud.elevenlabs.model`); the
+  month's characters with a bar when the key may read them; and what
+  happens when ElevenLabs doesn't answer (Yap's own voice steps in, or, with
+  no Kokoro downloaded, nothing is read). The lists load with the key as
+  typed, 600 ms after typing stops, and when the page opens. On this PC:
+  **Engine** Segmented Kokoro / Windows voices
   `ttsEngine`, "Natural voices, made on this PC. Recommended"; Kokoro's
   **download row** (`ModelRow`: Kokoro-82M · size · 54 voices ·
   Recommended, Download → progress → Active, delete via `ui/ConfirmDialog`;
