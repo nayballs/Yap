@@ -3,9 +3,9 @@
   // model runs — the graphics card (Parakeet and the other ONNX models
   // through DirectML, Whisper through Vulkan) or the processor. Automatic:
   // the graphics card, unless Yap measured the processor clearly faster for
-  // this model on this PC at every dictation length (once, in the
-  // background); or chosen. "Runs on: graphics card (180 ms for 11 s of
-  // speech on this PC)".
+  // this model on this PC on everyday dictations (once, in the background);
+  // or chosen. The line says what it chose and why: "Runs on: processor —
+  // fastest for your dictations on this PC (400 ms vs 630 ms)".
   //
   //   cfg: Settings' config $state (auto-save does the saving; the old GPU
   //        switch follows: useGpu = not the processor).
@@ -68,11 +68,28 @@
   const measured = $derived(status?.measured || null);
   const run = (device) => measured?.runs?.find((r) => r.device === device) || null;
   const secs = (ms) => `${Math.round((ms || 0) / 1000)} s`;
-  // The typical dictation length's warm time: "180 ms for 11 s of speech".
-  const typical = (r) => {
-    const t = r?.lengths?.[1];
-    return t?.warmMs != null ? `${t.warmMs} ms for ${secs(t.clipMs)} of speech` : null;
+  // A device's time for this person's dictations (the everyday lengths,
+  // weighed by their history).
+  const mine = (device) => run(device)?.everydayMs ?? null;
+  const other = (device) => (device === 'cpu' ? 'gpu' : 'cpu');
+  /** "(400 ms vs 630 ms)": the picked device first, when both ran. */
+  const versus = (device) => {
+    const a = mine(device);
+    const b = mine(other(device));
+    if (a == null) return '';
+    return b == null ? ` (${a} ms)` : ` (${a} ms vs ${b} ms)`;
   };
+  /** Why Automatic chose `device`. */
+  function why(device) {
+    const a = mine(device);
+    const b = mine(other(device));
+    const otherRun = run(other(device));
+    if (device === 'gpu' && otherRun?.skipped) return `far faster than the processor here${versus(device)}`;
+    if (!otherRun || otherRun.error || !otherRun.agrees) return `the ${NAME[other(device)]} didn't run this model correctly here`;
+    if (b == null) return `far faster than the ${NAME[other(device)]} here${versus(device)}`;
+    if (a != null && a <= b) return `fastest for your dictations on this PC${versus(device)}`;
+    return `the processor is only slightly faster for your dictations (${b} ms vs ${a} ms)`;
+  }
 
   // The line under "Runs on".
   const line = $derived.by(() => {
@@ -83,19 +100,16 @@
     const setting = cfg.sttDevice || 'auto';
     if (setting === 'auto') {
       if (!measured) return `Runs on: ${where} (not measured on this PC yet)`;
-      const time = typical(run(measured.pick));
-      if (measured.pick === 'cpu') return `Runs on: processor (clearly faster on this PC${time ? `: ${time}` : ''})`;
-      return `Runs on: ${NAME[measured.pick]}${time ? ` (${time} on this PC)` : ''}`;
+      return `Runs on: ${NAME[measured.pick]} — ${why(measured.pick)}`;
     }
     const chosen = `Runs on: ${where} (your choice)`;
     if (!measured || measured.pick === setting) return chosen;
-    const time = typical(run(measured.pick));
-    return `${chosen}. Automatic picks the ${NAME[measured.pick]} here${time ? ` (${time})` : ''}`;
+    return `${chosen}. Automatic picks the ${NAME[measured.pick]} here${versus(measured.pick)}`;
   });
 
   // What was measured, for the ⓘ.
   const RULE =
-    'Automatic keeps the graphics card unless the processor takes at least 30% less time at every length. On the processor, dictation slows down while a meeting records or another app keeps it busy.';
+    'Automatic keeps the graphics card unless the processor takes at least 20% less time on everyday dictations (the short and typical lengths, weighed by how long yours usually are); the long one is shown, not counted. On the processor, dictation slows down while a meeting records or another app keeps it busy.';
   const hint = $derived.by(() => {
     if (!measured)
       return `Yap times each speech model on this PC once, in the background, at three dictation lengths. ${RULE}`;

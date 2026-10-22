@@ -283,6 +283,27 @@ pub fn latest_dictation_raw() -> Option<String> {
         .map(|e| if e.raw.trim().is_empty() { e.text.clone() } else { e.raw.clone() })
 }
 
+/// How long each of the latest `limit` dictations was spoken for (seconds),
+/// estimated from its words at [`SPEAKING_WPM`], newest first — uploads and
+/// dictations that never transcribed aside (`stt_speed.rs`: how this person's
+/// dictations weigh the speed check's lengths).
+pub fn recent_dictation_secs(limit: usize) -> Vec<f32> {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    entries
+        .iter()
+        .rev()
+        .filter(|e| is_dictation_app(&e.app) && e.status.as_deref() != Some(FAILED))
+        .map(|e| if e.raw.trim().is_empty() { &e.text } else { &e.raw })
+        .map(|t| t.split_whitespace().count() as f32 * 60.0 / SPEAKING_WPM as f32)
+        .filter(|secs| *secs > 0.0)
+        .take(limit)
+        .collect()
+}
+
 fn is_dictation_app(app: &str) -> bool {
     app.trim().is_empty() || app.trim().to_ascii_lowercase().ends_with(".exe")
 }

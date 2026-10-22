@@ -305,7 +305,17 @@ to **Run again** from Home.
   provider for that load, one ONNX load at a time); `SttAdapter::device()` /
   `model()` say which. `apply_accelerator_settings` only sets the globals'
   defaults now. `model_fingerprint` (the files' size + newest change) tells a
-  re-downloaded model.
+  re-downloaded model. **transcribe-rs is vendored**
+  (`src-tauri/vendor/transcribe-rs`, through `[patch.crates-io]`; what
+  changed is in its `YAP.md`): on DirectML, Parakeet's decoder/joiner and
+  preprocessor load on the CPU (the TDT loop's ~200 runs per 11 s of speech
+  cost ~1.4 ms each as GPU round trips, ~0.2 ms on the CPU), and the
+  waveform is zero-padded to one planned length (30.25 s; the real length
+  still passed, so the words don't change) because DirectML's encoder runs
+  in ~55 ms only at the length its first run planned for and ~350 ms at any
+  other — the model transcribes a second of silence at load to plan it. On
+  this PC that took Parakeet V3 on DirectML from 441 / 630 / 1,244 ms to
+  133 / 158 / 578 ms at 3 / 11 / 36 s of speech.
   `transcribe_timed` (default: `transcribe`, no times) keeps the times the
   model gives (`Timed { text, words: Vec<TimedText> }`, seconds from the
   audio's start): Parakeet's words (`TimestampGranularity::Word`), Whisper's
@@ -327,25 +337,32 @@ to **Run again** from Home.
   turns, each run a length the engine hasn't had (300 ms of trailing
   silence plus 160 ms more a round: a real dictation never repeats a
   length, and a runtime that caches its plan per input shape would look
-  faster on a repeated clip than a dictation finds it — on this PC DirectML
-  didn't, its cost being a fixed ~0.4 s a call), each length's median kept
-  (`Timing`). The processor isn't timed further when its first
-  transcription took 5× the graphics card's (and over 3 s), and Whisper on
-  the processor isn't tried at all beside a graphics card whose first
-  transcription took ≤ 3 s (`skip_cpu_whisper`: whisper.cpp's 4 processor
-  threads need far longer for its 30-second window — large-v3 took minutes
-  on this PC, under load, against Vulkan's ~2 s); the graphics card is
-  always timed. **The pick** (`pick`, pure): the graphics card, unless the
-  processor took at most 70 % of its time at **every** length
-  (`clearly_faster`, `CPU_MARGIN` 0.3) — or the graphics card failed or got
-  the words wrong (the processor's are the reference, a word in twenty
-  aside: `agrees`). A narrow win leaves the processor to the person's apps:
-  a meeting recording or a busy app slows the processor path (the graphics
+  faster on a repeated clip than a dictation finds it), each length's median
+  kept (`Timing`). The processor isn't timed further when its first
+  transcription took 5× the graphics card's second, warm one (and over 3 s),
+  and Whisper on the processor isn't tried at all beside a graphics card
+  whose warm transcription took ≤ 3 s (`skip_cpu_whisper`: whisper.cpp's 4
+  processor threads need far longer for its 30-second window — large-v3 took
+  16 minutes for 11 s of speech on this PC against Vulkan's 0.9 s warm; its
+  first Vulkan run, 8.3 s with the shaders being built, would have let it
+  through); the graphics card is always timed. **The pick** (`pick`,
+  pure): everyday dictations decide — the short and typical lengths
+  (`EVERYDAY`); the long one is measured and shown, never counted. The
+  graphics card, unless the processor took at most 80 % of its time at
+  **both** (`clearly_faster`, `CPU_MARGIN` 0.2) — or the graphics card
+  failed or got the words wrong (the processor's are the reference, a word
+  in twenty aside: `agrees`). Each device's time **for your dictations**
+  (`Run::everyday_ms`, Settings' "400 ms vs 630 ms") weighs the two lengths
+  by this person's latest 200 dictations (`history::recent_dictation_secs`:
+  the spoken length from the words at 150 a minute; `short_share`: the
+  share nearer 3 s than 11 s; half and half with none). A narrow win leaves
+  the processor to the person's apps: a meeting recording or a busy app
+  slows the processor path (the graphics
   card's hardly), which the benchmark can't see. **When** (`schedule`): 60 s
   after start and 15 s after a model is installed or switched to
   (`Pipeline::set_engine`), only when the stored result doesn't fit
-  (`fits`: `METHOD` — 2, so the first version's one-clip results measure
-  again —, the model's files, and `pc_print` — each graphics adapter's ids,
+  (`fits`: `METHOD` — 3, so results from before the everyday rule and the
+  DirectML fixes measure again —, the model's files, and `pc_print` — each graphics adapter's ids,
   name and driver version, from DXGI — so a new driver measures again), and
   on demand (Settings' Measure again, `stt_speed_measure`). Never beside a
   dictation (or an Upload, or within 20 s of one), a meeting recording, a
@@ -366,7 +383,11 @@ to **Run again** from Home.
   `bench_this_pc` (release build) prints Yap's own benchmark and pick, then
   per device the load and first dictation, and per length the warm median at
   a new length and at the same length again (the numbers in
-  [status.md](./status.md)).
+  [status.md](./status.md)); `profile_parakeet` times Parakeet's stages
+  (preprocessor, encoder, decoder loop) on each device with ort directly,
+  and with `YAP_PROFILE_SHAPES` / `_BUCKETS` / `_SAME` shows how DirectML's
+  encoder takes lengths, fixed lengths, and the old path's words against the
+  new one's.
 - **`recent_audio.rs`** — **never lose a dictation** (2026-10-22, Wispr
   Flow's of Aug 2026): each dictation's audio (16 kHz mono 16-bit WAV) in
   `<data>/recent-audio/<id>.wav`, the id its time in unix ms, written on its

@@ -3,7 +3,7 @@
 //! Parakeet first, through DirectML; Whisper through Vulkan) or the
 //! processor — measured once per model and PC instead of assumed. The
 //! graphics card is the default and stays it unless the processor is
-//! **clearly** faster here at every dictation length.
+//! **clearly** faster here for everyday dictations (3 and 11 seconds).
 //!
 //! **The benchmark** ([`run`]): a bundled speech clip ([`CLIP`], ~36 s of
 //! Kokoro — Apache-2.0 — reading [`PASSAGE`]), cut at pauses into three
@@ -26,12 +26,17 @@
 //! that's quick warm ([`skip_cpu_whisper`]); the graphics card is always
 //! timed.
 //!
-//! **The pick** ([`pick`], pure): the graphics card, unless the processor
-//! took at most `1 − CPU_MARGIN` (70 %) of its time at **every** length
-//! ([`clearly_faster`]) — or the graphics card failed or got the words
-//! wrong. A processor that wins narrowly stays free for the person's apps,
-//! and a meeting recording or a busy app slows the processor path (not the
-//! graphics card's) later on.
+//! **The pick** ([`pick`], pure): judged on everyday dictations — the short
+//! and typical lengths ([`EVERYDAY`]); the long one is measured and shown,
+//! never counted. The graphics card, unless the processor took at most
+//! `1 − CPU_MARGIN` (80 %) of its time at **both** ([`clearly_faster`]) —
+//! or the graphics card failed or got the words wrong. A processor that
+//! wins narrowly stays free for the person's apps, and a meeting recording
+//! or a busy app slows the processor path (not the graphics card's) later
+//! on. Each device's time **for your dictations** ([`Run::everyday_ms`],
+//! what Settings shows) weighs the two lengths by how long this person's
+//! recent dictations were ([`short_share`], from history; half and half
+//! with none).
 //!
 //! **When**: once per model and PC — on Yap's start ([`AFTER_START`]) and
 //! when a model is installed or switched to ([`AFTER_CHANGE`]) if the
@@ -100,13 +105,17 @@ pub const WARM_RUNS: usize = 3;
 const TAIL_MS: u64 = 300;
 /// …and this much more each round, so every run is a new length.
 const PAD_STEP_MS: u64 = 160;
+/// Which of [`LENGTHS`] decide: everyday dictations (short and typical).
+pub const EVERYDAY: [usize; 2] = [0, TYPICAL];
 /// The processor is picked only if it takes at most `1 − CPU_MARGIN` of the
-/// graphics card's time at every length.
-pub const CPU_MARGIN: f64 = 0.30;
+/// graphics card's time at both everyday lengths.
+pub const CPU_MARGIN: f64 = 0.20;
 /// How the measuring is done; a stored result from another method is
 /// measured again (1: one 8-second clip; 2: three lengths, the graphics
-/// card kept unless the processor is clearly faster).
-pub const METHOD: u32 = 2;
+/// card kept unless the processor is clearly faster at all three; 3:
+/// everyday lengths decide, and Parakeet's DirectML path runs its decoder
+/// on the processor with a fixed encoder length — `vendor/transcribe-rs`).
+pub const METHOD: u32 = 3;
 /// How long after Yap starts the first measurement may begin.
 pub const AFTER_START: Duration = Duration::from_secs(60);
 /// …and after a model is installed or switched to.
@@ -177,11 +186,23 @@ pub struct Run {
     /// it quickly ([`skip_cpu_whisper`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub skipped: bool,
+    /// Its time for this person's dictations: the everyday lengths' warm
+    /// medians weighed by [`Measured::short_share`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub everyday_ms: Option<u64>,
 }
 
 impl Run {
     fn new(device: Device) -> Self {
-        Run { device, load_ms: 0, first_ms: 0, lengths: Vec::new(), agrees: false, error: None, skipped: false }
+        Run { device, load_ms: 0, first_ms: 0, lengths: Vec::new(), agrees: false, error: None, skipped: false, everyday_ms: None }
+    }
+
+    /// The everyday lengths' warm medians weighed: `short_share` of the
+    /// short one, the rest the typical one.
+    pub fn everyday(&self, short_share: f64) -> Option<u64> {
+        let short = self.lengths.get(EVERYDAY[0])?.warm_ms? as f64;
+        let typical = self.lengths.get(EVERYDAY[1])?.warm_ms? as f64;
+        Some((short * short_share + typical * (1.0 - short_share)).round() as u64)
     }
 }
 
@@ -201,8 +222,16 @@ pub struct Measured {
     /// How busy the processor was just before (percent), if known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu_load: Option<u32>,
+    /// The share of this person's recent dictations nearer the short length
+    /// than the typical one ([`short_share`]).
+    #[serde(default = "half")]
+    pub short_share: f64,
     pub runs: Vec<Run>,
     pub pick: Device,
+}
+
+fn half() -> f64 {
+    0.5
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -284,20 +313,39 @@ pub fn skip_cpu_whisper(gpu_warm_ms: u64) -> bool {
     gpu_warm_ms <= SLOW_FLOOR_MS
 }
 
-/// Ran, got the words right and has a warm median at every length.
+/// A length's warm median, if it was timed.
+fn warm(r: &Run, length: usize) -> Option<u64> {
+    r.lengths.get(length).and_then(|t| t.warm_ms)
+}
+
+/// Ran, got the words right and has a warm median at the everyday lengths.
 fn timed(r: &Run) -> bool {
-    r.error.is_none() && r.agrees && !r.lengths.is_empty() && r.lengths.iter().all(|t| t.warm_ms.is_some())
+    r.error.is_none() && r.agrees && EVERYDAY.iter().all(|&l| warm(r, l).is_some())
 }
 
 /// The processor took at most `1 − CPU_MARGIN` of the graphics card's time
-/// at every length.
+/// at both everyday lengths (the long one doesn't count).
 pub fn clearly_faster(cpu: &Run, gpu: &Run) -> bool {
-    !cpu.lengths.is_empty()
-        && cpu.lengths.len() == gpu.lengths.len()
-        && cpu.lengths.iter().zip(&gpu.lengths).all(|(c, g)| match (c.warm_ms, g.warm_ms) {
-            (Some(c), Some(g)) => c as f64 <= g as f64 * (1.0 - CPU_MARGIN),
-            _ => false,
-        })
+    EVERYDAY.iter().all(|&l| match (warm(cpu, l), warm(gpu, l)) {
+        (Some(c), Some(g)) => c as f64 <= g as f64 * (1.0 - CPU_MARGIN),
+        _ => false,
+    })
+}
+
+/// The share of `secs` (dictations' spoken lengths) nearer the short length
+/// than the typical one (`boundary`: halfway between them, seconds); half
+/// and half with none.
+pub fn short_share_of(secs: &[f32], boundary: f32) -> f64 {
+    if secs.is_empty() {
+        return 0.5;
+    }
+    secs.iter().filter(|s| **s < boundary).count() as f64 / secs.len() as f64
+}
+
+/// [`short_share_of`] this person's latest 200 dictations (history; none in
+/// a test run's first moments).
+fn short_share(boundary: f32) -> f64 {
+    short_share_of(&crate::history::recent_dictation_secs(200), boundary)
 }
 
 /// The device to run on: the graphics card, unless the processor is
@@ -905,7 +953,7 @@ fn run_measured(app: &AppHandle, data_dir: &Path, model_id: &str, model_print: &
         cpu_load = ?cpu_load,
         "Speech engine timing: measuring"
     );
-    let runs = match measure(data_dir, model_id, &devices, &audio, &call, &|| busy(app)) {
+    let mut runs = match measure(data_dir, model_id, &devices, &audio, &call, &|| busy(app)) {
         Ok(runs) => runs,
         Err(Stopped::Interrupted(why)) => {
             tracing::info!("Speech engine timing: stopped ({why}); trying again later");
@@ -920,6 +968,12 @@ fn run_measured(app: &AppHandle, data_dir: &Path, model_id: &str, model_print: &
     };
     let default = if has_gpu() { Device::Gpu } else { Device::Cpu };
     let pick = pick(&runs).unwrap_or(default);
+    // Each device's time for this person's dictations (Settings' line).
+    let boundary = cuts(&audio)[..2].iter().map(|&e| ms_of(e) as f32 / 1000.0).sum::<f32>() / 2.0;
+    let short_share = short_share(boundary);
+    for r in &mut runs {
+        r.everyday_ms = r.everyday(short_share);
+    }
     for r in &runs {
         tracing::info!(
             model = model_id,
@@ -929,7 +983,8 @@ fn run_measured(app: &AppHandle, data_dir: &Path, model_id: &str, model_print: &
             agrees = r.agrees,
             skipped = r.skipped,
             failed = r.error.is_some(),
-            "Speech engine timed (first transcription after loading)"
+            everyday_ms = ?r.everyday_ms,
+            "Speech engine timed (first transcription after loading; everyday dictations)"
         );
         for (t, (name, _)) in r.lengths.iter().zip(LENGTHS) {
             tracing::info!(
@@ -943,13 +998,14 @@ fn run_measured(app: &AppHandle, data_dir: &Path, model_id: &str, model_print: &
             );
         }
     }
-    tracing::info!(model = model_id, pick = pick.runtime(model_id), "Speech engine: the device for this model on this PC");
+    tracing::info!(model = model_id, pick = pick.runtime(model_id), short_share, "Speech engine: the device for this model on this PC");
     let measured = Measured {
         method: METHOD,
         model_print: model_print.to_string(),
         pc_print: pc_print(),
         at: now_secs(),
         cpu_load,
+        short_share,
         runs,
         pick,
     };
@@ -1027,8 +1083,8 @@ pub struct Status {
     pub measured: Option<Measured>,
     /// Why the last measurement didn't finish.
     pub error: Option<String>,
-    /// The processor must take at most this share less time than the
-    /// graphics card at every length to be picked (0.3).
+    /// The processor must take at least this share less time than the
+    /// graphics card at both everyday lengths to be picked (0.2).
     pub cpu_margin: f64,
 }
 
@@ -1101,22 +1157,43 @@ mod tests {
             agrees,
             error: None,
             skipped: false,
+            everyday_ms: None,
         }
     }
 
     #[test]
-    fn the_graphics_card_stays_unless_the_processor_is_clearly_faster_at_every_length() {
-        // The processor 3× faster everywhere: it's picked.
-        assert_eq!(pick(&[run(Device::Gpu, [300, 450, 900], true), run(Device::Cpu, [80, 150, 300], true)]), Some(Device::Cpu));
-        // Faster, but not by 30 % at one length (here the long one): the
-        // graphics card stays.
-        assert_eq!(pick(&[run(Device::Gpu, [300, 450, 400], true), run(Device::Cpu, [80, 150, 300], true)]), Some(Device::Gpu));
-        // 25 % faster everywhere: not clearly.
-        assert_eq!(pick(&[run(Device::Gpu, [100, 200, 400], true), run(Device::Cpu, [75, 150, 300], true)]), Some(Device::Gpu));
-        // Exactly 30 % less time counts.
-        assert_eq!(pick(&[run(Device::Gpu, [100, 200, 400], true), run(Device::Cpu, [70, 140, 280], true)]), Some(Device::Cpu));
+    fn everyday_dictations_decide_and_the_processor_must_be_clearly_faster_at_both() {
+        // This PC before the DirectML fix: the processor 70 % and 37 % faster
+        // at 3 and 11 s, slower at 36 s — the long one doesn't count.
+        assert_eq!(pick(&[run(Device::Gpu, [441, 630, 1244], true), run(Device::Cpu, [131, 396, 1620], true)]), Some(Device::Cpu));
+        // Faster, but not by 20 % at one everyday length: the graphics card.
+        assert_eq!(pick(&[run(Device::Gpu, [300, 450, 900], true), run(Device::Cpu, [80, 400, 300], true)]), Some(Device::Gpu));
+        // 15 % faster at both: not clearly.
+        assert_eq!(pick(&[run(Device::Gpu, [100, 200, 400], true), run(Device::Cpu, [85, 170, 300], true)]), Some(Device::Gpu));
+        // Exactly 20 % less time counts.
+        assert_eq!(pick(&[run(Device::Gpu, [100, 200, 400], true), run(Device::Cpu, [80, 160, 9_000], true)]), Some(Device::Cpu));
         // The graphics card faster: of course.
         assert_eq!(pick(&[run(Device::Gpu, [60, 90, 200], true), run(Device::Cpu, [80, 150, 900], true)]), Some(Device::Gpu));
+        // A long length that failed doesn't matter.
+        let mut no_long = run(Device::Cpu, [80, 150, 0], true);
+        no_long.lengths[2].warm_ms = None;
+        assert_eq!(pick(&[run(Device::Gpu, [300, 450, 900], true), no_long]), Some(Device::Cpu));
+    }
+
+    #[test]
+    fn the_time_for_your_dictations_weighs_the_two_everyday_lengths_by_your_history() {
+        let cpu = run(Device::Cpu, [100, 400, 1_600], true);
+        assert_eq!(cpu.everyday(0.5), Some(250));
+        assert_eq!(cpu.everyday(1.0), Some(100));
+        assert_eq!(cpu.everyday(0.25), Some(325));
+        // Spoken lengths nearer 3 s than 11 s count as short ones.
+        assert_eq!(short_share_of(&[2.0, 4.0, 9.0, 20.0], 7.0), 0.5);
+        assert_eq!(short_share_of(&[2.0, 3.0, 5.0], 7.0), 1.0);
+        // No history: half and half.
+        assert_eq!(short_share_of(&[], 7.0), 0.5);
+        let mut untimed = cpu.clone();
+        untimed.lengths.clear();
+        assert_eq!(untimed.everyday(0.5), None);
     }
 
     #[test]
@@ -1141,9 +1218,9 @@ mod tests {
         let mut untimed = run(Device::Cpu, [10, 10, 10], true);
         untimed.lengths.clear();
         assert_eq!(pick(&[run(Device::Gpu, [300, 450, 900], true), untimed]), Some(Device::Gpu));
-        // A length that failed mid-way.
+        // An everyday length that failed mid-way.
         let mut partial = run(Device::Gpu, [300, 450, 900], true);
-        partial.lengths[2].warm_ms = None;
+        partial.lengths[1].warm_ms = None;
         assert_eq!(pick(&[partial, run(Device::Cpu, [280, 440, 880], true)]), Some(Device::Cpu));
         // Nothing qualifies.
         assert_eq!(pick(&[run(Device::Gpu, [1, 1, 1], false)]), None);
@@ -1201,6 +1278,7 @@ mod tests {
             pc_print: pc.into(),
             at: 0,
             cpu_load: Some(4),
+            short_share: 0.5,
             runs: vec![],
             pick: Device::Gpu,
         };
@@ -1215,7 +1293,12 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(old.method, 0);
+        assert_eq!(old.short_share, 0.5);
         assert!(!fits(&old, "670523:1782000000", pc));
+        // …or judged at every length on the old DirectML path (method 2).
+        let mut two = m.clone();
+        two.method = 2;
+        assert!(!fits(&two, "670523:1782000000", pc));
     }
 
     #[test]
@@ -1370,7 +1453,8 @@ mod tests {
                             r.error.as_deref().map(|e| format!(", {e}")).unwrap_or_default()
                         );
                     }
-                    println!("  → Automatic picks: {:?}", pick(&runs).map(|d| d.runtime(model)));
+                    let everyday: Vec<String> = runs.iter().map(|r| format!("{} {:?} ms", r.device.runtime(model), r.everyday(0.5))).collect();
+                    println!("  → Automatic picks: {:?} (everyday dictations, half and half: {})", pick(&runs).map(|d| d.runtime(model)), everyday.join(", "));
                 }
                 Err(e) => println!("  Yap's benchmark failed: {e:?}"),
             }
@@ -1438,12 +1522,347 @@ mod tests {
                     let g = median(&new[&(li, "gpu")]).unwrap() as f64;
                     let c = median(&new[&(li, "cpu")]).unwrap() as f64;
                     line.push_str(&format!(
-                        "  | processor {:+.0} % time, words agree {}",
+                        "  | processor {:+.0} % time, words agree {}, same text {}",
                         (c / g - 1.0) * 100.0,
-                        agrees(Some(&texts[&(li, "cpu")]), &texts[&(li, "gpu")])
+                        agrees(Some(&texts[&(li, "cpu")]), &texts[&(li, "gpu")]),
+                        texts[&(li, "cpu")] == texts[&(li, "gpu")]
                     ));
                 }
                 println!("{line}");
+            }
+        }
+    }
+
+    /// Where the time goes in one Parakeet transcription, stage by stage —
+    /// the preprocessor (`nemo128.onnx`), the encoder, and the decoder loop
+    /// (one `decoder_joint` run per frame and per token, as transcribe-rs
+    /// runs it) — each on DirectML or the processor, and what a split costs.
+    /// The same steps transcribe-rs takes, with ort directly. `YAP_SPEED_DATA`
+    /// as for `bench_this_pc`; `YAP_SPEED_MODELS` (default v3);
+    /// `YAP_SPEED_ROUNDS` (default 5).
+    /// `cargo test --release --features engines stt_speed::tests::profile_parakeet -- --ignored --nocapture --test-threads=1`
+    #[cfg(feature = "engines")]
+    #[test]
+    #[ignore]
+    fn profile_parakeet() {
+        use ort::session::builder::GraphOptimizationLevel;
+        use ort::session::{Session, SessionInputValue};
+        use ort::value::Tensor;
+
+        fn open(path: &Path, gpu: bool, threads: Option<usize>) -> Session {
+            open_with(path, gpu, threads, &[])
+        }
+        fn open_with(path: &Path, gpu: bool, threads: Option<usize>, entries: &[(&str, &str)]) -> Session {
+            let e = |e: ort::Error<ort::session::builder::SessionBuilder>| e.to_string();
+            let mut b = Session::builder().unwrap().with_optimization_level(GraphOptimizationLevel::Level3).map_err(e).unwrap();
+            for (k, v) in entries {
+                b = b.with_config_entry(k, v).map_err(e).unwrap();
+            }
+            if let Some(n) = threads {
+                b = b.with_intra_threads(n).map_err(e).unwrap();
+            }
+            b = b.with_parallel_execution(!gpu).map_err(e).unwrap();
+            if gpu {
+                b = b.with_memory_pattern(false).map_err(e).unwrap();
+                b = b.with_execution_providers([ort::ep::DirectML::default().build(), ort::ep::CPU::default().build()]).map_err(e).unwrap();
+            } else {
+                b = b.with_execution_providers([ort::ep::CPU::default().build()]).map_err(e).unwrap();
+            }
+            b.commit_from_file(path).unwrap()
+        }
+        fn input<T: ort::value::PrimitiveTensorElementType + std::fmt::Debug + 'static>(name: &str, v: Tensor<T>) -> (String, SessionInputValue<'static>) {
+            (name.to_string(), v.into())
+        }
+        #[derive(Default, Clone, Copy)]
+        struct Times {
+            prep: u64,
+            enc: u64,
+            dec: u64,
+            runs: u64,
+        }
+        struct Model {
+            vocab: usize,
+            blank: i32,
+            states: [Vec<i64>; 2],
+        }
+        /// One transcription: the token ids and each stage's time (µs).
+        fn run(m: &Model, prep: &mut Session, enc: &mut Session, dec: &mut Session, audio: &[f32]) -> (Vec<i32>, Times) {
+            run_padded(m, prep, enc, dec, audio, 0)
+        }
+        /// …with the waveform zero-padded to `pad_to` samples (its length
+        /// still the audio's).
+        fn run_padded(m: &Model, prep: &mut Session, enc: &mut Session, dec: &mut Session, audio: &[f32], pad_to: usize) -> (Vec<i32>, Times) {
+            let mut t = Times::default();
+            // transcribe-rs puts 250 ms of silence before the audio.
+            let mut wave = vec![0f32; 4_000];
+            wave.extend_from_slice(audio);
+            let n = wave.len() as i64;
+            if wave.len() < pad_to {
+                wave.resize(pad_to, 0.0);
+            }
+            let total = wave.len() as i64;
+            let started = Instant::now();
+            let (features, fshape, flen) = {
+                let out = prep
+                    .run(vec![input("waveforms", Tensor::from_array(([1i64, total], wave)).unwrap()), input("waveforms_lens", Tensor::from_array(([1i64], vec![n])).unwrap())])
+                    .unwrap();
+                let (shape, f) = out["features"].try_extract_tensor::<f32>().unwrap();
+                let (_, l) = out["features_lens"].try_extract_tensor::<i64>().unwrap();
+                (f.to_vec(), shape.to_vec(), l.to_vec())
+            };
+            t.prep = started.elapsed().as_micros() as u64;
+            let started = Instant::now();
+            let (encoded, eshape, elen) = {
+                let out = enc
+                    .run(vec![input("audio_signal", Tensor::from_array((fshape, features)).unwrap()), input("length", Tensor::from_array(([1i64], flen)).unwrap())])
+                    .unwrap();
+                let (shape, e) = out["outputs"].try_extract_tensor::<f32>().unwrap();
+                let (_, l) = out["encoded_lengths"].try_extract_tensor::<i64>().unwrap();
+                (e.to_vec(), shape.to_vec(), l[0] as usize)
+            };
+            t.enc = started.elapsed().as_micros() as u64;
+            // [1, D, T]: frame t is every T-th value from t.
+            let (d, frames) = (eshape[1] as usize, eshape[2] as usize);
+            let started = Instant::now();
+            let size = |s: &[i64]| s.iter().map(|&x| x.max(1) as usize).product::<usize>();
+            let mut state = [vec![0f32; size(&m.states[0])], vec![0f32; size(&m.states[1])]];
+            let shape = |s: &[i64]| vec![s[0], 1, s[2]];
+            let (mut tokens, mut frame, mut emitted) = (Vec::new(), 0usize, 0usize);
+            while frame < elen.min(frames) {
+                let column: Vec<f32> = (0..d).map(|k| encoded[k * frames + frame]).collect();
+                let target = tokens.last().copied().unwrap_or(m.blank);
+                let out = dec
+                    .run(vec![
+                        input("encoder_outputs", Tensor::from_array(([1i64, d as i64, 1], column)).unwrap()),
+                        input("targets", Tensor::from_array(([1i64, 1], vec![target])).unwrap()),
+                        input("target_length", Tensor::from_array(([1i64], vec![1i32])).unwrap()),
+                        input("input_states_1", Tensor::from_array((shape(&m.states[0]), state[0].clone())).unwrap()),
+                        input("input_states_2", Tensor::from_array((shape(&m.states[1]), state[1].clone())).unwrap()),
+                    ])
+                    .unwrap();
+                t.runs += 1;
+                let (_, logits) = out["outputs"].try_extract_tensor::<f32>().unwrap();
+                let logits = &logits[..m.vocab.min(logits.len())];
+                let token = logits
+                    .iter()
+                    .enumerate()
+                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(i, _)| i as i32)
+                    .unwrap_or(m.blank);
+                if token != m.blank {
+                    state = [
+                        out["output_states_1"].try_extract_tensor::<f32>().unwrap().1.to_vec(),
+                        out["output_states_2"].try_extract_tensor::<f32>().unwrap().1.to_vec(),
+                    ];
+                    tokens.push(token);
+                    emitted += 1;
+                }
+                if token == m.blank || emitted == 10 {
+                    frame += 1;
+                    emitted = 0;
+                }
+            }
+            t.dec = started.elapsed().as_micros() as u64;
+            (tokens, t)
+        }
+
+        let data = PathBuf::from(std::env::var_os("YAP_SPEED_DATA").expect("YAP_SPEED_DATA"));
+        let models = std::env::var("YAP_SPEED_MODELS").unwrap_or_else(|_| "parakeet-tdt-0.6b-v3".into());
+        let rounds: usize = std::env::var("YAP_SPEED_ROUNDS").ok().and_then(|r| r.parse().ok()).unwrap_or(5);
+        let audio = clip();
+        let pieces: Vec<Vec<f32>> = cuts(&audio).into_iter().map(|e| audio[..e].to_vec()).collect();
+        println!("Processor load before: {:?} %", cpu_load(Duration::from_secs(1)));
+        for model in models.split(',').map(str::trim).filter(|m| !m.is_empty()) {
+            let dir = data.join("models").join(stt::model_filename(model));
+            let vocab = std::fs::read_to_string(dir.join("vocab.txt")).unwrap();
+            let blank = vocab.lines().position(|l| l.starts_with("<blk>")).unwrap() as i32;
+            let mut sessions: BTreeMap<&str, Session> = BTreeMap::new();
+            for (name, file, gpu, threads) in [
+                ("prep-gpu", "nemo128.onnx", true, None),
+                ("prep-cpu", "nemo128.onnx", false, None),
+                ("enc-gpu", "encoder-model.int8.onnx", true, None),
+                ("enc-cpu", "encoder-model.int8.onnx", false, None),
+                ("dec-gpu", "decoder_joint-model.int8.onnx", true, None),
+                ("dec-cpu", "decoder_joint-model.int8.onnx", false, None),
+                ("dec-cpu1", "decoder_joint-model.int8.onnx", false, Some(1)),
+            ] {
+                let t = Instant::now();
+                sessions.insert(name, open(&dir.join(file), gpu, threads));
+                println!("  {name}: loaded in {} ms", t.elapsed().as_millis());
+            }
+            let state_shape = |s: &Session, name: &str| -> Vec<i64> {
+                let i = s.inputs().iter().find(|i| i.name() == name).unwrap();
+                i.dtype().tensor_shape().unwrap().to_vec()
+            };
+            let m = Model {
+                vocab: vocab.lines().count(),
+                blank,
+                states: [state_shape(&sessions["dec-cpu"], "input_states_1"), state_shape(&sessions["dec-cpu"], "input_states_2")],
+            };
+            // The words: the old DirectML path (everything on DirectML, each
+            // length as it is) against the new one (the encoder alone on
+            // DirectML at its planned length, as vendor/transcribe-rs runs it)
+            // and the processor.
+            if std::env::var_os("YAP_PROFILE_SAME").is_some() {
+                let words: Vec<&str> = vocab.lines().map(|l| l.split(' ').next().unwrap_or("")).collect();
+                let text = |tokens: &[i32]| -> String {
+                    tokens.iter().map(|&t| words.get(t as usize).copied().unwrap_or("?")).collect::<String>().replace('\u{2581}', " ").trim().to_string()
+                };
+                let mut planned = open(&dir.join("encoder-model.int8.onnx"), true, None);
+                let [mut pg, mut pc, mut eg, mut ec, mut dg, mut dc] =
+                    ["prep-gpu", "prep-cpu", "enc-gpu", "enc-cpu", "dec-gpu", "dec-cpu"].map(|k| sessions.remove(k).unwrap());
+                let bucket = 16_000 * 30 + 4_000;
+                let _ = run_padded(&m, &mut pc, &mut planned, &mut dc, &[0.0; 16_000], bucket);
+                for round in 0..3u64 {
+                    for (li, piece) in pieces.iter().enumerate() {
+                        let audio = padded(piece, TAIL_MS + round * PAD_STEP_MS);
+                        let old = run(&m, &mut pg, &mut eg, &mut dg, &audio).0;
+                        let new = run_padded(&m, &mut pc, &mut planned, &mut dc, &audio, bucket).0;
+                        let cpu = run(&m, &mut pc, &mut ec, &mut dc, &audio).0;
+                        println!(
+                            "  {model} {} round {round}: new = old {}, new = processor {}, old = processor {}",
+                            LENGTHS[li].0,
+                            new == old,
+                            new == cpu,
+                            old == cpu
+                        );
+                        if new != old || old != cpu {
+                            println!("    old:       {}\n    new:       {}\n    processor: {}", text(&old), text(&new), text(&cpu));
+                        }
+                    }
+                }
+                continue;
+            }
+            // Fixed lengths: the waveform padded to a bucket, so DirectML's
+            // encoder always gets the shape it built its graph for; and graph
+            // fusion off.
+            if std::env::var_os("YAP_PROFILE_BUCKETS").is_some() {
+                let [mut ps, mut cs, mut ds] = ["prep-cpu", "enc-cpu", "dec-cpu"].map(|k| sessions.remove(k).unwrap());
+                let reference: Vec<Vec<i32>> =
+                    pieces.iter().map(|p| run(&m, &mut ps, &mut cs, &mut ds, &padded(p, TAIL_MS)).0).collect();
+                let enc_path = dir.join("encoder-model.int8.onnx");
+                for secs in [12usize, 16, 20, 30, 40] {
+                    let pad_to = 4_000 + secs * 16_000;
+                    let mut es = open(&enc_path, true, None);
+                    let t = Instant::now();
+                    let _ = run_padded(&m, &mut ps, &mut es, &mut ds, &pieces[0], pad_to);
+                    let first = t.elapsed().as_millis();
+                    let mut line = format!("  bucket {secs:>2} s: first {first} ms;");
+                    for (li, piece) in pieces.iter().enumerate() {
+                        if piece.len() + 4_000 + 16_000 > pad_to {
+                            continue;
+                        }
+                        let mut times = Vec::new();
+                        let mut same = true;
+                        for round in 0..5u64 {
+                            let (tokens, tm) = run_padded(&m, &mut ps, &mut es, &mut ds, &padded(piece, TAIL_MS + (round + 1) * PAD_STEP_MS), pad_to);
+                            times.push(tm.enc / 1000);
+                            if round == 0 {
+                                same = tokens == reference[li];
+                            }
+                        }
+                        line.push_str(&format!(" {} encoder {:?} ms, same tokens {same};", LENGTHS[li].0, times));
+                    }
+                    println!("{line}");
+                }
+                let mut es = open_with(&enc_path, true, None, &[("ep.dml.disable_graph_fusion", "1")]);
+                for (label, pad) in [("A", 100u64), ("A", 100), ("B", 200), ("B", 200), ("C", 300), ("A", 100)] {
+                    let (_, t) = run(&m, &mut ps, &mut es, &mut ds, &padded(&pieces[TYPICAL], pad));
+                    println!("  fusion off, shape {label}: encoder {} ms", t.enc / 1000);
+                }
+                return;
+            }
+            // How DirectML's encoder takes lengths it has had, and new ones.
+            if std::env::var_os("YAP_PROFILE_SHAPES").is_some() {
+                let [mut ps, mut es, mut ds] = ["prep-cpu", "enc-gpu", "dec-cpu"].map(|k| sessions.remove(k).unwrap());
+                for (label, pad) in [("A", 100), ("A", 100), ("A", 100), ("B", 200), ("B", 200), ("A", 100), ("C", 300), ("C", 300), ("B", 200), ("A", 100), ("D", 400), ("A", 100)] {
+                    let (_, t) = run(&m, &mut ps, &mut es, &mut ds, &padded(&pieces[TYPICAL], pad));
+                    println!("  shape {label}: encoder {} ms", t.enc / 1000);
+                }
+                for (label, pad) in [("A", 100), ("A", 100)] {
+                    std::thread::sleep(Duration::from_millis(1500));
+                    let (_, t) = run(&m, &mut ps, &mut es, &mut ds, &padded(&pieces[TYPICAL], pad));
+                    println!("  shape {label} after 1.5 s idle: encoder {} ms", t.enc / 1000);
+                }
+                for k in 0..4 {
+                    let mut cs = sessions.remove("enc-cpu").unwrap();
+                    let _ = run(&m, &mut ps, &mut cs, &mut ds, &padded(&pieces[TYPICAL], 100));
+                    sessions.insert("enc-cpu", cs);
+                    let (_, t) = run(&m, &mut ps, &mut es, &mut ds, &padded(&pieces[TYPICAL], 100));
+                    println!("  shape A after a processor encoder run ({k}): encoder {} ms", t.enc / 1000);
+                }
+                sessions.insert("prep-cpu", ps);
+                sessions.insert("enc-gpu", es);
+                sessions.insert("dec-cpu", ds);
+                return;
+            }
+            // (label, preprocessor, encoder, decoder)
+            let configs: [(&str, &str, &str, &str); 5] = [
+                ("all DirectML (today)", "prep-gpu", "enc-gpu", "dec-gpu"),
+                ("all processor", "prep-cpu", "enc-cpu", "dec-cpu"),
+                ("encoder DirectML, rest processor", "prep-cpu", "enc-gpu", "dec-cpu"),
+                ("encoder DirectML, decoder 1 thread", "prep-cpu", "enc-gpu", "dec-cpu1"),
+                ("prep+encoder DirectML, decoder processor", "prep-gpu", "enc-gpu", "dec-cpu"),
+            ];
+            // First runs (graph building) apart.
+            for (label, p, e, d) in configs {
+                let [mut ps, mut es, mut ds] = [p, e, d].map(|k| sessions.remove(k).unwrap());
+                let t = Instant::now();
+                let (_, times) = run(&m, &mut ps, &mut es, &mut ds, &padded(&pieces[TYPICAL], TAIL_MS));
+                println!(
+                    "  first run, {label}: {} ms (prep {} / enc {} / dec {} ms, {} decoder runs)",
+                    t.elapsed().as_millis(),
+                    times.prep / 1000,
+                    times.enc / 1000,
+                    times.dec / 1000,
+                    times.runs
+                );
+                sessions.insert(p, ps);
+                sessions.insert(e, es);
+                sessions.insert(d, ds);
+            }
+            let mut reference: Vec<Vec<i32>> = vec![Vec::new(); pieces.len()];
+            let mut all: BTreeMap<(usize, &str), Vec<(u64, Times)>> = BTreeMap::new();
+            for round in 0..rounds {
+                for (li, piece) in pieces.iter().enumerate() {
+                    let audio = padded(piece, TAIL_MS + (round as u64 + 1) * PAD_STEP_MS);
+                    for (label, p, e, d) in configs {
+                        let [mut ps, mut es, mut ds] = [p, e, d].map(|k| sessions.remove(k).unwrap());
+                        let t = Instant::now();
+                        let (tokens, times) = run(&m, &mut ps, &mut es, &mut ds, &audio);
+                        let total = t.elapsed().as_micros() as u64;
+                        sessions.insert(p, ps);
+                        sessions.insert(e, es);
+                        sessions.insert(d, ds);
+                        if round == 0 {
+                            if reference[li].is_empty() {
+                                reference[li] = tokens.clone();
+                            } else if reference[li] != tokens {
+                                println!("  ! {label} at {} gave other tokens", LENGTHS[li].0);
+                            }
+                        }
+                        all.entry((li, label)).or_default().push((total, times));
+                    }
+                }
+            }
+            println!("\n== {model}: median ms (preprocessor / encoder / decoder loop, decoder runs) ==");
+            for (li, piece) in pieces.iter().enumerate() {
+                println!("  {} ({:.1} s, {} tokens):", LENGTHS[li].0, piece.len() as f32 / 16_000.0, reference[li].len());
+                for (label, ..) in configs {
+                    let v = &all[&(li, label)];
+                    let med = |f: &dyn Fn(&(u64, Times)) -> u64| median(&v.iter().map(f).collect::<Vec<_>>()).unwrap();
+                    let runs = v[0].1.runs;
+                    let dec = med(&|x| x.1.dec);
+                    println!(
+                        "    {label:>42}: {:>5.0} ms  = {:>4.0} / {:>5.0} / {:>5.0}  ({runs} runs, {:.2} ms each)",
+                        med(&|x| x.0) as f64 / 1000.0,
+                        med(&|x| x.1.prep) as f64 / 1000.0,
+                        med(&|x| x.1.enc) as f64 / 1000.0,
+                        dec as f64 / 1000.0,
+                        dec as f64 / 1000.0 / runs.max(1) as f64
+                    );
+                    println!("{:>48} encoder runs: {:?}", "", v.iter().map(|x| x.1.enc / 1000).collect::<Vec<_>>());
+                }
             }
         }
     }

@@ -75,7 +75,7 @@ async function needsMic(yap) {
   test.skip(mics.length === 0, 'no microphone here; recording needs one');
 }
 
-test('Runs on: measured once on this PC at three lengths (the processor clearly faster here), Graphics card and Processor override it', async ({ yap, main, shot }) => {
+test('Runs on: measured once on this PC, everyday dictations decide (the processor clearly faster here), Graphics card and Processor override it', async ({ yap, main, shot }) => {
   const dialog = await openSettings(main, 'Speech-to-Text');
   const row = dialog.locator('[data-setting="runs-on"]');
   await row.scrollIntoViewIfNeeded();
@@ -83,7 +83,8 @@ test('Runs on: measured once on this PC at three lengths (the processor clearly 
   await shot(main, '01-runs-on-not-measured');
 
   await row.getByRole('button', { name: 'Measure now' }).click();
-  const picked = /Runs on: processor \(clearly faster on this PC: 1\d\d ms for 11 s of speech\)/;
+  // What it chose and why: each device's time for your dictations.
+  const picked = /Runs on: processor — fastest for your dictations on this PC \(1\d\d ms vs 4\d\d ms\)/;
   await expect(row).toContainText(picked, { timeout: 60_000 });
   await expect(row.getByRole('button', { name: 'Measure again' })).toBeEnabled();
   await shot(main, '02-runs-on-measured');
@@ -93,8 +94,11 @@ test('Runs on: measured once on this PC at three lengths (the processor clearly 
   const m = store.models[MODEL];
   expect(m.pick).toBe('cpu');
   expect(m.runs.map((r) => r.device).sort()).toEqual(['cpu', 'gpu']);
-  expect(m.method).toBe(2);
+  expect(m.method).toBe(3);
+  // No dictations yet: the two everyday lengths weigh the same.
+  expect(m.shortShare).toBe(0.5);
   for (const r of m.runs) {
+    expect(r.everydayMs).toBeGreaterThan(100);
     expect(r.agrees).toBe(true);
     // Short, typical and long dictations, three warm runs each.
     expect(r.lengths.map((t) => Math.round(t.clipMs / 1000))).toEqual([3, 11, 36]);
@@ -111,7 +115,7 @@ test('Runs on: measured once on this PC at three lengths (the processor clearly 
   const select = row.getByRole('combobox', { name: 'Runs on' });
   await select.selectOption('gpu');
   await expectStore(yap, 'config.json', (c) => c.sttDevice === 'gpu' && c.useGpu === true);
-  await expect(row).toContainText(/Runs on: graphics card \(your choice\)\. Automatic picks the processor here \(1\d\d ms for 11 s of speech\)/);
+  await expect(row).toContainText(/Runs on: graphics card \(your choice\)\. Automatic picks the processor here \(1\d\d ms vs 4\d\d ms\)/);
   await shot(main, '03-runs-on-graphics-card');
   // …the processor (the GPU switch off, as before)…
   await select.selectOption('cpu');

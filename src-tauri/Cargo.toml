@@ -183,3 +183,9 @@ whisper = ["engines"]
 # a `cargo build --release` run still points at http://localhost:1430.
 # `tauri build` enables this automatically; bare `cargo build` does not.
 custom-protocol = ["tauri/custom-protocol"]
+
+# transcribe-rs 0.3.11 with two DirectML fixes for Parakeet, vendored (see
+# vendor/transcribe-rs/YAP.md): the decoder/joiner and the preprocessor run
+# on the CPU, and the encoder always gets the input length it planned for.
+[patch.crates-io]
+transcribe-rs = { path = "vendor/transcribe-rs" }

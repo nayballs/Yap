@@ -52,7 +52,7 @@ Full list with versions and details: [app-shell.md](./docs/architecture/app-shel
 - **Shell:** Tauri 2 — Rust backend (`src-tauri/src/`) + Svelte 5 / Vite 6 frontend (`src/`).
 - **Windows:** `settings` (the main window), `onboarding`, `notepad` (meeting notes), `overlay` (the Yap bar).
 - **Audio:** `cpal` capture, `rodio` playback (chimes, spoken replies).
-- **STT:** `transcribe-rs` — whisper.cpp on Vulkan + ONNX models (Parakeet…) on DirectML; `engines` feature.
+- **STT:** `transcribe-rs` — whisper.cpp on Vulkan + ONNX models (Parakeet…) on DirectML; `engines` feature. Vendored (`src-tauri/vendor/transcribe-rs`, `[patch.crates-io]`) with two DirectML fixes for Parakeet — see its `YAP.md`.
 - **AI:** `reqwest` → any OpenAI-compatible endpoint, or the on-device llamafile sidecar (`local_llm.rs`).
 - **Spoken replies:** Kokoro-82M (ONNX on `ort`, CPU; eSpeak NG run separately) or Windows' voices; or ElevenLabs (cloud, the user's own key, streamed PCM).
 - **Speaker diarization (beta):** Nemotron-3-Diarization on NeMo-Speech.cpp, in a `yap.exe diarize` child.
@@ -106,7 +106,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `mic_watch.rs` — dead-mic watchdog: reopen the stream, then "No sound from <mic>".
 - `mic_privacy.rs` — reads Windows' microphone privacy switches; names the one blocking Yap.
 - `stt.rs` — `SttEngine` over transcribe-rs, the 14-model registry, download + verify, word times; each engine loads on a `Device` (graphics card or processor).
-- `stt_speed.rs` — the speech engine's device on this PC: a one-time background benchmark per model and PC at three dictation lengths (new driver, new download → again); the graphics card unless the processor is ≥ 30 % faster at every length; Settings' "Runs on".
+- `stt_speed.rs` — the speech engine's device on this PC: a one-time background benchmark per model and PC at three dictation lengths (new driver, new download → again); everyday lengths (3 and 11 s) decide: the graphics card unless the processor takes ≥ 20 % less time at both; Settings' "Runs on" says what it chose and why.
 - `recent_audio.rs` — a day of dictation audio (`recent-audio/`): failed dictations listed, Home's Run again and Play.
 - `media.rs` — Upload's audio-file decoding (Symphonia) and chunking.
 - `sound.rs` — start/stop chimes; the output device shared with spoken replies.

@@ -253,15 +253,21 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   (`#settings-speakers`, `SpeakerModels.svelte` + `diarization.svelte.js`: the
   switch, the speaker models' rows, credits behind a disclosure). **Language**
   (Language, Translate to English) and **Performance**: **Speed**, where the
-  model runs (`settings/RunsOn.svelte`, `stt_speed.rs`: "Runs on: graphics card
-  (180 ms for 11 s of speech on this PC)", "Runs on: processor (clearly faster on
-  this PC: 120 ms for 11 s of speech)" — or "(not measured on this PC yet)",
-  "(your choice). Automatic picks the processor here (…)" —, a Select Automatic /
+  model runs (`settings/RunsOn.svelte`, `stt_speed.rs`): the line says what
+  Automatic chose and why, with each device's time for your dictations
+  (`everydayMs`) — "Runs on: graphics card — fastest for your dictations on
+  this PC (150 ms vs 280 ms)", "Runs on: processor — fastest for your
+  dictations on this PC (400 ms vs 630 ms)", "…— the processor is only
+  slightly faster for your dictations (…)", "…— far faster than the
+  processor here", "…— the graphics card didn't run this model correctly
+  here" — or "(not measured on this PC yet)", "(your choice). Automatic
+  picks the processor here (150 ms vs 450 ms)"; a Select Automatic /
   Graphics card / Processor → `sttDevice`, with `useGpu` following it, and
   Measure now / Measure again; the ⓘ has each device's warm time at the three
   dictation lengths and its first run after loading, the rule — the graphics
-  card unless the processor takes 30 % less time at every length — and that a
-  meeting or a busy app slows the processor path; it follows `yap-stt-speed`) and Unload model when idle. (It replaced the GPU
+  card unless the processor takes 20 % less time on everyday dictations,
+  the long length shown but not counted — and that a meeting or a busy app
+  slows the processor path; it follows `yap-stt-speed`) and Unload model when idle. (It replaced the GPU
   acceleration switch, 2026-10-22.)
 - **Language Models** (`cleanup`): tabs Dictation Cleanup / Commands /
   Note Formatting / Chat & Voice Assistant (scope keys `cleanup`,

@@ -25,22 +25,26 @@ Ryzen 7 9800X3D, RTX 5070 Ti, Windows 11, Parakeet V3; memory = private working 
 **Trusting a dictation** (2026-10-22): **the speech engine's device on each
 PC** (`stt_speed.rs`: a one-time background benchmark per model at three
 dictation lengths, Settings → Speech-to-Text → Speed "Runs on: graphics card
-(… for 11 s of speech on this PC)" with Automatic / Graphics card /
-Processor; the graphics card unless the processor takes ≥ 30 % less time at
-every length). On this PC (RTX 5070 Ti, Ryzen 7 9800X3D; release build, the
-call a dictation makes, devices interleaved, medians of 7 warm runs, each a
-new length) int8 Parakeet V3 on DirectML vs the processor: 2.9 s of speech
-441 vs 131 ms, 11 s 630 vs 396 ms, 36 s 1,244 vs 1,620 ms; V2 443 / 626 /
-1,182 vs 125 / 395 / 1,588 ms — the processor is quicker for short and
-typical dictations, the graphics card for long ones, so Automatic keeps the
-graphics card for both (as before this feature). The first dictation after
-a load: DirectML ~3.3 s (2.5 s load + 0.8 s; the process's first DirectML
-run ~2.6 s) vs the processor ~1.5 s. The same length run again was no
-faster on DirectML (434 / 634 / 1,231 ms): its cost here is a fixed ~0.4 s a
-call, not re-planning per length. Whisper large-v3 (q5_0) on Vulkan: 345 /
-805 / 2,279 ms warm, its first run in a process 8.3 s (shaders); on the
+— fastest for your dictations on this PC (150 ms vs 280 ms)" with Automatic
+/ Graphics card / Processor; everyday lengths decide: the graphics card
+unless the processor takes ≥ 20 % less time at both 3 and 11 s, weighed by
+the person's own dictation lengths for the line). **Parakeet on DirectML
+made ~3× faster** (vendored transcribe-rs, `vendor/transcribe-rs/YAP.md`):
+the decoder loop and preprocessor on the CPU, the encoder's input padded to
+the one length it planned for at load. On this PC (RTX 5070 Ti, Ryzen 7
+9800X3D, the processor ~35–40 % busy with the owner's apps; release build,
+the call a dictation makes, devices interleaved, medians of 7 warm runs,
+each a new length), at 2.9 / 11.1 / 35.6 s of speech: V3 on DirectML
+441 / 630 / 1,244 ms before → 133 / 158 / 578 ms after, the processor
+140 / 424 / 1,743 ms; V2 128 / 161 / 564 ms vs 125 / 421 / 1,749 ms. The
+words are the same (V3 identical on every clip; V2's 11-second clip varies
+a comma between runs, as it did before and on the processor). The first
+dictation after a load: ~0.17 s on DirectML (was ~0.8 s, and ~2.6 s for
+the process's first) — the load takes ~0.8 s longer for it (~3.3 s, the
+encoder planning at load). Automatic picks the graphics card for both;
+Whisper large-v3 (q5_0) stays on Vulkan (345 / 805 / 2,279 ms warm; on the
 processor one 11-second dictation took 16 minutes, so it isn't tried beside
-a graphics card that's quick warm. Processor load slows the processor path
+a graphics card that's quick warm). Processor load slows the processor path
 only: the benchmark waits for a processor under 50 % busy, and a narrow win
 never moves a model off the graphics card. **"Use what
 I said"** (`as_said.rs`: the shortcut, the bar's offer, the tray's paste as

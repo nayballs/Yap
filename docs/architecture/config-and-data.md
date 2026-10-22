@@ -143,8 +143,9 @@
 - Groq usage: `%APPDATA%/yap/groq_usage.json`.
 - Speech engine timings: `%APPDATA%/yap/stt_speed.json` — per model id, the
   benchmark of each device on this PC (load, the first run after loading,
-  and the warm ms at three dictation lengths, whether its words matched),
-  the pick, when, the processor's load before, and what it was measured on
+  the warm ms at three dictation lengths, its time for your dictations,
+  whether its words matched), the pick, when, the processor's load before,
+  how this person's dictations weigh the lengths (`shortShare`), and what it was measured on
   (the method, the model's files, the graphics adapters and drivers): a
   stale one is measured again (`stt_speed.rs`). Safe to delete (the graphics card until measured again).
 - Recent dictation audio: `%APPDATA%/yap/recent-audio/` — `<id>.wav` (16 kHz
