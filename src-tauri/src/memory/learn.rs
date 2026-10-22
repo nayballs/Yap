@@ -772,6 +772,17 @@ pub async fn propose(text: &str, kind: Kind) -> Result<Proposal, String> {
     // Told by the person themselves: theirs to keep. An import, reviewed,
     // follows the setting.
     let sensitive_ok = kind == Kind::Tell || cfg.memory_sensitive;
+    // "Forget …" naming what's to go is Yap's own, for every model: the 4B's
+    // full path took the sister out with "my old job at Acme" in 2 of 4
+    // runs (2026-10-22), Yap's never. Nothing found by name: the model's.
+    if kind == Kind::Tell {
+        if let Some(what) = small::forget_request(text) {
+            let changes = small::forget(&super::items(), &what);
+            if !changes.is_empty() || path(&ep) == Path::Small {
+                return Ok(keep_proposal(changes, kind, sensitive_ok, text));
+            }
+        }
+    }
     if path(&ep) == Path::Small {
         return propose_small(text, kind, sensitive_ok, &cfg, &ep).await;
     }
@@ -804,20 +815,15 @@ pub async fn propose(text: &str, kind: Kind) -> Result<Proposal, String> {
     Ok(keep_proposal(changes, kind, sensitive_ok, text))
 }
 
-/// "Tell Yap what to change" and imports with a small model (`small.rs`):
-/// "Forget …" is Yap's own (`small::forget`: the facts and the people,
-/// projects and topics naming it — no model); anything else is read a
+/// "Tell Yap what to change" and imports with a small model (`small.rs`),
+/// "Forget …" aside (`propose`: Yap's own for every model): read a
 /// sentence (an import: a line) at a time like a chat, each answer checked.
 /// ≤ 8 sentences for a Tell, ≤ 30 lines for an import.
 async fn propose_small(text: &str, kind: Kind, sensitive_ok: bool, cfg: &crate::config::YapConfig, ep: &Endpoint) -> Result<Proposal, String> {
     static REMEMBER: std::sync::LazyLock<regex::Regex> =
         std::sync::LazyLock::new(|| regex::Regex::new(r"(?i)^\s*remember\s*[:,]?\s*(?:that\s+)?").expect("static regex"));
+    // ("Forget …" was Yap's own already: `propose`.)
     let items = super::items();
-    if kind == Kind::Tell {
-        if let Some(what) = small::forget_request(text) {
-            return Ok(keep_proposal(small::forget(&items, &what), kind, sensitive_ok, text));
-        }
-    }
     let asked = REMEMBER.replace(text, "").to_string();
     let found = small::told(&asked, kind == Kind::Import);
     let candidates: Vec<small::Candidate> = found.candidates.into_iter().take(max_changes(kind)).collect();
@@ -1006,7 +1012,14 @@ pub fn tool(name: &str, args: &Value) -> Value {
     match name {
         "remember" => {
             let fact = text("fact");
-            let name = text("name");
+            let mut name = text("name");
+            // Not a name ("user", "me", "dog": Qwen3.5-4B, 2026-10-22): a
+            // fact about the person themselves.
+            if !name.is_empty()
+                && (!ops::looks_like_a_name(&name) || matches!(ops::norm(&name).as_str(), "me" | "myself" | "i" | "the user" | "yourself" | "them" | "him" | "her"))
+            {
+                name.clear();
+            }
             let mut section = Section::parse(&text("section")).unwrap_or(if name.is_empty() { Section::Profile } else { Section::People });
             // A fact about someone with no name given: about the person.
             if !section.is_you() && name.is_empty() {
@@ -1197,6 +1210,16 @@ mod tests {
         // Not a "forget": a correction's removal stays as the model wrote it.
         let out = narrow_you_removals(vec![take_out(&["Lives in Norwich"])], &items, "Actually I moved to York last month");
         assert_eq!(out[0].remove_facts, ["Lives in Norwich"]);
+    }
+
+    #[test]
+    fn remember_with_a_name_that_isnt_one_is_about_the_person() {
+        // Qwen3.5-4B's remember calls for "Remember that my dog's name is Beans".
+        tool("remember", &json!({ "fact": "Dog's name is Beans", "name": "user", "section": "people" }));
+        tool("remember", &json!({ "fact": "Dog's name is Beans", "name": "dog", "section": "people" }));
+        let items = super::super::items();
+        assert!(!items.iter().any(|i| i.section == Section::People), "{items:?}");
+        assert_eq!(items.iter().find(|i| i.section == Section::Profile).map(|i| i.details.clone()), Some(vec!["Dog's name is Beans".to_string()]));
     }
 
     #[test]

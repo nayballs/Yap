@@ -38,8 +38,10 @@
 //!    play", "I'm learning"); never a question, a request, a plan for now
 //!    or a fact about the world (a capital, a price). A "name" that isn't
 //!    one ("I") falls back to what the person said of themselves.
-//! 4. **People are found by Yap too** ([`people_in`]): "my sister
-//!    Rochelle", "my manager, Mr Okafor", whatever the model wrote.
+//! 4. **Yap finds some memories itself**, whatever the model wrote: people
+//!    named with who they are ([`people_in`]: "my sister Rochelle", "my
+//!    manager, Mr Okafor"), a project named with ownership ([`project_in`]:
+//!    "a fantasy novel called The Salt Road"), a birthday ([`birthday_in`]).
 //!
 //! Pure; the calls are `learn.rs`'s.
 
@@ -397,7 +399,8 @@ fn candidate(clause: &str, asked: bool, sensitive_ok: bool, known: &[String]) ->
         return None;
     }
     if let Some(what) = remember_part(&clause) {
-        return (!is_question(&what, asked) && super::guard::secret_in(&what).is_none()).then(|| Candidate { text: what, kind: Kind::Told });
+        let ok = !is_question(&what, asked) && super::guard::secret_in(&what).is_none();
+        return ok.then_some(Candidate { text: what, kind: Kind::Told });
     }
     // How they want answers: a request is fine here, a one-off isn't.
     if answer_style(&clause) && lasting_ask(&clause) && !asked {
@@ -1087,7 +1090,8 @@ fn their_fact(fact: &str, name: &str) -> Option<String> {
         }
     }
     static IS: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)^(?:is|was)\s+(?:an?\s+)?"));
-    let f = ops::clean_fact(&IS.replace(&f, ""));
+    // "Rochelle moved to Bristol" → "Lives in Bristol" once her name is off.
+    let f = as_memory(&IS.replace(&f, ""));
     let n = format!(" {} ", ops::norm(&f));
     let names_them = name.split_whitespace().filter(|w| w.chars().count() >= 3).any(|w| n.contains(&format!(" {} ", ops::norm(w))));
     let restates = n.contains(" called ") || n.contains(" named ") || n.contains(" name is ");
@@ -1228,9 +1232,23 @@ pub fn validate(c: &Candidate, x: &Extracted, items: &[Item]) -> Result<Change, 
     }
 }
 
-/// Is `title` a name (or a capitalised title) the sentence really has?
+/// Is `title` a name (or a capitalised title) the sentence really has — and
+/// not a place it's in ("lives in Norwich": the 2B's person "Norwich")?
 fn names_in(c: &Candidate, title: &str) -> bool {
-    !title.trim().is_empty() && !matches!(bare(title).as_str(), "i" | "me" | "user" | "the user" | "you") && title_said(title, &c.text, true)
+    !title.trim().is_empty()
+        && !matches!(bare(title).as_str(), "i" | "me" | "user" | "the user" | "you")
+        && title_said(title, &c.text, true)
+        && !a_place_in(&c.text, title)
+}
+
+/// Does `name` follow "in", "at", "from", "near" in `text` ("lives in
+/// Norwich")? ("to" isn't one: "sent the photos to Marco".)
+fn a_place_in(text: &str, name: &str) -> bool {
+    let toks = tokens(text);
+    let Some(first) = tokens(name).into_iter().next() else {
+        return false;
+    };
+    toks.iter().enumerate().any(|(i, t)| i > 0 && *t == first && matches!(bare(&toks[i - 1]).as_str(), "in" | "at" | "from" | "near" | "outside" | "around"))
 }
 
 fn validate_in(c: &Candidate, mut section: Section, mut title: String, raw_fact: &str, items: &[Item]) -> Result<Change, Why> {
@@ -1282,6 +1300,10 @@ fn validate_in(c: &Candidate, mut section: Section, mut title: String, raw_fact:
             // crashing".
             if !the_person_speaks(c) && !told && c.kind != Kind::Preference && !lasting_possessive(&c.text) {
                 return Err("not about the person");
+            }
+            // A one-off thing done ("I sent the photos to Marco").
+            if one_off_event(&c.text) || momentary(&c.text) {
+                return Err("a one-off, not who they are");
             }
             // Their own words, when they said it of themselves.
             let fact = match own_words(c) {
@@ -1649,6 +1671,8 @@ mod tests {
         // A person's fact without their name; a restatement of who they are goes.
         assert_eq!(their_fact("Imogen is a vet in Bristol", "Imogen").as_deref(), Some("Vet in Bristol"));
         assert_eq!(their_fact("Has a sister called Rochelle who lives in York", "Rochelle"), None);
+        // The 0.8B's "Rochelle moved to Bristol": where she lives now.
+        assert_eq!(their_fact("Rochelle moved to Bristol", "Rochelle").as_deref(), Some("Lives in Bristol"));
         // A fact with a word nobody said.
         assert!(!said_in("Works night shifts at the hospital", "I work night shifts"));
         assert!(said_in("Works night shifts", "I work night shifts"));
@@ -1672,6 +1696,10 @@ mod tests {
         // person said of themselves, in their words, under Profile.
         let c = validate(&cand("I'm a nurse at St James's in Norwich"), &x(Section::People, "Nurse at St James's in Norwich", ""), &none).unwrap();
         assert_eq!((c.section, c.name.as_str(), c.facts.clone()), (Some(Section::Profile), "", vec!["Nurse at St James's in Norwich".to_string()]));
+        // A place taken for a person (the 2B's "Norwich"): the person's own words.
+        let told = Candidate { text: "lives in Norwich, UK".into(), kind: Kind::Told };
+        let c = validate(&told, &x(Section::People, "Norwich", "Lives in Norwich, UK"), &none).unwrap();
+        assert_eq!((c.section, c.facts.clone()), (Some(Section::Profile), vec!["Lives in Norwich, UK".to_string()]));
         // "I'm Declan, by the way" with a nonsense title: the name, said plainly.
         let c = validate(&cand("I'm Declan, by the way"), &x(Section::People, "the name as written", "My name is Declan"), &none).unwrap();
         assert_eq!(c.facts, ["Name is Declan"]);

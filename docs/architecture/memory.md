@@ -105,6 +105,12 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   changes' schema is its grammar, `prompt::schema`); a smaller one
   (Qwen2.5-1.5B, Qwen3.5-2B / 0.8B) takes **the small path** (`small.rs`,
   below; `extract`, `small_changes`, `learn_small`, `propose_small`).
+  **Learning from chats takes the small path for every local model**
+  (`chat_path`: provider `ondevice` or `local` — Ollama, LM Studio —
+  whatever its size; a cloud model or a custom endpoint keeps `path`):
+  on Qwen3.5-4B it kept no false memory where the full path kept 15
+  (people named in passing, "Coming to stay this weekend"), and missed
+  less. Meetings, Tell and imports follow `path` (the 4B's full path).
   Given the whole chat, the 1.5B kept what the person only asked about, a
   wifi password as a "preference" and "Nurse at St James's" as a person,
   and took up to two minutes of a processor; on the small path it learns
@@ -155,14 +161,18 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   the person, project or topic by name), and for a model without tools
   `spoken(text)` — "Remember that…" / "Forget that…" as a whole message
   (`spoken_request`; not "Remember when…?" nor "Don't forget to…") runs the
-  Tell pass and Yap answers itself ("Got it: I'll remember that."). With a
-  small model, Tell and imports take the small path too (`propose_small`):
-  **"Forget …" needs no model** (`small::forget_request` → `small::forget`:
-  every fact naming what's to go — a capitalised name in the request — and
-  the people, projects and topics whose name or "about" has it; Profile and
-  Preferences lose facts only; no name: `forget_changes`), anything else is
-  read a sentence (an import: a line, inside its code block, cut where a new
-  verb starts — `small::told`) at a time like a chat, ≤ 8 / ≤ 30.
+  Tell pass and Yap answers itself ("Got it: I'll remember that.").
+  **A Tell's "Forget …" needs no model, whatever the model**
+  (`small::forget_request` → `small::forget`: every fact naming what's to
+  go — a capitalised name in the request — and the people, projects and
+  topics whose name or "about" has it; Profile and Preferences lose facts
+  only; no name: `forget_changes`, and with nothing found a tool model's
+  full path asks the model): the 4B's full path took the sister out with
+  "Forget everything about my old job at Acme" in 2 of 4 runs, Yap's own
+  never. With a small model, the rest of a Tell and imports take the small
+  path too (`propose_small`): read a sentence (an import: a line, inside its
+  code block, cut where a new verb starts, the other assistant's own talk
+  left out — `small::told`) at a time like a chat, ≤ 8 / ≤ 30.
 - **`memory/small.rs`** — **the small path**, pure. **A wrong memory is
   worse than a missed one**, so most of it is Yap's own:
   1. **Candidates** (`candidates`): the person's messages (not pasted code
@@ -192,29 +202,42 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
      temperature 0, ≤ 80 tokens). A preference needs no call: the person's
      own words are the memory (`preference_of`: "Keep your answers short").
   3. **Yap checks the answer** (`validate`) before `ops::apply`'s guards:
-     the fact in the third person (`as_memory`: "I work nights" → "Works
-     nights", "Moved to Bristol" → "Lives in Bristol", "my" → "their"); every
-     word of it the sentence has (`said_in`, but for memory's own phrasing:
-     the 1.5B added "at the hospital" from a one-shot); never a question, a
-     request, a passing moment, a change ("Left…") or a fact about the world
-     (`about_the_world`: a capital, a price, "X is the…"); **people** only
-     named as written with a relationship or role word next to the name in
-     the sentence (`relation_of` — and who they are comes from those words,
-     not the model), or someone memory has who's the sentence's subject or
-     told about; their facts without their name (`their_fact`); **projects**
-     only with ownership ("I'm building", "my novel": `owns_project`) and a
-     capitalised name as written; **topics** only with a lasting interest
-     ("I play", "I'm learning": `keeps_up`); **preferences** only from a
-     sentence about answers. A person, project or topic whose "name" isn't one
-     the sentence has ("I", "The name as written"), when the person is the
-     sentence's subject, is kept as what they said about themselves
-     (Profile), if it passes. A new "Lives in X" replaces the item's other
-     "Lives in …" (`replaced`).
-  **People are found by Yap too** (`people_in`, `people_changes`): "my
-  sister Rochelle", "my manager, Mr Okafor", "my sister's name is
-  Rochelle", "Daniel, my flatmate", "Rochelle is my sister", an import's
-  "has a sister called Rochelle" — added with who they are whatever the
-  model wrote (its fact for them still goes through `validate`).
+     the model mostly decides *whether* and *where* — **Profile keeps the
+     person's own clause** in the third person (`own_words` → `as_memory`:
+     "I'm a nurse at St James's" → "Nurse at St James's", "I work nights" →
+     "Works nights", "Moved to Bristol" → "Lives in Bristol", "my" →
+     "their", "I'm Declan" → "Name is Declan"; the 1.5B's paraphrase lost
+     "nurse" once), and only when the person is the subject, told it, or it's
+     a lasting thing of theirs ("My birthday…", not "My code keeps
+     crashing"); every word of a fact the sentence has (`said_in`, but for
+     memory's own phrasing: the 1.5B added "at the hospital" from a
+     one-shot); never a question, a request, a passing moment, a change
+     ("Left…") or a fact about the world (`about_the_world`: a capital, a
+     price, "X is the…"); **people** only named as written with a
+     relationship or role word next to the name in the sentence
+     (`relation_of` — and who they are comes from those words, not the
+     model), or someone memory has who's the sentence's subject or told
+     about; their facts without their name (`their_fact`) and only ones that
+     say who they are (`who_they_are`: not "Leaves the heating on all day");
+     **projects** only with ownership ("I'm building", "my novel":
+     `owns_project`) and a capitalised name as written; **topics** only with
+     a lasting interest ("I play", "I'm learning": `keeps_up`);
+     **preferences** only from a sentence about answers. A person, project
+     or topic whose "name" isn't one the sentence has ("I", "The name as
+     written"), when the person is the sentence's subject, is kept as what
+     they said about themselves (Profile), if it passes. A new "Lives in X"
+     replaces the item's other "Lives in …" (`replaced`).
+  4. **Yap finds some memories itself**, whatever the model wrote: **people**
+     named with who they are (`people_in`: "my sister Rochelle", "my
+     manager, Mr Okafor", "my sister's name is Rochelle", "Daniel, my
+     flatmate", "Rochelle is my sister", an import's "has a sister called
+     Rochelle"); a **project** named with ownership (`project_in`: "I'm
+     writing a fantasy novel called The Salt Road" → The Salt Road, Fantasy
+     novel — instead of the model's Profile line about it); a **birthday**
+     (`birthday_in`: "Rochelle's birthday is on the 3rd of May" → Birthday 3
+     May, for her or the person); an import's "Prefers concise answers…"
+     (a preference, no call). A Profile line that only restates a person Yap
+     found ("Dog's name is Beans" next to Beans, Dog) is left out.
 - **`memory/vocab.rs`** — **memory feeds dictation**, conservatively.
   `entries(items, dictionary, is_word)`: the people and projects whose
   "Spell this name in dictation" is on (the newest 40), as dictionary entries
@@ -280,7 +303,12 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
 
 `MemorySection.svelte` (Settings → Assistant → Memory, after Commands and
 the Voice Assistant; page id `memory`, which the toast's **Manage** opens;
-store and toast in `memory.svelte.js`, started by ControlPanel), laid out like
+store and toast in `memory.svelte.js`, started by ControlPanel — it re-reads
+`memory_list` on `yap-memory-changed`, once more as soon as that listener is
+in place (a change before it would go unheard), and applies only an answer
+at least as new as the one shown: overlapping loads answer out of order, as
+each name's dictation hint asks the spell checker, and an older list put
+back made the memory e2e specs fail about 1 run in 30), laid out like
 Claude's in Settings' one row style (2026-10-22 review,
 [frontend-settings.md](./frontend-settings.md)): the switches, You, "Tell Yap
 what to change" and import / export / clear are flat rows; the people,
