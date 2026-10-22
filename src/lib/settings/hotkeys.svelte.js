@@ -1,9 +1,9 @@
-// Settings' four global shortcuts (input_hook.rs): which command applies
+// Settings' five global shortcuts (input_hook.rs): which command applies
 // each, their names for clash messages, and whether one is being picked
 // right now (Settings' in-page hotkey fallback stands down meanwhile, so
 // pressing the current hotkey to replace it doesn't start a dictation).
 // Shared by every page that shows a shortcut (Dictation, Commands, Voice
-// Assistant, Meetings) and the Shortcuts page, which shows all four.
+// Assistant, Meetings) and the Shortcuts page, which shows them all.
 import { invoke } from '@tauri-apps/api/core';
 import { formatHotkeySpec, hotkeysClash } from '../hotkeys.js';
 
@@ -12,6 +12,7 @@ export const HOTKEY_CMD = {
   editHotkey: 'configure_edit_hotkey',
   meetingHotkey: 'configure_meeting_hotkey',
   assistantHotkey: 'configure_assistant_hotkey',
+  readHotkey: 'configure_read_hotkey',
 };
 
 export const HOTKEY_NAMES = {
@@ -19,6 +20,7 @@ export const HOTKEY_NAMES = {
   editHotkey: 'rewrite shortcut',
   meetingHotkey: 'meeting shortcut',
   assistantHotkey: 'assistant shortcut',
+  readHotkey: 'read-aloud shortcut',
 };
 
 /** True while any <SettingsHotkey> is capturing a new key. */
@@ -36,7 +38,7 @@ export function onHotkeyCapturing(cfg, target, on) {
 }
 
 /**
- * The four never fire on one press (`hotkeysClash`, input_hook.rs
+ * The five never fire on one press (`hotkeysClash`, input_hook.rs
  * `clashes`): the message for a refused spec, else null.
  */
 export function validateHotkey(cfg, target, spec) {

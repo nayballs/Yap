@@ -58,7 +58,7 @@
   import { chatRequest } from './chatRequest.svelte.js';
   import ModelChip from './ModelChip.svelte';
   import { modelLine, whereItRuns } from './aiModel.js';
-  import { speech, initSpeech, readAloud as speakText, stopReading as stopSpeech } from './speech.svelte.js';
+  import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from './speech.svelte.js';
   import { formatHotkeySpec } from './hotkeys.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
   import { copyText, messageItems, conversationMarkdown } from './itemMenus.js';
@@ -557,8 +557,9 @@
       messages = [...messages.slice(0, -1), { ...asked, id: res.userMessageId ?? null }, answer];
       refreshList();
       scrollThread();
-      // Read out by itself ("When to speak", decided in Rust).
-      if (res.speak && answer.id) speakText(answer.text, answer.id);
+      // Read out by itself ("When to speak", decided in Rust): the voice
+      // alone, no reading card (that's ▶'s).
+      if (res.speak && answer.id) speakReply(answer.text, answer.id);
     } catch (e) {
       if (!alive) return;
       messages = messages.slice(0, -1);

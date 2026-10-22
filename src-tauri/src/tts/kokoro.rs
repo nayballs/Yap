@@ -625,6 +625,74 @@ mod real {
             }
         }
 
+        /// Read aloud's karaoke on Kokoro, measured: Kokoro's export gives no
+        /// durations, so the words' times come from its audio
+        /// (`marks::from_audio`); here they're set against where Parakeet
+        /// hears each word in that same audio (its own word times), next to
+        /// the plain spread over the length (`marks::estimate`). Nothing is
+        /// played. `YAP_TTS_MODELS` = an installed `models/tts`,
+        /// `YAP_STT_DATA` = a data folder with Parakeet v3 under `models/`.
+        /// `cargo test --features engines tts::kokoro::real::checks::
+        /// word_timing_against_parakeet -- --ignored --nocapture`.
+        #[test]
+        #[ignore]
+        fn word_timing_against_parakeet() {
+            use crate::tts::marks;
+            let files = files().expect("Kokoro installed under YAP_TTS_MODELS");
+            let data = PathBuf::from(std::env::var_os("YAP_STT_DATA").expect("YAP_STT_DATA"));
+            crate::stt::apply_accelerator_settings(true);
+            let stt = crate::stt::create_stt_engine(&data, "parakeet-tdt-0.6b-v3", true).expect("Parakeet");
+            let model = Arc::new(load(&files.model, threads()).unwrap());
+            const TEXTS: &[&str] = &[
+                "Reading aloud helps anyone who finds long pages hard going, and it never gets tired.",
+                "Your meeting with the design team is on Thursday at 2:30 pm, for about 45 minutes.",
+                "Before then, send the budget, book a room for four people, and reread your notes.",
+                "The quick brown fox jumps over the lazy dog, then naps in the afternoon sun.",
+            ];
+            let (mut audio_err, mut plain_err) = (Vec::new(), Vec::new());
+            for voice in ["af_bella", "bf_emma", "bm_george"] {
+                for text in TEXTS {
+                    let said = crate::tts::said_text(text);
+                    let mut s = synth(&model, &files, voice, english(&files, voice.starts_with('b')));
+                    let pcm = s.synthesize(&said).unwrap();
+                    let spans = marks::words(&said);
+                    let (from_audio, how) = marks::from_audio(&said, &spans, &pcm.samples, SAMPLE_RATE, 1);
+                    assert_eq!(how, marks::Timing::Audio);
+                    let plain = marks::estimate(&said, &spans, Duration::ZERO, pcm.duration());
+                    let audio16 = crate::pipeline::resample_linear(&pcm.samples, SAMPLE_RATE, 16_000);
+                    let heard = stt.transcribe_timed(&audio16, Some("en"), false, None).unwrap();
+                    // Parakeet's words, matched to the said ones (exact words only).
+                    let ptext = heard.words.iter().map(|w| w.text.trim()).collect::<Vec<_>>().join(" ");
+                    let pspans = marks::words(&ptext);
+                    if pspans.len() != heard.words.len() {
+                        continue;
+                    }
+                    let map = marks::align(&said, &spans, &ptext, &pspans);
+                    let key = |t: &str, (a, b): (usize, usize)| -> String {
+                        t.chars().skip(a).take(b - a).filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+                    };
+                    for (j, m) in map.iter().enumerate() {
+                        let Some(i) = *m else { continue };
+                        if key(&said, spans[i]) != key(&ptext, pspans[j]) {
+                            continue;
+                        }
+                        let truth = f64::from(heard.words[j].start) * 1000.0;
+                        audio_err.push((from_audio[i].as_secs_f64() * 1000.0 - truth).abs());
+                        plain_err.push((plain[i].as_secs_f64() * 1000.0 - truth).abs());
+                    }
+                }
+            }
+            let stats = |v: &mut Vec<f64>| {
+                v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let pick = |q: f64| v[((v.len() - 1) as f64 * q).round() as usize];
+                (v.len(), pick(0.5), pick(0.9), v.iter().filter(|&&e| e <= 150.0).count() as f64 / v.len() as f64 * 100.0)
+            };
+            let (n, med, p90, within) = stats(&mut audio_err);
+            println!("Kokoro, from its audio: {n} words, |error| median {med:.0} ms, 90th {p90:.0} ms, {within:.0}% within 150 ms");
+            let (n, med, p90, within) = stats(&mut plain_err);
+            println!("Kokoro, plain spread over the length: {n} words, |error| median {med:.0} ms, 90th {p90:.0} ms, {within:.0}% within 150 ms");
+        }
+
         /// Which sentences come out as NaN/silence, per model file and
         /// optimisation level (`YAP_KOKORO_PROBE` = more model files, `;`-separated).
         #[test]

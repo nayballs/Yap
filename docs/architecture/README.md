@@ -16,7 +16,7 @@ its one line in CLAUDE.md's module index).
 - [chat-and-assistant.md](./chat-and-assistant.md) — chats, the tool loop and its note tools, the Voice Assistant, the Chat view and its model picker.
 - [memory.md](./memory.md) — what Yap remembers about you: the store, learning from chats and meetings, what a question gets, the memory tools, names for dictation, Settings → Memory.
 - [web-and-apps.md](./web-and-apps.md) — web search (Yap's own and the cloud models' own), reading pages, opening apps.
-- [spoken-replies.md](./spoken-replies.md) — reading answers aloud: Kokoro, Windows' voices, text prepared for speech, the speaker.
+- [spoken-replies.md](./spoken-replies.md) — reading answers aloud: Kokoro, Windows' voices, text prepared for speech, the speaker; Read aloud, anywhere (`read_aloud.rs`) and its word timing.
 - [notes.md](./notes.md) — the notes store, folders, the Actions engine, the Notes view.
 - [meetings.md](./meetings.md) — the recorder, digests and the action plan, the end of a meeting, the notepad's AI helpers, the meeting notepad window, the Meetings view.
 - [speakers.md](./speakers.md) — the speaker engine (diarization, beta) and the speaker map: who said what.

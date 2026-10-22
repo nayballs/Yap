@@ -193,6 +193,13 @@ pub fn configure_assistant_hotkey(spec: String) {
     let _ = crate::input_hook::configure_assistant(&spec);
 }
 
+/// Live-apply the Read aloud shortcut (the Settings recorder pauses it while
+/// choosing a key, as for the others).
+#[tauri::command]
+pub fn configure_read_hotkey(spec: String) {
+    let _ = crate::input_hook::configure_read(&spec);
+}
+
 /// The assistant shortcut went down (`pressed`) or up in one of Yap's own
 /// windows (their in-page fallback: the global hook never sees keys while a
 /// Yap webview has the focus). The hook's own path, so push-to-talk's hold
@@ -1640,6 +1647,7 @@ pub fn save_config(
         tracing::warn!("Failed to apply meeting hotkey: {}", e);
     }
     crate::input_hook::configure_assistant_from(&cfg);
+    crate::input_hook::configure_read_from(&cfg);
     crate::tts::set_volume(cfg.tts_volume);
     // The tray is reconciled on every save (always-on since the pill retired) —
     // reconcile it live instead of waiting for the next app restart.

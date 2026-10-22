@@ -106,13 +106,14 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   with cleanup on a cloud provider and no key ("Add your Groq API key" + Add
   key, which opens and focuses the field).
 - **Hotkeys** (`settings/hotkeys.svelte.js` + `SettingsHotkey.svelte`): the
-  four (`HOTKEY_CMD` / `HOTKEY_NAMES`: dictation hotkey, rewrite shortcut,
-  meeting shortcut, assistant shortcut) are refused when they'd fire on one
+  five (`HOTKEY_CMD` / `HOTKEY_NAMES`: dictation hotkey, rewrite shortcut,
+  meeting shortcut, assistant shortcut, read-aloud shortcut) are refused when they'd fire on one
   press (`hotkeysClash`: "Already used by the …", or "Clashes with the … (Win
   + Alt + M): one press would start both"); while one is being picked
   (`hotkeyCapture.on`) its live binding is paused and the in-page fallback
-  stands down. The fallback catches the meeting, assistant and dictation keys,
-  in that order.
+  stands down. The fallback catches the meeting, assistant, read-aloud and
+  dictation keys, in that order (read aloud: the page's own selection,
+  `speech.svelte.js` `readPageSelection`).
 
 ## The pages
 
@@ -167,9 +168,10 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   (dictations never show up in Win+V history), and the **Dictionary** link row
   (its counts; it leaves Settings for the Dictionary view, `onshowview`).
 - **Shortcuts** (`settings/ShortcutsPage.svelte`, OpenWhispr's Hotkeys page):
-  the four global shortcuts together — Dictate, Rewrite selected text, Ask the
-  Voice Assistant, Meeting notes — each in keycaps with Change, a clash said
-  under the one being set. Their own pages show the same control.
+  the five global shortcuts together — Dictate, Rewrite selected text, Ask the
+  Voice Assistant, Read aloud, Meeting notes — each in keycaps with Change, a
+  clash said under the one being set. Their own pages show the same control
+  (Read aloud: Voice Assistant → **Read aloud**, `#settings-read-aloud`).
 - **Meetings** (`settings/MeetingsPage.svelte`, Wispr's Notetaker page and
   order): **Call detection** (`#settings-meetings`): "Detect calls and offer
   to take notes" (`meetingDetection`), **"Ask about calls in · 8 of 12 apps ›"**

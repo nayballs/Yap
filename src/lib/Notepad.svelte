@@ -44,7 +44,7 @@
   import { toast } from './ui/toast.svelte.js';
   import { renderMarkdown } from './markdown.js';
   import { nextModel, modelLine, whereItRuns } from './aiModel.js';
-  import { speech, initSpeech, readAloud } from './speech.svelte.js';
+  import { speech, initSpeech, readAloud, readPageSelection } from './speech.svelte.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
   import { openExternalLink } from './externalLinks.js';
   import { initMeetingCheckIns } from './meetingCheckIn.js';
@@ -829,6 +829,12 @@
       e.preventDefault();
       e.stopPropagation();
       invoke('assistant_key', { pressed: true }).catch(() => {});
+    } else if (cfg.readHotkey && hotkeyMatchesKeydown(e, cfg.readHotkey)) {
+      // Read aloud (read_aloud.rs): what's selected here. (During a meeting
+      // Yap keeps quiet, and the card says so.)
+      e.preventDefault();
+      e.stopPropagation();
+      readPageSelection();
     } else if (hotkeyMatchesKeydown(e, cfg.hotkey)) {
       e.preventDefault();
       e.stopPropagation();

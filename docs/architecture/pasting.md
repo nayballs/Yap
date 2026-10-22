@@ -44,7 +44,9 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   no-activate, cloaked, untitled or a shell window), classifying it
   (`app_kind::of_window`) and re-reading the cursor's context there
   (`selection::read_context`, not in a terminal). Test mode returns the text without pasting
-  ("e2e: not pasting the last transcript"). No hotkey for it yet. **The paste
+  ("e2e: not pasting the last transcript"). No hotkey for it yet.
+  `app_window()` / `focus(hwnd)`: the same window-finding and re-focusing
+  for the tray's "Read selection aloud" (`read_aloud.rs`). **The paste
   keys** (`simulate_paste(target, key)`; `inject_text`'s `kind` is the window's
   kind as read, before the settings): Ctrl+V as always (virtual keys only), or a
   terminal's own (`app_kind::Host::paste_key`: Shift+Insert, Ctrl+Shift+V) sent
@@ -91,7 +93,20 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   timeouts. **Edit
   mode** (`capture_selection(target, copy_fallback)`): the selected text
   (TextPattern, else the Ctrl+C trick — never in a terminal with terminal mode
-  on, where Ctrl+C would interrupt the program), 2 s UIA timeouts. **The text around the cursor** (`begin_dictation(target,
+  on, where Ctrl+C would interrupt the program), 2 s UIA timeouts. **Read
+  aloud** (`read_selected(target, copy_fallback)` → `Selected {text, via}`,
+  for `read_aloud.rs`): the focus must be in the target's process and not a
+  password box; then UI Automation's TextPattern selection of the focused
+  element or the first of up to 12 parents that has a TextPattern (a web
+  page's document when the focus is on a link; **read-only text too**: a
+  page, a PDF, a viewer — it's only read), several ranges (Word) joined
+  (`uia::selection_in`, `via` "uia"); else a Win32 edit control's own
+  selection cut from its ValuePattern text where `EM_GETSEL` says
+  (`uia::edit_selection_in`, "edit": a WinForms TextBox has no TextPattern);
+  else, only with `copy_fallback` — which read aloud never gives in a
+  terminal, whatever terminal mode says — the Ctrl+C trick ("copy"). Test
+  mode never; robot mode only in the test's own windows. Lengths and `via`
+  at `debug`, never the text. **The text around the cursor** (`begin_dictation(target,
   read)` from `start_recording`, `take_context()` at paste): when `smart_spacing` is
   on and it isn't edit mode, a background thread reads ≤ 500 characters before and
   after the caret and the selection (a long selection as its start + end) —

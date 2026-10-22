@@ -56,6 +56,7 @@ export const SETTINGS_INDEX = [
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Rewrite selected text', desc: 'Select text, press it and say how to change it', keywords: 'shortcut shortcuts hotkey edit rewrite commands', anchor: 'shortcut-rewrite' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Ask the Voice Assistant', desc: 'Ask out loud from any app', keywords: 'shortcut shortcuts hotkey assistant voice', anchor: 'shortcut-assistant' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Meeting notes', desc: 'Take notes on a call, press again to stop', keywords: 'shortcut shortcuts hotkey meeting win alt m', anchor: 'shortcut-meeting' },
+  { page: 'shortcuts', section: 'Global shortcuts', label: 'Read aloud', desc: 'Select text in any app and press it to hear it', keywords: 'shortcut shortcuts hotkey read aloud speak selection text to speech tts dyslexia reading', anchor: 'shortcut-read' },
 
   // ---- Meetings ----
   { page: 'meetings', section: 'Call detection', label: 'Detect calls and offer to take notes', desc: 'Nothing records until you click Record notes', keywords: 'call detection teams zoom meet calls notetaker', anchor: 'call-detection', toggle: 'meetingDetection' },
@@ -83,6 +84,7 @@ export const SETTINGS_INDEX = [
   // ---- Voice Assistant ----
   { page: 'voice', section: 'Assistant shortcut', label: 'Assistant shortcut', desc: 'Ask out loud from any app', keywords: 'shortcut hotkey assistant voice ask', anchor: 'assistant-shortcut' },
   { page: 'voice', section: 'Assistant shortcut', label: 'Show the answer on the Yap bar', desc: 'Your question and its answer above the bar', keywords: 'answer card bar', anchor: 'answer-card', toggle: 'assistantAnswerCard' },
+  { page: 'voice', section: 'Read aloud', label: 'Read aloud shortcut', desc: 'Select text in any app and hear it, word by word on the Yap bar', keywords: 'read aloud shortcut hotkey selection speak text to speech tts dyslexia reading karaoke', anchor: 'read-shortcut' },
   { page: 'voice', section: 'Opening apps', label: 'Let Yap open apps when you ask', desc: '“Open Spotify”', keywords: 'open apps launch start programs', anchor: 'open-apps', toggle: 'openApps' },
   { page: 'voice', section: 'Opening apps', label: 'Nicknames', desc: 'Say a nickname, and Yap opens that app', keywords: 'open apps alias nickname', anchor: 'app-nicknames' },
   { page: 'voice', section: 'Web search', label: 'Look things up on the web', desc: 'Chat and the Voice Assistant search when a question needs it', keywords: 'web search internet google exa tavily wikipedia', anchor: 'web-search', toggle: 'webSearch' },

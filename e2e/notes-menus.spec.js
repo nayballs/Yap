@@ -4,8 +4,8 @@
 //
 // A folder row: Rename in place (its notes go along), Delete… after a
 // question (its notes move to Personal); Personal and Meetings can't be
-// either, in the menu or in Rust. A note row: Move to ▸, Copy as Markdown,
-// Delete… (a recording meeting stops first, the notepad's way). The menus
+// either, in the menu or in Rust. A note row: Move to ▸, Read aloud, Copy as
+// Markdown, Delete… (a recording meeting stops first, the notepad's way). The menus
 // open from a right-click, the row's ⋯ and the keyboard (Shift+F10), close
 // on Esc with the focus back on the row, and cancel the `contextmenu` event so
 // WebView2's own menu never shows there. Elsewhere WebView2's menu is cut
@@ -230,6 +230,7 @@ test('a note row: Move to, Copy as Markdown, Delete…; a recording meeting stop
   await expect(menu(main).getByRole('menuitem')).toHaveText([
     'Rename',
     'Move to',
+    'Read aloud',
     'Copy as Markdown',
     'Export…',
     'Delete…',

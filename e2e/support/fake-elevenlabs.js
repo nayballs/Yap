@@ -11,6 +11,8 @@
 //   `usage = false`, the key isn't allowed to read it);
 // - `POST /v1/text-to-speech/{voice}/stream?output_format=pcm_24000`: raw
 //   16-bit PCM at 24 kHz for the sentence (~60 ms a word, in pieces);
+// - `POST …/stream/with-timestamps` (reading aloud): the same audio as JSON
+//   lines (base64), each with its characters' start times;
 // - `GET /samples/{name}.wav`: a voice's sample.
 // Every call needs `xi-api-key: <key>` (`KEY`, or `setKey`): another key is a
 // 401 `invalid_api_key`, as ElevenLabs answers. `fail(status, code)` answers
@@ -138,6 +140,39 @@ export async function startFakeElevenLabs() {
       for (let i = 0; i < pcm.length; i += 4_801) {
         if (res.destroyed) return;
         res.write(pcm.subarray(i, i + 4_801));
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      res.end();
+    } else if (req.method === 'POST' && /^\/v1\/text-to-speech\/[^/]+\/stream\/with-timestamps$/.test(url.pathname)) {
+      // Reading aloud (read_aloud.rs): the same audio as JSON lines, each
+      // with its characters' start times on the sentence's clock.
+      if (state.fail) {
+        const { status, type, code, message } = state.fail;
+        error(res, status, type, code, message);
+        return;
+      }
+      const text = String(JSON.parse(body || '{}').text || '');
+      const pcm = pcmFor(text);
+      const chars = [...text];
+      const perChar = pcm.length / 2 / 24_000 / Math.max(1, chars.length);
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Transfer-Encoding': 'chunked' });
+      const pieces = 3;
+      for (let p = 0; p < pieces; p++) {
+        if (res.destroyed) return;
+        const from = Math.floor((chars.length * p) / pieces);
+        const to = Math.floor((chars.length * (p + 1)) / pieces);
+        const a = Math.floor((pcm.length / 2) * (p / pieces)) * 2;
+        const b = Math.floor((pcm.length / 2) * ((p + 1) / pieces)) * 2;
+        const line = {
+          audio_base64: pcm.subarray(a, b).toString('base64'),
+          alignment: {
+            characters: chars.slice(from, to),
+            character_start_times_seconds: chars.slice(from, to).map((_, k) => (from + k) * perChar),
+            character_end_times_seconds: chars.slice(from, to).map((_, k) => (from + k + 1) * perChar),
+          },
+          normalized_alignment: null,
+        };
+        res.write(JSON.stringify(line) + '\n');
         await new Promise((r) => setTimeout(r, 5));
       }
       res.end();

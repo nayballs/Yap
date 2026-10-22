@@ -546,6 +546,34 @@ export function startEditorPage({ nonce, dir, note, beside }) {
 }
 
 /**
+ * A page of text to read ("Yap robot reading - <nonce>"): `paragraphs` as
+ * the page's own text (not a text box), in an element that has the focus
+ * (`#box`, focusable): `selectText(i?)` selects paragraph `i` (or them all)
+ * as a mouse would, over the DevTools protocol.
+ */
+export async function startReadingPage({ nonce, dir, paragraphs }) {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const body = `<div id="box" tabindex="-1">${paragraphs.map((p) => `<p>${esc(p)}</p>`).join('')}</div>`;
+  const page = await startPage({ nonce, dir, title: `Yap robot reading - ${nonce}`, body });
+  return {
+    ...page,
+    async selectText(i) {
+      await page.evaluate((n) => {
+        const box = document.getElementById('box');
+        const ps = box.querySelectorAll('p');
+        const range = document.createRange();
+        if (n == null) range.selectNodeContents(box);
+        else range.selectNodeContents(ps[n]);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }, i ?? null);
+      await sleep(400);
+    },
+  };
+}
+
+/**
  * A page titled "WhatsApp - <nonce>": a chat app to Yap (nothing is sent
  * anywhere); `editable`: its message box a contenteditable, as WhatsApp
  * Web's is; `attrs`: the box's attributes (default: its aria-label).
@@ -709,6 +737,13 @@ export async function startNotepad({ nonce, dir }) {
     file,
     focus: () => focus(win.hwnd),
     text: () => windowText(win.hwnd),
+    /** Select all its text (Ctrl+A, only while it's in front). */
+    async selectAll() {
+      await focus(win.hwnd);
+      const r = helper('keys', win.hwnd, nonce, 'ctrl+a');
+      if (!r.ok) throw new Error(`Couldn't select Notepad's text: ${r.error}`);
+      await sleep(150);
+    },
     async close() {
       try {
         await focus(win.hwnd);

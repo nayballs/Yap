@@ -231,6 +231,9 @@ struct Visibility {
     /// A question to the Voice Assistant is being asked, answered or read
     /// aloud (`assistant.rs`): its capsule shows, as a dictation's does.
     assistant: bool,
+    /// Text is being read aloud, or the reading card has a note
+    /// (`read_aloud.rs`): the card shows, bar on or off.
+    reading: bool,
     /// A meeting is recording.
     meeting: bool,
     /// "Hide the bar for 1 hour" is running.
@@ -250,7 +253,7 @@ struct Visibility {
 /// — though a card still shows over a borderless one (Wispr's call card
 /// appears over a game), just not the idle pill.
 fn shows(v: Visibility) -> bool {
-    if v.dictation != Dictation::Idle || v.assistant {
+    if v.dictation != Dictation::Idle || v.assistant || v.reading {
         return true;
     }
     if !v.enabled {
@@ -288,7 +291,7 @@ fn seen_now(v: Visibility) -> bool {
 /// while a dictation or the assistant shows (its ✕ / ✓, Undo and ■ work
 /// with the bar off too).
 fn clickable(v: Visibility, shown: bool, on_region: bool) -> bool {
-    (v.enabled || v.dictation != Dictation::Idle || v.assistant) && shown && on_region
+    (v.enabled || v.dictation != Dictation::Idle || v.assistant || v.reading) && shown && on_region
 }
 
 /// A monitor change waiting out [`FOLLOW_AFTER_MS`].
@@ -345,11 +348,15 @@ struct State {
     /// The dictation hotkey and meeting-notes shortcut specs, for tooltips.
     hotkey: String,
     meeting_hotkey: Option<String>,
+    /// The Read aloud shortcut, for 🔊's tooltip.
+    read_hotkey: Option<String>,
     /// "Hide the bar for 1 hour" until (unix ms), 0 = not hidden.
     hidden_until: u64,
     dictation: Dictation,
     /// Where a question to the Voice Assistant is (`yap-assistant`).
     assistant: crate::assistant::Phase,
+    /// The reading card is up (`read_aloud.rs`).
+    reading: bool,
     meeting: bool,
     /// What's fullscreen on the bar's monitor (whatever the setting).
     fullscreen: Fullscreen,
@@ -396,9 +403,11 @@ impl Default for State {
             edge: Edge::Bottom,
             hotkey: String::new(),
             meeting_hotkey: None,
+            read_hotkey: None,
             hidden_until: 0,
             dictation: Dictation::Idle,
             assistant: crate::assistant::Phase::Idle,
+            reading: false,
             meeting: false,
             fullscreen: Fullscreen::None,
             shown: false,
@@ -436,11 +445,18 @@ impl State {
         self.dictation != Dictation::Idle || self.assistant != crate::assistant::Phase::Idle
     }
 
+    /// Something to watch the cursor for: the bar is on, or something shows
+    /// with it off (a dictation, the assistant, the reading card).
+    fn watching(&self) -> bool {
+        self.enabled || self.busy() || self.reading
+    }
+
     fn visibility(&self, now: u64) -> Visibility {
         Visibility {
             enabled: self.enabled,
             dictation: self.dictation,
             assistant: self.assistant != crate::assistant::Phase::Idle,
+            reading: self.reading,
             meeting: self.meeting,
             hidden: self.hidden_until > now,
             fullscreen: self.fullscreen(),
@@ -543,6 +559,8 @@ pub struct Status {
     hotkey: String,
     /// The meeting-notes shortcut spec, if one is set, for the ◉ tooltip.
     meeting_hotkey: Option<String>,
+    /// The Read aloud shortcut spec, if one is set, for the 🔊 tooltip.
+    read_hotkey: Option<String>,
     /// `meeting::state()`: `{ recording, noteId, elapsedSecs }`.
     meeting: serde_json::Value,
     /// A live call ◉ would record ("Record this Teams call").
@@ -550,6 +568,8 @@ pub struct Status {
     /// Where a question to the Voice Assistant is: "idle" | "listening" |
     /// "thinking" | "speaking" (the capsule's assistant variant).
     assistant: crate::assistant::Phase,
+    /// The reading card is up (its content: `yap-read`, `read_aloud.rs`).
+    reading: bool,
     /// The card on screen (none or one: `notice.rs` shows them one at a
     /// time)…
     cards: Vec<Card>,
@@ -574,9 +594,11 @@ pub fn status() -> Status {
         fullscreen: s.fullscreen().as_str(),
         hotkey: s.hotkey.clone(),
         meeting_hotkey: s.meeting_hotkey.clone(),
+        read_hotkey: s.read_hotkey.clone(),
         meeting,
         call,
         assistant: s.assistant,
+        reading: s.reading,
         cards: s.front_card().cloned().into_iter().collect(),
         waiting: s
             .cards
@@ -681,7 +703,7 @@ fn poller(app: AppHandle, rx: mpsc::Receiver<()>) {
     loop {
         let timeout = {
             let s = lock();
-            let watching = s.enabled || s.busy();
+            let watching = s.watching();
             if !watching {
                 IDLE_TICK
             } else if s.interactive || s.near {
@@ -727,7 +749,7 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
     use overlay::win;
     let (placed, frozen, edge, replace, autohide_due) = {
         let s = lock();
-        let watching = s.enabled || s.busy();
+        let watching = s.watching();
         if !watching {
             return;
         }
@@ -913,12 +935,18 @@ fn give_focus_back() {
     }
 }
 
-/// Esc while the card on screen has an `escape_action`.
+/// Esc while the card on screen has an `escape_action` — or while the
+/// reading card is up: it stops reading.
 fn escape(app: &AppHandle) {
-    let target = {
+    let (reading, target) = {
         let s = lock();
-        s.front_card().and_then(|c| c.escape_action.clone().map(|a| (c.id.clone(), a)))
+        (s.reading, s.front_card().and_then(|c| c.escape_action.clone().map(|a| (c.id.clone(), a))))
     };
+    if reading {
+        tracing::info!("bar: Esc stops reading aloud");
+        crate::read_aloud::stop(app);
+        return;
+    }
     if let Some((id, action)) = target {
         tracing::info!(card = %id, "bar: Esc");
         card_action(app, &id, &action);
@@ -1018,6 +1046,7 @@ fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
         .ok()
         .and_then(|v| v.get("meetingHotkey").and_then(|h| h.as_str()).map(str::to_string))
         .filter(|h| !h.is_empty());
+    let read_hotkey = Some(cfg.read_hotkey.clone()).filter(|h| !h.trim().is_empty());
     let theme = theme_from_config(&cfg.bar_theme);
     let dictation_buttons = dictation_buttons_from_config(&cfg.bar_dictation_buttons);
     let changed = s.enabled != cfg.bar_enabled
@@ -1026,7 +1055,8 @@ fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
         || s.dictation_buttons != dictation_buttons
         || s.edge != edge
         || s.hotkey != cfg.hotkey
-        || s.meeting_hotkey != meeting_hotkey;
+        || s.meeting_hotkey != meeting_hotkey
+        || s.read_hotkey != read_hotkey;
     s.replace |= s.edge != edge;
     s.enabled = cfg.bar_enabled;
     s.hide_fullscreen = cfg.bar_hide_fullscreen;
@@ -1035,6 +1065,7 @@ fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
     s.edge = edge;
     s.hotkey = cfg.hotkey.clone();
     s.meeting_hotkey = meeting_hotkey;
+    s.read_hotkey = read_hotkey;
     changed
 }
 
@@ -1083,6 +1114,22 @@ pub fn on_pipeline_state(app: &AppHandle, state: &str) {
     repick(app);
     apply(app);
     wake();
+}
+
+/// The reading card came up or went (`read_aloud.rs`): the window shows
+/// while it's up, bar on or off, and Esc stops the reading.
+pub fn set_reading(app: &AppHandle, on: bool) {
+    let changed = {
+        let mut s = lock();
+        let changed = s.reading != on;
+        s.reading = on;
+        changed
+    };
+    if changed {
+        apply(app);
+        emit(app);
+        wake();
+    }
 }
 
 /// The bar takes cards right now (it's on and not hidden for an hour; over
@@ -1244,7 +1291,7 @@ fn after_cards_changed(app: &AppHandle) {
 fn sync_escape() {
     let wanted = {
         let s = lock();
-        s.shown && cards_seen() && s.front_card().is_some_and(|c| c.escape_action.is_some())
+        s.shown && (s.reading || cards_seen() && s.front_card().is_some_and(|c| c.escape_action.is_some()))
     };
     #[cfg(windows)]
     if wanted && !crate::e2e::active() {
@@ -1333,6 +1380,13 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         // ■ on the assistant's capsule: stop the answer (its voice, or one
         // still coming; it's in Chat either way).
         "assistant-stop" => crate::assistant::stop(app),
+        // 🔊: read the selection in the app you're in aloud (the bar never
+        // takes the focus, so it's still selected there); while reading, ■.
+        "read-aloud" => {
+            give_focus_back();
+            crate::read_aloud::read_selection(app, crate::read_aloud::Origin::Bar);
+        }
+        "read-stop" => crate::read_aloud::stop(app),
         // ■ on the recording pill: end the meeting, which writes the action
         // plan in Rust (or asks "Started by mistake?").
         "stop-meeting" => crate::meeting_end::end(app, Some(overlay::LABEL))?,
@@ -1412,7 +1466,8 @@ pub fn bar_pointer_left(app: AppHandle) {
 
 /// A bar button or menu item: "dictate" | "dictation-stop" |
 /// "dictation-cancel" | "dictation-undo" | "meeting" | "stop-meeting" |
-/// "open-note" | "new-note" | "open" | "settings" | "hide" | "show" | "off".
+/// "read-aloud" | "read-stop" | "open-note" | "new-note" | "open" |
+/// "settings" | "hide" | "show" | "off".
 #[tauri::command]
 pub async fn bar_action(app: AppHandle, action: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || act(&app, &action))
@@ -1940,6 +1995,23 @@ mod tests {
         // Its phases from the page's event.
         let phase: crate::assistant::Phase = serde_json::from_value(serde_json::json!("speaking")).unwrap();
         assert_eq!(phase, crate::assistant::Phase::Speaking);
+    }
+
+    #[test]
+    fn the_reading_card_shows_and_takes_clicks_bar_on_or_off() {
+        let off = Visibility { enabled: false, ..vis() };
+        for v in [
+            vis(),
+            off,
+            Visibility { hidden: true, ..vis() },
+            Visibility { fullscreen: Fullscreen::Exclusive, ..vis() },
+        ] {
+            assert!(shows(Visibility { reading: true, ..v }));
+        }
+        // Its buttons work with the bar off, and only on the card.
+        assert!(clickable(Visibility { reading: true, ..off }, true, true));
+        assert!(!clickable(Visibility { reading: true, ..off }, true, false));
+        assert!(!shows(off));
     }
 
     #[test]

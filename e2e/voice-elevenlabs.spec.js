@@ -249,6 +249,41 @@ test('a Chat answer is read aloud by ElevenLabs, sentence by sentence', async ({
   await setConfig(yap, main, { ttsProvider: 'local', speakReplies: false, speakWhen: 'voice' });
 });
 
+test('Read aloud with ElevenLabs: its own word timing (/stream/with-timestamps), a sentence ahead', async ({ yap, main, eleven }) => {
+  await setConfig(yap, main, { ...ELEVEN, ttsRate: 1 });
+  // Settings' copy auto-saves what it adopted (400 ms): ElevenLabs it is.
+  await main.waitForTimeout(700);
+  await expectStore(yap, 'config.json', (c) => c.ttsProvider === 'elevenlabs');
+  await yap.invoke('read_aloud_text', {
+    text: [
+      'The launch is on Friday.',
+      'Sam books the room at noon and sends the invites to the whole team before the end of the day.',
+      'The venue has space for forty people, a projector and a kitchen that the caterers can use.',
+      'Everyone should bring their laptop, their charger and any questions they still have about the plan.',
+      'We will meet again on Monday to go over what went well and what we would change next time.',
+    ].join(' '),
+    markdown: false,
+    source: 'yap',
+  });
+  // The first sentence asked for with its timing; the key in its header only.
+  expect((await spoken(yap)).map((s) => s.engine)).toEqual(['elevenlabs']);
+  await expect.poll(() => eleven.speech().length).toBeGreaterThanOrEqual(1);
+  const [first] = eleven.speech();
+  expect(first.path).toBe(`/v1/text-to-speech/${GEORGE}/stream/with-timestamps`);
+  expect(first.query).toBe('?output_format=pcm_24000');
+  expect(first.key).toBe(KEY);
+  expect(first.body).toEqual({ text: 'The launch is on Friday.', model_id: 'eleven_flash_v2_5' });
+  // The card's words timed by ElevenLabs itself, and it moves on.
+  await expect.poll(async () => (await yap.invoke('read_aloud_state')).timing).toBe('engine');
+  expect((await yap.invoke('read_aloud_state')).engine).toBe('elevenlabs');
+  await expect.poll(async () => (await yap.invoke('read_aloud_state')).word ?? -1).toBeGreaterThanOrEqual(1);
+  // Never all three asked for at once: a sentence ahead of the voice.
+  const s = await yap.invoke('read_aloud_state');
+  expect(eleven.speech().length).toBeLessThanOrEqual(s.index + 2);
+  await yap.invoke('read_aloud_action', { action: 'stop' });
+  await setConfig(yap, main, { ttsProvider: 'local' });
+});
+
 test('quota used up and no local voice: one notice, and the answer goes unsaid', async ({ yap, main, eleven, fakeLlm, shot }) => {
   expect((await yap.invoke('tts_kokoro_status')).status.installed).toBe(false);
   await setConfig(yap, main, { ...ELEVEN, ttsEngine: 'kokoro', speakReplies: true, speakWhen: 'always' });

@@ -1,6 +1,6 @@
 # Spoken replies
 
-Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on the person's own key; text prepared for speech, the speaker queue and when Yap talks. ("§Current status" below means [status.md](./status.md).)
+Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on the person's own key; text prepared for speech, the speaker queue and when Yap talks; and **Read aloud, anywhere** — any selected text read in that voice with a karaoke reading card on the Yap bar. ("§Current status" below means [status.md](./status.md).)
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -13,16 +13,19 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   voicing carries a `CloudPlan`: the local voice that can stand in
   (`local_voice`: Kokoro installed, or Windows voices chosen — not Windows
   voices as a stand-in for an undownloaded Kokoro) and the key/choice
-  fingerprints. `speak(text, id)` is the one way in — an answer's
-  markdown or any plain text (a later "read the selection aloud" reuses
-  it). **Engines** (`Engine` → `Synth`, text → `Pcm`; `Synth::stream`
+  fingerprints. `speak(text, id)` is the way in for spoken replies — an
+  answer's markdown or any plain text; `read(track, from, id, rate)` for
+  reading aloud (`read_aloud.rs`, below). **Engines** (`Engine` → `Synth`, text → `Pcm`; `Synth::stream`
   hands audio on as it's made — a cloud voice's first piece plays before
   the sentence is all made; the default makes the whole sentence;
   `prepare` (Kokoro and ElevenLabs join sentences under 3 words to the
   next), `cancel`): **Kokoro** (`tts/kokoro.rs`, below; the default) and
   **Windows voices** (`WindowsVoices`: WinRT `SpeechSynthesizer`,
   `SynthesizeTextToStreamAsync` → WAV → `parse_wav`; rate via
-  `SpeakingRate`, minimal appended silence). `chosen(cfg)`: Kokoro with
+  `SpeakingRate`, minimal appended silence; `IncludeWordBoundaryMetadata`
+  on, so each sentence's stream carries a `SpeechCue` per word —
+  `StartPositionInInput` (UTF-16) and `StartTime` — handed to the speaker
+  by `Synth::marks`). `chosen(cfg)`: Kokoro with
   `tts_voice` when `tts_engine` isn't "windows" and Kokoro can speak
   (installed, in this build), else Windows voices with `tts_windows_voice`
   — so Windows voices speak until Kokoro is downloaded, and Kokoro takes
@@ -61,7 +64,21 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   start over one, and refuses while a meeting records (the loopback would
   put Yap in "Them"; `meeting::start` stops it). Each sentence is
   `stream`ed into the sink piece by piece (each piece checked: stopped, or
-  a dictation started → the stream ends). **A cloud voice failing**
+  a dictation started → the stream ends). **A read-aloud job** (`Job.track`
+  + `first`: the `Track`'s shown sentences from there): each sentence is
+  said as `said_text` writes it (`inline_text` + `normalize::for_speech`),
+  made only once the one before it **plays** (`wait_turn`: one sentence
+  ahead of the voice, never the whole text), its pieces appended
+  **tagged** (`Playback::append_tagged`, `Tag {sentence, offset}`) — rodio
+  through a `Tagged` source that moves an atomic position on with every
+  sample the output takes (frozen while paused), `SimPlayback` on its
+  clock, which stands still while paused — and, once made, its words'
+  start times kept on the track (`Track::record` → `Made {starts, timing,
+  engine}`, the 32 sentences round the voice): the engine's own
+  (`Synth::marks`), else from its audio (`marks::from_audio`), mapped back
+  from the said words to the shown ones (`marks::align`). `position()`,
+  `pause()`, `resume()` (the playback held where it is: rodio's
+  `Sink::pause`). **A cloud voice failing**
   (`Job.fallback`: `Fallback {local, notify}`): the rest of that answer —
   the failed sentence included — goes to the local voice, if there's one,
   else the answer stops there; the failing engine is never asked again for
@@ -101,9 +118,14 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   (`SimPlayback`), no device; what would have been said (with its `engine`)
   goes to the debug-only `tts_e2e_spoken {clear?}` (a cloud voice's
   stand-in taking over adds a record with its `fallback` error; `clear`
-  also forgets the cloud's last failure). An `#[ignore]`d
+  also forgets the cloud's last failure; a read-aloud records all its
+  said sentences when it starts). An `#[ignore]`d
   `windows_voices_on_this_pc` lists the voices and synthesises a sentence
-  to a WAV in a temp folder (never played); `first_audio_latency`
+  to a WAV in a temp folder (never played); `windows_word_cues_on_this_pc`
+  makes a sentence into memory and prints each word's cue beside the
+  estimate from its audio alone (measured 2026-10-22, the default voice:
+  cues at 101 / 436 / 761 / 1386 … ms, the audio estimate within 0–150 ms
+  of them, the comma's pause pinned within 4 ms); `first_audio_latency`
   (`--features engines`) times `speak` → first piece at the output for
   Kokoro and for ElevenLabs' path against a local stand-in
   (`YAP_TTS_STANDIN_MS`).
@@ -150,10 +172,24 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     `insufficient_credits` (402) / the older 401 `quota_exceeded` → Quota,
     `missing_permissions` / `insufficient_permissions` / 403 → NotAllowed,
     429 → RateLimited, `voice_not_found` / 404 → VoiceGone, 5xx →
-    ServiceDown. Debug-only `YAP_ELEVENLABS_URL` names a test run's
-    stand-in (`e2e/support/fake-elevenlabs.js`); without it a test run
+    ServiceDown. **Word timing** (reading aloud: the engine built
+    `.timed(true)` by `voicing_for(cfg, true)`): the same request to
+    `POST /v1/text-to-speech/{voice}/stream/with-timestamps?output_format=
+    pcm_24000` (`timed_request`; the docs, 22 Oct 2026: a stream of JSON,
+    one object a line — `audio_base64` + `alignment {characters,
+    character_start_times_seconds, character_end_times_seconds}` for the
+    text as sent), parsed as it comes by `Timestamped` (a line split
+    across pieces kept, the base64 PCM through the same `S16Le`): the
+    audio handed on as before, every character's start kept for
+    `Synth::marks`; times are on the sentence's clock (ElevenLabs' own
+    example adds the pieces' lists up as they are) — a piece whose times
+    start again near zero is put after the audio before it.
+    Debug-only `YAP_ELEVENLABS_URL` names a test run's
+    stand-in (`e2e/support/fake-elevenlabs.js`, which serves both
+    endpoints); without it a test run
     never reaches the internet. Unit tests run against an in-process
-    stand-in (`standin`: chunked PCM in odd pieces, errors, silence).
+    stand-in (`standin`: chunked PCM in odd pieces, timed JSON lines on
+    either clock, errors, silence).
   - **`tts/kokoro.rs`** — **Kokoro-82M v1.0** (hexgrad, Apache-2.0), the
     natural voice: onnx-community's **fp32** export (the fp16 one turns
     longer British sentences into NaN — `checks::nan_probe`; int8 is 3.5–4×
@@ -194,6 +230,89 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     only if a lexicon won't read, and for the comparison. Why dictionary
     first: it's what Kokoro was trained on, and eSpeak runs only for the
     odd name (both scored alike on Parakeet).
+  - **`tts/marks.rs`** — **word timing** for the reading card's karaoke,
+    pure and unit-tested. `words` (a sentence's words as char spans, the
+    punctuation at their edges left out). Per engine, best first (`Timing`,
+    on the card as `data-timing` and the chip's tooltip): **Engine** —
+    Windows voices' word cues, ElevenLabs' character alignment
+    (`from_chars`: a word starts with its first timed character, an untimed
+    one between its neighbours; `None` if under half the words are timed);
+    **Audio** — **Kokoro**: its onnx-community export has one output,
+    `waveform` (checked on this PC's model: inputs `input_ids`, `style`,
+    `speed`; no durations), so `from_audio` finds the speech in the
+    sentence's own audio (`shape`: 10 ms frames, quiet under 8 % of the
+    90th-percentile frame and −48 dBFS, pauses ≥ 120 ms), spreads the words
+    over it by weight (syllables + 0.2 × letters, little words like "and"
+    × 0.6, a comma's pause 2.5, a full stop's 4 — fitted to Windows' cues)
+    and pins each pause in the audio to the punctuation whose estimated
+    place is nearest (`pinned`), the words between two pins spread between
+    them; **Estimate** — no speech in the audio (test mode's silent
+    stand-in): the same spread over its whole length (`estimate`). What's
+    said isn't always what's shown ("£12,400" → "twelve thousand four
+    hundred pounds"): `align` pairs the words the same on both sides (LCS,
+    lower case, letters and digits) and gives the said words between two
+    pairs to the shown words between them; `shown_starts` → each shown
+    word's start, forwards in time; `word_at(starts, t)` the word being
+    said. `utf16_to_char` for Windows' cues.
+  - **`read_aloud.rs`** — **Read aloud, anywhere** (2026-10-22; the
+    maintainer asked for reading help, dyslexia in mind; Wispr Flow has
+    none). Ways in: the **Read aloud shortcut** (`config.read_hotkey`,
+    unbound by default; `input_hook` binding `read-key-pressed`, press
+    only, never clashing — `configure_read_from`), **🔊 on the Yap bar**
+    (`bar_action "read-aloud"`; ■ `read-stop` while reading), the **tray's
+    "Read selection aloud"** ("Stop reading aloud" while it reads; the app
+    window on top found as "Paste last transcript" finds it and brought
+    back first), and in Yap: a **note's Read aloud** (its button beside
+    Export, its row menu), **Chat's and the Ask bars' ▶ / Read aloud on
+    answers** (`speech.svelte.js` → `read_aloud_text`: the same card, the
+    answer's id kept so ▶ shows ■), and the shortcut pressed in a Yap
+    window (the in-page fallback: `readPageSelection`, the page's own
+    selection). **The selection** (`read_selection_now`, a thread of its
+    own): the app in front (`current_foreground`), `selection::
+    read_selected(target, copy_fallback)` with Ctrl+C allowed only outside
+    a terminal (`app_kind::of_window` — the raw kind, whatever "Safer
+    pasting" says); none, or the same selection again while reading
+    (a fingerprint, never the text) → stop (the shortcut is its own Stop);
+    nothing and not reading → a note on the card, "Nothing selected" with
+    the shortcut named (`{key}`). Test mode reads no other app's selection
+    (robot mode: only the test's windows). **The text** (`sentences_for`,
+    pure): markdown (notes, answers) through `speakable_blocks`; plain text
+    (a selection) through `plain_blocks` — paragraphs, a list item or a line
+    under 40 characters its own block, a paragraph's wrapped lines joined
+    (a PDF's, an email's) and a hyphen at a wrapped line's end mended —
+    then `sentences`; up to `MAX_CHARS` (200,000; the card says when it was
+    cut); a run with no letter or digit isn't read; then `prepare_for_reading`
+    (the voice's own joining of short sentences). **Reading** (`start`):
+    `tts::read` from sentence 0 (a meeting or a call on → a note, "Not
+    now"), the session's `restarting` flag held over every (re)start so the
+    old voice's end isn't taken for this one's, a **ticker** (40 ms) that
+    follows `tts::position` and the track's `Made` starts: a new sentence →
+    `yap-read` (the whole card), a new word → `yap-read-word {session,
+    index, word}`. Controls (`read_aloud_action`): pause / resume / toggle
+    (the playback held, `tts::pause`), next / back (back: this sentence's
+    start once it's 1.5 s in, else the one before), faster / slower
+    (`SPEEDS` 0.5–2×; restarts the sentence at the new speed and keeps it
+    as `tts_rate`, `yap-voice-rate` for Settings' copy), stop / dismiss.
+    The voice ending (to the end, Chat's ■, a dictation, a meeting) ends
+    the reading (`on_tts_state`); an error is said on the card. `View`
+    (`read_aloud_state`): `phase` reading | paused | note | idle, the
+    sentence as `parts` (words numbered), `word`, `index`/`count`,
+    `rate`, `timing`, `engine`, `note`, `cut`, `made` (sentences made so
+    far: never far ahead), `hotkey`. `bar::set_reading` keeps the bar up
+    while the card is (bar on or off), with Esc watched. Logs: lengths,
+    counts, `via` and the outcome only (`log_privacy.rs`); reading with
+    ElevenLabs sends the text there, as Settings' voice line already says.
+    Debug-only `realtest_read_selection {hwnd}` (robot mode) runs the
+    shortcut's code and returns `Picked {via, chars, terminal,
+    copyAllowed, outcome, text}`. Tests: unit (`plain_blocks`,
+    `sentences_for`, `parts`, speeds, ⏮), the speaker's (`a_read_aloud_is_
+    made_a_sentence_ahead…`, `a_held_read_aloud…`, `an_engines_own_word_
+    timing…`), `e2e/read-aloud.spec.js` (the card, karaoke, ⏸ ⏭ ⏮, speed,
+    Stop, Esc, Dark + OpenDyslexic, a 30,000-character text made a sentence
+    ahead, nothing selected and 🔊, a note, Chat's id, the in-page shortcut,
+    Settings) and `e2e-real/read-aloud.real.js` (the test pad's text box
+    and rich box, Notepad, an Edge page's own text, a terminal never by
+    Ctrl+C).
   - **`tts/registry.rs`** — Kokoro's download into `<data>/models/tts/`
     (debug: `YAP_TTS_MODELS`): `kokoro-v1.0/` (model.onnx 325.5 MB + 54
     voices from **Hugging Face onnx-community/Kokoro-82M-v1.0-ONNX @

@@ -217,6 +217,56 @@ pub fn capture_selection(target_hwnd: Option<isize>, copy_fallback: bool) -> Opt
     }
 }
 
+/// What's selected in an app, for reading aloud (`read_aloud.rs`), and how
+/// it was read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Selected {
+    pub text: Option<String>,
+    /// "uia" (UI Automation's TextPattern: documents, web pages, PDFs —
+    /// read-only text too), "edit" (a Win32 edit control's own selection in
+    /// its ValuePattern text: WinForms has no TextPattern), "copy" (the
+    /// Ctrl+C trick), "" (nothing found).
+    pub via: &'static str,
+}
+
+/// The text selected in `target_hwnd`'s app, for reading aloud: UI
+/// Automation's TextPattern on the focused element or the document it's in
+/// (read-only text too: a web page, a PDF, a viewer), else a Win32 edit
+/// control's own selection, else — only with `copy_fallback`, never in a
+/// terminal — Ctrl+C. Never another process's element than the target's,
+/// never a password box; robot mode only in the test's own windows, test
+/// mode never. The text is never logged.
+pub fn read_selected(target_hwnd: Option<isize>, copy_fallback: bool) -> Selected {
+    let nothing = Selected { text: None, via: "" };
+    let Some(hwnd) = target_hwnd else { return nothing };
+    if crate::e2e::active() && !crate::realtest::permits(Some(hwnd)) {
+        return nothing;
+    }
+    let Some(pid) = crate::text_injector::window_process(hwnd) else { return nothing };
+    #[cfg(windows)]
+    {
+        if let Some(text) = uia::selection_in(pid) {
+            tracing::debug!(len = text.len(), "Read aloud: the selection, over UI Automation");
+            return Selected { text: Some(text), via: "uia" };
+        }
+        if let Some(text) = uia::edit_selection_in(pid) {
+            tracing::debug!(len = text.len(), "Read aloud: the selection, from the edit control");
+            return Selected { text: Some(text), via: "edit" };
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = pid;
+    if copy_fallback {
+        if let Some(text) = crate::text_injector::selection_via_copy(Some(hwnd)).map(|t| t.trim().to_string()) {
+            if !text.is_empty() {
+                tracing::debug!(len = text.len(), "Read aloud: the selection, by Ctrl+C");
+                return Selected { text: Some(text), via: "copy" };
+            }
+        }
+    }
+    nothing
+}
+
 /// Where the current dictation's context read stands.
 enum Reading {
     /// Nothing asked for (smart spacing off, edit mode, no target window).
@@ -667,6 +717,71 @@ mod uia {
             } else {
                 Some(trimmed.to_string())
             }
+        }
+    }
+
+    /// The focused element's selection for reading aloud, if the focus is
+    /// in process `pid` and not a password box: the TextPattern selection of
+    /// the focused element or of the first one above it that has one (a web
+    /// page's document, when the focus is on a link in it) — read-only text
+    /// too. Several selections (Word) one after another.
+    pub fn selection_in(pid: u32) -> Option<String> {
+        let _com = Com::init()?;
+        unsafe {
+            let automation = automation(super::SELECTION_TIMEOUT_MS)?;
+            let focused = automation.GetFocusedElement().ok()?;
+            if focused.CurrentProcessId().ok()? as u32 != pid || focused.CurrentIsPassword().ok()?.as_bool() {
+                return None;
+            }
+            let walker = automation.ControlViewWalker().ok()?;
+            let mut e = focused;
+            for _ in 0..12 {
+                if e.CurrentProcessId().ok()? as u32 != pid {
+                    return None;
+                }
+                let pattern = e
+                    .GetCurrentPattern(UIA_TextPatternId)
+                    .ok()
+                    .and_then(|u| u.cast::<IUIAutomationTextPattern>().ok());
+                if let Some(pattern) = pattern {
+                    let ranges = pattern.GetSelection().ok()?;
+                    let mut parts = Vec::new();
+                    for i in 0..ranges.Length().unwrap_or(0) {
+                        if let Some(t) = ranges.GetElement(i).ok().and_then(|r| r.GetText(-1).ok()) {
+                            let t = t.to_string();
+                            if !t.trim().is_empty() {
+                                parts.push(t);
+                            }
+                        }
+                    }
+                    let text = parts.join("\n");
+                    let text = text.trim();
+                    // A document with nothing selected: nothing to read.
+                    return (!text.is_empty()).then(|| text.to_string());
+                }
+                e = walker.GetParentElement(&e).ok()?;
+            }
+            None
+        }
+    }
+
+    /// A Win32 edit control's selection (a WinForms TextBox: a ValuePattern
+    /// and no TextPattern), cut from its value where the control says
+    /// (EM_GETSEL), if the focus is in process `pid` and not a password box.
+    pub fn edit_selection_in(pid: u32) -> Option<String> {
+        let _com = Com::init()?;
+        unsafe {
+            let automation = automation(super::SELECTION_TIMEOUT_MS)?;
+            let focused = automation.GetFocusedElement().ok()?;
+            if focused.CurrentProcessId().ok()? as u32 != pid || focused.CurrentIsPassword().ok()?.as_bool() {
+                return None;
+            }
+            let pattern = text_value_pattern(&focused)?;
+            let value = pattern.CurrentValue().ok()?.to_string();
+            let (value, at) = value_selection(&focused, value, super::SELECTION_TIMEOUT_MS);
+            let (start, end) = at?;
+            let text = value.get(start..end)?.trim();
+            (!text.is_empty()).then(|| text.to_string())
         }
     }
 

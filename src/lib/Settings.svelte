@@ -19,7 +19,7 @@
   import PromptStudio from './PromptStudio.svelte';
   import VoiceAgentConfig from './VoiceAgentConfig.svelte';
   import AgentNameField from './AgentNameField.svelte';
-  import { initSpeech } from './speech.svelte.js';
+  import { initSpeech, readPageSelection } from './speech.svelte.js';
   import VoiceSettings from './VoiceSettings.svelte';
   import OpenAppsSettings from './OpenAppsSettings.svelte';
   import WebSearchSettings from './WebSearchSettings.svelte';
@@ -460,6 +460,7 @@
     agentName: '',
     editHotkey: '',
     assistantHotkey: '',
+    readHotkey: '',
     assistantAnswerCard: true,
     openApps: true,
     appsBlocked: [],
@@ -606,6 +607,13 @@
       e.preventDefault();
       e.stopPropagation();
       invoke('assistant_key', { pressed: true }).catch(() => {});
+      return;
+    }
+    // Read aloud: what's selected on this page (read_aloud.rs).
+    if (hotkeyMatchesKeydown(e, cfg?.readHotkey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      readPageSelection();
       return;
     }
     if (!hotkeyMatchesKeydown(e, cfg?.hotkey)) return;
@@ -939,9 +947,14 @@
     const unVolume = listen('yap-voice-volume', (e) => {
       if (cfg && Number.isFinite(e.payload?.volume)) cfg.ttsVolume = e.payload.volume;
     });
+    // The reading card's − / + (read_aloud.rs saved it already).
+    const unRate = listen('yap-voice-rate', (e) => {
+      if (cfg && Number.isFinite(e.payload?.rate)) cfg.ttsRate = e.payload.rate;
+    });
     return () => {
       un.then((f) => f());
       unVolume.then((f) => f());
+      unRate.then((f) => f());
     };
   });
   const SPEAK_WHEN = [
@@ -1856,6 +1869,18 @@
                 desc="Your question and its answer, above the bar while Yap reads it out"
                 hint="Off: just the voice, with ■ on the bar to stop it. An answer Yap couldn't read aloud still shows."
               />
+            </Row>
+          </Group>
+          <!-- Read aloud, anywhere (read_aloud.rs): any selected text, in
+               the voice below, with the reading card on the Yap bar. -->
+          <Group title="Read aloud" id="settings-read-aloud">
+            <Row
+              label="Read aloud shortcut"
+              desc="Select text in any app and press it: Yap reads it in the voice below, each word lit up on the Yap bar as it's said"
+              hint="Press it again, or Esc, to stop. 🔊 on the Yap bar and the tray's Read selection aloud do the same, and notes and Chat answers have Read aloud too. The text is in your reading font (General → Appearance)."
+              setting="read-shortcut"
+            >
+              <SettingsHotkey {cfg} target="readHotkey" clearable />
             </Row>
           </Group>
           <!-- "Open Teams": apps installed on this PC (apps.rs). -->

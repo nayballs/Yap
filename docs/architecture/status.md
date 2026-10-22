@@ -58,7 +58,16 @@ the reply/fallback flows e2e-tested against `fake-elevenlabs.js`; first
 audio measured on this PC with `first_audio_latency`: Kokoro af_bella
 1.4 s cold / ~0.43 s warm for the preview sentence, ElevenLabs' path
 < 1 ms of Yap's own on top of the service's answer; not yet tried with a
-real key), combo hotkeys, the audio pre-roll (anti first-word clipping), **live
+real key), **Read aloud, anywhere** (`read_aloud.rs` + `tts/marks.rs`,
+2026-10-22: the selection in any app, a note or a Chat answer read in that
+voice with a karaoke reading card on the Yap bar; word timing from Windows'
+own word cues, ElevenLabs' `with-timestamps` alignment, else from Kokoro's
+audio — checked silently against Windows' cues on this PC, within 0–150 ms;
+the selection read for real by the robot in the test pad, Notepad and an
+Edge page, a terminal never by Ctrl+C; the card, karaoke, ⏸ ⏭ ⏮, speed,
+Esc, a 30,000-character text made a sentence ahead, e2e-tested; not yet
+heard on speakers by a person, nor with a real ElevenLabs key or a PDF
+viewer), combo hotkeys, the audio pre-roll (anti first-word clipping), **live
 streaming partials** (sliding-window, on by default, word-paced overlay reveal —
 validated live 2026-07-10), transcription history + stats, cleanup presets,
 **other apps silenced or paused while you dictate** (`mute.rs` + `media_pause.rs`,
