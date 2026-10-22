@@ -1,0 +1,27 @@
+{
+  "name": "brief-new-attendee",
+  "description": "Priya was in the last launch meeting, Siobhan is new; Sam was there but isn't coming, so his task isn't an open item.",
+  "meeting": {
+    "title": "Launch comms sync",
+    "in_minutes": 12,
+    "attendees": ["Priya Shah", "Siobhan Byrne"],
+    "description": "Agenda: the launch announcement and the press list"
+  },
+  "notes": [
+    {
+      "title": "Launch planning",
+      "days_ago": 5,
+      "participants": ["Priya Shah", "Sam Lee"],
+      "plan": "The team agreed the launch plan and who writes what.\n\n## Action plan\n### Priya\n- [ ] Write the launch announcement draft (due: Wednesday)\n### Sam\n- [ ] Order the event banners\n### You\n- [ ] Ask legal to review the press list\n\n## Decisions\n- Announce on the company blog first.\n\n## Unassigned\n- [ ] Update the status page"
+    }
+  ],
+  "expect": {
+    "first": false,
+    "cites": ["Launch planning"],
+    "contains": ["First meeting with Siobhan Byrne"],
+    "open_items": ["launch announcement", "press list"],
+    "no_open_items": ["banners", "status page"],
+    "owners": ["You", "Priya"],
+    "not_contains": ["Siobhan will", "Siobhan is", "Okonkwo", "lighting"]
+  }
+}

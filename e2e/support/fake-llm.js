@@ -168,6 +168,10 @@ const CLEANUP = 'You are a dictation cleanup engine';
 // "Tell Yap what to change", an import. Answered `{"changes": []}` unless a
 // spec says otherwise (`reply('memory', fn)`).
 const MEMORY = "You keep Yap's memory of the user";
+// A pre-meeting brief's "In short" (llm.rs MEETING_BRIEF_PROMPT,
+// calendar/brief.rs). "Nothing to add." unless a spec scripts it
+// (`reply('brief', fn)`; brief.spec.js).
+const BRIEF = 'You write a short brief for someone about to go into a meeting';
 
 const KINDS = [
   [DIGEST, 'digest'],
@@ -180,6 +184,7 @@ const KINDS = [
   [BLIND_SPOTS, 'blindSpots'],
   [CLEANUP, 'cleanup'],
   [MEMORY, 'memory'],
+  [BRIEF, 'brief'],
 ];
 
 /**
@@ -530,6 +535,7 @@ export async function startFakeLlm() {
         followUpEmail: followUpReply,
         blindSpots: blindSpotsReply,
         memory: () => '{"changes": []}',
+        brief: () => 'Nothing to add.',
       };
       const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user);
       res.writeHead(200, { 'content-type': 'application/json' });

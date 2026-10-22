@@ -1,0 +1,30 @@
+{
+  "name": "brief-project-meeting",
+  "description": "A project meeting: the project is in memory and named by the invite, Tanay's in memory and was in the kick-off, Imogen is new.",
+  "meeting": {
+    "title": "Northwind migration review",
+    "in_minutes": 15,
+    "attendees": ["Tanay Kothari", "Imogen Hart"],
+    "description": "Agenda: Northwind migration cut-over plan\nRollback steps"
+  },
+  "notes": [
+    {
+      "title": "Northwind migration kick-off",
+      "days_ago": 10,
+      "participants": ["Tanay Kothari"],
+      "plan": "The kick-off for moving billing onto the new platform.\n\n## Action plan\n### Tanay\n- [ ] Write the rollback runbook (due: next sprint)\n### You\n- [ ] Get sign-off from finance on the cut-over weekend\n\n## Decisions\n- Migrate the invoices first, then the customer records.\n\n## Open questions\n- Do we need a freeze on billing changes during the cut-over?"
+    }
+  ],
+  "memory": [
+    { "section": "projects", "title": "Northwind migration", "summary": "Moving billing to the new platform", "details": ["Cut-over planned for the spring"] },
+    { "section": "people", "title": "Tanay Kothari", "summary": "Platform engineer", "details": [] }
+  ],
+  "expect": {
+    "first": false,
+    "cites": ["Northwind migration kick-off"],
+    "contains": ["First meeting with Imogen Hart", "Northwind migration", "Platform engineer"],
+    "open_items": ["rollback runbook", "sign-off from finance"],
+    "owners": ["You", "Tanay"],
+    "not_contains": ["Imogen will", "Okonkwo", "lighting quote"]
+  }
+}

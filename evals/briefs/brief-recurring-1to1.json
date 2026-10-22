@@ -1,0 +1,38 @@
+{
+  "name": "brief-recurring-1to1",
+  "description": "A weekly 1:1: the last two of the series, an item done since, the same task in both, Priya in memory, an agenda.",
+  "meeting": {
+    "title": "Weekly 1:1 with Priya",
+    "series": "weekly-priya@example.com",
+    "in_minutes": 10,
+    "attendees": ["Priya Shah"],
+    "description": "Agenda: pricing page, hiring plan"
+  },
+  "notes": [
+    {
+      "title": "Weekly 1:1 with Priya",
+      "days_ago": 7,
+      "series": "weekly-priya@example.com",
+      "participants": ["Priya Shah"],
+      "plan": "Priya and you went through the pricing page and the support hiring plan.\n\n## Action plan\n### You\n- [ ] Send Priya the revised pricing table (due: Monday)\n- [ ] Book interviews for the two support roles\n### Priya\n- [ ] Draft the pricing FAQ (due: Thursday)\n\n## Decisions\n- Keep the free tier at three projects.\n\n## Open questions\n- Should the annual plan get a discount?"
+    },
+    {
+      "title": "Weekly 1:1 with Priya",
+      "days_ago": 14,
+      "series": "weekly-priya@example.com",
+      "participants": ["Priya Shah"],
+      "plan": "A short catch-up on the launch.\n\n## Action plan\n### Priya\n- [ ] Draft the pricing FAQ\n### You\n- [x] Share the launch checklist\n\n## Decisions\n- The launch stays on 12 November."
+    }
+  ],
+  "memory": [
+    { "section": "people", "title": "Priya Shah", "summary": "Product lead at Acme", "details": ["Works from the Bristol office"] }
+  ],
+  "expect": {
+    "first": false,
+    "cites": ["Weekly 1:1 with Priya"],
+    "open_items": ["revised pricing table", "pricing FAQ", "support roles"],
+    "no_open_items": ["launch checklist"],
+    "owners": ["You", "Priya"],
+    "not_contains": ["Okonkwo", "lighting", "harbour", "spring opening", "Tom"]
+  }
+}

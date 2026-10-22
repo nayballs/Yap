@@ -13,6 +13,7 @@
   // ControlPanel.
   import { toastStore, dismiss, pauseToast, resumeToast } from './toast.svelte.js';
   import { renderMarkdown } from '../markdown.js';
+  import BriefView from '../BriefView.svelte';
 
   let copiedId = $state(null);
   // Toasts whose `expand` notes are unfolded.
@@ -131,10 +132,13 @@
         {#if t.expand?.markdown && expanded.includes(t.id)}
           <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/markdown.js). -->
           <div class="notes">{@html renderMarkdown(t.expand.markdown)}</div>
+        {:else if t.expand?.brief && expanded.includes(t.id)}
+          <!-- A meeting's pre-meeting brief (calendar.svelte.js), its sources linked. -->
+          <div class="briefbox"><BriefView brief={t.expand.brief} tone="dark" compact /></div>
         {/if}
-        {#if t.action?.label || t.secondary?.label || t.expand?.markdown}
+        {#if t.action?.label || t.secondary?.label || t.expand?.markdown || t.expand?.brief}
           <div class="actions">
-            {#if t.expand?.markdown}
+            {#if t.expand?.markdown || t.expand?.brief}
               <button
                 class="expandbtn"
                 aria-expanded={expanded.includes(t.id)}
@@ -380,6 +384,18 @@
   }
   .notes :global(:last-child) {
     margin-bottom: 0;
+  }
+  .briefbox {
+    margin-top: 10px;
+    max-height: 260px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+    padding: 10px 11px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    user-select: text;
   }
   /* Action row: optional "What's new" toggle left, buttons right. */
   .actions {

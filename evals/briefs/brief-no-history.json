@@ -1,0 +1,24 @@
+{
+  "name": "brief-no-history",
+  "description": "A first meeting: nobody coming is in any note (another meeting with Sam is there), nothing in memory. Plainly 'First meeting with these people', no model call.",
+  "meeting": {
+    "title": "Intro call with Siobhan",
+    "in_minutes": 10,
+    "attendees": ["Siobhan Byrne"],
+    "description": "Agenda: introductions, how the agency works"
+  },
+  "notes": [
+    {
+      "title": "Design crit",
+      "days_ago": 3,
+      "participants": ["Sam Lee"],
+      "plan": "## Action plan\n### Sam\n- [ ] Rework the onboarding screens\n### You\n- [ ] Send Sam the brand guide"
+    }
+  ],
+  "expect": {
+    "first": true,
+    "not_cited": ["Design crit"],
+    "contains": ["First meeting with these people", "introductions"],
+    "not_contains": ["brand guide", "onboarding", "Sam"]
+  }
+}

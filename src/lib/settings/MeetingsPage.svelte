@@ -234,6 +234,15 @@
     <Row label="Remind me before scheduled meetings" desc="A card with Join & take notes" setting="meeting-reminder">
       <Select bind:value={cfg.meetingReminder} options={REMINDERS} ariaLabel="Notify before scheduled meetings start" />
     </Row>
+    <!-- calendar/brief.rs: on the reminder card, in Meetings and the notepad. -->
+    <Row setting="meeting-brief">
+      <Toggle
+        bind:checked={cfg.meetingBrief}
+        label="Prepare a brief before meetings"
+        desc="Last time with these people, open items and the agenda, each line linked to its note"
+        hint="Made on this PC 15 minutes before a calendar meeting, from your meeting notes and what Yap remembers. A short summary on top comes from your meeting AI model (Language Models → Note Formatting) when it's a cloud model or 4B and up; it never adds what the notes don't say."
+      />
+    </Row>
     <LinkRow
       label="Calendars"
       desc={calendar.connections.length ? 'Meeting names and attendees come from them' : 'Connect Google, Outlook or any calendar'}

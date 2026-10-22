@@ -1,0 +1,40 @@
+{
+  "name": "brief-vendor-follow-up",
+  "description": "Held out (written before the final run, never tuned on): two earlier meetings with Daniel, one with a plan (Imogen's task in it, but she isn't coming) and one only a transcript of promises.",
+  "meeting": {
+    "title": "Print vendor follow-up",
+    "in_minutes": 10,
+    "attendees": ["Daniel Moss"],
+    "description": "Agenda: compare the print quotes"
+  },
+  "notes": [
+    {
+      "title": "Print budget chat",
+      "days_ago": 5,
+      "participants": ["Daniel Moss"],
+      "transcript": [
+        "you: Did the print shop come back to you yet?",
+        "them: Only one of them. I'll chase the second quote this week.",
+        "you: Thanks. I'll check the paper samples they posted.",
+        "them: Good, the heavier paper might push the price up."
+      ]
+    },
+    {
+      "title": "Print vendor intro",
+      "days_ago": 12,
+      "participants": ["Daniel Moss", "Imogen Hart"],
+      "plan": "A first look at print vendors for the brochure.\n\n## Action plan\n### Imogen\n- [ ] Send the artwork files to the vendors\n### Daniel\n- [ ] Get three print quotes (due: 2 November)\n\n## Decisions\n- Print 5,000 brochures in the first run."
+    }
+  ],
+  "memory": [
+    { "section": "people", "title": "Daniel Moss", "summary": "Regional marketing lead", "details": [] }
+  ],
+  "expect": {
+    "first": false,
+    "cites": ["Print budget chat", "Print vendor intro"],
+    "open_items": ["three print quotes"],
+    "no_open_items": ["artwork"],
+    "owners": ["You", "Daniel"],
+    "not_contains": ["Okonkwo", "lighting", "sent the artwork", "artwork was sent", "chased the second", "10,000", "3 November"]
+  }
+}
