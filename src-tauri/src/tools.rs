@@ -2645,7 +2645,7 @@ mod tests {
             exa,
         );
         let settings =
-            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None };
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None, units: None };
         let endpoints = crate::web::Endpoints { exa: format!("{}/exa", fake.base), tavily: String::new(), standin: None, offline: false };
         let first = "Can you tell me the weather today in Kellbrook? I might walk over the hills.";
         let question = "Hmm. Look up the weather kelp for me today.";
