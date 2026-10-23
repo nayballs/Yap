@@ -13,6 +13,30 @@ fallback (the dictation, assistant and meeting keys while a Yap window has the
 focus) and its auto-save run for the window's whole life. Esc closes it (a
 search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
 
+- **Its copy of the config, in step with config.json** (2026-10-23).
+  Settings reads the config once, at mount, and auto-saves 400 ms after any
+  change. Other surfaces save config.json too — the Speech-to-Text page's
+  model switch (`modelStore.setActiveModel` → `set_active_model`), the
+  tray's model menu, onboarding, a notice's button — and the auto-save used
+  to write the whole stale copy back: the next switch flipped anywhere in
+  Settings put the old speech model (and onboarding's choices) back. Now
+  `base` is config.json as this copy last agreed with it (read, or saved),
+  and `settings/configMerge.js`'s `merge3(base, mine, theirs)` (JSON
+  three-way: what only one side changed comes from it; objects merge key by
+  key; a setting changed on both sides keeps this copy's — the edit being
+  made) runs both ways, one at a time (`inTurn`): on **`yap-config-saved`**
+  (Rust's `config::save` sends it after every save) what changed on disk
+  and not here is adopted into the copy (`adoptSaved`; a provider adopted
+  sets the Language Models tab's mode, scopes remount their tabs); the
+  **auto-save** (`persist`) reads config.json, puts this copy's changes onto
+  it, adopts the rest, and writes nothing when the copy has nothing to add.
+  A setting the person changes while a merge is under way is never
+  overwritten (`adopt` skips it). The older one-off adoptions
+  (`yap-config-patched`, `yap-chat-model-changed`, `yap-dictionary-learned`,
+  `yap-meeting-detect-choice`, …) still run; they and this agree. e2e:
+  `speech-models.spec.js` (a model switched on the Speech-to-Text page, then
+  as the tray does, survives a switch flipped in Settings).
+
 - **The nav** (`settings/nav.js` `NAV_GROUPS`, Claude-style scopes, sentence
   case): a **search box** on top ("Search settings", Ctrl F); then General ·
   Dictation · Shortcuts · Meetings | **Assistant**: Commands · Voice Assistant

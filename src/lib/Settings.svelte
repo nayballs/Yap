@@ -53,6 +53,7 @@
   import { NAV_GROUPS, PAGE_LABELS, resolveTarget } from './settings/nav.js';
   import { searchSettings, groupResults, countByPage } from './settings/settingsIndex.js';
   import { hotkeyCapture } from './settings/hotkeys.svelte.js';
+  import { merge3, same, copy } from './settings/configMerge.js';
   import SettingsHotkey from './settings/SettingsHotkey.svelte';
   import SearchResults from './settings/SearchResults.svelte';
   import GeneralPage from './settings/GeneralPage.svelte';
@@ -531,10 +532,10 @@
       /* not in Tauri — leave blank */
     }
     const stored = await invoke('get_config');
+    // config.json as this copy agrees with it (see "Staying in step" below).
+    base = copy(stored);
     cfg = { ...FIELD_DEFAULTS, ...stored };
-    // Derive the Language-Models UI state from the persisted provider id.
-    ppMode = cfg.ppProvider === 'ondevice' ? 'ondevice' : cfg.ppProvider === 'local' ? 'selfhosted' : 'cloud';
-    if (CLOUD_PROVIDER_IDS.includes(cfg.ppProvider)) cloudProvider = cfg.ppProvider;
+    providerUi();
     // Per-provider key store: the active key is authoritative for the active
     // provider (covers keys edited right before the window closed, and migrates
     // configs from before the store existed). If the store is empty but a key
@@ -1523,10 +1524,81 @@
     };
   }
 
-  async function persist() {
-    await invoke('save_config', { cfg: buildClean() });
-    saved = true;
-    setTimeout(() => (saved = false), 1200);
+  // ---- Staying in step with config.json (2026-10-23) ----
+  // This copy is read once, at mount; other surfaces save config.json too —
+  // the Speech-to-Text page's model switch (modelStore), the tray's model
+  // menu, onboarding, a notice's button — and Rust sends `yap-config-saved`
+  // after every save. This copy's auto-save used to write the whole copy
+  // back, so the next switch flipped here put the old speech model (and
+  // onboarding's choices) back. `base` is config.json as this copy last
+  // agreed with it (read, or saved). A save from anywhere: what changed on
+  // disk since, and not here, is adopted (`adoptSaved`). The auto-save: this
+  // copy's changes put onto config.json as it is now (`merge3`), so a
+  // setting saved elsewhere since stays — and nothing is written when this
+  // copy has nothing to add. An edit being made is never undone: a setting
+  // changed both here and there keeps this copy's. One at a time (`inTurn`).
+  let base = null;
+  let syncing = Promise.resolve();
+  function inTurn(fn) {
+    const run = syncing.then(fn, fn);
+    syncing = run.catch(() => {});
+    return run;
+  }
+
+  // The Language Models tab's UI state, from the saved provider id.
+  function providerUi() {
+    ppMode = cfg.ppProvider === 'ondevice' ? 'ondevice' : cfg.ppProvider === 'local' ? 'selfhosted' : 'cloud';
+    if (CLOUD_PROVIDER_IDS.includes(cfg.ppProvider)) cloudProvider = cfg.ppProvider;
+  }
+
+  // `next` (the merge) into this copy where it differs from `mine` (this
+  // copy as it was merged) — unless the person changed that setting since.
+  function adopt(mine, next) {
+    const now = buildClean();
+    const taken = [];
+    for (const k of Object.keys(next)) {
+      if (same(next[k], mine[k]) || !same(now[k], mine[k])) continue;
+      cfg[k] = copy(next[k]);
+      taken.push(k);
+    }
+    if (taken.includes('ppProvider')) providerUi();
+    // The scope tabs read their scope once (ScopeProviderConfig).
+    if (taken.includes('llmScopes')) {
+      ensureScopes();
+      chatScopeRev += 1;
+    }
+  }
+
+  async function adoptSaved() {
+    if (!loaded || !cfg || !base) return;
+    const disk = await invoke('get_config');
+    const mine = buildClean();
+    adopt(mine, merge3(base, mine, disk));
+    base = disk;
+  }
+
+  onMount(() => {
+    const un = listen('yap-config-saved', () => {
+      inTurn(adoptSaved).catch(() => {});
+    });
+    return () => un.then((f) => f());
+  });
+
+  function persist() {
+    return inTurn(async () => {
+      const mine = buildClean();
+      const disk = await invoke('get_config');
+      const next = merge3(base, mine, disk);
+      adopt(mine, next);
+      if (same(next, disk)) {
+        base = disk;
+        return;
+      }
+      await invoke('save_config', { cfg: next });
+      base = copy(next);
+      saved = true;
+      setTimeout(() => (saved = false), 1200);
+    });
   }
 
   // ---- Auto-save: debounce any cfg change, then persist ----
