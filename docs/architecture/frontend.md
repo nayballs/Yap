@@ -225,8 +225,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   calls `initAppearance()`) resolves the choice (System via
   `matchMedia('(prefers-color-scheme: dark)')`, followed as Windows switches)
   and marks `<html data-yap-theme="light|dark">`; Settings applies its copy
-  at once, the other windows on `yap-config-saved`; `onThemeChange` for
-  anything drawn in script. **No flash of light**: the choice is kept in the
+  at once, the other windows on `yap-config-saved`. **No flash of light**: the choice is kept in the
   origin's localStorage (`yap.theme`, `yap.barTheme`, shared by every Yap
   window), which an inline head script in `index.html` reads before the
   first paint, naming the window too (`data-window`, from

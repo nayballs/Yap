@@ -137,10 +137,6 @@ export function menuOpenFor(el) {
   return contextMenu.open && !!el && contextMenu.returnFocus === el;
 }
 
-export function closeContextMenu() {
-  contextMenu.open = false;
-}
-
 /**
  * Ask before something that can't be undone ("Delete “Launch plan”?"). `run`
  * does it: return `false` (or throw) to keep the dialog open — say why in a
