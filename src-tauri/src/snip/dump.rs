@@ -1,4 +1,4 @@
-//! `yap.exe snip-dump [--out <folder>] [--no-overlay] [--runs N]` (debug
+//! `yap.exe snip-dump [--out <folder>] [--no-overlay] [--runs N] [--demo]` (debug
 //! builds): the snip's spike. Captures every monitor — WGC with Yap's HDR
 //! path, WGC in plain 8-bit, GDI — times each step, writes the PNGs into
 //! `--out` (a folder you choose; nothing else is written), and times the
@@ -207,11 +207,13 @@ pub fn main(args: Vec<String>) -> i32 {
     per_monitor_dpi();
     let mut out = PathBuf::from("snip-dump");
     let mut overlay_runs = 3usize;
+    let mut demo = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--out" => out = it.next().map(PathBuf::from).unwrap_or(out),
             "--no-overlay" => overlay_runs = 0,
+            "--demo" => demo = true,
             "--runs" => overlay_runs = it.next().and_then(|n| n.parse().ok()).unwrap_or(overlay_runs),
             other => {
                 eprintln!("unknown argument {other}");
@@ -312,6 +314,33 @@ pub fn main(args: Vec<String>) -> i32 {
                 "shortcutToVisibleMs": total_ms,
             })),
             Err(e) => overlay_runs_out.push(serde_json::json!({ "run": run, "error": e })),
+        }
+    }
+
+    // `--demo`: how the overlay looks with a box drawn on it (posted window
+    // messages, never the mouse), captured off the screen into the folder.
+    if demo {
+        let (frames, _) = capture::capture(&monitors, Force::Auto);
+        let screens: Vec<overlay::Screen> = frames
+            .into_iter()
+            .filter_map(Result::ok)
+            .map(|f| overlay::Screen { monitor: f.monitor.clone(), width: f.width, height: f.height, bgra: std::sync::Arc::new(f.bgra) })
+            .collect();
+        let (w, h) = screens.first().map(|s| (s.width as i32, s.height as i32)).unwrap_or((0, 0));
+        let opts = overlay::Options { focus: 0, interactive: false, hidden: false };
+        if overlay::open(screens, opts, Box::new(|_| {})).is_ok() {
+            let lp = |x: i32, y: i32| ((y as u16 as isize) << 16) | (x as u16 as isize);
+            let _ = overlay::post_input(0, vec![(0x0201, 1, lp(w * 3 / 10, h * 3 / 10)), (0x0200, 1, lp(w * 11 / 20, h * 11 / 20))]);
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            let (shot, _) = capture::capture(&monitors[..1], Force::Wgc8);
+            if let Some(Ok(f)) = shot.first() {
+                let rgba = crop_rgba(&f.bgra, f.width, &Rect::new(0, 0, f.width as i32, f.height as i32));
+                if let Ok(png) = encode_png(&rgba, f.width, f.height, true) {
+                    let _ = std::fs::write(out.join("overlay-demo.png"), png);
+                }
+            }
+            overlay::close();
+            std::thread::sleep(std::time::Duration::from_millis(150));
         }
     }
 

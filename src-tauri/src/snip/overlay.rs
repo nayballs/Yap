@@ -817,6 +817,12 @@ mod win {
         SESSION.with(|s| s.borrow().as_ref().is_some_and(|s| s.opts.hidden))
     }
 
+    /// A real snip (not a test's hidden one, nor the spike's click-through
+    /// one): only then is the mouse captured while you drag.
+    fn interactive_session() -> bool {
+        SESSION.with(|s| s.borrow().as_ref().is_some_and(|s| s.opts.interactive && !s.opts.hidden))
+    }
+
     /// The box moved: its new place, its label, what to repaint.
     fn drag_to(hwnd: HWND, now: (i32, i32)) {
         let dirty_rects = WINDOWS.with(|w| {
@@ -869,7 +875,7 @@ mod win {
                 win.drag = Some(at);
             }
         });
-        if !hidden_session() {
+        if interactive_session() {
             unsafe { SetCapture(hwnd) };
         }
         drag_to(hwnd, at);
