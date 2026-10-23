@@ -1953,11 +1953,13 @@ pub fn refers_back(question: &str) -> bool {
 /// "the latest Rust release"), sentence by sentence, a sentence of nothing
 /// else left out ("Can you look up please, for me? Can you look up Groc
 /// subscriptions for me, please?" → "Groc subscriptions": a tester's, dictated,
-/// 2026-10-21). Pure.
+/// 2026-10-21), "tell me" too ("Can you tell me the weather today in
+/// Kellbrook?" → "the weather today in Kellbrook": Yap's own search when the
+/// model wouldn't make one, a tester's voice chat, 2026-10-23). Pure.
 pub fn search_query(question: &str) -> String {
     static ASK: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            r"(?i)^\s*(?:hey\s+\w+[,!]?\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|please\s+)?(?:(?:quickly\s+)?(?:look\s+up|look\s+(?:it|this|that)\s+up|search\s+(?:the\s+(?:web|internet)\s+|online\s+)?(?:for\s+)?|web\s+search|google|find\s+out|check)\s*(?:online\s+|on\s+the\s+web\s+)?(?:for\s+)?)",
+            r"(?i)^\s*(?:hey\s+\w+[,!]?\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|please\s+)?(?:(?:quickly\s+)?(?:look\s+up|look\s+(?:it|this|that)\s+up|search\s+(?:the\s+(?:web|internet)\s+|online\s+)?(?:for\s+)?|web\s+search|google|find\s+out|check|tell\s+me(?:\s+about)?|let\s+me\s+know(?:\s+about)?)\s*(?:online\s+|on\s+the\s+web\s+)?(?:for\s+)?)",
         )
         .expect("static regex")
     });
@@ -2727,6 +2729,11 @@ mod tests {
             search_query("Can you web search Grok's subscription and how much it costs for me?"),
             "Grok's subscription and how much it costs"
         );
+        // A tester's voice question (2026-10-23; a fictional town): "tell me" is
+        // asking too.
+        assert_eq!(search_query("Can you tell me the weather today in Kellbrook?"), "the weather today in Kellbrook");
+        assert_eq!(search_query("Tell me about the Starfall Requiem patch notes."), "the Starfall Requiem patch notes");
+        assert_eq!(search_query("Could you let me know the exchange rate for euros?"), "the exchange rate for euros");
         // Nothing else in it: the question as it is.
         assert_eq!(search_query("Please?"), "Please?");
     }
