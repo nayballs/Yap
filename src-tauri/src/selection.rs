@@ -194,6 +194,12 @@ fn class_says_empty(class: &str) -> bool {
 /// `target_hwnd` is the foreground window captured at hotkey-press (used to
 /// aim the Ctrl+C fallback). Returns `None` if nothing is selected.
 pub fn capture_selection(target_hwnd: Option<isize>, copy_fallback: bool) -> Option<String> {
+    // A test run reads no other app's selection; robot mode only its own
+    // windows' (as every other read here).
+    if crate::e2e::active() && !crate::realtest::permits(target_hwnd) {
+        tracing::debug!("e2e: not reading another app's selection (edit mode → no selection)");
+        return None;
+    }
     if let Some(text) = uia_selected_text() {
         let t = text.trim();
         if !t.is_empty() {

@@ -13,7 +13,11 @@
   measured clearly faster on this PC, `stt_speed.rs` — | "gpu" | "cpu"), keep_recent_audio (a day of dictation
   audio to run one again, on; `recent_audio.rs`), as_said_hotkey ("Use what I
   said", "" = unbound) + as_said_offer (the bar's offer after AI cleanup,
-  on; both `as_said.rs`), input_device, sound +
+  on; both `as_said.rs`), rewrite_last_dictation (`rewriteLastDictation`,
+  serde default on: the rewrite shortcut with nothing selected rewrites the
+  last dictation — within a minute, in the same field, still ending at the
+  cursor —; off, it writes new text as before 2026-10-23; Settings →
+  Commands; `as_said::rewritable`), input_device, sound +
   volume, output_device, quiet_other_apps ("Silence other apps while you
   dictate", off; reads old configs' `muteWhileRecording`) + pause_media
   ("Pause music and videos while you dictate", off; both `mute.rs`),
@@ -233,7 +237,9 @@
   speech models on the graphics card unless the processor measured clearly
   faster on this PC (`stt_device` "auto"; the graphics card until measured), a day of dictation audio kept
   (`keep_recent_audio`), "Use what I said" offered on the bar after AI cleanup
-  (`as_said_offer`) with no shortcut (`as_said_hotkey` ""),
+  (`as_said_offer`) with no shortcut (`as_said_hotkey` ""), the rewrite
+  shortcut taking the last dictation when nothing is selected
+  (`rewrite_last_dictation` on; the shortcut itself unbound),
   live transcription preview **on**
   (`streaming_partials`), AI cleanup **off** (turned on locally, the model
   recommended for this PC: Qwen3.5 4B on a graphics card with ≥ 5.5 GiB of its

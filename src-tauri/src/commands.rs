@@ -269,6 +269,39 @@ pub async fn e2e_dictation(state: State<'_, AppState>, text: String) -> Result<c
     robot.dictate_text(text).await
 }
 
+/// Debug-only, test mode: the rewrite shortcut with `text` as what was
+/// said, in the window a dictation goes to (`e2e_target_window`'s stand-in,
+/// or none). Nothing is selected (a test run reads no selection), so the
+/// last dictation is rewritten when "Rewrite your last dictation" takes it,
+/// else new text is written — the AI asked either way, nothing read or
+/// pasted. Returns what it did.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn e2e_rewrite(state: State<'_, AppState>, text: String) -> Result<crate::pipeline::Rewritten, String> {
+    if !crate::e2e::active() {
+        return Err("e2e_rewrite is for test runs".into());
+    }
+    let robot = {
+        let guard = state.pipeline.lock().map_err(|_| "the pipeline lock is poisoned")?;
+        guard.as_ref().ok_or("no pipeline")?.robot()
+    };
+    robot.rewrite_text(text).await
+}
+
+/// Debug-only, test mode: dictations and the rewrite shortcut go to a
+/// stand-in window (`on`) instead of the one in front — never a real
+/// window: nothing is read or pasted there (`pipeline::test_target`).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_target_window(on: bool) -> Result<(), String> {
+    if !crate::e2e::active() || crate::realtest::on() {
+        return Err("e2e_target_window is for test runs (not robot mode)".into());
+    }
+    crate::pipeline::set_test_target(on);
+    tracing::info!(on, "e2e: dictations go to a stand-in window");
+    Ok(())
+}
+
 /// The assistant shortcut went down (`pressed`) or up in one of Yap's own
 /// windows (their in-page fallback: the global hook never sees keys while a
 /// Yap webview has the focus). The hook's own path, so push-to-talk's hold

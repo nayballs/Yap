@@ -476,6 +476,9 @@
     llmScopes: {},
     agentName: '',
     editHotkey: '',
+    // The rewrite shortcut with nothing selected rewrites the last
+    // dictation (as_said.rs).
+    rewriteLastDictation: true,
     assistantHotkey: '',
     readHotkey: '',
     assistantAnswerCard: true,
@@ -1838,11 +1841,24 @@
           <Group title="Rewrite selected text" id="settings-rewrite">
             <Row
               label="Rewrite shortcut"
-              desc="Select text in any app, press it and say how to change it. With nothing selected within a minute of a dictation, it rewrites that dictation where it is; otherwise it writes where your cursor is"
+              desc={cfg.rewriteLastDictation
+                ? 'Select text in any app, press it and say how to change it. With nothing selected within a minute of a dictation, it rewrites that dictation where it is; otherwise it writes where your cursor is'
+                : 'Select text in any app, press it and say how to change it. With nothing selected, it writes where your cursor is'}
               hint="For example “make this a bulleted list”, “more formal” or “in French”."
               setting="rewrite-shortcut"
             >
               <SettingsHotkey {cfg} target="editHotkey" clearable />
+            </Row>
+            <!-- as_said.rs: nothing selected, right after a dictation into
+                 the same field (still ending at the cursor) → that dictation
+                 rewritten. Off: write mode, as before. -->
+            <Row setting="rewrite-last">
+              <Toggle
+                bind:checked={cfg.rewriteLastDictation}
+                label="Rewrite your last dictation when nothing is selected"
+                desc="Within a minute, in the same field"
+                hint="Only while it's exactly as Yap typed it, with the cursor right after it; otherwise Yap says so and changes nothing."
+              />
             </Row>
           </Group>
           <Group title="Model and prompt" id="settings-commands-model">

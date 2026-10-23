@@ -220,8 +220,15 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   name in any dictation" (`llmScopes.voiceAgent.enabled`), Agent name
   (`AgentNameField.svelte`: saves itself 0.8 s after typing stops or as you
   leave it, and keeps the name in the dictionary). **Rewrite selected text**:
-  the Rewrite shortcut (`editHotkey`). **Model and prompt**: a link row with
-  the model in use → Language Models → Commands.
+  the Rewrite shortcut (`editHotkey`), its line following the switch below
+  (on: "With nothing selected within a minute of a dictation, it rewrites
+  that dictation where it is; otherwise it writes where your cursor is";
+  off: "With nothing selected, it writes where your cursor is"), and
+  **"Rewrite your last dictation when nothing is selected"** ·
+  "Within a minute, in the same field" (`#rewrite-last`,
+  `rewriteLastDictation`, on; in the search index with its switch; the
+  rules in `as_said.rs`, [pasting.md](./pasting.md)). **Model and prompt**: a
+  link row with the model in use → Language Models → Commands.
 - **Voice Assistant** (`voice`): "Ask Yap something by voice and hear the
   answer", the example note (names the shortcut once set) linking to
   Commands. **Assistant shortcut** (`#settings-assistant-shortcut`,
