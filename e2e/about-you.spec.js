@@ -116,7 +116,7 @@ test('About you: one Region picker — Automatic from Windows, a country picked 
   const told = group.getByLabel('What the AI is told');
   await expect(told).toContainText("About the user: they're in the United Kingdom (British English); it's ");
   await expect(told).toContainText(
-    'Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £'
+    'Give times in UK time and metric units, but miles for distances and speeds. Temperatures in °C: convert one a source gives in °F (68°F is 20°C). Prices: in £ (GBP) when you have them in £'
   );
   await expect(told).toContainText('Their name is Imogen.');
   await expect(told).toContainText("They told Yap: \"I'm a teacher in Bristol and I run at weekends\"");
@@ -200,7 +200,7 @@ test("Chat: the model is told about the user, and Exa searches the user's countr
   expect(block).toMatch(/^About the user: they're in the United Kingdom \(British English\)\. Give times/);
   expect(block).not.toMatch(/\d\d:\d\d/);
   expect(block).toContain(
-    `Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like "$15 a month (US price)".`
+    `Give times in UK time and metric units, but miles for distances and speeds. Temperatures in °C: convert one a source gives in °F (68°F is 20°C). Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like "$15 a month (US price)".`
   );
   expect(block).toContain('Their name is Imogen.');
   expect(block).toContain('They told Yap: "I run at weekends"');

@@ -41,6 +41,24 @@ function wavMs(file) {
 /** The parts' length in ms. */
 const lengthMs = (parts) => parts.reduce((ms, p) => ms + (p.kind === 'wav' ? wavMs(p.path) : p.secs * 1_000), 0);
 
+/** How long a WAV goes on after its last sound (over −50 dBFS), in ms:
+ *  Windows' voice ends every sentence with ~0.86–0.91 s of silence. */
+function tailMs(file) {
+  const buf = fs.readFileSync(file);
+  const at = buf.indexOf('data', 12, 'latin1');
+  const n = buf.readUInt32LE(at + 4) / 2;
+  let last = n;
+  while (last > 0 && Math.abs(buf.readInt16LE(at + 8 + 2 * (last - 1))) <= 104) last--;
+  return Math.round(((n - last) / 16_000) * 1_000);
+}
+
+/** When the parts' last word ends, in ms from the start: the pause is
+ *  counted from there, not from the end of the last WAV's own silence. */
+const lastWordMs = (parts) => {
+  const last = parts.findLast((p) => p.kind === 'wav');
+  return lengthMs(parts) - (last && parts.at(-1) === last ? tailMs(last.path) : 0);
+};
+
 let llm;
 test.beforeAll(async ({ robot }) => {
   llm = await startFakeLlm();
@@ -73,13 +91,15 @@ const lastQuestion = () => String(llm.requests.at(-1)?.user ?? '');
 test('a spoken question with a thinking pause in it ends on its own after the last word', async ({ robot }) => {
   test.setTimeout(240_000);
   const before = llm.requests.length;
-  const asked = [quiet(0.8), wav("What's on my shopping list"), quiet(0.9), wav('for the weekend?')];
+  // The thinking pause between the halves is the voice's own silence: the
+  // end of the first WAV and the start of the second, ~1.0–1.2 s (tailMs).
+  const asked = [quiet(0.8), wav("What's on my shopping list"), wav('for the weekend?')];
   const parts = [...asked, quiet(6)];
   const r = await robot.yap.invoke('e2e_assistant_audio', { parts });
   expect(r.endedByItself, 'the pause ended it').toBe(true);
   // After the last word and its pause — the preview's words can push it a
   // tick later, never earlier — and well before the quiet ran out.
-  const spoken = lengthMs(asked);
+  const spoken = lastWordMs(asked);
   expect(r.listenedMs).toBeGreaterThanOrEqual(spoken + PAUSE - 300);
   expect(r.listenedMs).toBeLessThanOrEqual(spoken + PAUSE + 1_500);
   // Both halves were asked: the thinking pause didn't cut it.
@@ -95,7 +115,7 @@ test('gathering your thoughts first keeps the mic; then the pause ends it', asyn
   const asked = [quiet(5), wav('What time is my next meeting?')];
   const r = await robot.yap.invoke('e2e_assistant_audio', { parts: [...asked, quiet(6)] });
   expect(r.endedByItself).toBe(true);
-  expect(r.listenedMs).toBeGreaterThanOrEqual(lengthMs(asked) + PAUSE - 300);
+  expect(r.listenedMs).toBeGreaterThanOrEqual(lastWordMs(asked) + PAUSE - 300);
   await expect.poll(() => llm.requests.length, { timeout: 60_000 }).toBeGreaterThan(before);
   expect(lastQuestion()).toMatch(/meeting/i);
   await robot.yap.invoke('tts_stop');
@@ -108,7 +128,7 @@ test('over a noisy room, the question still ends on the pause', async ({ robot }
   const asked = [quiet(1.5), wav('Remind me what the plan for Friday is.')];
   const r = await robot.yap.invoke('e2e_assistant_audio', { parts: [...asked, quiet(6)], noiseDb: -40 });
   expect(r.endedByItself).toBe(true);
-  expect(r.listenedMs).toBeLessThanOrEqual(lengthMs(asked) + PAUSE + 1_500);
+  expect(r.listenedMs).toBeLessThanOrEqual(lastWordMs(asked) + PAUSE + 1_500);
   await expect.poll(() => llm.requests.length, { timeout: 60_000 }).toBeGreaterThan(before);
   expect(lastQuestion()).toMatch(/friday/i);
   await robot.yap.invoke('tts_stop');
