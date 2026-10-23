@@ -338,11 +338,8 @@ pub struct YapConfig {
     /// Don't show any window on launch (dictation still works via the hotkey).
     #[serde(default)]
     pub start_hidden: bool,
-    /// Deprecated (2026-07-09, pill retirement): the tray is Yap's only
-    /// persistent surface now and is always built; this field is kept so old
-    /// configs load but is no longer consulted.
-    #[serde(default = "default_true")]
-    pub show_tray_icon: bool,
+    // (`showTrayIcon`, retired with the pill on 2026-07-09: the tray is
+    // always built. An old config.json's value is ignored on load.)
     /// Launch Yap at OS login.
     #[serde(default)]
     pub autostart: bool,
@@ -964,7 +961,6 @@ impl Default for YapConfig {
             terminal_mode: true,
             restore_clipboard: true,
             start_hidden: false,
-            show_tray_icon: true,
             autostart: false,
             audio_feedback_volume: default_audio_feedback_volume(),
             selected_language: default_selected_language(),
@@ -1728,6 +1724,14 @@ mod tests {
         fresh.as_object_mut().unwrap().remove("configVersion");
         from_empty.as_object_mut().unwrap().remove("configVersion");
         assert_eq!(fresh, from_empty);
+    }
+
+    #[test]
+    fn a_retired_setting_in_an_old_file_is_ignored() {
+        // `showTrayIcon` (retired 2026-07-09): the rest of the file still loads.
+        let cfg: YapConfig = serde_json::from_str(r#"{"showTrayIcon":false,"startHidden":true}"#).unwrap();
+        assert!(cfg.start_hidden);
+        assert!(serde_json::to_value(&cfg).unwrap().get("showTrayIcon").is_none());
     }
 
     #[test]
