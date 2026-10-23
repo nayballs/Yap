@@ -97,7 +97,7 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   light, dark on dark mode's cream). Thin scrollbars in Settings
   (`settings/settings.css`, the pages' shared styles under `.settings-shell`:
   page header, `.set-link`, `.set-note`, `.set-banner`, `details.set-more`
-  disclosures, `.set-card`, `.set-flash`).
+  disclosures, `.set-flash`).
 - **Contrast, measured** (WCAG AA on `--yap-s1`): descriptions, page lines
   and nav group labels `--yap-muted` 5.1:1 (4.6:1 on the nav), links 4.8:1,
   headings ink 15:1, the ✕ 4.8:1, an off switch's edge 3.4:1, the focus ring
