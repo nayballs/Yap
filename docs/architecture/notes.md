@@ -35,8 +35,12 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   after a speaker edit also `lineSpeakers`, `[voice, locked]` per line), which
   keeps the Notes view and the meeting notepad in sync both ways (each sends
   only the fields it edited). `modify(id, f)` changes one note under the store lock
-  (read and write in one step — the chat's `edit_note`; only a change bumps
-  `updated_ts` and saves). Unit tests get an in-memory store per test
+  (read and write in one step — the chat's `edit_note`, "Transcribe again";
+  only a change bumps `updated_ts` and saves). `insert_transcript` puts
+  lines transcribed after the fact (a crash's, `meeting_audio.rs`) where they
+  belong by time, digests and stop marks moving along (a stop mark after
+  them when a later recording follows). `delete` takes the note's meeting
+  audio with it (`meeting_audio::forget`). Unit tests get an in-memory store per test
   thread (`cfg(test)`), never `notes.json`. `event` (optional) = the calendar meeting the note
   belongs to (`NoteEvent`: key, title, start/end, the invite's description,
   service), set by `link_event` (also the meeting's title as a real title,
@@ -93,7 +97,9 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   will move to Personal."; the view goes to Personal if it was on it),
   Personal and Meetings showing both off with the reason; a note's
   **Rename** (its title, focused), **Move to ▸** (the folders, this one
-  ticked), **Read aloud** / Stop reading (`readNote`), **Copy as Markdown** (`noteMarkdown`), **Export…**, **Delete…**
+  ticked), **Read aloud** / Stop reading (`readNote`), **Copy as Markdown** (`noteMarkdown`), **Export…**,
+  on a meeting note **Transcribe again…** (`meetingAudio.svelte.js`, asked
+  first; off with the reason while it records or with no audio kept), **Delete…**
   (asked first; a meeting note goes through `meeting_delete`, which stops its
   recording first and makes the notepad let go, any other through
   `note_delete`); meta chip row shows date + attendees popover
@@ -130,7 +136,10 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   Copy button; no AI → a toast with Open Language Models); live
   **meeting transcript bubbles** under their speaker's name, once per run of
   one voice (`transcriptItems`; the name opens the speaker menu, below; follow
-  the newest line; echo lines
+  the newest line; ▶ beside a bubble on hover, and Play this line in its
+  menu, plays its stretch of the meeting's kept audio — `meeting_audio.rs`;
+  over them "Transcribing again…" or, after a crash, "Yap closed while this
+  meeting was recording…" with Transcribe it; echo lines
   hidden behind a "Show N lines…" toggle; a `dictated` marker is a quiet dashed
   "You dictated here · left out of the notes" divider with a mic glyph), an
   **AI notes so far** view of the

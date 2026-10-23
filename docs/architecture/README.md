@@ -18,7 +18,7 @@ its one line in CLAUDE.md's module index).
 - [web-and-apps.md](./web-and-apps.md) — web search (Yap's own and the cloud models' own), reading pages, opening apps.
 - [spoken-replies.md](./spoken-replies.md) — reading answers aloud: Kokoro, Windows' voices, text prepared for speech, the speaker; Read aloud, anywhere (`read_aloud.rs`) and its word timing.
 - [notes.md](./notes.md) — the notes store, folders, the Actions engine, the Notes view.
-- [meetings.md](./meetings.md) — the recorder, digests and the action plan, the end of a meeting, the notepad's AI helpers, the meeting notepad window, the Meetings view.
+- [meetings.md](./meetings.md) — the recorder, its audio kept on disk (crash recovery, Transcribe again, ▶ a line), digests and the action plan, the end of a meeting, the notepad's AI helpers, the meeting notepad window, the Meetings view.
 - [speakers.md](./speakers.md) — the speaker engine (diarization, beta) and the speaker map: who said what.
 - [call-detection-and-guards.md](./call-detection-and-guards.md) — call detection, the call apps' icons, a recording's guard rails, hiding meeting windows from screen capture.
 - [calendar.md](./calendar.md) — calendar connections, sync, the reminder card, the "Connect your calendar" dialog.

@@ -23,10 +23,12 @@
 //! Segments `{source: "you"|"them", text, ts}` (ts = when that audio was
 //! captured) go through the correction dictionary exactly as a dictation
 //! does (`pipeline::apply_corrections`), then are emitted live
-//! (`yap-meeting-segment`), persisted to the note's `transcript` as they come
-//! (a crash loses at most one chunk), and handed to the rolling digests
-//! (`meeting_summary.rs`) that keep the end-of-meeting action plan fast for
-//! meetings of any length.
+//! (`yap-meeting-segment`), persisted to the note's `transcript` as they come,
+//! and handed to the rolling digests (`meeting_summary.rs`) that keep the
+//! end-of-meeting action plan fast for meetings of any length. Both sides'
+//! audio is also written to disk as it's captured (`meeting_audio.rs`), so
+//! a crash loses nothing: the next start transcribes what never became
+//! lines ([`replay`]), and so can "Transcribe again".
 //!
 //! Unlike OpenWhispr there is NO realtime-cloud path — chunks are transcribed
 //! locally, so "live" means ~15 s behind, fully offline.
@@ -1743,7 +1745,8 @@ pub fn stop() -> Result<(), String> {
 // recording's clock and dated from when it started. The audio on disk has
 // dictations blanked already (the push path's silence), so they stay out;
 // their markers come back from where they began. A hotkey dictation made
-// meanwhile goes first: between chunks the replay waits for it.
+// meanwhile goes first, and a meeting that starts recording: between chunks
+// the replay waits for them.
 
 /// One side's audio read back from disk, in order.
 pub(crate) trait Feed: Send {
@@ -1762,11 +1765,13 @@ pub(crate) struct Replayed {
 }
 
 /// Wait while a hotkey dictation records, and a moment after one (its own
-/// transcription takes the warm engine first).
-async fn give_way_to_dictation(last: &mut u64) {
+/// transcription takes the warm engine first) — and while a meeting
+/// records (its chunks have the engine; two takers would load a second copy
+/// of the model).
+async fn give_way(last: &mut u64) {
     loop {
         let (count, recording) = crate::pipeline::dictation_state();
-        if recording {
+        if recording || is_recording() {
             tokio::time::sleep(Duration::from_millis(200)).await;
         } else if count != *last {
             *last = count;
@@ -1823,7 +1828,7 @@ pub(crate) async fn replay(
     let mut done = from;
     let mut dictations = crate::pipeline::dictation_state().0;
     loop {
-        give_way_to_dictation(&mut dictations).await;
+        give_way(&mut dictations).await;
         top_up(you, &mine.buf, &mut you_end, fill);
         top_up(them, &call.buf, &mut them_end, fill);
         let mut batch: Vec<(u64, TranscriptSegment)> = Vec::new();

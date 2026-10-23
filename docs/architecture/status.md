@@ -216,7 +216,15 @@ local Share (copy, .md, email), delete, an editable consent message, split
 screen with the call now or when joining (a glass preview on hover); every
 stop, Yap's own included, writes the action plan in Rust without bringing up
 the main window; e2e-tested in `notepad.spec.js`, split screen and its
-preview unit-tested only),
+preview unit-tested only), **meeting audio kept on disk** (`meeting_audio.rs`,
+2026-10-23: both sides as lossless FLAC from Yap's own small encoder,
+written as they're captured, dictations blanked, 14 days by default — a
+crash loses nothing: the next start offers to transcribe what never became
+lines, then summarises; "Transcribe again" on the current model keeps the
+notes, the summary and names on matching lines; ▶ plays a line; Settings →
+Meetings keeps, ages and deletes it; unit-tested, e2e-tested with a killed
+and restarted test instance, the sizes measured on Windows TTS speech
+— not yet with a real call, a power cut, or hours of audio),
 and an **AI Chat** surface (`chats.rs` + eager
 keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — nine tools,
 including safe partial note edits (search → exact-once replace, `note_text.rs`),
@@ -391,7 +399,9 @@ from attendees, the speaker map and names said)
 and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](../meetings.md) "Limits"), and a real call (live
 WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a
-hotkey dictation mid-call) still wants one hands-on pass;
+hotkey dictation mid-call) still wants one hands-on pass; meeting audio
+isn't yet transcribed again by itself when a meeting ends (on demand only),
+the speaker engine isn't run again over it, and it can't be exported;
 the calendar has no one-click Outlook (Microsoft Graph); the pre-meeting
 brief (2026-10-22: unit-, e2e- and model-evaluated, not yet seen before a
 real meeting) checks the AI's lines word by word, so a mix-up of two things

@@ -1020,8 +1020,8 @@ fn set_if_changed<T: PartialEq>(slot: &mut T, value: T) -> bool {
 }
 
 /// Append meeting-recorder segments to a note's transcript and mark it a
-/// meeting note (the recorder persists every drain, so a crash loses at most
-/// one chunk).
+/// meeting note (the recorder persists every drain; what a crash keeps it
+/// from transcribing is on disk, `meeting_audio.rs`).
 pub fn append_transcript(id: u64, segments: &[TranscriptSegment]) -> Result<(), String> {
     if segments.is_empty() {
         return Ok(());

@@ -207,7 +207,15 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   quiet" (`meetingEndWhenQuiet`), "Hide Yap from screen sharing"
   (`meetingHideFromCapture`, in `#settings-screen-sharing`), "Tell speakers
   apart in meetings" (`SpeakersToggle`, the same switch as Speech-to-Text's,
-  with a link to the models). **Notepad**: "Open the notepad when a meeting
+  with a link to the models), "Suggest who's speaking"
+  (`meetingSpeakerNames`). **Meeting audio** (`#settings-meeting-audio`,
+  `meeting_audio.rs`): "Keep meeting audio" (`meetingKeepAudio`, on), "Keep
+  it for" (1 / 7 / 14 / 30 / 90 days → `meetingAudioDays`, greyed while
+  off), "Delete all meeting audio" ("2 meetings · 180 MB" from
+  `meeting_audio_status`, kept current by `yap-meeting-audio`; Delete all… →
+  the confirm dialog → `meeting_audio_clear`). Privacy & data's "What
+  leaves this PC" has a Meeting audio row ("Never leaves this PC: kept here
+  for 14 days…"). **Notepad**: "Open the notepad when a meeting
   starts" (`meetingOpenNotepad`), "Split the screen when joining"
   (`meetingSplitScreen`, greyed with a reason while the first is off), "Show
   live transcript" (`meetingLiveTranscript`), Meeting shortcut

@@ -275,6 +275,8 @@ fn delete_recording(note_id: u64, recording: u64) {
     let _ = std::fs::remove_file(meta_path(note_id, recording));
     // The note's folder goes with its last recording.
     let _ = std::fs::remove_dir(note_dir(note_id));
+    // Nothing of it is waiting to be recovered any more.
+    pending().retain(|m| !(m.note_id == note_id && m.recording == recording));
 }
 
 // ---- Writing it as it's recorded ----
@@ -606,6 +608,7 @@ pub fn forget(note_id: u64) {
     }
     if left == 0 {
         let _ = std::fs::remove_dir_all(note_dir(note_id));
+        pending().retain(|m| m.note_id != note_id);
     }
 }
 
@@ -832,6 +835,11 @@ pub fn start_job(app: &AppHandle, note_id: u64, kind: Kind) -> Result<(), String
     crate::notes::get(note_id).ok_or("Note not found")?;
     if crate::meeting::recording_note() == Some(note_id) {
         return Err("Stop the recording first".to_string());
+    }
+    // One taker of the speech engine at a time (`meeting::replay` also
+    // waits for a recording that starts meanwhile).
+    if crate::meeting::is_recording() {
+        return Err("Yap is recording a meeting: try again when it ends".to_string());
     }
     let have = recordings(note_id);
     let todo: Vec<Meta> = match kind {
