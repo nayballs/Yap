@@ -10,7 +10,7 @@
 // and `e2e_rewrite` stands in for the shortcut and the speech; the rewrite
 // itself, in real windows, is the robot's (e2e-real/rewrite-last.real.js).
 import fs from 'node:fs';
-import { test as base, expect, openSettings, closeSettings, settingsDialog, expectStore } from './support/fixtures.js';
+import { test as base, expect, openSettings, closeSettings, settingsDialog, expectStore, setConfig } from './support/fixtures.js';
 import { startFakeLlm, cleanupTranscript, rewriteText } from './support/fake-llm.js';
 
 const SAID = 'hey can you send me the report by friday';
@@ -29,16 +29,6 @@ const test = base.extend({
 const ON_LINE = 'With nothing selected within a minute of a dictation, it rewrites that dictation where it is';
 const OFF_LINE = 'With nothing selected, it writes where your cursor is';
 const log = (yap) => fs.readFileSync(yap.logPath, 'utf8');
-
-/** Change the config as Settings would, then let Settings' 400 ms auto-save settle (read-aloud.spec.js). */
-async function setConfig(yap, main, patch) {
-  const cfg = await yap.invoke('get_config');
-  await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
-  await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
-  // Settings' copy auto-saves what it adopted (400 ms later): settled.
-  await main.waitForTimeout(700);
-  await expectStore(yap, 'config.json', (c) => Object.entries(patch).every(([k, v]) => JSON.stringify(c[k]) === JSON.stringify(v)));
-}
 
 test('Settings → Commands: the switch is on by default, saves off and on, the shortcut\'s line follows it, and search finds it', async ({
   yap,
