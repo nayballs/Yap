@@ -1439,3 +1439,34 @@ gets the same conversion and line), the seven ×2: **4/14 before** (the two cont
 **Left out**: speeds — Ireland's answers kept the pages' mph (5/5 before and after; the soft
 check says km/h); conversions of other units in pages (miles, pounds); a decade ("the mid-40s
 °F") isn't converted, only the line asks the model to.
+
+## A forced search's words (23 Oct 2026)
+
+A tester asked the Voice Assistant, in a new conversation, "Can you tell me the weather today
+in Kellbrook? Oh, don't tell me that's not working. Oh yeah." (the town is fictional here) on
+Qwen3.5-4B (on the card, web search on). `needs_web` matched "weather", so the first step was
+made to search (`tool_choice: "required"`) — but the voice started 0.77 s after the question
+with no search run, and the sidecar's log shows that step writing 1,961 tokens in 8 s until a
+dictation cut it off.
+
+**The cause**: llama.cpp's grammar for `"required"` lets Qwen3.5 write **before** its call (it
+only has to call a tool before it ends), and won't let it end without one. Replaying the turn's
+forced request 150 times against llamafile 0.10.6 (MTP on): 135 calls straight away, 15 with
+words first — mostly "I'll search for weather information for Kellbrook.", but also "I can't
+provide weather information for Kellbrook as I don't have access to real-time weather data…"
+(879 characters, then a `web_search`) and one ending in `search_notes`. Words started at
+0.05–0.07 s. Yap's step release (`stream::releases`: a sentence and then more) let the long
+ones out as the answer, and the Voice Assistant said them; the line taken back when the call
+came didn't stop the voice. The older suites show the same: 20 forced steps of 1,132 with words
+first (75–417 tokens), all on 21–22 Oct. A clean forced call is 23–41 tokens (1,112 of them).
+
+**The scenario**: `web-weather-voice-must-search` (that question, by voice, a stand-in web,
+`--locale en-GB`). Before (×12, `--timeout 30`): 11 clean; one forced step wrote from 0.44 s
+(its words the turn's "first words") for **4,864 tokens until the 30 s timeout**, then Yap's
+search. After (`stream::ChipsOnly`, the words left out of the call kept in the conversation,
+`tools::MUST_SEARCH_TOKENS` = 128), ×40 and ×150: **190/190**, no text shown before a forced
+step ended, the slowest forced step 1.0 s — the one that wrote on ("I can't tell you the
+weather in Kellbrook. Kellbrook is a fictional town in Baldur's Gate…") was cut at 128
+tokens, Yap searched, the answer's first words came at 1.3 s. A capped call cut mid-way
+(tested at 20 tokens) ends `finish_reason: "length"` with its arguments half written: a
+rejected call, so Yap searches.

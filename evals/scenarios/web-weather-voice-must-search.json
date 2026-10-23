@@ -1,0 +1,40 @@
+{
+  "name": "web-weather-voice-must-search",
+  "description": "The Voice Assistant, a new conversation, a rambling spoken weather question (a tester's voice chat, 2026-10-23; the town is fictional). A model on this PC must search first (tool_choice \"required\"), but llama.cpp's grammar lets Qwen3.5 write an answer before its call: Yap never shows or says that text, and a step that writes on is cut short and searched for. Right: the search runs, the answer comes from the pages (°C). Run with --locale en-GB; the transcript shows each forced step's words.",
+  "tags": [
+    "web",
+    "voice",
+    "locale",
+    "standin"
+  ],
+  "voice": true,
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Kellbrook Weather Today | Forecastly",
+        "url": "https://forecastly.example/gb/kellbrook/today",
+        "published": "2026-10-23",
+        "text": "Today in Kellbrook: cloudy with light rain from mid-afternoon, high 12°C, low 7°C, wind SW 14 km/h. Tonight: showers easing, 8°C."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Can you tell me the weather today in Kellbrook? Oh, don't tell me that's not working. Oh yeah.",
+      "expect": {
+        "min_searches": 1,
+        "min_sources": 1,
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "answer_contains": [
+          "12"
+        ],
+        "max_words": 60
+      }
+    }
+  ]
+}
