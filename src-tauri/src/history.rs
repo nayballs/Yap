@@ -34,6 +34,13 @@ pub struct HistoryEntry {
     pub raw: String,
     /// The final text that was actually injected (after cleanup + dictionary).
     pub text: String,
+    /// The words as said, when AI cleanup changed them: the transcript
+    /// through the corrections, the voice command and snippets, no
+    /// cleanup (`pipeline::as_said_text`), fitted to the same place as
+    /// `text`. Home's "AI edited · N changes" compares the two, and its
+    /// "Paste what I said" pastes it (`as_said.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub said: Option<String>,
     /// Active model id at the time.
     #[serde(default)]
     pub model: String,
@@ -138,19 +145,47 @@ pub fn record_with(
     status: Option<&str>,
     error: Option<&str>,
 ) {
-    if text.trim().is_empty() {
-        return;
+    record_dictation(Dictation { raw, text, said: None, model, app, audio, status, error });
+}
+
+/// One dictation for [`record_dictation`].
+pub struct Dictation<'a> {
+    pub raw: &'a str,
+    pub text: &'a str,
+    /// Its words as said, when AI cleanup changed them ([`HistoryEntry::said`]).
+    pub said: Option<&'a str>,
+    pub model: &'a str,
+    pub app: &'a str,
+    pub audio: Option<&'a str>,
+    pub status: Option<&'a str>,
+    pub error: Option<&'a str>,
+}
+
+/// Record a dictation; returns its timestamp (its id beside its text), or
+/// `None` when there was nothing to record (empty text).
+pub fn record_dictation(d: Dictation<'_>) -> Option<u64> {
+    if d.text.trim().is_empty() {
+        return None;
     }
+    let ts = now_secs();
     push(HistoryEntry {
-        ts: now_secs(),
-        raw: raw.to_string(),
-        text: text.to_string(),
-        model: model.to_string(),
-        app: app.to_string(),
-        audio: audio.map(str::to_string),
-        status: status.map(str::to_string),
-        error: error.map(str::to_string),
+        ts,
+        raw: d.raw.to_string(),
+        text: d.text.to_string(),
+        said: said_beside(d.said, d.text),
+        model: d.model.to_string(),
+        app: d.app.to_string(),
+        audio: d.audio.map(str::to_string),
+        status: d.status.map(str::to_string),
+        error: d.error.map(str::to_string),
     });
+    Some(ts)
+}
+
+/// The words as said worth keeping beside `text`: trimmed, and only when
+/// they're something other than `text`.
+fn said_beside(said: Option<&str>, text: &str) -> Option<String> {
+    said.map(str::trim).filter(|s| !s.is_empty() && *s != text.trim()).map(str::to_string)
 }
 
 /// A dictation that never got transcribed ([`FAILED`]): listed with its
@@ -162,6 +197,7 @@ pub fn record_failed(ts: Option<u64>, model: &str, app: &str, audio: &str, error
         ts: ts.unwrap_or_else(now_secs),
         raw: String::new(),
         text: String::new(),
+        said: None,
         model: model.to_string(),
         app: app.to_string(),
         audio: Some(audio.to_string()),
@@ -199,8 +235,9 @@ pub fn find_audio(ts: u64, audio: &str) -> Option<HistoryEntry> {
 }
 
 /// Run again: the entry with `audio` gets the new transcript (`raw`, `text`,
-/// `model`) and is no longer a failure. `false` when it's gone.
-pub fn rerun_result(audio: &str, raw: &str, text: &str, model: &str) -> bool {
+/// its words as said when cleanup changed them, `model`) and is no longer a
+/// failure. `false` when it's gone.
+pub fn rerun_result(audio: &str, raw: &str, text: &str, said: Option<&str>, model: &str) -> bool {
     let mut guard = match STATE.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
@@ -211,6 +248,7 @@ pub fn rerun_result(audio: &str, raw: &str, text: &str, model: &str) -> bool {
     };
     e.raw = raw.to_string();
     e.text = text.to_string();
+    e.said = said_beside(said, text);
     e.model = model.to_string();
     e.status = None;
     e.error = None;
@@ -238,6 +276,11 @@ pub fn list(limit: usize) -> Value {
                 "app": e.app,
                 "words": word_count(&e.text),
             });
+            // Its words as said, when AI cleanup changed them (Home's "AI
+            // edited", "Paste what I said").
+            if let Some(said) = &e.said {
+                item["said"] = json!(said);
+            }
             // Its audio, while it's kept (Run again, Play).
             if let Some(id) = e.audio.as_deref().filter(|id| crate::recent_audio::has(id)) {
                 item["audio"] = json!(id);
@@ -306,6 +349,16 @@ pub fn recent_dictation_secs(limit: usize) -> Vec<f32> {
 
 fn is_dictation_app(app: &str) -> bool {
     app.trim().is_empty() || app.trim().to_ascii_lowercase().ends_with(".exe")
+}
+
+/// The entry Home lists at `ts` with `text` (the pair it deletes by, too).
+pub fn find(ts: u64, text: &str) -> Option<HistoryEntry> {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    entries.iter().rev().find(|e| e.ts == ts && e.text == text).cloned()
 }
 
 /// One entry by timestamp (the local-API bridge's transcription id; first
@@ -474,9 +527,36 @@ mod tests {
         }
         // A failed one isn't the last dictation to paste.
         assert_ne!(latest_dictation().as_deref(), Some(""));
-        assert!(rerun_result("t-failed", "the plan is ready", "The plan is ready.", "large"));
+        assert!(rerun_result("t-failed", "um the plan is ready", "The plan is ready.", Some("um the plan is ready"), "large"));
         let fixed = find_audio(now - 600, "t-failed").unwrap();
         assert_eq!((fixed.status, fixed.text.as_str(), fixed.model.as_str()), (None, "The plan is ready.", "large"));
-        assert!(!rerun_result("t-gone", "x", "x", "large"));
+        assert_eq!(fixed.said.as_deref(), Some("um the plan is ready"));
+        assert!(!rerun_result("t-gone", "x", "x", None, "large"));
+    }
+
+    #[test]
+    fn the_words_as_said_are_kept_only_when_they_differ() {
+        let ts = record_dictation(Dictation {
+            raw: "um send it to sam",
+            text: "Send it to Sam.",
+            said: Some(" um send it to sam "),
+            model: "parakeet-tdt-0.6b-v3",
+            app: "slack.exe",
+            audio: None,
+            status: None,
+            error: None,
+        })
+        .expect("recorded");
+        let e = find(ts, "Send it to Sam.").expect("found by its time and text");
+        assert_eq!(e.said.as_deref(), Some("um send it to sam"));
+        // Listed for Home.
+        let listed = list(50);
+        let item = listed.as_array().unwrap().iter().find(|i| i["text"] == "Send it to Sam.").unwrap();
+        assert_eq!(item["said"], "um send it to sam");
+        // The same words: nothing to keep.
+        assert_eq!(said_beside(Some("Same. "), "Same."), None);
+        assert_eq!(said_beside(Some("  "), "Same."), None);
+        // Nothing to record.
+        assert!(record_dictation(Dictation { raw: "", text: " ", said: None, model: "", app: "", audio: None, status: None, error: None }).is_none());
     }
 }

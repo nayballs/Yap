@@ -85,7 +85,7 @@ export const SETTINGS_INDEX = [
   // ---- Commands ----
   { page: 'commands', section: 'Say its name', label: 'Answer to its name in any dictation', desc: '"Hey Yap, …" and the AI does what you ask', keywords: 'commands wake word hey yap agent ai', anchor: 'wake-word' },
   { page: 'commands', section: 'Say its name', label: 'Agent name', desc: 'The name Commands answer to', keywords: 'name jarvis wake word agent', anchor: 'agent-name' },
-  { page: 'commands', section: 'Rewrite selected text', label: 'Rewrite shortcut', desc: 'Select text, press it and say how to change it', keywords: 'edit rewrite shortcut hotkey selection', anchor: 'rewrite-shortcut' },
+  { page: 'commands', section: 'Rewrite selected text', label: 'Rewrite shortcut', desc: 'Select text, press it and say how to change it', keywords: 'edit rewrite shortcut hotkey selection last dictation transform formal shorter translate', anchor: 'rewrite-shortcut' },
   { page: 'commands', section: 'Model and prompt', label: 'Commands model and prompt', desc: 'Language Models → Commands', keywords: 'model prompt language model ai', anchor: 'commands-model' },
 
   // ---- Voice Assistant ----

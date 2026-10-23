@@ -60,7 +60,25 @@ never moves a model off the graphics card. **"Use what
 I said"** (`as_said.rs`: the shortcut, the bar's offer, the tray's paste as
 said), checked by the robot in the test pad, Notepad, an Edge box, a chat
 app and its contenteditable (swapped) and in a terminal, after an edit and
-with another window in front (refused, copied). **A day of dictation audio**
+with another window in front (refused, copied). **What the AI changed, and
+undo it later** (2026-10-23): Home's "AI edited · N changes" on a dictation
+whose words cleanup changed opens into a word diff (`lib/wordDiff.js`,
+history's `said`), with **Paste what I said** (the latest dictation swapped
+in its app within 2 minutes, its window brought back; any other copied) —
+the diff unit-tested (`word-diff.spec.js`), the Home UI e2e-tested
+(`home-ai-edits.spec.js`, light and dark), the swap from Home a robot test
+written (`as-said.real.js`), not yet run by the coordinator nor tried by a
+person (the window brought back to the front from Home is the part only a
+person's click shows). **Rewriting the last dictation** (2026-10-23): the
+rewrite shortcut with nothing selected, within a minute of a dictation in
+that window, rewrites it in place (the paste still ending at the cursor,
+else nothing pasted and said) — the rules unit-tested (`as_said::
+rewritable`, `keep_spaces`), robot tests written (`rewrite-last.real.js`:
+the test pad, an Edge box, a contenteditable, typed since and the cursor
+moved refused, a selection or another window as before, a terminal never),
+not yet run; not yet tried with a real voice and AI model. The spoken
+"undo that" / "revert" was left out: "revert" alone is a real message, and
+"undo that" reads as "delete it" in Windows' own voice commands. **A day of dictation audio**
 (`recent_audio.rs`): failed dictations listed, Run again (any installed
 model) and Play in Home, a crash mid-dictation recovered at the next start —
 e2e-tested on the stub engine (`dictation-trust.spec.js`), Run again on real

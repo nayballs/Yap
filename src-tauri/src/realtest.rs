@@ -644,6 +644,24 @@ pub mod commands {
         robot.dictate_text(text).await
     }
 
+    /// The rewrite shortcut with `text` as the spoken instruction, in the
+    /// window in front (`hwnd`, when given, must be it): its selection read
+    /// (UI Automation; no Ctrl+C in robot mode) — none, right after a
+    /// dictation there, and that dictation is rewritten in place
+    /// (`as_said.rs`) — then the AI (the cleanup model, unless Commands has
+    /// its own) and the paste. Returns what it did.
+    #[tauri::command]
+    pub async fn realtest_rewrite_text(
+        state: State<'_, AppState>,
+        text: String,
+        hwnd: Option<i64>,
+    ) -> Result<crate::pipeline::Rewritten, String> {
+        only_robot()?;
+        in_front(hwnd)?;
+        let robot = robot_of(&state)?;
+        robot.rewrite_text(text).await
+    }
+
     /// A dictation from a WAV file (`path`, any format Upload reads): played
     /// into the dictation mic in real time through the real start/stop path
     /// (the mic's own audio is left out meanwhile), so the STT, the live

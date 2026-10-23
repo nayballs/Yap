@@ -46,6 +46,33 @@
 //!
 //! Test runs touch nothing (`realtest::gate`: a log line, the text
 //! returned); robot mode only the test's own windows.
+//!
+//! **The last paste** ([`remember`], 2026-10-23): Yap keeps the last text
+//! it pasted into an app's field — a dictation, or a Command's or a
+//! rewrite's answer — with its window, its kind of app and when; beside it
+//! the words as said when cleanup changed them, and its history entry
+//! ([`recorded`]). Sent with a submit key, or a paste that didn't land:
+//! forgotten. Three things use it:
+//! - "Use what I said" (above);
+//! - **Home's "Paste what I said"** ([`paste_entry`]): on the dictation Yap
+//!   still remembers, within [`SWAP_WITHIN`] and not swapped yet, Yap brings
+//!   its window back to the front and swaps it exactly as above, every
+//!   check included; on any other entry — or where the swap refuses — the
+//!   words as said are copied (privately) and Yap says so;
+//! - **rewriting the last dictation** (the rewrite shortcut with nothing
+//!   selected; Wispr Flow's Command Mode and Transforms, by behaviour):
+//!   within [`REWRITE_WITHIN`] of a paste into the window in front, not a
+//!   terminal ([`rewritable`], [`rewrite_target`] at the key press), the
+//!   spoken instruction is applied to that paste instead of writing new
+//!   text. Stricter than the swap: the paste must still **end exactly at
+//!   the caret** — typed after, edited, or the cursor moved away refuses,
+//!   since the instruction may no longer be about it. Checked before the AI
+//!   is asked ([`rewrite_check`]: refused → "Couldn't rewrite your last
+//!   dictation", nothing pasted) and again when it answers
+//!   ([`replace_last`]: selected exactly, pasted over with the spaces
+//!   around it kept, read back; refused → the field left alone and the
+//!   rewrite copied instead). The rewrite is then the last paste, so "now
+//!   shorter" works on it.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -58,6 +85,11 @@ use crate::app_kind::AppKind;
 
 /// How long after a dictation its paste can still be swapped.
 pub const SWAP_WITHIN: Duration = Duration::from_secs(120);
+/// How long after a paste the rewrite shortcut, with nothing selected,
+/// rewrites it instead of writing new text (Wispr Flow's minute): time to
+/// read it and ask, short enough that "make it more formal" is still about
+/// it.
+pub const REWRITE_WITHIN: Duration = Duration::from_secs(60);
 /// How long the bar offers it.
 pub const OFFER_MS: u64 = 6_000;
 /// How long a field gets to show a selection or the new text before Yap
@@ -69,22 +101,41 @@ const SELECT_WAIT: Duration = Duration::from_millis(1_500);
 const CHECK_WAIT: Duration = Duration::from_millis(1_000);
 
 const NOTHING: &str = "Nothing to swap: Use what I said works right after a dictation AI cleanup changed";
+/// The swap's refusal when the paste isn't where Yap left it.
+const MOVED: &str = "the text Yap pasted has changed or moved";
+/// The rewrite's, which wants the cursor right after it too.
+const EDITED_SINCE: &str = "it's been changed, or the cursor isn't right after it any more";
 
-/// The last dictation AI cleanup changed, as it went to the paste.
+/// The last text Yap pasted into an app's field (see the module comment).
 #[derive(Debug, Clone)]
-struct Pasted {
+pub(crate) struct Pasted {
     seq: u64,
     /// The window it went into (`None`: one of Yap's own, or none — never
-    /// swapped there).
+    /// swapped or rewritten there).
     hwnd: Option<isize>,
     /// The kind of app as read (its paste keys).
     kind: AppKind,
     /// What was pasted (fitted).
     pasted: String,
-    /// The words as said, fitted to the same place.
-    said: String,
+    /// The words as said, fitted to the same place, when AI cleanup
+    /// changed them: what "Use what I said" swaps it for.
+    said: Option<String>,
+    /// Its history entry (`ts`), once recorded ([`recorded`]).
+    entry: Option<u64>,
     at: Instant,
     restore_clipboard: bool,
+}
+
+impl Pasted {
+    /// What was pasted, as the AI is to rewrite it.
+    pub(crate) fn text(&self) -> &str {
+        self.pasted.trim()
+    }
+
+    /// How long ago it was pasted.
+    pub(crate) fn age(&self) -> Duration {
+        self.at.elapsed()
+    }
 }
 
 static LAST: Mutex<Option<Pasted>> = Mutex::new(None);
@@ -108,28 +159,44 @@ pub fn words_differ(cleaned: &str, said: &str) -> bool {
     words(cleaned) != words(said)
 }
 
-/// A dictation just pasted (`pasted`, fitted) into `hwnd`; `said`: its words
-/// as said, fitted the same way, when cleanup changed them. Returns its
-/// number when there's something to swap (anything else is forgotten).
+/// Text just pasted (`pasted`, fitted) into `hwnd`: the last paste from now
+/// on. `said`: a dictation's words as said, fitted the same way, when
+/// cleanup changed them. Returns its number when there's something to swap
+/// for them. Nothing pasted into another app's window and nothing to swap:
+/// forgotten.
 pub fn remember(hwnd: Option<isize>, kind: AppKind, pasted: &str, said: Option<&str>, restore_clipboard: bool) -> Option<u64> {
+    let said = said.filter(|s| *s != pasted && !s.trim().is_empty());
     let mut l = last();
-    match said {
-        Some(said) if said != pasted && !said.trim().is_empty() => {
-            let seq = SEQ.fetch_add(1, Ordering::SeqCst) + 1;
-            *l = Some(Pasted {
-                seq,
-                hwnd,
-                kind,
-                pasted: pasted.to_string(),
-                said: said.to_string(),
-                at: Instant::now(),
-                restore_clipboard,
-            });
-            Some(seq)
-        }
-        _ => {
-            *l = None;
-            None
+    if pasted.trim().is_empty() || (hwnd.is_none() && said.is_none()) {
+        *l = None;
+        return None;
+    }
+    let seq = SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    *l = Some(Pasted {
+        seq,
+        hwnd,
+        kind,
+        pasted: pasted.to_string(),
+        said: said.map(str::to_string),
+        entry: None,
+        at: Instant::now(),
+        restore_clipboard,
+    });
+    said.is_some().then_some(seq)
+}
+
+/// Nothing Yap pasted is left in a field to swap or rewrite (a paste that
+/// didn't land, one sent with a submit key).
+pub fn forget() {
+    *last() = None;
+}
+
+/// The paste just remembered is history's entry `ts` (its text `text`, as
+/// history keeps it): Home's "Paste what I said" on that entry can swap it.
+pub fn recorded(ts: u64, text: &str) {
+    if let Some(p) = last().as_mut() {
+        if p.entry.is_none() && p.pasted.trim() == text.trim() {
+            p.entry = Some(ts);
         }
     }
 }
@@ -137,7 +204,7 @@ pub fn remember(hwnd: Option<isize>, kind: AppKind, pasted: &str, said: Option<&
 /// Dictation `seq` is still the one to swap (the bar's offer runs out
 /// otherwise).
 pub fn offered(seq: u64) -> bool {
-    last().as_ref().is_some_and(|p| p.seq == seq)
+    last().as_ref().is_some_and(|p| p.seq == seq && p.said.is_some())
 }
 
 /// What "Use what I said" did.
@@ -149,7 +216,8 @@ pub enum Outcome {
     /// control) or "text" (UI Automation's TextPattern).
     Swapped { checked: bool, how: &'static str, said: String },
     /// Not here (`why`): the words as said are on the clipboard instead.
-    Copied { why: String, said: String },
+    /// `told`: Yap has said so already (an alert); else the caller says it.
+    Copied { why: String, said: String, told: bool },
     /// A test run: nothing was touched.
     TestMode { said: String },
 }
@@ -158,32 +226,260 @@ pub enum Outcome {
 /// module comment). Blocking: UI Automation, the paste. `Err`: nothing to
 /// swap, or robot mode refused the window.
 pub fn swap(app: &AppHandle) -> Result<Outcome, String> {
-    let p = last().clone().ok_or(NOTHING)?;
+    let p = last().clone().filter(|p| p.said.is_some()).ok_or(NOTHING)?;
     if p.at.elapsed() > SWAP_WITHIN {
         *last() = None;
         return Err(NOTHING.into());
     }
-    match crate::realtest::gate(p.hwnd, "swap the paste for the words as said") {
-        crate::realtest::Gate::Go => {}
-        crate::realtest::Gate::TestMode => {
-            *last() = None;
-            tracing::info!(chars = p.said.chars().count(), "e2e: not swapping the paste for the words as said");
-            return Ok(Outcome::TestMode { said: p.said });
-        }
-        crate::realtest::Gate::Refused(why) => return Err(why),
+    if let Some(outcome) = gate_swap(&p)? {
+        return Ok(outcome);
     }
     // One swap per dictation, whatever comes of it.
     *last() = None;
-    let outcome = match replace(&p) {
-        Ok(o) => o,
-        Err(why) => copy_instead(app, &p, why),
+    Ok(swap_now(app, &p))
+}
+
+/// A swap of `p` in a test run (nothing touched: `Some`), robot mode's
+/// refusal (`Err`), or go (`None`).
+fn gate_swap(p: &Pasted) -> Result<Option<Outcome>, String> {
+    let said = p.said.clone().unwrap_or_default();
+    match crate::realtest::gate(p.hwnd, "swap the paste for the words as said") {
+        crate::realtest::Gate::Go => Ok(None),
+        crate::realtest::Gate::TestMode => {
+            *last() = None;
+            tracing::info!(chars = said.chars().count(), "e2e: not swapping the paste for the words as said");
+            Ok(Some(Outcome::TestMode { said }))
+        }
+        crate::realtest::Gate::Refused(why) => Err(why),
+    }
+}
+
+/// Swap `p` (gated already): replaced, else copied and said.
+fn swap_now(app: &AppHandle, p: &Pasted) -> Outcome {
+    let said = p.said.clone().unwrap_or_default();
+    let outcome = match replace_in_field(p, &|_| said.clone(), true) {
+        Ok(Put::Replaced { checked, how, .. }) => Outcome::Swapped { checked, how, said },
+        // On the clipboard already, and nothing was pasted.
+        Ok(Put::OnClipboard) => Outcome::Copied { why: "the window couldn't be reached".into(), said, told: false },
+        Err(why) => copy_instead(app, p, why),
     };
     match &outcome {
         Outcome::Swapped { checked, how, .. } => tracing::info!(checked, how, "Use what I said: the paste swapped"),
         Outcome::Copied { why, .. } => tracing::info!(why = %why, "Use what I said: copied instead"),
         Outcome::TestMode { .. } => {}
     }
+    outcome
+}
+
+/// Home's **Paste what I said** on its entry at `ts` with `text`: the
+/// dictation Yap still remembers (within [`SWAP_WITHIN`], not swapped yet)
+/// is swapped in its field — its window brought back to the front first,
+/// then every check of [`swap`] —; any other, or where that refuses, has
+/// its words as said copied (privately). Blocking.
+pub fn paste_entry(app: &AppHandle, ts: u64, text: &str) -> Result<Outcome, String> {
+    let entry = crate::history::find(ts, text).ok_or("This dictation isn't in your history any more")?;
+    let said = entry
+        .said
+        .filter(|s| !s.trim().is_empty())
+        .ok_or("Yap didn't keep what you said for this dictation")?;
+    let remembered = last().clone().filter(|p| p.said.is_some() && p.entry == Some(ts) && p.pasted.trim() == text.trim());
+    let why = match remembered {
+        Some(p) if p.at.elapsed() <= SWAP_WITHIN => {
+            if let Some(outcome) = gate_swap(&p)? {
+                return Ok(outcome);
+            }
+            *last() = None;
+            let back = p.hwnd.is_some_and(bring_back);
+            tracing::info!(back, "Paste what I said: the latest dictation, in its own window");
+            if !back {
+                return Ok(copy_instead(app, &p, "Yap couldn't bring its window back".into()));
+            }
+            return Ok(swap_now(app, &p));
+        }
+        Some(_) => "it's been more than two minutes since you said it",
+        None => "Yap only swaps your latest dictation, right after it",
+    };
+    copy_said(said.trim(), why)
+}
+
+/// The words as said on the clipboard (privately), for the caller to say
+/// so (Home's toast). A test run never touches the clipboard.
+fn copy_said(said: &str, why: &str) -> Result<Outcome, String> {
+    let out = || Outcome::Copied { why: why.to_string(), said: said.to_string(), told: false };
+    if crate::e2e::active() && !crate::realtest::on() {
+        tracing::info!(chars = said.chars().count(), "e2e: not copying the words as said");
+        return Ok(out());
+    }
+    if !crate::text_injector::copy_privately(said) {
+        return Err("The clipboard couldn't take the text".into());
+    }
+    tracing::info!(chars = said.chars().count(), "Paste what I said: copied");
+    Ok(out())
+}
+
+/// Bring `hwnd` back to the front (Home's "Paste what I said": Yap's own
+/// window has it), and give the app a moment to put the focus back in its
+/// field. `false`: it didn't come.
+fn bring_back(hwnd: isize) -> bool {
+    if crate::text_injector::current_foreground() == Some(hwnd) {
+        return true;
+    }
+    if !crate::text_injector::window_exists(hwnd) {
+        return false;
+    }
+    crate::text_injector::focus(hwnd);
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_millis(800) {
+        if crate::text_injector::current_foreground() == Some(hwnd) {
+            std::thread::sleep(SETTLE);
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    false
+}
+
+// ---- Rewriting the last paste -----------------------------------------------------
+
+/// The rewrite shortcut's rule (pure): with nothing selected, the last
+/// paste is what it rewrites when it went into the window in front now
+/// (`target`), not a terminal (its line can't be selected), at most
+/// [`REWRITE_WITHIN`] ago.
+pub fn rewritable(pasted_in: Option<isize>, kind: AppKind, age: Duration, target: Option<isize>) -> bool {
+    pasted_in.is_some() && pasted_in == target && !kind.is_terminal() && age <= REWRITE_WITHIN
+}
+
+/// The last paste, when the rewrite shortcut — nothing selected in
+/// `target` — is to rewrite it ([`rewritable`]). A test run never (it
+/// reads no other app); robot mode only in the test's own windows.
+pub(crate) fn rewrite_target(target: Option<isize>) -> Option<Pasted> {
+    let p = last().clone()?;
+    (rewritable(p.hwnd, p.kind, p.at.elapsed(), target) && crate::realtest::permits(p.hwnd)).then_some(p)
+}
+
+/// Before the AI is asked: the last paste `p` is still in its field exactly
+/// as pasted, the cursor right after it, its window in front (not an admin
+/// app). `Err(why)`. Read only; blocking (UI Automation).
+pub(crate) fn rewrite_check(p: &Pasted) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let hwnd = p.hwnd.ok_or("Yap didn't paste it into another app")?;
+        usable(hwnd, p.kind)?;
+        let pid = crate::text_injector::window_process(hwnd).ok_or("the window is gone")?;
+        if uia::ends_at_caret(hwnd, pid, &p.pasted) {
+            Ok(())
+        } else {
+            Err(EDITED_SINCE.into())
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = p;
+        Err("Yap can only do this on Windows".into())
+    }
+}
+
+/// The rewrite shortcut found nothing selected and its last dictation not
+/// as Yap pasted it (`why`): said plainly, nothing pasted.
+pub(crate) fn cant_rewrite(app: &AppHandle, why: &str) {
+    tracing::info!(why = %why, "Rewrite the last dictation: refused, nothing pasted");
+    crate::alert::show_soon(
+        app,
+        crate::alert::Alert {
+            kind: "pasteBlocked",
+            icon: "clipboard",
+            title: "Couldn't rewrite your last dictation".into(),
+            body: format!("Yap left it as it is ({why}). Select the text you want to change, then try again."),
+            action: None,
+            timeout_ms: 12_000,
+        },
+    );
+}
+
+/// What became of a rewrite of the last paste.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "outcome")]
+pub enum Rewrote {
+    /// The last paste was replaced by the rewrite (`text`, as pasted).
+    /// `checked`: read back. `how`: "edit" or "text", as for a swap.
+    Replaced { checked: bool, how: &'static str, text: String },
+    /// Not there any more (`why`): the field was left alone and the rewrite
+    /// is on the clipboard (the person told).
+    Copied { why: String, text: String },
+    /// A test run: nothing was touched.
+    TestMode { text: String },
+}
+
+/// The AI's `rewrite` of the last paste `p` put in its place: selected
+/// exactly (still ending at the caret), pasted over with the spaces around
+/// it kept as they were ([`keep_spaces`]), read back — then it's the last
+/// paste. Where that can't be done safely the field is left alone and the
+/// rewrite goes on the clipboard instead, said. Blocking.
+pub(crate) fn replace_last(app: &AppHandle, p: &Pasted, rewrite: &str) -> Result<Rewrote, String> {
+    match crate::realtest::gate(p.hwnd, "rewrite the last dictation") {
+        crate::realtest::Gate::Go => {}
+        crate::realtest::Gate::TestMode => {
+            tracing::info!(chars = rewrite.chars().count(), "e2e: not rewriting the last dictation");
+            return Ok(Rewrote::TestMode { text: rewrite.to_string() });
+        }
+        crate::realtest::Gate::Refused(why) => return Err(why),
+    }
+    let outcome = match replace_in_field(p, &|selected| keep_spaces(selected, rewrite), false) {
+        Ok(Put::Replaced { checked, how, text }) => {
+            remember(p.hwnd, p.kind, &text, None, p.restore_clipboard);
+            Rewrote::Replaced { checked, how, text }
+        }
+        Ok(Put::OnClipboard) => rewrite_copied(app, "the window couldn't be reached".into(), rewrite, false),
+        Err(why) => rewrite_copied(app, why, rewrite, true),
+    };
+    match &outcome {
+        Rewrote::Replaced { checked, how, .. } => tracing::info!(checked, how, "Rewrite the last dictation: replaced"),
+        Rewrote::Copied { why, .. } => tracing::info!(why = %why, "Rewrite the last dictation: copied instead"),
+        Rewrote::TestMode { .. } => {}
+    }
     Ok(outcome)
+}
+
+/// The rewrite couldn't take the last paste's place: on the clipboard
+/// (privately; `copy`: not there yet), and the person told.
+fn rewrite_copied(app: &AppHandle, why: String, rewrite: &str, copy: bool) -> Rewrote {
+    let text = rewrite.trim().to_string();
+    let copied = !copy || crate::text_injector::copy_privately(&text);
+    crate::alert::show_soon(
+        app,
+        crate::alert::Alert {
+            kind: "pasteBlocked",
+            icon: "clipboard",
+            title: if copied {
+                "Couldn't replace your last dictation — copied the rewrite instead".into()
+            } else {
+                "Couldn't replace your last dictation".into()
+            },
+            body: if copied {
+                format!("Yap left your text as it was ({why}). The rewrite is on the clipboard: press Ctrl+V.")
+            } else {
+                format!("Yap left your text as it was ({why}), and the clipboard couldn't take the rewrite.")
+            },
+            action: None,
+            timeout_ms: 12_000,
+        },
+    );
+    Rewrote::Copied { why, text }
+}
+
+/// `rewrite` with the spaces `selected` (what it replaces) had around it,
+/// so the text on either side stays as it was.
+pub fn keep_spaces(selected: &str, rewrite: &str) -> String {
+    if selected.trim().is_empty() {
+        return rewrite.trim().to_string();
+    }
+    let lead = &selected[..selected.len() - selected.trim_start().len()];
+    let trail = &selected[selected.trim_end().len()..];
+    let body = rewrite.trim();
+    if body.is_empty() {
+        return String::new();
+    }
+    format!("{lead}{body}{trail}")
 }
 
 /// [`swap`] off the caller's thread (the shortcut, the bar), the bar's
@@ -237,31 +533,38 @@ fn end_offer(app: &AppHandle) {
     let _ = app.emit("yap-state", "idle");
 }
 
-/// Swap it: select exactly what was pasted, paste the words as said over
-/// it, read it back. `Err(why)`: not here (nothing was changed).
+/// What [`replace_in_field`] did.
+enum Put {
+    /// The paste was replaced by `text` (`checked`: read back).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Replaced { checked: bool, how: &'static str, text: String },
+    /// The window couldn't be reached: the text is on the clipboard (the
+    /// paste's own fallback) and nothing was pasted.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    OnClipboard,
+}
+
+/// Replace the paste `p` in its field: select exactly what was pasted —
+/// ending at the caret, or (`anywhere`) else there exactly once —, paste
+/// `with(what was selected)` over it, read it back. `Err(why)`: not here
+/// (nothing was changed).
 #[cfg(not(windows))]
-fn replace(_p: &Pasted) -> Result<Outcome, String> {
+fn replace_in_field(_p: &Pasted, _with: &dyn Fn(&str) -> String, _anywhere: bool) -> Result<Put, String> {
     Err("Yap can only do this on Windows".into())
 }
 
 #[cfg(windows)]
-fn replace(p: &Pasted) -> Result<Outcome, String> {
+fn replace_in_field(p: &Pasted, with: &dyn Fn(&str) -> String, anywhere: bool) -> Result<Put, String> {
     let hwnd = p.hwnd.ok_or("Yap didn't paste it into another app")?;
-    if p.kind.is_terminal() {
-        return Err("a terminal's line can't be selected".into());
-    }
-    let front = crate::text_injector::current_foreground();
-    if front != Some(hwnd) {
-        tracing::debug!(dictation = hwnd, front = ?front, "Use what I said: another window is in front");
-        return Err("you've moved on to another window".into());
-    }
-    if crate::elevated::target_blocked(hwnd) {
-        return Err("the app runs as administrator".into());
-    }
+    usable(hwnd, p.kind)?;
     let pid = crate::text_injector::window_process(hwnd).ok_or("the window is gone")?;
-    let how = uia::select_pasted(hwnd, pid, &p.pasted)?;
+    let (how, selected) = uia::select_pasted(hwnd, pid, &p.pasted, anywhere)?;
+    let text = with(&selected);
+    if text.trim().is_empty() {
+        return Err("there was nothing to put in its place".into());
+    }
     let delivery = tauri::async_runtime::block_on(crate::text_injector::inject_text(
-        &p.said,
+        &text,
         p.restore_clipboard,
         Some(hwnd),
         true,
@@ -269,29 +572,46 @@ fn replace(p: &Pasted) -> Result<Outcome, String> {
     ))?;
     match delivery {
         crate::text_injector::Delivery::Pasted | crate::text_injector::Delivery::Typed => {}
-        // On the clipboard already, and nothing was pasted.
         crate::text_injector::Delivery::LeftOnClipboard | crate::text_injector::Delivery::WindowGone => {
-            return Ok(Outcome::Copied { why: "the window couldn't be reached".into(), said: p.said.clone() });
+            return Ok(Put::OnClipboard);
         }
     }
     // Read back until the field shows it (an app may take a moment).
     let started = Instant::now();
     let checked = loop {
         std::thread::sleep(SETTLE);
-        if uia::ends_at_caret(hwnd, pid, &p.said) {
+        if uia::ends_at_caret(hwnd, pid, &text) {
             break true;
         }
         if started.elapsed() > CHECK_WAIT {
             break false;
         }
     };
-    Ok(Outcome::Swapped { checked, how, said: p.said.clone() })
+    Ok(Put::Replaced { checked, how, text })
+}
+
+/// The paste's window may be touched: still in front, not a terminal (its
+/// line can't be selected), not an app running as administrator.
+#[cfg(windows)]
+fn usable(hwnd: isize, kind: AppKind) -> Result<(), String> {
+    if kind.is_terminal() {
+        return Err("a terminal's line can't be selected".into());
+    }
+    let front = crate::text_injector::current_foreground();
+    if front != Some(hwnd) {
+        tracing::debug!(dictation = hwnd, front = ?front, "The last paste: another window is in front");
+        return Err("you've moved on to another window".into());
+    }
+    if crate::elevated::target_blocked(hwnd) {
+        return Err("the app runs as administrator".into());
+    }
+    Ok(())
 }
 
 /// Not here: the words as said on the clipboard (privately), and the person
 /// told.
 fn copy_instead(app: &AppHandle, p: &Pasted, why: String) -> Outcome {
-    let said = p.said.trim().to_string();
+    let said = p.said.as_deref().unwrap_or_default().trim().to_string();
     let copied = crate::text_injector::copy_privately(&said);
     crate::alert::show_soon(
         app,
@@ -312,7 +632,7 @@ fn copy_instead(app: &AppHandle, p: &Pasted, why: String) -> Outcome {
             timeout_ms: 12_000,
         },
     );
-    Outcome::Copied { why, said }
+    Outcome::Copied { why, said, told: true }
 }
 
 // ---- the pure parts ---------------------------------------------------------------
@@ -441,7 +761,14 @@ mod uia {
         UIA_TextPatternId, UIA_ValuePatternId,
     };
 
-    use super::{byte_at_units, match_before, same_text, unique_in, unit_counts, units, SELECT_WAIT, SETTLE};
+    use super::{byte_at_units, match_before, same_text, unique_in, unit_counts, units, EDITED_SINCE, MOVED, SELECT_WAIT, SETTLE};
+
+    /// Why the paste couldn't be found: moved or edited (`anywhere`: the
+    /// swap, which takes it wherever it is once), or not right before the
+    /// caret (the rewrite).
+    fn not_found(anywhere: bool) -> String {
+        (if anywhere { MOVED } else { EDITED_SINCE }).to_string()
+    }
 
     /// UI Automation's answers, at most this long each.
     const TIMEOUT_MS: u32 = 800;
@@ -629,9 +956,11 @@ mod uia {
     }
 
     /// Select exactly `pasted` (just pasted into `hwnd`, of process `pid`)
-    /// in the focused field: "edit" or "text" (how). `Err(why)` when it
-    /// can't be done safely; nothing was changed then (but a selection).
-    pub fn select_pasted(hwnd: isize, pid: u32, pasted: &str) -> Result<&'static str, String> {
+    /// in the focused field — ending at the caret, or (`anywhere`) else
+    /// wherever it is exactly once: "edit" or "text" (how), and the text
+    /// selected (the paste as the field has it). `Err(why)` when it can't be
+    /// done safely; nothing was changed then (but a selection).
+    pub fn select_pasted(hwnd: isize, pid: u32, pasted: &str, anywhere: bool) -> Result<(&'static str, String), String> {
         let _com = Com::init().ok_or("UI Automation isn't available")?;
         let a = automation().ok_or("UI Automation isn't available")?;
         // A Win32 edit control whose text UI Automation gives as a value
@@ -639,10 +968,10 @@ mod uia {
         // (Windows 11 Notepad's RichEdit) goes the TextPattern way.
         if let Some((edit, rich)) = focused_edit(hwnd) {
             if let Some(value) = edit_value(&a, edit, rich) {
-                return select_in_edit(edit, rich, value, pasted).map(|()| "edit");
+                return select_in_edit(edit, rich, value, pasted, anywhere).map(|t| ("edit", t));
             }
         }
-        unsafe { select_in_text(&a, pid, pasted).map(|()| "text") }
+        unsafe { select_in_text(&a, pid, pasted, anywhere).map(|t| ("text", t)) }
     }
 
     /// A Win32 edit control's text as UI Automation's ValuePattern gives
@@ -657,26 +986,28 @@ mod uia {
     }
 
     /// A Win32 edit control: its text (`value`), the pasted text ending at
-    /// its caret (or there once), `EM_SETSEL`, and `EM_GETSEL` saying so.
-    fn select_in_edit(edit: HWND, rich: bool, value: String, pasted: &str) -> Result<(), String> {
+    /// its caret (or, `anywhere`, there once), `EM_SETSEL`, and `EM_GETSEL`
+    /// saying so. Returns the text selected.
+    fn select_in_edit(edit: HWND, rich: bool, value: String, pasted: &str, anywhere: bool) -> Result<String, String> {
         let (_, caret) = em_getsel(edit).ok_or("the field didn't answer")?;
         let end_b = byte_at_units(&value, caret, rich).ok_or("the field didn't answer as expected")?;
         let (start_b, end_b) = match match_before(&value, end_b, pasted) {
             Some(start) => (start, end_b),
-            None => unique_in(&value, pasted).ok_or("the text Yap pasted has changed or moved")?,
+            None if anywhere => unique_in(&value, pasted).ok_or_else(|| not_found(true))?,
+            None => return Err(not_found(false)),
         };
         let (su, eu) = (units(&value, start_b, rich), units(&value, end_b, rich));
         if !em_setsel(edit, su, eu) || em_getsel(edit) != Some((su, eu)) {
             return Err("the field wouldn't select the text".into());
         }
-        Ok(())
+        Ok(value[start_b..end_b].to_string())
     }
 
     /// A TextPattern field: the text before the caret ending with the paste
-    /// (else `FindText` finding it once), a range over it that reads back
-    /// exactly the paste, `Select()`, and the field's selection reading back
-    /// the same.
-    unsafe fn select_in_text(a: &IUIAutomation, pid: u32, pasted: &str) -> Result<(), String> {
+    /// (else, `anywhere`, `FindText` finding it once), a range over it that
+    /// reads back exactly the paste, `Select()`, and the field's selection
+    /// reading back the same. Returns the text selected.
+    unsafe fn select_in_text(a: &IUIAutomation, pid: u32, pasted: &str, anywhere: bool) -> Result<String, String> {
         let (element, pattern) = text_field(a, pid)?;
         let document = pattern.DocumentRange().map_err(|_| "Yap can't read this field")?;
         if let Ok(v) = document.GetAttributeValue(UIA_IsReadOnlyAttributeId) {
@@ -688,8 +1019,8 @@ mod uia {
             Some(end) => before_caret(&end, pasted),
             None => None,
         }
-        .or_else(|| found_once(&document, pasted))
-        .ok_or("the text Yap pasted has changed or moved")?;
+        .or_else(|| if anywhere { found_once(&document, pasted) } else { None })
+        .ok_or_else(|| not_found(anywhere))?;
         if let Err(e) = range.Select() {
             tracing::debug!(code = ?e.code(), "Use what I said: the field refused Select()");
             return Err("the field wouldn't select the text".into());
@@ -702,7 +1033,7 @@ mod uia {
             let selected = pattern.GetSelection().ok().filter(|r| r.Length().unwrap_or(0) > 0).and_then(|r| r.GetElement(0).ok());
             let got = selected.as_ref().and_then(text);
             if got.as_deref().is_some_and(|t| same_text(t, &want)) {
-                return Ok(());
+                return Ok(want);
             }
             if started.elapsed() > SELECT_WAIT {
                 tracing::debug!(
@@ -753,8 +1084,8 @@ mod uia {
         None
     }
 
-    /// Whether `said` now ends at the caret of the focused field in `hwnd`
-    /// (the swap landed).
+    /// Whether `said` ends at the caret of the focused field in `hwnd` (the
+    /// swap landed; the last paste is still there for a rewrite).
     pub fn ends_at_caret(hwnd: isize, pid: u32, said: &str) -> bool {
         let Some(_com) = Com::init() else { return false };
         let Some(a) = automation() else { return false };
@@ -790,9 +1121,48 @@ pub async fn as_said_swap(app: AppHandle) -> Result<Outcome, String> {
     .map_err(|e| format!("The swap failed: {e}"))?
 }
 
+/// Home's **Paste what I said** on a dictation (`ts` and `text`: the pair
+/// Home lists it by) — see [`paste_entry`].
+#[tauri::command]
+pub async fn as_said_paste_entry(app: AppHandle, ts: u64, text: String) -> Result<Outcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let r = paste_entry(&app, ts, &text);
+        end_offer(&app);
+        r
+    })
+    .await
+    .map_err(|e| format!("Paste what I said failed: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_kind::{Host, Terminal};
+
+    #[test]
+    fn the_rewrite_shortcut_takes_the_last_paste_only_in_its_window_within_a_minute() {
+        let s = Duration::from_secs;
+        assert!(rewritable(Some(7), AppKind::Other, s(3), Some(7)));
+        assert!(rewritable(Some(7), AppKind::Messaging, s(60), Some(7)), "a minute on the dot");
+        assert!(!rewritable(Some(7), AppKind::Other, s(61), Some(7)), "older: write mode, as before");
+        assert!(!rewritable(Some(7), AppKind::Other, s(3), Some(8)), "another window in front");
+        assert!(!rewritable(Some(7), AppKind::Other, s(3), None), "Yap's own window in front");
+        assert!(!rewritable(None, AppKind::Other, s(3), None), "never pasted into another app");
+        let terminal = AppKind::Terminal(Terminal { coding_cli: None, host: Host::WindowsTerminal });
+        assert!(!rewritable(Some(7), terminal, s(3), Some(7)), "a terminal's line can't be selected");
+    }
+
+    #[test]
+    fn a_rewrite_keeps_the_spaces_around_what_it_replaces() {
+        // Yap's trailing space, kept after the rewrite.
+        assert_eq!(keep_spaces("hey can you send it ", " Could you send it, please?\n"), "Could you send it, please? ");
+        // A paste mid-text, a space before it.
+        assert_eq!(keep_spaces(" the blue one", "the red one"), " the red one");
+        // The field dropped the trailing space: none added.
+        assert_eq!(keep_spaces("Send it.", "Please send it."), "Please send it.");
+        assert_eq!(keep_spaces("Send it. ", "  "), "", "nothing from the AI: nothing");
+        assert_eq!(keep_spaces("  ", "Send it."), "Send it.");
+    }
 
     #[test]
     fn the_paste_is_found_ending_at_the_caret() {
@@ -854,13 +1224,35 @@ mod tests {
         assert!(words_differ("It's done.", "its done"));
     }
 
+    /// (The one test that uses the last paste itself: tests run at once.)
     #[test]
-    fn only_a_changed_dictation_in_a_window_is_remembered() {
+    fn the_last_paste_is_remembered_swapped_only_when_cleanup_changed_it() {
         let seq = remember(Some(42), AppKind::Other, "Hello there. ", Some("hello there um "), true).unwrap();
         assert!(offered(seq));
-        // Nothing changed: forgotten.
+        // Its history entry, by its text as history keeps it; not another's.
+        recorded(1_700_000_001, "Something else.");
+        assert_eq!(last().as_ref().unwrap().entry, None);
+        recorded(1_700_000_000, "Hello there.");
+        assert_eq!(last().as_ref().unwrap().entry, Some(1_700_000_000));
+        // The rewrite shortcut in that window takes it; in another, not.
+        assert_eq!(rewrite_target(Some(42)).map(|p| p.text().to_string()).as_deref(), Some("Hello there."));
+        assert!(rewrite_target(Some(43)).is_none());
+        // Nothing changed: nothing to swap or offer, but it's still the last
+        // paste (a rewrite may take it).
         assert!(remember(Some(42), AppKind::Other, "Same. ", Some("Same. "), true).is_none());
         assert!(!offered(seq));
+        let p = last().clone().unwrap();
+        assert_eq!((p.said.as_deref(), p.text(), p.entry), (None, "Same.", None));
         assert!(remember(Some(42), AppKind::Other, "A. ", None, true).is_none());
+        assert_eq!(last().as_ref().map(|p| p.text().to_string()).as_deref(), Some("A."));
+        // Into one of Yap's own windows with nothing to swap: forgotten.
+        assert!(remember(None, AppKind::Other, "B. ", None, true).is_none());
+        assert!(last().is_none());
+        // There with the words as said: kept for "Use what I said" (which
+        // copies them there), never for a rewrite.
+        assert!(remember(None, AppKind::Other, "B. ", Some("b um "), true).is_some());
+        assert!(rewrite_target(None).is_none());
+        forget();
+        assert!(last().is_none());
     }
 }

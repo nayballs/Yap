@@ -112,11 +112,11 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `media.rs` — Upload's audio-file decoding (Symphonia) and chunking.
 - `sound.rs` — start/stop chimes; the output device shared with spoken replies.
 - `mute.rs` / `media_pause.rs` — silence other apps / pause media while dictating; exact restore.
-- `history.rs` — local dictation history (with its audio's id; failed / not pasted) and the stats dashboard.
+- `history.rs` — local dictation history (with its audio's id and the words as said when cleanup changed them; failed / not pasted) and the stats dashboard.
 
 **Pasting** — [pasting.md](./docs/architecture/pasting.md)
 - `text_injector.rs` — private, verified clipboard paste with each app's paste keys, a lost paste typed, submit key, re-focus, Paste last transcript (and as said).
-- `as_said.rs` — "Use what I said": swap a cleaned paste for the words as said (shortcut, bar, tray), only where it can select exactly what it pasted; else copied.
+- `as_said.rs` — the last paste: "Use what I said" swaps a cleaned paste for the words as said (shortcut, bar, tray, Home's Paste what I said), and the rewrite shortcut with nothing selected rewrites the last dictation (≤ 1 min, still ending at the cursor) — only where it can select exactly what it pasted; else copied or refused.
 - `elevated.rs` — apps running as administrator: the text is left on the clipboard.
 - `selection.rs` — UI Automation reads: text around the cursor, edit-mode selection, read aloud's selection (read-only text too), post-paste watch; did a paste land.
 - `smart_insert.rs` — fits a dictation to the text around the cursor (case, spaces, full stop).
@@ -223,7 +223,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `lib/appearance.js` — General → Appearance in every window: Theme (System / Light / Dark → `data-yap-theme`, System follows Windows live; the bar's Match app → `data-bar-theme`; `index.html`'s head script puts it on before the first paint), reading font/size tokens (`--yap-font-reading`, `--yap-reading-scale`) for chats/notes/notepad only, and reduced Motion.
 - `lib/ControlPanel.svelte` — the main window (label `settings`): sidebar, Settings modal, title bar.
 - `ui/toast.svelte.js` + `ui/noticePolicy.js` — app-wide toasts running the page's notice policy.
-- `HomeView` / `InsightsView` / `UploadView` — dictation feed, stats, audio-file transcription; `lib/appNames.js` (apps by their names), `lib/aiErrors.js` (AI failures in plain words).
+- `HomeView` / `InsightsView` / `UploadView` — dictation feed (a dictation's "AI edited · N changes" word diff, `lib/wordDiff.js`, and Paste what I said), stats, audio-file transcription; `lib/appNames.js` (apps by their names), `lib/aiErrors.js` (AI failures in plain words).
 - `App.svelte` — one chunk per window: each loads only its own view (the Yap bar ~150 KB, not the whole app).
 - `DictionaryView.svelte` — corrections and snippets ([dictionary.md](./docs/architecture/dictionary.md)).
 - `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)).

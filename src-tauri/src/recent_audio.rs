@@ -391,8 +391,8 @@ pub async fn history_rerun(app: AppHandle, ts: u64, audio: String, model: Option
         let guard = state.pipeline.lock().map_err(|_| "The dictation pipeline isn't available")?;
         guard.as_ref().ok_or("The dictation pipeline isn't running")?.rerunner()
     };
-    let (raw, text, model) = rerun.run(samples, model, &entry.app).await?;
-    crate::history::rerun_result(&audio, &raw, &text, &model);
+    let crate::pipeline::Reran { raw, text, said, model } = rerun.run(samples, model, &entry.app).await?;
+    crate::history::rerun_result(&audio, &raw, &text, said.as_deref(), &model);
     tracing::info!(chars = text.chars().count(), model = %model, "Ran a dictation again");
     let _ = app.emit("yap-history-changed", ());
     Ok(serde_json::json!({ "text": text, "model": model, "modelName": crate::stt::model_name(&model) }))

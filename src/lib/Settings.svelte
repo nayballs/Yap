@@ -1838,8 +1838,8 @@
           <Group title="Rewrite selected text" id="settings-rewrite">
             <Row
               label="Rewrite shortcut"
-              desc="Select text in any app, press it and say how to change it. With nothing selected, it writes where your cursor is"
-              hint="For example “make this a bulleted list” or “more formal”."
+              desc="Select text in any app, press it and say how to change it. With nothing selected within a minute of a dictation, it rewrites that dictation where it is; otherwise it writes where your cursor is"
+              hint="For example “make this a bulleted list”, “more formal” or “in French”."
               setting="rewrite-shortcut"
             >
               <SettingsHotkey {cfg} target="editHotkey" clearable />

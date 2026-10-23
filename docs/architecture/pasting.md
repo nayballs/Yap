@@ -1,6 +1,6 @@
 # Pasting: where the text goes
 
-Putting a dictation into the app you're in: the clipboard paste and the submit key, apps running as administrator, UI Automation reads of the field, fitting the text to what's around the cursor, and the kind of app (terminals, coding CLIs, chat apps). The pipeline that calls all this is [dictation.md](./dictation.md).
+Putting a dictation into the app you're in: the clipboard paste and the submit key, apps running as administrator, UI Automation reads of the field, fitting the text to what's around the cursor, the kind of app (terminals, coding CLIs, chat apps), and the last paste afterwards (swapped for the words as said, or rewritten). The pipeline that calls all this is [dictation.md](./dictation.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -110,6 +110,37 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   as said"); robot mode only in the test's windows (`e2e-real/as-said.real.js`:
   the test pad, Notepad, an Edge box, a chat app and its contenteditable,
   swapped; a terminal, an edited paste and another window in front, refused).
+  **The last paste** (2026-10-23): `remember` keeps the last text Yap pasted
+  into an app's window — a dictation, or a Command's / rewrite's answer
+  (`pipeline::run_agent`) — with the words as said only when cleanup changed
+  them (the swap needs them; `offered` too), and its history entry once
+  recorded (`recorded(ts, text)`); `forget` when a paste didn't land or a
+  submit key sent it. **Home's Paste what I said** (`as_said_paste_entry
+  {ts, text}` → `paste_entry`): the entry the last paste is, within
+  `SWAP_WITHIN` and not swapped yet → its window brought back to the front
+  (`bring_back`: Yap's own window has it after the click; ≤ 0.8 s, then the
+  app's moment to put its focus back) and the very same swap, every check
+  included (`swap_now`); any other entry, or a window that won't come back
+  → its words as said (history's `said`) copied privately, `Outcome::Copied
+  { why, told }` (`told`: an alert said it already; else Home's toast says
+  "Copied what you said" and why). A test run neither swaps nor copies (the
+  log says which it would). **Rewriting the last paste** (the rewrite
+  shortcut with nothing selected): `rewritable(pasted_in, kind, age,
+  target)` (pure: the same window, not a terminal, ≤ `REWRITE_WITHIN` = 60 s,
+  Wispr Flow's minute) and `rewrite_target` at the key press (never in a
+  test run; robot mode only the test's windows); `rewrite_check` before the
+  AI is asked — `usable` (in front, not a terminal, not an admin app) and
+  the paste ending **at the caret** (`uia::ends_at_caret`; no "there once"
+  fallback: typed after it, or the cursor moved, refuses — the swap still
+  finds it there) — else `cant_rewrite` ("Couldn't rewrite your last
+  dictation", nothing pasted); `replace_last` then selects it again at the
+  caret (`select_pasted(…, anywhere: false)`), pastes the answer with the
+  selection's own spaces around it (`keep_spaces`, pure), reads it back and
+  remembers it as the last paste (`Rewrote::Replaced`); refused → nothing
+  changed in the field, the rewrite copied privately with "Couldn't replace
+  your last dictation — copied the rewrite instead" (`Rewrote::Copied`).
+  Robot tests: `e2e-real/rewrite-last.real.js`, and Home's paste in
+  `as-said.real.js`.
 - **`elevated.rs`** — apps running as administrator: Windows (UIPI) drops keys
   sent to a higher integrity level, and `SendInput` doesn't say so. The target's
   level is compared with Yap's (`OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`

@@ -232,6 +232,11 @@ const FOLLOW_UP = 'You write the follow-up email';
 const BLIND_SPOTS = 'You review a meeting for what it left open';
 // A dictation's AI cleanup (llm.rs BASE_PROMPT).
 const CLEANUP = 'You are a dictation cleanup engine';
+// The rewrite shortcut and Commands (llm.rs EDIT_BASE_PROMPT): the text to
+// change, if any, in the system prompt, the spoken instruction as the user's
+// turn. "OK" unless a spec scripts it (`reply('rewrite', fn)`; `rewriteText`
+// gives the text it was asked to change).
+const REWRITE = 'You are a writing assistant';
 // Memory's passes (memory/prompt.rs): learning from a chat or a meeting,
 // "Tell Yap what to change", an import. Answered `{"changes": []}` unless a
 // spec says otherwise (`reply('memory', fn)`).
@@ -254,6 +259,7 @@ const KINDS = [
   [FOLLOW_UP, 'followUpEmail'],
   [BLIND_SPOTS, 'blindSpots'],
   [CLEANUP, 'cleanup'],
+  [REWRITE, 'rewrite'],
   [MEMORY, 'memory'],
   [SPEAKER_NAME, 'speakerName'],
   [BRIEF, 'brief'],
@@ -271,6 +277,16 @@ const unlabel = (l) => l.replace(SPOKEN, '');
 /** The transcript a cleanup call frames between triple quotes (llm.rs). */
 export function cleanupTranscript(user) {
   return /"""\n([\s\S]*?)\n"""/.exec(user)?.[1] ?? user;
+}
+
+/** The text a rewrite call (a request's `system`) was asked to change; '' to write new text. */
+export function rewriteText(system) {
+  return /"""\n([\s\S]*?)\n"""/.exec(system)?.[1] ?? '';
+}
+
+/** A rewrite call's spoken instruction (a request's `user`). */
+export function rewriteInstruction(user) {
+  return /^User's instruction: (.*)$/m.exec(user)?.[1] ?? user;
 }
 
 /** "Questions to ask": from the latest talk. */

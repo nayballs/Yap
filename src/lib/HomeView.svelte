@@ -6,7 +6,10 @@
   // A dictation whose audio Yap still keeps (recent_audio.rs: a day) can be
   // **run again** (on the same model or another) and **played**; one that
   // failed (never transcribed, or its paste didn't land) says so, with Run
-  // again at hand.
+  // again at hand. A dictation whose words AI cleanup changed says so —
+  // "AI edited · N changes" (`said` beside `text`, lib/wordDiff.js) — and
+  // opens into what changed, with **Paste what I said** (as_said.rs: swapped
+  // in its app right after the dictation, else copied).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
@@ -17,6 +20,7 @@
   import { toast, dismiss } from './ui/toast.svelte.js';
   import { MODELS } from './models.js';
   import { attention } from './attention.svelte.js';
+  import { wordDiff } from './wordDiff.js';
 
   let { onopensettings = null, onnavigate = null } = $props();
   // Settings' live "needs attention" items: no speech model yet means the
@@ -37,6 +41,10 @@
   let running = $state(null);
   let playing = $state(null);
   let player = null;
+  // What AI cleanup changed (its row's key while open), and Paste what I
+  // said under way.
+  let openDiff = $state(null);
+  let pastingSaid = $state(null);
 
   // Rotating hero tips: a different card each day (dots to browse). Each tip
   // teaches one feature that already exists — the hero is onboarding forever:
@@ -289,13 +297,60 @@
     });
   }
 
+  // ---- What AI cleanup changed: the words as said (`said`) against what
+  // was pasted, word by word (lib/wordDiff.js: capitals and punctuation
+  // aside). Only a dictation whose words it changed says "AI edited". ----
+  const aiEdits = $derived(
+    new Map(
+      entries
+        .filter((e) => e.said && e.text && e.status !== 'failed')
+        .map((e) => [rowKey(e), wordDiff(e.said, e.text)])
+        .filter(([, d]) => d.changes > 0)
+    )
+  );
+
+  function toggleDiff(e) {
+    const key = rowKey(e);
+    openDiff = openDiff === key ? null : key;
+  }
+
+  /** "it's been…" → "It's been…". */
+  const sentence = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
+
+  /** Paste what I said (`as_said_paste_entry`): swapped in its app right after the dictation, else copied. */
+  async function pasteSaid(e) {
+    if (pastingSaid) return;
+    pastingSaid = rowKey(e);
+    try {
+      const r = await invoke('as_said_paste_entry', { ts: e.ts, text: e.text });
+      if (r.outcome === 'swapped') {
+        toast({
+          title: 'Swapped for what you said',
+          description: r.checked ? 'In the app you dictated into.' : "In the app you dictated into. Yap couldn't read it back to check.",
+          variant: 'success',
+        });
+      } else if (r.outcome === 'copied' && !r.told) {
+        toast({ title: 'Copied what you said', description: `${sentence(r.why)}. Press Ctrl+V to paste it.`, chip: 'Dictation', icon: 'clipboard' });
+      } else if (r.outcome === 'testMode') {
+        toast({ title: 'A test run: nothing swapped' });
+      }
+    } catch (err) {
+      toast({ title: "Couldn't paste what you said", description: String(err), variant: 'destructive' });
+    } finally {
+      pastingSaid = null;
+    }
+  }
+
   function rowMenu(ev, e) {
     const raw = (e.raw || '').trim();
+    const edited = aiEdits.has(rowKey(e));
     openContextMenu(
       ev,
       [
         e.text ? { label: 'Copy', icon: 'copy', onselect: () => copyText(e.text) } : null,
-        raw && raw !== e.text.trim()
+        edited ? { label: 'Paste what I said', icon: 'paste', onselect: () => pasteSaid(e) } : null,
+        edited ? { label: 'Copy what I said', icon: 'copy', onselect: () => copyText(e.said, 'Copied what you said') } : null,
+        raw && raw !== e.text.trim() && !edited
           ? { label: 'Copy raw transcript', icon: 'copy', onselect: () => copyText(raw, 'Copied the raw transcript') }
           : null,
         e.audio ? { label: 'Run again', icon: 'sync', onselect: () => rerun(e) } : null,
@@ -477,6 +532,9 @@
             <div class="daycap">{g.label}</div>
             <div class="daylist">
               {#each g.items as e, i (`${rowKey(e)}:${i}`)}
+                {@const edits = aiEdits.get(rowKey(e))}
+                {@const editsOpen = !!edits && openDiff === rowKey(e)}
+                {@const editsId = `ai-edits-${e.ts}-${i}`}
                 <!-- Focusable for its menu from the keyboard (the ContextMenu key, Shift+F10). -->
                 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
                 <div
@@ -496,6 +554,32 @@
                       <p class="text failedtext">Not transcribed{e.error ? ` · ${e.error}` : ''}</p>
                     {:else}
                       <p class="text">{e.text}</p>
+                    {/if}
+                    {#if edits}
+                      <!-- What AI cleanup changed: the words as said against
+                           the text pasted (lib/wordDiff.js). -->
+                      <button class="aiedit" class:on={editsOpen} aria-expanded={editsOpen} aria-controls={editsId} onclick={() => toggleDiff(e)}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" /></svg>
+                        AI edited · {edits.changes}
+                        {edits.changes === 1 ? 'change' : 'changes'}
+                        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                      </button>
+                      {#if editsOpen}
+                        <div class="diff" id={editsId} role="region" aria-label="What AI cleanup changed">
+                          <!-- One line in the source: the text keeps its own spaces and line breaks. -->
+                          <p class="difftext">{#each edits.parts as p, k}{k ? p.sep : ''}{#if p.type === 'del'}<del><span class="sr">{'taken out: '}</span>{p.text}</del>{:else if p.type === 'add'}<ins><span class="sr">{'put in: '}</span>{p.text}</ins>{:else}{p.text}{/if}{/each}</p>
+                          <p class="diffkey">
+                            <span class="sample del">Struck through</span>: the AI took it out ·
+                            <span class="sample ins">underlined</span>: the AI put it in
+                          </p>
+                          <div class="diffacts">
+                            <button class="diffbtn primary" disabled={!!pastingSaid} onclick={() => pasteSaid(e)}>
+                              {pastingSaid === rowKey(e) ? 'Pasting…' : 'Paste what I said'}
+                            </button>
+                            <button class="diffbtn" onclick={() => copyText(e.said, 'Copied what you said')}>Copy what I said</button>
+                          </div>
+                        </div>
+                      {/if}
                     {/if}
                     {#if e.status}
                       <p class="failline">
@@ -944,6 +1028,137 @@
     background: var(--yap-s3);
   }
   .retry:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  /* What AI cleanup changed: a quiet pill under the text (always in view,
+     unlike the hover meta), opening into the diff. Removed words struck in
+     the danger colour, added ones underlined on an amber wash — never
+     colour alone. */
+  .aiedit {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin: 5px 0 0;
+    padding: 1px 8px 1px 7px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: 999px;
+    background: none;
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.7;
+    cursor: pointer;
+    transition:
+      color var(--yap-dur) ease,
+      background var(--yap-dur) ease,
+      border-color var(--yap-dur) ease;
+  }
+  .aiedit:hover,
+  .aiedit.on {
+    color: var(--yap-fg);
+    border-color: var(--yap-border);
+    background: var(--yap-s2);
+  }
+  .aiedit:focus-visible,
+  .diffbtn:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
+  }
+  .aiedit svg {
+    width: 11px;
+    height: 11px;
+    color: var(--yap-primary);
+  }
+  .aiedit .chev {
+    width: 10px;
+    height: 10px;
+    color: currentColor;
+    transition: transform var(--yap-dur) ease;
+  }
+  .aiedit.on .chev {
+    transform: rotate(180deg);
+  }
+  .diff {
+    margin: 8px 0 2px;
+    padding: 10px 12px 11px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+  }
+  .difftext {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.75;
+    color: var(--yap-fg);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .difftext del,
+  .sample.del {
+    color: var(--yap-danger);
+    text-decoration: line-through;
+    text-decoration-thickness: 1.5px;
+    background: color-mix(in srgb, var(--yap-danger) 9%, transparent);
+    border-radius: 3px;
+    padding: 0 2px;
+  }
+  .difftext ins,
+  .sample.ins {
+    color: var(--yap-fg);
+    text-decoration: underline;
+    text-decoration-color: var(--yap-primary);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+    background: var(--yap-primary-wash);
+    border-radius: 3px;
+    padding: 0 2px;
+  }
+  .sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .diffkey {
+    margin: 7px 0 0;
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--yap-muted);
+  }
+  .diffacts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 9px;
+  }
+  .diffbtn {
+    padding: 3px 11px;
+    border: 1px solid var(--yap-border);
+    border-radius: 999px;
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--yap-dur) ease;
+  }
+  .diffbtn:hover:not(:disabled) {
+    background: var(--yap-s3);
+  }
+  .diffbtn.primary {
+    border-color: transparent;
+    background: var(--yap-ink);
+    color: var(--yap-ink-fg);
+  }
+  .diffbtn.primary:hover:not(:disabled) {
+    background: var(--yap-ink-hover);
+  }
+  .diffbtn:disabled {
     opacity: 0.6;
     cursor: default;
   }

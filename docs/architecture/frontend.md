@@ -289,7 +289,27 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   again with ›"), answered by a "Transcribed again" toast with Copy. A failed
   one (`status`: `failed` — "Not transcribed · Yap closed before it was
   transcribed" — or `notPasted` — a "Didn't paste" flag and why) says so in the
-  row, with a Run again button in view.
+  row, with a Run again button in view. **What the AI changed** (2026-10-23):
+  a dictation whose words AI cleanup changed (history's `said`, the words as
+  said, beside its `text`) shows a quiet pill under its text, always in view
+  — "✦ AI edited · N changes" (a `button`, `aria-expanded` /
+  `aria-controls`) — that opens a panel (`role="region"`, "What AI cleanup
+  changed") with the text as a word diff: words the AI took out struck
+  through in `--yap-danger` on a faint danger wash (`<del>`), words it put
+  in underlined in `--yap-primary` on `--yap-primary-wash` (`<ins>`), each
+  with a visually hidden "taken out: " / "put in: " for screen readers
+  (never colour alone; checked in light and dark), a legend, and **Paste
+  what I said** (`as_said_paste_entry`: the latest dictation swapped in its
+  app, its window brought back — "Swapped for what you said" —, any other
+  copied: "Copied what you said" + why, unless Yap's own alert said it) and
+  **Copy what I said**. `lib/wordDiff.js` (no dependency): a word LCS over
+  normalised words (`wordKey`: lower case, letters, digits, apostrophes —
+  capitals and punctuation aren't changes, cleanup adds them to almost
+  every dictation, so a punctuation-only cleanup shows nothing), the same
+  start and end trimmed first, a middle over 250,000 cells one change; a run
+  of words out and/or in is one change; the cleaned text's line breaks
+  kept. The row's menu gets Paste / Copy what I said instead of Copy raw
+  transcript there.
 - **`InsightsView.svelte`** = the stats
   dashboard promoted out of Settings→History (serif hero number, stat grid,
   30-day amber heatmap, top-apps-by-words bars from `get_history`, grouped by
@@ -381,7 +401,8 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   thread and transcript lines), Chat's conversations (Rename in place,
   Copy as Markdown, Delete…; the hover ⋯ replaced the trash) and messages
   (Copy / Copy as Markdown / Read aloud; a question: Copy — `itemMenus.js`),
-  Home's dictations (Copy, Copy raw transcript, Delete…; the trash asks
+  Home's dictations (Copy, Copy raw transcript — or, AI-edited, Paste what
+  I said and Copy what I said —, Run again, Play, Delete…; the trash asks
   too), Meetings' past notes (Open, Generate summary, Copy as Markdown,
   Delete… via `meeting_delete`; a hover ⋯) and calendar meetings (Open note
   + their row buttons), Dictionary rows (Edit, ≈ Catch near-misses,
