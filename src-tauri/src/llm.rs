@@ -26,6 +26,9 @@ const CLEANUP_TIMEOUT: Duration = Duration::from_secs(20);
 /// cleanup keeps [`CLEANUP_TIMEOUT`] (the raw text is its fallback).
 pub(crate) const LOCAL_CHAT_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// A Chat call carrying screenshots: at least this long (the upload).
+pub(crate) const IMAGE_TIMEOUT: Duration = Duration::from_secs(45);
+
 /// [`LOCAL_CHAT_TIMEOUT`] for a server on this PC (Yap's sidecar, Ollama, LM
 /// Studio: a loopback address), else [`CLEANUP_TIMEOUT`]. Pure.
 pub(crate) fn chat_timeout(base_url: &str) -> Duration {
@@ -635,6 +638,8 @@ pub async fn note_chat(
         messages.push(json!({ "role": role, "content": text }));
     }
     messages.push(json!({ "role": "user", "content": question }));
+    // A Chat turn's screenshots go with its question (Snip to Chat).
+    crate::snip::turn::attach(&mut messages);
     // A model on this PC may take a while on a processor (`chat_timeout`).
     let req = ChatRequest::chat(base_url, api_key, model, provider, 0.5, Value::Array(messages), None, None);
     let message = match live {
@@ -1163,6 +1168,9 @@ async fn post_chat_request(
     // runs until its last chunk.
     let _busy = crate::local_llm::request_starting(base_url);
 
+    // A request carrying screenshots uploads them too: more time (Snip to
+    // Chat; a cloud Chat call's 20 s covered the upload as well).
+    let timeout = if crate::snip::turn::has_images(&body) { timeout.max(IMAGE_TIMEOUT) } else { timeout };
     let client = reqwest::Client::builder()
         .timeout(crate::eval::timeout(timeout))
         .build()

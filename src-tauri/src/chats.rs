@@ -44,6 +44,42 @@ pub struct ChatMessage {
     /// `stream.rs`): what had come so far, checked like any answer.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stopped: bool,
+    /// The screenshots a question carried (Snip to Chat, `snip.rs`): their
+    /// ids and sizes only — the PNGs are files in `<data>/chat-images/`
+    /// (`snip::images`). Only written when there are some.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ChatImage>,
+}
+
+/// A screenshot a question carried: the file's id (`img_<16 hex>`), its
+/// size as stored, and where it came from ("snip"). The pixels stay in
+/// `<data>/chat-images/<id>.png`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatImage {
+    pub id: String,
+    pub w: u32,
+    pub h: u32,
+    #[serde(default)]
+    pub bytes: u64,
+    #[serde(default)]
+    pub source: String,
+    /// Its file is gone (kept past "Keep chat screenshots"): set on the copy
+    /// a page gets (`chat_get`), never stored.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gone: bool,
+}
+
+/// Every image id a conversation refers to (the screenshots sweep keeps
+/// these for their time; anything else goes after a day).
+pub fn image_ids() -> std::collections::HashSet<String> {
+    with_store(|s| {
+        s.conversations
+            .iter()
+            .flat_map(|c| c.messages.iter())
+            .flat_map(|m| m.images.iter().map(|i| i.id.clone()))
+            .collect()
+    })
 }
 
 /// One web source of an answer: its number in the answer's citations, the
@@ -314,12 +350,28 @@ pub fn append_message(
             voice,
             sources: sources.to_vec(),
             stopped,
+            images: Vec::new(),
         });
         conv.updated_ts = now_secs();
         let index = conv.messages.len() - 1;
         save_to_disk(s);
         Ok(index)
     })
+}
+
+/// The person's question with the screenshots it carries (Snip to Chat).
+/// Returns its index.
+pub fn append_question(id: u64, text: &str, voice: bool, images: &[ChatImage]) -> Result<usize, String> {
+    let index = append(id, "user", text, &[], None, voice)?;
+    if !images.is_empty() {
+        with_store(|s| {
+            if let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) {
+                m.images = images.to_vec();
+                save_to_disk(s);
+            }
+        });
+    }
+    Ok(index)
 }
 
 pub fn delete(id: u64) {
@@ -330,15 +382,37 @@ pub fn delete(id: u64) {
 /// and "Delete all chats…"). Returns how many were there to delete; ids
 /// already gone are skipped.
 pub fn delete_many(ids: &[u64]) -> usize {
-    with_store(|s| {
+    let (gone, images) = with_store(|s| {
+        let images: Vec<String> = s
+            .conversations
+            .iter()
+            .filter(|c| ids.contains(&c.id))
+            .flat_map(|c| c.messages.iter().flat_map(|m| m.images.iter().map(|i| i.id.clone())))
+            .collect();
         let before = s.conversations.len();
         s.conversations.retain(|c| !ids.contains(&c.id));
         let gone = before - s.conversations.len();
         if gone > 0 {
             save_to_disk(s);
         }
-        gone
-    })
+        (gone, images)
+    });
+    // Their screenshots go with them, once the store no longer has them.
+    if !images.is_empty() {
+        crate::snip::images::delete(&images);
+    }
+    gone
+}
+
+/// A conversation as a page gets it: each screenshot whose file is gone
+/// (kept past "Keep chat screenshots") says so (`gone`).
+pub fn for_page(mut conv: Conversation) -> Conversation {
+    for m in conv.messages.iter_mut() {
+        for img in m.images.iter_mut() {
+            img.gone = !crate::snip::images::exists(&img.id);
+        }
+    }
+    conv
 }
 
 /// A conversation a [`search`] found: its id, title, last activity and the
@@ -894,6 +968,7 @@ mod tests {
             voice: false,
             sources,
             stopped: false,
+            images: vec![],
         };
         let messages = vec![
             msg("user", vec![]),

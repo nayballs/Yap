@@ -1429,6 +1429,9 @@ async fn tool_loop(
     let mut messages: Vec<Value> = vec![json!({ "role": "system", "content": system })];
     messages.extend(history.iter().cloned());
     messages.extend(crate::chats::question_messages(&context, question));
+    // The turn's screenshots go with the question (Snip to Chat; nothing
+    // without any).
+    crate::snip::turn::attach(&mut messages);
 
     let mut tools = definitions();
     if open_apps {
@@ -1450,8 +1453,7 @@ async fn tool_loop(
     let previous: Option<String> = history
         .last()
         .filter(|m| m["role"] == "assistant")
-        .and_then(|m| m["content"].as_str())
-        .map(str::to_string);
+        .and_then(|m| crate::snip::turn::text_of(&m["content"]));
 
     // Yap searches first: the results go to the model as its own call's.
     if let (FirstStep::YapSearches(query), Some(turn)) = (&first, web.as_deref_mut()) {
@@ -1474,7 +1476,8 @@ async fn tool_loop(
     let earlier: Vec<String> = history
         .iter()
         .flat_map(|m| {
-            let mut texts: Vec<String> = m["content"].as_str().map(str::to_string).into_iter().collect();
+            // (A question with screenshots has parts: its text counts.)
+            let mut texts: Vec<String> = crate::snip::turn::text_of(&m["content"]).into_iter().collect();
             texts.extend(m["tool_calls"].as_array().into_iter().flatten().filter_map(|c| c["function"]["arguments"].as_str().map(str::to_string)));
             texts
         })
@@ -1482,7 +1485,8 @@ async fn tool_loop(
     let earlier: Vec<&str> = earlier.iter().map(String::as_str).collect();
     // The person's own earlier messages: a word of theirs the model put in
     // for a misheard one stays ("kelp" → "Kellbrook", `web::fresh_query`).
-    let own: Vec<&str> = history.iter().filter(|m| m["role"] == "user").filter_map(|m| m["content"].as_str()).collect();
+    let own: Vec<String> = history.iter().filter(|m| m["role"] == "user").filter_map(|m| crate::snip::turn::text_of(&m["content"])).collect();
+    let own: Vec<&str> = own.iter().map(String::as_str).collect();
 
     let mut rejected = 0u32;
     for _step in 0..MAX_TOOL_STEPS {

@@ -106,6 +106,12 @@ pub struct CatalogModel {
     /// "reasoning", OpenRouter's `reasoning` parameter).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinks: Option<bool>,
+    /// Can it read images (Snip to Chat): only when the provider says —
+    /// Anthropic's `capabilities.image_input.supported`, Groq's and
+    /// OpenRouter's input modalities. Gemini's and OpenAI's lists don't
+    /// say; `snip::vision` has family rules for those.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vision: Option<bool>,
     /// Still callable but on its way out (Anthropic's `lifecycle`,
     /// OpenRouter's `expiration_date`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -314,6 +320,40 @@ pub fn tools_for(provider: &str, model: &str) -> Option<bool> {
             .and_then(|m| m.tools)
     })
     .flatten()
+}
+
+/// What the provider's list says about `model` reading images (`None`: it
+/// didn't say, or there's no good list).
+pub fn vision_for(provider: &str, model: &str) -> Option<bool> {
+    listed_model(provider, model).and_then(|m| m.vision)
+}
+
+/// `model` in the provider's good list, if it's there.
+pub fn listed_model(provider: &str, model: &str) -> Option<CatalogModel> {
+    with_store(|c| {
+        let list = c.providers.get(provider)?;
+        if list.error.is_some() && list.models.is_empty() {
+            return None;
+        }
+        list.models
+            .iter()
+            .find(|m| m.id == model || m.base.as_deref() == Some(model) || m.aliases.iter().any(|a| a == model))
+            .cloned()
+    })
+    .flatten()
+}
+
+/// A provider's good list (`None`: never fetched, or it's empty).
+pub fn models_of(provider: &str) -> Option<Vec<CatalogModel>> {
+    with_store(|c| c.providers.get(provider).filter(|l| !l.models.is_empty()).map(|l| l.models.clone())).flatten()
+}
+
+/// Debug and test: a provider's list as if it had been fetched.
+#[cfg(test)]
+pub fn set_models_for_test(provider: &str, models: Vec<CatalogModel>) {
+    with_store(|c| {
+        c.providers.insert(provider.to_string(), ProviderList { fetched_at: 1, checked_at: 1, error: None, models });
+    });
 }
 
 // ------------------------------------------------------------ the keys
@@ -853,6 +893,7 @@ pub fn parse_groq(v: &Value) -> (usize, Vec<CatalogModel>) {
             thinks: features
                 .as_ref()
                 .map(|f| f.iter().any(|x| x == "reasoning")),
+            vision: (!inputs.is_empty()).then(|| inputs.iter().any(|i| i == "image")),
             ..Default::default()
         });
     }
@@ -921,6 +962,7 @@ pub fn parse_anthropic(pages: &[Value]) -> (usize, Vec<CatalogModel>) {
                 created: rfc3339_secs(&m["created_at"]),
                 context: positive(&m["max_input_tokens"]),
                 deprecated: lifecycle == "deprecated",
+                vision: m["capabilities"]["image_input"]["supported"].as_bool(),
                 ..Default::default()
             });
         }
@@ -1017,6 +1059,7 @@ pub fn parse_openrouter(pages: &[Value]) -> (usize, Vec<CatalogModel>) {
                     p.iter()
                         .any(|x| x == "reasoning" || x == "include_reasoning")
                 }),
+                vision: (!inputs.is_empty()).then(|| inputs.iter().any(|i| i == "image")),
                 deprecated: m["expiration_date"].as_str().is_some_and(|s| !s.is_empty()),
                 ..Default::default()
             });
@@ -1700,6 +1743,44 @@ mod tests {
         assert_eq!(kept[1].desc, "");
         assert_eq!(kept[0].thinks, Some(true));
         assert_eq!(kept[0].context, Some(1048576));
+    }
+
+    /// Snip to Chat: which models read images, where the lists say it.
+    #[test]
+    fn the_lists_say_which_models_read_images() {
+        let groq = json!({"data": [
+            {"id": "openai/gpt-oss-20b", "active": true, "input_modalities": ["text"], "output_modalities": ["text"]},
+            {"id": "qwen/qwen3.8-27b", "active": true, "input_modalities": ["text", "image"], "output_modalities": ["text"]},
+            {"id": "example-lab/new-model-9b", "active": true}
+        ]});
+        let (_, models) = parse_groq(&groq);
+        let vision = |id: &str| models.iter().find(|m| m.id == id).unwrap().vision;
+        assert_eq!(vision("openai/gpt-oss-20b"), Some(false));
+        assert_eq!(vision("qwen/qwen3.8-27b"), Some(true));
+        assert_eq!(vision("example-lab/new-model-9b"), None, "the list didn't say");
+
+        let anthropic = json!({"data": [
+            {"id": "claude-haiku-5-5", "display_name": "Claude Haiku 5.5", "capabilities": {"image_input": {"supported": true}}},
+            {"id": "claude-text-1", "display_name": "Claude Text", "capabilities": {"image_input": {"supported": false}}},
+            {"id": "claude-old-2", "display_name": "Claude Old"}
+        ], "has_more": false});
+        let (_, models) = parse_anthropic(&[anthropic]);
+        let vision = |id: &str| models.iter().find(|m| m.id == id).unwrap().vision;
+        assert_eq!((vision("claude-haiku-5-5"), vision("claude-text-1"), vision("claude-old-2")), (Some(true), Some(false), None));
+
+        let openrouter = json!({"data": [
+            {"id": "openai/gpt-5-mini", "name": "OpenAI: GPT-5 Mini", "architecture": {"input_modalities": ["text", "image"], "output_modalities": ["text"]}},
+            {"id": "meta-llama/llama-3.3-70b-instruct", "name": "Llama", "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]}}
+        ]});
+        let (_, models) = parse_openrouter(&[openrouter]);
+        assert_eq!(models[0].vision, Some(true));
+        assert_eq!(models[1].vision, Some(false));
+
+        // Looked up by id, a dated snapshot's alias included.
+        set_models_for_test("groq", parse_groq(&groq).1);
+        assert_eq!(vision_for("groq", "qwen/qwen3.8-27b"), Some(true));
+        assert_eq!(vision_for("groq", "nope"), None);
+        assert_eq!(vision_for("gemini", "gemini-3.6-flash"), None, "no list");
     }
 
     #[test]

@@ -421,6 +421,11 @@ pub struct Status {
     /// The on-device model's context (tokens), when the call goes to it:
     /// the chip's tooltip says it.
     pub context: Option<u32>,
+    /// Can the model read images (Snip to Chat, `snip::vision`): `null`
+    /// when nothing says (Chat lets it try).
+    pub images: Option<bool>,
+    /// When it can't: the model to switch to, the same provider first.
+    pub images_switch: Option<crate::snip::vision::Switch>,
 }
 
 pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
@@ -438,6 +443,10 @@ pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
         .as_ref()
         .filter(|m| m.provider == PROVIDER_ONDEVICE && on_device.context > 0)
         .map(|_| on_device.context);
+    let images = model.as_ref().and_then(|m| crate::snip::vision::reads_images(&m.provider, &m.id));
+    let images_switch = (images == Some(false))
+        .then(|| crate::snip::vision::suggest(model.as_ref().map(|m| m.provider.as_str()).unwrap_or(""), &keyed_providers(cfg)))
+        .flatten();
     Status {
         scope: scope.key(),
         ready,
@@ -458,6 +467,8 @@ pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
             tools: crate::tools::supports_tools(PROVIDER_ONDEVICE, &on_device.id),
         }),
         context,
+        images,
+        images_switch,
     }
 }
 

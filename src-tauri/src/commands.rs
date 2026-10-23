@@ -252,6 +252,13 @@ pub fn configure_as_said_hotkey(spec: String) {
     let _ = crate::input_hook::configure_as_said(&spec);
 }
 
+/// Live-apply the Snip to Chat shortcut (`snip.rs`; paused while Settings
+/// picks a key, as for the others).
+#[tauri::command]
+pub fn configure_snip_hotkey(spec: String) {
+    let _ = crate::input_hook::configure_snip(&spec);
+}
+
 /// Debug-only, test mode: `text` as if a dictation had just heard it —
 /// the dictation's own steps from cleanup on (nothing is pasted in a test
 /// run), the bar's "Use what I said" offer included. Stands in for a
@@ -1003,7 +1010,7 @@ pub fn chats_list() -> serde_json::Value {
 /// One conversation with its messages.
 #[tauri::command]
 pub fn chat_get(id: u64) -> Result<crate::chats::Conversation, String> {
-    crate::chats::get(id).ok_or_else(|| "Conversation not found".to_string())
+    crate::chats::get(id).map(crate::chats::for_page).ok_or_else(|| "Conversation not found".to_string())
 }
 
 #[tauri::command]
@@ -1148,7 +1155,9 @@ pub(crate) async fn chat_turn(
     let (keep, step) = if scope == Some("assistant") { (8, 4) } else { (19, 6) };
     let earlier = &conv.messages[crate::chats::history_start(conv.messages.len(), keep, step)..];
     let history: Vec<(String, String)> = earlier.iter().map(|m| (m.role.clone(), m.text.clone())).collect();
-    let user_index = crate::chats::append(conv.id, "user", &text, &[], None, by_voice)?;
+    // The question, with the screenshots it carries (Snip to Chat, the
+    // turn's `snip::turn`): kept with it in chats.json as ids.
+    let user_index = crate::chats::append_question(conv.id, &text, by_voice, &crate::snip::turn::images())?;
     // This turn answers the conversation now: one still answering there
     // ends, with nothing saved.
     stop.answers(conv.id);
@@ -1380,7 +1389,7 @@ pub(crate) async fn chat_turn(
             crate::web::Turn::new(settings, crate::web::Endpoints::current(), &text, &earlier)
                 .with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())))
         });
-        let messages: Vec<serde_json::Value> = if replay {
+        let mut messages: Vec<serde_json::Value> = if replay {
             crate::chats::history_messages(earlier)
         } else {
             history
@@ -1388,6 +1397,9 @@ pub(crate) async fn chat_turn(
                 .map(|(r, t)| serde_json::json!({ "role": if r == "assistant" { "assistant" } else { "user" }, "content": t }))
                 .collect()
         };
+        // Earlier screenshots: the newest few sent again, the rest a line
+        // (snip/turn.rs).
+        crate::snip::turn::with_history_images(&mut messages, earlier, &provider, &base_url).await;
         let extra = crate::tools::Extra { memory: true, search_chats: cfg.memory_search_chats, conversation: Some(conv.id) };
         let looped = crate::tools::run_tool_loop_with(
             &system,
@@ -1804,6 +1816,14 @@ async fn app_turn(
 /// sends a newer question next). The error [`crate::stream::SUPERSEDED`]: a
 /// newer question in the conversation replaced it — no answer saved, the
 /// question kept.
+///
+/// `images`: the screenshots the question carries (Snip to Chat: ids from
+/// `yap-snip`), saved with it and sent with every model call of the turn
+/// as `image_url` parts fitted to the provider (`snip::turn`). A model
+/// that can't read images is refused before anything is saved
+/// (`snip::vision::CANT_READ`); one whose server turns the image down is
+/// remembered as such and the error says so (`snip::vision::COULDNT_READ`).
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
     app: AppHandle,
@@ -1813,28 +1833,58 @@ pub async fn chat_send(
     voice: Option<bool>,
     on_stream: crate::stream::PageChannel,
     turn_id: Option<String>,
+    images: Option<Vec<String>>,
 ) -> Result<serde_json::Value, String> {
     let by_voice = voice.unwrap_or(false);
     let stop = crate::stream::Stoppable::new(turn_id.as_deref());
     let watched = on_stream.0.is_some();
-    let turn = chat_turn(
-        Some(&app),
-        conversation_id,
-        &text,
-        scope.as_deref(),
-        by_voice,
-        |conv, index| {
-            // The page learns its conversation (a new one) as soon as it's made.
-            on_stream.send_json(serde_json::json!({
-                "kind": "turn",
-                "conversationId": conv,
-                "userMessageId": format!("chat:{conv}:{index}"),
-            }));
-        },
-        watched.then_some(&on_stream as &dyn crate::stream::Sink),
-        Some(&stop),
+    // Screenshots: the model must be able to read them, and their copies
+    // for it are made (usually already, while the question was typed).
+    let image_ids = images.unwrap_or_default();
+    let (turn_images, target) = if image_ids.is_empty() {
+        (crate::snip::turn::TurnImages::default(), None)
+    } else {
+        let cfg = config::load();
+        let (base_url, _key, model, provider, _persona, _thinking) = resolve_chat_endpoint(&cfg)?;
+        if crate::snip::vision::reads_images(&provider, &model) == Some(false) {
+            return Err(format!("{} ({model})", crate::snip::vision::CANT_READ));
+        }
+        let prepared = crate::snip::turn::prepare(&image_ids, &provider, &base_url).await?;
+        tracing::info!(images = prepared.images.len(), "Chat: a question with screenshots");
+        (prepared, Some((provider, model)))
+    };
+    let turned = crate::snip::turn::with(
+        turn_images,
+        chat_turn(
+            Some(&app),
+            conversation_id,
+            &text,
+            scope.as_deref(),
+            by_voice,
+            |conv, index| {
+                // The page learns its conversation (a new one) as soon as it's made.
+                on_stream.send_json(serde_json::json!({
+                    "kind": "turn",
+                    "conversationId": conv,
+                    "userMessageId": format!("chat:{conv}:{index}"),
+                }));
+            },
+            watched.then_some(&on_stream as &dyn crate::stream::Sink),
+            Some(&stop),
+        ),
     )
-    .await?;
+    .await;
+    let turn = match (turned, &target) {
+        (Ok(turn), _) => turn,
+        // The server turned the image down: that model is a "no" from now
+        // on, and the page offers a switch instead of a plain error.
+        (Err(e), Some((provider, model))) if crate::snip::vision::is_image_refusal(&e) => {
+            tracing::info!(provider, "Chat: the model refused the screenshot");
+            crate::snip::vision::refused(provider, model);
+            return Err(format!("{} ({model})", crate::snip::vision::COULDNT_READ));
+        }
+        (Err(e), _) => return Err(e),
+    };
     // Read out by itself? (Asked at the answer: a dictation may have started
     // meanwhile, and the settings may have changed.)
     let now = config::load();
@@ -1911,6 +1961,12 @@ pub fn save_config(
     crate::input_hook::configure_assistant_from(&cfg);
     crate::input_hook::configure_read_from(&cfg);
     crate::input_hook::configure_as_said_from(&cfg);
+    crate::input_hook::configure_snip_from(&cfg);
+    // "Keep chat screenshots" shortened: the older ones go now.
+    if cfg.chat_image_days != prev.chat_image_days {
+        let days = cfg.chat_image_days;
+        std::thread::spawn(move || crate::snip::images::sweep(days));
+    }
     // Settings → Speech-to-Text → Runs on (stt_speed.rs): the warm engine
     // moves to the device chosen now, at a quiet moment.
     crate::stt_speed::sync(&cfg);

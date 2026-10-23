@@ -468,7 +468,8 @@ pub struct CallLog {
 
 impl CallLog {
     pub async fn start(provider: &str, endpoint: &str, body: &Value) -> CallLog {
-        let estimate = estimate_tokens(body);
+        // A screenshot's data URL counts as its size, not its base64.
+        let estimate = estimate_tokens(&crate::snip::turn::redact_images(body));
         loop {
             let wait = {
                 let guard = rec();
@@ -524,7 +525,9 @@ impl CallLog {
                 r.turn.retries += 1;
             }
         }
-        write("request", json!({ "call": self.n, "attempt": attempt, "body": body }));
+        // Screenshots as their size ("data:image/png;base64,<183 KB>"), never
+        // their bytes, in a run's log.
+        write("request", json!({ "call": self.n, "attempt": attempt, "body": crate::snip::turn::redact_images(body) }));
     }
 
     fn ms(&self) -> u64 {
