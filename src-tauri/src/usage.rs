@@ -90,8 +90,16 @@ fn usage_path() -> PathBuf {
 }
 
 fn load_from_disk() -> GroqUsage {
-    match std::fs::read_to_string(usage_path()) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+    let path = usage_path();
+    match std::fs::read_to_string(&path) {
+        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| {
+            // Set aside, never saved over (like every store; a unit test
+            // never moves the real one).
+            if !cfg!(test) {
+                crate::config::quarantine_corrupt(&path);
+            }
+            GroqUsage::default()
+        }),
         Err(_) => GroqUsage::default(),
     }
 }

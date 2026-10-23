@@ -6,7 +6,10 @@
 //   "pasteBlocked" — the app runs as administrator, so the dictation is on
 //     the clipboard instead: "Your text is copied: press Ctrl+V" (elevated.rs);
 //   "micBlocked" — Windows' privacy settings keep desktop apps off the
-//     microphone, with Open settings (mic_privacy.rs).
+//     microphone, with Open settings (mic_privacy.rs);
+//   "configReset" — config.json couldn't be read: set aside and the
+//     settings reset (all, or the ones it couldn't read), with Show file
+//     (config.rs).
 // A button's id goes back to Rust (`alert_action`), which does it. Rust has
 // already applied the cooldowns (notice.rs); here they're toasts of kind
 // "alert" (ui/noticePolicy.js): never held behind a dictation.
@@ -16,7 +19,7 @@ import { toast } from './ui/toast.svelte.js';
 
 // "assistant": the Voice Assistant has no AI model, or couldn't answer
 // (assistant.rs), with Open settings → Language Models.
-const CHIPS = { clipboard: 'Paste', mic: 'Microphone', call: 'Calls', assistant: 'Voice Assistant' };
+const CHIPS = { clipboard: 'Paste', mic: 'Microphone', call: 'Calls', assistant: 'Voice Assistant', settings: 'Settings' };
 
 let started = false;
 

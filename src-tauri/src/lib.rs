@@ -765,6 +765,10 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let cfg = config::load();
+            // Every save of config.json tells the windows (Settings' copy
+            // adopts it); one Yap couldn't read at start is said once the
+            // windows are up (config.rs).
+            config::init(&handle);
 
             // Register the app handle so the usage tracker can emit live
             // `groq-usage` updates after each AI-cleanup call.

@@ -91,7 +91,9 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   `notice.rs`).
   Every JSON store writes atomically and quarantines a corrupt file on load
   instead of crashing (`config::atomic_write`/`quarantine_corrupt`, used by all
-  eleven stores).
+  eleven stores; each write its own temp file). config.json too: set aside
+  as it was, the settings that still read kept, the person told once, saves
+  one at a time ([config-and-data.md](./config-and-data.md)).
 
 ## Modules
 

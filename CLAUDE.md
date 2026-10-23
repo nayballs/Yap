@@ -212,7 +212,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `theme.rs` — the theme on the Rust side: the opaque windows' webview backgrounds (no white flash), onboarding's title bar, Windows' app mode (frontend.md).
 - `portable.rs` — portable mode (a `portable` marker → `<exe>/Data`).
 - `commands.rs` — the Tauri commands; logging is `lib.rs init_logging` (app-shell.md).
-- `config.rs` — `YapConfig`, load/save, migrations, dictionary helpers (config-and-data.md).
+- `config.rs` — `YapConfig`, load/save (one at a time; `update` in one step; an unreadable file set aside, the person told), migrations, dictionary helpers (config-and-data.md).
 - `e2e.rs` / `realtest.rs` — test mode, and robot mode's real pastes into the test's own windows.
 - `log_privacy.rs` — a test: no user content in the log at `info` and above (app-shell.md, Logging).
 
@@ -367,7 +367,9 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 `notices.json`, `memory.json` (what Yap remembers about you), `quieted_apps.json`
 (only mid-dictation), `stt_speed.json` (each model's device timings),
 `recent-audio/` (a day of dictation audio), `icons/`, `logs/`. Every JSON
-store writes atomically and quarantines a corrupt file instead of crashing. Secrets
+store writes atomically and quarantines a corrupt file instead of crashing —
+config.json too: set aside, never saved over, the person told; its saves one at a time
+(`config::update`; [config-and-data.md](./docs/architecture/config-and-data.md)). Secrets
 never go in files: the account session and calendar tokens live in Windows Credential
 Manager. The local API's discovery file is `~/.yap/cli-bridge.json`.
 

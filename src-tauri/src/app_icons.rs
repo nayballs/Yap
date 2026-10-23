@@ -225,14 +225,13 @@ fn refresh(dir: &Path, now: u64, sources: impl Fn(&App) -> Vec<Source>) -> BTree
     icons
 }
 
-/// Write `bytes` to `path` whole (a temp file renamed over it).
+/// Write `bytes` to `path` whole (a temp file of its own renamed over it:
+/// `config::atomic_write_bytes`).
 fn write_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
+    crate::config::atomic_write_bytes(path, bytes)
 }
 
 // ---- sources ----------------------------------------------------------------------
