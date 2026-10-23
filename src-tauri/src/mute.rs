@@ -360,10 +360,18 @@ fn leftovers_path() -> std::path::PathBuf {
 }
 
 fn load_leftovers() -> Vec<Quieted> {
-    std::fs::read_to_string(leftovers_path())
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    let path = leftovers_path();
+    let Ok(s) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    serde_json::from_str(&s).unwrap_or_else(|_| {
+        // Set aside, never saved over (like every store; a unit test never
+        // moves the real one).
+        if !cfg!(test) {
+            crate::config::quarantine_corrupt(&path);
+        }
+        Vec::new()
+    })
 }
 
 /// Write what's down now, the leftovers and the live dictation's (the file

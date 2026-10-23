@@ -1948,12 +1948,9 @@ pub fn save_config(
             p.update_config(cfg);
         }
     }
-    // Pages that show what the config resolves to (the Chat view's model
-    // chip) read it again.
-    {
-        use tauri::Emitter;
-        let _ = app.emit("yap-config-saved", ());
-    }
+    // (Pages that show what the config resolves to — the Chat view's model
+    // chip, the theme — read it again on `yap-config-saved`, which
+    // `config::save` sends after every save, this one included.)
     Ok(())
 }
 
@@ -1973,9 +1970,7 @@ pub async fn download_model_size(
     model_size: String,
 ) -> Result<(), String> {
     // Persist the choice so it survives restarts and the settings UI agrees.
-    let mut cfg = config::load();
-    cfg.model_size = model_size.clone();
-    config::save(&cfg)?;
+    let cfg = config::update(|c| c.model_size = model_size.clone())?;
 
     download_and_activate(&app, &state, &model_size).await?;
 
@@ -2003,9 +1998,7 @@ pub fn set_active_model(state: State<'_, AppState>, model_size: String) -> Resul
         .map_err(|e| e.to_string())?;
 
     // Persist the choice.
-    let mut cfg = config::load();
-    cfg.model_size = model_size.clone();
-    config::save(&cfg)?;
+    let cfg = config::update(|c| c.model_size = model_size.clone())?;
 
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
@@ -2102,9 +2095,7 @@ pub fn cancel_recording(state: State<'_, AppState>) {
 #[tauri::command]
 pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     crate::set_autostart_enabled(&app, enabled)?;
-    let mut cfg = config::load();
-    cfg.autostart = enabled;
-    config::save(&cfg)?;
+    config::update(|c| c.autostart = enabled)?;
     Ok(())
 }
 

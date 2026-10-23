@@ -389,6 +389,20 @@ pub async fn e2e_dictate_audio(
     robot.dictate_audio(samples, false).await
 }
 
+/// Test mode only: the next dictation panics in its paste step, as a bug
+/// there would (`app_kind::word_before`'s did) — dictation must come back
+/// on its own, and say it failed (`pipeline::Busy`).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_crash_next_dictation() -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    tracing::info!("e2e: the next dictation crashes on purpose");
+    crate::pipeline::crash_next_dictation();
+    Ok(())
+}
+
 /// One stretch of [`e2e_assistant_audio`]'s audio.
 #[cfg(debug_assertions)]
 #[derive(Debug, serde::Deserialize)]

@@ -14,7 +14,8 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   themselves whether the window counts as focused, `e2e_focus`). **Rules per
   kind** (`rule`: a bar card's id / a notification's tag): priority (Prompt —
   call, calendar, meeting-limit, meeting-checkin — > Alert — micBlocked,
-  pasteBlocked, calls-fatigue, assistantNoModel, meetingRecovery ("Yap
+  pasteBlocked, calls-fatigue, configReset (held over a dictation, never
+  dropped), assistantNoModel, meetingRecovery ("Yap
   closed during a meeting", held while dictating or recording, waiting as
   long as it takes; `meeting_audio.rs`), and the Voice Assistant's
   answer `assistant` (never held, never stale) — > Info > Tip — hint, word-suggestion), held
@@ -42,7 +43,10 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   up)" — kind `voiceFallback`, once per reason in 10 minutes
   (`tts/cloud.rs`), Open settings → Voice Assistant → Voice; `meeting_audio.rs`'s
   "Yap closed during a meeting" at the next start, with **Transcribe it**
-  — `recoverMeetings`): in one place (`notice::place`) — a
+  — `recoverMeetings`), a settings
+  file Yap couldn't read ("Your settings were reset" / "Some of your
+  settings were reset", kind `configReset`, once, with **Show file** →
+  `config::show_old_file`: Explorer on the copy set aside; `config.rs`): in one place (`notice::place`) — a
   toast in the main window while it's focused (`yap-alert` →
   `lib/alerts.js`, kind `alert`), else a Yap bar card, else a Windows
   notification, else the window on screen; the same alert again within its

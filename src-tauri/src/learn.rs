@@ -1453,24 +1453,26 @@ fn added_title(added: &[String]) -> String {
 /// new correction): config.json, the pipeline's live copy, and the windows'
 /// (`yap-dictionary-learned`). Returns the terms added.
 fn add_words(app: &AppHandle, words: &[Suggestion]) -> Result<Vec<String>, String> {
-    let mut cfg = crate::config::load();
     let mut added = Vec::new();
-    for s in words {
-        if in_dictionary(&cfg.dictionary, &s.heard, &s.term) {
-            continue;
+    // In one step with the save (`config::update`): a dictionary change
+    // saved meanwhile elsewhere isn't lost.
+    let cfg = crate::config::update(|cfg| {
+        for s in words {
+            if in_dictionary(&cfg.dictionary, &s.heard, &s.term) {
+                continue;
+            }
+            cfg.dictionary.push(DictionaryEntry {
+                from: s.heard.clone(),
+                to: s.term.clone(),
+                fuzzy: true,
+                snippet: false,
+            });
+            added.push(s.term.clone());
         }
-        cfg.dictionary.push(DictionaryEntry {
-            from: s.heard.clone(),
-            to: s.term.clone(),
-            fuzzy: true,
-            snippet: false,
-        });
-        added.push(s.term.clone());
-    }
+    })?;
     if added.is_empty() {
         return Ok(added);
     }
-    crate::config::save(&cfg)?;
     if let Some(state) = app.try_state::<crate::AppState>() {
         if let Ok(guard) = state.pipeline.lock() {
             if let Some(p) = guard.as_ref() {

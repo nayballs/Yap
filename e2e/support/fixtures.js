@@ -259,11 +259,13 @@ function holds(now, want) {
 /**
  * Change config.json as another surface would (the Integrations view's
  * Local API switch does it this way), and tell Settings' copy
- * (`yap-config-patched`), so its auto-save can't put the old values back.
- * Settings saves what it adopted 400 ms later (Settings.svelte `persist`):
- * wait for that save, then check the config holds every patched value. A
- * spec that went on at once raced it: a late save of the last patch put back
- * what this one changed (CI, 2026-10-23).
+ * (`yap-config-patched`). Settings' copy also adopts any save on its own
+ * (`yap-config-saved`), and its auto-save puts only its own changes onto
+ * config.json as it is now — writing nothing when it has none (Settings.svelte
+ * "Staying in step"). Wait out that auto-save (400 ms), then check the
+ * config holds every patched value. A spec that went on at once raced it:
+ * a late save of the last patch put back what this one changed (CI,
+ * 2026-10-23, before Settings merged its saves).
  */
 export async function setConfig(yap, main, patch) {
   const cfg = await yap.invoke('get_config');

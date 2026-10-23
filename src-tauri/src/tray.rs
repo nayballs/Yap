@@ -289,9 +289,11 @@ fn activate_model(app: &AppHandle, model_id: &str) {
         let use_gpu = config::load().use_gpu;
         match stt::create_stt_engine(&data_dir, &model_id, use_gpu) {
             Ok(engine) => {
-                let mut cfg = config::load();
-                cfg.model_size = model_id.clone();
-                let _ = config::save(&cfg);
+                // (Settings' copy adopts it from `yap-config-saved`.)
+                let cfg = config::update(|c| c.model_size = model_id.clone()).unwrap_or_else(|e| {
+                    tracing::warn!("Tray model switch: the choice couldn't be saved ({e})");
+                    config::YapConfig { model_size: model_id.clone(), ..config::load() }
+                });
                 if let Some(st) = app.try_state::<AppState>() {
                     if let Ok(guard) = st.pipeline.lock() {
                         if let Some(p) = guard.as_ref() {

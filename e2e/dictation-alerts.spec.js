@@ -154,3 +154,28 @@ test('a dead mic with the privacy switch off is blamed on the switch, on the bar
     await yap.invoke('open_settings');
   }
 });
+
+// A bug that panics in a dictation's task (app_kind::word_before slicing a
+// no-break space in the paste was one) left `processing` set for good:
+// every press after it was ignored until Yap restarted, and nobody was told
+// (pipeline.rs `Busy`). `e2e_crash_next_dictation` makes the next one panic
+// in its paste step.
+test('a dictation that crashes: Yap can dictate again at once, says it failed, and lists it to run again', async ({ yap, shot }) => {
+  await needsMic(yap);
+  const before = dictations(yap);
+  await yap.invoke('e2e_crash_next_dictation');
+  // The robot waits for the dictation to finish: it used to wait out its
+  // 5-minute deadline here.
+  expect(await yap.invoke('e2e_dictate_audio', { seconds: 1 })).toBeNull();
+  await expect(capsule(yap)).toContainText('Dictation failed — Yap hit an error. Try again');
+  await shot(yap.overlay, '06-dictation-crashed');
+  expect(logCount(yap, 'A transcription crashed; Yap can dictate again')).toBe(1);
+  // In Home as failed, with its audio (Run again).
+  await expectStore(yap, 'history.json', (h) => {
+    const last = h.at(-1);
+    return h.length === before + 1 && last.status === 'failed' && last.error === 'The dictation crashed' && !!last.audio;
+  });
+  // The next dictation goes through.
+  const next = await yap.invoke('e2e_dictate_audio', { seconds: 1 });
+  expect(next?.raw).toContain('STT stub');
+});

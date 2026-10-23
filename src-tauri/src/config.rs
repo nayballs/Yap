@@ -4,7 +4,12 @@
 //! GPU toggle, the sound cue, and the correction dictionary.
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::cell::Cell;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::time::Duration;
+use tauri::{AppHandle, Emitter};
 
 /// A single transcription correction: replace `from` with `to`.
 /// Post-processing fix for words the STT model mishears
@@ -1094,16 +1099,30 @@ fn config_path() -> PathBuf {
     data_dir().join("config.json")
 }
 
-/// Load config from disk, falling back to defaults.
+/// Load config from disk, falling back to defaults. A config.json Yap can't
+/// read is never saved over: one that isn't a config this build can read is
+/// set aside and what can be read of it kept, the person told once
+/// ([`load_at`], [`init`]); one another program holds runs Yap on the
+/// defaults without saving them over it.
 pub fn load() -> YapConfig {
     // A model evaluation (`eval.rs`) runs on its own settings, in memory (its
     // API key never goes to disk).
     if let Some(cfg) = crate::eval::config() {
         return cfg;
     }
-    let mut cfg = match std::fs::read_to_string(config_path()) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-        Err(_) => YapConfig::default(),
+    // A unit test reads the real config.json at most: never sets it aside
+    // or writes it.
+    let mut cfg = if cfg!(test) {
+        match read_at(&config_path()) {
+            Read::Parsed(cfg) => *cfg,
+            _ => YapConfig::default(),
+        }
+    } else {
+        let loaded = load_at(&config_path());
+        if let Some(reset) = loaded.reset {
+            report_reset(reset);
+        }
+        loaded.cfg
     };
     // Migration: users still on the "default" cleanup preset get the current
     // default body (so prompt improvements land without a "Modified" badge). A
@@ -1216,27 +1235,82 @@ fn migrate_once(cfg: &mut YapConfig) -> bool {
     true
 }
 
-/// Atomic file write: write to `<path>.tmp`, then rename over the target
-/// (`std::fs::rename` replaces on Windows). A `tauri dev` rebuild or crash
-/// mid-write can otherwise leave a torn JSON file — which the stores would
-/// fail to parse and (before this fix) silently replace with an empty
-/// default, destroying user data.
-pub(crate) fn atomic_write(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, contents)?;
-    std::fs::rename(&tmp, path)
+// ---- Files on disk: atomic writes, corrupt files set aside ------------------
+
+/// Atomic file write: write to a temp file beside `path`, then rename it over
+/// the target (`std::fs::rename` replaces on Windows). A `tauri dev` rebuild
+/// or crash mid-write can otherwise leave a torn JSON file — which the stores
+/// would fail to parse and (before this fix) silently replace with an empty
+/// default, destroying user data. Each write has a temp file of its own
+/// (`<name>.<pid>-<n>.tmp`): two writes of one file at once shared
+/// `<name>.tmp` until 2026-10-23, so one could rename the other's half-written
+/// file into place. The rename is tried again for a moment while another
+/// program (an antivirus, a backup tool) holds the target.
+pub(crate) fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
+    atomic_write_bytes(path, contents.as_bytes())
+}
+
+/// [`atomic_write`] for bytes.
+pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "yap".into());
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_file_name(format!("{name}.{}-{n}.tmp", std::process::id()));
+    let written = std::fs::write(&tmp, bytes).and_then(|()| rename_patiently(&tmp, path));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
+}
+
+/// `std::fs::rename`, tried again for up to ~100 ms while the target is held
+/// by another program (sharing or lock violation, access denied).
+fn rename_patiently(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut tries = 0;
+    loop {
+        match std::fs::rename(from, to) {
+            Err(e) if tries < 5 && held(&e) => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            done => return done,
+        }
+    }
+}
+
+/// Another program has the file open (Windows: access denied, a sharing or
+/// lock violation).
+fn held(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(32 | 33))
+}
+
+/// Move a file Yap can't read aside as `<stem>.corrupt-<unix-secs>` (`-2`,
+/// `-3`… when that's taken; copied when it can't be moved) so it is NEVER
+/// overwritten by a fresh default — the data stays recoverable. Returns
+/// where it went.
+fn set_aside(path: &Path) -> std::io::Result<PathBuf> {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let backup = (1..)
+        .map(|n| match n {
+            1 => path.with_extension(format!("corrupt-{secs}")),
+            n => path.with_extension(format!("corrupt-{secs}-{n}")),
+        })
+        .find(|p| !p.exists())
+        .unwrap_or_else(|| path.with_extension("corrupt"));
+    match rename_patiently(path, &backup) {
+        Ok(()) => Ok(backup),
+        Err(_) => std::fs::copy(path, &backup).map(|_| backup),
+    }
 }
 
 /// Move an unparseable store file aside (`<name>.corrupt-<unix-secs>`) so it
 /// is NEVER overwritten by a fresh default — the data stays recoverable.
-pub(crate) fn quarantine_corrupt(path: &std::path::Path) {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let backup = path.with_extension(format!("corrupt-{ts}"));
-    match std::fs::rename(path, &backup) {
-        Ok(_) => tracing::error!(
+pub(crate) fn quarantine_corrupt(path: &Path) {
+    match set_aside(path) {
+        Ok(backup) => tracing::error!(
             "Unparseable store {:?} quarantined to {:?} — starting fresh, data preserved",
             path,
             backup
@@ -1245,12 +1319,264 @@ pub(crate) fn quarantine_corrupt(path: &std::path::Path) {
     }
 }
 
-/// Persist config to disk (atomically).
-pub fn save(cfg: &YapConfig) -> Result<(), String> {
-    if crate::eval::active() {
-        return Ok(()); // a model evaluation's settings stay in memory
+// ---- config.json: read, repaired, saved one at a time ------------------------
+
+/// Saves of config.json, one at a time. Some ten threads load, change and
+/// save it (the tray, the bar, call detection, Settings' auto-save…).
+static SAVES: Mutex<()> = Mutex::new(());
+
+thread_local! {
+    /// This thread holds [`SAVES`] already (a save inside [`update`], a
+    /// repair inside a load inside it): it isn't taken twice.
+    static HOLDING_SAVES: Cell<bool> = const { Cell::new(false) };
+}
+
+/// [`SAVES`], held until dropped (nothing more where this thread holds it).
+struct SaveLock(Option<MutexGuard<'static, ()>>);
+
+impl Drop for SaveLock {
+    fn drop(&mut self) {
+        if self.0.is_some() {
+            HOLDING_SAVES.with(|h| h.set(false));
+        }
     }
-    std::fs::create_dir_all(data_dir()).map_err(|e| e.to_string())?;
+}
+
+fn lock_saves() -> SaveLock {
+    if HOLDING_SAVES.with(Cell::get) {
+        return SaveLock(None);
+    }
+    let guard = SAVES.lock().unwrap_or_else(|p| p.into_inner());
+    HOLDING_SAVES.with(|h| h.set(true));
+    SaveLock(Some(guard))
+}
+
+/// config.json files Yap couldn't open when it last read them (another
+/// program held them, or one it couldn't read couldn't be set aside): Yap
+/// runs on the defaults meanwhile and never saves them over the real file,
+/// until a read of it works again.
+static UNREAD: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Mark `path` unread or read; returns whether it was unread before.
+fn mark_unread(path: &Path, unread: bool) -> bool {
+    let mut list = UNREAD.lock().unwrap_or_else(|p| p.into_inner());
+    let was = list.iter().any(|p| p == path);
+    if unread && !was {
+        list.push(path.to_path_buf());
+    } else if !unread && was {
+        list.retain(|p| p != path);
+    }
+    was
+}
+
+/// What reading config.json found.
+enum Read {
+    Parsed(Box<YapConfig>),
+    /// No file: a first run, or one moved aside.
+    Missing,
+    /// There, but not a config this build can read — torn, not JSON, a
+    /// value of another type: its bytes.
+    Corrupt(Vec<u8>),
+    /// There, but it couldn't be opened (another program holds it).
+    Unopened(std::io::Error),
+}
+
+fn read_at(path: &Path) -> Read {
+    match std::fs::read(path) {
+        Ok(bytes) => match serde_json::from_slice(without_bom(&bytes)) {
+            Ok(cfg) => Read::Parsed(Box::new(cfg)),
+            Err(_) => Read::Corrupt(bytes),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Read::Missing,
+        Err(e) => Read::Unopened(e),
+    }
+}
+
+/// `bytes` without the byte-order mark Notepad puts first.
+fn without_bom(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)
+}
+
+/// A config.json Yap couldn't read: where it went, what became of it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Reset {
+    /// The file as it was, set aside. `None`: it couldn't be, so Yap runs on
+    /// the defaults without saving over it.
+    pub moved_to: Option<PathBuf>,
+    /// Some settings were read from it (only those it couldn't read went
+    /// back to their defaults); else all of them did.
+    pub kept: bool,
+    /// The settings (JSON names) that went back to their defaults when some
+    /// were kept.
+    pub dropped: Vec<String>,
+}
+
+/// config.json as [`load_at`] read it.
+struct Loaded {
+    cfg: YapConfig,
+    /// It couldn't be read and was set aside: the person is to be told.
+    reset: Option<Reset>,
+}
+
+/// config.json at `path`: parsed; none, the defaults; held by another
+/// program (after a few tries), the defaults, never saved over it
+/// ([`UNREAD`]); not a config this build can read, repaired ([`repair_at`]).
+/// Until 2026-10-23 every one of those was "the defaults", and the next save
+/// wrote them over the real file: API keys, the dictionary and the hotkeys
+/// gone.
+fn load_at(path: &Path) -> Loaded {
+    let mut tries = 0;
+    let read = loop {
+        match read_at(path) {
+            // Another program holding it is usually gone in a moment.
+            Read::Unopened(_) if tries < 4 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            read => break read,
+        }
+    };
+    match read {
+        Read::Parsed(cfg) => {
+            mark_unread(path, false);
+            Loaded { cfg: *cfg, reset: None }
+        }
+        Read::Missing => {
+            mark_unread(path, false);
+            Loaded { cfg: YapConfig::default(), reset: None }
+        }
+        Read::Unopened(e) => {
+            if !mark_unread(path, true) {
+                tracing::warn!(error = %e, "config.json couldn't be opened: Yap runs on the defaults and won't save over it until it can read it");
+            }
+            Loaded { cfg: YapConfig::default(), reset: None }
+        }
+        Read::Corrupt(_) => repair_at(path),
+    }
+}
+
+/// A config.json this build can't read, under the save lock (read again
+/// there: another thread may have repaired it, or saved a good one,
+/// meanwhile). The file as it was is set aside (`config.corrupt-<secs>`),
+/// never saved over. The settings in it that can still be read are kept —
+/// a value of another type (a newer build's, after a downgrade) resets only
+/// that setting — and written back as config.json; a torn file or one that
+/// isn't JSON leaves the defaults. Where it couldn't be set aside, Yap runs
+/// on what it could read without saving over it.
+fn repair_at(path: &Path) -> Loaded {
+    let _saves = lock_saves();
+    let bytes = match read_at(path) {
+        Read::Corrupt(bytes) => bytes,
+        Read::Parsed(cfg) => return Loaded { cfg: *cfg, reset: None },
+        Read::Missing | Read::Unopened(_) => return load_at(path),
+    };
+    let salvaged = salvage(&bytes);
+    let moved_to = match set_aside(path) {
+        Ok(to) => Some(to),
+        Err(e) => {
+            mark_unread(path, true);
+            tracing::warn!(error = %e, "config.json couldn't be read nor set aside: Yap won't save over it");
+            None
+        }
+    };
+    let (cfg, kept, dropped) = match salvaged {
+        Some((cfg, dropped)) => {
+            if moved_to.is_some() {
+                if let Err(e) = write_at(path, &cfg) {
+                    tracing::warn!("config.json: the settings kept couldn't be written back ({e})");
+                }
+            }
+            (cfg, true, dropped)
+        }
+        None => (YapConfig::default(), false, Vec::new()),
+    };
+    let aside = moved_to.as_deref().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned());
+    tracing::warn!(
+        aside = aside.as_deref().unwrap_or("(not set aside)"),
+        bytes = bytes.len(),
+        kept,
+        reset_settings = dropped.len(),
+        "config.json couldn't be read: set aside, never saved over"
+    );
+    Loaded { cfg, reset: Some(Reset { moved_to, kept, dropped }) }
+}
+
+/// The settings in `bytes` — JSON, but not a config this build can read —
+/// that can still be read, each on its own, and the names of those that
+/// can't. `None`: not a JSON object at all (torn, empty).
+fn salvage(bytes: &[u8]) -> Option<(YapConfig, Vec<String>)> {
+    let serde_json::Value::Object(fields) = serde_json::from_slice(without_bom(bytes)).ok()? else {
+        return None;
+    };
+    let mut kept = serde_json::Map::new();
+    let mut dropped = Vec::new();
+    for (name, value) in fields {
+        // Every field has a serde default: a config of this one alone reads
+        // when its value does.
+        let alone = serde_json::Value::Object(std::iter::once((name.clone(), value.clone())).collect());
+        if serde_json::from_value::<YapConfig>(alone).is_ok() {
+            kept.insert(name, value);
+        } else {
+            dropped.push(name);
+        }
+    }
+    let cfg = serde_json::from_value(serde_json::Value::Object(kept)).ok()?;
+    Some((cfg, dropped))
+}
+
+/// Persist config to disk (atomically, one save at a time), then
+/// `yap-config-saved` to every window: Settings' copy adopts what changed
+/// (Settings.svelte), the theme follows (appearance.js). Refused while
+/// config.json is one Yap couldn't open when it last read it ([`UNREAD`]).
+pub fn save(cfg: &YapConfig) -> Result<(), String> {
+    // A model evaluation's settings stay in memory; a unit test never writes
+    // the real config.json.
+    if crate::eval::active() || cfg!(test) {
+        return Ok(());
+    }
+    save_at(&config_path(), cfg)?;
+    if let Some(app) = APP.get() {
+        let _ = app.emit(EVENT_SAVED, ());
+    }
+    Ok(())
+}
+
+/// Change the config in one step: loaded, changed by `change`, saved when
+/// anything changed — never interleaved with another save, so a change
+/// another thread saved meanwhile isn't lost (load → change → save on two
+/// threads at once kept only one). Returns the config as it is now.
+pub fn update(change: impl FnOnce(&mut YapConfig)) -> Result<YapConfig, String> {
+    let _saves = lock_saves();
+    let mut cfg = load();
+    if changed(&mut cfg, change) {
+        save(&cfg)?;
+    }
+    Ok(cfg)
+}
+
+/// Apply `change` to `cfg`: whether anything changed.
+fn changed(cfg: &mut YapConfig, change: impl FnOnce(&mut YapConfig)) -> bool {
+    let before = serde_json::to_value(&*cfg).ok();
+    change(cfg);
+    before.is_none() || serde_json::to_value(&*cfg).ok() != before
+}
+
+#[cfg(test)]
+fn update_at(path: &Path, change: impl FnOnce(&mut YapConfig)) -> Result<YapConfig, String> {
+    let _saves = lock_saves();
+    let mut cfg = load_at(path).cfg;
+    if changed(&mut cfg, change) {
+        save_at(path, &cfg)?;
+    }
+    Ok(cfg)
+}
+
+/// `cfg` saved to `path` (see [`save`]).
+fn save_at(path: &Path, cfg: &YapConfig) -> Result<(), String> {
+    let _saves = lock_saves();
+    if UNREAD.lock().unwrap_or_else(|p| p.into_inner()).iter().any(|p| p == path) {
+        return Err("Yap couldn't open config.json when it last read it, so it won't save over it".into());
+    }
     // Anything this build saves has been through `load`'s migrations already,
     // so stamp the current version even if the caller's copy lost the field —
     // a missing version would re-run the one-time migrations on next load.
@@ -1261,8 +1587,124 @@ pub fn save(cfg: &YapConfig) -> Result<(), String> {
         use_gpu: cfg.stt_device != "cpu",
         ..cfg.clone()
     };
-    let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
-    atomic_write(&config_path(), &json).map_err(|e| e.to_string())
+    write_at(path, &cfg)
+}
+
+/// `cfg` written to `path` as it is (atomically).
+fn write_at(path: &Path, cfg: &YapConfig) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
+    atomic_write(path, &json).map_err(|e| e.to_string())
+}
+
+// ---- Telling the person -------------------------------------------------------
+
+/// Every window's event after a save of config.json, from wherever it came.
+pub const EVENT_SAVED: &str = "yap-config-saved";
+
+static APP: OnceLock<AppHandle> = OnceLock::new();
+
+/// A config.json Yap couldn't read, waiting to be told (once).
+static RESET: Mutex<Option<Reset>> = Mutex::new(None);
+
+/// …and where the last one went, for its alert's "Show file".
+static OLD_FILE: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// A config.json Yap couldn't read was set aside (or couldn't be): told now
+/// when the app is up, else by [`init`].
+fn report_reset(reset: Reset) {
+    if let Some(to) = &reset.moved_to {
+        *OLD_FILE.lock().unwrap_or_else(|p| p.into_inner()) = Some(to.clone());
+    }
+    *RESET.lock().unwrap_or_else(|p| p.into_inner()) = Some(reset);
+    if let Some(app) = APP.get() {
+        tell_reset(app);
+    }
+}
+
+/// Start with the app: `yap-config-saved` after every save from now on,
+/// and a config.json Yap couldn't read at start (the first load runs before
+/// logging and the windows) said once the windows are up.
+pub fn init(app: &AppHandle) {
+    let _ = APP.set(app.clone());
+    if RESET.lock().unwrap_or_else(|p| p.into_inner()).is_some() {
+        let app = app.clone();
+        let _ = std::thread::Builder::new().name("config-reset".into()).spawn(move || {
+            std::thread::sleep(Duration::from_secs(4));
+            tell_reset(&app);
+        });
+    }
+}
+
+fn tell_reset(app: &AppHandle) {
+    let Some(reset) = RESET.lock().unwrap_or_else(|p| p.into_inner()).take() else {
+        return;
+    };
+    let aside = reset.moved_to.as_deref().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned());
+    tracing::warn!(
+        aside = aside.as_deref().unwrap_or("(not set aside)"),
+        kept = reset.kept,
+        reset_settings = reset.dropped.len(),
+        "Settings: config.json couldn't be read; telling the person"
+    );
+    crate::alert::show_soon(app, reset_alert(&reset));
+}
+
+/// What the person is told about a config.json Yap couldn't read.
+pub(crate) fn reset_alert(reset: &Reset) -> crate::alert::Alert {
+    let (title, body) = match (&reset.moved_to, reset.kept) {
+        (Some(to), true) => {
+            let n = reset.dropped.len();
+            let which = if n == 1 { "1 setting".to_string() } else { format!("{n} settings") };
+            (
+                "Some of your settings were reset",
+                format!(
+                    "Yap couldn't read all of its settings file, so {which} went back to the default. The rest are as you left them. The file as it was is saved as {}.",
+                    to.display()
+                ),
+            )
+        }
+        (Some(to), false) => (
+            "Your settings were reset",
+            format!(
+                "Yap couldn't read its settings file, so it started with the default settings. The old file is saved as {}.",
+                to.display()
+            ),
+        ),
+        (None, _) => (
+            "Yap couldn't read your settings",
+            "It's using the default settings for now and won't save over your settings file. Close any program that has config.json open, then restart Yap.".to_string(),
+        ),
+    };
+    crate::alert::Alert {
+        kind: "configReset",
+        icon: "settings",
+        title: title.into(),
+        body,
+        action: reset.moved_to.is_some().then_some(crate::alert::Action {
+            id: crate::alert::SHOW_OLD_SETTINGS,
+            label: "Show file",
+        }),
+        timeout_ms: 60_000,
+    }
+}
+
+/// The alert's "Show file": the settings file Yap couldn't read, in
+/// Explorer. A test run only says so in the log.
+pub(crate) fn show_old_file(app: &AppHandle) {
+    let Some(path) = OLD_FILE.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
+        return;
+    };
+    if crate::e2e::active() {
+        tracing::info!("e2e: not showing the old settings file");
+        return;
+    }
+    use tauri_plugin_opener::OpenerExt;
+    if let Err(e) = app.opener().reveal_item_in_dir(&path) {
+        tracing::warn!("Settings: couldn't show the old settings file ({e})");
+    }
 }
 
 impl YapConfig {
@@ -1533,6 +1975,169 @@ mod tests {
 
     fn snippet(from: &str, to: &str) -> DictionaryEntry {
         DictionaryEntry { snippet: true, ..entry(from, to) }
+    }
+
+    // ---- config.json on disk: a scratch folder of its own per test ----
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("yap-config-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The files beside config.json (copies moved aside, temp files left).
+    fn others(dir: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "config.json")
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_config_that_cant_be_read_is_moved_aside_never_saved_over() {
+        let dir = scratch("torn");
+        let path = dir.join("config.json");
+        // Torn mid-write: the hotkey, a key and the dictionary in it.
+        let torn: &[u8] = br#"{ "hotkey": "kb:121", "ppApiKeys": { "groq": "example-key" }, "dictionary": [ { "from": "power to keep", "#;
+        std::fs::write(&path, torn).unwrap();
+        let loaded = load_at(&path);
+        // The defaults for now…
+        assert_eq!(loaded.cfg.hotkey, YapConfig::default().hotkey);
+        // …and the file moved aside as it was, never to be saved over.
+        let aside = others(&dir);
+        assert_eq!(aside.len(), 1, "{aside:?}");
+        assert!(aside[0].starts_with("config.corrupt-"), "{aside:?}");
+        assert_eq!(std::fs::read(dir.join(&aside[0])).unwrap(), torn);
+        assert!(!path.exists());
+        // Told once, with where it is.
+        let reset = loaded.reset.expect("the person is told");
+        assert_eq!(reset.moved_to, Some(dir.join(&aside[0])));
+        assert!(!reset.kept);
+        // The next save writes a fresh config.json beside it.
+        let cfg = YapConfig { hotkey: "kb:122".into(), ..loaded.cfg };
+        save_at(&path, &cfg).unwrap();
+        let again = load_at(&path);
+        assert_eq!(again.cfg.hotkey, "kb:122");
+        assert!(again.reset.is_none(), "nothing more to tell");
+        assert_eq!(std::fs::read(dir.join(&aside[0])).unwrap(), torn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_setting_this_build_cant_read_resets_alone_the_rest_kept() {
+        let dir = scratch("salvage");
+        let path = dir.join("config.json");
+        // A value of another type (a newer build's, opened after a
+        // downgrade): only the dictionary can't be read.
+        let text = r#"{ "hotkey": "kb:121", "ppApiKeys": { "groq": "example-key" }, "dictionary": "not a list", "modelSize": "moonshine-base", "configVersion": 3 }"#;
+        std::fs::write(&path, text).unwrap();
+        let loaded = load_at(&path);
+        assert_eq!(loaded.cfg.hotkey, "kb:121");
+        assert_eq!(loaded.cfg.pp_api_keys.get("groq").map(String::as_str), Some("example-key"));
+        assert_eq!(loaded.cfg.model_size, "moonshine-base");
+        assert!(loaded.cfg.dictionary.is_empty());
+        let reset = loaded.reset.expect("the person is told");
+        assert!(reset.kept);
+        assert_eq!(reset.dropped, vec!["dictionary".to_string()]);
+        // The file as it was, aside; what could be kept is config.json again.
+        let aside = others(&dir);
+        assert_eq!(aside.len(), 1, "{aside:?}");
+        assert_eq!(std::fs::read_to_string(dir.join(&aside[0])).unwrap(), text);
+        let again = load_at(&path);
+        assert!(again.reset.is_none());
+        assert_eq!((again.cfg.hotkey.as_str(), again.cfg.model_size.as_str()), ("kb:121", "moonshine-base"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saves_from_many_threads_never_tear_the_file() {
+        let dir = scratch("threads");
+        let path = dir.join("config.json");
+        save_at(&path, &YapConfig::default()).unwrap();
+        let problems = std::sync::Mutex::new(Vec::<String>::new());
+        std::thread::scope(|s| {
+            for t in 0..8usize {
+                let (path, problems) = (&path, &problems);
+                s.spawn(move || {
+                    // Each thread's config is a different size: a torn
+                    // write shows as a file that doesn't parse.
+                    let cfg = YapConfig {
+                        hotkey: format!("kb:{}", 100 + t),
+                        dictionary: (0..t * 40).map(|i| entry(&format!("word {i}"), &format!("Word {i}"))).collect(),
+                        ..YapConfig::default()
+                    };
+                    for _ in 0..40 {
+                        if let Err(e) = save_at(path, &cfg) {
+                            problems.lock().unwrap().push(format!("save: {e}"));
+                        }
+                        let read = std::fs::read(path).map_err(|e| e.to_string());
+                        if let Err(e) = read.and_then(|b| serde_json::from_slice::<YapConfig>(&b).map_err(|e| e.to_string())) {
+                            problems.lock().unwrap().push(format!("read: {e}"));
+                        }
+                    }
+                });
+            }
+        });
+        let problems = problems.into_inner().unwrap();
+        assert!(problems.is_empty(), "{} problems, first: {:?}", problems.len(), problems.first());
+        // Nothing left beside it (no temp file).
+        assert_eq!(others(&dir), Vec::<String>::new());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn changes_from_many_threads_are_all_kept() {
+        let dir = scratch("update");
+        let path = dir.join("config.json");
+        save_at(&path, &YapConfig::default()).unwrap();
+        std::thread::scope(|s| {
+            for t in 0..8usize {
+                let path = &path;
+                s.spawn(move || {
+                    for i in 0..10 {
+                        update_at(path, |c| c.dictionary.push(entry(&format!("t{t} w{i}"), "x"))).unwrap();
+                    }
+                });
+            }
+        });
+        // Every thread's every change: none saved over by another's.
+        assert_eq!(load_at(&path).cfg.dictionary.len(), 80);
+        // Nothing changed: nothing written.
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        update_at(&path, |c| c.hotkey = c.hotkey.clone()).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Another program has config.json open (an antivirus, a backup tool)
+    /// when Yap reads it: Yap runs on the defaults, and never saves them
+    /// over the real file once it's free again.
+    #[cfg(windows)]
+    #[test]
+    fn a_config_yap_couldnt_open_is_never_saved_over() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = scratch("held");
+        let path = dir.join("config.json");
+        let mine = YapConfig { hotkey: "kb:121".into(), ..YapConfig::default() };
+        save_at(&path, &mine).unwrap();
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+        let loaded = load_at(&path);
+        assert_eq!(loaded.cfg.hotkey, YapConfig::default().hotkey, "the defaults for now");
+        assert!(loaded.reset.is_none(), "nothing moved aside");
+        drop(held);
+        // Free again, but this copy is the defaults: refused.
+        assert!(save_at(&path, &loaded.cfg).is_err());
+        assert_eq!(load_at(&path).cfg.hotkey, "kb:121", "the real one is still there");
+        // Read since: saves go through.
+        save_at(&path, &YapConfig { hotkey: "kb:122".into(), ..mine }).unwrap();
+        assert_eq!(load_at(&path).cfg.hotkey, "kb:122");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

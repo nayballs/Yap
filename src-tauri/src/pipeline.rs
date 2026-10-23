@@ -1574,11 +1574,11 @@ impl Shared {
         if self.recording.load(Ordering::SeqCst) {
             return Err("A dictation is recording".into());
         }
-        if self.processing.swap(true, Ordering::SeqCst) {
+        let Some(busy) = Busy::take(self, Job::Dictation) else {
             return Err("Yap is busy transcribing — try again in a moment".into());
-        }
+        };
         let Some(k) = self.kept.lock().ok().and_then(|mut k| k.take()) else {
-            self.processing.store(false, Ordering::SeqCst);
+            busy.done();
             return Err("Nothing to undo: the cancelled dictation is gone".into());
         };
         self.target_hwnd.store(k.target_hwnd, Ordering::Relaxed);
@@ -1604,11 +1604,11 @@ impl Shared {
         tracing::info!(samples = k.audio.len(), "Undo: transcribing the cancelled dictation for its own window");
         self.undoing.store(true, Ordering::SeqCst);
         let shared = Arc::clone(self);
-        tauri::async_runtime::spawn(async move {
+        spawn_busy(busy, async move {
+            // `run_stt` consumes its Arc; keep a second handle for the flag.
             let flag = Arc::clone(&shared);
             shared.run_stt(k.audio).await;
             flag.undoing.store(false, Ordering::SeqCst);
-            flag.processing.store(false, Ordering::SeqCst);
         });
         Ok(())
     }
@@ -1657,15 +1657,10 @@ impl Shared {
         tracing::info!(samples = audio.len(), "Recording stopped, transcribing");
 
         // Mark "processing" so a rapid re-toggle can't start an overlapping
-        // transcription. Cleared once `run_stt` returns (all paths), below.
-        self.processing.store(true, Ordering::SeqCst);
+        // transcription. Cleared when the task ends, however it ends (`Busy`).
+        let busy = Busy::hold(self, Job::Dictation);
         let shared = Arc::clone(self);
-        tauri::async_runtime::spawn(async move {
-            // `run_stt` consumes its Arc; keep a second handle to clear the flag.
-            let flag = Arc::clone(&shared);
-            shared.run_stt(audio).await;
-            flag.processing.store(false, Ordering::SeqCst);
-        });
+        spawn_busy(busy, async move { shared.run_stt(audio).await });
     }
 
     /// Is this dictation a **Command** (it says the agent's name; was "the
@@ -2093,6 +2088,11 @@ impl Shared {
     /// submit key, history. Returns what went to the paste (the robot's
     /// report; a dictation ignores it).
     async fn deliver(self: &Arc<Self>, text: String) -> Delivered {
+        // Test mode's crash on purpose (`e2e_crash_next_dictation`).
+        #[cfg(debug_assertions)]
+        if crate::e2e::active() && CRASH_NEXT.swap(false, Ordering::SeqCst) {
+            panic!("e2e: a dictation crashing in its paste, on purpose");
+        }
         // Smart routing: which app were we dictating into? The
         // foreground window was captured at record-start; resolve
         // it to a process name (e.g. "slack.exe") so per-app
@@ -2856,6 +2856,127 @@ impl crate::mic::Sink for Shared {
     }
 }
 
+// ---- A transcription's `processing` flag ---------------------------------------
+
+/// What a transcription task was, for what its crash says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Job {
+    /// A dictation: the hotkey's, Undo's, robot mode's.
+    Dictation,
+    /// An Upload file.
+    Upload,
+    /// Home's Run again.
+    Rerun,
+}
+
+/// Who holds the `processing` flag: the pipeline, or a unit test's stand-in.
+pub(crate) trait Holder: Send + Sync + 'static {
+    fn processing(&self) -> &AtomicBool;
+    /// The task ended without finishing (a panic in it): put things back
+    /// and tell the person. Must not panic itself.
+    fn crashed(&self, job: Job);
+}
+
+/// The `processing` flag (starts refused while it's set: one transcription
+/// at a time), held for one transcription task and let go when it ends —
+/// **however it ends**. A panic in the task (a bug: `app_kind::word_before`
+/// slicing a no-break space in the paste was one) unwound past the line
+/// after the `.await` that cleared the flag: every press after it was
+/// ignored ("a transcription is still processing"), the bar stayed on
+/// "processing", the updater waited for ever — until a restart, and nobody
+/// was told. Now the flag goes with the task: dropped without [`Busy::done`]
+/// (the task panicked), [`Holder::crashed`] first puts things back and says
+/// so (the dictation listed as failed with its audio, "Dictation failed" on
+/// the bar).
+pub(crate) struct Busy<H: Holder> {
+    holder: Arc<H>,
+    job: Job,
+    finished: bool,
+}
+
+impl<H: Holder> Busy<H> {
+    /// Take the flag: `None` while another transcription holds it.
+    pub(crate) fn take(holder: &Arc<H>, job: Job) -> Option<Self> {
+        (!holder.processing().swap(true, Ordering::SeqCst)).then(|| Busy { holder: Arc::clone(holder), job, finished: false })
+    }
+
+    /// Set the flag (a stop: starts are refused already while it's set).
+    pub(crate) fn hold(holder: &Arc<H>, job: Job) -> Self {
+        holder.processing().store(true, Ordering::SeqCst);
+        Busy { holder: Arc::clone(holder), job, finished: false }
+    }
+
+    /// The task ended as it should: the flag goes, nothing to say.
+    pub(crate) fn done(mut self) {
+        self.finished = true;
+    }
+}
+
+impl<H: Holder> Drop for Busy<H> {
+    fn drop(&mut self) {
+        if !self.finished {
+            let (holder, job) = (&self.holder, self.job);
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| holder.crashed(job))).is_err() {
+                tracing::error!(?job, "A transcription crashed, and putting things back failed too");
+            }
+        }
+        self.holder.processing().store(false, Ordering::SeqCst);
+    }
+}
+
+/// What a crashed dictation says on the bar.
+const CRASHED: &str = "Dictation failed — Yap hit an error. Try again";
+
+/// Test mode: the next dictation panics in its paste step
+/// (`e2e::e2e_crash_next_dictation`).
+#[cfg(debug_assertions)]
+static CRASH_NEXT: AtomicBool = AtomicBool::new(false);
+
+#[cfg(debug_assertions)]
+pub(crate) fn crash_next_dictation() {
+    CRASH_NEXT.store(true, Ordering::SeqCst);
+}
+
+impl Holder for Shared {
+    fn processing(&self) -> &AtomicBool {
+        &self.processing
+    }
+
+    fn crashed(&self, job: Job) {
+        tracing::error!(?job, "A transcription crashed; Yap can dictate again");
+        self.undoing.store(false, Ordering::SeqCst);
+        match job {
+            Job::Dictation => {
+                // A question for the Voice Assistant that will never come.
+                if self.assistant.swap(false, Ordering::SeqCst) {
+                    crate::assistant::nothing(&self.app);
+                }
+                // Listed with its audio, to run again (if it wasn't yet).
+                self.list_failed("The dictation crashed");
+                let _ = self.app.emit(DICTATION_ERROR, CRASHED);
+                let _ = self.app.emit("yap-state", "error");
+            }
+            Job::Upload => {
+                let _ = self.app.emit("yap-upload-error", "The transcription crashed — try again");
+            }
+            Job::Rerun => {
+                let _ = self.app.emit("yap-error", "Run again failed — Yap hit an error. Try again");
+            }
+        }
+    }
+}
+
+/// `work` on the async runtime, holding `busy` until it ends (see [`Busy`]).
+pub(crate) fn spawn_busy<H: Holder>(
+    busy: Busy<H>,
+    work: impl std::future::Future<Output = ()> + Send + 'static,
+) -> tauri::async_runtime::JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        work.await;
+        busy.done();
+    })
+}
+
 /// The running pipeline: the shared state, with the mic (`mic.rs`) and the
 /// warm speech engine in it.
 pub struct Pipeline {
@@ -3109,15 +3230,11 @@ impl Pipeline {
         if shared.recording.load(Ordering::SeqCst) {
             return Err("Recording in progress — stop dictating first".into());
         }
-        if shared.processing.swap(true, Ordering::SeqCst) {
+        let Some(busy) = Busy::take(&shared, Job::Upload) else {
             return Err("Yap is busy transcribing — try again in a moment".into());
-        }
+        };
         shared.upload_cancel.store(false, Ordering::SeqCst);
-        tauri::async_runtime::spawn(async move {
-            let flag = Arc::clone(&shared);
-            shared.run_file_transcription(path).await;
-            flag.processing.store(false, Ordering::SeqCst);
-        });
+        spawn_busy(busy, async move { shared.run_file_transcription(path).await });
         Ok(())
     }
 
@@ -3192,11 +3309,12 @@ impl Rerun {
     /// See `Shared::rerun`.
     pub(crate) async fn run(&self, audio: Vec<f32>, model: Option<String>, app_name: &str) -> Result<Reran, String> {
         let shared = &self.0;
-        if shared.recording.load(Ordering::SeqCst) || shared.processing.swap(true, Ordering::SeqCst) {
+        let busy = (!shared.recording.load(Ordering::SeqCst)).then(|| Busy::take(shared, Job::Rerun)).flatten();
+        let Some(busy) = busy else {
             return Err("Yap is busy with a dictation — try again in a moment".into());
-        }
+        };
         let out = shared.rerun(audio, model, app_name).await;
-        shared.processing.store(false, Ordering::SeqCst);
+        busy.done();
         out
     }
 }
@@ -3257,6 +3375,13 @@ impl Drop for FeedOn {
 impl Robot {
     const BUSY: &'static str = "Yap is busy with another dictation";
 
+    /// The `processing` flag for a robot dictation (`None`: one records or
+    /// transcribes already), let go however it ends ([`Busy`]).
+    fn take_busy(&self) -> Option<Busy<Shared>> {
+        let shared = &self.0;
+        (!shared.recording.load(Ordering::SeqCst)).then(|| Busy::take(shared, Job::Dictation)).flatten()
+    }
+
     /// The report of the latest dictation that went to the paste (an Undo's,
     /// say), taken; `None` while none has since this was last asked.
     pub(crate) fn take_delivered(&self) -> Option<Delivered> {
@@ -3269,16 +3394,16 @@ impl Robot {
     /// would), then the dictation's own steps from cleanup to the paste.
     pub(crate) async fn dictate_text(&self, text: String) -> Result<Delivered, String> {
         let shared = &self.0;
-        if shared.recording.load(Ordering::SeqCst) || shared.processing.swap(true, Ordering::SeqCst) {
+        let Some(busy) = self.take_busy() else {
             return Err(Self::BUSY.into());
-        }
+        };
         shared.capture_target(false);
         crate::selection::wait_for_context(Duration::from_millis(1_500));
         crate::screen_terms::wait_for_terms(Duration::from_millis(3_000));
         let _ = shared.app.emit("yap-state", "processing");
         tracing::info!(len = text.len(), "e2e: robot dictation from a transcript");
         let report = shared.deliver(text).await;
-        shared.processing.store(false, Ordering::SeqCst);
+        busy.done();
         shared.end_state(report.offer);
         Ok(report)
     }
@@ -3290,9 +3415,9 @@ impl Robot {
     /// paste. Returns what it did.
     pub(crate) async fn rewrite_text(&self, instruction: String) -> Result<Rewritten, String> {
         let shared = &self.0;
-        if shared.recording.load(Ordering::SeqCst) || shared.processing.swap(true, Ordering::SeqCst) {
+        let Some(busy) = self.take_busy() else {
             return Err(Self::BUSY.into());
-        }
+        };
         if let Ok(mut r) = LAST_REWRITE.lock() {
             *r = None;
         }
@@ -3301,7 +3426,7 @@ impl Robot {
         tracing::info!(len = instruction.len(), "e2e: robot rewrite from a transcript");
         shared.run_rewrite(instruction).await;
         shared.edit_mode.store(false, Ordering::SeqCst);
-        shared.processing.store(false, Ordering::SeqCst);
+        busy.done();
         Ok(LAST_REWRITE.lock().ok().and_then(|mut r| r.take()).unwrap_or_default())
     }
 
@@ -3326,9 +3451,9 @@ impl Robot {
         if !shared.recording.load(Ordering::SeqCst) && crate::assistant::off_for_meeting(&shared.app) {
             return Err("The Voice Assistant is off during meetings".into());
         }
-        if shared.recording.load(Ordering::SeqCst) || shared.processing.swap(true, Ordering::SeqCst) {
+        let Some(busy) = self.take_busy() else {
             return Err(Self::BUSY.into());
-        }
+        };
         crate::tts::stop_for_dictation();
         ASSISTANT_ARMED.store(true, Ordering::SeqCst);
         shared.capture_target(false);
@@ -3340,7 +3465,7 @@ impl Robot {
         let _ = shared.app.emit("yap-state", "processing");
         tracing::info!(len = text.len(), "e2e: a question for the Voice Assistant from a transcript");
         let asked = shared.assistant.swap(false, Ordering::SeqCst) && shared.ask_assistant(text.trim());
-        shared.processing.store(false, Ordering::SeqCst);
+        busy.done();
         let _ = shared.app.emit("yap-state", "idle");
         if asked {
             Ok(())
@@ -3728,6 +3853,49 @@ mod tests {
             fuzzy,
             snippet: false,
         }
+    }
+
+    /// The pipeline's part in [`Busy`], with the crashes it was told of.
+    #[derive(Default)]
+    struct Stand {
+        processing: AtomicBool,
+        crashes: Mutex<Vec<Job>>,
+    }
+
+    impl Holder for Stand {
+        fn processing(&self) -> &AtomicBool {
+            &self.processing
+        }
+        fn crashed(&self, job: Job) {
+            self.crashes.lock().unwrap().push(job);
+        }
+    }
+
+    /// A panic in a transcription's task (`app_kind::word_before`'s, in the
+    /// paste, was one) skipped the line after the `.await` that cleared
+    /// `processing`: every press after it was ignored ("a transcription is
+    /// still processing") until Yap restarted, and nobody was told.
+    #[test]
+    fn a_transcription_that_crashes_lets_dictation_go_and_says_so() {
+        let stand = Arc::new(Stand::default());
+        let busy = Busy::hold(&stand, Job::Dictation);
+        let task = spawn_busy(busy, async {
+            tokio::task::yield_now().await;
+            panic!("a bug after the transcript (this test's own panic)");
+        });
+        assert!(tauri::async_runtime::block_on(task).is_err(), "the task panicked");
+        assert!(!stand.processing.load(Ordering::SeqCst), "dictation is free again");
+        assert_eq!(*stand.crashes.lock().unwrap(), vec![Job::Dictation], "and the person is told");
+
+        // One that ends as it should: free again, nothing said.
+        let busy = Busy::take(&stand, Job::Upload).expect("free");
+        assert!(Busy::take(&stand, Job::Rerun).is_none(), "one transcription at a time");
+        tauri::async_runtime::block_on(spawn_busy(busy, async {})).unwrap();
+        assert!(!stand.processing.load(Ordering::SeqCst));
+        // Taken and given back without a task (Undo with nothing to undo).
+        Busy::take(&stand, Job::Dictation).expect("free").done();
+        assert!(!stand.processing.load(Ordering::SeqCst));
+        assert_eq!(stand.crashes.lock().unwrap().len(), 1, "nothing more said");
     }
 
     #[test]

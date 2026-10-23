@@ -686,6 +686,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             e2e::e2e_dictate_audio,
             #[cfg(debug_assertions)]
+            e2e::e2e_crash_next_dictation,
+            #[cfg(debug_assertions)]
             e2e::e2e_assistant_audio,
             #[cfg(debug_assertions)]
             mic_privacy::e2e_mic_privacy,
@@ -774,6 +776,10 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let cfg = config::load();
+            // Every save of config.json tells the windows (Settings' copy
+            // adopts it); one Yap couldn't read at start is said once the
+            // windows are up (config.rs).
+            config::init(&handle);
 
             // Register the app handle so the usage tracker can emit live
             // `groq-usage` updates after each AI-cleanup call.

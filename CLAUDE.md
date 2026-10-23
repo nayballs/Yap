@@ -98,7 +98,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 ## Module index (`src-tauri/src/`)
 
 **Dictation** — [dictation.md](./docs/architecture/dictation.md)
-- `pipeline.rs` — the heart: buffer and pre-roll, modes, the start chime on the mic's first audio, the model loaded off the startup thread, `run_stt` → `deliver`, Undo, chat/assistant routing.
+- `pipeline.rs` — the heart: buffer and pre-roll, modes, the start chime on the mic's first audio, the model loaded off the startup thread, `run_stt` → `deliver`, Undo, chat/assistant routing; the `processing` guard (`Busy`) let go however a task ends, a crash said.
 - `gesture.rs` — push-to-talk's pure state machine: hold, double-tap hands-free, lone tap.
 - `coaching.rs` — push-to-talk coaching hints (≤ 3 each; counts in `hints.json`).
 - `input_hook.rs` — low-level keyboard/mouse hooks: six bindings (Read aloud's the fifth, Use what I said's the sixth), combo rules, `clashes`, menu-mask key.
@@ -213,7 +213,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `theme.rs` — the theme on the Rust side: the opaque windows' webview backgrounds (no white flash), onboarding's title bar, Windows' app mode (frontend.md).
 - `portable.rs` — portable mode (a `portable` marker → `<exe>/Data`).
 - `commands.rs` — the Tauri commands; logging is `lib.rs init_logging` (app-shell.md).
-- `config.rs` — `YapConfig`, load/save, migrations, dictionary helpers (config-and-data.md).
+- `config.rs` — `YapConfig`, load/save (one at a time; `update` in one step; an unreadable file set aside, the person told), migrations, dictionary helpers (config-and-data.md).
 - `e2e.rs` / `realtest.rs` — test mode, and robot mode's real pastes into the test's own windows.
 - `log_privacy.rs` — a test: no user content in the log at `info` and above (app-shell.md, Logging).
 
@@ -369,7 +369,9 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 (only mid-dictation), `stt_speed.json` (each model's device timings),
 `recent-audio/` (a day of dictation audio), `meeting-audio/` (each meeting's audio as
 FLAC, 14 days), `icons/`, `logs/`. Every JSON
-store writes atomically and quarantines a corrupt file instead of crashing. Secrets
+store writes atomically and quarantines a corrupt file instead of crashing —
+config.json too: set aside, never saved over, the person told; its saves one at a time
+(`config::update`; [config-and-data.md](./docs/architecture/config-and-data.md)). Secrets
 never go in files: the account session and calendar tokens live in Windows Credential
 Manager. The local API's discovery file is `~/.yap/cli-bridge.json`.
 

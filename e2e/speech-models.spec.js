@@ -5,23 +5,58 @@
 //
 // A model counts as installed when its file or folder is in Data/models, so
 // the spec seeds an empty Moonshine Base folder (never the active model: the
-// default is Parakeet V3, which isn't installed here).
+// default is Parakeet V3, which isn't installed here), and SenseVoice and
+// Canary 180M Flash to switch between (the stub engine never reads them).
+//
+// Switching the speech model saves it in Rust (`set_active_model`), outside
+// Settings' copy of the config: the next switch flipped anywhere in Settings
+// put the old model back, until Settings adopted saves from elsewhere
+// (2026-10-23).
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openSettings } from './support/fixtures.js';
+import { test as base, expect, openSettings, closeSettings, expectStore } from './support/fixtures.js';
 
 const MODEL_DIR = 'moonshine-base';
+const SWITCH_DIRS = ['sense-voice-int8', 'canary-180m-flash'];
 
 const test = base.extend({
   yapOptions: [
     async ({}, use) => {
       await use({
         name: 'speech-models',
-        prepare: (dataDir) => fs.mkdirSync(path.join(dataDir, 'models', MODEL_DIR), { recursive: true }),
+        prepare: (dataDir) => {
+          for (const dir of [MODEL_DIR, ...SWITCH_DIRS]) fs.mkdirSync(path.join(dataDir, 'models', dir), { recursive: true });
+        },
       });
     },
     { scope: 'worker' },
   ],
+});
+
+test('a speech model switched outside Settings stays when a setting is changed in Settings', async ({ yap, main }) => {
+  // On the Speech-to-Text page: Use SenseVoice (saved in Rust).
+  let dialog = await openSettings(main, 'Speech-to-Text');
+  const row = dialog.locator('.manager .mrow').filter({ hasText: 'SenseVoice' });
+  await row.scrollIntoViewIfNeeded();
+  await row.getByRole('button', { name: 'Use' }).click();
+  await expectStore(yap, 'config.json', (c) => c.modelSize === 'sense-voice-int8');
+  // A switch in Settings: the model stays.
+  dialog = await openSettings(main, 'Dictation');
+  const offer = dialog.getByRole('button', { name: 'Offer what you said after AI cleanup' });
+  await offer.click();
+  await expectStore(yap, 'config.json', (c) => c.asSaidOffer === false);
+  await main.waitForTimeout(700);
+  expect(yap.readConfig().modelSize).toBe('sense-voice-int8');
+
+  // As the tray or onboarding does it (no page involved): Canary 180M Flash.
+  await yap.invoke('set_active_model', { modelSize: 'canary-180m-flash' });
+  await expectStore(yap, 'config.json', (c) => c.modelSize === 'canary-180m-flash');
+  // The next switch keeps it too.
+  await offer.click();
+  await expectStore(yap, 'config.json', (c) => c.asSaidOffer === true);
+  await main.waitForTimeout(700);
+  expect(yap.readConfig().modelSize).toBe('canary-180m-flash');
+  await closeSettings(main);
 });
 
 test('deleting a speech model asks first, Cancel keeps it, Delete removes it', async ({ yap, main, shot }) => {

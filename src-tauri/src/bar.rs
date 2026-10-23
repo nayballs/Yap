@@ -1437,9 +1437,7 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
             emit(app);
         }
         "off" => {
-            let mut cfg = crate::config::load();
-            cfg.bar_enabled = false;
-            crate::config::save(&cfg)?;
+            let cfg = crate::config::update(|c| c.bar_enabled = false)?;
             sync(app, &cfg);
             let _ = app.emit(EVENT_CHANGED, serde_json::json!({ "enabled": false }));
             tracing::info!("bar: turned off from its menu");

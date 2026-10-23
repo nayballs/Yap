@@ -425,12 +425,10 @@ const EVENT_CONSENT: &str = "yap-consent-message-changed";
 #[tauri::command]
 pub fn notepad_consent_message(app: AppHandle, message: String) -> Result<(), String> {
     let message = message.trim().to_string();
-    let mut cfg = crate::config::load();
-    if cfg.meeting_consent_message == message {
+    if crate::config::load().meeting_consent_message == message {
         return Ok(());
     }
-    cfg.meeting_consent_message = message.clone();
-    crate::config::save(&cfg)?;
+    crate::config::update(|c| c.meeting_consent_message = message.clone())?;
     let _ = app.emit(EVENT_CONSENT, serde_json::json!({ "message": message }));
     Ok(())
 }

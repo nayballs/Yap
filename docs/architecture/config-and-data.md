@@ -131,7 +131,39 @@
   Those fixes are idempotent; changes that must run only ONCE go in
   `migrate_once`, keyed by `config_version` (`CONFIG_VERSION`; a missing field =
   0, a pre-versioning file). `load()` saves straight after one runs, and `save()`
-  stamps the current version, so a later user choice is never undone. v1
+  stamps the current version, so a later user choice is never undone.
+  **config.json is never lost** (2026-10-23; before, any file that didn't
+  parse — and any read error — became the defaults, and the next save wrote
+  them over the real file: API keys, dictionary, hotkeys gone). `load_at`:
+  no file → the defaults; a file another program holds open → tried for
+  ~200 ms, then the defaults *and* `save` refuses to write over it
+  (`UNREAD`) until a read works again; a file this build can't read (torn,
+  not JSON, a value of another type — a newer build's, after a downgrade) →
+  `repair_at`, under the save lock: the file is **set aside as it was**
+  (`config.corrupt-<unix secs>`, `-2`… if taken; copied when it can't be
+  moved; never saved over), the settings that still read on their own are
+  **kept** (`salvage`: only the unreadable ones reset) and written back,
+  and the person is told **once** (`report_reset` → `init`, 4 s after start
+  as the first load runs before logging and the windows: an `alert.rs`
+  "configReset" — "Your settings were reset" / "Some of your settings were
+  reset", where the old file is, **Show file** → Explorer; the log says the
+  copy's file name and counts, never the contents). A UTF-8 byte-order mark
+  (Notepad) is read past. **Saves, one at a time**: `save` (and `load`'s
+  migration and repair writes) hold one save lock (`SAVES`, re-entrant on
+  its thread); `update(|c| …)` loads, changes and saves under it in one
+  step (saving only if anything changed), so a change another thread saved
+  meanwhile isn't lost — the tray's model switch, the bar's "off",
+  `download_model_size`/`set_active_model`, `set_autostart`, learned words
+  and the notepad's consent message use it (call detection's two saves in
+  `meeting_detect.rs`, and the `save_config` callers in `ai_model.rs`,
+  `tts.rs`, `read_aloud.rs`, `local_llm.rs`, still load → change → save).
+  Every save then emits **`yap-config-saved`** to every window (`init`
+  registers the app; Settings' copy adopts what changed,
+  [frontend-settings.md](./frontend-settings.md); the theme follows). A unit
+  test never sets aside or writes the real config.json (`load` reads it at
+  most, `save` is a no-op); the mechanics are tested on scratch files
+  (`load_at` / `save_at` / `update_at`: torn, salvaged, held open, 8 threads
+  saving at once, 8 threads updating at once). v1
   (2026-10-05) turned live partials back on: `Default` said off until then, so
   every install since July had saved `false`. v3 (2026-10-22, the dark
   theme) turned a saved bar_theme "light" — the old default, saved by every
@@ -224,7 +256,12 @@
   Settings → Memory, exported there as a .zip of Markdown. Sent with questions
   to the AI model the person uses, never to Yap.
 - All of the above (plus config) write atomically and quarantine a corrupt file
-  on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`).
+  on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`;
+  config.json its own way, above). Each write has a temp file of its own
+  (`<name>.<pid>-<n>.tmp`, renamed over the file, tried again for ~100 ms
+  while another program holds it): until 2026-10-23 every write of a file
+  shared `<name>.tmp`, so two at once could rename a half-written file into
+  place. The app icons' cache writes the same way.
 - App icons: `%APPDATA%/yap/icons/` — `<app>.png` per installed call app and
   `sources.json` (what each was made from); a cache, rebuilt whenever it's
   missing, stale or unreadable (`app_icons.rs`).

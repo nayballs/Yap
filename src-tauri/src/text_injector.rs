@@ -1220,7 +1220,13 @@ pub fn prepare_dictation_as_said(
 /// this session's latest dictation as said, else history's newest one's
 /// transcript through the corrections and snippets.
 pub fn last_said_transcript() -> Option<String> {
-    let remembered = last_dictation().is_some().then(|| last_said().clone().or_else(|| last_dictation().clone())).flatten();
+    // One lock at a time, each let go at the end of its own statement: a
+    // guard kept for the whole expression while it locked the last
+    // dictation again deadlocked (a std Mutex never returns from that).
+    let dictated = last_dictation().clone();
+    let said = last_said().clone();
+    // The words as said when cleanup changed them, else the dictation.
+    let remembered = dictated.as_ref().and(said).or(dictated);
     remembered
         .or_else(|| {
             let raw = crate::history::latest_dictation_raw()?;
@@ -1696,6 +1702,35 @@ mod tests {
         assert!(syncs_clipboard(Some("VirtualBoxVM.exe")));
         assert!(!syncs_clipboard(Some("chrome.exe")));
         assert!(!syncs_clipboard(None));
+    }
+
+    /// "Paste last transcript (as said)" after a dictation AI cleanup didn't
+    /// change (cleanup off, the default): the dictation itself, at once. It
+    /// took the last dictation's lock again inside the statement that held
+    /// it, and a std Mutex never returns from that: the tray's worker hung,
+    /// then the tray's menu and the next dictation behind it — Yap froze.
+    /// (The one test that uses the last dictation itself.)
+    #[test]
+    fn paste_last_as_said_after_a_dictation_cleanup_left_alone_never_hangs() {
+        let ask = || {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(last_said_transcript());
+            });
+            rx.recv_timeout(std::time::Duration::from_secs(5))
+                .expect("last_said_transcript never returned: it deadlocked on the last dictation's lock")
+        };
+        prepare_dictation("Send the plan to Sam.", false, &[], AppKind::Other);
+        assert_eq!(ask().as_deref(), Some("Send the plan to Sam."));
+        assert_eq!(last_transcript().as_deref(), Some("Send the plan to Sam."));
+        // Cleanup changed it: the words as said; the plain paste, the cleaned text.
+        let (text, said) = prepare_dictation_as_said("Send the plan to Sam.", "um send the plan to sam", false, &[], AppKind::Other);
+        assert_eq!((text.as_str(), said.as_str()), ("Send the plan to Sam.", "um send the plan to sam"));
+        assert_eq!(ask().as_deref(), Some("um send the plan to sam"));
+        assert_eq!(last_transcript().as_deref(), Some("Send the plan to Sam."));
+        // And still there to read after the as-said one (the locks let go).
+        assert!(has_last_transcript());
+        forget_last_transcript();
     }
 
     #[test]
