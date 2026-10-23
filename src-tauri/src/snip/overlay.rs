@@ -582,6 +582,10 @@ mod win {
                 unsafe {
                     focused = SetForegroundWindow(target).as_bool();
                     let _ = SetFocus(Some(target));
+                    // The cross at once, before the mouse moves.
+                    if let Ok(cross) = LoadCursorW(None, IDC_CROSS) {
+                        windows::Win32::UI::WindowsAndMessaging::SetCursor(Some(cross));
+                    }
                 }
             }
             // The hint fades after a moment.
