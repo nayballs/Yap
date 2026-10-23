@@ -161,7 +161,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `notes.rs` — the notes store (`notes.json`), folders, the Actions engine, transcript fields.
 
 **Meetings** — [meetings.md](./docs/architecture/meetings.md) (guide: [`docs/meetings.md`](./docs/meetings.md))
-- `meeting.rs` — the recorder: mic + loopback, chunking, echo, dictations kept out, one clock.
+- `meeting.rs` — the recorder: mic + loopback, chunking, echo, dictations kept out, one clock; `replay` from disk.
+- `meeting_audio.rs` (+ `meeting_audio/`) — the meeting's audio kept on disk as it records (own FLAC encoder, 14 days): crash recovery, Transcribe again (`redo.rs`: notes, summary, names on matching lines kept), ▶ a line.
 - `meeting_summary.rs` — rolling digests, bounded inputs, action-plan checks, helper inputs.
 - `meeting_end.rs` — a recording's end: "Started by mistake?", AI title, the action-plan job.
 - `meeting_assist.rs` — the notepad's AI: What did I miss?, one-tap helpers, the AI title.
@@ -229,7 +230,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)).
 - `lib/markdown.js` — every rendered answer/note: markdown-it + DOMPurify, citation pills ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
 - `ChatView.svelte` + `ChatModelPicker.svelte` — Chat and its model picker ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)); `lib/streaming.js` — streamed answers in Chat and the notepad's Ask sheet (the channel, ■, half-written markdown closed off, the checked answer's smooth swap).
-- `MeetingsView` / `Notepad` / `SplitPreview` — meetings and the notepad ([meetings.md](./docs/architecture/meetings.md)); `BriefView.svelte` + `brief.js` — a meeting's pre-meeting brief everywhere it shows ([calendar.md](./docs/architecture/calendar.md#pre-meeting-briefs)); `SpeakerMenu` / `SpeakerCard` — a speaker's menu and the name cards ([speakers.md](./docs/architecture/speakers.md)).
+- `MeetingsView` / `Notepad` / `SplitPreview` — meetings and the notepad ([meetings.md](./docs/architecture/meetings.md)); `meetingAudio.svelte.js` — a meeting's kept audio in both: Transcribe again, ▶ a line, the crash banner; `BriefView.svelte` + `brief.js` — a meeting's pre-meeting brief everywhere it shows ([calendar.md](./docs/architecture/calendar.md#pre-meeting-briefs)); `SpeakerMenu` / `SpeakerCard` — a speaker's menu and the name cards ([speakers.md](./docs/architecture/speakers.md)).
 - `ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
 - `Overlay.svelte` + `bar/` — the Yap bar's page, the reading card `bar/ReadingCard.svelte` ([yap-bar.md](./docs/architecture/yap-bar.md)).
@@ -366,22 +367,23 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 `groq_usage.json`, `dictionary_usage.json`, `hints.json`, `word_suggestions.json`,
 `notices.json`, `memory.json` (what Yap remembers about you), `quieted_apps.json`
 (only mid-dictation), `stt_speed.json` (each model's device timings),
-`recent-audio/` (a day of dictation audio), `icons/`, `logs/`. Every JSON
+`recent-audio/` (a day of dictation audio), `meeting-audio/` (each meeting's audio as
+FLAC, 14 days), `icons/`, `logs/`. Every JSON
 store writes atomically and quarantines a corrupt file instead of crashing. Secrets
 never go in files: the account session and calendar tokens live in Windows Credential
 Manager. The local API's discovery file is `~/.yap/cli-bridge.json`.
 
 Notable defaults: F9 in toggle mode, **Parakeet TDT 0.6B v3** on the device measured fastest here, AI cleanup off,
 smart spacing / terminal mode / no full stop in chats on, the Yap bar on, call
-detection on (it only asks), a 2-hour meeting limit, Win+Alt+M, web search and spoken
-replies off. Every setting, file and default: [config-and-data.md](./docs/architecture/config-and-data.md).
+detection on (it only asks), a 2-hour meeting limit, Win+Alt+M, meeting audio kept 14 days,
+web search and spoken replies off. Every setting, file and default: [config-and-data.md](./docs/architecture/config-and-data.md).
 
 ---
 
 ## Current status
 
 - **Dictation is complete and real**: local transcription (Whisper/Vulkan + ONNX/DirectML, or the processor where that's faster on the PC), push-to-talk, AI cleanup (cloud or on-device Qwen) with "Use what I said", Commands, smart pasting into terminals and chat apps, dictionary learning, Undo, a day of audio to run a dictation again.
-- **Meetings**: recorder (You/Them), rolling digests + action plan, the notepad, call detection, guard rails, the calendar, beta speaker separation.
+- **Meetings**: recorder (You/Them), its audio kept on disk (crash recovery, Transcribe again, ▶ a line), rolling digests + action plan, the notepad, call detection, guard rails, the calendar, beta speaker separation.
 - **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation).
 - **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly.
 - Much is unit-, e2e- and robot-tested but not yet tried in real use (a real call, real AI apps, answers heard on speakers…).

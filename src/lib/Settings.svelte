@@ -432,6 +432,9 @@
     meetingOpenNotepad: true,
     meetingSplitScreen: false,
     meetingLiveTranscript: true,
+    // Meeting audio kept on disk (meeting_audio.rs): to transcribe again, play a line.
+    meetingKeepAudio: true,
+    meetingAudioDays: 14,
     meetingDiarization: false,
     diarizationModel: 'nemotron-3-diarization',
     meetingReminder: '15s',

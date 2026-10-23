@@ -39,6 +39,7 @@ mod media;
 mod media_pause;
 mod meeting;
 mod meeting_assist;
+mod meeting_audio;
 mod meeting_detect;
 mod meeting_end;
 mod meeting_guard;
@@ -589,6 +590,12 @@ pub fn run() {
             meeting_end::meeting_summary_status,
             meeting_end::meeting_discard,
             meeting_end::meeting_delete,
+            meeting_audio::meeting_audio_status,
+            meeting_audio::meeting_audio_clear,
+            meeting_audio::meeting_audio_note,
+            meeting_audio::meeting_audio_clip,
+            meeting_audio::meeting_transcribe_again,
+            meeting_audio::meeting_recover,
             meeting_assist::meeting_catch_up,
             meeting_assist::meeting_assist,
             speakers::speaker_rename,
@@ -668,6 +675,8 @@ pub fn run() {
             e2e::e2e_meeting_output_change,
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_quiet,
+            #[cfg(debug_assertions)]
+            meeting_audio::e2e_meeting_recovery_offer,
             #[cfg(debug_assertions)]
             e2e::e2e_main_on_screen,
             #[cfg(debug_assertions)]
@@ -817,6 +826,9 @@ pub fn run() {
             // Recent dictations' audio past its time goes (recent_audio.rs),
             // and one Yap stopped transcribing (a crash) is listed as failed.
             recent_audio::init(&handle);
+            // Meeting audio past its days goes, and what a crash left of a
+            // meeting is offered to transcribe (meeting_audio.rs).
+            meeting_audio::init(&handle);
 
             // Clear any orphaned cleanup sidecar from a previous session (a
             // crash or task-kill skips every exit path; installers launched by

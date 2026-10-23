@@ -187,8 +187,9 @@ pub fn wav_bytes(id: &str) -> Option<Vec<u8>> {
     std::fs::read(wav_path(id)).ok()
 }
 
-/// 16-bit PCM WAV of 16 kHz mono samples.
-fn wav(samples: &[f32]) -> Vec<u8> {
+/// 16-bit PCM WAV of 16 kHz mono samples (a meeting line's clip too:
+/// `meeting_audio::clip`).
+pub(crate) fn wav(samples: &[f32]) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
     let mut w = Vec::with_capacity(44 + samples.len() * 2);
     w.extend_from_slice(b"RIFF");

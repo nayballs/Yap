@@ -677,6 +677,16 @@ pub struct YapConfig {
     /// meeting chat, as the person edited it. Empty: Yap's default.
     #[serde(default)]
     pub meeting_consent_message: String,
+    /// "Keep meeting audio" (Settings → Meetings): each recording's audio
+    /// stays on this PC for `meeting_audio_days`, to transcribe a meeting
+    /// again and play its lines (`meeting_audio.rs`). Off, it's still
+    /// written while a meeting records (a crash loses nothing) and deleted
+    /// once the meeting is transcribed. On by default.
+    #[serde(default = "default_true")]
+    pub meeting_keep_audio: bool,
+    /// For how many days (14, like Wispr Flow's playback).
+    #[serde(default = "default_meeting_audio_days")]
+    pub meeting_audio_days: u32,
     /// "Tell speakers apart in meetings" (beta; Settings → Speech-to-Text,
     /// and Meetings): label the voices on the call side while a
     /// meeting records, on this PC (`diarize.rs`). Off by default, and it
@@ -901,6 +911,9 @@ fn default_motion() -> String {
 fn default_meeting_max_minutes() -> u32 {
     120
 }
+fn default_meeting_audio_days() -> u32 {
+    crate::meeting_audio::DEFAULT_DAYS
+}
 fn default_meeting_call_end() -> String {
     "ask".into()
 }
@@ -1033,6 +1046,8 @@ impl Default for YapConfig {
             meeting_split_screen: false,
             meeting_live_transcript: true,
             meeting_consent_message: String::new(),
+            meeting_keep_audio: true,
+            meeting_audio_days: default_meeting_audio_days(),
             meeting_diarization: false,
             diarization_model: default_diarization_model(),
             meeting_speaker_names: true,

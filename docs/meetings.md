@@ -177,6 +177,89 @@ notification ("Yap can't hear the call", or "…your mic" with **Update
 settings**). The recording carries on either way. An in-person meeting (no
 call) gets the "Them" warning once too; its wording says "If".
 
+## The meeting's audio, kept on disk
+
+Since 2026-10-23 (`meeting_audio.rs`) the recorder keeps the meeting's
+audio as well as its lines, on this PC only, so that a crash loses nothing,
+a meeting can be **transcribed again** later, and a line can be **played**.
+Wispr Flow keeps 14 days of meeting audio to play back; Meetily transcribes
+again; Yap does both.
+
+**What's written.** Each recording (a resumed meeting is a second one) is
+two files in `<data>/meeting-audio/<note id>/`: `<recording>-you.flac` (the
+mic) and `<recording>-them.flac` (the call), plus `<recording>.json` — when
+it started, how far each side is in the note, where hotkey dictations began,
+and whether it ended. They're written **as the meeting records**: the
+recorder's own push path copies every sample it keeps — a dictation already
+replaced by silence (its pre-roll too: the newest third of a second is held
+back until it can't be blanked any more), a call side that went quiet
+already filled — and a writer thread appends it every half second, a FLAC
+frame (a quarter second) at a time, onto the disk itself every 5 s. So the
+files are the recording's clock sample for sample, and a dictation is kept
+out of them as it is out of the transcript.
+
+**Why FLAC.** Two sources for up to a few hours: as 16 kHz 16-bit WAV that's
+115 MB an hour each. FLAC is lossless — a better model later hears exactly
+what the live one did — and Yap already decodes it (Symphonia, for Upload),
+so only an encoder was needed: a small one of Yap's own (`flac.rs`, FLAC's
+fixed predictors with Rice coding; no new crate, no C library), a few
+microseconds a frame. Measured on this PC (`cargo test --lib -- --ignored
+flac_sizes`, `YAP_FLAC_SAMPLE` = a speech WAV): digital silence 0.2 MB an
+hour, a room's hiss at −60 dBFS 47 MB, Windows' text-to-speech 60 MB (52 %
+of WAV), that speech over the hiss 70 MB (61 %). A call side is digital
+silence whenever nobody on the call talks, so a two-hour meeting comes to
+roughly 0.2 GB for both sides, against 0.46 GB as WAV. (A lossy codec —
+Opus, ~11 MB an hour — would need a C library and Symphonia can't decode it;
+IMA ADPCM, 29 MB an hour, loses what a better model might use.)
+
+**How long it's kept.** Settings → Meetings → **Meeting audio**: "Keep
+meeting audio" (on) for **14 days** (1, 7, 14, 30 or 90): long enough to
+transcribe a meeting again after a better model arrives, or to check what
+someone said last week; short enough that it never piles up (a week of
+meetings is ~0.5–1 GB). Never more than 10 GB in all (the oldest go first);
+a recording going on is never touched. Off, the audio is still written while
+a meeting records (the crash case) and deleted as soon as the meeting's
+lines are in. Deleting a note deletes its audio; **Delete all meeting
+audio** says what it costs ("3 meetings · 412 MB") and clears it, notes and
+transcripts staying. Nothing is uploaded, and the log has ids, counts and
+lengths only.
+
+**After a crash.** A crash, a power cut or Yap being killed mid-meeting
+leaves a recording that never ended. At the next start Yap finds it (not
+one another Yap is writing: the files are opened so nobody else may write
+them, which a second Yap on the same data can tell), counts what never
+became lines, and — at least a second of it — says so in one place
+(`notice.rs`: a toast while the main window is looked at, else the Yap bar,
+else a Windows notification): "Yap closed during a meeting · The last
+3 minutes of “Supplier call” weren't transcribed. The audio is kept:
+transcribe it into the note now?" with **Transcribe it**. The note says it
+too, in the Notes view and the notepad, until it's done. Transcribe it runs
+the recorder's own steps over the audio from where the note stops — the
+same cuts in pauses, engine, correction dictionary, echo check and
+dictation markers — puts the lines where they belong by time, and then does
+what a stop would have: the ⏸ mark, then "Started by mistake?" or the AI
+title and the action plan (`meeting_end.rs`).
+
+**Transcribe again.** On a past meeting with its audio kept — the Notes
+view's note menu (**Transcribe again…**) or the notepad's ⋯ — Yap asks first
+("Transcribe “Supplier call” again? Yap runs Parakeet V3 over the meeting's
+audio and replaces its transcript. Your notes stay as they are, and names
+stay on the lines that still match. The summary stays as it is until you
+generate it again."), then replays every recording of it on the speech model
+in use now, with "Transcribing again with Parakeet V3 · 40%" over the
+transcript. What it keeps: **My thoughts** (never touched); **who said
+what** where the lines still match by time — a new line takes the name of
+the old line of its side it overlaps by at least half, split where two old
+voices meet; the **summary** (said so: "The summary is still the earlier
+one: generate it again to match"); the ⏸ marks, moved to the same places;
+"You dictated here" markers; and lines it has no audio for (a recording from
+before audio was kept). The rolling digests are dropped, so the next
+summary is written from the new lines.
+
+**Play a line.** ▶ beside a transcript line (on hover, or Play this line in
+its right-click menu) plays both sides of its stretch, a quarter second
+either side, mixed — while the meeting still records, too.
+
 ## Who said what
 
 Every transcript line has a side (`source`: the mic "you", the call "them")
@@ -998,8 +1081,31 @@ KeyTips) and Win the Start menu.
   voice takes the guess, "Not Priya" sticks, several: the most talkative
   one, moved at the end; a user's name for "Them" on one voice only), and
   digests and stop marks moving with a split line (and a digest following
-  its last line).
+  its last line). The audio on disk (`cargo test --lib -- meeting_audio
+  meeting:: notes::`): the FLAC encoder against Symphonia (every kind of
+  block, a short last one, a file cut off mid-frame or mid-header, seeking
+  to the sample), the disk queue equal to the buffer sample for sample with
+  a dictation blanked and a stall filled, retention (age, a deleted note's,
+  the cap, never a live one), a crash's recording found, measured and
+  clipped, `redo::rebuild` (voices and locks kept on matching lines, a line
+  over two voices split, a line that barely touches keeping its side,
+  markers and lines without audio staying, each recording's stop mark),
+  lines recovered into a resumed meeting.
 - **e2e** (`npm run test:app`), with no audio device and no real AI:
+  - `e2e/meeting-audio-kept.spec.js`: a recording's two FLAC files and its
+    notes on disk (ended, ~24 s each), a line's clip as a WAV of the right
+    length, ▶ → Stop playing; the notepad's ⋯ → Transcribe again (the
+    confirm dialog's wording) with a changed dictionary replacing every line,
+    My thoughts and a name put on a line kept; deleting the meeting deleting
+    its audio; Settings → Meetings saying "1 meeting · 62 KB" and Delete
+    all… clearing it, the transcript staying, no ▶ left.
+  - `e2e/meeting-crash.spec.js`: a test instance killed outright mid-meeting
+    (`YapApp.kill()`) and started again on its data (`launchYap({ restart:
+    true })`): the note's banner, the offer as a toast (`e2e_meeting_recovery_offer`),
+    Transcribe it bringing the call's 48 s into the note in time order, the
+    stop mark and the action plan job (needsAi), then Transcribe again from
+    the Notes view's menu keeping the summary written while Yap was down and
+    a name put on a line.
   - `e2e/speaker-labels.spec.js`: placed lines (with word times) fed to the
     recorder and the engine's timelines scripted (`e2e_diarize_timeline`; a
     `done` one held until the stop): names filling in in the notepad and the
@@ -1115,6 +1221,14 @@ KeyTips) and Win the Start menu.
 
 ## Limits and follow-ups
 
+- **Meeting audio.** It's transcribed again on request, not by itself when
+  a meeting ends (Wispr's "refined transcript"); the speaker engine isn't run
+  again over it (the step toward speakers out of beta); it can't be
+  exported; a transcription after the fact doesn't diarize. A line recovered
+  into a meeting that was resumed and digested since isn't in the digest
+  that covers its place (the next "Generate summary" after Transcribe again
+  reads it). A write torn inside a frame's header on a power cut costs the
+  quarter second before it too.
 - **Who's who on the call.** Everyone remote is "Them" unless named (by the
   user, or as a guess from a 1:1 invite). Tasks are attributed from the
   attendee list, the speaker map and names said out loud ("Bob, can you…");

@@ -184,6 +184,14 @@ fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) {
     start_summary(app, note_id);
 }
 
+/// The part of a meeting a crash left is transcribed now
+/// (`meeting_audio.rs`): the end of the meeting, as a stop would have been —
+/// its stop mark, "Started by mistake?" or the AI title and the action plan.
+pub fn recovered(app: &AppHandle, note_id: u64) {
+    let app = app.clone();
+    std::thread::spawn(move || finished(&app, note_id, false, None));
+}
+
 /// "Started by mistake?" as a card on the Yap bar: Keep (or its ✕, or a
 /// minute left alone) leaves the note, Discard deletes it. With the bar off
 /// or hidden, nobody asks and the note stays, as Keep would leave it.

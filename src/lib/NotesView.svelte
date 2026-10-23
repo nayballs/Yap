@@ -37,6 +37,21 @@
   import { speech, initSpeech, readAloud, stopReading } from './speech.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
   import { copyText, messageItems } from './itemMenus.js';
+  import {
+    meetingAudio,
+    initMeetingAudio,
+    onJobDone,
+    refreshAudio,
+    runningJob,
+    jobLine,
+    lastPart,
+    cantTranscribeAgain,
+    askTranscribeAgain,
+    recoverMeeting,
+    canPlay,
+    playLine,
+    stopLine,
+  } from './meetingAudio.svelte.js';
 
   /** This window's label: the `origin` of its saves and stops. */
   const LABEL = 'settings';
@@ -151,6 +166,13 @@
           icon: 'copy',
           onselect: () => copyText(line.text),
         },
+        canPlay(selected?.id, selected?.transcript?.[line.i])
+          ? {
+              label: meetingAudio.playing === `${selected.id}:${line.i}` ? 'Stop playing' : 'Play this line',
+              icon: meetingAudio.playing === `${selected.id}:${line.i}` ? 'stop' : 'play',
+              onselect: () => playLine(selected.id, line.i, selected.transcript[line.i]),
+            }
+          : null,
         !run.echo
           ? {
               label: 'Who said this?',
@@ -660,6 +682,18 @@
           : { label: 'Read aloud', icon: 'play', onselect: () => readNote(n.id) },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyNoteMarkdown(n.id) },
         { label: 'Export…', icon: 'download', onselect: () => exportNote(n.id) },
+        // A meeting kept on disk (meeting_audio.rs): on the speech model in use now.
+        ...(n.noteType === 'meeting'
+          ? [
+              {
+                label: 'Transcribe again…',
+                icon: 'sync',
+                disabled: !!cantTranscribeAgain(n, recording),
+                onselect: () => transcribeAgain(n),
+              },
+              ...(cantTranscribeAgain(n, recording) ? [{ note: cantTranscribeAgain(n, recording) }] : []),
+            ]
+          : []),
         { separator: true },
         {
           label: 'Delete…',
@@ -682,6 +716,24 @@
       itemEls[n.id]
     );
   }
+  // The open note's audio kept on disk (meeting_audio.rs): ▶ on its lines,
+  // what a crash left of it; kept current from `yap-meeting-audio`.
+  let audioFor = null;
+  $effect(() => {
+    const id = selected?.id ?? null;
+    if (id === audioFor) return;
+    audioFor = id;
+    stopLine();
+    if (id != null) refreshAudio(id);
+  });
+
+  // "Transcribe again…" (the note's menu): asked first (meetingAudio.svelte.js).
+  async function transcribeAgain(n) {
+    if (selected?.id === n.id) flushSave();
+    await refreshAudio(n.id);
+    askTranscribeAgain(n, { title: displayTitle(n), returnFocus: itemEls[n.id] });
+  }
+
   let titleEl = $state(null);
   async function renameNote(id) {
     if (selected?.id !== id) await select(id);
@@ -1077,6 +1129,9 @@
     refreshList();
     refreshActions();
     const unlisteners = [];
+    // A meeting transcribed again (or what a crash left): its new lines.
+    initMeetingAudio();
+    unlisteners.push(onJobDone((job) => job.noteId === selected?.id && reloadSelected()));
     invoke('meeting_state')
       .then((s) => {
         meeting = s || { recording: false };
@@ -1109,8 +1164,9 @@
     return () => {
       flushSave();
       stopElapsed();
-      // Leaving Notes: an answer being read stops.
+      // Leaving Notes: an answer being read stops, and a line playing.
       stopReading('notes:');
+      stopLine();
       unlisteners.forEach((u) => u && u());
     };
   });
@@ -1587,6 +1643,19 @@
               </button>
             {/if}
           </div>
+          {#if runningJob(selected.id)}
+            <!-- Its audio being transcribed (meeting_audio.rs). -->
+            <p class="tredo" role="status"><span class="spin" aria-hidden="true"></span>{jobLine(runningJob(selected.id))}</p>
+          {:else if meetingAudio.byNote[selected.id]?.recoverableSecs && !recordingThisNote}
+            <!-- What a crash left of it: the audio is kept. -->
+            <div class="trecover" role="status">
+              <span>
+                Yap closed while this meeting was recording. The last
+                {lastPart(meetingAudio.byNote[selected.id].recoverableSecs)} transcribed; the audio is kept.
+              </span>
+              <button class="planbtn" onclick={() => recoverMeeting(selected.id)}>Transcribe it</button>
+            </div>
+          {/if}
           {#if selected.transcript?.length}
             <!-- "Speaker 2 is Priya?" (speakers/naming.rs) -->
             <SpeakerCard note={selected} origin={LABEL} onchanged={onSpeakerChanged} />
@@ -1671,6 +1740,22 @@
                         {/if}
                       {/if}
                       <p>{line.text}</p>
+                      {#if canPlay(selected.id, selected.transcript[line.i])}
+                        <!-- ▶ this line's stretch of the meeting, both sides (meeting_audio.rs). -->
+                        <button
+                          class="lineplay"
+                          class:on={meetingAudio.playing === `${selected.id}:${line.i}`}
+                          aria-label={meetingAudio.playing === `${selected.id}:${line.i}` ? 'Stop playing' : 'Play this line'}
+                          title={meetingAudio.playing === `${selected.id}:${line.i}` ? 'Stop' : 'Play this line'}
+                          onclick={() => playLine(selected.id, line.i, selected.transcript[line.i])}
+                        >
+                          {#if meetingAudio.playing === `${selected.id}:${line.i}`}
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" /></svg>
+                          {:else}
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor" /></svg>
+                          {/if}
+                        </button>
+                      {/if}
                       {#if speakerMenu?.key === `l${line.i}`}
                         <!-- "Who said this?" from the line's menu: the speaker menu at the line. -->
                         <SpeakerMenu
@@ -2506,6 +2591,77 @@
   .bubble.echo {
     opacity: 0.55;
     border: 1px dashed var(--yap-border);
+  }
+  /* ▶ a line (meeting_audio.rs): beside it, on hover or focus. */
+  .lineplay {
+    position: absolute;
+    top: 3px;
+    right: -25px;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: 50%;
+    background: var(--yap-s3);
+    color: var(--yap-fg-62);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+  .bubble.you .lineplay {
+    right: auto;
+    left: -25px;
+  }
+  .lineplay svg {
+    width: 10px;
+    height: 10px;
+  }
+  .bubble:hover .lineplay,
+  .bubble:focus-within .lineplay,
+  .lineplay.on {
+    opacity: 1;
+  }
+  .lineplay:hover,
+  .lineplay.on {
+    color: var(--yap-primary);
+  }
+  /* A meeting's audio being transcribed, or what a crash left of it. */
+  .tredo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 11.5px;
+    color: var(--yap-muted);
+  }
+  .tredo .spin {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1.5px solid var(--yap-border);
+    border-top-color: var(--yap-primary);
+    animation: tredo-spin 0.9s linear infinite;
+  }
+  @keyframes tredo-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .trecover {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--yap-s2);
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--yap-fg-62);
+  }
+  .trecover span {
+    flex: 1;
   }
   /* "You dictated here": a dictation made mid-meeting, left out of "You". */
   .dictated {

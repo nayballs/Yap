@@ -47,7 +47,11 @@
   `notice.rs`), the meeting
   notepad: meeting_open_notepad (default on) + meeting_split_screen (default
   off) + meeting_live_transcript (default on) + meeting_consent_message (the
-  notepad's "Copy consent message" text; empty = the default), speaker
+  notepad's "Copy consent message" text; empty = the default), meeting
+  audio (`meeting_audio.rs`, Settings → Meetings): meeting_keep_audio ("Keep
+  meeting audio", on: to transcribe a meeting again and play its lines; off,
+  it's still written while a meeting records and deleted once it's
+  transcribed) + meeting_audio_days (14; 1 / 7 / 14 / 30 / 90), speaker
   diarization: meeting_diarization ("Tell speakers apart in meetings", beta,
   off) + diarization_model (a `diarize/registry.rs` id, default
   `nemotron-3-diarization`), speaker names: meeting_speaker_names ("Suggest
@@ -170,6 +174,16 @@
   `<id>.pending` while one is being transcribed (`recent_audio.rs`). Never
   leaves the PC; deleted on schedule, with its history entry, by clearing
   history and by Settings → Privacy & data → Clear recent audio.
+- Meeting audio: `%APPDATA%/yap/meeting-audio/<note id>/` — for each
+  recording of the meeting, `<recording>-you.flac` and `-them.flac` (16 kHz
+  mono FLAC, written as it records: ~50–70 MB an hour for the mic, far less
+  for a call side that's often silent) and `<recording>.json` (when it
+  started, how far each side is in the note, where dictations began,
+  whether it ended — not after a crash, which the next start offers to
+  transcribe) (`meeting_audio.rs`). Never leaves the PC; kept
+  `meeting_audio_days` (14) from the recording's start, ≤ 10 GB in all (the
+  oldest first), deleted with its note, by Settings → Meetings → Delete all
+  meeting audio, or once transcribed with "Keep meeting audio" off.
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History).
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
   participants, meeting transcripts).
@@ -268,7 +282,9 @@
   screen (`meeting_split_screen` off: it moves another app's window); with a
   calendar connected, the reminder card **right before** a meeting (15 s,
   `meeting_reminder`) and a **brief** of what to know going in
-  (`meeting_brief`, on); spoken replies **off** (`speak_replies`; once on, only
+  (`meeting_brief`, on), meeting audio **kept 14 days** on this PC to
+  transcribe a meeting again and play its lines (`meeting_keep_audio`,
+  `meeting_audio_days`); spoken replies **off** (`speak_replies`; once on, only
   for questions asked by voice, `speak_when`, and a dictated question is sent
   by itself, `talk_back_hands_free`) in **Kokoro's af_bella** at 1× once
   Kokoro is downloaded (`tts_engine` "kokoro"), Windows' default voice

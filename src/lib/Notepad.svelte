@@ -80,6 +80,20 @@
     withLineSplice,
     hasLine,
   } from './notepadText.js';
+  import {
+    meetingAudio,
+    initMeetingAudio,
+    refreshAudio,
+    runningJob,
+    jobLine,
+    lastPart,
+    cantTranscribeAgain,
+    askTranscribeAgain,
+    recoverMeeting,
+    canPlay,
+    playLine,
+    stopLine,
+  } from './meetingAudio.svelte.js';
 
   /** This window's label: the `origin` of its saves and stops. */
   const LABEL = 'notepad';
@@ -102,6 +116,18 @@
   const progress = $derived(note ? summaries.progress[note.id] : null);
   const writing = $derived(job?.state === 'running');
   const hasSummary = $derived(!!note?.enhancedContent?.trim());
+  // The meeting's audio kept on disk (meeting_audio.rs): ⋯ → Transcribe
+  // again, ▶ on its lines, what a crash left of it.
+  const audio = $derived(note ? meetingAudio.byNote[note.id] : null);
+  const redo = $derived(note ? runningJob(note.id) : null);
+  let audioFor = null;
+  $effect(() => {
+    const id = note?.id ?? null;
+    if (id === audioFor) return;
+    audioFor = id;
+    stopLine();
+    if (id != null) refreshAudio(id);
+  });
 
   // ---- loading and saving ----
 
@@ -512,6 +538,13 @@
       e,
       [
         { label: 'Copy line', icon: 'copy', onselect: () => copyLine(line) },
+        canPlay(note?.id, note?.transcript?.[line.i])
+          ? {
+              label: meetingAudio.playing === `${note.id}:${line.i}` ? 'Stop playing' : 'Play this line',
+              icon: meetingAudio.playing === `${note.id}:${line.i}` ? 'stop' : 'play',
+              onselect: () => playLine(note.id, line.i, note.transcript[line.i]),
+            }
+          : null,
         !item.echo
           ? {
               label: 'Who said this?',
@@ -886,6 +919,14 @@
     menu = null;
     confirmOpen = true;
   }
+  // ⋯ → Transcribe again (asked first in the window's confirm dialog).
+  async function transcribeAgain() {
+    menu = null;
+    if (!note) return;
+    flushSave();
+    await refreshAudio(note.id);
+    askTranscribeAgain(note, { title: note.title?.trim() || '' });
+  }
   async function deleteNote() {
     if (!note || deleting) return;
     deleting = true;
@@ -1008,6 +1049,7 @@
 
   onMount(() => {
     initMeetingSummary();
+    initMeetingAudio();
     // "Ending notes in 30 s…" and "Still in your meeting?" (meeting_guard.rs),
     // here while the notepad is on screen.
     initMeetingCheckIns(LABEL);
@@ -1098,6 +1140,7 @@
     {:else if name === 'text'}<path d="M5 6.5h14M5 12h14M5 17.5h9" />
     {:else if name === 'audio'}<rect x="9" y="3" width="6" height="10" rx="3" /><path d="M5.5 10.5a6.5 6.5 0 0 0 13 0" /><path d="M12 17v3.5" /><path d="M8.5 20.5h7" />
     {:else if name === 'save'}<path d="M12 4v11" /><path d="M7.5 10.5L12 15l4.5-4.5" /><path d="M5 19.5h14" />
+    {:else if name === 'redo'}<path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 5v6h-6" />
     {:else if name === 'mail'}<rect x="3.5" y="5.5" width="17" height="13" rx="2" /><path d="M4 7l8 6 8-6" />
     {:else if name === 'trash'}<path d="M4.5 7h15" /><path d="M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2" /><path d="M6.5 7l.8 12a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4l.8-12" />
     {:else if name === 'newchat'}<path d="M12 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V12" /><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L13 14l-4 1 1-4z" />
@@ -1168,6 +1211,17 @@
               <button role="menuitem" class="item" onclick={saveNote}>
                 {@render icon('save')}<span>Save as .md</span>
               </button>
+              {#if !recordingThis && (note.noteType === 'meeting' || lineCount)}
+                <button
+                  role="menuitem"
+                  class="item"
+                  onclick={transcribeAgain}
+                  disabled={!!cantTranscribeAgain(note, recordingThis)}
+                  title={cantTranscribeAgain(note, recordingThis) || 'With the speech model you use now'}
+                >
+                  {@render icon('redo')}<span>Transcribe again</span>
+                </button>
+              {/if}
               <button role="menuitem" class="item danger" onclick={askDelete}>
                 {@render icon('trash')}<span>Delete</span>
               </button>
@@ -1329,6 +1383,19 @@
             {/if}
           </div>
           {/if}
+          {#if redo}
+            <!-- Its audio being transcribed (meeting_audio.rs). -->
+            <p class="redoline" role="status"><span class="spin" aria-hidden="true"></span>{jobLine(redo)}</p>
+          {:else if audio?.recoverableSecs && !recordingThis}
+            <!-- What a crash left of it: the audio is kept. -->
+            <div class="recoverbar" role="status">
+              <p>
+                Yap closed while this meeting was recording. The last {lastPart(audio.recoverableSecs)}
+                transcribed; the audio is kept.
+              </p>
+              <button class="recoverbtn" onclick={() => recoverMeeting(note.id)}>Transcribe it</button>
+            </div>
+          {/if}
           {#if note && !searchQuery}
             <!-- "Speaker 2 is Priya?" (speakers/naming.rs) -->
             <div class="namecardwrap">
@@ -1400,6 +1467,7 @@
                         <!-- svelte-ignore a11y_no_static_element_interactions -->
                         <div
                           class="row"
+                          class:playable={canPlay(note.id, note.transcript?.[line.i])}
                           class:menuopen={speakerMenu?.key === `l${line.i}` || menuOpenFor(lineEls[line.i])}
                           oncontextmenu={(e) => lineMenu(e, item, line)}
                           onkeydown={(e) => menuKey(e, (k) => lineMenu(k, item, line))}
@@ -1414,6 +1482,17 @@
                               onclick={() => toggleSpeakerMenu(`l${line.i}`, item.speaker, [line.i], 'lines')}
                             >
                               {@render icon('person')}
+                            </button>
+                          {/if}
+                          {#if canPlay(note.id, note.transcript?.[line.i])}
+                            <!-- ▶ this line's stretch of the meeting, both sides (meeting_audio.rs). -->
+                            <button
+                              class="lineplay"
+                              class:on={meetingAudio.playing === `${note.id}:${line.i}`}
+                              aria-label={meetingAudio.playing === `${note.id}:${line.i}` ? 'Stop playing' : 'Play this line'}
+                              onclick={() => playLine(note.id, line.i, note.transcript[line.i])}
+                            >
+                              {@render icon(meetingAudio.playing === `${note.id}:${line.i}` ? 'stop' : 'play')}
                             </button>
                           {/if}
                           <button class="linecopy" aria-label="Copy line" bind:this={lineEls[line.i]} onclick={() => copyLine(line)}>
@@ -2004,8 +2083,11 @@
     height: 14px;
     color: var(--yap-paper-text-2);
   }
-  .item:hover {
+  .item:hover:not(:disabled) {
     background: var(--yap-paper-s2);
+  }
+  .item:disabled {
+    opacity: 0.45;
   }
   .item.danger,
   .item.danger :global(svg) {
@@ -2531,6 +2613,93 @@
   .row:hover .linecopy,
   .linecopy:focus-visible {
     opacity: 1;
+  }
+  /* ▶ a line (meeting_audio.rs), left of the person and copy buttons. */
+  .row.playable {
+    padding-right: 76px;
+  }
+  .lineplay {
+    position: absolute;
+    top: 50%;
+    right: 52px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--yap-paper-text-2);
+    opacity: 0;
+    transform: translateY(-50%);
+    transition: opacity 0.12s;
+  }
+  .lineplay :global(svg) {
+    width: 12px;
+    height: 12px;
+  }
+  .row:hover .lineplay,
+  .lineplay:focus-visible,
+  .lineplay.on {
+    opacity: 1;
+  }
+  .lineplay:hover,
+  .lineplay.on {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
+  }
+  /* A meeting's audio being transcribed, or what a crash left of it. */
+  .redoline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 40px 0 32px;
+    font-size: 13px;
+    color: var(--yap-paper-text-2);
+  }
+  .redoline .spin {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 1.5px solid var(--yap-paper-s2);
+    border-top-color: var(--yap-live);
+    animation: redo-spin 0.9s linear infinite;
+  }
+  @keyframes redo-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .recoverbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 12px 40px 0 32px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--yap-paper-s1);
+  }
+  .recoverbar p {
+    flex: 1;
+    margin: 0;
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--yap-paper-text-2);
+  }
+  .recoverbtn {
+    flex: 0 0 auto;
+    height: 30px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 999px;
+    background: var(--yap-paper-ink);
+    color: var(--yap-paper);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
   }
   .linecopy:hover {
     background: var(--yap-paper-s2);

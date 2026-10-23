@@ -1,6 +1,6 @@
 # Meetings
 
-The meeting recorder, rolling digests and the action plan, the end of a recording, the notepad's AI helpers, and the meeting notepad window, plus the Meetings view. The full behaviour guide is [`docs/meetings.md`](../meetings.md); telling voices apart is [speakers.md](./speakers.md); call detection and guard rails are [call-detection-and-guards.md](./call-detection-and-guards.md); the calendar is [calendar.md](./calendar.md).
+The meeting recorder and its audio kept on disk, rolling digests and the action plan, the end of a recording, the notepad's AI helpers, and the meeting notepad window, plus the Meetings view. The full behaviour guide is [`docs/meetings.md`](../meetings.md); telling voices apart is [speakers.md](./speakers.md); call detection and guard rails are [call-detection-and-guards.md](./call-detection-and-guards.md); the calendar is [calendar.md](./calendar.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -85,6 +85,88 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   theirs at once (`after_ingest`), and the worker, after `finish` (or, in a
   test run with no engine, `diarize::finish_scripted`), calls `labels::end`
   (an engine that never sent final labels: labelled as far as it went).
+  **The audio on disk** (`meeting_audio.rs`, below): `start` makes a
+  `meeting_audio::Recorder` before the capture, which turns on each side's
+  `disk` queue (`keep_on_disk`): the push path copies every sample it
+  appends — a dictation already blanked (and its pre-roll blanked in the
+  queue too, `disk_spans` noting where), `fill_if_stalled`'s silence — so
+  the files are the session clock sample for sample; `take_for_disk` holds
+  the mic's newest `DICTATION_LOOKBACK` back until the end. The worker
+  reports how far each side is in the note after every batch
+  (`Recorder::progress`, the chunk's `to`) and `finish`es it after the
+  final labels, before the last `yap-meeting-state`. **`replay`** — the
+  worker's own steps over audio read back from disk (`Feed`): the same cuts
+  at quiet moments (topped up to 16 s, final drain at the end), the same
+  engine, correction dictionary (the note's attendees in the prompt:
+  `transcribe_chunk` takes the note) and echo check (`Source::replayed_from`
+  numbers its loudness frames as live), markers for dictations from where
+  they began; it waits for a hotkey dictation (and 3 s after one) between
+  chunks so the dictation's own transcription gets the warm engine.
+- **`meeting_audio.rs`** (+ `meeting_audio/flac.rs`, `meeting_audio/redo.rs`)
+  — **meeting audio kept on disk** (2026-10-23; Wispr Flow keeps 14 days to
+  play, Meetily transcribes again): `<data>/meeting-audio/<note
+  id>/<recording>-you.flac` / `-them.flac` + `<recording>.json` (`Meta`: its
+  clock's start, `endedMs` — `None` while it records and after a crash —,
+  `keep`, `you/themDone` how far the note has it, `you/themLen`, `dictated`
+  where dictations began). **Format**: FLAC, 16 kHz mono 16-bit, written by
+  `flac.rs`'s own encoder (fixed 4,096-sample blocks, FLAC's fixed predictors
+  0–4 + partitioned Rice coding, no LPC, ~300 lines, no new crate; Symphonia,
+  already in Yap for Upload, decodes and seeks it — a binary search for frame
+  headers, no seek table). Lossless, so a later model hears what the live
+  one did; measured (`cargo test -- --ignored flac_sizes`): digital silence
+  0.2 MB/h, a −60 dBFS room 47 MB/h, Windows TTS speech 60 MB/h (52 % of
+  WAV's 115), speech over that room 70 MB/h (61 %) — a two-hour meeting
+  ~0.2–0.25 GB for both sides instead of 0.46. Each frame (256 ms) is
+  appended as it fills: a crash leaves a file that decodes to its last
+  whole frame (a write torn inside the next frame's header costs the frame
+  before it too); the header says "length unknown" until `finish` writes
+  it, and a crash's is filled in when it's found. **`Recorder`** (made by
+  `meeting::start`): both files opened write-only-to-us (`FILE_SHARE_READ`:
+  other programs read, never write or delete — which is also how a second
+  Yap on the same data tells a live recording from a crash's, `in_use`), a
+  writer thread emptying the queues every 500 ms and syncing every 5 s,
+  `finish` closing them (lengths into the header and the meta), marking it
+  ended and deleting it at once when "Keep meeting audio" was off;
+  `discard` when the capture never started; dropped unfinished = left for a
+  recovery. **Retention** (`prune`, at start and hourly; `to_drop` pure):
+  older than `meeting_audio_days` (14) by its start, a deleted note's
+  (`notes::delete` → `forget`; none while the notes store is empty), then
+  the oldest past `MAX_BYTES` (10 GB) — never a recording being written;
+  half-written `.tmp` leftovers. **After a crash** (`init` → `crashed`):
+  recordings not ended, not in use, their note there, ≥ 1 s never in the
+  note (lengths counted from `done` to the end) are `pending`; one with
+  nothing left is closed quietly. `offer` puts "Yap closed during a meeting"
+  in one place (`alert::show`, kind `meetingRecovery`, held while dictating
+  or recording: the window's toast, the bar, a notification) with
+  **Transcribe it** (`RECOVER_ACTION` → `recover_all`); the note says it
+  too (`meeting_audio_note`'s `recoverableSecs`). **Jobs** (`start_job`, one
+  per note, refused while a meeting records — `replay` also waits for one that starts, and for a dictation —; `yap-meeting-redo {noteId, kind:
+  recover|again, state, percent, model, error, summary}`): **recover** =
+  `meeting::replay` from `done` to the end, `notes::insert_transcript` (by
+  time: the end normally, before a later recording's lines with a stop mark
+  after them), the recording ended, then `meeting_end::recovered` (the stop
+  mark, "Started by mistake?" or the AI title and the action plan, as a
+  stop); **again** = every recording replayed from 0 on the speech model in
+  use now, then `redo::rebuild` under `notes::modify`: each recording's
+  lines (dated within it) replaced, lines with no audio and every
+  dictation marker kept, a new line taking the voice and lock of the old
+  line of its side it overlaps by at least half the shorter (split by
+  `speakers::split_line` where two old voices meet), the stop marks moved
+  to the same places, the digests dropped (written again from the new
+  lines by the next summary), My thoughts, the speaker map and the summary
+  untouched (the windows say the summary is the earlier one). **Play a
+  line** (`clip`): both sides of `[start − 250 ms, end + 250 ms]` on its
+  recording's clock (the recording the line's `ts` falls in), mixed, as a
+  WAV (`recent_audio::wav`), ≤ 60 s. Commands `meeting_audio_status` /
+  `meeting_audio_clear` (Settings), `meeting_audio_note`,
+  `meeting_audio_clip`, `meeting_transcribe_again`, `meeting_recover`;
+  debug-only `e2e_meeting_recovery_offer`; events `yap-meeting-audio
+  {noteId}` and `yap-meeting-redo`. Logs: ids, counts, lengths only.
+  Unit-tested (the encoder against Symphonia: every block kind, cut-off
+  files, seeking; retention, metas, a crash's recording found and clipped;
+  `rebuild`; the disk queue against the buffer with a dictation; inserting
+  recovered lines); e2e `meeting-audio-kept.spec.js` and
+  `meeting-crash.spec.js` (a killed test instance, restarted).
 - **`meeting_summary.rs`** — meeting summaries that keep up with long meetings
   (map-reduce, the map done while recording). A bigger on-device context
   lets the final call read more (`FinalBudget::for_endpoint`: the single
@@ -313,6 +395,26 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   `meetingCheckIn.js`). It has
   the **in-page hotkey fallback** (dictation, and the meeting shortcut when
   one is set), config re-read on focus.
+- **`lib/meetingAudio.svelte.js`** — a meeting note's audio on disk, for the
+  Notes view and the notepad alike: `meeting_audio_note` per open note
+  (refreshed on `yap-meeting-audio`), the jobs from `yap-meeting-redo`
+  (`jobLine`: "Transcribing again with Parakeet V3 · 40%", "Transcribing the
+  rest of the meeting"; `onJobDone` → the view reloads the note; one toast,
+  in the window that started it: an error, or "Transcribed again", adding
+  that the summary is the earlier one when there is one),
+  `askTranscribeAgain` (the window's ConfirmDialog: "Transcribe “Supplier
+  call” again?" · the model · notes and matching names kept · "The summary
+  stays as it is until you generate it again."), `recoverMeeting`, and a
+  line's ▶ (`playLine`: `meeting_audio_clip` as a blob in an `Audio`, one at
+  a time; `canPlay`: placed, not a marker, audio kept). The **notepad**: ⋯ →
+  **Transcribe again** (not while it records; greyed with the reason), ▶
+  left of a line's person and copy buttons (and Play this line in its
+  menu), and over the transcript the job's line or the crash banner ("Yap
+  closed while this meeting was recording. The last 5 seconds weren't
+  transcribed; the audio is kept." · **Transcribe it**). The **Notes view**:
+  the note's menu **Transcribe again…** on meeting notes (off with the
+  reason), ▶ beside a bubble on hover and in its menu, the same banner and
+  line in the transcript box.
 - **`lib/SplitPreview.svelte`** — the split preview window's page (label
   `split-preview`, App.svelte routes it, transparent body): one glass
   rectangle inset 24 px (`rgba(255,255,255,.10)`, a 2 px
