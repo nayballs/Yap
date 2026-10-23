@@ -1023,11 +1023,15 @@ const RATE_LIMIT_PATIENCE: Duration = Duration::from_secs(30);
 /// 10.98s" / "1m2.5s" / "450ms" wording in the body (Groq, OpenAI). `None` =
 /// it didn't say.
 fn rate_limit_wait(retry_after_ms: Option<&str>, retry_after: Option<&str>, body: &str) -> Option<Duration> {
+    // A day at most: "inf", "1e400" or a run of digits would otherwise
+    // panic in `from_secs_f64` (or in the caller's `+ 250 ms`); NaN is 0.
+    const DAY: Duration = Duration::from_secs(86_400);
+    let secs = |s: f64| Duration::try_from_secs_f64(s.max(0.0)).map_or(DAY, |d| d.min(DAY));
     if let Some(ms) = retry_after_ms.and_then(|v| v.trim().parse::<f64>().ok()) {
-        return Some(Duration::from_secs_f64(ms.max(0.0) / 1000.0));
+        return Some(secs(ms / 1000.0));
     }
     if let Some(s) = retry_after.and_then(|v| v.trim().parse::<f64>().ok()) {
-        return Some(Duration::from_secs_f64(s.max(0.0)));
+        return Some(secs(s));
     }
     let lower = body.to_ascii_lowercase();
     let at = lower.find("try again in")? + "try again in".len();
@@ -1054,7 +1058,7 @@ fn rate_limit_wait(retry_after_ms: Option<&str>, retry_after: Option<&str>, body
         any = true;
         rest = &rest[unit_len..];
     }
-    any.then(|| Duration::from_secs_f64(total))
+    any.then(|| secs(total))
 }
 
 /// The error for a rate limit we didn't (or couldn't) wait out: said plainly,
@@ -1475,6 +1479,12 @@ mod tests {
         assert_eq!(rate_limit_wait(None, None, "Too many requests"), None);
         assert_eq!(rate_limit_wait(None, None, "try again in a moment"), None);
         assert_eq!(rate_limit_wait(None, Some("Wed, 21 Oct 2026 07:28:00 GMT"), "busy"), None);
+        // Nonsense from a proxy: a day at most, never a panic.
+        let day = Some(86_400_000);
+        assert_eq!(ms(rate_limit_wait(None, Some("inf"), "")), day);
+        assert_eq!(ms(rate_limit_wait(Some("1e400"), None, "")), day);
+        assert_eq!(ms(rate_limit_wait(None, None, &format!("try again in {}s", "9".repeat(400)))), day);
+        assert_eq!(ms(rate_limit_wait(None, Some("NaN"), "")), Some(0));
     }
 
     #[test]
