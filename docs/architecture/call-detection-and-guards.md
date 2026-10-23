@@ -191,7 +191,9 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   countdownMs, recentMs, afterEndMs, hourMs, fadeMs, marginMs}` (which also
   turns on the test player's live mic, `e2e::set_live_mic`) shorten the
   timings for the e2e suite.
-- **`capture.rs`** — hides Yap's meeting windows from screen capture and
+- **`capture.rs`** — (also `for_snip`: every Yap window on screen out of a
+  Snip to Chat capture for its moment, then back as the meeting setting
+  wants; [snip.md](./snip.md)) — hides Yap's meeting windows from screen capture and
   sharing: while a meeting records and `config.meeting_hide_from_capture` is
   on (default **on**, Wispr's "Don't show Notepad and Flow Bar in screen
   capture"), the windows labelled **`overlay`**, **`notepad`** and

@@ -14,6 +14,7 @@ its one line in CLAUDE.md's module index).
 - [dictionary.md](./dictionary.md) — near-miss (fuzzy) correction, the vocabulary's order, learning words from corrections, the Dictionary view.
 - [ai-models.md](./ai-models.md) — what every model is told about the person (About you), the LLM client and its prompts, the on-device model (llamafile, GGUF headers, the graphics card, context length), which model a call goes to, the providers' live model lists, Groq usage, the model evaluations.
 - [chat-and-assistant.md](./chat-and-assistant.md) — chats, the tool loop and its note tools, the Voice Assistant, the Chat view and its model picker.
+- [snip.md](./snip.md) — Snip to Chat: capturing every monitor (HDR right), the native overlay, chat screenshots on disk and how long they're kept, which models read images and the switch, a question's images on their way.
 - [memory.md](./memory.md) — what Yap remembers about you: the store, learning from chats and meetings, what a question gets, the memory tools, names for dictation, Settings → Memory.
 - [web-and-apps.md](./web-and-apps.md) — web search (Yap's own and the cloud models' own), reading pages, opening apps.
 - [spoken-replies.md](./spoken-replies.md) — reading answers aloud: Kokoro, Windows' voices, text prepared for speech, the speaker; Read aloud, anywhere (`read_aloud.rs`) and its word timing.

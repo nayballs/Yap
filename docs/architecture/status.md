@@ -383,6 +383,26 @@ pad. Not yet used day to day: whether what a real week of chats teaches it
 is worth keeping, and the 5-minute scheduler and the quit/restart path,
 only unit-level.
 
+**Snip to Chat** (2026-10-23, [snip.md](./snip.md)): Win+Alt+S, ✂ on the bar,
+the tray, Chat's + or saying "snip"; every monitor captured at once on
+Windows.Graphics.Capture (FP16 ÷ the SDR white level on an HDR monitor), a
+native overlay per monitor, the box saved as a PNG and put in Chat's box (the
+conversation Chat shows, else a new one; never sent by itself), the three
+one-tap prompts, Enter on an empty box for "What's this?", the model told when
+it can't read images with a one-click switch, screenshots kept 30 days by
+default. **Measured** (`snip-dump`, an optimised build, two 1440p monitors,
+one HDR at 240 nits): every monitor captured in ~26 ms, the overlay on screen
+**~50–60 ms after the request** (87–91 ms in a debug build); a full monitor as
+PNG in 6–7 ms. HDR: known swatches from a GDI window read exactly (worst error
+0) through the FP16 path on the HDR monitor. Unit-tested (the HDR round trip at
+five white levels, crop maths at mixed DPI, request shapes per provider, the
+vision rules, retention, the voice phrases) and e2e-tested over fake monitors
+(`e2e/snip.spec.js`, 11 tests). **Not yet tried**: the interactive overlay by
+hand (a real drag, the focus, Esc through the hook) — `e2e-real/snip.real.js`
+is written, not yet run; an HDR-aware app's swatches (Edge) on the HDR
+monitor; a real Anthropic / OpenAI / Gemini / OpenRouter request with an
+image (shapes from their docs; the fake's checked).
+
 ## Not yet done
 
 Not yet done: the AI Chat surface has no semantic-vector

@@ -62,6 +62,11 @@ enter" voice command** (`voice_enter`, default on;
 `pipeline::take_voice_enter`): a dictation whose LAST words are "press
 enter"/"press return" (final text, else the raw transcript in case cleanup
 dropped it) loses them and presses `auto_submit_key` after the paste.
+**"Snip"** (`snip_voice`, default on; `snip::is_snip_phrase`, checked first
+in `deliver` and in `ask_assistant`): a dictation — or a Voice Assistant
+question — that is only "snip", "snip it", "take a snip", "screenshot" or
+"take a screenshot" starts Snip to Chat ([snip.md](./snip.md)) instead of a
+paste or a question; inside a sentence ("snip the ends off") it's dictated.
 **Names on screen** ("Spell names the way they're written on screen",
 `screen_names`, on; [dictionary.md](./dictionary.md), `screen_terms.rs`):
 `capture_target` starts a background read of the target window's visible

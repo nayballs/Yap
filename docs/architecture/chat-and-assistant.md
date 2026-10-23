@@ -109,6 +109,17 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   points back at one (`chats::refers_to_past`). Every turn tells memory's
   scheduler (`memory::learn::after_turn`): the chat is read for lasting
   facts once it's gone quiet.
+  **Screenshots** (Snip to Chat, [snip.md](./snip.md)): a question may carry
+  up to 4 (`ChatMessage.images` = `ChatImage {id, w, h, bytes, source}`,
+  only written when there are some — the PNGs are files in
+  `<data>/chat-images/`, deleted with their conversation by `delete_many`;
+  `append_question`; `image_ids` for the sweep; `for_page` marks one past
+  "Keep chat screenshots" `gone`). `chat_send(images)` checks the model reads
+  them (`snip::vision`) and runs the turn with them (`snip::turn`): each
+  model call's question becomes a content array (the image parts, then the
+  text; the text first for OpenRouter), the newest 3 earlier screenshots in
+  the history window go again, older ones as a line; a server's refusal
+  becomes `vision::COULDNT_READ` (that model a "no" this session).
   **The history window** moves three turns at a time
   (`chats::history_start`: 14–19 messages, the Voice Assistant's 5–8), not
   every turn, so a long chat keeps its prompt's start.
@@ -642,5 +653,17 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   an older spoken question (`userMessageId` ≠ the one followed) are left
   alone, so they never land in the newer one's bubble or end its
   "Thinking…". A typed Enter still waits while an answer comes (type
-  ahead), as before.
+  ahead), as before. **A snip** ([snip.md](./snip.md), 2026-10-23) lands in
+  the box (`yap-snip`, or ControlPanel's `chatRequest {snip}`): the
+  conversation Rust chose — the one open here when the window was on screen
+  on it, else a new chat —, the thumbnail and its size with ✕, the three
+  one-tap prompts (What's this? · Explain this error · Summarise), "Ask about
+  this screenshot…", the caret there; Enter on an empty box asks "What's
+  this?"; never sent by itself; it waits while another view shows
+  (`chatShots.svelte.js`). A model that can't read images: one amber line
+  with "Use <model> on <provider>" (`chat_set_model`), "Choose another
+  model…" (the picker, `ModelChip.openPicker`) and "Send without the
+  screenshot", Send waiting. A question's screenshots show in its bubble
+  (click: large) or "Screenshot removed after 30 days". + → "Take a
+  screenshot" (`snip_start {origin: "chat"}`).
   No semantic vectors yet (ROADMAP step 3).
