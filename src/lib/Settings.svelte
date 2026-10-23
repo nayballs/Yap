@@ -53,7 +53,7 @@
   import { NAV_GROUPS, PAGE_LABELS, resolveTarget } from './settings/nav.js';
   import { searchSettings, groupResults, countByPage } from './settings/settingsIndex.js';
   import { hotkeyCapture } from './settings/hotkeys.svelte.js';
-  import { merge3, same, copy } from './settings/configMerge.js';
+  import { merge3, same, copy, fill } from './settings/configMerge.js';
   import SettingsHotkey from './settings/SettingsHotkey.svelte';
   import SearchResults from './settings/SearchResults.svelte';
   import GeneralPage from './settings/GeneralPage.svelte';
@@ -565,6 +565,9 @@
     listen('local-llm-download-progress', (e) => {
       if (e.payload) localProgress = e.payload;
     });
+    // This copy as set up, before any change worth saving (the migration
+    // below is one): what `fill` puts in base's holes.
+    pristine = buildClean();
     const migrated = migrateRoutesToProfiles();
     loaded = true;
     // Persist the migration immediately so it isn't redone (and duplicated) on
@@ -1552,6 +1555,10 @@
   // copy has nothing to add. An edit being made is never undone: a setting
   // changed both here and there keeps this copy's. One at a time (`inTurn`).
   let base = null;
+  // This copy as first set up (defaults and fill-ins included): a setting
+  // config.json doesn't have yet, unchanged here since, is no change of
+  // this copy's (`fill`).
+  let pristine = null;
   let syncing = Promise.resolve();
   function inTurn(fn) {
     const run = syncing.then(fn, fn);
@@ -1587,7 +1594,7 @@
     if (!loaded || !cfg || !base) return;
     const disk = await invoke('get_config');
     const mine = buildClean();
-    adopt(mine, merge3(base, mine, disk));
+    adopt(mine, merge3(fill(base, pristine), mine, disk));
     base = disk;
   }
 
@@ -1602,7 +1609,7 @@
     return inTurn(async () => {
       const mine = buildClean();
       const disk = await invoke('get_config');
-      const next = merge3(base, mine, disk);
+      const next = merge3(fill(base, pristine), mine, disk);
       adopt(mine, next);
       if (same(next, disk)) {
         base = disk;
