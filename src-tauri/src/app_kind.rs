@@ -783,10 +783,13 @@ const ABBREVIATIONS: &[&str] = &[
 ];
 
 /// The word just before a full stop at byte `dot` of `s` (back to the
-/// last space).
+/// last space: past all of it, a no-break space being two bytes).
 pub(crate) fn word_before(s: &str, dot: usize) -> &str {
     let head = &s[..dot];
-    let start = head.rfind(char::is_whitespace).map(|i| i + 1).unwrap_or(0);
+    let start = head
+        .char_indices()
+        .rfind(|&(_, c)| c.is_whitespace())
+        .map_or(0, |(i, c)| i + c.len_utf8());
     head[start..].trim_start_matches(['(', '"', '\'', '“', '‘'])
 }
 
@@ -1182,6 +1185,20 @@ mod tests {
         assert_eq!(chat("He said \"fine.\" Then left."), "He said \"fine.\" Then left");
         // Spaces around it are kept as they were.
         assert_eq!(chat("Sounds good. "), "Sounds good ");
+    }
+
+    #[test]
+    fn a_wide_space_before_the_last_word_is_one_space() {
+        // No-break (U+00A0), narrow no-break (U+202F) and ideographic
+        // (U+3000) spaces are several bytes: the word after one starts past
+        // all of them (web editors' drafts, French cleanup's "15 h.").
+        for space in ['\u{a0}', '\u{202f}', '\u{3000}'] {
+            let text = format!("See you at 15{space}h.");
+            assert_eq!(word_before(&text, text.len() - 1), "h");
+            assert_eq!(chat(&text), format!("See you at 15{space}h"));
+            let draft = FieldContext { before: format!("Hi{space}Bob."), after: String::new(), selection: String::new() };
+            assert_eq!(drop_chat_full_stop("See you.", Some(&draft), &[]), "See you");
+        }
     }
 
     #[test]
