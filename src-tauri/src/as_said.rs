@@ -342,25 +342,50 @@ fn bring_back(hwnd: isize) -> bool {
 // ---- Rewriting the last paste -----------------------------------------------------
 
 /// The rewrite shortcut's rule (pure): with nothing selected, the last
-/// paste is what it rewrites when it went into the window in front now
-/// (`target`), not a terminal (its line can't be selected), at most
-/// [`REWRITE_WITHIN`] ago.
-pub fn rewritable(pasted_in: Option<isize>, kind: AppKind, age: Duration, target: Option<isize>) -> bool {
-    pasted_in.is_some() && pasted_in == target && !kind.is_terminal() && age <= REWRITE_WITHIN
+/// paste is what it rewrites when "Rewrite your last dictation" is on
+/// (`on`, `config.rewrite_last_dictation`), it went into the window in
+/// front now (`target`), not a terminal (its line can't be selected), at
+/// most [`REWRITE_WITHIN`] ago. Otherwise the shortcut writes new text, as
+/// it always did.
+pub fn rewritable(on: bool, pasted_in: Option<isize>, kind: AppKind, age: Duration, target: Option<isize>) -> bool {
+    on && pasted_in.is_some() && pasted_in == target && !kind.is_terminal() && age <= REWRITE_WITHIN
 }
 
 /// The last paste, when the rewrite shortcut — nothing selected in
-/// `target` — is to rewrite it ([`rewritable`]). A test run never (it
-/// reads no other app); robot mode only in the test's own windows.
-pub(crate) fn rewrite_target(target: Option<isize>) -> Option<Pasted> {
+/// `target`, the setting `on` — is to rewrite it ([`rewritable`]). A test
+/// run only in its stand-in window (`pipeline::test_target`, where nothing
+/// is read or pasted); robot mode only in the test's own windows.
+pub(crate) fn rewrite_target(on: bool, target: Option<isize>) -> Option<Pasted> {
     let p = last().clone()?;
-    (rewritable(p.hwnd, p.kind, p.at.elapsed(), target) && crate::realtest::permits(p.hwnd)).then_some(p)
+    (rewritable(on, p.hwnd, p.kind, p.at.elapsed(), target) && may_rewrite_in(p.hwnd)).then_some(p)
+}
+
+/// A normal run, robot mode's own windows, or a test run's stand-in.
+fn may_rewrite_in(hwnd: Option<isize>) -> bool {
+    if crate::realtest::permits(hwnd) {
+        return true;
+    }
+    #[cfg(debug_assertions)]
+    {
+        hwnd.is_some() && hwnd == crate::pipeline::test_target()
+    }
+    #[cfg(not(debug_assertions))]
+    false
 }
 
 /// Before the AI is asked: the last paste `p` is still in its field exactly
 /// as pasted, the cursor right after it, its window in front (not an admin
-/// app). `Err(why)`. Read only; blocking (UI Automation).
+/// app). `Err(why)`. Read only; blocking (UI Automation). A test run reads
+/// nothing (its stand-in window: taken to be there).
 pub(crate) fn rewrite_check(p: &Pasted) -> Result<(), String> {
+    match crate::realtest::gate(p.hwnd, "read the field for the last dictation") {
+        crate::realtest::Gate::Go => {}
+        crate::realtest::Gate::TestMode => {
+            tracing::info!("e2e: not reading the field for the last dictation");
+            return Ok(());
+        }
+        crate::realtest::Gate::Refused(why) => return Err(why),
+    }
     #[cfg(windows)]
     {
         let hwnd = p.hwnd.ok_or("Yap didn't paste it into another app")?;
@@ -1142,14 +1167,29 @@ mod tests {
     #[test]
     fn the_rewrite_shortcut_takes_the_last_paste_only_in_its_window_within_a_minute() {
         let s = Duration::from_secs;
-        assert!(rewritable(Some(7), AppKind::Other, s(3), Some(7)));
-        assert!(rewritable(Some(7), AppKind::Messaging, s(60), Some(7)), "a minute on the dot");
-        assert!(!rewritable(Some(7), AppKind::Other, s(61), Some(7)), "older: write mode, as before");
-        assert!(!rewritable(Some(7), AppKind::Other, s(3), Some(8)), "another window in front");
-        assert!(!rewritable(Some(7), AppKind::Other, s(3), None), "Yap's own window in front");
-        assert!(!rewritable(None, AppKind::Other, s(3), None), "never pasted into another app");
+        assert!(rewritable(true, Some(7), AppKind::Other, s(3), Some(7)));
+        assert!(rewritable(true, Some(7), AppKind::Messaging, s(60), Some(7)), "a minute on the dot");
+        assert!(!rewritable(true, Some(7), AppKind::Other, s(61), Some(7)), "older: write mode, as before");
+        assert!(!rewritable(true, Some(7), AppKind::Other, s(3), Some(8)), "another window in front");
+        assert!(!rewritable(true, Some(7), AppKind::Other, s(3), None), "Yap's own window in front");
+        assert!(!rewritable(true, None, AppKind::Other, s(3), None), "never pasted into another app");
         let terminal = AppKind::Terminal(Terminal { coding_cli: None, host: Host::WindowsTerminal });
-        assert!(!rewritable(Some(7), terminal, s(3), Some(7)), "a terminal's line can't be selected");
+        assert!(!rewritable(true, Some(7), terminal, s(3), Some(7)), "a terminal's line can't be selected");
+    }
+
+    #[test]
+    fn with_rewrite_your_last_dictation_off_the_shortcut_writes_new_text_as_before() {
+        let s = Duration::from_secs;
+        // Every case the switch on would take: none.
+        for (kind, age) in [(AppKind::Other, s(0)), (AppKind::Other, s(3)), (AppKind::Messaging, s(60))] {
+            assert!(!rewritable(false, Some(7), kind, age, Some(7)), "{kind:?} {age:?}");
+        }
+        // And on by default, in a config that has never seen the key.
+        let cfg: crate::config::YapConfig = serde_json::from_str("{}").unwrap();
+        assert!(cfg.rewrite_last_dictation);
+        assert!(crate::config::YapConfig::default().rewrite_last_dictation);
+        let off: crate::config::YapConfig = serde_json::from_str(r#"{"rewriteLastDictation": false}"#).unwrap();
+        assert!(!off.rewrite_last_dictation);
     }
 
     #[test]
@@ -1235,8 +1275,10 @@ mod tests {
         recorded(1_700_000_000, "Hello there.");
         assert_eq!(last().as_ref().unwrap().entry, Some(1_700_000_000));
         // The rewrite shortcut in that window takes it; in another, not.
-        assert_eq!(rewrite_target(Some(42)).map(|p| p.text().to_string()).as_deref(), Some("Hello there."));
-        assert!(rewrite_target(Some(43)).is_none());
+        assert_eq!(rewrite_target(true, Some(42)).map(|p| p.text().to_string()).as_deref(), Some("Hello there."));
+        assert!(rewrite_target(true, Some(43)).is_none());
+        // "Rewrite your last dictation" off: never.
+        assert!(rewrite_target(false, Some(42)).is_none());
         // Nothing changed: nothing to swap or offer, but it's still the last
         // paste (a rewrite may take it).
         assert!(remember(Some(42), AppKind::Other, "Same. ", Some("Same. "), true).is_none());
@@ -1251,7 +1293,7 @@ mod tests {
         // There with the words as said: kept for "Use what I said" (which
         // copies them there), never for a rewrite.
         assert!(remember(None, AppKind::Other, "B. ", Some("b um "), true).is_some());
-        assert!(rewrite_target(None).is_none());
+        assert!(rewrite_target(true, None).is_none());
         forget();
         assert!(last().is_none());
     }

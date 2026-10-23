@@ -8,8 +8,10 @@
 // then the last paste ("now shorter" works on it). Typed since, or the
 // cursor moved away: nothing pasted, the AI not asked, and Yap says so.
 // Something selected, another window, a terminal: the rewrite shortcut as
-// before (the selection rewritten, or new text written at the cursor). The
-// minute itself is the unit tests' (`as_said::rewritable`).
+// before (the selection rewritten, or new text written at the cursor), and
+// so is everything with Settings → Commands' "Rewrite your last dictation
+// when nothing is selected" off. The minute itself is the unit tests'
+// (`as_said::rewritable`).
 //
 // `realtest_rewrite_text` stands in for the shortcut and the speech: the
 // window in front, its selection read as at the key press (no Ctrl+C in
@@ -163,6 +165,31 @@ test('something selected, or another window: the rewrite shortcut as before', as
   await expect.poll(() => page.value()).toBe(WRITTEN);
   await sleep(300);
   expect(await pad.text('box')).toBe(CLEANED);
+});
+
+test('"Rewrite your last dictation" off: nothing selected right after a dictation writes new text at the cursor, as before', async ({
+  robot,
+}) => {
+  const { pad } = robot;
+  await robot.configure({ rewriteLastDictation: false });
+  try {
+    await pad.set('box', '');
+    await robot.dictate(pad, SAID);
+    await expect.poll(() => pad.text('box')).toBe(CLEANED);
+    const out = await rewrite(robot, pad, 'make it more formal');
+    expect(out).toMatchObject({ last: false, outcome: 'pasted', text: FORMAL });
+    // The AI was never given the dictation: new text, written after it.
+    expect(lastAsked()).toEqual({ text: '', instruction: 'make it more formal' });
+    await expect.poll(() => pad.text('box')).toBe(`${CLEANED}${FORMAL}`);
+  } finally {
+    await robot.configure({ rewriteLastDictation: true });
+  }
+  // On again: the next dictation is rewritten in place.
+  await pad.set('box', '');
+  await robot.dictate(pad, SAID);
+  await expect.poll(() => pad.text('box')).toBe(CLEANED);
+  expect((await rewrite(robot, pad, 'make it more formal')).outcome).toBe('replaced');
+  await expect.poll(() => pad.text('box')).toBe(FORMAL);
 });
 
 test('a terminal: never rewritten in place — new text written at its prompt, as before', async ({ robot }) => {

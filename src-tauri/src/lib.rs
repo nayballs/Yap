@@ -734,6 +734,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             realtest::commands::realtest_rewrite_text,
             #[cfg(debug_assertions)]
+            commands::e2e_rewrite,
+            #[cfg(debug_assertions)]
+            commands::e2e_target_window,
+            #[cfg(debug_assertions)]
             realtest::commands::realtest_dictate_wav,
             #[cfg(debug_assertions)]
             realtest::commands::realtest_clipboard,

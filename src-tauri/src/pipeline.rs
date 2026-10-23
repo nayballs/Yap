@@ -334,6 +334,30 @@ pub(crate) fn set_test_silent_mic(silent: bool) {
     TEST_SILENT_MIC.store(silent, Ordering::SeqCst);
 }
 
+/// Test mode only (`e2e_target_window`): a stand-in for the window a
+/// dictation goes into, so the last paste and the rewrite shortcut's choice
+/// (`as_said.rs`) can be seen in a test run. Never a real window — a test
+/// run reads and pastes into nothing, there or anywhere. 0 = none: the
+/// window in front, as ever.
+#[cfg(debug_assertions)]
+static TEST_TARGET: AtomicIsize = AtomicIsize::new(0);
+
+/// The stand-in's handle: no window has it.
+#[cfg(debug_assertions)]
+const TEST_STAND_IN: isize = 0x7E57_0001;
+
+#[cfg(debug_assertions)]
+pub(crate) fn set_test_target(on: bool) {
+    TEST_TARGET.store(if on { TEST_STAND_IN } else { 0 }, Ordering::SeqCst);
+}
+
+/// The stand-in window, in a plain test run (never robot mode).
+#[cfg(debug_assertions)]
+pub(crate) fn test_target() -> Option<isize> {
+    let h = TEST_TARGET.load(Ordering::SeqCst);
+    (h != 0 && crate::e2e::active() && !crate::realtest::on()).then_some(h)
+}
+
 /// Robot mode only (`realtest.rs`): a WAV is playing into the dictation in
 /// the mic's place — the real mic's audio is dropped meanwhile, and a
 /// recording may start without one.
@@ -1232,6 +1256,9 @@ impl Shared {
         // Capture the window the user is dictating into, before the overlay
         // (or anything else) can steal focus. Restored at paste time.
         let hwnd = crate::text_injector::current_foreground().unwrap_or(0);
+        // A test run's stand-in window, when a spec asked for one.
+        #[cfg(debug_assertions)]
+        let hwnd = test_target().unwrap_or(hwnd);
         self.target_hwnd.store(hwnd, Ordering::Relaxed);
         // A question for the Voice Assistant (its shortcut: answered out
         // loud, nothing pasted), or for the Chat view (its mic, or the hotkey
@@ -1278,9 +1305,11 @@ impl Shared {
             let sel = crate::selection::capture_selection(target, !in_terminal);
             // Nothing selected right after a paste into this window: the
             // instruction is for that paste — the last dictation — not new
-            // text (`as_said.rs`).
+            // text (`as_said.rs`), unless "Rewrite your last dictation" is
+            // off (then write mode, as ever).
             if sel.is_none() {
-                rewrite_last = crate::as_said::rewrite_target(target);
+                let on = self.config.read().map(|c| c.rewrite_last_dictation).unwrap_or(true);
+                rewrite_last = crate::as_said::rewrite_target(on, target);
                 if let Some(p) = &rewrite_last {
                     tracing::info!(
                         chars = p.text().chars().count(),

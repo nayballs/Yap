@@ -186,6 +186,13 @@ pub struct YapConfig {
     /// Same "kb:VKEY"/"mouse:ID" format as `hotkey`.
     #[serde(default)]
     pub edit_hotkey: String,
+    /// The rewrite shortcut with nothing selected rewrites the **last
+    /// dictation** — within a minute, in the same field, while it still
+    /// ends at the cursor (`as_said.rs`) — instead of writing new text
+    /// (Settings → Commands). On by default; off, nothing selected always
+    /// means write mode, as before 2026-10-23.
+    #[serde(default = "default_true")]
+    pub rewrite_last_dictation: bool,
     /// The **Voice Assistant** shortcut (Settings → Voice Assistant,
     /// `assistant.rs`): from any app, ask Yap's Chat something out loud and
     /// hear the answer; it never types into the app you're in. Empty =
@@ -937,6 +944,7 @@ impl Default for YapConfig {
         Self {
             hotkey: default_hotkey(),
             edit_hotkey: String::new(),
+            rewrite_last_dictation: true,
             assistant_hotkey: String::new(),
             read_hotkey: String::new(),
             as_said_hotkey: String::new(),

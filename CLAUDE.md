@@ -116,7 +116,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 
 **Pasting** — [pasting.md](./docs/architecture/pasting.md)
 - `text_injector.rs` — private, verified clipboard paste with each app's paste keys, a lost paste typed, submit key, re-focus, Paste last transcript (and as said).
-- `as_said.rs` — the last paste: "Use what I said" swaps a cleaned paste for the words as said (shortcut, bar, tray, Home's Paste what I said), and the rewrite shortcut with nothing selected rewrites the last dictation (≤ 1 min, still ending at the cursor) — only where it can select exactly what it pasted; else copied or refused.
+- `as_said.rs` — the last paste: "Use what I said" swaps a cleaned paste for the words as said (shortcut, bar, tray, Home's Paste what I said), and the rewrite shortcut with nothing selected rewrites the last dictation (≤ 1 min, still ending at the cursor; Settings → Commands can turn it off) — only where it can select exactly what it pasted; else copied or refused.
 - `elevated.rs` — apps running as administrator: the text is left on the clipboard.
 - `selection.rs` — UI Automation reads: text around the cursor, edit-mode selection, read aloud's selection (read-only text too), post-paste watch; did a paste land.
 - `smart_insert.rs` — fits a dictation to the text around the cursor (case, spaces, full stop).

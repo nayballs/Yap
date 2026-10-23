@@ -125,10 +125,13 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   { why, told }` (`told`: an alert said it already; else Home's toast says
   "Copied what you said" and why). A test run neither swaps nor copies (the
   log says which it would). **Rewriting the last paste** (the rewrite
-  shortcut with nothing selected): `rewritable(pasted_in, kind, age,
-  target)` (pure: the same window, not a terminal, ≤ `REWRITE_WITHIN` = 60 s,
-  Wispr Flow's minute) and `rewrite_target` at the key press (never in a
-  test run; robot mode only the test's windows); `rewrite_check` before the
+  shortcut with nothing selected): `rewritable(on, pasted_in, kind, age,
+  target)` (pure: the switch on — Settings → Commands, `config.
+  rewrite_last_dictation`, default on; off = write mode as before —, the
+  same window, not a terminal, ≤ `REWRITE_WITHIN` = 60 s, Wispr Flow's
+  minute) and `rewrite_target` at the key press (a test run only its
+  stand-in window, where nothing is read; robot mode only the test's
+  windows); `rewrite_check` before the
   AI is asked — `usable` (in front, not a terminal, not an admin app) and
   the paste ending **at the caret** (`uia::ends_at_caret`; no "there once"
   fallback: typed after it, or the cursor moved, refuses — the swap still
