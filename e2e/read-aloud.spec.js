@@ -14,7 +14,7 @@
 // answer's Read aloud, and the in-page shortcut, use.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test, expect, openView, openSettings, closeSettings, settingsDialog, expectStore } from './support/fixtures.js';
+import { test, expect, openView, openSettings, closeSettings, settingsDialog, expectStore, setConfig } from './support/fixtures.js';
 import { SCREENSHOTS } from './support/yap.js';
 
 const PARAGRAPH = [
@@ -28,15 +28,6 @@ const state = (yap) => yap.invoke('read_aloud_state');
 const spoken = (yap) => yap.invoke('tts_e2e_spoken');
 const speaking = async (yap) => (await yap.invoke('tts_state')).speaking;
 const card = (yap) => yap.overlay.locator('[data-region="reading"].card');
-
-async function setConfig(yap, main, patch) {
-  const cfg = await yap.invoke('get_config');
-  await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
-  await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
-  // Settings' copy auto-saves what it adopted (400 ms later): settled.
-  await main.waitForTimeout(700);
-  await expectStore(yap, 'config.json', (c) => Object.entries(patch).every(([k, v]) => JSON.stringify(c[k]) === JSON.stringify(v)));
-}
 
 /** The reading card alone, as a picture (for the report and the README). */
 async function cardShot(yap, name) {

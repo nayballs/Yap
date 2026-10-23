@@ -8,7 +8,7 @@
 // Settings' always-mounted config copy adopts so its auto-save keeps it.
 // Each answer shows the model that wrote it. The "Groq" here is a local fake
 // (support/fake-llm.js) behind a test key: nothing leaves the PC.
-import { test as base, expect, openView, openSettings, closeSettings, settingsDialog, expectStore } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, settingsDialog, expectStore, setConfig } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 
 const TEST_KEY = 'e2e-fake-key';
@@ -42,17 +42,6 @@ function chatScope(fields) {
 }
 function groqChat(fakeLlm, model) {
   return chatScope({ provider: 'groq', baseUrl: fakeLlm.base, model, apiKey: TEST_KEY });
-}
-
-/**
- * Change config.json as another surface would, and tell Settings' copy (as
- * the Integrations view does with `yap-config-patched`), so its auto-save
- * can't put the old values back.
- */
-async function setConfig(yap, main, patch) {
-  const cfg = await yap.invoke('get_config');
-  await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
-  await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
 }
 
 const chip = (main) => main.locator('.modelchip .chip');

@@ -243,3 +243,36 @@ export async function expectStore(yap, file, check, message) {
     }, { message: message ?? `${file} to be updated`, timeout: 10_000 })
     .toBe(true);
 }
+
+/** Every value in `want` is in `now`: objects field by field (a saved value
+ *  may carry fields of its own), arrays item by item, the rest exactly. */
+function holds(now, want) {
+  if (Array.isArray(want)) {
+    return Array.isArray(now) && now.length === want.length && want.every((w, i) => holds(now[i], w));
+  }
+  if (want && typeof want === 'object') {
+    return !!now && typeof now === 'object' && Object.entries(want).every(([k, v]) => holds(now[k], v));
+  }
+  return JSON.stringify(now) === JSON.stringify(want);
+}
+
+/**
+ * Change config.json as another surface would (the Integrations view's
+ * Local API switch does it this way), and tell Settings' copy
+ * (`yap-config-patched`), so its auto-save can't put the old values back.
+ * Settings saves what it adopted 400 ms later (Settings.svelte `persist`):
+ * wait for that save, then check the config holds every patched value. A
+ * spec that went on at once raced it: a late save of the last patch put back
+ * what this one changed (CI, 2026-10-23).
+ */
+export async function setConfig(yap, main, patch) {
+  const cfg = await yap.invoke('get_config');
+  await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
+  await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
+  await main.waitForTimeout(700);
+  await expect
+    .poll(async () => holds(await yap.invoke('get_config'), patch), {
+      message: `the config to hold ${Object.keys(patch).join(', ')}`,
+    })
+    .toBe(true);
+}

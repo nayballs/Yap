@@ -20,7 +20,7 @@
 // (YAP_E2E_GPU): ~5.8 GB of room beside Windows and speech recognition.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test, expect, openView, openSettings, closeSettings, expectStore } from './support/fixtures.js';
+import { test, expect, openView, openSettings, closeSettings, expectStore, setConfig } from './support/fixtures.js';
 import { qwen35_4b, qwen25_1_5b, writeModel } from './support/gguf.js';
 
 const CARD = 'NVIDIA GeForce RTX 4060';
@@ -209,14 +209,6 @@ test('Settings → Language Models → Local has the same control', async ({ yap
   await expectStore(yap, 'config.json', (c) => c.localContext === 0);
   await closeSettings(main);
 });
-
-/** Change config.json as another surface would, and tell Settings' copy. */
-async function setConfig(yap, main, patch) {
-  const cfg = await yap.invoke('get_config');
-  await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
-  await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
-  await main.waitForTimeout(600);
-}
 
 test('the 1.5B goes up to its own maximum, and a bigger setting is held to it', async ({ yap, main }) => {
   await fresh(yap);

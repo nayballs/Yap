@@ -22,7 +22,7 @@
 // and the bundled model empty placeholder files that never run.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, openSettings, closeSettings, expectStore } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { startFakeLocalModels } from './support/local-llm.js';
 import { RUNS } from './support/yap.js';
@@ -115,13 +115,6 @@ function groqChat(fakeLlm, model) {
   return { enabled: true, provider: 'groq', baseUrl: fakeLlm.base, model, apiKey: TEST_KEY, apiKeys: {}, prompt: '', disableThinking: false };
 }
 
-/** Change config.json as another surface would, and tell Settings' copy. */
-async function setConfig(yap, main, patch) {
-  const cfg = await yap.invoke('get_config');
-  await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
-  await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
-  await main.waitForTimeout(500);
-}
 /** Chat back on the fake Groq's GPT-OSS 20B, the on-device model the default. */
 async function backToGroq(yap, main, fakeLlm) {
   const cfg = await yap.invoke('get_config');

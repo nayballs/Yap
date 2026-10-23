@@ -21,7 +21,7 @@
 //
 // The model is the scripted fake AI (support/fake-llm.js), the web the fake
 // web (support/fake-web.js): nothing goes on the internet.
-import { test as base, expect, openView, openSettings, closeSettings, expectStore } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { startFakeWeb } from './support/fake-web.js';
 
@@ -165,15 +165,13 @@ test("Dictation Cleanup: the one spelling switch, named for the region's variety
 test("Chat: the model is told about the user, and Exa searches the user's country", async ({ yap, main, fakeLlm, fakeWeb }) => {
   // The name and note from the test before (one Yap per worker), set here
   // too so this test stands alone; web search on with an Exa key.
-  const cfg = await yap.invoke('get_config');
-  await yap.invoke('save_config', {
-    cfg: { ...cfg, aboutName: 'Imogen', aboutMe: 'I run at weekends', webSearch: true, webSearchService: 'exa', webSearchKeys: { exa: EXA_KEY } },
+  await setConfig(yap, main, {
+    aboutName: 'Imogen',
+    aboutMe: 'I run at weekends',
+    webSearch: true,
+    webSearchService: 'exa',
+    webSearchKeys: { exa: EXA_KEY },
   });
-  await main.evaluate(
-    (p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })),
-    { aboutName: 'Imogen', aboutMe: 'I run at weekends', webSearch: true, webSearchService: 'exa', webSearchKeys: { exa: EXA_KEY } }
-  );
-  await main.waitForTimeout(500);
 
   const from = fakeLlm.requests.length;
   const webFrom = fakeWeb.requests.length;

@@ -19,8 +19,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect, openSettings, closeSettings, expectStore } from './support/fixtures.js';
 
-const CARD = 'NVIDIA GeForce RTX 5070 Ti';
-
 /** Placeholder runtime + default model in <data>/llm (installed, never run). */
 function placeholders(dataDir) {
   const llm = path.join(dataDir, 'llm');

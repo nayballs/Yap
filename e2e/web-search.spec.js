@@ -53,6 +53,7 @@ import {
   expectStore,
   inAnotherApp,
   mainOnScreen,
+  setConfig,
 } from './support/fixtures.js';
 import { startFakeLlm, GROUNDING_REDIRECT } from './support/fake-llm.js';
 import { startFakeWeb, GALE_URL, GUIDE_URL, TIPS_URL, RPG_URL } from './support/fake-web.js';
@@ -89,23 +90,6 @@ const test = base.extend({
     { scope: 'worker' },
   ],
 });
-
-/** Change config.json as another surface would, and tell Settings' copy. */
-async function setConfig(yap, main, patch) {
-  const cfg = await yap.invoke('get_config');
-  await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
-  await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
-  // Settings saves its copy 400 ms after a change: one still due from the
-  // test before could land on top of this one for a moment ("Unknown tool:
-  // web_search"). Let it save, then check the change held.
-  await main.waitForTimeout(500);
-  // (Saved values may carry fields of their own: each patched value must be there.)
-  const holds = (now, want) =>
-    want && typeof want === 'object' && !Array.isArray(want)
-      ? !!now && typeof now === 'object' && Object.entries(want).every(([k, v]) => holds(now[k], v))
-      : JSON.stringify(now) === JSON.stringify(want);
-  await expect.poll(async () => holds(await yap.invoke('get_config'), patch)).toBe(true);
-}
 
 const chatScope = (fakeLlm, model = 'fake-chat', provider = 'custom', extra = {}) => ({
   chat: { enabled: true, provider, baseUrl: fakeLlm.base, model, ...extra },
