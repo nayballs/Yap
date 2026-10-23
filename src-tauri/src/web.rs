@@ -2009,8 +2009,22 @@ pub fn price_note(local: &crate::about_you::LocalPrices) -> String {
 /// "UK", "match", a year), or when it's a number. Nothing changes when the
 /// question points back at earlier messages ("it", "that one", "those") or
 /// shares fewer than two words with the query (too little to stand alone:
-/// "and in the UK?"), nor when too little would be left. Pure.
-pub fn fresh_query(query: &str, question: &str, earlier: &[&str]) -> String {
+/// "and in the UK?"), nor when too little would be left.
+///
+/// **A word the person said before, misheard now, stays**: "Can you tell me
+/// the weather today in Kellbrook?", then "Look up the weather kelp for me
+/// today." — the speech engine heard the town as "kelp", the model searched
+/// "weather Kellbrook Fellshire today", and this cut it to "weather
+/// Fellshire today": county-wide storm news for a question about one town
+/// (a tester's voice chat, 2026-10-23; a fictional town and county here).
+/// So an earlier word stays when the person's **own** earlier message
+/// (`own`: theirs, not the model's answers or searches; its asking — "can
+/// you check" — left out, [`search_query`]) has it, that message is about
+/// this one's subject too (a word in common), and this question has a word
+/// the query left out that sounds like it, or like its start
+/// (`fuzzy::sounds_like`: the model wrote the misheard word as the person
+/// had said it). Pure.
+pub fn fresh_query(query: &str, question: &str, earlier: &[&str], own: &[&str]) -> String {
     fn words(s: &str) -> Vec<String> {
         s.to_lowercase()
             .replace('’', "'")
@@ -2039,12 +2053,39 @@ pub fn fresh_query(query: &str, question: &str, earlier: &[&str]) -> String {
         return query.to_string();
     }
     let before: Vec<String> = earlier.iter().flat_map(|t| words(t)).collect();
+    // The question's words the query left out ("kelp"), one by one and two
+    // side by side ("kel brook").
+    let missing = |w: &String| w.chars().count() >= 3 && !QUERY_STOP.contains(&w.as_str()) && !q.iter().any(|x| same(x, w));
+    let mut left_out: Vec<String> = Vec::new();
+    for (i, w) in asked.iter().enumerate() {
+        if missing(w) {
+            left_out.push(w.clone());
+            if let Some(next) = asked.get(i + 1).filter(|n| missing(n)) {
+                left_out.push(format!("{w}{next}"));
+            }
+        }
+    }
+    // The person's own words for what they asked before, in a message about
+    // this question's subject too.
+    let theirs: Vec<String> = if left_out.is_empty() {
+        Vec::new()
+    } else {
+        own.iter()
+            .map(|t| words(&search_query(t)))
+            .filter(|said| content.iter().any(|c| said.iter().any(|w| same(w, c))))
+            .flatten()
+            .collect()
+    };
+    let misheard = |w: &str| theirs.iter().any(|t| same(w, t)) && left_out.iter().any(|h| crate::fuzzy::sounds_like(h, w));
     let kept: Vec<&str> = query
         .split_whitespace()
         .filter(|raw| {
             let w = words(raw);
             let Some(w) = w.first() else { return true };
-            w.chars().all(|c| c.is_ascii_digit()) || asked.iter().any(|a| same(w, a)) || !before.iter().any(|b| same(w, b))
+            w.chars().all(|c| c.is_ascii_digit())
+                || asked.iter().any(|a| same(w, a))
+                || !before.iter().any(|b| same(w, b))
+                || misheard(w)
         })
         .collect();
     if kept.len() < 2 || kept.len() == query.split_whitespace().count() {
@@ -2737,20 +2778,69 @@ mod tests {
             r#"{"query":"Grok subscription management X platform account settings billing"}"#,
             "To check your Grok subscription, go to grok.com/dashboard/billing while logged in to your account.",
         ];
+        // The person's own message: its "check" is how they asked, not what.
+        let own = [earlier[0]];
         let q2 = "Can you look up please, for me? Can you look up Groc subscriptions for me, please?";
-        assert_eq!(fresh_query("Grok subscription management check account billing", q2, &earlier), "Grok subscription");
+        assert_eq!(fresh_query("Grok subscription management check account billing", q2, &earlier, &own), "Grok subscription");
         // The model's own words that nothing earlier had stay, and numbers.
-        assert_eq!(fresh_query("Grok subscriptions price UK 2026 check", q2, &earlier), "Grok subscriptions price UK 2026");
+        assert_eq!(fresh_query("Grok subscriptions price UK 2026 check", q2, &earlier, &own), "Grok subscriptions price UK 2026");
+        // A filler the query leaves out ("Hmm") changes nothing of that.
+        let hmm = "Hmm, can you look up Groc subscriptions for me?";
+        assert_eq!(fresh_query("Grok subscription management check account billing", hmm, &earlier, &own), "Grok subscription");
         // Nothing earlier: as written ("Arsenal… tonight 21 October 2026 time").
         let arsenal = "Arsenal Football Club match tonight 21 October 2026 time";
-        assert_eq!(fresh_query(arsenal, "When are Arsenal playing tonight?", &[]), arsenal);
+        assert_eq!(fresh_query(arsenal, "When are Arsenal playing tonight?", &[], &[]), arsenal);
         // A follow-up pointing back, or one too short to stand alone: as written.
         let rpg = ["What are the best RPG games coming out in 2026?", "1. Starfall Requiem (12 March)"];
-        assert_eq!(fresh_query("Starfall Requiem price", "How much is the first one?", &rpg), "Starfall Requiem price");
-        assert_eq!(fresh_query("Starfall Requiem price UK", "And how much is it in the UK?", &rpg), "Starfall Requiem price UK");
-        assert_eq!(fresh_query("Grok subscription price UK", "and in pounds?", &earlier), "Grok subscription price UK");
+        let rpg_own = [rpg[0]];
+        assert_eq!(fresh_query("Starfall Requiem price", "How much is the first one?", &rpg, &rpg_own), "Starfall Requiem price");
+        assert_eq!(fresh_query("Starfall Requiem price UK", "And how much is it in the UK?", &rpg, &rpg_own), "Starfall Requiem price UK");
+        assert_eq!(fresh_query("Grok subscription price UK", "and in pounds?", &earlier, &own), "Grok subscription price UK");
         // Nothing to leave out.
-        assert_eq!(fresh_query("Grok subscriptions", q2, &earlier), "Grok subscriptions");
+        assert_eq!(fresh_query("Grok subscriptions", q2, &earlier, &own), "Grok subscriptions");
+    }
+
+    // A tester's voice chat (2026-10-23; the town here is fictional): the
+    // Voice Assistant heard the town the second time as "kelp", the model
+    // searched for the town as first said, and the guard took it out —
+    // "weather Fellshire today", county-wide storm news for one town.
+    #[test]
+    fn a_misheard_word_the_person_said_before_stays_in_the_search() {
+        let q1 = "Can you tell me the weather today in Kellbrook? I might walk over the hills this afternoon.";
+        let q2 = "Hmm. Look up the weather kelp for me today.";
+        let model_query = "weather Kellbrook Fellshire today";
+        // The first question was still being answered: only it came before.
+        assert_eq!(fresh_query(model_query, q2, &[q1], &[q1]), model_query);
+        // …and the same once it had its answer (and the search behind it).
+        let answered = [q1, r#"{"query":"weather Kellbrook today"}"#, "Kellbrook is mild today with sunny spells [1]."];
+        assert_eq!(fresh_query(model_query, q2, &answered, &[q1]), model_query);
+        // Heard as two words ("kel brook"): the same.
+        let q2b = "Look up the weather in kel brook for me today.";
+        assert_eq!(fresh_query("weather Kellbrook today", q2b, &[q1], &[q1]), "weather Kellbrook today");
+
+        // Only the person's own words: a name from the model's answer that
+        // the question doesn't have is still left out…
+        let q0 = "Can you tell me the weather today on the coast?";
+        let from_model = [q0, "Along the coast near Kellbrook it is mild today."];
+        assert_eq!(fresh_query(model_query, q2, &from_model, &[q0]), "weather Fellshire today");
+        // …only for a word the question has misheard (nothing like
+        // "cycling" sounds like the town: it goes)…
+        let other_town = "Can you look up the weather today in Ashford Vale for cycling?";
+        assert_eq!(
+            fresh_query("weather today Ashford Vale Kellbrook", other_town, &[q1], &[q1]),
+            "weather today Ashford Vale"
+        );
+        // …and only from a message about this subject too.
+        let unrelated = "Is there a farm shop in Kellbrook?";
+        let q3 = "Look up the forecast kelp for tomorrow.";
+        assert_eq!(fresh_query("forecast Kellbrook tomorrow", q3, &[unrelated], &[unrelated]), "forecast tomorrow");
+        // A filler the query leaves out is no misheard word: "okay" isn't
+        // the start of the "account" the person said before.
+        let billing = "Can you check the Grok subscriptions on my account?";
+        assert_eq!(
+            fresh_query("Grok subscription account", "Okay, look up Groc subscriptions plans.", &[billing], &[billing]),
+            "Grok subscription"
+        );
     }
 
     #[test]

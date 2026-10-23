@@ -1464,6 +1464,9 @@ async fn tool_loop(
         })
         .collect();
     let earlier: Vec<&str> = earlier.iter().map(String::as_str).collect();
+    // The person's own earlier messages: a word of theirs the model put in
+    // for a misheard one stays ("kelp" → "Kellbrook", `web::fresh_query`).
+    let own: Vec<&str> = history.iter().filter(|m| m["role"] == "user").filter_map(|m| m["content"].as_str()).collect();
 
     let mut rejected = 0u32;
     for _step in 0..MAX_TOOL_STEPS {
@@ -1556,7 +1559,7 @@ async fn tool_loop(
                 // The forced first search: for this question, not words
                 // carried over from earlier ones.
                 if forced {
-                    let fresh = crate::web::fresh_query(&q, question, &earlier);
+                    let fresh = crate::web::fresh_query(&q, question, &earlier, &own);
                     if fresh != q {
                         tracing::info!(words_before = q.split_whitespace().count(), words_after = fresh.split_whitespace().count(), "Chat: earlier words left out of the forced search");
                         crate::eval::post_fix("fresh_query");
@@ -2624,6 +2627,53 @@ mod tests {
         assert!(asked.contains(MUST_SEARCH_NOTE) && asked.ends_with("</context>\n\nWhat's the latest Python?"), "{asked}");
         assert_eq!(chat[1]["messages"][1], chat[0]["messages"][1], "the same message on the next step");
         assert!(!chat[0]["messages"][0]["content"].as_str().unwrap().contains("2026"), "no clock in the system prompt");
+    }
+
+    /// A tester's voice chat (2026-10-23; the town is fictional): the
+    /// Voice Assistant's second question heard the town as "kelp"; the
+    /// model's forced search named the town as the person first said it,
+    /// and the guard against earlier words cut it out. The person's own
+    /// earlier question, from the history, keeps it in.
+    #[tokio::test]
+    async fn a_forced_search_keeps_the_town_the_person_named_before_misheard_now() {
+        let exa = json!({ "results": [{ "title": "Kellbrook weather", "url": "https://weather.example/kellbrook", "highlights": ["Kellbrook: dry, 14°C."] }] });
+        let fake = fake_server(
+            vec![
+                calls(&[("web_search", json!({ "query": "weather Kellbrook Fellshire today" }))]),
+                json!({ "role": "assistant", "content": "Kellbrook stays dry today, around 14°C [1]." }),
+            ],
+            exa,
+        );
+        let settings =
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None };
+        let endpoints = crate::web::Endpoints { exa: format!("{}/exa", fake.base), tavily: String::new(), standin: None, offline: false };
+        let first = "Can you tell me the weather today in Kellbrook? I might walk over the hills.";
+        let question = "Hmm. Look up the weather kelp for me today.";
+        // The first question was still unanswered: it alone came before.
+        let history = vec![json!({ "role": "user", "content": first })];
+        let mut turn = crate::web::Turn::new(settings, endpoints, question, &[first]);
+        let (reply, chips) = run_tool_loop(
+            "You are helpful.",
+            &history,
+            question,
+            &[],
+            &format!("{}/v1", fake.base),
+            "",
+            "fake-chat",
+            "custom",
+            false,
+            false,
+            &|_| {},
+            Some(&mut turn),
+            FirstStep::MustSearch,
+        )
+        .await
+        .expect("an answer");
+        assert_eq!(reply, "Kellbrook stays dry today, around 14°C [1].");
+        assert_eq!(chips, ["Searched the web: \"weather Kellbrook Fellshire today\""]);
+        let requests = fake.requests.lock().unwrap().clone();
+        let (_, exa_body) = requests.iter().find(|(u, _)| u.starts_with("/exa/search")).expect("Exa asked");
+        assert_eq!(exa_body["query"], "weather Kellbrook Fellshire today");
     }
 
     /// The web tools' instructions and schemas, on top of a tool step's

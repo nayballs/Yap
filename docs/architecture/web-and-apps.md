@@ -78,7 +78,22 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   back at them: "Grok subscriptions check account" carried "check" from the
   question before, 2026-10-21 — its own query, with
   the conversation in mind: "Arsenal Football Club match tonight 21 October
-  2026 time"); a server that refuses or answers in words anyway gets **Yap's
+  2026 time"; then **`fresh_query`** takes out the words it carried over
+  anyway: a word earlier messages had and this question doesn't — not a
+  number, not a near-miss of the question's own, "Groc" → "Grok" — unless
+  the question points back or shares under two words with the query; **but
+  a word the person said before, misheard now, stays** (2026-10-23): the
+  Voice Assistant heard a tester's town the second time as "kelp", the
+  model searched "weather Kellbrook Fellshire today" — a fictional town and
+  county here — and the guard cut it to "weather Fellshire today",
+  county-wide storm news; now an earlier word stays when the person's **own** earlier message
+  (not the model's answers or searches; its asking — "can you check" — left
+  out, `search_query`) has it, that message shares a word with this one,
+  and this question has a word the query left out that sounds like it or
+  like its start (`fuzzy::sounds_like`: the same first sound, and a sound
+  distance ≤ 0.4 or the heard word's three or more sounds beginning it —
+  "kelp" / "Kellbrook" = "klp" / "klprk"; a filler like "okay" isn't the
+  start of "account")); a server that refuses or answers in words anyway gets **Yap's
   search instead** (`search_query(question)`: the asking — "can you check /
   look up / web search", "please", "for me" — left out sentence by sentence,
   a sentence of nothing else dropped; handed over as the call the

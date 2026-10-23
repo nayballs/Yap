@@ -275,19 +275,36 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `PageChannel`, an optional Tauri channel argument (`onStream`; Tauri's
   own `Channel` can't be left out, and the e2e suite's direct invokes
   don't send one — no channel, a whole answer as before). **Stop**
-  (`Stoppable`, `stream_stop {id}`, `unless_stopped`): the page sends a
-  `turnId`; ■ drops the turn's future, which closes the stream (llama.cpp
-  stops generating on a closed connection); `chat_turn` keeps what was
-  shown (`Watch`), checks it like any answer and saves it with `stopped:
-  true` (`chats::append_message`); nothing shown yet → the error
-  `stream::STOPPED`, the question kept (as after a failure). **Never
+  (`Stoppable`, `stream_stop {id}`, `unless_stopped` → `Halt`): the page
+  sends a `turnId`; ■ drops the turn's future, which closes the stream
+  (llama.cpp stops generating on a closed connection); `chat_turn` keeps
+  what was shown (`Watch`), checks it like any answer and saves it with
+  `stopped: true` (`chats::append_message`); nothing shown yet → the error
+  `stream::STOPPED`, the question kept (as after a failure). **A newer
+  question replaces an older one** (`Halt::Superseded`, 2026-10-23): every
+  `chat_turn` has a `Stoppable` (its own when no page sent one: the Voice
+  Assistant, an evaluation), and once its question is saved
+  (`Stoppable::answers(conversation)`, also in `app_turn`) it's the turn
+  answering that conversation — one still answering there ends the way ■
+  ends it, but with **nothing saved** (the error `stream::SUPERSEDED`): its
+  question stays, the model reads it with the newer one, and the pages
+  take its bubble away without an error. The newest question decides,
+  from any surface: the Voice Assistant's barge-in or follow-up, a
+  question typed in Chat while a spoken one is answered, one dictated into
+  Chat and sent by itself while Chat's answer comes (the page drops it
+  first: `stream_stop {id, superseded: true}`, then sends). A tester's voice
+  chat: the first question, set aside for the barge-in that asked the
+  second, was asked again after the second's answer, and chats.json had
+  both questions, then both answers. **Never
   slowing a dictation** (`Dictations`, a model on this PC only:
   `ai_model::runs_here`): a Chat stream is dropped when a **new**
   dictation starts during it (`NewDictations`: the dictations-started
   count moved — not one under way when the step began, which is the Voice
   Assistant's own question being finished), the page told it's waiting
   ("Waiting for your dictation to finish…"), and the step asked again once
-  the dictation is done (`meeting_summary::wait_idle`, ≤ 5 times); the
+  the dictation is done (`meeting_summary::wait_idle`, ≤ 5 times) — unless
+  that dictation was a newer question to the same conversation, which
+  supersedes the turn while it waits (above); the
   notepad's helpers keep their rule (`AnyDictation`, as
   `chat_beside_dictation`: wait one out first, drop the call whenever one
   is busy — `chat_beside_dictation_live`). The sidecar's Busy guard
@@ -334,11 +351,13 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   updated if under `RECENT_SECS` (30 min) — so pressing again asks a
   follow-up — else a new one; then `commands::chat_turn` (the Chat view's
   own turn: RAG, tools, `voice: true`), `yap-assistant-turn {phase:
-  asked|answered|failed|open, conversationId, show}` for the main window
-  (`show` = the window was in front: ControlPanel brings Chat up on it).
+  asked|answered|failed|superseded|open, conversationId, userMessageId,
+  show}` for the main window (`show` = the window was in front:
+  ControlPanel brings Chat up on it; `userMessageId` = which question).
   **Streamed** (`Streamed`, a `stream::Sink`, 2026-10-22): the Chat view
   follows the answer as it's written (`yap-assistant-stream
-  {conversationId, event}`), and the voice **starts at its first whole
+  {conversationId, userMessageId, event}`: an older question's events never
+  land in a newer one's bubble), and the voice **starts at its first whole
   sentence** (`tts::speak_streamed` → a `tts::Feed`; `tts::ready_sentences`:
   the first block's sentences, never the one still being written, at most
   `STREAM_SAY` = 2 while it's written — the short version's), the capsule
@@ -350,7 +369,14 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   back to "$8"). The answer's id is known before it's saved (the question's
   index + 1). Barge-in, ■, a newer question, a meeting starting: the voice
   stops and no more goes in (`Feed::push` says so); a meeting started
-  meanwhile leaves the answer on its card for a reading time.
+  meanwhile leaves the answer on its card for a reading time. **A newer
+  question in the same conversation** (a barge-in or follow-up asked while
+  the last answer is still coming — or still waiting out that very
+  question's recording, as a model on this PC does) **replaces** the older
+  turn once it's saved (`stream::Halt::Superseded`, above): no answer saved
+  for it, nothing more said (its feed closed, its voice stopped if it's
+  still the one speaking), no alert, `yap-assistant-turn {phase:
+  superseded}`.
   **`reply(meeting, interrupted)`** (pure): always **spoken** (whatever
   "Speak replies" / "When to speak" say), except when a meeting or call
   started while the answer was coming, or a dictation did → shown only; a
@@ -529,5 +555,18 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `streamingHeight`; nothing while motion is reduced) — an unchecked claim
   never stays after the end. A failure removes the streamed bubble with
   the question, as before. A question asked out loud streams the same way
-  while its conversation is open (`yap-assistant-stream`).
+  while its conversation is open (`yap-assistant-stream`). **A newer
+  question replaces the answer still coming** (2026-10-23): a question
+  dictated into the box and sent by itself (hands-free, "press enter")
+  while an answer comes no longer waits for it (`sendWhenFree` alone): the
+  page drops the answer first (`replaceAnswer` → `streamCall`'s
+  `supersede()`, `stream_stop {id, superseded: true}`) and sends at once; a
+  turn a newer question replaced — that, or one asked out loud — ends with
+  `SUPERSEDED`: its bubble goes, its question stays (with its saved id), no
+  toast, nothing handed back to the box. A spoken question's bubble is its
+  own (`spoken`), the send's carries its `turn`, and events and phases for
+  an older spoken question (`userMessageId` ≠ the one followed) are left
+  alone, so they never land in the newer one's bubble or end its
+  "Thinking…". A typed Enter still waits while an answer comes (type
+  ahead), as before.
   No semantic vectors yet (ROADMAP step 3).

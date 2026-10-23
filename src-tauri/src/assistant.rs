@@ -52,11 +52,22 @@
 //! a price in it waits for the check (`about_you::restore_price_signs` may
 //! change it). Barge-in, ■ and the meeting rule stop it as before.
 //!
+//! **A newer question replaces an older one** in the same conversation: a
+//! barge-in or follow-up asked while the last answer is still coming (or
+//! still waiting out that very question's recording, as a model on this PC
+//! does) ends the older turn once the newer question is saved — no answer
+//! is saved for it, nothing more of it is said (`stream::Halt::Superseded`,
+//! `commands::chat_turn`). Before, it was asked again after the newer one's
+//! answer, and both answers showed under both questions (a tester's voice
+//! chat, 2026-10-23).
+//!
 //! Events: `yap-assistant {phase, conversationId, messageId}` (the bar's
 //! capsule), `yap-assistant-turn {phase: asked | answered | failed |
-//! open, conversationId, text, show}` (the main window: `show` = bring the
-//! Chat view up) and `yap-assistant-stream {conversationId, event}` (the
-//! Chat view follows the answer as it's written: a `stream::Event`).
+//! superseded | open, conversationId, userMessageId, text, show}` (the main
+//! window: `show` = bring the Chat view up; `userMessageId` = which question,
+//! "chat:<conversation>:<index>") and `yap-assistant-stream {conversationId,
+//! userMessageId, event}` (the Chat view follows the answer as it's written:
+//! a `stream::Event`).
 
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -408,6 +419,9 @@ struct Streamed {
 #[derive(Default)]
 struct Speaking {
     conversation: Option<u64>,
+    /// The question's id ("chat:<conversation>:<index>"): the Chat view
+    /// follows this question's answer, not an older one's.
+    question_id: Option<String>,
     /// The answer's id, as it will be saved ("chat:<conversation>:<index>").
     message_id: Option<String>,
     feed: Option<std::sync::Arc<crate::tts::Feed>>,
@@ -515,7 +529,10 @@ impl Streamed {
 
 impl crate::stream::Sink for Streamed {
     fn send(&self, ev: crate::stream::Event) {
-        let conversation = self.lock().conversation;
+        let (conversation, question) = {
+            let st = self.lock();
+            (st.conversation, st.question_id.clone())
+        };
         if let crate::stream::Event::Chips { web, .. } = &ev {
             self.lock().web = *web;
         }
@@ -524,7 +541,10 @@ impl crate::stream::Sink for Streamed {
                 self.speak_ready(text);
             }
         }
-        let _ = self.app.emit(STREAM, serde_json::json!({ "conversationId": conversation, "event": ev }));
+        let _ = self.app.emit(
+            STREAM,
+            serde_json::json!({ "conversationId": conversation, "userMessageId": question, "event": ev }),
+        );
     }
 }
 
@@ -569,6 +589,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
         {
             let mut st = streamed.lock();
             st.conversation = Some(conv);
+            st.question_id = Some(format!("chat:{conv}:{index}"));
             st.message_id = Some(format!("chat:{conv}:{}", index + 1));
         }
         let _ = asked_app.emit(
@@ -593,12 +614,34 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
         None,
     )
     .await;
-    let (feed, said, carded_early) = {
+    let (feed, said, carded_early, question_id, answer_id) = {
         let st = streamed.lock();
-        (st.feed.clone(), st.said, st.carded)
+        (st.feed.clone(), st.said, st.carded, st.question_id.clone(), st.message_id.clone())
     };
     let turn = match turn {
         Ok(turn) => turn,
+        // A newer question in its conversation replaced it (a barge-in, a
+        // follow-up, Chat): nothing saved, nothing more said, no alert —
+        // the newer question is the one being answered. The Chat view
+        // takes its bubble away.
+        Err(e) if e == crate::stream::SUPERSEDED => {
+            if let Some(feed) = &feed {
+                feed.close();
+                // Still saying what it had of this answer: not any more
+                // (the newer answer's voice is its own).
+                if answer_id.is_some() && crate::tts::speaking_id() == answer_id {
+                    crate::tts::stop();
+                }
+            }
+            tracing::info!("Voice Assistant: a newer question replaced this one");
+            let conv = streamed.lock().conversation;
+            let _ = app.emit(
+                TURN,
+                serde_json::json!({ "phase": "superseded", "conversationId": conv, "userMessageId": question_id }),
+            );
+            give_up(&app, generation);
+            return;
+        }
         Err(e) => {
             // Half an answer said: it stops there.
             if let Some(feed) = &feed {
@@ -606,8 +649,11 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                 crate::tts::stop();
             }
             tracing::warn!("Voice Assistant: no answer ({e})");
-            let conv = lock().conversation;
-            let _ = app.emit(TURN, serde_json::json!({ "phase": "failed", "conversationId": conv, "error": e }));
+            let conv = streamed.lock().conversation.or(lock().conversation);
+            let _ = app.emit(
+                TURN,
+                serde_json::json!({ "phase": "failed", "conversationId": conv, "userMessageId": question_id, "error": e }),
+            );
             if current(generation) {
                 crate::alert::show_soon(&app, failed_alert(&e));
             }
@@ -621,6 +667,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
         serde_json::json!({
             "phase": "answered",
             "conversationId": turn.conversation_id,
+            "userMessageId": format!("chat:{}:{}", turn.conversation_id, turn.user_index),
             "messageId": message_id,
             "show": focused,
         }),

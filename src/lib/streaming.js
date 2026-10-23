@@ -4,10 +4,13 @@
 // - `streamCall(cmd, args, onEvent)` invokes a command with a Tauri channel
 //   (`onStream`) and a stop id (`turnId`): each event the backend streams
 //   reaches `onEvent`, `stop()` is the ■ (the stream closes; a model on this
-//   PC stops generating), and the promise ends with the command's own answer
-//   — the CHECKED one (honesty checks: no made-up sources list, no claimed
-//   search, no citation with nothing behind it), which the page puts in
-//   place of what streamed.
+//   PC stops generating), `supersede()` drops it for a newer question the
+//   page sends next (nothing saved: the promise fails with SUPERSEDED), and
+//   the promise ends with the command's own answer — the CHECKED one
+//   (honesty checks: no made-up sources list, no claimed search, no
+//   citation with nothing behind it), which the page puts in place of what
+//   streamed. A newer question in the same conversation from anywhere (the
+//   Voice Assistant) ends it with SUPERSEDED too (stream.rs `Halt`).
 // - `liveAnswer()` / `applyEvent()`: the streamed bubble's state from the
 //   events (`text`: the answer so far, whole; `tool`: a tool call began —
 //   its chip "Searching the web…"; `chips`: the tools done and the web
@@ -28,8 +31,15 @@ let seq = 0;
 export const STOPPED = 'Stopped before the answer began.';
 
 /**
- * Invoke `cmd` streamed: `onEvent(ev)` hears each event, `stop()` ends it.
- * Returns `{ promise, stop, turnId }`.
+ * What a turn a newer question in its conversation replaced comes back as
+ * (stream.rs SUPERSEDED): no answer saved, the question kept.
+ */
+export const SUPERSEDED = 'A newer question replaced this one.';
+
+/**
+ * Invoke `cmd` streamed: `onEvent(ev)` hears each event, `stop()` ends it
+ * (what came is kept), `supersede()` drops it for a newer question.
+ * Returns `{ promise, stop, supersede, turnId }`.
  */
 export function streamCall(cmd, args, onEvent) {
   const turnId = `t${Date.now().toString(36)}-${++seq}`;
@@ -43,7 +53,8 @@ export function streamCall(cmd, args, onEvent) {
   };
   const promise = invoke(cmd, { ...args, onStream: channel, turnId });
   const stop = () => invoke('stream_stop', { id: turnId }).catch(() => false);
-  return { promise, stop, turnId };
+  const supersede = () => invoke('stream_stop', { id: turnId, superseded: true }).catch(() => false);
+  return { promise, stop, supersede, turnId };
 }
 
 /** A streamed answer's state before anything came. */
