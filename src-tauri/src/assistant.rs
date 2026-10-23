@@ -14,7 +14,9 @@
 //!    dictation key does (`Pipeline::on_assistant_key`: toggle, or
 //!    push-to-talk with the double-tap lock; a press while Yap speaks stops
 //!    the voice first — barge-in). The bar's capsule shows its assistant
-//!    variant ("Ask Yap…").
+//!    variant ("Ask Yap…"). Once you've said something, a pause ends it as
+//!    a second press would ("Stop listening when I pause", `pause.rs`;
+//!    never under a held push-to-talk key).
 //! 2. **Thinking** ([`heard`]): on stop the warm STT engine transcribes it
 //!    and the correction dictionary runs (`pipeline.rs`); the question goes
 //!    to Chat — the conversation open in the Chat view, else the last one if

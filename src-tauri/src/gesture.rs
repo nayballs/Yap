@@ -106,6 +106,14 @@ impl Gesture {
         self.state
     }
 
+    /// The recording is locked hands-free (a double-tap, or one started
+    /// elsewhere and followed): nobody's holding it with the key, so the
+    /// Voice Assistant's pause may end it (`pause.rs`). A hold, or a tap
+    /// still waiting for its second press, isn't.
+    pub fn hands_free(&self) -> bool {
+        matches!(self.state, State::LockHeld | State::Locked)
+    }
+
     /// Back to idle (toggle mode, or a start that was refused).
     pub fn reset(&mut self) {
         self.state = State::Idle;
@@ -297,6 +305,24 @@ mod tests {
         assert_eq!(r.g.state(), State::Idle);
         // And the next press is a fresh hold.
         assert_eq!(r.press(400_000), act(Action::Start));
+    }
+
+    #[test]
+    fn only_a_locked_recording_is_hands_free() {
+        // What the Voice Assistant's pause asks before it ends a question:
+        // never under a held key, nor a tap that may still become a lock.
+        let mut r = Rig::new();
+        assert!(!r.g.hands_free());
+        r.press(0);
+        assert!(!r.g.hands_free(), "held");
+        r.release(100);
+        assert!(!r.g.hands_free(), "a tap waiting for its second press");
+        r.press(300);
+        assert!(r.g.hands_free(), "the second press, still down");
+        r.release(400);
+        assert!(r.g.hands_free(), "locked");
+        r.press(5_000);
+        assert!(!r.g.hands_free(), "stopped");
     }
 
     #[test]

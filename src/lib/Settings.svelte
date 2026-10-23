@@ -1882,7 +1882,9 @@
               label="Assistant shortcut"
               desc={cfg.recordingMode === 'pushToTalk'
                 ? 'Hold it while you ask, or double-tap it to ask hands-free. It never types into your app'
-                : 'Press it, ask, press it again. It never types into your app'}
+                : cfg.assistantStopOnPause
+                  ? 'Press it and ask: Yap stops listening when you pause. It never types into your app'
+                  : 'Press it, ask, press it again. It never types into your app'}
               hint="Press it while Yap speaks to cut in. Answers are read aloud with Speak replies on, and shown on the Yap bar otherwise. Paused during meetings and calls."
               setting="assistant-shortcut"
             >
@@ -1893,6 +1895,18 @@
                 <p class="set-note">Set an assistant shortcut to ask Yap from any app, even while its window is closed.</p>
               </Row>
             {/if}
+            <!-- "Stop listening when I pause" (pause.rs): a pause after the
+                 question ends it, as a second press would. -->
+            <Row setting="stop-on-pause">
+              <Toggle
+                bind:checked={cfg.assistantStopOnPause}
+                label="Stop listening when I pause"
+                desc={cfg.recordingMode === 'pushToTalk'
+                  ? 'Asking hands-free (a double-tap), a pause after your question sends it'
+                  : "A pause after your question sends it, so you needn't press the shortcut again"}
+                hint="A second and a half of quiet once you've said something; the Yap bar shows it running out. Before you start talking, Yap waits as long as you need. The shortcut still ends it at once, and while you hold it down, letting go does."
+              />
+            </Row>
             <Row setting="answer-card">
               <Toggle
                 bind:checked={cfg.assistantAnswerCard}

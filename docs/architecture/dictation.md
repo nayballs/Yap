@@ -168,7 +168,18 @@ to **Run again** from Home.
   `run_stt` hands its transcript, after `apply_corrections` only, to
   `assistant::heard` (`ask_assistant`): no cleanup, Command, paste or
   history; nothing heard → "Yap didn't catch a question"; a cancel isn't
-  kept for Undo; every early end calls `assistant::nothing`.
+  kept for Undo; every early end calls `assistant::nothing`. **A pause ends
+  the assistant's question** ("Stop listening when I pause",
+  `assistant_stop_on_pause`, on; [chat-and-assistant.md](./chat-and-assistant.md),
+  `pause.rs`): `start_recording` arms a `PauseSlot` for the session
+  (`arm_pause`, an assistant recording only), `take_audio` feeds it the
+  mic's audio, `fire_pending_start` says "speak now", `stream_partials`
+  hands it each tick's words (`pause_words`, with the buffer length the
+  tick read), and `spawn_pause_watch` stops the recording on its verdict
+  as the key would — in toggle mode, or push-to-talk locked hands-free
+  (`gesture::hands_free`), never under a held key. Dictation itself never
+  ends on a pause. `stop_and_transcribe` does nothing for a recording
+  that's already stopped (a press racing the pause).
   **Barge-in**: `start_recording` first calls `tts::stop_for_dictation()` —
   a spoken reply stops before anything records, and if Yap was audible in
   the last ~450 ms the pre-roll is left out (it would hold Yap's voice).
@@ -249,7 +260,9 @@ to **Run again** from Home.
   with), Start / Stop / Discard / Lock + an optional hint + "tick me in N ms"
   out. States Idle → Held → (TapPending → LockHeld → Locked). `TAP_MAX_MS` 300,
   `DOUBLE_TAP_GAP_MS` 500, `LONG_HOLD_MS` 60 s. Every call is told whether a
-  dictation records right now and follows that first. Unit-tested.
+  dictation records right now and follows that first. `hands_free()`:
+  locked (LockHeld / Locked), what the Voice Assistant's pause asks before
+  it ends a question. Unit-tested.
 - **`coaching.rs`** — push-to-talk coaching hints: a lone tap → "Hold {key} while
   you talk" (or double-tap for hands-free), a minute-long hold → "Double-tap
   {key} for hands-free". Each ≤ 3 times, never within 10 min of another, none

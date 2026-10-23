@@ -144,6 +144,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `tools.rs` / `note_text.rs` — the tool loop: note tools (safe partial edits), apps, web (a local model must search first), safety rule.
 - `stream.rs` — streaming answers: SSE from every provider (tool calls reassembled and checked, a whole answer when streaming fails), a step's text held until it's an answer, ■ Stop, a newer question in the conversation replacing the turn still answering, a local stream stepping aside for a dictation; the checked answer replaces what streamed.
 - `assistant.rs` — the Voice Assistant: ask Chat out loud from any app, spoken from the answer's first sentence; off during meetings.
+- `pause.rs` — "Stop listening when I pause": a 1.5 s pause ends a Voice Assistant question (the mic's level against a learned noise floor, checked by the live preview's words; never before speech, never under a held key); pure.
 
 **Memory** — [memory.md](./docs/architecture/memory.md)
 - `memory.rs` (+ `memory/`) — what Yap remembers about you (`memory.json`): learned from quiet chats and meetings (a model without tools by the careful small path, `memory/small.rs`), sent with questions, remember/forget/search_chats tools, names for dictation, export, Undo.

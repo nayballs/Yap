@@ -403,7 +403,66 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   The bar's capsule shows while `phase != Idle`, the bar on or off.
   Debug-only `e2e_assistant_ask {text, listenMs}` (`Robot::ask_assistant`:
   the press's own steps — barge-in, the target, "recording" for
-  `listenMs` — with `text` as the transcript).
+  `listenMs` — with `text` as the transcript). **A pause ends the
+  question** (`pause.rs`, below; 2026-10-23): no second press needed.
+- **`pause.rs`** — **"Stop listening when I pause"** (Settings → Voice
+  Assistant, `assistant_stop_on_pause`, on; 2026-10-23, after a log where
+  the maintainer asked a question in 2.5 s, waited 6 s in silence, and his
+  grumble became part of the question). Once you've said something to the
+  Voice Assistant, a pause of **1.5 s** (`PAUSE_MS`) ends the question as
+  a second press would: the stop chime, the transcription, the answer.
+  **Never before you've spoken**, never under a held push-to-talk key
+  (letting go ends it): toggle mode and the double-tap lock only
+  (`gesture::hands_free`). Dictation never ends by itself. Pure, timed in
+  audio (samples), never on the clock, unit-tested like `gesture.rs`:
+  `Pause::new(at)` (the buffer's length: the pre-roll), `speak_now` (the
+  start chime: `fire_pending_start`), `audio(samples)` (`take_audio`),
+  `words(covered, text)` (each live-preview tick, `stream_partials`), and
+  `verdict()` → `Listen | Ending {left_ms} | End(Pause | NoNewWords)`.
+  **The signal**: the mic's level, 20 ms frames (RMS, dBFS) against a
+  **noise floor** the room teaches it — down fast in the quiet between
+  words, up slowly (`FLOOR_RISE_DB_PER_S` 4) under a sound that stays, so
+  a fan, a hum or steady music becomes the floor while speech, which dips,
+  doesn't; speech = `MARGIN_DB` (10) over the floor and ≥ `SPEECH_MIN_DB`
+  (−50, OpenWhispr's speech gate: RMS 0.003); digital silence teaches it
+  nothing; a sound counts from `ONSET_MS` (60: clicks and keys don't);
+  nothing counts for `SETTLE_MS` (400) after "speak now" (the chime); a
+  pause can end it once `HEARD_MS` (300) of speech was heard. **Checked by
+  the live preview's words** while it runs (`partials.rs`, on by default):
+  no words yet ("", `[BLANK_AUDIO]`, `(music)` — `word_count`) → a pause
+  ends nothing (a cough, a door); more words than ever in a stretch the
+  level called quiet = a voice it missed, the pause counts from there; and
+  **no new words for `STALL_MS` (4 s) of audio** ends it though the level
+  never went quiet (music, a TV, a noise not learned yet) — only once the
+  words grew twice. **Why the level and not a VAD model**: Handy's Silero
+  (via ONNX) is a model to ship or download, absent from the stub build,
+  and says "voice", not "finished"; the level never ends a question early
+  because of noise (noise only keeps it open; the shortcut still ends it),
+  and the words catch what it can't. **Why 1.5 s**: none of Handy (Silero
+  VAD, 450 ms hangover, only trims silence), FluidVoice (a level meter's
+  noise gate) or OpenWhispr (stops on the key; its only silence setting is
+  the 600 ms server VAD it asks of OpenAI's Realtime API to cut a live
+  transcript into turns) ends a recording on a pause; 600 ms would cut a
+  question at its first thinking pause, and 1.5 s ends one promptly while
+  letting a short "um" pause through. **What it can't tell**: a sound the
+  floor first takes for talk and then learns (music that starts as you
+  start listening) can end it before you speak when the preview is off,
+  or when a model makes words up from it; the preview's words otherwise
+  hold it. **In the pipeline**: `arm_pause` (`start_recording`, an
+  assistant recording with the setting on: a `PauseSlot` for its session),
+  `spawn_pause_watch` (thread `assistant-pause`, every 50 ms: `End` →
+  `stop_and_transcribe` under the gesture lock — which now does nothing
+  for a recording already stopped, so a press at the same moment can't
+  stop it twice; `Ending` → `yap-assistant-pause {leftMs}` once, `Listen`
+  after it → `{leftMs: null}`), logged as "Voice Assistant: you paused, so
+  the question ends" with the reason and how much was heard (no text).
+  **The bar**: an amber hairline at the capsule's foot runs down over the
+  last second (`.pauseline`, `dictation.pauseMs`; it moves with Motion
+  reduced: it says how long is left). Debug-only `e2e_assistant_audio
+  {parts, press, noiseDb}` (`e2e.rs` → `Robot::ask_assistant_audio`):
+  tones, quiet and WAVs over a room's hiss played in the mic's place, the
+  shortcut pressed through the real key path (`toggle | hold |
+  handsFree`) → `{endedByItself, listenedMs}`.
 
 ## The Chat view
 

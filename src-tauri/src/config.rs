@@ -549,6 +549,14 @@ pub struct YapConfig {
     /// lost (`assistant::card_on_bar`). On by default.
     #[serde(default = "default_true")]
     pub assistant_answer_card: bool,
+    /// "Stop listening when I pause" (Settings → Voice Assistant,
+    /// `pause.rs`): once you've said something to the Voice Assistant, a
+    /// pause ends the question as a second press of its shortcut would —
+    /// never before you've spoken, and never while push-to-talk's key is
+    /// held (letting go ends it). Dictation never ends by itself. On by
+    /// default.
+    #[serde(default = "default_true")]
+    pub assistant_stop_on_pause: bool,
     /// "Let Yap open apps when you ask" (Settings → Voice Assistant → Opening
     /// apps; `apps.rs`): "open Spotify" in Chat or to the Voice Assistant
     /// opens an app from the Start menu's list of apps installed on this PC
@@ -997,6 +1005,7 @@ impl Default for YapConfig {
             speak_when: default_speak_when(),
             talk_back_hands_free: true,
             assistant_answer_card: true,
+            assistant_stop_on_pause: true,
             open_apps: true,
             apps_blocked: Vec::new(),
             app_nicknames: Vec::new(),
