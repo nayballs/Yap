@@ -138,6 +138,10 @@ pub fn rule(kind: &str) -> Rule {
         // "Stop asking about calls?": after a prompt, never during a
         // dictation.
         "calls-fatigue" => Rule { hold_dictation: true, max_wait_ms: None, ..alert },
+        // "Yap closed during a meeting" (meeting_audio.rs), at the next
+        // start: not over a dictation or a meeting going on, and as long as
+        // it takes (the note says it too).
+        "meetingRecovery" => Rule { hold_dictation: true, hold_meeting: true, max_wait_ms: None, ..alert },
         // The Voice Assistant's answer (assistant.rs): the person just asked
         // for it, so it shows at once — over a meeting too (that's when it
         // isn't read aloud) — and steps aside only for a question against

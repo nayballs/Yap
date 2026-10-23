@@ -211,6 +211,13 @@ pub(crate) struct Captured {
     /// device's audio and the silence filled in) also goes to the engine,
     /// so its clock is this one (`diarize.rs`).
     tee: Option<crate::diarize::Tee>,
+    /// The audio on its way to disk (`meeting_audio.rs`): everything
+    /// appended here — dictations blanked, gaps filled — that its writer
+    /// hasn't taken yet, so the file is this side's session clock exactly.
+    /// `None` while no audio is kept.
+    disk: Option<Vec<f32>>,
+    /// Where dictations began that the disk's writer hasn't noted yet.
+    disk_spans: Vec<u64>,
 }
 
 /// One source's audio, shared by its capture and the worker.
@@ -226,6 +233,18 @@ impl Captured {
             talk: 0,
             gate,
             tee: None,
+            disk: None,
+            disk_spans: Vec::new(),
+        }
+    }
+
+    /// A side read back from disk, from session position `start` on
+    /// ([`replay`]): no device, no dictation gate.
+    fn replayed_from(start: u64) -> Self {
+        Captured {
+            start,
+            real_end: start,
+            ..Captured::new(None)
         }
     }
 
@@ -250,10 +269,22 @@ impl Captured {
     /// was dropped.
     fn push(&mut self, samples: &[f32], dictation: Option<(u64, bool)>) -> bool {
         let end = self.end();
-        let blank = match (self.gate.as_mut(), dictation) {
-            (Some(gate), Some(state)) => gate.before_push(state, &mut self.samples, end),
-            _ => false,
+        let (blank, began) = match (self.gate.as_mut(), dictation) {
+            (Some(gate), Some(state)) => {
+                let was_open = gate.open.is_some();
+                let blank = gate.before_push(state, &mut self.samples, end);
+                (blank, gate.open.filter(|_| !was_open))
+            }
+            _ => (false, None),
         };
+        // A dictation began: its pre-roll, just blanked in the buffer, is
+        // still waiting for the disk too (its writer holds that much back).
+        if let (Some(from), Some(disk)) = (began, self.disk.as_mut()) {
+            let k = ((end - from) as usize).min(disk.len());
+            let n = disk.len();
+            disk[n - k..].fill(0.0);
+            self.disk_spans.push(from);
+        }
         let fits = self.samples.len() + samples.len() <= MAX_BUFFER_SAMPLES;
         if fits {
             let n = samples.len();
@@ -261,6 +292,13 @@ impl Captured {
                 self.samples.resize(self.samples.len() + n, 0.0);
             } else {
                 self.samples.extend_from_slice(samples);
+            }
+            if let Some(disk) = self.disk.as_mut() {
+                if blank {
+                    disk.resize(disk.len() + n, 0.0);
+                } else {
+                    disk.extend_from_slice(samples);
+                }
             }
             if let Some(tee) = &self.tee {
                 if blank {
@@ -298,6 +336,9 @@ impl Captured {
         self.samples.resize(self.samples.len() + n, 0.0);
         if let Some(tee) = &self.tee {
             tee.silence(n);
+        }
+        if let Some(disk) = self.disk.as_mut() {
+            disk.resize(disk.len() + n, 0.0);
         }
     }
 
@@ -616,6 +657,42 @@ pub(crate) fn keep_in_step(a: &AudioBuf, b: &AudioBuf) {
             c.fill_if_stalled(a_end);
         }
     }
+}
+
+// ---- Keeping the audio on disk ----
+//
+// `meeting_audio.rs` writes each side to a file as it's captured. The push
+// path above copies every sample it appends (dictations blanked, gaps
+// filled) to the side's `disk` queue; the writer takes it from there every
+// half second. It holds the mic's newest [`DICTATION_LOOKBACK`] back, so a
+// dictation starting now still blanks its pre-roll on disk too.
+
+/// From now on, keep what this side appends for the disk (before its first
+/// sample: the file is the session clock from 0).
+pub(crate) fn keep_on_disk(buf: &AudioBuf) {
+    if let Ok(mut c) = buf.lock() {
+        c.disk = Some(Vec::new());
+    }
+}
+
+/// Stop keeping this side for the disk (its writer gave up).
+pub(crate) fn drop_disk(buf: &AudioBuf) {
+    if let Ok(mut c) = buf.lock() {
+        c.disk = None;
+        c.disk_spans.clear();
+    }
+}
+
+/// What's waiting for the disk, and where dictations began since last
+/// asked: all of it at the end (`all`), else all but the mic's newest
+/// [`DICTATION_LOOKBACK`]. `None` when this side isn't kept.
+pub(crate) fn take_for_disk(buf: &AudioBuf, all: bool) -> Option<(Vec<f32>, Vec<u64>)> {
+    let mut c = buf.lock().ok()?;
+    let hold = if all || c.gate.is_none() { 0 } else { DICTATION_LOOKBACK };
+    let spans = std::mem::take(&mut c.disk_spans);
+    let disk = c.disk.as_mut()?;
+    let rest = disk.split_off(disk.len().saturating_sub(hold));
+    Some((std::mem::replace(disk, rest), spans))
 }
 
 // ---- Following the output device ----
@@ -976,9 +1053,8 @@ fn peak(samples: &[f32]) -> f32 {
 /// The meeting's attendees (from its calendar invite, or typed in) and the
 /// people its speaker map names, ahead of the dictionary's spellings, for the
 /// Whisper prompt: names come out spelled as the invite has them.
-fn with_attendees(dictionary: &[crate::config::DictionaryEntry]) -> Vec<crate::config::DictionaryEntry> {
-    let names = recording_note()
-        .and_then(crate::notes::get)
+fn with_attendees(note_id: u64, dictionary: &[crate::config::DictionaryEntry]) -> Vec<crate::config::DictionaryEntry> {
+    let names = crate::notes::get(note_id)
         .map(|n| crate::speakers::known_people(&n))
         .unwrap_or_default();
     names
@@ -996,7 +1072,7 @@ fn with_attendees(dictionary: &[crate::config::DictionaryEntry]) -> Vec<crate::c
 /// corrected text. Also the times of its words, when the model gives them
 /// (ms from the chunk's start, one per word of the corrected text:
 /// `speakers::word_times`), for the voice separation to split lines at.
-async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option<(String, Vec<(u64, u64)>)> {
+async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>, note_id: u64) -> Option<(String, Vec<(u64, u64)>)> {
     if samples.len() < MIN_CHUNK_SECS * RATE || peak(&samples) < SILENCE_PEAK {
         return None;
     }
@@ -1033,7 +1109,7 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option
     };
     let translate = cfg.translate_to_english;
     let dict_prompt =
-        crate::config::dictionary_prompt(&with_attendees(&crate::dict_usage::ranked(&crate::memory::with_names(&cfg.dictionary))));
+        crate::config::dictionary_prompt(&with_attendees(note_id, &crate::dict_usage::ranked(&crate::memory::with_names(&cfg.dictionary))));
 
     let slot = Arc::clone(engine_slot);
     let outcome = tokio::task::spawn_blocking(move || {
@@ -1082,13 +1158,31 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>) -> Option
 struct Source {
     buf: AudioBuf,
     loudness: Envelope,
+    /// The meeting's note (its attendees spell names for the model).
+    note_id: u64,
 }
 
 impl Source {
-    fn new(buf: AudioBuf) -> Self {
+    fn new(buf: AudioBuf, note_id: u64) -> Self {
         Source {
             buf,
             loudness: Envelope::default(),
+            note_id,
+        }
+    }
+
+    /// A side read back from disk from session position `start` on
+    /// ([`replay`]): its loudness frames numbered as the live worker's were.
+    fn replayed_from(start: u64, note_id: u64) -> Self {
+        let frame = ENV_FRAME as u64;
+        Source {
+            buf: Arc::new(Mutex::new(Captured::replayed_from(start))),
+            loudness: Envelope {
+                first: start / frame,
+                carry: vec![0.0; (start % frame) as usize],
+                ..Default::default()
+            },
+            note_id,
         }
     }
 
@@ -1100,7 +1194,7 @@ impl Source {
         let to = from + chunk.samples.len() as u64;
         self.loudness.push(&chunk.samples);
         let onset = from + speech_onset(&chunk.samples) as u64;
-        let (text, words) = match transcribe_chunk(engine_slot, chunk.samples).await {
+        let (text, words) = match transcribe_chunk(engine_slot, chunk.samples, self.note_id).await {
             Some((text, words)) => (Some(text), words),
             None => (None, Vec::new()),
         };
@@ -1444,6 +1538,10 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
     }
     let stop = Arc::new(AtomicBool::new(false));
     let overflow = Arc::new(AtomicBool::new(false));
+    // Both sides' audio kept on disk from their first sample
+    // (meeting_audio.rs): a crash loses nothing, and the meeting can be
+    // transcribed again later. `None`: it couldn't be (logged).
+    let recorder = crate::meeting_audio::Recorder::start(&app, note_id, &mic_buf, &sys_buf);
 
     let bufs = (Arc::clone(&mic_buf), Arc::clone(&sys_buf));
     let flags = (Arc::clone(&stop), Arc::clone(&overflow));
@@ -1455,12 +1553,20 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
     };
     #[cfg(not(debug_assertions))]
     let capture = spawn_device_capture(bufs.0, bufs.1, flags.0, flags.1);
-    capture?;
+    if let Err(e) = capture {
+        if let Some(r) = recorder {
+            r.discard();
+        }
+        return Err(e);
+    }
     // This recording's lines (from here on) get the engine's voices
     // (speakers::labels).
     crate::speakers::labels::begin(note_id, diarizer.as_ref().map(|d| d.id()));
 
     let started_ms = now_ms();
+    if let Some(r) = &recorder {
+        r.started(started_ms);
+    }
     let session = Session {
         note_id,
         started_ms,
@@ -1478,8 +1584,12 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
 
     // The chunk/transcribe worker.
     tauri::async_runtime::spawn(async move {
-        let mut you = Source::new(mic_buf);
-        let mut them = Source::new(sys_buf);
+        let mut you = Source::new(mic_buf, note_id);
+        let mut them = Source::new(sys_buf, note_id);
+        // How far each side is transcribed into the note (session
+        // position): the audio on disk past it is what a crash recovery
+        // transcribes.
+        let mut done = (0u64, 0u64);
         // What "them" said lately, for the echo check: (from, to, text) in
         // samples on the session clock.
         let mut theirs: VecDeque<(u64, u64, String)> = Default::default();
@@ -1512,6 +1622,7 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
             // a dictation marker by where the dictation began.
             let mut batch: Vec<(u64, TranscriptSegment)> = Vec::new();
             if let Some(h) = them.next(&engine_slot, stopping).await {
+                done.1 = h.to;
                 if let Some(text) = h.text.clone() {
                     let seg = h.line("them", text.clone(), at);
                     batch.push((h.onset, seg));
@@ -1522,6 +1633,7 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
                 }
             }
             if let Some(h) = you.next(&engine_slot, stopping).await {
+                done.0 = h.to;
                 for &from in &h.dictated {
                     tracing::info!(note_id, "Meeting: a dictation was left out of \"You\"");
                     batch.push((from, TranscriptSegment::dictation_marker(at(from))));
@@ -1544,6 +1656,9 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
             let batch = batch.into_iter().map(|(_, seg)| seg).collect();
             if let Err(e) = ingest(&app, note_id, batch) {
                 tracing::warn!("Meeting segments not saved: {}", e);
+            }
+            if let Some(r) = &recorder {
+                r.progress(done);
             }
             if !warned && overflow.load(Ordering::Relaxed) {
                 warned = true;
@@ -1585,6 +1700,12 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
             None => {}
         }
         crate::speakers::labels::end(&app, note_id);
+        // The audio's files closed: kept for the days Settings says, or
+        // deleted now that the transcript is done ("Keep meeting audio" off).
+        if let Some(r) = recorder {
+            let _ = tauri::async_runtime::spawn_blocking(move || r.finish()).await;
+            crate::meeting_audio::changed(&app, note_id);
+        }
 
         ACTIVE_NOTE.store(0, Ordering::SeqCst);
         {
@@ -1609,6 +1730,136 @@ pub fn stop() -> Result<(), String> {
             Ok(())
         }
         None => Err("No meeting is being recorded".to_string()),
+    }
+}
+
+// ---- Transcribing a recording again from its audio on disk ----
+//
+// `meeting_audio.rs` keeps each recording's two sides on disk. Crash
+// recovery (the part that never became lines) and "Transcribe again" (all
+// of it, on the speech model in use now) hand that audio back here, to the
+// live worker's own steps: the same cuts at quiet moments, the same engine
+// and correction dictionary, the echo check, each line placed on the
+// recording's clock and dated from when it started. The audio on disk has
+// dictations blanked already (the push path's silence), so they stay out;
+// their markers come back from where they began. A hotkey dictation made
+// meanwhile goes first: between chunks the replay waits for it.
+
+/// One side's audio read back from disk, in order.
+pub(crate) trait Feed: Send {
+    /// Up to `n` more samples; fewer (or none) at the end.
+    fn read(&mut self, n: usize) -> Vec<f32>;
+}
+
+/// What [`replay`] made of a recording's audio.
+#[derive(Debug, Default)]
+pub(crate) struct Replayed {
+    /// Its lines and dictation markers, in time order.
+    pub segments: Vec<TranscriptSegment>,
+    /// How far each side got (session positions, samples).
+    pub you_done: u64,
+    pub them_done: u64,
+}
+
+/// Wait while a hotkey dictation records, and a moment after one (its own
+/// transcription takes the warm engine first).
+async fn give_way_to_dictation(last: &mut u64) {
+    loop {
+        let (count, recording) = crate::pipeline::dictation_state();
+        if recording {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        } else if count != *last {
+            *last = count;
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        } else {
+            return;
+        }
+    }
+}
+
+/// Top `buf` up to `fill` samples from `feed` (nothing past its `end`).
+fn top_up(feed: &mut dyn Feed, buf: &AudioBuf, end: &mut bool, fill: usize) {
+    let have = buffered(buf);
+    if *end || have >= fill {
+        return;
+    }
+    let more = feed.read(fill - have);
+    if more.len() < fill - have {
+        *end = true;
+    }
+    if let Ok(mut b) = buf.lock() {
+        b.samples.extend_from_slice(&more);
+    }
+}
+
+/// Transcribe a recording of note `note_id` from its audio on disk, as the
+/// live worker would have (see above): `you` and `them` start at session
+/// positions `from`, the recording started at `started_ms` (unix ms), and
+/// `dictated` lists where hotkey dictations began (markers for those from
+/// `from.0` on). `progress(you, them)` after each step, in samples.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn replay(
+    engine_slot: &EngineSlot,
+    note_id: u64,
+    you: &mut dyn Feed,
+    them: &mut dyn Feed,
+    started_ms: u64,
+    from: (u64, u64),
+    dictated: &[u64],
+    progress: &(dyn Fn(u64, u64) + Send + Sync),
+) -> Replayed {
+    let mut mine = Source::replayed_from(from.0, note_id);
+    let mut call = Source::replayed_from(from.1, note_id);
+    let at = move |pos: u64| (started_ms + pos * 1000 / RATE as u64) / 1000;
+    let mut marks: Vec<u64> = dictated.iter().copied().filter(|&d| d >= from.0).collect();
+    marks.sort_unstable();
+    marks.dedup();
+    let mut marks = marks.into_iter().peekable();
+    // A chunk's worth and a bit, so each cut lands at a quiet moment as live.
+    let fill = (CHUNK_SECS + 1) * RATE;
+    let (mut you_end, mut them_end) = (false, false);
+    let mut theirs: VecDeque<(u64, u64, String)> = Default::default();
+    let mut out = Vec::new();
+    let mut done = from;
+    let mut dictations = crate::pipeline::dictation_state().0;
+    loop {
+        give_way_to_dictation(&mut dictations).await;
+        top_up(you, &mine.buf, &mut you_end, fill);
+        top_up(them, &call.buf, &mut them_end, fill);
+        let mut batch: Vec<(u64, TranscriptSegment)> = Vec::new();
+        if let Some(h) = call.next(engine_slot, them_end).await {
+            done.1 = h.to;
+            if let Some(text) = h.text.clone() {
+                batch.push((h.onset, h.line("them", text.clone(), at)));
+                theirs.push_back((h.from, h.to, text));
+                while theirs.len() > 4 {
+                    theirs.pop_front();
+                }
+            }
+        }
+        if let Some(h) = mine.next(engine_slot, you_end).await {
+            done.0 = h.to;
+            while let Some(m) = marks.next_if(|&m| m < h.to) {
+                batch.push((m, TranscriptSegment::dictation_marker(at(m))));
+            }
+            if let Some(text) = h.text.clone() {
+                let echo = sounds_like_echo(&mine.loudness, &call.loudness, h.from, h.to, &text, &theirs);
+                batch.push((h.onset, TranscriptSegment { echo, ..h.line("you", text, at) }));
+            }
+        }
+        batch.sort_by_key(|(onset, _)| *onset);
+        out.extend(batch.into_iter().map(|(_, seg)| seg));
+        progress(done.0, done.1);
+        let more = |end: bool, buf: &AudioBuf| !end || buffered(buf) > 0;
+        if !more(you_end, &mine.buf) && !more(them_end, &call.buf) {
+            break;
+        }
+    }
+    out.extend(marks.map(|m| TranscriptSegment::dictation_marker(at(m))));
+    Replayed {
+        segments: out,
+        you_done: done.0,
+        them_done: done.1,
     }
 }
 
@@ -1718,6 +1969,47 @@ mod tests {
 
     /// One 10 ms callback.
     const CALLBACK: usize = RATE / 100;
+
+    #[test]
+    fn the_disk_gets_the_meeting_as_transcribed_dictations_left_out() {
+        let buf: AudioBuf = Arc::new(Mutex::new(mic((0, false))));
+        keep_on_disk(&buf);
+        let push = |audio: &[f32], state: (u64, bool)| {
+            let mut c = buf.lock().unwrap();
+            for piece in audio.chunks(CALLBACK) {
+                assert!(c.push(piece, Some(state)));
+            }
+        };
+        // The writer takes what's there every so often, holding the
+        // newest pre-roll back.
+        let mut disk: Vec<f32> = Vec::new();
+        let mut spans = Vec::new();
+        let take = |all: bool, disk: &mut Vec<f32>, spans: &mut Vec<u64>| {
+            let (samples, s) = take_for_disk(&buf, all).unwrap();
+            disk.extend(samples);
+            spans.extend(s);
+        };
+        push(&tone(2.0), (0, false));
+        take(false, &mut disk, &mut spans);
+        assert_eq!(disk.len(), 2 * RATE - DICTATION_LOOKBACK, "the newest pre-roll held back");
+        push(&tone(1.0), (1, true)); // a dictation: its pre-roll blanked on disk too
+        take(false, &mut disk, &mut spans);
+        push(&tone(1.0), (1, false));
+        // A side that stalled is filled on disk as in the buffer.
+        buf.lock().unwrap().fill_if_stalled(5 * RATE as u64);
+        take(true, &mut disk, &mut spans);
+        let c = buf.lock().unwrap();
+        assert_eq!(disk.len(), c.samples.len(), "sample for sample the session clock");
+        assert_eq!(disk, c.samples);
+        let from = 2 * RATE - DICTATION_LOOKBACK;
+        assert!(silent(&disk[from..3 * RATE]));
+        assert!(loud(&disk[from - RATE / 10..from]));
+        assert_eq!(spans, vec![from as u64]);
+        drop(c);
+        // Stopped: nothing more for the disk.
+        drop_disk(&buf);
+        assert!(take_for_disk(&buf, true).is_none());
+    }
 
     #[test]
     fn a_dictation_goes_silent_with_its_pre_roll() {

@@ -1,9 +1,10 @@
 <script>
   // Settings → Meetings (2026-10-22 review, out of General; Wispr Flow's
   // Notetaker page and its order): Call detection (meeting_detect.rs), While
-  // a meeting records (meeting_guard.rs, capture.rs, diarize.rs), Notepad
-  // (notepad.rs) and Calendar (calendar.rs). The 12 call apps' switches
-  // live one level down, behind "Ask about calls in · 8 of 12 apps ›".
+  // a meeting records (meeting_guard.rs, capture.rs, diarize.rs), Meeting
+  // audio (meeting_audio.rs), Notepad (notepad.rs) and Calendar
+  // (calendar.rs). The 12 call apps' switches live one level down, behind
+  // "Ask about calls in · 8 of 12 apps ›".
   //
   //   cfg:  Settings' config $state (auto-save does the saving).
   //   goto: opens another Settings page.
@@ -20,6 +21,12 @@
   import { meetingDetect } from '../meetingDetect.svelte.js';
   import { calendar } from '../calendar.svelte.js';
   import { formatHotkeySpec } from '../hotkeys.js';
+  import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
+  import { onMount } from 'svelte';
+  import Button from '../ui/Button.svelte';
+  import { askConfirm } from '../ui/contextMenu.svelte.js';
+  import { toast } from '../ui/toast.svelte.js';
 
   let { cfg, goto = null, apps = $bindable(false) } = $props();
 
@@ -75,6 +82,63 @@
   const appsValue = $derived(
     meetingDetect.apps.length ? `${asking.length} of ${meetingDetect.apps.length} apps` : ''
   );
+
+  // Meeting audio kept on disk (meeting_audio.rs): { meetings, recordings, bytes }.
+  const AUDIO_DAYS = [
+    { value: 1, label: '1 day' },
+    { value: 7, label: '7 days' },
+    { value: 14, label: '14 days' },
+    { value: 30, label: '30 days' },
+    { value: 90, label: '90 days' },
+  ];
+  const daysOptions = $derived(
+    AUDIO_DAYS.some((o) => o.value === cfg.meetingAudioDays)
+      ? AUDIO_DAYS
+      : [...AUDIO_DAYS, { value: cfg.meetingAudioDays, label: `${cfg.meetingAudioDays} days` }]
+  );
+  let audio = $state(null);
+  async function loadAudio() {
+    try {
+      audio = await invoke('meeting_audio_status');
+    } catch {
+      audio = null;
+    }
+  }
+  onMount(() => {
+    loadAudio();
+    // A recording kept, a note deleted, old audio gone (meeting_audio.rs).
+    const un = listen('yap-meeting-audio', loadAudio);
+    return () => un.then((f) => f());
+  });
+  function size(bytes) {
+    const mb = bytes / (1024 * 1024);
+    if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+    return mb >= 1 ? `${mb.toFixed(mb >= 10 ? 0 : 1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+  const audioDesc = $derived.by(() => {
+    if (!audio) return 'Deletes the audio of every meeting';
+    if (!audio.recordings) return 'Nothing kept right now';
+    return `${audio.meetings} ${audio.meetings === 1 ? 'meeting' : 'meetings'} · ${size(audio.bytes)}`;
+  });
+  function clearAudio(e) {
+    const btn = e?.currentTarget;
+    askConfirm({
+      title: 'Delete all meeting audio?',
+      body: 'The audio Yap kept of your meetings goes from this PC. Their notes, transcripts and summaries stay; they can’t be transcribed again or played any more. A meeting recording now keeps its audio.',
+      confirmLabel: 'Delete audio',
+      busyLabel: 'Deleting…',
+      returnFocus: btn,
+      run: async () => {
+        try {
+          await invoke('meeting_audio_clear');
+          await loadAudio();
+        } catch (err) {
+          toast({ title: "Couldn't delete the audio", description: String(err), variant: 'destructive' });
+          return false;
+        }
+      },
+    });
+  }
 
   const shortcutDesc = $derived(
     cfg.meetingHotkey
@@ -205,6 +269,26 @@
         desc="Names for the voices, from what's said and who was invited. You confirm each one."
         hint="When someone says “Priya, can you…?” and a voice answers, Yap asks “Speaker 2 is Priya?”. When a meeting ends, the AI you use for meetings can suggest more, and Yap checks each against the transcript. Nothing listens to how anyone sounds."
       />
+    </Row>
+  </Group>
+
+  <!-- Meeting audio kept on disk (meeting_audio.rs): written as a meeting
+       records, so a crash loses nothing; kept to transcribe again and play. -->
+  <Group title="Meeting audio" id="settings-meeting-audio">
+    <Row setting="meeting-audio">
+      <Toggle
+        bind:checked={cfg.meetingKeepAudio}
+        label="Keep meeting audio"
+        desc="On this PC only, so you can transcribe a meeting again and play its lines"
+        hint="Yap saves it as the meeting records, so a crash loses nothing. Off, it's deleted as soon as the meeting is transcribed. Deleting a meeting note deletes its audio. Nothing is uploaded."
+        onchange={loadAudio}
+      />
+    </Row>
+    <Row label="Keep it for" desc="Then it's deleted. The notes and transcripts stay" setting="meeting-audio-days">
+      <Select bind:value={cfg.meetingAudioDays} options={daysOptions} ariaLabel="Keep meeting audio for" disabled={!cfg.meetingKeepAudio} />
+    </Row>
+    <Row label="Delete all meeting audio" desc={audioDesc} setting="clear-meeting-audio">
+      <Button variant="secondary" size="sm" disabled={!audio?.recordings} onclick={clearAudio}>Delete all…</Button>
     </Row>
   </Group>
 

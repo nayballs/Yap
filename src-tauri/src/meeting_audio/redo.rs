@@ -1,0 +1,293 @@
+//! **Transcribe again**: a meeting's new lines put in place of the old ones
+//! (pure, unit-tested; `meeting_audio::transcribe_again` runs it under the
+//! notes store's lock).
+//!
+//! What it keeps:
+//! - **lines it has no audio for**: a recording from before audio was kept,
+//!   or whose audio has gone (each recording's lines are those dated within
+//!   it), and every "You dictated here" marker (the audio has silence there;
+//!   the marker stays where it was);
+//! - **who said what, where the lines still match by time**: a new line
+//!   takes the voice (and the "I said who this is" lock) of the old line of
+//!   its side it overlaps most — at least half of the shorter of the two;
+//!   one that spans two old voices is split at its words where they change
+//!   (`speakers::split_line`), as the speaker engine's labels split lines.
+//!   The speaker map itself (the names) isn't touched;
+//! - **where each recording stopped** (`Note::breaks`): moved to the same
+//!   place among the new lines.
+//!
+//! The note's own text ("My thoughts") and its summary are fields this
+//! never sees. The rolling digests are dropped by the caller: they were
+//! written from the old lines, and "Generate summary" writes them again
+//! from the new ones.
+
+use crate::notes::TranscriptSegment;
+use crate::speakers::Turn;
+
+/// One recording of the meeting, transcribed again.
+#[derive(Debug, Clone, Default)]
+pub struct Redone {
+    /// When it started and when its audio ends (unix ms).
+    pub started_ms: u64,
+    pub end_ms: u64,
+    /// Its new lines (and markers for dictations no old line marked), in
+    /// time order.
+    pub lines: Vec<TranscriptSegment>,
+}
+
+/// The note's new transcript.
+#[derive(Debug, Default)]
+pub struct Rebuilt {
+    pub transcript: Vec<TranscriptSegment>,
+    pub breaks: Vec<usize>,
+    /// Old lines replaced, and new lines put in.
+    pub replaced: usize,
+    pub added: usize,
+    /// New lines that kept a voice other than their side's own.
+    pub voiced: usize,
+}
+
+/// Which recording a line dated `ts` (unix seconds, rounded down) belongs
+/// to: the latest to start that it falls within.
+fn recording_of(redone: &[Redone], ts: u64) -> Option<usize> {
+    let ms = ts * 1000;
+    redone.iter().rposition(|r| ms + 999 >= r.started_ms && ms <= r.end_ms + 1000)
+}
+
+/// How long two stretches overlap (ms).
+fn overlap(a: (u64, u64), b: (u64, u64)) -> u64 {
+    a.1.min(b.1).saturating_sub(a.0.max(b.0))
+}
+
+fn place(seg: &TranscriptSegment) -> Option<(u64, u64)> {
+    Some((seg.start_ms?, seg.end_ms?))
+}
+
+/// `line` with the voices of the old lines it matches by time (see above).
+fn with_voices(line: TranscriptSegment, olds: &[&TranscriptSegment]) -> Vec<TranscriptSegment> {
+    let Some(at) = place(&line).filter(|_| line.is_talk()) else {
+        return vec![line];
+    };
+    // A match: at least half the shorter of the two.
+    let matches = |o: &TranscriptSegment, at: (u64, u64)| {
+        place(o).is_some_and(|p| {
+            let shared = overlap(p, at);
+            shared > 0 && shared * 2 >= (p.1 - p.0).min(at.1 - at.0).max(1)
+        })
+    };
+    let near: Vec<&TranscriptSegment> = olds
+        .iter()
+        .copied()
+        .filter(|o| o.source == line.source && o.is_talk() && matches(o, at))
+        .collect();
+    if near.is_empty() {
+        return vec![line];
+    }
+    let parts = if near.iter().any(|o| o.speaker_id() != near[0].speaker_id()) {
+        let turns: Vec<Turn> = near
+            .iter()
+            .filter_map(|o| {
+                let (start_ms, end_ms) = place(o)?;
+                Some(Turn { start_ms, end_ms, speaker: o.speaker_id().to_string() })
+            })
+            .collect();
+        crate::speakers::split_line(&line, &turns)
+    } else {
+        vec![line]
+    };
+    parts
+        .into_iter()
+        .map(|mut part| {
+            let at = place(&part).unwrap_or(at);
+            let best = near
+                .iter()
+                .filter(|o| matches(o, at))
+                .max_by_key(|o| place(o).map_or(0, |p| overlap(p, at)));
+            if let Some(best) = best {
+                let id = best.speaker_id();
+                part.speaker = if id == part.source { String::new() } else { id.to_string() };
+                part.speaker_locked = best.speaker_locked;
+            }
+            part
+        })
+        .collect()
+}
+
+/// The note's transcript with each of `redone`'s recordings' lines put in
+/// place of the old ones (see the module notes). `old_breaks` are the old
+/// transcript's stop marks.
+pub fn rebuild(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone]) -> Rebuilt {
+    let mut kept: Vec<TranscriptSegment> = Vec::new();
+    let mut by_recording: Vec<Vec<&TranscriptSegment>> = vec![Vec::new(); redone.len()];
+    let mut replaced = 0;
+    for seg in old {
+        match recording_of(redone, seg.ts).filter(|_| !seg.dictated) {
+            Some(i) => {
+                by_recording[i].push(seg);
+                replaced += 1;
+            }
+            None => kept.push(seg.clone()),
+        }
+    }
+    let mut added = 0;
+    let mut fresh: Vec<TranscriptSegment> = Vec::new();
+    for (i, r) in redone.iter().enumerate() {
+        for line in &r.lines {
+            // A marker the old transcript has already (same place): once.
+            if line.dictated && kept.iter().any(|k| k.dictated && k.ts == line.ts) {
+                continue;
+            }
+            let parts = with_voices(line.clone(), &by_recording[i]);
+            added += parts.len();
+            fresh.extend(parts);
+        }
+    }
+    let voiced = fresh
+        .iter()
+        .filter(|s| s.is_talk() && !s.speaker.is_empty() && s.speaker != s.source)
+        .count();
+    let mut transcript = kept;
+    transcript.extend(fresh);
+    // In time order (stable: lines from one second keep their order).
+    transcript.sort_by_key(|s| s.ts);
+
+    // Each stop where it was: after the recording it ended (a line of a
+    // recording done again), else after the line it followed.
+    let mut breaks: Vec<usize> = old_breaks
+        .iter()
+        .filter(|&&b| b > 0 && b <= old.len())
+        .map(|&b| {
+            let before = &old[b - 1];
+            let upto = match recording_of(redone, before.ts).filter(|_| !before.dictated) {
+                Some(i) => redone[i].end_ms / 1000,
+                None => before.ts,
+            };
+            transcript.partition_point(|s| s.ts <= upto)
+        })
+        .filter(|&b| b > 0)
+        .collect();
+    breaks.sort_unstable();
+    breaks.dedup();
+    Rebuilt { transcript, breaks, replaced, added, voiced }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const T0: u64 = 1_761_000_000_000; // a recording's start, unix ms
+
+    fn line(source: &str, text: &str, start_ms: u64, end_ms: u64) -> TranscriptSegment {
+        TranscriptSegment {
+            source: source.into(),
+            text: text.into(),
+            ts: (T0 + start_ms) / 1000,
+            start_ms: Some(start_ms),
+            end_ms: Some(end_ms),
+            ..Default::default()
+        }
+    }
+
+    fn voiced(mut seg: TranscriptSegment, speaker: &str, locked: bool) -> TranscriptSegment {
+        seg.speaker = speaker.into();
+        seg.speaker_locked = locked;
+        seg
+    }
+
+    fn redone(lines: Vec<TranscriptSegment>, secs: u64) -> Redone {
+        Redone { started_ms: T0, end_ms: T0 + secs * 1000, lines }
+    }
+
+    #[test]
+    fn new_lines_replace_the_old_and_keep_their_voices() {
+        let old = vec![
+            voiced(line("them", "hello all", 1_000, 4_000), "them-1", false),
+            line("you", "hi there", 5_000, 7_000),
+            voiced(line("them", "budget is due", 9_000, 14_000), "p-1", true),
+        ];
+        let new = vec![
+            line("them", "Hello, all.", 1_200, 4_100),
+            line("you", "Hi there.", 5_100, 6_900),
+            line("them", "The budget is due Friday.", 8_800, 14_200),
+        ];
+        let r = rebuild(&old, &[3], &[redone(new, 20)]);
+        assert_eq!(r.transcript.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(), [
+            "Hello, all.",
+            "Hi there.",
+            "The budget is due Friday."
+        ]);
+        // The engine's voice, "You", and a name the person put on (locked).
+        assert_eq!(r.transcript[0].speaker, "them-1");
+        assert!(!r.transcript[0].speaker_locked);
+        assert_eq!(r.transcript[1].speaker, "");
+        assert_eq!(r.transcript[2].speaker, "p-1");
+        assert!(r.transcript[2].speaker_locked);
+        assert_eq!((r.replaced, r.added, r.voiced), (3, 3, 2));
+        assert_eq!(r.breaks, vec![3]);
+    }
+
+    #[test]
+    fn a_line_over_two_old_voices_is_split_where_they_change() {
+        let old = vec![
+            voiced(line("them", "one two three", 0, 3_000), "them-1", false),
+            voiced(line("them", "four five six", 3_000, 6_000), "them-2", false),
+        ];
+        let mut long = line("them", "one two three four five six", 0, 6_000);
+        long.words = vec![[0, 900], [1_000, 1_900], [2_000, 2_900], [3_100, 3_900], [4_100, 4_900], [5_100, 5_900]];
+        let r = rebuild(&old, &[], &[redone(vec![long], 6)]);
+        let got: Vec<(&str, &str)> = r.transcript.iter().map(|s| (s.speaker.as_str(), s.text.as_str())).collect();
+        assert_eq!(got, [("them-1", "one two three"), ("them-2", "four five six")]);
+    }
+
+    #[test]
+    fn a_line_that_barely_touches_an_old_one_keeps_its_own_side() {
+        let old = vec![voiced(line("them", "earlier", 0, 2_000), "them-3", false)];
+        // 300 ms of overlap on a 6 s line, and 15% of the old one's 2 s.
+        let new = vec![line("them", "Something else entirely.", 1_700, 7_700)];
+        let r = rebuild(&old, &[], &[redone(new, 10)]);
+        assert_eq!(r.transcript[0].speaker, "");
+        // And "You" never takes the call's voice.
+        let old = vec![voiced(line("them", "theirs", 0, 4_000), "them-1", false)];
+        let r = rebuild(&old, &[], &[redone(vec![line("you", "mine", 0, 4_000)], 5)]);
+        assert_eq!(r.transcript[0].speaker, "");
+    }
+
+    #[test]
+    fn markers_and_lines_without_audio_stay_where_they_were() {
+        let earlier = TranscriptSegment {
+            source: "them".into(),
+            text: "from a recording with no audio".into(),
+            ts: T0 / 1000 - 3_600,
+            ..Default::default()
+        };
+        let marker = TranscriptSegment::dictation_marker((T0 + 6_000) / 1000);
+        let old = vec![earlier.clone(), line("you", "before", 1_000, 5_000), marker.clone(), line("you", "after", 9_000, 12_000)];
+        // Breaks: after the old recording, and at the end of this one.
+        let new = vec![line("you", "Before.", 1_000, 5_000), line("you", "After.", 9_000, 12_000)];
+        let r = rebuild(&old, &[1, 4], &[redone(new, 13)]);
+        let texts: Vec<&str> = r.transcript.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(texts, ["from a recording with no audio", "Before.", "", "After."]);
+        assert!(r.transcript[2].dictated);
+        assert_eq!(r.breaks, vec![1, 4]);
+        assert_eq!((r.replaced, r.added), (2, 2));
+        // A marker the replay found again isn't doubled.
+        let again = vec![line("you", "Before.", 1_000, 5_000), marker, line("you", "After.", 9_000, 12_000)];
+        let r = rebuild(&old, &[1, 4], &[redone(again, 13)]);
+        assert_eq!(r.transcript.iter().filter(|s| s.dictated).count(), 1);
+    }
+
+    #[test]
+    fn each_recording_takes_back_its_own_lines_and_stop() {
+        // Two recordings of one meeting (a pause between), 30 s apart.
+        let second = T0 + 30_000;
+        let late = |text: &str, s: u64, e: u64| TranscriptSegment { ts: (second + s) / 1000, ..line("them", text, s, e) };
+        let old = vec![line("them", "first a", 0, 4_000), line("them", "first b", 5_000, 9_000), late("second a", 0, 3_000)];
+        let fresh_one = redone(vec![line("them", "First A.", 0, 4_000), line("them", "First B, longer.", 5_000, 9_500), line("them", "First C.", 10_000, 11_000)], 12);
+        let fresh_two = Redone { started_ms: second, end_ms: second + 5_000, lines: vec![late("Second A.", 0, 3_000)] };
+        let r = rebuild(&old, &[2, 3], &[fresh_one, fresh_two]);
+        let texts: Vec<&str> = r.transcript.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(texts, ["First A.", "First B, longer.", "First C.", "Second A."]);
+        // The pause now falls after the first recording's three lines.
+        assert_eq!(r.breaks, vec![3, 4]);
+    }
+}

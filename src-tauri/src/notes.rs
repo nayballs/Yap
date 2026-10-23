@@ -1040,6 +1040,50 @@ pub fn append_transcript(id: u64, segments: &[TranscriptSegment]) -> Result<(), 
     })
 }
 
+/// Lines transcribed after the fact (`meeting_audio.rs`: the part of a
+/// meeting a crash left), put where they belong by time — normally at the
+/// end; before a later recording's lines if the meeting was resumed since,
+/// with a stop mark after them. Digests and stop marks after them move
+/// along. Marks the note a meeting note.
+pub fn insert_transcript(id: u64, segments: &[TranscriptSegment]) -> Result<(), String> {
+    if segments.is_empty() {
+        return Ok(());
+    }
+    modify(id, |note| {
+        insert_lines(note, segments);
+        note.note_type = "meeting".to_string();
+        Ok(((), true))
+    })
+}
+
+fn insert_lines(note: &mut Note, segments: &[TranscriptSegment]) {
+    let last_ts = segments.iter().map(|s| s.ts).max().unwrap_or(0);
+    let at = note.transcript.partition_point(|s| s.ts <= segments[0].ts);
+    let n = segments.len();
+    note.transcript.splice(at..at, segments.iter().cloned());
+    // (A digest that read on past here covers them too: no gap between
+    // digests.)
+    for d in &mut note.digests {
+        if d.from_seg > at {
+            d.from_seg += n;
+        }
+        if d.to_seg > at {
+            d.to_seg += n;
+        }
+    }
+    for b in &mut note.breaks {
+        if *b > at {
+            *b += n;
+        }
+    }
+    // A later recording follows: this one stopped where its lines end.
+    let end = at + n;
+    if end < note.transcript.len() && note.transcript[end].ts >= last_ts && !note.breaks.contains(&end) {
+        note.breaks.push(end);
+        note.breaks.sort_unstable();
+    }
+}
+
 /// A recording of note `id` stopped (paused or ended): mark the place in its
 /// transcript (see [`Note::breaks`]). Returns the marks when one was added —
 /// not for a recording that added nothing, nor before the first line.
@@ -1172,6 +1216,8 @@ pub fn delete(id: u64) {
         store.notes.retain(|n| n.id != id);
         save_to_disk(store);
     });
+    // Its meeting audio goes with it (meeting_audio.rs).
+    crate::meeting_audio::forget(id);
 }
 
 #[cfg(test)]
@@ -1550,6 +1596,41 @@ mod tests {
         let old: Note = serde_json::from_value(json!({ "id": 5, "createdTs": 1, "updatedTs": 1 })).unwrap();
         assert!(!old.folder_chosen);
         assert!(serde_json::to_value(&old).unwrap().get("folderChosen").is_none());
+    }
+
+    #[test]
+    fn lines_transcribed_after_a_crash_go_where_they_belong() {
+        let line = |ts: u64| TranscriptSegment { source: "them".into(), text: format!("at {ts}"), ts, ..Default::default() };
+        // Normally the end of the meeting: appended.
+        let mut note = store_with_note().notes.remove(0);
+        note.transcript = vec![line(10), line(20)];
+        insert_lines(&mut note, &[line(30), line(40)]);
+        let ts: Vec<u64> = note.transcript.iter().map(|s| s.ts).collect();
+        assert_eq!(ts, [10, 20, 30, 40]);
+        assert!(note.breaks.is_empty(), "the end's stop is meeting_end's to mark");
+        // Resumed since (a later recording at 100+, stopped at the end):
+        // before it, with a stop mark after them; its marks and digests
+        // move along.
+        let mut note = store_with_note().notes.remove(0);
+        note.transcript = vec![line(10), line(20), line(100), line(110)];
+        note.breaks = vec![4];
+        note.digests = vec![MeetingDigest {
+            from_seg: 2,
+            to_seg: 4,
+            start_ts: 100,
+            end_ts: 110,
+            key_points: vec![],
+            decisions: vec![],
+            actions: vec![],
+            questions: vec![],
+            raw: String::new(),
+        }];
+        insert_lines(&mut note, &[line(30), line(40)]);
+        let ts: Vec<u64> = note.transcript.iter().map(|s| s.ts).collect();
+        assert_eq!(ts, [10, 20, 30, 40, 100, 110]);
+        assert_eq!(note.breaks, [4, 6]);
+        // The digest that read on from here covers them too (no gap).
+        assert_eq!((note.digests[0].from_seg, note.digests[0].to_seg), (2, 6));
     }
 
     #[test]

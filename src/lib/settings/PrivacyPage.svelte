@@ -84,6 +84,15 @@
       page: 'privacy#recent-audio',
     },
     {
+      // meeting_audio.rs: each meeting's audio, on this PC only.
+      what: 'Meeting audio',
+      where:
+        cfg.meetingKeepAudio !== false
+          ? `Never leaves this PC: kept here for ${cfg.meetingAudioDays || 14} ${cfg.meetingAudioDays === 1 ? 'day' : 'days'}, to transcribe a meeting again and play its lines`
+          : 'Never leaves this PC: deleted once a meeting is transcribed',
+      page: 'meetings#meeting-audio',
+    },
+    {
       what: 'AI cleanup',
       where: cfg.postProcessEnabled ? goes(cfg.ppProvider, 'Your dictations, as text,') : 'Off',
       page: 'cleanup',

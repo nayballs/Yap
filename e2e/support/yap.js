@@ -84,22 +84,31 @@ function rmrf(dir) {
  * @param {string} [opts.exe]  the build to run (copied into the run folder)
  * @param {(dataDir: string) => void} [opts.prepare]  last touches to Data/
  *   before launch (the robot's STT spec links a model in)
+ * @param {boolean} [opts.restart]  start again on the run folder's Data/ as
+ *   the last instance left it (after `kill()`: a crash), config included
  */
-export async function launchYap({ name, config = {}, env = {}, data = {}, runsDir = RUNS, exe = EXE, prepare }) {
+export async function launchYap({ name, config = {}, env = {}, data = {}, runsDir = RUNS, exe = EXE, prepare, restart = false }) {
   if (!fs.existsSync(exe)) {
     throw new Error(`No test build at ${exe} — run \`npm run test:app:build\` first.`);
   }
   const runDir = path.join(runsDir, name);
-  rmrf(runDir);
+  if (restart) {
+    // A fresh WebView2 profile (the last one's DevToolsActivePort is stale).
+    rmrf(path.join(runDir, 'webview2'));
+  } else {
+    rmrf(runDir);
+  }
   const appDir = path.join(runDir, 'app');
   const dataDir = path.join(appDir, 'Data');
   fs.mkdirSync(dataDir, { recursive: true });
   fs.copyFileSync(exe, path.join(appDir, 'yap.exe'));
   fs.writeFileSync(path.join(appDir, 'portable'), 'Yap Portable Mode');
-  fs.writeFileSync(
-    path.join(dataDir, 'config.json'),
-    JSON.stringify({ ...BASE_CONFIG, ...config }, null, 2)
-  );
+  if (!restart) {
+    fs.writeFileSync(
+      path.join(dataDir, 'config.json'),
+      JSON.stringify({ ...BASE_CONFIG, ...config }, null, 2)
+    );
+  }
   for (const [file, value] of Object.entries(data)) {
     fs.writeFileSync(path.join(dataDir, file), JSON.stringify(value, null, 2));
   }
@@ -287,6 +296,26 @@ export class YapApp {
 
   readConfig() {
     return this.readJson('config.json');
+  }
+
+  /**
+   * A crash: this instance's process tree killed outright (no exit hooks),
+   * its Data/ left as it was for `launchYap({ restart: true })`. Only ever
+   * the process this harness started, in its own portable run folder.
+   */
+  async kill() {
+    const marker = path.join(this.appDir, 'portable');
+    if (!fs.existsSync(marker) || fs.readFileSync(marker, 'utf8') !== 'Yap Portable Mode' || !this.dataDir.startsWith(this.runDir)) {
+      throw new Error(`Not killing ${this.child.pid}: ${this.appDir} isn't a portable test copy`);
+    }
+    await this.browser?.close().catch(() => {});
+    const { child } = this;
+    if (child.exitCode === null && child.signalCode === null) {
+      const gone = new Promise((r) => child.once('exit', r));
+      execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      await Promise.race([gone, sleep(10_000)]);
+    }
+    await sleep(500);
   }
 
   /** Quit (by closing stdin), falling back to killing the process tree. */
