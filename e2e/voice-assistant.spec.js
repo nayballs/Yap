@@ -411,6 +411,67 @@ test('■ stops the answer, and a press while Yap speaks cuts it off to listen (
   await setConfig(yap, main, { assistantHotkey: '' });
 });
 
+// A tester's voice chat (2026-10-23; the town is fictional): a question was
+// still being answered (by a model on this PC, so set aside for the
+// barge-in's recording) when a newer one was asked; the older was asked
+// again after the newer one's answer, and both answers showed under both
+// questions. The newer question replaces it now (stream.rs
+// `Halt::Superseded`): one answer, to the newer question, said once.
+test('a barge-in question replaces the one still being answered: one answer, to the newer one', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  await setConfig(yap, main, { speakReplies: true, speakWhen: 'voice' });
+  await freshChat(main);
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  // The first answer stops coming after its first two sentences (until Yap
+  // hangs up): the barge-in always lands while it's being answered.
+  fakeLlm.scriptChat([
+    {
+      content:
+        'Kellbrook is mild today with sunny spells. Light winds come from the west all afternoon. Dry until late evening, then a little rain.',
+      stream: { gapMs: 150, hangAfter: 9 },
+    },
+    { content: 'Kellbrook stays dry and mild today.' },
+  ]);
+  const chatCalls = () => fakeLlm.requests.filter((r) => r.kind === 'other').length;
+  const before = chatCalls();
+  const first = 'Can you tell me the weather today in Kellbrook?';
+  await ask(yap, first);
+  const live = thread(main).getByTestId('chat-streaming');
+  await expect(live).toContainText('Kellbrook is mild today', { timeout: 10_000 });
+  // The barge-in: the shortcut again, a newer question (misheard, as it was).
+  await ask(yap, 'Look up the weather kelp for me today.', 1500);
+  const answers = thread(main).locator('.cbubble.assistant');
+  await expect(answers).toHaveText(['Kellbrook stays dry and mild today.'], { timeout: 15_000 });
+  await expect(live).toHaveCount(0);
+  await expect(thread(main).locator('.thinking')).toHaveCount(0);
+  const questions = thread(main).locator('.cbubble.user');
+  await expect(questions).toHaveCount(2);
+  await expect(questions.nth(0).getByLabel('Asked by voice')).toBeVisible();
+  await expect(questions.nth(1).getByLabel('Asked by voice')).toBeVisible();
+  await shot(main, '28-barge-in-replaced-the-older-question');
+  // Said: the newer answer; nothing more of the older one after the barge-in.
+  await expect.poll(async () => (await spoken(yap)).map((s) => s.text).at(-1), { timeout: 10_000 }).toBe(
+    'Kellbrook stays dry and mild today.'
+  );
+  expect((await spoken(yap)).some((s) => s.text.includes('until late evening'))).toBe(false);
+  // Saved: both questions, one answer. The older was never asked again
+  // (past the 2 s a model on this PC waits after a dictation).
+  await main.waitForTimeout(3_000);
+  const conv = yap.readJson('chats.json').conversations.find((c) => c.title === first);
+  expect(conv.messages.map((m) => [m.role, !!m.voice])).toEqual([
+    ['user', true],
+    ['user', true],
+    ['assistant', false],
+  ]);
+  expect(chatCalls()).toBe(before + 2);
+  await yap.invoke('tts_stop');
+  await setConfig(yap, main, { speakReplies: false, speakWhen: 'voice' });
+});
+
 // Streamed (stream.rs): the voice starts at the answer's first whole
 // sentence, while the rest is still being written — and says it all once.
 test('a spoken answer starts at its first sentence, while the rest is still being written', async ({

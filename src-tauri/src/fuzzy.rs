@@ -410,6 +410,23 @@ pub(crate) fn sound_distance(a: &str, b: &str) -> (f64, usize) {
     (normalized_levenshtein(&ka, &kb), len)
 }
 
+/// Whether `heard` — what the speech model wrote — may be `word` misheard:
+/// both start with the same sound (as Soundex keeps the first letter: a
+/// misheard name keeps its onset; "brook" and "Ashbrook" aren't
+/// "Kellbrook"), and they sound alike ([`sound_distance`] ≤ 0.4) or `heard`
+/// sounds like the way `word` **begins** (its [`sound_key`], three sounds
+/// or more — two would make "okay" the start of "account" —, is the start
+/// of `word`'s): a name heard as a shorter everyday word, "kelp" for
+/// "Kellbrook" ("klp" / "klprk"; a tester's voice chat, 2026-10-23). Pure.
+pub(crate) fn sounds_like(heard: &str, word: &str) -> bool {
+    let (h, w) = (sound_key(&letters_key(heard)), sound_key(&letters_key(word)));
+    if h.chars().count() < 2 || w.chars().count() < 2 || h.chars().next() != w.chars().next() {
+        return false;
+    }
+    let n = h.chars().count();
+    sound_distance(heard, word).0 <= 0.4 || (n >= 3 && n < w.chars().count() && w.starts_with(&h))
+}
+
 /// A rough sound of an (English) word's letters (`letters_key`): its
 /// consonants, with letters that sound alike as one (c/k/q/g → k, b/p → p,
 /// d/t → t, f/v/ph → f, s/z and soft c → s, sh/ch → x, th → t, x → ks),
@@ -723,6 +740,24 @@ mod tests {
         // Unrelated words are far apart either way.
         assert!(spelling_distance("the meeting", "Sarah").0 > 0.8);
         assert!(sound_distance("the meeting", "Sarah").0 > 0.8);
+    }
+
+    #[test]
+    fn a_name_heard_as_a_shorter_word_sounds_like_its_start() {
+        // A tester's voice chat (2026-10-23), a fictional town: the name
+        // heard as an everyday word that sounds like how it begins.
+        assert!(sounds_like("kelp", "Kellbrook"));
+        assert!(sounds_like("kelbrook", "Kellbrook"));
+        assert!(sounds_like("calbrook", "Kellbrook"));
+        assert!(sounds_like("Groc", "Grok"));
+        // Other words don't — nor a name that only ends the same.
+        for heard in ["cycling", "actually", "hmm", "today", "weather", "brook", "Ashbrook", "climate"] {
+            assert!(!sounds_like(heard, "Kellbrook"), "{heard}");
+        }
+        // Too few sounds to be the start of a word: a filler isn't "account".
+        assert!(!sounds_like("okay", "account"));
+        assert!(!sounds_like("kel", "Kellbrook"));
+        assert!(!sounds_like("k", "Kellbrook"));
     }
 
     // ── echo guard (port of OpenWhispr's dictionaryEchoFilter tests) ──

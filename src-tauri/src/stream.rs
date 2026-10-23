@@ -30,8 +30,10 @@
 //!   slows a dictation: a stream is dropped when a dictation starts (llama.cpp
 //!   cancels on a closed connection), waited out and asked again
 //!   ([`call`]).
-//! - **Stop** ([`Stops`]): the page's ■ closes the stream; what was shown so
-//!   far is kept (checked like any answer, `commands::chat_turn`).
+//! - **Stop** ([`Stoppable`]): the page's ■ closes the stream; what was shown
+//!   so far is kept (checked like any answer, `commands::chat_turn`). **A
+//!   newer question** to the same conversation ends a turn still answering
+//!   there the same way, with nothing saved ([`Halt::Superseded`]).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -347,7 +349,11 @@ pub struct Live<'a> {
 /// reasoning), the whole message back as `llm::post_chat_request` returns
 /// it. A model on this PC steps aside for a dictation: the stream is dropped
 /// (llama.cpp stops generating), the page told it's waiting, and the call
-/// goes again once the dictation is done.
+/// goes again once the dictation is done — unless that dictation was a
+/// newer question to the same conversation (the Voice Assistant asked
+/// again, a question dictated into Chat and sent): saving it supersedes this
+/// turn ([`Stoppable::answers`]), and `chat_turn` drops this call, waiting
+/// or asking again, as ■ would.
 pub async fn call(live: Live<'_>, req: &crate::llm::ChatRequest, tools_offered: bool, disable_thinking: bool) -> Result<Value, String> {
     let mut step = Step::new(live.sink, tools_offered, disable_thinking);
     let Some(beside) = live.beside else {
@@ -401,34 +407,105 @@ fn answers(msg: &Value) -> bool {
     msg["tool_calls"].as_array().is_none_or(|c| c.is_empty())
 }
 
-// ── Stop ────────────────────────────────────────────────────────────────
+// ── Stop, and a newer question ──────────────────────────────────────────
+
+/// Why a turn ended before its answer did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Halt {
+    /// The page's ■: what was shown stays, checked and saved as stopped.
+    Stopped,
+    /// **A newer question to the same conversation** replaced it — the Voice
+    /// Assistant asked again (a barge-in, a follow-up), a question typed in
+    /// Chat, one dictated into Chat and sent while this was being answered:
+    /// nothing is saved for it (`commands::chat_turn`); its question stays,
+    /// and the model reads it with the newer one. Before, it was asked
+    /// again once the dictation it had stepped aside for — the newer
+    /// question — was done, and answered after the newer one: both answers
+    /// showed under both questions (a tester's voice chat, 2026-10-23).
+    Superseded,
+}
+
+/// A turn's off switch: fired once, with why (the first reason stays).
+#[derive(Default)]
+struct Signal {
+    why: Mutex<Option<Halt>>,
+    notify: tokio::sync::Notify,
+}
+
+impl Signal {
+    fn fire(&self, why: Halt) {
+        self.why.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert(why);
+        // `notify_one` keeps the permit if nobody waits yet.
+        self.notify.notify_one();
+    }
+
+    fn fired(&self) -> Option<Halt> {
+        *self.why.lock().unwrap_or_else(|p| p.into_inner())
+    }
+}
 
 /// The streams a page can stop (its ■): by the id it sent with the call.
-static STOPS: Mutex<Option<HashMap<String, Arc<tokio::sync::Notify>>>> = Mutex::new(None);
+static STOPS: Mutex<Option<HashMap<String, Arc<Signal>>>> = Mutex::new(None);
 
-/// A stoppable stream, registered under the page's id until dropped.
+/// The turn answering each conversation now (conversation id → the turn's
+/// number, its switch): a newer question saved there ends the older one.
+type Answering = HashMap<u64, (u64, Arc<Signal>)>;
+static ANSWERING: Mutex<Option<Answering>> = Mutex::new(None);
+
+/// Numbers the turns that answer a conversation ([`Stoppable::answers`]).
+static TURNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A turn's answer that can be **stopped** (the page's ■, registered under
+/// the page's id) and **superseded** (a newer question to its conversation,
+/// once [`Stoppable::answers`] says which) until dropped.
 pub struct Stoppable {
     id: Option<String>,
-    notify: Arc<tokio::sync::Notify>,
+    signal: Arc<Signal>,
+    /// The conversation it answers, and its turn's number there.
+    answering: Mutex<Option<(u64, u64)>>,
 }
 
 impl Stoppable {
-    /// `id`: the page's (none: it can't be stopped, `stopped` never fires).
+    /// `id`: the page's (none: no ■ reaches it; only a newer question can
+    /// end it, once it [`answers`](Self::answers) a conversation).
     pub fn new(id: Option<&str>) -> Stoppable {
-        let notify = Arc::new(tokio::sync::Notify::new());
+        let signal = Arc::new(Signal::default());
         let id = id.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
         if let Some(id) = &id {
-            STOPS.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashMap::new).insert(id.clone(), Arc::clone(&notify));
+            STOPS.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashMap::new).insert(id.clone(), Arc::clone(&signal));
         }
-        Stoppable { id, notify }
+        Stoppable { id, signal, answering: Mutex::new(None) }
     }
 
-    /// Fires when the page stops it.
-    pub async fn stopped(&self) {
-        if self.id.is_none() {
-            std::future::pending::<()>().await;
+    /// Its question is saved in `conversation`: from now on this turn is the
+    /// one answering there, and an older turn still answering there is
+    /// **superseded** — it ends, and nothing is saved for it. The newest
+    /// question decides, whichever surface asked it: the Voice Assistant's
+    /// barge-in or follow-up, Chat's typed or dictated question, "open
+    /// Teams". (A dictation into another app is no question here: a model on
+    /// this PC still steps aside for it and asks again, [`call`].)
+    pub fn answers(&self, conversation: u64) {
+        let n = TURNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let older = ANSWERING
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_or_insert_with(HashMap::new)
+            .insert(conversation, (n, Arc::clone(&self.signal)));
+        *self.answering.lock().unwrap_or_else(|p| p.into_inner()) = Some((conversation, n));
+        if let Some((_, older)) = older.filter(|(_, s)| !Arc::ptr_eq(s, &self.signal)) {
+            tracing::info!(conversation, "A newer question in the conversation replaces the answer still coming");
+            older.fire(Halt::Superseded);
         }
-        self.notify.notified().await;
+    }
+
+    /// Fires when the page stops it or a newer question replaces it: why.
+    pub async fn halted(&self) -> Halt {
+        loop {
+            if let Some(why) = self.signal.fired() {
+                return why;
+            }
+            self.signal.notify.notified().await;
+        }
     }
 }
 
@@ -439,6 +516,15 @@ impl Drop for Stoppable {
                 map.remove(id);
             }
         }
+        let answering = *self.answering.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((conversation, n)) = answering {
+            if let Some(map) = ANSWERING.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+                // Only its own entry: a newer turn's stays.
+                if map.get(&conversation).is_some_and(|(m, _)| *m == n) {
+                    map.remove(&conversation);
+                }
+            }
+        }
     }
 }
 
@@ -446,25 +532,29 @@ impl Drop for Stoppable {
 /// asked for the stop, shows "Stopped").
 pub const STOPPED: &str = "Stopped before the answer began.";
 
-/// `work`, unless `stop` fires first (`None`: stopped — `work` is dropped,
-/// which closes its stream).
-pub async fn unless_stopped<T>(work: impl std::future::Future<Output = T>, stop: Option<&Stoppable>) -> Option<T> {
+/// What a superseded turn ends in ([`Halt::Superseded`]): no answer saved,
+/// the question kept. The pages take its bubble away, quietly.
+pub const SUPERSEDED: &str = "A newer question replaced this one.";
+
+/// `work`, unless `stop` fires first (`Err`: why — `work` is dropped, which
+/// closes its stream).
+pub async fn unless_stopped<T>(work: impl std::future::Future<Output = T>, stop: Option<&Stoppable>) -> Result<T, Halt> {
     match stop {
-        None => Some(work.await),
+        None => Ok(work.await),
         Some(s) => tokio::select! {
-            out = work => Some(out),
-            _ = s.stopped() => None,
+            out = work => Ok(out),
+            why = s.halted() => Err(why),
         },
     }
 }
 
-/// Stop the stream the page called `id` (its ■). `true` if one was running.
-pub fn stop(id: &str) -> bool {
-    let notify = STOPS.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(|m| m.get(id).cloned());
-    match notify {
-        Some(n) => {
-            // `notify_one` keeps the permit if nobody waits yet.
-            n.notify_one();
+/// Stop the stream the page called `id` (its ■; `why` Superseded: a newer
+/// question replaces it). `true` if one was running.
+pub fn stop(id: &str, why: Halt) -> bool {
+    let signal = STOPS.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(|m| m.get(id).cloned());
+    match signal {
+        Some(s) => {
+            s.fire(why);
             true
         }
         None => false,
@@ -473,10 +563,14 @@ pub fn stop(id: &str) -> bool {
 
 /// ■ on a streamed answer (Chat, the notepad's Ask sheet): the stream closes
 /// (a model on this PC stops generating) and what was shown is kept.
+/// `superseded`: the Chat view is about to send a newer question (one
+/// dictated and sent by itself while this answer came): the turn ends with
+/// nothing saved ([`Halt::Superseded`]), the newer question goes next.
 #[tauri::command]
-pub fn stream_stop(id: String) -> bool {
-    let stopped = stop(&id);
-    tracing::info!(stopped, "A streamed answer was stopped");
+pub fn stream_stop(id: String, superseded: Option<bool>) -> bool {
+    let why = if superseded.unwrap_or(false) { Halt::Superseded } else { Halt::Stopped };
+    let stopped = stop(&id, why);
+    tracing::info!(stopped, superseded = why == Halt::Superseded, "A streamed answer was stopped");
     stopped
 }
 
@@ -1041,15 +1135,69 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
         rt.block_on(async {
             let s = Stoppable::new(Some("turn-1"));
-            assert!(!stop("turn-2"));
-            assert!(stop("turn-1"));
+            assert!(!stop("turn-2", Halt::Stopped));
+            assert!(stop("turn-1", Halt::Stopped));
             // The permit waits for the watcher.
-            tokio::time::timeout(Duration::from_secs(1), s.stopped()).await.expect("stopped");
+            let why = tokio::time::timeout(Duration::from_secs(1), s.halted()).await.expect("stopped");
+            assert_eq!(why, Halt::Stopped);
             drop(s);
-            assert!(!stop("turn-1"), "gone once dropped");
+            assert!(!stop("turn-1", Halt::Stopped), "gone once dropped");
             // No id: never stopped.
             let none = Stoppable::new(None);
-            assert!(tokio::time::timeout(Duration::from_millis(30), none.stopped()).await.is_err());
+            assert!(tokio::time::timeout(Duration::from_millis(30), none.halted()).await.is_err());
+            // The page's "a newer question replaces it" (a dictated question
+            // sent by itself while this one is answered).
+            let s = Stoppable::new(Some("turn-3"));
+            assert!(stop("turn-3", Halt::Superseded));
+            assert_eq!(unless_stopped(std::future::pending::<()>(), Some(&s)).await, Err(Halt::Superseded));
+        });
+    }
+
+    // A tester's voice chat (2026-10-23): a spoken question was still being
+    // answered when a barge-in asked a newer one in the same conversation;
+    // the older was asked again after the newer's answer, and both answers
+    // were saved under both questions. Saving the newer question ends it.
+    #[test]
+    fn a_newer_question_in_the_same_conversation_supersedes_the_older_turn() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        rt.block_on(async {
+            // Conversation ids of their own: other tests run beside this one.
+            let (talk, other) = (90_001, 90_002);
+            let older = Stoppable::new(None);
+            older.answers(talk);
+            let elsewhere = Stoppable::new(Some("turn-elsewhere"));
+            elsewhere.answers(other);
+            // The newer question is saved in the same conversation: the
+            // older ends (while it waits out a dictation, or asks again).
+            let newer = Stoppable::new(None);
+            newer.answers(talk);
+            let waiting = std::future::pending::<&str>();
+            assert_eq!(unless_stopped(waiting, Some(&older)).await, Err(Halt::Superseded));
+            // The newer one and another conversation's turn go on.
+            let done = unless_stopped(async { "answered" }, Some(&newer)).await;
+            assert_eq!(done, Ok("answered"));
+            assert!(tokio::time::timeout(Duration::from_millis(30), newer.halted()).await.is_err());
+            assert!(tokio::time::timeout(Duration::from_millis(30), elsewhere.halted()).await.is_err());
+            // The older one gone: the newer is still the one answering, and
+            // the next question supersedes it in turn.
+            drop(older);
+            let next = Stoppable::new(None);
+            next.answers(talk);
+            assert_eq!(tokio::time::timeout(Duration::from_secs(1), newer.halted()).await, Ok(Halt::Superseded));
+            // A turn that ended leaves nothing behind: a question after it
+            // supersedes nobody.
+            drop(next);
+            drop(newer);
+            let after = Stoppable::new(None);
+            after.answers(talk);
+            assert!(tokio::time::timeout(Duration::from_millis(30), after.halted()).await.is_err());
+            // ■ first: it stays a stop, whatever comes after.
+            let third = 90_003;
+            let stopped = Stoppable::new(Some("turn-stopped"));
+            stopped.answers(third);
+            assert!(stop("turn-stopped", Halt::Stopped));
+            Stoppable::new(None).answers(third);
+            assert_eq!(stopped.halted().await, Halt::Stopped);
         });
     }
 }

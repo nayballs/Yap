@@ -1058,6 +1058,15 @@ impl ChatTurn {
 /// `stop`: the page's ■ — the stream closes, and what was shown so far is
 /// the answer, checked and saved as stopped (nothing shown: an error,
 /// [`crate::stream::STOPPED`]).
+///
+/// **A newer question replaces an older one** still being answered in the
+/// same conversation: once this turn's question is saved, a turn still
+/// answering there ends with nothing saved (`stream::Stoppable::answers`,
+/// the error [`crate::stream::SUPERSEDED`]) — its question stays, and the
+/// model reads it with the newer one. A tester's voice chat (2026-10-23):
+/// the Voice Assistant's first question, set aside for the barge-in that
+/// asked the second, was asked again after the second's answer, and both
+/// answers were saved under both questions.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn chat_turn(
     app: Option<&AppHandle>,
@@ -1073,9 +1082,19 @@ pub(crate) async fn chat_turn(
     if text.is_empty() {
         return Err("Type a message first".to_string());
     }
+    // No ■ from a page (the Voice Assistant, an evaluation): a switch of its
+    // own, so a newer question can still end it.
+    let own_stop;
+    let stop = match stop {
+        Some(s) => s,
+        None => {
+            own_stop = crate::stream::Stoppable::new(None);
+            &own_stop
+        }
+    };
     let cfg = config::load();
     if let Some(plan) = crate::apps::plan_for(&text, &cfg, conversation_id).await {
-        return app_turn(conversation_id, &text, by_voice, asked, plan).await;
+        return app_turn(conversation_id, &text, by_voice, asked, plan, stop).await;
     }
     crate::ai_model::wake_on_device(&cfg).await?;
     let (base_url, api_key, model, provider, persona, disable_thinking) =
@@ -1105,6 +1124,9 @@ pub(crate) async fn chat_turn(
     let earlier = &conv.messages[crate::chats::history_start(conv.messages.len(), keep, step)..];
     let history: Vec<(String, String)> = earlier.iter().map(|m| (m.role.clone(), m.text.clone())).collect();
     let user_index = crate::chats::append(conv.id, "user", &text, &[], None, by_voice)?;
+    // This turn answers the conversation now: one still answering there
+    // ends, with nothing saved.
+    stop.answers(conv.id);
     asked(conv.id, user_index);
 
     // **Two parts, for the model's cache** (2026-10-22): the system prompt
@@ -1360,13 +1382,14 @@ pub(crate) async fn chat_turn(
             live,
         );
         // Stopped: what was shown so far is the answer (a step's text that
-        // came before a tool call was never shown).
-        let (reply, tools_used, stopped) = match crate::stream::unless_stopped(looped, stop).await {
-            Some(done) => {
+        // came before a tool call was never shown). Superseded: no answer.
+        let (reply, tools_used, stopped) = match crate::stream::unless_stopped(looped, Some(stop)).await {
+            Ok(done) => {
                 let (reply, tools_used) = done?;
                 (reply, tools_used, false)
             }
-            None => {
+            Err(crate::stream::Halt::Superseded) => return Err(superseded()),
+            Err(crate::stream::Halt::Stopped) => {
                 let seen = watch.as_ref().map(|w| w.seen()).unwrap_or_default();
                 tracing::info!(shown = seen.text.len(), "Chat: the answer was stopped");
                 (seen.text, seen.chips, true)
@@ -1396,7 +1419,7 @@ pub(crate) async fn chat_turn(
             web_on,
             by_voice,
             live,
-            stop,
+            Some(stop),
             watch.as_ref(),
         )
         .await?;
@@ -1574,10 +1597,18 @@ async fn small_model_answer(
     }
     let answered = crate::llm::note_chat(&system, &history, text, base_url, api_key, model, provider, disable_thinking, live);
     let (reply, stopped) = match crate::stream::unless_stopped(answered, stop).await {
-        Some(reply) => (reply?, false),
-        None => (watch.map(|w| w.seen().text).unwrap_or_default(), true),
+        Ok(reply) => (reply?, false),
+        Err(crate::stream::Halt::Superseded) => return Err(superseded()),
+        Err(crate::stream::Halt::Stopped) => (watch.map(|w| w.seen().text).unwrap_or_default(), true),
     };
     Ok(SmallAnswer { reply, chips, sources, looked, pages, stopped })
+}
+
+/// A turn a newer question in its conversation replaced (`chat_turn`): no
+/// answer saved, the question kept; [`crate::stream::SUPERSEDED`].
+fn superseded() -> String {
+    tracing::info!("Chat: a newer question in the conversation replaced this turn; no answer saved");
+    crate::stream::SUPERSEDED.to_string()
 }
 
 /// A small model's answer ([`small_model_answer`]): the text, its chips and
@@ -1689,16 +1720,19 @@ fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chats::
 
 /// A turn Yap answers itself (`apps.rs`): the request saved like any
 /// question, the app opened (or why not) as the answer, with its chip. No
-/// model, so none is named.
+/// model, so none is named. Like any newer question, it replaces an answer
+/// still coming in its conversation (`stop`, [`chat_turn`]).
 async fn app_turn(
     conversation_id: Option<u64>,
     text: &str,
     by_voice: bool,
     asked: impl FnOnce(u64, usize) + Send,
     plan: crate::apps::Plan,
+    stop: &crate::stream::Stoppable,
 ) -> Result<ChatTurn, String> {
     let conv = turn_conversation(conversation_id, text);
     let user_index = crate::chats::append(conv.id, "user", text, &[], None, by_voice)?;
+    stop.answers(conv.id);
     asked(conv.id, user_index);
     // What its answer leaves open: "Did you mean …?", "Which one?", the app
     // "open it again" means.
@@ -1732,7 +1766,10 @@ async fn app_turn(
 /// doing}`, `{kind: "chips", chips, sources, web}`, `{kind: "waiting",
 /// waiting}`, plus `{kind: "turn", conversationId}` once the question is
 /// saved); `reply` is then the checked answer to put in its place.
-/// `turnId`: what `stream_stop` stops it by (the ■).
+/// `turnId`: what `stream_stop` stops it by (the ■, or `superseded`: the page
+/// sends a newer question next). The error [`crate::stream::SUPERSEDED`]: a
+/// newer question in the conversation replaced it — no answer saved, the
+/// question kept.
 #[tauri::command]
 pub async fn chat_send(
     app: AppHandle,

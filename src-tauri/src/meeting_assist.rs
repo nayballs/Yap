@@ -168,8 +168,8 @@ async fn streamed_answer(
     let sink = on_stream.0.is_some().then_some(&watch as &dyn crate::stream::Sink);
     let asked = summary::chat_beside_dictation_live(app, ep, messages, opts, sink);
     match crate::stream::unless_stopped(asked, Some(&stop)).await {
-        Some(answer) => Ok((answer?, false)),
-        None => {
+        Ok(answer) => Ok((answer?, false)),
+        Err(_) => {
             let shown = watch.seen().text;
             if shown.trim().is_empty() {
                 return Err(crate::stream::STOPPED.to_string());

@@ -294,6 +294,98 @@ test('a dictation starting mid-stream: the local stream steps aside, then answer
   expect(fakeLlm.requests.length).toBe(asked + 1);
 });
 
+// A newer question to the same conversation replaces the answer still
+// coming (stream.rs `Halt::Superseded`). A tester's voice chat (2026-10-23):
+// the older question, set aside for the barge-in that asked the newer one,
+// was asked again after the newer one's answer, and both answers showed
+// under both questions. Now the older turn ends when the newer question is
+// saved: no answer for it, its bubble gone, its question kept, no error.
+async function savedRoles(yap, title) {
+  const c = yap.readJson('chats.json')?.conversations?.find((x) => x.title === title);
+  return c?.messages.map((m) => m.role) ?? [];
+}
+
+test('a question asked out loud while the answer streams replaces it: one answer, to the newer question', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  await freshChat(main);
+  // The first answer stops coming half way (until Yap hangs up).
+  fakeLlm.scriptChat([
+    {
+      content: 'Kellbrook has a farmers market on Saturday morning. There is a quiz night at the village hall later on, and a band after that.',
+      stream: { gapMs: 120, hangAfter: 8 },
+    },
+    { content: 'Saturday in Kellbrook looks dry and mild, around 14 degrees.' },
+  ]);
+  const title = "What's on in Kellbrook this weekend?";
+  await send(main, title);
+  await expect(streamingBubble(main)).toContainText('farmers market');
+  const asked = fakeLlm.requests.length;
+  // The Voice Assistant, asked into the conversation open here (1.5 s of
+  // recording: the local stream steps aside for it first).
+  await yap.invoke('e2e_assistant_ask', { text: 'And the weather there on Saturday?', listenMs: 1500 });
+  const answers = thread(main).locator('.cbubble.assistant');
+  await expect(answers).toHaveText(['Saturday in Kellbrook looks dry and mild, around 14 degrees.'], { timeout: 15_000 });
+  await expect(streamingBubble(main)).toHaveCount(0);
+  await expect(main.locator('.thinking')).toHaveCount(0);
+  const questions = thread(main).locator('.cbubble.user');
+  await expect(questions).toHaveCount(2);
+  await expect(questions.nth(0)).toContainText(title);
+  await expect(questions.nth(1)).toContainText('And the weather there on Saturday?');
+  // Nothing went wrong: no error, nothing handed back to the box.
+  await expect(main.getByText("Couldn't send")).toHaveCount(0);
+  await expect(box(main)).toHaveValue('');
+  await expect(main.getByRole('button', { name: 'Stop the answer' })).toHaveCount(0);
+  await shot(main, '10-a-spoken-question-replaced-the-answer');
+  // Saved: both questions, one answer.
+  await expect.poll(() => savedRoles(yap, title)).toEqual(['user', 'user', 'assistant']);
+  // The older stream was dropped, and never asked again (past the 2 s a
+  // model on this PC waits after a dictation).
+  expect(fakeLlm.requests[asked - 1].aborted).toBe(true);
+  await main.waitForTimeout(3_000);
+  expect(fakeLlm.requests.filter((r) => r.kind === 'other').length).toBe(
+    fakeLlm.requests.slice(0, asked).filter((r) => r.kind === 'other').length + 1
+  );
+  expect(await savedRoles(yap, title)).toEqual(['user', 'user', 'assistant']);
+});
+
+test('a question dictated and sent while the answer streams replaces it, and goes at once', async ({ yap, main, fakeLlm, shot }) => {
+  await freshChat(main);
+  // The first answer stops coming half way (until Yap hangs up).
+  fakeLlm.scriptChat([
+    {
+      content: 'The Kellbrook fete starts at noon. There is a dog show, a cake stall and a tug of war after lunch.',
+      stream: { gapMs: 120, hangAfter: 7 },
+    },
+    { content: 'Parking is in the school field, free all day.' },
+  ]);
+  const title = 'When does the Kellbrook fete start?';
+  await send(main, title);
+  await expect(streamingBubble(main)).toContainText('starts at noon');
+  const asked = fakeLlm.requests.length;
+  // Dictated into the box and sent by itself ("press enter" said at the end).
+  await yap.invoke('e2e_chat_dictation', { text: 'Where do I park, press enter' });
+  const answers = thread(main).locator('.cbubble.assistant');
+  await expect(answers).toHaveText(['Parking is in the school field, free all day.'], { timeout: 15_000 });
+  await expect(streamingBubble(main)).toHaveCount(0);
+  const questions = thread(main).locator('.cbubble.user');
+  await expect(questions).toHaveCount(2);
+  await expect(questions.nth(1)).toContainText('Where do I park');
+  await expect(questions.nth(1).getByLabel('Asked by voice')).toBeVisible();
+  await expect(main.getByText("Couldn't send")).toHaveCount(0);
+  await expect(box(main)).toHaveValue('');
+  await shot(main, '11-a-dictated-question-replaced-the-answer');
+  await expect.poll(() => savedRoles(yap, title)).toEqual(['user', 'user', 'assistant']);
+  // The older stream was dropped; only the newer question was asked after it.
+  expect(fakeLlm.requests[asked - 1].aborted).toBe(true);
+  expect(fakeLlm.requests.filter((r) => r.kind === 'other').length).toBe(
+    fakeLlm.requests.slice(0, asked).filter((r) => r.kind === 'other').length + 1
+  );
+});
+
 test('a server that ignores "stream" still answers, whole', async ({ main, fakeLlm }) => {
   fakeLlm.setStreaming(false);
   try {

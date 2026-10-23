@@ -53,6 +53,16 @@
   // "Thinking…", then the answer, which Rust reads aloud). With no shortcut
   // set, the empty thread says how to set one.
   //
+  // A newer question replaces an older one still being answered in the
+  // same conversation (stream.rs `Halt::Superseded`, a tester's voice chat,
+  // 2026-10-23): asked out loud, typed here while a spoken one is answered,
+  // or dictated here and sent by itself while this view's answer comes
+  // (`replaceAnswer`). The older turn saves no answer: its bubble goes, its
+  // question stays (the model reads it with the newer one), and no error
+  // shows (`SUPERSEDED`, phase `superseded`). Each spoken question's events
+  // carry its id (`userMessageId`), so an older one's never land in the
+  // newer one's bubble.
+  //
   // The web (web.rs, "Look things up on the web" in Settings → Voice
   // Assistant): an answer written from web pages cites them as [1], drawn
   // as small pills (markdown.js), with a Sources row under it — number,
@@ -73,7 +83,7 @@
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
   import { copyText, messageItems, conversationMarkdown } from './itemMenus.js';
   import { openExternalLink } from './externalLinks.js';
-  import { streamCall, liveAnswer, applyEvent, closePartial, settle, streamingHeight, STOPPED } from './streaming.js';
+  import { streamCall, liveAnswer, applyEvent, closePartial, settle, streamingHeight, STOPPED, SUPERSEDED } from './streaming.js';
 
   // A chip about the web (web.rs) or the safety rule (tools.rs).
   const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;
@@ -106,8 +116,10 @@
   let input = $state('');
   let sending = $state(false);
   // The ■ of the answer being written (streamCall's stop), and whether it
-  // was pressed.
+  // was pressed; and its "a newer question replaces it" (streamCall's
+  // supersede).
   let stopAnswerCall = null;
+  let supersedeAnswerCall = null;
   let stopping = $state(false);
   // An answer is being written in the thread (its bubble shows, not "Thinking…").
   const streaming = $derived(messages.some((m) => m.streaming));
@@ -137,6 +149,8 @@
   // A hands-free question arrived while an answer was still coming: sent
   // once it's in.
   let sendWhenFree = false;
+  // Numbers this view's sends (their question and bubble carry it: `turn`).
+  let sendSeq = 0;
   let alive = true;
 
   // ---- The Voice Assistant
@@ -144,8 +158,10 @@
   let assistantHotkey = $state('');
   // Chat's model is set up (ai_model_status; re-read on every config save).
   let chatReady = $state(true);
-  // The conversation whose spoken question is being answered ("Thinking…").
+  // The conversation whose spoken question is being answered ("Thinking…"),
+  // and that question's id ("chat:<conversation>:<index>").
   let assistantPending = $state(null);
+  let assistantTurn = null;
   // "New chat" was clicked: a spoken question starts a new conversation
   // rather than continuing the last one.
   let choseNew = false;
@@ -238,8 +254,12 @@
       byVoice = true;
     }
     if (p?.send && input.trim()) {
-      if (sending) sendWhenFree = true;
-      else send();
+      if (sending) {
+        // A newer question while the answer comes: it replaces that one
+        // (nothing saved for it), and goes as soon as it has.
+        sendWhenFree = true;
+        replaceAnswer();
+      } else send();
     } else {
       await tick();
       inputEl?.focus();
@@ -322,16 +342,22 @@
   // A spoken question's answer as it's written (assistant.rs): it grows at
   // the end of its conversation while that's the one shown.
   let assistantLive = liveAnswer();
+  // The spoken answer's own bubble (`spoken`: never this view's own send's).
+  const spokenAt = () => messages.findLastIndex((m) => m.streaming && m.spoken);
+  // An event about the spoken question this view follows (one without an
+  // id, as before, counts).
+  const followed = (p) => !p?.userMessageId || !assistantTurn || p.userMessageId === assistantTurn;
   function followAssistantStream(p) {
     const id = p?.conversationId;
-    if (id == null || id !== activeId || assistantPending !== id) return;
+    if (id == null || id !== activeId || assistantPending !== id || !followed(p)) return;
     assistantLive = applyEvent(assistantLive, p.event);
-    let last = messages[messages.length - 1];
-    if (!last?.streaming) {
+    let at = spokenAt();
+    if (at < 0) {
       if (!assistantLive.started) return;
-      messages = [...messages, { role: 'assistant', streaming: true, text: '', tools: [], id: null }];
-      last = messages[messages.length - 1];
+      messages = [...messages, { role: 'assistant', streaming: true, spoken: true, text: '', tools: [], id: null }];
+      at = messages.length - 1;
     }
+    const last = messages[at];
     last.text = assistantLive.text;
     last.tools = assistantLive.chips;
     last.doing = assistantLive.doing;
@@ -344,8 +370,21 @@
     const id = p?.conversationId;
     if (p?.phase === 'asked') {
       assistantPending = id ?? null;
+      assistantTurn = p.userMessageId ?? null;
       assistantLive = liveAnswer();
-    } else if (p?.phase === 'answered' || p?.phase === 'failed') assistantPending = null;
+    } else if (['answered', 'failed', 'superseded'].includes(p?.phase)) {
+      // An older question a newer one replaced ends after the newer was
+      // asked: the newer one stays pending.
+      if (!followed(p)) return;
+      assistantPending = null;
+      assistantTurn = null;
+    }
+    if (p?.phase === 'superseded') {
+      // No answer was saved for it: its bubble goes, its question stays.
+      // (Nothing to read back: the newer question's events show the rest.)
+      messages = messages.filter((m) => !(m.streaming && m.spoken));
+      return;
+    }
     if (id == null) return;
     try {
       const conv = await invoke('chat_get', { id });
@@ -354,8 +393,9 @@
         activeId = id;
         scope = null;
       }
-      // The answer that streamed here, replaced by the saved (checked) one.
-      const streamedAt = messages.findIndex((m) => m.streaming);
+      // The answer that streamed here, replaced by the saved (checked) one
+      // (only an answer: a newer question's arrival replaces nothing).
+      const streamedAt = p?.phase === 'answered' ? spokenAt() : -1;
       const streamed = streamedAt >= 0 ? messages[streamedAt].text : null;
       const fromHeight = streamingHeight(threadEl);
       messages = (conv.messages || []).map((m, i) => ({
@@ -593,18 +633,29 @@
     byVoice = false;
     // The next question: the last answer stops talking.
     stopReading();
-    messages = [...messages, { role: 'user', text, voice, id: null }];
-    const qi = messages.length - 1;
+    // This send's question and bubble carry its `turn`, and are found by
+    // it: a spoken question's bubble may come and go in between (one a
+    // newer question replaced), moving them.
+    const turn = ++sendSeq;
+    messages = [...messages, { role: 'user', text, voice, id: null, turn }];
+    const firstAt = messages.length - 1;
+    const mine = (role) => messages.findIndex((m) => m.turn === turn && m.role === role);
+    const questionAt = () => {
+      const i = mine('user');
+      return i >= 0 ? i : firstAt;
+    };
+    let askedId = null;
     sending = true;
     stopping = false;
     scrollThread();
     // The answer as it's written: its bubble appears with the first text
-    // or tool call, at `ai`, and grows in place.
+    // or tool call and grows in place.
     let live = liveAnswer();
-    let ai = -1;
+    let made = false;
     const onEvent = (ev) => {
       if (!alive) return;
       if (ev?.kind === 'turn') {
+        askedId = ev.userMessageId ?? null;
         // A new conversation: it's in the list from the first question.
         if (activeId == null && ev.conversationId != null) {
           activeId = ev.conversationId;
@@ -613,10 +664,13 @@
         return;
       }
       live = applyEvent(live, ev);
+      let ai = mine('assistant');
       if (ai < 0) {
-        if (!live.started && !live.waiting) return;
-        messages = [...messages, { role: 'assistant', streaming: true, text: '', tools: [], id: null }];
+        // Not yet (or no longer: another conversation opened meanwhile).
+        if (made || (!live.started && !live.waiting)) return;
+        messages = [...messages, { role: 'assistant', streaming: true, text: '', tools: [], id: null, turn }];
         ai = messages.length - 1;
+        made = true;
       }
       const m = messages[ai];
       if (!m?.streaming) return;
@@ -629,11 +683,14 @@
     };
     const call = streamCall('chat_send', { conversationId: activeId, text, scope, voice }, onEvent);
     stopAnswerCall = call.stop;
+    supersedeAnswerCall = call.supersede;
     try {
       const res = await call.promise;
       if (!alive) return;
       activeId = res.conversationId;
+      const qi = questionAt();
       const asked = messages[qi];
+      const ai = mine('assistant');
       const streamed = ai >= 0 ? messages[ai].text : null;
       const fromHeight = streamingHeight(threadEl);
       // The checked answer takes the streamed one's place: the same bubble,
@@ -657,6 +714,17 @@
       if (res.speak && answer.id) speakReply(answer.text, answer.id);
     } catch (e) {
       if (!alive) return;
+      if (String(e).includes(SUPERSEDED)) {
+        // A newer question in this conversation replaced it (asked out
+        // loud, or dictated here and sent): no answer was saved, its bubble
+        // goes, the question stays as saved. No error: nothing went wrong.
+        messages = messages
+          .filter((m) => !(m.role === 'assistant' && m.streaming && m.turn === turn))
+          .map((m) => (m.role === 'user' && m.turn === turn && m.id == null ? { ...m, id: askedId } : m));
+        refreshList();
+        return;
+      }
+      const qi = questionAt();
       if (stopping && String(e).includes(STOPPED)) {
         // Stopped before any of the answer came: the question stays.
         messages = [...messages.slice(0, qi), { ...messages[qi], stopped: true }];
@@ -684,6 +752,7 @@
       sending = false;
       stopping = false;
       stopAnswerCall = null;
+      supersedeAnswerCall = null;
       if (alive && sendWhenFree) {
         sendWhenFree = false;
         send();
@@ -696,6 +765,16 @@
     if (!sending || stopping || !stopAnswerCall) return;
     stopping = true;
     stopAnswerCall();
+  }
+
+  /**
+   * A newer question is waiting to go (`sendWhenFree`): the answer still
+   * coming is dropped, nothing saved for it, so the newer one goes now —
+   * not after an answer to a question you've moved on from.
+   */
+  function replaceAnswer() {
+    if (!sending || stopping || !supersedeAnswerCall) return;
+    supersedeAnswerCall();
   }
 
   /** Keep the newest text in view while it's written — unless you scrolled up to read. */
