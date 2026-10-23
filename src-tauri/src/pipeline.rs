@@ -414,12 +414,45 @@ struct Kept {
     target_kind: AppKind,
     edit: bool,
     selection: Option<String>,
+    /// Edit mode's last dictation to rewrite (nothing was selected).
+    rewrite_last: Option<crate::as_said::Pasted>,
 }
 
 /// The latest dictation's report, for the robot's WAV dictations (which
 /// deliver from `run_stt`).
 #[cfg(debug_assertions)]
 static LAST_DELIVERED: Mutex<Option<Delivered>> = Mutex::new(None);
+
+/// What the rewrite shortcut (or a Command) did — the robot's report
+/// (`realtest.rs`); debug builds only.
+#[cfg(debug_assertions)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Rewritten {
+    /// It was the last dictation's rewrite (nothing was selected).
+    pub last: bool,
+    /// The AI's text; empty when it never got that far.
+    pub text: String,
+    /// "replaced" / "copied" / "testMode" (the last dictation's), "pasted"
+    /// (a selection's or new text), "refused" (nothing pasted), "nothing"
+    /// (nothing said or written), "failed" (the AI).
+    pub outcome: String,
+    /// Why it wasn't replaced or pasted.
+    pub why: Option<String>,
+}
+
+#[cfg(debug_assertions)]
+static LAST_REWRITE: Mutex<Option<Rewritten>> = Mutex::new(None);
+
+/// Keep what the rewrite did for the robot (debug builds only).
+fn report_rewrite(last: bool, text: &str, outcome: &str, why: Option<String>) {
+    #[cfg(debug_assertions)]
+    if let Ok(mut r) = LAST_REWRITE.lock() {
+        *r = Some(Rewritten { last, text: text.to_string(), outcome: outcome.to_string(), why });
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = (last, text, outcome, why);
+}
 
 /// The scrolling waveform's level meter: the peak over ~80 ms of audio.
 #[derive(Default)]
@@ -533,8 +566,13 @@ struct Shared {
     /// pause"); `None` for any other recording, or with the setting off.
     pause: Mutex<Option<PauseSlot>>,
     /// Text selected in the target app, captured at edit-mode record-start. Empty
-    /// (`None`) → "write mode" (generate new text from the instruction alone).
+    /// (`None`) → "write mode" (generate new text from the instruction alone)
+    /// — unless `rewrite_last`.
     selection: Mutex<Option<String>>,
+    /// Edit mode with nothing selected, right after a paste into the same
+    /// window (`as_said::rewrite_target`, at record start): the instruction
+    /// rewrites that paste — the last dictation — in place.
+    rewrite_last: Mutex<Option<crate::as_said::Pasted>>,
     /// True from `stop_and_transcribe` until `run_stt` finishes. Blocks starting a
     /// new recording while one is still transcribing — a rapid re-toggle would
     /// otherwise spawn a second `run_stt` that finds the engine taken and rebuilds
@@ -729,6 +767,9 @@ impl Shared {
             buf.clear();
         }
         if let Ok(mut g) = self.selection.lock() {
+            *g = None;
+        }
+        if let Ok(mut g) = self.rewrite_last.lock() {
             *g = None;
         }
         self.edit_mode.store(false, Ordering::SeqCst);
@@ -1231,12 +1272,29 @@ impl Shared {
         // mode on) never by Ctrl+C: with nothing selected it interrupts the
         // program running there.
         self.edit_mode.store(edit, Ordering::SeqCst);
+        let mut rewrite_last = None;
         if edit {
             let target = if hwnd == 0 { None } else { Some(hwnd) };
             let sel = crate::selection::capture_selection(target, !in_terminal);
+            // Nothing selected right after a paste into this window: the
+            // instruction is for that paste — the last dictation — not new
+            // text (`as_said.rs`).
+            if sel.is_none() {
+                rewrite_last = crate::as_said::rewrite_target(target);
+                if let Some(p) = &rewrite_last {
+                    tracing::info!(
+                        chars = p.text().chars().count(),
+                        secs = p.age().as_secs(),
+                        "Rewrite shortcut with nothing selected: rewriting the last dictation"
+                    );
+                }
+            }
             if let Ok(mut g) = self.selection.lock() {
                 *g = sel;
             }
+        }
+        if let Ok(mut g) = self.rewrite_last.lock() {
+            *g = rewrite_last;
         }
         // "Match the text around the cursor": read it in the background now,
         // for the paste (`text_injector::prepare_dictation`). Not for edit
@@ -1419,6 +1477,7 @@ impl Shared {
         // The edit-mode selection/state goes with it (into the kept
         // recording, or nowhere), so it can't leak into a later session.
         let selection = self.selection.lock().ok().and_then(|mut g| g.take());
+        let rewrite_last = self.rewrite_last.lock().ok().and_then(|mut g| g.take());
         let edit = self.edit_mode.swap(false, Ordering::SeqCst);
         // The names read off the screen are this dictation's only (an Undo
         // reads them again).
@@ -1442,6 +1501,7 @@ impl Shared {
             target_kind: self.target_kind.lock().map(|k| *k).unwrap_or_default(),
             edit,
             selection,
+            rewrite_last,
         };
         if let Ok(mut k) = self.kept.lock() {
             *k = Some(kept);
@@ -1500,6 +1560,9 @@ impl Shared {
         if let Ok(mut g) = self.selection.lock() {
             *g = k.selection;
         }
+        if let Ok(mut g) = self.rewrite_last.lock() {
+            *g = k.rewrite_last;
+        }
         let (smart_spacing, in_terminal, screen_names) = self
             .config
             .read()
@@ -1540,6 +1603,9 @@ impl Shared {
                 buf.clear();
             }
             if let Ok(mut g) = self.selection.lock() {
+                *g = None;
+            }
+            if let Ok(mut g) = self.rewrite_last.lock() {
                 *g = None;
             }
             self.edit_mode.store(false, Ordering::SeqCst);
@@ -1613,21 +1679,33 @@ impl Shared {
             .ok()
             .and_then(|mut g| g.take())
             .unwrap_or_default();
-        self.run_agent(instruction, selection).await
+        // Nothing selected, right after a paste into this window: that paste
+        // — the last dictation — is what the instruction is for.
+        let last = self
+            .rewrite_last
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
+            .filter(|_| selection.trim().is_empty());
+        self.run_agent(instruction, selection, last).await
     }
 
     /// Shared runner for **Commands**: apply `instruction` via the Commands
     /// scope (`voiceAgent`) (or
     /// the global cleanup endpoint) and paste the result. `selection` empty =
-    /// write mode. Two callers: the edit hotkey (`run_rewrite`, selection
-    /// captured at key-press) and the **wake-word path** (no selection — the
-    /// whole transcript is the instruction, OpenWhispr-style).
-    async fn run_agent(self: &Arc<Self>, instruction: String, selection: String) {
+    /// write mode — unless `last`, the last dictation to rewrite in place
+    /// (`as_said.rs`: checked still there before the AI is asked, replaced
+    /// exactly, or nothing pasted). Two callers: the edit hotkey
+    /// (`run_rewrite`, selection captured at key-press) and the **wake-word
+    /// path** (no selection — the whole transcript is the instruction,
+    /// OpenWhispr-style). What it pasted is the last paste from then on.
+    async fn run_agent(self: &Arc<Self>, instruction: String, selection: String, last: Option<crate::as_said::Pasted>) {
         // Nothing heard (the edit key tapped without speaking): go quietly back
         // to idle like an empty dictation does. Falling through used to surface
         // "Rewrite failed via <provider> — check its key", blaming the API key.
         if instruction.trim().is_empty() {
             tracing::info!("Edit mode: no speech detected, nothing to rewrite");
+            report_rewrite(last.is_some(), "", "nothing", None);
             let _ = self.app.emit("yap-state", "idle");
             return;
         }
@@ -1676,6 +1754,7 @@ impl Shared {
             // The on-device model, down for a moment while Yap restarts it.
             let restarting = provider == crate::local_llm::PROVIDER_ONDEVICE && crate::local_llm::restart_under_way();
             tracing::warn!(restarting, "Edit mode needs an AI cleanup endpoint (none configured)");
+            report_rewrite(last.is_some(), "", "failed", Some("no AI model".into()));
             let _ = self.app.emit(
                 DICTATION_ERROR,
                 if restarting {
@@ -1695,6 +1774,7 @@ impl Shared {
             ["groq", "anthropic", "openai", "gemini", "openrouter"];
         if api_key.is_empty() && KEYED_PROVIDERS.contains(&provider.as_str()) {
             tracing::warn!(provider = %provider, "Rewrite skipped: no API key for provider");
+            report_rewrite(last.is_some(), "", "failed", Some("no API key".into()));
             let _ = self.app.emit(
                 DICTATION_ERROR,
                 format!("Commands: no {provider} API key — add one in Language Models"),
@@ -1706,6 +1786,28 @@ impl Shared {
         let target = match self.target_hwnd.load(Ordering::Relaxed) {
             0 => None,
             h => Some(h),
+        };
+
+        // The last dictation: still in its field exactly as pasted, the
+        // cursor right after it? Else nothing to rewrite — said, nothing
+        // pasted, the AI not asked.
+        if let Some(p) = &last {
+            let p = p.clone();
+            let refused = match tokio::task::spawn_blocking(move || crate::as_said::rewrite_check(&p)).await {
+                Ok(Ok(())) => None,
+                Ok(Err(why)) => Some(why),
+                Err(e) => Some(format!("Yap couldn't look: {e}")),
+            };
+            if let Some(why) = refused {
+                crate::as_said::cant_rewrite(&self.app, &why);
+                report_rewrite(true, "", "refused", Some(why));
+                let _ = self.app.emit("yap-state", "idle");
+                return;
+            }
+        }
+        let selection = match &last {
+            Some(p) => p.text().to_string(),
+            None => selection,
         };
 
         match crate::llm::rewrite(
@@ -1723,6 +1825,34 @@ impl Shared {
             Ok(result) => {
                 let mut out = result.trim().to_string();
                 if out.is_empty() {
+                    report_rewrite(last.is_some(), "", "nothing", None);
+                    let _ = self.app.emit("yap-state", "idle");
+                    return;
+                }
+                // The last dictation's rewrite: put in its place, exactly,
+                // or the field left alone and the rewrite copied.
+                if let Some(p) = last {
+                    tracing::info!(chars = out.chars().count(), "Rewrite of the last dictation");
+                    tracing::debug!(text = %out, "Rewrite text");
+                    let _ = self.app.emit("yap-transcript", out.clone());
+                    let app = self.app.clone();
+                    let text = out.clone();
+                    match tokio::task::spawn_blocking(move || crate::as_said::replace_last(&app, &p, &text)).await {
+                        Ok(Ok(rewrote)) => {
+                            let (outcome, why) = match &rewrote {
+                                crate::as_said::Rewrote::Replaced { .. } => ("replaced", None),
+                                crate::as_said::Rewrote::Copied { why, .. } => ("copied", Some(why.clone())),
+                                crate::as_said::Rewrote::TestMode { .. } => ("testMode", None),
+                            };
+                            report_rewrite(true, &out, outcome, why);
+                        }
+                        // Robot mode refused the window (said already).
+                        Ok(Err(why)) => {
+                            tracing::warn!("Rewrite of the last dictation refused: {why}");
+                            report_rewrite(true, &out, "refused", Some(why));
+                        }
+                        Err(e) => tracing::warn!("Rewrite of the last dictation failed: {e}"),
+                    }
                     let _ = self.app.emit("yap-state", "idle");
                     return;
                 }
@@ -1738,16 +1868,26 @@ impl Shared {
                 let strict = self.undoing.load(Ordering::SeqCst);
                 let read = self.read_kind();
                 match crate::text_injector::inject_text(&out, restore_clipboard, target, strict, read).await {
-                    Ok(crate::text_injector::Delivery::Pasted | crate::text_injector::Delivery::Typed) => {}
+                    // The last paste now: "now shorter", with nothing
+                    // selected, rewrites it.
+                    Ok(crate::text_injector::Delivery::Pasted | crate::text_injector::Delivery::Typed) => {
+                        crate::as_said::remember(target, read, &out, None, restore_clipboard);
+                        report_rewrite(false, &out, "pasted", None);
+                    }
                     // An app running as administrator: on the clipboard.
                     Ok(crate::text_injector::Delivery::LeftOnClipboard) => {
+                        crate::as_said::forget();
                         crate::alert::show_soon(&self.app, crate::elevated::alert());
                     }
                     // An Undo whose window is gone: on the clipboard.
                     Ok(crate::text_injector::Delivery::WindowGone) => {
+                        crate::as_said::forget();
                         crate::alert::show_soon(&self.app, undo_window_gone());
                     }
-                    Err(e) => tracing::warn!("Rewrite inject failed: {}", e),
+                    Err(e) => {
+                        crate::as_said::forget();
+                        tracing::warn!("Rewrite inject failed: {}", e);
+                    }
                 }
                 let _ = self.app.emit("yap-state", "idle");
             }
@@ -1755,6 +1895,7 @@ impl Shared {
                 // Don't fall back to typing the raw instruction — that would paste
                 // "make this a list" into the doc. Surface an error instead.
                 tracing::warn!("Rewrite failed: {}", e);
+                report_rewrite(last.is_some(), "", "failed", Some(e.clone()));
                 let _ = self.app.emit(
                     DICTATION_ERROR,
                     format!("Rewrite failed via {provider} — check its key in Language Models"),
@@ -2142,6 +2283,8 @@ impl Shared {
                 // text is on the clipboard, and the person is told
                 // to paste it (no submit key, no correction watch).
                 Ok(crate::text_injector::Delivery::LeftOnClipboard) => {
+                    // Nothing in the field to swap or rewrite.
+                    crate::as_said::forget();
                     report.left_on_clipboard = true;
                     not_pasted = Some("Left on the clipboard: the app runs as administrator");
                     if submit.is_some() {
@@ -2152,6 +2295,7 @@ impl Shared {
                 // An Undo whose window is gone (or won't come to the
                 // front): never into another one; on the clipboard.
                 Ok(crate::text_injector::Delivery::WindowGone) => {
+                    crate::as_said::forget();
                     report.left_on_clipboard = true;
                     report.error = Some("the dictation's window is gone".into());
                     not_pasted = Some("Left on the clipboard: its window was gone");
@@ -2168,11 +2312,12 @@ impl Shared {
                             report.error = Some(e);
                         }
                         // Sent: nothing left in the field to swap.
-                        crate::as_said::remember(None, read, &corrected, None, restore_clipboard);
+                        crate::as_said::forget();
                     } else {
-                        // "Use what I said" (as_said.rs): this paste can be
-                        // swapped for the words as said, and the bar offers
-                        // it when cleanup changed the words.
+                        // The last paste (as_said.rs): it can be swapped for
+                        // the words as said — the bar offers it when cleanup
+                        // changed the words — or rewritten by the rewrite
+                        // shortcut with nothing selected.
                         let seq = crate::as_said::remember(target, read, &corrected, said.as_deref(), restore_clipboard);
                         let offer = self.config.read().map(|c| c.as_said_offer).unwrap_or(false);
                         report.offer = seq.filter(|_| {
@@ -2193,7 +2338,7 @@ impl Shared {
                     tracing::warn!("Inject failed: {}", e);
                     report.error = Some(e);
                     not_pasted = Some("The paste didn't go through");
-                    crate::as_said::remember(None, read, &corrected, None, restore_clipboard);
+                    crate::as_said::forget();
                 }
             }
 
@@ -2210,15 +2355,22 @@ impl Shared {
             if history_enabled {
                 let app_name =
                     crate::text_injector::app_name_for(target).unwrap_or_default();
-                crate::history::record_with(
-                    &raw,
-                    corrected.trim(),
-                    &model,
-                    &app_name,
-                    audio.as_deref(),
-                    not_pasted.map(|_| crate::history::NOT_PASTED),
-                    not_pasted,
-                );
+                // With its words as said when cleanup changed them (Home's
+                // "AI edited · N changes" and "Paste what I said").
+                let ts = crate::history::record_dictation(crate::history::Dictation {
+                    raw: &raw,
+                    text: corrected.trim(),
+                    said: said.as_deref(),
+                    model: &model,
+                    app: &app_name,
+                    audio: audio.as_deref(),
+                    status: not_pasted.map(|_| crate::history::NOT_PASTED),
+                    error: not_pasted,
+                });
+                // The last paste is this entry (Home can swap it there).
+                if let Some(ts) = ts {
+                    crate::as_said::recorded(ts, corrected.trim());
+                }
                 // Its audio written (Home lists it with Run again).
                 if let Some(id) = &audio {
                     crate::recent_audio::finished(id);
@@ -2473,7 +2625,7 @@ impl Shared {
                     Ok(text) if !self.to_chat.load(Ordering::SeqCst) && self.wake_word_hit(text.trim()) => {
                         tracing::info!("Agent's name heard — running the dictation as a Command");
                         self.drop_kept_audio();
-                        self.run_agent(text.trim().to_string(), String::new()).await;
+                        self.run_agent(text.trim().to_string(), String::new(), None).await;
                         return;
                     }
                     Ok(text) => {
@@ -2562,8 +2714,9 @@ impl Shared {
     /// dictation's `audio` transcribed afresh — on `model` (an installed
     /// one; `None` = the one in use: the warm engine, else loaded for this
     /// and dropped) — then AI cleanup as for its app, the corrections and
-    /// snippets. Nothing is pasted. Returns (transcript, text, model id).
-    async fn rerun(self: &Arc<Self>, audio: Vec<f32>, model: Option<String>, app_name: &str) -> Result<(String, String, String), String> {
+    /// snippets. Nothing is pasted. Returns the transcript, the text, the
+    /// words as said when cleanup changed them, and the model id.
+    async fn rerun(self: &Arc<Self>, audio: Vec<f32>, model: Option<String>, app_name: &str) -> Result<Reran, String> {
         let cfg = self.config.read().map(|c| c.clone()).map_err(|_| "Yap's settings couldn't be read")?;
         let model_id = model.filter(|m| !m.trim().is_empty()).unwrap_or_else(|| cfg.model_size.clone());
         let data_dir = config::data_dir();
@@ -2610,7 +2763,9 @@ impl Shared {
         if text.is_empty() {
             return Err("Nothing was left after the cleanup".into());
         }
-        Ok((raw, text, model_id))
+        // The words as said, when cleanup changed them (Home's "AI edited").
+        let said = (cleaned.trim() != raw).then(|| as_said_text(&raw, &c, None)).filter(|s| s.trim() != text);
+        Ok(Reran { raw, text, said, model: model_id })
     }
 
     /// Audio kept for a dictation that ended up nowhere (a Command, nothing
@@ -2716,6 +2871,7 @@ impl Pipeline {
             assistant: AtomicBool::new(false),
             pause: Mutex::new(None),
             selection: Mutex::new(None),
+            rewrite_last: Mutex::new(None),
             processing: AtomicBool::new(false),
             upload_cancel: AtomicBool::new(false),
             mic_test: AtomicBool::new(false),
@@ -2991,9 +3147,21 @@ impl Pipeline {
 /// beside a dictation: it holds the `processing` guard meanwhile.
 pub(crate) struct Rerun(Arc<Shared>);
 
+/// What [`Rerun::run`] made of a kept dictation.
+pub(crate) struct Reran {
+    /// The transcript.
+    pub raw: String,
+    /// After AI cleanup, the corrections and snippets.
+    pub text: String,
+    /// The words as said, when cleanup changed them (`as_said_text`).
+    pub said: Option<String>,
+    /// The model id that ran it.
+    pub model: String,
+}
+
 impl Rerun {
-    /// (transcript, text, model id) — see `Shared::rerun`.
-    pub(crate) async fn run(&self, audio: Vec<f32>, model: Option<String>, app_name: &str) -> Result<(String, String, String), String> {
+    /// See `Shared::rerun`.
+    pub(crate) async fn run(&self, audio: Vec<f32>, model: Option<String>, app_name: &str) -> Result<Reran, String> {
         let shared = &self.0;
         if shared.recording.load(Ordering::SeqCst) || shared.processing.swap(true, Ordering::SeqCst) {
             return Err("Yap is busy with a dictation — try again in a moment".into());
@@ -3084,6 +3252,28 @@ impl Robot {
         shared.processing.store(false, Ordering::SeqCst);
         shared.end_state(report.offer);
         Ok(report)
+    }
+
+    /// The rewrite shortcut with `instruction` as what was said: the window
+    /// in front becomes the target and its selection is read, as at the
+    /// key press — nothing selected right after a paste there, and that
+    /// paste (the last dictation) is what's rewritten — then the AI and the
+    /// paste. Returns what it did.
+    pub(crate) async fn rewrite_text(&self, instruction: String) -> Result<Rewritten, String> {
+        let shared = &self.0;
+        if shared.recording.load(Ordering::SeqCst) || shared.processing.swap(true, Ordering::SeqCst) {
+            return Err(Self::BUSY.into());
+        }
+        if let Ok(mut r) = LAST_REWRITE.lock() {
+            *r = None;
+        }
+        shared.capture_target(true);
+        let _ = shared.app.emit("yap-state", "processing");
+        tracing::info!(len = instruction.len(), "e2e: robot rewrite from a transcript");
+        shared.run_rewrite(instruction).await;
+        shared.edit_mode.store(false, Ordering::SeqCst);
+        shared.processing.store(false, Ordering::SeqCst);
+        Ok(LAST_REWRITE.lock().ok().and_then(|mut r| r.take()).unwrap_or_default())
     }
 
     /// [`Robot::dictate_text`] as the Chat view's mic would start it: into

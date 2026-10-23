@@ -5,19 +5,24 @@
 // text box (UI Automation's TextPattern) and a chat app (Edge's WhatsApp
 // stand-in). Where that can't be done safely — a terminal, the text edited
 // since, another window in front — nothing in the app changes: the words as
-// said go on the clipboard instead (privately), and Yap says so.
+// said go on the clipboard instead (privately), and Yap says so. Later, from
+// Home ("AI edited · N changes" → Paste what I said): the latest dictation
+// swapped the same way, an earlier one copied.
 import { test, expect, lf } from './support/robot.js';
 import { edgeExe, hasWindowsTerminal, notepadBusy } from './support/targets.js';
-import { startFakeLlm } from '../e2e/support/fake-llm.js';
+import { startFakeLlm, cleanupTranscript } from '../e2e/support/fake-llm.js';
 
 const SAID = 'um so send the report to sam by friday';
 const CLEANED = 'Send the report to Sam by Friday.';
+// An earlier dictation, for Home.
+const EARLIER_SAID = 'um book the big room for tuesday';
+const EARLIER_CLEANED = 'Book the big room for Tuesday.';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let llm;
 test.beforeAll(async ({ robot }) => {
   llm = await startFakeLlm();
-  llm.reply('cleanup', () => CLEANED);
+  llm.reply('cleanup', (user) => (cleanupTranscript(user) === EARLIER_SAID ? EARLIER_CLEANED : CLEANED));
   await robot.configure({ postProcessEnabled: true, ppProvider: 'custom', ppBaseUrl: llm.base, ppModel: 'fake-cleanup', ppApiKey: '' });
 });
 
@@ -56,6 +61,43 @@ test('the test pad (a WinForms text box): the paste swapped for the words as sai
   await expect.poll(() => pad.text('box')).toBe(CLEANED);
   await robot.yap.invoke('bar_action', { action: 'as-said' });
   await expect.poll(() => pad.text('box')).toBe(SAID);
+});
+
+test('later, from Home: "Paste what I said" swaps the latest dictation in its window; an earlier one is copied, the app left alone', async ({
+  robot,
+}) => {
+  const { pad, yap } = robot;
+  const main = yap.main;
+  await pad.set('box', '');
+  await robot.dictate(pad, EARLIER_SAID);
+  await expect.poll(() => pad.text('box')).toBe(EARLIER_CLEANED);
+  await pad.set('box', 'Note: ');
+  await robot.dictate(pad, SAID);
+  await expect.poll(() => pad.text('box')).toBe(`Note: ${CLEANED}`);
+
+  // Home, its newest row first. (Clicked over DevTools: the pad keeps the
+  // focus, as when Yap brings the dictation's window back to the front.)
+  await main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Home', exact: true }).click();
+  const row = (text) => main.locator('.daylist .item').filter({ hasText: text }).first();
+  const latest = row(CLEANED);
+  await latest.getByRole('button', { name: 'AI edited · 1 change' }).click();
+  await expect(latest.getByRole('region', { name: 'What AI cleanup changed' }).locator('del')).toHaveText(['taken out: um so']);
+  await latest.getByRole('button', { name: 'Paste what I said' }).click();
+  await expect.poll(() => pad.text('box')).toBe(`Note: ${SAID}`);
+  await expect(main.getByRole('status').filter({ hasText: 'Swapped for what you said' })).toBeVisible();
+
+  // An earlier dictation: never looked for in the app — copied, and said.
+  const earlier = row(EARLIER_CLEANED);
+  await earlier.getByRole('button', { name: 'AI edited · 1 change' }).click();
+  await earlier.getByRole('button', { name: 'Paste what I said' }).click();
+  await expect(main.getByRole('status').filter({ hasText: 'Copied what you said' })).toContainText(
+    'Yap only swaps your latest dictation, right after it. Press Ctrl+V to paste it.'
+  );
+  await sleep(500);
+  expect(await pad.text('box')).toBe(`Note: ${SAID}`);
+  const clip = await robot.clipboard('check', EARLIER_SAID);
+  expect(clip.matchesText).toBe(true);
+  expect(clip.private).toBe(true);
 });
 
 test('edited since: the app is left alone, the words as said copied instead', async ({ robot }) => {

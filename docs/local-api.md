@@ -62,7 +62,7 @@ Same envelope contract as OpenWhispr's v1 API:
 | GET | `/v1/meetings/search?q=&limit=` | meetings whose title, attendees, typed notes, AI summary or transcript mention the words (3+ letters), best first, each with up to 3 `matches: [{at, speaker, text, page}]` and a `summaryMatch` line; `limit` default 10 |
 | GET | `/v1/mcp/config` | `{data:{allowWrites}}`: whether AI apps may save notes (see below) |
 | GET | `/v1/transcriptions/list?limit=` | dictation history, newest first (`limit` default 50) |
-| GET | `/v1/transcriptions/{ts}` | one entry: `{ts, raw, text, model, app}` |
+| GET | `/v1/transcriptions/{ts}` | one entry: `{ts, raw, text, model, app}`, and `said` (the words as said, corrected but not cleaned up) when AI cleanup changed them |
 | DELETE | `/v1/transcriptions/{ts}` | 204 |
 
 No audio routes: Yap doesn't retain dictation audio.

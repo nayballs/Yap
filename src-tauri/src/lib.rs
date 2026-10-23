@@ -483,6 +483,7 @@ pub fn run() {
             commands::get_stats,
             text_injector::paste_last_transcript,
             as_said::as_said_swap,
+            as_said::as_said_paste_entry,
             commands::configure_as_said_hotkey,
             stt_speed::stt_speed_status,
             stt_speed::stt_speed_measure,
@@ -730,6 +731,8 @@ pub fn run() {
             realtest::commands::realtest_refusals,
             #[cfg(debug_assertions)]
             realtest::commands::realtest_dictate_text,
+            #[cfg(debug_assertions)]
+            realtest::commands::realtest_rewrite_text,
             #[cfg(debug_assertions)]
             realtest::commands::realtest_dictate_wav,
             #[cfg(debug_assertions)]

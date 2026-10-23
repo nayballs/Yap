@@ -84,7 +84,16 @@ the voice command and snippets — and fits them to the same place
 (`text_injector::prepare_dictation_as_said`), so **"Use what I said"**
 (`as_said.rs`, [pasting.md](./pasting.md)) can swap the paste for them; the
 bar offers it for a few seconds when the words differ (`yap-state`
-"cleaned", `Shared::end_state`). **Every dictation's audio** is kept a day
+"cleaned", `Shared::end_state`). History keeps them beside the text
+(`said`, fitted the same way; `history::record_dictation`), so Home shows
+**what the AI changed** ("AI edited · N changes", a word diff) and **Paste
+what I said** later ([frontend.md](./frontend.md)); the paste is then the
+**last paste** `as_said` remembers, tagged with its history entry
+(`as_said::recorded`). **Rewrite the last dictation** (2026-10-23): the
+rewrite shortcut with nothing selected, within `as_said::REWRITE_WITHIN`
+(a minute) of a paste into the window in front (not a terminal), applies
+the instruction to that paste instead of writing new text — see
+`pipeline.rs` below. **Every dictation's audio** is kept a day
 (`recent_audio.rs`, below) from `run_stt`'s start, and its history entry
 carries it; a dictation that never got transcribed (no model, the model
 failed, Yap closed mid-way) or whose paste didn't land is listed as such,
@@ -158,6 +167,26 @@ to **Run again** from Home.
   agent (`agent_name`, default "Yap"; fuzzy-matched) routes the whole
   transcript through the Commands scope (`llm_scopes["voiceAgent"]`, its key kept) in write mode (`run_agent`, shared with
   the edit hotkey = the rewrite shortcut) instead of cleanup — the agent prompt strips the name+command.
+  **The rewrite shortcut with nothing selected** (2026-10-23; Wispr Flow's
+  Command Mode / Transforms by behaviour): `capture_target(edit)` reads the
+  selection as ever; none, and `as_said::rewrite_target(target)` names the
+  last paste when it went into this window within a minute and isn't a
+  terminal's (`as_said::rewritable`, pure) → `rewrite_last` (kept with a
+  cancel for Undo). `run_rewrite` hands it to `run_agent(instruction,
+  selection, last)`: before the AI is asked, `as_said::rewrite_check` (the
+  window in front, not an admin app, the paste still ending exactly at the
+  caret — typed after it, edited, or the cursor moved away refuses: the
+  instruction may not be about it any more) → refused: "Couldn't rewrite
+  your last dictation" (`as_said::cant_rewrite`, an alert), nothing pasted;
+  else the paste is the text the AI changes, and its answer goes through
+  `as_said::replace_last` (selected exactly again, pasted over with the
+  spaces around it kept, read back; refused → the field left alone, the
+  rewrite copied, said). Something selected, another window, over a
+  minute, a terminal: write mode or the selection's rewrite, as before.
+  Whatever `run_agent` pastes is the last paste from then on ("now
+  shorter" rewrites the rewrite); a paste that didn't land forgets it.
+  Robot mode: `Robot::rewrite_text` (`realtest_rewrite_text`), its report
+  (`Rewritten`, debug-only).
   **The Voice Assistant's shortcut** (`Pipeline::on_assistant_key`, the
   hook's `assistant-key-*` or the in-page `assistant_key`): the same
   `on_key` (toggle / push-to-talk gestures; no coaching hints for it) with
@@ -568,7 +597,11 @@ to **Run again** from Home.
   meeting records or is live in one (`pause_verdict`, pure). Debug-only
   `list` for the robot.
 - **`history.rs`** — local-only transcription history (`history.json`): each
-  dictation's timestamp, raw + final text, model, and focused app — and its
+  dictation's timestamp, raw + final text, its words as said when AI
+  cleanup changed them (`said`: corrections, voice command and snippets,
+  no cleanup, fitted as the text was — `record_dictation`, which returns
+  the entry's `ts`; Run again sets it afresh; `find(ts, text)` is Home's
+  lookup), model, and focused app — and its
   audio's id (`audio`, `recent_audio.rs`; listed only while the file's kept)
   and, for one that went wrong, `status` (`failed`: never transcribed, empty
   text, kept in time order — `record_failed`; `notPasted`: its paste didn't
