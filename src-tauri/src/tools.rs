@@ -1178,7 +1178,13 @@ pub enum FirstStep {
     /// ("Arsenal Football Club match tonight 21 October 2026 time"). A
     /// server that refuses `tool_choice`, or a step that calls another tool
     /// or answers in words, gets Yap's search instead
-    /// ([`search_for_the_model`], the question as the query). Until 22 Oct
+    /// ([`search_for_the_model`], the question as the query). **The step's
+    /// words are never the answer**: llama.cpp lets Qwen3.5 write before
+    /// its call, so nothing it writes is shown or said
+    /// (`stream::ChipsOnly`), nor kept in the conversation, and it may write
+    /// [`MUST_SEARCH_TOKENS`] — the Voice Assistant said "I can't provide
+    /// weather information…" before any search (a tester's voice chat,
+    /// 2026-10-23). Until 22 Oct
     /// 2026 the step offered `web_search` alone: the next step, offering all
     /// the tools, then read the whole prompt again (0.63 s instead of 0.31 s
     /// on the card, 40 s instead of 20 s on a processor,
@@ -1213,6 +1219,16 @@ pub const MUST_SEARCH_NOTE: &str = "First search the web (web_search) for what t
 pub fn must_search_choice() -> Value {
     json!("required")
 }
+
+/// The most a step that must search may write ([`FirstStep::MustSearch`]).
+/// Its call is 23–41 tokens (all 1,112 forced steps in the model
+/// evaluations), but llama.cpp's `"required"` grammar lets Qwen3.5 write
+/// before the call and won't let it stop without one: in a tester's voice
+/// chat (2026-10-23) the step wrote 1,961 tokens in 8 s until a dictation
+/// cut it off, in an evaluation of that question 4,864 in 30 s until the
+/// timeout. Cut here, the step is words (or a call cut short) and Yap
+/// searches for the model, under a second in on the card.
+pub const MUST_SEARCH_TOKENS: u32 = 128;
 
 /// What a `search_notes` that found nothing tells the model while web
 /// search is on, for a question that isn't about the person's own notes
@@ -1471,7 +1487,7 @@ async fn tool_loop(
     let mut rejected = 0u32;
     for _step in 0..MAX_TOOL_STEPS {
         let forced = must_search;
-        let req = crate::llm::ChatRequest::chat(
+        let mut req = crate::llm::ChatRequest::chat(
             base_url,
             api_key,
             model,
@@ -1481,10 +1497,22 @@ async fn tool_loop(
             Some(&tools),
             must_search.then(must_search_choice),
         );
-        let answer = ask(live, &req, true, disable_thinking).await;
+        // The step made to search is a call, never the answer: its words
+        // aren't shown or said, and it's cut short if it writes on
+        // ([`MUST_SEARCH_TOKENS`]).
+        let chips_only = live.map(|l| crate::stream::ChipsOnly(l.sink));
+        let step_live = match (live, &chips_only) {
+            (Some(l), Some(quiet)) if forced => Some(crate::stream::Live { sink: quiet, beside: l.beside }),
+            _ => live,
+        };
+        if forced {
+            req.max_tokens = Some(MUST_SEARCH_TOKENS);
+        }
+        let answer = ask(step_live, &req, true, disable_thinking).await;
         // A server that won't be made to search (it refuses `tool_choice`,
         // answers in words, or calls another tool): Yap searches for the
         // model, with the question as the query, and the model goes on.
+        // (What it wrote instead was never shown.)
         if must_search {
             must_search = false;
             let searched = answer.as_ref().is_ok_and(|m| {
@@ -1492,10 +1520,6 @@ async fn tool_loop(
             });
             if !searched {
                 tracing::info!(provider, "Chat: the model wasn't made to search; Yap searches for it");
-                // What it wrote instead isn't the answer: off the page.
-                if let Some(live) = live {
-                    live.sink.send(crate::stream::Event::Text { text: String::new() });
-                }
                 if let Some(turn) = web.as_deref_mut() {
                     searching(live);
                     search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used).await;
@@ -1545,7 +1569,13 @@ async fn tool_loop(
         }
 
         // Append the assistant turn (with its tool_calls), execute each call,
-        // and feed the results back.
+        // and feed the results back. A forced step's words go without it:
+        // nobody saw them, and "I don't have access to real-time weather
+        // data" would steer the answer from the search.
+        let mut msg = msg;
+        if forced {
+            msg["content"] = Value::Null;
+        }
         messages.push(msg.clone());
         // This step only searched the notes, and found nothing.
         let mut notes_found_nothing = true;
@@ -2860,6 +2890,122 @@ mod tests {
         assert_eq!(call["id"], "call_1");
         assert_eq!(serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap()).unwrap(), json!({ "query": "kitchen budget" }));
         assert_eq!(messages.last().unwrap()["role"], "tool");
+    }
+
+    /// A must-search turn, streamed to `seen` (a model on this PC, the web
+    /// on, Exa at the fake's own address): the fake answers every request
+    /// in turn, the search's too.
+    async fn ask_must_search(fake: &FakeServer, question: &str, seen: &Seen) -> Result<(String, Vec<String>), String> {
+        let settings =
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None, units: None };
+        let endpoints = crate::web::Endpoints { exa: format!("{}/exa", fake.base), tavily: String::new(), standin: None, offline: false };
+        let mut turn = crate::web::Turn::new(settings, endpoints, question, &[]);
+        tool_loop(
+            "You are helpful.",
+            &[],
+            question,
+            &[],
+            &format!("{}/v1", fake.base),
+            "",
+            "fake-chat",
+            "custom",
+            false,
+            false,
+            &|_| {},
+            Some(&mut turn),
+            FirstStep::MustSearch,
+            Extra::default(),
+            Some(crate::stream::Live { sink: seen, beside: None }),
+        )
+        .await
+    }
+
+    fn kellbrook_pages() -> Reply {
+        Reply::Json(
+            200,
+            json!({ "results": [{ "title": "Kellbrook weather", "url": "https://weather.example/kellbrook", "highlights": ["Kellbrook today: cloudy, 12°C."] }] }),
+        )
+    }
+
+    /// A tester's voice chat (2026-10-23; the town is fictional): the step
+    /// made to search (`tool_choice: "required"`) wrote first — llama.cpp's
+    /// grammar lets Qwen3.5 put words before its call (15 of 150 times on
+    /// this question) — and its opening sentence went to the page and the
+    /// Voice Assistant's voice as the answer before any search. A forced
+    /// step's words never show: only its call's chip, then the answer from
+    /// the search.
+    #[tokio::test]
+    async fn a_search_that_must_come_first_never_shows_the_words_before_its_call() {
+        let fake = fake_streamer(vec![
+            Reply::Sse(vec![
+                delta(json!({ "role": "assistant", "content": "I can't provide weather information for Kellbrook, " })),
+                delta(json!({ "content": "as I don't have access to real-time weather data. " })),
+                delta(json!({ "content": "For the weather, check a weather website.\n\n" })),
+                delta(json!({ "tool_calls": [{ "index": 0, "id": "call_1", "type": "function", "function": { "name": "web_search", "arguments": "" } }] })),
+                delta(json!({ "tool_calls": [{ "index": 0, "function": { "arguments": "{\"query\": \"Kellbrook weather today\"}" } }] })),
+                finish("tool_calls"),
+                "[DONE]".into(),
+            ]),
+            kellbrook_pages(),
+            streamed_answer(&["Kellbrook is ", "cloudy today, ", "around 12°C [1]."]),
+        ]);
+        let seen = Seen::default();
+        let question = "Can you tell me the weather today in Kellbrook? Oh, don't tell me that's not working.";
+        let (reply, chips) = ask_must_search(&fake, question, &seen).await.expect("an answer");
+        assert_eq!(reply, "Kellbrook is cloudy today, around 12°C [1].");
+        assert_eq!(chips, ["Searched the web: \"Kellbrook weather today\""]);
+        let events = seen.events();
+        assert!(!seen.texts().iter().any(|t| t.contains("can't provide") || t.contains("weather website")), "{events:?}");
+        // Nothing written before the search's chips; then the answer.
+        let chips_at = events.iter().position(|e| matches!(e, crate::stream::Event::Chips { .. })).expect("the chips");
+        let first_text = events.iter().position(|e| matches!(e, crate::stream::Event::Text { text } if !text.is_empty())).expect("text");
+        assert!(chips_at < first_text, "{events:?}");
+        assert_eq!(seen.texts().last().unwrap(), &reply);
+        // Its call went back as the model made it, without the words nobody
+        // saw (they'd steer the answer: "I don't have access…").
+        let requests = fake.requests.lock().unwrap().clone();
+        let chat: Vec<&Value> = requests.iter().filter(|(u, _)| u.ends_with("/chat/completions")).map(|(_, b)| b).collect();
+        assert_eq!(chat.len(), 2);
+        assert_eq!(chat[0]["tool_choice"], "required");
+        let step = chat[1]["messages"].as_array().unwrap().iter().rev().nth(1).unwrap().clone();
+        assert_eq!(step["tool_calls"][0]["function"]["name"], "web_search");
+        assert!(step["content"].is_null(), "{step}");
+    }
+
+    /// The same step writing on instead (llama.cpp's grammar won't let it end
+    /// without a call: 1,961 tokens in 8 s in that chat, before a dictation
+    /// cut it): it may write [`MUST_SEARCH_TOKENS`] — a call is 23–41 — and,
+    /// cut there with words only, Yap searches for it, the question as the
+    /// query. None of its words show.
+    #[tokio::test]
+    async fn a_search_that_must_come_first_is_cut_short_when_it_writes_on() {
+        let fake = fake_streamer(vec![
+            Reply::Sse(vec![
+                delta(json!({ "role": "assistant", "content": "I can't check the weather in Kellbrook right now. " })),
+                delta(json!({ "content": "I don't have access to live weather data. Is there something else " })),
+                delta(json!({ "content": "I can help you with? Oh wait, you mentioned" })),
+                finish("length"),
+                "[DONE]".into(),
+            ]),
+            kellbrook_pages(),
+            streamed_answer(&["Kellbrook is ", "cloudy today, ", "around 12°C [1]."]),
+        ]);
+        let seen = Seen::default();
+        let question = "What's the weather in Kellbrook today?";
+        let (reply, chips) = ask_must_search(&fake, question, &seen).await.expect("an answer");
+        assert_eq!(reply, "Kellbrook is cloudy today, around 12°C [1].");
+        assert_eq!(chips, ["Searched the web: \"What's the weather in Kellbrook today\""]);
+        assert!(!seen.texts().iter().any(|t| t.contains("can't check") || t.contains("live weather")), "{:?}", seen.events());
+        let requests = fake.requests.lock().unwrap().clone();
+        let chat: Vec<&Value> = requests.iter().filter(|(u, _)| u.ends_with("/chat/completions")).map(|(_, b)| b).collect();
+        assert_eq!(chat.len(), 2);
+        // Only the forced step is held to a call's length.
+        assert_eq!(chat[0]["max_tokens"], MUST_SEARCH_TOKENS);
+        assert!(chat[1].get("max_tokens").is_none(), "the answer may run long");
+        // Its words never went back to the model either: Yap's search did.
+        let messages = chat[1]["messages"].as_array().unwrap();
+        assert!(!messages.iter().any(|m| m["content"].as_str().is_some_and(|c| c.contains("can't check"))));
+        assert_eq!(messages[messages.len() - 2]["tool_calls"][0]["id"], YAP_SEARCH_ID);
     }
 
     #[tokio::test]

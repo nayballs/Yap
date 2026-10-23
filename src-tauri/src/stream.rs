@@ -20,8 +20,9 @@
 //! - **A step** ([`Step`]): one model call's deltas → what the page sees.
 //!   With tools offered, a step's opening text is held until it is either a
 //!   tool call (→ a chip, the text never shown) or about a sentence of
-//!   answer ([`releases`]); reasoning blocks are hidden when the scope says
-//!   so; the text goes out at most every [`MIN_GAP`].
+//!   answer ([`releases`]); a search that must come first shows none of
+//!   its text, only its call ([`ChipsOnly`]); reasoning blocks are hidden
+//!   when the scope says so; the text goes out at most every [`MIN_GAP`].
 //! - **The watcher** ([`Sink`]): the Chat view's channel (`chat_send`), the
 //!   notepad's, the Voice Assistant (speaks sentence by sentence), a model
 //!   evaluation (times the first words). [`Watch`] keeps what was shown, for
@@ -148,6 +149,25 @@ impl Sink for Watch<'_> {
             }
         }
         self.inner.send(ev);
+    }
+}
+
+/// **A step whose words are never the answer**: a search that must come
+/// first (`tools::FirstStep::MustSearch`). Its tool call's chip goes on to
+/// the watcher, and so does a wait for a dictation; its text never does —
+/// not to the page, not to the Voice Assistant's voice. llama.cpp's
+/// `tool_choice: "required"` lets Qwen3.5 write before its call ("I can't
+/// provide weather information for Kellbrook, as I don't have access to
+/// real-time weather data…", 15 times in 150 on one question), and that
+/// went out as the answer's first sentence and was said aloud before any
+/// search had run (a tester's voice chat, 2026-10-23).
+pub struct ChipsOnly<'a>(pub &'a dyn Sink);
+
+impl Sink for ChipsOnly<'_> {
+    fn send(&self, ev: Event) {
+        if !matches!(ev, Event::Text { .. }) {
+            self.0.send(ev);
+        }
     }
 }
 

@@ -200,7 +200,15 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   the tools, and `MUST_SEARCH_NOTE` in the question's context: search this
   message, not earlier messages' words; no `web_search` made (another
   tool, or words), or the server refuses →
-  Yap's own search for it, `search_for_the_model`; until 2026-10-22 only
+  Yap's own search for it, `search_for_the_model`; **the step's words are
+  never the answer** (2026-10-23): llama.cpp lets Qwen3.5 write before its
+  forced call, and the Voice Assistant said "I can't provide weather
+  information…" before any search (a tester's voice chat), so the step
+  streams through `stream::ChipsOnly` (its chip only, no text to the page
+  or the voice), its words are left out of the call kept in the
+  conversation, and it's held to `MUST_SEARCH_TOKENS` (128) — the grammar
+  won't let it stop without a call, and one wrote on for 1,961 tokens;
+  until 2026-10-22 only
   `web_search` was offered, so the next step's tools differed and a local
   model read the whole prompt again) or `YapSearches(query)`
   (Yap searches before the first step; the model evaluations' comparison,
@@ -259,8 +267,15 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   followed by more text, or 200 characters — so the line a model writes
   before a tool call ("I'll search your notes for that.") never shows; a
   tool-call delta turns the step into its chip (`Event::Tool`, "Searching
-  the web…" from `doing`), and text shown before it is taken back; without
-  tools (a small model, the last call) text shows at once. Reasoning blocks
+  the web…" from `doing`), and text shown before it is taken back (on the
+  page: a voice already saying it goes on); without
+  tools (a small model, the last call) text shows at once. **A search
+  that must come first shows no text at all** (`ChipsOnly`, a sink around
+  the watcher that lets everything but `text` through; 2026-10-23): its
+  words are never the answer, and a long one — "I can't provide weather
+  information for Kellbrook, as I don't have access to real-time weather
+  data…" — passed `releases` and the Voice Assistant said it before any
+  search (`tools.rs` above). Reasoning blocks
   never show (`without_thinking`, even a half-written `<thi`, when the
   scope hides thinking); gpt-oss's `【1】` shows as `[1]`; the text goes out
   at most every 50 ms (`MIN_GAP`), whole each time. **The events** (the

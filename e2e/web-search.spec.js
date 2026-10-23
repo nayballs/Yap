@@ -839,3 +839,61 @@ test('the Voice Assistant says a web answer short, with the sources in Chat', as
   await shot(main, '10-chat-after-the-assistant');
   await setConfig(yap, main, { speakReplies: false });
 });
+
+// A tester's voice chat (2026-10-23): the step a model on this PC is made to
+// search with (tool_choice "required") wrote first — llama.cpp lets Qwen3.5
+// put words before its call — and the Voice Assistant said them as the
+// answer before any search ran. A forced step's words are never said nor
+// shown (stream::ChipsOnly), nor sent back to the model, and the step is
+// held to a call's length (tools::MUST_SEARCH_TOKENS).
+test('the Voice Assistant never says what a model on this PC wrote before the search it must make', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  await setConfig(yap, main, { webSearch: true, webSearchKeys: { exa: EXA_KEY }, llmScopes: chatScope(fakeLlm), speakReplies: true });
+  await yap.invoke('assistant_stop');
+  await yap.invoke('tts_stop');
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  await freshChat(main);
+  // Every text the Chat view's answers show while the question is answered.
+  await main.evaluate(() => {
+    window.__answersSeen = [];
+    const look = () => document.querySelectorAll('.msgs .cbubble.assistant').forEach((b) => window.__answersSeen.push(b.textContent));
+    window.__answersWatch = new MutationObserver(look);
+    window.__answersWatch.observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  const from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([
+    {
+      preamble: "I can't look that up, as I don't have access to live game guides. From memory, Gale is in Moonrise Towers. ",
+      tools: [{ name: 'web_search', args: { query: "Gale location Baldur's Gate 3" } }],
+      stream: { gapMs: 150 },
+    },
+    { content: 'Gale is on the beach west of the Nautiloid crash site [1].' },
+  ]);
+  await ask(yap, 'Where do I find Gale in Baldur’s Gate 3?');
+  const said = 'Gale is on the beach west of the Nautiloid crash site. The details and sources are in Chat.';
+  await expect.poll(async () => (await yap.invoke('tts_e2e_spoken')).map((s) => s.text), { timeout: 15_000 }).toEqual([said]);
+  await expect(lastAnswer(main)).toContainText('Gale is on the beach west of the Nautiloid crash site');
+  await expect(chipsOfLast(main)).toHaveText(['Searched the web: "Gale location Baldur\'s Gate 3"']);
+  const shown = await main.evaluate(() => {
+    window.__answersWatch.disconnect();
+    return window.__answersSeen;
+  });
+  expect(shown.length).toBeGreaterThan(0);
+  expect(shown.filter((t) => /live game guides|Moonrise/.test(t))).toEqual([]);
+  await shot(main, '17-assistant-forced-search-words-never-said');
+  // The forced step: a call, held to a call's length; its words never went
+  // back to the model.
+  const steps = fakeLlm.requests.slice(from).filter((r) => r.tools.length);
+  expect(steps.map((s) => [s.toolChoice, s.maxTokens])).toEqual([
+    ['required', 128],
+    [null, null],
+  ]);
+  expect(steps[1].messages.at(-2).tool_calls[0].function.name).toBe('web_search');
+  expect(steps[1].messages.at(-2).content).toBeNull();
+  await yap.invoke('tts_stop');
+  await setConfig(yap, main, { speakReplies: false });
+});

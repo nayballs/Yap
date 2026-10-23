@@ -99,7 +99,21 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   a sentence of nothing else dropped; handed over as the call the
   model would have made: chip, sources, safety rule, 3-search cap). Left to
   decide, Qwen3.5-4B answered a tester's "best RPG games coming out in 2026"
-  from memory (2026-10-21). Cloud models decide for themselves. **Nothing
+  from memory (2026-10-21). **The forced step's words are never the
+  answer** (2026-10-23): llama.cpp's "required" grammar lets Qwen3.5 write
+  before its call — and won't let it stop without one — so a tester's
+  spoken "Can you tell me the weather today in Kellbrook?…" (a fictional
+  town here) was answered aloud from its first sentence, "I can't provide
+  weather information…", 0.77 s in, while the step wrote on for 1,961
+  tokens and no search ran (replayed on the 4B: words before the call 15
+  times in 150, one evaluation turn writing 4,864 tokens until its 30 s
+  timeout). Now the step's text goes nowhere (`stream::ChipsOnly`: its
+  call's chip only — not the page, not the voice), its words aren't kept
+  with its call in the conversation, and it may write
+  `tools::MUST_SEARCH_TOKENS` (128; a call is 23–41): cut there with words
+  only, Yap searches for it (`web-weather-voice-must-search`, 150 runs: no
+  text before a forced step ended; the one that wrote on was cut at 1.0 s,
+  the answer's first words at 1.3 s). Cloud models decide for themselves. **Nothing
   in the notes** (`tools::EmptyNotes`, web search on, a question not about
   the person's own things): a `search_notes` that found nothing carries
   `NOTHING_IN_NOTES_HINT` ("search the web for it next (web_search) instead
