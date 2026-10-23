@@ -640,6 +640,7 @@ fn settings_for(m: &Model, s: &Scenario, apps: &[AppEntry], web: &WebPlan) -> cr
         memory_search_chats: s.settings.memory_search_chats,
         about_name: s.settings.about_name.clone(),
         about_me: s.settings.about_me.clone(),
+        region_country: s.settings.region.clone(),
         web_search: web.on,
         web_search_native: web.native,
         web_search_service: web.service.clone(),

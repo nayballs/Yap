@@ -1,0 +1,46 @@
+{
+  "name": "web-weather-uk-asks-fahrenheit",
+  "description": "A UK user asks the weather in a US town in Fahrenheit (for a relative there); the pages give °F (stand-in web, fictional town). Right: °F, as asked — Yap's °C-first conversion of the pages (about_you::convert_temperatures) mustn't override a question that names the other scale. Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "units",
+    "locale",
+    "standin"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Harlow Creek, OH Weather Today, Oct 23 | 58°F, Partly Cloudy",
+        "url": "https://weatherdial.example/harlow-creek-oh-us/today",
+        "published": "2026-10-23",
+        "text": "Current weather in Harlow Creek, Ohio: 58°F, partly cloudy. Feels like 56°F. Wind S 6 mph. Today's high 64°F, tonight's low 47°F. Dry through the evening."
+      },
+      {
+        "title": "Harlow Creek, OH Hourly Forecast | Forecastly",
+        "url": "https://forecastly.example/us/oh/harlow-creek/hourly",
+        "published": "2026-10-23",
+        "text": "11 AM 58°F partly cloudy · 2 PM 63°F · 5 PM 61°F · 8 PM 53°F · 11 PM 49°F. Wind S 5–8 mph."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "My brother lives in Harlow Creek, Ohio. What's the weather there today, in Fahrenheit?",
+      "expect": {
+        "min_sources": 1,
+        "temperatures": "F",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ]
+      }
+    }
+  ]
+}

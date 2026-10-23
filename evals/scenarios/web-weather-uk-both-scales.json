@@ -1,0 +1,47 @@
+{
+  "name": "web-weather-uk-both-scales",
+  "description": "A UK user asks tomorrow's forecast for a town; the pages lead with °F and give °C in brackets after it (\"High 48°F (9°C)\"), the shape the morning's answer of 2026-10-23 copied (\"35°F (1.5°C)\"). Stand-in web, fictional town. Right: the °C figures first, a °F at most in brackets after one; the wind in mph. Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "units",
+    "locale",
+    "standin"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Pellingham, England, United Kingdom 3-Day Weather Forecast | 48°F",
+        "url": "https://weatherdial.example/pellingham-england-gb/3-day",
+        "published": "2026-10-23",
+        "text": "Saturday 24 October: cloudy morning, rain spreading east in the afternoon. High 48°F (9°C), low 39°F (4°C). Wind SW 14 mph, gusts to 30 mph. Chance of rain 70%. Sunday 25 October: showers clearing, high 50°F (10°C), low 41°F (5°C), wind W 10 mph."
+      },
+      {
+        "title": "Pellingham weather tomorrow, hour by hour | Forecastly",
+        "url": "https://forecastly.example/gb/pellingham/tomorrow",
+        "published": "2026-10-23",
+        "text": "Sat 24 Oct. 8 AM 41°F (5°C) cloudy · 11 AM 45°F (7°C) cloudy · 2 PM 48°F (9°C) rain · 5 PM 46°F (8°C) heavy rain · 8 PM 42°F (6°C) rain easing. Wind SW 12–16 mph."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "What's the forecast for Pellingham tomorrow?",
+      "expect": {
+        "min_sources": 1,
+        "temperatures": "C",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "answer_not_matches": "km/h|kph|kilomet"
+      }
+    }
+  ]
+}

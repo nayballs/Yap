@@ -40,13 +40,24 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   pipeline, `note_ask`), local and cloud: "About the user: they're in the
   United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK
   time (UTC+01:00). Give times in UK time and metric units, but miles for
-  distances and speeds. Prices: in £ (GBP) when you have them in £; never
+  distances and speeds. Temperatures in °C: convert one a source gives in °F
+  (68°F is 20°C). Prices: in £ (GBP) when you have them in £; never
   change a price's currency sign — a price in another currency stays as it
   is, labelled, like "$15 a month (US price)". Their name is Imogen. They
   told Yap: "…"" (the example is "£15 a month (UK price)" for a US user,
   and no real plan's price: with "$8 a month" as the example and "Give
   prices in £", Qwen3.5-4B wrote x.ai's "$8/month" as "£8/month" 2 times in
-  3 — the model evaluations, model-evals.md) — only the parts known; with
+  3 — the model evaluations, model-evals.md). **Temperatures** have their
+  own sentence (`Units::temperatures`, 2026-10-23): "metric units" alone let
+  a UK weather answer copy its pages' "35°F (1.5°C), feeling colder at
+  30°F"; a US user's is "Temperatures in °F: convert one a source gives in
+  °C (20°C is 68°F)" (and "US units (miles, pounds)"); the examples are no
+  figure the evaluations' pages give. The sentence alone didn't change
+  Qwen3.5-4B's web answers (told to convert, it copied the °F or got it
+  wrong), so **the web text itself puts their scale first**
+  (`convert_temperatures`: "35°F" → "2°C (35°F)", with `temperature_note`'s
+  line beside it; `temperature_units`: not when the question names the
+  other scale — web-and-apps.md) — only the parts known; with
   nothing known, just the date and time (its clock changes every minute, so
   it goes last and the rest of the prompt stays cacheable). `about_name`
   (≤ 60 characters) and `about_me` (≤ 300, one line). **Search** is aimed at
@@ -505,7 +516,10 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   dictations (words English spells two ways, as speech-to-text writes them):
   how many come out British or American under the run's locale.
   **`--locale`** stands in for Windows' region (`YAP_E2E_LOCALE`, About you):
-  without it no region reaches the prompts. A scenario with `needs_web` and
+  without it no region reaches the prompts; a scenario's `settings.region`
+  picks a country over it, as Settings' Region does (`config.region_country`;
+  the US and Ireland controls of the weather scenarios, checked with
+  `temperatures`: "C" | "F"). A scenario with `needs_web` and
   no `web` object runs live with the run's key (until 2026-10-21 a derived
   `Default` left them keyless: Wikipedia). `--cleanup-layout combined |
   system` tries the cleanup's prompt laid out another way (`combined` = the

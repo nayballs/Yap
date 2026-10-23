@@ -285,7 +285,9 @@ isn't logged.
     "memory_sensitive": false,                // "Include sensitive topics in memory" (memory.rs)
     "memory_search_chats": true,              // "Search and reference past chats"
     "about_name": "Declan",                   // About you's name and note (about_you.rs; the region is --locale)
-    "about_me": "I work weekends in Norwich."
+    "about_me": "I work weekends in Norwich.",
+    "region": "US"                            // About you's Region picked in Settings (config.region_country),
+                                              // over the run's --locale; default: Automatic (the --locale)
   },
   "apps": "standard",                         // evals/apps/standard.json, an inline [{id, name}] list, or "this_pc"
   "seed": {
@@ -329,6 +331,7 @@ field is an error, so a typo can't silently skip a check):
 | `no_post_fixes` | Yap didn't have to fix the answer before showing it (`commands::chat_turn`'s checks: a sources list or note the model wrote, a claimed search, a citation with nothing behind it). Use it in `soft`: it measures the model, the hard checks what the person sees. A search Yap ran for the model isn't a fix. |
 | `min_sources`, `sources_any` | The answer came with at least n web sources (Chat's Sources row); one of their addresses holds one of these. |
 | `min_searches` | At least n web searches ran this turn (the model's and Yap's own: a price question's second search for local prices). |
+| `temperatures` | `"C"` or `"F"`: the answer's temperatures lead with that scale — it gives one, every one in the other scale is only a conversion right after one in it ("2°C (35°F)", "2°C / 35°F"), such a pair agrees, and each figure is one the turn's web pages give, or one of theirs converted (within 1°C). Degrees said without a scale ("about 7 degrees", a spoken answer) take the scale whose figures on the pages they fit. |
 | `clipboard_contains`, `clipboard_untouched` | What the clipboard tool was handed. |
 | `notes` | `[{ "title", "exists", "folder", "contains", "not_contains" }]`, as the notes are afterwards. |
 | `folders`, `notes_count` | The folders afterwards, exactly (no invented ones); how many notes. |
@@ -1358,3 +1361,81 @@ What it took, run by run:
 Word-level checks can't catch two true facts swapped within a sentence; the 4B didn't do that
 here, the 1.5B did. Open items are the notes' unticked ones: a task done since but never
 ticked still shows.
+
+## Temperatures where the user is (23 Oct 2026)
+
+A UK user on Qwen3.5-4B (on the card, web search on) asked the weather in a UK town. Exa's
+weather pages gave °F ("<Town>, Scotland, United Kingdom Weather Today, Oct 23 | 35°F,
+Overcast") and the answer copied them: "temperatures around 35°F (1.5°C), feeling colder at
+30°F… Winds are light at about 2–4 mph". The About you block said "metric units, but miles for
+distances and speeds".
+
+**The scenarios** (stand-in webs, fictional towns, `--locale` the UK with UK time; tag `units`):
+`web-weather-uk-fahrenheit` (that question, °F pages), `web-weather-uk-both-scales` (pages
+leading with °F, °C in brackets: "High 48°F (9°C)"), `web-weather-uk-voice` (the Voice
+Assistant, the weekend), `web-weather-ie-fahrenheit` (Region Ireland: km and °C), and three
+controls — `web-weather-us-fahrenheit` (Region US, °F pages: °F stays),
+`web-weather-us-celsius-pages` (Region US, a Scottish town's °C pages: °F wanted) and
+`web-weather-uk-asks-fahrenheit` (a UK user asking "…in Fahrenheit?"). Two harness additions:
+a scenario's `settings.region` picks a country as Settings' Region does, and the
+`temperatures` check ("C" | "F", above), which caught two wrong conversions ("13°C (46°F)")
+and, on the way, two bugs of its own (a decade, "the low 40s°F", read as no temperature;
+gpt-oss's non-breaking-hyphen minus) and one in `no_false_claims` ("Starting around 41°F" read
+as an app started).
+
+**Qwen3.5-4B**, RTX 5070 Ti, llamafile 0.10.6 (MTP on), 16K, ×5 (run folders
+`<builds>/eval-runs/20261023-08*-celsius-*`):
+
+| Scenario | Before | The block's sentence | + a line beside the results | + the pages converted (ships) |
+|---|---|---|---|---|
+| `web-weather-uk-fahrenheit` | 0/5 ("35°F (about 2°C)") | 0/5 | 0/5 | **5/5** ("2°C (35°F)… -1°C (30°F)") |
+| `web-weather-uk-both-scales` | 0/5 | 0/5 | 5/5 | **5/5** |
+| `web-weather-uk-voice` | 0/5 | 0/5 (one "13°C (44°F)") | 0/5 (four "13°C (46°F)") | **5/5** ("highs around 7°C") |
+| `web-weather-ie-fahrenheit` | 0/5 | 0/5 | 0/5 | **5/5** |
+| `web-weather-us-celsius-pages` | 0/5 (2°C as the pages) | 0/5 | 0/5 | **5/5** ("36°F (2°C)") |
+| `web-weather-us-fahrenheit` (control) | 5/5 | 5/5 | 5/5 | 5/5 |
+| `web-weather-uk-asks-fahrenheit` (control) | 5/5 | — | — | 5/5 (58°F, as asked) |
+| **All** | **10/35** | 5/30 | 10/30 | **35/35** |
+
+What each step did:
+
+- **The block's sentence** ("Temperatures in °C: convert one a source gives in °F (68°F is
+  20°C)."; for the US the other way round, `Units::temperatures`): nothing — the 4B led with °F
+  in 24 of 25 metric answers, as before (25 of 25). It stays: it says what the person uses for
+  any answer, and a cloud model reads it.
+- **A line beside the results** ("…give every temperature in °C, converted…", in the web tools'
+  result): it then led with °C where the page already had °C in brackets (5/5), but where it had
+  to convert, it copied the °F or got it wrong.
+- **The pages converted** (`about_you::convert_temperatures`, web-and-apps.md): the web text
+  puts the person's scale first ("35°F" → "2°C (35°F)", ranges, a page's own conversion moved
+  first, °C → °F for the US), with the line beside it saying so: every metric answer led with
+  °C and every conversion was right — the model copies what it reads. A question naming the
+  other scale is left alone (`temperature_units`: the UK user's "in Fahrenheit?" got 58°F).
+  ~150 more prompt tokens a weather turn (the figures and the line); the turn's time the same
+  (0.9–1.0 s).
+
+A deterministic fix of the *answer* (in the spirit of `restore_price_signs`) was considered
+and not built: it would have to recognise every way a model writes a temperature (ranges,
+"the low 40s°F", "44 degrees" with no scale, wrong conversions to correct), and the Voice
+Assistant speaks an answer's sentences as they stream, before any fix of the final text.
+Converting the pages is the same arithmetic on regular text, before the model writes.
+
+**Nothing else moved**: the 13 region scenarios (the 12 price ones, `web-grok-subscriptions`,
+`memory-learn-about-you`; live ones on Exa) ×2: **26/26 before, 26/26 after**, no soft warnings
+either way, and the temperature line never fired on their pages. (Turn times aren't compared:
+the "before" run shared the processor with a build.) Dictation cleanup's spelling line doesn't
+use the block, so it isn't affected.
+
+**Groq `openai/gpt-oss-20b`** (`uk-fahrenheit`, `ie-fahrenheit`, `us-celsius-pages`, ×1, 16k
+tokens a run): before 1/3 ("a high of about 41 °F (≈5 °C)"; the US user's answer in °C; Ireland
+right, wind in km/h too); after 3/3 — its US answer, "36 °F (2 °C)… feels like 30 °F (‑1 °C)",
+first failed on the check's own bug (the non-breaking hyphen), fixed and unit-tested on that
+answer.
+
+**Qwen3.5-2B on the processor** (no tools: the fixed web pipeline, `small_model_answer`, which
+gets the same conversion and line), the seven ×2: **4/14 before** (the two controls only),
+**14/14 after**; 4.3 → 4.7 s a turn (~90 more prompt tokens).
+
+**Left out**: speeds — Ireland's answers kept the pages' mph (5/5 before and after; the soft
+check says km/h); conversions of other units in pages (miles, pounds); a decade ("the mid-40s
+°F") isn't converted, only the line asks the model to.

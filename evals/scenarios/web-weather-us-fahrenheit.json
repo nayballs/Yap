@@ -1,0 +1,50 @@
+{
+  "name": "web-weather-us-fahrenheit",
+  "description": "The control: someone whose Region is the United States asks the weather in a US town, the pages in °F and mph (stand-in web, fictional town). Right: the temperatures in °F (a °C at most in brackets after one) — a rule for metric regions mustn't turn a US answer into °C. Run with --locale en-GB: the scenario picks the US in Settings (`settings.region`).",
+  "tags": [
+    "web",
+    "units",
+    "locale",
+    "standin"
+  ],
+  "settings": {
+    "region": "US"
+  },
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Harlow Creek, OH Weather Today, Oct 23 | 58°F, Partly Cloudy",
+        "url": "https://weatherdial.example/harlow-creek-oh-us/today",
+        "published": "2026-10-23",
+        "text": "Current weather in Harlow Creek, Ohio: 58°F, partly cloudy. Feels like 56°F. Wind S 6 mph. Today's high 64°F, tonight's low 47°F. Dry through the evening."
+      },
+      {
+        "title": "Harlow Creek, OH Hourly Forecast | Forecastly",
+        "url": "https://forecastly.example/us/oh/harlow-creek/hourly",
+        "published": "2026-10-23",
+        "text": "11 AM 58°F partly cloudy · 2 PM 63°F · 5 PM 61°F · 8 PM 53°F · 11 PM 49°F. Wind S 5–8 mph."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "What's the weather like in Harlow Creek today?",
+      "expect": {
+        "min_sources": 1,
+        "temperatures": "F",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "answer_not_matches": "km/h|kph|kilomet"
+      }
+    }
+  ]
+}

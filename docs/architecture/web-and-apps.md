@@ -135,12 +135,26 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   text (`Turn::texts`: results and page parts) gave only as "$8" gets its
   page's sign back (`about_you::restore_price_signs`, post-fix
   `price_sign`; not 0, not an estimate said as one — "about £6", which the
-  evals' `prices_keep_their_sign` lets pass too). **Models
+  evals' `prices_keep_their_sign` lets pass too). **Temperatures in the
+  person's scale** (2026-10-23, `Settings.units` from About you's region;
+  a UK weather answer copied its pages' "35°F (1.5°C), feeling colder at
+  30°F"): Yap *does* convert these — a temperature has one right answer in
+  each scale, unlike a price — so the web text a model gets puts theirs
+  first (`about_you::convert_temperatures`: "35°F" → "2°C (35°F)", a range
+  "30–35°F" → "-1 to 2°C (30–35°F)", a page's "48°F (9°C)" → "9°C
+  (48°F)"; °C → °F for the US; whole degrees; a decade, "the mid-40s °F",
+  stays), in search results (titles, text, a provider's summary) and page
+  reads, and the result says `temperatures`: "The user uses °C: Yap has put
+  °C before these pages' °F figures, like "20°C (68°F)". Give every
+  temperature in °C (the °F in brackets after it at most), converting any
+  still in °F." (`about_you::temperature_note`). A question that names the
+  other scale ("…in Fahrenheit?" from the UK) leaves the pages as they are
+  (`about_you::temperature_units`). **Models
   that can't call tools** (`commands::small_model_answer`): the fixed
   pipeline — `needs_web`, `search_query` (the ask stripped; a price
   question's aimed at the country, and searched once more for local prices,
   `local_prices_again`, their pages first or the "couldn't find" line in
-  the prompt),
+  the prompt; temperatures in their scale first, and the same line),
   `grounded_sources` (≤ 3 sources, ≤ 1,500 tokens) + `grounded_prompt`
   (answer only from them, cite, < 80 words) with the history fitted
   (`fit_history`, ≤ 2,000) for an 8k model; no search → `NOT_SEARCHED_LINE`

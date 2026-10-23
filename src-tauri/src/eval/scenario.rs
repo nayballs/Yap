@@ -73,6 +73,12 @@ pub struct Settings {
     pub about_name: String,
     #[serde(default)]
     pub about_me: String,
+    /// About you's Region, a country picked in Settings (ISO, "US";
+    /// `config.region_country`): everything follows it, as in the app —
+    /// its money, units and spelling, over the run's `--locale` (Windows').
+    /// Default: Automatic (the run's `--locale`).
+    #[serde(default)]
+    pub region: String,
 }
 
 impl Default for Settings {
@@ -86,6 +92,7 @@ impl Default for Settings {
             memory_search_chats: true,
             about_name: String::new(),
             about_me: String::new(),
+            region: String::new(),
         }
     }
 }
@@ -375,6 +382,13 @@ pub struct Expect {
     /// searched this turn: not checked.
     #[serde(default)]
     pub prices_keep_their_sign: bool,
+    /// The answer's temperatures lead with this scale, "C" or "F": it gives
+    /// at least one with its scale, every one in the other scale is only a
+    /// conversion right after one in this ("2°C (35°F)"), such a pair
+    /// agrees, and each figure in this scale is one the pages give, or one
+    /// of theirs converted (within 1°C). A UK weather answer copied the
+    /// pages' "35°F (1.5°C)" (Qwen3.5-4B, 2026-10-23). See [`temperature_fault`].
+    pub temperatures: Option<String>,
     /// Memory afterwards: items holding these words (or not).
     #[serde(default)]
     pub memory: Vec<MemoryExpect>,
@@ -627,8 +641,10 @@ fn false_claims(o: &Observed) -> Vec<String> {
         // "Starting in Act 1…", "Opening at 9…": a preposition after it isn't
         // an app, nor a date ("launching March 2026", a game's release:
         // web-tester-chat, 2026-10-21).
+        // Nor "around"/"about" a figure ("Starting around 41°F", a forecast:
+        // web-weather-uk-both-scales, 2026-10-23).
         const NOT_AN_APP: &[&str] = &[
-            "in", "at", "from", "with", "on", "by", "to", "point", "out", "off", "over", "of", "hours", "times", "soon", "later",
+            "in", "at", "from", "with", "on", "by", "to", "point", "out", "off", "over", "of", "hours", "times", "soon", "later", "around", "about",
             "early", "late", "next", "this", "january", "february", "march", "april", "may", "june", "july", "august",
             "september", "october", "november", "december",
         ];
@@ -710,6 +726,144 @@ pub fn price_swapped(reply: &str, pages: &[String]) -> Option<String> {
             _ => None,
         }
     })
+}
+
+/// A temperature with its scale in a text: where it is, its value and its
+/// scale ('C' or 'F').
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Temperature {
+    pub start: usize,
+    pub end: usize,
+    pub value: f64,
+    pub scale: char,
+}
+
+impl Temperature {
+    fn celsius(&self) -> f64 {
+        if self.scale == 'F' {
+            (self.value - 32.0) * 5.0 / 9.0
+        } else {
+            self.value
+        }
+    }
+
+    fn fahrenheit(&self) -> f64 {
+        if self.scale == 'F' {
+            self.value
+        } else {
+            self.value * 9.0 / 5.0 + 32.0
+        }
+    }
+}
+
+/// A figure's start and value: a range's dash ("30–35°F", "8-10°C") isn't
+/// a minus sign. Pure.
+fn figure(text: &str, start: usize, number: &str) -> Option<(usize, f64)> {
+    let (mut digits, mut start) = (number, start);
+    if let Some(dash) = digits.chars().next().filter(|ch| !ch.is_ascii_digit()) {
+        if text[..start].chars().next_back().is_some_and(char::is_alphanumeric) {
+            digits = &digits[dash.len_utf8()..];
+            start += dash.len_utf8();
+        }
+    }
+    Some((start, digits.replace(['−', '–', '‑'], "-").parse::<f64>().ok()?))
+}
+
+/// The temperatures with their scale in `text`, in order: "35°F", "−1.5
+/// °C", "8 degrees Celsius", "46 degrees F", "9C", "the low 40s°F". A figure
+/// without one ("8 degrees", the "30" of "30–35°F") isn't one. Pure.
+pub fn temperatures_in(text: &str) -> Vec<Temperature> {
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            r"([-−–‑]?\d+(?:\.\d+)?)s?(?:\s?[°º˚]\s?(?i:(c|f|celsius|centigrade|fahrenheit))\b|\s?(?i:(?:degrees?\s+)?(celsius|centigrade|fahrenheit))\b|\s?(?i:degrees?\s+(c|f))\b|([CF])\b)",
+        )
+        .expect("static regex")
+    });
+    re.captures_iter(text)
+        .filter_map(|c| {
+            let (whole, number) = (c.get(0)?, c.get(1)?);
+            let scale = (2..=5).find_map(|i| c.get(i))?.as_str().chars().next()?.to_ascii_uppercase();
+            let (start, value) = figure(text, whole.start(), number.as_str())?;
+            Some(Temperature { start, end: whole.end(), value, scale: if scale == 'F' { 'F' } else { 'C' } })
+        })
+        .collect()
+}
+
+/// The figures in `text` said in degrees without a scale ("about 7
+/// degrees", "44°"), as (start, end, value), the scaled ones left out.
+/// Pure.
+fn bare_degrees_in(text: &str) -> Vec<(usize, usize, f64)> {
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"([-−–‑]?\d+(?:\.\d+)?)\s?(?:[°º˚]|(?i:degrees?)\b)").expect("static regex"));
+    let scaled = temperatures_in(text);
+    re.captures_iter(text)
+        .filter_map(|c| {
+            let (whole, number) = (c.get(0)?, c.get(1)?);
+            let (start, value) = figure(text, whole.start(), number.as_str())?;
+            (!scaled.iter().any(|t| t.start <= start && start < t.end)).then_some((start, whole.end(), value))
+        })
+        .collect()
+}
+
+/// Is `gap`, the text between two temperatures, only what joins one to its
+/// conversion: " (", " / ", "** (about ", " | ", " (30 to "? Pure.
+fn joins_a_conversion(gap: &str) -> bool {
+    const WORDS: &[&str] = &["about", "around", "roughly", "approx", "approximately", "or", "to", "which", "is", "that", "s", "equivalent", "i", "e", "ie"];
+    gap.chars().count() <= 30
+        && gap.chars().all(|c| c.is_alphabetic() || c.is_whitespace() || c.is_ascii_digit() || "([/,~≈-–−‑.:=|*_'’".contains(c))
+        && gap.split(|c: char| !c.is_alphabetic()).filter(|w| !w.is_empty()).all(|w| WORDS.contains(&w.to_lowercase().as_str()))
+}
+
+/// Why `reply`'s temperatures don't lead with `scale` ('C' or 'F'), if they
+/// don't: it gives none; one in the other scale isn't a conversion right
+/// after one in this ("2°C (35°F)" and "2°C / 35°F" pass, "35°F (2°C)"
+/// doesn't); such a pair disagrees ("8°C (35°F)"); or — with `pages`, the
+/// web text the model read — a figure in this scale is neither one the
+/// pages give nor one of theirs converted, within 1°C ("35°C" for a page's
+/// 35°F). A figure in degrees without a scale (a spoken answer's "about 7
+/// degrees") takes the one whose figures on the pages it fits — "44
+/// degrees" where they say 44°F is °F — and is left out when it fits
+/// neither or both. Pure.
+pub fn temperature_fault(reply: &str, scale: char, pages: &[String]) -> Option<String> {
+    let given: Vec<Temperature> = pages.iter().flat_map(|p| temperatures_in(p)).collect();
+    let mut found = temperatures_in(reply);
+    for (start, end, value) in bare_degrees_in(reply) {
+        let f = given.iter().any(|g| (g.fahrenheit() - value).abs() <= 1.8);
+        let c = given.iter().any(|g| (g.celsius() - value).abs() <= 1.0);
+        match (f, c) {
+            (true, false) => found.push(Temperature { start, end, value, scale: 'F' }),
+            (false, true) => found.push(Temperature { start, end, value, scale: 'C' }),
+            _ => {}
+        }
+    }
+    found.sort_by_key(|t| t.start);
+    let quote = |t: &Temperature| {
+        let before: String = reply[..t.start].chars().rev().take(30).collect::<Vec<_>>().into_iter().rev().collect();
+        clip(&format!("{before}{}", &reply[t.start..t.end]), 60)
+    };
+    if found.is_empty() {
+        return Some(format!("gives no temperature with its scale (want °{scale})"));
+    }
+    for (i, t) in found.iter().enumerate().filter(|(_, t)| t.scale != scale) {
+        let pair = i.checked_sub(1).map(|j| &found[j]).filter(|p| p.scale == scale && joins_a_conversion(&reply[p.end..t.start]));
+        match pair {
+            None => return Some(format!("leads with °{}, not °{scale}: \"{}\"", t.scale, quote(t))),
+            Some(p) if (p.celsius() - t.celsius()).abs() > 1.0 => {
+                return Some(format!("{} and {} disagree", &reply[p.start..p.end], &reply[t.start..t.end]));
+            }
+            Some(_) => {}
+        }
+    }
+    if !given.is_empty() {
+        let grounded = |t: &Temperature| given.iter().any(|g| (g.celsius() - t.celsius()).abs() <= 1.0);
+        if let Some(t) = found.iter().filter(|t| t.scale == scale).find(|t| !grounded(t)) {
+            return Some(format!("{} is neither in the pages nor one of theirs converted", &reply[t.start..t.end]));
+        }
+    }
+    None
 }
 
 /// The first sentence of `reply` that says it searched or looked something
@@ -885,16 +1039,30 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
     if e.no_post_fixes && !fixes.is_empty() {
         fails.push(format!("Yap had to fix the answer: {}", fixes.join(", ")));
     }
-    if e.prices_keep_their_sign {
-        let pages: Vec<String> = calls
+    // The web text the model read this turn (its searches' and page reads' results).
+    let pages = || -> Vec<String> {
+        calls
             .iter()
             .filter(|c| crate::web::TOOL_NAMES.contains(&c.name.as_str()) && c.success)
             .map(|c| c.result.to_string())
-            .collect();
+            .collect()
+    };
+    if e.prices_keep_their_sign {
+        let pages = pages();
         if !pages.is_empty() {
             if let Some(price) = price_swapped(&o.reply, &pages) {
                 fails.push(format!("swaps a price's currency: {price}"));
             }
+        }
+    }
+    if let Some(want) = &e.temperatures {
+        match want.trim().trim_start_matches('°').to_ascii_uppercase().as_str() {
+            s @ ("C" | "F") => {
+                if let Some(fault) = temperature_fault(&o.reply, if s == "C" { 'C' } else { 'F' }, &pages()) {
+                    fails.push(format!("temperatures: {fault}"));
+                }
+            }
+            _ => fails.push(format!("temperatures: \"{want}\" isn't C or F")),
         }
     }
     if let Some(want) = &e.clipboard_contains {
@@ -1198,6 +1366,44 @@ mod tests {
     }
 
     #[test]
+    fn temperatures_lead_with_the_scale_asked_for() {
+        let found = |t: &str| temperatures_in(t).iter().map(|t| (t.value, t.scale)).collect::<Vec<_>>();
+        assert_eq!(found("Overcast, 35°F (1.5 °C), feels like −1 ºC"), [(35.0, 'F'), (1.5, 'C'), (-1.0, 'C')]);
+        assert_eq!(found("30–35°F, 8-10°C, 9C, 46 degrees F, 8 degrees Celsius"), [(35.0, 'F'), (10.0, 'C'), (9.0, 'C'), (46.0, 'F'), (8.0, 'C')]);
+        // A spoken answer's decades (Qwen3.5-4B, 2026-10-23).
+        assert_eq!(found("in the low 40s°F (around 4-7°C), the high 40s Fahrenheit"), [(40.0, 'F'), (7.0, 'C'), (40.0, 'F')]);
+        // No scale, no temperature; nor a wind speed.
+        assert!(found("About 8 degrees, winds 2–4 mph, 91% humidity").is_empty());
+        let pages = [r#"{"results":[{"text":"Overcast, 35°F, feels like 30°F. High 41°F, low 31°F. Wind 2–4 mph."}]}"#.to_string()];
+        let fault = |r: &str, s: char| temperature_fault(r, s, &pages);
+        // The answer a UK user got (Qwen3.5-4B, 2026-10-23).
+        let theirs = "It's overcast with temperatures around 35°F (1.5°C), feeling colder at 30°F. Winds are light at about 2–4 mph.";
+        assert!(fault(theirs, 'C').unwrap().starts_with("leads with °F, not °C"), "{:?}", fault(theirs, 'C'));
+        // °C first, °F in brackets (or after a slash, in a table) is right.
+        assert_eq!(fault("Overcast, about 2°C (35°F), feeling like −1°C (30°F). High **5°C** (41°F). Winds 2–4 mph.", 'C'), None);
+        assert_eq!(fault("High 5°C / 41°F, low −0.5°C | 31°F", 'C'), None);
+        assert_eq!(fault("Lows of −1 to 2°C (30 to 35°F)", 'C'), None);
+        // A pair that disagrees; a °C figure from nowhere ("35°C" for 35°F).
+        assert_eq!(fault("About 8°C (35°F) today.", 'C').as_deref(), Some("8°C and 35°F disagree"));
+        assert_eq!(fault("It's 35°C and overcast.", 'C').as_deref(), Some("35°C is neither in the pages nor one of theirs converted"));
+        // No temperature at all.
+        assert!(fault("Overcast and calm.", 'C').unwrap().starts_with("gives no temperature"));
+        // Degrees without a scale, as a spoken answer says them: the scale
+        // whose figures on the pages they fit.
+        assert_eq!(fault("Overcast, around 2 degrees, up to 5 later.", 'C'), None);
+        assert!(fault("Overcast, around 35 degrees, feeling like 30.", 'C').unwrap().starts_with("leads with °F, not °C: \"Overcast, around 35 degrees\""));
+        assert!(fault("Overcast and calm, 2–4 mph.", 'C').unwrap().starts_with("gives no temperature"));
+        // A US user: °F, with °C after it at most — gpt-oss-20b's minus is a
+        // non-breaking hyphen, its space a narrow no-break one (2026-10-23).
+        assert_eq!(fault("Overcast, 35°F (2°C), feels like 30°F.", 'F'), None);
+        assert_eq!(fault("- **Current:** 36\u{202f}°F (2\u{202f}°C), overcast, feels like 30\u{202f}°F (‑1\u{202f}°C).", 'F'), None);
+        assert!(fault("Overcast, 2°C (35°F).", 'F').unwrap().starts_with("leads with °C, not °F"));
+        let e: Expect = serde_json::from_value(json!({ "temperatures": "°C" })).unwrap();
+        assert_eq!(check(&e, &obs("About 2°C (35°F).")), Vec::<String>::new());
+        assert_eq!(check(&e, &obs("About 35°F.")).len(), 1);
+    }
+
+    #[test]
     fn argument_predicates() {
         assert!(arg_matches(&json!("Spotify"), &json!("spotify")));
         assert!(arg_matches(&json!("Baldur's Gate 3"), &json!({ "contains_any": ["baldur", "bg3"] })));
@@ -1226,6 +1432,7 @@ mod tests {
         assert_eq!(claims("I can't open apps from here, sorry.").len(), 0);
         assert_eq!(claims("Starting in Act 1, Gale is near the crash site.").len(), 0);
         assert_eq!(claims("- **Starfall Requiem** – Sci-fi party RPG, launching 12 March 2026 on PC").len(), 0);
+        assert_eq!(claims("Hourly: Starting around 5°C (41°F) in the morning, warming to 9°C by midday.").len(), 0);
         // What the 1.5B said with no tools (2026-10-18 runs).
         assert_eq!(claims("Spotify has launched, and I'm ready to play your liked songs.").len(), 1);
         assert_eq!(claims("Got it. I'll move the beta ship date from Friday to Monday in the launch plan.").len(), 1);
