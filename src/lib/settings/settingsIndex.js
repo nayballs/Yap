@@ -50,6 +50,7 @@ export const SETTINGS_INDEX = [
   { page: 'dictation', section: 'Typing into apps', label: 'Append trailing space', desc: 'A space after each dictation', keywords: 'space paste pasting', anchor: 'trailing-space', toggle: 'appendTrailingSpace' },
   { page: 'dictation', section: 'Typing into apps', label: 'Press Enter after pasting', desc: 'Sends the message for you', keywords: 'auto-submit auto submit enter send paste', anchor: 'auto-submit', toggle: 'autoSubmit' },
   { page: 'dictation', section: 'Typing into apps', label: 'Say “press enter” to send', desc: 'Yap leaves the words out and presses the key after pasting', keywords: 'press enter voice command send return', anchor: 'voice-enter', toggle: 'voiceEnter' },
+  { page: 'dictation', section: 'Typing into apps', label: 'Say “snip” to take a screenshot', desc: 'A dictation of just “snip” starts Snip to Chat', keywords: 'snip screenshot screen capture voice command picture image', anchor: 'snip-voice', toggle: 'snipVoice' },
   { page: 'dictation', section: 'Typing into apps', label: 'Send key', desc: 'Enter, Ctrl + Enter or Shift + Enter', keywords: 'auto-submit key enter ctrl shift', anchor: 'send-key' },
   { page: 'dictation', section: 'Typing into apps', label: 'Safer pasting into terminals', desc: 'One line, and Enter only when you say “press enter”', keywords: 'terminal powershell command line claude code codex paste pasting', anchor: 'terminal-mode', toggle: 'terminalMode' },
   { page: 'dictation', section: 'Typing into apps', label: 'Restore clipboard after paste', desc: "Puts back what you'd copied. Dictations never show up in Win+V history", keywords: 'clipboard copy paste win+v history', anchor: 'restore-clipboard', toggle: 'restoreClipboard' },
@@ -62,6 +63,7 @@ export const SETTINGS_INDEX = [
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Read aloud', desc: 'Select text in any app and press it to hear it', keywords: 'shortcut shortcuts hotkey read aloud speak selection text to speech tts dyslexia reading', anchor: 'shortcut-read' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Use what I said', desc: 'Swap what Yap pasted for your words before AI cleanup', keywords: 'shortcut shortcuts hotkey raw transcript revert undo cleanup as said', anchor: 'shortcut-as-said' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Meeting notes', desc: 'Take notes on a call, press again to stop', keywords: 'shortcut shortcuts hotkey meeting win alt m', anchor: 'shortcut-meeting' },
+  { page: 'shortcuts', section: 'Global shortcuts', label: 'Snip to Chat', desc: 'Drag a box over any screen, into Chat', keywords: 'shortcut shortcuts hotkey snip snipping screenshot screen capture picture image win alt s', anchor: 'shortcut-snip' },
 
   // ---- Meetings ----
   { page: 'meetings', section: 'Call detection', label: 'Detect calls and offer to take notes', desc: 'Nothing records until you click Record notes', keywords: 'call detection teams zoom meet calls notetaker', anchor: 'call-detection', toggle: 'meetingDetection' },
@@ -154,6 +156,7 @@ export const SETTINGS_INDEX = [
   { page: 'privacy', section: 'History', label: 'Clear history', desc: 'Removes every saved dictation', keywords: 'delete erase history', anchor: 'clear-history' },
   { page: 'privacy', section: 'History', label: 'Keep recent dictation audio', desc: 'A day of it, to run a dictation again', keywords: 'audio recordings voice run again retry lost failed recent', anchor: 'recent-audio', toggle: 'keepRecentAudio' },
   { page: 'privacy', section: 'History', label: 'Clear recent audio', desc: 'Deletes the kept dictation audio', keywords: 'delete erase audio recordings voice', anchor: 'clear-recent-audio' },
+  { page: 'privacy', section: 'Chat screenshots', label: 'Keep chat screenshots', desc: '7, 30 or 90 days, or forever', keywords: 'snip screenshot screenshots images pictures delete keep retention days', anchor: 'chat-images' },
   { page: 'privacy', section: 'Local API', label: "Let apps on this PC use Yap's data", desc: 'The Local API for scripts and AI apps', keywords: 'local api bridge cli scripts http', anchor: 'local-api' },
   { page: 'privacy', section: 'Logs and data', label: 'Debug logging', desc: 'More detail in the log, for a bug report', keywords: 'debug logs diagnostics bug report troubleshooting', anchor: 'debug-logging', toggle: 'debugLogging' },
   { page: 'privacy', section: 'Logs and data', label: 'Log file', desc: 'Open the logs folder', keywords: 'logs folder', anchor: 'logs' },

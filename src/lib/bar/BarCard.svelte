@@ -55,6 +55,7 @@
     mic: 'Microphone',
     clipboard: 'Paste',
     assistant: 'Voice Assistant',
+    snip: 'Snip to Chat',
   };
   const answer = $derived(card.style === 'answer');
   const chip = $derived(card.chip ?? CHIPS[card.icon] ?? null);
@@ -89,6 +90,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0" /><path d="M12 17.5V21" /></svg>
       {:else if card.icon === 'clipboard'}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 4V3h6v1" /><path d="M9 10h6M9 14h4" /></svg>
+      {:else if card.icon === 'snip'}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4 8.1 15.9" /><path d="M14.5 14.5 20 20" /><path d="M8.1 8.1 12 12" /></svg>
       {:else if card.icon === 'assistant'}
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
       {/if}

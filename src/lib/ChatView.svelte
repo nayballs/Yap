@@ -69,6 +69,18 @@
   // title, site — that opens each in the browser (open_external). Kept with
   // the message (chats.rs `sources`). Its search / read chips carry a globe,
   // and an action refused after reading the web a shield.
+  //
+  // Snip to Chat (snip.rs, 2026-10-23): a snip lands here (`yap-snip`, or
+  // ControlPanel's chatRequest when Chat wasn't open) in the conversation
+  // Rust chose — the one open here, if the window was on screen on one; else
+  // a new chat — as a thumbnail above the box, the caret in the box: type or
+  // dictate a question, tap one of the three prompts, or press Enter on an
+  // empty box for "What's this?". Nothing is ever sent by itself. A model
+  // that can't read images says so above the box with a one-click switch
+  // (ai_model_status `images` / `imagesSwitch`, snip/vision.rs); Send waits
+  // meanwhile. The question keeps its screenshots (chats.rs `images`): a
+  // thumbnail in its bubble, or "Screenshot removed after 30 days" once
+  // "Keep chat screenshots" has removed it. + → "Take a screenshot" snips too.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy, tick, untrack } from 'svelte';
@@ -76,7 +88,9 @@
   import { toast } from './ui/toast.svelte.js';
   import { chatRequest } from './chatRequest.svelte.js';
   import ModelChip from './ModelChip.svelte';
-  import { modelLine, whereItRuns } from './aiModel.js';
+  import { modelLine, modelName, providerName, whereItRuns } from './aiModel.js';
+  import { chatImageUrl, SNIP_PROMPTS, DEFAULT_PROMPT, MAX_SHOTS, removedLine, sizeLine, visionRefused } from './chatImages.js';
+  import { waitingShots } from './chatShots.svelte.js';
   import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from './speech.svelte.js';
   import { formatHotkeySpec } from './hotkeys.js';
   import { aiError } from './aiErrors.js';
@@ -128,6 +142,32 @@
   // 'meetings' when the Meetings view's Ask bar started this chat: answers
   // are grounded in your meeting notes (calendar::meetings_context).
   let scope = $state(null);
+
+  // ---- Snip to Chat (snip.rs)
+  // Screenshots waiting in the message box: { id, w, h, bytes, source };
+  // kept while another view shows (chatShots.svelte.js).
+  let attached = $state(waitingShots.list);
+  $effect(() => {
+    waitingShots.list = attached;
+  });
+  // Can the Chat model read them (ai_model_status): images true | false |
+  // null (not known: it may try), the switch Rust suggests, the model.
+  let vision = $state({ images: null, imagesSwitch: null, model: null });
+  // "Keep chat screenshots" (config chatImageDays), for a removed one's line.
+  let keepDays = $state(30);
+  // The model chip (its picker opens for "Choose another model…").
+  let chipRef = $state(null);
+  // A screenshot opened large (its id), or null.
+  let viewing = $state(null);
+  // The snip shortcut, for the + menu's "Take a screenshot".
+  let snipHotkey = $state('');
+  const visionBlocked = $derived(attached.length > 0 && vision.images === false);
+  const switchName = $derived.by(() => {
+    const s = vision.imagesSwitch;
+    if (!s) return '';
+    const named = modelName({ provider: s.provider, id: s.model });
+    return named && named !== 'Unknown model' ? named : s.name || s.model;
+  });
 
   // ---- Spoken replies
   let speakReplies = $state(false);
@@ -195,9 +235,83 @@
       : 'Voice replies off'
   );
 
+  // ---- Snip to Chat
+
+  /** Whether the Chat model reads images, and the switch if it can't. */
+  async function refreshVision() {
+    try {
+      const s = await invoke('ai_model_status', { scope: 'chat' });
+      vision = { images: s?.images ?? null, imagesSwitch: s?.imagesSwitch ?? null, model: s?.ready ? s.model : null };
+    } catch {
+      /* keep the last */
+    }
+  }
+
+  /**
+   * A snip landed (`yap-snip`): in the conversation Rust chose — the one
+   * open here when the snip started, else a new chat — in the box, the
+   * caret there. Never sent by itself.
+   */
+  async function takeSnip(p) {
+    const img = p?.image;
+    if (!img?.id) return;
+    if (p.conversationId != null) {
+      if (p.conversationId !== activeId) await selectConversation(p.conversationId);
+    } else if (activeId != null) {
+      newChat();
+    }
+    if (!attached.some((a) => a.id === img.id)) attached = [...attached, img].slice(-MAX_SHOTS);
+    refreshVision();
+    await tick();
+    inputEl?.focus();
+  }
+
+  function removeShot(id) {
+    attached = attached.filter((a) => a.id !== id);
+    inputEl?.focus();
+  }
+
+  /** One of the three prompts: asked at once, with the screenshot. */
+  function askAbout(prompt) {
+    if (sending || visionBlocked) return;
+    input = prompt;
+    send();
+  }
+
+  /** The suggested model that reads images, picked here (chat_set_model). */
+  async function useVisionModel() {
+    const s = vision.imagesSwitch;
+    if (!s) return;
+    try {
+      await invoke('chat_set_model', { provider: s.provider, model: s.model });
+      await refreshVision();
+      chipRef?.refresh?.();
+      // Its copies of the screenshots, made now: Send stays instant.
+      if (attached.length) invoke('chat_images_prepare', { ids: attached.map((a) => a.id) }).catch(() => {});
+      inputEl?.focus();
+    } catch (e) {
+      toast({ title: "Couldn't switch the model", description: String(e), variant: 'destructive' });
+    }
+  }
+
+  /** "Send without the screenshot": for a question that doesn't need it. */
+  function sendWithout() {
+    attached = [];
+    if (input.trim()) send();
+    else inputEl?.focus();
+  }
+
+  /** + → "Take a screenshot": Yap's window leaves the shot (snip.rs). */
+  function takeScreenshot() {
+    plusOpen = false;
+    invoke('snip_start', { origin: 'chat' }).catch(() => {});
+  }
+
   async function loadVoiceSettings() {
     try {
       const c = await invoke('get_config');
+      if (Number.isFinite(c?.chatImageDays)) keepDays = c.chatImageDays;
+      snipHotkey = c?.snipHotkey || '';
       speakReplies = !!c?.speakReplies;
       voiceVolume = Number.isFinite(Number(c?.ttsVolume)) ? Number(c.ttsVolume) : 0.5;
       speakWhen = c?.speakWhen || 'voice';
@@ -311,6 +425,7 @@
     activeId = null;
     messages = [];
     input = '';
+    attached = [];
     byVoice = false;
     scope = null;
     choseNew = true;
@@ -626,10 +741,15 @@
   }
 
   async function send() {
-    const text = input.trim();
+    // With a screenshot waiting, an empty box asks "What's this?".
+    const shots = attached;
+    const text = input.trim() || (shots.length ? DEFAULT_PROMPT : '');
     if (!text || sending) return;
+    // The model can't read the screenshot: the line above the box says so.
+    if (shots.length && vision.images === false) return;
     const voice = byVoice;
     input = '';
+    attached = [];
     byVoice = false;
     // The next question: the last answer stops talking.
     stopReading();
@@ -637,7 +757,7 @@
     // it: a spoken question's bubble may come and go in between (one a
     // newer question replaced), moving them.
     const turn = ++sendSeq;
-    messages = [...messages, { role: 'user', text, voice, id: null, turn }];
+    messages = [...messages, { role: 'user', text, voice, id: null, turn, images: shots }];
     const firstAt = messages.length - 1;
     const mine = (role) => messages.findIndex((m) => m.turn === turn && m.role === role);
     const questionAt = () => {
@@ -681,7 +801,11 @@
       m.waiting = live.waiting;
       followThread();
     };
-    const call = streamCall('chat_send', { conversationId: activeId, text, scope, voice }, onEvent);
+    const call = streamCall(
+      'chat_send',
+      { conversationId: activeId, text, scope, voice, images: shots.length ? shots.map((s) => s.id) : null },
+      onEvent
+    );
     stopAnswerCall = call.stop;
     supersedeAnswerCall = call.supersede;
     try {
@@ -733,7 +857,15 @@
       }
       messages = messages.slice(0, qi);
       input = text; // give the message back
+      attached = shots;
       byVoice = voice;
+      // The model couldn't read the screenshot: the line above the box says
+      // so, with the switch (Rust remembers it as a "no" now).
+      if (shots.length && visionRefused(e)) {
+        await refreshVision();
+        if (vision.images !== false) vision = { ...vision, images: false };
+        return;
+      }
       // Said so it's clear what to do (aiErrors.js); the raw error is in the log.
       // A sentence reads as a sentence; only an error Yap can't explain gets
       // the copyable error box.
@@ -793,6 +925,10 @@
   }
 
   function onKeydown(e) {
+    if (e.key === 'Escape' && viewing) {
+      viewing = null;
+      return;
+    }
     if (e.key === 'Escape' && plusOpen) {
       plusOpen = false;
       return;
@@ -845,8 +981,13 @@
   onMount(() => {
     refreshList();
     loadVoiceSettings();
+    refreshVision();
     setTimeout(() => inputEl?.focus(), 0);
     const uns = [
+      // A snip landed while Chat is open (snip.rs).
+      listen('yap-snip', (e) => takeSnip(e.payload)),
+      // Another Chat model: can it read the screenshot?
+      listen('yap-chat-model-changed', refreshVision),
       listen('yap-chat-dictation', (e) => onChatDictation(e.payload)),
       // A question asked with the assistant shortcut, live (and its card's
       // "Open in Chat").
@@ -858,8 +999,12 @@
       listen('yap-voice-volume', (e) => {
         if (Number.isFinite(e.payload?.volume)) voiceVolume = e.payload.volume;
       }),
-      // Settings changed "Speak replies" or "When to speak".
-      listen('yap-config-saved', loadVoiceSettings),
+      // Settings changed "Speak replies" or "When to speak" (or the Chat
+      // model, or how long screenshots are kept).
+      listen('yap-config-saved', () => {
+        loadVoiceSettings();
+        refreshVision();
+      }),
     ];
     return () => uns.forEach((u) => u.then((f) => f()));
   });
@@ -879,6 +1024,11 @@
     if (!req) return;
     chatRequest.pending = null;
     untrack(() => {
+      // A snip that landed while Chat wasn't open (ControlPanel brought it up).
+      if (req.snip) {
+        takeSnip(req.snip);
+        return;
+      }
       if (req.dictated) {
         onChatDictation(req);
         return;
@@ -1071,6 +1221,27 @@
                 <p class="cwait" aria-live="polite">Waiting for your dictation to finish…</p>
               {/if}
             {:else}
+              {#if m.images?.length}
+                <!-- The screenshots it asked about (snip.rs); one past "Keep chat
+                     screenshots" says so in its place. -->
+                <div class="shots" role="group" aria-label="Screenshots">
+                  {#each m.images as img (img.id)}
+                    {#if img.gone}
+                      <span class="shot gone" data-testid="chat-shot-gone">{removedLine(keepDays)}</span>
+                    {:else}
+                      <button
+                        type="button"
+                        class="shot"
+                        title="Open the screenshot"
+                        aria-label={`Screenshot, ${sizeLine(img)}`}
+                        onclick={() => (viewing = img.id)}
+                      >
+                        <img src={chatImageUrl(img.id)} alt="" style={`aspect-ratio: ${img.w} / ${img.h}`} />
+                      </button>
+                    {/if}
+                  {/each}
+                </div>
+              {/if}
               <p class="cbody">
                 {#if m.voice}
                   <span class="viavoice" title="Asked by voice" aria-label="Asked by voice">
@@ -1153,6 +1324,60 @@
          under it, quiet, whether answers are read aloud and the model the
          message goes to. The model picker opens above it all. -->
     <div class="composer" data-model-picker-above>
+      {#if attached.length}
+        <!-- Snip to Chat (snip.rs): the screenshots this question carries, three
+             one-tap questions, and — a model that can't read images — one line
+             saying so, with the switch. Nothing goes until you send. -->
+        <div class="snipbar" data-testid="chat-attachments">
+          {#if visionBlocked}
+            <div class="visionline" role="status" data-testid="chat-vision-line">
+              <span class="vtext">
+                <b>{modelName(vision.model)} can't read images.</b>
+                {#if !vision.imagesSwitch}None of your models can: Claude, Gemini and OpenAI models can.{/if}
+              </span>
+              {#if vision.imagesSwitch}
+                <button type="button" class="vbtn primary" onclick={useVisionModel}>
+                  Use {switchName} on {providerName({ provider: vision.imagesSwitch.provider })}
+                </button>
+              {/if}
+              <button type="button" class="vbtn" onclick={() => chipRef?.openPicker()}>
+                {vision.imagesSwitch ? 'Choose another model…' : 'Connect one…'}
+              </button>
+              <button type="button" class="vlink" onclick={sendWithout}>Send without the screenshot</button>
+            </div>
+          {/if}
+          <div class="shotrow">
+            {#each attached as img (img.id)}
+              <div class="shotchip">
+                <button
+                  type="button"
+                  class="thumb"
+                  title="Open the screenshot"
+                  aria-label={`Screenshot, ${sizeLine(img)}`}
+                  onclick={() => (viewing = img.id)}
+                >
+                  <img src={chatImageUrl(img.id)} alt="" />
+                </button>
+                <span class="shotsize">{sizeLine(img)}</span>
+                <button type="button" class="shotx" aria-label="Remove the screenshot" title="Remove" onclick={() => removeShot(img.id)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+                </button>
+              </div>
+            {/each}
+            <div class="prompts" role="group" aria-label="Ask about the screenshot">
+              {#each SNIP_PROMPTS as p (p)}
+                <button
+                  type="button"
+                  class="promptchip"
+                  disabled={sending || visionBlocked}
+                  title={visionBlocked ? "This model can't read images" : `Ask “${p}”`}
+                  onclick={() => askAbout(p)}>{p}</button
+                >
+              {/each}
+            </div>
+          </div>
+        </div>
+      {/if}
       <div class="inputbar">
         <div class="pluswrap" bind:this={plusEl}>
           <button
@@ -1169,6 +1394,15 @@
           </button>
           {#if plusOpen}
             <div class="pluspop" role="dialog" aria-label="Chat options">
+              <!-- Snip to Chat (snip.rs): this window leaves the shot. -->
+              <button class="optrow" aria-label="Take a screenshot" onclick={takeScreenshot}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4 8.1 15.9" /><path d="M14.5 14.5 20 20" /><path d="M8.1 8.1 12 12" /></svg>
+                <span class="opttext">
+                  <span class="optname">Take a screenshot</span>
+                  <span class="optdesc">Drag a box over any screen{snipHotkey ? ` · ${formatHotkeySpec(snipHotkey)}` : ''}</span>
+                </span>
+              </button>
+              <div class="optsep"></div>
               <!-- Spoken replies on / off (Settings → Voice Assistant → Speak replies). -->
               <button class="optrow" aria-pressed={speakReplies} aria-label="Voice replies" title={voiceTitle} onclick={toggleVoiceReplies}>
                 {#if speakReplies}
@@ -1213,7 +1447,7 @@
           class="msginput"
           bind:this={inputEl}
           bind:value={input}
-          placeholder="Ask about your notes, or anything else"
+          placeholder={attached.length ? 'Ask about this screenshot…' : 'Ask about your notes, or anything else'}
           aria-label="Message"
           aria-busy={sending}
           onkeydown={(e) => e.key === 'Enter' && !e.isComposing && send()}
@@ -1235,18 +1469,31 @@
           <button class="sendbtn stopbtn" disabled={stopping} onclick={stopAnswer} aria-label="Stop the answer" title="Stop (Esc)">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
           </button>
-        {:else if input.trim()}
-          <button class="sendbtn" disabled={sending} onclick={send} aria-label="Send" title="Send (Enter)">
+        {:else if input.trim() || attached.length}
+          <button
+            class="sendbtn"
+            disabled={sending || visionBlocked}
+            onclick={send}
+            aria-label="Send"
+            title={visionBlocked ? "This model can't read images" : 'Send (Enter)'}
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10 4 15l5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>
           </button>
         {/if}
       </div>
       <div class="composerfoot">
-        <ModelChip {onopensettings} quiet />
+        <ModelChip bind:this={chipRef} {onopensettings} quiet />
       </div>
     </div>
   </section>
 </div>
+
+{#if viewing}
+  <!-- A screenshot opened large: a click or Esc closes it. -->
+  <div class="shotview" role="dialog" aria-label="Screenshot" aria-modal="true" tabindex="-1" onclick={() => (viewing = null)} onkeydown={(e) => e.key === 'Escape' && (viewing = null)}>
+    <img src={chatImageUrl(viewing)} alt="Screenshot" />
+  </div>
+{/if}
 
 <style>
   .chat {
@@ -2137,5 +2384,192 @@
   .sendbtn svg {
     width: 15px;
     height: 15px;
+  }
+
+  /* ---- Snip to Chat: screenshots in a question, waiting in the box, large ---- */
+  .shots {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .shot {
+    display: block;
+    max-width: min(320px, 100%);
+    padding: 0;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    overflow: hidden;
+    background: var(--yap-s1);
+    cursor: zoom-in;
+  }
+  .shot img {
+    display: block;
+    width: 100%;
+    max-height: 240px;
+    object-fit: contain;
+  }
+  .shot:focus-visible {
+    outline: 2px solid var(--yap-focus-ring, var(--yap-primary-line));
+    outline-offset: 2px;
+  }
+  .shot.gone {
+    padding: 10px 14px;
+    font-family: var(--yap-font-ui, inherit);
+    font-size: 11.5px;
+    color: var(--yap-muted);
+    background: var(--yap-s2);
+    border-style: dashed;
+    cursor: default;
+  }
+  .snipbar {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .shotrow {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .shotchip {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 26px 3px 3px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-lg, 10px);
+    background: var(--yap-s2);
+  }
+  .thumb {
+    display: block;
+    padding: 0;
+    border: none;
+    border-radius: var(--yap-r-sm, 6px);
+    overflow: hidden;
+    background: var(--yap-s1);
+    cursor: zoom-in;
+  }
+  .thumb img {
+    display: block;
+    height: 52px;
+    max-width: 120px;
+    object-fit: cover;
+  }
+  .shotsize {
+    font-size: 10.5px;
+    color: var(--yap-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .shotx {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: var(--yap-muted);
+    cursor: pointer;
+  }
+  .shotx:hover {
+    background: var(--yap-s3, var(--yap-s1));
+    color: var(--yap-fg);
+  }
+  .shotx svg {
+    width: 11px;
+    height: 11px;
+  }
+  .prompts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .promptchip {
+    padding: 5px 11px;
+    border: 1px solid var(--yap-primary-line);
+    border-radius: var(--yap-r-full, 999px);
+    background: var(--yap-primary-wash);
+    color: var(--yap-fg);
+    font-size: 12px;
+    font-weight: 550;
+    cursor: pointer;
+  }
+  .promptchip:hover:not(:disabled) {
+    background: var(--yap-primary-tint);
+  }
+  .promptchip:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .visionline {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    padding: 7px 10px;
+    border: 1px solid var(--yap-primary-line);
+    border-radius: var(--yap-r);
+    background: var(--yap-primary-wash);
+    font-size: 12px;
+    color: var(--yap-fg);
+  }
+  .vtext {
+    flex: 1 1 220px;
+  }
+  .vbtn {
+    padding: 4px 10px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    background: var(--yap-s1);
+    color: var(--yap-fg);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .vbtn:hover {
+    border-color: var(--yap-border-hover, var(--yap-border));
+  }
+  .vbtn.primary {
+    border-color: var(--yap-ink);
+    background: var(--yap-ink);
+    color: var(--yap-ink-fg);
+  }
+  .vbtn.primary:hover {
+    background: var(--yap-ink-hover, var(--yap-ink));
+  }
+  .vlink {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-link, var(--yap-muted));
+    font-size: 11.5px;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .shotview {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: grid;
+    place-items: center;
+    padding: 32px;
+    background: var(--yap-scrim);
+    cursor: zoom-out;
+  }
+  .shotview img {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: var(--yap-r);
+    box-shadow: var(--yap-shadow-modal);
+    background: var(--yap-s1);
   }
 </style>

@@ -1,6 +1,6 @@
 <script>
   // Settings → Shortcuts (2026-10-22 review; OpenWhispr's Hotkeys page): the
-  // six global shortcuts together (input_hook.rs), each in Yap's keycaps,
+  // seven global shortcuts together (input_hook.rs), each in Yap's keycaps,
   // with a clash said where it happens. Their own pages show them too
   // (Dictation, Commands, Voice Assistant, Meetings): the same setting.
   //
@@ -41,6 +41,14 @@
   </Row>
   <Row label="Meeting notes" desc="Take notes on a call, and press again to stop and summarise" setting="shortcut-meeting">
     <SettingsHotkey {cfg} target="meetingHotkey" clearable />
+  </Row>
+  <Row
+    label="Snip to Chat"
+    desc="Drag a box over any screen: the picture goes into Chat for you to ask about"
+    hint="Esc or right-click cancels. ✂ on the Yap bar and the tray's Snip to Chat do the same. Windows never lets an app capture its administrator prompts, and video protected from copying comes out black."
+    setting="shortcut-snip"
+  >
+    <SettingsHotkey {cfg} target="snipHotkey" clearable />
   </Row>
 </Group>
 

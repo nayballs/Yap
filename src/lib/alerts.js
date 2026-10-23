@@ -16,7 +16,8 @@ import { toast } from './ui/toast.svelte.js';
 
 // "assistant": the Voice Assistant has no AI model, or couldn't answer
 // (assistant.rs), with Open settings → Language Models.
-const CHIPS = { clipboard: 'Paste', mic: 'Microphone', call: 'Calls', assistant: 'Voice Assistant' };
+// "snip": Snip to Chat couldn't start or save (snip.rs).
+const CHIPS = { clipboard: 'Paste', mic: 'Microphone', call: 'Calls', assistant: 'Voice Assistant', snip: 'Snip to Chat' };
 
 let started = false;
 
