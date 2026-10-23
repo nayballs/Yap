@@ -371,10 +371,15 @@ test('Motion: Reduced stops transitions and animations in every window; System f
   main,
   shot,
 }) => {
+  // Windows' "Animation effects" on, whatever the machine running this says
+  // (a CI runner's has read as off: "System" then reduced motion here too).
+  await main.emulateMedia({ reducedMotion: 'no-preference' });
   const group = await pick(main, yap, { font: 'default', size: 'default', motion: 'system' });
   await yap.invoke('notepad_open', { noteId: NOTE.id });
   await expect.poll(() => visible(yap, 'notepad')).toBe(true);
   const pad = yap.notepad;
+  await pad.emulateMedia({ reducedMotion: 'no-preference' });
+  await yap.overlay.emulateMedia({ reducedMotion: 'no-preference' }).catch(() => {});
   const thumb = group.locator('.seg .thumb').first();
   const pill = yap.overlay.locator('.pill');
 

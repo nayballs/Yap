@@ -1361,7 +1361,12 @@
               role="log"
               aria-label="Transcript"
               bind:this={logEl}
-              onscroll={() => (followLog = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40)}
+              onscroll={(e) => {
+                // The element scrolled, not `logEl`: a scroll queued as the
+                // log is swapped out arrives after bind:this let go (null).
+                const el = e.currentTarget;
+                followLog = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+              }}
             >
               {#each items as item (item.key)}
                 {#if item.kind === 'group'}

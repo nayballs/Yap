@@ -73,6 +73,11 @@ async function setConfig(yap, main, patch) {
   const cfg = await yap.invoke('get_config');
   await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
   await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
+  // Settings' copy auto-saves what it adopted (400 ms later): settled, or a
+  // late save of the last patch puts back what this one changed (CI,
+  // 2026-10-23: switched off, yet the pause ended the question).
+  await main.waitForTimeout(700);
+  await expectStore(yap, 'config.json', (c) => Object.entries(patch).every(([k, v]) => JSON.stringify(c[k]) === JSON.stringify(v)));
 }
 
 test.beforeEach(async ({ yap }) => {
