@@ -88,11 +88,13 @@ yap-snip {image, conversationId} → the main window up on Chat, the
 
 ## The overlay: native, not a webview (the spike)
 
-`yap.exe snip-dump --out <folder> [--runs N] [--no-overlay]` captures every
-monitor with each path (WGC + Yap's HDR conversion, WGC 8-bit, GDI), times
-it, writes the PNGs, shows the overlay over the frozen pictures
-click-through and never focused (it takes neither the mouse nor the keys),
-and checks a window of known swatches. On the maintainer's PC (two
+`yap.exe snip-dump --out <folder> [--runs N] [--no-overlay] [--demo]`
+captures every monitor with each path (WGC + Yap's HDR conversion, WGC
+8-bit, GDI), times it, writes the PNGs, shows the overlay over the frozen
+pictures click-through and never focused (it takes neither the mouse nor the
+keys), and checks a window of known swatches; `--demo` draws a box on the
+overlay with posted window messages and saves a capture of it
+(`overlay-demo.png`). On the maintainer's PC (two
 2560×1440 monitors, the primary HDR at 240 nits, Windows 11 build 26200):
 
 | | debug build | optimised build |
