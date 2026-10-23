@@ -65,6 +65,7 @@ mod model_catalog;
 mod mute;
 mod overlay;
 mod partials;
+mod pause;
 mod pipeline;
 mod portable;
 mod procs;
@@ -676,6 +677,8 @@ pub fn run() {
             e2e::e2e_mic_status,
             #[cfg(debug_assertions)]
             e2e::e2e_dictate_audio,
+            #[cfg(debug_assertions)]
+            e2e::e2e_assistant_audio,
             #[cfg(debug_assertions)]
             mic_privacy::e2e_mic_privacy,
             #[cfg(debug_assertions)]

@@ -48,6 +48,12 @@ export const dictation = $state({
   // 'idle' | 'listening' | 'thinking' | 'speaking'. Not idle, the capsule is
   // the assistant's ("Ask Yap…", "Thinking…", "Speaking…" with ■).
   assistant: 'idle',
+  // A Voice Assistant question about to end on a pause ("Stop listening
+  // when I pause", pause.rs: `yap-assistant-pause`): how long is left (ms)
+  // as it starts running out, 0 while it isn't; `pauseKey` restarts the
+  // capsule's run-down line each time.
+  pauseMs: 0,
+  pauseKey: 0,
 });
 
 // ---- Live partial transcript (streaming preview) ----
@@ -114,6 +120,7 @@ export function initDictation() {
       dictation.micSilent = '';
       dictation.micSilentFull = '';
       dictation.micWaiting = false;
+      dictation.pauseMs = 0;
     }
     if (state !== 'processing' && state !== 'processing-slow') dictation.modelLoading = false;
     // Keep the partial visible through the brief "processing" state, then
@@ -126,6 +133,16 @@ export function initDictation() {
   // first frame is already the assistant's.
   listen('yap-assistant', (e) => {
     dictation.assistant = e.payload?.phase || 'idle';
+  });
+  // The pause after a question is running out (or you spoke again: null).
+  listen('yap-assistant-pause', (e) => {
+    const left = e.payload?.leftMs;
+    if (left > 0) {
+      dictation.pauseMs = left;
+      dictation.pauseKey += 1;
+    } else {
+      dictation.pauseMs = 0;
+    }
   });
   listen('yap-dictation-cancelled', (e) => {
     if (e.payload?.undoMs > 0) dictation.undoMs = e.payload.undoMs;

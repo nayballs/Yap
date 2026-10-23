@@ -86,7 +86,10 @@
   and `eleven_flash_v2_5`); config v2 moved a saved
   Windows voice from tts_voice to tts_windows_voice and "windows" (never a
   choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
-  = unbound, the default), Read aloud's read_hotkey ("" = unbound, the
+  = unbound, the default) + assistant_answer_card (true) +
+  assistant_stop_on_pause (true: "Stop listening when I pause",
+  `pause.rs` — a pause after the question ends it, never before you've
+  spoken, never under a held push-to-talk key), Read aloud's read_hotkey ("" = unbound, the
   default; `read_aloud.rs`: the selection in any app read aloud, its speed
   the card's − / +, saved as tts_rate), opening apps (`apps.rs`): open_apps (true) +
   apps_blocked (app ids, "Don't open this one") + app_nicknames

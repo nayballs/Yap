@@ -36,7 +36,9 @@
   // waveform (or your words) while it listens, "Thinking…" while it's
   // transcribed and answered, then "Speaking…" with three bars while the
   // answer is read aloud. ■ stops the answer (`assistant-stop`) while it
-  // thinks or speaks; ✕ / ✓ work as for a dictation while it listens.
+  // thinks or speaks; ✕ / ✓ work as for a dictation while it listens. While
+  // the pause after your question runs out ("Stop listening when I pause",
+  // pause.rs: `dictation.pauseMs`) an amber hairline runs down at its foot.
   import { invoke } from '@tauri-apps/api/core';
   import { dictation } from './dictation.svelte.js';
 
@@ -131,6 +133,15 @@
     {:else}
       <span class="speakbars" aria-hidden="true"><i></i><i></i><i></i></span>
       <span class="txt" role="status">Speaking…</span>
+    {/if}
+    {#if askListening && dictation.pauseMs > 0}
+      <!-- "Stop listening when I pause" (pause.rs): the pause after your
+           question running out; speaking again takes it away. -->
+      {#key dictation.pauseKey}
+        <span class="pauseline" role="status" aria-label="Sending your question when the pause runs out">
+          <span data-keep-motion style={`animation-duration:${dictation.pauseMs}ms`}></span>
+        </span>
+      {/key}
     {/if}
     {#if offer}
       <button class="cbtn done" aria-label="Stop and ask" title="Stop and ask" onclick={() => act('dictation-stop')}>
@@ -443,6 +454,25 @@
     to {
       transform: scaleX(0);
     }
+  }
+  /* The Voice Assistant's pause running out: the same hairline in the
+     capsule's amber, from both ends to the middle. How long is left, so it
+     moves with Motion reduced too (`data-keep-motion`, app.css). */
+  .pauseline {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 3px;
+    height: 2px;
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  .pauseline span {
+    display: block;
+    height: 100%;
+    background: var(--bar-wave);
+    transform-origin: center;
+    animation: run-down linear forwards;
   }
 
   .dot {

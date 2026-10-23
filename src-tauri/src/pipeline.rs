@@ -1,6 +1,7 @@
 //! Yap's dictation pipeline.
 //!
-//! Simpler than Voice Mirror's (no TTS, no AI routing, no modes, no VAD):
+//! Simpler than Voice Mirror's (no TTS, no AI routing, no modes, no VAD —
+//! only a Voice Assistant question ends on a pause, `pause.rs`):
 //! the mic (`mic.rs`, opened on demand) captures audio into a buffer while
 //! *recording* is on; toggling off runs STT, applies the dictionary, and
 //! injects the text into whatever window is focused. A short chime marks
@@ -276,6 +277,22 @@ const LIVE_FALLBACK_MS: u64 = 3_000;
 /// still being opened after this long is watched anyway.
 const OPEN_PATIENCE_MS: u64 = 6_000;
 
+/// The bar's cue that a Voice Assistant question is about to end on a pause
+/// (`pause.rs`): `{leftMs}` as it starts running out, `{leftMs: null}` when
+/// you speak again.
+const PAUSE_CUE: &str = "yap-assistant-pause";
+/// How often the pause watch looks at its verdict.
+const PAUSE_POLL_MS: u64 = 50;
+
+/// "Stop listening when I pause" for one Voice Assistant recording
+/// (`pause.rs`): fed by the mic's audio, the start chime and the live
+/// preview; read by its watch thread (`spawn_pause_watch`).
+struct PauseSlot {
+    /// The recording it's for (`rec_session`).
+    session: u64,
+    pause: crate::pause::Pause,
+}
+
 /// The speech model loading in the background at startup (`Pipeline::start`,
 /// off the startup thread so the tray, the bar and the window come first).
 /// A dictation, a meeting chunk or a Run again that needs the engine
@@ -512,6 +529,9 @@ struct Shared {
     /// ([`destination`], at record start): transcribed, corrected and handed
     /// to `assistant::heard` — no cleanup, wake word, paste or history.
     assistant: AtomicBool,
+    /// The Voice Assistant recording's pause watch ("Stop listening when I
+    /// pause"); `None` for any other recording, or with the setting off.
+    pause: Mutex<Option<PauseSlot>>,
     /// Text selected in the target app, captured at edit-mode record-start. Empty
     /// (`None`) → "write mode" (generate new text from the instruction alone).
     selection: Mutex<Option<String>>,
@@ -651,6 +671,13 @@ impl Shared {
         {
             return; // that recording is over
         }
+        // "Speak now": a Voice Assistant question's pause watch counts
+        // speech from here (the chime itself left out, `pause.rs`).
+        if let Ok(mut p) = self.pause.lock() {
+            if let Some(slot) = p.as_mut().filter(|s| s.session == session) {
+                slot.pause.speak_now();
+            }
+        }
         let token = start.token;
         let quiet: Option<crate::sound::Played> =
             start.plan.any().then(|| Box::new(move || crate::mute::after_start_chime(token)) as crate::sound::Played);
@@ -779,6 +806,12 @@ impl Shared {
                     }
                 }
             }
+            // A Voice Assistant question listens for its pause (`pause.rs`).
+            if let Ok(mut p) = self.pause.lock() {
+                if let Some(slot) = p.as_mut() {
+                    slot.pause.audio(samples);
+                }
+            }
         }
         // The next scrolling-waveform bar (recording, or an active mic
         // test). The frontend shapes (gain/curve) and scrolls it.
@@ -864,6 +897,19 @@ impl Shared {
             g.machine.release(now, recording)
         };
         self.apply_gesture(&mut g, step, edit);
+    }
+
+    /// The Voice Assistant's shortcut moved ([`Pipeline::on_assistant_key`]).
+    fn assistant_key(self: &Arc<Self>, pressed: bool, at: Option<u64>) {
+        // Off during meetings and calls: a press doesn't start listening (a
+        // press while something records still stops it, below).
+        if pressed && !self.recording.load(Ordering::SeqCst) && crate::assistant::off_for_meeting(&self.app) {
+            return;
+        }
+        ASSISTANT_ARMED.store(pressed, Ordering::SeqCst);
+        self.on_key(pressed, false, at);
+        // Taken by the recording if one started; never left for another.
+        ASSISTANT_ARMED.store(false, Ordering::SeqCst);
     }
 
     /// The tap timer: a tap whose second press didn't come is thrown away.
@@ -983,6 +1029,9 @@ impl Shared {
             self.end_without_mic();
             return;
         }
+        // A question for the Voice Assistant ends on a pause (before the
+        // start chime: the watch counts speech from it).
+        let pause_watch = self.arm_pause(session);
         // The start chime first (Yap's own sound is never silenced), then
         // the other apps go quiet / pause once it has played (`mute.rs`) —
         // once the mic is on: at once when it's warm, else at its first
@@ -1026,7 +1075,100 @@ impl Shared {
         // length — see `partials::PartialSession`).
         self.maybe_start_streaming();
         self.spawn_mic_watch(session);
+        if pause_watch {
+            self.spawn_pause_watch(session);
+        }
         tracing::info!("Recording started");
+    }
+
+    /// "Stop listening when I pause" (`pause.rs`): a fresh watch for
+    /// recording `session` if it's a Voice Assistant question and the
+    /// setting is on, else none. Its clock starts where the buffer is (the
+    /// pre-roll), as the live preview's does. `true`: watch it.
+    fn arm_pause(&self, session: u64) -> bool {
+        let on = self.assistant.load(Ordering::SeqCst)
+            && self.config.read().map(|c| c.assistant_stop_on_pause).unwrap_or(false);
+        let at = if on { self.buffer.lock().map(|b| b.len() as u64).unwrap_or(0) } else { 0 };
+        if let Ok(mut p) = self.pause.lock() {
+            *p = on.then(|| PauseSlot { session, pause: crate::pause::Pause::new(at) });
+        }
+        on
+    }
+
+    /// May a pause end the recording now? Toggle mode, or push-to-talk
+    /// locked hands-free — never under a held key (letting go ends it).
+    /// `g`: the gesture lock, held.
+    fn hands_free(&self, g: &GestureSlot) -> bool {
+        self.recording_mode() != "pushToTalk" || g.machine.hands_free()
+    }
+
+    /// The pause watch for Voice Assistant recording `session`: ends the
+    /// question when `pause.rs` says so, as a press of the shortcut would
+    /// (the stop chime, the transcription, the answer), and tells the bar
+    /// while a pause runs out. Until the recording ends, however it ends.
+    fn spawn_pause_watch(self: &Arc<Self>, session: u64) {
+        let shared = Arc::clone(self);
+        let spawned = std::thread::Builder::new().name("assistant-pause".into()).spawn(move || {
+            use crate::pause::Verdict;
+            let live = || shared.recording.load(Ordering::SeqCst) && shared.rec_session.load(Ordering::SeqCst) == session;
+            let mut cue = false;
+            loop {
+                std::thread::sleep(Duration::from_millis(PAUSE_POLL_MS));
+                if !live() {
+                    break;
+                }
+                let verdict = shared
+                    .pause
+                    .lock()
+                    .ok()
+                    .and_then(|p| p.as_ref().filter(|s| s.session == session).map(|s| (s.pause.verdict(), s.pause.heard_ms())));
+                let Some((verdict, heard_ms)) = verdict else { break };
+                // Under the gesture lock, as a key's stop is: a press at
+                // this very moment finds it stopped, or stops it itself.
+                let g = shared.gesture.lock().unwrap_or_else(|p| p.into_inner());
+                let verdict = if shared.hands_free(&g) { verdict } else { Verdict::Listen };
+                match verdict {
+                    Verdict::End(why) => {
+                        if live() {
+                            tracing::info!(?why, heard_ms, "Voice Assistant: you paused, so the question ends");
+                            shared.stop_and_transcribe();
+                        }
+                        break;
+                    }
+                    Verdict::Ending { left_ms } if !cue => {
+                        cue = true;
+                        let _ = shared.app.emit(PAUSE_CUE, serde_json::json!({ "leftMs": left_ms }));
+                    }
+                    Verdict::Listen if cue => {
+                        cue = false;
+                        let _ = shared.app.emit(PAUSE_CUE, serde_json::json!({ "leftMs": null }));
+                    }
+                    _ => {}
+                }
+                drop(g);
+            }
+            if cue {
+                let _ = shared.app.emit(PAUSE_CUE, serde_json::json!({ "leftMs": null }));
+            }
+            if let Ok(mut p) = shared.pause.lock() {
+                if p.as_ref().is_some_and(|s| s.session == session) {
+                    *p = None;
+                }
+            }
+        });
+        if let Err(e) = spawned {
+            tracing::warn!("Voice Assistant: no pause watch ({})", e);
+        }
+    }
+
+    /// The live preview read the recording's first `covered` samples as
+    /// `text`: the pause watch's words (`pause.rs`).
+    fn pause_words(&self, covered: usize, text: &str) {
+        if let Ok(mut p) = self.pause.lock() {
+            if let Some(slot) = p.as_mut() {
+                slot.pause.words(covered as u64, text);
+            }
+        }
     }
 
     /// "Windows is blocking microphone access for desktop apps": in the
@@ -1380,7 +1522,11 @@ impl Shared {
     }
 
     fn stop_and_transcribe(self: &Arc<Self>) {
-        self.recording.store(false, Ordering::SeqCst);
+        // Stopped once: a second stop racing the first (the shortcut pressed
+        // as the Voice Assistant's pause ends it) does nothing.
+        if !self.recording.swap(false, Ordering::SeqCst) {
+            return;
+        }
         dictation_ended();
         // Stopped before the mic was on: no start chime after the stop's.
         self.drop_pending_start();
@@ -2568,6 +2714,7 @@ impl Pipeline {
             edit_mode: AtomicBool::new(false),
             to_chat: AtomicBool::new(false),
             assistant: AtomicBool::new(false),
+            pause: Mutex::new(None),
             selection: Mutex::new(None),
             processing: AtomicBool::new(false),
             upload_cancel: AtomicBool::new(false),
@@ -2688,18 +2835,7 @@ impl Pipeline {
     /// speaking stops the voice first (`start_recording`'s barge-in); a
     /// press while any recording runs stops it, as the other keys do.
     pub fn on_assistant_key(&self, pressed: bool, at: Option<u64>) {
-        // Off during meetings and calls: a press doesn't start listening (a
-        // press while something records still stops it, below).
-        if pressed
-            && !self.shared.recording.load(Ordering::SeqCst)
-            && crate::assistant::off_for_meeting(&self.shared.app)
-        {
-            return;
-        }
-        ASSISTANT_ARMED.store(pressed, Ordering::SeqCst);
-        self.shared.on_key(pressed, false, at);
-        // Taken by the recording if one started; never left for another.
-        ASSISTANT_ARMED.store(false, Ordering::SeqCst);
+        self.shared.assistant_key(pressed, at);
     }
 
     /// Cancel the recording (the bar's ✕, the tray's Cancel): nothing is
@@ -2875,6 +3011,32 @@ impl Rerun {
 #[cfg(debug_assertions)]
 pub(crate) struct Robot(Arc<Shared>);
 
+/// How [`Robot::ask_assistant_audio`] presses the assistant shortcut.
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum Press {
+    /// Pressed once to start (and again at the end, if it's still on).
+    Toggle,
+    /// Held down for the whole audio, let go at its end (push-to-talk).
+    Hold,
+    /// A double-tap: locked hands-free (push-to-talk), pressed again at the
+    /// end if it's still on.
+    HandsFree,
+}
+
+/// What [`Robot::ask_assistant_audio`] saw.
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AskedAloud {
+    /// The recording ended before its audio did, no key pressed: a pause
+    /// ended it.
+    pub ended_by_itself: bool,
+    /// How much of the audio was played before it ended (ms).
+    pub listened_ms: u64,
+}
+
 /// The robot's WAV plays in the mic's place until this drops.
 #[cfg(debug_assertions)]
 struct FeedOn;
@@ -2967,6 +3129,89 @@ impl Robot {
             crate::assistant::nothing(&shared.app);
             Err("Nothing to ask".into())
         }
+    }
+
+    /// A question to the **Voice Assistant** from `samples` (16 kHz mono)
+    /// played in the mic's place in real time, its shortcut pressed as
+    /// `press` says through the real key path (the recording mode and
+    /// push-to-talk's gestures as configured): the start, "speak now", the
+    /// live preview, the pause watch, and at the end of the audio the
+    /// shortcut again if the recording is still on — then the STT and the
+    /// question to Chat, as ever. Test mode's `e2e::e2e_assistant_audio`.
+    pub(crate) async fn ask_assistant_audio(&self, samples: Vec<f32>, press: Press) -> Result<AskedAloud, String> {
+        let shared = Arc::clone(&self.0);
+        if shared.recording.load(Ordering::SeqCst) || shared.processing.load(Ordering::SeqCst) {
+            return Err(Self::BUSY.into());
+        }
+        if crate::assistant::off_for_meeting(&shared.app) {
+            return Err("The Voice Assistant is off during meetings".into());
+        }
+        let _feed = FeedOn::start();
+        if let Ok(mut pre) = shared.preroll.lock() {
+            pre.clear();
+        }
+        let key = |pressed: bool| shared.assistant_key(pressed, None);
+        key(true);
+        if !shared.recording.load(Ordering::SeqCst) {
+            return Err("The recording didn't start (see the log)".into());
+        }
+        let session = shared.rec_session.load(Ordering::SeqCst);
+        match press {
+            // A toggle's release does nothing; a hold stays down.
+            Press::Toggle => key(false),
+            Press::Hold => {}
+            // A quick tap, then a second press: locked hands-free.
+            Press::HandsFree => {
+                tokio::time::sleep(Duration::from_millis(80)).await;
+                key(false);
+                tokio::time::sleep(Duration::from_millis(120)).await;
+                key(true);
+                tokio::time::sleep(Duration::from_millis(80)).await;
+                key(false);
+            }
+        }
+        tracing::info!(secs = samples.len() / TARGET_SAMPLE_RATE as usize, ?press, "e2e: a question for the Voice Assistant from audio");
+        let feeder = Arc::clone(&shared);
+        let played = tokio::task::spawn_blocking(move || {
+            let mut amp = AmpMeter::default();
+            let started = Instant::now();
+            let chunk = TARGET_SAMPLE_RATE as usize / 10;
+            for (i, part) in samples.chunks(chunk).enumerate() {
+                let due = Duration::from_millis(100 * i as u64);
+                if let Some(wait) = due.checked_sub(started.elapsed()) {
+                    std::thread::sleep(wait);
+                }
+                if !feeder.recording.load(Ordering::SeqCst) || feeder.rec_session.load(Ordering::SeqCst) != session {
+                    return 100 * i as u64;
+                }
+                feeder.take_audio(part, &mut amp);
+                if i == 0 {
+                    feeder.fire_pending_start();
+                }
+            }
+            (samples.len() / (TARGET_SAMPLE_RATE as usize / 1000)) as u64
+        })
+        .await
+        .map_err(|e| format!("The audio player failed: {e}"))?;
+        // Still listening at the end of the audio: the shortcut ends it.
+        let ended_by_itself = !(shared.recording.load(Ordering::SeqCst) && shared.rec_session.load(Ordering::SeqCst) == session);
+        if !ended_by_itself {
+            match press {
+                Press::Hold => key(false),
+                Press::Toggle | Press::HandsFree => {
+                    key(true);
+                    key(false);
+                }
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(120);
+        while shared.processing.load(Ordering::SeqCst) || shared.recording.load(Ordering::SeqCst) {
+            if Instant::now() > deadline {
+                return Err("The question wasn't transcribed within 2 minutes".into());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        Ok(AskedAloud { ended_by_itself, listened_ms: played })
     }
 
     /// `samples` (16 kHz mono) played into the dictation in real time, in
@@ -3080,7 +3325,7 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
 
         // Snapshot this tick's window under the buffer lock — only the bounded
         // window is cloned, never the whole recording.
-        let (win, rel_cut, abs_cut) = {
+        let (win, rel_cut, abs_cut, len) = {
             let buf = match shared.buffer.lock() {
                 Ok(b) => b,
                 Err(_) => break,
@@ -3091,12 +3336,13 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
             }
             match session.plan(len, &buf) {
                 crate::partials::TickPlan::Normal => {
-                    (buf[session.window_start..len].to_vec(), None, 0usize)
+                    (buf[session.window_start..len].to_vec(), None, 0usize, len)
                 }
                 crate::partials::TickPlan::Advance { cut } => (
                     buf[session.window_start..len].to_vec(),
                     Some(cut - session.window_start),
                     cut,
+                    len,
                 ),
             }
         };
@@ -3165,6 +3411,9 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
         };
 
         let display = session.display();
+        // A Voice Assistant question's pause watch reads the words too: what
+        // the first `len` samples said (`pause.rs`).
+        shared.pause_words(len, &display);
         if !display.is_empty() && display != last_emitted {
             // Recording may have stopped while we were transcribing — don't emit
             // a stale partial over the authoritative final transcript.
