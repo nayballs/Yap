@@ -677,6 +677,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             e2e::e2e_dictate_audio,
             #[cfg(debug_assertions)]
+            e2e::e2e_crash_next_dictation,
+            #[cfg(debug_assertions)]
             e2e::e2e_assistant_audio,
             #[cfg(debug_assertions)]
             mic_privacy::e2e_mic_privacy,

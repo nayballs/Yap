@@ -205,7 +205,8 @@ until it's fixed (none open now). Guide: [`docs/e2e-tests.md`](../e2e-tests.md) 
   dictation mic's state, `mic.rs`: open, live, Bluetooth, opens/closes, the
   last open's timing), `e2e_dictate_audio { seconds }` (a dictation of a
   tone played in the mic's place — a real start and stop, the mic held as
-  for any dictation; no microphone needed), `YAP_MIC_WARM_MS` (the mic's
+  for any dictation; no microphone needed), `e2e_crash_next_dictation` (the
+  next dictation panics in its paste step: `pipeline::Busy`), `YAP_MIC_WARM_MS` (the mic's
   warm window, short) and `YAP_E2E_MODEL_LOAD_MS` (the startup model load,
   slowed down), `e2e_learn_correction` (an
   edit of a pasted dictation as the correction watch would see it, or the

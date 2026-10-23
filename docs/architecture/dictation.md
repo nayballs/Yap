@@ -232,7 +232,22 @@ to **Run again** from Home.
   keeps it in history. A `processing` guard blocks
   starting a new recording while one is still transcribing (no overlapping `run_stt`
   / duplicate model load), and the buffer is capped at 15 min so a stuck key can't
-  OOM. With `streaming_partials` on, `stream_partials` (a per-session worker)
+  OOM. **The guard goes with the task, however it ends** (`Busy`,
+  2026-10-23): a stop's `run_stt`, Undo, Upload, Run again and robot mode's
+  dictations each hold a `Busy` (`take`: refused while held; `hold` for a
+  stop), spawned with it (`spawn_busy`) or done by hand (`done`). A panic in
+  the task (a bug: `app_kind::word_before`'s was one) used to skip the line
+  after the `.await` that cleared the flag — every press ignored until a
+  restart, the bar on "processing", the updater waiting, nobody told. Now
+  the flag drops with the task, and `Holder::crashed` first puts things
+  back and says so: for a dictation `undoing` cleared, a Voice Assistant
+  question ended (`assistant::nothing`), the dictation listed as failed
+  with its audio ("The dictation crashed", Run again) and "Dictation failed
+  — Yap hit an error. Try again" on the bar (`yap-dictation-error` +
+  "error"); an Upload `yap-upload-error`; Run again a `yap-error` toast.
+  Unit test `a_transcription_that_crashes_lets_dictation_go_and_says_so`;
+  e2e `dictation-alerts.spec.js` (debug-only `e2e_crash_next_dictation`
+  panics the next dictation's paste step on purpose). With `streaming_partials` on, `stream_partials` (a per-session worker)
   transcribes a bounded **sliding window** of the buffer every ~500 ms
   (`partials.rs`: text older than the window freezes as committed text, the
   window advances at quiet points via `media::quietest_index`, 20 s hard cap —
