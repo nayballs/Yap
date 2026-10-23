@@ -447,6 +447,7 @@ export async function startFakeLlm() {
   let serverModels = [{ id: 'fake-chat' }, { id: 'llama3.1:8b' }, { id: 'qwen2.5-7b-instruct' }, { id: 'nomic-embed-text' }];
   let callIds = 0;
   let ollama = null;
+  let rejectingImages = false;
   const server = http.createServer((req, res) => {
     let raw = '';
     req.on('data', (c) => (raw += c));
@@ -565,16 +566,29 @@ export async function startFakeLlm() {
       }
       const messages = body.messages ?? [];
       const system = messages.find((m) => m.role === 'system')?.content ?? '';
-      const user = messages.filter((m) => m.role === 'user').at(-1)?.content ?? '';
+      // A question with screenshots (Snip to Chat) has parts: its text, and
+      // the images' data URLs, recorded apart.
+      const textOf = (c) => (Array.isArray(c) ? c.filter((p) => p.type === 'text').map((p) => p.text).join('\n') : c);
+      const user = textOf(messages.filter((m) => m.role === 'user').at(-1)?.content ?? '');
+      const images = messages.flatMap((m) =>
+        Array.isArray(m.content) ? m.content.filter((p) => p.type === 'image_url').map((p) => p.image_url?.url ?? '') : []
+      );
       const kind = KINDS.find(([prefix]) => system.startsWith(prefix))?.[1] ?? 'other';
       const offered = (body.tools ?? []).map((t) => t.function?.name);
+      // A model that can't read images, as a server says it (`rejectImages`).
+      if (rejectingImages && images.length) {
+        requests.push({ kind: 'imageRefused', model: body.model, user, images, messages });
+        res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { message: 'image input is not supported for this model' } }));
+        return;
+      }
       requests.push({
         kind,
         model: body.model,
         maxTokens: body.max_tokens ?? null,
-        tokens: messages.reduce((n, m) => n + estimateTokens(String(m.content ?? '')), 0),
+        tokens: messages.reduce((n, m) => n + estimateTokens(String(textOf(m.content) ?? '')), 0),
         system,
         user,
+        images,
         tools: offered,
         toolChoice: body.tool_choice ?? null,
         responseFormat: body.response_format ?? null,
@@ -662,6 +676,8 @@ export async function startFakeLlm() {
     streamPace: (kind, pace) => (pace ? paces.set(kind, pace) : paces.delete(kind)),
     /** Answer whole even when asked to stream (`false`), or stream again. */
     setStreaming: (on) => (streaming = on),
+    /** Turn a request carrying images down with HTTP 400, as a text-only server does (`true`). */
+    rejectImages: (on) => (rejectingImages = on),
     close: () => {
       // A connection held open mid-stream (`hangAfter`) mustn't keep it up.
       server.closeAllConnections?.();
