@@ -57,7 +57,3 @@ export const ENGINE_PROVIDER = {
   // The speaker model (diarization.svelte.js).
   Nemotron: 'nvidia',
 };
-
-export function getProviderIcon(id) {
-  return PROVIDER_ICONS[id];
-}

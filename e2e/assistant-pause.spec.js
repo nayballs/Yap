@@ -14,7 +14,7 @@
 // decides, as with the preview off. The stub then transcribes the audio and
 // the question goes to a local fake Chat model (support/fake-llm.js).
 import path from 'node:path';
-import { test as base, expect, openSettings, settingsDialog, closeSettings, expectStore } from './support/fixtures.js';
+import { test as base, expect, openSettings, settingsDialog, closeSettings, expectStore, setConfig } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { SCREENSHOTS } from './support/yap.js';
 
@@ -67,18 +67,6 @@ const ask = (yap, parts, opts = {}) => yap.invoke('e2e_assistant_audio', { parts
 const capsule = (yap) => yap.overlay.locator('.capsule');
 /** Questions the fake Chat model was asked, as the stub heard them. */
 const asked = (fakeLlm) => fakeLlm.requests.filter((r) => String(r.user).includes('STT stub'));
-
-/** Change config.json as another surface would, and tell Settings' copy. */
-async function setConfig(yap, main, patch) {
-  const cfg = await yap.invoke('get_config');
-  await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
-  await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
-  // Settings' copy auto-saves what it adopted (400 ms later): settled, or a
-  // late save of the last patch puts back what this one changed (CI,
-  // 2026-10-23: switched off, yet the pause ended the question).
-  await main.waitForTimeout(700);
-  await expectStore(yap, 'config.json', (c) => Object.entries(patch).every(([k, v]) => JSON.stringify(c[k]) === JSON.stringify(v)));
-}
 
 test.beforeEach(async ({ yap }) => {
   await yap.invoke('assistant_stop');

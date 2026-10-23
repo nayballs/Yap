@@ -54,8 +54,9 @@ The meeting recorder, rolling digests and the action plan, the end of a recordin
   clock in ms — captured audio, standing still while none arrives — and a
   talk counter: both sides' talk samples plus talk segments ingested) is
   what `meeting_guard`'s quiet-meeting watch reads each second; the
-  `Session` keeps both sources for it. Commands: `meeting_start`/`meeting_stop`/
-  `meeting_state` (signatures unchanged). Test mode opens no audio device (WAVs
+  `Session` keeps both sources for it. Commands: `meeting_start`/
+  `meeting_state`; a recording ends through `meeting_end`/`meeting_pause`
+  (meeting_end.rs). Test mode opens no audio device (WAVs
   from `YAP_E2E_MEETING_AUDIO`, or silence; `e2e::e2e_meeting_feed`; the
   player also stages a dictation and an output switch, see `e2e.rs`). A
   meeting started right after Yap did waits for the speech model, still

@@ -1063,12 +1063,9 @@ fn find_free_port() -> Option<u16> {
 
 /// Has the child process already exited? (missing child counts as exited.)
 fn child_exited() -> bool {
-    match CHILD.lock() {
-        Ok(mut guard) => match guard.as_mut() {
-            Some(child) => matches!(child.try_wait(), Ok(Some(_))),
-            None => true,
-        },
-        Err(_) => true,
+    match CHILD.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+        Some(child) => matches!(child.try_wait(), Ok(Some(_))),
+        None => true,
     }
 }
 
@@ -1419,7 +1416,7 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
         .map_err(|e| fail(Failure::Launch(format!("failed to launch llamafile: {}", e))))?;
     // The model never keeps running after Yap: a crash or End task ends it too.
     crate::procs::end_with_yap(&child);
-    *CHILD.lock().unwrap() = Some(child);
+    *CHILD.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
     PORT.store(port, Ordering::SeqCst);
     READY.store(false, Ordering::SeqCst);
     // A stop between the look above and the child being kept missed it.
@@ -1611,12 +1608,13 @@ fn stop_inner() {
     if let Ok(mut s) = SERVING.lock() {
         *s = None;
     }
-    if let Ok(mut guard) = CHILD.lock() {
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-            tracing::info!("On-device cleanup sidecar stopped");
-        }
+    // Poisoned or not, the child is ended: a skipped kill would leave the
+    // model running while the next start launches another.
+    let mut guard = CHILD.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+        tracing::info!("On-device cleanup sidecar stopped");
     }
 }
 

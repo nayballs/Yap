@@ -1,9 +1,9 @@
 <script>
   // The main window "control panel" — ported from OpenWhispr's ControlPanel.tsx
   // + ControlPanelSidebar.tsx. Yap's main window is no longer a settings dialog:
-  // a slim sidebar routes between surfaces (Home = the dictation feed, Chat /
-  // Notes / Upload coming with Phase 6-7, Dictionary), and Settings opens as a
-  // modal overlay via the cogwheel — exactly OpenWhispr's structure.
+  // a slim sidebar routes between surfaces (Home = the dictation feed, Chat,
+  // Notes, Meetings, Upload, Dictionary…), and Settings opens as a modal
+  // overlay via the cogwheel — exactly OpenWhispr's structure.
   //
   // <Settings> stays ALWAYS MOUNTED (hidden when the modal is closed): its
   // window-level listeners (in-window hotkey fallback — the WebView2-focus

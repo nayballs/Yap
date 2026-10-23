@@ -155,33 +155,6 @@
   margin-top: 10px;
 }
 
-/* ---- a card, only for things that are objects (a model, a calendar
-   connection, an AI app) ---- */
-.settings-shell .set-card {
-  border: 1px solid var(--yap-border);
-  border-radius: var(--yap-r-lg);
-  background: var(--yap-s2);
-  box-shadow: var(--yap-shadow-sm);
-}
-
-/* ---- keycaps outside the hotkey control (the Shortcuts page's notes) ---- */
-.settings-shell kbd.set-key {
-  display: inline-grid;
-  place-items: center;
-  min-width: 22px;
-  height: 20px;
-  padding: 0 6px;
-  box-sizing: border-box;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--yap-key-fg);
-  background: var(--yap-key-bg);
-  border: 1px solid var(--yap-key-border);
-  border-bottom-width: 2px;
-  border-radius: 5px;
-}
-
 /* ---- a row a search result or a deep link landed on: a short wash ---- */
 .settings-shell .set-flash {
   animation: set-flash 1.8s ease-out 1;

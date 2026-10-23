@@ -46,6 +46,7 @@ import {
   expectStore,
   inAnotherApp,
   mainOnScreen,
+  setConfig,
 } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { startFakeKokoro } from './support/kokoro.js';
@@ -95,13 +96,6 @@ const test = base.extend({
     { scope: 'worker' },
   ],
 });
-
-/** Change config.json as another surface would, and tell Settings' copy. */
-async function setConfig(yap, main, patch) {
-  const cfg = await yap.invoke('get_config');
-  await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
-  await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
-}
 
 const spoken = (yap) => yap.invoke('tts_e2e_spoken');
 const speaking = async (yap) => (await yap.invoke('tts_state')).speaking;

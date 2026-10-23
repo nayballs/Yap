@@ -221,7 +221,11 @@ test('chat: the empty state offers a new chat', async ({ yap, main, shot }) => {
   `yap.overlay` are the other windows (the notepad isn't reset: a spec that
   uses it tidies up after itself); `yap.invoke(cmd, args)` calls a Tauri command;
   `yap.readJson('notes.json')` reads the instance's data dir, and
-  `expectStore(yap, file, check)` waits for a store to change.
+  `expectStore(yap, file, check)` waits for a store to change. To change
+  settings behind Settings' back, use `setConfig(yap, main, patch)`
+  (fixtures.js), never a spec's own `save_config`: it tells Settings' copy
+  (`yap-config-patched`) and waits out its auto-save (400 ms later) before
+  checking the patch held, or a late save puts the old values back mid-test.
 - Find things the way a person does: roles, labels, placeholders and visible
   text (`getByRole`, `getByPlaceholder`, `getByText`). The sidebar is the
   `navigation` "Main", the Settings modal is the `dialog` "Settings" with

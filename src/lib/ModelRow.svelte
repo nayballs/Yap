@@ -12,7 +12,6 @@
   // whose switch turns off with it; a speech model must be switched first).
   let { model, status = 'downloadable', percent = 0, onclick, ondelete = null, deleteActive = false } = $props();
 
-  const busy = $derived(status === 'downloading' || status === 'switching');
   const prov = $derived(ENGINE_PROVIDER[model.engine]);
   const icon = $derived(prov ? PROVIDER_ICONS[prov] : null);
   // Row click switches to an installed model; the Download button handles the rest.

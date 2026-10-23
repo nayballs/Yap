@@ -28,16 +28,10 @@
   const correctionCount = $derived(dict.filter((e) => !e.snippet).length);
   const snippetCount = $derived(dict.filter((e) => e.snippet).length);
 
-  onMount(async () => {
-    try {
-      const cfg = await invoke('get_config');
-      dict = Array.isArray(cfg?.dictionary) ? cfg.dictionary : [];
-      fuzzy = cfg?.dictionaryFuzzy ?? true;
-      learnWords = cfg?.learnWords ?? true;
-    } catch {
-      dict = [];
-    }
-    loaded = true;
+  // Not an async onMount: Svelte drops the cleanup an async one returns, and
+  // every visit to the view left its listener behind.
+  onMount(() => {
+    let gone = false;
     // Settings can also touch the dictionary (Commands' name save) — track it.
     const onExternal = (e) => {
       if (!Array.isArray(e.detail)) return;
@@ -47,9 +41,24 @@
       dict = e.detail.map((x) => ({ ...x }));
       setTimeout(() => (priming = false), 50);
     };
-    window.addEventListener('yap-dictionary-external', onExternal);
-    setTimeout(() => (priming = false), 0);
-    return () => window.removeEventListener('yap-dictionary-external', onExternal);
+    (async () => {
+      try {
+        const cfg = await invoke('get_config');
+        dict = Array.isArray(cfg?.dictionary) ? cfg.dictionary : [];
+        fuzzy = cfg?.dictionaryFuzzy ?? true;
+        learnWords = cfg?.learnWords ?? true;
+      } catch {
+        dict = [];
+      }
+      loaded = true;
+      if (gone) return;
+      window.addEventListener('yap-dictionary-external', onExternal);
+      setTimeout(() => (priming = false), 0);
+    })();
+    return () => {
+      gone = true;
+      window.removeEventListener('yap-dictionary-external', onExternal);
+    };
   });
 
   // Debounced patch-save: merge onto a FRESH config so this view can never

@@ -197,7 +197,7 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   webviews' `frontend_log` lines follow the same rule.
 - **`commands.rs`** — Tauri commands: recording (`toggle_recording`, `cancel_recording`,
   `dictation_key` — the in-page fallbacks' hotkey down/up),
-  config (`get_config`/`save_config`), models (`installed_models`, `download_model`,
+  config (`get_config`/`save_config`), models (`installed_models`,
   `download_model_size`, `set_active_model`, `delete_model`, `model_language_info`),
   devices (`list_audio_devices`, `list_output_devices`, `set_input_device` — live
   stream swap, `set_mic_test` — idle level meter), windows (`open_settings`,
@@ -221,8 +221,8 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   in lib.rs), `read_aloud_text` / `_selection` / `_action` / `_state`
   (read_aloud.rs), `chat_view_state` + `assistant_stop`
   (assistant.rs),
-  `meeting_start` (then `calendar::on_meeting_started`)/`meeting_stop`/
-  `meeting_state`, `transcribe_file`/`cancel_file_transcription`/
+  `meeting_start` (then `calendar::on_meeting_started`)/
+  `meeting_state` (a recording ends through meeting_end.rs's `meeting_end`), `transcribe_file`/`cancel_file_transcription`/
   `audio_file_info`, `log_info`/`open_logs_folder`, `delete_history_entry`.
   (`paste_last_transcript` lives in `text_injector.rs`.)
 

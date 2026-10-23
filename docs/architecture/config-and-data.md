@@ -32,7 +32,7 @@
   stop off chat messages", default on), auto_submit(+key),
   voice_enter (the "press enter" voice command, default on), terminal_mode
   ("Safer pasting into terminals", default on; both `app_kind.rs`),
-  restore_clipboard, show_tray_icon, autostart, model_unload_timeout, selected_language,
+  restore_clipboard, autostart, model_unload_timeout, selected_language,
   translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
   Notes/Slack/Code/Custom), the editable `pp_prompt` body, `pp_api_keys` (per-provider
   key store — the UI swaps the active `pp_api_key` from it on provider switch),

@@ -79,7 +79,6 @@ function store(key, value) {
 let themeChoice = stored(THEME_KEY, THEME_IDS, 'system');
 let barChoice = stored(BAR_THEME_KEY, BAR_THEME_IDS, 'app');
 let osDark = null; // MediaQueryList, once initAppearance ran
-const themeListeners = new Set();
 
 /** 'light' | 'dark': the theme `choice` resolves to with Windows' app mode
  *  dark (`systemDark`) or not. */
@@ -99,30 +98,15 @@ function systemDark() {
   return !!window.matchMedia?.('(prefers-color-scheme: dark)').matches;
 }
 
-/** The theme this window shows right now ('light' | 'dark'). */
-export function currentTheme() {
-  if (typeof document === 'undefined') return 'light';
-  return document.documentElement.dataset.yapTheme === 'dark' ? 'dark' : 'light';
-}
-
-/** Call `fn(theme)` whenever this window's theme changes (charts drawn in
- *  script, say). Returns a function that stops. */
-export function onThemeChange(fn) {
-  themeListeners.add(fn);
-  return () => themeListeners.delete(fn);
-}
-
 function applyTheme() {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   const theme = resolveTheme(themeChoice, systemDark());
   const bar = resolveBarTheme(barChoice, theme);
-  const changed = root.dataset.yapTheme !== theme;
-  if (changed) root.dataset.yapTheme = theme;
+  if (root.dataset.yapTheme !== theme) root.dataset.yapTheme = theme;
   if (root.dataset.barTheme !== bar) root.dataset.barTheme = bar;
   store(THEME_KEY, themeChoice);
   store(BAR_THEME_KEY, barChoice);
-  if (changed) for (const fn of themeListeners) fn(theme);
 }
 
 /** The bar's colours as Rust's bar status says them ('app' | 'light' |

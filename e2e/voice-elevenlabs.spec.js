@@ -20,7 +20,7 @@
 // the debug-only `tts_e2e_spoken`. Kokoro comes from the local stand-in
 // download (support/kokoro.js) and is silence in test mode.
 import path from 'node:path';
-import { test as base, expect, openView, openSettings, closeSettings, expectStore } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { startFakeKokoro } from './support/kokoro.js';
 import { startFakeElevenLabs, KEY, GEORGE, ALICE, OWN } from './support/fake-elevenlabs.js';
@@ -79,14 +79,7 @@ const test = base.extend({
   ],
 });
 
-/** Change config.json as another surface would, and tell Settings' copy. */
-async function setConfig(yap, main, patch) {
-  const cfg = await yap.invoke('get_config');
-  await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
-  await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
-}
-
-const spoken = (yap) => yap.invoke('tts_e2e_spoken');
+const spoken =(yap) => yap.invoke('tts_e2e_spoken');
 const speaking = async (yap) => (await yap.invoke('tts_state')).speaking;
 const box = (main) => main.getByRole('textbox', { name: 'Message' });
 const thread = (main) => main.locator('.msgs');

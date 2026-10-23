@@ -2283,6 +2283,13 @@ mod tests {
     }
 
     #[test]
+    fn sentences_after_a_no_break_space() {
+        // A web page's &nbsp; before a sentence's last word (read aloud).
+        assert_eq!(sentences("Le train part à 15\u{a0}h. Il arrive tard."), vec!["Le train part à 15\u{a0}h.", "Il arrive tard."]);
+        assert_eq!(sentences("Ask Dr.\u{a0}Smith. Then J.\u{202f}Lee."), vec!["Ask Dr.\u{a0}Smith.", "Then J.\u{202f}Lee."]);
+    }
+
+    #[test]
     fn long_sentences_are_cut_at_a_comma() {
         let long = format!("{}, {}", "word ".repeat(30).trim(), "more ".repeat(30).trim());
         let parts = sentences(&long);

@@ -410,26 +410,22 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Reconcile the tray with the current config. Since the pill was retired
-/// (2026-07-09) the tray is Yap's only persistent surface, so it is always
-/// built regardless of `show_tray_icon` — without it Settings would be
-/// unreachable. Called at startup AND from save_config.
-pub fn ensure_tray(app: &AppHandle, cfg: &config::YapConfig) {
-    let _ = cfg; // kept for signature stability (config no longer gates the tray)
-    let desired = true;
-    let exists = app.tray_by_id(TRAY_ID).is_some();
-    if desired && !exists {
-        // Fresh tray → the cached menus/icon-state belong to the old one.
-        *MENUS.lock().unwrap_or_else(|p| p.into_inner()) = None;
-        LAST_ICON_STATE
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clear();
-        if let Err(e) = build_tray(app) {
-            tracing::warn!("Failed to build tray: {}", e);
-        }
-    } else if !desired && exists {
-        app.remove_tray_by_id(TRAY_ID);
+/// Build the tray if it isn't there. Since the pill was retired (2026-07-09)
+/// the tray is Yap's only persistent surface, so it is always built — without
+/// it Settings would be unreachable — and no setting gates it (`_cfg`).
+/// Called at startup AND from save_config.
+pub fn ensure_tray(app: &AppHandle, _cfg: &config::YapConfig) {
+    if app.tray_by_id(TRAY_ID).is_some() {
+        return;
+    }
+    // Fresh tray → the cached menus/icon-state belong to the old one.
+    *MENUS.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    LAST_ICON_STATE
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clear();
+    if let Err(e) = build_tray(app) {
+        tracing::warn!("Failed to build tray: {}", e);
     }
 }
 

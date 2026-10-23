@@ -225,8 +225,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   calls `initAppearance()`) resolves the choice (System via
   `matchMedia('(prefers-color-scheme: dark)')`, followed as Windows switches)
   and marks `<html data-yap-theme="light|dark">`; Settings applies its copy
-  at once, the other windows on `yap-config-saved`; `onThemeChange` for
-  anything drawn in script. **No flash of light**: the choice is kept in the
+  at once, the other windows on `yap-config-saved`. **No flash of light**: the choice is kept in the
   origin's localStorage (`yap.theme`, `yap.barTheme`, shared by every Yap
   window), which an inline head script in `index.html` reads before the
   first paint, naming the window too (`data-window`, from
@@ -313,7 +312,8 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
 - **`InsightsView.svelte`** = the stats
   dashboard promoted out of Settings→History (serif hero number, stat grid,
   30-day amber heatmap, top-apps-by-words bars from `get_history`, grouped by
-  `appLabel`); Settings → History keeps only the enable toggle + recent list + clear.
+  `appLabel`); Settings → Privacy & data's History group keeps only the
+  enable toggle + clear (the list itself is Home's feed).
 - **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
   Symphonia decode → chunked transcription on the warm engine with progress +
   cancel — see `media.rs`); its line names the model ("transcribes with

@@ -16,7 +16,7 @@
 // Nothing leaves the PC: every provider is the local fake
 // (support/fake-llm.js) through the debug-only YAP_MODELS_STANDIN, with
 // test keys.
-import { test as base, expect, openView, openSettings, closeSettings, expectStore } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 
 const TEST_KEY = 'e2e-fake-key';
@@ -105,15 +105,6 @@ const test = base.extend({
 /** A whole Chat scope, as config.json holds one (config.rs `LlmScope`). */
 function groqChat(fakeLlm, model) {
   return { enabled: true, provider: 'groq', baseUrl: fakeLlm.base, model, apiKey: TEST_KEY, apiKeys: {}, prompt: '', disableThinking: false };
-}
-
-/** Change config.json as another surface would, and tell Settings' copy. */
-async function setConfig(yap, main, patch) {
-  const cfg = await yap.invoke('get_config');
-  await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
-  await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
-  // Let Settings' own auto-save (400 ms after a change) land first.
-  await main.waitForTimeout(500);
 }
 
 const chip = (main) => main.locator('.modelchip .chip');
