@@ -15,6 +15,7 @@
   import Row from '../ui/Row.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import Button from '../ui/Button.svelte';
+  import Select from '../ui/Select.svelte';
   import { askConfirm } from '../ui/contextMenu.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
   import { account } from '../account.svelte.js';
@@ -26,6 +27,33 @@
   let historyCount = $state(null);
   // Recent dictation audio (recent_audio.rs): { count, bytes }.
   let audio = $state(null);
+  // Chat's screenshots (Snip to Chat, snip/images.rs): { count, bytes }.
+  let shots = $state(null);
+  async function loadShots() {
+    try {
+      shots = await invoke('chat_images_usage');
+    } catch {
+      shots = null;
+    }
+  }
+  // "Keep chat screenshots" (config chatImageDays; 0 = forever).
+  const KEEP_SHOTS = [
+    { value: 7, label: '7 days' },
+    { value: 30, label: '30 days' },
+    { value: 90, label: '90 days' },
+    { value: 0, label: 'Forever' },
+  ];
+  const sizeText = (bytes) => {
+    const mb = bytes / (1024 * 1024);
+    return mb >= 1 ? `${mb.toFixed(mb >= 10 ? 0 : 1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  };
+  const shotsDesc = $derived(
+    !shots
+      ? 'Snip to Chat keeps each screenshot with its chat, on this PC'
+      : shots.count
+        ? `${shots.count} ${shots.count === 1 ? 'screenshot' : 'screenshots'} · ${sizeText(shots.bytes)}`
+        : 'None kept right now'
+  );
   onMount(() => {
     invoke('is_portable')
       .then((p) => (portable = !!p))
@@ -34,6 +62,7 @@
       .then((i) => (logInfo = i))
       .catch(() => {});
     loadCount();
+    loadShots();
     // A dictation saved, an entry deleted from Home, all cleared (history.rs).
     const un = listen('yap-history-changed', loadCount);
     return () => un.then((f) => f());
@@ -113,6 +142,12 @@
       what: 'Chat and the Voice Assistant',
       where: chat.provider ? goes(chat.provider, 'Your questions, and the notes they need,') : 'Not set up',
       page: 'cleanup#chat',
+    },
+    {
+      // snip.rs: kept on this PC; one leaves only inside a question you send.
+      what: 'Screenshots',
+      where: 'Kept on this PC. One goes to the AI model you use only with a question you send',
+      page: 'privacy#chat-images',
     },
     {
       what: 'About you',
@@ -271,6 +306,17 @@
   </Row>
   <Row label="Clear recent audio" desc={audioDesc} setting="clear-recent-audio">
     <Button variant="secondary" size="sm" disabled={!audio?.count} onclick={clearAudio}>Clear audio…</Button>
+  </Row>
+</Group>
+
+<Group title="Chat screenshots" id="settings-chat-images">
+  <Row
+    label="Keep chat screenshots"
+    desc={shotsDesc}
+    hint="Snip to Chat keeps each screenshot with its chat, on this PC only. Deleting a chat deletes its screenshots; after this long they're removed, and the chat says so."
+    setting="chat-images"
+  >
+    <Select bind:value={cfg.chatImageDays} options={KEEP_SHOTS} ariaLabel="Keep chat screenshots" onchange={() => setTimeout(loadShots, 1500)} />
   </Row>
 </Group>
 

@@ -20,7 +20,8 @@ mod tests {
 
     /// Variable and field names that hold what a person dictated, typed or
     /// was told. (Not `title`: card and notice titles are Yap's own words.)
-    const CONTENT: &str = "text|transcript|raw|raw_text|corrected|cleaned|cleaned_text|final_text|content|contents|answer|reply|question|query|prompt|said|heard|spoken|clipboard|clip_text|about|about_me|note_text|fact|facts|selection|before|after|partial|partials|utterance|dictation|message_text|user_text|body_text";
+    /// (And a screenshot's pixels or its data URL: Snip to Chat logs sizes.)
+    const CONTENT: &str = "text|transcript|raw|raw_text|corrected|cleaned|cleaned_text|final_text|content|contents|answer|reply|question|query|prompt|said|heard|spoken|clipboard|clip_text|about|about_me|note_text|fact|facts|selection|before|after|partial|partials|utterance|dictation|message_text|user_text|body_text|bgra|rgba|pixels|png|data_url|url_data";
 
     fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in std::fs::read_dir(dir).unwrap().flatten() {

@@ -9,7 +9,7 @@ own page is [accounts.md](./accounts.md).
 
 Settings is a modal in the main window (`ControlPanel.svelte`: `embedded`,
 `open`, `onclose`, `onshowview`), **always mounted** so its in-page hotkey
-fallback (the dictation, assistant and meeting keys while a Yap window has the
+fallback (the dictation, assistant, meeting, read-aloud and snip keys while a Yap window has the
 focus) and its auto-save run for the window's whole life. Esc closes it (a
 search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
 
@@ -206,14 +206,17 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   read the text around the cursor" while the first is on), "Press Enter after
   pasting" (`autoSubmit`; "In a terminal, only for coding tools like Claude
   Code" while terminal pasting is on), "Say “press enter” to send"
-  (`voiceEnter`), "Send key" (`autoSubmitKey`, while either is on), "Safer
+  (`voiceEnter`), **"Say “snip” to take a screenshot"** (`snipVoice`, on:
+  a dictation of just "snip" starts Snip to Chat; `snip-voice`), "Send key" (`autoSubmitKey`, while either is on), "Safer
   pasting into terminals" (`terminalMode`), "Restore clipboard after paste"
   (dictations never show up in Win+V history), and the **Dictionary** link row
   (its counts; it leaves Settings for the Dictionary view, `onshowview`).
 - **Shortcuts** (`settings/ShortcutsPage.svelte`, OpenWhispr's Hotkeys page):
-  the six global shortcuts together — Dictate, Rewrite selected text, Ask the
+  the seven global shortcuts together — Dictate, Rewrite selected text, Ask the
   Voice Assistant, Read aloud, **Use what I said** (`asSaidHotkey`, unbound
-  by default; `as_said.rs`), Meeting notes — each in keycaps with Change, a
+  by default; `as_said.rs`), Meeting notes, **Snip to Chat** (`snipHotkey`,
+  Win+Alt+S by default, its hint naming ✂, the tray, Esc and what Windows never
+  lets an app capture; `snip.rs`, [snip.md](./snip.md)) — each in keycaps with Change, a
   clash said under the one being set. Their own pages show the same control
   (Read aloud: Voice Assistant → **Read aloud**, `#settings-read-aloud`). (No
   in-page fallback for Use what I said: its paste is never in a Yap window.)
@@ -369,7 +372,7 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   notes): **What leaves this PC** — a table by feature as Yap is set up now
   (your voice, recent dictation audio, AI cleanup, names on screen — read on this PC for each
   dictation, or with cleanup on a cloud provider the names a dictation seems
-  to contain go there with it —, Chat and the Voice Assistant, About you, memory, web search,
+  to contain go there with it —, Chat and the Voice Assistant, screenshots (kept on this PC; one goes to the AI model only with a question you send), About you, memory, web search,
   spoken replies, AI apps, calendar, account), each row linking to its
   setting. **History** (`#settings-history`): "Keep dictation history"
   (`historyEnabled`) and Clear history… (asks first; the count from
@@ -378,7 +381,10 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   (`keepRecentAudio`, `recent_audio.rs`: the last 24 hours, on this PC, to run
   a dictation again; greyed while history is off) and Clear recent audio…
   ("3 dictations · 1.2 MB" from `recent_audio_status`; asks first; history
-  stays). **Local API** (`#settings-local-api`): `bridgeEnabled` (the
+  stays). **Chat screenshots** (`#settings-chat-images`): "Keep chat
+  screenshots" (`chatImageDays`: 7 / 30 / 90 days / Forever, `chat-images`;
+  "4 screenshots · 1.2 MB" from `chat_images_usage`; Snip to Chat, [snip.md](./snip.md)).
+  **Local API** (`#settings-local-api`): `bridgeEnabled` (the
   Integrations view follows it, `yap-bridge-changed`). **Logs and data**
   (`#settings-logs`): Debug logging (`debugLogging`; ⓘ: what you dictate can
   appear in logs), the log file (Copy path, Open logs folder) and where the

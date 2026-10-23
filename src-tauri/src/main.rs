@@ -27,5 +27,12 @@ fn main() {
     if std::env::args_os().nth(1).is_some_and(|arg| arg == "call-dump") {
         std::process::exit(yap_lib::run_call_dump());
     }
+    // `yap.exe snip-dump …` (debug builds): capture every monitor, time it
+    // and write the PNGs to a folder — the snip's spike (snip/dump.rs).
+    // Read only; no window, tray or hook.
+    #[cfg(debug_assertions)]
+    if std::env::args_os().nth(1).is_some_and(|arg| arg == "snip-dump") {
+        std::process::exit(yap_lib::run_snip_dump());
+    }
     yap_lib::run()
 }

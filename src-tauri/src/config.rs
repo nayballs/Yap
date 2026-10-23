@@ -222,6 +222,23 @@ pub struct YapConfig {
     /// dictation whose words AI cleanup changed (`as_said.rs`). On by default.
     #[serde(default = "default_true")]
     pub as_said_offer: bool,
+    /// **Snip to Chat** (Settings → Shortcuts, `snip.rs`): drag a box over
+    /// any screen and the image goes into Chat. Default Win+Alt+S (free in
+    /// Windows' and Game Bar's own Win+Alt set); empty = unbound. Never
+    /// shares a key with the other shortcuts (`input_hook::clashes`).
+    #[serde(default = "default_snip_hotkey")]
+    pub snip_hotkey: String,
+    /// "Say 'snip' to take a screenshot": a dictation or Voice Assistant
+    /// question that's only "snip" ("snip it", "take a screenshot"…) takes
+    /// one instead of being pasted or asked (`snip::is_snip_phrase`). On by
+    /// default.
+    #[serde(default = "default_true")]
+    pub snip_voice: bool,
+    /// "Keep chat screenshots" (Settings → Privacy & data): days a chat's
+    /// screenshots are kept (7, 30, 90; 0 = forever). Deleting a
+    /// conversation deletes its screenshots whatever this says. Default 30.
+    #[serde(default = "default_chat_image_days")]
+    pub chat_image_days: u32,
     /// Active model id from the STT registry (e.g. "parakeet-tdt-0.6b-v3",
     /// "small"). Field name kept as `model_size` for config back-compat.
     #[serde(default = "default_model_size")]
@@ -929,6 +946,13 @@ fn default_meeting_hotkey() -> String {
 fn default_meeting_reminder() -> String {
     "15s".into()
 }
+fn default_snip_hotkey() -> String {
+    // Win+Alt+S (VK 'S' = 83): "S for snip", beside Win+Alt+M.
+    "kb:alt+win+83".into()
+}
+fn default_chat_image_days() -> u32 {
+    crate::snip::images::KEEP_DEFAULT
+}
 fn default_web_search_service() -> String {
     "exa".into()
 }
@@ -964,6 +988,9 @@ impl Default for YapConfig {
             read_hotkey: String::new(),
             as_said_hotkey: String::new(),
             as_said_offer: true,
+            snip_hotkey: default_snip_hotkey(),
+            snip_voice: true,
+            chat_image_days: default_chat_image_days(),
             model_size: default_model_size(),
             use_gpu: true,
             stt_device: default_stt_device(),

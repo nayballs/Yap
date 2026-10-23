@@ -1,3 +1,5 @@
+// `{ snip: { image, conversationId } }`: a snip that landed while Chat wasn't
+// open (Snip to Chat, snip.rs): into the message box, never sent by itself.
 // A question for the Chat view, handed over by another view (the Meetings
 // view's Ask bar): ChatView starts a new chat with it and clears `pending`.
 // `{ text, scope }`; scope 'meetings' grounds the answer in meeting notes.

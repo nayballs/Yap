@@ -101,7 +101,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `pipeline.rs` — the heart: buffer and pre-roll, modes, the start chime on the mic's first audio, the model loaded off the startup thread, `run_stt` → `deliver`, Undo, chat/assistant routing; the `processing` guard (`Busy`) let go however a task ends, a crash said.
 - `gesture.rs` — push-to-talk's pure state machine: hold, double-tap hands-free, lone tap.
 - `coaching.rs` — push-to-talk coaching hints (≤ 3 each; counts in `hints.json`).
-- `input_hook.rs` — low-level keyboard/mouse hooks: six bindings (Read aloud's the fifth, Use what I said's the sixth), combo rules, `clashes`, menu-mask key.
+- `input_hook.rs` — low-level keyboard/mouse hooks: seven bindings (Read aloud's the fifth, Use what I said's the sixth, Snip to Chat's the seventh), combo rules, `clashes`, menu-mask key; Esc while a snip is up.
 - `partials.rs` / `agent_detect.rs` — live partials' sliding window; Commands by name (see `pipeline.rs`).
 - `mic.rs` — the dictation mic, opened on demand: held by a dictation / the mic check / "Keep the microphone ready", warm a minute after, closed at once on Bluetooth (HFP); its own thread.
 - `mic_watch.rs` — dead-mic watchdog: reopen the stream, then "No sound from <mic>".
@@ -135,16 +135,22 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `gguf.rs` — read-only GGUF headers and memory estimates per context length.
 - `gpu.rs` — the graphics card (DXGI), for the recommended on-device model.
 - `ai_model.rs` — which model a scope's next call goes to; the Chat picker's switch.
-- `model_catalog.rs` — providers' live model lists (and self-hosted servers'), cached a day.
+- `model_catalog.rs` — providers' live model lists (and self-hosted servers'), cached a day; which read images, where they say.
 - `usage.rs` — daily Groq token/request usage.
 - `eval.rs` (+ `eval/`) — model evaluations (`yap.exe eval`) through the real Chat code.
 
 **Chat and the Voice Assistant** — [chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)
-- `chats.rs` — conversations (`chats.json`), tool chips, sources; the history a model gets (earlier searches replayed) and the checks on every answer (made-up sources, claimed searches, unsourced citations).
+- `chats.rs` — conversations (`chats.json`), tool chips, sources; a question's screenshots (ids; deleted with it); the history a model gets (earlier searches replayed) and the checks on every answer (made-up sources, claimed searches, unsourced citations).
 - `tools.rs` / `note_text.rs` — the tool loop: note tools (safe partial edits), apps, web (a local model must search first), safety rule.
 - `stream.rs` — streaming answers: SSE from every provider (tool calls reassembled and checked, a whole answer when streaming fails), a step's text held until it's an answer (a forced search's never shown), ■ Stop, a newer question in the conversation replacing the turn still answering, a local stream stepping aside for a dictation; the checked answer replaces what streamed.
 - `assistant.rs` — the Voice Assistant: ask Chat out loud from any app, spoken from the answer's first sentence; off during meetings.
 - `pause.rs` — "Stop listening when I pause": a 1.5 s pause ends a Voice Assistant question (the mic's level against a learned noise floor, checked by the live preview's words; never before speech, never under a held key); pure.
+
+**Snip to Chat** — [snip.md](./docs/architecture/snip.md)
+- `snip.rs` — drag a box over any screen, into Chat: Win+Alt+S / ✂ on the bar / tray / Chat's + / saying "snip"; the conversation Chat shows, else a new one; never sent by itself; the `yapsnip` scheme.
+- `snip/capture.rs` / `snip/hdr.rs` — every monitor at once on Windows.Graphics.Capture (FP16 ÷ the SDR white level on an HDR monitor, GDI as the fallback); the HDR → sRGB tables.
+- `snip/overlay.rs` / `snip/geom.rs` — the native per-monitor overlay (painted cloaked, physical pixels); the box, crop and label maths.
+- `snip/images.rs` / `snip/turn.rs` / `snip/vision.rs` — `chat-images/` and "Keep chat screenshots"; a question's `image_url` parts per provider; which models read images and the one-click switch. `snip/dump.rs`: `yap.exe snip-dump` (debug).
 
 **Memory** — [memory.md](./docs/architecture/memory.md)
 - `memory.rs` (+ `memory/`) — what Yap remembers about you (`memory.json`): learned from quiet chats and meetings (a model without tools by the careful small path, `memory/small.rs`), sent with questions, remember/forget/search_chats tools, names for dictation, export, Undo.
@@ -178,7 +184,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `meeting_detect.rs` — notices calls (mic consent store), prompts, per-app choice, fatigue, tray item.
 - `app_icons.rs` — the call apps' own installed icons, cached.
 - `meeting_guard.rs` — length limit, quiet meetings, check-ins, the meeting shortcut, notices.
-- `capture.rs` — hides meeting windows from screen capture while recording.
+- `capture.rs` — hides meeting windows from screen capture while recording; every Yap window out of a snip's capture.
 
 **Calendar** — [calendar.md](./docs/architecture/calendar.md) (guide: [`docs/calendar.md`](./docs/calendar.md))
 - `calendar.rs` (+ `calendar/`) — Google/iCal connections, sync, parsing, reminder cards, notes tie-in, pre-meeting briefs (`calendar/brief.rs`: last time, open items, memory, the agenda, every line cited; the AI's lines checked).
@@ -204,9 +210,9 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `updates.rs` — background update checks and downloads, announcements, safe install.
 
 **App shell, config, tests** — [app-shell.md](./docs/architecture/app-shell.md), [config-and-data.md](./docs/architecture/config-and-data.md), [build-and-test.md](./docs/architecture/build-and-test.md)
-- `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` / `call-dump` run before the app starts.
+- `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` / `call-dump` / `snip-dump` run before the app starts.
 - `lib.rs` — Tauri setup: plugins, hook + pipeline, tray, shutdown cleanup, DWM-cloak init.
-- `tray.rs` — tray icon and menu (models, Paste last transcript, Read selection aloud, Record this call, updates).
+- `tray.rs` — tray icon and menu (models, Paste last transcript, Read selection aloud, Snip to Chat, Record this call, updates).
 - `context_menu.rs` — WebView2's context menu cut to editing commands (Inspect: debug + Shift).
 - `procs.rs` — process lineage; the kill-on-close job so helpers never outlive Yap.
 - `webview_memory.rs` — hidden windows' webviews get WebView2's low memory target; back to normal on screen.
@@ -229,11 +235,11 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `DictionaryView.svelte` — corrections and snippets ([dictionary.md](./docs/architecture/dictionary.md)).
 - `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)).
 - `lib/markdown.js` — every rendered answer/note: markdown-it + DOMPurify, citation pills ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
-- `ChatView.svelte` + `ChatModelPicker.svelte` — Chat and its model picker ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)); `lib/streaming.js` — streamed answers in Chat and the notepad's Ask sheet (the channel, ■, half-written markdown closed off, the checked answer's smooth swap).
+- `ChatView.svelte` + `ChatModelPicker.svelte` — Chat and its model picker, a snip in the box (`chatImages.js`, `chatShots.svelte.js`; [snip.md](./docs/architecture/snip.md)) ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)); `lib/streaming.js` — streamed answers in Chat and the notepad's Ask sheet (the channel, ■, half-written markdown closed off, the checked answer's smooth swap).
 - `MeetingsView` / `Notepad` / `SplitPreview` — meetings and the notepad ([meetings.md](./docs/architecture/meetings.md)); `meetingAudio.svelte.js` — a meeting's kept audio in both: Transcribe again, ▶ a line, the crash banner; `BriefView.svelte` + `brief.js` — a meeting's pre-meeting brief everywhere it shows ([calendar.md](./docs/architecture/calendar.md#pre-meeting-briefs)); `SpeakerMenu` / `SpeakerCard` — a speaker's menu and the name cards ([speakers.md](./docs/architecture/speakers.md)).
 - `ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
-- `Overlay.svelte` + `bar/` — the Yap bar's page, the reading card `bar/ReadingCard.svelte` ([yap-bar.md](./docs/architecture/yap-bar.md)).
+- `Overlay.svelte` + `bar/` — the Yap bar's page (🎤 ◉ 🔊 ✂ ^), the reading card `bar/ReadingCard.svelte` ([yap-bar.md](./docs/architecture/yap-bar.md)).
 - `Settings.svelte` + `settings/` — Settings, always mounted in the modal: the nav by scope with search (`settingsIndex.js`; old links land via `nav.js` aliases), General / Dictation / Shortcuts / Meetings / Privacy & data / About as page components, one row style in `lib/ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch.
 - `MemorySection.svelte` + `memory.svelte.js` — Settings → Assistant → Memory and the "Yap remembered…" toast ([memory.md](./docs/architecture/memory.md)).
 - `AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
@@ -365,7 +371,7 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 `models/` (speech; `diarization/`, `tts/`), `llm/` (on-device GGUFs), `history.json`,
 `notes.json`, `chats.json`, `calendar.json`, `updates.json`, `model_catalog.json`,
 `groq_usage.json`, `dictionary_usage.json`, `hints.json`, `word_suggestions.json`,
-`notices.json`, `memory.json` (what Yap remembers about you), `quieted_apps.json`
+`notices.json`, `memory.json` (what Yap remembers about you), `chat-images/` (Chat's screenshots, Snip to Chat), `quieted_apps.json`
 (only mid-dictation), `stt_speed.json` (each model's device timings),
 `recent-audio/` (a day of dictation audio), `meeting-audio/` (each meeting's audio as
 FLAC, 14 days), `icons/`, `logs/`. Every JSON
@@ -376,7 +382,7 @@ never go in files: the account session and calendar tokens live in Windows Crede
 Manager. The local API's discovery file is `~/.yap/cli-bridge.json`.
 
 Notable defaults: F9 in toggle mode, **Parakeet TDT 0.6B v3** on the device measured fastest here, AI cleanup off,
-smart spacing / terminal mode / no full stop in chats on, the Yap bar on, call
+smart spacing / terminal mode / no full stop in chats on, the Yap bar on, Win+Alt+S snips to Chat (screenshots kept 30 days), call
 detection on (it only asks), a 2-hour meeting limit, Win+Alt+M, meeting audio kept 14 days,
 web search and spoken replies off. Every setting, file and default: [config-and-data.md](./docs/architecture/config-and-data.md).
 
@@ -386,7 +392,7 @@ web search and spoken replies off. Every setting, file and default: [config-and-
 
 - **Dictation is complete and real**: local transcription (Whisper/Vulkan + ONNX/DirectML, or the processor where that's faster on the PC), push-to-talk, AI cleanup (cloud or on-device Qwen) with "Use what I said", Commands, smart pasting into terminals and chat apps, dictionary learning, Undo, a day of audio to run a dictation again.
 - **Meetings**: recorder (You/Them), its audio kept on disk (crash recovery, Transcribe again, ▶ a line), rolling digests + action plan, the notepad, call detection, guard rails, the calendar, beta speaker separation.
-- **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation).
+- **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation), Snip to Chat (a screenshot of any screen into Chat, HDR right; the overlay up ~50–60 ms after Win+Alt+S).
 - **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly.
 - Much is unit-, e2e- and robot-tested but not yet tried in real use (a real call, real AI apps, answers heard on speakers…).
 - **Not yet done**: Chat's semantic search, a rich notes editor, the call app's speaker names checked in a real call, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.

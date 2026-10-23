@@ -1,5 +1,8 @@
 //! Unified input hook for the dictation, edit (Commands' rewrite), meeting,
-//! Voice Assistant and Read aloud key bindings.
+//! Voice Assistant, Read aloud, "Use what I said" and Snip to Chat key
+//! bindings. The snip shortcut (Win+Alt+S by default) only acts on its
+//! press (`snip.rs`); while a snip's overlay is up, Esc cancels it here too
+//! and goes no further ([`snip_escape`]).
 //!
 //! Installs both WH_KEYBOARD_LL and WH_MOUSE_LL hooks to capture:
 //! - Keyboard keys (including those sent by mouse side buttons via driver software)
@@ -111,6 +114,15 @@ static READ_BINDING: KeyBinding = KeyBinding::new();
 /// "Use what I said" (`as_said.rs`): swap the last cleaned dictation's
 /// paste for the words as said. Unbound by default.
 static AS_SAID_BINDING: KeyBinding = KeyBinding::new();
+/// Snip to Chat (`snip.rs`): drag a box over any screen. Win+Alt+S by
+/// default; its press only.
+static SNIP_BINDING: KeyBinding = KeyBinding::new();
+/// A snip's overlay is up: Esc cancels it here too, in case Windows didn't
+/// let the overlay take the focus (`snip::cancel`).
+static SNIP_ESC: AtomicBool = AtomicBool::new(false);
+/// Not an event: Esc while a snip is up (the forwarder cancels it).
+#[cfg(target_os = "windows")]
+const SNIP_ESCAPE: &str = "input-hook:snip-escape";
 
 /// Channel from the hook callback to the emit-forwarder thread. The callback
 /// must NEVER do slow work (like `app.emit`, which can block on a busy webview):
@@ -266,6 +278,47 @@ pub fn configure_as_said_from(cfg: &crate::config::YapConfig) {
     if let Err(e) = configure_as_said(spec) {
         tracing::warn!("Failed to apply the Use-what-I-said shortcut: {}", e);
     }
+}
+
+/// Parse a key spec string and configure the **Snip to Chat** shortcut
+/// (`snip.rs`). An empty spec unbinds it.
+pub fn configure_snip(key_spec: &str) -> Result<String, String> {
+    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
+    SNIP_BINDING.configure(key_type, key_code, mods);
+    let desc = format_binding(key_type, key_code, mods);
+    info!("Snip key configured: {} (spec: {:?})", desc, key_spec);
+    Ok(desc)
+}
+
+/// The snip shortcut from config, unless it clashes with one of the other
+/// six (a hand-edited config.json, or a shortcut someone had on Win+Alt+S
+/// before snips existed: theirs stays, the snip's is left unbound and the
+/// log says why).
+pub fn configure_snip_from(cfg: &crate::config::YapConfig) {
+    let spec = cfg.snip_hotkey.trim();
+    let others = [
+        ("dictation hotkey", cfg.hotkey.as_str()),
+        ("rewrite shortcut", cfg.edit_hotkey.as_str()),
+        ("meeting shortcut", cfg.meeting_hotkey.as_str()),
+        ("assistant shortcut", cfg.assistant_hotkey.as_str()),
+        ("read-aloud shortcut", cfg.read_hotkey.as_str()),
+        ("Use-what-I-said shortcut", cfg.as_said_hotkey.as_str()),
+    ];
+    let spec = match others.iter().find(|(_, other)| clashes(spec, other)) {
+        Some((name, _)) => {
+            tracing::warn!("The snip shortcut {spec:?} clashes with the {name}: left unbound");
+            ""
+        }
+        None => spec,
+    };
+    if let Err(e) = configure_snip(spec) {
+        tracing::warn!("Failed to apply the snip shortcut: {}", e);
+    }
+}
+
+/// While a snip's overlay is up, Esc goes to it (`snip.rs`).
+pub fn snip_escape(on: bool) {
+    SNIP_ESC.store(on, Ordering::SeqCst);
 }
 
 /// The modifier family of a virtual key (any platform; the hook's own
@@ -790,6 +843,17 @@ unsafe extern "system" fn low_level_keyboard_proc(
 
         let is_keydown = msg == win32::WM_KEYDOWN || msg == win32::WM_SYSKEYDOWN;
 
+        // Esc while a snip's overlay is up: it cancels the snip, and goes no
+        // further (the app behind the overlay mustn't get it).
+        if vkey == 0x1B && SNIP_ESC.load(Ordering::Relaxed) {
+            if is_keydown {
+                if let Some(tx) = EVENT_TX.get() {
+                    let _ = tx.send((SNIP_ESCAPE, 0));
+                }
+            }
+            return 1;
+        }
+
         let mut suppress = false;
         for (binding, pressed, released) in [
             (
@@ -802,6 +866,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
             (&ASSISTANT_BINDING, "assistant-key-pressed", "assistant-key-released"),
             (&READ_BINDING, "read-key-pressed", "read-key-released"),
             (&AS_SAID_BINDING, "as-said-key-pressed", "as-said-key-released"),
+            (&SNIP_BINDING, "snip-key-pressed", "snip-key-released"),
         ] {
             suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
         }
@@ -896,6 +961,12 @@ unsafe extern "system" fn low_level_mouse_proc(
                 handle_binding_event(&AS_SAID_BINDING, "as-said-key-pressed", "as-said-key-released", is_press);
                 return 1;
             }
+
+            // …and Snip to Chat's.
+            if SNIP_BINDING.matches_mouse(id) {
+                handle_binding_event(&SNIP_BINDING, "snip-key-pressed", "snip-key-released", is_press);
+                return 1;
+            }
         }
     }
 
@@ -923,6 +994,10 @@ pub fn start_input_hook(app_handle: AppHandle) {
             while let Ok((event, at)) = rx.recv() {
                 if event == MENU_MASK {
                     send_menu_mask();
+                    continue;
+                }
+                if event == SNIP_ESCAPE {
+                    crate::snip::cancel("escape");
                     continue;
                 }
                 info!("Input hook: emitting {}", event);
@@ -1136,6 +1211,26 @@ mod tests {
     #[test]
     fn parse_empty_spec() {
         assert_eq!(parse_key_spec("").unwrap(), (KEY_TYPE_NONE, 0, 0));
+    }
+
+    /// Snip to Chat's Win+Alt+S: its own key, clashing with none of Yap's
+    /// defaults; a hand-made binding on it wins (the snip's is unbound).
+    #[test]
+    fn the_snip_shortcut_is_win_alt_s_and_its_own_key() {
+        let cfg = crate::config::YapConfig::default();
+        assert_eq!(cfg.snip_hotkey, "kb:alt+win+83");
+        assert_eq!(parse_key_spec(&cfg.snip_hotkey), Ok((KEY_TYPE_KEYBOARD, 83, MOD_ALT | MOD_WIN)));
+        assert_eq!(format_binding(KEY_TYPE_KEYBOARD, 83, MOD_ALT | MOD_WIN), format_binding(KEY_TYPE_KEYBOARD, 83, MOD_WIN | MOD_ALT));
+        for other in [&cfg.hotkey, &cfg.meeting_hotkey, &cfg.edit_hotkey, &cfg.assistant_hotkey, &cfg.read_hotkey, &cfg.as_said_hotkey] {
+            assert!(!clashes(&cfg.snip_hotkey, other), "{other}");
+        }
+        // Someone's read-aloud shortcut on Win+Alt+S, or Alt+Win+S written
+        // the other way round: a clash.
+        assert!(clashes("kb:alt+win+83", "kb:win+alt+83"));
+        assert!(clashes("kb:alt+win+83", "mods:alt+win"));
+        assert!(!clashes("kb:alt+win+83", "kb:alt+win+77"));
+        // The menu mask runs for it (Win and Alt held, S swallowed).
+        assert!(needs_menu_mask(MOD_ALT | MOD_WIN, false));
     }
 
     #[test]

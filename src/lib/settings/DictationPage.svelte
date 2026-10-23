@@ -220,6 +220,16 @@
       desc="End a dictation with “press enter” and Yap presses the key for you"
     />
   </Row>
+  <!-- Snip to Chat by voice (snip.rs `is_snip_phrase`): only the whole
+       dictation, so "snip the ends off" is dictated as it is. -->
+  <Row setting="snip-voice">
+    <Toggle
+      bind:checked={cfg.snipVoice}
+      label="Say “snip” to take a screenshot"
+      desc="A dictation of just “snip” or “take a screenshot” starts Snip to Chat instead of typing"
+      hint="Also “snip it” and “screenshot”, to the Voice Assistant too. Only on its own: “snip the ends off” is typed as you said it."
+    />
+  </Row>
   {#if cfg.autoSubmit || cfg.voiceEnter}
     <Row label="Send key" desc="The key Yap presses to send" setting="send-key">
       <Select bind:value={cfg.autoSubmitKey} options={SEND_KEYS} ariaLabel="Send key" />

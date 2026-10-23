@@ -261,6 +261,12 @@ fn view() -> Viewing {
     *VIEW.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// What the Chat view shows (Snip to Chat puts a screenshot in the
+/// conversation open there, `snip.rs`).
+pub fn chat_viewing() -> Viewing {
+    view()
+}
+
 fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }

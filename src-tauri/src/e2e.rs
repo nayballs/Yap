@@ -507,6 +507,184 @@ pub fn e2e_meeting_feed(
     Ok(n)
 }
 
+// ---- Snip to Chat (snip.rs): fake monitors, never the real screen ----------------------
+
+/// A fake monitor for a test snip: where it is, its size (physical px), its
+/// scale, and whether it's an HDR one (its picture then goes through the
+/// real FP16 → sRGB conversion at `whiteNits`).
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FakeMonitor {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    #[serde(default = "one")]
+    pub scale: f32,
+    #[serde(default)]
+    pub hdr: bool,
+    #[serde(default)]
+    pub white_nits: Option<f32>,
+}
+
+#[cfg(debug_assertions)]
+fn one() -> f32 {
+    1.0
+}
+
+/// A fake monitor's picture (sRGB): light grey (#F5F5F5, what an 8-bit
+/// capture of an HDR desktop clips first), with four 200×100 blocks at
+/// (40, 40) #C0C0C0, (260, 40) #E53935, (40, 160) #202020 and (260, 160)
+/// #808080 — the snip spec cuts them out and checks their colours.
+#[cfg(debug_assertions)]
+pub fn fake_pixel(x: i32, y: i32) -> [u8; 3] {
+    let in_block = |bx: i32, by: i32| x >= bx && x < bx + 200 && y >= by && y < by + 100;
+    if in_block(40, 40) {
+        [0xc0, 0xc0, 0xc0]
+    } else if in_block(260, 40) {
+        [0xe5, 0x39, 0x35]
+    } else if in_block(40, 160) {
+        [0x20, 0x20, 0x20]
+    } else if in_block(260, 160) {
+        [0x80, 0x80, 0x80]
+    } else {
+        [0xf5, 0xf5, 0xf5]
+    }
+}
+
+/// A fake monitor's frame: BGRA8; an HDR one composed as Windows would
+/// (FP16 scRGB boosted to its white level) and converted back by the real
+/// `snip::hdr` path.
+#[cfg(debug_assertions)]
+pub fn fake_frame(m: &FakeMonitor) -> crate::snip::capture::Frame {
+    use crate::snip::{capture, hdr};
+    let (w, h) = (m.width.max(1) as usize, m.height.max(1) as usize);
+    let white = m.white_nits.unwrap_or(if m.hdr { 200.0 } else { 80.0 });
+    let bgra = if m.hdr {
+        let one = hdr::f32_to_f16(1.0);
+        let lut: Vec<u16> = (0..=255u8).map(|v| hdr::composed(v, white)).collect();
+        let mut halves = vec![0u16; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let [r, g, b] = fake_pixel(x as i32, y as i32);
+                let i = (y * w + x) * 4;
+                halves[i..i + 4].copy_from_slice(&[lut[r as usize], lut[g as usize], lut[b as usize], one]);
+            }
+        }
+        hdr::ToSrgb8::new(white).frame_to_bgra8(&halves, w * 4, w, h)
+    } else {
+        let mut out = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let [r, g, b] = fake_pixel(x as i32, y as i32);
+                let i = (y * w + x) * 4;
+                out[i..i + 4].copy_from_slice(&[b, g, r, 255]);
+            }
+        }
+        out
+    };
+    capture::Frame {
+        monitor: capture::Monitor {
+            handle: 0,
+            device: String::new(),
+            x: m.x,
+            y: m.y,
+            width: m.width,
+            height: m.height,
+            scale: m.scale,
+            primary: m.x == 0 && m.y == 0,
+            hdr: m.hdr,
+            white_nits: white,
+        },
+        width: w as u32,
+        height: h as u32,
+        bgra,
+        method: capture::Method::Fake,
+        capture_ms: 0.0,
+        arrived_ms: 0.0,
+        convert_ms: 0.0,
+    }
+}
+
+/// Test mode only: a snip over fake monitors (never the real screen; its
+/// overlay windows are made, painted and driven, but never shown). `origin`
+/// as the page would say it. Returns at once: poll `e2e_snip_last` for
+/// "selecting". `start: false`: the fake monitors only, for the next snip
+/// however it starts (a spoken "snip", the bar's ✂).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_snip(app: AppHandle, monitors: Vec<FakeMonitor>, origin: Option<String>, start: Option<bool>) -> Result<(), String> {
+    if !active() || crate::realtest::on() {
+        return Err("e2e_snip is for test runs (not robot mode)".into());
+    }
+    crate::snip::set_fake_frames(monitors.iter().map(fake_frame).collect());
+    if start.unwrap_or(true) {
+        crate::snip::start(&app, crate::snip::Origin::parse(origin.as_deref().or(Some("shortcut"))));
+    }
+    Ok(())
+}
+
+/// A mouse or key event for a test snip's overlay (`e2e_snip_input`).
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnipEvent {
+    /// "down" | "move" | "up" | "right" | "esc"
+    pub kind: String,
+    #[serde(default)]
+    pub x: i32,
+    #[serde(default)]
+    pub y: i32,
+}
+
+/// Test mode (robot mode too): window messages to a snip overlay — the
+/// mouse and keys as Windows sends them, never the real ones.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_snip_input(screen: usize, events: Vec<SnipEvent>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".into());
+    }
+    const WM_MOUSEMOVE: u32 = 0x0200;
+    const WM_LBUTTONDOWN: u32 = 0x0201;
+    const WM_LBUTTONUP: u32 = 0x0202;
+    const WM_RBUTTONUP: u32 = 0x0205;
+    const WM_KEYDOWN: u32 = 0x0100;
+    let lp = |x: i32, y: i32| ((y as u16 as isize) << 16) | (x as u16 as isize);
+    let msgs = events
+        .iter()
+        .map(|e| match e.kind.as_str() {
+            "down" => Ok((WM_LBUTTONDOWN, 1usize, lp(e.x, e.y))),
+            "move" => Ok((WM_MOUSEMOVE, 1, lp(e.x, e.y))),
+            "up" => Ok((WM_LBUTTONUP, 0, lp(e.x, e.y))),
+            "right" => Ok((WM_RBUTTONUP, 0, lp(e.x, e.y))),
+            "esc" => Ok((WM_KEYDOWN, 0x1B, 0)),
+            other => Err(format!("unknown event {other}")),
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    #[cfg(windows)]
+    {
+        crate::snip::overlay::post_input(screen, msgs)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (screen, msgs);
+        Err("Windows only".into())
+    }
+}
+
+/// Test mode (robot mode too): how the last snip went — its outcome, the
+/// monitors and how each was captured, the overlay's timing, the image.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_snip_last() -> Result<Option<crate::snip::Last>, String> {
+    if !active() {
+        return Err("Only in e2e test mode".into());
+    }
+    Ok(crate::snip::last())
+}
+
 /// End of setup: say so in the log (the harness won't drive an instance that
 /// doesn't) and quit once the harness closes our stdin (it finished, or died).
 pub fn start(app: &AppHandle) {

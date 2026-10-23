@@ -1663,6 +1663,12 @@ impl Shared {
         spawn_busy(busy, async move { shared.run_stt(audio).await });
     }
 
+    /// Is this dictation (or Voice Assistant question) "snip" as a whole
+    /// ("Say 'snip' to take a screenshot", `snip::is_snip_phrase`)?
+    fn snip_said(&self, transcript: &str) -> bool {
+        self.config.read().is_ok_and(|c| c.snip_voice) && crate::snip::is_snip_phrase(transcript)
+    }
+
     /// Is this dictation a **Command** (it says the agent's name; was "the
     /// Voice Agent's wake word")? Port of OpenWhispr's
     /// `resolveDictationAgentReachability` + `detectAgentName` gate: the
@@ -2093,6 +2099,14 @@ impl Shared {
         if crate::e2e::active() && CRASH_NEXT.swap(false, Ordering::SeqCst) {
             panic!("e2e: a dictation crashing in its paste, on purpose");
         }
+        // "Snip" (or "take a screenshot") as the whole dictation: Snip to
+        // Chat instead of a paste (snip.rs). Nothing pasted, nothing kept.
+        if self.snip_said(text.trim()) {
+            tracing::info!("Voice command: snip");
+            self.to_chat.store(false, Ordering::SeqCst);
+            crate::snip::start(&self.app, crate::snip::Origin::Voice);
+            return Delivered::default();
+        }
         // Smart routing: which app were we dictating into? The
         // foreground window was captured at record-start; resolve
         // it to a process name (e.g. "slack.exe") so per-app
@@ -2498,6 +2512,12 @@ impl Shared {
             tracing::info!("Voice Assistant: nothing heard");
             crate::assistant::nothing(&self.app);
             return false;
+        }
+        // "Snip" said as the whole question: a screenshot, not a question.
+        if self.snip_said(&question) {
+            crate::assistant::nothing(&self.app);
+            crate::snip::start(&self.app, crate::snip::Origin::Voice);
+            return true;
         }
         tracing::info!(len = question.len(), "Voice Assistant: a question");
         crate::assistant::heard(&self.app, question);

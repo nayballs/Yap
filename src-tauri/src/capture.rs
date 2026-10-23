@@ -141,6 +141,59 @@ pub fn sync_window(window: &WebviewWindow) {
     }
 }
 
+/// **Snip to Chat** (`snip.rs`): every Yap window on screen leaves the
+/// capture for the moment of it (`hide`), so no Yap window — the bar, the
+/// main window the snip was started from — is in the shot; then back to
+/// what the meeting setting wants. Runs on the main thread and waits for
+/// it (half a second at most); after hiding, one composition pass
+/// (`DwmFlush`) so the capture's frame is already without them.
+pub fn for_snip(app: &AppHandle, hide: bool) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = app.clone();
+    let ran = app.run_on_main_thread(move || {
+        let meeting = wanted();
+        let mut changed = 0;
+        for (label, window) in handle.webview_windows() {
+            let keep = meeting && MEETING_WINDOWS.contains(&label.as_str());
+            if hide {
+                if window.is_visible().unwrap_or(false) && read(&window) == Some(WDA_NONE) {
+                    set_quietly(&window, true);
+                    changed += 1;
+                }
+            } else if read(&window).is_some_and(|a| (a != WDA_NONE) != keep) {
+                set_quietly(&window, keep);
+                changed += 1;
+            }
+        }
+        let _ = tx.send(changed);
+    });
+    let changed = if ran.is_ok() { rx.recv_timeout(std::time::Duration::from_millis(500)).unwrap_or(0) } else { 0 };
+    #[cfg(windows)]
+    if hide && changed > 0 {
+        unsafe {
+            let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = changed;
+    tracing::debug!(hide, windows = changed, "capture: Yap's windows for a snip");
+}
+
+/// [`set`] without its log lines (a snip toggles them every time).
+#[cfg(windows)]
+fn set_quietly(window: &WebviewWindow, hide: bool) {
+    let Ok(hwnd) = window.hwnd() else { return };
+    unsafe {
+        let flag = if hide { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
+        if win::SetWindowDisplayAffinity(hwnd.0, flag) == 0 && hide {
+            win::SetWindowDisplayAffinity(hwnd.0, WDA_MONITOR);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn set_quietly(_window: &WebviewWindow, _hide: bool) {}
+
 /// A recording started or stopped (`yap-meeting-state`): apply, and with
 /// the setting off, warn when a meeting starts.
 fn on_meeting_state(app: &AppHandle, payload: &str) {

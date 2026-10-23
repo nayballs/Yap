@@ -200,6 +200,17 @@
       chatRequest.pending = { assistant: p };
       activeView = 'chat';
     }).then((u) => uns.push(u));
+    // A snip landed (Snip to Chat, snip.rs): Chat comes up with it in the
+    // message box (ChatView takes it from there; while it's open it gets
+    // the event itself). Rust has brought the window up.
+    listen('yap-snip', (e) => {
+      const p = e.payload;
+      if (!p?.image?.id) return;
+      settingsOpen = false;
+      if (activeView === 'chat') return;
+      chatRequest.pending = { snip: p };
+      activeView = 'chat';
+    }).then((u) => uns.push(u));
     // A meeting with only a few words ended: "Started by mistake?", when Rust
     // picked this window to ask (the meeting notepad asks when it's open).
     listen('yap-meeting-ended', (e) => {

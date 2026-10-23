@@ -94,6 +94,11 @@
     if (focusChip) tick().then(() => chipEl?.focus());
   }
 
+  /** Open the picker (Chat's "Choose another model…" for a screenshot). */
+  export function openPicker() {
+    if (!open) onChip();
+  }
+
   // Outside the chip and its picker: closed. On pointerdown (the path is
   // taken as the event starts, so a row the click re-renders still counts
   // as inside).

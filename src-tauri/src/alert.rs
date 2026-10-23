@@ -115,6 +115,39 @@ pub fn show_soon(app: &AppHandle, alert: Alert) {
     }
 }
 
+/// Snip to Chat refused during a dictation (`snip.rs`).
+pub fn snip_dictating(app: &AppHandle) {
+    show_soon(
+        app,
+        Alert {
+            kind: "snipDictating",
+            icon: "snip",
+            title: "Finish the dictation first".into(),
+            body: "Snip to Chat starts once the dictation is done.".into(),
+            action: None,
+            timeout_ms: 4_000,
+        },
+    );
+}
+
+/// A snip that couldn't be taken (`snip.rs`): `why` is Yap's own words,
+/// never the screen's content.
+pub fn snip_failed(app: &AppHandle, why: &str) {
+    show_soon(
+        app,
+        Alert {
+            kind: "snipFailed",
+            icon: "snip",
+            title: "Couldn't take the screenshot".into(),
+            body: format!(
+                "{why}. Windows never lets an app capture its administrator prompts (the dimmed screen), and video protected from copying comes out black."
+            ),
+            action: None,
+            timeout_ms: 8_000,
+        },
+    );
+}
+
 /// An alert's button (the toast's, the bar card's, the notification's).
 pub fn act(app: &AppHandle, action: &str) {
     match action {

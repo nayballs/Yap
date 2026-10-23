@@ -463,6 +463,11 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   A failed last check = `ok: false` (the page shows the curated list).
   `tools_for(provider, model)` feeds `tools::supports_tools`: a cloud model
   its provider says can't call tools gets no note tools ("· no note tools").
+  **Which models read images** (Snip to Chat, [snip.md](./snip.md)): `vision`
+  where the list says it — Anthropic's `capabilities.image_input.supported`,
+  Groq's and OpenRouter's input modalities — and `vision_for(provider,
+  model)`; `snip::vision` adds family rules where it doesn't (Gemini, OpenAI)
+  and the switch `ai_model_status` offers (`images`, `imagesSwitch`).
   **Self-hosted / custom servers** (`llm_models {provider: local|custom,
   scope, baseUrl}`): `GET {base}/models` with the scope's key (OpenWhispr's
   OpenAICompatiblePanel reading: `data` or `models`, `id` or `name`), kept a

@@ -248,6 +248,8 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     } else {
         MenuItem::with_id(app, "read_selection", "Read selection aloud", true, None::<&str>)?
     };
+    // Snip to Chat (snip.rs): drag a box over any screen, into Chat.
+    let snip = MenuItem::with_id(app, "snip", "Snip to Chat", true, None::<&str>)?;
     let (sep_update, sep_models, sep_quit) = (sep()?, sep()?, sep()?);
     let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&version, &sep_update];
     if let Some(call) = &call {
@@ -263,6 +265,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     items.push(&paste_last);
     items.push(&paste_said);
     items.push(&read);
+    items.push(&snip);
     items.push(&sep_paste);
     items.push(models.as_ref());
     let sep_settings = sep()?;
@@ -332,6 +335,8 @@ fn on_menu_event(app: &AppHandle, id: &str) {
         // Off the main thread (UI Automation can take a moment).
         "read_selection" => crate::read_aloud::read_selection(app, crate::read_aloud::Origin::Tray),
         "read_stop" => crate::read_aloud::stop(app),
+        // Its own thread (snip.rs), after the menu has faded out.
+        "snip" => crate::snip::start(app, crate::snip::Origin::Tray),
         other if other.starts_with("meeting_record:") => {
             // Off the main thread: starting the recorder blocks for a moment
             // and looks at the main window.

@@ -6,8 +6,9 @@
   //   idle      a 40 × 8 pill outline, its bottom 14 px above the work area,
   //             in a 60 × 20 hit wrapper;
   //   hover     it opens into 🎤 Dictate, ◉ Meeting notes, 🔊 Read aloud (the
-  //             selection in the app you're in; ■ while reading) and a ^
-  //             menu, with a tooltip naming each button's shortcut;
+  //             selection in the app you're in; ■ while reading), ✂ Snip to
+  //             Chat (snip.rs) and a ^ menu, with a tooltip naming each
+  //             button's shortcut;
   //   dictating the dictation overlay (waveform, live text, Transcribing…,
   //             the error) in the pill's place, with ✕ / ✓ while it records
   //             (as Settings says: off by default, when pointed at, or
@@ -58,6 +59,7 @@
     hotkey: '',
     meetingHotkey: null,
     readHotkey: null,
+    snipHotkey: null,
     meeting: { recording: false },
     call: null,
     cards: [],
@@ -182,6 +184,7 @@
     dictate: { label: 'Dictate', keys: keys(bar.hotkey) },
     notes: { label: bar.call ?? 'New note', keys: keys(bar.meetingHotkey) },
     read: { label: reading.phase === 'reading' || reading.phase === 'paused' ? 'Stop reading' : 'Read aloud', keys: keys(bar.readHotkey) },
+    snip: { label: 'Snip to Chat', keys: keys(bar.snipHotkey) },
     open: { label: 'Open notes', keys: '' },
     stop: { label: 'Stop and summarise', keys: keys(bar.meetingHotkey) },
   });
@@ -222,6 +225,8 @@
   // so it's still selected there); ■ while Yap reads.
   const readingNow = $derived(reading.phase === 'reading' || reading.phase === 'paused');
   const readAloud = () => act(readingNow ? 'read-stop' : 'read-aloud');
+  // ✂: Snip to Chat (snip.rs) — drag a box over any screen, into Chat.
+  const snip = () => act('snip');
   const stopMeeting = () => act('stop-meeting');
   const openMeeting = () => act('open-note');
   function menuItem(action) {
@@ -431,6 +436,16 @@
             {/if}
           </button>
           <button
+            class="btn snip"
+            aria-label="Snip to Chat"
+            tabindex={expanded ? 0 : -1}
+            onclick={snip}
+            onpointerenter={(e) => hoverTip('snip', e)}
+            onpointerleave={() => hoverTip(null)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4 8.1 15.9" /><path d="M14.5 14.5 20 20" /><path d="M8.1 8.1 12 12" /></svg>
+          </button>
+          <button
             class="btn more"
             class:on={menuOpen}
             aria-label="More"
@@ -588,9 +603,9 @@
     transition: all 0.1s cubic-bezier(0.05, 0.6, 0.4, 0.95);
   }
   /* (The open pill isn't measured yet: Yap's own until it is — 128 px for
-     Wispr's two buttons and its menu, 34 more for 🔊.) */
+     Wispr's two buttons and its menu, 34 more for 🔊, 34 for ✂.) */
   .pill.open {
-    width: 162px;
+    width: 196px;
     height: 38px;
     padding: 0 4px;
     border-radius: 19px;

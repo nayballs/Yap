@@ -359,6 +359,8 @@ struct State {
     meeting_hotkey: Option<String>,
     /// The Read aloud shortcut, for 🔊's tooltip.
     read_hotkey: Option<String>,
+    /// The Snip to Chat shortcut, for ✂'s tooltip.
+    snip_hotkey: Option<String>,
     /// "Hide the bar for 1 hour" until (unix ms), 0 = not hidden.
     hidden_until: u64,
     dictation: Dictation,
@@ -413,6 +415,7 @@ impl Default for State {
             hotkey: String::new(),
             meeting_hotkey: None,
             read_hotkey: None,
+            snip_hotkey: None,
             hidden_until: 0,
             dictation: Dictation::Idle,
             assistant: crate::assistant::Phase::Idle,
@@ -572,6 +575,8 @@ pub struct Status {
     meeting_hotkey: Option<String>,
     /// The Read aloud shortcut spec, if one is set, for the 🔊 tooltip.
     read_hotkey: Option<String>,
+    /// The Snip to Chat shortcut spec, if one is set, for the ✂ tooltip.
+    snip_hotkey: Option<String>,
     /// `meeting::state()`: `{ recording, noteId, elapsedSecs }`.
     meeting: serde_json::Value,
     /// A live call ◉ would record ("Record this Teams call").
@@ -606,6 +611,7 @@ pub fn status() -> Status {
         hotkey: s.hotkey.clone(),
         meeting_hotkey: s.meeting_hotkey.clone(),
         read_hotkey: s.read_hotkey.clone(),
+        snip_hotkey: s.snip_hotkey.clone(),
         meeting,
         call,
         assistant: s.assistant,
@@ -1065,6 +1071,7 @@ fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
         .and_then(|v| v.get("meetingHotkey").and_then(|h| h.as_str()).map(str::to_string))
         .filter(|h| !h.is_empty());
     let read_hotkey = Some(cfg.read_hotkey.clone()).filter(|h| !h.trim().is_empty());
+    let snip_hotkey = Some(cfg.snip_hotkey.clone()).filter(|h| !h.trim().is_empty());
     let theme = theme_from_config(&cfg.bar_theme);
     let dictation_buttons = dictation_buttons_from_config(&cfg.bar_dictation_buttons);
     let changed = s.enabled != cfg.bar_enabled
@@ -1074,7 +1081,8 @@ fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
         || s.edge != edge
         || s.hotkey != cfg.hotkey
         || s.meeting_hotkey != meeting_hotkey
-        || s.read_hotkey != read_hotkey;
+        || s.read_hotkey != read_hotkey
+        || s.snip_hotkey != snip_hotkey;
     s.replace |= s.edge != edge;
     s.enabled = cfg.bar_enabled;
     s.hide_fullscreen = cfg.bar_hide_fullscreen;
@@ -1084,6 +1092,7 @@ fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
     s.hotkey = cfg.hotkey.clone();
     s.meeting_hotkey = meeting_hotkey;
     s.read_hotkey = read_hotkey;
+    s.snip_hotkey = snip_hotkey;
     changed
 }
 
@@ -1411,6 +1420,9 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
             crate::read_aloud::read_selection(app, crate::read_aloud::Origin::Bar);
         }
         "read-stop" => crate::read_aloud::stop(app),
+        // ✂: Snip to Chat (snip.rs). The bar never took the focus, so the
+        // app you're in is the one a cancel goes back to.
+        "snip" => crate::snip::start(app, crate::snip::Origin::Bar),
         // ■ on the recording pill: end the meeting, which writes the action
         // plan in Rust (or asks "Started by mistake?").
         "stop-meeting" => crate::meeting_end::end(app, Some(overlay::LABEL))?,

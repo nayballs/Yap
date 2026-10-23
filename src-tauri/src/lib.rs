@@ -76,6 +76,7 @@ mod recent_audio;
 mod screen_terms;
 mod selection;
 mod smart_insert;
+mod snip;
 mod sound;
 mod speakers;
 mod stt;
@@ -214,6 +215,13 @@ pub fn run_eval() -> i32 {
 /// read only, to a file (`speakers/call_ui.rs`).
 pub fn run_call_dump() -> i32 {
     speakers::call_ui::dump_main(std::env::args().skip(2).collect())
+}
+
+/// `yap.exe snip-dump …` (main.rs, debug builds): every monitor captured
+/// and timed, the PNGs written to a folder (`snip/dump.rs`).
+#[cfg(debug_assertions)]
+pub fn run_snip_dump() -> i32 {
+    snip::dump::main(std::env::args().skip(2).collect())
 }
 
 /// Reload handle for the global log filter — lets the Settings "Debug mode"
@@ -441,6 +449,9 @@ pub fn run() {
         .manage(AppState {
             pipeline: Mutex::new(None),
         })
+        // Chat's screenshots, by id only (Snip to Chat, snip.rs):
+        // yapsnip://localhost/img/<id> (http://yapsnip.localhost/… in WebView2).
+        .register_uri_scheme_protocol("yapsnip", |_ctx, request| snip::serve(&request))
         .invoke_handler(tauri::generate_handler![
             commands::toggle_recording,
             commands::dictation_key,
@@ -485,6 +496,10 @@ pub fn run() {
             as_said::as_said_swap,
             as_said::as_said_paste_entry,
             commands::configure_as_said_hotkey,
+            commands::configure_snip_hotkey,
+            snip::snip_start,
+            snip::chat_images_usage,
+            snip::chat_images_prepare,
             stt_speed::stt_speed_status,
             stt_speed::stt_speed_measure,
             recent_audio::recent_audio_status,
@@ -690,6 +705,12 @@ pub fn run() {
             #[cfg(debug_assertions)]
             e2e::e2e_assistant_audio,
             #[cfg(debug_assertions)]
+            e2e::e2e_snip,
+            #[cfg(debug_assertions)]
+            e2e::e2e_snip_input,
+            #[cfg(debug_assertions)]
+            e2e::e2e_snip_last,
+            #[cfg(debug_assertions)]
             mic_privacy::e2e_mic_privacy,
             #[cfg(debug_assertions)]
             elevated::e2e_paste_elevated,
@@ -810,6 +831,8 @@ pub fn run() {
             input_hook::configure_read_from(&cfg);
             // "Use what I said" (as_said.rs; unbound by default).
             input_hook::configure_as_said_from(&cfg);
+            // Snip to Chat (snip.rs; Win+Alt+S by default, never a clash).
+            input_hook::configure_snip_from(&cfg);
 
             // Clear ort's 0-byte DirectML.dll stub so ONNX uses the real system
             // DirectML, then fix the transcribe-rs accelerator policy before any
@@ -983,6 +1006,12 @@ pub fn run() {
             // for the words as said (as_said.rs), on its own thread.
             let as_said_handle = handle.clone();
             handle.listen("as-said-key-pressed", move |_| as_said::swap_soon(&as_said_handle));
+
+            // Snip to Chat: drag a box over any screen, the image into Chat
+            // (snip.rs, on its own thread); again while it's up cancels.
+            let snip_handle = handle.clone();
+            handle.listen("snip-key-pressed", move |_| snip::start(&snip_handle, snip::Origin::Shortcut));
+            snip::init(&handle);
 
             // Drive the overlay (the Yap bar) from the pipeline's `yap-state`
             // event (decoupled from the pipeline itself). It always shows

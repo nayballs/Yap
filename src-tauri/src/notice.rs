@@ -156,6 +156,9 @@ pub fn rule(kind: &str) -> Rule {
         // "The Voice Assistant is off during meetings": the answer to a press
         // made during one, so it shows over the meeting, every press.
         "assistantMeetingOff" => Rule { hold_meeting: false, ..alert },
+        // Snip to Chat (snip.rs): "Finish the dictation first", "Couldn't
+        // take the screenshot" — the answer to the person's own press.
+        "snipDictating" | "snipFailed" => Rule { hold_meeting: false, ..alert },
         // Ready to install: waits for a dictation or a meeting to end, as
         // long as it takes.
         "update" => Rule { hold_meeting: true, max_wait_ms: None, yields: true, ..info },

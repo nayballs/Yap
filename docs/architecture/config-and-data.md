@@ -13,7 +13,7 @@
   measured clearly faster on this PC, `stt_speed.rs` — | "gpu" | "cpu"), keep_recent_audio (a day of dictation
   audio to run one again, on; `recent_audio.rs`), as_said_hotkey ("Use what I
   said", "" = unbound) + as_said_offer (the bar's offer after AI cleanup,
-  on; both `as_said.rs`), rewrite_last_dictation (`rewriteLastDictation`,
+  on; both `as_said.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md), rewrite_last_dictation (`rewriteLastDictation`,
   serde default on: the rewrite shortcut with nothing selected rewrites the
   last dictation — within a minute, in the same field, still ending at the
   cursor —; off, it writes new text as before 2026-10-23; Settings →
@@ -216,6 +216,12 @@
   `meeting_audio_days` (14) from the recording's start, ≤ 10 GB in all (the
   oldest first), deleted with its note, by Settings → Meetings → Delete all
   meeting audio, or once transcribed with "Keep meeting audio" off.
+- Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
+  screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
+  keeps only its id, size, bytes and source. Deleted with its conversation, after
+  "Keep chat screenshots" (30 days by default), and a day after a snip that was
+  never sent. Never leaves the PC except inside the Chat request you send;
+  never logged.
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History).
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
   participants, meeting transcripts).
@@ -288,7 +294,9 @@
   speech models on the graphics card unless the processor measured clearly
   faster on this PC (`stt_device` "auto"; the graphics card until measured), a day of dictation audio kept
   (`keep_recent_audio`), "Use what I said" offered on the bar after AI cleanup
-  (`as_said_offer`) with no shortcut (`as_said_hotkey` ""), the rewrite
+  (`as_said_offer`) with no shortcut (`as_said_hotkey` ""), Snip to Chat on
+  Win+Alt+S (`snip_hotkey`), saying "snip" taking one (`snip_voice`) and chat
+  screenshots kept 30 days (`chat_image_days`), the rewrite
   shortcut taking the last dictation when nothing is selected
   (`rewrite_last_dictation` on; the shortcut itself unbound),
   live transcription preview **on**

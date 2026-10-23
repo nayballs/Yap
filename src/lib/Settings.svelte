@@ -419,6 +419,10 @@
     // "Use what I said" (as_said.rs): its shortcut and the bar's offer.
     asSaidHotkey: '',
     asSaidOffer: true,
+    // Snip to Chat (snip.rs): its shortcut, saying "snip", keeping screenshots.
+    snipHotkey: 'kb:alt+win+83',
+    snipVoice: true,
+    chatImageDays: 30,
     streamingPartials: true,
     historyEnabled: true,
     meetingDetection: true,
@@ -638,6 +642,13 @@
       e.preventDefault();
       e.stopPropagation();
       readPageSelection();
+      return;
+    }
+    // Snip to Chat (snip.rs): Yap's own windows leave the shot.
+    if (hotkeyMatchesKeydown(e, cfg?.snipHotkey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      invoke('snip_start', { origin: 'shortcut' }).catch(() => {});
       return;
     }
     if (!hotkeyMatchesKeydown(e, cfg?.hotkey)) return;
