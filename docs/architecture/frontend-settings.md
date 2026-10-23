@@ -21,7 +21,8 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   Privacy & data · About. At the bottom the account button and a footer with
   the version and the "Saved ✓" pulse every auto-save gives (the old status
   bar under the page is gone). The active page is a white pill with the amber
-  icon chip; the red attention count stays on its page's row (and the cog).
+  icon chip; the red attention count stays on its page's row (and on the
+  title bar's bell, which names each item).
 - **Page ids** (never renamed: links use them): `general`, `dictation`,
   `shortcuts`, `meetings`, `commands`, `voice`, `memory`, `models` (Speech-to-Text),
   `cleanup` (Language Models), `connectors`, `mcp`, `privacy`, `about`,
@@ -112,8 +113,9 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   with cleanup on a cloud provider and no key ("Add your Groq API key" + Add
   key, which opens and focuses the field).
 - **Hotkeys** (`settings/hotkeys.svelte.js` + `SettingsHotkey.svelte`): the
-  five (`HOTKEY_CMD` / `HOTKEY_NAMES`: dictation hotkey, rewrite shortcut,
-  meeting shortcut, assistant shortcut, read-aloud shortcut) are refused when they'd fire on one
+  six (`HOTKEY_CMD` / `HOTKEY_NAMES`: dictation hotkey, rewrite shortcut,
+  meeting shortcut, assistant shortcut, read-aloud shortcut, Use-what-I-said
+  shortcut) are refused when they'd fire on one
   press (`hotkeysClash`: "Already used by the …", or "Clashes with the … (Win
   + Alt + M): one press would start both"); while one is being picked
   (`hotkeyCapture.on`) its live binding is paused and the in-page fallback

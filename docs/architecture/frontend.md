@@ -292,7 +292,8 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
 - **`InsightsView.svelte`** = the stats
   dashboard promoted out of Settings→History (serif hero number, stat grid,
   30-day amber heatmap, top-apps-by-words bars from `get_history`, grouped by
-  `appLabel`); Settings → History keeps only the enable toggle + recent list + clear.
+  `appLabel`); Settings → Privacy & data's History group keeps only the
+  enable toggle + clear (the list itself is Home's feed).
 - **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
   Symphonia decode → chunked transcription on the warm engine with progress +
   cancel — see `media.rs`); its line names the model ("transcribes with

@@ -1544,7 +1544,7 @@
   // ---- Settings attention badge (Wispr-style red count) ----
   // Real conditions only: an update waiting, no STT model installed, or AI
   // cleanup pointed at a cloud provider with no key. Settings is always
-  // mounted, so this stays live for the ControlPanel cog badge too.
+  // mounted, so this stays live for the ControlPanel's bell too.
   const KEYED_PROVIDERS = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter'];
   $effect(() => {
     if (!loaded || !cfg) return;
