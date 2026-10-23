@@ -2277,7 +2277,7 @@ mod tests {
             exa,
         );
         let settings =
-            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None };
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None, units: None };
         let endpoints = crate::web::Endpoints {
             exa: format!("{}/exa", fake.base),
             tavily: String::new(),
@@ -2486,7 +2486,7 @@ mod tests {
             exa,
         );
         let settings =
-            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None };
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None, units: None };
         let endpoints = crate::web::Endpoints {
             exa: format!("{}/exa", fake.base),
             tavily: String::new(),
@@ -2531,7 +2531,7 @@ mod tests {
         let notes_twice = calls(&[("search_notes", json!({ "query": "Grok plans" })), ("search_notes", json!({ "query": "Grok" }))]);
         let run = |fake: &FakeServer, question: &'static str| {
             let settings =
-                crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: Some("GB".into()), local: None };
+                crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: Some("GB".into()), local: None, units: None };
             let endpoints = crate::web::Endpoints { exa: format!("{}/exa", fake.base), tavily: String::new(), standin: None, offline: false };
             let base = format!("{}/v1", fake.base);
             async move {
@@ -2588,7 +2588,7 @@ mod tests {
             exa,
         );
         let settings =
-            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None };
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None, units: None };
         let endpoints = crate::web::Endpoints { exa: format!("{}/exa", fake.base), tavily: String::new(), standin: None, offline: false };
         let question = "What's the latest Python?";
         let mut turn = crate::web::Turn::new(settings, endpoints, question, &[]);

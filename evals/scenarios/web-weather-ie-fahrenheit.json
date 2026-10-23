@@ -1,0 +1,50 @@
+{
+  "name": "web-weather-ie-fahrenheit",
+  "description": "Someone whose Region is Ireland (km and °C) asks the weather in an Irish town; the pages give °F and mph (stand-in web, fictional town). Right: the temperatures in °C, a °F at most in brackets after one; the wind in km/h ideally (soft). Run with --locale en-GB: the scenario picks Ireland in Settings (`settings.region`).",
+  "tags": [
+    "web",
+    "units",
+    "locale",
+    "standin"
+  ],
+  "settings": {
+    "region": "IE"
+  },
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Kilcrannagh, County Clare, Ireland Weather Tomorrow, Oct 24 | 52°F, Showers",
+        "url": "https://weatherdial.example/kilcrannagh-clare-ie/tomorrow",
+        "published": "2026-10-23",
+        "text": "Tomorrow in Kilcrannagh: showers, some heavy, from mid-morning. High 52°F, low 45°F. Feels like 47°F in the wind. Wind W 18 mph, gusts to 35 mph. Chance of rain 80%."
+      },
+      {
+        "title": "Kilcrannagh 10-Day Weather Forecast | Forecastly",
+        "url": "https://forecastly.example/ie/kilcrannagh/10-day",
+        "published": "2026-10-23",
+        "text": "Fri 23 Oct: Cloudy, 54°F / 46°F, wind SW 12 mph. Sat 24 Oct: Showers, 52°F / 45°F, wind W 18 mph. Sun 25 Oct: Bright spells, 50°F / 41°F, wind NW 10 mph."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "What's the weather going to be like in Kilcrannagh tomorrow?",
+      "expect": {
+        "min_sources": 1,
+        "temperatures": "C",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "answer_matches": "km/h|kph|kilomet"
+      }
+    }
+  ]
+}

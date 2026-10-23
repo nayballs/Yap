@@ -1,0 +1,53 @@
+{
+  "name": "web-weather-uk-fahrenheit",
+  "description": "A UK user's weather question of 2026-10-23 on Qwen3.5-4B (web search on): the results (Exa's weather pages) gave the temperatures in °F, titles like \"<Town>, Scotland, United Kingdom Weather Today, Oct 23 | 35°F, Overcast\", and the answer copied them: \"temperatures around 35°F (1.5°C), feeling colder at 30°F… Winds are light at about 2–4 mph\". Stand-in web: every search finds °F pages (fictional town). Right: the temperatures in °C, a °F at most in brackets after one; the wind stays in mph (the UK's metric but for distances and speeds). Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "units",
+    "locale",
+    "standin"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Glenbrackie, Scotland, United Kingdom Weather Today, Oct 23 | 35°F, Overcast",
+        "url": "https://weatherdial.example/glenbrackie-scotland-gb/today",
+        "published": "2026-10-23",
+        "text": "Current weather in Glenbrackie: 35°F, overcast. Feels like 30°F. Wind NW 2–4 mph. Humidity 91%. Visibility 6 mi. Today's high 41°F, tonight's low 31°F. A 20% chance of light rain after 3 PM."
+      },
+      {
+        "title": "Hourly weather for Glenbrackie, Scotland | 35°F",
+        "url": "https://forecastly.example/gb/glenbrackie/hourly",
+        "published": "2026-10-23",
+        "text": "9 AM 35°F overcast · 12 PM 39°F overcast · 3 PM 41°F light drizzle (20%) · 6 PM 37°F · 9 PM 33°F. Winds light and variable, 2–4 mph."
+      },
+      {
+        "title": "Glenbrackie 10-Day Weather Forecast | Forecastly",
+        "url": "https://forecastly.example/gb/glenbrackie/10-day",
+        "published": "2026-10-23",
+        "text": "Fri 23 Oct: Overcast, 41°F / 31°F, wind NW 3 mph. Sat 24 Oct: Light rain, 44°F / 36°F, wind SW 9 mph. Sun 25 Oct: Showers, 46°F / 38°F, wind W 12 mph. Mon 26 Oct: Partly cloudy, 43°F / 33°F, wind NW 7 mph."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "What's the weather like in Glenbrackie today?",
+      "expect": {
+        "min_sources": 1,
+        "temperatures": "C",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "answer_not_matches": "km/h|kph|kilomet"
+      }
+    }
+  ]
+}

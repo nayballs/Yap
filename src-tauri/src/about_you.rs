@@ -510,12 +510,26 @@ impl Units {
     }
 
     /// The prompt's: "metric units", "metric units, but miles for distances
-    /// and speeds", "US units (miles, pounds, °F)".
+    /// and speeds", "US units (miles, pounds)".
     fn in_prompt(self) -> &'static str {
         match self {
             Units::Metric => "metric units",
             Units::MetricMiles => "metric units, but miles for distances and speeds",
-            Units::Us => "US units (miles, pounds, °F)",
+            Units::Us => "US units (miles, pounds)",
+        }
+    }
+
+    /// The prompt's temperature sentence: "metric units" says nothing a
+    /// model applies to a page's "35°F" (a UK weather answer on Qwen3.5-4B
+    /// copied its pages' "35°F (1.5°C), feeling colder at 30°F", 2026-10-23).
+    /// On its own it didn't change the 4B's web answers — the pages
+    /// converted do that ([`convert_temperatures`]) — but it says what the
+    /// person uses for any answer. Its example is no figure the evaluations'
+    /// pages give.
+    fn temperatures(self) -> &'static str {
+        match self {
+            Units::Metric | Units::MetricMiles => "Temperatures in °C: convert one a source gives in °F (68°F is 20°C).",
+            Units::Us => "Temperatures in °F: convert one a source gives in °C (20°C is 68°F).",
         }
     }
 }
@@ -680,17 +694,20 @@ fn language_in_prompt(r: &Region) -> Option<String> {
 }
 
 /// **The whole block**: where the person is and what they speak, the date
-/// and their time, how to give prices, times and units, their name and what
-/// they said about themselves — only the parts that are known. `now`: the
-/// moment it describes. What Settings shows, and what a prompt made for one
-/// question ends with (a small model's web answer); a prompt kept from turn
-/// to turn has [`profile_block`] and the question [`clock_line`]. Pure.
+/// and their time, how to give prices, times, units and temperatures, their
+/// name and what they said about themselves — only the parts that are
+/// known. `now`: the moment it describes. What Settings shows, and what a
+/// prompt made for one question ends with (a small model's web answer); a
+/// prompt kept from turn to turn has [`profile_block`] and the question
+/// [`clock_line`]. Pure.
 ///
 /// "About the user: they're in the United Kingdom (British English); it's
 /// Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK
-/// time and metric units. Prices: in £ (GBP) when you have them in £; never
-/// change a price's currency sign — a price in another currency stays as it
-/// is, labelled, like "$15 a month (US price)".
+/// time and metric units, but miles for distances and speeds. Temperatures
+/// in °C: convert one a source gives in °F (68°F is 20°C). Prices: in £
+/// (GBP) when you have them in £; never change a price's currency sign — a
+/// price in another currency stays as it is, labelled, like "$15 a month
+/// (US price)".
 /// Their name is Imogen. They told Yap: "I run at weekends.""
 pub fn prompt_block(p: &Profile, now: DateTime<Utc>) -> String {
     let when = when(p, now);
@@ -763,8 +780,8 @@ pub fn clock_line(p: &Profile, now: DateTime<Utc>) -> String {
     format!("{first}{}.", chars.as_str())
 }
 
-/// The rest of the block: times, units, prices, the name and the note —
-/// each starting with a space. Pure.
+/// The rest of the block: times, units, temperatures, prices, the name and
+/// the note — each starting with a space. Pure.
 fn how_to_answer(p: &Profile) -> String {
     let r = &p.region;
     let mut out = String::new();
@@ -777,6 +794,10 @@ fn how_to_answer(p: &Profile) -> String {
     }
     if !give.is_empty() {
         out.push_str(&format!(" Give {}.", give.join(" and ")));
+    }
+    if let Some(u) = r.units {
+        out.push(' ');
+        out.push_str(u.temperatures());
     }
     // Prices: theirs when known — never a sign swapped. Told "Give prices
     // in £", Qwen3.5-4B wrote x.ai's US "$8/month" as "£8/month" 2 times in
@@ -1113,6 +1134,110 @@ pub fn restored_price_note(restored: &[String], local: &LocalPrices) -> String {
     format!("*{list} {is} as {gives}, in {currency}: not {} prices.*", local.place)
 }
 
+/// **Temperatures their way** (2026-10-23). A UK weather answer on
+/// Qwen3.5-4B copied its pages' "35°F (1.5°C), feeling colder at 30°F…".
+/// What the model evaluations showed (weather questions over pages in the
+/// other scale, ×5): the block's own sentence ([`Units::temperatures`])
+/// changed nothing — °F first in 25 of 25 metric answers before, 24 of 25
+/// with it; a line next to the results, telling it to convert, fixed only
+/// pages that already gave °C beside °F (5 of 5), and where it had to
+/// convert, the 4B copied the °F or got it wrong ("13°C (46°F)"). Given the
+/// conversion, it copies that. So web text gets the person's scale first
+/// ([`convert_temperatures`]) and this line, in the web tools' results
+/// (`web::Turn`) and in a small model's web prompt. `None` when the units
+/// aren't known or the text has no temperature in the other scale. Pure.
+pub fn temperature_note(units: Option<Units>, text: &str) -> Option<String> {
+    static FAHRENHEIT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\ds?\s?[°º˚]\s?F\b|\ds?\s?(?:degrees?\s+)?fahrenheit\b|\d\s?degrees?\s+F\b").expect("static regex")
+    });
+    static CELSIUS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\ds?\s?[°º˚]\s?C\b|\ds?\s?(?:degrees?\s+)?(?:celsius|centigrade)\b|\d\s?degrees?\s+C\b").expect("static regex")
+    });
+    let (theirs, other, example, found) = match units? {
+        Units::Us => ("°F", "°C", "68°F (20°C)", &*CELSIUS),
+        Units::Metric | Units::MetricMiles => ("°C", "°F", "20°C (68°F)", &*FAHRENHEIT),
+    };
+    found.is_match(text).then(|| {
+        format!("The user uses {theirs}: Yap has put {theirs} before these pages' {other} figures, like \"{example}\". Give every temperature in {theirs} (the {other} in brackets after it at most), converting any still in {other}.")
+    })
+}
+
+/// The units a web answer's temperatures are put in: the person's, unless
+/// the question asks for the other scale ("…in Fahrenheit?" from the UK,
+/// "in Celsius" from the US): then the pages stay as they are. Pure.
+pub fn temperature_units(units: Option<Units>, question: &str) -> Option<Units> {
+    let q = question.to_lowercase();
+    let other = match units? {
+        Units::Us => ["celsius", "centigrade", "°c"].iter().any(|w| q.contains(w)),
+        Units::Metric | Units::MetricMiles => ["fahrenheit", "°f"].iter().any(|w| q.contains(w)),
+    };
+    units.filter(|_| !other)
+}
+
+/// **The pages' temperatures in the person's scale first** ([`temperature_note`]
+/// says why): for someone who uses °C, "35°F" → "2°C (35°F)", "30–35°F" →
+/// "-1 to 2°C (30–35°F)", "48°F (9°C)" → "9°C (48°F)" (the page's own
+/// conversion kept); for someone in the US the same from °C to °F. A figure
+/// already after one in their scale ("2°C (35°F)") stays, and so does what
+/// can't be converted exactly (a decade: "the mid-40s °F"). Whole degrees,
+/// as forecasts give them. `None` when nothing changes. Pure.
+pub fn convert_temperatures(units: Option<Units>, text: &str) -> Option<String> {
+    // A figure or a range ("30–35", "30 to 35") and its scale, then maybe the
+    // page's own conversion in brackets or after a slash.
+    // A minus sign may be "-", "−", "–" or "‑" (a non-breaking hyphen).
+    const FIGURES: &str = r"(?:(?P<lo>[-−–‑]?\d+(?:\.\d+)?)\s?(?:–|-|‑|to)\s?)?(?P<hi>[-−–‑]?\d+(?:\.\d+)?)";
+    const OWN: &str = r"(?:[-−–‑]?\d+(?:\.\d+)?\s?(?:–|-|‑|to)\s?)?[-−–‑]?\d+(?:\.\d+)?";
+    static FROM_F: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(&format!(r"(?i)(?P<from>{FIGURES}\s?(?:[°º˚]\s?F|degrees?\s+fahrenheit)\b)(?:\s?[(/]\s?(?P<own>{OWN}\s?[°º˚]\s?C)\b\s?\)?)?"))
+            .expect("static regex")
+    });
+    static FROM_C: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(&format!(r"(?i)(?P<from>{FIGURES}\s?(?:[°º˚]\s?C|degrees?\s+(?:celsius|centigrade))\b)(?:\s?[(/]\s?(?P<own>{OWN}\s?[°º˚]\s?F)\b\s?\)?)?"))
+            .expect("static regex")
+    });
+    static AFTER_C: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"(?i)[°º˚]\s?C\s?[(/]\s?$").expect("static regex"));
+    static AFTER_F: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"(?i)[°º˚]\s?F\s?[(/]\s?$").expect("static regex"));
+    let (re, after_theirs, sign, convert): (&regex::Regex, &regex::Regex, &str, fn(f64) -> f64) = match units? {
+        Units::Us => (&FROM_C, &AFTER_F, "°F", |c| c * 9.0 / 5.0 + 32.0),
+        Units::Metric | Units::MetricMiles => (&FROM_F, &AFTER_C, "°C", |f| (f - 32.0) * 5.0 / 9.0),
+    };
+    let whole = |v: &str| -> Option<String> {
+        let n = convert(v.replace(['−', '–', '‑'], "-").parse::<f64>().ok()?).round();
+        Some(if n == 0.0 { "0".to_string() } else { format!("{}", n as i64) })
+    };
+    let mut changed = false;
+    let out = re.replace_all(text, |c: &regex::Captures| {
+        let all = c.get(0).expect("match");
+        let (mut from, mut hi, mut dash) = (&c["from"], &c["hi"], "");
+        // Already the conversion of one in their scale: "2°C (35°F)".
+        if after_theirs.is_match(&text[..all.start()]) {
+            return all.as_str().to_string();
+        }
+        // "41°F–44°F": a dash right after a word or a figure is a range's,
+        // not a minus sign.
+        if let Some(d) = hi.chars().next().filter(|ch| !ch.is_ascii_digit() && c.name("lo").is_none()) {
+            if text[..all.start()].chars().next_back().is_some_and(char::is_alphanumeric) {
+                (dash, hi, from) = (&hi[..d.len_utf8()], &hi[d.len_utf8()..], &from[d.len_utf8()..]);
+            }
+        }
+        let theirs = match (c.name("own"), c.name("lo")) {
+            (Some(own), _) => Some(own.as_str().to_string()),
+            (None, Some(lo)) => whole(lo.as_str()).zip(whole(hi)).map(|(lo, hi)| format!("{lo} to {hi}{sign}")),
+            (None, None) => whole(hi).map(|hi| format!("{hi}{sign}")),
+        };
+        match theirs {
+            Some(t) => {
+                changed = true;
+                format!("{dash}{t} ({from})")
+            }
+            None => all.as_str().to_string(),
+        }
+    });
+    changed.then(|| out.into_owned())
+}
+
 /// Dictation cleanup's spelling line ("Write in my region's spelling", on by
 /// default): keep the person's variety of English. `None` when it's off or
 /// the variety isn't known. Pure over the region.
@@ -1191,7 +1316,7 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 10, 21, 20, 40, 0).unwrap()
     }
 
-    const UK_BLOCK: &str = "About the user: they're in the United Kingdom (British English). Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\".";
+    const UK_BLOCK: &str = "About the user: they're in the United Kingdom (British English). Give times in UK time and metric units, but miles for distances and speeds. Temperatures in °C: convert one a source gives in °F (68°F is 20°C). Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\".";
 
     #[test]
     fn a_uk_pc_reads_as_the_uk() {
@@ -1204,7 +1329,7 @@ mod tests {
         let p = Profile { region: r, name: "Imogen".into(), about: "I'm a teacher in Bristol and I run at weekends".into() };
         assert_eq!(
             prompt_block(&p, at()),
-            "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK time and metric units, but miles for distances and speeds. Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Their name is Imogen. They told Yap: \"I'm a teacher in Bristol and I run at weekends\""
+            "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK time and metric units, but miles for distances and speeds. Temperatures in °C: convert one a source gives in °F (68°F is 20°C). Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Their name is Imogen. They told Yap: \"I'm a teacher in Bristol and I run at weekends\""
         );
     }
 
@@ -1300,7 +1425,10 @@ mod tests {
         let p = Profile { region: r, ..Default::default() };
         let line = prompt_block(&p, at());
         assert!(line.starts_with("About the user: they're in France (French); it's "), "{line}");
-        assert!(line.contains("Give metric units. Prices: in € (EUR) when you have them in €; never change"), "{line}");
+        assert!(
+            line.contains("Give metric units. Temperatures in °C: convert one a source gives in °F (68°F is 20°C). Prices: in € (EUR) when you have them in €; never change"),
+            "{line}"
+        );
         // "the" where English says it.
         assert_eq!(in_sentence(country("NL").unwrap()), "the Netherlands");
         assert_eq!(in_sentence(country("DE").unwrap()), "Germany");
@@ -1311,10 +1439,76 @@ mod tests {
         let us = resolve(&parse_stand_in("en-US"), "");
         assert_eq!(us.spelling, Some(Spelling::American));
         assert_eq!(summary(&us), "Prices in $ · miles and °F · American spelling");
+        // Temperatures their way, a source's other scale converted.
+        let us_line = profile_block(&Profile { region: us, ..Default::default() });
+        assert!(
+            us_line.contains("Give US units (miles, pounds). Temperatures in °F: convert one a source gives in °C (20°C is 68°F). Prices: in $ (USD)"),
+            "{us_line}"
+        );
+        // No units known, no temperature line.
+        assert!(!profile_block(&Profile { name: "Sam".into(), ..Default::default() }).contains("Temperatures"));
         // Shared signs and letter signs carry the code.
         assert_eq!(summary(&resolve(&parse_stand_in("sv-SE"), "")), "Prices in kr (SEK) · km and °C");
         assert_eq!(summary(&resolve(&parse_stand_in("ja-JP"), "")), "Prices in ¥ (JPY) · km and °C");
         assert_eq!(summary(&resolve(&parse_stand_in("hi-IN"), "")), "Prices in ₹ · km and °C");
+    }
+
+    #[test]
+    fn pages_in_the_other_temperature_scale_get_a_line() {
+        // The pages of a UK weather answer that copied them (2026-10-23).
+        let pages = "Glenbrackie, Scotland, United Kingdom Weather Today, Oct 23 | 35°F, Overcast\nFeels like 30°F. Wind NW 2–4 mph.";
+        let metric = "The user uses °C: Yap has put °C before these pages' °F figures, like \"20°C (68°F)\". Give every temperature in °C (the °F in brackets after it at most), converting any still in °F.";
+        assert_eq!(temperature_note(Some(Units::MetricMiles), pages).as_deref(), Some(metric));
+        assert_eq!(temperature_note(Some(Units::Metric), pages).as_deref(), Some(metric));
+        // °F with °C beside it still leads with °F; spelled out, or a decade.
+        assert!(temperature_note(Some(Units::Metric), "High 48°F (9°C)").is_some());
+        assert!(temperature_note(Some(Units::Metric), "the mid-40s Fahrenheit").is_some());
+        assert!(temperature_note(Some(Units::Metric), "46 degrees F at noon").is_some());
+        // Already theirs, no temperature, or nothing known: no line.
+        assert_eq!(temperature_note(Some(Units::Metric), "High 9°C, low 4°C, wind 14 mph"), None);
+        assert_eq!(temperature_note(Some(Units::Metric), "Fahrenheit was a physicist; Grok Plus $8/month"), None);
+        assert_eq!(temperature_note(None, pages), None);
+        // A US user and °C pages: the other way round.
+        assert_eq!(
+            temperature_note(Some(Units::Us), "Glenbrackie now: 2°C, overcast").as_deref(),
+            Some("The user uses °F: Yap has put °F before these pages' °C figures, like \"68°F (20°C)\". Give every temperature in °F (the °C in brackets after it at most), converting any still in °C.")
+        );
+        assert_eq!(temperature_note(Some(Units::Us), pages), None);
+    }
+
+    #[test]
+    fn the_pages_temperatures_come_in_their_scale_first() {
+        let uk = Some(Units::MetricMiles);
+        let c = |t: &str| convert_temperatures(uk, t);
+        // The morning's pages (2026-10-23): whole degrees, below zero too.
+        assert_eq!(
+            c("Weather Today, Oct 23 | 35°F, Overcast. Feels like 30°F. High 41°F / low 31°F, 32 °F at dawn.").as_deref(),
+            Some("Weather Today, Oct 23 | 2°C (35°F), Overcast. Feels like -1°C (30°F). High 5°C (41°F) / low -1°C (31°F), 0°C (32 °F) at dawn.")
+        );
+        // A range; the page's own conversion put first; spelled out.
+        assert_eq!(c("Highs 30–35°F, lows 28 to 30°F").as_deref(), Some("Highs -1 to 2°C (30–35°F), lows -2 to -1°C (28 to 30°F)"));
+        assert_eq!(c("High 48°F (9°C), 45-48°F (7-9°C), 41°F / 5°C").as_deref(), Some("High 9°C (48°F), 7-9°C (45-48°F), 5°C (41°F)"));
+        assert_eq!(c("46 degrees Fahrenheit").as_deref(), Some("8°C (46 degrees Fahrenheit)"));
+        // A minus sign in any of its dashes; a dash after a figure is a range's.
+        assert_eq!(c("lows of –4°F, ‑4°F or −4°F").as_deref(), Some("lows of -20°C (–4°F), -20°C (‑4°F) or -20°C (−4°F)"));
+        assert_eq!(c("41°F–44°F").as_deref(), Some("5°C (41°F)–7°C (44°F)"));
+        // Already theirs first, theirs only, a decade, no temperature: as it is.
+        assert_eq!(c("High 9°C (48°F), low 4°C / 39°F"), None);
+        assert_eq!(c("High 9°C, wind 14 mph, 2–4 mph"), None);
+        assert_eq!(c("in the mid-40s °F"), None);
+        assert_eq!(c("Grok Plus is $8/month; 10-Day forecast"), None);
+        assert_eq!(convert_temperatures(None, "35°F"), None);
+        // A US user: °C pages get °F first.
+        assert_eq!(
+            convert_temperatures(Some(Units::Us), "Glenbrackie now: 2°C, feels like -1°C. Max 5 °C (41°F), 7-9°C.").as_deref(),
+            Some("Glenbrackie now: 36°F (2°C), feels like 30°F (-1°C). Max 41°F (5 °C), 45 to 48°F (7-9°C).")
+        );
+        assert_eq!(convert_temperatures(Some(Units::Us), "35°F, overcast"), None);
+        // Asked for the other scale: the pages stay as they are.
+        assert_eq!(temperature_units(uk, "What's the weather in Harlow Creek today?"), uk);
+        assert_eq!(temperature_units(uk, "What's it like in Harlow Creek today, in Fahrenheit?"), None);
+        assert_eq!(temperature_units(Some(Units::Us), "How warm is Glenbrackie in Celsius?"), None);
+        assert_eq!(temperature_units(Some(Units::Us), "How warm is Glenbrackie today?"), Some(Units::Us));
     }
 
     #[test]

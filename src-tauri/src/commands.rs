@@ -1533,12 +1533,21 @@ async fn small_model_answer(
                     _ => None,
                 };
                 let (found_sources, block) = crate::web::grounded_sources(&found.hits, SMALL_WEB_TOKENS);
+                // Temperatures in the person's scale first, with a line
+                // saying so (about_you.rs).
+                let units = crate::about_you::temperature_units(settings.units, text);
+                let temperature_line = crate::about_you::temperature_note(units, &block);
+                let block = crate::about_you::convert_temperatures(units, &block).unwrap_or(block);
                 system = crate::web::grounded_prompt(persona, &block, &crate::web::today(), by_voice);
                 pages.push(block);
                 system.push(' ');
                 let zone = crate::about_you::profile(cfg).region.time_zone_label;
                 system.push_str(&crate::web::time_note(zone.as_deref()));
                 if let Some(line) = price_line {
+                    system.push(' ');
+                    system.push_str(&line);
+                }
+                if let Some(line) = temperature_line {
                     system.push(' ');
                     system.push_str(&line);
                 }

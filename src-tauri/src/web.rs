@@ -149,6 +149,9 @@ pub struct Settings {
     /// search names the country ([`local_query`]), and results with only
     /// another country's prices lead to one more search ([`Turn`]).
     pub local: Option<crate::about_you::LocalPrices>,
+    /// How the person measures: results with temperatures in the other
+    /// scale get a line to convert them (`about_you::temperature_note`).
+    pub units: Option<crate::about_you::Units>,
 }
 
 impl Settings {
@@ -167,6 +170,7 @@ impl Settings {
             native: None,
             country: region.country.clone(),
             local: crate::about_you::LocalPrices::for_region(region),
+            units: region.units,
         }
     }
 
@@ -1518,6 +1522,12 @@ impl Turn {
         }
     }
 
+    /// The scale this turn's temperatures go in: the person's, unless the
+    /// question asks for the other (`about_you::temperature_units`).
+    fn temperature_units(&self) -> Option<crate::about_you::Units> {
+        crate::about_you::temperature_units(self.settings.units, &self.question)
+    }
+
     /// Yap runs the search for local prices itself (a model on this PC),
     /// instead of telling the model to.
     pub fn set_yap_retries(&mut self, on: bool) {
@@ -1640,6 +1650,19 @@ impl Turn {
                 if found.native == Some(native::Provider::Gemini) && !found.hits.is_empty() {
                     self.grounded = true;
                 }
+                // Temperatures in the person's scale first ("2°C (35°F)"),
+                // with a line saying so (about_you.rs).
+                let units = self.temperature_units();
+                let original: Vec<&str> =
+                    found.hits.iter().flat_map(|h| [h.title.as_str(), h.text.as_str()]).chain(found.summary.as_deref()).collect();
+                let temperatures = crate::about_you::temperature_note(units, &original.join("\n"));
+                let theirs = |s: &str| crate::about_you::convert_temperatures(units, s).unwrap_or_else(|| s.to_string());
+                let mut found = found;
+                for h in &mut found.hits {
+                    h.title = theirs(&h.title);
+                    h.text = theirs(&h.text);
+                }
+                found.summary = found.summary.as_deref().map(theirs);
                 let mut numbers = Vec::new();
                 let results: Vec<Value> = found
                     .hits
@@ -1679,6 +1702,9 @@ impl Turn {
                 if let Some(note) = self.local_note(&query, &text) {
                     data["local_prices"] = json!(note);
                 }
+                if let Some(note) = temperatures {
+                    data["temperatures"] = json!(note);
+                }
                 self.texts.push(text);
                 ok(data, display)
             }
@@ -1714,6 +1740,10 @@ impl Turn {
                 self.seen = true;
                 let n = self.number(&page.title, &url);
                 let (part, next) = page_part(&page.text, offset, PAGE_TOKENS);
+                // Temperatures in the person's scale first (about_you.rs).
+                let units = self.temperature_units();
+                let temperatures = crate::about_you::temperature_note(units, &part);
+                let part = crate::about_you::convert_temperatures(units, &part).unwrap_or(part);
                 self.texts.push(part.clone());
                 let mut data = json!({
                     "n": n,
@@ -1726,6 +1756,9 @@ impl Turn {
                 });
                 if let Some(next) = next {
                     data["next_offset"] = json!(next);
+                }
+                if let Some(note) = temperatures {
+                    data["temperatures"] = json!(note);
                 }
                 ok(data, format!("Read {}", short_url(&page.url)))
             }
@@ -2265,7 +2298,7 @@ mod tests {
     use super::*;
 
     fn settings(key: &str) -> Settings {
-        Settings { service: Service::Exa, key: key.into(), lang: "en".into(), native: None, country: None, local: None }
+        Settings { service: Service::Exa, key: key.into(), lang: "en".into(), native: None, country: None, local: None, units: None }
     }
 
     fn offline() -> Endpoints {
@@ -2726,6 +2759,32 @@ mod tests {
         assert!(turn.execute("web_search", &search("Grok monthly price UK")).await["data"].get("local_prices").is_none());
         let mut turn = Turn::new(s(), endpoints_of(&us), "What is Grok?", &[]);
         assert!(turn.execute("web_search", &search("Grok chatbot")).await["data"].get("local_prices").is_none());
+    }
+
+    #[tokio::test]
+    async fn results_in_the_other_temperature_scale_say_to_convert() {
+        use crate::about_you::Units;
+        let f = fake((500, Value::Null), json!({ "results": [{ "title": "Glenbrackie Weather Today | 35°F, Overcast", "url": "https://weather.example/glenbrackie", "highlights": ["Overcast, 35°F, feels like 30°F. Wind 2–4 mph."] }] }));
+        let search = json!({ "query": "Glenbrackie weather today" });
+        let with = |units| Settings { units, ..settings("exa-key") };
+        // Someone in the UK: °C first in the results, and a line next to them.
+        let mut turn = Turn::new(with(Some(Units::MetricMiles)), endpoints_of(&f), "What's the weather like in Glenbrackie today?", &[]);
+        let r = turn.execute("web_search", &search).await;
+        let hit = &r["data"]["results"][0];
+        assert_eq!(hit["title"], "Glenbrackie Weather Today | 2°C (35°F), Overcast");
+        assert!(hit["text"].as_str().unwrap().contains("Overcast, 2°C (35°F), feels like -1°C (30°F)."), "{hit}");
+        assert!(r["data"]["temperatures"].as_str().unwrap().starts_with("The user uses °C: Yap has put °C before these pages' °F figures"), "{r}");
+        // In the US, nothing known, or asked in °F: as the pages give them.
+        for (units, question) in [
+            (Some(Units::Us), "What's the weather like in Glenbrackie today?"),
+            (None, "What's the weather like in Glenbrackie today?"),
+            (Some(Units::MetricMiles), "What's the weather like in Glenbrackie today, in Fahrenheit?"),
+        ] {
+            let mut turn = Turn::new(with(units), endpoints_of(&f), question, &[]);
+            let r = turn.execute("web_search", &search).await;
+            assert!(r["data"].get("temperatures").is_none(), "{units:?}");
+            assert_eq!(r["data"]["results"][0]["title"], "Glenbrackie Weather Today | 35°F, Overcast");
+        }
     }
 
     #[test]

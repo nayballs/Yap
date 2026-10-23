@@ -1,0 +1,49 @@
+{
+  "name": "web-weather-us-celsius-pages",
+  "description": "The control the other way: someone whose Region is the United States asks the weather in a Scottish town they're flying to; the pages give °C (stand-in web, fictional town). Right: the temperatures in °F, a °C at most in brackets after one. Run with --locale en-GB: the scenario picks the US in Settings (`settings.region`).",
+  "tags": [
+    "web",
+    "units",
+    "locale",
+    "standin"
+  ],
+  "settings": {
+    "region": "US"
+  },
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Glenbrackie weather: 2°C, overcast | Scottish Weather Watch",
+        "url": "https://scotweather.example/glenbrackie",
+        "published": "2026-10-23",
+        "text": "Glenbrackie now: 2°C, overcast, feels like -1°C. Wind north-westerly 2–4 mph. Today's maximum 5°C, overnight minimum 0°C. Light drizzle possible this afternoon."
+      },
+      {
+        "title": "Glenbrackie 5-day forecast | Scottish Weather Watch",
+        "url": "https://scotweather.example/glenbrackie/5-day",
+        "published": "2026-10-23",
+        "text": "Friday: overcast, max 5°C, min 0°C. Saturday: light rain, max 7°C, min 2°C. Sunday: showers, max 8°C, min 3°C. Monday: sunny spells, max 6°C, min 1°C."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "I'm flying out to Glenbrackie in Scotland soon, what's the weather like there right now?",
+      "expect": {
+        "min_sources": 1,
+        "temperatures": "F",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ]
+      }
+    }
+  ]
+}

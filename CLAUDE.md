@@ -129,7 +129,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `screen_terms.rs` (+ `screen_terms/`) — "Spell names the way they're written on screen": the target window's visible text read at record start (UIA, bounded) → its names and terms, for that dictation only: a strict near-miss pass (every model), cleanup's "Spell these names as written" line.
 
 **AI models** — [ai-models.md](./docs/architecture/ai-models.md)
-- `about_you.rs` — About you: one Region (Windows' country, or one picked; money, units, language and spelling follow it, the clock is the PC's), name and note → the block every model's prompt ends with, searches and prices aimed at the country, cleanup spelling.
+- `about_you.rs` — About you: one Region (Windows' country, or one picked; money, units, language and spelling follow it, the clock is the PC's), name and note → the block every model's prompt ends with, searches and prices aimed at the country, the web's temperatures in their scale first, cleanup spelling.
 - `llm.rs` — OpenAI-compatible client, immutable base prompts, chat/tool calls, rate-limit waits.
 - `local_llm.rs` — on-device llamafile sidecar: models, recommendation, server args (MTP), context, restarts, warm-up, the runtime's background upgrade (retry without MTP, the way back, launch repair, cross-Yap lock).
 - `gguf.rs` — read-only GGUF headers and memory estimates per context length.
