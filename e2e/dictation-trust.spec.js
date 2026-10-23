@@ -196,6 +196,22 @@ test('"Use what I said": the bar offers it after AI cleanup changed the words, o
   }
 });
 
+test('the tray\'s "Paste last transcript (as said)" after a dictation cleanup left alone (cleanup off): the dictation itself, and Yap still answers', async ({ yap }) => {
+  // Cleanup off, the default (the test before switched it back off): no
+  // words as said for this dictation.
+  await configure(yap, { postProcessEnabled: false });
+  const r = await yap.invoke('e2e_dictation', { text: 'send the plan to sam' });
+  expect(r.asSaid ?? null).toBeNull();
+  // It froze Yap (text_injector.rs took the last dictation's lock twice):
+  // the command never answered, nor anything after it.
+  const frozen = new Promise((resolve) => setTimeout(() => resolve('Yap froze'), 5_000));
+  const said = await Promise.race([yap.invoke('paste_last_transcript', { asSaid: true }), frozen]);
+  expect(said.trim()).toBe(r.text.trim());
+  // Still answering: the plain paste, and another dictation.
+  expect((await yap.invoke('paste_last_transcript')).trim()).toBe(r.text.trim());
+  expect((await yap.invoke('e2e_dictation', { text: 'still here' })).text.trim()).toContain('still here');
+});
+
 test('Shortcuts: "Use what I said" is unbound until set, and can\'t take another shortcut\'s key', async ({ yap, main, shot }) => {
   const dialog = await openSettings(main, 'Shortcuts');
   const row = dialog.locator('[data-setting="shortcut-as-said"]');

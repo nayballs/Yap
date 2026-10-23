@@ -49,7 +49,14 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   {asSaid: true}`): the same with the words before AI cleanup
   (`last_said_transcript`: this session's, kept by
   `prepare_dictation_as_said`, else history's newest transcript through
-  `pipeline::as_said_text`). `copy_privately` puts text on the clipboard
+  `pipeline::as_said_text`); after a dictation cleanup left alone (cleanup
+  off, the default) it's the dictation itself. Until 2026-10-23 that case
+  froze Yap: the last dictation's lock was taken again inside the statement
+  that held it (a std `Mutex` never returns), so the tray's worker hung and
+  the tray menu and the next dictation behind it. Each lock is now let go
+  at the end of its own statement (unit test
+  `paste_last_as_said_after_a_dictation_cleanup_left_alone_never_hangs`;
+  e2e `dictation-trust.spec.js`, robot `as-said.real.js`). `copy_privately` puts text on the clipboard
   as a paste would and leaves it (Use what I said's refusals).
   `app_window()` / `focus(hwnd)`: the same window-finding and re-focusing
   for the tray's "Read selection aloud" (`read_aloud.rs`). **The paste

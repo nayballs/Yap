@@ -100,6 +100,34 @@ test('later, from Home: "Paste what I said" swaps the latest dictation in its wi
   expect(clip.private).toBe(true);
 });
 
+test('the tray\'s "Paste last transcript (as said)" after a dictation cleanup left alone: the dictation pasted again, and Yap still answers', async ({
+  robot,
+}) => {
+  const { pad, yap } = robot;
+  // Cleanup gives the words back unchanged: no words as said, the case of
+  // cleanup off (the default). It froze Yap: the last dictation's lock
+  // taken twice (text_injector.rs), the tray's paste hung and everything
+  // after it.
+  llm.reply('cleanup', (user) => cleanupTranscript(user));
+  try {
+    await pad.set('box', '');
+    const r = await robot.dictate(pad, 'Paste me as said.');
+    expect(r.asSaid ?? null).toBeNull();
+    await expect.poll(() => pad.text('box')).toBe('Paste me as said.');
+    await pad.set('box', 'Once more: ');
+    await pad.focus();
+    const frozen = new Promise((resolve) => setTimeout(() => resolve('Yap froze'), 5_000));
+    expect(await Promise.race([yap.invoke('paste_last_transcript', { asSaid: true }), frozen])).toBe('Paste me as said.');
+    await expect.poll(() => pad.text('box')).toBe('Once more: Paste me as said.');
+    // Still answering: the next dictation pastes.
+    await pad.set('box', '');
+    await robot.dictate(pad, 'Still here.');
+    await expect.poll(() => pad.text('box')).toBe('Still here.');
+  } finally {
+    llm.reply('cleanup', (user) => (cleanupTranscript(user) === EARLIER_SAID ? EARLIER_CLEANED : CLEANED));
+  }
+});
+
 test('edited since: the app is left alone, the words as said copied instead', async ({ robot }) => {
   const { pad, yap } = robot;
   // The paste edited before the swap.
