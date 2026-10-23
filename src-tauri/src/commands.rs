@@ -715,14 +715,6 @@ pub fn meeting_start(
     Ok(())
 }
 
-/// Stop the active meeting recording (final chunk is transcribed + persisted,
-/// then the closing `yap-meeting-state` fires).
-#[tauri::command]
-pub fn meeting_stop() -> Result<(), String> {
-    tracing::info!("Meeting stop asked for (meeting_stop)");
-    crate::meeting::stop()
-}
-
 /// `{ recording, noteId?, elapsedSecs? }` for the Notes UI.
 #[tauri::command]
 pub fn meeting_state() -> serde_json::Value {
@@ -1937,13 +1929,6 @@ pub fn save_config(
 #[tauri::command]
 pub fn bridge_status() -> serde_json::Value {
     crate::bridge::status()
-}
-
-/// Download the configured Whisper model, then load it into the pipeline.
-#[tauri::command]
-pub async fn download_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let cfg = config::load();
-    download_and_activate(&app, &state, &cfg.model_size).await
 }
 
 /// Select a model size, download it (with progress events), and make it the
