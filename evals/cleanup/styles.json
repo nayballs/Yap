@@ -1,0 +1,167 @@
+{
+  "description": "Styles by app (cleanup_styles.rs), for `yap.exe eval --styles`: dictations as speech-to-text writes them, each for a kind of app and one of its tones, with checks on the cleaned text. Each is cleaned twice: as before styles (the main cleanup alone, as every app got it until 24 Oct 2026) and with its kind's style, through the dictation's own code (`cleanup_styles::resolve` for a stand-in app of the kind, then `cleanup_styles::clean`). The order mixes the kinds, as dictations into different apps would. `quick`: the cases a cloud model's run keeps (`--styles-quick`). Checks: `has` (every one, any case), `has_any` (one of each list), `not` (none of them, as whole words, any case), `exact`, `starts_with` (case as written), `lines_min` (lines with text), `lowercase` (no capital outside `keep`), `no_final_period`, `empty`, `max_words`. People and places are fictional.",
+  "cases": [
+    {
+      "name": "email-formal-thanks",
+      "category": "email",
+      "tone": "formal",
+      "quick": true,
+      "text": "hi sarah um thanks for your time today i'll send over the updated proposal by thursday let me know if you need anything before then thanks",
+      "checks": { "has": ["Sarah", "Thursday", "proposal"], "has_any": [["I will"], ["Hi Sarah", "Dear Sarah", "Hello Sarah"]], "not": ["I'll", "um", "regards", "Sincerely", "Best,", "["], "lines_min": 2 }
+    },
+    {
+      "name": "work-casual-deck",
+      "category": "workChat",
+      "tone": "casual",
+      "quick": true,
+      "text": "hey can you send me the deck before the call um i think the numbers on slide three are out of date no rush",
+      "checks": { "has": ["deck", "slide", "no rush"], "not": ["um", "Dear", "regards", "could you please", ";"], "max_words": 26 }
+    },
+    {
+      "name": "ai-literal-function",
+      "category": "aiPrompts",
+      "tone": "literal",
+      "quick": true,
+      "text": "um can you write a python function that uh reverses a string and add some tests",
+      "checks": { "has": ["Python", "function", "reverses a string", "tests"], "not": ["please", "um", "uh", "def", "```", "Sure", "Here"], "max_words": 15 }
+    },
+    {
+      "name": "term-um-push",
+      "category": "terminal",
+      "tone": "command",
+      "quick": true,
+      "text": "um git push origin main",
+      "checks": { "exact": "git push origin main" }
+    },
+    {
+      "name": "personal-verycasual-lunch",
+      "category": "personalChat",
+      "tone": "veryCasual",
+      "quick": true,
+      "text": "are you free for lunch tomorrow let's do twelve if that works",
+      "checks": { "has": ["lunch", "tomorrow"], "lowercase": true, "no_final_period": true, "max_words": 14 }
+    },
+    {
+      "name": "docs-formal-risk",
+      "category": "documents",
+      "tone": "formal",
+      "quick": true,
+      "text": "the main risk is um the timeline we can't ship the new onboarding until the payments work is done so we should plan for that",
+      "checks": { "has": ["timeline", "onboarding", "payments"], "has_any": [["cannot", "can not"]], "not": ["can't", "um"] }
+    },
+    {
+      "name": "filler-email",
+      "category": "email",
+      "tone": "formal",
+      "quick": true,
+      "text": "um uh",
+      "checks": { "empty": true }
+    },
+    {
+      "name": "ai-literal-explain",
+      "category": "aiPrompts",
+      "tone": "literal",
+      "quick": true,
+      "text": "explain why the build fails on windows but not on linux",
+      "checks": { "has": ["explain", "build fails", "Windows", "Linux"], "not": ["please", "could you", "can you", "because"], "max_words": 11 }
+    },
+    {
+      "name": "term-git-status",
+      "category": "terminal",
+      "tone": "command",
+      "text": "git status",
+      "checks": { "exact": "git status" }
+    },
+    {
+      "name": "email-formal-no-greeting-added",
+      "category": "email",
+      "tone": "formal",
+      "text": "just a quick note to say the invoice was paid this morning so we're all square",
+      "checks": { "has": ["invoice", "paid", "this morning"], "not": ["Dear", "Hi", "Hello", "regards", "Sincerely", "we're", "["] }
+    },
+    {
+      "name": "personal-casual-coffee",
+      "category": "personalChat",
+      "tone": "casual",
+      "text": "hey are you around this evening i was thinking we could grab a coffee around six let me know",
+      "checks": { "has": ["coffee", "this evening", "let me know"], "has_any": [["six", "6"]], "not": ["Dear", "I would", "shall", "regards", ";"], "max_words": 21 }
+    },
+    {
+      "name": "ai-literal-rename",
+      "category": "aiPrompts",
+      "tone": "literal",
+      "text": "rename the user id field to account id everywhere except the migrations",
+      "checks": { "has": ["rename", "except", "migrations"], "has_any": [["account id", "account ID", "accountId", "account_id"]], "not": ["please"], "max_words": 13 }
+    },
+    {
+      "name": "email-casual-notes",
+      "category": "email",
+      "tone": "casual",
+      "text": "hi tom thanks for the notes i'll go through them tonight and get back to you tomorrow",
+      "checks": { "has": ["Tom", "tonight", "tomorrow"], "has_any": [["I'll"]], "not": ["I will", "Dear", "regards", "Best", "Cheers", "["] }
+    },
+    {
+      "name": "term-npm",
+      "category": "terminal",
+      "tone": "command",
+      "text": "npm run build",
+      "checks": { "exact": "npm run build" }
+    },
+    {
+      "name": "work-casual-late",
+      "category": "workChat",
+      "tone": "casual",
+      "text": "i'll be a few minutes late to standup the train's delayed",
+      "checks": { "has": ["late", "standup", "delayed"], "has_any": [["I'll"]], "not": ["I will", "Dear", "apologies", "regards", ";"], "max_words": 13 }
+    },
+    {
+      "name": "ai-literal-question",
+      "category": "aiPrompts",
+      "tone": "literal",
+      "text": "what's the difference between a mutex and a semaphore",
+      "checks": { "has": ["difference", "mutex", "semaphore"], "not": ["please", "A mutex is"], "max_words": 10 }
+    },
+    {
+      "name": "personal-verycasual-late",
+      "category": "personalChat",
+      "tone": "veryCasual",
+      "text": "running about ten minutes late sorry",
+      "checks": { "has": ["late", "sorry"], "lowercase": true, "no_final_period": true, "max_words": 7 }
+    },
+    {
+      "name": "email-formal-dentist",
+      "category": "email",
+      "tone": "formal",
+      "text": "hey i can't make the call tomorrow i've got a dentist appointment can we do friday instead",
+      "checks": { "has": ["dentist", "Friday"], "not": ["can't", "I've", "regards", "Sincerely", "["] }
+    },
+    {
+      "name": "filler-chat",
+      "category": "workChat",
+      "tone": "casual",
+      "text": "uh you know um",
+      "checks": { "empty": true }
+    },
+    {
+      "name": "other-natural",
+      "category": "other",
+      "tone": "natural",
+      "text": "so um the thing is we should probably move the meeting to next week because uh half the team is away",
+      "checks": { "has": ["next week", "half the team", "probably"], "not": ["um", "uh"] }
+    },
+    {
+      "name": "term-cd",
+      "category": "terminal",
+      "tone": "command",
+      "text": "cd projects",
+      "checks": { "exact": "cd projects" }
+    },
+    {
+      "name": "filler-ai",
+      "category": "aiPrompts",
+      "tone": "literal",
+      "text": "um",
+      "checks": { "empty": true }
+    }
+  ]
+}

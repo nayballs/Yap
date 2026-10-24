@@ -138,6 +138,28 @@ Qwen3.5 re-uses its cache only up to a checkpoint before the last user message, 
 ~370-token instruction again for every dictation); `system` moves the instruction to the end
 of the system prompt.
 
+### Styles by app (`--styles`)
+
+```bash
+yap.exe eval --styles --model local:<4b.gguf> --ngl 999 --cleanup-rounds 3
+yap.exe eval --styles --styles-quick --styles-phase after --model groq:openai/gpt-oss-20b --keys-from-yap
+```
+
+Instead of the scenarios, each case in `evals/cleanup/styles.json` (a dictation as
+speech-to-text writes it, its kind of app and one of that kind's tones, and checks on the
+text: words it must and mustn't have, an exact text, lower case, no final full stop, lines,
+at most n words, empty) is cleaned **before** — the call every dictation made until 24 Oct 2026,
+the main body whatever the app — and **after**, with its kind's style through the dictation's
+own code (`cleanup_styles::resolve` for a stand-in app of the kind, `cleanup_styles::clean`),
+each case before then after, the kinds mixed as dictations into different apps would be.
+Per phase: the pass rate overall and per kind, and the wall time per kind (mean, median) with
+llama.cpp's prompt tokens processed and tokens generated, over the cleanups a model was asked
+for (filler alone and "As said" ask none). `--styles-phase before|after` runs one,
+`--styles-quick` the eight cases marked `quick` (one cloud run each, under ~20k Groq tokens),
+`--only` cases by name; `YAP_EVAL_STYLE_LINES=<file.json>` (`{"email": "…", "formal": "…",
+"wins": "…"}`) tries other wording for a kind's or a tone's sentence without a rebuild.
+`styles.md` in the run folder.
+
 ### Pre-meeting briefs (`--brief`)
 
 ```bash
@@ -1539,3 +1561,62 @@ poem about my cat Biscuit who loves sleeping in the laundry basket. Make the poe
 approximately 8 lines long." — no poem, no answer, on either model. A model's preamble
 ("Here is the polished text:") would be stripped (`transforms::clean_output`); neither wrote
 one.
+
+## Styles by app (24 Oct 2026)
+
+`cleanup_styles.rs` (ai-models.md): a tone per kind of app, as one line just before the
+transcript. `--styles` over `evals/cleanup/styles.json`: 22 cases — emails turned formal (and
+one kept casual), chats kept casual or made very casual, documents formal, AI prompts kept
+literal (no "please", nothing rephrased, a question not answered), terminal commands
+untouched, filler alone, everything else in the speaker's words — each before (the call every
+dictation made until now) and after. Run folders `<builds>/eval-runs/20261024-15*-styles-*`;
+an RTX 5070 Ti and a Ryzen 7 9800X3D **shared with other builds** (the processor 60–90 % busy
+throughout), so the times are for comparing before with after in the same run, not absolute.
+
+| Model | Before | After | Mean ms a cleanup, before → after |
+|---|---|---|---|
+| Qwen3.5-4B, graphics card (×3) | 36/66 (55 %) | **66/66 (100 %)** | 372 → 379 (cases interleaved) |
+| Qwen3.5-4B, processor (×1) | 12/22 (55 %) | **22/22 (100 %)** | 3,671 → 3,494 |
+| Qwen2.5-1.5B, processor (×2) | 24/44 (55 %) | **32/44 (73 %)** | 3,007 → 3,116 |
+| Groq gpt-oss-20b (the 8 quick cases) | 5/8 (62 %) | **8/8 (100 %)** | 614 → 583 (Groq's own time; 18.0k / 16.4k tokens) |
+
+Per kind on the 4B (graphics card, after): email 15/15, work chat 9/9, personal chat 9/9,
+documents 3/3, AI prompts 15/15, terminal 12/12, everything else 3/3. What "before" failed:
+"I'll" kept in a formal email (all three), "can't" in a formal document, a capital and a full
+stop in a very casual text, filler alone answered "Nothing to clean." or given back as "um" —
+the styles' whole point, and the filler a bug of its own: now no model is asked
+(`filler_only`). The 1.5B follows the tones less (it kept "can't" and "we're" in formal emails
+and dropped "sorry" from a very casual text, both before and after); it's the processor's
+model, and still better after.
+
+**What it costs.** The line is ~60–90 tokens read afresh with each dictation, after the
+prompt every kind shares (the system prompt never changes with the kind, so the server's
+cache holds): prompt tokens processed a dictation ~35 → ~90–105 (none added for everything
+else). On the card that's lost in the noise (+7 ms a cleanup over 66 interleaved pairs; an
+earlier, quieter run 207 → 210 ms); on the processor the 1.5B took ~0.1 s more (+4 %, a busy
+processor); Groq the same. The one kind that cost more was the email, until its line changed:
+
+**"An email" invents an email.** Told "This dictation is an email. Keep a greeting, paragraphs
+and a sign-off that were said on lines of their own, and never add one that wasn't said",
+Qwen3.5-4B added a sign-off to 5 of its 12 email outputs ("Best regards, [Your Name]", once
+"Best, Alex"); with "…never add a greeting, sign-off, name or [placeholder]…" all 12 got one,
+and "Dear Team," over a note — naming the thing to avoid wrote it. It also generated ~35
+tokens where the note was ~20 (email cleanups 207 → 299 ms).
+Four wordings of the email sentence over the four email cases ×3 (`YAP_EVAL_STYLE_LINES`):
+
+| Email sentence | Pass | Mean ms | Gen tokens |
+|---|---|---|---|
+| "…an email: put a greeting and a sign-off that were said on lines of their own, and add none of your own." | 15/15 * | 327 | 34 |
+| "…an email: keep its greeting and sign-off, if it has them, on lines of their own." | 14/15 | 229 | — |
+| **"This dictation is the body of an email."** | **15/15** | **197** | **25** |
+| none | 12/15 | 172 | — |
+
+\* passing only because `drop_unsaid_frame` took off what the model made up. "The body of an
+email" keeps the frame that was said and adds none; `drop_unsaid_frame` stays as the net
+(a greeting or sign-off line none of whose words were said, and "[placeholders]").
+
+**Other fixes the cases found**: a casual message's semicolons (the models write them though
+the tone says none: "late to standup; the train's delayed") become commas, unless the text
+looks like code; a command's capital and full stop come off ("Git status." → "git status") —
+the 4B and Groq already wrote commands untouched (12/12, before too), so this is for the
+model that doesn't.

@@ -426,7 +426,7 @@ const CHAT_PAGES: &[&str] = &[
 ];
 
 /// The process name without its folder and ".exe", in lower case.
-fn exe_stem(exe: &str) -> String {
+pub(crate) fn exe_stem(exe: &str) -> String {
     let base = exe.trim().rsplit(['\\', '/']).next().unwrap_or("");
     let lower = base.to_lowercase();
     lower.strip_suffix(".exe").unwrap_or(&lower).to_string()
@@ -564,9 +564,15 @@ fn title_shows_chat(title: &str) -> bool {
     })
 }
 
+/// A browser, by its process name (`stem`: lower case, no ".exe"): its
+/// window's title is the page's (`cleanup_styles.rs` reads the site there).
+pub(crate) fn is_browser(stem: &str) -> bool {
+    BROWSER_EXES.contains(&stem)
+}
+
 /// A title part without unread counts and markers ("(3) WhatsApp", "•
 /// Discord") or Edge's "and 2 more pages".
-fn page_name(seg: &str) -> &str {
+pub(crate) fn page_name(seg: &str) -> &str {
     let mut s = seg.trim();
     loop {
         let before = s;
@@ -630,6 +636,21 @@ pub fn of_window(hwnd: Option<isize>) -> AppKind {
     {
         let _ = hwnd;
         AppKind::Other
+    }
+}
+
+/// The title of the window `hwnd` (Windows' cached caption: never a message
+/// to the window), for `cleanup_styles.rs`, which reads the site a browser
+/// shows. Never logged. Empty off Windows.
+pub(crate) fn window_title(hwnd: isize) -> String {
+    #[cfg(windows)]
+    {
+        win::title(hwnd)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = hwnd;
+        String::new()
     }
 }
 

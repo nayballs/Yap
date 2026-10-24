@@ -47,6 +47,7 @@ mod spike;
 mod standin;
 #[cfg(debug_assertions)]
 mod transforms;
+mod styles;
 
 #[cfg(debug_assertions)]
 static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

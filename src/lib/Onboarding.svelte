@@ -173,8 +173,14 @@
   let cleanupEnabled = $state(false); // reflects what we set up this session
   let enabledSummary = $state('');
 
-  // Private vs cloud, superwhisper-style two-card choice.
+  // Private vs cloud, superwhisper-style two-card choice. The recommendation
+  // (2026-10-24, cleanup_styles.rs): on this PC when its graphics card runs
+  // the recommended model (gpu.rs) or a model is already here; else a cloud
+  // provider (Groq's free plan); the person picks either, or "Maybe later"
+  // leaves cleanup off.
   let cleanupMode = $state('local'); // 'local' | 'cloud'
+  let modePicked = false;
+  const recommendLocal = $derived(!!llm.gpuCapable || (llm.curated || []).some((m) => m.installed));
   // Curated id: the model recommended for this PC (local_llm_status's
   // `recommendedId`: Qwen3.5 4B where the graphics card can run it, else
   // Qwen2.5 1.5B) until the person picks another.
@@ -229,6 +235,7 @@
     try {
       llm = await invoke('local_llm_status');
       if (!localPicked && llm.recommendedId) localPick = llm.recommendedId;
+      if (!modePicked) cleanupMode = recommendLocal ? 'local' : 'cloud';
       cleanupEnabled = !!cfg?.postProcessEnabled;
       if (cleanupEnabled) {
         enabledSummary =
@@ -606,6 +613,13 @@
     <div class="cleanup-box">
       {#if cleanupEnabled}
         <div class="cleanup-done">✓ AI cleanup is on — <strong>{enabledSummary}</strong>.</div>
+        <!-- Styles by app (cleanup_styles.rs): what it does where, out of the box. -->
+        <p class="fine styles-intro">It writes each kind of app its own way:</p>
+        <ul class="styles-preview" aria-label="Styles by app">
+          {#each [['Email', 'formal'], ['Work and personal chats', 'casual'], ['Documents', 'formal'], ['AI prompts', 'word for word'], ['Terminals', 'commands as said'], ['Everything else', 'your words, tidied']] as [kind, tone] (kind)}
+            <li><strong>{kind}</strong> · {tone}</li>
+          {/each}
+        </ul>
         <button class="skip" onclick={() => (cleanupEnabled = false)}>
           Choose a different model or provider →
         </button>
@@ -629,19 +643,22 @@
           <button
             class="mode-card"
             class:sel={cleanupMode === 'local'}
-            onclick={() => (cleanupMode = 'local')}
+            data-recommended={recommendLocal ? 'yes' : 'no'}
+            onclick={() => ((cleanupMode = 'local'), (modePicked = true))}
           >
             <span class="mode-title">🔒 Private</span>
-            <span class="mode-sub">runs on your PC · no account</span>
-            <span class="mode-badge">Recommended</span>
+            <span class="mode-sub">{recommendLocal ? 'runs on your PC · no account' : 'runs on your PC · slower without a graphics card'}</span>
+            {#if recommendLocal}<span class="mode-badge">Recommended for this PC</span>{/if}
           </button>
           <button
             class="mode-card"
             class:sel={cleanupMode === 'cloud'}
-            onclick={() => (cleanupMode = 'cloud')}
+            data-recommended={recommendLocal ? 'no' : 'yes'}
+            onclick={() => ((cleanupMode = 'cloud'), (modePicked = true))}
           >
             <span class="mode-title">☁ Cloud</span>
-            <span class="mode-sub">bring your own key</span>
+            <span class="mode-sub">bring your own key · Groq's is free</span>
+            {#if !recommendLocal}<span class="mode-badge">Recommended for this PC</span>{/if}
           </button>
         </div>
 
@@ -715,8 +732,9 @@
             <input class="cloud-inp" placeholder="Model (e.g. openai/gpt-oss-20b)" bind:value={cloudModel} />
           </div>
           <button class="start wide" onclick={enableCloudCleanup}>Enable cloud cleanup</button>
-          <p class="fine">Your key is stored locally. Transcripts (never audio) are sent to the
-            provider you chose. Groq's free tier is plenty for dictation.</p>
+          <p class="fine" data-privacy="cloud">Your voice never leaves this PC: Yap transcribes it here, and only the text of
+            each dictation goes to the provider you pick, to be cleaned up. Your key stays on this PC. Groq's free plan
+            is plenty for dictation.</p>
         {/if}
       {/if}
       {#if llmError}<p class="error">{llmError}</p>{/if}
@@ -1198,6 +1216,27 @@
     font-size: 14px;
     text-align: center;
     line-height: 1.6;
+  }
+  .styles-intro {
+    margin: 10px 0 4px;
+  }
+  .styles-preview {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    max-width: 460px;
+  }
+  .styles-preview li {
+    padding: 3px 10px;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-raised-soft);
+    border: 1px solid var(--yap-border-subtle);
+    font-size: 12px;
+    color: var(--yap-fg-80);
   }
   .cleanup-progress {
     width: 100%;

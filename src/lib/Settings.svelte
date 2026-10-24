@@ -25,6 +25,7 @@
   import WebSearchSettings from './WebSearchSettings.svelte';
   import { applyAppearance } from './appearance.js';
   import RegionSpelling from './RegionSpelling.svelte';
+  import CleanupStyles from './settings/CleanupStyles.svelte';
   import KokoroOffer from './KokoroOffer.svelte';
   import { kokoro, startKokoro } from './kokoro.svelte.js';
   import NoteFormattingConfig from './NoteFormattingConfig.svelte';
@@ -483,6 +484,8 @@
     routingScope: 'all_apps',
     appRoutes: [],
     cleanupProfiles: [],
+    // Styles by app (settings/CleanupStyles.svelte, cleanup_styles.rs).
+    cleanupStyles: true,
     llmScopes: {},
     agentName: '',
     editHotkey: '',
@@ -1442,9 +1445,13 @@
   }
 
   // ---- Profiles library ----
+  // The person's own profiles; the styles by app (a profile with a
+  // `category`) are Styles by app's (settings/CleanupStyles.svelte).
+  const ownProfiles = $derived((cfg.cleanupProfiles || []).filter((p) => !p.category));
+  const styleProfiles = $derived((cfg.cleanupProfiles || []).filter((p) => p.category));
   function addProfile(seedBody = '', name = '') {
     const id = newId();
-    const n = name || `Profile ${cfg.cleanupProfiles.length + 1}`;
+    const n = name || `Profile ${ownProfiles.length + 1}`;
     // provider '' = inherit the global AI-cleanup model (the default).
     cfg.cleanupProfiles = [
       ...cfg.cleanupProfiles,
@@ -1488,7 +1495,7 @@
     if (!name) return;
     if ((cfg.appRoutes || []).some((r) => (r.app || '').toLowerCase() === name.toLowerCase())) return;
     // Ensure at least one profile exists to bind to (seed from the global body).
-    let profileId = cfg.cleanupProfiles[0]?.id;
+    let profileId = ownProfiles[0]?.id;
     if (!profileId) profileId = addProfile(cfg.ppPrompt || '', 'Default');
     cfg.appRoutes = [
       ...(cfg.appRoutes || []),
@@ -1533,6 +1540,8 @@
         .filter((r) => r.app),
       cleanupProfiles: (cfg.cleanupProfiles || [])
         .map((p) => ({
+          // A style's kind, tone and apps (cleanup_styles.rs) ride along.
+          ...p,
           id: p.id,
           name: (p.name || '').trim() || 'Untitled',
           prompt: p.prompt || '',
@@ -2416,6 +2425,8 @@
           </Group>
 
           {#if cfg.postProcessEnabled}
+          <CleanupStyles {cfg} />
+
           <Group title="Prompt Studio" id="settings-prompt-studio" desc="View, change and test what the cleanup model is told" bare>
             <div class="ps-wrap" data-setting="prompt-studio">
             <PromptStudio
@@ -2455,8 +2466,8 @@
                       Cleanup styles to reuse: terse for chat, formal for email, careful with code.
                       Change one and every app using it follows.
                     </p>
-                    {#if cfg.cleanupProfiles.length > 0}
-                      {#each cfg.cleanupProfiles as prof (prof.id)}
+                    {#if ownProfiles.length > 0}
+                      {#each ownProfiles as prof (prof.id)}
                         <div class="route">
                           <div class="route-head">
                             <input class="route-label" placeholder="Profile name" bind:value={prof.name} />
@@ -2526,7 +2537,8 @@
                   <div class="routes">
                     <div class="routes-sub">App rules</div>
                     <p class="note">
-                      A profile for each app: Yap goes by the app you were in when you started dictating.
+                      A profile for each app: Yap goes by the app you were in when you started dictating. A rule wins
+                      over Styles by app.
                     </p>
                     {#if cfg.appRoutes.length > 0}
                       {#each cfg.appRoutes as route, i (i)}
@@ -2536,7 +2548,11 @@
                           <span class="grow">
                             <Select
                               bind:value={route.profileId}
-                              options={[{ value: '', label: 'Default cleanup' }, ...cfg.cleanupProfiles.map((p) => ({ value: p.id, label: p.name }))]}
+                              options={[
+                                { value: '', label: 'Default cleanup' },
+                                ...ownProfiles.map((p) => ({ value: p.id, label: p.name })),
+                                ...styleProfiles.map((p) => ({ value: p.id, label: `Style: ${p.name}` })),
+                              ]}
                               ariaLabel={`Profile for ${route.label || route.app}`}
                               fill
                             />

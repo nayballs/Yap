@@ -73,6 +73,11 @@ Dictation cleanup:
                            | system (the instruction in the system prompt)
   --cleanup-quick          only the back-to-back rounds (no first call, Chat turns or spelling):
                            a cloud model's tokens   --cleanup-limit <n>  only the first n dictations
+  --styles                 instead of the scenarios: styles by app (cleanup_styles.rs) on
+                           evals/cleanup/styles.json — each case before styles and with its
+                           kind's style, checked and timed per kind; styles.md
+                           (--cleanup-rounds rounds)   --styles-phase before|after  one of them
+  --styles-quick           only the cases marked quick (~8 cleanups: a cloud model's tokens)
 Speaker names (speakers/naming.rs; instead of the scenarios; speakers.md):
   --speakers               score Rust alone, then Rust + each --model's answers, on
                            evals/speakers/*.json: correct / wrong / missed names per voice
@@ -135,6 +140,9 @@ struct Args {
     cleanup_layout: Option<&'static str>,
     cleanup_quick: bool,
     cleanup_limit: Option<usize>,
+    styles: bool,
+    styles_phase: Option<&'static str>,
+    styles_quick: bool,
     brief: bool,
     transforms: bool,
     bench: Option<String>,
@@ -212,6 +220,18 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--cleanup-quick" => a.cleanup_quick = true,
             "--cleanup-limit" => a.cleanup_limit = Some(num(value()?, &flag)?.max(1) as usize),
+            "--styles" => a.styles = true,
+            "--styles-phase" => {
+                let p = value()?;
+                a.styles_phase = Some(
+                    super::styles::PHASES
+                        .iter()
+                        .copied()
+                        .find(|x| *x == p)
+                        .ok_or_else(|| format!("--styles-phase {}, not {p}", super::styles::PHASES.join("|")))?,
+                );
+            }
+            "--styles-quick" => a.styles_quick = true,
             "--brief" => a.brief = true,
             "--transforms" => a.transforms = true,
             "--bench" => {
@@ -256,7 +276,9 @@ pub fn main(argv: Vec<String>) -> i32 {
         return dump_apps(p);
     }
     // Raw requests alone need no scenarios (and --only then names requests).
-    let scenarios = if (args.models.is_empty() || args.cleanup || args.speakers || args.brief || args.transforms || args.bench.is_some()) && !args.list {
+    let scenarios = if (args.models.is_empty() || args.cleanup || args.styles || args.speakers || args.brief || args.transforms || args.bench.is_some())
+        && !args.list
+    {
         Vec::new()
     } else {
         match load_scenarios(&args) {
@@ -1193,6 +1215,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
     } else {
         None
     };
+    let style_cases = if args.styles {
+        let path = scenarios_dir(args).join("..").join("cleanup").join("styles.json");
+        match super::styles::load(&path) {
+            Ok(b) => Some(b),
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        None
+    };
+    let mut style_runs: Vec<(String, Value)> = Vec::new();
     let speaker_meetings = if args.speakers {
         let dir = scenarios_dir(args).join("..").join("speakers");
         match super::speakers::load(&dir) {
@@ -1294,6 +1329,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             cleanup = super::cleanup::run(b, &ep, args.cleanup_rounds, setup).await;
             cleanups.push((m.label.clone(), cleanup.clone()));
         }
+        let mut styles_result = Value::Null;
+        if let Some(b) = &style_cases {
+            record::set_context(json!({ "model": m.label, "scenario": "styles" }));
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            let phases: Vec<&'static str> = match args.styles_phase {
+                Some(p) => vec![p],
+                None => super::styles::PHASES.to_vec(),
+            };
+            styles_result = super::styles::run(b, &ep, args.cleanup_rounds, &phases, args.styles_quick, &args.only).await;
+            style_runs.push((m.label.clone(), styles_result.clone()));
+        }
         let mut speakers_result = Value::Null;
         if let Some(meetings) = &speaker_meetings {
             record::set_config(Some(crate::config::YapConfig::default()));
@@ -1348,6 +1396,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "paced_ms": record::paced_ms() - paced_before,
             "wall_ms": model_started.elapsed().as_millis() as u64,
             "cleanup": cleanup,
+            "styles": styles_result,
             "speakers": speakers_result,
             "bench": bench_result,
             "brief": brief_result,
@@ -1396,6 +1445,10 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
     if !cleanups.is_empty() {
         let md = record::redact(&super::cleanup::markdown(&cleanups));
         let _ = std::fs::write(run_dir.join("cleanup.md"), &md);
+    }
+    if !style_runs.is_empty() {
+        let md = record::redact(&super::styles::markdown(&style_runs));
+        let _ = std::fs::write(run_dir.join("styles.md"), &md);
     }
     if !speaker_runs.is_empty() {
         let md = record::redact(&super::speakers::markdown(&speaker_runs));
