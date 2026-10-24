@@ -3,15 +3,18 @@
 // - what each note has (`meeting_audio_note`: recordings, length, what a
 //   crash left to transcribe, the speech model "Transcribe again" would use),
 //   kept current from `yap-meeting-audio`;
-// - its transcription jobs ("Transcribe again", or the part a crash left),
-//   from `yap-meeting-redo` { noteId, kind: again|recover, state:
-//   running|done|error, percent, model, error };
+// - its transcription jobs ("Transcribe again", the part a crash left, the
+//   refine after a meeting, Try again on a stretch that failed), from
+//   `yap-meeting-redo` { noteId, kind: again|recover|refine|retry, state:
+//   running|done|error|cancelled, percent, model, error, summary, waiting,
+//   thenSummary }, with Cancel and the refine's "Update summary";
 // - "Transcribe again…" behind the window's confirm dialog
 //   (ui/ConfirmDialog via askConfirm), and the crash banner's "Transcribe it";
 // - a transcript line's ▶ (`meeting_audio_clip`: both sides of its stretch,
 //   as a WAV), one line playing at a time.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { SvelteSet } from 'svelte/reactivity';
 import { askConfirm } from './ui/contextMenu.svelte.js';
 import { toast } from './ui/toast.svelte.js';
 
@@ -49,11 +52,16 @@ export function initMeetingAudio() {
       if (!startedHere.delete(job.noteId)) return;
       if (job.state === 'error') {
         toast({
-          title: job.kind === 'recover' ? "Couldn't transcribe the rest of the meeting" : "Couldn't transcribe the meeting again",
+          title:
+            job.kind === 'recover'
+              ? "Couldn't transcribe the rest of the meeting"
+              : job.kind === 'retry'
+                ? "Couldn't transcribe that part"
+                : "Couldn't transcribe the meeting again",
           description: job.error || '',
           variant: 'destructive',
         });
-      } else if (job.kind === 'again') {
+      } else if (job.kind === 'again' && job.state === 'done') {
         toast({
           title: 'Transcribed again',
           description: job.summary
@@ -106,9 +114,73 @@ export function lastPart(secs) {
 export function jobLine(job) {
   if (!job) return '';
   const pct = job.percent > 0 ? ` · ${job.percent}%` : '';
+  if (job.kind === 'refine') {
+    if (job.waiting === 'meeting') return 'Improving the transcript after the meeting that’s recording';
+    if (job.waiting === 'summary') return 'Improving the transcript once the summary is written';
+    return `${job.thenSummary ? 'Improving the transcript, then the summary' : 'Improving the transcript'}${pct}`;
+  }
+  if (job.kind === 'retry') return `Transcribing that part again${pct}`;
   return job.kind === 'recover'
     ? `Transcribing the rest of the meeting${pct}`
     : `Transcribing again with ${job.model || 'your speech model'}${pct}`;
+}
+
+// Refines whose "didn't change anything" line was put away (this window).
+const dismissed = new SvelteSet();
+
+/**
+ * What the note's job line shows, if anything: the job running, or — a
+ * refine done on a meeting with a summary — "Transcript improved · Update
+ * summary" (until the summary is written again), or why a refine changed
+ * nothing. `{ job, kind: 'running' | 'improved' | 'unchanged' }`.
+ */
+export function jobState(noteId) {
+  const job = meetingAudio.jobs[noteId];
+  if (!job) return null;
+  if (job.state === 'running') return { job, kind: 'running' };
+  if (job.kind === 'refine' && job.state === 'done' && job.summary) return { job, kind: 'improved' };
+  if (job.kind === 'refine' && job.state === 'error' && !dismissed.has(noteId)) return { job, kind: 'unchanged' };
+  return null;
+}
+
+/** The refine's "didn't change anything" line, put away. */
+export function dismissJob(noteId) {
+  dismissed.add(noteId);
+}
+
+/** Stop a note's job (its line's Cancel): the transcript stays as it was. */
+export async function cancelJob(noteId) {
+  try {
+    await invoke('meeting_job_cancel', { noteId });
+  } catch (e) {
+    toast({ title: "Couldn't cancel it", description: String(e), variant: 'destructive' });
+  }
+}
+
+/** "Update summary" after a refine: the summary written again from the improved lines. */
+export async function updateSummary(noteId) {
+  try {
+    await invoke('meeting_summarise', { noteId });
+  } catch (e) {
+    toast({ title: "Couldn't write the summary", description: String(e), variant: 'destructive' });
+  }
+}
+
+/** The transcript is being completed before the summary (it follows by itself). */
+export function summaryFollows(noteId) {
+  const job = meetingAudio.jobs[noteId];
+  return job?.state === 'running' && !!job.thenSummary;
+}
+
+/** "Try again" on a stretch that couldn't be transcribed (its marker `seg`). */
+export async function retryChunk(noteId, seg) {
+  try {
+    startedHere.add(noteId);
+    await invoke('meeting_retry_chunk', { noteId, source: seg.source, ts: seg.ts, startMs: seg.startMs });
+  } catch (e) {
+    startedHere.delete(noteId);
+    toast({ title: "Couldn't try it again", description: String(e), variant: 'destructive' });
+  }
 }
 
 /** Why "Transcribe again" can't run on `note` now (null: it can). */
@@ -162,7 +234,7 @@ export async function recoverMeeting(noteId) {
 /** Whether line `seg` can be played (placed on its recording's clock, the audio kept). */
 export function canPlay(noteId, seg) {
   const a = meetingAudio.byNote[noteId];
-  return !!a?.recordings && seg?.startMs != null && seg?.endMs != null && !seg.dictated;
+  return !!a?.recordings && seg?.startMs != null && seg?.endMs != null && !seg.dictated && !seg.failed;
 }
 
 let player = null;

@@ -33,6 +33,10 @@
   } from './notepadText.js';
   import SpeakerMenu from './SpeakerMenu.svelte';
   import SpeakerCard from './SpeakerCard.svelte';
+  // The refine after a meeting, Try again on a stretch that failed (meeting_refine.rs).
+  import MeetingJob from './MeetingJob.svelte';
+  import FailedChunk from './FailedChunk.svelte';
+  import { jobState } from './meetingAudio.svelte.js';
   import { nextModel, modelLine, whereItRuns } from './aiModel.js';
   import { speech, initSpeech, readAloud, stopReading } from './speech.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
@@ -42,8 +46,6 @@
     initMeetingAudio,
     onJobDone,
     refreshAudio,
-    runningJob,
-    jobLine,
     lastPart,
     cantTranscribeAgain,
     askTranscribeAgain,
@@ -1643,9 +1645,9 @@
               </button>
             {/if}
           </div>
-          {#if runningJob(selected.id)}
-            <!-- Its audio being transcribed (meeting_audio.rs). -->
-            <p class="tredo" role="status"><span class="spin" aria-hidden="true"></span>{jobLine(runningJob(selected.id))}</p>
+          {#if jobState(selected.id)}
+            <!-- Its audio being transcribed (meeting_audio.rs), with Cancel; a refine's "Update summary". -->
+            <MeetingJob noteId={selected.id} look="app" />
           {:else if meetingAudio.byNote[selected.id]?.recoverableSecs && !recordingThisNote}
             <!-- What a crash left of it: the audio is kept. -->
             <div class="trecover" role="status">
@@ -1696,6 +1698,12 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>
                     <span>You dictated here · left out of the notes</span>
                   </div>
+                {:else if run.kind === 'failed'}
+                  <FailedChunk
+                    noteId={selected.id}
+                    seg={selected.transcript[run.i]}
+                    why={recordingThisNote ? 'After the meeting' : meetingAudio.byNote[selected.id] && !meetingAudio.byNote[selected.id].recordings ? "This meeting's audio isn't kept" : null}
+                  />
                 {:else if run.kind === 'group'}
                   {#each run.lines as line, j (line.i)}
                     <!-- Focusable for its menu from the keyboard (the ContextMenu key, Shift+F10). -->
@@ -2627,28 +2635,7 @@
   .lineplay.on {
     color: var(--yap-primary);
   }
-  /* A meeting's audio being transcribed, or what a crash left of it. */
-  .tredo {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0;
-    font-size: 11.5px;
-    color: var(--yap-muted);
-  }
-  .tredo .spin {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    border: 1.5px solid var(--yap-border);
-    border-top-color: var(--yap-primary);
-    animation: tredo-spin 0.9s linear infinite;
-  }
-  @keyframes tredo-spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
+  /* What a crash left of its audio (a job's line is MeetingJob.svelte). */
   .trecover {
     display: flex;
     align-items: center;
