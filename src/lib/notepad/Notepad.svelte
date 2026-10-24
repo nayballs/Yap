@@ -39,26 +39,26 @@
   import { emit, listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { onMount, tick } from 'svelte';
-  import ToastHost from './ui/ToastHost.svelte';
-  import SpeakerMenu from './components/SpeakerMenu.svelte';
-  import SpeakerCard from './components/SpeakerCard.svelte';
+  import ToastHost from '../ui/ToastHost.svelte';
+  import SpeakerMenu from '../components/SpeakerMenu.svelte';
+  import SpeakerCard from '../components/SpeakerCard.svelte';
   // The refine after a meeting, Try again on a stretch that failed (meeting_refine.rs).
-  import MeetingJob from './components/MeetingJob.svelte';
-  import FailedChunk from './components/FailedChunk.svelte';
-  import { jobState, summaryFollows } from './stores/meetingAudio.svelte.js';
-  import BriefView from './components/BriefView.svelte';
-  import { briefTeaser } from './core/brief.js';
-  import { toast } from './ui/toast.svelte.js';
-  import { showSaveError } from './notices/saveErrors.js';
-  import { renderMarkdown } from './core/markdown.js';
-  import { nextModel, modelLine, whereItRuns } from './core/aiModel.js';
-  import { speech, initSpeech, readAloud, readPageSelection } from './stores/speech.svelte.js';
-  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './core/hotkeys.js';
-  import { openExternalLink } from './core/externalLinks.js';
-  import { initMeetingCheckIns } from './notices/meetingCheckIn.js';
-  import { openContextMenu, menuKey, menuOpenFor, menuOrDialogOpen } from './ui/contextMenu.svelte.js';
-  import { messageItems } from './core/itemMenus.js';
-  import { streamCall, liveAnswer, applyEvent, closePartial, settle, streamingHeight, STOPPED } from './core/streaming.js';
+  import MeetingJob from '../components/MeetingJob.svelte';
+  import FailedChunk from '../components/FailedChunk.svelte';
+  import { jobState, summaryFollows } from '../stores/meetingAudio.svelte.js';
+  import BriefView from '../components/BriefView.svelte';
+  import { briefTeaser } from '../core/brief.js';
+  import { toast } from '../ui/toast.svelte.js';
+  import { showSaveError } from '../notices/saveErrors.js';
+  import { renderMarkdown } from '../core/markdown.js';
+  import { nextModel, modelLine, whereItRuns } from '../core/aiModel.js';
+  import { speech, initSpeech, readAloud, readPageSelection } from '../stores/speech.svelte.js';
+  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from '../core/hotkeys.js';
+  import { openExternalLink } from '../core/externalLinks.js';
+  import { initMeetingCheckIns } from '../notices/meetingCheckIn.js';
+  import { openContextMenu, menuKey, menuOpenFor, menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
+  import { messageItems } from '../core/itemMenus.js';
+  import { streamCall, liveAnswer, applyEvent, closePartial, settle, streamingHeight, STOPPED } from '../core/streaming.js';
   import {
     summaries,
     initMeetingSummary,
@@ -66,7 +66,7 @@
     summarise,
     stepLine,
     askStartedByMistake,
-  } from './stores/meetingSummary.svelte.js';
+  } from '../stores/meetingSummary.svelte.js';
   import {
     noteMarkdown,
     noteText,
@@ -88,8 +88,8 @@
     withTaskMark,
     newSinceSummary,
     newSinceLine,
-  } from './core/notepadText.js';
-  import { editLine, taskToggled, setTask, saveSummary, askReplaceSummary } from './core/noteEdits.js';
+  } from '../core/notepadText.js';
+  import { editLine, taskToggled, setTask, saveSummary, askReplaceSummary } from '../core/noteEdits.js';
   import {
     meetingAudio,
     initMeetingAudio,
@@ -101,7 +101,7 @@
     canPlay,
     playLine,
     stopLine,
-  } from './stores/meetingAudio.svelte.js';
+  } from '../stores/meetingAudio.svelte.js';
 
   /** This window's label: the `origin` of its saves and stops. */
   const LABEL = 'notepad';

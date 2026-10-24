@@ -18,10 +18,10 @@
   // them got one list — the last one's — so the main window lost its CSS.
   const VIEWS = {
     settings: () => import('./lib/views/ControlPanel.svelte'),
-    onboarding: () => import('./lib/Onboarding.svelte'),
-    notepad: () => import('./lib/Notepad.svelte'),
-    'split-preview': () => import('./lib/SplitPreview.svelte'),
-    overlay: () => import('./lib/Overlay.svelte'),
+    onboarding: () => import('./lib/onboarding/Onboarding.svelte'),
+    notepad: () => import('./lib/notepad/Notepad.svelte'),
+    'split-preview': () => import('./lib/notepad/SplitPreview.svelte'),
+    overlay: () => import('./lib/bar/Overlay.svelte'),
   };
   const view = (VIEWS[label] ?? VIEWS.overlay)();
 

@@ -1,23 +1,23 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import { formatHotkeySpec, hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './core/hotkeys.js';
-  import HotkeyInput from './ui/HotkeyInput.svelte';
-  import { validateHotkey } from './settings/hotkeys.svelte.js';
+  import { formatHotkeySpec, hotkeyMatchesKeydown, hotkeyMatchesKeyup } from '../core/hotkeys.js';
+  import HotkeyInput from '../ui/HotkeyInput.svelte';
+  import { validateHotkey } from '../settings/hotkeys.svelte.js';
 
   // Diagnostics -> the backend's rolling yap.log (webview consoles are
   // invisible in normal runs; this made the event-delivery bug debuggable).
   const flog = (m) => invoke('frontend_log', { msg: '[onboarding] ' + m }).catch(() => {});
-  import yapIcon from '../assets/yap-logo.svg';
-  import { MODELS } from './core/speechModels.js';
+  import yapIcon from '../../assets/yap-logo.svg';
+  import { MODELS } from '../core/speechModels.js';
   import ModelCard from './ModelCard.svelte';
-  import brandAnthropic from '../assets/brands/anthropic.svg';
-  import brandOpenai from '../assets/brands/openai.svg';
-  import brandMeta from '../assets/brands/meta.svg';
-  import brandGoogle from '../assets/brands/google.svg';
-  import brandQwen from '../assets/brands/qwen.svg';
-  import brandOllama from '../assets/brands/ollama.svg';
-  import brandOpenrouter from '../assets/brands/openrouter.svg';
+  import brandAnthropic from '../../assets/brands/anthropic.svg';
+  import brandOpenai from '../../assets/brands/openai.svg';
+  import brandMeta from '../../assets/brands/meta.svg';
+  import brandGoogle from '../../assets/brands/google.svg';
+  import brandQwen from '../../assets/brands/qwen.svg';
+  import brandOllama from '../../assets/brands/ollama.svg';
+  import brandOpenrouter from '../../assets/brands/openrouter.svg';
 
   // Brand badges (superwhisper-style coloured squares). `icon` = white SVG
   // (simple-icons, CC0); brands without one fall back to a letter badge.
