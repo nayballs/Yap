@@ -237,6 +237,11 @@ const CLEANUP = 'You are a dictation cleanup engine';
 // turn. "OK" unless a spec scripts it (`reply('rewrite', fn)`; `rewriteText`
 // gives the text it was asked to change).
 const REWRITE = 'You are a writing assistant';
+// A saved transform (llm.rs TRANSFORM_BASE_PROMPT, transforms.rs): the
+// instruction and the text (between <text> tags) as the user's turn. "OK"
+// unless a spec scripts it (`reply('transform', fn)`; `transformText` and
+// `transformInstruction` read the request).
+const TRANSFORM = 'You transform text';
 // Memory's passes (memory/prompt.rs): learning from a chat or a meeting,
 // "Tell Yap what to change", an import. Answered `{"changes": []}` unless a
 // spec says otherwise (`reply('memory', fn)`).
@@ -260,6 +265,7 @@ const KINDS = [
   [BLIND_SPOTS, 'blindSpots'],
   [CLEANUP, 'cleanup'],
   [REWRITE, 'rewrite'],
+  [TRANSFORM, 'transform'],
   [MEMORY, 'memory'],
   [SPEAKER_NAME, 'speakerName'],
   [BRIEF, 'brief'],
@@ -282,6 +288,16 @@ export function cleanupTranscript(user) {
 /** The text a rewrite call (a request's `system`) was asked to change; '' to write new text. */
 export function rewriteText(system) {
   return /"""\n([\s\S]*?)\n"""/.exec(system)?.[1] ?? '';
+}
+
+/** The text a transform call (a request's `user`) was asked to change. */
+export function transformText(user) {
+  return /<text>\n([\s\S]*?)\n<\/text>/.exec(user)?.[1] ?? '';
+}
+
+/** A transform call's instruction (a request's `user`). */
+export function transformInstruction(user) {
+  return /^INSTRUCTION: (.*)$/m.exec(user)?.[1] ?? '';
 }
 
 /** A rewrite call's spoken instruction (a request's `user`). */
