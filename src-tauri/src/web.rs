@@ -79,6 +79,7 @@ pub use grounding::{
     local_query, local_retry_query, needs_web, no_search_line, price_note, refers_back, search_query, strip_sources_note,
     NOT_SEARCHED_LINE, NOT_SEARCHED_NOTE, NOT_SEARCHED_THAT_NOTE,
 };
+#[cfg(debug_assertions)]
 pub use page::clear_caches;
 pub use turn::{bracket_citations, normal_url, Turn};
 

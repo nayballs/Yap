@@ -82,7 +82,9 @@ mod notes;
 use serde_json::{json, Value};
 
 pub use agent::{run_tool_loop_with, FirstStep};
-pub use notes::{changed_note, definitions, rag_notes, search_notes};
+pub use notes::{rag_notes, search_notes};
+#[cfg(debug_assertions)]
+pub use notes::{changed_note, definitions};
 
 const MAX_TOOL_STEPS: usize = 20;
 const MAX_CONTENT_LENGTH: usize = 500;

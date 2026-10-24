@@ -92,6 +92,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
+#[cfg(any(debug_assertions, test))]
 use serde_json::{json, Value};
 
 pub use index::{apps, App, Source};

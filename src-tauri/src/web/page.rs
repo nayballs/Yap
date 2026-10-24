@@ -12,10 +12,13 @@ use serde::Serialize;
 
 use crate::privacy::net::Recorded as _;
 
+#[cfg(debug_assertions)]
 use super::native;
 use super::turn::normal_url;
 use super::wiki::tidy_lines;
-use super::{network_error, site_of, tidy, Endpoints, CACHE_FOR, MAX_REDIRECTS, PAGE_BYTES, PAGE_TIMEOUT, SEARCHES, USER_AGENT};
+use super::{network_error, site_of, tidy, Endpoints, CACHE_FOR, MAX_REDIRECTS, PAGE_BYTES, PAGE_TIMEOUT, USER_AGENT};
+#[cfg(debug_assertions)]
+use super::SEARCHES;
 
 /// Host names that are this PC or its network, whatever they resolve to.
 fn is_local_name(host: &str) -> bool {

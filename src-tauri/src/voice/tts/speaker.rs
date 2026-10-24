@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use super::playback::{rodio_opener, set_volume, sim_opener, volume, Opener, Playback, Tag};
+#[cfg(debug_assertions)]
+use super::playback::volume;
+use super::playback::{rodio_opener, set_volume, sim_opener, Opener, Playback, Tag};
 use super::text::{inline_text, sentences, speakable_blocks, utterances};
 #[cfg(debug_assertions)]
 use super::{spoken, Spoken};
