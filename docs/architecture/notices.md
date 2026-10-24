@@ -34,6 +34,14 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   fixture runs it before every test), `e2e_focus {focused}` and `e2e_notice
   {surface: bar|window, kind, title, body, level, timeoutMs, dictating}`
   (a notice through the real policy, or a pretend dictation's `yap-state`).
+- **The offer of AI cleanup** (`cleanup_styles::offer`, `lib/cleanupOffer.js`,
+  2026-10-24): one tip, ever, in the main window — to someone with cleanup
+  off on a PC the on-device model fits, after five dictations — asked of
+  Rust after a dictation is saved or when the window comes to the front;
+  `cleanup_offer_status` says yes only while `window_view` has the person
+  looking at the main window and `moment()` has no dictation, meeting or
+  first-run setup, and never with tips off. Set it up / Not now; shown =
+  `cleanup_offer_seen`.
 - **`alert.rs`** — one-off notices the person must act on (`elevated.rs`'s
   "Your text is copied: press Ctrl+V", `mic_privacy.rs`'s "Windows is blocking
   microphone access…", call-prompt fatigue's "Stop asking about calls?" /

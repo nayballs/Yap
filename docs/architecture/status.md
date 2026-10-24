@@ -32,6 +32,30 @@ Ryzen 7 9800X3D, RTX 5070 Ti, Windows 11, Parakeet V3; memory = private working 
 
 ## What works
 
+**AI cleanup that sounds right with no set-up** (2026-10-24,
+`cleanup_styles.rs`, ai-models.md): **styles by app** — Email formal, Work
+and Personal chat casual, Documents formal, AI prompts literal (no
+"please", nothing rephrased, never answered), Terminal commands as said,
+everything else in the speaker's own words — each kind a cleanup profile
+with built-in apps (programs, and web apps by their tab's title; coding
+CLIs and shells as `app_kind.rs` reads them), editable in Settings →
+Language Models → Dictation cleanup → Styles by app with You say / Yap
+types examples; the person's own app rules win as before; filler alone
+asks no model. **Offered in first setup** (on this PC when the graphics
+card runs the recommended model, else the cloud with what goes there;
+nothing on until chosen) and once, as a tip, to someone with cleanup off
+on a PC it fits. Existing installs keep cleanup as they had it; someone with
+their own body keeps it everywhere (styles off for them). Model
+evaluations (`--styles`, docs/model-evals.md "Styles by app"): 22 cases
+per kind and tone passing 55 % → 100 % on Qwen3.5-4B, 62 % → 100 % on
+Groq's gpt-oss-20b (8 cases), 55 % → 73 % on Qwen2.5-1.5B, at no time a
+dictation would notice (+7 ms on the card). Unit-tested (category detection, resolution, lines,
+fitting, the offer), e2e-tested (`cleanup-styles.spec.js`,
+`cleanup-offer.spec.js`), robot tests written (`cleanup-styles.real.js`:
+a web mail page, a chat page, a plain page, PowerShell, the Claude Code
+stand-in). Not yet tried with a real voice in real Outlook, Slack or
+WhatsApp, nor the 1.5B on a PC without a graphics card day to day.
+
 **Trusting a dictation** (2026-10-22): **the speech engine's device on each
 PC** (`stt_speed.rs`: a one-time background benchmark per model at three
 dictation lengths, Settings → Speech-to-Text → Speed "Runs on: graphics card

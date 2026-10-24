@@ -6,7 +6,10 @@ How a dictation runs: the hotkey and push-to-talk gestures, the mic, speech-to-t
 
 ## The pipeline order
 
-Pipeline order after transcription: **AI cleanup → dictionary (exact, then a
+Pipeline order after transcription: **AI cleanup (in the style of the kind
+of app it goes into — email formal, chats casual, AI prompts literal,
+terminal commands as said: `cleanup_styles.rs`, [ai-models.md](./ai-models.md);
+the person's own app rules first, as ever) → dictionary (exact, then a
 fuzzy near-miss pass) → names on screen (`screen_terms.rs`: a name heard a
 little wrong spelled as the window shows it) → the "press enter" voice
 command → snippets → fit to the

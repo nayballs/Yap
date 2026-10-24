@@ -40,7 +40,19 @@
   (the 4B offered once, `local_llm::upgrade_offer`) + `local_context` (the
   on-device model's context in tokens; 0 = 8,192; `local_llm::effective_context`), `cleanup_profiles` (each
   with an optional per-profile LLM override: provider/base_url/model/api_key — empty
-  provider = inherit global) + `app_routes` smart routing, streaming_partials,
+  provider = inherit global; since 2026-10-24 also **styles by app**,
+  `cleanup_styles.rs`: a profile with a `category` — "email", "workChat",
+  "personalChat", "documents", "aiPrompts", "terminal", "other", ids
+  `style-<category>`, one each, added at load — its `tone` ("formal",
+  "casual", "veryCasual", "natural", "literal", "command", "off"; defaults
+  formal / casual / casual / formal / literal / command / natural), `apps`
+  (added: a process name or a site's name) and `removed_apps` (built-in apps
+  taken out, by name); a style's `prompt` is *added* to `pp_prompt`) +
+  `app_routes` smart routing (a rule may name a style) + `cleanup_styles`
+  ("Match the style to the app": missing = decided once at load, on unless
+  `pp_preset` isn't "default" — a body the person picked for everywhere
+  stays as it was; no `migrate_once`) + `cleanup_offer_seen` (the one tip
+  offering cleanup was shown; `cleanup_styles::offer`), streaming_partials,
   history_enabled, update_checks_enabled, dictionary_fuzzy, learn_words
   ("Suggest words from your corrections", default on, `learn.rs`),
   show_tips ("Show tips", default on: coaching hints and nudges;

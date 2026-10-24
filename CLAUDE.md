@@ -87,7 +87,7 @@ global hotkey ─▶ input_hook ─▶ "dictation-key-pressed" / "-released"
                                             emits "yap-transcript"
 ```
 
-After transcription: **AI cleanup → dictionary (exact, then fuzzy near-misses) →
+After transcription: **AI cleanup (in the style of the kind of app: `cleanup_styles.rs`) → dictionary (exact, then fuzzy near-misses) →
 the "press enter" voice command → snippets → fit to the kind of app and the text
 around the cursor → inject → submit key, or the correction watch**. Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation never
@@ -131,6 +131,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 **AI models** — [ai-models.md](./docs/architecture/ai-models.md)
 - `about_you.rs` — About you: one Region (Windows' country, or one picked; money, units, language and spelling follow it, the clock is the PC's), name and note → the block every model's prompt ends with, searches and prices aimed at the country, the web's temperatures in their scale first, cleanup spelling.
 - `llm.rs` — OpenAI-compatible client, immutable base prompts, chat/tool calls, rate-limit waits.
+- `cleanup_styles.rs` — styles by app: cleanup's tone per kind of app (email formal, chats casual, AI prompts literal, terminal commands as said; built-in app lists, editable), as cleanup profiles; app rules first; the one offer of cleanup.
 - `local_llm.rs` — on-device llamafile sidecar: models, recommendation, server args (MTP), context, restarts, warm-up, the runtime's background upgrade (retry without MTP, the way back, launch repair, cross-Yap lock).
 - `gguf.rs` — read-only GGUF headers and memory estimates per context length.
 - `gpu.rs` — the graphics card (DXGI), for the recommended on-device model.
@@ -230,7 +231,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `lib/appearance.js` — General → Appearance in every window: Theme (System / Light / Dark → `data-yap-theme`, System follows Windows live; the bar's Match app → `data-bar-theme`; `index.html`'s head script puts it on before the first paint), reading font/size tokens (`--yap-font-reading`, `--yap-reading-scale`) for chats/notes/notepad only, and reduced Motion.
 - `lib/ControlPanel.svelte` — the main window (label `settings`): sidebar, Settings modal, title bar.
 - `ui/toast.svelte.js` + `ui/noticePolicy.js` — app-wide toasts running the page's notice policy.
-- `HomeView` / `InsightsView` / `UploadView` — dictation feed (a dictation's "AI edited · N changes" word diff, `lib/wordDiff.js`, and Paste what I said), stats, audio-file transcription; `lib/appNames.js` (apps by their names), `lib/aiErrors.js` (AI failures in plain words).
+- `HomeView` / `InsightsView` / `UploadView` — dictation feed (a dictation's "AI edited · N changes" word diff, `lib/wordDiff.js`, and Paste what I said), stats, audio-file transcription; `lib/appNames.js` (apps by their names), `lib/aiErrors.js` (AI failures in plain words), `lib/cleanupOffer.js` (the one tip offering AI cleanup).
 - `App.svelte` — one chunk per window: each loads only its own view (the Yap bar ~150 KB, not the whole app).
 - `DictionaryView.svelte` — corrections and snippets ([dictionary.md](./docs/architecture/dictionary.md)).
 - `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)).
@@ -240,7 +241,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
 - `Overlay.svelte` + `bar/` — the Yap bar's page (🎤 ◉ 🔊 ✂ ^), the reading card `bar/ReadingCard.svelte` ([yap-bar.md](./docs/architecture/yap-bar.md)).
-- `Settings.svelte` + `settings/` — Settings, always mounted in the modal: the nav by scope with search (`settingsIndex.js`; old links land via `nav.js` aliases), General / Dictation / Shortcuts / Meetings / Privacy & data / About as page components, one row style in `lib/ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch.
+- `Settings.svelte` + `settings/` — Settings, always mounted in the modal: the nav by scope with search (`settingsIndex.js`; old links land via `nav.js` aliases), General / Dictation / Shortcuts / Meetings / Privacy & data / About as page components, one row style in `lib/ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch, `settings/CleanupStyles.svelte` + `lib/cleanupStyles.js` its Styles by app (tones, examples, apps).
 - `MemorySection.svelte` + `memory.svelte.js` — Settings → Assistant → Memory and the "Yap remembered…" toast ([memory.md](./docs/architecture/memory.md)).
 - `AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
 - `ModelManager` / `ModelRow`, `Onboarding`, `lib/ui/` — speech models, first run, primitives, right-click menus.
@@ -390,7 +391,7 @@ web search and spoken replies off. Every setting, file and default: [config-and-
 
 ## Current status
 
-- **Dictation is complete and real**: local transcription (Whisper/Vulkan + ONNX/DirectML, or the processor where that's faster on the PC), push-to-talk, AI cleanup (cloud or on-device Qwen) with "Use what I said", Commands, smart pasting into terminals and chat apps, dictionary learning, Undo, a day of audio to run a dictation again.
+- **Dictation is complete and real**: local transcription (Whisper/Vulkan + ONNX/DirectML, or the processor where that's faster on the PC), push-to-talk, AI cleanup (cloud or on-device Qwen; a style per kind of app, offered in first setup) with "Use what I said", Commands, smart pasting into terminals and chat apps, dictionary learning, Undo, a day of audio to run a dictation again.
 - **Meetings**: recorder (You/Them), its audio kept on disk (crash recovery, Transcribe again, ▶ a line), rolling digests + action plan, the notepad, call detection, guard rails, the calendar, beta speaker separation.
 - **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation), Snip to Chat (a screenshot of any screen into Chat, HDR right; the overlay up ~50–60 ms after Win+Alt+S).
 - **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly.

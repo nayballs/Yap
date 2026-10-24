@@ -158,6 +158,70 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   again without one; a 400 about reasoning on a call with tools (OpenAI's
   GPT-6 take tools on Chat Completions only with reasoning off) again with
   `reasoning_effort: "none"`, once each.
+- **`cleanup_styles.rs`** — **styles by app** (2026-10-24; Wispr Flow's
+  styles per kind of app and OpenWhispr's Tone & Style of 21 Oct, by
+  behaviour; the market analysis' #5): cleanup that sounds right where you
+  are with no set-up. **Kinds** (`Category`): Email, Work chat, Personal
+  chat, Documents, AI prompts, Terminal, Everything else, each with
+  built-in apps (`built_in`: process names — Outlook/olk, Thunderbird,
+  Slack, Teams, WhatsApp, Discord, Word, Notion, Obsidian, ChatGPT, Cursor,
+  VS Code… — and the site a browser tab's title ends with: Gmail, Outlook,
+  Google Docs, Claude, Gemini…; Edge's profile segment allowed for; a chat
+  page `app_kind` found anywhere in the title), plus what `app_kind.rs`
+  reads of a terminal (a shell → Terminal, a coding CLI → AI prompts).
+  **Tones** (`Tone`; the kind's first): Email Formal / Casual / Natural,
+  chats Formal / Casual / Very casual (Casual), Documents Formal / Casual /
+  Natural, AI prompts **Literal** (no word added — no "please" —, nothing
+  rephrased, never answered) / Natural, Terminal **Command** (the words as
+  said, no capital or full stop) / **As said** (no AI), everything else
+  Natural / Formal / Casual. **They're cleanup profiles**
+  (`config::CleanupProfile` with a `category`, ids `style-<kind>`,
+  `ensure_profiles` at load): the tone, the apps added (`apps`: a process
+  or a site's name) and taken out (`removed_apps`), extra instructions
+  (`prompt`, *added* to the main body), the per-profile model override.
+  **Resolution** (`resolve(cfg, target)`, pure): the person's own app rule
+  for the process first, exactly as before (`YapConfig::resolve_cleanup`;
+  a rule naming a style takes that style), then "only clean up in apps with
+  a rule", then the kind's style while "Match the style to the app" is on
+  (`config.cleanup_styles`; `category`: a terminal's kind, then an app the
+  person added — moved here from another kind —, then the built-ins kept),
+  else the main body everywhere. **The prompt**: the system prompt is the
+  guardrails + the main body (+ the kind's additions) as ever; the style is
+  Yap's own line just before the transcript (`line`, joined with the names
+  on screen by `before_transcript`; `llm::with_names_line` places it): "This
+  dictation is the body of an email. Tone: formal and polished: complete
+  sentences, full punctuation, contractions written out (I will, do not),
+  no slang. The tone wins over keeping the speaker's wording; names keep
+  their spelling. Never change the meaning or add information." So every
+  kind shares the cached prompt and reads only its line and the transcript
+  afresh (~60–90 tokens more; model-evals.md "Styles by app": told "an
+  email", Qwen3.5-4B wrapped notes in "Dear Team," and "Best regards, [Your
+  Name]"; "the body of an email" stopped it). **The answer fitted** (`fit`):
+  an email's greeting and sign-off the model made up taken off
+  (`drop_unsaid_frame`: short lines none of whose words were said, and
+  "[placeholders]"), a command without the capital and full stop a
+  sentence would have ("Git status." → "git status"), a casual message's
+  semicolons as commas (not in code), a very casual one's final full stop.
+  **Filler alone** ("um uh", `filler_only`) asks no model: nothing typed.
+  `clean` is the one call (`pipeline::clean_up`, the model evaluations'
+  `--styles`). **The window** (`Target::of_window`, at the paste): its
+  process (`text_injector::app_name_for`), the kind read at record start,
+  and the title only for a browser (or Windows' app frame host), never
+  logged; Run again goes by the history entry's process. Test mode:
+  debug-only `e2e_style_app {exe, title}` stands in. **Existing installs**:
+  `on_load` decides "Match the style to the app" once for a config without
+  it — on, unless `pp_preset` isn't "default" (a body or preset they picked
+  for everywhere stays exactly as it was); cleanup itself is never turned
+  on. **The one offer** (`offer`, `cleanup_offer_status` / `_seen`;
+  `lib/cleanupOffer.js`): cleanup off, never shown, tips on, a PC the
+  on-device model fits (`gpu::can_run_big_model`, or a model already here)
+  and five dictations: one tip in the main window after a dictation or
+  when it comes to the front, only while the notice policy has the person
+  looking at it (`notice::window_view`, no dictation or meeting) — "Let Yap
+  tidy what you say" with Set it up (Language Models) / Not now — and never
+  again. A test run offers it only with `YAP_E2E_CLEANUP_OFFER`.
+  `cleanup_styles_catalog` gives Settings the kinds, tones and built-in apps
+  (with the names they go by). Unit-tested.
 - **`local_llm.rs`** — the on-device AI cleanup sidecar: runs **Mozilla llamafile**
   (llama.cpp, single-file OpenAI-compatible server) as a hidden child process on a
   free localhost port, serving **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) when no

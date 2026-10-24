@@ -347,10 +347,28 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   bring-your-own GGUFs), "Hide the model's thinking" for reasoning models.
   **Spelling** (`#settings-cleanup-spelling`, `RegionSpelling.svelte`: "Write
   in my region's spelling" → `regionSpelling`, greyed while cleanup is off).
-  With cleanup on: **Prompt Studio** (`PromptStudio.svelte`: View shows the
+  With cleanup on: **Styles by app** (`#settings-cleanup-styles`,
+  `settings/CleanupStyles.svelte` + `lib/cleanupStyles.js`, 2026-10-24;
+  `cleanup_styles.rs`): "Match the style to the app" (`cleanupStyles`,
+  `cleanup-styles`; off: "every app gets the same cleanup"), then a card per
+  kind of app from `cleanup_styles_catalog` (an icon, its name, its apps
+  — "Outlook, Gmail, Thunderbird and 10 more" —, its tone as a Segmented
+  bound to the kind's profile's `tone`, a line per tone, and a **You say →
+  Yap types** example for that tone, Wispr's example cards; the examples are
+  what Qwen3.5 4B wrote) and **Apps and instructions** (a `set-more`
+  disclosure: the apps as chips with ✕ — a built-in one goes to
+  `removedApps`, "Taken out: … put back" —, an add box suggesting apps
+  dictated into lately — `addApp` takes it out of every other kind, so
+  Discord moves from Personal to Work chat —, and "Extra instructions for
+  these apps", added to the main prompt). A note when "Only clean up in
+  apps with a rule" is on. The kinds' profiles ride in `cleanupProfiles`
+  (`buildClean` keeps their fields); Smart routing's Profiles list shows only
+  the person's own (`ownProfiles`), and an app rule can name a style
+  ("Style: Email"). **Prompt Studio** (`PromptStudio.svelte`: View shows the
   first four lines and "Show the whole prompt", Customize — preset + body +
   Save/Reset —, Test), **Smart routing** (only clean up in apps with a rule;
-  profiles with a per-profile model; app rules; Yap's own Selects), **Usage
+  profiles with a per-profile model; app rules — "A rule wins over Styles by
+  app"; Yap's own Selects), **Usage
   today**, and one line on where the text goes with a link to Privacy & data.
   The other tabs (`VoiceAgentConfig`, `NoteFormattingConfig`, `ChatConfig`,
   sharing `ScopeProviderConfig`): their switch first; off, one line; on, the

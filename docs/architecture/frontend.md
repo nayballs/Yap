@@ -368,7 +368,15 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   <card> runs Qwen3.5 4B quickly…", else Qwen2.5 1.5B; then Qwen2.5 1.5B as
   the light one; **two shown, the rest behind "More models (N)"** so the
   Download button shows without scrolling — a pick further down keeps the
-  list open) → the tray (the Yap bar, click the icon to open Yap,
+  list open). **Which way is recommended** (2026-10-24): **Private** (on
+  this PC) when the graphics card runs the recommended model or a model is
+  already here, else **Cloud** ("Recommended for this PC" on that card,
+  picked; Private says "slower without a graphics card"), with the privacy
+  line "Your voice never leaves this PC: … only the text of each dictation
+  goes to the provider you pick" (`data-privacy="cloud"`); nothing is on
+  until the person enables one — "Maybe later" leaves cleanup off. Once on,
+  the step says what it does where (Styles by app: Email · formal, chats ·
+  casual, AI prompts · word for word…; `cleanup_styles.rs`) → the tray (the Yap bar, click the icon to open Yap,
   right-click to paste the last dictation; the footer pinned at the bottom
   of every step) → "try it here" live dictation test with **Settings' own
   shortcut picker** (`ui/HotkeyInput.svelte` + `validateHotkey`: combos,
