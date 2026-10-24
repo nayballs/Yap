@@ -260,12 +260,14 @@ export const test = base.extend({
     { scope: 'worker', timeout: 120_000 },
   ],
 
-  // After each test: the windows it opened close (the test pad stays), and
-  // if Yap saw the focus move while keys were on their way (`realtest::
-  // check_after`: they may have reached another window), the test fails,
-  // naming the process that took the focus.
+  // Before each test: no toast an earlier test left in Yap's main window
+  // (`clearToasts`). After it: the windows it opened close (the test pad
+  // stays), and if Yap saw the focus move while keys were on their way
+  // (`realtest::check_after`: they may have reached another window), the
+  // test fails, naming the process that took the focus.
   afterEachRobot: [
     async ({ robot }, use) => {
+      await clearToasts(robot.yap.main);
       const seen = (await robot.yap.invoke('realtest_refusals')).length;
       await use();
       await robot.closeTargets();
@@ -294,6 +296,37 @@ export const test = base.extend({
     });
   },
 });
+
+/**
+ * Close the toasts up in Yap's main window (their Close buttons, clicked
+ * over CDP: no real input), then move the page's pointer off them.
+ *
+ * Why: one robot Yap serves every spec with the default `robotOptions`, one
+ * after another (Playwright runs those files in one worker). A click over
+ * CDP leaves the page's pointer where it clicked, and nothing moves it after
+ * — learn.real.js clicks Add and Not now on its suggestion toast. From then
+ * on every toast comes up under that pointer: hovered, its timer paused for
+ * good, and no notice may take its place (noticePolicy.js `preempts`: never
+ * from under the pointer). So rewrite-last.real.js' "Couldn't rewrite your
+ * last dictation" stayed up, and testpad.real.js' guard test, later in the
+ * run, never saw "Robot mode refused to paste": it waited in the queue
+ * (failed in full runs on 2026-10-23 and 24, passed alone; learn,
+ * rewrite-last then testpad fail every time without this).
+ */
+export async function clearToasts(main) {
+  const toasts = main.getByRole('status');
+  try {
+    await expect(async () => {
+      const close = toasts.getByRole('button', { name: 'Close', exact: true }).first();
+      if ((await close.count()) > 0) await close.click({ timeout: 1_000 });
+      await expect(toasts).toHaveCount(0, { timeout: 500 });
+    }).toPass({ timeout: 20_000 });
+    // The click left the page's pointer where the toasts come up.
+    await main.mouse.move(0, 0);
+  } catch (e) {
+    console.warn(`robot: couldn't clear the toasts in Yap's main window: ${e.message}`);
+  }
+}
 
 /** A process's name, for a message ("claude.exe"). */
 function processName(pid) {

@@ -18,6 +18,11 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   later words make the same term as closely alone), so the word or list marker
   before a term survives ("to Kubernetes", "1. kubernetes"; found by the real-app
   robot, 2026-10-17). Max 3 words per n-gram, so "Chat G P T" (4) leaves a "T".
+  The text between the words is kept as it was, line breaks included, and a
+  run never reaches over a line break (an email's "Hi Sam," keeps its own
+  line: until 2026-10-24 every pass here — the dictionary's, memory's names,
+  the names on screen — put the words back together with single spaces, and
+  the real-app robot's Gmail page got "Hi Sam, Thank you for the figures.").
   Runs after `apply_dictionary` for ONNX models (`dictionary_fuzzy`, default on);
   snippets are never candidates. **`apply_names`** is the same loop for the
   names Yap remembers (`memory/vocab.rs`, run after the dictionary's own pass

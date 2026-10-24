@@ -977,6 +977,20 @@ mod tests {
     }
 
     #[test]
+    fn an_email_keeps_its_lines() {
+        // The robot's Gmail page (2026-10-24): any term on screen and an
+        // email's greeting lost its own line ("Hi Sam, Thank you…").
+        let s = screen(SCREEN);
+        let keep = |_: &str| false;
+        let email = "Hi Sam,\n\nThank you for the figures.\n\nBest regards,\nAlex";
+        assert_eq!(s.correct(email, &keep, &words), email);
+        assert_eq!(
+            s.correct("Hi Sam,\n\nI spoke to Rachelle about it.", &keep, &words),
+            "Hi Sam,\n\nI spoke to Rochelle about it."
+        );
+    }
+
+    #[test]
     fn ordinary_words_near_a_name_are_never_changed() {
         let s = screen(SCREEN);
         let keep = |_: &str| false;
