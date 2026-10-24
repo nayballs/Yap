@@ -122,11 +122,13 @@ async fn ask(ep: &Endpoint, system: &str, user: &str, max_changes: usize, backgr
 /// `response_format`); a server that won't take the schema is asked once
 /// more without it.
 async fn call(ep: &Endpoint, messages: &Value, opts: &crate::llm::ChatOptions, extra: serde_json::Map<String, Value>) -> Result<String, String> {
-    let out = crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages.clone(), opts, extra.clone()).await;
+    let ask = crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages.clone(), opts, extra.clone());
+    let out = crate::net::within(crate::net::Feature::Memory, ask).await;
     match out {
         Err(e) if !extra.is_empty() && (e.contains("response_format") || e.contains("400") || e.contains("schema")) => {
             tracing::info!("Memory: the model's server refused the JSON schema; asking without it");
-            crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages.clone(), opts, serde_json::Map::new()).await
+            let ask = crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages.clone(), opts, serde_json::Map::new());
+            crate::net::within(crate::net::Feature::Memory, ask).await
         }
         other => other,
     }

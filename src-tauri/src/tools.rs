@@ -1302,10 +1302,15 @@ async fn search_for_the_model(turn: &mut crate::web::Turn, query: &str, messages
 /// tool call shown as its chip; a model on this PC steps aside for a
 /// dictation), else as a whole answer.
 async fn ask(live: Option<crate::stream::Live<'_>>, req: &crate::llm::ChatRequest, tools_offered: bool, disable_thinking: bool) -> Result<Value, String> {
-    match live {
-        Some(live) => crate::stream::call(live, req, tools_offered, disable_thinking).await,
-        None => crate::llm::post_whole(req).await,
-    }
+    // Recorded as Chat's in the network receipts (net.rs), unless the turn
+    // is already someone else's (the Voice Assistant's).
+    let step = async move {
+        match live {
+            Some(live) => crate::stream::call(live, req, tools_offered, disable_thinking).await,
+            None => crate::llm::post_whole(req).await,
+        }
+    };
+    crate::net::within(crate::net::Feature::Chat, step).await
 }
 
 /// Yap's own web search is under way (the page shows it as a chip).

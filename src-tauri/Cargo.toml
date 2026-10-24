@@ -88,6 +88,9 @@ png = "0.18"
 
 # Model download + directory-model extract/verify (used by stt.rs)
 reqwest = { version = "0.12", features = ["stream", "json"] }
+# Network receipts (net.rs): an answer's body counted as it's read, its
+# size hint kept. The http-body 1 reqwest itself builds on: no new copy.
+http-body = "1"
 # Chat's `read_page` (web.rs): a web page's readable text, on this PC — a
 # close port of Mozilla's readability.js (MIT). 0.17 builds on the same
 # dom_query (0.27, html5ever 0.38) tauri-utils and wry already pull in, so

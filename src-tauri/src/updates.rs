@@ -574,6 +574,21 @@ fn build_updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, Strin
     builder.build().map_err(|e| e.to_string())
 }
 
+/// Where a check goes, as the network receipts name it (`net.rs`): the test
+/// endpoint, else the first of tauri.conf.json's (GitHub Releases).
+fn receipt_endpoint(app: &AppHandle) -> String {
+    if let Some(url) = test_endpoint() {
+        return url.to_string();
+    }
+    app.config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|u| u["endpoints"][0].as_str())
+        .unwrap_or("https://github.com/")
+        .to_string()
+}
+
 /// A short, human reason for a failed check (the raw error goes to the log).
 fn friendly_check_error(e: &str) -> String {
     let lower = e.to_ascii_lowercase();
@@ -615,7 +630,17 @@ async fn run_check(app: &AppHandle, manual: bool) -> (Outcome, String) {
     changed(app);
 
     let result = match build_updater(app) {
-        Ok(updater) => updater.check().await.map_err(|e| e.to_string()),
+        Ok(updater) => {
+            // The updater has its own HTTP client: its check is recorded
+            // by hand in the network receipts (net.rs).
+            let receipt = crate::net::begin(crate::net::Purpose::UpdateCheck, &receipt_endpoint(app));
+            let checked = updater.check().await.map_err(|e| e.to_string());
+            match &checked {
+                Ok(found) => receipt.answered(0, 0, found.as_ref().map_or(0, |u| u.raw_json.to_string().len() as u64)),
+                Err(_) => receipt.failed(0, 0),
+            }
+            checked
+        }
         Err(e) => Err(e),
     };
     let checked_at = now();
@@ -713,6 +738,7 @@ async fn download_update(app: AppHandle) {
 
     let mut received: u64 = 0;
     let mut last_emit = Instant::now();
+    let receipt = crate::net::begin(crate::net::Purpose::UpdateDownload, update.download_url.as_str());
     let result = update
         .download(
             |chunk, total| {
@@ -731,6 +757,10 @@ async fn download_update(app: AppHandle) {
             || {},
         )
         .await;
+    match &result {
+        Ok(bytes) => receipt.answered(0, 0, bytes.len() as u64),
+        Err(_) => receipt.failed(0, received),
+    }
 
     match result {
         Ok(bytes) => {

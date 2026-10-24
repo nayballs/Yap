@@ -1840,7 +1840,8 @@ impl Shared {
             None => selection,
         };
 
-        match crate::llm::rewrite(
+        // Recorded as Commands' in the network receipts (net.rs).
+        match crate::net::within(crate::net::Feature::Commands, crate::llm::rewrite(
             &instruction,
             &selection,
             &base_url,
@@ -1849,7 +1850,7 @@ impl Shared {
             &provider,
             &body,
             disable_thinking,
-        )
+        ))
         .await
         {
             Ok(result) => {
@@ -2212,7 +2213,7 @@ impl Shared {
                 let spelling = self.config.read().ok().and_then(|c| crate::about_you::cleanup_spelling(&c));
                 // The names on screen the transcript seems to hold.
                 let names = crate::screen_terms::cleanup_line(screen, raw, &dict);
-                match crate::llm::cleanup_with_names(
+                match crate::net::within(crate::net::Feature::Dictation, crate::llm::cleanup_with_names(
                     raw,
                     &pp_base_url,
                     &pp_api_key,
@@ -2223,7 +2224,7 @@ impl Shared {
                     names.as_deref(),
                     &dict,
                     pp_disable_thinking,
-                )
+                ))
                 .await
                 {
                     // Ok(empty) is a DELIBERATE empty result (filler-only

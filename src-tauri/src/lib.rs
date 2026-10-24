@@ -27,6 +27,7 @@ mod commands;
 mod config;
 mod context_menu;
 mod diarize;
+mod diagnostics;
 mod dict_usage;
 mod e2e;
 mod elevated;
@@ -64,6 +65,7 @@ mod mic_privacy;
 mod mic_watch;
 mod model_catalog;
 mod mute;
+mod net;
 mod overlay;
 mod partials;
 mod pause;
@@ -187,6 +189,8 @@ pub(crate) fn shutdown_cleanup() {
     local_llm::shutdown();
     bridge::stop();
     mute::restore_all();
+    // The week of network receipts, as it stands (net.rs).
+    net::flush();
 }
 
 /// `yap.exe mcp` (main.rs): serve MCP to an AI app over stdin/stdout until it
@@ -526,6 +530,15 @@ pub fn run() {
             commands::action_delete,
             commands::log_info,
             commands::open_logs_folder,
+            net::connections_summary,
+            net::connections_clear,
+            net::connections_note,
+            diagnostics::diagnostics_preview,
+            diagnostics::diagnostics_save,
+            diagnostics::diagnostics_reveal,
+            diagnostics::diagnostics_issue_url,
+            #[cfg(debug_assertions)]
+            diagnostics::e2e_save_path,
             commands::meeting_start,
             commands::meeting_state,
             commands::note_export,
@@ -801,6 +814,9 @@ pub fn run() {
             // adopts it); one Yap couldn't read at start is said once the
             // windows are up (config.rs).
             config::init(&handle);
+            // Network receipts (net.rs): every connection Yap makes, kept a
+            // week in connections.json.
+            net::init(&handle);
 
             // Register the app handle so the usage tracker can emit live
             // `groq-usage` updates after each AI-cleanup call.
