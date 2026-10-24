@@ -206,6 +206,10 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 **Accounts** — [accounts.md](./docs/architecture/accounts.md)
 - `auth.rs` — optional accounts: browser/email/phone sign-in, the session, where you're signed in.
 
+**Network receipts, Report a problem** — [privacy-receipts.md](./docs/architecture/privacy-receipts.md)
+- `net.rs` — every request through one place (`.send_for(Purpose)`, the feature from `net::within`): host, purpose, status, bytes, never content; on this PC / your network / internet; `connections.json` (7 days, folded per 10 min); the updater, the Local API and the account picture by hand.
+- `diagnostics.rs` — Report a problem: a .zip shown before it's saved (system, an allow-listed settings summary, connections, errors, 3 days of `info`+ logs scrubbed); Save dialog, never uploaded; GitHub's new-issue page.
+
 **Updates** — [updates-and-release.md](./docs/architecture/updates-and-release.md)
 - `updates.rs` — background update checks and downloads, announcements, safe install.
 
@@ -240,6 +244,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
 - `Overlay.svelte` + `bar/` — the Yap bar's page (🎤 ◉ 🔊 ✂ ^), the reading card `bar/ReadingCard.svelte` ([yap-bar.md](./docs/architecture/yap-bar.md)).
+- `settings/ConnectionsView.svelte` (Privacy & data → Network connections) + `settings/ReportProblem.svelte` (About) — [privacy-receipts.md](./docs/architecture/privacy-receipts.md); `lib/connections.js` notes the account picture.
 - `Settings.svelte` + `settings/` — Settings, always mounted in the modal: the nav by scope with search (`settingsIndex.js`; old links land via `nav.js` aliases), General / Dictation / Shortcuts / Meetings / Privacy & data / About as page components, one row style in `lib/ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch.
 - `MemorySection.svelte` + `memory.svelte.js` — Settings → Assistant → Memory and the "Yap remembered…" toast ([memory.md](./docs/architecture/memory.md)).
 - `AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
@@ -371,7 +376,7 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 `models/` (speech; `diarization/`, `tts/`), `llm/` (on-device GGUFs), `history.json`,
 `notes.json`, `chats.json`, `calendar.json`, `updates.json`, `model_catalog.json`,
 `groq_usage.json`, `dictionary_usage.json`, `hints.json`, `word_suggestions.json`,
-`notices.json`, `memory.json` (what Yap remembers about you), `chat-images/` (Chat's screenshots, Snip to Chat), `quieted_apps.json`
+`notices.json`, `memory.json` (what Yap remembers about you), `chat-images/` (Chat's screenshots, Snip to Chat), `connections.json` (a week of network receipts: hosts and purposes, never content), `quieted_apps.json`
 (only mid-dictation), `stt_speed.json` (each model's device timings),
 `recent-audio/` (a day of dictation audio), `meeting-audio/` (each meeting's audio as
 FLAC, 14 days), `icons/`, `logs/`. Every JSON
@@ -393,7 +398,7 @@ web search and spoken replies off. Every setting, file and default: [config-and-
 - **Dictation is complete and real**: local transcription (Whisper/Vulkan + ONNX/DirectML, or the processor where that's faster on the PC), push-to-talk, AI cleanup (cloud or on-device Qwen) with "Use what I said", Commands, smart pasting into terminals and chat apps, dictionary learning, Undo, a day of audio to run a dictation again.
 - **Meetings**: recorder (You/Them), its audio kept on disk (crash recovery, Transcribe again, ▶ a line), rolling digests + action plan, the notepad, call detection, guard rails, the calendar, beta speaker separation.
 - **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation), Snip to Chat (a screenshot of any screen into Chat, HDR right; the overlay up ~50–60 ms after Win+Alt+S).
-- **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly.
+- **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly, network receipts (every connection, by purpose) and Report a problem (a diagnostic file you check, never uploaded).
 - Much is unit-, e2e- and robot-tested but not yet tried in real use (a real call, real AI apps, answers heard on speakers…).
 - **Not yet done**: Chat's semantic search, a rich notes editor, the call app's speaker names checked in a real call, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.
 

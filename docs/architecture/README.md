@@ -27,6 +27,7 @@ its one line in CLAUDE.md's module index).
 - [notices.md](./notices.md) — the notice policy, alerts, Windows notifications.
 - [integrations.md](./integrations.md) — the local API, the MCP server, adding Yap to AI apps, the Integrations view.
 - [accounts.md](./accounts.md) — optional accounts: sign-in, sessions, Settings → Account.
+- [privacy-receipts.md](./privacy-receipts.md) — network receipts (every connection Yap makes, by host and purpose: `net.rs`, Settings → Privacy & data → Network connections) and Report a problem (a diagnostic file checked before it's saved: `diagnostics.rs`, Settings → About).
 - [updates-and-release.md](./updates-and-release.md) — the updater, the installer, the stable and nightly channels, cutting a nightly.
 - [frontend.md](./frontend.md) — theme, window chrome, the ControlPanel and its toasts, Home / Insights / Upload, the speech model browser, onboarding, UI primitives and right-click menus.
 - [frontend-settings.md](./frontend-settings.md) — Settings, page by page.

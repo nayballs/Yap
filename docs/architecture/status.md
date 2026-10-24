@@ -32,6 +32,25 @@ Ryzen 7 9800X3D, RTX 5070 Ti, Windows 11, Parakeet V3; memory = private working 
 
 ## What works
 
+**Trust: network receipts and Report a problem** (2026-10-24,
+[privacy-receipts.md](./privacy-receipts.md)): every request Yap makes goes
+through `net.rs` (a unit test fails on any that doesn't), recorded by host,
+purpose, feature, status and bytes — never content — in `connections.json`
+for a week; Settings → Privacy & data → Network connections lists them by
+purpose and host, cloud and on this PC alike, with a filter and Clear.
+Settings → About → Report a problem builds a diagnostic .zip (system, an
+allow-listed settings summary, connections, errors, 3 days of `info`+ logs
+scrubbed), shows it before it's saved through the Save dialog, uploads
+nothing, then offers GitHub's new-issue page. Unit-tested (the recorder on
+a real local request, the store's folding and roll-over, hosts without
+paths or queries, a bundle seeded with fake keys and personal details
+holding none of them) and e2e-tested (`e2e/network-receipts.spec.js`: a
+cloud call and one on this PC through fake servers, the filter, light and
+dark, Clear; the preview, Save, the zip searched, the issue page). **Not
+yet tried**: the list over a real day of use (a real cloud provider, the
+updater's real check against GitHub, a model download), the real Save
+dialog and Show in folder.
+
 **Trusting a dictation** (2026-10-22): **the speech engine's device on each
 PC** (`stt_speed.rs`: a one-time background benchmark per model at three
 dictation lengths, Settings → Speech-to-Text → Speed "Runs on: graphics card

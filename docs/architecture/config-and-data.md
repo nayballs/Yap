@@ -230,6 +230,14 @@
   chat models as it last listed them (id, name, created, context, tools,
   first seen), when, and why the last check failed (`model_catalog.rs`).
   Never a key. Safe to delete (the curated lists show until the next check).
+- Network receipts: `%APPDATA%/yap/connections.json` — every connection Yap
+  made in the last 7 days, folded per purpose, feature and host within 10
+  minutes (when, the host — never a path, query, header or body —, the
+  purpose label, the feature, this PC / your network / internet, the
+  count, failures, the last status, bytes sent and received), ≤ 4,000
+  entries (`net.rs`, [privacy-receipts.md](./privacy-receipts.md)). Never
+  content or a key. Cleared from Settings → Privacy & data → Network
+  connections; safe to delete.
 - Updates: `%APPDATA%/yap/updates.json` — which update was announced (and when),
   the last check time, and the restart marker (`updates.rs`).
 - Calendar: `%APPDATA%/yap/calendar.json` — connected calendars (name, kind,
