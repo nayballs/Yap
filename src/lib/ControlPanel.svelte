@@ -27,6 +27,7 @@
   import { initWordSuggestions } from './wordSuggestions.js';
   import { initAlerts } from './alerts.js';
   import { initMemory } from './memory.svelte.js';
+  import { initCleanupOffer } from './cleanupOffer.js';
   import ConnectCalendarDialog from './ConnectCalendarDialog.svelte';
   // Every view is in this window's one chunk (~590 KB): loading the views
   // other than Home on demand was measured on 2026-10-22 and changed nothing
@@ -96,6 +97,9 @@
   // Memory (memory.rs via memory.svelte.js): "Yap remembered: your sister
   // is Rochelle" with Undo and Manage (→ Settings → Memory).
   initMemory({ openSettings: (section) => openSettings(section) });
+  // The one offer of AI cleanup, to someone with it off on a PC the
+  // on-device model fits (cleanup_styles.rs via cleanupOffer.js).
+  initCleanupOffer({ openSettings: (section) => openSettings(section) });
   let bellOpen = $state(false);
 
   // Sidebar nav (Wispr order: Home, Insights, then the work surfaces).
