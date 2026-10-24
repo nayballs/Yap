@@ -380,7 +380,8 @@ store writes atomically and quarantines a corrupt file instead of crashing —
 config.json too: set aside, never saved over, the person told; its saves one at a time
 (`config::update`; [config-and-data.md](./docs/architecture/config-and-data.md)). A write
 that fails (a full disk, a file another program holds) keeps the data in memory, is
-retried with the next save and is said once, with Try again (`saving.rs`). Secrets
+retried with the next save and is said once, with Try again (`saving.rs`); temp files a
+crash mid-write left are swept at start-up (Yap's own names only). Secrets
 never go in files: the account session and calendar tokens live in Windows Credential
 Manager. The local API's discovery file is `~/.yap/cli-bridge.json`.
 

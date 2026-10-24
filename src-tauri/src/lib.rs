@@ -809,6 +809,9 @@ pub fn run() {
             config::init(&handle);
             // A store's save that fails is said from now on (saving.rs).
             saving::init(&handle);
+            // Temp files a crash mid-write left behind (config.rs): Yap's
+            // own names only, off the startup thread.
+            let _ = std::thread::Builder::new().name("temp-sweep".into()).spawn(config::sweep_temp_files);
 
             // Register the app handle so the usage tracker can emit live
             // `groq-usage` updates after each AI-cleanup call.

@@ -271,7 +271,9 @@ atomically with corrupt-file quarantine, and **a write that fails is said**
 change; "Couldn't save your note: the disk is full." with Try again where
 the person made the change, one notice for a save that failed by itself;
 unit-tested on locked and read-only files, e2e-tested with staged
-failures in `save-errors.spec.js` — a real full disk not tried). The default (no-feature) build still ships
+failures in `save-errors.spec.js` — a real full disk not tried); the temp
+files a crash mid-write leaves are swept at start-up, Yap's own stale ones
+only (unit-tested). The default (no-feature) build still ships
 the stub for fast `cargo check`. **Optional accounts** (`auth.rs` + `cloud/`): email
 codes and Google/GitHub/Discord sign-in, sign-out, delete-account — tested end
 to end locally (2026-10-01, `wrangler dev` + a mock provider). **Live since

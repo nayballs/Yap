@@ -96,7 +96,8 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   one at a time ([config-and-data.md](./config-and-data.md)). A store's
   write that fails keeps its data in memory, is retried with the next save
   and is said once, with Try again (`saving.rs`; `saving::init` in setup,
-  `saving::flush` in `shutdown_cleanup`).
+  `saving::flush` in `shutdown_cleanup`); setup sweeps the temp files a
+  crash mid-write left (`config::sweep_temp_files`, its own thread).
 
 ## Modules
 

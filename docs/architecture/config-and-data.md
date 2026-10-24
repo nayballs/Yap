@@ -267,7 +267,14 @@
   (`<name>.<pid>-<n>.tmp`, renamed over the file, tried again for ~100 ms
   while another program holds it): until 2026-10-23 every write of a file
   shared `<name>.tmp`, so two at once could rename a half-written file into
-  place. The app icons' cache writes the same way.
+  place. The app icons' cache writes the same way. A crash mid-write leaves
+  its temp file behind, which nothing replaces any more, so **start-up
+  sweeps them** (`config::sweep_temp_files`, on a thread of its own,
+  2026-10-24): in the data folder, `icons/`, `llm/` and each meeting's
+  `meeting-audio/` folder, only Yap's own names — `<file>.<pid>-<n>.tmp`,
+  and a store's `<stem>.tmp` of before 2026-10-23 (`OLD_TEMP_STEMS`) — and
+  only files over 10 minutes old (a dev build beside the installed one
+  writes the same folder); anything else is never touched.
 - **A write that fails is said, and nothing is lost** (`saving.rs`,
   2026-10-24; until then it was a warning in the log while the page said
   it saved). Every store writes through its `Saver` (`notes::SAVER`,

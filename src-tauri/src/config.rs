@@ -1333,6 +1333,85 @@ fn set_aside(path: &Path) -> std::io::Result<PathBuf> {
     }
 }
 
+/// How old a temp file must be before the start-up sweep takes it: a write
+/// takes milliseconds, so one this old was left by a crash (or a Yap killed
+/// mid-write) — never one another Yap is writing now (a dev build shares the
+/// folder with the installed one).
+const STALE_TEMP: Duration = Duration::from_secs(10 * 60);
+
+/// The stores whose writes went through `<stem>.tmp` before 2026-10-23
+/// (`with_extension("tmp")`), whose leftovers the sweep takes too.
+const OLD_TEMP_STEMS: &[&str] = &[
+    "config",
+    "notes",
+    "chats",
+    "memory",
+    "calendar",
+    "history",
+    "groq_usage",
+    "dictionary_usage",
+    "hints",
+    "word_suggestions",
+    "notices",
+    "quieted_apps",
+    "stt_speed",
+    "model_catalog",
+    "updates",
+];
+
+/// A temp file of Yap's own writes: `<file>.<pid>-<n>.tmp` ([`atomic_write`]),
+/// or a store's `<stem>.tmp` of before 2026-10-23. Nothing else.
+fn is_yap_temp(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".tmp") else {
+        return false;
+    };
+    if OLD_TEMP_STEMS.contains(&stem) {
+        return true;
+    }
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    match stem.rsplit_once('.').and_then(|(file, tag)| Some((file, tag.split_once('-')?))) {
+        Some((file, (pid, n))) => !file.is_empty() && digits(pid) && digits(n),
+        None => false,
+    }
+}
+
+/// Remove the temp files of Yap's own writes ([`is_yap_temp`]) older than
+/// `older_than` from `dir` (files only, not its subfolders). Returns how many.
+fn sweep_temps_in(dir: &Path, older_than: Duration) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let now = std::time::SystemTime::now();
+    entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter(|e| is_yap_temp(&e.file_name().to_string_lossy()))
+        .filter(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .is_ok_and(|at| now.duration_since(at).is_ok_and(|age| age >= older_than))
+        })
+        .filter(|e| std::fs::remove_file(e.path()).is_ok())
+        .count()
+}
+
+/// At start-up (on a thread of its own): the temp files a crash mid-write
+/// left behind — each write's is unique since 2026-10-23, so nothing
+/// replaced them — in the data folder and the folders Yap writes the same
+/// way (`icons/`, `llm/`, each meeting's in `meeting-audio/`). Only Yap's
+/// own names, only stale ones.
+pub fn sweep_temp_files() {
+    let dir = data_dir();
+    let mut dirs = vec![dir.clone(), dir.join("icons"), dir.join("llm")];
+    if let Ok(meetings) = std::fs::read_dir(dir.join("meeting-audio")) {
+        dirs.extend(meetings.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()));
+    }
+    let removed: usize = dirs.iter().map(|d| sweep_temps_in(d, STALE_TEMP)).sum();
+    if removed > 0 {
+        tracing::info!(removed, "Removed temp files an interrupted save left behind");
+    }
+}
+
 /// Move an unparseable store file aside (`<name>.corrupt-<unix-secs>`) so it
 /// is NEVER overwritten by a fresh default — the data stays recoverable.
 pub(crate) fn quarantine_corrupt(path: &Path) {
@@ -2139,6 +2218,53 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(30));
         update_at(&path, |c| c.hotkey = c.hotkey.clone()).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A crash mid-write leaves its temp file behind: the start-up sweep
+    /// takes Yap's own (`<file>.<pid>-<n>.tmp`, and the `<store>.tmp` of
+    /// before 2026-10-23) once they're stale, and nothing else.
+    #[test]
+    fn the_start_up_sweep_takes_only_yaps_own_stale_temp_files() {
+        let dir = scratch("sweep");
+        let an_hour_ago = std::time::SystemTime::now() - Duration::from_secs(3600);
+        let make = |name: &str, stale: bool| {
+            let p = dir.join(name);
+            std::fs::write(&p, "{").unwrap();
+            if stale {
+                std::fs::File::options().write(true).open(&p).unwrap().set_modified(an_hour_ago).unwrap();
+            }
+        };
+        // A crash's leftovers.
+        for name in ["notes.json.4321-7.tmp", "config.json.12-0.tmp", "notes.tmp", "config.tmp"] {
+            make(name, true);
+        }
+        // Yap's, but being written now (another Yap shares the folder).
+        make("history.json.999-3.tmp", false);
+        // Not Yap's names, or not files.
+        let theirs = [
+            "notes.json",
+            "config.corrupt-1700000000",
+            "report.tmp",
+            "notes.json.tmp",
+            "photo.1-2.png",
+            "notes.json.abc-1.tmp",
+            "x.12-.tmp",
+            "a.b-c.tmp",
+            ".tmp",
+        ];
+        for name in theirs {
+            make(name, true);
+        }
+        std::fs::create_dir(dir.join("cache.1-2.tmp")).unwrap();
+        assert_eq!(sweep_temps_in(&dir, Duration::from_secs(600)), 4);
+        let mut left: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        let mut want: Vec<String> = theirs.iter().map(|s| s.to_string()).chain(["history.json.999-3.tmp".into(), "cache.1-2.tmp".into()]).collect();
+        want.sort();
+        assert_eq!(left, want);
+        // A folder that isn't there: nothing to do.
+        assert_eq!(sweep_temps_in(&dir.join("missing"), Duration::from_secs(600)), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
