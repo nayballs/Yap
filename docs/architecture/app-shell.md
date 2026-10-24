@@ -197,6 +197,11 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   `log_privacy.rs` is a lint-style test that fails on an `info!`/`warn!`/
   `error!` formatting a content-named variable (`text = %…`, `{answer}`); the
   webviews' `frontend_log` lines follow the same rule.
+- **`net.rs`** / **`diagnostics.rs`** — the network receipts (every request
+  goes out through `net::Recorded::send_for`; `net::init` in setup names
+  `connections.json`, `net::flush` in `shutdown_cleanup`) and Report a
+  problem's diagnostic file (its logs are this section's `info` and above,
+  scrubbed again): [privacy-receipts.md](./privacy-receipts.md).
 - **`commands.rs`** — Tauri commands: recording (`toggle_recording`, `cancel_recording`,
   `dictation_key` — the in-page fallbacks' hotkey down/up),
   config (`get_config`/`save_config`), models (`installed_models`,

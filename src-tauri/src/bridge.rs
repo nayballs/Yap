@@ -199,7 +199,10 @@ fn read_bridge_file() -> Option<(u16, String)> {
 /// a crashed instance points at a closed port).
 fn bridge_answers(port: u16, token: &str) -> bool {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    // The network receipts (net.rs): Yap asking a Local API on this PC.
+    let receipt = crate::net::begin(crate::net::Purpose::LocalApi, &format!("http://127.0.0.1:{port}/"));
     let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300)) else {
+        receipt.failed(0, 0);
         return false;
     };
     let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
@@ -208,11 +211,14 @@ fn bridge_answers(port: u16, token: &str) -> bool {
         token
     );
     if stream.write_all(request.as_bytes()).is_err() {
+        receipt.failed(0, 0);
         return false;
     }
     let mut head = [0u8; 16];
     let n = stream.read(&mut head).unwrap_or(0);
-    head[..n].starts_with(b"HTTP/1.1 200") || head[..n].starts_with(b"HTTP/1.0 200")
+    let ok = head[..n].starts_with(b"HTTP/1.1 200") || head[..n].starts_with(b"HTTP/1.0 200");
+    receipt.answered(if ok { 200 } else { 0 }, request.len() as u64, n as u64);
+    ok
 }
 
 fn remove_bridge_file() {
@@ -226,7 +232,10 @@ fn remove_bridge_file() {
 // ---- request handling ----
 
 fn respond_json(request: tiny_http::Request, status: u16, body: &Value) {
-    let response = Response::from_string(body.to_string())
+    let body = body.to_string();
+    // The network receipts (net.rs): an app on this PC asked, Yap answered.
+    crate::net::local_api(status, request.body_length().unwrap_or(0) as u64, body.len() as u64);
+    let response = Response::from_string(body)
         .with_status_code(status)
         .with_header(
             tiny_http::Header::from_bytes(
@@ -247,6 +256,7 @@ fn respond_error(request: tiny_http::Request, status: u16, code: &str, message: 
 }
 
 fn respond_no_content(request: tiny_http::Request) {
+    crate::net::local_api(204, request.body_length().unwrap_or(0) as u64, 0);
     let _ = request.respond(Response::empty(204));
 }
 

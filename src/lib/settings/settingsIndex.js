@@ -158,6 +158,7 @@ export const SETTINGS_INDEX = [
 
   // ---- Privacy & data ----
   { page: 'privacy', section: 'What leaves this PC', label: 'What leaves this PC', desc: 'Feature by feature, as Yap is set up', keywords: 'privacy cloud data sent private', anchor: 'leaves' },
+  { page: 'privacy', section: 'Network connections', label: 'Network connections', desc: 'Every connection Yap made in the last 7 days, and why', keywords: 'network connections receipts internet traffic hosts cloud sent received requests online offline', anchor: 'connections' },
   { page: 'privacy', section: 'History', label: 'Keep dictation history', desc: 'Kept only on this PC', keywords: 'history dictations saved stats', anchor: 'history', toggle: 'historyEnabled' },
   { page: 'privacy', section: 'History', label: 'Clear history', desc: 'Removes every saved dictation', keywords: 'delete erase history', anchor: 'clear-history' },
   { page: 'privacy', section: 'History', label: 'Keep recent dictation audio', desc: 'A day of it, to run a dictation again', keywords: 'audio recordings voice run again retry lost failed recent', anchor: 'recent-audio', toggle: 'keepRecentAudio' },
@@ -170,6 +171,7 @@ export const SETTINGS_INDEX = [
 
   // ---- About ----
   { page: 'about', section: 'Updates', label: 'Updates', desc: 'Check for updates, release notes', keywords: 'update version check release notes', anchor: 'updates' },
+  { page: 'about', section: 'Report a problem', label: 'Report a problem', desc: 'A diagnostic file you check before saving', keywords: 'bug report problem issue diagnostics diagnostic logs support crash help feedback github', anchor: 'report-problem' },
   { page: 'about', section: 'Learn more', label: 'Setup guide', desc: 'The first-run steps again', keywords: 'onboarding tutorial setup welcome', anchor: 'setup-guide' },
   { page: 'about', section: 'Learn more', label: 'Source code', desc: 'Yap on GitHub', keywords: 'github open source', anchor: 'github' },
 

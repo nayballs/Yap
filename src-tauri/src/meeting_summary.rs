@@ -1334,6 +1334,8 @@ async fn digest_window(
         messages,
         &opts,
     );
+    // Recorded as Meetings' in the network receipts (net.rs).
+    let call = crate::net::within(crate::net::Feature::Meetings, call);
     let reply = if yield_to_dictation {
         unless_busy(call, || dictation_busy(app))
             .await
@@ -2008,7 +2010,7 @@ pub(crate) async fn chat_beside_dictation_live(
     );
     let beside = crate::stream::AnyDictation(app.clone());
     let live = crate::stream::Live { sink, beside: ep.is_local().then_some(&beside as &dyn crate::stream::Dictations) };
-    let message = crate::stream::call(live, &req, false, opts.disable_thinking).await?;
+    let message = crate::net::within(crate::net::Feature::Meetings, crate::stream::call(live, &req, false, opts.disable_thinking)).await?;
     crate::llm::answer_text(&message, opts.disable_thinking)
 }
 
@@ -2023,7 +2025,8 @@ pub(crate) async fn chat_beside_dictation_with(
     extra: serde_json::Map<String, Value>,
 ) -> Result<String, String> {
     let call = move |messages: Value| {
-        crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, opts, extra.clone())
+        let ask = crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, opts, extra.clone());
+        crate::net::within(crate::net::Feature::Meetings, ask)
     };
     if !ep.is_local() {
         return call(messages).await;

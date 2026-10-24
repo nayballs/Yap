@@ -52,6 +52,7 @@ pub(crate) mod tz;
 mod vault;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use crate::net::Recorded as _;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -691,7 +692,7 @@ async fn fetch_feed(link: &str) -> Result<Vec<u8>, String> {
     let resp = HTTP
         .get(link)
         .header(reqwest::header::ACCEPT, "text/calendar, text/plain;q=0.8, */*;q=0.5")
-        .send()
+        .send_for(crate::net::Purpose::Calendar("iCal link"))
         .await
         .map_err(|_| "Couldn't reach the calendar. Yap tries again in a few minutes.".to_string())?;
     match resp.status().as_u16() {

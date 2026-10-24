@@ -34,6 +34,7 @@
 //! never go on the internet."
 
 use std::collections::HashMap;
+use crate::net::Recorded as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -368,7 +369,7 @@ pub async fn stream_speech(req: &SpeechRequest, out: &mut dyn FnMut(Pcm) -> bool
         .header("xi-api-key", req.key.header())
         .header("accept", "audio/pcm, application/json")
         .json(&req.body)
-        .send();
+        .send_for(crate::net::Purpose::Voice(NAME));
     let resp = tokio::select! {
         _ = &mut stop => return Ok(Streamed { stopped: true, ..done }),
         r = tokio::time::timeout(FIRST_AUDIO, send) => match r {
@@ -521,7 +522,7 @@ pub async fn stream_speech_timed(
         .header("xi-api-key", req.key.header())
         .header("accept", "application/json")
         .json(&req.body)
-        .send();
+        .send_for(crate::net::Purpose::Voice(NAME));
     let resp = tokio::select! {
         _ = &mut stop => return Ok((Streamed { stopped: true, ..done }, Vec::new())),
         r = tokio::time::timeout(FIRST_AUDIO, send) => match r {
@@ -775,7 +776,7 @@ async fn get_json(path_and_query: &str, key: &Key) -> Result<Value, Failure> {
         .get(format!("{base}{path_and_query}"))
         .header("xi-api-key", key.header())
         .timeout(LIST_TIMEOUT)
-        .send()
+        .send_for(crate::net::Purpose::VoiceList(NAME))
         .await
         .map_err(|e| send_failure(&e))?;
     if !resp.status().is_success() {
@@ -923,7 +924,7 @@ pub async fn fetch_sample(url: &str) -> Result<Pcm, String> {
     if !sample_allowed(url) {
         return Err("Yap won't fetch that sample".into());
     }
-    let resp = SAMPLE_HTTP.get(url).send().await.map_err(|_| format!("Couldn't fetch the {NAME} sample"))?;
+    let resp = SAMPLE_HTTP.get(url).send_for(crate::net::Purpose::VoiceSample(NAME)).await.map_err(|_| format!("Couldn't fetch the {NAME} sample"))?;
     if !resp.status().is_success() {
         return Err(format!("Couldn't fetch the {NAME} sample ({})", resp.status().as_u16()));
     }

@@ -436,7 +436,7 @@ async fn install_package(
                     continue;
                 }
             }
-            dl::download(&as_dl, &partial, &report).await?;
+            dl::download(&as_dl, &partial, &report, crate::net::Download::Voice).await?;
             dl::verify(&partial, &as_dl).await?;
             match src.dest {
                 Dest::File(name) => {

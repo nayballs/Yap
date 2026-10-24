@@ -1326,10 +1326,14 @@ pub async fn write(
         return Ok((Checked::default(), String::new()));
     };
     let opts = ep.options(REPLY_TOKENS, 0.2);
-    let reply = match app {
-        Some(app) => crate::meeting_summary::chat_beside_dictation(app, ep, messages, &opts).await?,
-        None => crate::llm::chat(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, &opts).await?,
+    // Recorded as the calendar's brief in the network receipts (net.rs).
+    let ask = async {
+        match app {
+            Some(app) => crate::meeting_summary::chat_beside_dictation(app, ep, messages, &opts).await,
+            None => crate::llm::chat(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, &opts).await,
+        }
     };
+    let reply = crate::net::within(crate::net::Feature::Brief, ask).await?;
     Ok((check_summary(&reply, facts), reply))
 }
 

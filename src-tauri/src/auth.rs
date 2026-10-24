@@ -28,6 +28,7 @@
 //! Server endpoints and the handoff protocol: `cloud/README.md`.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use crate::net::Recorded as _;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -269,7 +270,7 @@ async fn refresh_methods(app: &AppHandle) {
         let resp = CLIENT
             .get(format!("{}/api/providers", base_url()))
             .timeout(Duration::from_secs(8))
-            .send()
+            .send_for(crate::net::Purpose::Account)
             .await
             .ok()?;
         resp.status().is_success().then_some(())?;
@@ -351,7 +352,7 @@ pub async fn auth_start(app: AppHandle, provider: String) -> Result<(), String> 
     let health = CLIENT
         .get(format!("{}/api/health", base_url()))
         .timeout(Duration::from_secs(6))
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await;
     if !health.is_ok_and(|r| r.status().is_success()) {
         return Err(UNREACHABLE.into());
@@ -517,7 +518,7 @@ async fn redeem(app: &AppHandle, code: &str) -> Result<(), String> {
     let resp = CLIENT
         .post(api("/electron/token"))
         .json(&json!({ "token": handoff.identifier, "state": state, "code_verifier": verifier }))
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await
         // Never reached the server, so the code is still good: keep waiting.
         .map_err(|_| UNREACHABLE.to_string())?;
@@ -619,7 +620,7 @@ pub async fn auth_email_send(email: String) -> Result<(), String> {
     let resp = CLIENT
         .post(api("/email-otp/send-verification-otp"))
         .json(&json!({ "email": email, "type": "sign-in" }))
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     read_api(resp).await.map_err(|e| e.friendly())?;
@@ -637,7 +638,7 @@ pub async fn auth_email_verify(app: AppHandle, email: String, code: String) -> R
     let resp = CLIENT
         .post(api("/sign-in/email-otp"))
         .json(&json!({ "email": email, "otp": code }))
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     let body = read_api(resp).await.map_err(|e| e.friendly())?;
@@ -939,7 +940,7 @@ async fn poll_once(device_code: &str) -> PollReply {
     let sent = CLIENT
         .post(api("/device/token"))
         .json(&json!({ "grant_type": DEVICE_GRANT, "device_code": device_code, "client_id": CLIENT_ID }))
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await;
     let Ok(resp) = sent else {
         return PollReply::Retry;
@@ -969,7 +970,7 @@ pub async fn auth_device_start(app: AppHandle, renew: Option<bool>) -> Result<Op
     let resp = CLIENT
         .post(api("/device/code"))
         .json(&json!({ "client_id": CLIENT_ID }))
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     let body = read_api(resp).await.map_err(|e| e.friendly())?;
@@ -1394,7 +1395,7 @@ async fn end_session(token: &str) -> bool {
         .post(api("/sign-out"))
         .bearer_auth(token)
         .json(&json!({}))
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await
         .is_ok()
 }
@@ -1431,7 +1432,7 @@ pub async fn auth_delete_account(app: AppHandle) -> Result<(), String> {
         .post(api("/delete-user"))
         .bearer_auth(&token)
         .json(&json!({}))
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     match read_api(resp).await {
@@ -1466,7 +1467,7 @@ async fn get_session(token: &str) -> Result<Option<Profile>, ApiError> {
     let resp = CLIENT
         .get(api("/get-session"))
         .bearer_auth(token)
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await
         .map_err(|_| ApiError::network())?;
     let body = read_api(resp).await?;
@@ -1477,7 +1478,7 @@ async fn list_providers(token: &str) -> Result<Vec<String>, ApiError> {
     let resp = CLIENT
         .get(api("/list-accounts"))
         .bearer_auth(token)
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await
         .map_err(|_| ApiError::network())?;
     let body = read_api(resp).await?;
@@ -1534,7 +1535,7 @@ pub async fn auth_list_sessions(app: AppHandle) -> Result<Vec<DeviceSession>, St
     let resp = CLIENT
         .get(account_api("/sessions"))
         .bearer_auth(&token)
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     match read_api(resp).await {
@@ -1552,7 +1553,7 @@ pub async fn auth_revoke_other_sessions(app: AppHandle) -> Result<(), String> {
         .post(api("/revoke-other-sessions"))
         .bearer_auth(&token)
         .json(&json!({}))
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     if let Err(e) = read_api(resp).await {
@@ -1571,7 +1572,7 @@ pub async fn auth_revoke_session(app: AppHandle, id: String) -> Result<(), Strin
         .post(account_api("/sessions/revoke"))
         .bearer_auth(&token)
         .json(&json!({ "id": id }))
-        .send()
+        .send_for(crate::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     if let Err(e) = read_api(resp).await {

@@ -19,6 +19,7 @@
   import { account, displayName, initAccount, initials, PROVIDER_LABELS } from './account.svelte.js';
   import { openExternalLink } from './externalLinks.js';
   import { openContextMenu, menuKey } from './ui/contextMenu.svelte.js';
+  import { noteAccountPicture } from './connections.js';
 
   const RESEND_SECONDS = 30;
 
@@ -712,7 +713,7 @@
   {#if status.signedIn}
     <div class="profile">
       {#if status.user?.image && !imgFailed}
-        <img class="avatar" src={status.user.image} alt="" referrerpolicy="no-referrer" onerror={() => (imgFailed = true)} />
+        <img class="avatar" src={status.user.image} alt="" referrerpolicy="no-referrer" onload={() => noteAccountPicture(status.user.image)} onerror={() => (imgFailed = true)} />
       {:else}
         <span class="avatar initials" aria-hidden="true">{initials(status.user)}</span>
       {/if}

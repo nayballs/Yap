@@ -231,7 +231,11 @@ until it's fixed (none open now). Guide: [`docs/e2e-tests.md`](../e2e-tests.md) 
   tag or JSON — stands in for Windows; unset, nothing is detected), no AI
   provider's model list (`model_catalog.rs`: the debug-only
   `YAP_MODELS_STANDIN` points at `e2e/support/fake-llm.js`; unset, the
-  curated lists), `e2e_coaching_reset` (every
+  curated lists), a stand-in recorded as the service it stands in for in
+  the network receipts (`net.rs`: the debug-only `YAP_E2E_NET_ALIASES`,
+  `127.0.0.1:<port>=api.groq.com;…`), Report a problem's file saved where
+  `e2e_save_path` says, never through Windows' Save dialog
+  (`diagnostics.rs`), `e2e_coaching_reset` (every
   push-to-talk hint due again), `e2e_notice_reset` / `e2e_focus` /
   `e2e_notice` (notice.rs: cooldowns and fatigue forgotten before every
   test, whether the main window counts as focused — by default while it's on

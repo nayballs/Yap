@@ -398,7 +398,11 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   dictation, or with cleanup on a cloud provider the names a dictation seems
   to contain go there with it —, Chat and the Voice Assistant, screenshots (kept on this PC; one goes to the AI model only with a question you send), About you, memory, web search,
   spoken replies, AI apps, calendar, account), each row linking to its
-  setting. **History** (`#settings-history`): "Keep dictation history"
+  setting. **Network connections** (`#settings-connections`): a link row
+  ("12 today" · "3 left this PC today, 9 stayed on it") one level down to
+  `settings/ConnectionsView.svelte` (`privacy#connections-list` opens it
+  directly; the network receipts, [privacy-receipts.md](./privacy-receipts.md)).
+  **History** (`#settings-history`): "Keep dictation history"
   (`historyEnabled`) and Clear history… (asks first; the count from
   `get_stats`, re-read on `yap-history-changed`; it clears the kept audio
   too); the list itself is Home's feed. "Keep recent dictation audio"
@@ -417,8 +421,11 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   Yap does (Parakeet era wording), "Your voice never leaves this PC" with a
   link to Privacy & data, **Updates** (the shared store's states: Check for
   updates, Downloading…, "Yap X is ready to install" + Restart to update,
-  release notes; a line on automatic checks linking to General), **Learn
-  more** (Show setup guide again, the GitHub link).
+  release notes; a line on automatic checks linking to General), **Report a
+  problem** (`settings/ReportProblem.svelte`, row `report-problem`: the
+  diagnostic file's contents shown first, then Save…, then "Open a GitHub
+  issue" / Show in folder; [privacy-receipts.md](./privacy-receipts.md)),
+  **Learn more** (Show setup guide again, the GitHub link).
 - **Account** (`AccountSection.svelte`, [accounts.md](./accounts.md)): while
   Yap asks the service which sign-ins it offers, placeholder buttons and
   "Checking sign-in options…".

@@ -64,6 +64,7 @@
   import PrivacyPage from './settings/PrivacyPage.svelte';
   import RunsOn from './settings/RunsOn.svelte';
   import AboutPage from './settings/AboutPage.svelte';
+  import { noteAccountPicture } from './connections.js';
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
   // (OpenWhispr SettingsModal-style) instead of filling the window. The parent
@@ -796,6 +797,7 @@
   // gives it a short wash; "cleanup#chat" opens that Language Models tab.
   let contentEl = $state(null);
   let meetingApps = $state(false); // Meetings → "Ask about calls in"'s list
+  let privacyConnections = $state(false); // Privacy & data → Network connections
   function goto(target) {
     const to = resolveTarget(target, SCOPE_TABS.map((t) => t.value));
     if (!to) return false;
@@ -805,6 +807,7 @@
     railSearch = false;
     section = to.page;
     meetingApps = to.page === 'meetings' && to.anchor === 'call-apps-list';
+    privacyConnections = to.page === 'privacy' && to.anchor === 'connections-list';
     if (to.scope) llmScope = to.scope;
     tick().then(() => {
       if (!to.anchor) {
@@ -1833,7 +1836,7 @@
     >
       <span class="acct-avatar">
         {#if acctUser?.image && !acctImgFailed}
-          <img src={acctUser.image} alt="" referrerpolicy="no-referrer" onerror={() => (acctImgFailed = true)} />
+          <img src={acctUser.image} alt="" referrerpolicy="no-referrer" onload={() => noteAccountPicture(acctUser.image)} onerror={() => (acctImgFailed = true)} />
         {:else if acctUser}
           <span class="acct-ini">{initials(acctUser)}</span>
         {:else}
@@ -2659,7 +2662,7 @@
           {/if}
 
         {:else if section === 'privacy'}
-          <PrivacyPage {cfg} {goto} />
+          <PrivacyPage {cfg} {goto} bind:connections={privacyConnections} />
 
         {:else if section === 'about'}
           <AboutPage {cfg} version={APP_VERSION} {goto} />

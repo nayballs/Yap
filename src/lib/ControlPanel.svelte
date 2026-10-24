@@ -43,6 +43,7 @@
   import { chatRequest } from './chatRequest.svelte.js';
   import IntegrationsView from './IntegrationsView.svelte';
   import { menuOrDialogOpen } from './ui/contextMenu.svelte.js';
+  import { noteAccountPicture } from './connections.js';
 
   let activeView = $state('home');
 
@@ -336,7 +337,7 @@
       <button class="acct" class:signed={!!acctUser} onclick={() => openSettings('account')}>
         <span class="acct-avatar">
           {#if acctUser?.image && !acctImgFailed}
-            <img src={acctUser.image} alt="" referrerpolicy="no-referrer" onerror={() => (acctImgFailed = true)} />
+            <img src={acctUser.image} alt="" referrerpolicy="no-referrer" onload={() => noteAccountPicture(acctUser.image)} onerror={() => (acctImgFailed = true)} />
           {:else if acctUser}
             <span class="acct-ini">{initials(acctUser)}</span>
           {:else}
