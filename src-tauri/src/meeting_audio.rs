@@ -203,6 +203,12 @@ pub struct Meta {
     /// the part a crash recovery transcribes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dictated: Vec<u64>,
+    /// The speech model the live transcript was made with (a registry id;
+    /// empty in recordings from before 2026-10-24): what the refine after
+    /// the meeting compares the best installed one with
+    /// (`meeting_refine.rs`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
 }
 
 impl Meta {
@@ -323,6 +329,7 @@ impl Recorder {
             recording,
             started_ms: recording,
             keep: cfg.meeting_keep_audio,
+            model: cfg.model_size.clone(),
             ..Default::default()
         };
         save_meta(&meta);
@@ -392,8 +399,11 @@ impl Recorder {
     }
 
     /// The recording ended and every chunk of it is in the note: kept for
-    /// its days, or deleted now ("Keep meeting audio" off).
-    pub fn finish(mut self) {
+    /// its days, or deleted now ("Keep meeting audio" off) — unless `hold`:
+    /// a chunk of it failed (Try again needs its audio) or the meeting may
+    /// be transcribed again when it ends (`meeting_refine.rs`); then it
+    /// goes once that's done ([`release`]), or a day on ([`prune`]).
+    pub fn finish(mut self, hold: bool) {
         self.close();
         let mut keep = true;
         self.update(|m| {
@@ -401,11 +411,13 @@ impl Recorder {
             keep = m.keep;
         });
         live().remove(&(self.note_id, self.recording));
-        if !keep {
+        if keep {
+            tracing::info!(note_id = self.note_id, "Meeting audio: recording kept");
+        } else if hold {
+            tracing::info!(note_id = self.note_id, "Meeting audio: held until it's transcribed again (not kept)");
+        } else {
             delete_recording(self.note_id, self.recording);
             tracing::info!(note_id = self.note_id, "Meeting audio: deleted with the meeting transcribed (not kept)");
-        } else {
-            tracing::info!(note_id = self.note_id, "Meeting audio: recording kept");
         }
     }
 
@@ -494,13 +506,23 @@ pub struct Kept {
     pub live: bool,
     /// Its note is gone.
     pub orphan: bool,
+    /// Not to be kept ("Keep meeting audio" off), but held after its
+    /// meeting for a refine or a Try again ([`Recorder::finish`]): it goes
+    /// a day on at the latest ([`HELD_MS`]).
+    pub held: bool,
 }
 
+/// How long audio not to be kept is held at most after its meeting.
+pub const HELD_MS: u64 = 24 * 60 * 60 * 1000;
+
 /// Which of `all` go (pure): every one whose note is gone, those older than
-/// `keep_ms`, then the oldest while there's more than `max_bytes` — never
-/// one being recorded.
+/// `keep_ms` (a day for audio only held, [`HELD_MS`]), then the oldest
+/// while there's more than `max_bytes` — never one being recorded.
 pub fn to_drop(all: &[Kept], now_ms: u64, keep_ms: u64, max_bytes: u64) -> Vec<(u64, u64)> {
-    let gone = |k: &Kept| k.orphan || now_ms.saturating_sub(k.started_ms) > keep_ms;
+    let gone = |k: &Kept| {
+        let age = now_ms.saturating_sub(k.started_ms);
+        k.orphan || age > keep_ms || (k.held && age > HELD_MS)
+    };
     let mut out: Vec<(u64, u64)> =
         all.iter().filter(|k| !k.live && gone(k)).map(|k| (k.note_id, k.recording)).collect();
     let mut left: Vec<&Kept> = all.iter().filter(|k| k.live || !gone(k)).collect();
@@ -539,8 +561,8 @@ fn kept_all() -> Vec<Kept> {
             }
         }
         for recording in ids {
-            let started_ms =
-                read_meta(&meta_path(note_id, recording)).map(|m| m.started_ms).unwrap_or(recording);
+            let meta = read_meta(&meta_path(note_id, recording));
+            let started_ms = meta.as_ref().map(|m| m.started_ms).unwrap_or(recording);
             out.push(Kept {
                 note_id,
                 recording,
@@ -548,6 +570,7 @@ fn kept_all() -> Vec<Kept> {
                 bytes: recording_bytes(note_id, recording),
                 live: recording_now(note_id, recording),
                 orphan: !known(note_id),
+                held: meta.is_some_and(|m| !m.keep && m.ended_ms.is_some()),
             });
         }
     }
@@ -594,9 +617,38 @@ pub fn prune(app: Option<&AppHandle>) {
     }
 }
 
+/// The end-of-meeting steps are done with note `note_id`'s audio (a refine
+/// finished, or none is due; a Try again done): the recordings that were
+/// only held for that ("Keep meeting audio" off, [`Recorder::finish`]) go
+/// now — unless a stretch of the meeting still couldn't be transcribed
+/// (Try again needs it: a day at most, [`HELD_MS`]) or a job runs on it.
+pub fn release(app: &AppHandle, note_id: u64) {
+    if jobs().get(&note_id).is_some_and(|j| j.state == "running") {
+        return;
+    }
+    let failed = crate::notes::get(note_id).is_some_and(|n| n.transcript.iter().any(|s| s.failed));
+    if failed {
+        return;
+    }
+    let mut n = 0;
+    for m in recordings(note_id) {
+        if !m.keep && m.ended_ms.is_some() && !recording_now(note_id, m.recording) {
+            delete_recording(note_id, m.recording);
+            n += 1;
+        }
+    }
+    if n > 0 {
+        tracing::info!(note_id, recordings = n, "Meeting audio: deleted now the meeting's transcribed (not kept)");
+        changed(app, note_id);
+    }
+}
+
 /// Note `note_id` was deleted: its audio goes (not a recording going on:
-/// the next clean-up takes that).
+/// the next clean-up takes that), and a job on it stops.
 pub fn forget(note_id: u64) {
+    if let Some(cancel) = cancels().get(&note_id) {
+        cancel.store(true, Ordering::SeqCst);
+    }
     let recordings: Vec<u64> = recordings(note_id).iter().map(|m| m.recording).collect();
     let mut left = 0;
     for recording in recordings {
@@ -792,12 +844,18 @@ fn open_sides(meta: &Meta, from: (u64, u64)) -> Result<(FileFeed, FileFeed), Str
     Ok((open("you", from.0)?, open("them", from.1)?))
 }
 
-/// Recovery, or transcribing again.
+/// Recovery, transcribing again (on demand, or the refine after a meeting),
+/// or one stretch tried again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Kind {
     Recover,
     Again,
+    /// The refine when a meeting ends (`meeting_refine.rs`): the meeting
+    /// transcribed again in the background, on the best model installed.
+    Refine,
+    /// "Try again" on a stretch that couldn't be transcribed.
+    Retry,
 }
 
 /// A note's audio being transcribed, as every window shows it
@@ -807,15 +865,40 @@ pub enum Kind {
 pub struct Redo {
     pub note_id: u64,
     pub kind: Kind,
-    /// "running" | "done" | "error".
+    /// "running" | "done" | "error" | "cancelled".
     pub state: &'static str,
     /// 0–100 while running.
     pub percent: u8,
     /// The speech model it runs on (its name).
     pub model: String,
     pub error: Option<String>,
-    /// Done, and the note has a summary (written from the old lines).
+    /// Done, and the note has a summary (written from the old lines): the
+    /// windows offer "Update summary" until it's written again.
     pub summary: bool,
+    /// A refine waiting its turn: "summary" (the action plan is being
+    /// written first) or "meeting" (another meeting is recording).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<&'static str>,
+    /// The summary is written once this is done (the live transcript had
+    /// holes: `meeting_refine.rs`, "Which comes first").
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub then_summary: bool,
+}
+
+impl Redo {
+    fn running(note_id: u64, kind: Kind, model: &str) -> Self {
+        Redo {
+            note_id,
+            kind,
+            state: "running",
+            percent: 0,
+            model: model.to_string(),
+            error: None,
+            summary: false,
+            waiting: None,
+            then_summary: false,
+        }
+    }
 }
 
 /// Each note's latest job (kept after it ends, for a window opened later).
@@ -824,9 +907,96 @@ fn jobs() -> std::sync::MutexGuard<'static, HashMap<u64, Redo>> {
     JOBS.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// The running jobs' Cancel.
+fn cancels() -> std::sync::MutexGuard<'static, HashMap<u64, Arc<AtomicBool>>> {
+    static CANCELS: LazyLock<Mutex<HashMap<u64, Arc<AtomicBool>>>> = LazyLock::new(Default::default);
+    CANCELS.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// What a cancelled job ends with.
+pub const CANCELLED: &str = "Cancelled";
+
 fn publish(app: &AppHandle, redo: Redo) {
     jobs().insert(redo.note_id, redo.clone());
     let _ = app.emit(EVENT_REDO, redo);
+}
+
+/// Note `note_id`'s job now, if one runs.
+pub fn running_job(note_id: u64) -> Option<Redo> {
+    jobs().get(&note_id).filter(|j| j.state == "running").cloned()
+}
+
+/// A job for `note_id` starts (one per note): published as running, its
+/// Cancel made. `background`: the refine's low priority.
+fn begin(app: &AppHandle, first: Redo, background: bool) -> Result<crate::meeting::Ctl, String> {
+    let note_id = first.note_id;
+    {
+        let mut all = jobs();
+        if all.get(&note_id).is_some_and(|j| j.state == "running") {
+            return Err("It's being transcribed already".to_string());
+        }
+        all.insert(note_id, first.clone());
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    cancels().insert(note_id, Arc::clone(&cancel));
+    let _ = app.emit(EVENT_REDO, first);
+    Ok(crate::meeting::Ctl { background, cancel: Some(cancel) })
+}
+
+/// A job ended: published (`done` with whether the note has a summary to
+/// update, `error`, or `cancelled`), its Cancel gone, the windows told.
+fn end_job(app: &AppHandle, note_id: u64, kind: Kind, model: &str, result: &Result<(), String>) {
+    cancels().remove(&note_id);
+    let (state, error) = match result {
+        Ok(()) => ("done", None),
+        Err(e) if e == CANCELLED => ("cancelled", None),
+        Err(e) => {
+            tracing::warn!(note_id, ?kind, "Meeting audio: transcription failed: {e}");
+            ("error", Some(e.clone()))
+        }
+    };
+    let summary = state == "done" && crate::notes::get(note_id).is_some_and(|n| !n.enhanced_content.trim().is_empty());
+    publish(app, Redo { state, percent: 100, error, summary, ..Redo::running(note_id, kind, model) });
+    changed(app, note_id);
+    // The windows bring the note's new lines in.
+    let _ = app.emit("yap-notes-changed", ());
+}
+
+/// Stop note `note_id`'s job (the line's Cancel): between two chunks, the
+/// transcript as it was. `false`: none runs.
+pub fn cancel(note_id: u64) -> bool {
+    match cancels().get(&note_id) {
+        Some(c) => {
+            c.store(true, Ordering::SeqCst);
+            true
+        }
+        None => false,
+    }
+}
+
+/// The note's summary is being written again: its "Update summary" offer
+/// is answered (every window drops it).
+pub fn summary_redone(app: &AppHandle, note_id: u64) {
+    let job = {
+        let mut all = jobs();
+        match all.get_mut(&note_id) {
+            Some(j) if j.summary => {
+                j.summary = false;
+                Some(j.clone())
+            }
+            _ => None,
+        }
+    };
+    if let Some(job) = job {
+        let _ = app.emit(EVENT_REDO, job);
+    }
+}
+
+/// The speech engine in use (the pipeline's warm slot).
+fn warm_slot(app: &AppHandle) -> Option<crate::pipeline::EngineSlot> {
+    let state = app.state::<crate::AppState>();
+    let guard = state.pipeline.lock().ok()?;
+    guard.as_ref().map(|p| p.engine_slot())
 }
 
 /// Start transcribing note `note_id`'s audio in the background: the part a
@@ -843,54 +1013,31 @@ pub fn start_job(app: &AppHandle, note_id: u64, kind: Kind) -> Result<(), String
     }
     let have = recordings(note_id);
     let todo: Vec<Meta> = match kind {
-        Kind::Again => have.into_iter().filter(|m| !recording_now(note_id, m.recording)).collect(),
         Kind::Recover => pending().iter().filter(|m| m.note_id == note_id).cloned().collect(),
+        _ => have.into_iter().filter(|m| !recording_now(note_id, m.recording)).collect(),
     };
     if todo.is_empty() {
         return Err(match kind {
-            Kind::Again => "This meeting's audio isn't kept any more".to_string(),
             Kind::Recover => "Nothing of this meeting is waiting to be transcribed".to_string(),
+            _ => "This meeting's audio isn't kept any more".to_string(),
         });
     }
     let model = crate::stt::model_name(&crate::config::load().model_size);
-    let first = Redo { note_id, kind, state: "running", percent: 0, model: model.clone(), error: None, summary: false };
-    {
-        let mut all = jobs();
-        if all.get(&note_id).is_some_and(|j| j.state == "running") {
-            return Err("It's being transcribed already".to_string());
-        }
-        all.insert(note_id, first.clone());
-    }
-    let _ = app.emit(EVENT_REDO, first);
-    let engine_slot = {
-        let state = app.state::<crate::AppState>();
-        let guard = state.pipeline.lock().map_err(|_| "The speech engine isn't available")?;
-        guard.as_ref().map(|p| p.engine_slot())
-    };
-    let Some(engine_slot) = engine_slot else {
-        let error = "The speech engine isn't running".to_string();
-        publish(app, Redo { note_id, kind, state: "error", percent: 0, model, error: Some(error.clone()), summary: false });
-        return Err(error);
+    let ctl = begin(app, Redo::running(note_id, kind, &model), false)?;
+    let Some(engine_slot) = warm_slot(app) else {
+        let result = Err("The speech engine isn't running".to_string());
+        end_job(app, note_id, kind, &model, &result);
+        return result;
     };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let result = match kind {
-            Kind::Recover => recover(&app, &engine_slot, note_id, todo, &model).await,
-            Kind::Again => transcribe_again(&app, &engine_slot, note_id, todo, &model).await,
+            Kind::Recover => recover(&app, &engine_slot, note_id, todo, &model, &ctl).await,
+            _ => transcribe_again(&app, &engine_slot, note_id, todo, &model, Kind::Again, &ctl, false).await,
         };
-        let (state, error) = match result {
-            Ok(()) => ("done", None),
-            Err(e) => {
-                tracing::warn!(note_id, ?kind, "Meeting audio: transcription failed: {e}");
-                ("error", Some(e))
-            }
-        };
-        let summary = crate::notes::get(note_id).is_some_and(|n| !n.enhanced_content.trim().is_empty());
-        publish(&app, Redo { note_id, kind, state, percent: 100, model, error, summary });
-        changed(&app, note_id);
-        // The windows bring the note's new lines in.
-        let _ = app.emit("yap-notes-changed", ());
-        if kind == Kind::Recover && state == "done" && crate::meeting::recording_note() != Some(note_id) {
+        let recovered = kind == Kind::Recover && result.is_ok();
+        end_job(&app, note_id, kind, &model, &result);
+        if recovered && crate::meeting::recording_note() != Some(note_id) {
             // The end of the meeting, as a stop would have been.
             crate::meeting_end::recovered(&app, note_id);
         }
@@ -898,9 +1045,77 @@ pub fn start_job(app: &AppHandle, note_id: u64, kind: Kind) -> Result<(), String
     Ok(())
 }
 
+/// **The refine** of note `note_id` (`meeting_refine.rs` decides when, and
+/// on which model: `model_id`): published at once as running; it waits its
+/// turn — the summary job first unless `then_summary` (`meeting_refine.rs`,
+/// "Which comes first"), never beside a recording, a dictation always
+/// before it — then transcribes every recording again at low priority and
+/// puts the lines in through the same replacement as Transcribe again
+/// ([`transcribe_again`]). `after(app, result)` runs when it ends, however
+/// it ended (the end-of-meeting steps, the audio released).
+pub fn start_refine(
+    app: &AppHandle,
+    note_id: u64,
+    model_id: &str,
+    then_summary: bool,
+    after: impl FnOnce(&AppHandle, &Result<(), String>) + Send + 'static,
+) -> Result<(), String> {
+    let todo: Vec<Meta> = recordings(note_id).into_iter().filter(|m| !recording_now(note_id, m.recording)).collect();
+    if todo.is_empty() {
+        return Err("This meeting's audio isn't kept".to_string());
+    }
+    let model = crate::stt::model_name(model_id);
+    let first = Redo { then_summary, ..Redo::running(note_id, Kind::Refine, &model) };
+    let ctl = begin(app, first.clone(), true)?;
+    let app = app.clone();
+    let model_id = model_id.to_string();
+    tauri::async_runtime::spawn(async move {
+        let result = refine(&app, note_id, todo, &model_id, &first, &ctl).await;
+        end_job(&app, note_id, Kind::Refine, &first.model, &result);
+        after(&app, &result);
+    });
+    Ok(())
+}
+
+/// The refine's run (see [`start_refine`]).
+async fn refine(app: &AppHandle, note_id: u64, todo: Vec<Meta>, model_id: &str, first: &Redo, ctl: &crate::meeting::Ctl) -> Result<(), String> {
+    // Its turn: after the summary being written (unless this comes first),
+    // never beside a meeting recording.
+    loop {
+        if ctl.cancelled() {
+            return Err(CANCELLED.to_string());
+        }
+        let waiting = if !first.then_summary && crate::meeting_end::summary_running_for(note_id) {
+            Some("summary")
+        } else if crate::meeting::is_recording() {
+            Some("meeting")
+        } else {
+            None
+        };
+        let Some(waiting) = waiting else { break };
+        if jobs().get(&note_id).is_some_and(|j| j.waiting != Some(waiting)) {
+            publish(app, Redo { waiting: Some(waiting), ..first.clone() });
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    publish(app, first.clone());
+    // The model in use now: the warm engine, taken a chunk at a time.
+    // Another: a slot of its own, loaded once and dropped after.
+    let slot = if model_id == crate::config::load().model_size {
+        warm_slot(app).ok_or("The speech engine isn't running")?
+    } else {
+        let slot = crate::pipeline::EngineCell::for_model(model_id, None);
+        drop(crate::pipeline::lease_engine(&slot, Duration::from_secs(1)).await?);
+        slot
+    };
+    tracing::info!(note_id, model = %model_id, recordings = todo.len(), "Meeting refine: transcribing again");
+    transcribe_again(app, &slot, note_id, todo, &first.model, Kind::Refine, ctl, true).await
+}
+
 /// Progress across a job's recordings: `total` samples of both sides in
 /// all; `before` of them done in earlier recordings.
-fn reporter(app: &AppHandle, note_id: u64, kind: Kind, model: &str, before: u64, total: u64, from: (u64, u64)) -> impl Fn(u64, u64) + Send + Sync {
+#[allow(clippy::too_many_arguments)]
+fn reporter(app: &AppHandle, note_id: u64, kind: Kind, model: &str, before: u64, total: u64, from: (u64, u64), then_summary: bool) -> impl Fn(u64, u64) + Send + Sync {
     let app = app.clone();
     let model = model.to_string();
     let last = AtomicU64::new(u64::MAX);
@@ -908,22 +1123,25 @@ fn reporter(app: &AppHandle, note_id: u64, kind: Kind, model: &str, before: u64,
         let done = before + you.saturating_sub(from.0) + them.saturating_sub(from.1);
         let percent = (done * 100 / total.max(1)).min(99);
         if last.swap(percent, Ordering::SeqCst) != percent {
-            publish(&app, Redo { note_id, kind, state: "running", percent: percent as u8, model: model.clone(), error: None, summary: false });
+            publish(&app, Redo { percent: percent as u8, then_summary, ..Redo::running(note_id, kind, &model) });
         }
     }
 }
 
 /// The part a crash left of each recording in `todo`, into the note where
 /// it belongs (by time), then the recording closed.
-async fn recover(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id: u64, todo: Vec<Meta>, model: &str) -> Result<(), String> {
+async fn recover(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id: u64, todo: Vec<Meta>, model: &str, ctl: &crate::meeting::Ctl) -> Result<(), String> {
     let total: u64 = todo.iter().map(|m| m.you_len.saturating_sub(m.you_done) + m.them_len.saturating_sub(m.them_done)).sum();
     let mut before = 0;
     let mut lines = 0;
     for mut meta in todo {
         let from = (meta.you_done, meta.them_done);
         let (mut you, mut them) = open_sides(&meta, from)?;
-        let progress = reporter(app, note_id, Kind::Recover, model, before, total, from);
-        let out = crate::meeting::replay(engine, note_id, &mut you, &mut them, meta.started_ms, from, &meta.dictated, &progress).await;
+        let progress = reporter(app, note_id, Kind::Recover, model, before, total, from, false);
+        let out = crate::meeting::replay(engine, note_id, &mut you, &mut them, meta.started_ms, from, &meta.dictated, &progress, ctl).await;
+        if out.cancelled {
+            return Err(CANCELLED.to_string());
+        }
         before += meta.you_len.saturating_sub(from.0) + meta.them_len.saturating_sub(from.1);
         lines += out.segments.iter().filter(|s| s.is_talk()).count();
         crate::notes::insert_transcript(note_id, &out.segments)?;
@@ -942,24 +1160,44 @@ async fn recover(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id:
 
 /// Every recording in `todo` transcribed again, its lines put in place of
 /// the old ones (`redo.rs`: notes, names on matching lines and the summary
-/// kept; the digests dropped, to be written again from the new lines).
-async fn transcribe_again(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id: u64, todo: Vec<Meta>, model: &str) -> Result<(), String> {
+/// kept; the digests dropped, to be written again from the new lines) —
+/// "Transcribe again", and the refine after a meeting (`kind`), which also
+/// `check`s the new lines say what the old ones did (`meeting_refine::
+/// agrees`: a model that didn't understand the meeting's language changes
+/// nothing). Never while the note's summary is being written (it reads
+/// the lines and their digests): the new lines wait for it.
+#[allow(clippy::too_many_arguments)]
+async fn transcribe_again(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id: u64, todo: Vec<Meta>, model: &str, kind: Kind, ctl: &crate::meeting::Ctl, check: bool) -> Result<(), String> {
     let total: u64 = todo.iter().map(|m| m.you_len + m.them_len).sum();
+    let then_summary = jobs().get(&note_id).is_some_and(|j| j.then_summary);
     let mut before = 0;
     let mut redone = Vec::new();
     for meta in &todo {
         let (mut you, mut them) = open_sides(meta, (0, 0))?;
-        let progress = reporter(app, note_id, Kind::Again, model, before, total, (0, 0));
+        let progress = reporter(app, note_id, kind, model, before, total, (0, 0), then_summary);
         // A crash's part never had its markers: they come with it.
         let extra: Vec<u64> = if meta.ended_ms.is_none() {
             meta.dictated.iter().copied().filter(|&d| d >= meta.you_done).collect()
         } else {
             Vec::new()
         };
-        let out = crate::meeting::replay(engine, note_id, &mut you, &mut them, meta.started_ms, (0, 0), &extra, &progress).await;
+        let out = crate::meeting::replay(engine, note_id, &mut you, &mut them, meta.started_ms, (0, 0), &extra, &progress, ctl).await;
+        if out.cancelled {
+            return Err(CANCELLED.to_string());
+        }
         before += meta.you_len + meta.them_len;
         let len = meta.you_len.max(meta.them_len).max(out.you_done).max(out.them_done);
         redone.push(redo::Redone { started_ms: meta.started_ms, end_ms: meta.started_ms + len * 1000 / RATE, lines: out.segments });
+    }
+    if check {
+        let old = crate::notes::get(note_id).ok_or("Note not found")?;
+        crate::meeting_refine::agrees(&old.transcript, &redone)?;
+    }
+    while crate::meeting_end::summary_running_for(note_id) {
+        if ctl.cancelled() {
+            return Err(CANCELLED.to_string());
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
     }
     let (replaced, added, voiced) = crate::notes::modify(note_id, |note| {
         let r = redo::rebuild(&note.transcript, &note.breaks, &redone);
@@ -974,8 +1212,96 @@ async fn transcribe_again(app: &AppHandle, engine: &crate::pipeline::EngineSlot,
         save_meta(&meta);
         pending().retain(|m| m.recording != meta.recording);
     }
-    tracing::info!(note_id, replaced, added, voiced, "Meeting audio: transcribed again");
+    tracing::info!(note_id, ?kind, replaced, added, voiced, "Meeting audio: transcribed again");
     Ok(())
+}
+
+// ---- Try again: one stretch that couldn't be transcribed ----
+
+/// One side's file from a position, for at most `left` samples.
+struct RangeFeed {
+    reader: flac::Reader,
+    left: usize,
+}
+
+impl crate::meeting::Feed for RangeFeed {
+    fn read(&mut self, n: usize) -> Vec<f32> {
+        let n = n.min(self.left);
+        let out = if n == 0 { Vec::new() } else { self.reader.read(n) };
+        self.left -= out.len().min(self.left);
+        out
+    }
+}
+
+/// **Try again** on a failed chunk's marker (`source`'s stretch starting
+/// `start_ms` on the clock of the recording the line dated `ts` is in):
+/// that stretch of that side transcribed from its audio on disk, on the
+/// speech model in use now, its lines put in the marker's place
+/// (`redo::fill`). Not while a meeting records (the live chunks have the
+/// engine).
+pub fn start_retry(app: &AppHandle, note_id: u64, source: &str, ts: u64, start_ms: u64) -> Result<(), String> {
+    let note = crate::notes::get(note_id).ok_or("Note not found")?;
+    if crate::meeting::is_recording() {
+        return Err("Yap is recording a meeting: try again when it ends".to_string());
+    }
+    let marker = note
+        .transcript
+        .iter()
+        .find(|s| s.failed && s.source == source && s.start_ms == Some(start_ms))
+        .cloned()
+        .ok_or("That part is transcribed already")?;
+    let end_ms = marker.end_ms.unwrap_or(start_ms).max(start_ms);
+    let meta = recording_at(note_id, ts).ok_or("This meeting's audio isn't kept any more")?;
+    let model = crate::stt::model_name(&crate::config::load().model_size);
+    let ctl = begin(app, Redo::running(note_id, Kind::Retry, &model), false)?;
+    let Some(engine_slot) = warm_slot(app) else {
+        let result = Err("The speech engine isn't running".to_string());
+        end_job(app, note_id, Kind::Retry, &model, &result);
+        return result;
+    };
+    let app = app.clone();
+    let source = source.to_string();
+    tauri::async_runtime::spawn(async move {
+        let result = retry(&app, &engine_slot, &meta, &source, (start_ms, end_ms), &model, &ctl).await;
+        end_job(&app, note_id, Kind::Retry, &model, &result);
+        release(&app, note_id);
+    });
+    Ok(())
+}
+
+async fn retry(app: &AppHandle, engine: &crate::pipeline::EngineSlot, meta: &Meta, source: &str, (start_ms, end_ms): (u64, u64), model: &str, ctl: &crate::meeting::Ctl) -> Result<(), String> {
+    let note_id = meta.note_id;
+    let (from, to) = (start_ms * RATE / 1000, end_ms * RATE / 1000);
+    let mut reader = flac::Reader::open(&audio_path(note_id, meta.recording, source))?;
+    reader.seek(from);
+    let mut feed = RangeFeed { reader, left: (to - from) as usize };
+    let mut none = crate::meeting::NoFeed;
+    let (you, them): (&mut dyn crate::meeting::Feed, &mut dyn crate::meeting::Feed) =
+        if source == "you" { (&mut feed, &mut none) } else { (&mut none, &mut feed) };
+    let at = if source == "you" { (from, 0) } else { (0, from) };
+    let progress = reporter(app, note_id, Kind::Retry, model, 0, to - from, at, false);
+    let out = crate::meeting::replay(engine, note_id, you, them, meta.started_ms, at, &[], &progress, ctl).await;
+    if out.cancelled {
+        return Err(CANCELLED.to_string());
+    }
+    let lines: Vec<_> = out.segments.into_iter().filter(|s| s.source == source && !s.dictated).collect();
+    let still = lines.iter().any(|s| s.failed);
+    let n = lines.len();
+    crate::notes::modify(note_id, |note| {
+        let at = note
+            .transcript
+            .iter()
+            .position(|s| s.failed && s.source == source && s.start_ms == Some(start_ms))
+            .ok_or("That part is transcribed already")?;
+        redo::fill(note, at, lines);
+        Ok(((), true))
+    })?;
+    tracing::info!(note_id, lines = n, still, "Meeting audio: a stretch tried again");
+    if still {
+        Err("Yap still couldn't transcribe it. Check the speech model in Settings → Speech-to-Text.".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 // ---- Playing a line ----
@@ -1110,6 +1436,21 @@ pub fn meeting_recover(app: AppHandle, note_id: u64) -> Result<(), String> {
     start_job(&app, note_id, Kind::Recover)
 }
 
+/// "Try again" on a stretch that couldn't be transcribed (its marker:
+/// side, the line's `ts`, `startMs`): progress and the result come as
+/// [`EVENT_REDO`] (kind `retry`).
+#[tauri::command]
+pub fn meeting_retry_chunk(app: AppHandle, note_id: u64, source: String, ts: u64, start_ms: u64) -> Result<(), String> {
+    start_retry(&app, note_id, &source, ts, start_ms)
+}
+
+/// Cancel a note's transcription job (the refine's line): the transcript
+/// stays as it was. `false`: none was running.
+#[tauri::command]
+pub fn meeting_job_cancel(note_id: u64) -> bool {
+    cancel(note_id)
+}
+
 /// Test mode only: offer what a crash left again, now (the start's offer
 /// came before the suite could watch).
 #[cfg(debug_assertions)]
@@ -1128,7 +1469,7 @@ mod tests {
 
     fn k(note_id: u64, recording: u64, days_ago: u64, bytes: u64) -> Kept {
         let now = 100 * 86_400_000;
-        Kept { note_id, recording, started_ms: now - days_ago * 86_400_000, bytes, live: false, orphan: false }
+        Kept { note_id, recording, started_ms: now - days_ago * 86_400_000, bytes, live: false, orphan: false, held: false }
     }
 
     #[test]
@@ -1146,6 +1487,9 @@ mod tests {
         // A recording going on is never touched, however old or big.
         let live = [Kept { live: true, orphan: true, ..k(4, 40, 30, 500) }, k(5, 50, 1, 10)];
         assert_eq!(to_drop(&live, now, keep, 100), vec![(5, 50)]);
+        // Audio not to be kept, held for a refine: a day at most.
+        let held = [Kept { held: true, ..k(6, 60, 2, 5) }, Kept { held: true, started_ms: now - HELD_MS / 2, ..k(7, 70, 0, 5) }];
+        assert_eq!(to_drop(&held, now, keep, u64::MAX), vec![(6, 60)]);
     }
 
     #[test]

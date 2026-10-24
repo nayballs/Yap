@@ -171,6 +171,31 @@ pub fn rebuild(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone
     Rebuilt { transcript, breaks, replaced, added, voiced }
 }
 
+/// **Try again** on one failed chunk: its marker (line `at`) gives way to
+/// `lines` — what that stretch says now (none: it was quiet after all; a
+/// marker again: it failed again). Not [`rebuild`]: that replaces every
+/// line of a recording, this fills one hole in one side. Stop marks and
+/// digests after it move along; a digest that covered the hole covers its
+/// lines.
+pub fn fill(note: &mut crate::notes::Note, at: usize, lines: Vec<TranscriptSegment>) {
+    if at >= note.transcript.len() {
+        return;
+    }
+    let n = lines.len();
+    note.transcript.splice(at..at + 1, lines);
+    let moved = |i: usize| if i > at { i + n - 1 } else { i };
+    for d in &mut note.digests {
+        d.from_seg = moved(d.from_seg);
+        d.to_seg = moved(d.to_seg);
+    }
+    for b in &mut note.breaks {
+        *b = moved(*b);
+    }
+    note.breaks.retain(|&b| b > 0);
+    note.breaks.dedup();
+    note.digests.retain(|d| d.to_seg > d.from_seg);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,5 +314,58 @@ mod tests {
         assert_eq!(texts, ["First A.", "First B, longer.", "First C.", "Second A."]);
         // The pause now falls after the first recording's three lines.
         assert_eq!(r.breaks, vec![3, 4]);
+    }
+
+    #[test]
+    fn a_failed_chunk_is_replaced_by_its_lines_when_the_meeting_is_done_again() {
+        // The live pass couldn't transcribe 15–30 s of "Them": a marker.
+        let marker = TranscriptSegment::failed_marker("them", (T0 + 15_000) / 1000, 15_000, 30_000);
+        assert!(!marker.is_talk(), "summaries skip it");
+        let old = vec![line("them", "before", 1_000, 14_000), marker, line("them", "after", 31_000, 40_000)];
+        let new = vec![
+            line("them", "Before.", 1_000, 14_000),
+            line("them", "The missing part.", 15_500, 29_000),
+            line("them", "After.", 31_000, 40_000),
+        ];
+        let r = rebuild(&old, &[3], &[redone(new, 41)]);
+        let texts: Vec<&str> = r.transcript.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(texts, ["Before.", "The missing part.", "After."]);
+        assert!(!r.transcript.iter().any(|s| s.failed));
+        assert_eq!(r.breaks, vec![3]);
+    }
+
+    fn note_with(transcript: Vec<TranscriptSegment>, breaks: Vec<usize>, digests: Vec<(usize, usize)>) -> crate::notes::Note {
+        let mut n: crate::notes::Note = serde_json::from_value(serde_json::json!({
+            "id": 1, "title": "Call", "content": "", "createdTs": 1, "updatedTs": 1,
+        }))
+        .unwrap();
+        n.transcript = transcript;
+        n.breaks = breaks;
+        n.digests = digests
+            .into_iter()
+            .map(|(from_seg, to_seg)| {
+                serde_json::from_value(serde_json::json!({ "fromSeg": from_seg, "toSeg": to_seg, "startTs": 0, "endTs": 0 })).unwrap()
+            })
+            .collect();
+        n
+    }
+
+    #[test]
+    fn try_again_fills_the_hole_and_moves_what_follows() {
+        let marker = TranscriptSegment::failed_marker("you", (T0 + 15_000) / 1000, 15_000, 30_000);
+        let base = vec![line("them", "a", 0, 1_000), marker.clone(), line("them", "b", 31_000, 32_000)];
+        // Two lines in its place: the stop after "b" and the digest move on.
+        let mut n = note_with(base.clone(), vec![3], vec![(0, 2), (2, 3)]);
+        fill(&mut n, 1, vec![line("you", "one", 15_000, 20_000), line("you", "two", 21_000, 29_000)]);
+        let texts: Vec<&str> = n.transcript.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(texts, ["a", "one", "two", "b"]);
+        assert_eq!(n.breaks, vec![4]);
+        assert_eq!(n.digests.iter().map(|d| (d.from_seg, d.to_seg)).collect::<Vec<_>>(), [(0, 3), (3, 4)]);
+        // Quiet after all: the marker just goes.
+        let mut n = note_with(base, vec![2, 3], vec![(0, 2)]);
+        fill(&mut n, 1, vec![]);
+        assert_eq!(n.transcript.len(), 2);
+        assert_eq!(n.breaks, vec![1, 2]);
+        assert_eq!(n.digests.iter().map(|d| (d.from_seg, d.to_seg)).collect::<Vec<_>>(), [(0, 1)]);
     }
 }

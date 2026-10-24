@@ -602,10 +602,7 @@ fn folders_changed(app: &AppHandle, change: &crate::notes::FolderChange) {
 #[tauri::command]
 pub fn note_delete(app: AppHandle, id: u64) -> Result<(), String> {
     use tauri::Emitter;
-    if crate::meeting::recording_note() == Some(id) {
-        return Err("This meeting is still recording".to_string());
-    }
-    crate::notes::delete(id);
+    crate::meeting::delete_note(id)?;
     let _ = app.emit("yap-notes-changed", ());
     let _ = app.emit(crate::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
     crate::notepad::on_note_deleted(&app, id);

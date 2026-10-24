@@ -26,6 +26,9 @@
 //!   [`e2e_meeting_output_change`] stage a hotkey dictation and a switch of
 //!   Windows' default output at a point of that audio, and
 //!   [`e2e_meeting_quiet`] shortens the quiet-side warning's timings;
+//!   [`e2e_meeting_fail`] makes the live recorder's chunks over a stretch
+//!   fail, and `YAP_E2E_REFINE_CHUNK_MS` slows the refine's chunks
+//!   (`meeting_refine::e2e_slow_chunk`);
 //! - it reads no installed apps' icons (Settings' call apps, the bar's call
 //!   card): [`app_icons_dir`] (`YAP_E2E_APP_ICONS`) names stand-ins instead.
 //!
@@ -309,6 +312,23 @@ pub fn e2e_meeting_quiet(quiet_secs: Option<f32>, talk_secs: Option<f32>) -> Res
     let timings = quiet_secs.map(|q| (q, talk_secs.unwrap_or(q / 18.0)));
     tracing::info!(?timings, "e2e: quiet-side timings");
     crate::meeting::set_test_quiet_timings(timings);
+    Ok(())
+}
+
+/// Test mode only: the live recorder's chunks of `side` ("you", "them" or
+/// "both") overlapping `[from, to)` seconds of the recording fail, as if
+/// the speech engine had (`meeting.rs`, "Failed chunks"); the meeting's
+/// audio transcribed again later (Try again, the refine) is unaffected. No
+/// `side`: none fail.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_meeting_fail(side: Option<String>, from: Option<f32>, to: Option<f32>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let fails = side.map(|s| (s, from.unwrap_or(0.0), to.unwrap_or(f32::MAX)));
+    tracing::info!(?fails, "e2e: meeting chunks fail");
+    crate::meeting::set_test_failures(fails);
     Ok(())
 }
 

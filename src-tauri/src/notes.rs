@@ -58,6 +58,12 @@ pub struct TranscriptSegment {
     /// times (Parakeet, Whisper, SenseVoice). Empty otherwise.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub words: Vec<[u32; 2]>,
+    /// Not speech: a stretch of its side (`start_ms`..`end_ms`) the speech
+    /// model couldn't transcribe (`meeting.rs`, "Failed chunks"). No
+    /// `text`; the views show "Couldn't transcribe 0:42–1:12 · Try again"
+    /// (`meeting_audio::retry`), and summaries skip it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub failed: bool,
     /// A "you" segment that was the call audio leaking from the speakers into
     /// the mic (`meeting::is_echo`). Kept, but left out of the summary and
     /// hidden in the transcript view.
@@ -84,6 +90,19 @@ impl TranscriptSegment {
         }
     }
 
+    /// The marker for `source`'s stretch `start_ms..end_ms` (its recording's
+    /// clock) that couldn't be transcribed, dated `ts` (where it begins).
+    pub fn failed_marker(source: &str, ts: u64, start_ms: u64, end_ms: u64) -> Self {
+        TranscriptSegment {
+            source: source.to_string(),
+            ts,
+            start_ms: Some(start_ms),
+            end_ms: Some(end_ms),
+            failed: true,
+            ..Default::default()
+        }
+    }
+
     /// The voice of this line (before any merges in the note's speaker
     /// map): its `speaker`, else its side.
     pub fn speaker_id(&self) -> &str {
@@ -94,9 +113,10 @@ impl TranscriptSegment {
         }
     }
 
-    /// Talk the summaries read: neither echo nor a dictation marker.
+    /// Talk the summaries read: neither echo nor a marker (a dictation, a
+    /// stretch that couldn't be transcribed).
     pub fn is_talk(&self) -> bool {
-        !self.echo && !self.dictated
+        !self.echo && !self.dictated && !self.failed
     }
 }
 

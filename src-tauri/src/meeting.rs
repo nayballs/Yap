@@ -546,7 +546,111 @@ struct Session {
     them: AudioBuf,
 }
 
-static SESSION: Mutex<Option<Session>> = Mutex::new(None);
+/// The recorder's one slot. A start **claims** it first, under the lock,
+/// before it opens the devices (up to seconds), and only then records:
+/// until 2026-10-24 it checked for a session, let go of the lock, opened
+/// the devices and set the session — so two starts at once (the meeting
+/// shortcut and the call prompt, the tray and the calendar) could both
+/// pass the check and start two recorders, the first one's mic held until
+/// Yap quit.
+enum Slot {
+    Free,
+    /// A start has claimed it for this note and is opening the devices.
+    Starting(u64),
+    Recording(Session),
+}
+
+impl Slot {
+    fn session(&self) -> Option<&Session> {
+        match self {
+            Slot::Recording(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// The note it's claimed or recording for.
+    fn note(&self) -> Option<u64> {
+        match self {
+            Slot::Free => None,
+            Slot::Starting(id) => Some(*id),
+            Slot::Recording(s) => Some(s.note_id),
+        }
+    }
+}
+
+static SESSION: Mutex<Slot> = Mutex::new(Slot::Free);
+
+fn slot() -> std::sync::MutexGuard<'static, Slot> {
+    SESSION.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The recorder's slot, claimed for one note until it records, or let go
+/// again when the start fails (dropped).
+struct Claim {
+    note_id: u64,
+    recording: bool,
+}
+
+impl Claim {
+    /// Claim the slot for `note_id`: refused while another start or a
+    /// recording has it.
+    fn take(note_id: u64) -> Result<Claim, String> {
+        let mut slot = slot();
+        if !matches!(*slot, Slot::Free) {
+            return Err("A meeting is already being recorded".to_string());
+        }
+        *slot = Slot::Starting(note_id);
+        Ok(Claim { note_id, recording: false })
+    }
+
+    /// The devices are up: the slot holds the session now.
+    fn record(mut self, session: Session) {
+        let mut slot = slot();
+        debug_assert!(matches!(*slot, Slot::Starting(id) if id == self.note_id));
+        *slot = Slot::Recording(session);
+        self.recording = true;
+    }
+}
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        if !self.recording {
+            let mut slot = slot();
+            if matches!(*slot, Slot::Starting(id) if id == self.note_id) {
+                *slot = Slot::Free;
+            }
+        }
+    }
+}
+
+/// The recorder's slot is one for the whole process: unit tests that use
+/// it (here and the local API's) take turns.
+#[cfg(test)]
+pub(crate) static SLOT_TESTS: Mutex<()> = Mutex::new(());
+
+/// A start claiming `note_id`, for other modules' tests (the local API's
+/// delete): holds the slot until dropped.
+#[cfg(test)]
+pub(crate) fn claim_for_test(note_id: u64) -> impl Drop {
+    Claim::take(note_id).expect("the recorder's slot is free")
+}
+
+/// **Delete a note** — every way one is deleted while Yap may be recording
+/// (the Notes view, the local API, "Started by mistake?"'s Discard): never
+/// the note a meeting records into, or is starting to. Under the recorder's
+/// lock, so a start can't claim the note between the check and the delete.
+/// (Until 2026-10-24 the local API's delete skipped the check: every later
+/// chunk then failed "Note not found", the recorder kept the mic, and the
+/// notepad showed a deleted note.)
+pub fn delete_note(note_id: u64) -> Result<(), String> {
+    let slot = slot();
+    if slot.note() == Some(note_id) {
+        return Err("This meeting is still recording".to_string());
+    }
+    crate::notes::delete(note_id);
+    drop(slot);
+    Ok(())
+}
 /// Note id of the active session (0 = none).
 static ACTIVE_NOTE: AtomicU64 = AtomicU64::new(0);
 /// Talk segments ingested since Yap started (any recording, the e2e feed's
@@ -572,8 +676,8 @@ pub struct Activity {
 /// [`Activity`] of the recording going on, if one is.
 pub fn activity() -> Option<Activity> {
     let (note_id, you, them) = {
-        let guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
-        let s = guard.as_ref()?;
+        let guard = slot();
+        let s = guard.session()?;
         (s.note_id, Arc::clone(&s.you), Arc::clone(&s.them))
     };
     let levels = |buf: &AudioBuf| buf.lock().map(|c| c.levels()).unwrap_or_default();
@@ -597,17 +701,18 @@ fn now_ms() -> u64 {
 /// the call app shows is dated with it (`speakers/call_ui.rs`).
 pub fn them_clock_ms(note_id: u64) -> Option<u64> {
     let them = {
-        let guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
-        let s = guard.as_ref().filter(|s| s.note_id == note_id)?;
+        let guard = slot();
+        let s = guard.session().filter(|s| s.note_id == note_id)?;
         Arc::clone(&s.them)
     };
     let end = them.lock().map(|c| c.levels().end).ok()?;
     Some(end * 1000 / RATE as u64)
 }
 
-/// Whether a meeting is being recorded (the updater won't restart mid-meeting).
+/// Whether a meeting is being recorded, or starting to (the updater won't
+/// restart mid-meeting; a refine waits).
 pub fn is_recording() -> bool {
-    SESSION.lock().unwrap_or_else(|p| p.into_inner()).is_some()
+    !matches!(*slot(), Slot::Free)
 }
 
 /// The note a meeting is being recorded into, if any.
@@ -620,8 +725,8 @@ pub fn recording_note() -> Option<u64> {
 
 /// Session state for the UI: `{ recording, noteId, elapsedSecs }`.
 pub fn state() -> serde_json::Value {
-    let guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
-    match guard.as_ref() {
+    let guard = slot();
+    match guard.session() {
         Some(s) => serde_json::json!({
             "recording": true,
             "noteId": s.note_id,
@@ -1066,40 +1171,60 @@ fn with_attendees(note_id: u64, dictionary: &[crate::config::DictionaryEntry]) -
         .collect()
 }
 
-/// Transcribe one chunk on the shared warm engine (take → transcribe →
-/// put back; lazily reloads the model if the idle watcher dropped it), then
-/// run the correction dictionary over it as a dictation's text gets it
-/// (`pipeline::apply_corrections`: exact, then fuzzy for ONNX models). Both
-/// sides go through here, so the echo check compares corrected text with
-/// corrected text. Also the times of its words, when the model gives them
-/// (ms from the chunk's start, one per word of the corrected text:
-/// `speakers::word_times`), for the voice separation to split lines at.
-async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>, note_id: u64) -> Option<(String, Vec<(u64, u64)>)> {
+/// How long a meeting's chunk waits for the warm engine while a dictation
+/// (or an Upload's chunk) has it out, before loading a copy after all.
+const CHUNK_ENGINE_WAIT: Duration = Duration::from_secs(60);
+
+/// What became of a chunk.
+enum Transcribed {
+    /// Its words (corrected) and their times.
+    Words(String, Vec<(u64, u64)>),
+    /// Silence, too short, or nothing came of it.
+    Nothing,
+    /// It couldn't be transcribed — no speech model, an engine error, a
+    /// crash: the transcript marks the stretch (see "Failed chunks" below).
+    Failed,
+}
+
+/// How a transcription runs: the live recorder's chunks, or a meeting's
+/// audio transcribed again in the background ([`replay`]).
+#[derive(Clone, Default)]
+pub(crate) struct Ctl {
+    /// A background job (the refine after a meeting): its transcriptions
+    /// run on a below-normal-priority thread (`meeting_refine::LowPriority`).
+    pub background: bool,
+    /// Set to stop a replay between chunks (Cancel).
+    pub cancel: Option<Arc<AtomicBool>>,
+}
+
+impl Ctl {
+    pub(crate) fn cancelled(&self) -> bool {
+        self.cancel.as_ref().is_some_and(|c| c.load(Ordering::SeqCst))
+    }
+}
+
+/// Transcribe one chunk on the shared warm engine (taken out for it and
+/// given back: `pipeline::EngineCell::take`, which waits while a dictation
+/// has it rather than load a second copy, and loads the model when nobody
+/// has it), then run the correction dictionary over it as a dictation's
+/// text gets it (`pipeline::apply_corrections`: exact, then fuzzy for ONNX
+/// models). Both sides go through here, so the echo check compares
+/// corrected text with corrected text. Also the times of its words, when
+/// the model gives them (ms from the chunk's start, one per word of the
+/// corrected text: `speakers::word_times`), for the voice separation to
+/// split lines at. An engine that fails isn't given back: the next chunk
+/// loads a fresh one (a graphics card lost after sleep, a driver reset).
+async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>, note_id: u64, ctl: &Ctl) -> Transcribed {
     if samples.len() < MIN_CHUNK_SECS * RATE || peak(&samples) < SILENCE_PEAK {
-        return None;
+        return Transcribed::Nothing;
     }
-    let mut engine = engine_slot.lock().ok().and_then(|mut g| g.take());
-    // A meeting started right after Yap did: the model is still loading in
-    // the background (`pipeline::model_loading`): wait, never a second copy.
-    if engine.is_none() && crate::pipeline::model_loading() {
-        let _ = tokio::task::spawn_blocking(|| crate::pipeline::wait_for_model(Duration::from_secs(180))).await;
-        engine = engine_slot.lock().ok().and_then(|mut g| g.take());
-    }
-    let engine = match engine {
-        Some(e) => e,
-        None => {
-            let cfg = crate::config::load();
-            match crate::stt::create_stt_engine(
-                &crate::config::data_dir(),
-                &cfg.model_size,
-                cfg.use_gpu,
-            ) {
-                Ok(e) => e,
-                Err(e) => {
-                    tracing::warn!("Meeting: no STT engine available: {}", e);
-                    return None;
-                }
-            }
+    // A meeting started right after Yap did waits for the model still
+    // loading in the background (`lease_engine`): never a second copy.
+    let lease = match crate::pipeline::lease_engine(engine_slot, CHUNK_ENGINE_WAIT).await {
+        Ok(lease) => lease,
+        Err(e) => {
+            tracing::warn!(note_id, "Meeting: no STT engine available: {}", e);
+            return Transcribed::Failed;
         }
     };
 
@@ -1113,45 +1238,42 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>, note_id: 
     let dict_prompt =
         crate::config::dictionary_prompt(&with_attendees(note_id, &crate::dict_usage::ranked(&crate::memory::with_names(&cfg.dictionary))));
 
-    let slot = Arc::clone(engine_slot);
+    let background = ctl.background;
     let outcome = tokio::task::spawn_blocking(move || {
-        let result = engine.transcribe_timed(
-            &samples,
-            language.as_deref(),
-            translate,
-            dict_prompt.as_deref(),
-        );
-        (engine, result)
+        let _low = background.then(crate::meeting_refine::LowPriority::now);
+        #[cfg(debug_assertions)]
+        if background {
+            crate::meeting_refine::e2e_slow_chunk();
+        }
+        let result = match lease.engine() {
+            Some(engine) => engine.transcribe_timed(&samples, language.as_deref(), translate, dict_prompt.as_deref()),
+            None => Err(crate::stt::SttError::NotReady),
+        };
+        (lease, result)
     })
     .await;
 
     match outcome {
-        Ok((engine, result)) => {
-            if let Ok(mut g) = slot.lock() {
-                if g.is_none() {
-                    *g = Some(engine);
-                }
-            }
-            match result {
-                Ok(timed) => {
-                    let t = crate::pipeline::apply_corrections(timed.text.trim(), &cfg);
-                    let t = t.trim().to_string();
-                    if t.is_empty() {
-                        None
-                    } else {
-                        let words = crate::speakers::word_times(&t, &timed.words);
-                        Some((t, words))
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("Meeting chunk transcription failed: {}", e);
-                    None
-                }
+        Ok((lease, Ok(timed))) => {
+            drop(lease);
+            let t = crate::pipeline::apply_corrections(timed.text.trim(), &cfg);
+            let t = t.trim().to_string();
+            if t.is_empty() {
+                Transcribed::Nothing
+            } else {
+                let words = crate::speakers::word_times(&t, &timed.words);
+                Transcribed::Words(t, words)
             }
         }
+        Ok((mut lease, Err(e))) => {
+            tracing::warn!(note_id, "Meeting chunk transcription failed: {}", e);
+            lease.discard();
+            Transcribed::Failed
+        }
         Err(e) => {
-            tracing::warn!("Meeting chunk task failed: {}", e);
-            None
+            // (Its lease was dropped in the panic: the engine goes with it.)
+            tracing::warn!(note_id, "Meeting chunk task failed: {}", e);
+            Transcribed::Failed
         }
     }
 }
@@ -1162,20 +1284,26 @@ struct Source {
     loudness: Envelope,
     /// The meeting's note (its attendees spell names for the model).
     note_id: u64,
+    /// "you" or "them".
+    side: &'static str,
+    /// Read back from disk ([`replay`]), not the live recorder.
+    replayed: bool,
 }
 
 impl Source {
-    fn new(buf: AudioBuf, note_id: u64) -> Self {
+    fn new(buf: AudioBuf, note_id: u64, side: &'static str) -> Self {
         Source {
             buf,
             loudness: Envelope::default(),
             note_id,
+            side,
+            replayed: false,
         }
     }
 
     /// A side read back from disk from session position `start` on
     /// ([`replay`]): its loudness frames numbered as the live worker's were.
-    fn replayed_from(start: u64, note_id: u64) -> Self {
+    fn replayed_from(start: u64, note_id: u64, side: &'static str) -> Self {
         let frame = ENV_FRAME as u64;
         Source {
             buf: Arc::new(Mutex::new(Captured::replayed_from(start))),
@@ -1185,20 +1313,33 @@ impl Source {
                 ..Default::default()
             },
             note_id,
+            side,
+            replayed: true,
         }
     }
 
     /// The next chunk, transcribed, or `None` when none is ready.
-    async fn next(&mut self, engine_slot: &EngineSlot, final_drain: bool) -> Option<Heard> {
+    async fn next(&mut self, engine_slot: &EngineSlot, final_drain: bool, ctl: &Ctl) -> Option<Heard> {
         // (The lock is let go before the transcription is awaited.)
         let chunk = self.buf.lock().ok()?.take_chunk(final_drain)?;
         let from = chunk.from;
         let to = from + chunk.samples.len() as u64;
         self.loudness.push(&chunk.samples);
         let onset = from + speech_onset(&chunk.samples) as u64;
-        let (text, words) = match transcribe_chunk(engine_slot, chunk.samples, self.note_id).await {
-            Some((text, words)) => (Some(text), words),
-            None => (None, Vec::new()),
+        #[cfg(debug_assertions)]
+        let staged = !self.replayed && test_fails(self.side, from, to);
+        #[cfg(not(debug_assertions))]
+        let staged = false;
+        let outcome = if staged {
+            tracing::info!(side = self.side, "e2e: a meeting chunk fails on purpose");
+            Transcribed::Failed
+        } else {
+            transcribe_chunk(engine_slot, chunk.samples, self.note_id, ctl).await
+        };
+        let (text, words, failed) = match outcome {
+            Transcribed::Words(text, words) => (Some(text), words, false),
+            Transcribed::Nothing => (None, Vec::new(), false),
+            Transcribed::Failed => (None, Vec::new(), true),
         };
         Some(Heard {
             from,
@@ -1206,6 +1347,7 @@ impl Source {
             onset,
             text,
             words,
+            failed,
             dictated: chunk.dictated,
         })
     }
@@ -1218,10 +1360,13 @@ struct Heard {
     /// Where the speech in it starts: dates the segment, and orders "you"
     /// and "them" chunks that were cut at the same moment.
     onset: u64,
-    /// `None`: silence (a dictation blanked, say), or nothing came of it.
+    /// `None`: silence (a dictation blanked, say), nothing came of it, or
+    /// it failed.
     text: Option<String>,
     /// Its words' times, ms from `from` (empty: the model gives none).
     words: Vec<(u64, u64)>,
+    /// It couldn't be transcribed (see "Failed chunks" below).
+    failed: bool,
     /// Where dictations began that are due a "you dictated here" marker.
     dictated: Vec<u64>,
 }
@@ -1244,6 +1389,76 @@ impl Heard {
             ..Default::default()
         }
     }
+
+    /// The marker for this chunk when it failed: the whole stretch, dated
+    /// where it begins.
+    fn failed_marker(&self, source: &str, at: impl Fn(u64) -> u64) -> TranscriptSegment {
+        let ms = |pos: u64| pos * 1000 / RATE as u64;
+        TranscriptSegment::failed_marker(source, at(self.from), ms(self.from), ms(self.to))
+    }
+}
+
+// ---- Failed chunks ----
+//
+// A chunk that can't be transcribed (no speech model, the engine erring
+// after the PC slept, a crash in it) is never silence: its stretch gets a
+// marker in the transcript (`TranscriptSegment::failed`, "Couldn't
+// transcribe 0:42–1:12 · Try again"), which summaries skip, and the person
+// is told once per meeting, in one place (`meeting_guard::notice`). Its
+// audio is on disk (`meeting_audio.rs`): **Try again** transcribes just that
+// stretch into its place, and a meeting with failed chunks is transcribed
+// again when it ends (`meeting_refine.rs`) unless Settings says Never.
+
+/// The meetings told about a failed chunk since Yap started (once each).
+static TOLD_FAILED: Mutex<std::collections::BTreeSet<u64>> = Mutex::new(std::collections::BTreeSet::new());
+
+/// Tell the person, once per meeting, that part of it couldn't be
+/// transcribed.
+fn tell_failed(app: &AppHandle, note_id: u64) {
+    if !TOLD_FAILED.lock().unwrap_or_else(|p| p.into_inner()).insert(note_id) {
+        return;
+    }
+    let body = if crate::config::load().meeting_refine == crate::meeting_refine::NEVER {
+        "Its audio is kept: use Try again on the transcript once the meeting ends."
+    } else {
+        "Its audio is kept: Yap transcribes that part again when the meeting ends."
+    };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        crate::meeting_guard::notice(
+            &app,
+            &crate::meeting_guard::Notice {
+                kind: "warning",
+                title: "Yap couldn't transcribe part of this meeting".to_string(),
+                body: body.to_string(),
+                icon: "call",
+                variant: "default",
+                settings: None,
+                note_id: Some(note_id),
+                surface: None,
+            },
+        );
+    });
+}
+
+/// Test mode only: the live recorder's chunks of `side` ("you", "them" or
+/// "both") that overlap `[from, to)` seconds of its recording fail, as if
+/// the speech engine had (`e2e::e2e_meeting_fail`). A replay of the audio
+/// (Try again, the refine) transcribes them as ever.
+#[cfg(debug_assertions)]
+static TEST_FAILS: Mutex<Option<(String, f32, f32)>> = Mutex::new(None);
+
+#[cfg(debug_assertions)]
+pub(crate) fn set_test_failures(fails: Option<(String, f32, f32)>) {
+    *TEST_FAILS.lock().unwrap_or_else(|p| p.into_inner()) = fails;
+}
+
+#[cfg(debug_assertions)]
+fn test_fails(side: &str, from: u64, to: u64) -> bool {
+    let guard = TEST_FAILS.lock().unwrap_or_else(|p| p.into_inner());
+    let Some((which, a, b)) = guard.as_ref() else { return false };
+    let secs = |pos: u64| pos as f32 / RATE as f32;
+    (which == "both" || which == side) && secs(from) < *b && secs(to) > *a
 }
 
 /// Offset of the first 20 ms frame of speech in `samples`: the first at a
@@ -1516,15 +1731,15 @@ fn drain_interval() -> Duration {
     Duration::from_secs(DRAIN_INTERVAL_SECS)
 }
 
-/// Start recording into `note_id`. Fails if a session is already running or
-/// the streams can't be built. Emits `yap-meeting-state`.
+/// Start recording into `note_id`. Fails if a session is already running —
+/// or starting: the slot is claimed before the devices open (see [`Slot`])
+/// — if the note is gone, or if the streams can't be built. Emits
+/// `yap-meeting-state`.
 pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<(), String> {
-    {
-        let guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
-        if guard.is_some() {
-            return Err("A meeting is already being recorded".to_string());
-        }
-    }
+    let claim = Claim::take(note_id)?;
+    // Deleted just before the claim (a delete holds the recorder's lock, so
+    // none can come after it).
+    crate::notes::get(note_id).ok_or("Note not found")?;
     // A spoken reply stops before the call is heard (tts.rs; and nothing
     // is read aloud while this records).
     crate::tts::stop();
@@ -1576,18 +1791,18 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
         you: Arc::clone(&mic_buf),
         them: Arc::clone(&sys_buf),
     };
-    {
-        let mut guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
-        *guard = Some(session);
-    }
+    claim.record(session);
     ACTIVE_NOTE.store(note_id, Ordering::SeqCst);
     let _ = app.emit("yap-meeting-state", state());
     tracing::info!(note_id, "Meeting recording started");
 
     // The chunk/transcribe worker.
     tauri::async_runtime::spawn(async move {
-        let mut you = Source::new(mic_buf, note_id);
-        let mut them = Source::new(sys_buf, note_id);
+        let mut you = Source::new(mic_buf, note_id, "you");
+        let mut them = Source::new(sys_buf, note_id, "them");
+        let live = Ctl::default();
+        // Chunks that couldn't be transcribed (see "Failed chunks").
+        let mut failed = 0usize;
         // How far each side is transcribed into the note (session
         // position): the audio on disk past it is what a crash recovery
         // transcribes.
@@ -1623,8 +1838,13 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
             // Segments are dated (and ordered) by where their speech starts;
             // a dictation marker by where the dictation began.
             let mut batch: Vec<(u64, TranscriptSegment)> = Vec::new();
-            if let Some(h) = them.next(&engine_slot, stopping).await {
+            if let Some(h) = them.next(&engine_slot, stopping, &live).await {
                 done.1 = h.to;
+                if h.failed {
+                    failed += 1;
+                    tracing::warn!(note_id, side = "them", secs = (h.to - h.from) / RATE as u64, "Meeting: a chunk couldn't be transcribed; marked");
+                    batch.push((h.from, h.failed_marker("them", at)));
+                }
                 if let Some(text) = h.text.clone() {
                     let seg = h.line("them", text.clone(), at);
                     batch.push((h.onset, seg));
@@ -1634,11 +1854,16 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
                     }
                 }
             }
-            if let Some(h) = you.next(&engine_slot, stopping).await {
+            if let Some(h) = you.next(&engine_slot, stopping, &live).await {
                 done.0 = h.to;
                 for &from in &h.dictated {
                     tracing::info!(note_id, "Meeting: a dictation was left out of \"You\"");
                     batch.push((from, TranscriptSegment::dictation_marker(at(from))));
+                }
+                if h.failed {
+                    failed += 1;
+                    tracing::warn!(note_id, side = "you", secs = (h.to - h.from) / RATE as u64, "Meeting: a chunk couldn't be transcribed; marked");
+                    batch.push((h.from, h.failed_marker("you", at)));
                 }
                 if let Some(text) = h.text.clone() {
                     let (mic, call) = (&you.loudness, &them.loudness);
@@ -1661,6 +1886,9 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
             }
             if let Some(r) = &recorder {
                 r.progress(done);
+            }
+            if failed > 0 {
+                tell_failed(&app, note_id);
             }
             if !warned && overflow.load(Ordering::Relaxed) {
                 warned = true;
@@ -1703,17 +1931,18 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
         }
         crate::speakers::labels::end(&app, note_id);
         // The audio's files closed: kept for the days Settings says, or
-        // deleted now that the transcript is done ("Keep meeting audio" off).
+        // deleted now that the transcript is done ("Keep meeting audio"
+        // off) — unless a chunk failed (Try again needs it) or the meeting
+        // may be transcribed again when it ends (`meeting_refine.rs`): then
+        // it goes once that's done.
         if let Some(r) = recorder {
-            let _ = tauri::async_runtime::spawn_blocking(move || r.finish()).await;
+            let hold = failed > 0 || crate::meeting_refine::may_refine(&crate::config::load());
+            let _ = tauri::async_runtime::spawn_blocking(move || r.finish(hold)).await;
             crate::meeting_audio::changed(&app, note_id);
         }
 
         ACTIVE_NOTE.store(0, Ordering::SeqCst);
-        {
-            let mut guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
-            *guard = None;
-        }
+        *slot() = Slot::Free;
         let _ = app.emit("yap-meeting-state", state());
         tracing::info!(note_id, "Meeting recording finished");
     });
@@ -1725,8 +1954,8 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
 /// clears the session, and emits the final `yap-meeting-state` — the UI waits
 /// for that event before running the meeting enhancement.
 pub fn stop() -> Result<(), String> {
-    let guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
-    match guard.as_ref() {
+    let guard = slot();
+    match guard.session() {
         Some(s) => {
             s.stop.store(true, Ordering::SeqCst);
             Ok(())
@@ -1754,22 +1983,37 @@ pub(crate) trait Feed: Send {
     fn read(&mut self, n: usize) -> Vec<f32>;
 }
 
+/// A side with nothing to transcribe (Try again on the other side's stretch).
+pub(crate) struct NoFeed;
+
+impl Feed for NoFeed {
+    fn read(&mut self, _n: usize) -> Vec<f32> {
+        Vec::new()
+    }
+}
+
 /// What [`replay`] made of a recording's audio.
 #[derive(Debug, Default)]
 pub(crate) struct Replayed {
-    /// Its lines and dictation markers, in time order.
+    /// Its lines, dictation markers and markers for chunks that failed
+    /// again, in time order.
     pub segments: Vec<TranscriptSegment>,
     /// How far each side got (session positions, samples).
     pub you_done: u64,
     pub them_done: u64,
+    /// Stopped part-way (Cancel): `segments` is only the start.
+    pub cancelled: bool,
 }
 
 /// Wait while a hotkey dictation records, and a moment after one (its own
 /// transcription takes the warm engine first) — and while a meeting
-/// records (its chunks have the engine; two takers would load a second copy
-/// of the model).
-async fn give_way(last: &mut u64) {
+/// records (its chunks have the engine; a refine never runs beside a
+/// recording). `false`: cancelled meanwhile.
+async fn give_way(last: &mut u64, ctl: &Ctl) -> bool {
     loop {
+        if ctl.cancelled() {
+            return false;
+        }
         let (count, recording) = crate::pipeline::dictation_state();
         if recording || is_recording() {
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1777,7 +2021,7 @@ async fn give_way(last: &mut u64) {
             *last = count;
             tokio::time::sleep(Duration::from_secs(3)).await;
         } else {
-            return;
+            return true;
         }
     }
 }
@@ -1801,7 +2045,8 @@ fn top_up(feed: &mut dyn Feed, buf: &AudioBuf, end: &mut bool, fill: usize) {
 /// live worker would have (see above): `you` and `them` start at session
 /// positions `from`, the recording started at `started_ms` (unix ms), and
 /// `dictated` lists where hotkey dictations began (markers for those from
-/// `from.0` on). `progress(you, them)` after each step, in samples.
+/// `from.0` on). `progress(you, them)` after each step, in samples. `ctl`:
+/// a background job's (low priority, its Cancel checked between chunks).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn replay(
     engine_slot: &EngineSlot,
@@ -1812,9 +2057,10 @@ pub(crate) async fn replay(
     from: (u64, u64),
     dictated: &[u64],
     progress: &(dyn Fn(u64, u64) + Send + Sync),
+    ctl: &Ctl,
 ) -> Replayed {
-    let mut mine = Source::replayed_from(from.0, note_id);
-    let mut call = Source::replayed_from(from.1, note_id);
+    let mut mine = Source::replayed_from(from.0, note_id, "you");
+    let mut call = Source::replayed_from(from.1, note_id, "them");
     let at = move |pos: u64| (started_ms + pos * 1000 / RATE as u64) / 1000;
     let mut marks: Vec<u64> = dictated.iter().copied().filter(|&d| d >= from.0).collect();
     marks.sort_unstable();
@@ -1826,14 +2072,21 @@ pub(crate) async fn replay(
     let mut theirs: VecDeque<(u64, u64, String)> = Default::default();
     let mut out = Vec::new();
     let mut done = from;
+    let mut failed = 0;
     let mut dictations = crate::pipeline::dictation_state().0;
     loop {
-        give_way(&mut dictations).await;
+        if !give_way(&mut dictations, ctl).await {
+            return Replayed { segments: out, you_done: done.0, them_done: done.1, cancelled: true };
+        }
         top_up(you, &mine.buf, &mut you_end, fill);
         top_up(them, &call.buf, &mut them_end, fill);
         let mut batch: Vec<(u64, TranscriptSegment)> = Vec::new();
-        if let Some(h) = call.next(engine_slot, them_end).await {
+        if let Some(h) = call.next(engine_slot, them_end, ctl).await {
             done.1 = h.to;
+            if h.failed {
+                failed += 1;
+                batch.push((h.from, h.failed_marker("them", at)));
+            }
             if let Some(text) = h.text.clone() {
                 batch.push((h.onset, h.line("them", text.clone(), at)));
                 theirs.push_back((h.from, h.to, text));
@@ -1842,10 +2095,14 @@ pub(crate) async fn replay(
                 }
             }
         }
-        if let Some(h) = mine.next(engine_slot, you_end).await {
+        if let Some(h) = mine.next(engine_slot, you_end, ctl).await {
             done.0 = h.to;
             while let Some(m) = marks.next_if(|&m| m < h.to) {
                 batch.push((m, TranscriptSegment::dictation_marker(at(m))));
+            }
+            if h.failed {
+                failed += 1;
+                batch.push((h.from, h.failed_marker("you", at)));
             }
             if let Some(text) = h.text.clone() {
                 let echo = sounds_like_echo(&mine.loudness, &call.loudness, h.from, h.to, &text, &theirs);
@@ -1861,10 +2118,14 @@ pub(crate) async fn replay(
         }
     }
     out.extend(marks.map(|m| TranscriptSegment::dictation_marker(at(m))));
+    if failed > 0 {
+        tracing::warn!(note_id, failed, "Meeting audio: chunks still couldn't be transcribed");
+    }
     Replayed {
         segments: out,
         you_done: done.0,
         them_done: done.1,
+        cancelled: false,
     }
 }
 
@@ -1876,6 +2137,114 @@ mod tests {
         (0..(secs * RATE as f32) as usize)
             .map(|i| 0.3 * (i as f32 * 0.07).sin())
             .collect()
+    }
+
+    // ---- the recorder's slot: one recorder, and its note kept ----
+
+    fn session(note_id: u64) -> Session {
+        Session { note_id, started_ms: 0, stop: Arc::new(AtomicBool::new(false)), you: Captured::call(), them: Captured::call() }
+    }
+
+    /// What [`start`] does around the devices: claim the slot, open the
+    /// devices (`opening`: up to seconds), record.
+    fn start_like(note_id: u64, opening: Duration) -> Result<(), String> {
+        let claim = Claim::take(note_id)?;
+        std::thread::sleep(opening);
+        claim.record(session(note_id));
+        Ok(())
+    }
+
+    /// The meeting shortcut and the call prompt (or the tray and the
+    /// calendar) start a meeting at the same moment: one recorder. Until
+    /// 2026-10-24 both passed the "already recording?" check while the
+    /// devices opened, and both recorded.
+    #[test]
+    fn two_starts_at_once_give_one_recorder() {
+        let _turn = SLOT_TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        *slot() = Slot::Free;
+        let together = Arc::new(std::sync::Barrier::new(2));
+        let starts: Vec<_> = [101, 102]
+            .into_iter()
+            .map(|note| {
+                let together = Arc::clone(&together);
+                std::thread::spawn(move || {
+                    together.wait();
+                    start_like(note, Duration::from_millis(200))
+                })
+            })
+            .collect();
+        let results: Vec<Result<(), String>> = starts.into_iter().map(|t| t.join().unwrap()).collect();
+        assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1, "one recorder: {results:?}");
+        assert!(slot().session().is_some());
+        // A start whose devices fail lets go of the slot.
+        *slot() = Slot::Free;
+        let failing = Claim::take(7).unwrap();
+        assert!(is_recording(), "starting counts");
+        assert!(Claim::take(8).is_err(), "and holds off another start");
+        drop(failing);
+        assert!(!is_recording());
+        assert!(Claim::take(8).is_ok());
+        *slot() = Slot::Free;
+    }
+
+    /// The local API (or any delete) never takes the note a meeting records
+    /// into, nor one it's starting to: until 2026-10-24 the local API's
+    /// delete skipped the check, and every later chunk failed "Note not
+    /// found" while the recorder kept the mic.
+    #[test]
+    fn the_note_being_recorded_is_never_deleted() {
+        let _turn = SLOT_TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        *slot() = Slot::Free;
+        let note = crate::notes::create("Weekly sync", "", "meeting", "Meetings");
+        let claim = Claim::take(note.id).unwrap();
+        assert!(delete_note(note.id).is_err(), "starting");
+        claim.record(session(note.id));
+        assert!(delete_note(note.id).is_err(), "recording");
+        assert!(crate::notes::get(note.id).is_some());
+        // Another note goes as ever.
+        let other = crate::notes::create("Lunch plans", "", "personal", "Personal");
+        assert!(delete_note(other.id).is_ok());
+        assert!(crate::notes::get(other.id).is_none());
+        // The recording ended: it can go.
+        *slot() = Slot::Free;
+        assert!(delete_note(note.id).is_ok());
+        assert!(crate::notes::get(note.id).is_none());
+    }
+
+    // ---- failed chunks ----
+
+    /// A chunk that fails is a marker over its stretch — not silence: its
+    /// audio has left the buffer, so without one nobody would know.
+    #[test]
+    fn a_failed_chunk_leaves_a_marker_not_silence() {
+        let buf = buffered_audio(tone(16.0));
+        let mut src = Source::new(buf, 1, "them");
+        set_test_failures(Some(("them".into(), 0.0, 100.0)));
+        let slot = EngineSlot::default();
+        let h = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(src.next(&slot, false, &Ctl::default()))
+            .unwrap();
+        set_test_failures(None);
+        assert!(h.failed && h.text.is_none());
+        assert!(h.to >= 11 * RATE as u64, "a whole chunk");
+        assert_eq!(buffered(&src.buf) as u64, 16 * RATE as u64 - h.to, "its audio has left the buffer");
+        let started_ms = 1_761_000_000_000u64;
+        let at = |pos: u64| (started_ms + pos * 1000 / RATE as u64) / 1000;
+        let marker = h.failed_marker("them", at);
+        assert!(marker.failed && marker.text.is_empty() && !marker.is_talk());
+        assert_eq!(marker.ts, started_ms / 1000);
+        assert_eq!((marker.start_ms, marker.end_ms), (Some(0), Some(h.to * 1000 / RATE as u64)));
+        // It reads back from the note as it was written (`failed` on disk).
+        let back: TranscriptSegment = serde_json::from_value(serde_json::to_value(&marker).unwrap()).unwrap();
+        assert!(back.failed && back.start_ms == Some(0));
+        // A line that isn't one says nothing of it.
+        let plain = serde_json::to_value(TranscriptSegment { text: "hello".into(), ..Default::default() }).unwrap();
+        assert!(plain.get("failed").is_none());
+        // The summaries' word count skips it.
+        assert_eq!(crate::notes::speech_words(&[marker]), 0);
     }
 
     #[test]

@@ -164,10 +164,39 @@ fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) {
         crate::meeting_assist::maybe_title(app, note_id, true);
         return;
     }
+    drop(note);
+    // The refined transcript (`meeting_refine.rs`, "Which comes first"):
+    // with holes in the live one (chunks failed), the refine first, then
+    // these steps; else these steps now and the refine after the summary.
+    let plan = crate::meeting_refine::plan(note_id);
+    if let Some(p) = plan.as_ref().filter(|p| p.first) {
+        if crate::meeting_refine::start(app, note_id, p, origin.map(str::to_string)) {
+            return;
+        }
+    }
+    let mistake = end_steps(app, note_id, origin);
+    match plan.filter(|p| !p.first && !mistake) {
+        Some(p) => {
+            crate::meeting_refine::start(app, note_id, &p, None);
+        }
+        None => crate::meeting_audio::release(app, note_id),
+    }
+}
+
+/// The end of a meeting from its transcript as it stands: "Started by
+/// mistake?" (a handful of words, nothing typed, and no stretch that
+/// couldn't be transcribed — that one may have been the meeting), or the
+/// AI title and the action plan. After the refine when that came first
+/// (`meeting_refine.rs`). Returns whether it asked "Started by mistake?".
+pub fn end_steps(app: &AppHandle, note_id: u64, origin: Option<&str>) -> bool {
+    let Some(note) = crate::notes::get(note_id) else {
+        return false; // deleted meanwhile
+    };
     let words = crate::notes::speech_words(&note.transcript);
-    let mistake = started_by_mistake(words, &note.content);
+    let failed = note.transcript.iter().any(|s| s.failed);
+    let mistake = started_by_mistake(words, &note.content) && !failed;
     let surface = surface(app, origin);
-    tracing::info!(note_id, words, mistake, ?surface, "Meeting ended");
+    tracing::info!(note_id, words, mistake, failed, ?surface, "Meeting ended");
     let _ = app.emit(
         EVENT_ENDED,
         serde_json::json!({ "noteId": note_id, "mistake": mistake, "words": words, "surface": surface }),
@@ -178,10 +207,11 @@ fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) {
         if surface.is_none() {
             ask_on_bar(app, note_id);
         }
-        return;
+        return true;
     }
     crate::meeting_assist::maybe_title(app, note_id, true);
     start_summary(app, note_id);
+    false
 }
 
 /// The part of a meeting a crash left is transcribed now
@@ -267,6 +297,12 @@ pub fn summary_running() -> bool {
     jobs().values().any(|j| j.state == "running")
 }
 
+/// Note `note_id`'s action plan is being written (a refine waits for it,
+/// `meeting_audio.rs`).
+pub fn summary_running_for(note_id: u64) -> bool {
+    jobs().get(&note_id).is_some_and(|j| j.state == "running")
+}
+
 fn publish(app: &AppHandle, summary: Summary) {
     jobs().insert(summary.note_id, summary.clone());
     let _ = app.emit(EVENT_SUMMARY, summary);
@@ -293,6 +329,8 @@ pub fn start_summary(app: &AppHandle, note_id: u64) -> bool {
         all.insert(note_id, first.clone());
     }
     let _ = app.emit(EVENT_SUMMARY, first);
+    // From the lines as they are now: a refine's "Update summary" is answered.
+    crate::meeting_audio::summary_redone(app, note_id);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let step = |n: u8| {
@@ -376,6 +414,11 @@ pub fn meeting_summarise(app: AppHandle, note_id: u64) -> Result<(), String> {
     if crate::meeting::recording_note() == Some(note_id) {
         return Err("Stop the recording first".to_string());
     }
+    // The transcript is being completed first (`meeting_refine.rs`): the
+    // summary follows by itself.
+    if crate::meeting_audio::running_job(note_id).is_some_and(|j| j.then_summary) {
+        return Ok(());
+    }
     start_summary(&app, note_id);
     Ok(())
 }
@@ -391,11 +434,8 @@ pub fn meeting_summary_status(note_id: u64) -> Option<Summary> {
 /// notepad closes if it showed it.
 #[tauri::command]
 pub fn meeting_discard(app: AppHandle, note_id: u64) -> Result<(), String> {
-    if crate::meeting::recording_note() == Some(note_id) {
-        return Err("This meeting is still recording".to_string());
-    }
     crate::notes::get(note_id).ok_or("Note not found")?;
-    crate::notes::delete(note_id);
+    crate::meeting::delete_note(note_id)?;
     jobs().remove(&note_id);
     withdraw_mistake_card(&app, note_id);
     tracing::info!(note_id, "Meeting note deleted");

@@ -486,15 +486,13 @@ fn route(
             }
         }
         (Method::Delete, ["v1", "notes", id]) => {
-            match parse_id(id).and_then(crate::notes::get) {
-                Some(note) => {
-                    crate::notes::delete(note.id);
+            match delete_note(id) {
+                Ok(note_id) => {
                     let _ = app.emit("yap-notes-changed", ());
+                    let _ = app.emit(crate::meeting_end::EVENT_DELETED, json!({ "id": note_id }));
                     respond_no_content(request);
                 }
-                None => {
-                    respond_error(request, 404, "not_found", &format!("Note {} not found", id))
-                }
+                Err((status, code, message)) => respond_error(request, status, code, &message),
             }
         }
 
@@ -573,6 +571,17 @@ fn route(
     }
 }
 
+/// `DELETE /v1/notes/{id}`: the note deleted (its id), or the answer —
+/// 404, or 409 for the note a meeting is recording into (the shared delete
+/// path refuses it: `meeting::delete_note`).
+fn delete_note(id: &str) -> Result<u64, (u16, &'static str, String)> {
+    let note = parse_id(id)
+        .and_then(crate::notes::get)
+        .ok_or_else(|| (404, "not_found", format!("Note {id} not found")))?;
+    crate::meeting::delete_note(note.id).map_err(|e| (409, "conflict", e))?;
+    Ok(note.id)
+}
+
 fn parse_id(s: &str) -> Option<u64> {
     let id = s.parse::<u64>().ok()?;
     (id > 0).then_some(id)
@@ -631,5 +640,22 @@ mod tests {
         assert_eq!(parse_id("0"), None);
         assert_eq!(parse_id("abc"), None);
         assert_eq!(parse_id("-1"), None);
+    }
+
+    /// `DELETE /v1/notes/{id}` on the note a meeting is recording into:
+    /// refused (409), the note kept. Until 2026-10-24 the local API deleted
+    /// it, and the recorder went on into a note that wasn't there.
+    #[test]
+    fn the_local_api_never_deletes_the_note_being_recorded() {
+        let _turn = crate::meeting::SLOT_TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let note = crate::notes::create("Client call", "", "meeting", "Meetings");
+        let recording = crate::meeting::claim_for_test(note.id);
+        let refused = delete_note(&note.id.to_string()).unwrap_err();
+        assert_eq!((refused.0, refused.1), (409, "conflict"));
+        assert!(crate::notes::get(note.id).is_some(), "the note is kept");
+        drop(recording);
+        assert_eq!(delete_note(&note.id.to_string()), Ok(note.id));
+        assert!(crate::notes::get(note.id).is_none());
+        assert_eq!(delete_note(&note.id.to_string()).unwrap_err().0, 404);
     }
 }
